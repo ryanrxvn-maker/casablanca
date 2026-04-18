@@ -1,0 +1,188 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* -----------------------------------------------------------------------
+   CASABLANCA — design system base
+   Dark tech/fintech visual, inspired by Ora Banking, Linear, Vercel.
+   Core tokens live in tailwind.config.ts; this file handles globals.
+----------------------------------------------------------------------- */
+
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  color-scheme: dark;
+  --bg: #0a0a0a;
+  --bg-soft: #111111;
+  --line: #1a1a1a;
+  --line-strong: #222222;
+  --text: #ffffff;
+  --text-muted: #888888;
+  --lime: #c8ff00;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Outfit', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  min-height: 100vh;
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(60% 50% at 50% -10%, rgba(200, 255, 0, 0.08), transparent 70%),
+    radial-gradient(40% 40% at 90% 110%, rgba(200, 255, 0, 0.05), transparent 70%),
+    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: auto, auto, 48px 48px, 48px 48px;
+}
+
+::selection {
+  background: var(--lime);
+  color: #000;
+}
+
+/* ----- Reusable primitives ----- */
+@layer components {
+  .container-app {
+    @apply mx-auto w-full max-w-[960px] px-5;
+  }
+
+  .card {
+    @apply relative rounded-[16px] border border-line bg-bg-soft/80 backdrop-blur-sm;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+  }
+
+  .card-pad {
+    @apply p-6 md:p-8;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-[12px] bg-lime px-5 py-3 text-sm font-semibold text-black transition hover:brightness-95 active:brightness-90 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-[12px] border border-line-strong bg-transparent px-5 py-3 text-sm font-medium text-text-muted transition hover:border-lime hover:text-white disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-[12px] px-3 py-2 text-sm text-text-muted transition hover:text-white;
+  }
+
+  .input-field {
+    @apply w-full rounded-[12px] border border-line-strong bg-bg px-4 py-3 text-sm text-white outline-none transition placeholder:text-text-dim focus:border-lime;
+  }
+
+  .label-field {
+    @apply mb-2 block text-xs font-medium uppercase tracking-widest text-text-muted;
+  }
+
+  .badge-online {
+    @apply inline-flex items-center gap-2 rounded-full border border-line-strong bg-bg-soft px-3 py-1 text-[11px] font-medium uppercase tracking-widest text-text-muted;
+  }
+
+  .badge-online::before {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 9999px;
+    background: var(--lime);
+    box-shadow: 0 0 12px var(--lime);
+    @apply animate-pulse-soft;
+  }
+
+  .tab-link {
+    @apply relative whitespace-nowrap px-4 py-3 text-sm font-medium text-text-muted transition hover:text-white;
+  }
+
+  .tab-link-active {
+    @apply text-white;
+  }
+
+  .tab-link-active::after {
+    content: '';
+    position: absolute;
+    left: 1rem;
+    right: 1rem;
+    bottom: -1px;
+    height: 2px;
+    background: var(--lime);
+    border-radius: 2px;
+  }
+
+  .brand {
+    font-weight: 900;
+    letter-spacing: 0.25em;
+    color: var(--lime);
+  }
+
+  .section-title {
+    @apply text-2xl font-extrabold tracking-tight md:text-3xl;
+  }
+
+  .mono {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+  }
+}
+
+/* Range input (slider) styling — used in tool controls */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--line-strong);
+  border-radius: 9999px;
+  outline: none;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: var(--lime);
+  cursor: pointer;
+  box-shadow: 0 0 0 4px rgba(200, 255, 0, 0.15);
+  transition: box-shadow 0.15s ease;
+}
+
+input[type='range']::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 0 6px rgba(200, 255, 0, 0.25);
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 9999px;
+  background: var(--lime);
+  cursor: pointer;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #1f1f1f;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2a2a2a;
+}
