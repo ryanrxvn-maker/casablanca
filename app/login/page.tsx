@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AuthShell } from '@/components/AuthShell';
+import { GoogleButton } from '@/components/GoogleButton';
 import { createClient } from '@/lib/supabase/client';
 
 export default function LoginPage() {
@@ -104,13 +105,7 @@ export default function LoginPage() {
           <div className="flex-1 border-t border-line" />
         </div>
 
-        <button
-          type="button"
-          onClick={handleGoogleLogin}
-          className="btn-secondary"
-        >
-          Continuar com Google
-        </button>
+        <GoogleButton onClick={handleGoogleLogin} disabled={loading} />
 
         <div className="text-center">
           <Link

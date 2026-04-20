@@ -21,7 +21,7 @@ export function ToolShell({
           </p>
         )}
       </div>
-      <div className="card card-pad">{children}</div>
+      <div className="card-3d card-pad">{children}</div>
     </div>
   );
 }

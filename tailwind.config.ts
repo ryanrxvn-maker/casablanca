@@ -29,9 +29,10 @@ const config: Config = {
         },
       },
       fontFamily: {
-        display: ['Outfit', 'system-ui', 'sans-serif'],
-        sans: ['Outfit', 'system-ui', 'sans-serif'],
-        mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
+        display: ['var(--font-display)', 'system-ui', 'sans-serif'],
+        sans: ['var(--font-display)', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-mono)', 'ui-monospace', 'monospace'],
+        tech: ['var(--font-tech)', 'var(--font-display)', 'system-ui'],
       },
       borderRadius: {
         DEFAULT: '12px',
@@ -49,10 +50,27 @@ const config: Config = {
           '0%, 100%': { opacity: '1' },
           '50%': { opacity: '0.45' },
         },
+        'ripple': {
+          '0%': {
+            transform: 'translate(-50%, -50%) scale(0)',
+            opacity: '0.55',
+          },
+          '100%': {
+            transform: 'translate(-50%, -50%) scale(18)',
+            opacity: '0',
+          },
+        },
+        'drift': {
+          '0%': { transform: 'translate3d(0,0,0)' },
+          '50%': { transform: 'translate3d(0,-6px,0)' },
+          '100%': { transform: 'translate3d(0,0,0)' },
+        },
       },
       animation: {
         'fade-in-up': 'fade-in-up 0.5s ease-out both',
         'pulse-soft': 'pulse-soft 1.8s ease-in-out infinite',
+        'ripple': 'ripple 0.6s ease-out forwards',
+        'drift': 'drift 8s ease-in-out infinite',
       },
       backgroundImage: {
         'grid-lines':
@@ -62,6 +80,16 @@ const config: Config = {
       },
       backgroundSize: {
         'grid-lines': '48px 48px',
+      },
+      boxShadow: {
+        'depth-1':
+          '0 1px 0 rgba(255,255,255,0.04) inset, 0 10px 20px -15px rgba(0,0,0,0.8), 0 2px 4px rgba(0,0,0,0.4)',
+        'depth-2':
+          '0 1px 0 rgba(255,255,255,0.06) inset, 0 20px 40px -20px rgba(0,0,0,0.9), 0 8px 16px rgba(0,0,0,0.45)',
+        'depth-3':
+          '0 1px 0 rgba(255,255,255,0.08) inset, 0 40px 80px -30px rgba(0,0,0,0.95), 0 16px 32px rgba(0,0,0,0.5)',
+        'lime-glow':
+          '0 0 0 1px rgba(200,255,0,0.35), 0 0 40px -5px rgba(200,255,0,0.45)',
       },
     },
   },

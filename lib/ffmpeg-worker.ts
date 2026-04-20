@@ -1,102 +1,94 @@
 /**
  * CASABLANCA — Wrapper do FFmpeg WASM.
  *
- * Carrega o core via CDN (unpkg) em Client Component. Precisa de SharedArrayBuffer,
- * portanto exige os headers COOP/COEP (configurados em next.config.js + vercel.json).
+ * Singleton com `getFFmpeg()` + helpers de alto nivel (speedUpVideo,
+ * speedUpAudio, compressVideo, extractAudio, cutVideoSegments).
  *
- * API: singleton com `getFFmpeg()`, mais helpers de alto nível:
- *   - speedUpVideo: acelera video mantendo pitch (atempo + setpts).
- *   - speedUpAudio: acelera audio mantendo pitch.
- *   - compressVideo: H.264 com CRF + scale opcional.
- *   - extractAudio: extrai trilha de audio de um video.
+ * Nota de arquitetura:
+ * - Usamos APENAS o core single-threaded (`@ffmpeg/core`). O core-mt depende
+ *   de COOP/COEP perfeitos + workers que rodam em contexto isolado, e em
+ *   algumas configuracoes trava indefinidamente (o que estava causando o bug
+ *   de "Carregando FFmpeg..." infinito). O core ST e' confiavel em toda
+ *   plataforma e nao trava.
+ * - Tentamos primeiro unpkg, e caimos pra jsdelivr se falhar.
+ * - Toda operacao tem timeout explicito para nao pendurar a UI.
  */
 
 import type { FFmpeg } from '@ffmpeg/ffmpeg';
 
 export type FFProgress = { ratio: number; time: number };
 export type FFLog = (line: string) => void;
+export type FFLoadStage = (stage: string) => void;
 
 let instance: FFmpeg | null = null;
 let loadingPromise: Promise<FFmpeg> | null = null;
-let activeVariant: 'mt' | 'st' | null = null;
+
+const CORE_VERSION = '0.12.6';
+const CDNS = [
+  `https://unpkg.com/@ffmpeg/core@${CORE_VERSION}/dist/umd`,
+  `https://cdn.jsdelivr.net/npm/@ffmpeg/core@${CORE_VERSION}/dist/umd`,
+];
+
+const LOAD_TIMEOUT_MS = 90_000; // 90s total pra carregar core + wasm
 
 /**
- * Detecta se o ambiente atual suporta o core multithreaded. Precisa de:
- *   - SharedArrayBuffer disponivel (requer COOP/COEP em resposta de todas
- *     as dependencias: HTML, scripts, workers, blobs).
- *   - window.crossOriginIsolated === true (garantia definitiva dos headers).
- */
-export function supportsFFmpegMT(): boolean {
-  if (typeof window === 'undefined') return false;
-  if (typeof SharedArrayBuffer === 'undefined') return false;
-  return (window as unknown as { crossOriginIsolated?: boolean }).crossOriginIsolated === true;
-}
-
-/**
- * Retorna qual variante do core esta ativa. Util para UI/telemetria.
- * `null` se o FFmpeg ainda nao foi carregado.
- */
-export function getFFmpegVariant(): 'mt' | 'st' | null {
-  return activeVariant;
-}
-
-/**
- * Carrega e retorna o singleton do FFmpeg. Na primeira chamada, baixa o core
- * WASM (~30MB) do CDN. Chamadas seguintes reaproveitam a instância carregada.
+ * Carrega (se necessario) e retorna a instancia singleton do FFmpeg.
  *
- * Seleciona automaticamente `@ffmpeg/core-mt` (multithreaded) quando o browser
- * esta `crossOriginIsolated` e tem `SharedArrayBuffer` — o MT reduz o tempo de
- * compressao/aceleracao em ~2-3x. Caso contrario, cai para `@ffmpeg/core` (ST).
+ * `onStage` recebe stages humanas tipo "Baixando core (1/2)...", "Inicializando...".
+ * `onLog` recebe linhas cruas do FFmpeg (stderr).
  */
-export async function getFFmpeg(onLog?: FFLog): Promise<FFmpeg> {
+export async function getFFmpeg(
+  onStage?: FFLoadStage,
+  onLog?: FFLog,
+): Promise<FFmpeg> {
   if (instance) return instance;
   if (loadingPromise) return loadingPromise;
 
-  loadingPromise = (async () => {
-    const { FFmpeg } = await import('@ffmpeg/ffmpeg');
-
-    const ff = new FFmpeg();
-    if (onLog) ff.on('log', ({ message }) => onLog(message));
-
-    const useMT = supportsFFmpegMT();
-    const baseURL = useMT
-      ? 'https://unpkg.com/@ffmpeg/core-mt@0.12.6/dist/umd'
-      : 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-
-    if (useMT) {
-      // MT requer 3 arquivos: core.js, core.wasm e core.worker.js (pool de threads)
-      const [coreURL, wasmURL, workerURL] = await Promise.all([
-        cachedBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-        cachedBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-        cachedBlobURL(`${baseURL}/ffmpeg-core.worker.js`, 'text/javascript'),
-      ]);
-      await ff.load({ coreURL, wasmURL, workerURL });
-      activeVariant = 'mt';
-    } else {
-      // ST: core + wasm, sem worker adicional
-      const [coreURL, wasmURL] = await Promise.all([
-        cachedBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-        cachedBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-      ]);
-      await ff.load({ coreURL, wasmURL });
-      activeVariant = 'st';
-    }
-
-    instance = ff;
-    return ff;
-  })();
+  loadingPromise = withTimeout(loadCore(onStage, onLog), LOAD_TIMEOUT_MS, 'Timeout ao carregar FFmpeg');
 
   try {
-    return await loadingPromise;
+    instance = await loadingPromise;
+    return instance;
   } catch (e) {
     loadingPromise = null;
-    activeVariant = null;
     throw e;
   }
 }
 
+async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
+  onStage?.('Baixando modulo FFmpeg...');
+  const { FFmpeg } = await import('@ffmpeg/ffmpeg');
+
+  const ff = new FFmpeg();
+  if (onLog) ff.on('log', ({ message }) => onLog(message));
+
+  let lastErr: unknown = null;
+  for (let i = 0; i < CDNS.length; i++) {
+    const baseURL = CDNS[i];
+    try {
+      onStage?.(`Baixando core WASM (CDN ${i + 1}/${CDNS.length})...`);
+      const [coreURL, wasmURL] = await Promise.all([
+        cachedBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+        cachedBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+      ]);
+      onStage?.('Inicializando runtime...');
+      await ff.load({ coreURL, wasmURL });
+      onStage?.('Pronto.');
+      return ff;
+    } catch (err) {
+      lastErr = err;
+      console.warn(`[ffmpeg] CDN ${i + 1} falhou:`, err);
+      // tenta proximo CDN
+    }
+  }
+  throw new Error(
+    'Nao foi possivel carregar o FFmpeg. Verifique sua conexao. Detalhe: ' +
+      (lastErr instanceof Error ? lastErr.message : String(lastErr)),
+  );
+}
+
 /**
- * Retorna true se o browser suporta os recursos minimos (WebAssembly).
+ * Retorna true se o browser suporta WebAssembly (minimo para FFmpeg rodar).
  */
 export function isFFmpegSupported(): boolean {
   if (typeof window === 'undefined') return false;
@@ -107,44 +99,29 @@ export function isFFmpegSupported(): boolean {
 
 export type RunOptions = {
   onProgress?: (p: FFProgress) => void;
+  onStage?: FFLoadStage;
   onLog?: FFLog;
 };
 
-/**
- * Decompoe atempo em chain (FFmpeg aceita atempo entre 0.5 e 2.0). Para 2.5x,
- * a gente aplica atempo=2,atempo=1.25. Para 3x, atempo=2,atempo=1.5.
- */
 function atempoChain(speed: number): string {
   const s = Math.max(0.5, Math.min(4, speed));
   if (s <= 2) return `atempo=${s.toFixed(3)}`;
-  // s entre 2 e 4: aplica atempo=2 e depois o resto
   const rest = s / 2;
   return `atempo=2.0,atempo=${rest.toFixed(3)}`;
 }
 
-/**
- * Acelera um video mantendo pitch do audio.
- *   -filter:a atempo=X  (chain se necessario)
- *   -filter:v setpts=PTS/X
- * Saida: MP4 (H.264 + AAC).
- */
 export async function speedUpVideo(
   file: Blob,
   speed: number,
   opts: RunOptions = {},
 ): Promise<Blob> {
-  const ff = await getFFmpeg(opts.onLog);
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
   const { fetchFile } = await import('@ffmpeg/util');
 
   const inputName = 'in.' + guessExt(file, 'mp4');
   const outputName = 'out.mp4';
 
-  let progressHandler: ((e: { progress: number; time: number }) => void) | null = null;
-  if (opts.onProgress) {
-    progressHandler = ({ progress, time }) =>
-      opts.onProgress!({ ratio: Math.max(0, Math.min(1, progress)), time });
-    ff.on('progress', progressHandler);
-  }
+  const progressHandler = wireProgress(ff, opts.onProgress);
 
   try {
     await ff.writeFile(inputName, await fetchFile(file));
@@ -168,27 +145,19 @@ export async function speedUpVideo(
   }
 }
 
-/**
- * Acelera audio mantendo pitch. Saida WAV (PCM) por padrao, ou MP3/AAC se pedido.
- */
 export async function speedUpAudio(
   file: Blob,
   speed: number,
   format: 'wav' | 'mp3' = 'wav',
   opts: RunOptions = {},
 ): Promise<Blob> {
-  const ff = await getFFmpeg(opts.onLog);
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
   const { fetchFile } = await import('@ffmpeg/util');
 
   const inputName = 'in.' + guessExt(file, 'mp3');
   const outputName = 'out.' + format;
 
-  let progressHandler: ((e: { progress: number; time: number }) => void) | null = null;
-  if (opts.onProgress) {
-    progressHandler = ({ progress, time }) =>
-      opts.onProgress!({ ratio: Math.max(0, Math.min(1, progress)), time });
-    ff.on('progress', progressHandler);
-  }
+  const progressHandler = wireProgress(ff, opts.onProgress);
 
   try {
     await ff.writeFile(inputName, await fetchFile(file));
@@ -211,31 +180,57 @@ export async function speedUpAudio(
 }
 
 /**
- * Comprime video com H.264 CRF. Opcionalmente rescala para 1080/720/480.
+ * Extrai audio de um video e o converte para MP3.
  */
+export async function extractAudioAs(
+  file: Blob,
+  format: 'wav' | 'mp3',
+  opts: RunOptions = {},
+): Promise<Blob> {
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const { fetchFile } = await import('@ffmpeg/util');
+
+  const inputName = 'in.' + guessExt(file, 'mp4');
+  const outputName = 'out.' + format;
+
+  const progressHandler = wireProgress(ff, opts.onProgress);
+
+  try {
+    await ff.writeFile(inputName, await fetchFile(file));
+    const args = ['-i', inputName, '-vn'];
+    if (format === 'wav') {
+      args.push('-c:a', 'pcm_s16le', '-ar', '44100');
+    } else {
+      args.push('-c:a', 'libmp3lame', '-q:a', '2');
+    }
+    args.push(outputName);
+    await ff.exec(args);
+    const data = await ff.readFile(outputName);
+    return toBlob(data, format === 'wav' ? 'audio/wav' : 'audio/mpeg');
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    await safeDelete(ff, inputName);
+    await safeDelete(ff, outputName);
+  }
+}
+
 export async function compressVideo(
   file: Blob,
   params: { crf: number; resolution: 'original' | '1080' | '720' | '480' },
   opts: RunOptions = {},
 ): Promise<Blob> {
-  const ff = await getFFmpeg(opts.onLog);
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
   const { fetchFile } = await import('@ffmpeg/util');
 
   const inputName = 'in.' + guessExt(file, 'mp4');
   const outputName = 'out.mp4';
 
-  let progressHandler: ((e: { progress: number; time: number }) => void) | null = null;
-  if (opts.onProgress) {
-    progressHandler = ({ progress, time }) =>
-      opts.onProgress!({ ratio: Math.max(0, Math.min(1, progress)), time });
-    ff.on('progress', progressHandler);
-  }
+  const progressHandler = wireProgress(ff, opts.onProgress);
 
   try {
     await ff.writeFile(inputName, await fetchFile(file));
     const args: string[] = ['-i', inputName];
     if (params.resolution !== 'original') {
-      // -2 para manter aspect ratio e garantir numero par (requisito H.264)
       args.push('-vf', `scale=-2:${params.resolution}`);
     }
     args.push(
@@ -257,37 +252,110 @@ export async function compressVideo(
   }
 }
 
+export async function extractAudio(file: Blob, opts: RunOptions = {}): Promise<Blob> {
+  return extractAudioAs(file, 'wav', opts);
+}
+
 /**
- * Extrai a trilha de audio de um video como WAV (PCM 16-bit).
+ * Substitui a trilha de audio de um video pela trilha em `audio`.
+ * Mantem o video (sem re-encode) quando possivel. Usado pela Camuflagem
+ * quando o usuario quer manter o video original e so trocar o audio.
  */
-export async function extractAudio(
-  file: Blob,
+export async function muxAudioIntoVideo(
+  video: Blob,
+  audio: Blob,
   opts: RunOptions = {},
 ): Promise<Blob> {
-  const ff = await getFFmpeg(opts.onLog);
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
   const { fetchFile } = await import('@ffmpeg/util');
 
-  const inputName = 'in.' + guessExt(file, 'mp4');
-  const outputName = 'out.wav';
-
-  let progressHandler: ((e: { progress: number; time: number }) => void) | null = null;
-  if (opts.onProgress) {
-    progressHandler = ({ progress, time }) =>
-      opts.onProgress!({ ratio: Math.max(0, Math.min(1, progress)), time });
-    ff.on('progress', progressHandler);
-  }
+  const videoExt = guessExt(video, 'mp4');
+  const audioExt = guessExt(audio, 'wav');
+  const videoName = 'vin.' + videoExt;
+  const audioName = 'ain.' + audioExt;
+  const outputName = 'out.mp4';
+  const progressHandler = wireProgress(ff, opts.onProgress);
 
   try {
-    await ff.writeFile(inputName, await fetchFile(file));
+    await Promise.all([
+      ff.writeFile(videoName, await fetchFile(video)),
+      ff.writeFile(audioName, await fetchFile(audio)),
+    ]);
     await ff.exec([
-      '-i', inputName,
-      '-vn',
-      '-c:a', 'pcm_s16le',
-      '-ar', '44100',
+      '-i', videoName,
+      '-i', audioName,
+      '-map', '0:v:0',
+      '-map', '1:a:0',
+      '-c:v', 'copy',
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      '-shortest',
+      '-movflags', '+faststart',
       outputName,
     ]);
     const data = await ff.readFile(outputName);
-    return toBlob(data, 'audio/wav');
+    return toBlob(data, 'video/mp4');
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    await safeDelete(ff, videoName);
+    await safeDelete(ff, audioName);
+    await safeDelete(ff, outputName);
+  }
+}
+
+/**
+ * Corta um video em varios segmentos [start, end] (em segundos) e concatena
+ * tudo em um unico MP4 de saida. Usado pela Decupagem-em-video.
+ */
+export async function cutVideoSegments(
+  file: Blob,
+  segments: Array<{ start: number; end: number }>,
+  opts: RunOptions = {},
+): Promise<Blob> {
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const { fetchFile } = await import('@ffmpeg/util');
+
+  const ext = guessExt(file, 'mp4');
+  const inputName = 'in.' + ext;
+  const outputName = 'out.mp4';
+  const progressHandler = wireProgress(ff, opts.onProgress);
+
+  try {
+    await ff.writeFile(inputName, await fetchFile(file));
+
+    // Monta filter_complex com [0:v]trim + [0:a]atrim para cada segmento,
+    // e depois concat tudo num unico video/audio.
+    const filterLines: string[] = [];
+    const concatInputs: string[] = [];
+    segments.forEach((seg, i) => {
+      const start = seg.start.toFixed(3);
+      const end = seg.end.toFixed(3);
+      filterLines.push(
+        `[0:v]trim=start=${start}:end=${end},setpts=PTS-STARTPTS[v${i}]`,
+        `[0:a]atrim=start=${start}:end=${end},asetpts=PTS-STARTPTS[a${i}]`,
+      );
+      concatInputs.push(`[v${i}][a${i}]`);
+    });
+    filterLines.push(
+      `${concatInputs.join('')}concat=n=${segments.length}:v=1:a=1[outv][outa]`,
+    );
+    const filterComplex = filterLines.join(';');
+
+    await ff.exec([
+      '-i', inputName,
+      '-filter_complex', filterComplex,
+      '-map', '[outv]',
+      '-map', '[outa]',
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-crf', '23',
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      '-movflags', '+faststart',
+      outputName,
+    ]);
+    const data = await ff.readFile(outputName);
+    return toBlob(data, 'video/mp4');
   } finally {
     if (progressHandler) ff.off('progress', progressHandler);
     await safeDelete(ff, inputName);
@@ -296,6 +364,19 @@ export async function extractAudio(
 }
 
 // ---------- Internos ------------------------------------------------------
+
+type ProgressEvent = { progress: number; time: number };
+
+function wireProgress(
+  ff: FFmpeg,
+  onProgress?: (p: FFProgress) => void,
+): ((e: ProgressEvent) => void) | null {
+  if (!onProgress) return null;
+  const handler = ({ progress, time }: ProgressEvent) =>
+    onProgress({ ratio: Math.max(0, Math.min(1, progress)), time });
+  ff.on('progress', handler);
+  return handler;
+}
 
 function guessExt(file: Blob, fallback: string): string {
   const f = file as File;
@@ -316,7 +397,6 @@ function toBlob(data: Uint8Array | string, type: string): Blob {
   if (typeof data === 'string') {
     return new Blob([data], { type });
   }
-  // Copia defensiva para ArrayBuffer "dono"
   const copy = new Uint8Array(data.length);
   copy.set(data);
   return new Blob([copy.buffer], { type });
@@ -330,18 +410,26 @@ async function safeDelete(ff: FFmpeg, name: string) {
   }
 }
 
+function withTimeout<T>(p: Promise<T>, ms: number, msg: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(msg + ' (apos ' + ms + 'ms)')), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
+
 // ---------- Cache do core FFmpeg -----------------------------------------
 
-const CORE_CACHE = 'casablanca-ffmpeg-core-v1';
+const CORE_CACHE = 'casablanca-ffmpeg-core-v2';
 
-/**
- * Busca um asset do CDN usando Cache API quando disponivel. No primeiro
- * carregamento faz download + cacheia; em sessoes seguintes le do cache.
- * Converte o response em blob URL pro FFmpeg.load() consumir.
- *
- * Fallback para fetch direto + blob quando Cache API nao esta presente
- * (ex: Safari privado) ou quando o cache falha por qualquer motivo.
- */
 async function cachedBlobURL(url: string, mime: string): Promise<string> {
   try {
     if (typeof caches !== 'undefined') {
@@ -350,7 +438,6 @@ async function cachedBlobURL(url: string, mime: string): Promise<string> {
       if (!resp) {
         const fresh = await fetch(url);
         if (!fresh.ok) throw new Error('HTTP ' + fresh.status + ' ao baixar ' + url);
-        // Clona pra ter 2 readable streams (um pra cache, outro pro blob)
         await cache.put(url, fresh.clone());
         resp = fresh;
       }
@@ -360,16 +447,22 @@ async function cachedBlobURL(url: string, mime: string): Promise<string> {
   } catch (err) {
     console.warn('[ffmpeg-worker] cache falhou, usando fetch direto:', err);
   }
-  // Fallback: fetch direto sem cache
   const resp = await fetch(url);
+  if (!resp.ok) throw new Error('HTTP ' + resp.status + ' em ' + url);
   const bytes = await resp.arrayBuffer();
   return URL.createObjectURL(new Blob([bytes], { type: mime }));
 }
 
-/**
- * Limpa o cache do core FFmpeg. Util pra forcar re-download em updates.
- */
 export async function clearFFmpegCache(): Promise<void> {
   if (typeof caches === 'undefined') return;
   await caches.delete(CORE_CACHE);
+}
+
+// Compat: alguns lugares chamam getFFmpegVariant/supportsFFmpegMT.
+// Mantemos stubs pra nao quebrar build enquanto migramos.
+export function getFFmpegVariant(): 'st' | null {
+  return instance ? 'st' : null;
+}
+export function supportsFFmpegMT(): boolean {
+  return false;
 }

@@ -9,12 +9,9 @@ import {
   downloadBlob,
   encodeWAV,
   splitByParagraphs,
-  trimSilences,
 } from '@/lib/audio-engine';
 import { buildZip } from '@/lib/zip-builder';
 import { formatTime } from '@/lib/utils';
-
-type Mode = 'split-trim' | 'split-only' | 'trim-only';
 
 type OutputPart = {
   index: number;
@@ -37,8 +34,6 @@ function partFileName(base: string, index: number) {
 
 export default function AudioSplitPage() {
   const [file, setFile] = useState<File | null>(null);
-  const [mode, setMode] = useState<Mode>('split-trim');
-  const [keepSilence, setKeepSilence] = useState(0.05);
   const [processing, setProcessing] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [parts, setParts] = useState<OutputPart[]>([]);
@@ -59,19 +54,8 @@ export default function AudioSplitPage() {
       setStatus('Decodificando audio...');
       const decoded = await decodeAudioRobust(file, (s) => setStatus(s));
 
-      let toSplit = decoded;
-      if (mode !== 'split-only') {
-        setStatus('Removendo silencios...');
-        toSplit = trimSilences(decoded, keepSilence);
-      }
-
-      let buffers: AudioBuffer[];
-      if (mode === 'trim-only') {
-        buffers = [toSplit];
-      } else {
-        setStatus('Detectando pausas e dividindo...');
-        buffers = splitByParagraphs(toSplit);
-      }
+      setStatus('Detectando pausas e dividindo...');
+      const buffers = splitByParagraphs(decoded);
 
       setStatus('Gerando ' + buffers.length + ' arquivo(s)...');
       const out: OutputPart[] = buffers.map((buf, i) => {
@@ -116,7 +100,7 @@ export default function AudioSplitPage() {
   return (
     <ToolShell
       title="Audio Split"
-      description="Divide seu audio em partes por paragrafos e remove silencios automaticamente."
+      description="Divide seu audio em partes por paragrafos detectando pausas naturais."
     >
       <div className="flex flex-col gap-6">
         <div>
@@ -132,35 +116,10 @@ export default function AudioSplitPage() {
           />
         </div>
 
-        <div>
-          <label className="label-field">Modo</label>
-          <select
-            value={mode}
-            onChange={(e) => setMode(e.target.value as Mode)}
-            className="input-field"
-          >
-            <option value="split-trim">Remover silencios + Dividir</option>
-            <option value="split-only">Apenas Dividir</option>
-            <option value="trim-only">Apenas Remover Silencios</option>
-          </select>
-        </div>
-
-        <div>
-          <div className="flex items-center justify-between">
-            <label className="label-field !mb-0">Tolerancia de silencio</label>
-            <span className="mono text-xs text-lime">
-              {keepSilence.toFixed(2)}s
-            </span>
-          </div>
-          <input
-            type="range"
-            min={0.01}
-            max={0.5}
-            step={0.01}
-            value={keepSilence}
-            onChange={(e) => setKeepSilence(parseFloat(e.target.value))}
-            className="mt-3"
-          />
+        <div className="rounded-[12px] border border-line bg-bg px-4 py-3 text-xs text-text-muted">
+          A divisao procura as pausas mais longas do audio e quebra em partes
+          equilibradas (em media 4 partes por minuto de fala). Para remover
+          silencios use a ferramenta <span className="text-lime">Decupagem</span>.
         </div>
 
         <div className="flex flex-wrap gap-3">

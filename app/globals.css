@@ -3,12 +3,10 @@
 @tailwind utilities;
 
 /* -----------------------------------------------------------------------
-   CASABLANCA — design system base
-   Dark tech/fintech visual, inspired by Ora Banking, Linear, Vercel.
-   Core tokens live in tailwind.config.ts; this file handles globals.
+   CASABLANCA - design system base
+   Dark tech/fintech visual com profundidade 3D, fonte techy nas tabs e
+   interacoes responsivas a mouse (glow follow + ripple click).
 ----------------------------------------------------------------------- */
-
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
   color-scheme: dark;
@@ -19,6 +17,10 @@
   --text: #ffffff;
   --text-muted: #888888;
   --lime: #c8ff00;
+
+  /* Mouse-tracked spotlight (atualizado por components/MouseGlow.tsx). */
+  --mx: 50vw;
+  --my: -10vh;
 }
 
 * {
@@ -31,13 +33,14 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: 'Outfit', system-ui, sans-serif;
+  font-family: var(--font-display), 'Outfit', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 body {
   min-height: 100vh;
+  position: relative;
   background-color: var(--bg);
   background-image:
     radial-gradient(60% 50% at 50% -10%, rgba(200, 255, 0, 0.08), transparent 70%),
@@ -45,6 +48,39 @@ body {
     linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
   background-size: auto, auto, 48px 48px, 48px 48px;
+}
+
+/* Spotlight sutil seguindo o mouse globalmente. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background: radial-gradient(
+    420px circle at var(--mx) var(--my),
+    rgba(200, 255, 0, 0.08),
+    transparent 65%
+  );
+  transition: background 0.18s ease-out;
+}
+
+/* Grain/noise overlay leve pra adicionar textura premium. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0.035;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.55'/></svg>");
+}
+
+/* Conteudo acima do overlay. */
+body > * {
+  position: relative;
+  z-index: 2;
 }
 
 ::selection {
@@ -59,8 +95,33 @@ body {
   }
 
   .card {
-    @apply relative rounded-[16px] border border-line bg-bg-soft/80 backdrop-blur-sm;
-    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+    @apply relative rounded-[16px] border border-line bg-bg-soft/80 backdrop-blur-sm shadow-depth-1;
+  }
+
+  /* card 3D com gradiente sutil + glow tracking */
+  .card-3d {
+    @apply card shadow-depth-2;
+    background-image:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(0, 0, 0, 0.15)),
+      radial-gradient(
+        500px circle at var(--gx, 50%) var(--gy, 0%),
+        rgba(200, 255, 0, 0.07),
+        transparent 60%
+      );
+    transition:
+      transform 0.25s ease,
+      box-shadow 0.25s ease,
+      border-color 0.25s ease;
+  }
+
+  .card-3d:hover {
+    border-color: rgba(200, 255, 0, 0.35);
+    transform: translateY(-2px);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.08) inset,
+      0 30px 60px -25px rgba(0, 0, 0, 0.95),
+      0 12px 24px rgba(0, 0, 0, 0.5),
+      0 0 40px -8px rgba(200, 255, 0, 0.25);
   }
 
   .card-pad {
@@ -68,11 +129,27 @@ body {
   }
 
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-[12px] bg-lime px-5 py-3 text-sm font-semibold text-black transition hover:brightness-95 active:brightness-90 disabled:cursor-not-allowed disabled:opacity-40;
+    @apply relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-[12px] bg-lime px-5 py-3 text-sm font-semibold text-black transition active:translate-y-[1px] disabled:cursor-not-allowed disabled:opacity-40;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.5) inset,
+      0 -2px 0 rgba(0, 0, 0, 0.18) inset,
+      0 8px 18px -6px rgba(200, 255, 0, 0.45),
+      0 2px 4px rgba(0, 0, 0, 0.4);
+  }
+  .btn-primary:hover:not(:disabled) {
+    filter: brightness(1.05);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.6) inset,
+      0 -2px 0 rgba(0, 0, 0, 0.18) inset,
+      0 12px 28px -6px rgba(200, 255, 0, 0.6),
+      0 2px 6px rgba(0, 0, 0, 0.4);
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center gap-2 rounded-[12px] border border-line-strong bg-transparent px-5 py-3 text-sm font-medium text-text-muted transition hover:border-lime hover:text-white disabled:cursor-not-allowed disabled:opacity-40;
+    @apply relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-[12px] border border-line-strong bg-bg-soft/40 px-5 py-3 text-sm font-medium text-text-muted transition hover:border-lime hover:text-white active:translate-y-[1px] disabled:cursor-not-allowed disabled:opacity-40;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.04) inset,
+      0 4px 12px -6px rgba(0, 0, 0, 0.6);
   }
 
   .btn-ghost {
@@ -80,11 +157,20 @@ body {
   }
 
   .input-field {
-    @apply w-full rounded-[12px] border border-line-strong bg-bg px-4 py-3 text-sm text-white outline-none transition placeholder:text-text-dim focus:border-lime;
+    @apply w-full rounded-[12px] border border-line-strong bg-bg/80 px-4 py-3 text-sm text-white outline-none transition placeholder:text-text-dim focus:border-lime focus:bg-bg;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.03) inset,
+      0 2px 6px -4px rgba(0, 0, 0, 0.6);
+  }
+  .input-field:focus {
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.05) inset,
+      0 0 0 3px rgba(200, 255, 0, 0.18);
   }
 
   .label-field {
     @apply mb-2 block text-xs font-medium uppercase tracking-widest text-text-muted;
+    font-family: var(--font-tech), var(--font-display), system-ui;
   }
 
   .badge-online {
@@ -101,41 +187,64 @@ body {
     @apply animate-pulse-soft;
   }
 
+  /* Tabs com fonte tech (Orbitron) e acabamento 3D */
   .tab-link {
-    @apply relative whitespace-nowrap px-4 py-3 text-sm font-medium text-text-muted transition hover:text-white;
+    @apply relative whitespace-nowrap px-4 py-3 text-[12px] font-medium uppercase tracking-[0.18em] text-text-muted transition hover:text-white;
+    font-family: var(--font-tech), var(--font-display), system-ui;
   }
 
   .tab-link-active {
     @apply text-white;
+    text-shadow: 0 0 10px rgba(200, 255, 0, 0.35);
   }
 
   .tab-link-active::after {
     content: '';
     position: absolute;
-    left: 1rem;
-    right: 1rem;
+    left: 0.75rem;
+    right: 0.75rem;
     bottom: -1px;
     height: 2px;
-    background: var(--lime);
+    background: linear-gradient(90deg, transparent, var(--lime), transparent);
     border-radius: 2px;
+    box-shadow: 0 0 12px rgba(200, 255, 0, 0.6);
   }
 
   .brand {
     font-weight: 900;
     letter-spacing: 0.25em;
     color: var(--lime);
+    font-family: var(--font-tech), var(--font-display), system-ui;
+    text-shadow: 0 0 14px rgba(200, 255, 0, 0.45);
   }
 
   .section-title {
     @apply text-2xl font-extrabold tracking-tight md:text-3xl;
+    font-family: var(--font-tech), var(--font-display), system-ui;
+    letter-spacing: 0.04em;
   }
 
   .mono {
-    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-family: var(--font-mono), 'JetBrains Mono', ui-monospace, monospace;
   }
 }
 
-/* Range input (slider) styling — used in tool controls */
+/* ----- Click ripple (anexado dinamicamente em components/Ripple.tsx) ----- */
+.ripple-dot {
+  position: absolute;
+  left: var(--rx, 50%);
+  top: var(--ry, 50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.55);
+  transform: translate(-50%, -50%) scale(0);
+  pointer-events: none;
+  animation: ripple 0.6s ease-out forwards;
+  mix-blend-mode: screen;
+}
+
+/* Range input (slider) styling */
 input[type='range'] {
   -webkit-appearance: none;
   appearance: none;
@@ -154,12 +263,16 @@ input[type='range']::-webkit-slider-thumb {
   border-radius: 9999px;
   background: var(--lime);
   cursor: pointer;
-  box-shadow: 0 0 0 4px rgba(200, 255, 0, 0.15);
+  box-shadow:
+    0 0 0 4px rgba(200, 255, 0, 0.15),
+    0 0 12px rgba(200, 255, 0, 0.5);
   transition: box-shadow 0.15s ease;
 }
 
 input[type='range']::-webkit-slider-thumb:hover {
-  box-shadow: 0 0 0 6px rgba(200, 255, 0, 0.25);
+  box-shadow:
+    0 0 0 6px rgba(200, 255, 0, 0.25),
+    0 0 18px rgba(200, 255, 0, 0.65);
 }
 
 input[type='range']::-moz-range-thumb {
@@ -185,4 +298,19 @@ input[type='range']::-moz-range-thumb {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #2a2a2a;
+}
+
+/* Reduce motion for users who prefer it */
+@media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after {
+    display: none;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }

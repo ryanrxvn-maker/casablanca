@@ -1,97 +1,195 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
-import { FileUpload } from '@/components/FileUpload';
-import { AudioPlayer } from '@/components/AudioPlayer';
-import { VideoPlayer } from '@/components/VideoPlayer';
+import { BatchFileUpload } from '@/components/BatchFileUpload';
 import { downloadBlob } from '@/lib/audio-engine';
 import {
   speedUpAudio,
   speedUpVideo,
+  extractAudioAs,
   type FFProgress,
 } from '@/lib/ffmpeg-worker';
+import { buildZip } from '@/lib/zip-builder';
+import { formatBytes } from '@/lib/utils';
 
-type AudioFormat = 'wav' | 'mp3';
+type OutFormat = 'mp4' | 'mp3' | 'wav';
+
+type JobState = 'queued' | 'running' | 'done' | 'error';
+
+type Job = {
+  id: string;
+  file: File;
+  state: JobState;
+  progress: number;
+  resultBlob: Blob | null;
+  resultUrl: string | null;
+  error: string | null;
+};
+
+const MAX_BATCH = 20;
+
+function isVideo(f: File) {
+  return f.type.startsWith('video/') || /\.(mp4|webm|mov|mkv)$/i.test(f.name);
+}
+
+function baseName(name: string) {
+  return name.replace(/\.[^.]+$/, '').replace(/\s+/g, '_');
+}
+
+function makeJob(file: File): Job {
+  return {
+    id: file.name + ':' + file.size + ':' + file.lastModified,
+    file,
+    state: 'queued',
+    progress: 0,
+    resultBlob: null,
+    resultUrl: null,
+    error: null,
+  };
+}
 
 export default function AceleradorPage() {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [speed, setSpeed] = useState(1.5);
-  const [audioFormat, setAudioFormat] = useState<AudioFormat>('wav');
+  const [format, setFormat] = useState<OutFormat>('mp4');
   const [processing, setProcessing] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{
-    blob: Blob;
-    url: string;
-    isVideo: boolean;
-  } | null>(null);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [stageMsg, setStageMsg] = useState<string | null>(null);
+  const [zipping, setZipping] = useState(false);
 
-  const isVideo = file?.type.startsWith('video/') ?? false;
+  const allVideos = useMemo(() => files.length > 0 && files.every(isVideo), [
+    files,
+  ]);
+  const anyAudio = useMemo(() => files.some((f) => !isVideo(f)), [files]);
 
-  function reset() {
-    if (result) URL.revokeObjectURL(result.url);
-    setResult(null);
-    setStatus(null);
-    setError(null);
-    setProgress(0);
+  // Se ha algum audio e o format atual e MP4, troca pra MP3
+  useEffect(() => {
+    if (format === 'mp4' && anyAudio) setFormat('mp3');
+  }, [anyAudio, format]);
+
+  const doneJobs = jobs.filter((j) => j.state === 'done');
+  const hasResults = doneJobs.length > 0;
+
+  function setFilesSafe(next: File[]) {
+    if (processing) return;
+    jobs.forEach((j) => j.resultUrl && URL.revokeObjectURL(j.resultUrl));
+    setJobs([]);
+    setFiles(next.slice(0, MAX_BATCH));
   }
 
-  async function process() {
-    if (!file) return;
-    reset();
+  function updateJob(id: string, patch: Partial<Job>) {
+    setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)));
+  }
+
+  async function processOne(job: Job, i: number, total: number): Promise<void> {
+    const fmt = format;
+    const onProgress = (p: FFProgress) =>
+      updateJob(job.id, { progress: Math.round(p.ratio * 100) });
+    const onStage = (s: string) =>
+      setStageMsg(`Item ${i + 1}/${total}: ${job.file.name} — ${s}`);
+
+    if (fmt === 'mp4') {
+      const blob = await speedUpVideo(job.file, speed, { onProgress, onStage });
+      return finish(job, blob);
+    }
+    // Audio output (mp3 ou wav)
+    if (isVideo(job.file)) {
+      // Primeiro extrai audio no formato, depois acelera
+      onStage('Extraindo audio...');
+      const audio = await extractAudioAs(job.file, fmt, { onStage });
+      onStage('Acelerando audio...');
+      const out = await speedUpAudio(audio, speed, fmt, { onProgress, onStage });
+      return finish(job, out);
+    }
+    const out = await speedUpAudio(job.file, speed, fmt, { onProgress, onStage });
+    return finish(job, out);
+  }
+
+  function finish(job: Job, blob: Blob) {
+    const url = URL.createObjectURL(blob);
+    updateJob(job.id, {
+      state: 'done',
+      progress: 100,
+      resultBlob: blob,
+      resultUrl: url,
+    });
+  }
+
+  async function processAll() {
+    if (files.length === 0 || processing) return;
     setProcessing(true);
+    setStageMsg('Preparando lote...');
+    jobs.forEach((j) => j.resultUrl && URL.revokeObjectURL(j.resultUrl));
+    const initial = files.map(makeJob);
+    setJobs(initial);
+
     try {
-      setStatus('Carregando FFmpeg (pode levar alguns segundos na primeira vez)...');
-      const onProgress = (p: FFProgress) => {
-        setProgress(Math.round(p.ratio * 100));
-        setStatus('Processando... ' + Math.round(p.ratio * 100) + '%');
-      };
-
-      let blob: Blob;
-      if (isVideo) {
-        blob = await speedUpVideo(file, speed, { onProgress });
-      } else {
-        blob = await speedUpAudio(file, speed, audioFormat, { onProgress });
+      for (let i = 0; i < initial.length; i++) {
+        const job = initial[i];
+        updateJob(job.id, { state: 'running', progress: 0 });
+        try {
+          await processOne(job, i, initial.length);
+        } catch (e) {
+          console.error('[acelerador]', job.file.name, e);
+          updateJob(job.id, {
+            state: 'error',
+            error: (e as Error).message ?? 'Falha.',
+          });
+        }
       }
-
-      const url = URL.createObjectURL(blob);
-      setResult({ blob, url, isVideo });
-      setStatus(null);
-      setProgress(100);
-    } catch (e) {
-      console.error(e);
-      setError((e as Error).message ?? 'Falha ao processar o arquivo.');
-      setStatus(null);
+      setStageMsg('Lote finalizado.');
     } finally {
       setProcessing(false);
     }
   }
 
-  async function download() {
-    if (!result || !file) return;
-    const base = file.name.replace(/\.[^.]+$/, '').replace(/\s+/g, '_');
-    const ext = result.isVideo ? 'mp4' : audioFormat;
-    await downloadBlob(result.blob, base + '_' + speed.toFixed(1) + 'x.' + ext);
+  async function downloadOne(job: Job) {
+    if (!job.resultBlob) return;
+    await downloadBlob(
+      job.resultBlob,
+      baseName(job.file.name) + '_' + speed.toFixed(1) + 'x.' + format,
+    );
   }
+
+  async function downloadZip() {
+    const done = jobs.filter((j) => j.state === 'done' && j.resultBlob);
+    if (done.length === 0) return;
+    setZipping(true);
+    try {
+      const zip = await buildZip(
+        done.map((j) => ({
+          name: baseName(j.file.name) + '_' + speed.toFixed(1) + 'x.' + format,
+          data: j.resultBlob!,
+        })),
+      );
+      await downloadBlob(zip, 'acelerador_' + speed.toFixed(1) + 'x.zip');
+    } finally {
+      setZipping(false);
+    }
+  }
+
+  const formatOptions: Array<{ id: OutFormat; label: string; disabled: boolean }> = [
+    { id: 'mp4', label: 'MP4 (video)', disabled: anyAudio || files.length === 0 },
+    { id: 'mp3', label: 'MP3 (audio)', disabled: false },
+    { id: 'wav', label: 'WAV (audio)', disabled: false },
+  ];
 
   return (
     <ToolShell
       title="Acelerador"
-      description="Acelera o audio ou video sem alterar o tom da voz (atempo + setpts)."
+      description="Acelera audio/video sem mudar o tom. Processa ate 20 arquivos com escolha de formato de saida."
     >
       <div className="flex flex-col gap-6">
         <div>
-          <label className="label-field">Arquivo</label>
-          <FileUpload
-            accept="audio/*,video/mp4,video/webm"
-            value={file}
-            onChange={(f) => {
-              reset();
-              setFile(f);
-            }}
-            hint="Audio (MP3, WAV) ou video (MP4, WEBM)"
+          <label className="label-field">Arquivos (ate {MAX_BATCH})</label>
+          <BatchFileUpload
+            accept="audio/*,video/mp4,video/webm,video/quicktime"
+            value={files}
+            onChange={setFilesSafe}
+            max={MAX_BATCH}
+            hint="MP3, WAV, MP4, WEBM ou MOV"
+            disabled={processing}
           />
         </div>
 
@@ -108,86 +206,127 @@ export default function AceleradorPage() {
             value={speed}
             onChange={(e) => setSpeed(parseFloat(e.target.value))}
             className="mt-3"
+            disabled={processing}
           />
         </div>
 
-        {!isVideo && file ? (
-          <div>
-            <label className="label-field">Formato de saida</label>
-            <div className="flex flex-wrap gap-2">
-              {(['wav', 'mp3'] as const).map((f) => (
+        <div>
+          <label className="label-field">Formato de saida</label>
+          <div className="flex flex-wrap gap-2">
+            {formatOptions.map((opt) => {
+              const active = format === opt.id;
+              return (
                 <button
-                  key={f}
-                  onClick={() => setAudioFormat(f)}
+                  key={opt.id}
+                  type="button"
+                  onClick={() => !opt.disabled && setFormat(opt.id)}
+                  disabled={processing || opt.disabled}
                   className={
-                    audioFormat === f
+                    active
                       ? 'rounded-[12px] bg-lime px-4 py-2 text-sm font-semibold text-black'
-                      : 'rounded-[12px] border border-line-strong px-4 py-2 text-sm text-text-muted hover:border-lime hover:text-white'
+                      : 'rounded-[12px] border border-line-strong px-4 py-2 text-sm text-text-muted hover:border-lime hover:text-white disabled:opacity-40'
                   }
+                  title={opt.disabled ? 'MP4 indisponivel: um dos arquivos nao e video' : undefined}
                 >
-                  {f.toUpperCase()}
+                  {opt.label}
                 </button>
-              ))}
-            </div>
+              );
+            })}
           </div>
-        ) : null}
+          {allVideos && format !== 'mp4' ? (
+            <p className="mt-2 text-xs text-text-muted">
+              Saida de audio puro: o video sera descartado e so o audio
+              acelerado sera exportado.
+            </p>
+          ) : null}
+        </div>
 
         <div className="flex flex-wrap gap-3">
           <button
-            onClick={process}
+            onClick={processAll}
             className="btn-primary"
-            disabled={!file || processing}
+            disabled={files.length === 0 || processing}
           >
-            {processing ? 'Processando...' : 'Acelerar'}
+            {processing ? 'Processando...' : `Acelerar ${files.length || ''}`.trim()}
           </button>
           <button
-            onClick={() => {
-              reset();
-              setFile(null);
-            }}
+            onClick={() => setFilesSafe([])}
             className="btn-secondary"
-            disabled={processing}
+            disabled={processing || files.length === 0}
           >
             Limpar
           </button>
+          {hasResults && !processing ? (
+            <button
+              onClick={downloadZip}
+              className="btn-secondary"
+              disabled={zipping}
+            >
+              {zipping ? 'Zipando...' : `Baixar ZIP (${doneJobs.length})`}
+            </button>
+          ) : null}
         </div>
 
-        {status ? (
+        {stageMsg ? (
           <div className="rounded-[12px] border border-line bg-bg px-4 py-3 text-xs text-text-muted">
-            {status}
-            {progress > 0 && progress < 100 ? (
-              <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-line">
-                <div
-                  className="h-full bg-lime transition-all"
-                  style={{ width: progress + '%' }}
-                />
-              </div>
-            ) : null}
+            {stageMsg}
           </div>
         ) : null}
 
-        {error ? (
-          <div className="rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300">
-            {error}
-          </div>
-        ) : null}
-
-        {result ? (
-          <div className="mt-2 border-t border-line pt-6">
-            <div className="mb-3 text-xs uppercase tracking-widest text-text-muted">
-              Resultado ({speed.toFixed(1)}x)
-            </div>
-            {result.isVideo ? (
-              <VideoPlayer src={result.url} />
-            ) : (
-              <AudioPlayer src={result.url} label="Preview" />
-            )}
-            <div className="mt-3 flex justify-end">
-              <button onClick={download} className="btn-primary !py-2 text-xs">
-                Baixar
-              </button>
-            </div>
-          </div>
+        {jobs.length > 0 ? (
+          <ul className="flex flex-col gap-2">
+            {jobs.map((j) => (
+              <li
+                key={j.id}
+                className="rounded-[12px] border border-line bg-bg p-3"
+              >
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="min-w-0 flex-1 truncate text-white">
+                    {j.file.name}
+                  </span>
+                  <span
+                    className={
+                      'mono shrink-0 ' +
+                      (j.state === 'done'
+                        ? 'text-lime'
+                        : j.state === 'error'
+                          ? 'text-red-400'
+                          : 'text-text-muted')
+                    }
+                  >
+                    {j.state === 'queued'
+                      ? 'na fila'
+                      : j.state === 'running'
+                        ? j.progress + '%'
+                        : j.state === 'done'
+                          ? formatBytes(j.resultBlob?.size ?? 0)
+                          : 'erro'}
+                  </span>
+                </div>
+                {j.state === 'running' ? (
+                  <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-line">
+                    <div
+                      className="h-full bg-lime transition-all"
+                      style={{ width: j.progress + '%' }}
+                    />
+                  </div>
+                ) : null}
+                {j.state === 'error' && j.error ? (
+                  <div className="mt-2 text-xs text-red-300">{j.error}</div>
+                ) : null}
+                {j.state === 'done' ? (
+                  <div className="mt-2 flex items-center justify-end text-xs text-text-muted">
+                    <button
+                      onClick={() => downloadOne(j)}
+                      className="btn-ghost !py-1 !px-2 text-xs"
+                    >
+                      Baixar
+                    </button>
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
         ) : null}
       </div>
     </ToolShell>

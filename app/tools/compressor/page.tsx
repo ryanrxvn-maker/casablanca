@@ -2,10 +2,10 @@
 
 import { useMemo, useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
-import { FileUpload } from '@/components/FileUpload';
-import { VideoPlayer } from '@/components/VideoPlayer';
+import { BatchFileUpload } from '@/components/BatchFileUpload';
 import { downloadBlob } from '@/lib/audio-engine';
 import { compressVideo, type FFProgress } from '@/lib/ffmpeg-worker';
+import { buildZip } from '@/lib/zip-builder';
 import { formatBytes } from '@/lib/utils';
 
 type Resolution = 'original' | '1080' | '720' | '480';
@@ -17,103 +17,200 @@ const resolutionFactor: Record<Resolution, number> = {
   '480': 0.28,
 };
 
+type JobState = 'queued' | 'running' | 'done' | 'error';
+
+type Job = {
+  id: string;
+  file: File;
+  state: JobState;
+  progress: number;
+  resultBlob: Blob | null;
+  resultUrl: string | null;
+  resultSize: number | null;
+  error: string | null;
+};
+
+const MAX_BATCH = 20;
+
+function baseName(name: string) {
+  return name.replace(/\.[^.]+$/, '').replace(/\s+/g, '_');
+}
+
+function makeJob(file: File): Job {
+  return {
+    id: file.name + ':' + file.size + ':' + file.lastModified,
+    file,
+    state: 'queued',
+    progress: 0,
+    resultBlob: null,
+    resultUrl: null,
+    resultSize: null,
+    error: null,
+  };
+}
+
 export default function CompressorPage() {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [crf, setCrf] = useState(23);
   const [resolution, setResolution] = useState<Resolution>('original');
   const [processing, setProcessing] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
-  const [progress, setProgress] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ blob: Blob; url: string } | null>(null);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [stageMsg, setStageMsg] = useState<string | null>(null);
+  const [zipping, setZipping] = useState(false);
 
-  const estimate = useMemo(() => {
-    if (!file) return null;
-    // tamanho x (crf/23) x fator_resolucao - conforme spec
-    const size = file.size * (crf / 23) * resolutionFactor[resolution];
-    return Math.max(size, 0);
-  }, [file, crf, resolution]);
+  const totalInput = useMemo(
+    () => files.reduce((acc, f) => acc + f.size, 0),
+    [files],
+  );
+  const totalEstimate = useMemo(() => {
+    const factor = (crf / 23) * resolutionFactor[resolution];
+    return totalInput * factor;
+  }, [totalInput, crf, resolution]);
 
-  function reset() {
-    if (result) URL.revokeObjectURL(result.url);
-    setResult(null);
-    setStatus(null);
-    setError(null);
-    setProgress(0);
+  const totalOutput = useMemo(
+    () => jobs.reduce((acc, j) => acc + (j.resultSize ?? 0), 0),
+    [jobs],
+  );
+
+  const doneJobs = jobs.filter((j) => j.state === 'done');
+  const hasResults = doneJobs.length > 0;
+
+  function setFilesSafe(next: File[]) {
+    if (processing) return;
+    // Limpa resultados anteriores
+    jobs.forEach((j) => j.resultUrl && URL.revokeObjectURL(j.resultUrl));
+    setJobs([]);
+    setFiles(next.slice(0, MAX_BATCH));
   }
 
-  async function process() {
-    if (!file) return;
-    reset();
+  function updateJob(id: string, patch: Partial<Job>) {
+    setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)));
+  }
+
+  async function processAll() {
+    if (files.length === 0 || processing) return;
     setProcessing(true);
+    setStageMsg('Preparando lote...');
+
+    // Limpa URLs antigas
+    jobs.forEach((j) => j.resultUrl && URL.revokeObjectURL(j.resultUrl));
+    const initial = files.map(makeJob);
+    setJobs(initial);
+
     try {
-      setStatus('Carregando FFmpeg (pode levar alguns segundos na primeira vez)...');
-      const onProgress = (p: FFProgress) => {
-        setProgress(Math.round(p.ratio * 100));
-        setStatus('Comprimindo... ' + Math.round(p.ratio * 100) + '%');
-      };
-      const blob = await compressVideo(file, { crf, resolution }, { onProgress });
-      const url = URL.createObjectURL(blob);
-      setResult({ blob, url });
-      setStatus(null);
-      setProgress(100);
-    } catch (e) {
-      console.error(e);
-      setError((e as Error).message ?? 'Falha ao comprimir o video.');
-      setStatus(null);
+      for (let i = 0; i < initial.length; i++) {
+        const job = initial[i];
+        setStageMsg(`Comprimindo ${i + 1}/${initial.length}: ${job.file.name}`);
+        updateJob(job.id, { state: 'running', progress: 0 });
+
+        const onProgress = (p: FFProgress) => {
+          const pct = Math.round(p.ratio * 100);
+          updateJob(job.id, { progress: pct });
+        };
+
+        try {
+          const blob = await compressVideo(
+            job.file,
+            { crf, resolution },
+            {
+              onProgress,
+              onStage: (s) =>
+                setStageMsg(
+                  `Comprimindo ${i + 1}/${initial.length}: ${job.file.name} — ${s}`,
+                ),
+            },
+          );
+          const url = URL.createObjectURL(blob);
+          updateJob(job.id, {
+            state: 'done',
+            progress: 100,
+            resultBlob: blob,
+            resultUrl: url,
+            resultSize: blob.size,
+          });
+        } catch (e) {
+          console.error('[compressor]', job.file.name, e);
+          updateJob(job.id, {
+            state: 'error',
+            error: (e as Error).message ?? 'Falha.',
+          });
+        }
+      }
+      setStageMsg('Lote finalizado.');
     } finally {
       setProcessing(false);
     }
   }
 
-  async function download() {
-    if (!result || !file) return;
-    const base = file.name.replace(/\.[^.]+$/, '').replace(/\s+/g, '_');
-    const suffix = resolution === 'original' ? 'crf' + crf : resolution + 'p_crf' + crf;
-    await downloadBlob(result.blob, base + '_' + suffix + '.mp4');
+  async function downloadOne(job: Job) {
+    if (!job.resultBlob) return;
+    const suffix =
+      resolution === 'original' ? 'crf' + crf : resolution + 'p_crf' + crf;
+    await downloadBlob(
+      job.resultBlob,
+      baseName(job.file.name) + '_' + suffix + '.mp4',
+    );
+  }
+
+  async function downloadZip() {
+    const done = jobs.filter((j) => j.state === 'done' && j.resultBlob);
+    if (done.length === 0) return;
+    setZipping(true);
+    try {
+      const suffix =
+        resolution === 'original' ? 'crf' + crf : resolution + 'p_crf' + crf;
+      const zip = await buildZip(
+        done.map((j) => ({
+          name: baseName(j.file.name) + '_' + suffix + '.mp4',
+          data: j.resultBlob!,
+        })),
+      );
+      await downloadBlob(zip, 'compressor_' + suffix + '.zip');
+    } finally {
+      setZipping(false);
+    }
   }
 
   return (
     <ToolShell
       title="Compressor"
-      description="Comprime videos grandes mantendo qualidade perceptivel, com H.264 CRF."
+      description="Comprime ate 20 videos de uma vez com H.264 CRF, mostrando previsao de tamanho final."
     >
       <div className="flex flex-col gap-6">
         <div>
-          <label className="label-field">Video</label>
-          <FileUpload
+          <label className="label-field">Videos (ate {MAX_BATCH})</label>
+          <BatchFileUpload
             accept="video/mp4,video/webm,video/quicktime"
-            value={file}
-            onChange={(f) => {
-              reset();
-              setFile(f);
-            }}
+            value={files}
+            onChange={setFilesSafe}
+            max={MAX_BATCH}
             hint="MP4, WEBM ou MOV"
+            disabled={processing}
           />
         </div>
 
-        {file && (
+        {files.length > 0 ? (
           <div className="grid gap-3 rounded-[12px] border border-line bg-bg p-4 sm:grid-cols-3">
             <div>
-              <div className="label-field">Arquivo</div>
-              <div className="truncate text-sm text-white">{file.name}</div>
+              <div className="label-field">Arquivos</div>
+              <div className="mono text-sm text-white">{files.length}</div>
             </div>
             <div>
-              <div className="label-field">Tamanho original</div>
-              <div className="mono text-sm text-white">{formatBytes(file.size)}</div>
+              <div className="label-field">Total entrada</div>
+              <div className="mono text-sm text-white">
+                {formatBytes(totalInput)}
+              </div>
             </div>
             <div>
-              <div className="label-field">Previsao final</div>
+              <div className="label-field">Previsao total saida</div>
               <div className="mono text-sm text-lime">
-                {result
-                  ? formatBytes(result.blob.size)
-                  : estimate
-                    ? '~ ' + formatBytes(estimate)
-                    : '-'}
+                {hasResults
+                  ? formatBytes(totalOutput)
+                  : '~ ' + formatBytes(totalEstimate)}
               </div>
             </div>
           </div>
-        )}
+        ) : null}
 
         <div>
           <div className="flex items-center justify-between">
@@ -128,6 +225,7 @@ export default function CompressorPage() {
             value={crf}
             onChange={(e) => setCrf(parseInt(e.target.value))}
             className="mt-3"
+            disabled={processing}
           />
           <div className="mt-2 flex justify-between text-[11px] uppercase tracking-widest text-text-muted">
             <span>Alta qualidade</span>
@@ -142,10 +240,11 @@ export default function CompressorPage() {
               <button
                 key={r}
                 onClick={() => setResolution(r)}
+                disabled={processing}
                 className={
                   resolution === r
                     ? 'rounded-[12px] bg-lime px-4 py-2 text-sm font-semibold text-black'
-                    : 'rounded-[12px] border border-line-strong px-4 py-2 text-sm text-text-muted hover:border-lime hover:text-white'
+                    : 'rounded-[12px] border border-line-strong px-4 py-2 text-sm text-text-muted hover:border-lime hover:text-white disabled:opacity-50'
                 }
               >
                 {r === 'original' ? 'Original' : r + 'p'}
@@ -156,66 +255,102 @@ export default function CompressorPage() {
 
         <div className="flex flex-wrap gap-3">
           <button
-            onClick={process}
+            onClick={processAll}
             className="btn-primary"
-            disabled={!file || processing}
+            disabled={files.length === 0 || processing}
           >
-            {processing ? 'Processando...' : 'Comprimir'}
+            {processing
+              ? 'Processando...'
+              : `Comprimir ${files.length || ''} ${files.length === 1 ? 'video' : 'videos'}`.trim()}
           </button>
           <button
-            onClick={() => {
-              reset();
-              setFile(null);
-            }}
+            onClick={() => setFilesSafe([])}
             className="btn-secondary"
-            disabled={processing}
+            disabled={processing || files.length === 0}
           >
             Limpar
           </button>
+          {hasResults && !processing ? (
+            <button
+              onClick={downloadZip}
+              className="btn-secondary"
+              disabled={zipping}
+            >
+              {zipping ? 'Zipando...' : `Baixar ZIP (${doneJobs.length})`}
+            </button>
+          ) : null}
         </div>
 
-        {status ? (
+        {stageMsg ? (
           <div className="rounded-[12px] border border-line bg-bg px-4 py-3 text-xs text-text-muted">
-            {status}
-            {progress > 0 && progress < 100 ? (
-              <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-line">
-                <div
-                  className="h-full bg-lime transition-all"
-                  style={{ width: progress + '%' }}
-                />
-              </div>
-            ) : null}
+            {stageMsg}
           </div>
         ) : null}
 
-        {error ? (
-          <div className="rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300">
-            {error}
-          </div>
-        ) : null}
-
-        {result ? (
-          <div className="mt-2 border-t border-line pt-6">
-            <div className="mb-3 flex items-center justify-between">
-              <div className="text-xs uppercase tracking-widest text-text-muted">
-                Resultado
-              </div>
-              <div className="mono text-xs text-lime">
-                {formatBytes(result.blob.size)}
-                {file
-                  ? ' | ' +
-                    Math.round((1 - result.blob.size / file.size) * 100) +
-                    '% menor'
-                  : ''}
-              </div>
-            </div>
-            <VideoPlayer src={result.url} />
-            <div className="mt-3 flex justify-end">
-              <button onClick={download} className="btn-primary !py-2 text-xs">
-                Baixar MP4
-              </button>
-            </div>
-          </div>
+        {jobs.length > 0 ? (
+          <ul className="flex flex-col gap-2">
+            {jobs.map((j) => (
+              <li
+                key={j.id}
+                className="rounded-[12px] border border-line bg-bg p-3"
+              >
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="min-w-0 flex-1 truncate text-white">
+                    {j.file.name}
+                  </span>
+                  <span
+                    className={
+                      'mono shrink-0 ' +
+                      (j.state === 'done'
+                        ? 'text-lime'
+                        : j.state === 'error'
+                          ? 'text-red-400'
+                          : 'text-text-muted')
+                    }
+                  >
+                    {j.state === 'queued'
+                      ? 'na fila'
+                      : j.state === 'running'
+                        ? j.progress + '%'
+                        : j.state === 'done'
+                          ? formatBytes(j.resultSize ?? 0)
+                          : 'erro'}
+                  </span>
+                </div>
+                {j.state === 'running' ? (
+                  <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-line">
+                    <div
+                      className="h-full bg-lime transition-all"
+                      style={{ width: j.progress + '%' }}
+                    />
+                  </div>
+                ) : null}
+                {j.state === 'error' && j.error ? (
+                  <div className="mt-2 text-xs text-red-300">{j.error}</div>
+                ) : null}
+                {j.state === 'done' ? (
+                  <div className="mt-2 flex items-center justify-between text-xs text-text-muted">
+                    <span>
+                      {formatBytes(j.file.size)} →{' '}
+                      <span className="text-lime">
+                        {formatBytes(j.resultSize ?? 0)}
+                      </span>{' '}
+                      ({Math.round(
+                        (1 - (j.resultSize ?? 0) / j.file.size) * 100,
+                      )}
+                      % menor)
+                    </span>
+                    <button
+                      onClick={() => downloadOne(j)}
+                      className="btn-ghost !py-1 !px-2 text-xs"
+                    >
+                      Baixar
+                    </button>
+                  </div>
+                ) : null}
+              </li>
+            ))}
+          </ul>
         ) : null}
       </div>
     </ToolShell>

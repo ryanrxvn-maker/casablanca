@@ -127,18 +127,20 @@ Todas as cores e tokens vivem em `tailwind.config.ts` + `app/globals.css`. Class
 | Módulo                    | Status           | Observação                                    |
 | ------------------------- | ---------------- | --------------------------------------------- |
 | Design system             | ✅ Completo       | Tema, componentes base, tipografia.           |
-| Auth (login/register/...)  | ✅ Completo       | Supabase + Google OAuth + middleware.          |
-| Layout com tabs            | ✅ Completo       | Header + TabNav + rotas.                       |
+| Auth (login/register/...)  | ✅ Completo       | Supabase + Google OAuth + middleware + OTP code `/verify`. |
+| Layout com tabs            | ✅ Completo       | Header + TabNav (Orbitron) + rotas.            |
+| **Agenda**                 | ✅ Completo       | Day/Week/Month + recorrência + donut stats + notificações + CSV. |
 | **Calculadora**            | ✅ Completo       | Funcional, em tempo real.                      |
 | **Audio Split**            | ✅ Completo       | Motor Web Audio API + split por pausas + ZIP nativo. |
-| **Decupagem**              | ✅ Completo (áudio) | Decodifica áudio de MP4/WEBM direto no navegador. |
-| **Camuflagem**             | ✅ Completo       | Inversão de fase estéreo + até 10 pares + ZIP. |
-| **Acelerador**             | ✅ Completo       | FFmpeg WASM: atempo (áudio) + setpts (vídeo), preview. |
-| **Compressor**             | ✅ Completo       | FFmpeg WASM H.264 CRF + scale 1080/720/480 + preview. |
-| **Portfolio editor**       | ✅ Completo       | Upload + thumbnail automático + categorias + drag-and-drop + delete. |
-| Portfolio público `/p/[slug]` | ✅ Completo    | Lê dados do Supabase via RLS pública.          |
-| **Provas sociais**         | ✅ Completo       | Upload múltiplo + masonry + caption inline + delete. |
-| SQL migrations             | ✅ Completo       | `001_init.sql` + `002_storage.sql` + `003_privacy_hardening.sql`. |
+| **Decupagem**              | ✅ Completo       | Áudio (WAV/MP3) + vídeo (corte via ffmpeg filter_complex). |
+| **Camuflagem**             | ✅ Completo       | Inversão de fase estéreo + batch + MP4/MP3/WAV + mux em vídeo. |
+| **Acelerador**             | ✅ Completo       | FFmpeg WASM: atempo + setpts, batch-20, MP4/MP3/WAV. |
+| **Compressor**             | ✅ Completo       | FFmpeg WASM H.264 CRF + scale + batch-20 + size prediction. |
+| **Portfolio editor**       | ✅ Completo       | Upload + thumbnail + categorias + drag-and-drop + cover picker. |
+| Portfolio público `/p/[slug]` | ✅ Completo    | RPC `get_public_profile_by_slug` (sem vazar email) + capas animadas + WhatsApp. |
+| **Provas sociais**         | ✅ Completo       | Upload múltiplo + masonry + caption inline + delete + zoom modal. |
+| Visual 3D + mouse FX       | ✅ Completo       | `card-3d`, cursor spotlight, ripple click, Orbitron tabs, grain overlay. |
+| SQL migrations             | ✅ Completo       | `001` → `005_agenda.sql`. |
 
 ---
 

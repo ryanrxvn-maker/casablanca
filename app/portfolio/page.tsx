@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useState, type DragEvent } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { FileUpload } from '@/components/FileUpload';
@@ -12,12 +13,26 @@ import {
   deleteByPublicUrl,
 } from '@/lib/portfolio-upload';
 
+const MAX_VIDEO_MB = 100;
+const MAX_VIDEO_BYTES = MAX_VIDEO_MB * 1024 * 1024;
+
 type Profile = {
   id: string;
   name: string | null;
   portfolio_slug: string | null;
   portfolio_public: boolean;
+  whatsapp: string | null;
+  portfolio_show_avatar: boolean;
+  portfolio_cover: string;
 };
+
+const COVER_OPTIONS: Array<{ id: string; label: string }> = [
+  { id: 'default', label: 'Padrao' },
+  { id: 'matrix', label: 'Codigo' },
+  { id: 'dollars', label: 'Dollars' },
+  { id: 'tech', label: 'Tech' },
+  { id: 'minimal', label: 'Minimal' },
+];
 
 type PortfolioItem = {
   id: string;
@@ -35,7 +50,9 @@ const DEFAULT_CATEGORIES = ['Microleads', 'Ads'];
 export default function PortfolioEditor() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [slugDraft, setSlugDraft] = useState('');
+  const [whatsappDraft, setWhatsappDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  const [savingWhats, setSavingWhats] = useState(false);
   const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
   const [newCategory, setNewCategory] = useState('');
   const [activeCategory, setActiveCategory] = useState('Microleads');
@@ -75,12 +92,19 @@ export default function PortfolioEditor() {
       if (!data.user) return;
       const { data: prof } = await supabase
         .from('profiles')
-        .select('id, name, portfolio_slug, portfolio_public')
+        .select(
+          'id, name, portfolio_slug, portfolio_public, whatsapp, portfolio_show_avatar, portfolio_cover',
+        )
         .eq('id', data.user.id)
         .maybeSingle();
       if (prof) {
-        setProfile(prof as Profile);
+        setProfile({
+          ...(prof as Profile),
+          portfolio_show_avatar: prof.portfolio_show_avatar ?? true,
+          portfolio_cover: prof.portfolio_cover ?? 'default',
+        });
         setSlugDraft(prof.portfolio_slug ?? '');
+        setWhatsappDraft(prof.whatsapp ?? '');
         await Promise.all([loadItems(prof.id), loadCategories(prof.id)]);
       }
     });
@@ -107,6 +131,38 @@ export default function PortfolioEditor() {
     setProfile({ ...profile, portfolio_public: on });
   }
 
+  async function toggleShowAvatar(on: boolean) {
+    if (!profile) return;
+    const supabase = createClient();
+    await supabase
+      .from('profiles')
+      .update({ portfolio_show_avatar: on })
+      .eq('id', profile.id);
+    setProfile({ ...profile, portfolio_show_avatar: on });
+  }
+
+  async function saveCover(id: string) {
+    if (!profile) return;
+    const supabase = createClient();
+    await supabase
+      .from('profiles')
+      .update({ portfolio_cover: id })
+      .eq('id', profile.id);
+    setProfile({ ...profile, portfolio_cover: id });
+  }
+
+  async function saveWhatsapp() {
+    if (!profile) return;
+    setSavingWhats(true);
+    const supabase = createClient();
+    await supabase
+      .from('profiles')
+      .update({ whatsapp: whatsappDraft.trim() || null })
+      .eq('id', profile.id);
+    setProfile({ ...profile, whatsapp: whatsappDraft.trim() || null });
+    setSavingWhats(false);
+  }
+
   async function addCategory() {
     if (!profile || !newCategory.trim()) return;
     const name = newCategory.trim();
@@ -121,9 +177,50 @@ export default function PortfolioEditor() {
     setNewCategory('');
   }
 
+  /**
+   * Remove uma categoria. As categorias DEFAULT (Microleads, Ads) nao podem
+   * ser removidas — sao fixas. Se houver videos na categoria, o usuario
+   * precisa confirmar (e os videos ficam "orfaos" marcados com aquela
+   * categoria, mas nao aparecem na lista ate recadastrar).
+   */
+  async function deleteCategory(name: string) {
+    if (!profile) return;
+    if (DEFAULT_CATEGORIES.includes(name)) return;
+    const inCatCount = items.filter((i) => i.category === name).length;
+    const msg =
+      inCatCount > 0
+        ? `A categoria "${name}" tem ${inCatCount} video(s). Excluir assim mesmo? Os videos serao removidos.`
+        : `Excluir a categoria "${name}"?`;
+    if (!confirm(msg)) return;
+    const supabase = createClient();
+    // Remove videos dessa categoria (com seus arquivos)
+    const victims = items.filter((i) => i.category === name);
+    for (const v of victims) {
+      await supabase.from('portfolio_items').delete().eq('id', v.id);
+      if (v.video_url) await deleteByPublicUrl(VIDEO_BUCKET, v.video_url).catch(() => null);
+      if (v.thumbnail_url)
+        await deleteByPublicUrl(THUMB_BUCKET, v.thumbnail_url).catch(() => null);
+    }
+    await supabase
+      .from('portfolio_categories')
+      .delete()
+      .eq('user_id', profile.id)
+      .eq('name', name);
+    setCategories((prev) => prev.filter((c) => c !== name));
+    if (activeCategory === name) setActiveCategory(DEFAULT_CATEGORIES[0]);
+    await loadItems(profile.id);
+  }
+
   async function uploadNewVideo() {
     if (!profile || !newFile) return;
     setUploadError(null);
+    if (newFile.size > MAX_VIDEO_BYTES) {
+      setUploadError(
+        `Arquivo muito grande: ${(newFile.size / (1024 * 1024)).toFixed(1)}MB. ` +
+          `O limite por video e ${MAX_VIDEO_MB}MB.`,
+      );
+      return;
+    }
     setUploadStage('Iniciando...');
     try {
       await uploadPortfolioItem({
@@ -244,6 +341,27 @@ export default function PortfolioEditor() {
       description="Gerencie videos por categoria, defina um link publico e compartilhe com clientes."
     >
       <div className="flex flex-col gap-8">
+        <div>
+          <Link
+            href="/tools"
+            className="group inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-text-muted transition hover:text-lime"
+          >
+            <svg
+              className="h-4 w-4 -translate-x-0 transition-transform duration-300 group-hover:-translate-x-1"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              aria-hidden
+            >
+              <path
+                fillRule="evenodd"
+                d="M12.79 5.23a.75.75 0 010 1.06L9.08 10l3.71 3.71a.75.75 0 11-1.06 1.06l-4.24-4.24a.75.75 0 010-1.06l4.24-4.24a.75.75 0 011.06 0z"
+                clipRule="evenodd"
+              />
+            </svg>
+            Voltar para as ferramentas
+          </Link>
+        </div>
+
         <div className="grid gap-4 md:grid-cols-2">
           <div>
             <label className="label-field">Slug publico</label>
@@ -281,38 +399,127 @@ export default function PortfolioEditor() {
 
           <div>
             <label className="label-field">Visibilidade</label>
-            <div className="flex items-center gap-3 rounded-[12px] border border-line bg-bg px-4 py-3">
+            <div className="flex flex-col gap-2 rounded-[12px] border border-line bg-bg px-4 py-3">
+              <div className="flex items-center gap-3">
+                <input
+                  id="public-toggle"
+                  type="checkbox"
+                  checked={profile?.portfolio_public ?? false}
+                  onChange={(e) => togglePublic(e.target.checked)}
+                  className="h-4 w-4 accent-lime"
+                />
+                <label htmlFor="public-toggle" className="text-sm text-white">
+                  Portfolio publico
+                </label>
+              </div>
+              <div className="flex items-center gap-3">
+                <input
+                  id="show-avatar-toggle"
+                  type="checkbox"
+                  checked={profile?.portfolio_show_avatar ?? true}
+                  onChange={(e) => toggleShowAvatar(e.target.checked)}
+                  className="h-4 w-4 accent-lime"
+                />
+                <label htmlFor="show-avatar-toggle" className="text-sm text-white">
+                  Mostrar foto no portfolio publico
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <div>
+            <label className="label-field">WhatsApp (botao flutuante)</label>
+            <div className="flex gap-2">
               <input
-                id="public-toggle"
-                type="checkbox"
-                checked={profile?.portfolio_public ?? false}
-                onChange={(e) => togglePublic(e.target.checked)}
-                className="h-4 w-4 accent-lime"
+                className="input-field"
+                value={whatsappDraft}
+                onChange={(e) => setWhatsappDraft(e.target.value)}
+                placeholder="+5511999998888"
               />
-              <label htmlFor="public-toggle" className="text-sm text-white">
-                Portfolio publico
-              </label>
+              <button
+                onClick={saveWhatsapp}
+                className="btn-secondary"
+                disabled={savingWhats}
+              >
+                {savingWhats ? '...' : 'Salvar'}
+              </button>
+            </div>
+            <p className="mt-1.5 text-xs text-text-muted">
+              Formato internacional com DDI. Deixe vazio para esconder o botao.
+            </p>
+          </div>
+
+          <div>
+            <label className="label-field">Capa do portfolio</label>
+            <div className="flex flex-wrap gap-2">
+              {COVER_OPTIONS.map((opt) => {
+                const active = (profile?.portfolio_cover ?? 'default') === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => saveCover(opt.id)}
+                    className={
+                      'rounded-full border px-3 py-1.5 text-xs transition ' +
+                      (active
+                        ? 'border-lime bg-lime/10 text-lime'
+                        : 'border-line bg-bg text-text-muted hover:border-lime/40 hover:text-white')
+                    }
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
 
         <div className="grid gap-6 md:grid-cols-[220px_1fr]">
-          <aside className="card card-pad h-fit">
+          <aside className="card-3d card-pad h-fit">
             <div className="label-field">Categorias</div>
             <nav className="flex flex-col gap-1">
-              {categories.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setActiveCategory(c)}
-                  className={
-                    activeCategory === c
-                      ? 'rounded-[8px] bg-lime/10 px-3 py-2 text-left text-sm font-medium text-lime'
-                      : 'rounded-[8px] px-3 py-2 text-left text-sm text-text-muted hover:bg-bg-softer hover:text-white'
-                  }
-                >
-                  {c}
-                </button>
-              ))}
+              {categories.map((c) => {
+                const isActive = activeCategory === c;
+                const isDefault = DEFAULT_CATEGORIES.includes(c);
+                return (
+                  <div
+                    key={c}
+                    className={
+                      'group flex items-center gap-1 rounded-[8px] ' +
+                      (isActive ? 'bg-lime/10' : 'hover:bg-bg-softer')
+                    }
+                  >
+                    <button
+                      onClick={() => setActiveCategory(c)}
+                      className={
+                        isActive
+                          ? 'flex-1 px-3 py-2 text-left text-sm font-medium text-lime'
+                          : 'flex-1 px-3 py-2 text-left text-sm text-text-muted hover:text-white'
+                      }
+                    >
+                      {c}
+                    </button>
+                    {!isDefault ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteCategory(c);
+                        }}
+                        className="mr-1 rounded p-1 text-text-dim opacity-0 transition hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
+                        aria-label={`Excluir categoria ${c}`}
+                        title="Excluir categoria"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                          <path d="M2.5 3h7l-.5 7a1 1 0 01-1 1h-4a1 1 0 01-1-1L2.5 3zm2-1.5A.5.5 0 015 1h2a.5.5 0 01.5.5V2h3a.5.5 0 010 1h-9a.5.5 0 010-1h3v-.5z" />
+                        </svg>
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              })}
             </nav>
             <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3">
               <input
@@ -339,7 +546,7 @@ export default function PortfolioEditor() {
               </span>
             </div>
 
-            <div className="card card-pad flex flex-col gap-3">
+            <div className="card-3d card-pad flex flex-col gap-3">
               <div className="label-field !mb-0">Adicionar video</div>
               <FileUpload
                 accept="video/mp4,video/webm,video/quicktime"

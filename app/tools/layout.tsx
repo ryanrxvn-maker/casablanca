@@ -2,6 +2,7 @@ import { Header } from '@/components/Header';
 import { TabNav } from '@/components/TabNav';
 
 const toolTabs = [
+  { label: 'Agenda', href: '/tools/agenda' },
   { label: 'Audio Split', href: '/tools/audio-split' },
   { label: 'Decupagem', href: '/tools/decupagem' },
   { label: 'Camuflagem', href: '/tools/camuflagem' },

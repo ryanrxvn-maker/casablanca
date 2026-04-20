@@ -27,6 +27,27 @@ Leva cerca de 20-30 minutos se você já tem conta nos dois serviços.
      por duas funções SECURITY DEFINER: `get_public_profile_by_slug(slug)`
      e `is_public_profile(uid)`. As policies de items/cats/proofs passam a
      chamar `is_public_profile(user_id)` em vez de fazer EXISTS em profiles.
+   - Cole o conteúdo de `supabase/migrations/004_portfolio_extras.sql` e rode.
+     Adiciona os campos `whatsapp`, `portfolio_show_avatar` e
+     `portfolio_cover` na tabela `profiles`, e reescreve
+     `get_public_profile_by_slug` para expor eles. Esses campos alimentam o
+     botão flutuante de WhatsApp, a foto circular e a capa do /p/[slug].
+   - Cole o conteúdo de `supabase/migrations/005_agenda.sql` e rode.
+     Cria as tabelas `agenda_tasks` e `agenda_occurrences` usadas pela
+     ferramenta **Agenda** (/tools/agenda). Ambas têm RLS restrita ao dono
+     e suportam tarefas pontuais/recorrentes com status de conclusão.
+
+4. Em **Authentication → Email Templates → Confirm signup**, troque o corpo
+   padrão para usar `{{ .Token }}` em vez de `{{ .ConfirmationURL }}`. O
+   fluxo de cadastro (`/register` → `/verify`) espera um código numérico
+   de 6 dígitos. Exemplo de corpo:
+
+   ```
+   Seu código de confirmação: {{ .Token }}
+   ```
+
+   Se preferir manter o link mágico, ajuste `/register` para redirecionar
+   pro login em vez de `/verify`.
 
 3. Em **Project Settings → API**, copie:
    - **Project URL** (formato `https://xxxxx.supabase.co`)
