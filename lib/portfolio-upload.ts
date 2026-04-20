@@ -11,6 +11,7 @@ import { createClient } from './supabase/client';
 export const VIDEO_BUCKET = 'portfolio-videos';
 export const THUMB_BUCKET = 'portfolio-thumbnails';
 export const PROOFS_BUCKET = 'social-proofs';
+export const AVATAR_BUCKET = 'avatars';
 
 function randomId() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -135,6 +136,16 @@ export async function uploadProof(userId: string, file: File): Promise<UploadRes
   const ext = extFromName(file.name, 'jpg');
   const name = `${randomId()}.${ext}`;
   return uploadToBucket(PROOFS_BUCKET, userId, file, name);
+}
+
+/**
+ * Upload de foto de perfil (avatar). Retorna publicUrl pra gravar em
+ * profiles.avatar_url. O chamador deve atualizar o profile em separado.
+ */
+export async function uploadAvatar(userId: string, file: File): Promise<UploadResult> {
+  const ext = extFromName(file.name, 'jpg');
+  const name = `${randomId()}.${ext}`;
+  return uploadToBucket(AVATAR_BUCKET, userId, file, name, file.type || undefined);
 }
 
 /**

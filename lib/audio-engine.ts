@@ -153,8 +153,18 @@ export function trimSilences(
 // ---------- Split por parágrafos ------------------------------------------
 
 /**
- * Divide o buffer em ~targetChunks partes nas pausas mais longas.
- * Para um áudio de 3min, target padrão fica entre 12 e 15.
+ * Divide o buffer em ~targetChunks partes.
+ *
+ * Algoritmo em duas passadas:
+ *   1. Se o audio TEM silencios naturais (>= MIN_SILENCE_SEC), usa os mais
+ *      longos como pontos de corte (comportamento original).
+ *   2. Se NAO tem silencios suficientes (audio ja decupado), cai pro fallback
+ *      de "vales de energia": detecta os `target - 1` MENORES minimos locais
+ *      da envelope RMS (janela de busca > minDistance pra distribuir).
+ *      Esses minimos sao os momentos mais quietos do audio — naturalmente
+ *      entre palavras — entao nao cortam no meio da fala.
+ *
+ * Para um audio de 3min, target padrao fica entre 12 e 15.
  */
 export function splitByParagraphs(
   buffer: AudioBuffer,
@@ -165,25 +175,32 @@ export function splitByParagraphs(
     targetChunks ??
     Math.max(2, Math.round((durationSec / 60) * TARGET_CHUNKS_PER_MIN));
 
-  const silences = detectSilences(buffer);
-
-  // Ordena silêncios por duração (maiores primeiro) e pega os `target - 1` melhores
-  // para usar como pontos de divisão — depois reordena pela posição.
-  const byDuration = [...silences].sort(
-    (a, b) => b.end - b.start - (a.end - a.start)
-  );
-  const cuts = byDuration
-    .slice(0, Math.max(0, target - 1))
-    .sort((a, b) => a.start - b.start);
-
   const sr = buffer.sampleRate;
+  const silences = detectSilences(buffer);
+  const needed = Math.max(0, target - 1);
+
+  // Se tem silencios suficientes, usa eles (meio do silencio como corte)
+  // Senao, cai pro vale-de-energia.
+  let cutSamples: number[] = [];
+
+  if (silences.length >= needed && needed > 0) {
+    const byDuration = [...silences].sort(
+      (a, b) => b.end - b.start - (a.end - a.start),
+    );
+    cutSamples = byDuration
+      .slice(0, needed)
+      .map((cut) => Math.floor(((cut.start + cut.end) / 2) * sr))
+      .sort((a, b) => a - b);
+  } else if (needed > 0) {
+    // Fallback: vales na envelope RMS (audio decupado).
+    cutSamples = findEnergyValleys(buffer, needed);
+  }
+
   const parts: AudioBuffer[] = [];
   let prev = 0;
 
-  for (const cut of cuts) {
-    // Divide no meio do silêncio para ficar natural
-    const mid = Math.floor(((cut.start + cut.end) / 2) * sr);
-    const end = Math.max(prev + 1, Math.min(buffer.length, mid));
+  for (const cutSample of cutSamples) {
+    const end = Math.max(prev + 1, Math.min(buffer.length, cutSample));
     parts.push(sliceBuffer(buffer, prev, end));
     prev = end;
   }
@@ -191,6 +208,113 @@ export function splitByParagraphs(
     parts.push(sliceBuffer(buffer, prev, buffer.length));
   }
   return parts;
+}
+
+/**
+ * Fallback pra audio sem silencios marcantes: acha os N momentos mais quietos,
+ * respeitando uma distancia minima entre cortes pra nao ficarem empilhados.
+ *
+ * Como funciona:
+ *   1. Computa RMS por janela de RMS_WINDOW_MS
+ *   2. Identifica minimos locais (janela > neighborhood)
+ *   3. Filtra minimos muito perto das bordas
+ *   4. Ordena por RMS crescente (mais quietos primeiro)
+ *   5. Greedy: adiciona cortes se distarem >= minDistanceSec do ja-escolhidos
+ *   6. Retorna os samples ordenados por posicao
+ */
+function findEnergyValleys(buffer: AudioBuffer, count: number): number[] {
+  const sr = buffer.sampleRate;
+  const ch = buffer.getChannelData(0);
+  const total = ch.length;
+  const windowSize = Math.max(1, Math.floor((RMS_WINDOW_MS / 1000) * sr));
+  const nWindows = Math.floor(total / windowSize);
+  if (nWindows < 4) return [];
+
+  const rms = new Float32Array(nWindows);
+  for (let w = 0; w < nWindows; w++) {
+    const from = w * windowSize;
+    const to = Math.min(total, from + windowSize);
+    let sum = 0;
+    for (let i = from; i < to; i++) sum += ch[i] * ch[i];
+    rms[w] = Math.sqrt(sum / (to - from));
+  }
+
+  // Vizinhanca pra detectar minimos locais (cerca de 150ms)
+  const neighborhood = Math.max(
+    3,
+    Math.floor((0.15 * 1000) / RMS_WINDOW_MS),
+  );
+
+  const candidates: Array<{ w: number; rms: number }> = [];
+  for (let w = neighborhood; w < nWindows - neighborhood; w++) {
+    let isMin = true;
+    const val = rms[w];
+    for (let k = 1; k <= neighborhood && isMin; k++) {
+      if (rms[w - k] < val || rms[w + k] < val) isMin = false;
+    }
+    if (isMin) candidates.push({ w, rms: val });
+  }
+
+  // Se nao achou o suficiente, relaxa pra todos os windows (ordena por rms)
+  const pool =
+    candidates.length >= count
+      ? candidates
+      : Array.from({ length: nWindows }, (_, w) => ({ w, rms: rms[w] }));
+
+  pool.sort((a, b) => a.rms - b.rms);
+
+  // Distancia minima entre cortes: max(2s, duracao / (count+1) * 0.6)
+  const durationSec = total / sr;
+  const targetSec = durationSec / (count + 1);
+  const minDistanceSec = Math.max(1.5, targetSec * 0.55);
+  const minDistanceSamples = Math.floor(minDistanceSec * sr);
+  const edgeSkipSamples = Math.floor(Math.max(0.5, targetSec * 0.3) * sr);
+
+  const chosen: number[] = [];
+  for (const c of pool) {
+    if (chosen.length >= count) break;
+    const sample = c.w * windowSize;
+    if (sample < edgeSkipSamples) continue;
+    if (sample > total - edgeSkipSamples) continue;
+    let ok = true;
+    for (const s of chosen) {
+      if (Math.abs(s - sample) < minDistanceSamples) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) chosen.push(sample);
+  }
+
+  // Se mesmo assim nao deu, completa distribuindo uniformemente
+  if (chosen.length < count) {
+    const step = total / (count + 1);
+    for (let i = 1; i <= count; i++) {
+      const target = Math.floor(i * step);
+      // pega o minimo local mais proximo do target
+      let best = target;
+      let bestVal = Infinity;
+      const searchRange = Math.floor((step * 0.4) / windowSize);
+      const baseW = Math.floor(target / windowSize);
+      for (
+        let w = Math.max(0, baseW - searchRange);
+        w <= Math.min(nWindows - 1, baseW + searchRange);
+        w++
+      ) {
+        if (rms[w] < bestVal) {
+          bestVal = rms[w];
+          best = w * windowSize;
+        }
+      }
+      if (!chosen.some((s) => Math.abs(s - best) < minDistanceSamples / 2)) {
+        chosen.push(best);
+        if (chosen.length >= count) break;
+      }
+    }
+  }
+
+  chosen.sort((a, b) => a - b);
+  return chosen.slice(0, count);
 }
 
 function sliceBuffer(buffer: AudioBuffer, from: number, to: number): AudioBuffer {

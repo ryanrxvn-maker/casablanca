@@ -16,6 +16,7 @@ import {
   computeStats,
   endOfMonth,
   expandEvents,
+  parseYmd,
   sameDate,
   startOfDay,
   startOfMonth,
@@ -116,8 +117,15 @@ export default function AgendaPage() {
   const [draft, setDraft] = useState<TaskDraft | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [now, setNow] = useState<Date>(new Date());
+  const [toast, setToast] = useState<string | null>(null);
   const notifiedRef = useRef<Set<string>>(new Set());
+
+  function flashToast(msg: string, ms = 2400) {
+    setToast(msg);
+    setTimeout(() => setToast((cur) => (cur === msg ? null : cur)), ms);
+  }
 
   // ---- load user + data ----
   useEffect(() => {
@@ -148,8 +156,15 @@ export default function AgendaPage() {
         .order('start_date', { ascending: true }),
       supabase.from('agenda_occurrences').select('*').eq('user_id', uid),
     ]);
-    if (tRes.data) setTasks(tRes.data as AgendaTask[]);
-    if (oRes.data) setOccurrences(oRes.data as AgendaOccurrence[]);
+    if (tRes.error) {
+      console.error('[agenda] reload tasks error:', tRes.error);
+      flashToast('Erro ao carregar tarefas: ' + tRes.error.message);
+    }
+    if (oRes.error) {
+      console.error('[agenda] reload occurrences error:', oRes.error);
+    }
+    setTasks((tRes.data as AgendaTask[]) ?? []);
+    setOccurrences((oRes.data as AgendaOccurrence[]) ?? []);
     setLoading(false);
   }
 
@@ -230,8 +245,12 @@ export default function AgendaPage() {
   // ---- CRUD ----
   async function saveDraft() {
     if (!draft || !userId) return;
-    if (!draft.title.trim()) return;
+    if (!draft.title.trim()) {
+      setSaveError('O titulo e obrigatorio.');
+      return;
+    }
     setSaving(true);
+    setSaveError(null);
     const payload = {
       user_id: userId,
       title: draft.title.trim(),
@@ -242,7 +261,9 @@ export default function AgendaPage() {
       start_time: draft.start_time || null,
       duration_min: draft.duration_min ? parseInt(draft.duration_min, 10) : null,
       weekdays:
-        draft.weekdays.length > 0 ? draft.weekdays.sort().join(',') : null,
+        draft.weekdays.length > 0
+          ? draft.weekdays.slice().sort((a, b) => a - b).join(',')
+          : null,
       end_date: draft.end_date || null,
       notify: draft.notify,
       notify_offset: draft.notify_offset
@@ -250,13 +271,23 @@ export default function AgendaPage() {
         : 10,
     };
     try {
-      if (draft.id) {
-        await supabase.from('agenda_tasks').update(payload).eq('id', draft.id);
-      } else {
-        await supabase.from('agenda_tasks').insert(payload);
+      const res = draft.id
+        ? await supabase.from('agenda_tasks').update(payload).eq('id', draft.id)
+        : await supabase.from('agenda_tasks').insert(payload);
+      if (res.error) {
+        console.error('[agenda] saveDraft error:', res.error);
+        setSaveError(res.error.message);
+        return;
       }
+      // Move a visao pra data da tarefa pro usuario VER a tarefa que criou.
+      const targetDate = parseYmd(payload.start_date);
+      setAnchor(startOfDay(targetDate));
       await reload(userId);
       setDraft(null);
+      flashToast(draft.id ? 'Tarefa atualizada.' : 'Tarefa criada.');
+    } catch (e) {
+      console.error('[agenda] saveDraft exception:', e);
+      setSaveError((e as Error).message ?? 'Erro ao salvar.');
     } finally {
       setSaving(false);
     }
@@ -477,8 +508,18 @@ export default function AgendaPage() {
           onSave={saveDraft}
           onDelete={deleteDraft}
           saving={saving}
-          onClose={() => setDraft(null)}
+          error={saveError}
+          onClose={() => {
+            setDraft(null);
+            setSaveError(null);
+          }}
         />
+      ) : null}
+
+      {toast ? (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 rounded-full border border-lime/40 bg-bg px-4 py-2 text-xs text-lime shadow-2xl">
+          {toast}
+        </div>
       ) : null}
     </ToolShell>
   );
@@ -913,6 +954,7 @@ function TaskModal({
   onDelete,
   onClose,
   saving,
+  error,
 }: {
   draft: TaskDraft;
   setDraft: (d: TaskDraft | null) => void;
@@ -920,6 +962,7 @@ function TaskModal({
   onDelete: () => void;
   onClose: () => void;
   saving: boolean;
+  error?: string | null;
 }) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -1025,7 +1068,21 @@ function TaskModal({
                 <button
                   key={r}
                   type="button"
-                  onClick={() => update('recurrence', r)}
+                  onClick={() => {
+                    // Quando troca pra weekly/biweekly e nao ha weekdays,
+                    // pre-seleciona o dia da semana da data inicial pra nao
+                    // dar confusao ("porque minha tarefa nao aparece?").
+                    const next: TaskDraft = { ...draft, recurrence: r };
+                    if (
+                      (r === 'weekly' || r === 'biweekly' || r === 'daily') &&
+                      draft.weekdays.length === 0 &&
+                      draft.start_date
+                    ) {
+                      const d = new Date(draft.start_date + 'T00:00:00');
+                      if (!isNaN(d.getTime())) next.weekdays = [d.getDay()];
+                    }
+                    setDraft(next);
+                  }}
                   className={
                     'rounded-[10px] border px-3 py-1.5 text-xs ' +
                     (draft.recurrence === r
@@ -1137,6 +1194,12 @@ function TaskModal({
               </div>
             ) : null}
           </div>
+
+          {error ? (
+            <div className="rounded-[8px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+              {error}
+            </div>
+          ) : null}
 
           <div className="mt-2 flex items-center justify-between gap-2">
             {draft.id ? (

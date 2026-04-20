@@ -29,10 +29,13 @@ npm install
 ### 2. Configurar Supabase
 
 1. Crie um projeto em [supabase.com](https://supabase.com).
-2. No painel, vá em **SQL Editor** e rode os três scripts na ordem:
+2. No painel, vá em **SQL Editor** e rode os scripts na ordem:
    - `supabase/migrations/001_init.sql` — cria tabelas, RLS e trigger de profile automático.
    - `supabase/migrations/002_storage.sql` — cria os buckets e policies de storage.
    - `supabase/migrations/003_privacy_hardening.sql` — fecha leak de `email` em perfis públicos (RPC `get_public_profile_by_slug` + helper `is_public_profile`).
+   - `supabase/migrations/004_portfolio_extras.sql` — adiciona `whatsapp`, `portfolio_show_avatar`, `portfolio_cover` em `profiles`.
+   - `supabase/migrations/005_agenda.sql` — tabelas `agenda_tasks` e `agenda_occurrences` com RLS.
+   - `supabase/migrations/006_profile_upgrade.sql` — portfolio sempre público, bucket `avatars` pra foto de perfil, trigger `handle_new_user` atualizado.
 3. Copie **Project URL** e **anon key** (em *Project Settings → API*) para `.env.local`:
 
 ```env
@@ -140,7 +143,7 @@ Todas as cores e tokens vivem em `tailwind.config.ts` + `app/globals.css`. Class
 | Portfolio público `/p/[slug]` | ✅ Completo    | RPC `get_public_profile_by_slug` (sem vazar email) + capas animadas + WhatsApp. |
 | **Provas sociais**         | ✅ Completo       | Upload múltiplo + masonry + caption inline + delete + zoom modal. |
 | Visual 3D + mouse FX       | ✅ Completo       | `card-3d`, cursor spotlight, ripple click, Orbitron tabs, grain overlay. |
-| SQL migrations             | ✅ Completo       | `001` → `005_agenda.sql`. |
+| SQL migrations             | ✅ Completo       | `001` → `006_profile_upgrade.sql`. |
 
 ---
 

@@ -233,10 +233,16 @@ export async function compressVideo(
     if (params.resolution !== 'original') {
       args.push('-vf', `scale=-2:${params.resolution}`);
     }
+    // Preset "veryfast" e 3-4x mais rapido que "medium" com CRF equivalente
+    // perdendo pouquissima eficiencia de compressao. Em WASM single-threaded
+    // isso e a diferenca de "demora muito" pra "roda em tempo aceitavel".
+    // tune=fastdecode tambem ajuda no playback de celulares fracos.
     args.push(
       '-c:v', 'libx264',
-      '-preset', 'medium',
+      '-preset', 'veryfast',
+      '-tune', 'fastdecode',
       '-crf', String(params.crf),
+      '-g', '120',
       '-c:a', 'aac',
       '-b:a', '128k',
       '-movflags', '+faststart',
@@ -341,14 +347,19 @@ export async function cutVideoSegments(
     );
     const filterComplex = filterLines.join(';');
 
+    // Preset "ultrafast" + tune zerolatency + CRF um pouco maior pra
+    // maximizar velocidade no WASM single-threaded. A Decupagem corta muitos
+    // segmentos (ate dezenas), entao cada segundo de encoder importa.
     await ff.exec([
       '-i', inputName,
       '-filter_complex', filterComplex,
       '-map', '[outv]',
       '-map', '[outa]',
       '-c:v', 'libx264',
-      '-preset', 'veryfast',
-      '-crf', '23',
+      '-preset', 'ultrafast',
+      '-tune', 'zerolatency',
+      '-crf', '26',
+      '-g', '60',
       '-c:a', 'aac',
       '-b:a', '128k',
       '-movflags', '+faststart',

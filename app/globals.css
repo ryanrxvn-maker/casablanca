@@ -189,7 +189,7 @@ body > * {
 
   /* Tabs com fonte tech (Orbitron) e acabamento 3D */
   .tab-link {
-    @apply relative whitespace-nowrap px-4 py-3 text-[12px] font-medium uppercase tracking-[0.18em] text-text-muted transition hover:text-white;
+    @apply relative whitespace-nowrap px-2 py-3 text-[10px] font-medium uppercase tracking-[0.08em] text-text-muted transition hover:text-white sm:px-3 sm:text-[11px] sm:tracking-[0.14em] md:text-[12px] md:tracking-[0.18em];
     font-family: var(--font-tech), var(--font-display), system-ui;
   }
 
@@ -201,8 +201,8 @@ body > * {
   .tab-link-active::after {
     content: '';
     position: absolute;
-    left: 0.75rem;
-    right: 0.75rem;
+    left: 0.5rem;
+    right: 0.5rem;
     bottom: -1px;
     height: 2px;
     background: linear-gradient(90deg, transparent, var(--lime), transparent);

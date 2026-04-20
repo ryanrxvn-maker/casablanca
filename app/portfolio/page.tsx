@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { FileUpload } from '@/components/FileUpload';
 import { createClient } from '@/lib/supabase/client';
@@ -10,17 +10,20 @@ import {
   VIDEO_BUCKET,
   THUMB_BUCKET,
   uploadPortfolioItem,
+  uploadAvatar,
   deleteByPublicUrl,
 } from '@/lib/portfolio-upload';
 
 const MAX_VIDEO_MB = 100;
 const MAX_VIDEO_BYTES = MAX_VIDEO_MB * 1024 * 1024;
+const MAX_AVATAR_MB = 5;
+const MAX_AVATAR_BYTES = MAX_AVATAR_MB * 1024 * 1024;
 
 type Profile = {
   id: string;
   name: string | null;
+  avatar_url: string | null;
   portfolio_slug: string | null;
-  portfolio_public: boolean;
   whatsapp: string | null;
   portfolio_show_avatar: boolean;
   portfolio_cover: string;
@@ -53,6 +56,7 @@ export default function PortfolioEditor() {
   const [whatsappDraft, setWhatsappDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [savingWhats, setSavingWhats] = useState(false);
+  const [savingCover, setSavingCover] = useState<string | null>(null);
   const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
   const [newCategory, setNewCategory] = useState('');
   const [activeCategory, setActiveCategory] = useState('Microleads');
@@ -61,17 +65,24 @@ export default function PortfolioEditor() {
   const [newTitle, setNewTitle] = useState('');
   const [uploadStage, setUploadStage] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [avatarStage, setAvatarStage] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadItems = useCallback(async (userId: string) => {
     const supabase = createClient();
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('portfolio_items')
       .select('id, title, category, niche, video_url, thumbnail_url, order, created_at')
       .eq('user_id', userId)
       .order('order', { ascending: true })
       .order('created_at', { ascending: false });
+    if (error) {
+      console.error('[portfolio] loadItems error:', error);
+      return;
+    }
     if (data) setItems(data as PortfolioItem[]);
   }, []);
 
@@ -93,7 +104,7 @@ export default function PortfolioEditor() {
       const { data: prof } = await supabase
         .from('profiles')
         .select(
-          'id, name, portfolio_slug, portfolio_public, whatsapp, portfolio_show_avatar, portfolio_cover',
+          'id, name, avatar_url, portfolio_slug, whatsapp, portfolio_show_avatar, portfolio_cover',
         )
         .eq('id', data.user.id)
         .maybeSingle();
@@ -114,86 +125,140 @@ export default function PortfolioEditor() {
     if (!profile) return;
     setSaving(true);
     const supabase = createClient();
-    await supabase
+    const { error } = await supabase
       .from('profiles')
       .update({ portfolio_slug: slugify(slugDraft) })
       .eq('id', profile.id);
+    if (error) console.error('[portfolio] saveSlug error:', error);
+    else setProfile({ ...profile, portfolio_slug: slugify(slugDraft) });
     setSaving(false);
-  }
-
-  async function togglePublic(on: boolean) {
-    if (!profile) return;
-    const supabase = createClient();
-    await supabase
-      .from('profiles')
-      .update({ portfolio_public: on })
-      .eq('id', profile.id);
-    setProfile({ ...profile, portfolio_public: on });
   }
 
   async function toggleShowAvatar(on: boolean) {
     if (!profile) return;
+    // Update otimista pra feedback imediato
+    setProfile({ ...profile, portfolio_show_avatar: on });
     const supabase = createClient();
-    await supabase
+    const { error } = await supabase
       .from('profiles')
       .update({ portfolio_show_avatar: on })
       .eq('id', profile.id);
-    setProfile({ ...profile, portfolio_show_avatar: on });
+    if (error) {
+      console.error('[portfolio] toggleShowAvatar error:', error);
+      // reverte
+      setProfile((p) => (p ? { ...p, portfolio_show_avatar: !on } : p));
+    }
   }
 
   async function saveCover(id: string) {
     if (!profile) return;
-    const supabase = createClient();
-    await supabase
-      .from('profiles')
-      .update({ portfolio_cover: id })
-      .eq('id', profile.id);
+    // Update otimista pra UI responder clique de imediato
+    const prev = profile.portfolio_cover;
     setProfile({ ...profile, portfolio_cover: id });
+    setSavingCover(id);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('profiles')
+        .update({ portfolio_cover: id })
+        .eq('id', profile.id);
+      if (error) {
+        console.error('[portfolio] saveCover error:', error);
+        // reverte
+        setProfile((p) => (p ? { ...p, portfolio_cover: prev } : p));
+        alert('Nao foi possivel salvar a capa: ' + error.message);
+      }
+    } finally {
+      setSavingCover(null);
+    }
   }
 
   async function saveWhatsapp() {
     if (!profile) return;
     setSavingWhats(true);
     const supabase = createClient();
-    await supabase
+    const { error } = await supabase
       .from('profiles')
       .update({ whatsapp: whatsappDraft.trim() || null })
       .eq('id', profile.id);
-    setProfile({ ...profile, whatsapp: whatsappDraft.trim() || null });
+    if (error) console.error('[portfolio] saveWhatsapp error:', error);
+    else setProfile({ ...profile, whatsapp: whatsappDraft.trim() || null });
     setSavingWhats(false);
+  }
+
+  async function onAvatarSelected(file: File | null) {
+    if (!profile || !file) return;
+    setAvatarError(null);
+    if (file.size > MAX_AVATAR_BYTES) {
+      setAvatarError(
+        'Imagem muito grande (' + (file.size / 1024 / 1024).toFixed(1) +
+          'MB). Limite: ' + MAX_AVATAR_MB + 'MB.',
+      );
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      setAvatarError('Envie um arquivo de imagem (JPG/PNG/WEBP).');
+      return;
+    }
+    setAvatarStage('Enviando...');
+    try {
+      const prevUrl = profile.avatar_url;
+      const { publicUrl } = await uploadAvatar(profile.id, file);
+      const supabase = createClient();
+      const { error } = await supabase
+        .from('profiles')
+        .update({ avatar_url: publicUrl })
+        .eq('id', profile.id);
+      if (error) throw error;
+      setProfile({ ...profile, avatar_url: publicUrl });
+      setAvatarStage(null);
+      if (prevUrl && !prevUrl.startsWith('data:')) {
+        deleteByPublicUrl('avatars', prevUrl).catch(() => null);
+      }
+    } catch (e) {
+      console.error('[portfolio] avatar upload error:', e);
+      setAvatarError((e as Error).message ?? 'Falha ao enviar imagem.');
+      setAvatarStage(null);
+    }
   }
 
   async function addCategory() {
     if (!profile || !newCategory.trim()) return;
     const name = newCategory.trim();
     const supabase = createClient();
-    await supabase.from('portfolio_categories').insert({
+    const { error } = await supabase.from('portfolio_categories').insert({
       user_id: profile.id,
       name,
       type: 'custom',
     });
+    if (error) {
+      console.error('[portfolio] addCategory error:', error);
+      alert('Nao foi possivel adicionar categoria: ' + error.message);
+      return;
+    }
     setCategories((prev) => Array.from(new Set([...prev, name])));
     setActiveCategory(name);
     setNewCategory('');
   }
 
   /**
-   * Remove uma categoria. As categorias DEFAULT (Microleads, Ads) nao podem
-   * ser removidas — sao fixas. Se houver videos na categoria, o usuario
-   * precisa confirmar (e os videos ficam "orfaos" marcados com aquela
-   * categoria, mas nao aparecem na lista ate recadastrar).
+   * Remove uma categoria. Agora TODAS podem ser excluidas (inclusive as
+   * defaults Microleads/Ads). Se a categoria excluida e uma default,
+   * simplesmente escondemos do sidebar (a gente remove do state), ja que
+   * nao existe row correspondente em portfolio_categories pra elas.
+   * Videos da categoria tambem sao removidos junto.
    */
   async function deleteCategory(name: string) {
     if (!profile) return;
-    if (DEFAULT_CATEGORIES.includes(name)) return;
     const inCatCount = items.filter((i) => i.category === name).length;
     const msg =
       inCatCount > 0
-        ? `A categoria "${name}" tem ${inCatCount} video(s). Excluir assim mesmo? Os videos serao removidos.`
-        : `Excluir a categoria "${name}"?`;
+        ? 'A categoria "' + name + '" tem ' + inCatCount +
+            ' video(s). Excluir assim mesmo? Os videos serao removidos.'
+        : 'Excluir a categoria "' + name + '"?';
     if (!confirm(msg)) return;
+
     const supabase = createClient();
-    // Remove videos dessa categoria (com seus arquivos)
     const victims = items.filter((i) => i.category === name);
     for (const v of victims) {
       await supabase.from('portfolio_items').delete().eq('id', v.id);
@@ -201,23 +266,35 @@ export default function PortfolioEditor() {
       if (v.thumbnail_url)
         await deleteByPublicUrl(THUMB_BUCKET, v.thumbnail_url).catch(() => null);
     }
+    // Remove registro da categoria (so existe pra custom, mas e noop pras defaults)
     await supabase
       .from('portfolio_categories')
       .delete()
       .eq('user_id', profile.id)
       .eq('name', name);
+
     setCategories((prev) => prev.filter((c) => c !== name));
-    if (activeCategory === name) setActiveCategory(DEFAULT_CATEGORIES[0]);
+    if (activeCategory === name) {
+      const remaining = categories.filter((c) => c !== name);
+      setActiveCategory(remaining[0] ?? 'Microleads');
+    }
     await loadItems(profile.id);
   }
 
   async function uploadNewVideo() {
-    if (!profile || !newFile) return;
+    if (!profile) {
+      setUploadError('Perfil ainda carregando. Aguarde e tente novamente.');
+      return;
+    }
+    if (!newFile) {
+      setUploadError('Selecione um arquivo de video primeiro.');
+      return;
+    }
     setUploadError(null);
     if (newFile.size > MAX_VIDEO_BYTES) {
       setUploadError(
-        `Arquivo muito grande: ${(newFile.size / (1024 * 1024)).toFixed(1)}MB. ` +
-          `O limite por video e ${MAX_VIDEO_MB}MB.`,
+        'Arquivo muito grande: ' + (newFile.size / (1024 * 1024)).toFixed(1) +
+          'MB. O limite por video e ' + MAX_VIDEO_MB + 'MB.',
       );
       return;
     }
@@ -236,8 +313,12 @@ export default function PortfolioEditor() {
       setNewTitle('');
       setUploadStage(null);
     } catch (e) {
-      console.error(e);
-      setUploadError((e as Error).message ?? 'Falha no upload.');
+      console.error('[portfolio] uploadNewVideo error:', e);
+      const msg = (e as Error).message ?? 'Falha no upload.';
+      setUploadError(
+        msg +
+          ' — Verifique se voce rodou as migrations SQL no Supabase e se os buckets de Storage existem.',
+      );
       setUploadStage(null);
     }
   }
@@ -252,23 +333,16 @@ export default function PortfolioEditor() {
     await loadItems(profile.id);
   }
 
-  /**
-   * Reordena os items da categoria ativa: move `fromIdx` -> `toIdx` e atualiza
-   * o campo `order` de TODOS os items da categoria em batch (Promise.all).
-   * Faz update otimista na UI pra nao ter flash; se o Supabase falhar, recarrega.
-   */
   async function reorderItems(fromIdx: number, toIdx: number) {
     if (!profile || fromIdx === toIdx) return;
     const inCat = items.filter((i) => i.category === activeCategory);
     if (fromIdx < 0 || fromIdx >= inCat.length) return;
     if (toIdx < 0 || toIdx >= inCat.length) return;
 
-    // Aplica o move localmente
     const reordered = [...inCat];
     const [moved] = reordered.splice(fromIdx, 1);
     reordered.splice(toIdx, 0, moved);
 
-    // Update otimista: reescreve `order` com o novo indice
     const newOrderById = new Map(reordered.map((it, idx) => [it.id, idx]));
     setItems((prev) =>
       prev.map((it) =>
@@ -278,7 +352,6 @@ export default function PortfolioEditor() {
       ),
     );
 
-    // Batch update no Supabase
     const supabase = createClient();
     try {
       await Promise.all(
@@ -295,7 +368,6 @@ export default function PortfolioEditor() {
   function handleDragStart(e: DragEvent<HTMLLIElement>, id: string) {
     setDraggingId(id);
     e.dataTransfer.effectAllowed = 'move';
-    // Precisa setar algum data pro Firefox disparar o drag
     e.dataTransfer.setData('text/plain', id);
   }
 
@@ -334,6 +406,8 @@ export default function PortfolioEditor() {
       : null;
 
   const visibleItems = items.filter((i) => i.category === activeCategory);
+  const displayName = profile?.name?.trim() || 'Editor';
+  const initial = displayName.charAt(0).toUpperCase();
 
   return (
     <ToolShell
@@ -360,6 +434,61 @@ export default function PortfolioEditor() {
             </svg>
             Voltar para as ferramentas
           </Link>
+        </div>
+
+        {/* Avatar + nome */}
+        <div className="card-3d card-pad flex flex-col gap-4 sm:flex-row sm:items-center">
+          <div className="flex items-center gap-4">
+            {profile?.avatar_url ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={profile.avatar_url}
+                alt=""
+                className="h-20 w-20 rounded-full border border-line object-cover"
+              />
+            ) : (
+              <span className="flex h-20 w-20 items-center justify-center rounded-full border border-line bg-bg text-2xl font-bold text-lime">
+                {initial}
+              </span>
+            )}
+            <div className="flex flex-col gap-1">
+              <div className="text-sm font-semibold text-white">{displayName}</div>
+              <div className="text-xs text-text-muted">
+                Foto de perfil exibida no header e no portfolio publico.
+              </div>
+            </div>
+          </div>
+
+          <div className="sm:ml-auto flex flex-col gap-2">
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => onAvatarSelected(e.target.files?.[0] ?? null)}
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="btn-secondary !py-1.5 !px-3 text-xs"
+                onClick={() => avatarInputRef.current?.click()}
+                disabled={!!avatarStage}
+              >
+                {avatarStage ?? 'Enviar foto do PC'}
+              </button>
+              <Link
+                href="/perfil"
+                className="btn-ghost !py-1.5 !px-3 text-xs"
+              >
+                Editar perfil
+              </Link>
+            </div>
+            {avatarError ? (
+              <div className="rounded-[8px] border border-red-500/40 bg-red-500/10 px-2 py-1 text-[11px] text-red-300">
+                {avatarError}
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
@@ -402,18 +531,6 @@ export default function PortfolioEditor() {
             <div className="flex flex-col gap-2 rounded-[12px] border border-line bg-bg px-4 py-3">
               <div className="flex items-center gap-3">
                 <input
-                  id="public-toggle"
-                  type="checkbox"
-                  checked={profile?.portfolio_public ?? false}
-                  onChange={(e) => togglePublic(e.target.checked)}
-                  className="h-4 w-4 accent-lime"
-                />
-                <label htmlFor="public-toggle" className="text-sm text-white">
-                  Portfolio publico
-                </label>
-              </div>
-              <div className="flex items-center gap-3">
-                <input
                   id="show-avatar-toggle"
                   type="checkbox"
                   checked={profile?.portfolio_show_avatar ?? true}
@@ -421,9 +538,13 @@ export default function PortfolioEditor() {
                   className="h-4 w-4 accent-lime"
                 />
                 <label htmlFor="show-avatar-toggle" className="text-sm text-white">
-                  Mostrar foto no portfolio publico
+                  Mostrar minha foto de perfil pro cliente
                 </label>
               </div>
+              <p className="text-[11px] text-text-muted">
+                Seu portfolio e sempre publico. Voce controla apenas se sua foto
+                aparece pros clientes.
+              </p>
             </div>
           </div>
         </div>
@@ -456,23 +577,29 @@ export default function PortfolioEditor() {
             <div className="flex flex-wrap gap-2">
               {COVER_OPTIONS.map((opt) => {
                 const active = (profile?.portfolio_cover ?? 'default') === opt.id;
+                const pending = savingCover === opt.id;
                 return (
                   <button
                     key={opt.id}
                     type="button"
                     onClick={() => saveCover(opt.id)}
+                    disabled={!!savingCover}
                     className={
                       'rounded-full border px-3 py-1.5 text-xs transition ' +
                       (active
                         ? 'border-lime bg-lime/10 text-lime'
-                        : 'border-line bg-bg text-text-muted hover:border-lime/40 hover:text-white')
+                        : 'border-line bg-bg text-text-muted hover:border-lime/40 hover:text-white') +
+                      (pending ? ' opacity-60' : '')
                     }
                   >
-                    {opt.label}
+                    {pending ? '...' : opt.label}
                   </button>
                 );
               })}
             </div>
+            <p className="mt-1.5 text-xs text-text-muted">
+              Clique pra trocar. A mudanca e salva automaticamente.
+            </p>
           </div>
         </div>
 
@@ -482,7 +609,6 @@ export default function PortfolioEditor() {
             <nav className="flex flex-col gap-1">
               {categories.map((c) => {
                 const isActive = activeCategory === c;
-                const isDefault = DEFAULT_CATEGORIES.includes(c);
                 return (
                   <div
                     key={c}
@@ -501,22 +627,20 @@ export default function PortfolioEditor() {
                     >
                       {c}
                     </button>
-                    {!isDefault ? (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteCategory(c);
-                        }}
-                        className="mr-1 rounded p-1 text-text-dim opacity-0 transition hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
-                        aria-label={`Excluir categoria ${c}`}
-                        title="Excluir categoria"
-                      >
-                        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-                          <path d="M2.5 3h7l-.5 7a1 1 0 01-1 1h-4a1 1 0 01-1-1L2.5 3zm2-1.5A.5.5 0 015 1h2a.5.5 0 01.5.5V2h3a.5.5 0 010 1h-9a.5.5 0 010-1h3v-.5z" />
-                        </svg>
-                      </button>
-                    ) : null}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteCategory(c);
+                      }}
+                      className="mr-1 rounded p-1 text-text-dim transition hover:bg-red-500/10 hover:text-red-400 opacity-60 group-hover:opacity-100"
+                      aria-label={`Excluir categoria ${c}`}
+                      title="Excluir categoria"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                        <path d="M2.5 3h7l-.5 7a1 1 0 01-1 1h-4a1 1 0 01-1-1L2.5 3zm2-1.5A.5.5 0 015 1h2a.5.5 0 01.5.5V2h3a.5.5 0 010 1h-9a.5.5 0 010-1h3v-.5z" />
+                      </svg>
+                    </button>
                   </div>
                 );
               })}
@@ -551,7 +675,10 @@ export default function PortfolioEditor() {
               <FileUpload
                 accept="video/mp4,video/webm,video/quicktime"
                 value={newFile}
-                onChange={setNewFile}
+                onChange={(f) => {
+                  setNewFile(f);
+                  setUploadError(null);
+                }}
                 hint="MP4, WEBM ou MOV"
               />
               <input
@@ -573,6 +700,7 @@ export default function PortfolioEditor() {
                     onClick={() => {
                       setNewFile(null);
                       setNewTitle('');
+                      setUploadError(null);
                     }}
                     className="btn-ghost !py-2 text-xs"
                     disabled={!!uploadStage}

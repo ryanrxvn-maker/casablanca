@@ -129,14 +129,6 @@ export function Header() {
               </div>
               <nav className="flex flex-col py-1 text-sm">
                 <Link
-                  href="/tools"
-                  onClick={() => setOpen(false)}
-                  className="px-4 py-2 text-text-muted transition hover:bg-bg hover:text-text"
-                  role="menuitem"
-                >
-                  Ferramentas
-                </Link>
-                <Link
                   href="/portfolio"
                   onClick={() => setOpen(false)}
                   className="px-4 py-2 text-text-muted transition hover:bg-bg hover:text-text"
@@ -145,12 +137,20 @@ export function Header() {
                   Portfolio
                 </Link>
                 <Link
-                  href="/portfolio/provas-sociais"
+                  href="/tools"
                   onClick={() => setOpen(false)}
                   className="px-4 py-2 text-text-muted transition hover:bg-bg hover:text-text"
                   role="menuitem"
                 >
-                  Provas sociais
+                  Ferramentas
+                </Link>
+                <Link
+                  href="/perfil"
+                  onClick={() => setOpen(false)}
+                  className="px-4 py-2 text-text-muted transition hover:bg-bg hover:text-text"
+                  role="menuitem"
+                >
+                  Editar perfil
                 </Link>
                 <button
                   type="button"

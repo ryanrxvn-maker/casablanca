@@ -36,6 +36,14 @@ Leva cerca de 20-30 minutos se você já tem conta nos dois serviços.
      Cria as tabelas `agenda_tasks` e `agenda_occurrences` usadas pela
      ferramenta **Agenda** (/tools/agenda). Ambas têm RLS restrita ao dono
      e suportam tarefas pontuais/recorrentes com status de conclusão.
+   - Cole o conteúdo de `supabase/migrations/006_profile_upgrade.sql` e rode.
+     Torna `portfolio_public = true` por padrão (portfolio sempre público),
+     cria o bucket de Storage `avatars` com RLS (upload de foto de perfil
+     do PC em `/perfil` e `/portfolio`), e reescreve
+     `get_public_profile_by_slug` / `is_public_profile` pra não filtrarem
+     mais por `portfolio_public`. Também atualiza o trigger
+     `handle_new_user` pra que novos cadastros já venham com portfolio
+     público.
 
 4. Em **Authentication → Email Templates → Confirm signup**, troque o corpo
    padrão para usar `{{ .Token }}` em vez de `{{ .ConfirmationURL }}`. O
