@@ -1,6 +1,6 @@
-# CASABLANCA — Guia de deploy
+# DARKO LAB — Guia de deploy
 
-Passo a passo para colocar o CASABLANCA em produção na Vercel com Supabase.
+Passo a passo para colocar o DARKO LAB em produção na Vercel com Supabase.
 Leva cerca de 20-30 minutos se você já tem conta nos dois serviços.
 
 ---
@@ -44,6 +44,15 @@ Leva cerca de 20-30 minutos se você já tem conta nos dois serviços.
      mais por `portfolio_public`. Também atualiza o trigger
      `handle_new_user` pra que novos cadastros já venham com portfolio
      público.
+   - Cole o conteúdo de `supabase/migrations/007_darko_visibility.sql` e rode.
+     **Re-introduz a privacidade do portfolio** (`portfolio_public` volta a
+     filtrar perfil privado → 404 em `/p/[slug]`), remove as colunas
+     legadas `portfolio_cover` e `portfolio_show_avatar` (agora o perfil só
+     controla publico/privado + foto sempre visível), e roda
+     `notify pgrst, 'reload schema'` pra forçar o PostgREST a recarregar o
+     schema cache (resolve o erro "Could not find the table
+     'public.agenda_tasks'" que aparecia quando a Agenda tentava ler as
+     tabelas antes da migration 005 ser aplicada).
 
 4. Em **Authentication → Email Templates → Confirm signup**, troque o corpo
    padrão para usar `{{ .Token }}` em vez de `{{ .ConfirmationURL }}`. O
@@ -129,7 +138,7 @@ vercel deploy --prod           # quando estiver confiante
 
 Na primeira vez o CLI vai perguntar:
 - Link com projeto existente? **No** (vai criar novo)
-- Nome do projeto: `casablanca` (ou o que preferir)
+- Nome do projeto: `darko-lab` (ou o que preferir)
 - Diretório: `./` (enter)
 - Override settings? **No**
 

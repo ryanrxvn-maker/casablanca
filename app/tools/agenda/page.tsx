@@ -118,9 +118,19 @@ export default function AgendaPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [schemaError, setSchemaError] = useState<string | null>(null);
   const [now, setNow] = useState<Date>(new Date());
   const [toast, setToast] = useState<string | null>(null);
   const notifiedRef = useRef<Set<string>>(new Set());
+
+  function isSchemaMissingError(err: unknown): boolean {
+    const msg = (err as { message?: string })?.message ?? String(err ?? '');
+    return (
+      msg.toLowerCase().includes('schema cache') ||
+      msg.toLowerCase().includes('could not find the table') ||
+      msg.toLowerCase().includes('does not exist')
+    );
+  }
 
   function flashToast(msg: string, ms = 2400) {
     setToast(msg);
@@ -158,10 +168,19 @@ export default function AgendaPage() {
     ]);
     if (tRes.error) {
       console.error('[agenda] reload tasks error:', tRes.error);
-      flashToast('Erro ao carregar tarefas: ' + tRes.error.message);
+      if (isSchemaMissingError(tRes.error)) {
+        setSchemaError(tRes.error.message);
+      } else {
+        flashToast('Erro ao carregar tarefas: ' + tRes.error.message);
+      }
+    } else {
+      setSchemaError(null);
     }
     if (oRes.error) {
       console.error('[agenda] reload occurrences error:', oRes.error);
+      if (isSchemaMissingError(oRes.error)) {
+        setSchemaError(oRes.error.message);
+      }
     }
     setTasks((tRes.data as AgendaTask[]) ?? []);
     setOccurrences((oRes.data as AgendaOccurrence[]) ?? []);
@@ -276,7 +295,14 @@ export default function AgendaPage() {
         : await supabase.from('agenda_tasks').insert(payload);
       if (res.error) {
         console.error('[agenda] saveDraft error:', res.error);
-        setSaveError(res.error.message);
+        if (isSchemaMissingError(res.error)) {
+          setSchemaError(res.error.message);
+          setSaveError(
+            'Tabela agenda_tasks nao existe no Supabase. Rode a migration 005_agenda.sql no SQL Editor.',
+          );
+        } else {
+          setSaveError(res.error.message);
+        }
         return;
       }
       // Move a visao pra data da tarefa pro usuario VER a tarefa que criou.
@@ -384,6 +410,28 @@ export default function AgendaPage() {
       description="Seu planner diario. Urgencias, recorrencias, notificacoes e relatorio em tempo real."
     >
       <div className="flex flex-col gap-6">
+        {schemaError ? (
+          <div className="rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-4 text-sm text-red-200">
+            <div className="mb-1 font-semibold text-red-300">
+              Tabelas da Agenda ainda nao foram criadas no Supabase
+            </div>
+            <div className="text-xs">
+              Abra o SQL Editor no painel do Supabase e rode{' '}
+              <span className="mono text-red-100">
+                supabase/migrations/005_agenda.sql
+              </span>{' '}
+              (e depois 006_profile_upgrade.sql + 007_darko_visibility.sql pra
+              forcar o reload do schema cache). Se acabou de rodar e ainda da
+              erro, rode no SQL Editor:{' '}
+              <span className="mono text-red-100">
+                notify pgrst, &apos;reload schema&apos;;
+              </span>
+            </div>
+            <pre className="mono mt-2 whitespace-pre-wrap rounded bg-black/30 px-2 py-1 text-[10px] text-red-100">
+              {schemaError}
+            </pre>
+          </div>
+        ) : null}
         {/* Toolbar */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">

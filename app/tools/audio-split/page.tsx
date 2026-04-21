@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { FileUpload } from '@/components/FileUpload';
 import { AudioPlayer } from '@/components/AudioPlayer';
+import { useToolState } from '@/components/ToolsStateProvider';
 import {
   decodeAudioRobust,
   downloadBlob,
@@ -33,11 +33,21 @@ function partFileName(base: string, index: number) {
 }
 
 export default function AudioSplitPage() {
-  const [file, setFile] = useState<File | null>(null);
-  const [processing, setProcessing] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
-  const [parts, setParts] = useState<OutputPart[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  // State persistente via provider — sobrevive navegacao entre ferramentas
+  const [file, setFile] = useToolState<File | null>('audio-split:file', null);
+  const [processing, setProcessing] = useToolState<boolean>(
+    'audio-split:processing',
+    false,
+  );
+  const [status, setStatus] = useToolState<string | null>(
+    'audio-split:status',
+    null,
+  );
+  const [parts, setParts] = useToolState<OutputPart[]>('audio-split:parts', []);
+  const [error, setError] = useToolState<string | null>(
+    'audio-split:error',
+    null,
+  );
 
   function reset() {
     parts.forEach((p) => URL.revokeObjectURL(p.url));

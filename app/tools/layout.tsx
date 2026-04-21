@@ -1,5 +1,6 @@
 import { Header } from '@/components/Header';
 import { TabNav } from '@/components/TabNav';
+import { ToolsStateProvider } from '@/components/ToolsStateProvider';
 
 const toolTabs = [
   { label: 'Agenda', href: '/tools/agenda' },
@@ -17,10 +18,12 @@ export default function ToolsLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-screen flex-col">
-      <Header />
-      <TabNav tabs={toolTabs} />
-      <main className="container-app flex-1 py-10">{children}</main>
-    </div>
+    <ToolsStateProvider>
+      <div className="flex min-h-screen flex-col">
+        <Header />
+        <TabNav tabs={toolTabs} />
+        <main className="container-app flex-1 py-10">{children}</main>
+      </div>
+    </ToolsStateProvider>
   );
 }

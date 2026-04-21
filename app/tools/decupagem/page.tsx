@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { FileUpload } from '@/components/FileUpload';
 import { AudioPlayer } from '@/components/AudioPlayer';
+import { useToolState } from '@/components/ToolsStateProvider';
 import {
   decodeAudioRobust,
   downloadBlob,
@@ -68,15 +68,39 @@ function computeSpeechSegments(
 }
 
 export default function DecupagemPage() {
-  const [file, setFile] = useState<File | null>(null);
-  const [keepSilence, setKeepSilence] = useState(0.05);
-  const [outputKind, setOutputKind] = useState<OutputKind>('video');
-  const [audioFormat, setAudioFormat] = useState<AudioFmt>('mp3');
-  const [processing, setProcessing] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
-  const [progress, setProgress] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<Result | null>(null);
+  const [file, setFile] = useToolState<File | null>('decupagem:file', null);
+  const [keepSilence, setKeepSilence] = useToolState<number>(
+    'decupagem:keepSilence',
+    0.05,
+  );
+  const [outputKind, setOutputKind] = useToolState<OutputKind>(
+    'decupagem:outputKind',
+    'video',
+  );
+  const [audioFormat, setAudioFormat] = useToolState<AudioFmt>(
+    'decupagem:audioFormat',
+    'mp3',
+  );
+  const [processing, setProcessing] = useToolState<boolean>(
+    'decupagem:processing',
+    false,
+  );
+  const [status, setStatus] = useToolState<string | null>(
+    'decupagem:status',
+    null,
+  );
+  const [progress, setProgress] = useToolState<number | null>(
+    'decupagem:progress',
+    null,
+  );
+  const [error, setError] = useToolState<string | null>(
+    'decupagem:error',
+    null,
+  );
+  const [result, setResult] = useToolState<Result | null>(
+    'decupagem:result',
+    null,
+  );
 
   const fileIsVideo = file ? isVideoFile(file) : false;
   const effectiveKind: OutputKind = fileIsVideo ? outputKind : 'audio';

@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { BatchFileUpload } from '@/components/BatchFileUpload';
+import { useToolState } from '@/components/ToolsStateProvider';
 import { downloadBlob } from '@/lib/audio-engine';
 import { compressVideo, type FFProgress } from '@/lib/ffmpeg-worker';
 import { buildZip } from '@/lib/zip-builder';
@@ -50,13 +51,25 @@ function makeJob(file: File): Job {
 }
 
 export default function CompressorPage() {
-  const [files, setFiles] = useState<File[]>([]);
-  const [crf, setCrf] = useState(23);
-  const [resolution, setResolution] = useState<Resolution>('original');
-  const [processing, setProcessing] = useState(false);
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [stageMsg, setStageMsg] = useState<string | null>(null);
-  const [zipping, setZipping] = useState(false);
+  const [files, setFiles] = useToolState<File[]>('compressor:files', []);
+  const [crf, setCrf] = useToolState<number>('compressor:crf', 23);
+  const [resolution, setResolution] = useToolState<Resolution>(
+    'compressor:resolution',
+    'original',
+  );
+  const [processing, setProcessing] = useToolState<boolean>(
+    'compressor:processing',
+    false,
+  );
+  const [jobs, setJobs] = useToolState<Job[]>('compressor:jobs', []);
+  const [stageMsg, setStageMsg] = useToolState<string | null>(
+    'compressor:stageMsg',
+    null,
+  );
+  const [zipping, setZipping] = useToolState<boolean>(
+    'compressor:zipping',
+    false,
+  );
 
   const totalInput = useMemo(
     () => files.reduce((acc, f) => acc + f.size, 0),

@@ -1,41 +1,28 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { FileUpload } from '@/components/FileUpload';
 import { createClient } from '@/lib/supabase/client';
-import { slugify } from '@/lib/utils';
 import {
   VIDEO_BUCKET,
   THUMB_BUCKET,
   uploadPortfolioItem,
-  uploadAvatar,
   deleteByPublicUrl,
 } from '@/lib/portfolio-upload';
 
 const MAX_VIDEO_MB = 100;
 const MAX_VIDEO_BYTES = MAX_VIDEO_MB * 1024 * 1024;
-const MAX_AVATAR_MB = 5;
-const MAX_AVATAR_BYTES = MAX_AVATAR_MB * 1024 * 1024;
 
 type Profile = {
   id: string;
   name: string | null;
   avatar_url: string | null;
   portfolio_slug: string | null;
-  whatsapp: string | null;
-  portfolio_show_avatar: boolean;
-  portfolio_cover: string;
+  portfolio_public: boolean;
 };
-
-const COVER_OPTIONS: Array<{ id: string; label: string }> = [
-  { id: 'default', label: 'Padrao' },
-  { id: 'matrix', label: 'Codigo' },
-  { id: 'dollars', label: 'Dollars' },
-  { id: 'tech', label: 'Tech' },
-  { id: 'minimal', label: 'Minimal' },
-];
 
 type PortfolioItem = {
   id: string;
@@ -51,12 +38,11 @@ type PortfolioItem = {
 const DEFAULT_CATEGORIES = ['Microleads', 'Ads'];
 
 export default function PortfolioEditor() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [slugDraft, setSlugDraft] = useState('');
-  const [whatsappDraft, setWhatsappDraft] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [savingWhats, setSavingWhats] = useState(false);
-  const [savingCover, setSavingCover] = useState<string | null>(null);
+  const [togglingPublic, setTogglingPublic] = useState(false);
   const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
   const [newCategory, setNewCategory] = useState('');
   const [activeCategory, setActiveCategory] = useState('Microleads');
@@ -65,11 +51,14 @@ export default function PortfolioEditor() {
   const [newTitle, setNewTitle] = useState('');
   const [uploadStage, setUploadStage] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [avatarStage, setAvatarStage] = useState<string | null>(null);
-  const [avatarError, setAvatarError] = useState<string | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
-  const avatarInputRef = useRef<HTMLInputElement | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  function flashToast(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2600);
+  }
 
   const loadItems = useCallback(async (userId: string) => {
     const supabase = createClient();
@@ -88,138 +77,100 @@ export default function PortfolioEditor() {
 
   const loadCategories = useCallback(async (userId: string) => {
     const supabase = createClient();
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('portfolio_categories')
       .select('name')
       .eq('user_id', userId);
+    if (error) {
+      console.error('[portfolio] loadCategories error:', error);
+    }
     const names = (data ?? []).map((c: { name: string }) => c.name);
     const merged = Array.from(new Set([...DEFAULT_CATEGORIES, ...names]));
     setCategories(merged);
   }, []);
 
   useEffect(() => {
-    const supabase = createClient();
-    supabase.auth.getUser().then(async ({ data }) => {
-      if (!data.user) return;
-      const { data: prof } = await supabase
-        .from('profiles')
-        .select(
-          'id, name, avatar_url, portfolio_slug, whatsapp, portfolio_show_avatar, portfolio_cover',
-        )
-        .eq('id', data.user.id)
-        .maybeSingle();
-      if (prof) {
-        setProfile({
-          ...(prof as Profile),
-          portfolio_show_avatar: prof.portfolio_show_avatar ?? true,
-          portfolio_cover: prof.portfolio_cover ?? 'default',
-        });
-        setSlugDraft(prof.portfolio_slug ?? '');
-        setWhatsappDraft(prof.whatsapp ?? '');
-        await Promise.all([loadItems(prof.id), loadCategories(prof.id)]);
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const supabase = createClient();
+        const { data: userData, error: userErr } = await supabase.auth.getUser();
+        if (userErr) throw userErr;
+        if (!userData.user) {
+          router.replace('/login');
+          return;
+        }
+
+        const { data: prof, error } = await supabase
+          .from('profiles')
+          .select('id, name, avatar_url, portfolio_slug, portfolio_public')
+          .eq('id', userData.user.id)
+          .maybeSingle();
+
+        if (cancelled) return;
+        if (error) throw error;
+
+        if (!prof) {
+          setLoadError(
+            'Seu perfil nao existe no banco. Rode a migration 001_init.sql no Supabase.',
+          );
+          setLoading(false);
+          return;
+        }
+
+        const p: Profile = {
+          id: prof.id,
+          name: prof.name ?? null,
+          avatar_url: prof.avatar_url ?? null,
+          portfolio_slug: prof.portfolio_slug ?? null,
+          portfolio_public: prof.portfolio_public ?? false,
+        };
+        setProfile(p);
+        await Promise.all([loadItems(p.id), loadCategories(p.id)]);
+        setLoading(false);
+      } catch (e) {
+        if (cancelled) return;
+        console.error('[portfolio] load error:', e);
+        setLoadError((e as Error).message ?? 'Falha ao carregar perfil.');
+        setLoading(false);
       }
-    });
-  }, [loadItems, loadCategories]);
+    })();
 
-  async function saveSlug() {
-    if (!profile) return;
-    setSaving(true);
-    const supabase = createClient();
-    const { error } = await supabase
-      .from('profiles')
-      .update({ portfolio_slug: slugify(slugDraft) })
-      .eq('id', profile.id);
-    if (error) console.error('[portfolio] saveSlug error:', error);
-    else setProfile({ ...profile, portfolio_slug: slugify(slugDraft) });
-    setSaving(false);
-  }
+    return () => {
+      cancelled = true;
+    };
+  }, [router, loadItems, loadCategories]);
 
-  async function toggleShowAvatar(on: boolean) {
+  async function togglePublic(on: boolean) {
     if (!profile) return;
-    // Update otimista pra feedback imediato
-    setProfile({ ...profile, portfolio_show_avatar: on });
-    const supabase = createClient();
-    const { error } = await supabase
-      .from('profiles')
-      .update({ portfolio_show_avatar: on })
-      .eq('id', profile.id);
-    if (error) {
-      console.error('[portfolio] toggleShowAvatar error:', error);
-      // reverte
-      setProfile((p) => (p ? { ...p, portfolio_show_avatar: !on } : p));
-    }
-  }
-
-  async function saveCover(id: string) {
-    if (!profile) return;
-    // Update otimista pra UI responder clique de imediato
-    const prev = profile.portfolio_cover;
-    setProfile({ ...profile, portfolio_cover: id });
-    setSavingCover(id);
+    setTogglingPublic(true);
+    const prev = profile.portfolio_public;
+    setProfile({ ...profile, portfolio_public: on });
     try {
       const supabase = createClient();
       const { error } = await supabase
         .from('profiles')
-        .update({ portfolio_cover: id })
-        .eq('id', profile.id);
-      if (error) {
-        console.error('[portfolio] saveCover error:', error);
-        // reverte
-        setProfile((p) => (p ? { ...p, portfolio_cover: prev } : p));
-        alert('Nao foi possivel salvar a capa: ' + error.message);
-      }
-    } finally {
-      setSavingCover(null);
-    }
-  }
-
-  async function saveWhatsapp() {
-    if (!profile) return;
-    setSavingWhats(true);
-    const supabase = createClient();
-    const { error } = await supabase
-      .from('profiles')
-      .update({ whatsapp: whatsappDraft.trim() || null })
-      .eq('id', profile.id);
-    if (error) console.error('[portfolio] saveWhatsapp error:', error);
-    else setProfile({ ...profile, whatsapp: whatsappDraft.trim() || null });
-    setSavingWhats(false);
-  }
-
-  async function onAvatarSelected(file: File | null) {
-    if (!profile || !file) return;
-    setAvatarError(null);
-    if (file.size > MAX_AVATAR_BYTES) {
-      setAvatarError(
-        'Imagem muito grande (' + (file.size / 1024 / 1024).toFixed(1) +
-          'MB). Limite: ' + MAX_AVATAR_MB + 'MB.',
-      );
-      return;
-    }
-    if (!file.type.startsWith('image/')) {
-      setAvatarError('Envie um arquivo de imagem (JPG/PNG/WEBP).');
-      return;
-    }
-    setAvatarStage('Enviando...');
-    try {
-      const prevUrl = profile.avatar_url;
-      const { publicUrl } = await uploadAvatar(profile.id, file);
-      const supabase = createClient();
-      const { error } = await supabase
-        .from('profiles')
-        .update({ avatar_url: publicUrl })
+        .update({ portfolio_public: on })
         .eq('id', profile.id);
       if (error) throw error;
-      setProfile({ ...profile, avatar_url: publicUrl });
-      setAvatarStage(null);
-      if (prevUrl && !prevUrl.startsWith('data:')) {
-        deleteByPublicUrl('avatars', prevUrl).catch(() => null);
-      }
+      flashToast(on ? 'Portfolio publico.' : 'Portfolio privado.');
     } catch (e) {
-      console.error('[portfolio] avatar upload error:', e);
-      setAvatarError((e as Error).message ?? 'Falha ao enviar imagem.');
-      setAvatarStage(null);
+      console.error('[portfolio] togglePublic error:', e);
+      setProfile((p) => (p ? { ...p, portfolio_public: prev } : p));
+      flashToast('Erro: ' + (e as Error).message);
+    } finally {
+      setTogglingPublic(false);
     }
+  }
+
+  function copyPortfolioLink() {
+    if (!profile?.portfolio_slug || typeof window === 'undefined') return;
+    const url = window.location.origin + '/p/' + profile.portfolio_slug;
+    navigator.clipboard
+      .writeText(url)
+      .then(() => flashToast('Link copiado!'))
+      .catch(() => flashToast('Falha ao copiar. Link: ' + url));
   }
 
   async function addCategory() {
@@ -241,13 +192,6 @@ export default function PortfolioEditor() {
     setNewCategory('');
   }
 
-  /**
-   * Remove uma categoria. Agora TODAS podem ser excluidas (inclusive as
-   * defaults Microleads/Ads). Se a categoria excluida e uma default,
-   * simplesmente escondemos do sidebar (a gente remove do state), ja que
-   * nao existe row correspondente em portfolio_categories pra elas.
-   * Videos da categoria tambem sao removidos junto.
-   */
   async function deleteCategory(name: string) {
     if (!profile) return;
     const inCatCount = items.filter((i) => i.category === name).length;
@@ -266,7 +210,6 @@ export default function PortfolioEditor() {
       if (v.thumbnail_url)
         await deleteByPublicUrl(THUMB_BUCKET, v.thumbnail_url).catch(() => null);
     }
-    // Remove registro da categoria (so existe pra custom, mas e noop pras defaults)
     await supabase
       .from('portfolio_categories')
       .delete()
@@ -312,12 +255,13 @@ export default function PortfolioEditor() {
       setNewFile(null);
       setNewTitle('');
       setUploadStage(null);
+      flashToast('Video publicado.');
     } catch (e) {
       console.error('[portfolio] uploadNewVideo error:', e);
       const msg = (e as Error).message ?? 'Falha no upload.';
       setUploadError(
         msg +
-          ' — Verifique se voce rodou as migrations SQL no Supabase e se os buckets de Storage existem.',
+          ' — Cheque se voce rodou as migrations 001_init.sql + 002_storage.sql e se os buckets de Storage existem com RLS.',
       );
       setUploadStage(null);
     }
@@ -400,28 +344,58 @@ export default function PortfolioEditor() {
     setDragOverId(null);
   }
 
+  if (loading) {
+    return (
+      <ToolShell title="Seu portfolio" description="Carregando seu perfil...">
+        <div className="flex flex-col items-center gap-3 py-14 text-center text-sm text-text-muted">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-line border-t-lime" />
+          <div>Carregando portfolio do Supabase...</div>
+        </div>
+      </ToolShell>
+    );
+  }
+
+  if (loadError || !profile) {
+    return (
+      <ToolShell title="Seu portfolio" description="Nao foi possivel carregar.">
+        <div className="flex flex-col gap-4 rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-4 text-sm text-red-300">
+          <div className="font-semibold">Erro ao carregar portfolio</div>
+          <pre className="mono whitespace-pre-wrap text-xs">{loadError}</pre>
+          <div className="text-xs text-red-200">
+            Cheque se voce rodou as migrations SQL no Supabase (001 ate 007).
+          </div>
+          <button
+            onClick={() => window.location.reload()}
+            className="btn-primary !py-2 text-xs self-start"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      </ToolShell>
+    );
+  }
+
+  const displayName = profile.name?.trim() || 'Editor';
+  const initial = displayName.charAt(0).toUpperCase();
   const publicUrl =
-    typeof window !== 'undefined' && profile?.portfolio_slug
+    typeof window !== 'undefined' && profile.portfolio_slug
       ? window.location.origin + '/p/' + profile.portfolio_slug
       : null;
-
   const visibleItems = items.filter((i) => i.category === activeCategory);
-  const displayName = profile?.name?.trim() || 'Editor';
-  const initial = displayName.charAt(0).toUpperCase();
 
   return (
     <ToolShell
       title="Seu portfolio"
-      description="Gerencie videos por categoria, defina um link publico e compartilhe com clientes."
+      description="Gerencie videos por categoria. Ajuste foto, link e WhatsApp em Editar perfil."
     >
-      <div className="flex flex-col gap-8">
-        <div>
+      <div className="flex flex-col gap-6">
+        <div className="flex items-center justify-between">
           <Link
             href="/tools"
             className="group inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-text-muted transition hover:text-lime"
           >
             <svg
-              className="h-4 w-4 -translate-x-0 transition-transform duration-300 group-hover:-translate-x-1"
+              className="h-4 w-4 transition-transform duration-300 group-hover:-translate-x-1"
               viewBox="0 0 20 20"
               fill="currentColor"
               aria-hidden
@@ -434,172 +408,90 @@ export default function PortfolioEditor() {
             </svg>
             Voltar para as ferramentas
           </Link>
+          <Link href="/perfil" className="btn-ghost !py-1.5 !px-3 text-xs">
+            Editar perfil
+          </Link>
         </div>
 
-        {/* Avatar + nome */}
-        <div className="card-3d card-pad flex flex-col gap-4 sm:flex-row sm:items-center">
-          <div className="flex items-center gap-4">
-            {profile?.avatar_url ? (
+        {/* Cabecalho: avatar + nome + status + gerar link + toggle publico */}
+        <div className="card-3d card-pad flex flex-col gap-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+            {profile.avatar_url ? (
               /* eslint-disable-next-line @next/next/no-img-element */
               <img
                 src={profile.avatar_url}
                 alt=""
-                className="h-20 w-20 rounded-full border border-line object-cover"
+                className="h-16 w-16 rounded-full border border-line object-cover"
               />
             ) : (
-              <span className="flex h-20 w-20 items-center justify-center rounded-full border border-line bg-bg text-2xl font-bold text-lime">
+              <span className="flex h-16 w-16 items-center justify-center rounded-full border border-line bg-bg text-xl font-bold text-lime">
                 {initial}
               </span>
             )}
-            <div className="flex flex-col gap-1">
-              <div className="text-sm font-semibold text-white">{displayName}</div>
-              <div className="text-xs text-text-muted">
-                Foto de perfil exibida no header e no portfolio publico.
-              </div>
-            </div>
-          </div>
-
-          <div className="sm:ml-auto flex flex-col gap-2">
-            <input
-              ref={avatarInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => onAvatarSelected(e.target.files?.[0] ?? null)}
-            />
-            <div className="flex gap-2">
-              <button
-                type="button"
-                className="btn-secondary !py-1.5 !px-3 text-xs"
-                onClick={() => avatarInputRef.current?.click()}
-                disabled={!!avatarStage}
-              >
-                {avatarStage ?? 'Enviar foto do PC'}
-              </button>
-              <Link
-                href="/perfil"
-                className="btn-ghost !py-1.5 !px-3 text-xs"
-              >
-                Editar perfil
-              </Link>
-            </div>
-            {avatarError ? (
-              <div className="rounded-[8px] border border-red-500/40 bg-red-500/10 px-2 py-1 text-[11px] text-red-300">
-                {avatarError}
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <div>
-            <label className="label-field">Slug publico</label>
-            <div className="flex gap-2">
-              <input
-                className="input-field"
-                value={slugDraft}
-                onChange={(e) => setSlugDraft(e.target.value)}
-                placeholder="seu-nome"
-              />
-              <button onClick={saveSlug} className="btn-secondary" disabled={saving}>
-                {saving ? '...' : 'Salvar'}
-              </button>
-            </div>
-            {publicUrl ? (
-              <div className="mt-2 flex items-center gap-2 text-xs text-text-muted">
-                <span className="mono truncate">{publicUrl}</span>
-                <button
-                  onClick={() => navigator.clipboard.writeText(publicUrl)}
-                  className="btn-ghost !py-1 !px-2 text-xs"
+            <div className="flex-1 min-w-0">
+              <div className="text-lg font-semibold text-white">{displayName}</div>
+              <div className="flex items-center gap-2 text-xs">
+                <span
+                  className={
+                    'mono inline-block rounded-full px-2 py-0.5 ' +
+                    (profile.portfolio_public
+                      ? 'bg-lime/20 text-lime'
+                      : 'bg-text-dim/20 text-text-muted')
+                  }
                 >
-                  Copiar
-                </button>
-                <a
-                  href={publicUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="btn-ghost !py-1 !px-2 text-xs"
-                >
-                  Abrir
-                </a>
+                  {profile.portfolio_public ? 'PUBLICO' : 'PRIVADO'}
+                </span>
+                {publicUrl ? (
+                  <span className="mono truncate text-text-muted">
+                    {publicUrl.replace(/^https?:\/\//, '')}
+                  </span>
+                ) : (
+                  <span className="text-text-muted">
+                    sem slug — defina em Editar perfil
+                  </span>
+                )}
               </div>
-            ) : null}
-          </div>
-
-          <div>
-            <label className="label-field">Visibilidade</label>
-            <div className="flex flex-col gap-2 rounded-[12px] border border-line bg-bg px-4 py-3">
-              <div className="flex items-center gap-3">
-                <input
-                  id="show-avatar-toggle"
-                  type="checkbox"
-                  checked={profile?.portfolio_show_avatar ?? true}
-                  onChange={(e) => toggleShowAvatar(e.target.checked)}
-                  className="h-4 w-4 accent-lime"
-                />
-                <label htmlFor="show-avatar-toggle" className="text-sm text-white">
-                  Mostrar minha foto de perfil pro cliente
-                </label>
-              </div>
-              <p className="text-[11px] text-text-muted">
-                Seu portfolio e sempre publico. Voce controla apenas se sua foto
-                aparece pros clientes.
-              </p>
             </div>
-          </div>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2">
-          <div>
-            <label className="label-field">WhatsApp (botao flutuante)</label>
-            <div className="flex gap-2">
-              <input
-                className="input-field"
-                value={whatsappDraft}
-                onChange={(e) => setWhatsappDraft(e.target.value)}
-                placeholder="+5511999998888"
-              />
-              <button
-                onClick={saveWhatsapp}
-                className="btn-secondary"
-                disabled={savingWhats}
-              >
-                {savingWhats ? '...' : 'Salvar'}
-              </button>
-            </div>
-            <p className="mt-1.5 text-xs text-text-muted">
-              Formato internacional com DDI. Deixe vazio para esconder o botao.
-            </p>
-          </div>
-
-          <div>
-            <label className="label-field">Capa do portfolio</label>
             <div className="flex flex-wrap gap-2">
-              {COVER_OPTIONS.map((opt) => {
-                const active = (profile?.portfolio_cover ?? 'default') === opt.id;
-                const pending = savingCover === opt.id;
-                return (
+              {publicUrl ? (
+                <>
                   <button
-                    key={opt.id}
-                    type="button"
-                    onClick={() => saveCover(opt.id)}
-                    disabled={!!savingCover}
-                    className={
-                      'rounded-full border px-3 py-1.5 text-xs transition ' +
-                      (active
-                        ? 'border-lime bg-lime/10 text-lime'
-                        : 'border-line bg-bg text-text-muted hover:border-lime/40 hover:text-white') +
-                      (pending ? ' opacity-60' : '')
-                    }
+                    onClick={copyPortfolioLink}
+                    className="btn-primary !py-2 text-xs"
                   >
-                    {pending ? '...' : opt.label}
+                    Gerar link pro cliente
                   </button>
-                );
-              })}
+                  <a
+                    href={publicUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn-ghost !py-2 text-xs"
+                  >
+                    Abrir
+                  </a>
+                </>
+              ) : null}
             </div>
-            <p className="mt-1.5 text-xs text-text-muted">
-              Clique pra trocar. A mudanca e salva automaticamente.
-            </p>
+          </div>
+
+          <div className="flex items-start gap-3 rounded-[10px] border border-line bg-bg px-4 py-3">
+            <input
+              id="toggle-public"
+              type="checkbox"
+              checked={profile.portfolio_public}
+              onChange={(e) => togglePublic(e.target.checked)}
+              disabled={togglingPublic}
+              className="mt-0.5 h-4 w-4 accent-lime"
+            />
+            <label htmlFor="toggle-public" className="flex-1 cursor-pointer">
+              <div className="text-sm font-semibold text-white">
+                Deixar portfolio publico
+              </div>
+              <div className="mt-0.5 text-xs text-text-muted">
+                Quando privado, seu /p/&lt;slug&gt; responde 404. Use pra ajustar
+                videos antes de mandar pros clientes.
+              </div>
+            </label>
           </div>
         </div>
 
@@ -691,7 +583,7 @@ export default function PortfolioEditor() {
                 <button
                   onClick={uploadNewVideo}
                   className="btn-primary !py-2 text-xs"
-                  disabled={!newFile || !!uploadStage}
+                  disabled={!newFile || !!uploadStage || !profile}
                 >
                   {uploadStage ? 'Enviando...' : 'Enviar'}
                 </button>
@@ -805,6 +697,12 @@ export default function PortfolioEditor() {
             )}
           </section>
         </div>
+
+        {toast ? (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 rounded-full border border-lime/40 bg-bg px-4 py-2 text-xs text-lime shadow-2xl z-50">
+            {toast}
+          </div>
+        ) : null}
       </div>
     </ToolShell>
   );

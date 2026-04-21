@@ -47,7 +47,7 @@ export default function LoginPage() {
   return (
     <AuthShell
       title="Entrar"
-      subtitle="Acesse sua conta CASABLANCA"
+      subtitle="Acesse sua conta DARKO LAB"
       footer={
         <>
           Ainda não tem conta?{' '}

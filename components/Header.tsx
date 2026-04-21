@@ -24,12 +24,14 @@ export function Header() {
   const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [open, setOpen] = useState(false);
+  const [avatarBroken, setAvatarBroken] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const supabase = createClient();
     let cancelled = false;
-    (async () => {
+
+    async function fetchProfile() {
+      const supabase = createClient();
       const { data: userData } = await supabase.auth.getUser();
       const uid = userData.user?.id;
       if (!uid) return;
@@ -43,10 +45,22 @@ export function Header() {
           name: data?.name ?? null,
           avatar_url: data?.avatar_url ?? null,
         });
+        setAvatarBroken(false);
       }
-    })();
+    }
+
+    fetchProfile();
+
+    // Escuta evento customizado disparado por /perfil quando o usuario
+    // troca foto/nome, pra manter o Header em sync sem refresh.
+    function onProfileUpdated() {
+      fetchProfile();
+    }
+    window.addEventListener('darko:profile-updated', onProfileUpdated);
+
     return () => {
       cancelled = true;
+      window.removeEventListener('darko:profile-updated', onProfileUpdated);
     };
   }, []);
 
@@ -82,11 +96,13 @@ export function Header() {
             aria-haspopup="menu"
             aria-expanded={open}
           >
-            {profile?.avatar_url ? (
+            {profile?.avatar_url && !avatarBroken ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={profile.avatar_url}
-                alt=""
+                alt={displayName}
+                onError={() => setAvatarBroken(true)}
+                referrerPolicy="no-referrer"
                 className="h-8 w-8 rounded-full border border-line object-cover"
               />
             ) : (

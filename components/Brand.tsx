@@ -1,7 +1,11 @@
 import Link from 'next/link';
+import { DarkoLogo } from './DarkoLogo';
 
 /**
- * Logo textual CASABLANCA — font-weight 900, letter-spacing 0.25em, cor lime.
+ * Brand da aplicacao — DARKO LAB.
+ *
+ * Combina o coelho sombrio do Donnie Darko (olho verde lime brilhando)
+ * com o wordmark em caixa alta, letter-spacing hacker.
  */
 export function Brand({
   href = '/tools',
@@ -11,16 +15,18 @@ export function Brand({
   size?: 'sm' | 'md' | 'lg';
 }) {
   const sizes = {
-    sm: 'text-sm',
-    md: 'text-lg',
-    lg: 'text-2xl',
+    sm: { text: 'text-sm', logo: 20 },
+    md: { text: 'text-lg', logo: 28 },
+    lg: { text: 'text-2xl', logo: 40 },
   };
+  const s = sizes[size];
   return (
     <Link
       href={href}
-      className={`brand font-display uppercase ${sizes[size]} select-none`}
+      className={`brand flex items-center gap-2 font-display uppercase ${s.text} select-none`}
     >
-      CASABLANCA
+      <DarkoLogo size={s.logo} />
+      <span>DARKO LAB</span>
     </Link>
   );
 }

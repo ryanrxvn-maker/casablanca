@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { CoverBackground } from '@/components/CoverBackground';
 
 type VideoItem = {
   id: string;
@@ -22,34 +21,27 @@ type PublicProfile = {
   name: string | null;
   avatar_url: string | null;
   whatsapp: string | null;
-  showAvatar: boolean;
-  cover: string;
 };
 
 type Tab = 'videos' | 'proofs';
 
+/**
+ * Gera URL do wa.me sanitizada.
+ * - Aceita "+55..." ou numero sem DDI (auto-prefixa 55 pra telefone brasileiro
+ *   de 10-11 digitos) pra garantir que wa.me abra direto no contato certo.
+ * - Se o input ja for URL http, passa direto.
+ */
 function whatsappHref(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return '';
   if (trimmed.startsWith('http')) return trimmed;
-  const digits = trimmed.replace(/\D/g, '');
+  let digits = trimmed.replace(/\D/g, '');
   if (!digits) return '';
-  return `https://wa.me/${digits}`;
-}
-
-function coverBackground(cover: string): string {
-  switch (cover) {
-    case 'matrix':
-      return 'bg-[radial-gradient(ellipse_at_top,_rgba(132,204,22,0.18),_transparent_60%),linear-gradient(180deg,_#080c06,_#030503)]';
-    case 'dollars':
-      return 'bg-[radial-gradient(ellipse_at_top,_rgba(34,197,94,0.2),_transparent_60%),linear-gradient(180deg,_#030b06,_#020302)]';
-    case 'tech':
-      return 'bg-[radial-gradient(ellipse_at_top,_rgba(59,130,246,0.15),_transparent_60%),linear-gradient(180deg,_#030712,_#020409)]';
-    case 'minimal':
-      return 'bg-[linear-gradient(180deg,_#0a0a0a,_#020202)]';
-    default:
-      return 'bg-[radial-gradient(ellipse_at_top,_rgba(132,204,22,0.12),_transparent_55%),linear-gradient(180deg,_#0a0a0a,_#030303)]';
+  // Auto-prefixa 55 se parecer celular BR sem DDI (10 ou 11 digitos).
+  if (digits.length === 10 || digits.length === 11) {
+    digits = '55' + digits;
   }
+  return `https://wa.me/${digits}`;
 }
 
 export function PublicPortfolioLayout({
@@ -99,33 +91,30 @@ export function PublicPortfolioLayout({
   const filteredVideos = videos.filter((v) => v.category === activeCat);
 
   return (
-    <div className={'relative flex min-h-screen flex-col ' + coverBackground(profile.cover)}>
-      {/* Hero / cabecalho com foto circular */}
+    <div className="relative flex min-h-screen flex-col bg-[radial-gradient(ellipse_at_top,_rgba(132,204,22,0.12),_transparent_55%),linear-gradient(180deg,_#0a0a0a,_#030303)]">
+      {/* Hero / cabecalho com foto circular (sempre visivel) */}
       <header className="relative overflow-hidden">
-        <CoverBackground cover={profile.cover} />
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute -left-20 -top-20 h-80 w-80 rounded-full bg-lime/10 blur-3xl" />
           <div className="absolute -right-32 top-16 h-96 w-96 rounded-full bg-lime/5 blur-3xl" />
         </div>
 
         <div className="container-app relative flex flex-col items-center gap-6 py-16 text-center md:py-20">
-          {profile.showAvatar ? (
-            <div className="relative">
-              <div className="absolute inset-0 -m-1 rounded-full bg-gradient-to-br from-lime/60 via-lime/20 to-transparent blur-sm" />
-              {profile.avatar_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={profile.avatar_url}
-                  alt={displayName}
-                  className="relative h-28 w-28 rounded-full border-2 border-lime/60 object-cover shadow-[0_8px_40px_rgba(132,204,22,0.25)] md:h-32 md:w-32"
-                />
-              ) : (
-                <div className="relative flex h-28 w-28 items-center justify-center rounded-full border-2 border-lime/60 bg-bg text-4xl font-black text-lime shadow-[0_8px_40px_rgba(132,204,22,0.25)] md:h-32 md:w-32">
-                  {initial}
-                </div>
-              )}
-            </div>
-          ) : null}
+          <div className="relative">
+            <div className="absolute inset-0 -m-1 rounded-full bg-gradient-to-br from-lime/60 via-lime/20 to-transparent blur-sm" />
+            {profile.avatar_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={profile.avatar_url}
+                alt={displayName}
+                className="relative h-28 w-28 rounded-full border-2 border-lime/60 object-cover shadow-[0_8px_40px_rgba(132,204,22,0.25)] md:h-32 md:w-32"
+              />
+            ) : (
+              <div className="relative flex h-28 w-28 items-center justify-center rounded-full border-2 border-lime/60 bg-bg text-4xl font-black text-lime shadow-[0_8px_40px_rgba(132,204,22,0.25)] md:h-32 md:w-32">
+                {initial}
+              </div>
+            )}
+          </div>
 
           <div>
             <h1 className="text-4xl font-black tracking-tight md:text-6xl">
@@ -270,7 +259,7 @@ export function PublicPortfolioLayout({
 
       <footer className="border-t border-line/40 bg-bg/40 backdrop-blur-sm">
         <div className="container-app flex h-14 items-center justify-center text-xs text-text-muted">
-          Feito com <span className="mx-1 text-lime">CASABLANCA</span>
+          Feito com <span className="mx-1 text-lime">DARKO LAB</span>
         </div>
       </footer>
 

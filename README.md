@@ -1,6 +1,8 @@
-# CASABLANCA
+# DARKO LAB
 
 Plataforma SaaS de ferramentas para editores de vídeo e criadores de conteúdo, com portfolio compartilhável.
+
+> **Branding**: o produto chamado anteriormente "CASABLANCA" foi rebatizado para **DARKO LAB** (logo: coelho sombrio com olhos lime brilhando, inspirado em Donnie Darko). O nome do repositório/diretório permanece `CASABLANCA` por inércia; toda a UI, metadata e favicon já refletem DARKO LAB.
 
 Este repositório contém o **scaffold completo** da aplicação: Next.js 14 (App Router) + Supabase + Tailwind, com design system, autenticação, rotas, layouts e placeholders para todas as ferramentas.
 
@@ -82,7 +84,9 @@ casablanca/
 │   │   └── provas-sociais/
 │   └── p/[slug]/               Portfolio público (server-rendered)
 ├── components/
-│   ├── Brand.tsx               Logo CASABLANCA
+│   ├── Brand.tsx               Wordmark DARKO LAB + DarkoLogo
+│   ├── DarkoLogo.tsx           SVG do coelho sombrio (olhos lime)
+│   ├── ToolsStateProvider.tsx  Context que persiste estado das ferramentas
 │   ├── Header.tsx              Header com badge ONLINE + logout
 │   ├── TabNav.tsx              Tabs com underline lime
 │   ├── AudioPlayer.tsx         Player com seek

@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { BatchFileUpload } from '@/components/BatchFileUpload';
+import { useToolState } from '@/components/ToolsStateProvider';
 import { downloadBlob } from '@/lib/audio-engine';
 import {
   speedUpAudio,
@@ -50,13 +51,25 @@ function makeJob(file: File): Job {
 }
 
 export default function AceleradorPage() {
-  const [files, setFiles] = useState<File[]>([]);
-  const [speed, setSpeed] = useState(1.5);
-  const [format, setFormat] = useState<OutFormat>('mp4');
-  const [processing, setProcessing] = useState(false);
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [stageMsg, setStageMsg] = useState<string | null>(null);
-  const [zipping, setZipping] = useState(false);
+  const [files, setFiles] = useToolState<File[]>('acelerador:files', []);
+  const [speed, setSpeed] = useToolState<number>('acelerador:speed', 1.5);
+  const [format, setFormat] = useToolState<OutFormat>(
+    'acelerador:format',
+    'mp4',
+  );
+  const [processing, setProcessing] = useToolState<boolean>(
+    'acelerador:processing',
+    false,
+  );
+  const [jobs, setJobs] = useToolState<Job[]>('acelerador:jobs', []);
+  const [stageMsg, setStageMsg] = useToolState<string | null>(
+    'acelerador:stageMsg',
+    null,
+  );
+  const [zipping, setZipping] = useToolState<boolean>(
+    'acelerador:zipping',
+    false,
+  );
 
   const allVideos = useMemo(() => files.length > 0 && files.every(isVideo), [
     files,

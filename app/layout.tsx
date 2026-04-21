@@ -32,9 +32,9 @@ const tech = Orbitron({
 });
 
 export const metadata: Metadata = {
-  title: 'CASABLANCA — Ferramentas para editores',
+  title: 'DARKO LAB — Ferramentas para editores',
   description:
-    'Plataforma de ferramentas para editores de video e criadores: decupagem, camuflagem, compressao e portfolio profissional.',
+    'DARKO LAB: plataforma de ferramentas para editores de video e criadores — decupagem, camuflagem, compressao, agenda e portfolio profissional.',
   icons: {
     icon: '/favicon.svg',
   },

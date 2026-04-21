@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { FileUpload } from '@/components/FileUpload';
 import { AudioPlayer } from '@/components/AudioPlayer';
+import { useToolState } from '@/components/ToolsStateProvider';
 import { camuflar } from '@/lib/camuflagem';
 import { downloadBlob } from '@/lib/audio-engine';
 import { buildZip } from '@/lib/zip-builder';
@@ -36,10 +36,18 @@ function baseName(name: string) {
 }
 
 export default function CamuflagemPage() {
-  const [pairs, setPairs] = useState<Pair[]>([newPair()]);
-  const [volume, setVolume] = useState(30);
-  const [format, setFormat] = useState<OutFormat>('wav');
-  const [processingAll, setProcessingAll] = useState(false);
+  const [pairs, setPairs] = useToolState<Pair[]>('camuflagem:pairs', [
+    newPair(),
+  ]);
+  const [volume, setVolume] = useToolState<number>('camuflagem:volume', 30);
+  const [format, setFormat] = useToolState<OutFormat>(
+    'camuflagem:format',
+    'wav',
+  );
+  const [processingAll, setProcessingAll] = useToolState<boolean>(
+    'camuflagem:processingAll',
+    false,
+  );
 
   function updatePair(id: string, patch: Partial<Pair>) {
     setPairs((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
