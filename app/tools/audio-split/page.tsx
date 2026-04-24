@@ -27,9 +27,10 @@ function baseName(name?: string | null) {
   return stem.replace(/\s+/g, '_');
 }
 
-function partFileName(base: string, index: number) {
-  const n = String(index).padStart(2, '0');
-  return base + '_parte-' + n + '.wav';
+function partFileName(_base: string, index: number) {
+  // Nome simples "parteN.wav" — dentro do ZIP fica parte1.wav, parte2.wav, etc.
+  // O nome do ZIP (parametro externo) pode continuar usando o basename.
+  return 'parte' + index + '.wav';
 }
 
 export default function AudioSplitPage() {

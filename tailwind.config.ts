@@ -65,12 +65,22 @@ const config: Config = {
           '50%': { transform: 'translate3d(0,-6px,0)' },
           '100%': { transform: 'translate3d(0,0,0)' },
         },
+        'slide-in-left': {
+          '0%': { opacity: '0', transform: 'translateX(-18px)' },
+          '100%': { opacity: '1', transform: 'translateX(0)' },
+        },
+        'scale-in': {
+          '0%': { opacity: '0', transform: 'scale(0.92)' },
+          '100%': { opacity: '1', transform: 'scale(1)' },
+        },
       },
       animation: {
         'fade-in-up': 'fade-in-up 0.5s ease-out both',
         'pulse-soft': 'pulse-soft 1.8s ease-in-out infinite',
         'ripple': 'ripple 0.6s ease-out forwards',
         'drift': 'drift 8s ease-in-out infinite',
+        'slide-in-left': 'slide-in-left 0.55s cubic-bezier(.2,.8,.2,1) both',
+        'scale-in': 'scale-in 0.4s ease-out both',
       },
       backgroundImage: {
         'grid-lines':

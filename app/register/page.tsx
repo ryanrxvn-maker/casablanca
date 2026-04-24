@@ -148,7 +148,7 @@ export default function RegisterPage() {
             autoComplete="tel"
           />
           <p className="mt-1 text-[11px] text-text-muted">
-            Usamos para o botao de WhatsApp no seu portfolio publico.
+            Usado apenas pra contato — nao aparece em lugar nenhum publicamente.
           </p>
         </div>
         <div>

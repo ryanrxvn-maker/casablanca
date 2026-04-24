@@ -14,11 +14,10 @@ type Profile = {
 /**
  * Header global — usado dentro das areas logadas.
  *
- * Mudancas de privacidade:
- * - O email NAO e mais exibido no header (vazava informacao pessoal pra
- *   qualquer um olhando a tela).
- * - Remocao do badge ONLINE.
- * - Link "Portfolio" foi movido pro dropdown do perfil (discricao).
+ * Privacidade:
+ * - O email NAO e exibido (vazava info pessoal pra qualquer um olhando a tela).
+ * - Sem badge ONLINE.
+ * - Conta: apenas Configuracoes + Sair no dropdown.
  */
 export function Header() {
   const router = useRouter();
@@ -51,8 +50,8 @@ export function Header() {
 
     fetchProfile();
 
-    // Escuta evento customizado disparado por /perfil quando o usuario
-    // troca foto/nome, pra manter o Header em sync sem refresh.
+    // Escuta evento customizado (mantido por compatibilidade) pra manter
+    // o Header em sync sem refresh quando o nome ou avatar mudarem.
     function onProfileUpdated() {
       fetchProfile();
     }
@@ -106,7 +105,7 @@ export function Header() {
                 className="h-8 w-8 rounded-full border border-line object-cover"
               />
             ) : (
-              <span className="flex h-8 w-8 items-center justify-center rounded-full border border-line bg-surface text-xs font-bold text-lime">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full border border-line bg-bg-soft text-xs font-bold text-lime">
                 {initial}
               </span>
             )}
@@ -133,7 +132,7 @@ export function Header() {
           {open ? (
             <div
               role="menu"
-              className="absolute right-0 mt-2 w-60 overflow-hidden rounded-[12px] border border-line bg-surface shadow-2xl"
+              className="absolute right-0 mt-2 w-60 overflow-hidden rounded-[12px] border border-line bg-bg-soft shadow-2xl"
             >
               <div className="border-b border-line px-4 py-3">
                 <div className="truncate text-sm font-semibold">
@@ -145,14 +144,6 @@ export function Header() {
               </div>
               <nav className="flex flex-col py-1 text-sm">
                 <Link
-                  href="/portfolio"
-                  onClick={() => setOpen(false)}
-                  className="px-4 py-2 text-text-muted transition hover:bg-bg hover:text-text"
-                  role="menuitem"
-                >
-                  Portfolio
-                </Link>
-                <Link
                   href="/tools"
                   onClick={() => setOpen(false)}
                   className="px-4 py-2 text-text-muted transition hover:bg-bg hover:text-text"
@@ -161,12 +152,12 @@ export function Header() {
                   Ferramentas
                 </Link>
                 <Link
-                  href="/perfil"
+                  href="/configuracoes"
                   onClick={() => setOpen(false)}
                   className="px-4 py-2 text-text-muted transition hover:bg-bg hover:text-text"
                   role="menuitem"
                 >
-                  Editar perfil
+                  Configurações
                 </Link>
                 <button
                   type="button"

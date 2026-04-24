@@ -229,6 +229,41 @@ body > * {
   }
 }
 
+/* ----- Tool rail (sidebar esquerda das ferramentas) ----- */
+.rail-item-in {
+  animation: rail-in 0.55s cubic-bezier(.2,.8,.2,1) both;
+}
+
+@keyframes rail-in {
+  0% {
+    opacity: 0;
+    transform: translateX(-14px) scale(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+/* Suite switcher — glow sutil no thumb ativo */
+.suite-switcher {
+  position: relative;
+  overflow: hidden;
+}
+
+.suite-switcher::before {
+  content: '';
+  position: absolute;
+  inset: -30%;
+  background: radial-gradient(
+    40% 40% at 50% 50%,
+    rgba(200, 255, 0, 0.08),
+    transparent 70%
+  );
+  pointer-events: none;
+  animation: drift 8s ease-in-out infinite;
+}
+
 /* ----- Click ripple (anexado dinamicamente em components/Ripple.tsx) ----- */
 .ripple-dot {
   position: absolute;

@@ -154,7 +154,7 @@ export default function CamuflagemPage() {
   return (
     <ToolShell
       title="Camuflagem"
-      description="Inversao de fase estereo: IA escuta o WHITE, publico escuta o BLACK. Exporte em MP4 (video), MP3 ou WAV."
+      description="Inversao de fase estereo: IA escuta o WHITE, publico escuta o BLACK. O output tem SEMPRE a duracao do BLACK — o WHITE e so uma camada de camuflagem. Exporte em MP4 (video), MP3 ou WAV."
     >
       <div className="flex flex-col gap-6">
         <div>
@@ -264,6 +264,10 @@ export default function CamuflagemPage() {
                       updatePair(pair.id, { white: f, status: 'idle' })
                     }
                   />
+                  <p className="mt-1 text-[11px] text-text-muted">
+                    Pode ser mais curto que o BLACK — o output fica com a
+                    duracao do BLACK, e a IA segue sem identificar a trilha.
+                  </p>
                 </div>
               </div>
 

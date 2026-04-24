@@ -1,5 +1,5 @@
 /**
- * CASABLANCA — Camuflagem estéreo.
+ * DARKO LAB — Camuflagem estéreo.
  *
  * Técnica: inversão de fase entre canais.
  *   L = black + gain * white
@@ -10,6 +10,13 @@
  * em mono (L + R), o BLACK se cancela e sobra apenas 2 * gain * WHITE.
  *
  * Ganho: (volumePercent / 100) * 0.05  (equivalente a ~-26dB).
+ *
+ * Comprimento do output:
+ *   O output sempre tem o comprimento do BLACK — o WHITE é apenas uma camada
+ *   de camuflagem. Se o WHITE for mais curto, ele simplesmente pára (silêncio
+ *   no overlay); se for mais longo, é truncado no fim do BLACK. O BLACK
+ *   continua intacto em fase invertida do começo ao fim, preservando a
+ *   propriedade de não ser identificado pela IA em mono.
  */
 
 import { decodeAudioRobust, encodeWAV } from './audio-engine';
@@ -35,7 +42,13 @@ export async function camuflar({
 
   const gain = (Math.max(5, Math.min(100, volumePercent)) / 100) * 0.05;
   const sampleRate = blackBuf.sampleRate;
-  const length = Math.min(blackBuf.length, whiteBuf.length);
+
+  // O output TEM SEMPRE o comprimento do BLACK. O WHITE é só uma camada de
+  // camuflagem — se for mais curto, a parte sem WHITE sai só com o BLACK em
+  // fase invertida (que continua não sendo identificado pela IA em mono,
+  // porque L + R = 0 nessa região). Se for mais longo, truncamos.
+  const length = blackBuf.length;
+  const whiteLen = whiteBuf.length;
 
   // Converte multicanal para mono somando canais (média)
   const blackMono = toMono(blackBuf);
@@ -48,7 +61,9 @@ export async function camuflar({
 
   for (let i = 0; i < length; i++) {
     const b = blackMono[i] ?? 0;
-    const w = whiteMono[i] ?? 0;
+    // Quando o WHITE acaba antes do BLACK, w = 0 a partir daí (só BLACK
+    // em fase invertida sobrevive — ainda inaudível em mono).
+    const w = i < whiteLen ? whiteMono[i] ?? 0 : 0;
     L[i] = clamp(b + gain * w);
     R[i] = clamp(-b + gain * w);
   }

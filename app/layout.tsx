@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+
 import { Space_Grotesk, JetBrains_Mono, Orbitron } from 'next/font/google';
 import { MouseGlow } from '@/components/MouseGlow';
 import { RippleRoot } from '@/components/RippleRoot';
@@ -34,7 +35,7 @@ const tech = Orbitron({
 export const metadata: Metadata = {
   title: 'DARKO LAB — Ferramentas para editores',
   description:
-    'DARKO LAB: plataforma de ferramentas para editores de video e criadores — decupagem, camuflagem, compressao, agenda e portfolio profissional.',
+    'DARKO LAB: suite de ferramentas para editores de video e criadores — decupagem, camuflagem, compressao e uma AI Suite com Auto B-Roll e Troca de Produto.',
   icons: {
     icon: '/favicon.svg',
   },
