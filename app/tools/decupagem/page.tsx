@@ -243,7 +243,7 @@ export default function DecupagemPage() {
                 type="button"
                 onClick={() => setOutputKind('video')}
                 className={
-                  'flex-1 rounded-[12px] border px-4 py-3 text-sm transition ' +
+                  'flex-1 rounded-[12px] border px-4 py-3 text-sm transition-all duration-200 active:scale-[0.97] ' +
                   (outputKind === 'video'
                     ? 'border-lime bg-lime/10 text-lime'
                     : 'border-line bg-bg text-text-muted hover:border-lime/50')
@@ -255,7 +255,7 @@ export default function DecupagemPage() {
                 type="button"
                 onClick={() => setOutputKind('audio')}
                 className={
-                  'flex-1 rounded-[12px] border px-4 py-3 text-sm transition ' +
+                  'flex-1 rounded-[12px] border px-4 py-3 text-sm transition-all duration-200 active:scale-[0.97] ' +
                   (outputKind === 'audio'
                     ? 'border-lime bg-lime/10 text-lime'
                     : 'border-line bg-bg text-text-muted hover:border-lime/50')
@@ -275,7 +275,7 @@ export default function DecupagemPage() {
                 type="button"
                 onClick={() => setAudioFormat('mp3')}
                 className={
-                  'flex-1 rounded-[12px] border px-4 py-3 text-sm transition ' +
+                  'flex-1 rounded-[12px] border px-4 py-3 text-sm transition-all duration-200 active:scale-[0.97] ' +
                   (audioFormat === 'mp3'
                     ? 'border-lime bg-lime/10 text-lime'
                     : 'border-line bg-bg text-text-muted hover:border-lime/50')
@@ -287,7 +287,7 @@ export default function DecupagemPage() {
                 type="button"
                 onClick={() => setAudioFormat('wav')}
                 className={
-                  'flex-1 rounded-[12px] border px-4 py-3 text-sm transition ' +
+                  'flex-1 rounded-[12px] border px-4 py-3 text-sm transition-all duration-200 active:scale-[0.97] ' +
                   (audioFormat === 'wav'
                     ? 'border-lime bg-lime/10 text-lime'
                     : 'border-line bg-bg text-text-muted hover:border-lime/50')
@@ -338,8 +338,23 @@ export default function DecupagemPage() {
         </div>
 
         {status ? (
-          <div className="rounded-[12px] border border-line bg-bg px-4 py-3 text-xs text-text-muted">
-            {status}
+          <div
+            className={
+              'rounded-[12px] border px-4 py-3 text-xs ' +
+              (processing
+                ? 'scan-line border-lime/40 bg-bg-soft/40 text-lime'
+                : 'border-line bg-bg text-text-muted')
+            }
+          >
+            <div className="flex items-center gap-2">
+              {processing ? (
+                <span className="relative flex h-2 w-2 shrink-0">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
+                </span>
+              ) : null}
+              <span className="mono uppercase tracking-widest">{status}</span>
+            </div>
             {progress !== null ? (
               <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-line">
                 <div
@@ -352,13 +367,17 @@ export default function DecupagemPage() {
         ) : null}
 
         {error ? (
-          <div className="rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300">
+          <div
+            key={error}
+            role="alert"
+            className="error-shake rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300 shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)]"
+          >
             {error}
           </div>
         ) : null}
 
         {result ? (
-          <div className="mt-2 border-t border-line pt-6">
+          <div className="fade-in-up mt-2 border-t border-line pt-6">
             <div className="mb-4 grid gap-3 sm:grid-cols-3">
               <div>
                 <div className="label-field">Duracao original</div>
@@ -379,7 +398,7 @@ export default function DecupagemPage() {
               <video
                 src={result.url}
                 controls
-                className="w-full rounded-[12px] border border-line bg-bg"
+                className="w-full rounded-[12px] border border-lime/30 bg-bg shadow-[0_0_28px_-12px_rgba(200,255,0,0.4)]"
               />
             ) : (
               <AudioPlayer src={result.url} label="Preview" />

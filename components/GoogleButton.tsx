@@ -21,10 +21,15 @@ export function GoogleButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="group relative flex w-full items-center justify-center gap-3 overflow-hidden rounded-[12px] border border-line-strong bg-white px-4 py-2.5 text-sm font-semibold text-[#1f1f1f] transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
+      className="group relative flex w-full items-center justify-center gap-3 overflow-hidden rounded-[12px] border border-line-strong bg-white px-4 py-2.5 text-sm font-semibold text-[#1f1f1f] transition-all duration-300 hover:bg-gray-50 hover:-translate-y-[1px] hover:shadow-[0_8px_24px_-12px_rgba(0,0,0,0.5),0_0_22px_-8px_rgba(255,255,255,0.35)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
     >
+      {/* Sheen sweep on hover */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 ease-out group-hover:translate-x-full"
+      />
       <GoogleIcon />
-      <span>{label ?? 'Continuar com Google'}</span>
+      <span className="relative">{label ?? 'Continuar com Google'}</span>
     </button>
   );
 }

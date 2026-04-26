@@ -130,7 +130,7 @@ export default function AutoBrollPage() {
       <div className="grid gap-5">
         <div className="grid gap-2 md:grid-cols-2">
           <label className="block">
-            <span className="mb-1 block text-xs uppercase tracking-wide text-text-muted">
+            <span className="label-field">
               Público-alvo
             </span>
             <input
@@ -144,7 +144,7 @@ export default function AutoBrollPage() {
           </label>
 
           <label className="block">
-            <span className="mb-1 block text-xs uppercase tracking-wide text-text-muted">
+            <span className="label-field">
               Persona do narrador
             </span>
             <input
@@ -159,7 +159,7 @@ export default function AutoBrollPage() {
         </div>
 
         <label className="block">
-          <span className="mb-1 block text-xs uppercase tracking-wide text-text-muted">
+          <span className="label-field">
             Copy completa da VSL
           </span>
           <textarea
@@ -171,12 +171,13 @@ export default function AutoBrollPage() {
             disabled={processing}
           />
           <div className="mt-1 text-xs text-text-muted">
-            {fullCopy.trim().length} caracteres
+            <span className="mono text-lime">{fullCopy.trim().length}</span>{' '}
+            caracteres
           </div>
         </label>
 
         <label className="block">
-          <span className="mb-1 block text-xs uppercase tracking-wide text-text-muted">
+          <span className="label-field">
             Referência visual (opcional)
           </span>
           <textarea
@@ -190,7 +191,11 @@ export default function AutoBrollPage() {
         </label>
 
         {error && (
-          <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          <div
+            key={error}
+            role="alert"
+            className="error-shake rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300 shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)]"
+          >
             {error}
           </div>
         )}
@@ -226,9 +231,35 @@ export default function AutoBrollPage() {
           )}
         </div>
 
+        {processing && !result && (
+          <div className="scan-line tech-frame mt-2 rounded-xl border border-lime/30 bg-bg-soft/40 p-5">
+            <div className="flex items-center gap-3">
+              <span className="relative flex h-3 w-3">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
+                <span className="relative inline-flex h-3 w-3 rounded-full bg-lime shadow-[0_0_12px_rgba(200,255,0,0.9)]" />
+              </span>
+              <span className="text-sm font-medium uppercase tracking-widest text-lime">
+                Claude analisando a copy...
+              </span>
+            </div>
+            <div className="mt-4 grid gap-2">
+              <div className="shimmer h-3 w-3/4 rounded-full bg-bg" />
+              <div className="shimmer h-3 w-11/12 rounded-full bg-bg" />
+              <div className="shimmer h-3 w-2/3 rounded-full bg-bg" />
+              <div className="shimmer h-3 w-5/6 rounded-full bg-bg" />
+            </div>
+            <p className="mono mt-4 text-[11px] uppercase tracking-widest text-text-muted">
+              gerando tabela de cenas · prompts · JSON nano banana
+            </p>
+          </div>
+        )}
+
         {result && (
           <div className="mt-2 grid gap-5">
-            <section className="rounded-xl border border-line bg-bg-soft/40 p-4">
+            <section
+              className="fade-in-up rounded-xl border border-line bg-bg-soft/40 p-4"
+              style={{ animationDelay: '0ms' }}
+            >
               <header className="mb-3 flex items-center justify-between">
                 <h2 className="text-sm font-semibold uppercase tracking-wide text-text-muted">
                   Pacote completo (markdown)
@@ -247,7 +278,10 @@ export default function AutoBrollPage() {
             </section>
 
             {result.nanoBananaJson && Array.isArray(result.nanoBananaJson) && (
-              <section className="rounded-xl border border-line bg-bg-soft/40 p-4">
+              <section
+                className="fade-in-up rounded-xl border border-line bg-bg-soft/40 p-4"
+                style={{ animationDelay: '120ms' }}
+              >
                 <header className="mb-3">
                   <h2 className="text-sm font-semibold uppercase tracking-wide text-text-muted">
                     Prompts Nano Banana 2 ({result.nanoBananaJson.length}{' '}
@@ -255,10 +289,11 @@ export default function AutoBrollPage() {
                   </h2>
                 </header>
                 <ul className="grid gap-3">
-                  {result.nanoBananaJson.map((p) => (
+                  {result.nanoBananaJson.map((p, idx) => (
                     <li
                       key={p.id}
-                      className="rounded-lg border border-line bg-black/30 p-3"
+                      className="fade-in-up rounded-lg border border-line bg-black/30 p-3"
+                      style={{ animationDelay: `${Math.min(idx, 12) * 40}ms` }}
                     >
                       <div className="mb-2 flex flex-wrap items-center gap-2">
                         <span className="rounded-full bg-lime-soft px-2 py-0.5 text-xs font-medium text-lime">
@@ -289,8 +324,15 @@ export default function AutoBrollPage() {
 
             {result.usage && (
               <div className="text-xs text-text-muted">
-                Claude usage: {result.usage.input_tokens} in /{' '}
-                {result.usage.output_tokens} out tokens
+                Claude usage:{' '}
+                <span className="mono text-lime">
+                  {result.usage.input_tokens.toLocaleString('pt-BR')}
+                </span>{' '}
+                in /{' '}
+                <span className="mono text-lime">
+                  {result.usage.output_tokens.toLocaleString('pt-BR')}
+                </span>{' '}
+                out tokens
               </div>
             )}
           </div>

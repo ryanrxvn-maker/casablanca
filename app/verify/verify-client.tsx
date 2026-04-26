@@ -186,7 +186,12 @@ export default function VerifyClient() {
                 onPaste={onPaste}
                 inputMode="numeric"
                 maxLength={1}
-                className="mono h-14 w-full rounded-[12px] border border-line-strong bg-bg text-center text-2xl font-bold text-white focus:border-lime focus:outline-none"
+                className={
+                  'mono h-14 w-full rounded-[12px] border bg-bg text-center text-2xl font-bold transition-all duration-200 focus:scale-[1.04] focus:border-lime focus:outline-none focus:shadow-[0_0_22px_-6px_rgba(200,255,0,0.65),0_0_0_3px_rgba(200,255,0,0.18)] ' +
+                  (d
+                    ? 'border-lime/60 text-lime'
+                    : 'border-line-strong text-white')
+                }
                 aria-label={'Digito ' + (i + 1)}
               />
             ))}
@@ -194,12 +199,24 @@ export default function VerifyClient() {
         </div>
 
         {error && (
-          <div className="rounded-[12px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+          <div
+            key={error}
+            role="alert"
+            className="error-shake rounded-[12px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300 shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)]"
+          >
             {error}
           </div>
         )}
         {resentMsg && (
-          <div className="rounded-[12px] border border-lime/40 bg-lime/10 px-3 py-2 text-xs text-lime">
+          <div
+            key={resentMsg}
+            role="status"
+            className="fade-in-up flex items-center gap-2 rounded-[12px] border border-lime/40 bg-lime/10 px-3 py-2 text-xs text-lime shadow-[0_0_22px_-8px_rgba(200,255,0,0.5)]"
+          >
+            <span className="relative flex h-2 w-2 shrink-0">
+              <span className="absolute inline-flex h-full w-full animate-pulse-soft rounded-full bg-lime opacity-60" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
+            </span>
             {resentMsg}
           </div>
         )}

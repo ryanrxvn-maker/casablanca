@@ -98,7 +98,7 @@ body > * {
     @apply relative rounded-[16px] border border-line bg-bg-soft/80 backdrop-blur-sm shadow-depth-1;
   }
 
-  /* card 3D com gradiente sutil + glow tracking */
+  /* card 3D com gradiente sutil + glow tracking + conic border on hover */
   .card-3d {
     @apply card shadow-depth-2;
     background-image:
@@ -109,19 +109,50 @@ body > * {
         transparent 60%
       );
     transition:
-      transform 0.25s ease,
-      box-shadow 0.25s ease,
+      transform 0.35s cubic-bezier(.2,.8,.2,1),
+      box-shadow 0.35s cubic-bezier(.2,.8,.2,1),
       border-color 0.25s ease;
+    transform-style: preserve-3d;
+  }
+
+  /* Conic border animada — ativa so no hover, fica por tras do card. */
+  .card-3d::after {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: conic-gradient(
+      from var(--angle, 0deg),
+      transparent 0%,
+      rgba(200, 255, 0, 0.45) 25%,
+      transparent 50%,
+      rgba(200, 255, 0, 0.25) 75%,
+      transparent 100%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask-composite: exclude;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+    animation: card-border-spin 6s linear infinite;
+  }
+
+  .card-3d:hover::after {
+    opacity: 1;
   }
 
   .card-3d:hover {
     border-color: rgba(200, 255, 0, 0.35);
-    transform: translateY(-2px);
+    transform: translateY(-3px);
     box-shadow:
       0 1px 0 rgba(255, 255, 255, 0.08) inset,
-      0 30px 60px -25px rgba(0, 0, 0, 0.95),
-      0 12px 24px rgba(0, 0, 0, 0.5),
-      0 0 40px -8px rgba(200, 255, 0, 0.25);
+      0 36px 72px -25px rgba(0, 0, 0, 0.95),
+      0 16px 32px rgba(0, 0, 0, 0.55),
+      0 0 50px -8px rgba(200, 255, 0, 0.3);
   }
 
   .card-pad {
@@ -129,31 +160,56 @@ body > * {
   }
 
   .btn-primary {
-    @apply relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-[12px] bg-lime px-5 py-3 text-sm font-semibold text-black transition active:translate-y-[1px] disabled:cursor-not-allowed disabled:opacity-40;
+    @apply relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-[12px] bg-lime px-5 py-3 text-sm font-semibold text-black transition-all duration-200 active:translate-y-[1px] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40;
     box-shadow:
       0 1px 0 rgba(255, 255, 255, 0.5) inset,
       0 -2px 0 rgba(0, 0, 0, 0.18) inset,
       0 8px 18px -6px rgba(200, 255, 0, 0.45),
       0 2px 4px rgba(0, 0, 0, 0.4);
   }
+  /* Sheen passando pelo botao no hover */
+  .btn-primary::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      120deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.35) 50%,
+      transparent 100%
+    );
+    transform: translateX(-120%);
+    transition: transform 0.6s cubic-bezier(.2,.8,.2,1);
+    pointer-events: none;
+  }
   .btn-primary:hover:not(:disabled) {
-    filter: brightness(1.05);
+    filter: brightness(1.06);
+    transform: translateY(-1px);
     box-shadow:
       0 1px 0 rgba(255, 255, 255, 0.6) inset,
       0 -2px 0 rgba(0, 0, 0, 0.18) inset,
-      0 12px 28px -6px rgba(200, 255, 0, 0.6),
+      0 14px 32px -6px rgba(200, 255, 0, 0.65),
       0 2px 6px rgba(0, 0, 0, 0.4);
+  }
+  .btn-primary:hover:not(:disabled)::before {
+    transform: translateX(120%);
   }
 
   .btn-secondary {
-    @apply relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-[12px] border border-line-strong bg-bg-soft/40 px-5 py-3 text-sm font-medium text-text-muted transition hover:border-lime hover:text-white active:translate-y-[1px] disabled:cursor-not-allowed disabled:opacity-40;
+    @apply relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-[12px] border border-line-strong bg-bg-soft/40 px-5 py-3 text-sm font-medium text-text-muted transition-all duration-200 hover:border-lime hover:text-white hover:-translate-y-[1px] active:translate-y-0 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40;
     box-shadow:
       0 1px 0 rgba(255, 255, 255, 0.04) inset,
       0 4px 12px -6px rgba(0, 0, 0, 0.6);
   }
+  .btn-secondary:hover:not(:disabled) {
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.06) inset,
+      0 8px 18px -6px rgba(0, 0, 0, 0.8),
+      0 0 24px -8px rgba(200, 255, 0, 0.25);
+  }
 
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 rounded-[12px] px-3 py-2 text-sm text-text-muted transition hover:text-white;
+    @apply inline-flex items-center justify-center gap-2 rounded-[12px] px-3 py-2 text-sm text-text-muted transition-all duration-200 hover:bg-bg-soft/60 hover:text-white active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40;
   }
 
   .input-field {
@@ -216,6 +272,73 @@ body > * {
     color: var(--lime);
     font-family: var(--font-tech), var(--font-display), system-ui;
     text-shadow: 0 0 14px rgba(200, 255, 0, 0.45);
+    animation: brand-breathe 4s ease-in-out infinite;
+  }
+
+  .shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .shimmer::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      100deg,
+      transparent 25%,
+      rgba(255, 255, 255, 0.06) 50%,
+      transparent 75%
+    );
+    animation: shimmer-pass 2.2s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  /* Scan line sutil atravessando elemento — use em cards "processando" */
+  .scan-line {
+    position: relative;
+    overflow: hidden;
+  }
+  .scan-line::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 2px;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(200, 255, 0, 0.9) 50%,
+      transparent 100%
+    );
+    animation: scan-move 2.2s linear infinite;
+    pointer-events: none;
+  }
+
+  /* Frame tech — cantos estilo HUD futurista */
+  .tech-frame {
+    position: relative;
+  }
+  .tech-frame::before,
+  .tech-frame::after {
+    content: '';
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border: 1px solid rgba(200, 255, 0, 0.55);
+    pointer-events: none;
+  }
+  .tech-frame::before {
+    top: -1px;
+    left: -1px;
+    border-right: none;
+    border-bottom: none;
+  }
+  .tech-frame::after {
+    bottom: -1px;
+    right: -1px;
+    border-left: none;
+    border-top: none;
   }
 
   .section-title {
@@ -335,10 +458,180 @@ input[type='range']::-moz-range-thumb {
   background: #2a2a2a;
 }
 
+/* Floating ambient orbs (background) */
+.orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(60px);
+  opacity: 0.55;
+  mix-blend-mode: screen;
+  will-change: transform;
+}
+.orb-a {
+  width: 520px;
+  height: 520px;
+  top: -180px;
+  left: -140px;
+  background: radial-gradient(circle, rgba(200, 255, 0, 0.22), transparent 65%);
+  animation: orb-float-a 22s ease-in-out infinite;
+}
+.orb-b {
+  width: 380px;
+  height: 380px;
+  bottom: -120px;
+  right: -100px;
+  background: radial-gradient(circle, rgba(130, 180, 255, 0.15), transparent 65%);
+  animation: orb-float-b 28s ease-in-out infinite;
+}
+.orb-c {
+  width: 280px;
+  height: 280px;
+  top: 45%;
+  left: 60%;
+  background: radial-gradient(circle, rgba(255, 100, 180, 0.08), transparent 65%);
+  animation: orb-float-c 32s ease-in-out infinite;
+}
+
+/* Keyframes — animacoes extras que nao moram no tailwind.config */
+@keyframes orb-float-a {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  33% { transform: translate3d(40px, 30px, 0) scale(1.08); }
+  66% { transform: translate3d(-20px, 60px, 0) scale(0.96); }
+}
+@keyframes orb-float-b {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  40% { transform: translate3d(-60px, -40px, 0) scale(1.05); }
+  80% { transform: translate3d(30px, -20px, 0) scale(0.94); }
+}
+@keyframes orb-float-c {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(-50px, 30px, 0); }
+}
+@keyframes shimmer-pass {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(120%); }
+}
+@keyframes scan-move {
+  0% { transform: translateY(0); opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { transform: translateY(100%); opacity: 0; }
+}
+@keyframes card-border-spin {
+  0% { --angle: 0deg; }
+  100% { --angle: 360deg; }
+}
+@keyframes brand-breathe {
+  0%, 100% {
+    text-shadow: 0 0 14px rgba(200, 255, 0, 0.45);
+  }
+  50% {
+    text-shadow:
+      0 0 18px rgba(200, 255, 0, 0.65),
+      0 0 32px rgba(200, 255, 0, 0.25);
+  }
+}
+
+/* Eye-pulse for the DarkoLogo pupil — subtle scaling + opacity pulse */
+@keyframes darko-eye-pulse {
+  0%, 100% { opacity: 1; transform-box: fill-box; transform-origin: center; transform: scale(1); }
+  50% { opacity: 0.75; transform-box: fill-box; transform-origin: center; transform: scale(0.88); }
+}
+.darko-eye-pulse {
+  animation: darko-eye-pulse 3.2s ease-in-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.darko-eye-pulse.delay {
+  animation-delay: 0.4s;
+}
+
+/* Eye-blink on hover — quick scale-y squash that mimics a blink */
+@keyframes darko-eye-blink {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.05); }
+}
+.brand:hover .darko-eye-pulse {
+  animation: darko-eye-blink 220ms ease-in-out 1;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.brand:hover .darko-eye-pulse.delay {
+  animation-delay: 70ms;
+}
+
+/* Toast slide-up + soft bounce */
+@keyframes toast-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 20px) scale(0.92);
+  }
+  60% {
+    opacity: 1;
+    transform: translate(-50%, -2px) scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+.toast-pop {
+  animation: toast-pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* Dropdown reveal — slight slide + fade + scale anchored top-right */
+@keyframes dropdown-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.96);
+    transform-origin: top right;
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    transform-origin: top right;
+  }
+}
+.dropdown-pop {
+  animation: dropdown-pop 200ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+  transform-origin: top right;
+}
+
+/* Error shake — used on form error banners when something goes wrong */
+@keyframes error-shake {
+  0%, 100% { transform: translateX(0); }
+  15% { transform: translateX(-6px); }
+  30% { transform: translateX(5px); }
+  45% { transform: translateX(-4px); }
+  60% { transform: translateX(3px); }
+  75% { transform: translateX(-2px); }
+  90% { transform: translateX(1px); }
+}
+.error-shake {
+  animation: error-shake 420ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+/* Generic enter — fade + slight slide-up — for stagger lists */
+@keyframes fade-in-up {
+  0% { opacity: 0; transform: translateY(6px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.fade-in-up {
+  animation: fade-in-up 280ms cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+
+/* Register the --angle custom property so the keyframe can animate it */
+@property --angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
 /* Reduce motion for users who prefer it */
 @media (prefers-reduced-motion: reduce) {
   body::before,
-  body::after {
+  body::after,
+  .orb {
     display: none;
   }
   *,

@@ -56,12 +56,22 @@ export function AudioPlayer({
   }
 
   return (
-    <div className="flex items-center gap-3 rounded-[12px] border border-line bg-bg px-3 py-2">
+    <div
+      className={
+        'flex items-center gap-3 rounded-[12px] border bg-bg px-3 py-2 transition-colors duration-300 ' +
+        (playing ? 'border-lime/50' : 'border-line')
+      }
+    >
       <audio ref={audioRef} src={src} preload="metadata" />
       <button
         onClick={toggle}
         aria-label={playing ? 'Pausar' : 'Reproduzir'}
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-lime text-black transition hover:brightness-95"
+        className={
+          'group/play relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-lime text-black transition-all duration-200 hover:brightness-95 hover:scale-[1.06] active:scale-[0.94] ' +
+          (playing
+            ? 'shadow-[0_0_20px_-2px_rgba(200,255,0,0.7)]'
+            : 'shadow-[0_0_0_0_rgba(200,255,0,0)]')
+        }
       >
         {playing ? (
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">

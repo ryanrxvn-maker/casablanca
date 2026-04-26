@@ -91,7 +91,12 @@ export function Header() {
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
-            className="group flex items-center gap-3 rounded-full border border-line bg-bg/60 py-1 pl-1 pr-3 text-left transition hover:border-lime/60 hover:bg-bg"
+            className={
+              'group flex items-center gap-3 rounded-full border bg-bg/60 py-1 pl-1 pr-3 text-left transition-all duration-300 hover:bg-bg ' +
+              (open
+                ? 'border-lime/70 shadow-[0_0_22px_-6px_rgba(200,255,0,0.65)]'
+                : 'border-line hover:border-lime/60 hover:shadow-[0_0_18px_-8px_rgba(200,255,0,0.45)]')
+            }
             aria-haspopup="menu"
             aria-expanded={open}
           >
@@ -132,7 +137,7 @@ export function Header() {
           {open ? (
             <div
               role="menu"
-              className="absolute right-0 mt-2 w-60 overflow-hidden rounded-[12px] border border-line bg-bg-soft shadow-2xl"
+              className="dropdown-pop absolute right-0 mt-2 w-60 overflow-hidden rounded-[12px] border border-line bg-bg-soft/95 shadow-2xl backdrop-blur-md"
             >
               <div className="border-b border-line px-4 py-3">
                 <div className="truncate text-sm font-semibold">

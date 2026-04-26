@@ -235,9 +235,10 @@ export default function AceleradorPage() {
                   onClick={() => !opt.disabled && setFormat(opt.id)}
                   disabled={processing || opt.disabled}
                   className={
-                    active
-                      ? 'rounded-[12px] bg-lime px-4 py-2 text-sm font-semibold text-black'
-                      : 'rounded-[12px] border border-line-strong px-4 py-2 text-sm text-text-muted hover:border-lime hover:text-white disabled:opacity-40'
+                    'rounded-[12px] px-4 py-2 text-sm transition-all duration-200 active:scale-[0.97] disabled:opacity-40 ' +
+                    (active
+                      ? 'bg-lime font-semibold text-black shadow-[0_0_18px_-4px_rgba(200,255,0,0.6)]'
+                      : 'border border-line-strong text-text-muted hover:border-lime hover:text-white')
                   }
                   title={opt.disabled ? 'MP4 indisponivel: um dos arquivos nao e video' : undefined}
                 >
@@ -281,17 +282,33 @@ export default function AceleradorPage() {
         </div>
 
         {stageMsg ? (
-          <div className="rounded-[12px] border border-line bg-bg px-4 py-3 text-xs text-text-muted">
-            {stageMsg}
+          <div
+            className={
+              'rounded-[12px] border px-4 py-3 text-xs ' +
+              (processing
+                ? 'scan-line border-lime/40 bg-bg-soft/40 text-lime'
+                : 'border-line bg-bg text-text-muted')
+            }
+          >
+            <div className="flex items-center gap-2">
+              {processing ? (
+                <span className="relative flex h-2 w-2 shrink-0">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
+                </span>
+              ) : null}
+              <span className="mono uppercase tracking-widest">{stageMsg}</span>
+            </div>
           </div>
         ) : null}
 
         {jobs.length > 0 ? (
           <ul className="flex flex-col gap-2">
-            {jobs.map((j) => (
+            {jobs.map((j, idx) => (
               <li
                 key={j.id}
-                className="rounded-[12px] border border-line bg-bg p-3"
+                className="fade-in-up rounded-[12px] border border-line bg-bg p-3"
+                style={{ animationDelay: `${Math.min(idx, 8) * 35}ms` }}
               >
                 <div className="flex items-center justify-between gap-2 text-xs">
                   <span className="min-w-0 flex-1 truncate text-white">

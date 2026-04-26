@@ -1,6 +1,7 @@
 /**
  * Shell visual para cada página de ferramenta.
  * Define título, descrição e container animado.
+ * Usa tech-frame pra marcar os cantos com "HUD corners" lime — premium feel.
  */
 export function ToolShell({
   title,
@@ -21,7 +22,7 @@ export function ToolShell({
           </p>
         )}
       </div>
-      <div className="card-3d card-pad">{children}</div>
+      <div className="card-3d card-pad tech-frame">{children}</div>
     </div>
   );
 }

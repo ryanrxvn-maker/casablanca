@@ -23,9 +23,11 @@ export function Brand({
   return (
     <Link
       href={href}
-      className={`brand flex items-center gap-2 font-display uppercase ${s.text} select-none`}
+      className={`brand group flex items-center gap-2 font-display uppercase ${s.text} select-none transition-transform duration-300 hover:scale-[1.04]`}
     >
-      <DarkoLogo size={s.logo} />
+      <span className="transition-transform duration-500 group-hover:rotate-[-4deg]">
+        <DarkoLogo size={s.logo} />
+      </span>
       <span>DARKO LAB</span>
     </Link>
   );

@@ -154,19 +154,38 @@ export default function AudioSplitPage() {
         </div>
 
         {status ? (
-          <div className="rounded-[12px] border border-line bg-bg px-4 py-3 text-xs text-text-muted">
-            {status}
+          <div
+            className={
+              'rounded-[12px] border px-4 py-3 text-xs ' +
+              (processing
+                ? 'scan-line border-lime/40 bg-bg-soft/40 text-lime'
+                : 'border-line bg-bg text-text-muted')
+            }
+          >
+            <div className="flex items-center gap-2">
+              {processing ? (
+                <span className="relative flex h-2 w-2 shrink-0">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
+                </span>
+              ) : null}
+              <span className="mono uppercase tracking-widest">{status}</span>
+            </div>
           </div>
         ) : null}
 
         {error ? (
-          <div className="rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300">
+          <div
+            key={error}
+            role="alert"
+            className="error-shake rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300 shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)]"
+          >
             {error}
           </div>
         ) : null}
 
         {parts.length > 0 ? (
-          <div className="mt-2 border-t border-line pt-6">
+          <div className="fade-in-up mt-2 border-t border-line pt-6">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-sm font-semibold uppercase tracking-widest text-text-muted">
                 Resultado ({parts.length} parte{parts.length > 1 ? 's' : ''})
@@ -178,8 +197,12 @@ export default function AudioSplitPage() {
               ) : null}
             </div>
             <ul className="flex flex-col gap-3">
-              {parts.map((p) => (
-                <li key={p.index} className="flex flex-col gap-2">
+              {parts.map((p, idx) => (
+                <li
+                  key={p.index}
+                  className="fade-in-up flex flex-col gap-2"
+                  style={{ animationDelay: `${Math.min(idx, 8) * 50}ms` }}
+                >
                   <div className="flex items-center justify-between text-xs text-text-muted">
                     <span>
                       Parte {p.index}

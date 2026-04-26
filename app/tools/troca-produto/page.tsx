@@ -249,7 +249,7 @@ export default function TrocaProdutoPage() {
       <div className="grid gap-5">
         <div className="grid gap-4 md:grid-cols-2">
           <label className="block">
-            <span className="mb-1 block text-xs uppercase tracking-wide text-text-muted">
+            <span className="label-field">
               Produto antigo (como aparece na fala)
             </span>
             <input
@@ -262,7 +262,7 @@ export default function TrocaProdutoPage() {
             />
           </label>
           <label className="block">
-            <span className="mb-1 block text-xs uppercase tracking-wide text-text-muted">
+            <span className="label-field">
               Produto novo
             </span>
             <input
@@ -277,7 +277,7 @@ export default function TrocaProdutoPage() {
         </div>
 
         <label className="block">
-          <span className="mb-1 block text-xs uppercase tracking-wide text-text-muted">
+          <span className="label-field">
             Áudio da VSL
           </span>
           <input
@@ -299,14 +299,44 @@ export default function TrocaProdutoPage() {
         </label>
 
         {error && (
-          <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          <div
+            key={error}
+            role="alert"
+            className="error-shake rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300 shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)]"
+          >
             {error}
           </div>
         )}
 
         {busy && (
-          <div className="rounded-lg border border-lime/40 bg-lime-soft px-4 py-3 text-sm text-lime">
-            {stageMsg}
+          <div className="scan-line tech-frame rounded-xl border border-lime/40 bg-bg-soft/40 p-5">
+            <div className="flex items-center gap-3">
+              <span className="relative flex h-3 w-3">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
+                <span className="relative inline-flex h-3 w-3 rounded-full bg-lime shadow-[0_0_12px_rgba(200,255,0,0.9)]" />
+              </span>
+              <span className="text-sm font-medium uppercase tracking-widest text-lime">
+                {stage === 'transcribing'
+                  ? 'AssemblyAI · transcrevendo'
+                  : stage === 'cloning'
+                    ? 'ElevenLabs · clonando voz'
+                    : stage === 'tts'
+                      ? 'ElevenLabs · gerando TTS'
+                      : stage === 'splicing'
+                        ? 'FFmpeg · remontando audio'
+                        : 'processando'}
+              </span>
+            </div>
+            <div className="mt-4 grid gap-2">
+              <div className="shimmer h-3 w-3/4 rounded-full bg-bg" />
+              <div className="shimmer h-3 w-11/12 rounded-full bg-bg" />
+              <div className="shimmer h-3 w-2/3 rounded-full bg-bg" />
+            </div>
+            {stageMsg && (
+              <p className="mono mt-4 text-[11px] uppercase tracking-widest text-text-muted">
+                {stageMsg}
+              </p>
+            )}
           </div>
         )}
 
@@ -344,7 +374,7 @@ export default function TrocaProdutoPage() {
         </div>
 
         {transcript && (
-          <section className="rounded-xl border border-line bg-bg-soft/40 p-4">
+          <section className="fade-in-up rounded-xl border border-line bg-bg-soft/40 p-4">
             <header className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-semibold uppercase tracking-wide text-text-muted">
                 Ocorrências encontradas ({transcript.matches.length})
@@ -382,7 +412,8 @@ export default function TrocaProdutoPage() {
                   return (
                     <li
                       key={i}
-                      className="flex items-start gap-3 rounded-lg border border-line bg-black/30 p-3"
+                      className="fade-in-up flex items-start gap-3 rounded-lg border border-line bg-black/30 p-3"
+                      style={{ animationDelay: `${Math.min(i, 10) * 35}ms` }}
                     >
                       <input
                         type="checkbox"
@@ -409,9 +440,13 @@ export default function TrocaProdutoPage() {
         )}
 
         {resultUrl && (
-          <section className="rounded-xl border border-line bg-bg-soft/40 p-4">
-            <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-text-muted">
-              Resultado
+          <section className="fade-in-up rounded-xl border border-lime/40 bg-bg-soft/40 p-4 shadow-[0_0_28px_-12px_rgba(200,255,0,0.5)]">
+            <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-lime">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-pulse-soft rounded-full bg-lime opacity-60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_10px_rgba(200,255,0,0.9)]" />
+              </span>
+              Resultado pronto
             </h2>
             <audio src={resultUrl} controls className="w-full" />
           </section>

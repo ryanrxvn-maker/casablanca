@@ -173,7 +173,10 @@ export default function CamuflagemPage() {
             disabled={processingAll}
           />
           <p className="mt-2 text-xs text-text-muted">
-            Ganho aplicado: {((volume / 100) * 0.05).toFixed(4)}
+            Ganho aplicado:{' '}
+            <span className="mono text-lime">
+              {((volume / 100) * 0.05).toFixed(4)}
+            </span>
           </p>
         </div>
 
@@ -190,9 +193,10 @@ export default function CamuflagemPage() {
                   onClick={() => !disabled && setFormat(f)}
                   disabled={processingAll || disabled}
                   className={
-                    active
-                      ? 'rounded-[12px] bg-lime px-4 py-2 text-sm font-semibold text-black'
-                      : 'rounded-[12px] border border-line-strong px-4 py-2 text-sm text-text-muted hover:border-lime hover:text-white disabled:opacity-40'
+                    'rounded-[12px] px-4 py-2 text-sm transition-all duration-200 active:scale-[0.97] disabled:opacity-40 ' +
+                    (active
+                      ? 'bg-lime font-semibold text-black shadow-[0_0_18px_-4px_rgba(200,255,0,0.6)]'
+                      : 'border border-line-strong text-text-muted hover:border-lime hover:text-white')
                   }
                   title={
                     disabled
@@ -217,7 +221,16 @@ export default function CamuflagemPage() {
           {pairs.map((pair, i) => (
             <div
               key={pair.id}
-              className="rounded-[12px] border border-line bg-bg p-4"
+              className={
+                'rounded-[12px] border bg-bg p-4 transition-colors ' +
+                (pair.status === 'processing'
+                  ? 'scan-line border-lime/40'
+                  : pair.status === 'done'
+                    ? 'border-lime/30'
+                    : pair.status === 'error'
+                      ? 'border-red-500/40'
+                      : 'border-line')
+              }
             >
               <div className="mb-3 flex items-center justify-between">
                 <span className="text-xs font-semibold uppercase tracking-widest text-text-muted">
@@ -272,7 +285,11 @@ export default function CamuflagemPage() {
               </div>
 
               {pair.errorMsg ? (
-                <div className="mt-3 rounded-[8px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                <div
+                  key={pair.errorMsg}
+                  role="alert"
+                  className="error-shake mt-3 rounded-[8px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300 shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)]"
+                >
                   {pair.errorMsg}
                 </div>
               ) : null}
@@ -283,7 +300,7 @@ export default function CamuflagemPage() {
                     <video
                       src={pair.resultUrl}
                       controls
-                      className="w-full rounded-[12px] border border-line bg-black"
+                      className="w-full rounded-[12px] border border-lime/30 bg-black shadow-[0_0_28px_-12px_rgba(200,255,0,0.4)]"
                     />
                   ) : (
                     <AudioPlayer src={pair.resultUrl} label="Resultado camuflado" />

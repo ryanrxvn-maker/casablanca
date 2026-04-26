@@ -70,15 +70,27 @@ export function DarkoLogo({
         strokeLinecap="round"
       />
 
-      {/* Olho esquerdo - brilho lime */}
+      {/* Olho esquerdo - brilho lime + pulso sutil */}
       <g filter="url(#darko-shadow)">
-        <circle cx="25" cy="40" r="4.5" fill="url(#darko-eye-glow)" />
+        <circle
+          cx="25"
+          cy="40"
+          r="4.5"
+          fill="url(#darko-eye-glow)"
+          className="darko-eye-pulse"
+        />
         <circle cx="25" cy="40" r="1.6" fill="#eaff00" />
       </g>
 
-      {/* Olho direito */}
+      {/* Olho direito - pulso defasado */}
       <g filter="url(#darko-shadow)">
-        <circle cx="39" cy="40" r="4.5" fill="url(#darko-eye-glow)" />
+        <circle
+          cx="39"
+          cy="40"
+          r="4.5"
+          fill="url(#darko-eye-glow)"
+          className="darko-eye-pulse delay"
+        />
         <circle cx="39" cy="40" r="1.6" fill="#eaff00" />
       </g>
     </svg>

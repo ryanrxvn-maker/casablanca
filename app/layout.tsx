@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import { Space_Grotesk, JetBrains_Mono, Orbitron } from 'next/font/google';
 import { MouseGlow } from '@/components/MouseGlow';
 import { RippleRoot } from '@/components/RippleRoot';
+import { FloatingOrbs } from '@/components/FloatingOrbs';
 import './globals.css';
 
 /**
@@ -52,6 +53,7 @@ export default function RootLayout({
       className={`${display.variable} ${mono.variable} ${tech.variable}`}
     >
       <body>
+        <FloatingOrbs />
         <MouseGlow />
         <RippleRoot />
         {children}

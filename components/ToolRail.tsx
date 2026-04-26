@@ -53,15 +53,22 @@ export function ToolRail({ items }: { items: RailItem[] }) {
                   className={
                     'group relative flex h-11 w-11 items-center justify-center rounded-[12px] border transition-all duration-300 ' +
                     (active
-                      ? 'border-lime/70 bg-lime/10 text-lime shadow-[0_0_24px_-6px_rgba(200,255,0,0.6)]'
-                      : 'border-line-strong bg-bg/60 text-text-muted hover:-translate-y-[1px] hover:border-lime/60 hover:text-white')
+                      ? 'border-lime/70 bg-lime/10 text-lime shadow-[0_0_24px_-6px_rgba(200,255,0,0.6)] scale-[1.06]'
+                      : 'border-line-strong bg-bg/60 text-text-muted hover:-translate-y-[1px] hover:scale-[1.04] hover:border-lime/60 hover:text-white')
                   }
                 >
                   {it.icon}
+                  {/* Dot pulsante ativo — visivel so no item selecionado */}
+                  {active ? (
+                    <span
+                      aria-hidden
+                      className="absolute -right-0.5 -top-0.5 h-2 w-2 animate-pulse-soft rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]"
+                    />
+                  ) : null}
                   {/* Tooltip lateral */}
                   <span
                     aria-hidden
-                    className="pointer-events-none absolute left-[calc(100%+10px)] whitespace-nowrap rounded-[8px] border border-line bg-bg-soft px-2 py-1 text-[11px] uppercase tracking-widest text-text opacity-0 shadow-depth-2 transition-opacity duration-200 group-hover:opacity-100"
+                    className="pointer-events-none absolute left-[calc(100%+10px)] whitespace-nowrap rounded-[8px] border border-line bg-bg-soft px-2 py-1 text-[11px] uppercase tracking-widest text-text opacity-0 shadow-depth-2 transition-all duration-200 group-hover:translate-x-0 group-hover:opacity-100 -translate-x-1"
                   >
                     {it.label}
                   </span>
