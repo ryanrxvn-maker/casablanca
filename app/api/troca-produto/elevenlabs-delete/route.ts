@@ -3,11 +3,7 @@ import { NextResponse } from 'next/server';
 /**
  * POST /api/troca-produto/elevenlabs-delete
  *
- * Remove a voz clonada da biblioteca do ElevenLabs. Chamado pelo
- * front apos concluir a geracao do audio final, pra nao acumular
- * vozes temporarias na conta.
- *
- * JSON body: { voiceId: string }
+ * Remove a voz clonada da biblioteca do ElevenLabs.
  */
 
 export const runtime = 'nodejs';
@@ -15,40 +11,54 @@ export const maxDuration = 30;
 
 type Body = { voiceId: string };
 
-export async function POST(req: Request) {
-  const apiKey = process.env.ELEVENLABS_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json(
-      { error: 'ELEVENLABS_API_KEY não configurada.' },
-      { status: 500 },
-    );
-  }
-
-  let body: Body;
-  try {
-    body = (await req.json()) as Body;
-  } catch {
-    return NextResponse.json({ error: 'Body JSON inválido.' }, { status: 400 });
-  }
-  if (!body.voiceId) {
-    return NextResponse.json({ error: 'voiceId ausente.' }, { status: 400 });
-  }
-
-  const res = await fetch(
-    `https://api.elevenlabs.io/v1/voices/${encodeURIComponent(body.voiceId)}`,
-    {
-      method: 'DELETE',
-      headers: { 'xi-api-key': apiKey },
-    },
+function jsonError(message: string, status = 500, detail?: string) {
+  return NextResponse.json(
+    detail ? { error: message, detail: detail.slice(0, 500) } : { error: message },
+    { status },
   );
+}
 
-  if (!res.ok) {
-    const t = await res.text();
-    return NextResponse.json(
-      { error: 'Falha ao deletar voz.', detail: t.slice(0, 500) },
-      { status: 502 },
+export async function POST(req: Request) {
+  try {
+    const apiKey = process.env.ELEVENLABS_API_KEY;
+    if (!apiKey) {
+      return jsonError('ELEVENLABS_API_KEY nao configurada no servidor.', 500);
+    }
+
+    let body: Body;
+    try {
+      body = (await req.json()) as Body;
+    } catch (e) {
+      return jsonError(
+        'Body JSON invalido.',
+        400,
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+    if (!body.voiceId) {
+      return jsonError('voiceId ausente.', 400);
+    }
+
+    const res = await fetch(
+      `https://api.elevenlabs.io/v1/voices/${encodeURIComponent(body.voiceId)}`,
+      {
+        method: 'DELETE',
+        headers: { 'xi-api-key': apiKey },
+      },
+    );
+
+    if (!res.ok) {
+      const t = await res.text().catch(() => '');
+      return jsonError('Falha ao deletar voz no ElevenLabs.', 502, t);
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    console.error('[elevenlabs-delete route]', e);
+    return jsonError(
+      'Erro inesperado no servidor.',
+      500,
+      e instanceof Error ? e.message : String(e),
     );
   }
-
-  return NextResponse.json({ ok: true });
 }

@@ -53,6 +53,38 @@ type Stage =
   | 'done'
   | 'error';
 
+// Vercel limita o body de uma route handler a 4.5MB no plano Hobby/Pro.
+// Damos uma margem de seguranca pra header overhead do multipart.
+const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Le a Response como JSON quando possivel; quando o platform devolve
+ * texto puro (ex: "Request Entity Too Large"), embrulhamos numa estrutura
+ * { error: string } pra o caller nao explodir com JSON.parse.
+ */
+async function readResponseJson(res: Response): Promise<{
+  error?: string;
+  detail?: string;
+  [key: string]: unknown;
+}> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    const sniff = text.trim().slice(0, 120);
+    if (/Request Entity Too Large/i.test(sniff)) {
+      return {
+        error:
+          'Arquivo grande demais para o servidor (limite ~4MB). Comprima o audio primeiro com a ferramenta Compressor.',
+      };
+    }
+    return {
+      error: `Resposta nao-JSON do servidor (HTTP ${res.status}).`,
+      detail: sniff,
+    };
+  }
+}
+
 export default function TrocaProdutoPage() {
   const [file, setFile] = useToolState<File | null>('trocaProduto:file', null);
   const [oldProduct, setOldProduct] = useToolState<string>(
@@ -101,6 +133,12 @@ export default function TrocaProdutoPage() {
       setError('Informe o nome do produto antigo.');
       return;
     }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setError(
+        `Arquivo de ${(file.size / 1024 / 1024).toFixed(1)}MB excede o limite de upload (${MAX_UPLOAD_BYTES / 1024 / 1024}MB). Comprima o audio primeiro com a ferramenta Compressor.`,
+      );
+      return;
+    }
     setError(null);
     setTranscript(null);
     setStage('transcribing');
@@ -114,11 +152,16 @@ export default function TrocaProdutoPage() {
         method: 'POST',
         body: fd,
       });
-      const json = (await res.json()) as Transcript & { error?: string };
+      const json = (await readResponseJson(res)) as Partial<Transcript> & {
+        error?: string;
+      };
       if (!res.ok) throw new Error(json.error || 'Falha na transcrição.');
+      if (!json.matches || !json.words) {
+        throw new Error('Resposta incompleta do servidor.');
+      }
       setTranscript({
-        transcriptId: json.transcriptId,
-        text: json.text,
+        transcriptId: json.transcriptId ?? '',
+        text: json.text ?? '',
         words: json.words,
         matches: json.matches,
       });
@@ -144,6 +187,12 @@ export default function TrocaProdutoPage() {
       setError('Selecione ao menos uma ocorrência para substituir.');
       return;
     }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setError(
+        `Arquivo de ${(file.size / 1024 / 1024).toFixed(1)}MB excede o limite de upload (${MAX_UPLOAD_BYTES / 1024 / 1024}MB). Comprima o audio primeiro com a ferramenta Compressor.`,
+      );
+      return;
+    }
 
     setError(null);
     if (resultUrl) URL.revokeObjectURL(resultUrl);
@@ -161,7 +210,7 @@ export default function TrocaProdutoPage() {
         method: 'POST',
         body: cloneFd,
       });
-      const cloneJson = (await cloneRes.json()) as {
+      const cloneJson = (await readResponseJson(cloneRes)) as {
         voiceId?: string;
         error?: string;
       };
@@ -193,7 +242,7 @@ export default function TrocaProdutoPage() {
           }),
         });
         if (!ttsRes.ok) {
-          const errJson = (await ttsRes.json().catch(() => ({}))) as {
+          const errJson = (await readResponseJson(ttsRes)) as {
             error?: string;
           };
           throw new Error(errJson.error || `Falha no TTS #${k + 1}.`);
@@ -292,10 +341,31 @@ export default function TrocaProdutoPage() {
             disabled={busy}
           />
           {file && (
-            <div className="mt-1 text-xs text-text-muted">
-              {file.name} — {(file.size / 1024 / 1024).toFixed(2)} MB
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-text-muted">
+              <span>
+                {file.name} —{' '}
+                <span
+                  className={
+                    'mono ' +
+                    (file.size > MAX_UPLOAD_BYTES ? 'text-red-300' : 'text-lime')
+                  }
+                >
+                  {(file.size / 1024 / 1024).toFixed(2)} MB
+                </span>
+              </span>
+              {file.size > MAX_UPLOAD_BYTES ? (
+                <span className="text-red-300">
+                  · acima do limite ({MAX_UPLOAD_BYTES / 1024 / 1024}MB).
+                  Comprima primeiro com a Compressor.
+                </span>
+              ) : null}
             </div>
           )}
+          <p className="mt-2 text-[11px] text-text-muted">
+            Limite de upload: {MAX_UPLOAD_BYTES / 1024 / 1024}MB. Para arquivos
+            maiores, use a ferramenta{' '}
+            <span className="text-lime">Compressor</span> antes de enviar.
+          </p>
         </label>
 
         {error && (
