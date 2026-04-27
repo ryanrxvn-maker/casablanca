@@ -374,6 +374,101 @@ export async function cutVideoSegments(
   }
 }
 
+// ---------- Normalizador de Volume --------------------------------------
+//
+// O FFmpeg tem dois filtros principais pra equalizar volume:
+//  - `loudnorm`: implementa EBU R128 (broadcast standard). Caro de rodar em
+//    WASM single-threaded e idealmente quer 2-pass pra medir antes; pulamos.
+//  - `dynaudnorm`: normalizador dinamico que ajusta gain ao longo do audio,
+//    suavizando trechos baixos sem clip nos altos. Perfeito pro caso "uma
+//    voz mais alta que outra".
+//
+// Usamos dynaudnorm com presets variando agressividade. Saida pode ser MP4
+// (re-encode mantendo video), MP3 ou WAV (so audio).
+
+export type NormalizeIntensity = 'suave' | 'padrao' | 'forte';
+
+const DYNAUDNORM_PRESETS: Record<NormalizeIntensity, string> = {
+  // p=peak (alvo de pico, 0-1), m=max gain, s=compress factor (smoothing)
+  suave: 'dynaudnorm=p=0.95:m=10:s=12:f=250',
+  padrao: 'dynaudnorm=p=0.9:m=15:s=15:f=300',
+  forte: 'dynaudnorm=p=0.85:m=20:s=20:f=400',
+};
+
+export type NormalizeOutFormat = 'mp4' | 'mp3' | 'wav';
+
+/**
+ * Normaliza o volume de um arquivo (video ou audio).
+ *
+ * - Se output for MP4: mantem o video, re-encoda audio com dynaudnorm aplicado.
+ *   So funciona se o input tiver trilha de video.
+ * - Se output for MP3/WAV: descarta video (se houver) e gera so audio normalizado.
+ *
+ * O filtro `dynaudnorm` faz o que o usuario quer ver: trechos baixos sobem,
+ * trechos altos baixam, voz fica equilibrada ao longo do clip.
+ */
+export async function normalizeVolume(
+  file: Blob,
+  params: {
+    intensity: NormalizeIntensity;
+    output: NormalizeOutFormat;
+  },
+  opts: RunOptions = {},
+): Promise<Blob> {
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const { fetchFile } = await import('@ffmpeg/util');
+
+  const inputName = 'in.' + guessExt(file, 'mp4');
+  const outputName = 'out.' + params.output;
+  const filter = DYNAUDNORM_PRESETS[params.intensity];
+  const progressHandler = wireProgress(ff, opts.onProgress);
+
+  try {
+    opts.onStage?.('Carregando arquivo...');
+    await ff.writeFile(inputName, await fetchFile(file));
+
+    const args: string[] = ['-i', inputName, '-af', filter];
+
+    if (params.output === 'mp4') {
+      // Mantem video, re-encoda so audio com filtro de normalizacao.
+      // -c:v copy nem sempre funciona bem com -af (FFmpeg pode reclamar
+      // de mismatch de timestamps), entao fazemos re-encode rapido com
+      // ultrafast pra compensar a velocidade.
+      args.push(
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-tune', 'fastdecode',
+        '-crf', '22',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        '-movflags', '+faststart',
+      );
+      opts.onStage?.('Normalizando audio + remontando video...');
+    } else if (params.output === 'mp3') {
+      args.push('-vn', '-c:a', 'libmp3lame', '-q:a', '2');
+      opts.onStage?.('Normalizando e exportando MP3...');
+    } else {
+      args.push('-vn', '-c:a', 'pcm_s16le', '-ar', '44100');
+      opts.onStage?.('Normalizando e exportando WAV...');
+    }
+
+    args.push(outputName);
+    await ff.exec(args);
+    const data = await ff.readFile(outputName);
+    const mime =
+      params.output === 'mp4'
+        ? 'video/mp4'
+        : params.output === 'mp3'
+          ? 'audio/mpeg'
+          : 'audio/wav';
+    return toBlob(data, mime);
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    await safeDelete(ff, inputName);
+    await safeDelete(ff, outputName);
+  }
+}
+
 // ---------- Internos ------------------------------------------------------
 
 type ProgressEvent = { progress: number; time: number };

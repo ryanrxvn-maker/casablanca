@@ -86,6 +86,7 @@ app/
 │   ├── compressor/            Base Suite — comprime MP4/MOV/WEBM
 │   ├── audio-split/           Base Suite — divide áudio em partes de N min
 │   ├── acelerador/            Base Suite — acelera 1×–4×
+│   ├── normalizador/          Base Suite — equilibra volume (dynaudnorm)
 │   ├── calculadora/           Base Suite — converte bitrate/tamanho
 │   ├── auto-broll/            AI Suite — copy → cenas + prompts + JSON
 │   └── troca-produto/         AI Suite — troca nome de produto no áudio
@@ -132,6 +133,7 @@ servidor.
 | **Compressor** | Reduz o tamanho de vídeos até ±10% do alvo, batch até 10. |
 | **Audio Split** | Divide um áudio em partes de N minutos e zipa como `parte1.wav`, `parte2.wav`, … |
 | **Acelerador** | Acelera áudio/vídeo 1×–4×, preserva pitch. |
+| **Normalizador** | Equilibra volume com `dynaudnorm` (3 intensidades). Saída MP4/MP3/WAV. Ideal pra VSL com voz desigual. |
 | **Calculadora** | Converte bitrate ↔ tamanho pra estimar target antes de comprimir. |
 
 ---

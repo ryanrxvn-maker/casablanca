@@ -11,6 +11,7 @@ import {
   IconCamuflagem,
   IconCompressor,
   IconDecupagem,
+  IconNormalizador,
   IconTrocaProduto,
 } from './ToolIcons';
 
@@ -43,6 +44,11 @@ export const BASE_SUITE: RailItem[] = [
     href: '/tools/acelerador',
     label: 'Acelerador',
     icon: <IconAcelerador />,
+  },
+  {
+    href: '/tools/normalizador',
+    label: 'Normalizador',
+    icon: <IconNormalizador />,
   },
   {
     href: '/tools/calculadora',

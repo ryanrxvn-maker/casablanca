@@ -82,6 +82,25 @@ export function IconAcelerador(p: IconProps) {
   );
 }
 
+/** Normalizador — barras de equalizer alinhadas + linha media (volume nivelado) */
+export function IconNormalizador(p: IconProps) {
+  return (
+    <svg {...baseProps(p)}>
+      {/* linha media horizontal */}
+      <path d="M3 12h18" strokeDasharray="2 2" opacity="0.6" />
+      {/* barras antes da normalizacao (alturas variaveis) */}
+      <path d="M5 8v8" />
+      <path d="M8 6v12" />
+      <path d="M11 9v6" />
+      {/* divisor */}
+      <path d="M13 5v14" opacity="0.4" />
+      {/* barras depois (todas alinhadas em torno da linha media) */}
+      <path d="M16 10v4" />
+      <path d="M19 10v4" />
+    </svg>
+  );
+}
+
 /** Calculadora — grid + display */
 export function IconCalculadora(p: IconProps) {
   return (
