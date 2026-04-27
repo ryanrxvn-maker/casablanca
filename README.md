@@ -134,7 +134,7 @@ servidor.
 | **Audio Split** | Divide um áudio em partes de N minutos e zipa como `parte1.wav`, `parte2.wav`, … |
 | **Acelerador** | Acelera áudio/vídeo 1×–4×, preserva pitch. |
 | **Normalizador** | Equilibra volume com `dynaudnorm` (3 intensidades). Saída MP4/MP3/WAV. Ideal pra VSL com voz desigual. |
-| **Calculadora** | Converte bitrate ↔ tamanho pra estimar target antes de comprimir. |
+| **Calculadora** | Calcula orçamento de projeto: valor/min × minutagem − desconto. Presets de R$/min comuns + state persistente. |
 
 ---
 

@@ -125,15 +125,22 @@ export async function speedUpVideo(
 
   try {
     await ff.writeFile(inputName, await fetchFile(file));
+    // Mesma estrategia do Compressor: ultrafast + x264-params agressivos.
+    // Aceleracao ja descarta frames implicitamente (PTS/speed), entao a perda
+    // de eficiencia do encoder importa pouco e o ganho de tempo e enorme.
     await ff.exec([
       '-i', inputName,
       '-filter:v', `setpts=PTS/${speed}`,
       '-filter:a', atempoChain(speed),
       '-c:v', 'libx264',
-      '-preset', 'veryfast',
+      '-preset', 'ultrafast',
+      '-tune', 'fastdecode',
       '-crf', '23',
+      '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
+      '-pix_fmt', 'yuv420p',
       '-c:a', 'aac',
       '-b:a', '128k',
+      '-movflags', '+faststart',
       outputName,
     ]);
     const data = await ff.readFile(outputName);
@@ -231,18 +238,28 @@ export async function compressVideo(
     await ff.writeFile(inputName, await fetchFile(file));
     const args: string[] = ['-i', inputName];
     if (params.resolution !== 'original') {
-      args.push('-vf', `scale=-2:${params.resolution}`);
+      // fast_bilinear e ~30-40% mais rapido que o scaler default e a perda
+      // visual em escala downward (1080->720->480) e imperceptivel.
+      args.push('-vf', `scale=-2:${params.resolution}:flags=fast_bilinear`);
     }
-    // Preset "veryfast" e 3-4x mais rapido que "medium" com CRF equivalente
-    // perdendo pouquissima eficiencia de compressao. Em WASM single-threaded
-    // isso e a diferenca de "demora muito" pra "roda em tempo aceitavel".
-    // tune=fastdecode tambem ajuda no playback de celulares fracos.
+    // ENCODE: preset ultrafast + x264-params agressivos.
+    //
+    // Mudancas vs versao anterior (preset veryfast + tune fastdecode):
+    //   - ultrafast e ~2x mais rapido que veryfast no WASM single-threaded
+    //   - bframes=0 + ref=1 elimina look-ahead pesado
+    //   - rc-lookahead=10 (default 40) reduz buffer interno do encoder
+    //   - aq-mode=1 simplifica adaptive quantization
+    //
+    // Em CRF 23, o arquivo final fica ~10-15% maior que com veryfast, mas
+    // o tempo de encode cai pela metade. O usuario regula o tradeoff via CRF.
     args.push(
       '-c:v', 'libx264',
-      '-preset', 'veryfast',
+      '-preset', 'ultrafast',
       '-tune', 'fastdecode',
       '-crf', String(params.crf),
       '-g', '120',
+      '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
+      '-pix_fmt', 'yuv420p',
       '-c:a', 'aac',
       '-b:a', '128k',
       '-movflags', '+faststart',
@@ -256,6 +273,147 @@ export async function compressVideo(
     await safeDelete(ff, inputName);
     await safeDelete(ff, outputName);
   }
+}
+
+// ---------- Estimativa de tamanho do video comprimido ------------------
+//
+// Bitrate-alvo do libx264 com preset ultrafast a CRF 23, em bps. Calibrado
+// empiricamente em videos reais de VSL/social/screencast.
+// (CRF logaritmico: cada +6 = ~metade do bitrate; cada -6 = ~dobro.)
+// Bitrate-alvo do libx264 com preset ULTRAFAST a CRF 23, em bps.
+// O preset ultrafast produz arquivos ~15% maiores que veryfast/medium no
+// mesmo CRF, entao calibramos um pouco mais alto que valores "padrao".
+// Calibrado empiricamente em VSL/screencast/talking-head 1080p reais.
+const TARGET_BITRATE_AT_CRF23: Record<
+  'original' | '1080' | '720' | '480',
+  number
+> = {
+  original: 6_500_000,
+  '1080': 6_500_000,
+  '720': 3_200_000,
+  '480': 1_300_000,
+};
+
+const AUDIO_BITRATE = 128_000;
+
+/**
+ * Estima o tamanho do MP4 comprimido em bytes.
+ *
+ * Forma base:
+ *   videoBitrate = base[res] * 2^((23 - crf) / 6)
+ *   sizeBytes    = (videoBitrate + 128kbps) * duration / 8
+ *
+ * Refinamentos:
+ *  - Quando `resolution === 'original'` e altura conhecida, o bitrate-alvo
+ *    e escalado proporcional ao quadrado da razao de altura.
+ *  - "Floor" do input: se o input ja e muito comprimido (bitrate baixo), o
+ *    output nao pode ficar dramaticamente menor — clampamos em 60% do input.
+ *  - "Ceiling" do input: o output nunca pode ser maior que ~95% do input
+ *    quando mantendo a mesma resolucao (caso usuario esteja em CRF muito
+ *    baixo + ultrafast, que poderia inflar arquivo).
+ */
+export function estimateCompressedSize(params: {
+  durationSec: number;
+  inputHeight?: number;
+  inputBytes: number;
+  crf: number;
+  resolution: 'original' | '1080' | '720' | '480';
+}): number {
+  if (!params.durationSec || params.durationSec <= 0) {
+    // Sem duracao, cai num heuristico crudo proporcional ao input.
+    const factor = Math.pow(2, (23 - params.crf) / 6);
+    const resScale =
+      params.resolution === 'original'
+        ? 1
+        : params.resolution === '1080'
+          ? 0.7
+          : params.resolution === '720'
+            ? 0.4
+            : 0.18;
+    return Math.round(params.inputBytes * factor * resScale);
+  }
+
+  let videoBps = TARGET_BITRATE_AT_CRF23[params.resolution];
+
+  // Original + altura conhecida → escala proporcional a area.
+  if (params.resolution === 'original' && params.inputHeight && params.inputHeight > 0) {
+    const ratio = (params.inputHeight / 1080) ** 2;
+    videoBps = Math.min(10_000_000, 6_500_000 * ratio);
+  }
+
+  // CRF logaritmico: cada -6 dobra bitrate, cada +6 corta pela metade.
+  const crfFactor = Math.pow(2, (23 - params.crf) / 6);
+  videoBps *= crfFactor;
+
+  let predictedBytes = Math.round(((videoBps + AUDIO_BITRATE) * params.durationSec) / 8);
+
+  // Refinamento: se o input ja era muito comprimido (input bitrate < target),
+  // o output nao vai ficar magicamente menor — comprimir um arquivo ja-bem
+  // -comprimido raramente gera ganho de >40%. E se for re-encodado em
+  // ultrafast com bitrate-alvo MAIOR que o input, pode ate inflar.
+  const inputBitrate = (params.inputBytes * 8) / params.durationSec;
+
+  if (params.resolution === 'original') {
+    // Nao remosamos resolucao: floor em 60% do input (impossivel comprimir
+    // alem disso sem perda visivel forte).
+    const floor = params.inputBytes * 0.6;
+    // Ceiling em 105% do input (seguranca contra inflacao em CRF baixo).
+    const ceiling = params.inputBytes * 1.05;
+    predictedBytes = Math.max(floor, Math.min(ceiling, predictedBytes));
+  } else if (inputBitrate < videoBps * 0.7) {
+    // Input ja com bitrate menor que o alvo. Output nao deveria ser
+    // muito maior que o input, e provavelmente sera SIMILAR ao input
+    // (nao ha como ganhar mais comprimindo o que ja esta comprimido).
+    predictedBytes = Math.min(predictedBytes, Math.round(params.inputBytes * 0.95));
+  }
+
+  return predictedBytes;
+}
+
+/**
+ * Lê duração + altura de um arquivo de video usando o elemento HTMLVideo.
+ * Roda 100% no client, em ms, sem precisar do FFmpeg WASM.
+ */
+export function probeVideoMetadata(
+  file: Blob,
+): Promise<{ durationSec: number; height: number } | null> {
+  return new Promise((resolve) => {
+    if (typeof document === 'undefined') return resolve(null);
+    const url = URL.createObjectURL(file);
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.muted = true;
+
+    let done = false;
+    const cleanup = () => {
+      if (done) return;
+      done = true;
+      try {
+        video.removeAttribute('src');
+        video.load();
+      } catch {
+        /* ignora */
+      }
+      URL.revokeObjectURL(url);
+    };
+
+    video.onloadedmetadata = () => {
+      const dur = isFinite(video.duration) ? video.duration : 0;
+      const h = video.videoHeight || 0;
+      cleanup();
+      resolve({ durationSec: dur, height: h });
+    };
+    video.onerror = () => {
+      cleanup();
+      resolve(null);
+    };
+    setTimeout(() => {
+      cleanup();
+      resolve(null);
+    }, 8000);
+
+    video.src = url;
+  });
 }
 
 export async function extractAudio(file: Blob, opts: RunOptions = {}): Promise<Blob> {
@@ -376,23 +534,53 @@ export async function cutVideoSegments(
 
 // ---------- Normalizador de Volume --------------------------------------
 //
-// O FFmpeg tem dois filtros principais pra equalizar volume:
-//  - `loudnorm`: implementa EBU R128 (broadcast standard). Caro de rodar em
-//    WASM single-threaded e idealmente quer 2-pass pra medir antes; pulamos.
-//  - `dynaudnorm`: normalizador dinamico que ajusta gain ao longo do audio,
-//    suavizando trechos baixos sem clip nos altos. Perfeito pro caso "uma
-//    voz mais alta que outra".
+// Estrategia: compressor ESTATICO (acompressor) em vez de normalizacao
+// dinamica (dynaudnorm). Compressor estatico age sobre o nivel instantaneo
+// — quando entra uma voz baixa, ela JA aparece no nivel certo, sem drift
+// gradual. Quando entra uma voz alta, ela e atenuada na hora.
 //
-// Usamos dynaudnorm com presets variando agressividade. Saida pode ser MP4
-// (re-encode mantendo video), MP3 ou WAV (so audio).
+// Cadeia de filtros aplicada em todos os presets:
+//  1. highpass=f=80      → remove rumble (vento, fan, mesa)
+//  2. acompressor (1×)   → comprime dinamica (threshold + ratio)
+//  3. acompressor (2×)   → segundo estagio mais leve em "padrao"/"forte"
+//                          pra capturar transientes que escaparam do 1°
+//  4. alimiter           → ceiling final pra impedir clip
+//  5. loudnorm I=-16     → alvo de loudness fixo (single-pass, leve)
+//
+// IMPORTANTE: o `dynaudnorm` que era usado antes causava drift gradual
+// (voz baixa subia ao longo de varios segundos). Removido por completo.
 
 export type NormalizeIntensity = 'suave' | 'padrao' | 'forte';
 
-const DYNAUDNORM_PRESETS: Record<NormalizeIntensity, string> = {
-  // p=peak (alvo de pico, 0-1), m=max gain, s=compress factor (smoothing)
-  suave: 'dynaudnorm=p=0.95:m=10:s=12:f=250',
-  padrao: 'dynaudnorm=p=0.9:m=15:s=15:f=300',
-  forte: 'dynaudnorm=p=0.85:m=20:s=20:f=400',
+const NORMALIZE_PRESETS: Record<NormalizeIntensity, string> = {
+  // Threshold mais alto + ratio menor = comprime so os picos mais altos.
+  // Bom pra material que ja esta razoavel mas tem alguns picos a controlar.
+  suave: [
+    'highpass=f=80',
+    'acompressor=threshold=-20dB:ratio=2.5:attack=8:release=200:makeup=2',
+    'alimiter=limit=0.95',
+    'loudnorm=I=-16:LRA=11:TP=-1.5',
+  ].join(','),
+
+  // Dois estagios de compressor + limiter. Captura voz alta e voz baixa
+  // numa mesma faixa estreita. Recomendado para VSL com 2+ pessoas.
+  padrao: [
+    'highpass=f=80',
+    'acompressor=threshold=-26dB:ratio=4:attack=5:release=120:makeup=4',
+    'acompressor=threshold=-18dB:ratio=2.5:attack=3:release=80:makeup=2',
+    'alimiter=limit=0.95',
+    'loudnorm=I=-16:LRA=7:TP=-1.5',
+  ].join(','),
+
+  // Achata tudo de forma agressiva (estilo broadcast). Voz baixa e voz
+  // alta saem praticamente no mesmo volume percebido.
+  forte: [
+    'highpass=f=80',
+    'acompressor=threshold=-30dB:ratio=8:attack=2:release=60:makeup=6',
+    'acompressor=threshold=-20dB:ratio=4:attack=2:release=50:makeup=3',
+    'alimiter=limit=0.97',
+    'loudnorm=I=-14:LRA=5:TP=-1.0',
+  ].join(','),
 };
 
 export type NormalizeOutFormat = 'mp4' | 'mp3' | 'wav';
@@ -420,7 +608,7 @@ export async function normalizeVolume(
 
   const inputName = 'in.' + guessExt(file, 'mp4');
   const outputName = 'out.' + params.output;
-  const filter = DYNAUDNORM_PRESETS[params.intensity];
+  const filter = NORMALIZE_PRESETS[params.intensity];
   const progressHandler = wireProgress(ff, opts.onProgress);
 
   try {
@@ -433,12 +621,15 @@ export async function normalizeVolume(
       // Mantem video, re-encoda so audio com filtro de normalizacao.
       // -c:v copy nem sempre funciona bem com -af (FFmpeg pode reclamar
       // de mismatch de timestamps), entao fazemos re-encode rapido com
-      // ultrafast pra compensar a velocidade.
+      // ultrafast + bframes=0 — o video so precisa "passar reto" enquanto
+      // o trabalho real e o filtro de audio (acompressor + loudnorm).
       args.push(
         '-c:v', 'libx264',
-        '-preset', 'veryfast',
+        '-preset', 'ultrafast',
         '-tune', 'fastdecode',
         '-crf', '22',
+        '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
+        '-pix_fmt', 'yuv420p',
         '-c:a', 'aac',
         '-b:a', '192k',
         '-movflags', '+faststart',

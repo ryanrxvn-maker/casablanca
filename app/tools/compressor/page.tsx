@@ -1,22 +1,28 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { BatchFileUpload } from '@/components/BatchFileUpload';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { downloadBlob } from '@/lib/audio-engine';
-import { compressVideo, type FFProgress } from '@/lib/ffmpeg-worker';
+import {
+  compressVideo,
+  estimateCompressedSize,
+  probeVideoMetadata,
+  type FFProgress,
+} from '@/lib/ffmpeg-worker';
 import { buildZip } from '@/lib/zip-builder';
 import { formatBytes } from '@/lib/utils';
 
 type Resolution = 'original' | '1080' | '720' | '480';
 
-const resolutionFactor: Record<Resolution, number> = {
-  original: 1,
-  '1080': 0.75,
-  '720': 0.5,
-  '480': 0.28,
-};
+// Cache de duracao + altura por arquivo, fora do React state pra nao
+// disparar re-renders. A chave e file.name + size + lastModified que e
+// estavel entre tabs.
+const metaCache = new Map<string, { durationSec: number; height: number }>();
+function metaKey(f: File) {
+  return f.name + ':' + f.size + ':' + f.lastModified;
+}
 
 type JobState = 'queued' | 'running' | 'done' | 'error';
 
@@ -75,10 +81,82 @@ export default function CompressorPage() {
     () => files.reduce((acc, f) => acc + f.size, 0),
     [files],
   );
+
+  // Probe de metadata por arquivo (rodado em paralelo). Quando termina,
+  // mexe num counter local pra forcar recalculo do total.
+  const [metaTick, setMetaTick] = useToolState<number>(
+    'compressor:metaTick',
+    0,
+  );
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const newOnes = files.filter((f) => !metaCache.has(metaKey(f)));
+      if (newOnes.length === 0) return;
+      await Promise.all(
+        newOnes.map(async (f) => {
+          const meta = await probeVideoMetadata(f);
+          if (cancelled) return;
+          metaCache.set(metaKey(f), {
+            durationSec: meta?.durationSec ?? 0,
+            height: meta?.height ?? 0,
+          });
+        }),
+      );
+      if (!cancelled) setMetaTick((t) => t + 1);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files]);
+
+  // Estimativa precisa por arquivo + soma. Quando duracao = 0 (probe falhou)
+  // o estimate cai pra heuristica baseada em input bytes.
   const totalEstimate = useMemo(() => {
-    const factor = (crf / 23) * resolutionFactor[resolution];
-    return totalInput * factor;
-  }, [totalInput, crf, resolution]);
+    let total = 0;
+    for (const f of files) {
+      const meta = metaCache.get(metaKey(f)) ?? {
+        durationSec: 0,
+        height: 0,
+      };
+      total += estimateCompressedSize({
+        durationSec: meta.durationSec,
+        inputHeight: meta.height,
+        inputBytes: f.size,
+        crf,
+        resolution,
+      });
+    }
+    return total;
+    // metaTick entra no deps pra recalcular quando probes terminam
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files, crf, resolution, metaTick]);
+
+  // Soma de duracoes (em segundos) — mostrado no card de totais.
+  const totalDuration = useMemo(() => {
+    let dur = 0;
+    let hasAnyMeta = false;
+    for (const f of files) {
+      const meta = metaCache.get(metaKey(f));
+      if (meta && meta.durationSec > 0) {
+        dur += meta.durationSec;
+        hasAnyMeta = true;
+      }
+    }
+    return hasAnyMeta ? dur : null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files, metaTick]);
+
+  function formatDuration(sec: number): string {
+    if (sec < 60) return Math.round(sec) + 's';
+    const m = Math.floor(sec / 60);
+    const s = Math.round(sec % 60);
+    if (m < 60) return m + 'min ' + s + 's';
+    const h = Math.floor(m / 60);
+    const mm = m % 60;
+    return h + 'h ' + mm + 'min';
+  }
 
   const totalOutput = useMemo(
     () => jobs.reduce((acc, j) => acc + (j.resultSize ?? 0), 0),
@@ -203,7 +281,7 @@ export default function CompressorPage() {
         </div>
 
         {files.length > 0 ? (
-          <div className="grid gap-3 rounded-[12px] border border-line bg-bg p-4 sm:grid-cols-3">
+          <div className="grid gap-3 rounded-[12px] border border-line bg-bg p-4 sm:grid-cols-2 lg:grid-cols-4">
             <div>
               <div className="label-field">Arquivos</div>
               <div className="mono text-sm text-white">{files.length}</div>
@@ -215,12 +293,27 @@ export default function CompressorPage() {
               </div>
             </div>
             <div>
-              <div className="label-field">Previsao total saida</div>
+              <div className="label-field">Duracao total</div>
+              <div className="mono text-sm text-white">
+                {totalDuration !== null
+                  ? formatDuration(totalDuration)
+                  : '...'}
+              </div>
+            </div>
+            <div>
+              <div className="label-field">
+                {hasResults ? 'Total saida' : 'Previsao total saida'}
+              </div>
               <div className="mono text-sm text-lime">
                 {hasResults
                   ? formatBytes(totalOutput)
                   : '~ ' + formatBytes(totalEstimate)}
               </div>
+              {!hasResults && totalInput > 0 && totalEstimate > 0 ? (
+                <div className="mt-0.5 text-[10px] text-text-dim">
+                  {Math.round((1 - totalEstimate / totalInput) * 100)}% menor
+                </div>
+              ) : null}
             </div>
           </div>
         ) : null}
