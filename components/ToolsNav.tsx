@@ -13,6 +13,7 @@ import {
   IconDecupagem,
   IconNormalizador,
   IconRemoverElementos,
+  IconTakeSplitter,
   IconTrocaProduto,
 } from './ToolIcons';
 
@@ -50,6 +51,11 @@ export const BASE_SUITE: RailItem[] = [
     href: '/tools/normalizador',
     label: 'Normalizador',
     icon: <IconNormalizador />,
+  },
+  {
+    href: '/tools/take-splitter',
+    label: 'Separar Takes',
+    icon: <IconTakeSplitter />,
   },
   {
     href: '/tools/calculadora',

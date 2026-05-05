@@ -138,6 +138,23 @@ export function IconTrocaProduto(p: IconProps) {
   );
 }
 
+/** Take Splitter — film strip dividido em segmentos por linhas tracejadas */
+export function IconTakeSplitter(p: IconProps) {
+  return (
+    <svg {...baseProps(p)}>
+      {/* Film strip externo */}
+      <rect x="3" y="6" width="18" height="12" rx="1.5" />
+      {/* Sprocket holes superior + inferior */}
+      <path d="M3 9h18M3 15h18" opacity="0.5" />
+      {/* Tesouras / divisores tracejados em 2 pontos */}
+      <path d="M9 4v3M9 17v3" strokeDasharray="1 1.5" />
+      <path d="M15 4v3M15 17v3" strokeDasharray="1 1.5" />
+      {/* Pequena marca de "take" no centro */}
+      <circle cx="12" cy="12" r="0.8" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 /** Remover Elementos — borracha mágica (varinha + sparkle apagando) */
 export function IconRemoverElementos(p: IconProps) {
   return (

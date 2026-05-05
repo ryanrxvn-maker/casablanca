@@ -550,6 +550,218 @@ export async function cutVideoSegments(
 // IMPORTANTE: o `dynaudnorm` que era usado antes causava drift gradual
 // (voz baixa subia ao longo de varios segundos). Removido por completo.
 
+// ---------- Decupagem com Copy (audio extraction p/ transcricao) --------
+//
+// Extrai audio de um video em OPUS 12kbps mono 16kHz — bitrate baixo o
+// suficiente pra caber no body limit do Vercel route handler (4.5MB) ate
+// ~40min de video, com qualidade ainda aceitavel pra speech-to-text.
+// Tamanhos esperados:
+//   12kbps × 3600s / 8 = 5.4MB pra 1h
+//   12kbps × 2400s / 8 = 3.6MB pra 40min  ← cap escolhido
+//
+// O frontend usa esse audio pra mandar pro AssemblyAI via /api/decupagem-copy/match.
+
+export async function extractAudioForTranscription(
+  file: Blob,
+  opts: RunOptions = {},
+): Promise<Blob> {
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const { fetchFile } = await import('@ffmpeg/util');
+
+  const inputName = 'in.' + guessExt(file, 'mp4');
+  const outputName = 'out.opus';
+  const progressHandler = wireProgress(ff, opts.onProgress);
+
+  try {
+    opts.onStage?.('Carregando video...');
+    await ff.writeFile(inputName, await fetchFile(file));
+
+    opts.onStage?.('Extraindo audio (OPUS 12kbps mono 16kHz)...');
+    await ff.exec([
+      '-i', inputName,
+      '-vn',
+      '-c:a', 'libopus',
+      '-b:a', '12k',
+      '-ac', '1',
+      '-ar', '16000',
+      '-application', 'voip',
+      '-vbr', 'off',
+      outputName,
+    ]);
+    const data = await ff.readFile(outputName);
+    return toBlob(data, 'audio/ogg');
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    await safeDelete(ff, inputName);
+    await safeDelete(ff, outputName);
+  }
+}
+
+// ---------- Take Splitter (separa cenas/takes de um video) --------------
+//
+// Detecta cortes de cena via filtro `select='gt(scene,N)'` do FFmpeg
+// (1a passada, scan completo) e depois extrai cada segmento usando
+// -c copy (zero re-encode, lossless, instantaneo).
+//
+// Observacoes:
+// - Threshold 0.1-0.6: maior = menos cortes (so cenas muito diferentes).
+// - minDurationSec funde clusters de cortes muito proximos (descarta
+//   falsos positivos tipo flash/movimento brusco), e nunca cria takes
+//   menores que esse valor.
+// - 2 ffmpeg.exec() chamadas por video (um scan + N copies).
+
+export type Take = {
+  index: number;
+  startSec: number;
+  endSec: number;
+  blob: Blob;
+};
+
+function buildCutPoints(
+  durationSec: number,
+  sceneTimes: number[],
+  minDur: number,
+): number[] {
+  const sorted = [...sceneTimes]
+    .sort((a, b) => a - b)
+    .filter((t) => t > 0 && t < durationSec);
+  const out: number[] = [0];
+  for (const t of sorted) {
+    const last = out[out.length - 1];
+    if (t - last < minDur) {
+      // Cluster — substitui o cut anterior pelo atual (excepto se for a ancora 0)
+      if (out.length > 1) out[out.length - 1] = t;
+    } else {
+      out.push(t);
+    }
+  }
+  const last = out[out.length - 1];
+  if (durationSec - last < minDur && out.length > 1) {
+    out[out.length - 1] = durationSec;
+  } else {
+    out.push(durationSec);
+  }
+  return out;
+}
+
+export async function splitVideoByScenes(
+  file: Blob,
+  options: { threshold?: number; minDurationSec?: number } = {},
+  opts: RunOptions = {},
+): Promise<Take[]> {
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const { fetchFile } = await import('@ffmpeg/util');
+
+  const inputName = 'in.' + guessExt(file, 'mp4');
+  const threshold = Math.max(0.05, Math.min(0.95, options.threshold ?? 0.3));
+  const minDur = Math.max(0.5, options.minDurationSec ?? 3);
+
+  let durationSec = 0;
+  const sceneTimes: number[] = [];
+  const logHandler = ({ message }: { message: string }) => {
+    const dm = /Duration: (\d+):(\d+):([\d.]+)/.exec(message);
+    if (dm) {
+      const d = +dm[1] * 3600 + +dm[2] * 60 + parseFloat(dm[3]);
+      if (d > durationSec) durationSec = d;
+    }
+    const ptm = /pts_time:([\d.]+)/.exec(message);
+    if (ptm) {
+      const t = parseFloat(ptm[1]);
+      if (!isNaN(t) && t > 0) sceneTimes.push(t);
+    }
+    opts.onLog?.(message);
+  };
+  ff.on('log', logHandler);
+
+  // Mapeia progresso: detect = 0-70%, cuts = 70-100%
+  let phase: 'detect' | 'cut' = 'detect';
+  let cutsTotal = 0;
+  let cutsDone = 0;
+  const progHandler = ({ progress }: { progress: number }) => {
+    if (!opts.onProgress) return;
+    if (phase === 'detect') {
+      opts.onProgress({
+        ratio: Math.min(0.7, Math.max(0, progress) * 0.7),
+        time: 0,
+      });
+    } else {
+      const overall = 0.7 + (cutsDone / Math.max(1, cutsTotal)) * 0.3;
+      opts.onProgress({ ratio: Math.min(1, overall), time: 0 });
+    }
+  };
+  ff.on('progress', progHandler);
+
+  try {
+    opts.onStage?.('Carregando video no FFmpeg...');
+    await ff.writeFile(inputName, await fetchFile(file));
+
+    opts.onStage?.('Escaneando cortes de cena (1 passada)...');
+    // 1a passada: detecta cenas + escreve em null (rapido, so analise)
+    await ff.exec([
+      '-i', inputName,
+      '-filter:v', `select='gt(scene,${threshold})',showinfo`,
+      '-an',
+      '-f', 'null',
+      '-',
+    ]);
+
+    if (durationSec <= 0) {
+      durationSec =
+        sceneTimes.length > 0 ? sceneTimes[sceneTimes.length - 1] + 5 : 0;
+    }
+    if (durationSec <= 0) {
+      throw new Error('Nao foi possivel ler a duracao do video.');
+    }
+
+    const cuts = buildCutPoints(durationSec, sceneTimes, minDur);
+    const segments: Array<{ start: number; end: number }> = [];
+    for (let i = 0; i < cuts.length - 1; i++) {
+      segments.push({ start: cuts[i], end: cuts[i + 1] });
+    }
+    if (segments.length === 0) {
+      segments.push({ start: 0, end: durationSec });
+    }
+
+    cutsTotal = segments.length;
+    phase = 'cut';
+
+    const takes: Take[] = [];
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      opts.onStage?.(
+        `Extraindo take ${i + 1}/${segments.length} (${(seg.end - seg.start).toFixed(1)}s)...`,
+      );
+      const outName = `take_${String(i + 1).padStart(3, '0')}.mp4`;
+      // -c copy: sem re-encode. Cuts caem no keyframe mais proximo, ai
+      // a duracao real pode variar levemente. Pra documentario isso e ok.
+      await ff.exec([
+        '-ss', seg.start.toFixed(3),
+        '-to', seg.end.toFixed(3),
+        '-i', inputName,
+        '-c', 'copy',
+        '-avoid_negative_ts', 'make_zero',
+        '-movflags', '+faststart',
+        outName,
+      ]);
+      const data = await ff.readFile(outName);
+      takes.push({
+        index: i + 1,
+        startSec: seg.start,
+        endSec: seg.end,
+        blob: toBlob(data, 'video/mp4'),
+      });
+      await safeDelete(ff, outName);
+      cutsDone = i + 1;
+    }
+
+    return takes;
+  } finally {
+    ff.off('log', logHandler);
+    ff.off('progress', progHandler);
+    await safeDelete(ff, inputName);
+  }
+}
+
 // ---------- Remover Elementos (legendas / watermarks) -------------------
 //
 // Usa o filtro `delogo` do FFmpeg pra apagar regioes retangulares,
