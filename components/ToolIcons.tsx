@@ -138,6 +138,29 @@ export function IconTrocaProduto(p: IconProps) {
   );
 }
 
+/** Decupagem com Copy — script + film alinhados por uma seta */
+export function IconDecupageCopy(p: IconProps) {
+  return (
+    <svg {...baseProps(p)}>
+      {/* Documento (copy) */}
+      <rect x="3" y="4" width="7" height="16" rx="1" />
+      <path d="M5 8h3M5 11h3M5 14h3" opacity="0.7" />
+      {/* Seta de alinhamento */}
+      <path d="M11 12h2" />
+      <path d="M12 10l1.5 2-1.5 2" />
+      {/* Film strip (resultado decupado) */}
+      <rect x="14" y="6" width="7" height="12" rx="1" />
+      <path d="M14 9h7M14 15h7" opacity="0.5" />
+      {/* Sparkle IA */}
+      <path
+        d="M19.5 3l0.4 0.9 0.9 0.4-0.9 0.4-0.4 0.9-0.4-0.9-0.9-0.4 0.9-0.4 0.4-0.9z"
+        fill="currentColor"
+        stroke="none"
+      />
+    </svg>
+  );
+}
+
 /** Take Splitter — film strip dividido em segmentos por linhas tracejadas */
 export function IconTakeSplitter(p: IconProps) {
   return (

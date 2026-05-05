@@ -87,16 +87,23 @@ app/
 │   ├── audio-split/           Base Suite — divide áudio em partes de N min
 │   ├── acelerador/            Base Suite — acelera 1×–4×
 │   ├── normalizador/          Base Suite — equilibra volume (dynaudnorm)
-│   ├── calculadora/           Base Suite — converte bitrate/tamanho
+│   ├── take-splitter/         Base Suite — separa cenas/takes (scdet)
+│   ├── calculadora/           Base Suite — orçamento R$/min × minutagem
 │   ├── auto-broll/            AI Suite — copy → cenas + prompts + JSON
-│   └── troca-produto/         AI Suite — troca nome de produto no áudio
+│   ├── troca-produto/         AI Suite — troca nome de produto no áudio
+│   ├── remover-elementos/     AI Suite — remove legendas/watermarks (vision + delogo)
+│   └── decupagem-copy/        AI Suite — alinha video bruto com copy/script
 ├── api/
 │   ├── auto-broll/            Claude Messages API
-│   └── troca-produto/
-│       ├── assemblyai/        Upload + transcript + word-level timestamps
-│       ├── elevenlabs-clone/  Instant Voice Clone
-│       ├── elevenlabs-tts/    TTS com voice clonada
-│       └── elevenlabs-delete/ Cleanup pós-uso
+│   ├── troca-produto/
+│   │   ├── assemblyai/        Upload + transcript + word-level timestamps
+│   │   ├── elevenlabs-clone/  Instant Voice Clone
+│   │   ├── elevenlabs-tts/    TTS com voice clonada
+│   │   └── elevenlabs-delete/ Cleanup pós-uso
+│   ├── remover-elementos/
+│   │   └── detect/            Claude Haiku Vision → bounding boxes
+│   └── decupagem-copy/
+│       └── match/             AssemblyAI transcript + matcher copy↔video
 components/
 ├── Header.tsx, Brand.tsx, SuiteSwitcher.tsx, ToolRail.tsx, ToolsNav.tsx
 ├── ToolIcons.tsx, ToolShell.tsx, ToolsStateProvider.tsx
@@ -133,7 +140,8 @@ servidor.
 | **Compressor** | Reduz o tamanho de vídeos até ±10% do alvo, batch até 10. |
 | **Audio Split** | Divide um áudio em partes de N minutos e zipa como `parte1.wav`, `parte2.wav`, … |
 | **Acelerador** | Acelera áudio/vídeo 1×–4×, preserva pitch. |
-| **Normalizador** | Equilibra volume com `dynaudnorm` (3 intensidades). Saída MP4/MP3/WAV. Ideal pra VSL com voz desigual. |
+| **Normalizador** | Equilibra volume com cadeia `acompressor` 2-stage + `loudnorm` (3 intensidades). Saída MP4/MP3/WAV. Voz alta e baixa saem no mesmo nível, sem drift. Batch até 10. |
+| **Separar Takes** | Detecta cortes de cena via FFmpeg `select=gt(scene,T)` e divide o vídeo em takes nomeados (`take_001_NICHO.mp4`, …). Lossless `-c copy`. Até 2GB. |
 | **Calculadora** | Calcula orçamento de projeto: valor/min × minutagem − desconto. Presets de R$/min comuns + state persistente. |
 
 ---
@@ -180,6 +188,47 @@ Backend: quatro rotas em `app/api/troca-produto/*`.
 **Custo estimado por VSL**: depende da duração e do nº de ocorrências.
 Para um áudio de 20 min com ~10 trocas: ~$0,50 em AssemblyAI +
 ~$0,10 em ElevenLabs TTS + clone gratuito dentro do plano.
+
+### Remover Legenda & Marca d'Água (`/tools/remover-elementos`)
+
+Remove legendas hardcoded ou watermarks de vídeos. Arquitetura totalmente
+client-side com IA só na detecção:
+
+1. **Browser FFmpeg WASM** extrai 3 frames JPG do vídeo (~200KB cada).
+2. **Claude 3.5 Haiku Vision** retorna bounding boxes das regiões
+   (legendas + watermarks) em coordenadas %.
+3. Agregador funde regiões consistentes entre frames + filtra por
+   confidence.
+4. **Browser FFmpeg WASM** aplica filtro `delogo` nas regiões → MP4 limpo.
+
+Modos: Smart AI / Só Legenda / Só Watermark / Bottom 18% (sem IA) /
+Manual (X/Y/W/H em %). Batch até 5 vídeos × 500MB × 40min.
+
+Backend: `app/api/remover-elementos/detect/route.ts`.
+
+**Custo estimado**: ~$0,015 por vídeo (3 frames Haiku Vision). Para
+batch de 5: ~$0,075.
+
+### Decupagem por Copy (`/tools/decupagem-copy`)
+
+Recebe vídeo bruto de expert + copy/script. Retorna vídeo reeditado na
+ordem da copy, com a melhor take de cada frase escolhida automaticamente:
+
+1. **Browser FFmpeg WASM** extrai áudio em OPUS 12kbps mono 16kHz
+   (~3,6MB pra 40min, cabe no body limit do Vercel).
+2. **AssemblyAI** transcreve com timestamps por palavra (pt).
+3. **Server matcher**: pra cada frase da copy, sliding-window encontra o
+   melhor span no transcript. Score = completude (0.55) + fluência (0.15)
+   + sem fillers (0.15) + boundary limpo (0.15). Pega o melhor com
+   score ≥ 0.5.
+4. Retorna lista de cuts em ordem da copy.
+5. **Browser FFmpeg WASM** corta + concatena via `cutVideoSegments` →
+   MP4 final.
+
+Limite: 1 vídeo por vez, ≤800MB / ≤40min. Backend:
+`app/api/decupagem-copy/match/route.ts`.
+
+**Custo estimado**: ~$0,27 por vídeo de 40min (AssemblyAI).
 
 ---
 

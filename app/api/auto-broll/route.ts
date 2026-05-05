@@ -99,90 +99,102 @@ ${(b.visualReferenceChunk ?? '').trim() || '(none provided — pick a consistent
 Deliver the scene table and consistency block in Portuguese (pt-BR). Deliver the video prompts in English. Deliver the Nano Banana JSON strictly as specified. Follow the 3–5s pacing rule strictly.`;
 }
 
+function jsonError(message: string, status = 500, detail?: string) {
+  return NextResponse.json(
+    detail ? { error: message, detail: detail.slice(0, 500) } : { error: message },
+    { status },
+  );
+}
+
 export async function POST(req: Request) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return NextResponse.json(
-      {
-        error:
-          'ANTHROPIC_API_KEY não configurada. Adicione no .env.local e redeploy.',
-      },
-      { status: 500 },
-    );
-  }
-
-  let body: Body;
   try {
-    body = (await req.json()) as Body;
-  } catch {
-    return NextResponse.json({ error: 'Body JSON inválido.' }, { status: 400 });
-  }
-
-  if (!body.fullCopy || body.fullCopy.trim().length < 20) {
-    return NextResponse.json(
-      { error: 'Envie a copy completa da VSL (mínimo 20 caracteres).' },
-      { status: 400 },
-    );
-  }
-
-  // Chamada direta a Messages API — sem SDK extra.
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 8000,
-      system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: buildUserPrompt(body),
-        },
-      ],
-    }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    return NextResponse.json(
-      {
-        error: 'Falha ao chamar Claude API.',
-        status: res.status,
-        detail: text.slice(0, 500),
-      },
-      { status: 502 },
-    );
-  }
-
-  const json = (await res.json()) as {
-    content?: Array<{ type: string; text?: string }>;
-    usage?: { input_tokens: number; output_tokens: number };
-  };
-
-  const text =
-    json.content
-      ?.filter((b) => b.type === 'text')
-      .map((b) => b.text ?? '')
-      .join('\n\n') ?? '';
-
-  // Extrai o bloco JSON (seção 4) pra facilitar consumo no front.
-  let nanoBananaJson: unknown = null;
-  const fence = text.match(/```json\s*([\s\S]*?)\s*```/);
-  if (fence) {
-    try {
-      nanoBananaJson = JSON.parse(fence[1]);
-    } catch {
-      nanoBananaJson = null;
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      return jsonError(
+        'ANTHROPIC_API_KEY não configurada. Adicione no .env.local e redeploy.',
+        500,
+      );
     }
-  }
 
-  return NextResponse.json({
-    markdown: text,
-    nanoBananaJson,
-    usage: json.usage ?? null,
-  });
+    let body: Body;
+    try {
+      body = (await req.json()) as Body;
+    } catch (e) {
+      return jsonError(
+        'Body JSON inválido.',
+        400,
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+
+    if (!body.fullCopy || body.fullCopy.trim().length < 20) {
+      return jsonError(
+        'Envie a copy completa da VSL (mínimo 20 caracteres).',
+        400,
+      );
+    }
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5',
+        max_tokens: 8000,
+        system: SYSTEM_PROMPT,
+        messages: [
+          {
+            role: 'user',
+            content: buildUserPrompt(body),
+          },
+        ],
+      }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      return jsonError('Falha ao chamar Claude API.', 502, text);
+    }
+
+    const json = (await res.json().catch(() => null)) as {
+      content?: Array<{ type: string; text?: string }>;
+      usage?: { input_tokens: number; output_tokens: number };
+    } | null;
+
+    if (!json) {
+      return jsonError('Resposta inválida da Claude API.', 502);
+    }
+
+    const text =
+      json.content
+        ?.filter((b) => b.type === 'text')
+        .map((b) => b.text ?? '')
+        .join('\n\n') ?? '';
+
+    let nanoBananaJson: unknown = null;
+    const fence = text.match(/```json\s*([\s\S]*?)\s*```/);
+    if (fence) {
+      try {
+        nanoBananaJson = JSON.parse(fence[1]);
+      } catch {
+        nanoBananaJson = null;
+      }
+    }
+
+    return NextResponse.json({
+      markdown: text,
+      nanoBananaJson,
+      usage: json.usage ?? null,
+    });
+  } catch (e) {
+    console.error('[auto-broll route]', e);
+    return jsonError(
+      'Erro inesperado no servidor.',
+      500,
+      e instanceof Error ? e.message : String(e),
+    );
+  }
 }

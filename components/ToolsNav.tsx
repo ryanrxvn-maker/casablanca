@@ -10,6 +10,7 @@ import {
   IconCalculadora,
   IconCamuflagem,
   IconCompressor,
+  IconDecupageCopy,
   IconDecupagem,
   IconNormalizador,
   IconRemoverElementos,
@@ -79,6 +80,11 @@ export const AI_SUITE: RailItem[] = [
     href: '/tools/remover-elementos',
     label: 'Remover Legenda',
     icon: <IconRemoverElementos />,
+  },
+  {
+    href: '/tools/decupagem-copy',
+    label: 'Decupagem por Copy',
+    icon: <IconDecupageCopy />,
   },
 ];
 
