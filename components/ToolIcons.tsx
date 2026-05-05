@@ -138,6 +138,31 @@ export function IconTrocaProduto(p: IconProps) {
   );
 }
 
+/** Remover Elementos — borracha mágica (varinha + sparkle apagando) */
+export function IconRemoverElementos(p: IconProps) {
+  return (
+    <svg {...baseProps(p)}>
+      {/* Varinha em diagonal */}
+      <path d="M5 19l9-9" />
+      <path d="M14 10l1.5-1.5a2 2 0 012.8 2.8L16.8 12.8" />
+      {/* Borracha apagando — duas linhas onduladas indicando "limpando" */}
+      <path d="M3 21h6" opacity="0.5" />
+      {/* Sparkle de IA no topo da varinha */}
+      <path
+        d="M18 4l0.5 1.2 1.2 0.5-1.2 0.5L18 7.4l-0.5-1.2L16.3 5.7l1.2-0.5L18 4z"
+        fill="currentColor"
+        stroke="none"
+      />
+      <path
+        d="M21 9l0.3 0.7 0.7 0.3-0.7 0.3L21 11l-0.3-0.7L20 10l0.7-0.3L21 9z"
+        fill="currentColor"
+        stroke="none"
+        opacity="0.6"
+      />
+    </svg>
+  );
+}
+
 /** Sparkle utilitario (pra decorar botoes "AI") */
 export function IconSparkle(p: IconProps) {
   return (

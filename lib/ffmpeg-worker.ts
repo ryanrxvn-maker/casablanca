@@ -550,6 +550,117 @@ export async function cutVideoSegments(
 // IMPORTANTE: o `dynaudnorm` que era usado antes causava drift gradual
 // (voz baixa subia ao longo de varios segundos). Removido por completo.
 
+// ---------- Remover Elementos (legendas / watermarks) -------------------
+//
+// Usa o filtro `delogo` do FFmpeg pra apagar regioes retangulares,
+// interpolando das bordas adjacentes. Funciona muito bem pra:
+//  - Legendas hardcoded (bottom strip)
+//  - Watermarks/logos estaticos
+//  - Time codes / channel marks
+// Limitacao: regioes em movimento ou sobre conteudo complexo deixam
+// halo visivel. Pra esses casos a alternativa seria inpainting AI
+// (Replicate ProPainter), mas ai precisa servidor pra processar — fora
+// do escopo "sem mexer na estrutura".
+
+export type RemoveRegion = {
+  /** Coordenadas em PIXELS no espaco do video original */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export async function removeRegions(
+  file: Blob,
+  regions: RemoveRegion[],
+  opts: RunOptions & { preserveAudio?: boolean } = {},
+): Promise<Blob> {
+  if (regions.length === 0) throw new Error('Nenhuma regiao a remover.');
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const { fetchFile } = await import('@ffmpeg/util');
+
+  const inputName = 'in.' + guessExt(file, 'mp4');
+  const outputName = 'out.mp4';
+  const progressHandler = wireProgress(ff, opts.onProgress);
+
+  // delogo precisa de inteiros >= 1. Cada regiao vira um delogo na cadeia.
+  // band=4 suaviza as bordas pra ficar menos perceptivel.
+  const filterParts = regions.map((r) => {
+    const x = Math.max(0, Math.round(r.x));
+    const y = Math.max(0, Math.round(r.y));
+    const w = Math.max(2, Math.round(r.width));
+    const h = Math.max(2, Math.round(r.height));
+    return `delogo=x=${x}:y=${y}:w=${w}:h=${h}:show=0`;
+  });
+  const vfilter = filterParts.join(',');
+
+  const preserveAudio = opts.preserveAudio !== false;
+
+  try {
+    opts.onStage?.('Carregando video no FFmpeg...');
+    await ff.writeFile(inputName, await fetchFile(file));
+
+    opts.onStage?.('Aplicando remocao (delogo)...');
+    await ff.exec([
+      '-i', inputName,
+      '-vf', vfilter,
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-tune', 'fastdecode',
+      // CRF 20 (qualidade levemente maior que 23) pra nao acumular perda
+      // sobre a perda do delogo.
+      '-crf', '20',
+      '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
+      '-pix_fmt', 'yuv420p',
+      // Audio: copy quando possivel (sem perda + super rapido)
+      ...(preserveAudio ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '128k']),
+      '-movflags', '+faststart',
+      outputName,
+    ]);
+    const data = await ff.readFile(outputName);
+    return toBlob(data, 'video/mp4');
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    await safeDelete(ff, inputName);
+    await safeDelete(ff, outputName);
+  }
+}
+
+/**
+ * Extrai um frame JPEG do video num timestamp (s) — usado pra mandar
+ * pra IA detectar regioes. Tamanho cap pra economizar token.
+ */
+export async function extractFrameAt(
+  file: Blob,
+  timeSec: number,
+  opts: { maxWidth?: number; quality?: number } = {},
+): Promise<Blob> {
+  const ff = await getFFmpeg();
+  const { fetchFile } = await import('@ffmpeg/util');
+
+  const inputName = 'frame_in.' + guessExt(file, 'mp4');
+  const outputName = 'frame_out.jpg';
+  const maxW = opts.maxWidth ?? 1024;
+  const q = opts.quality ?? 5; // 1=best, 31=worst; 5 e bom pra IA
+
+  try {
+    await ff.writeFile(inputName, await fetchFile(file));
+    await ff.exec([
+      '-ss', timeSec.toFixed(2),
+      '-i', inputName,
+      '-vframes', '1',
+      '-vf', `scale=${maxW}:-2:flags=fast_bilinear`,
+      '-q:v', String(q),
+      outputName,
+    ]);
+    const data = await ff.readFile(outputName);
+    return toBlob(data, 'image/jpeg');
+  } finally {
+    await safeDelete(ff, inputName);
+    await safeDelete(ff, outputName);
+  }
+}
+
 export type NormalizeIntensity = 'suave' | 'padrao' | 'forte';
 
 const NORMALIZE_PRESETS: Record<NormalizeIntensity, string> = {

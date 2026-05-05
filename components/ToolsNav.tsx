@@ -12,6 +12,7 @@ import {
   IconCompressor,
   IconDecupagem,
   IconNormalizador,
+  IconRemoverElementos,
   IconTrocaProduto,
 } from './ToolIcons';
 
@@ -67,6 +68,11 @@ export const AI_SUITE: RailItem[] = [
     href: '/tools/troca-produto',
     label: 'Troca de Produto',
     icon: <IconTrocaProduto />,
+  },
+  {
+    href: '/tools/remover-elementos',
+    label: 'Remover Legenda',
+    icon: <IconRemoverElementos />,
   },
 ];
 
