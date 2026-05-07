@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getUserKey } from '@/lib/user-keys';
 
 /**
  * POST /api/troca-produto/elevenlabs-tts
@@ -26,10 +27,9 @@ function jsonError(message: string, status = 500, detail?: string) {
 
 export async function POST(req: Request) {
   try {
-    const apiKey = process.env.ELEVENLABS_API_KEY;
-    if (!apiKey) {
-      return jsonError('ELEVENLABS_API_KEY nao configurada no servidor.', 500);
-    }
+    const keyResult = await getUserKey('elevenlabs');
+    if ('response' in keyResult) return keyResult.response;
+    const apiKey = keyResult.key;
 
     let body: Body;
     try {

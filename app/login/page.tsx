@@ -1,14 +1,15 @@
 'use client';
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { AuthShell } from '@/components/AuthShell';
-import { GoogleButton } from '@/components/GoogleButton';
 import { createClient } from '@/lib/supabase/client';
 
-export default function LoginPage() {
+function LoginInner() {
   const router = useRouter();
+  const params = useSearchParams();
+  const betaClosed = params.get('beta') === 'closed';
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -32,32 +33,31 @@ export default function LoginPage() {
     router.refresh();
   }
 
-  async function handleGoogleLogin() {
-    setError(null);
-    const supabase = createClient();
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? window.location.origin}/auth/callback`,
-      },
-    });
-    if (error) setError(error.message);
-  }
-
   return (
     <AuthShell
       title="Entrar"
-      subtitle="Acesse sua conta DARKO LAB"
+      subtitle="DARKO LAB · acesso restrito"
       footer={
-        <>
-          Ainda não tem conta?{' '}
-          <Link href="/register" className="text-lime hover:underline">
-            Criar conta
-          </Link>
-        </>
+        <span className="text-text-muted">
+          Beta fechada · acesso por convite. Contato com o admin pra
+          solicitar acesso.
+        </span>
       }
     >
       <form onSubmit={handleEmailLogin} className="flex flex-col gap-4">
+        {betaClosed ? (
+          <div
+            role="status"
+            className="fade-in-up flex items-start gap-2 rounded-[12px] border border-lime/40 bg-lime/10 px-3 py-2 text-xs text-lime"
+          >
+            <span className="mt-0.5 inline-block h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
+            <span>
+              Esta versao esta em beta fechada. Cadastros abertos e recuperacao
+              de senha estao desativados — entre em contato com o admin.
+            </span>
+          </div>
+        ) : null}
+
         <div>
           <label className="label-field" htmlFor="email">
             Email
@@ -100,26 +100,15 @@ export default function LoginPage() {
         <button type="submit" className="btn-primary" disabled={loading}>
           {loading ? 'Entrando...' : 'Entrar'}
         </button>
-
-        <div className="relative my-2 flex items-center">
-          <div className="flex-1 border-t border-line" />
-          <span className="px-3 text-xs uppercase tracking-widest text-text-dim">
-            ou
-          </span>
-          <div className="flex-1 border-t border-line" />
-        </div>
-
-        <GoogleButton onClick={handleGoogleLogin} disabled={loading} />
-
-        <div className="text-center">
-          <Link
-            href="/forgot-password"
-            className="text-xs text-text-muted hover:text-white"
-          >
-            Esqueci minha senha
-          </Link>
-        </div>
       </form>
     </AuthShell>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginInner />
+    </Suspense>
   );
 }

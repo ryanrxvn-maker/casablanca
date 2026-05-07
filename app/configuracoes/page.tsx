@@ -160,6 +160,29 @@ export default function ConfiguracoesPage() {
           description="Configurações de login da sua conta. Alterações aqui afetam acesso, email e segurança."
         >
           <div className="flex flex-col gap-8">
+            <section>
+              <h2 className="label-field !mb-3">Chaves de IA (BYOK)</h2>
+              <a
+                href="/configuracoes/api"
+                className="block rounded-[12px] border border-lime/30 bg-lime/5 p-4 transition-all duration-300 hover:-translate-y-[1px] hover:border-lime/60 hover:bg-lime/10"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-lime">
+                      Configurar API Keys →
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-text-muted">
+                      Anthropic, AssemblyAI, ElevenLabs. Ferramentas de IA
+                      gastam credito da SUA conta nessas APIs.
+                    </div>
+                  </div>
+                  <span className="mono text-[10px] uppercase tracking-widest text-lime">
+                    BYOK
+                  </span>
+                </div>
+              </a>
+            </section>
+
             {/* ------ Email ------ */}
             <section>
               <h2 className="label-field !mb-3">Email da conta</h2>

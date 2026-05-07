@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { BatchFileUpload } from '@/components/BatchFileUpload';
+import { CostHint } from '@/components/CostHint';
+import { MissingKeyBanner } from '@/components/MissingKeyBanner';
+import { estimateRemoverElementos } from '@/lib/cost-estimator';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { downloadBlob } from '@/lib/audio-engine';
 import {
@@ -423,6 +426,8 @@ export default function RemoverElementosPage() {
       description="IA detecta legendas / watermarks nos seus videos e o FFmpeg apaga as regioes (filtro delogo). Tudo client-side: o video nao sai do seu browser, so 3 frames JPG vao pra IA detectar (~$0.02 por video). Batch ate 5 videos × 500MB × 40min."
     >
       <div className="flex flex-col gap-6">
+        <MissingKeyBanner services={['anthropic']} />
+
         <div>
           <label className="label-field">Videos (ate {MAX_BATCH})</label>
           <BatchFileUpload
@@ -568,6 +573,13 @@ export default function RemoverElementosPage() {
             </div>
           </div>
         </label>
+
+        {files.length > 0 &&
+        (mode === 'smart' || mode === 'subtitle' || mode === 'watermark') ? (
+          <CostHint
+            estimate={estimateRemoverElementos({ numVideos: files.length })}
+          />
+        ) : null}
 
         <div className="flex flex-wrap gap-3">
           <button

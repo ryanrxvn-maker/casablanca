@@ -9,6 +9,7 @@ import { createClient } from '@/lib/supabase/client';
 type Profile = {
   name: string | null;
   avatar_url: string | null;
+  is_admin: boolean;
 };
 
 /**
@@ -36,13 +37,14 @@ export function Header() {
       if (!uid) return;
       const { data } = await supabase
         .from('profiles')
-        .select('name, avatar_url')
+        .select('name, avatar_url, is_admin')
         .eq('id', uid)
         .maybeSingle();
       if (!cancelled) {
         setProfile({
           name: data?.name ?? null,
           avatar_url: data?.avatar_url ?? null,
+          is_admin: !!data?.is_admin,
         });
         setAvatarBroken(false);
       }
@@ -164,6 +166,19 @@ export function Header() {
                 >
                   Configurações
                 </Link>
+                {profile?.is_admin ? (
+                  <Link
+                    href="/admin"
+                    onClick={() => setOpen(false)}
+                    className="flex items-center justify-between px-4 py-2 text-lime transition hover:bg-bg"
+                    role="menuitem"
+                  >
+                    Admin
+                    <span className="mono rounded-full border border-lime/60 px-1.5 py-0.5 text-[8px] uppercase tracking-widest">
+                      ADMIN
+                    </span>
+                  </Link>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => {

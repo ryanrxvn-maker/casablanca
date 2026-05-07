@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getUserKey } from '@/lib/user-keys';
 
 /**
  * POST /api/remover-elementos/detect
@@ -74,10 +75,9 @@ type AnthropicResponse = {
 
 export async function POST(req: Request) {
   try {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      return jsonError('ANTHROPIC_API_KEY nao configurada.', 500);
-    }
+    const keyResult = await getUserKey('anthropic');
+    if ('response' in keyResult) return keyResult.response;
+    const apiKey = keyResult.key;
 
     let body: { frame?: string; mode?: Mode };
     try {

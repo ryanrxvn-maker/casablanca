@@ -38,8 +38,13 @@ Leva cerca de 25-40 minutos se você já tem conta nos serviços.
      removidos do produto. Em projetos novos que nunca rodaram 002-005 ela é
      idempotente (todos os `drop ... if exists` viram no-op).
 
-   **Projeto novo, caminho rápido**: rode apenas `001` → `006` → `008`.
-   **Projeto existente com deploys antigos**: rode tudo 001 → 008 em ordem.
+   **Projeto novo, caminho rápido**: rode `001` → `006` → `008` → `009`.
+   **Projeto existente com deploys antigos**: rode tudo 001 → 009 em ordem.
+
+   - `009_admin_access_control.sql` — **obrigatória pra closed beta.**
+     Adiciona `is_admin` + `is_active` em profiles, com trigger que bloqueia
+     non-admins de alterar essas flags. Bootstrap manual do primeiro admin
+     na seção 6 abaixo.
 
 3. Em **Authentication → Email Templates → Confirm signup**, troque o corpo
    padrão para usar `{{ .Token }}` em vez de `{{ .ConfirmationURL }}`. O
@@ -53,8 +58,14 @@ Leva cerca de 25-40 minutos se você já tem conta nos serviços.
 4. Em **Project Settings → API**, copie:
    - **Project URL** (formato `https://xxxxx.supabase.co`)
    - **anon public** key (formato `ey...`)
+   - **service_role** key (formato `ey...`) — **necessária pro painel admin
+     criar usuários sem precisar de email confirmation**
 
    Guarde — vão no `.env.local` e na Vercel.
+
+   ⚠️ **A service_role key bypassa todas as políticas de RLS.** Mantenha
+   apenas como variável de ambiente do servidor (sem prefixo
+   `NEXT_PUBLIC_`). Nunca commite, nunca exponha no client.
 
 ---
 
@@ -125,12 +136,13 @@ mas a variável fica no `.env.local.example` pra caso.
 
 2. Edite com todos os valores:
    ```env
-   # Supabase
+   # Supabase (obrigatorio)
    NEXT_PUBLIC_SUPABASE_URL=https://seu-projeto.supabase.co
    NEXT_PUBLIC_SUPABASE_ANON_KEY=ey...
-   NEXT_PUBLIC_SITE_URL=http://localhost:3000
+   NEXT_PUBLIC_SITE_URL=https://seu-deploy.vercel.app
+   SUPABASE_SERVICE_ROLE_KEY=ey...
 
-   # AI Suite
+   # AI Suite (obrigatorias)
    ANTHROPIC_API_KEY=sk-ant-...
    ASSEMBLYAI_API_KEY=...
    ELEVENLABS_API_KEY=...
@@ -138,6 +150,10 @@ mas a variável fica no `.env.local.example` pra caso.
    # Opcional
    REPLICATE_API_TOKEN=
    ```
+
+   ⚠️ `NEXT_PUBLIC_SITE_URL` é **crítica**: o middleware bloqueia chamadas
+   `/api/*` que venham de origens diferentes desta. Em produção, configure
+   pro URL exato do deploy Vercel.
 
 3. Rode o build:
    ```bash
@@ -193,10 +209,19 @@ Preview + Development:
 | `NEXT_PUBLIC_SUPABASE_URL`        | `https://seu-projeto.supabase.co`         |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY`   | `ey...`                                   |
 | `NEXT_PUBLIC_SITE_URL`            | `https://seu-dominio.vercel.app`          |
-| `ANTHROPIC_API_KEY`               | `sk-ant-...`                              |
-| `ASSEMBLYAI_API_KEY`              | `...`                                     |
-| `ELEVENLABS_API_KEY`              | `...`                                     |
+| `SUPABASE_SERVICE_ROLE_KEY`       | `ey...` (service_role, **só server**)     |
+| `SECRETS_ENCRYPTION_KEY`          | string aleatória ≥32 chars (gera com `openssl rand -base64 48`) |
 | `REPLICATE_API_TOKEN`             | (opcional, deixe vazio se não usar)       |
+
+⚠️ **`SECRETS_ENCRYPTION_KEY` é a master key** que cifra/decifra as chaves
+de IA dos usuários (BYOK). Trocá-la **invalida todas as keys configuradas**
+— os usuários vão precisar reconfigurar. Guarde com a mesma seriedade da
+service_role key.
+
+⚠️ **`ANTHROPIC_API_KEY` / `ASSEMBLYAI_API_KEY` / `ELEVENLABS_API_KEY` não
+são mais usadas pelo backend.** Cada usuário configura as suas próprias em
+`/configuracoes/api` (BYOK). Pode remover do .env se sobraram da versão
+anterior.
 
 Depois força rebuild:
 ```bash
@@ -205,7 +230,59 @@ vercel deploy --prod --force
 
 ---
 
-## 6. Pós-deploy — checklist de validação
+## 6. Bootstrap do admin (closed beta)
+
+⚠️ **Faça isso UMA VEZ logo após o primeiro deploy, antes de divulgar a URL
+pra qualquer outro usuário.**
+
+A migration 009 trava o app: ninguém consegue logar até alguém ser marcado
+como `is_admin=true` + `is_active=true`. O bootstrap precisa ser manual via
+SQL Editor porque o painel `/admin` só funciona se você já é admin.
+
+**Passos:**
+
+1. **Crie sua conta admin via Supabase Dashboard:**
+   - **Authentication → Users → Add user → Create new user**
+   - Email: seu admin email (ex: `silas@darkolab.com`)
+   - Password: escolha uma forte
+   - Marque "Auto Confirm User" pra pular o email de confirmação
+   - Clica **Create user**
+
+2. **Promova ela a admin via SQL Editor:**
+
+   ```sql
+   UPDATE profiles
+   SET is_admin = true,
+       is_active = true,
+       activated_at = now(),
+       name = 'Seu Nome Admin'
+   WHERE id = (
+     SELECT id FROM auth.users WHERE email = 'seu-email-admin@exemplo.com'
+   );
+   ```
+
+3. **Confira se funcionou:**
+   ```sql
+   SELECT u.email, p.name, p.is_admin, p.is_active, p.activated_at
+   FROM profiles p JOIN auth.users u ON u.id = p.id
+   WHERE p.is_admin = true;
+   ```
+   Deve retornar a sua linha com is_admin=true, is_active=true.
+
+4. **Logue no app** com esse email/senha. Vai cair em `/tools` normalmente
+   e o dropdown do header agora mostra um link **Admin** lime.
+
+5. **Crie os outros usuários do beta** via `/admin`:
+   - Form "Criar usuario": nome + email + senha (mín. 8 chars)
+   - Cada usuário criado já entra ATIVO (pode logar imediatamente)
+   - Você pode desativar / promover / deletar a qualquer momento
+
+A partir daqui, **`/register` está fechado**. Se alguém tentar acessar,
+cai em `/login?beta=closed` com a mensagem padrão.
+
+---
+
+## 7. Pós-deploy — checklist de validação
 
 Abra a URL de produção e valide:
 

@@ -2,6 +2,9 @@
 
 import { useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
+import { CostHint } from '@/components/CostHint';
+import { MissingKeyBanner } from '@/components/MissingKeyBanner';
+import { estimateTrocaProduto } from '@/lib/cost-estimator';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { getFFmpeg } from '@/lib/ffmpeg-worker';
 import { fetchFile } from '@ffmpeg/util';
@@ -296,6 +299,8 @@ export default function TrocaProdutoPage() {
       description="Substitui o nome de um produto em um áudio mantendo a voz original (ElevenLabs + AssemblyAI + FFmpeg)."
     >
       <div className="grid gap-5">
+        <MissingKeyBanner services={['assemblyai', 'elevenlabs']} />
+
         <div className="grid gap-4 md:grid-cols-2">
           <label className="block">
             <span className="label-field">
@@ -442,6 +447,18 @@ export default function TrocaProdutoPage() {
             </button>
           )}
         </div>
+
+        {transcript && transcript.matches.length > 0 ? (
+          <CostHint
+            estimate={estimateTrocaProduto({
+              durationSec:
+                (transcript.matches[transcript.matches.length - 1]?.endMs ??
+                  60_000) / 1000,
+              numReplacements: selectedMatches.length,
+              productNameLength: newProduct.length || 10,
+            })}
+          />
+        ) : null}
 
         {transcript && (
           <section className="fade-in-up rounded-xl border border-line bg-bg-soft/40 p-4">

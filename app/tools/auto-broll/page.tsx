@@ -3,6 +3,9 @@
 import { useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
+import { CostHint } from '@/components/CostHint';
+import { MissingKeyBanner } from '@/components/MissingKeyBanner';
+import { estimateAutoBroll } from '@/lib/cost-estimator';
 
 /**
  * Auto B-Roll — transforma a copy de uma VSL em um pacote de producao:
@@ -128,6 +131,8 @@ export default function AutoBrollPage() {
       description="Cole a copy da sua VSL e receba tabela de cenas, prompts de vídeo (3–5s) e JSON pronto pro Nano Banana 2."
     >
       <div className="grid gap-5">
+        <MissingKeyBanner services={['anthropic']} />
+
         <div className="grid gap-2 md:grid-cols-2">
           <label className="block">
             <span className="label-field">
@@ -199,6 +204,10 @@ export default function AutoBrollPage() {
             {error}
           </div>
         )}
+
+        {fullCopy.trim().length >= 20 ? (
+          <CostHint estimate={estimateAutoBroll(fullCopy.length)} />
+        ) : null}
 
         <div className="flex flex-wrap gap-3">
           <button

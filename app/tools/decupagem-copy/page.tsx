@@ -3,6 +3,9 @@
 import { useEffect, useMemo } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { FileUpload } from '@/components/FileUpload';
+import { CostHint } from '@/components/CostHint';
+import { MissingKeyBanner } from '@/components/MissingKeyBanner';
+import { estimateDecupagemCopy } from '@/lib/cost-estimator';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { downloadBlob } from '@/lib/audio-engine';
 import {
@@ -221,6 +224,8 @@ export default function DecupagemCopyPage() {
       description="Mande um video bruto de expert + a copy/script. A IA transcreve, alinha cada frase com a melhor take (mais fluente, sem repeticao/stutter) e devolve o video ja decupado na ordem da copy. AssemblyAI + FFmpeg WASM. 1 video por vez ate 800MB/40min."
     >
       <div className="flex flex-col gap-6">
+        <MissingKeyBanner services={['assemblyai']} />
+
         <div>
           <label className="label-field">Video bruto</label>
           <FileUpload
@@ -304,6 +309,10 @@ export default function DecupagemCopyPage() {
             </button>
           </div>
         </div>
+
+        {file && duration !== null && duration > 0 ? (
+          <CostHint estimate={estimateDecupagemCopy(duration)} />
+        ) : null}
 
         <div className="flex flex-wrap gap-3">
           <button

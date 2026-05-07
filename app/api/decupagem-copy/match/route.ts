@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getUserKey } from '@/lib/user-keys';
 
 /**
  * POST /api/decupagem-copy/match
@@ -58,10 +59,9 @@ function jsonError(message: string, status = 500, detail?: string) {
 
 export async function POST(req: Request) {
   try {
-    const apiKey = process.env.ASSEMBLYAI_API_KEY;
-    if (!apiKey) {
-      return jsonError('ASSEMBLYAI_API_KEY nao configurada.', 500);
-    }
+    const keyResult = await getUserKey('assemblyai');
+    if ('response' in keyResult) return keyResult.response;
+    const apiKey = keyResult.key;
 
     let form: FormData;
     try {

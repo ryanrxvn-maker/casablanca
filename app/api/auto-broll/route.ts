@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { getUserKey } from '@/lib/user-keys';
 
 /**
  * POST /api/auto-broll
@@ -108,13 +109,9 @@ function jsonError(message: string, status = 500, detail?: string) {
 
 export async function POST(req: Request) {
   try {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      return jsonError(
-        'ANTHROPIC_API_KEY não configurada. Adicione no .env.local e redeploy.',
-        500,
-      );
-    }
+    const keyResult = await getUserKey('anthropic');
+    if ('response' in keyResult) return keyResult.response;
+    const apiKey = keyResult.key;
 
     let body: Body;
     try {
