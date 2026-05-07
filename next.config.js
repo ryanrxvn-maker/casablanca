@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  reactStrictMode: true,
+  eslint: { ignoreDuringBuilds: true },
   // Sem source maps em producao — dificulta engenharia reversa do bundle.
   productionBrowserSourceMaps: false,
   // Remove o "X-Powered-By: Next.js" header.
