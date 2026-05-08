@@ -1,15 +1,6 @@
 import { NextResponse } from 'next/server';
 import { jsonError, requireAdmin, serviceClient } from '../_helpers';
 
-/**
- * POST /api/admin/create-user
- * body: { email, password, name }
- *
- * So admin. Usa service role pra criar o usuario via Supabase Admin API
- * (sem precisar de email confirmation), entao upserta o profile com
- * is_active=true e created_by=admin.
- */
-
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 
@@ -43,9 +34,17 @@ export async function POST(req: Request) {
       return jsonError('Nome obrigatorio.', 400);
     }
 
-    const svc = serviceClient();
+    let svc;
+    try {
+      svc = serviceClient();
+    } catch (e) {
+      return jsonError(
+        'Servidor mal configurado: SUPABASE_SERVICE_ROLE_KEY ausente.',
+        500,
+        e instanceof Error ? e.message : String(e),
+      );
+    }
 
-    // 1. Cria o auth user (com email_confirm=true → pode logar direto)
     const { data: authData, error: authErr } = await svc.auth.admin.createUser({
       email,
       password,
@@ -54,18 +53,25 @@ export async function POST(req: Request) {
     });
 
     if (authErr || !authData?.user) {
-      return jsonError(
-        authErr?.message?.includes('already registered')
-          ? 'Esse email ja tem conta.'
-          : 'Falha ao criar usuario.',
-        400,
-        authErr?.message,
-      );
+      // Mensagens da Supabase Admin API que aparecem com mais frequencia:
+      const msg = authErr?.message ?? '';
+      let friendly = 'Falha ao criar usuario.';
+      if (/already registered|already exists|duplicate/i.test(msg)) {
+        friendly = 'Esse email ja tem conta cadastrada.';
+      } else if (/password/i.test(msg) && /weak|strength|short|invalid/i.test(msg)) {
+        friendly = 'Senha fraca ou invalida pelas regras do Supabase. Tente uma com letras + numeros + simbolos.';
+      } else if (/email/i.test(msg) && /invalid|format/i.test(msg)) {
+        friendly = 'Email invalido.';
+      } else if (msg) {
+        friendly = msg;
+      }
+      return jsonError(friendly, 400, msg);
     }
 
     const newUserId = authData.user.id;
 
-    // 2. Upsert profile (uma trigger pode ja ter criado um row vazio)
+    // Profile com must_change_password=true (cliente vai ter que trocar
+    // a senha provisoria no primeiro login).
     const { error: profErr } = await svc
       .from('profiles')
       .upsert(
@@ -74,6 +80,7 @@ export async function POST(req: Request) {
           name,
           is_admin: false,
           is_active: true,
+          must_change_password: true,
           activated_at: new Date().toISOString(),
           created_by: guard.userId,
         },
@@ -81,13 +88,8 @@ export async function POST(req: Request) {
       );
 
     if (profErr) {
-      // Tenta remover o auth user pra nao deixar orfao
       await svc.auth.admin.deleteUser(newUserId).catch(() => {});
-      return jsonError(
-        'Falha ao criar profile.',
-        500,
-        profErr.message,
-      );
+      return jsonError('Falha ao criar profile.', 500, profErr.message);
     }
 
     return NextResponse.json({

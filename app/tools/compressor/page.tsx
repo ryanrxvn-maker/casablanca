@@ -6,11 +6,14 @@ import { BatchFileUpload } from '@/components/BatchFileUpload';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { downloadBlob } from '@/lib/audio-engine';
 import {
+  cancelFFmpeg,
   compressVideo,
   estimateCompressedSize,
+  isCancellationError,
   probeVideoMetadata,
   type FFProgress,
 } from '@/lib/ffmpeg-worker';
+import { CancelButton } from '@/components/CancelButton';
 import { buildZip } from '@/lib/zip-builder';
 import { formatBytes } from '@/lib/utils';
 
@@ -221,6 +224,14 @@ export default function CompressorPage() {
           });
         } catch (e) {
           console.error('[compressor]', job.file.name, e);
+          if (isCancellationError(e)) {
+            updateJob(job.id, { state: 'error', error: 'Cancelado pelo usuario.' });
+            // marca os jobs restantes como cancelados tambem
+            initial.slice(i + 1).forEach((rest) => {
+              updateJob(rest.id, { state: 'error', error: 'Cancelado pelo usuario.' });
+            });
+            break;
+          }
           updateJob(job.id, {
             state: 'error',
             error: (e as Error).message ?? 'Falha.',
@@ -361,15 +372,17 @@ export default function CompressorPage() {
         </div>
 
         <div className="flex flex-wrap gap-3">
-          <button
-            onClick={processAll}
-            className="btn-primary"
-            disabled={files.length === 0 || processing}
-          >
-            {processing
-              ? 'Processando...'
-              : `Comprimir ${files.length || ''} ${files.length === 1 ? 'video' : 'videos'}`.trim()}
-          </button>
+          {processing ? (
+            <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
+          ) : (
+            <button
+              onClick={processAll}
+              className="btn-primary"
+              disabled={files.length === 0}
+            >
+              {`Comprimir ${files.length || ''} ${files.length === 1 ? 'video' : 'videos'}`.trim()}
+            </button>
+          )}
           <button
             onClick={() => setFilesSafe([])}
             className="btn-secondary"

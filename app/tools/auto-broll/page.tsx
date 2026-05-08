@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
+import { CancelButton } from '@/components/CancelButton';
 import { CostHint } from '@/components/CostHint';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { estimateAutoBroll } from '@/lib/cost-estimator';
@@ -58,6 +59,11 @@ export default function AutoBrollPage() {
     null,
   );
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  function handleCancel() {
+    abortRef.current?.abort();
+  }
 
   async function handleGenerate() {
     if (fullCopy.trim().length < 20) {
@@ -67,6 +73,7 @@ export default function AutoBrollPage() {
     setError(null);
     setResult(null);
     setProcessing(true);
+    abortRef.current = new AbortController();
     try {
       const res = await fetch('/api/auto-broll', {
         method: 'POST',
@@ -77,6 +84,7 @@ export default function AutoBrollPage() {
           fullCopy,
           visualReferenceChunk: visualRef,
         }),
+        signal: abortRef.current.signal,
       });
       const json = (await res.json()) as ApiResult & { error?: string };
       if (!res.ok) {
@@ -88,9 +96,14 @@ export default function AutoBrollPage() {
         usage: json.usage,
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Erro desconhecido.');
+      if ((e as Error)?.name === 'AbortError') {
+        setError('Cancelado pelo usuario.');
+      } else {
+        setError(e instanceof Error ? e.message : 'Erro desconhecido.');
+      }
     } finally {
       setProcessing(false);
+      abortRef.current = null;
     }
   }
 
@@ -210,14 +223,18 @@ export default function AutoBrollPage() {
         ) : null}
 
         <div className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={handleGenerate}
-            disabled={processing || fullCopy.trim().length < 20}
-            className="btn-primary"
-          >
-            {processing ? 'Gerando pacote...' : 'Gerar pacote B-Roll'}
-          </button>
+          {processing ? (
+            <CancelButton onClick={handleCancel} label="Cancelar geracao" />
+          ) : (
+            <button
+              type="button"
+              onClick={handleGenerate}
+              disabled={fullCopy.trim().length < 20}
+              className="btn-primary"
+            >
+              Gerar pacote B-Roll
+            </button>
+          )}
           {result && (
             <>
               <button

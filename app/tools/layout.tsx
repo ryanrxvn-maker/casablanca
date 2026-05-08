@@ -1,4 +1,5 @@
 import { Header } from '@/components/Header';
+import { Heartbeat } from '@/components/Heartbeat';
 import { ToolsNav } from '@/components/ToolsNav';
 import { ToolsStateProvider } from '@/components/ToolsStateProvider';
 
@@ -18,6 +19,7 @@ export default function ToolsLayout({
   return (
     <ToolsStateProvider>
       <div className="flex min-h-screen flex-col">
+        <Heartbeat />
         <Header />
         <ToolsNav />
         <main className="container-app flex-1 py-10 md:pl-[76px]">

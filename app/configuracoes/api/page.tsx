@@ -251,19 +251,23 @@ export default function ApiKeysPage() {
             })}
           </div>
 
-          <div className="mono mt-6 rounded-[12px] border border-line-strong bg-bg-soft/30 p-4 text-[11px] text-text-muted">
-            <strong className="text-white">SEGURANCA:</strong> as chaves sao
-            cifradas com AES-256-GCM no servidor. Sao acessadas SO pelo seu
-            proprio user_id (RLS no Postgres). Mesmo um admin nao consegue
-            ler suas chaves — ele so consegue ATIVAR/DESATIVAR seu acesso.
-            <br />
-            <br />
-            Loading: {loading ? 'sim' : 'nao'} · Última atualizacao:{' '}
-            <span className="text-lime">
-              {status?.updatedAt
-                ? new Date(status.updatedAt).toLocaleString('pt-BR')
-                : 'nunca'}
-            </span>
+          <div className="mt-6 rounded-[12px] border border-lime/30 bg-lime/5 p-4">
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 text-lg" aria-hidden>
+                🔒
+              </span>
+              <div>
+                <div className="text-sm font-semibold text-lime">
+                  Suas chaves estao protegidas
+                </div>
+                <p className="mt-1 text-xs text-text-muted">
+                  Ninguem ve suas chaves alem de voce — nem o administrador,
+                  nem outros usuarios. Os creditos que cada ferramenta
+                  consome saem direto da sua conta na API
+                  correspondente.
+                </p>
+              </div>
+            </div>
           </div>
         </ToolShell>
       </main>

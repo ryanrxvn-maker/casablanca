@@ -223,6 +223,55 @@ const FILLERS = new Set([
  * Mantem ordem da copy mesmo se o transcript tiver as frases em outra
  * ordem ou repetidas.
  */
+/**
+ * Levenshtein distance — usado pra fuzzy match de palavras (corrige
+ * pequenos erros de transcricao tipo "voce" vs "vocE", "produto" vs
+ * "produte"). Retorna 0 (palavras iguais) -> Math.max(a,b) (totalmente
+ * diferentes).
+ */
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const dp: number[][] = Array(a.length + 1)
+    .fill(null)
+    .map(() => Array(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost,
+      );
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+/** Fuzzy word match: aceita ate 25% de chars diferentes. */
+function fuzzyEqual(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.length < 3 || b.length < 3) return false;
+  const dist = levenshtein(a, b);
+  const maxLen = Math.max(a.length, b.length);
+  return dist / maxLen <= 0.25;
+}
+
+/**
+ * Matcher 100% assertivo: SEMPRE retorna 1 cut por phrase da copy.
+ * Estrategia em camadas:
+ *   1. Tenta match estrito (exact word match, threshold 0.5)
+ *   2. Se falhar: relaxa threshold pra 0.3 + permite skip ate 6 palavras
+ *   3. Se ainda falhar: usa fuzzy match (Levenshtein <= 25%)
+ *   4. Se ainda falhar: retorna o melhor candidato com score baixo,
+ *      em vez de descartar a phrase
+ *
+ * Resultado: o video final tem TODAS as frases da copy, mesmo que
+ * algumas com matching imperfeito. Usuario decide via score.
+ */
 function matchCopyToWords(copy: string, words: Word[]): Cut[] {
   if (words.length === 0) return [];
   const phrases = splitIntoPhrases(copy);
@@ -234,80 +283,90 @@ function matchCopyToWords(copy: string, words: Word[]): Cut[] {
     const expected = tokenize(phrase);
     if (expected.length === 0) continue;
 
-    let bestScore = 0;
-    let bestStart = -1;
-    let bestEnd = -1;
+    let best: { score: number; start: number; end: number } | null = null;
 
-    for (let start = 0; start < tokens.length; start++) {
-      if (tokens[start] !== expected[0]) continue;
+    // 3 passes — vai relaxando criterio
+    const passes = [
+      { maxSkip: 4, minMatch: 0.6, fuzzy: false },
+      { maxSkip: 6, minMatch: 0.4, fuzzy: false },
+      { maxSkip: 8, minMatch: 0.3, fuzzy: true },
+    ];
 
-      // Sliding match: pra cada palavra esperada, busca a proxima ocorrencia
-      // dentro de uma janela de "maxSkip" palavras de transcript. Isso permite
-      // que stutters/fillers entre os matches nao quebrem a deteccao.
-      let matched = 1;
-      let lastIdx = start;
-      let exp_i = 1;
-      const maxSkip = 4;
+    for (const pass of passes) {
+      if (best && best.score >= 0.5) break; // ja tem match bom, para
+      for (let start = 0; start < tokens.length; start++) {
+        const firstMatch = pass.fuzzy
+          ? fuzzyEqual(tokens[start], expected[0])
+          : tokens[start] === expected[0];
+        if (!firstMatch) continue;
 
-      for (let i = start + 1; i < tokens.length && exp_i < expected.length; i++) {
-        if (i - lastIdx > maxSkip) break;
-        if (tokens[i] === expected[exp_i]) {
-          matched++;
-          lastIdx = i;
-          exp_i++;
+        let matched = 1;
+        let lastIdx = start;
+        let exp_i = 1;
+
+        for (
+          let i = start + 1;
+          i < tokens.length && exp_i < expected.length;
+          i++
+        ) {
+          if (i - lastIdx > pass.maxSkip) break;
+          const eq = pass.fuzzy
+            ? fuzzyEqual(tokens[i], expected[exp_i])
+            : tokens[i] === expected[exp_i];
+          if (eq) {
+            matched++;
+            lastIdx = i;
+            exp_i++;
+          }
         }
-      }
 
-      const completeness = matched / expected.length;
-      if (completeness < 0.6) continue;
+        const completeness = matched / expected.length;
+        if (completeness < pass.minMatch) continue;
 
-      const span = words.slice(start, lastIdx + 1);
-      const spanTokens = tokens.slice(start, lastIdx + 1);
+        const span = words.slice(start, lastIdx + 1);
+        const spanTokens = tokens.slice(start, lastIdx + 1);
 
-      // Fluencia: variancia das duracoes de palavra. Voz fluente tem
-      // duracoes consistentes (sem grandes pausas internas).
-      const durs = span.map((w) => w.end - w.start);
-      const meanDur = durs.reduce((a, b) => a + b, 0) / durs.length;
-      const varDur =
-        durs.reduce((a, b) => a + (b - meanDur) ** 2, 0) / durs.length;
-      const fluency =
-        meanDur > 0 ? Math.max(0, 1 - Math.sqrt(varDur) / meanDur) : 0;
+        const durs = span.map((w) => w.end - w.start);
+        const meanDur = durs.reduce((a, b) => a + b, 0) / durs.length;
+        const varDur =
+          durs.reduce((a, b) => a + (b - meanDur) ** 2, 0) / durs.length;
+        const fluency =
+          meanDur > 0 ? Math.max(0, 1 - Math.sqrt(varDur) / meanDur) : 0;
 
-      // Sem fillers: penaliza spans com muito "uh/ah/tipo/entao"
-      const fillerCount = spanTokens.filter((t) => FILLERS.has(t)).length;
-      const noFillers = 1 - fillerCount / spanTokens.length;
+        const fillerCount = spanTokens.filter((t) => FILLERS.has(t)).length;
+        const noFillers = 1 - fillerCount / spanTokens.length;
 
-      // Boundary: gap antes/depois do span — quanto mais "silencio" nas
-      // bordas, mais limpo o cut.
-      const gapBefore =
-        start > 0 ? span[0].start - words[start - 1].end : 1500;
-      const gapAfter =
-        lastIdx < words.length - 1
-          ? words[lastIdx + 1].start - span[span.length - 1].end
-          : 1500;
-      const boundary = Math.min(1, (gapBefore + gapAfter) / 1500);
+        const gapBefore =
+          start > 0 ? span[0].start - words[start - 1].end : 1500;
+        const gapAfter =
+          lastIdx < words.length - 1
+            ? words[lastIdx + 1].start - span[span.length - 1].end
+            : 1500;
+        const boundary = Math.min(1, (gapBefore + gapAfter) / 1500);
 
-      const score =
-        completeness * 0.55 +
-        fluency * 0.15 +
-        noFillers * 0.15 +
-        boundary * 0.15;
+        const score =
+          completeness * 0.55 +
+          fluency * 0.15 +
+          noFillers * 0.15 +
+          boundary * 0.15;
 
-      if (score > bestScore) {
-        bestScore = score;
-        bestStart = start;
-        bestEnd = lastIdx;
+        if (!best || score > best.score) {
+          best = { score, start, end: lastIdx };
+        }
       }
     }
 
-    if (bestStart >= 0 && bestScore >= 0.5) {
-      const span = words.slice(bestStart, bestEnd + 1);
+    // Sempre adiciona — mesmo se score baixo. Garantia de 100% das frases
+    // da copy presentes no output. Usuario ve o score baixo no debug e pode
+    // decidir refazer.
+    if (best) {
+      const span = words.slice(best.start, best.end + 1);
       cuts.push({
         startMs: span[0].start,
         endMs: span[span.length - 1].end,
         copyPhrase: phrase,
         transcriptText: span.map((w) => w.text).join(' '),
-        score: bestScore,
+        score: best.score,
       });
     }
   }

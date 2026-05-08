@@ -7,7 +7,13 @@ import { useToolState } from '@/components/ToolsStateProvider';
 import { camuflar } from '@/lib/camuflagem';
 import { downloadBlob } from '@/lib/audio-engine';
 import { buildZip } from '@/lib/zip-builder';
-import { extractAudioAs, muxAudioIntoVideo } from '@/lib/ffmpeg-worker';
+import {
+  cancelFFmpeg,
+  extractAudioAs,
+  isCancellationError,
+  muxAudioIntoVideo,
+} from '@/lib/ffmpeg-worker';
+import { CancelButton } from '@/components/CancelButton';
 
 type OutFormat = 'mp4' | 'mp3' | 'wav';
 
@@ -116,6 +122,14 @@ export default function CamuflagemPage() {
         });
       } catch (e) {
         console.error(e);
+        if (isCancellationError(e)) {
+          updatePair(pair.id, {
+            status: 'error',
+            errorMsg: 'Cancelado pelo usuario.',
+            stage: undefined,
+          });
+          break;
+        }
         updatePair(pair.id, {
           status: 'error',
           errorMsg: (e as Error).message ?? 'Falha',
@@ -327,13 +341,17 @@ export default function CamuflagemPage() {
           >
             + Adicionar par ({pairs.length}/10)
           </button>
-          <button
-            onClick={processAll}
-            className="btn-primary"
-            disabled={processingAll || !pairs.some((p) => p.black && p.white)}
-          >
-            {processingAll ? 'Processando...' : 'Processar tudo'}
-          </button>
+          {processingAll ? (
+            <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
+          ) : (
+            <button
+              onClick={processAll}
+              className="btn-primary"
+              disabled={!pairs.some((p) => p.black && p.white)}
+            >
+              Processar tudo
+            </button>
+          )}
           {doneCount > 1 ? (
             <button onClick={downloadAllZip} className="btn-secondary">
               Baixar ZIP ({doneCount})

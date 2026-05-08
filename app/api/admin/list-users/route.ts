@@ -4,7 +4,8 @@ import { jsonError, requireAdmin, serviceClient } from '../_helpers';
 /**
  * GET /api/admin/list-users
  *
- * So admin. Retorna lista de profiles com email (do auth.users via join).
+ * Retorna so os USUARIOS (is_admin=false). Admins (incluindo o proprio
+ * caller) sao filtrados — admin nao precisa se ver na lista.
  */
 
 export const runtime = 'nodejs';
@@ -17,10 +18,12 @@ export async function GET() {
   try {
     const svc = serviceClient();
 
-    // Pega lista de profiles ordenada por created_at desc
     const { data: profiles, error } = await svc
       .from('profiles')
-      .select('id, name, is_admin, is_active, activated_at, created_at')
+      .select(
+        'id, name, is_admin, is_active, activated_at, created_at, must_change_password, last_seen_at, last_ip, last_tool, last_tool_at',
+      )
+      .eq('is_admin', false)
       .order('created_at', { ascending: false });
 
     if (error) {

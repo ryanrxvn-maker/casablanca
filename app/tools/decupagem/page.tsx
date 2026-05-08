@@ -11,7 +11,13 @@ import {
   trimSilences,
   detectSilences,
 } from '@/lib/audio-engine';
-import { cutVideoSegments, extractAudioAs } from '@/lib/ffmpeg-worker';
+import {
+  cancelFFmpeg,
+  cutVideoSegments,
+  extractAudioAs,
+  isCancellationError,
+} from '@/lib/ffmpeg-worker';
+import { CancelButton } from '@/components/CancelButton';
 import { formatTime } from '@/lib/utils';
 
 type OutputKind = 'video' | 'audio';
@@ -125,8 +131,13 @@ export default function DecupagemPage() {
       }
     } catch (e) {
       console.error(e);
-      setError((e as Error).message ?? 'Falha ao processar o arquivo.');
-      setStatus(null);
+      if (isCancellationError(e)) {
+        setStatus('Cancelado pelo usuario.');
+        setError(null);
+      } else {
+        setError((e as Error).message ?? 'Falha ao processar o arquivo.');
+        setStatus(null);
+      }
     } finally {
       setProcessing(false);
       setProgress(null);
@@ -318,13 +329,17 @@ export default function DecupagemPage() {
         </div>
 
         <div className="flex flex-wrap gap-3">
-          <button
-            onClick={process}
-            className="btn-primary"
-            disabled={!file || processing}
-          >
-            {processing ? 'Processando...' : 'Decupar'}
-          </button>
+          {processing ? (
+            <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
+          ) : (
+            <button
+              onClick={process}
+              className="btn-primary"
+              disabled={!file}
+            >
+              Decupar
+            </button>
+          )}
           <button
             onClick={() => {
               reset();

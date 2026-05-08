@@ -7,13 +7,21 @@ import { CostHint } from '@/components/CostHint';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { estimateDecupagemCopy } from '@/lib/cost-estimator';
 import { useToolState } from '@/components/ToolsStateProvider';
-import { downloadBlob } from '@/lib/audio-engine';
 import {
-  extractAudioForTranscription,
+  decodeAudioRobust,
+  detectSilences,
+  downloadBlob,
+} from '@/lib/audio-engine';
+import {
+  cancelFFmpeg,
   cutVideoSegments,
+  extractAudioForTranscription,
+  isCancellationError,
   probeVideoMetadata,
   type FFProgress,
 } from '@/lib/ffmpeg-worker';
+import { CancelButton } from '@/components/CancelButton';
+import { useRef } from 'react';
 import { formatBytes, formatTime } from '@/lib/utils';
 
 /**
@@ -72,6 +80,20 @@ export default function DecupagemCopyPage() {
     'decupcopy:error',
     null,
   );
+  const [removeSilence, setRemoveSilence] = useToolState<boolean>(
+    'decupcopy:removeSilence',
+    true,
+  );
+  const [silenceTolerance, setSilenceTolerance] = useToolState<number>(
+    'decupcopy:silenceTolerance',
+    0.5,
+  );
+  const abortRef = useRef<AbortController | null>(null);
+
+  function handleCancel() {
+    abortRef.current?.abort();
+    cancelFFmpeg();
+  }
 
   // Probe duration ao adicionar arquivo
   useEffect(() => {
@@ -151,9 +173,11 @@ export default function DecupagemCopyPage() {
       fd.append('audio', audio, 'audio.opus');
       fd.append('copy', copyText);
 
+      abortRef.current = new AbortController();
       const res = await fetch('/api/decupagem-copy/match', {
         method: 'POST',
         body: fd,
+        signal: abortRef.current.signal,
       });
 
       const text = await res.text();
@@ -182,10 +206,54 @@ export default function DecupagemCopyPage() {
       setProgress(0.5);
 
       // Step 3: Cut + concat with FFmpeg WASM
-      const segments = json.cuts.map((c) => ({
+      let segments = json.cuts.map((c) => ({
         start: c.startMs / 1000,
         end: c.endMs / 1000,
       }));
+
+      // Step 3.1: Se removeSilence ativado, decoda audio + detecta
+      // silencios DENTRO de cada cut e divide em sub-cuts pulando os
+      // silencios. Mantem `silenceTolerance` de margem nos limites
+      // pra cortar natural (igual a ferramenta Decupagem).
+      if (removeSilence) {
+        setStage('Detectando silencios pra decupar...');
+        try {
+          const decoded = await decodeAudioRobust(file);
+          const allSilences = detectSilences(decoded);
+          const refined: typeof segments = [];
+          for (const seg of segments) {
+            const internal = allSilences.filter(
+              (s) => s.end > seg.start && s.start < seg.end,
+            );
+            if (internal.length === 0) {
+              refined.push(seg);
+              continue;
+            }
+            let cursor = seg.start;
+            for (const sil of internal) {
+              const silStart = Math.max(sil.start, seg.start) + silenceTolerance;
+              const silEnd = Math.min(sil.end, seg.end) - silenceTolerance;
+              if (silEnd > silStart) {
+                if (silStart > cursor) {
+                  refined.push({ start: cursor, end: silStart });
+                }
+                cursor = silEnd;
+              }
+            }
+            if (cursor < seg.end) {
+              refined.push({ start: cursor, end: seg.end });
+            }
+          }
+          segments = refined.filter((s) => s.end - s.start > 0.05);
+        } catch (silErr) {
+          console.warn('[silence-detect]', silErr);
+          // Falha em detectar silencios — segue com cuts originais
+        }
+      }
+
+      setStage(
+        `Cortando ${segments.length} segmento(s) e concatenando...`,
+      );
       const out = await cutVideoSegments(file, segments, {
         onStage: (s) => setStage(s),
         onProgress: (p: FFProgress) =>
@@ -198,13 +266,19 @@ export default function DecupagemCopyPage() {
       setProgress(null);
     } catch (e) {
       console.error(e);
-      setError(
-        (e as Error)?.message ?? 'Falha ao decupar pela copy.',
-      );
-      setStage(null);
+      if (isCancellationError(e) || (e as Error)?.name === 'AbortError') {
+        setStage('Cancelado pelo usuario.');
+        setError(null);
+      } else {
+        setError(
+          (e as Error)?.message ?? 'Falha ao decupar pela copy.',
+        );
+        setStage(null);
+      }
       setProgress(null);
     } finally {
       setProcessing(false);
+      abortRef.current = null;
     }
   }
 
@@ -310,20 +384,72 @@ export default function DecupagemCopyPage() {
           </div>
         </div>
 
+        <div className="rounded-[12px] border border-line bg-bg p-4">
+          <label className="flex items-start gap-3 text-sm">
+            <input
+              type="checkbox"
+              checked={removeSilence}
+              onChange={(e) => setRemoveSilence(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-lime"
+              disabled={processing}
+            />
+            <div className="flex-1">
+              <div className="text-white">
+                Remover silencios entre as falas
+              </div>
+              <div className="mt-0.5 text-[11px] text-text-muted">
+                Depois de alinhar a copy, decupa cada trecho tirando
+                pausas longas — igual a ferramenta Decupagem.
+              </div>
+            </div>
+          </label>
+          {removeSilence ? (
+            <div className="mt-4 border-t border-line pt-3">
+              <div className="flex items-center justify-between">
+                <label className="label-field !mb-0">
+                  Tolerancia de silencio
+                </label>
+                <span className="mono text-xs text-lime">
+                  {silenceTolerance.toFixed(2)}s
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0.05}
+                max={1}
+                step={0.05}
+                value={silenceTolerance}
+                onChange={(e) =>
+                  setSilenceTolerance(parseFloat(e.target.value))
+                }
+                className="mt-3"
+                disabled={processing}
+              />
+              <p className="mt-2 text-[11px] text-text-muted">
+                Margem mantida em cada borda do silencio detectado.
+                Valores baixos cortam mais agressivo, altos preservam mais
+                respiracao.
+              </p>
+            </div>
+          ) : null}
+        </div>
+
         {file && duration !== null && duration > 0 ? (
           <CostHint estimate={estimateDecupagemCopy(duration)} />
         ) : null}
 
         <div className="flex flex-wrap gap-3">
-          <button
-            onClick={process}
-            className="btn-primary"
-            disabled={
-              !file || processing || !!validation || !copyText.trim()
-            }
-          >
-            {processing ? 'Processando...' : 'Decupar pela Copy'}
-          </button>
+          {processing ? (
+            <CancelButton onClick={handleCancel} label="Cancelar processamento" />
+          ) : (
+            <button
+              onClick={process}
+              className="btn-primary"
+              disabled={!file || !!validation || !copyText.trim()}
+            >
+              Decupar pela Copy
+            </button>
+          )}
           <button
             onClick={() => {
               reset();

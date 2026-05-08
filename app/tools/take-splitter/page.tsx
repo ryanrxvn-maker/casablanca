@@ -6,11 +6,14 @@ import { FileUpload } from '@/components/FileUpload';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { downloadBlob } from '@/lib/audio-engine';
 import {
+  cancelFFmpeg,
+  isCancellationError,
   splitVideoByScenes,
   probeVideoMetadata,
   type Take,
   type FFProgress,
 } from '@/lib/ffmpeg-worker';
+import { CancelButton } from '@/components/CancelButton';
 import { buildZip } from '@/lib/zip-builder';
 import { formatBytes, formatTime } from '@/lib/utils';
 
@@ -152,11 +155,16 @@ export default function TakeSplitterPage() {
       setProgress(null);
     } catch (e) {
       console.error(e);
-      setError(
-        (e as Error)?.message ??
-          'Falha ao processar. O arquivo pode estar corrompido ou ser muito grande.',
-      );
-      setStatus(null);
+      if (isCancellationError(e)) {
+        setStatus('Cancelado pelo usuario.');
+        setError(null);
+      } else {
+        setError(
+          (e as Error)?.message ??
+            'Falha ao processar. O arquivo pode estar corrompido ou ser muito grande.',
+        );
+        setStatus(null);
+      }
       setProgress(null);
     } finally {
       setProcessing(false);
@@ -309,13 +317,17 @@ export default function TakeSplitterPage() {
         </div>
 
         <div className="flex flex-wrap gap-3">
-          <button
-            onClick={process}
-            className="btn-primary"
-            disabled={!file || processing || !!sizeError}
-          >
-            {processing ? 'Processando...' : 'Detectar e Separar'}
-          </button>
+          {processing ? (
+            <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
+          ) : (
+            <button
+              onClick={process}
+              className="btn-primary"
+              disabled={!file || !!sizeError}
+            >
+              Detectar e Separar
+            </button>
+          )}
           <button
             onClick={() => {
               reset();

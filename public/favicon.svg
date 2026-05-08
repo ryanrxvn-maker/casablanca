@@ -2,14 +2,23 @@
   <defs>
     <radialGradient id="g" cx="50%" cy="50%" r="50%">
       <stop offset="0%" stop-color="#eaff00" stop-opacity="1"/>
-      <stop offset="60%" stop-color="#b4ff00" stop-opacity="0.8"/>
+      <stop offset="60%" stop-color="#b4ff00" stop-opacity="0.85"/>
       <stop offset="100%" stop-color="#3b6000" stop-opacity="0"/>
     </radialGradient>
   </defs>
   <rect width="64" height="64" rx="12" fill="#0a0a0a"/>
-  <path d="M22 8 C21 16 20 24 22 32 C18 32 14 34 12 38 C10 42 10 48 13 52 C16 55 21 57 26 58 L38 58 C43 57 48 55 51 52 C54 48 54 42 52 38 C50 34 46 32 42 32 C44 24 43 16 42 8 C40 12 38 20 38 30 L26 30 C26 20 24 12 22 8 Z" fill="#161616" stroke="#262626" stroke-width="1"/>
-  <circle cx="25" cy="42" r="4.2" fill="url(#g)"/>
-  <circle cx="25" cy="42" r="1.5" fill="#eaff00"/>
-  <circle cx="39" cy="42" r="4.2" fill="url(#g)"/>
-  <circle cx="39" cy="42" r="1.5" fill="#eaff00"/>
+  <path d="M22 8 C21 16 20 24 22 32 C18 32 14 34 12 38 C10 42 10 48 13 52 C16 55 21 57 26 58 L38 58 C43 57 48 55 51 52 C54 48 54 42 52 38 C50 34 46 32 42 32 C44 24 43 16 42 8 C40 12 38 20 38 30 L26 30 C26 20 24 12 22 8 Z"
+        fill="rgba(10,10,10,0.85)"
+        stroke="rgba(200,255,0,0.65)"
+        stroke-width="1.6"
+        stroke-linejoin="round"/>
+  <path d="M26 52 L30 56 L34 52 L38 56 L42 52"
+        stroke="rgba(200,255,0,0.4)"
+        stroke-width="1"
+        fill="none"
+        stroke-linecap="round"/>
+  <circle cx="25" cy="42" r="4.8" fill="url(#g)"/>
+  <circle cx="25" cy="42" r="1.7" fill="#eaff00"/>
+  <circle cx="39" cy="42" r="4.8" fill="url(#g)"/>
+  <circle cx="39" cy="42" r="1.7" fill="#eaff00"/>
 </svg>

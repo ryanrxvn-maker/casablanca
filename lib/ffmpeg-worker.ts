@@ -55,6 +55,35 @@ export async function getFFmpeg(
   }
 }
 
+/**
+ * Cancela qualquer operacao em andamento. Mata o worker FFmpeg WASM,
+ * libera memoria, deixa proxima chamada de getFFmpeg reinicializar
+ * limpo. As Promises de exec() em andamento vao rejeitar com erro
+ * "terminated" — pegue isso no try/catch da tool.
+ */
+export function cancelFFmpeg(): void {
+  if (instance) {
+    try {
+      instance.terminate();
+    } catch {
+      /* ignora */
+    }
+    instance = null;
+  }
+  loadingPromise = null;
+}
+
+/**
+ * Sentinel pro caller saber que a falha foi cancelamento (nao bug).
+ */
+export const CANCELLED_ERROR = 'CANCELLED_BY_USER';
+
+export function isCancellationError(err: unknown): boolean {
+  if (!err) return false;
+  const msg = err instanceof Error ? err.message : String(err);
+  return /terminat|abort|cancel|destroyed/i.test(msg) || msg === CANCELLED_ERROR;
+}
+
 async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
   onStage?.('Baixando modulo FFmpeg...');
   const { FFmpeg } = await import('@ffmpeg/ffmpeg');
@@ -664,10 +693,19 @@ export async function splitVideoByScenes(
       const d = +dm[1] * 3600 + +dm[2] * 60 + parseFloat(dm[3]);
       if (d > durationSec) durationSec = d;
     }
-    const ptm = /pts_time:([\d.]+)/.exec(message);
-    if (ptm) {
-      const t = parseFloat(ptm[1]);
+    // scdet emite "lavfi.scd.time: NN.NNN" pra cada scene change detectado.
+    // Tambem capturamos pts_time (compat com select=gt(scene,...) caso
+    // FFmpeg fallback).
+    const sm = /lavfi\.scd\.time:\s*([\d.]+)/.exec(message);
+    if (sm) {
+      const t = parseFloat(sm[1]);
       if (!isNaN(t) && t > 0) sceneTimes.push(t);
+    } else {
+      const ptm = /pts_time:([\d.]+)/.exec(message);
+      if (ptm) {
+        const t = parseFloat(ptm[1]);
+        if (!isNaN(t) && t > 0) sceneTimes.push(t);
+      }
     }
     opts.onLog?.(message);
   };
@@ -696,10 +734,14 @@ export async function splitVideoByScenes(
     await ff.writeFile(inputName, await fetchFile(file));
 
     opts.onStage?.('Escaneando cortes de cena (1 passada)...');
-    // 1a passada: detecta cenas + escreve em null (rapido, so analise)
+    // 1a passada: usa scdet (Scene Change Detection) que e mais
+    // assertivo que select=gt(scene,N) — usa color histogram, nao
+    // so luminance diff. Threshold scdet vai de 0-100 (default 10).
+    // Mapeamos nosso 0.05-0.95 (compat com UI antiga) → 5-95.
+    const scdetThreshold = Math.round(threshold * 100);
     await ff.exec([
       '-i', inputName,
-      '-filter:v', `select='gt(scene,${threshold})',showinfo`,
+      '-filter:v', `scdet=threshold=${scdetThreshold}`,
       '-an',
       '-f', 'null',
       '-',

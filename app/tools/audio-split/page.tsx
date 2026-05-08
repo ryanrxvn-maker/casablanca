@@ -1,8 +1,10 @@
 'use client';
 
+import { useRef } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { FileUpload } from '@/components/FileUpload';
 import { AudioPlayer } from '@/components/AudioPlayer';
+import { CancelButton } from '@/components/CancelButton';
 import { useToolState } from '@/components/ToolsStateProvider';
 import {
   decodeAudioRobust,

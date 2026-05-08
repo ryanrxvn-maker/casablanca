@@ -6,11 +6,14 @@ import { BatchFileUpload } from '@/components/BatchFileUpload';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { downloadBlob } from '@/lib/audio-engine';
 import {
+  cancelFFmpeg,
+  isCancellationError,
   speedUpAudio,
   speedUpVideo,
   extractAudioAs,
   type FFProgress,
 } from '@/lib/ffmpeg-worker';
+import { CancelButton } from '@/components/CancelButton';
 import { buildZip } from '@/lib/zip-builder';
 import { formatBytes } from '@/lib/utils';
 
@@ -145,6 +148,13 @@ export default function AceleradorPage() {
           await processOne(job, i, initial.length);
         } catch (e) {
           console.error('[acelerador]', job.file.name, e);
+          if (isCancellationError(e)) {
+            updateJob(job.id, { state: 'error', error: 'Cancelado pelo usuario.' });
+            initial.slice(i + 1).forEach((rest) => {
+              updateJob(rest.id, { state: 'error', error: 'Cancelado pelo usuario.' });
+            });
+            break;
+          }
           updateJob(job.id, {
             state: 'error',
             error: (e as Error).message ?? 'Falha.',
@@ -256,13 +266,17 @@ export default function AceleradorPage() {
         </div>
 
         <div className="flex flex-wrap gap-3">
-          <button
-            onClick={processAll}
-            className="btn-primary"
-            disabled={files.length === 0 || processing}
-          >
-            {processing ? 'Processando...' : `Acelerar ${files.length || ''}`.trim()}
-          </button>
+          {processing ? (
+            <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
+          ) : (
+            <button
+              onClick={processAll}
+              className="btn-primary"
+              disabled={files.length === 0}
+            >
+              {`Acelerar ${files.length || ''}`.trim()}
+            </button>
+          )}
           <button
             onClick={() => setFilesSafe([])}
             className="btn-secondary"
