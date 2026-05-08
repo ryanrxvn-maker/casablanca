@@ -84,12 +84,17 @@ export async function updateSession(request: NextRequest) {
 
   // ===== Validacao is_active + is_admin pra rotas protegidas =====
   if (user && (pathname.startsWith('/tools') || pathname.startsWith('/configuracoes') || pathname.startsWith('/admin'))) {
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('is_active, is_admin')
-      .eq('id', user.id)
-      .maybeSingle();
+const adminClient = createServerClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,
+  { cookies: { getAll: () => [], setAll: () => {} } }
+);
 
+const { data: profile } = await adminClient
+  .from('profiles')
+  .select('is_active, is_admin')
+  .eq('id', user.id)
+  .maybeSingle();
     const isActive = profile?.is_active === true;
     const isAdmin = profile?.is_admin === true;
 
