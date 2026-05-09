@@ -742,250 +742,374 @@ async function fetchWithTimeout(url, opts, timeoutMs = 6000) {
  * Job principal. Estrategia hibrida: usa API interna do HeyGen pra
  * generation (mais robusto que click-fu) com cookies de sessao.
  */
+/**
+ * runJob - UI AUTOMATION na tela Quick Create do HeyGen (/avatar).
+ *
+ * Fluxo:
+ *  1. Navega pra https://app.heygen.com/avatar (Quick Create)
+ *  2. Garante que tab "Script to video" esta ativa
+ *  3. Seleciona motor (Avatar III/IV/V) clicando no toggle do topo
+ *  4. Abre dialog "Choose an Avatar", busca pelo groupName, clica no avatar
+ *     e seleciona o look correto (se grupo com >1 looks)
+ *  5. Cola o script no textarea (com React onChange trigger)
+ *  6. Clica botao Generate (seta no canto inferior direito)
+ *  7. Aguarda HeyGen processar e captura URL do MP4 final
+ */
 async function runJob(requestId, payload) {
   if (currentJob) {
     reportError(
       requestId,
-      'Outra geracao em andamento na mesma aba — aguarde finalizar.',
+      'Outra geracao em andamento na mesma aba - aguarde finalizar.',
     );
     return;
   }
   currentJob = requestId;
 
   try {
-    const {
-      copy,
-      audioBase64,
-      audioFilename,
-      avatarId,
-      voiceId,
-      motor,
-      partLabel,
-    } = payload;
+    const { copy, avatarId, motor, partLabel } = payload;
 
-    if (!avatarId) {
-      throw new Error('payload invalido: avatarId obrigatorio.');
-    }
-    if (!copy && !audioBase64) {
-      throw new Error('payload invalido: copy OU audioBase64 obrigatorio.');
-    }
+    if (!avatarId) throw new Error('payload invalido: avatarId obrigatorio.');
+    if (!copy) throw new Error('payload invalido: copy obrigatoria.');
 
-    reportProgress(requestId, `Preparando ${partLabel ?? ''}...`);
+    reportProgress(requestId, `Preparando ${partLabel ?? 'video'} via UI...`);
 
-    const headers = getInternalAuthHeaders();
-
-    // 1) Se modo audio: faz upload do audio pro HeyGen primeiro
-    let voiceBlock;
-    if (audioBase64) {
-      reportProgress(requestId, 'Uploadando audio pro HeyGen...');
-      const audioUrl = await uploadAudioToHeyGen(
-        audioBase64,
-        audioFilename ?? `${partLabel ?? 'audio'}.mp3`,
-        headers,
-      );
-      voiceBlock = {
-        type: 'audio',
-        audio_url: audioUrl,
-      };
-    } else {
-      voiceBlock = voiceId
-        ? { type: 'text', input_text: copy, voice_id: voiceId }
-        : { type: 'text', input_text: copy };
+    // 1) Navega pra /avatar (Quick Create) se nao estiver
+    if (!location.pathname.startsWith('/avatar') &&
+        !location.pathname.startsWith('/create')) {
+      console.log('[DARKO LAB UI] navegando pra /avatar');
+      location.href = 'https://app.heygen.com/avatar';
+      // Aguarda load
+      await sleep(3000);
     }
 
-    // avatar_style "normal" funciona pra talking_photos e studio avatars.
-    // O "motor" (III/IV/V) e' propriedade do avatar_id em si — nao precisa
-    // mandar separado. Se o avatar foi gravado como Avatar V, ele JA e' V.
-    const generateBody = {
-      video_inputs: [
-        {
-          character: {
-            type: 'avatar',
-            avatar_id: avatarId,
-            avatar_style: 'normal',
-          },
-          voice: voiceBlock,
-          background: { type: 'color', value: '#0a0a0a' },
-        },
-      ],
-      dimension: { width: 1080, height: 1920 },
-      title: partLabel
-        ? `DARKO LAB ${partLabel} (motor ${motor})`
-        : `DARKO LAB Auto (motor ${motor})`,
-    };
-    void motor; // motor e' label/info — nao influencia o payload diretamente
+    // 2) Aguarda textarea de script aparecer (UI carregada)
+    reportProgress(requestId, 'Aguardando UI HeyGen carregar...');
+    const textarea = await waitFor(
+      () => findScriptTextarea(),
+      20000,
+      300,
+    );
+    if (!textarea) throw new Error('Textarea de script nao apareceu em 20s.');
+    console.log('[DARKO LAB UI] textarea de script encontrado');
 
-    reportProgress(requestId, 'Enviando job pro HeyGen...');
-
-    // Padrao .private (api2.heygen.com) - mesma familia dos endpoints que ja
-    // confirmamos via cookies (avatar_group.private.list etc). Endpoints
-    // PUBLICOS (api.heygen.com/v2/video/generate) exigem Bearer API key e
-    // sempre dao 401 em cookie auth — deixados no fim como fallback ultimo.
-    // SIMPLE REQUEST: SEM Authorization/X-Requested-With pra evitar CORS
-    // preflight bloqueado (cookie autentica via credentials: 'include').
-    const simpleHeaders = { 'Content-Type': 'application/json' };
-    // Detecta se eh talking_photo (avatar v3 photo) — HeyGen usa endpoint
-    // diferente pra esse tipo. Avatares com IDs de 32 hex chars geralmente
-    // sao talking_photos.
-    const isPhotoAvatar = /^[a-f0-9]{32}$/i.test(avatarId);
-    const generateEndpoints = isPhotoAvatar ? [
-      // talking_photo specific endpoints (avatares photo/v3)
-      'https://api2.heygen.com/v1/talking_photo_video.private.generate',
-      'https://api2.heygen.com/v2/talking_photo_video.private.generate',
-      'https://api2.heygen.com/v1/talking_photo.private.generate',
-      'https://api2.heygen.com/v1/photo_video.private.generate',
-      'https://api2.heygen.com/v3/video.generate',
-      'https://api2.heygen.com/v3/video/generate',
-      'https://api2.heygen.com/v1/avatar_video.private.generate',
-      'https://api2.heygen.com/v2/avatar_video.private.generate',
-      'https://app.heygen.com/api/v2/video/generate',
-      'https://app.heygen.com/api/v3/video/generate',
-      'https://app.heygen.com/api/v1/video/generate',
-      'https://api2.heygen.com/v2/video.generate', // exige video_id (draft step)
-    ] : [
-      'https://api2.heygen.com/v1/avatar_video.private.generate',
-      'https://api2.heygen.com/v2/avatar_video.private.generate',
-      'https://api2.heygen.com/v3/video.generate',
-      'https://app.heygen.com/api/v2/video/generate',
-      'https://app.heygen.com/api/v3/video/generate',
-      'https://api2.heygen.com/v2/video.generate',
-    ];
-
-    let videoId = null;
-    const attempts = [];
-
-    for (const url of generateEndpoints) {
-      try {
-        const res = await fetch(url, {
-          method: 'POST',
-          credentials: 'include',
-          headers: simpleHeaders,
-          body: JSON.stringify(generateBody),
-        });
-        const bodyText = await res.text().catch(() => '');
-        // Se eh 200 ou 400 (endpoint existe), loga body INTEIRO pra debug
-        const snippet = (res.status === 200 || res.status === 400)
-          ? bodyText.slice(0, 1500)
-          : bodyText.slice(0, 200);
-        console.log(`[DARKO LAB generate] ${url} -> ${res.status} (${bodyText.length} bytes): ${snippet}`);
-        attempts.push(`${url} ${res.status}`);
-        if (res.status === 404) continue; // endpoint nao existe
-        if (res.status === 401 || res.status === 403) continue; // sem auth nesse, tenta proximo
-        if (!res.ok) continue;
-        let json = null;
-        try { json = JSON.parse(bodyText); } catch {}
-        videoId =
-          json?.data?.video_id ??
-          json?.data?.id ??
-          json?.video_id ??
-          json?.id ??
-          null;
-        if (videoId) {
-          console.log(`[DARKO LAB generate] SUCESSO em ${url}, video_id=${videoId}`);
-          break;
-        }
-        console.warn(`[DARKO LAB generate] ${url} 200 OK mas sem video_id no body`);
-      } catch (e) {
-        console.warn(`[DARKO LAB generate] ${url} THREW: ${e.message ?? e}`);
-        attempts.push(`${url} THREW`);
+    // 3) Seleciona motor (Avatar III / IV / V) - clica no botao do topo
+    if (motor) {
+      reportProgress(requestId, `Selecionando motor Avatar ${motor}...`);
+      const motorBtn = findMotorButton(motor);
+      if (motorBtn) {
+        console.log('[DARKO LAB UI] clicando motor', motor);
+        clickElement(motorBtn);
+        await sleep(800);
+      } else {
+        console.warn('[DARKO LAB UI] motor button Avatar', motor, 'nao achado - seguindo com motor atual');
       }
     }
 
-    if (!videoId) {
-      const summary = attempts.join(' | ');
-      throw new Error(
-        `HeyGen rejeitou a request. Todos endpoints testados: ${summary}. ` +
-        `Pra debug: na aba app.heygen.com, abra F12 -> Network, gere 1 video manualmente, ` +
-        `copie a URL completa do POST de generate e me mande.`
-      );
-    }
+    // 4) Seleciona avatar via dialog "Choose an Avatar"
+    reportProgress(requestId, 'Selecionando avatar...');
+    await selectAvatarInUI(avatarId);
 
-    if (!videoId) {
-      throw new Error(
-        `HeyGen rejeitou a request — login expirou ou endpoint mudou. Faca login em https://app.heygen.com e tente de novo. Detalhe: ${lastErrorDetail}`,
-      );
-    }
+    // 5) Cola script no textarea com React onChange trigger
+    reportProgress(requestId, 'Colando script...');
+    await pasteScriptIntoTextarea(textarea, copy);
+    await sleep(500);
 
-    // 2) Polar status
-    reportProgress(requestId, 'HeyGen processando avatar...', 0);
+    // 6) Clica Generate (seta no canto inferior direito)
+    reportProgress(requestId, 'Clicando Generate...');
+    const generateBtn = await waitFor(() => findGenerateButton(), 8000, 300);
+    if (!generateBtn) throw new Error('Botao Generate nao encontrado.');
+    console.log('[DARKO LAB UI] clicando Generate');
+    clickElement(generateBtn);
 
-    const pollDeadline = Date.now() + 15 * 60 * 1000; // 15min max
-    let lastPercent = 0;
+    // 7) Aguarda video processar - captura via Network XHR interception
+    //    OU via mudanca de URL pra /video/<id>
+    reportProgress(requestId, 'HeyGen processando...');
+    const videoUrl = await waitForVideoCompletion(requestId);
+    if (!videoUrl) throw new Error('Timeout aguardando video pronto.');
 
-    const statusEndpoints = [
-      `https://api2.heygen.com/v1/video_status.get?video_id=${encodeURIComponent(videoId)}`,
-      `https://api2.heygen.com/v2/video.status?video_id=${encodeURIComponent(videoId)}`,
-      `https://app.heygen.com/api/v1/video_status.get?video_id=${encodeURIComponent(videoId)}`,
-      `https://api.heygen.com/v1/video_status.get?video_id=${encodeURIComponent(videoId)}`,
-    ];
-
-    while (Date.now() < pollDeadline) {
-      if (currentJob !== requestId) {
-        throw new Error('Job foi cancelado.');
-      }
-
-      let data = null;
-      for (const url of statusEndpoints) {
-        try {
-          const r = await fetch(url, {
-            method: 'GET',
-            credentials: 'include',
-            headers,
-          });
-          if (r.ok) {
-            const j = await r.json().catch(() => null);
-            data = j?.data ?? j ?? null;
-            if (data) break;
-          }
-        } catch {
-          /* tenta proximo */
-        }
-      }
-
-      if (!data) {
-        await sleep(5000);
-        continue;
-      }
-
-      const status = String(data.status ?? '');
-      const videoUrl = data.video_url ?? data.url ?? '';
-
-      if (status === 'completed' && videoUrl) {
-        reportProgress(requestId, 'Concluido!', 1);
-        reportResult(requestId, videoUrl);
-        currentJob = null;
-        return;
-      }
-
-      if (status === 'failed') {
-        throw new Error(
-          data?.error?.message ?? data?.error ?? 'HeyGen retornou status failed.',
-        );
-      }
-
-      lastPercent = Math.min(0.9, lastPercent + 0.05);
-      reportProgress(
-        requestId,
-        `HeyGen: ${status || 'processando'}...`,
-        lastPercent,
-      );
-      await sleep(5000);
-    }
-
-    throw new Error('Timeout — HeyGen demorou mais de 15min.');
+    reportProgress(requestId, 'Video pronto!', 100);
+    reportResult(requestId, videoUrl);
   } catch (e) {
+    console.error('[DARKO LAB UI] runJob FAIL:', e);
     reportError(requestId, e?.message ?? String(e));
   } finally {
-    if (currentJob === requestId) currentJob = null;
+    currentJob = null;
   }
 }
 
+/* ============= UI Helpers ============= */
+
+function findScriptTextarea() {
+  // Heygen usa textarea com placeholder "Type or paste your script here..."
+  const selectors = [
+    'textarea[placeholder*="script" i]',
+    'textarea[placeholder*="paste" i]',
+    'textarea[placeholder*="type" i]',
+    'div[contenteditable="true"][role="textbox"]',
+  ];
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (el && el.offsetParent !== null) return el;
+  }
+  return null;
+}
+
+function findMotorButton(motor) {
+  // Procura botoes que contenham texto "Avatar III", "Avatar IV", "Avatar V"
+  const target = `Avatar ${motor}`;
+  const buttons = Array.from(document.querySelectorAll('button, [role="button"], [role="tab"]'));
+  return buttons.find((b) => {
+    const t = (b.textContent || '').trim();
+    return t === target || t.startsWith(target + ' ') || t === target.toUpperCase();
+  });
+}
+
+function findGenerateButton() {
+  // Botao de generate no canto inferior direito (seta)
+  // HeyGen usa varios atributos diferentes ao longo do tempo.
+  const candidates = Array.from(document.querySelectorAll('button'));
+  // Por aria-label
+  for (const b of candidates) {
+    const al = (b.getAttribute('aria-label') || '').toLowerCase();
+    if (al.includes('generate') || al.includes('submit') || al.includes('send')) {
+      if (!b.disabled && b.offsetParent !== null) return b;
+    }
+  }
+  // Por texto
+  for (const b of candidates) {
+    const t = (b.textContent || '').trim().toLowerCase();
+    if (t === 'generate' || t === 'gerar' || t === 'submit') {
+      if (!b.disabled && b.offsetParent !== null) return b;
+    }
+  }
+  // Por SVG arrow up icon (botao circular comum no HeyGen)
+  for (const b of candidates) {
+    if (b.disabled || b.offsetParent === null) continue;
+    const svg = b.querySelector('svg');
+    if (!svg) continue;
+    const html = svg.innerHTML.toLowerCase();
+    if (html.includes('arrow') || html.includes('m12') || html.includes('m4 12')) {
+      // botao com SVG de arrow
+      const rect = b.getBoundingClientRect();
+      // canto inferior direito
+      if (rect.right > window.innerWidth * 0.7 && rect.bottom > window.innerHeight * 0.5) {
+        return b;
+      }
+    }
+  }
+  return null;
+}
+
+async function selectAvatarInUI(avatarId) {
+  // Procura algum botao/area que abra o dialog "Choose an Avatar"
+  // ou um seletor de avatar no painel direito.
+  // A estrategia mais simples: clicar no preview/thumb do avatar atual,
+  // que abre o dialog.
+  const triggers = [
+    'button[aria-label*="avatar" i]',
+    'button[aria-label*="choose" i]',
+    'button[aria-label*="customize" i]',
+    '[data-testid*="avatar" i]',
+  ];
+  let trigger = null;
+  for (const sel of triggers) {
+    const candidates = document.querySelectorAll(sel);
+    for (const el of candidates) {
+      if (el.offsetParent !== null && !el.disabled) {
+        trigger = el;
+        break;
+      }
+    }
+    if (trigger) break;
+  }
+  // Fallback: procura imagem/avatar grande no lado direito
+  if (!trigger) {
+    const imgs = Array.from(document.querySelectorAll('img'));
+    for (const img of imgs) {
+      const rect = img.getBoundingClientRect();
+      // Imagem grande no lado direito
+      if (
+        rect.width > 100 &&
+        rect.height > 100 &&
+        rect.right > window.innerWidth * 0.5
+      ) {
+        // Sobe ate achar um button/clickable
+        let p = img.parentElement;
+        while (p && p !== document.body) {
+          if (p.tagName === 'BUTTON' || p.getAttribute('role') === 'button') {
+            trigger = p;
+            break;
+          }
+          p = p.parentElement;
+        }
+        if (trigger) break;
+      }
+    }
+  }
+
+  if (!trigger) {
+    console.warn('[DARKO LAB UI] gatilho do dialog Choose an Avatar nao achado, seguindo com avatar atual');
+    return;
+  }
+
+  console.log('[DARKO LAB UI] abrindo dialog Choose an Avatar');
+  clickElement(trigger);
+  await sleep(1200);
+
+  // Procura o avatar pelo ID no dialog. Cada avatar geralmente eh um div/button
+  // com a imagem dentro. O HeyGen renderiza o look_id em algum data-* ou no key.
+  // Estrategia mais simples: clicar no avatar por POSICAO usando o ID na URL da img.
+  const avatarCards = document.querySelectorAll('[role="dialog"] button, [role="dialog"] [role="button"], [role="dialog"] img');
+  for (const card of avatarCards) {
+    let foundId = false;
+    // Verifica src de img dentro do card
+    const imgs = card.tagName === 'IMG' ? [card] : Array.from(card.querySelectorAll('img'));
+    for (const img of imgs) {
+      if (img.src && img.src.includes(avatarId)) {
+        foundId = true;
+        break;
+      }
+    }
+    if (foundId) {
+      // Sobe ate achar clickable
+      let target = card;
+      while (target && target.tagName !== 'BUTTON' && target.getAttribute('role') !== 'button') {
+        target = target.parentElement;
+        if (!target || target === document.body) break;
+      }
+      if (target) {
+        console.log('[DARKO LAB UI] avatar encontrado, clicando');
+        clickElement(target);
+        await sleep(1000);
+
+        // Pode aparecer um sub-dialog com "Use Avatar" - clicar
+        const useBtn = Array.from(document.querySelectorAll('button'))
+          .find((b) => /use\s*avatar/i.test(b.textContent || ''));
+        if (useBtn && useBtn.offsetParent !== null) {
+          console.log('[DARKO LAB UI] clicando "Use Avatar"');
+          clickElement(useBtn);
+          await sleep(800);
+        }
+        return;
+      }
+    }
+  }
+
+  console.warn('[DARKO LAB UI] avatar', avatarId, 'nao achado no dialog. Fechando dialog e usando avatar atual.');
+  // Fecha o dialog (Esc ou click fora)
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  await sleep(500);
+}
+
+async function pasteScriptIntoTextarea(textarea, text) {
+  textarea.focus();
+  // Limpa primeiro
+  if (textarea.tagName === 'TEXTAREA') {
+    const setter = Object.getOwnPropertyDescriptor(
+      window.HTMLTextAreaElement.prototype,
+      'value',
+    ).set;
+    setter.call(textarea, '');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(100);
+    setter.call(textarea, text);
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    textarea.dispatchEvent(new Event('change', { bubbles: true }));
+  } else if (textarea.isContentEditable) {
+    textarea.innerHTML = '';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(100);
+    document.execCommand('insertText', false, text);
+  }
+}
+
+function clickElement(el) {
+  if (!el) return;
+  // Dispara mouse events completos (alguns sites precisam)
+  const rect = el.getBoundingClientRect();
+  const opts = {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    clientX: rect.left + rect.width / 2,
+    clientY: rect.top + rect.height / 2,
+  };
+  el.dispatchEvent(new MouseEvent('mouseover', opts));
+  el.dispatchEvent(new MouseEvent('mousedown', opts));
+  el.dispatchEvent(new MouseEvent('mouseup', opts));
+  el.dispatchEvent(new MouseEvent('click', opts));
+  // Fallback nativo
+  if (typeof el.click === 'function') el.click();
+}
+
 /**
- * Upload de audio pro HeyGen. Retorna URL hospedada nos servidores deles
- * pra usar no campo voice.audio_url.
+ * Apos clicar Generate, o HeyGen redireciona pra uma URL com video_id ou
+ * mostra o video numa tela de status. A gente intercepta:
+ *  a) mudanca de URL pra /video/<id> ou /share/<id>
+ *  b) elemento <video> com src .mp4 no DOM
+ *  c) request XHR pra video_status que retorne CDN URL
  *
- * Tenta multiplos endpoints (HeyGen as vezes muda) — usa o que responder OK.
+ * Polar tudo em paralelo a cada 5s ate 15min.
  */
+async function waitForVideoCompletion(requestId) {
+  const deadline = Date.now() + 15 * 60 * 1000;
+  let lastUrl = location.href;
+  let videoId = null;
+
+  while (Date.now() < deadline) {
+    if (currentJob !== requestId) throw new Error('Job foi cancelado.');
+
+    // a) Detecta video_id na URL
+    if (location.href !== lastUrl) {
+      lastUrl = location.href;
+      const m = location.href.match(/\/(?:video|share)\/([a-f0-9]{20,})/i);
+      if (m) {
+        videoId = m[1];
+        console.log('[DARKO LAB UI] video_id detectado na URL:', videoId);
+      }
+    }
+
+    // b) Procura <video> com src mp4 no DOM
+    const videos = document.querySelectorAll('video');
+    for (const v of videos) {
+      const src = v.src || v.currentSrc;
+      if (src && /\.mp4(\?|$)/i.test(src)) {
+        console.log('[DARKO LAB UI] <video> com mp4 detectado:', src);
+        return src;
+      }
+    }
+
+    // c) Se temos video_id, pola endpoint de status pra pegar URL CDN
+    if (videoId) {
+      const url = `https://api2.heygen.com/v1/video_status.get?video_id=${encodeURIComponent(videoId)}`;
+      try {
+        const r = await fetch(url, { method: 'GET', credentials: 'include' });
+        if (r.ok) {
+          const j = await r.json().catch(() => null);
+          const data = j?.data ?? j;
+          const status = String(data?.status ?? '').toLowerCase();
+          const videoUrl = data?.video_url ?? data?.video_url_caption ?? null;
+          if (data?.percent != null) {
+            reportProgress(requestId, `HeyGen processando... ${data.percent}%`, data.percent);
+          }
+          if (status === 'completed' && videoUrl) {
+            console.log('[DARKO LAB UI] video completed via API status, url:', videoUrl);
+            return videoUrl;
+          }
+          if (status === 'failed' || status === 'error') {
+            throw new Error('HeyGen reportou status failed.');
+          }
+        }
+      } catch (e) {
+        // ignora, continua poll
+      }
+    }
+
+    await sleep(5000);
+  }
+  return null;
+}
+
 async function uploadAudioToHeyGen(audioBase64, filename, headers) {
   // Decodifica base64 pra binary
   const binary = atob(audioBase64);
