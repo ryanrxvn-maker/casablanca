@@ -20,6 +20,16 @@
  *  9. Retornar video_url
  */
 
+// GUARD: previne injecao dupla (manifest content_scripts + auto-inject via
+// chrome.scripting.executeScript). Quando ha 2 listeners ambos retornando
+// "true" pra async response, Chrome fecha o canal com:
+//   "A listener indicated an asynchronous response by returning true, but
+//    the message channel closed before a response was received"
+if (window.__darkolab_heygen_loaded__) {
+  console.log('[DARKO LAB] content script JA carregado — skip duplicate inject');
+} else {
+  window.__darkolab_heygen_loaded__ = true;
+
 const SELECTORS = {
   scriptTextarea:
     'textarea[placeholder*="script" i], textarea[placeholder*="texto" i], div[contenteditable="true"]',
@@ -977,3 +987,5 @@ async function uploadAudioToHeyGen(audioBase64, filename, headers) {
 }
 
 console.log('[DARKO LAB HeyGen Content] online');
+
+} // fim do guard __darkolab_heygen_loaded__

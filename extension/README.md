@@ -55,6 +55,7 @@ A extensao:
 
 ## Versao
 
+2.6.1 — guard contra injecao dupla do heygen-content.js (window.__darkolab_heygen_loaded__). Quando o content script era injetado 2x (manifest + auto-inject), os 2 listeners retornavam true e o canal fechava com "channel closed before a response was received" mesmo apos sendResponse ter sido chamado pelo primeiro.
 2.6.0 — hierarquia AVATAR (grupo) -> LOOKS espelhada da UI HeyGen "Choose an Avatar". Lista mostra os AVATARES (Emma, Johan, etc) com nome HeyGen exato + badge "N looks". Click abre drawer com todos os looks daquele avatar (Radiant Redhead, Photo Avatar, etc). Selecao retorna o look.id real usado pra geracao.
 2.5.1 — restore truncated background.js + bridge.js (service worker registration failed).
 2.5.0 — FIX CRITICO: campo `source` do payload (URL do endpoint HeyGen) sobrescrevia `source: 'darkolab-ext'` no envelope do postMessage. Page filtrava a msg fora silenciosamente -> timeout 90s. Fix em 2 lugares: (1) background renomeou `source` -> `apiSource` no payload; (2) bridge sendToPage agora poe `source: 'darkolab-ext'` DEPOIS do spread (defesa em profundidade pra qualquer payload futuro que tenha campo `source`).
