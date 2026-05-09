@@ -518,14 +518,14 @@ function dpAssignWithSkip(
 
   // dp[i][j] = melhor score acumulado se phrase i usa cand j (j=-1 significa skip)
   // Compactamos j=-1 como cand[length] (ultimo+1)
-  // Type: dp[i] = Array de length cands[i].length+1
+  type PrevRef = { phraseIdx: number; candIdx: number };
   const dp: number[][] = [];
-  const prev: Array<{ phraseIdx: number; candIdx: number }>[][] = [];
+  const prev: (PrevRef | null)[][] = [];
 
   for (let i = 0; i < N; i++) {
     const cands = candidatesPerPhrase[i];
     dp.push(new Array(cands.length + 1).fill(-Infinity));
-    prev.push(new Array(cands.length + 1).fill(null));
+    prev.push(new Array<PrevRef | null>(cands.length + 1).fill(null));
   }
 
   // Base case: phrase 0
@@ -542,7 +542,7 @@ function dpAssignWithSkip(
 
     for (let j = 0; j <= cur.length; j++) {
       let bestScore = -Infinity;
-      let bestPrev: { phraseIdx: number; candIdx: number } | null = null;
+      let bestPrev: PrevRef | null = null;
 
       // Procura prev nao-skipped que satisfaz cronologia
       // Permite pular ate K phrases anteriores
