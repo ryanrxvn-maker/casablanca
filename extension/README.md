@@ -55,6 +55,7 @@ A extensao:
 
 ## Versao
 
+2.5.0 — FIX CRITICO: campo `source` do payload (URL do endpoint HeyGen) sobrescrevia `source: 'darkolab-ext'` no envelope do postMessage. Page filtrava a msg fora silenciosamente -> timeout 90s. Fix em 2 lugares: (1) background renomeou `source` -> `apiSource` no payload; (2) bridge sendToPage agora poe `source: 'darkolab-ext'` DEPOIS do spread (defesa em profundidade pra qualquer payload futuro que tenha campo `source`).
 2.4.0 — diagnostic full-chain logs (page <-> bridge <-> background <-> heygen-content) pra rastrear onde a mensagem morre + page timeout 30s -> 90s.
 2.3.0 — looks em PARALELO (Promise.all) + skip v2 (sempre 404). Tempo de ~3min pra ~5s. 100 avatares carregam em segundos.
 2.2.3 — desembrulha wrapper { look_type, look } (HeyGen aninha o objeto real em .look) + log SAMPLE look REAL.
@@ -69,9 +70,4 @@ A extensao:
 1.8.0 — fetch com timeout 6s + auth headers expandidos + log diagnostico + erros detalhados.
 1.7.0 — endpoints REAIS HeyGen confirmados (avatar_group.private.list + avatar_look.private.list).
 1.6.0 — listMyVoices (mesmo padrao avatares), avatar_style fixo "normal", logging endpoint usado.
-1.5.0 — fix syntax error (headers duplicado) + listMyAvatars (espelho fiel da biblioteca da conta).
-1.4.0 — URL HeyGen corrigida (/avatar em vez de /create-video) + tab navigate fallback.
-1.3.0 — manifest permissivo (qualquer *.vercel.app + localhost).
-1.2.0 — botao "Testar conexao HeyGen" + endpoints internos priorizados.
-1.1.0 — modo audio (lipsync via upload) + texto-pra-video.
-1.0.0 — primeira release (apenas modo texto).
+1.5.0 — fix 

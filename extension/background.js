@@ -160,11 +160,14 @@ async function handleListAvatars(requestId, bridgeTabId) {
     });
     console.log('[DARKO LAB BG] got resp from heygen content script: ok=', resp?.ok, 'avatars=', resp?.avatars?.length, 'err=', resp?.error);
     console.log('[DARKO LAB BG] >>> calling reportToPage with HG_AVATARS_RESULT');
+    // OBS: usamos `apiSource` (nao `source`) pra NAO conflitar com o campo
+    // `source: 'darkolab-ext'` que o bridge.js spreada na postMessage final.
+    // Bug v2.4.0 e anteriores: source do payload sobrescrevia source do envelope.
     reportToPage(bridgeTabId, requestId, 'HG_AVATARS_RESULT', {
       ok: !!resp?.ok,
       avatars: resp?.avatars ?? [],
       error: resp?.error ?? null,
-      source: resp?.source ?? null,
+      apiSource: resp?.source ?? null,
     });
   } catch (e) {
     console.error('[DARKO LAB BG] !!! sendMessage to heygen tab THREW:', e?.message ?? e);
@@ -309,12 +312,4 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   for (const [requestId, job] of activeJobs.entries()) {
     if (job.tabId === tabId) {
       activeJobs.delete(requestId);
-      reportToPage(job.bridgeTabId, requestId, 'HG_ERROR', {
-        error:
-          'Aba HeyGen foi fechada antes da geracao terminar. Reabra app.heygen.com e tente de novo.',
-      });
-    }
-  }
-});
-
-console.log('[DARKO LAB Background] service worker iniciado');
+      reportToPage(job.bri

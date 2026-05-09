@@ -20,7 +20,10 @@
   const VERSION = chrome.runtime.getManifest().version;
 
   function sendToPage(msg) {
-    window.postMessage({ source: 'darkolab-ext', ...msg }, '*');
+    // IMPORTANTE: `source: 'darkolab-ext'` precisa vir DEPOIS do spread,
+    // senao um campo `source` dentro do msg (vindo de payloads do background)
+    // sobrescreve o source do envelope e a page nao reconhece a mensagem.
+    window.postMessage({ ...msg, source: 'darkolab-ext' }, '*');
   }
 
   // Listener pra mensagens da pagina
@@ -110,10 +113,3 @@
         type: msg.type,
         requestId: msg.requestId,
         ...msg.payload,
-      });
-      console.log('[DARKO LAB Bridge] --> postMessage darkolab-ext type=', msg.type, 'reqId=', msg.requestId);
-    }
-  });
-
-  console.log('[DARKO LAB Bridge] online v' + VERSION + ' on ' + window.location.host);
-})();
