@@ -41,9 +41,157 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch((e) =>
         sendResponse({ ok: false, detail: e?.message ?? String(e) }),
       );
-    return true; // mantem o callback async
+    return true;
+  }
+  if (msg && msg.type === 'HG_LIST_AVATARS') {
+    listMyAvatars()
+      .then((res) => sendResponse(res))
+      .catch((e) =>
+        sendResponse({ ok: false, error: e?.message ?? String(e), avatars: [] }),
+      );
+    return true;
   }
 });
+
+/**
+ * Lista os avatares EXATAMENTE como aparecem na biblioteca da conta do user
+ * em https://app.heygen.com/avatars.
+ *
+ * Usa o mesmo endpoint INTERNO que o site HeyGen usa pra renderizar a tela
+ * "Choose an Avatar" / "My Avatars". Cookies da sessao logada autenticam.
+ *
+ * Tenta varios endpoints potenciais — HeyGen muda nomes ocasionalmente.
+ * Retorna a lista crua + metadados (thumb, name, version) pra exibicao
+ * fiel no DARKO LAB.
+ */
+async function listMyAvatars() {
+  const headers = getInternalAuthHeaders();
+
+  const endpoints = [
+    'https://app.heygen.com/api/v1/avatars/personalized.list',
+    'https://app.heygen.com/api/v2/avatar_group.list',
+    'https://app.heygen.com/api/v1/avatar.list',
+    'https://app.heygen.com/api/v2/avatars',
+    'https://api.heygen.com/v2/avatars',
+  ];
+
+  let lastError = '';
+  for (const url of endpoints) {
+    try {
+      const r = await fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+        headers,
+      });
+      if (r.status === 401 || r.status === 403) {
+        return {
+          ok: false,
+          error: 'Sessao HeyGen expirada — faca login novamente.',
+          avatars: [],
+        };
+      }
+      if (!r.ok) {
+        lastError = `${url} → ${r.status}`;
+        continue;
+      }
+      const json = await r.json().catch(() => null);
+      const items = parseAvatarsResponse(json);
+      if (items.length > 0) {
+        return { ok: true, avatars: items, source: url };
+      }
+      lastError = `${url} retornou vazio`;
+    } catch (e) {
+      lastError = `${url}: ${e.message ?? e}`;
+    }
+  }
+
+  return {
+    ok: false,
+    error: `Nenhum endpoint retornou avatares. ${lastError}`,
+    avatars: [],
+  };
+}
+
+/**
+ * Parser robusto pros varios formatos de resposta do HeyGen.
+ * Cada endpoint retorna um shape diferente.
+ */
+function parseAvatarsResponse(json) {
+  if (!json) return [];
+  const items = [];
+
+  // Formato v2/avatars: { data: { avatars: [...], talking_photos: [...] } }
+  if (json.data?.avatars && Array.isArray(json.data.avatars)) {
+    for (const a of json.data.avatars) {
+      items.push({
+        id: a.avatar_id ?? a.id,
+        name: a.avatar_name ?? a.name ?? '(sem nome)',
+        thumb:
+          a.preview_image_url ?? a.normal_preview ?? a.thumbnail_url ?? null,
+        videoPreview: a.preview_video_url ?? null,
+        type: 'avatar',
+        version: a.is_v3 ? 'V' : a.is_v2 ? 'IV' : 'III',
+      });
+    }
+  }
+  if (json.data?.talking_photos && Array.isArray(json.data.talking_photos)) {
+    for (const p of json.data.talking_photos) {
+      items.push({
+        id: p.talking_photo_id ?? p.id,
+        name: p.talking_photo_name ?? p.name ?? '(sem nome)',
+        thumb: p.preview_image_url ?? p.thumbnail_url ?? null,
+        videoPreview: null,
+        type: 'photo',
+        version: 'III',
+      });
+    }
+  }
+
+  // Formato avatar_group: { data: { avatar_group_list: [{ avatars: [...] }] } }
+  if (json.data?.avatar_group_list) {
+    for (const g of json.data.avatar_group_list) {
+      if (Array.isArray(g.avatars)) {
+        for (const a of g.avatars) {
+          items.push({
+            id: a.avatar_id ?? a.id,
+            name: a.avatar_name ?? a.name ?? g.name ?? '(sem nome)',
+            thumb:
+              a.preview_image_url ??
+              a.thumbnail_url ??
+              g.preview_image_url ??
+              null,
+            videoPreview: a.preview_video_url ?? null,
+            type: 'avatar',
+            version: a.is_v3 ? 'V' : a.is_v2 ? 'IV' : 'III',
+          });
+        }
+      }
+    }
+  }
+
+  // Formato personalized.list: { data: [{...}] }
+  if (Array.isArray(json.data)) {
+    for (const a of json.data) {
+      items.push({
+        id: a.avatar_id ?? a.id ?? a.talking_photo_id,
+        name: a.avatar_name ?? a.name ?? '(sem nome)',
+        thumb: a.preview_image_url ?? a.thumbnail_url ?? null,
+        videoPreview: a.preview_video_url ?? null,
+        type: a.talking_photo_id ? 'photo' : 'avatar',
+        version: a.is_v3 ? 'V' : a.is_v2 ? 'IV' : 'III',
+      });
+    }
+  }
+
+  // Dedup por id
+  const seen = new Set();
+  return items.filter((a) => {
+    if (!a.id) return false;
+    if (seen.has(a.id)) return false;
+    seen.add(a.id);
+    return true;
+  });
+}
 
 /**
  * Tenta uma chamada leve pro HeyGen pra confirmar se a sessao esta valida.
@@ -217,8 +365,6 @@ async function runJob(requestId, payload) {
     };
 
     reportProgress(requestId, 'Enviando job pro HeyGen...');
-
-    const headers = getInternalAuthHeaders();
 
     // Tenta endpoints INTERNOS primeiro (autenticam via cookie de sessao).
     // Fallback pra v2 publica so se o user tiver API key configurada na sessao

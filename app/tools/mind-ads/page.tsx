@@ -702,9 +702,8 @@ export default function MindAdsPage() {
                       setQuery={setAvatarQuery}
                       selected={selectedAvatar}
                       setSelected={setSelectedAvatar}
-                      motor={avatarType}
                       disabled={processing}
-                      label={`Avatar ${avatarType} (busca filtrada por motor)`}
+                      label="Avatar (sua biblioteca HeyGen)"
                     />
                   </div>
                   <div className="mt-4 border-t border-line pt-4">

@@ -1,12 +1,25 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import {
+  listMyHeyGenAvatars,
+  type LibraryAvatar,
+} from '@/lib/heygen-extension-bridge';
 
 /**
- * HeyGenAvatarPicker — busca avatares HeyGen por nome com preview thumbnail.
+ * HeyGenAvatarPicker — espelho 1:1 da biblioteca de avatares da conta
+ * HeyGen do user.
  *
- * Compartilhado entre HeyGen Auto Avatar e Mind Ads Suite. Faz lookup
- * via /api/heygen/avatars (que usa a API HeyGen pra previews).
+ * Como funciona:
+ *   - Pede pra extensao (via bridge) listar os avatares da conta logada.
+ *     A extensao chama o endpoint INTERNO do HeyGen com cookies de sessao,
+ *     que retorna EXATAMENTE os mesmos avatares que aparecem em
+ *     https://app.heygen.com/avatars (modal "Choose an Avatar").
+ *   - User pode filtrar por nome localmente (instantaneo, sem rede).
+ *   - Motor (III/IV/V) NAO filtra a busca — e' so um marcador pra hora
+ *     de gerar (avatar_style no payload).
+ *
+ * Se a extensao nao estiver instalada, mostra mensagem clara.
  */
 
 export type AvatarOption = {
@@ -14,93 +27,126 @@ export type AvatarOption = {
   name: string;
   thumb: string | null;
   videoPreview: string | null;
-  gender: string | null;
-  premium: boolean;
   type: 'avatar' | 'photo';
+  version: 'III' | 'IV' | 'V';
+  // Mantido por compat — sempre false (eliminamos a noção)
+  premium?: boolean;
+  gender?: string | null;
   isCustom?: boolean;
 };
+
+function libraryToOption(a: LibraryAvatar): AvatarOption {
+  return {
+    id: a.id,
+    name: a.name,
+    thumb: a.thumb,
+    videoPreview: a.videoPreview,
+    type: a.type,
+    version: a.version,
+  };
+}
 
 export function HeyGenAvatarPicker({
   query,
   setQuery,
   selected,
   setSelected,
-  motor,
   disabled,
-  label = 'Avatar (busca por nome)',
+  label = 'Avatar (sua biblioteca HeyGen)',
 }: {
   query: string;
   setQuery: (s: string) => void;
   selected: AvatarOption | null;
   setSelected: (a: AvatarOption | null) => void;
+  // Mantido por compat com chamadas existentes — nao afeta busca
   motor?: 'III' | 'IV' | 'V';
   disabled?: boolean;
   label?: string;
 }) {
-  const [results, setResults] = useState<AvatarOption[]>([]);
+  const [allAvatars, setAllAvatars] = useState<AvatarOption[]>([]);
   const [loading, setLoading] = useState(false);
-  const [total, setTotal] = useState(0);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    // Busca mesmo com query vazia se motor estiver setado
-    // (assim mostra a lista filtrada por motor antes do user digitar)
-    if (!query.trim() && !motor) {
-      setResults([]);
-      return;
-    }
-    const t = setTimeout(async () => {
-      setLoading(true);
-      try {
-        const params = new URLSearchParams();
-        if (query.trim()) params.set('q', query.trim());
-        if (motor) params.set('motor', motor);
-        const res = await fetch(`/api/heygen/avatars?${params.toString()}`);
-        const json = await res.json();
-        if (res.ok && Array.isArray(json.avatars)) {
-          setResults(json.avatars);
-          setTotal(Number(json.total ?? 0));
-        }
-      } catch {
-        /* ignora */
-      } finally {
-        setLoading(false);
+  async function loadLibrary() {
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await listMyHeyGenAvatars();
+      if (r.ok) {
+        setAllAvatars(r.avatars.map(libraryToOption));
+      } else {
+        setError(
+          r.error ??
+            'Nao consegui ler a biblioteca. Verifique se a extensao esta instalada e voce esta logado em app.heygen.com.',
+        );
       }
-    }, 200);
-    return () => clearTimeout(t);
-  }, [query, motor]);
+    } catch (e) {
+      setError((e as Error).message ?? 'Falha ao listar avatares.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Carrega a biblioteca uma vez ao montar
+  useEffect(() => {
+    loadLibrary();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Filtro local (instantaneo) por nome
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? allAvatars.filter((a) => a.name.toLowerCase().includes(q))
+    : allAvatars;
 
   return (
     <div>
-      <h2 className="label-field !mb-3">{label}</h2>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="label-field !mb-0">{label}</h2>
+        <button
+          type="button"
+          onClick={loadLibrary}
+          disabled={loading || disabled}
+          className="rounded-md border border-line-strong bg-bg-soft px-2.5 py-1 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime disabled:opacity-50"
+        >
+          {loading ? 'Atualizando...' : 'Recarregar biblioteca'}
+        </button>
+      </div>
+
       <input
         type="text"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder={
-          motor
-            ? `Avatar ${motor} — digite pra filtrar (deixa vazio pra ver todos)`
-            : 'Digite o nome do avatar (ex: Maya, Lucas...)'
+          allAvatars.length > 0
+            ? `Filtrar pelos seus ${allAvatars.length} avatares...`
+            : 'Carregando biblioteca...'
         }
         className="input-field"
-        disabled={disabled}
+        disabled={disabled || loading}
       />
+
       {loading ? (
         <div className="mt-2 flex items-center gap-2 text-[11px] text-lime">
           <span className="relative flex h-1.5 w-1.5">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
             <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-lime" />
           </span>
-          Buscando no HeyGen...
+          Lendo sua biblioteca via extensao...
         </div>
-      ) : results.length > 0 ? (
+      ) : error ? (
+        <div className="mt-2 rounded-[10px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-[11px] text-red-300">
+          ⚠ {error}
+        </div>
+      ) : (
         <div className="mt-2 text-[11px] text-text-muted">
-          {results.length} de {total} avatares
-          {motor ? ` (motor ${motor})` : ''}
+          {filtered.length} de {allAvatars.length} avatares
         </div>
-      ) : null}
-      {results.length > 0 ? (
-        <div className="mt-3 grid max-h-72 gap-2 overflow-y-auto">
-          {results.map((a) => {
+      )}
+
+      {filtered.length > 0 ? (
+        <div className="mt-3 grid max-h-96 gap-2 overflow-y-auto">
+          {filtered.map((a) => {
             const active = selected?.id === a.id;
             return (
               <button
@@ -126,28 +172,25 @@ export function HeyGenAvatarPicker({
                 ) : (
                   <div className="h-12 w-12 shrink-0 rounded-md bg-line" />
                 )}
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 text-sm font-medium text-white">
+                <div className="flex-1 min-w-0">
+                  <div className="truncate text-sm font-medium text-white">
                     {a.name}
-                    {a.isCustom ? (
-                      <span className="mono rounded-full bg-lime/15 px-1.5 py-0 text-[9px] uppercase text-lime">
-                        custom
-                      </span>
-                    ) : null}
                   </div>
                   <div className="mono text-[11px] uppercase text-text-muted">
-                    {a.type === 'photo' ? 'avatar III · photo' : a.premium ? 'avatar V · premium' : 'avatar IV · studio'}
-                    {a.gender ? ' · ' + a.gender : ''}
+                    {a.type === 'photo' ? 'photo' : 'studio'} · v{a.version}
                   </div>
                 </div>
                 {active ? (
-                  <span className="mono text-xs text-lime">SELECIONADO</span>
+                  <span className="mono shrink-0 text-xs text-lime">
+                    SELECIONADO
+                  </span>
                 ) : null}
               </button>
             );
           })}
         </div>
       ) : null}
+
       {selected ? (
         <div className="mt-3 flex items-center gap-3 rounded-[12px] border border-lime/30 bg-lime/5 px-3 py-2 text-xs text-lime">
           {selected.thumb ? (
@@ -161,7 +204,7 @@ export function HeyGenAvatarPicker({
           ) : null}
           <span className="font-semibold">✓ {selected.name}</span>
           <span className="mono ml-auto text-[10px] text-text-muted">
-            id: {selected.id.slice(0, 12)}...
+            avatar v{selected.version}
           </span>
         </div>
       ) : null}

@@ -400,23 +400,20 @@ export default function HeyGenAutoPage() {
               </div>
             </section>
 
-            {/* Avatar + voz — componentes compartilhados com Mind Ads Suite */}
+            {/* Avatar — biblioteca real da conta HeyGen via extensao */}
             <section className="border-t border-line pt-6">
               <HeyGenAvatarPicker
                 query={avatarQuery}
                 setQuery={setAvatarQuery}
                 selected={selectedAvatar}
                 setSelected={setSelectedAvatar}
-                motor={motor}
                 disabled={processing}
-                label={`Avatar ${motor} (busca filtrada por motor)`}
+                label="Avatar (sua biblioteca HeyGen)"
               />
               <p className="mt-2 text-[11px] text-text-muted">
-                {motor === 'III'
-                  ? '✓ Avatar III (Photo) — ilimitado no plano, nao consome creditos'
-                  : motor === 'IV'
-                    ? 'Avatar IV (Studio) — usa creditos do plano'
-                    : 'Avatar V (Studio Plus / Premium) — creditos premium'}
+                Lista 100% espelhada da sua conta HeyGen. O motor selecionado
+                acima ({motor}) sera usado na hora de gerar — escolha o avatar
+                aqui livremente.
               </p>
             </section>
 

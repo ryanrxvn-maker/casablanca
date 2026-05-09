@@ -65,6 +65,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'HG_LIST_AVATARS') {
+    const requestId = msg.requestId;
+    handleListAvatars(requestId, sender.tab?.id).catch((err) => {
+      reportToPage(sender.tab?.id, requestId, 'HG_AVATARS_RESULT', {
+        ok: false,
+        error: err?.message ?? String(err),
+        avatars: [],
+      });
+    });
+    sendResponse({ accepted: true });
+    return true;
+  }
+
   if (msg.type === 'HG_CANCEL') {
     const job = activeJobs.get(msg.requestId);
     if (job) {
@@ -128,6 +141,32 @@ async function handleTestSession(requestId, bridgeTabId) {
       ok: false,
       detail:
         'Aba HeyGen nao respondeu — recarregue chrome://extensions e tente de novo. (' +
+        (e?.message ?? '') +
+        ')',
+    });
+  }
+}
+
+async function handleListAvatars(requestId, bridgeTabId) {
+  const tab = await findOrCreateHeyGenTab();
+  await waitForTabReady(tab.id);
+  try {
+    const resp = await chrome.tabs.sendMessage(tab.id, {
+      type: 'HG_LIST_AVATARS',
+      requestId,
+    });
+    reportToPage(bridgeTabId, requestId, 'HG_AVATARS_RESULT', {
+      ok: !!resp?.ok,
+      avatars: resp?.avatars ?? [],
+      error: resp?.error ?? null,
+      source: resp?.source ?? null,
+    });
+  } catch (e) {
+    reportToPage(bridgeTabId, requestId, 'HG_AVATARS_RESULT', {
+      ok: false,
+      avatars: [],
+      error:
+        'Aba HeyGen nao respondeu. Abra app.heygen.com e tente de novo. (' +
         (e?.message ?? '') +
         ')',
     });

@@ -132,6 +132,66 @@ export function generateAvatarPart(
 }
 
 /**
+ * Pede pra extensao listar os avatares EXATAMENTE como aparecem na
+ * biblioteca da conta HeyGen do user (espelho 1:1, sem stock publico).
+ *
+ * Retorna lista crua com id, nome, thumb, version. Sem filtro de motor —
+ * motor so afeta o generate, nao a listagem.
+ */
+export type LibraryAvatar = {
+  id: string;
+  name: string;
+  thumb: string | null;
+  videoPreview: string | null;
+  type: 'avatar' | 'photo';
+  version: 'III' | 'IV' | 'V';
+};
+
+export function listMyHeyGenAvatars(): Promise<{
+  ok: boolean;
+  avatars: LibraryAvatar[];
+  error?: string;
+}> {
+  installListener();
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined') {
+      resolve({ ok: false, avatars: [], error: 'Sem window.' });
+      return;
+    }
+    const requestId = `list_${Date.now()}_${Math.random()
+      .toString(36)
+      .slice(2, 6)}`;
+    const handler = (ev: MessageEvent) => {
+      if (
+        ev.data?.source === 'darkolab-ext' &&
+        ev.data?.type === 'HG_AVATARS_RESULT' &&
+        ev.data?.requestId === requestId
+      ) {
+        window.removeEventListener('message', handler);
+        resolve({
+          ok: !!ev.data.ok,
+          avatars: Array.isArray(ev.data.avatars) ? ev.data.avatars : [],
+          error: ev.data.error ?? undefined,
+        });
+      }
+    };
+    window.addEventListener('message', handler);
+    window.postMessage(
+      { source: 'darkolab', type: 'HG_LIST_AVATARS', requestId },
+      '*',
+    );
+    setTimeout(() => {
+      window.removeEventListener('message', handler);
+      resolve({
+        ok: false,
+        avatars: [],
+        error: 'Extensao nao respondeu em 15s.',
+      });
+    }, 15000);
+  });
+}
+
+/**
  * Pinga a extensao e pede pra ela checar se a sessao HeyGen esta valida
  * (faz uma chamada leve pro endpoint de user info do HeyGen com cookies).
  *

@@ -67,13 +67,33 @@
       const requestId = data.requestId;
       chrome.runtime.sendMessage(
         { type: 'HG_TEST_SESSION', requestId },
-        (resp) => {
+        () => {
           if (chrome.runtime.lastError) {
             sendToPage({
               type: 'HG_TEST_RESULT',
               requestId,
               ok: false,
               detail:
+                chrome.runtime.lastError.message ?? 'Background nao respondeu.',
+            });
+          }
+        },
+      );
+      return;
+    }
+
+    if (data.type === 'HG_LIST_AVATARS') {
+      const requestId = data.requestId;
+      chrome.runtime.sendMessage(
+        { type: 'HG_LIST_AVATARS', requestId },
+        () => {
+          if (chrome.runtime.lastError) {
+            sendToPage({
+              type: 'HG_AVATARS_RESULT',
+              requestId,
+              ok: false,
+              avatars: [],
+              error:
                 chrome.runtime.lastError.message ?? 'Background nao respondeu.',
             });
           }
