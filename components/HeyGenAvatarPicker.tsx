@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   listMyHeyGenAvatars,
   type LibraryAvatar,
@@ -10,25 +10,17 @@ import {
 /**
  * HeyGenAvatarPicker - espelho 1:1 da biblioteca de avatares da conta
  * HeyGen do user, com hierarquia AVATAR -> LOOKS (igual UI HeyGen).
- *
- * UI:
- *   - Tela 1 (lista): grid de cards de AVATARES (Emma, Johan...) com thumb
- *     do avatar, nome HeyGen exato, e badge "N looks".
- *   - Tela 2 (looks): user clica num avatar -> drawer abre listando os looks
- *     daquele avatar (Radiant Redhead, Photo Avatar, etc) pra selecao precisa.
- *   - Selecionar um look retorna o look.id (que vai pro generate).
  */
 
 export type AvatarOption = {
-  id: string;          // ID do LOOK (passado pro generate HeyGen)
-  name: string;        // Nome do LOOK
+  id: string;
+  name: string;
   thumb: string | null;
   videoPreview: string | null;
   type: 'avatar' | 'photo';
   version: 'III' | 'IV' | 'V';
   groupId?: string;
-  groupName?: string;  // Nome do AVATAR pai (Emma, Johan...)
-  // Compat
+  groupName?: string;
   premium?: boolean;
   gender?: string | null;
   isCustom?: boolean;
@@ -45,6 +37,103 @@ function lookToOption(l: LibraryAvatar): AvatarOption {
     groupId: l.groupId,
     groupName: l.groupName,
   };
+}
+
+/**
+ * Thumb com fallback automatico: tenta a URL primaria. Se falhar (404 expirou,
+ * rede), tenta as fallbackUrls em ordem. Se TODAS falharem, mostra placeholder
+ * com a inicial do nome (estilizado).
+ */
+function ThumbWithFallback({
+  primary,
+  fallbacks,
+  alt,
+  className,
+  eager,
+}: {
+  primary: string | null;
+  fallbacks: (string | null)[];
+  alt: string;
+  className: string;
+  eager?: boolean;
+}) {
+  // Lista ordenada de URLs candidatas (sem nulls/duplicatas)
+  const candidates = useMemo(() => {
+    const out: string[] = [];
+    if (primary) out.push(primary);
+    for (const f of fallbacks) {
+      if (f && !out.includes(f)) out.push(f);
+    }
+    return out;
+  }, [primary, fallbacks]);
+
+  const [idx, setIdx] = useState(0);
+  const [allFailed, setAllFailed] = useState(candidates.length === 0);
+
+  // Reset quando candidates muda (novo avatar)
+  useEffect(() => {
+    setIdx(0);
+    setAllFailed(candidates.length === 0);
+  }, [candidates]);
+
+  if (allFailed) {
+    const initial = (alt || '?').trim().charAt(0).toUpperCase();
+    return (
+      <div
+        className={
+          className +
+          ' flex items-center justify-center bg-gradient-to-br from-bg-soft to-line text-3xl font-bold text-text-muted'
+        }
+        aria-label={alt}
+      >
+        {initial}
+      </div>
+    );
+  }
+
+  const currentSrc = candidates[idx];
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={currentSrc}
+      alt={alt}
+      className={className}
+      loading={eager ? 'eager' : 'lazy'}
+      decoding="async"
+      // @ts-ignore - fetchPriority eh suportado mas nao tipado em todos os React
+      fetchpriority={eager ? 'high' : 'low'}
+      onError={() => {
+        if (idx + 1 < candidates.length) {
+          setIdx(idx + 1);
+        } else {
+          setAllFailed(true);
+        }
+      }}
+    />
+  );
+}
+
+/**
+ * Pre-warm: dispara um new Image().src = url pra cada URL unica
+ * imediatamente quando a lista chega. Isso comeca o download em paralelo
+ * em background, antes do React renderizar e antes do <img> aparecer no
+ * viewport. Quando o <img> finalmente faz request, geralmente bate no
+ * cache do browser instant.
+ */
+function usePreWarmImages(urls: (string | null)[]) {
+  const warmedRef = useRef(new Set<string>());
+  useEffect(() => {
+    for (const u of urls) {
+      if (!u) continue;
+      if (warmedRef.current.has(u)) continue;
+      warmedRef.current.add(u);
+      // Cria um Image fora do DOM apenas pra disparar o GET
+      const img = new Image();
+      img.decoding = 'async';
+      img.referrerPolicy = 'no-referrer';
+      img.src = u;
+    }
+  }, [urls]);
 }
 
 export function HeyGenAvatarPicker({
@@ -92,6 +181,19 @@ export function HeyGenAvatarPicker({
     loadLibrary();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Pre-warm: TODAS as URLs (groups + looks) em paralelo assim que a lista chega
+  const allUrls = useMemo(() => {
+    const out: (string | null)[] = [];
+    for (const g of groups) {
+      if (g.thumb) out.push(g.thumb);
+      for (const l of g.looks) {
+        if (l.thumb) out.push(l.thumb);
+      }
+    }
+    return out;
+  }, [groups]);
+  usePreWarmImages(allUrls);
 
   // Filtro: busca em nome do AVATAR ou nome do LOOK
   const q = query.trim().toLowerCase();
@@ -166,8 +268,10 @@ export function HeyGenAvatarPicker({
       {/* Grid de AVATARES (igual UI "Choose an Avatar" do HeyGen) */}
       {filteredGroups.length > 0 ? (
         <div className="mt-3 grid max-h-[480px] grid-cols-3 gap-2 overflow-y-auto pr-1 sm:grid-cols-4 md:grid-cols-5">
-          {filteredGroups.map((g) => {
+          {filteredGroups.map((g, i) => {
             const isSelectedGroup = selected?.groupId === g.id;
+            // Fallbacks pro thumb do grupo: thumb do 1o look, 2o look, etc
+            const fallbacks = g.looks.map((l) => l.thumb);
             return (
               <button
                 key={g.id}
@@ -180,19 +284,15 @@ export function HeyGenAvatarPicker({
                     ? 'border-lime shadow-[0_0_18px_-4px_rgba(200,255,0,0.6)]'
                     : 'border-line-strong hover:border-lime/60')
                 }
-                title={`${g.name} — ${g.looksCount} look${g.looksCount > 1 ? 's' : ''}`}
+                title={`${g.name} - ${g.looksCount} look${g.looksCount > 1 ? 's' : ''}`}
               >
-                {g.thumb ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={g.thumb}
-                    alt={g.name}
-                    className="absolute inset-0 h-full w-full object-cover"
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="absolute inset-0 bg-line" />
-                )}
+                <ThumbWithFallback
+                  primary={g.thumb}
+                  fallbacks={fallbacks}
+                  alt={g.name}
+                  className="absolute inset-0 h-full w-full object-cover"
+                  eager={i < 12}
+                />
                 {/* Overlay dark */}
                 <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent p-2">
                   <div className="truncate text-[12px] font-semibold text-white">
@@ -224,14 +324,15 @@ export function HeyGenAvatarPicker({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-3 flex items-center gap-3">
-              {openGroup.thumb ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={openGroup.thumb}
+              <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full">
+                <ThumbWithFallback
+                  primary={openGroup.thumb}
+                  fallbacks={openGroup.looks.map((l) => l.thumb)}
                   alt={openGroup.name}
-                  className="h-10 w-10 shrink-0 rounded-full object-cover"
+                  className="h-full w-full object-cover"
+                  eager
                 />
-              ) : null}
+              </div>
               <div className="flex-1 min-w-0">
                 <div className="truncate text-lg font-semibold text-white">
                   {openGroup.name}
@@ -268,17 +369,13 @@ export function HeyGenAvatarPicker({
                         : 'border-line-strong hover:border-lime/60')
                     }
                   >
-                    {l.thumb ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={l.thumb}
-                        alt={l.name}
-                        className="absolute inset-0 h-full w-full object-cover"
-                        loading="lazy"
-                      />
-                    ) : (
-                      <div className="absolute inset-0 bg-line" />
-                    )}
+                    <ThumbWithFallback
+                      primary={l.thumb}
+                      fallbacks={[openGroup.thumb]}
+                      alt={l.name}
+                      className="absolute inset-0 h-full w-full object-cover"
+                      eager
+                    />
                     <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-2">
                       <div className="truncate text-[12px] font-semibold text-white">
                         {l.name}
@@ -303,18 +400,18 @@ export function HeyGenAvatarPicker({
       {/* Pill do selecionado embaixo */}
       {selected ? (
         <div className="mt-3 flex items-center gap-3 rounded-[12px] border border-lime/30 bg-lime/5 px-3 py-2 text-xs text-lime">
-          {selected.thumb ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={selected.thumb}
+          <div className="h-8 w-8 shrink-0 overflow-hidden rounded-md">
+            <ThumbWithFallback
+              primary={selected.thumb}
+              fallbacks={[]}
               alt={selected.name}
-              className="h-8 w-8 rounded-md object-cover"
-              loading="lazy"
+              className="h-full w-full object-cover"
+              eager
             />
-          ) : null}
+          </div>
           <div className="flex-1 min-w-0">
             <div className="truncate font-semibold">
-              ✓ {selected.groupName ? `${selected.groupName} — ${selected.name}` : selected.name}
+              ✓ {selected.groupName ? `${selected.groupName} - ${selected.name}` : selected.name}
             </div>
             <div className="mono text-[9px] uppercase text-lime/60">
               look v{selected.version} · {selected.type}
