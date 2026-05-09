@@ -773,23 +773,34 @@ async function runJob(requestId, payload) {
 
     reportProgress(requestId, `Preparando ${partLabel ?? 'video'} via UI...`);
 
-    // 1) Navega pra /avatar (Quick Create) se nao estiver
-    if (!location.pathname.startsWith('/avatar') &&
-        !location.pathname.startsWith('/create')) {
-      console.log('[DARKO LAB UI] navegando pra /avatar');
+    // 1) Se ja temos textarea visivel, nao navega - estamos numa tela boa.
+    //    Senao, vai pra /avatar (Quick Create).
+    if (!findScriptTextarea()) {
+      console.log('[DARKO LAB UI] sem textarea, navegando pra /avatar (era ' + location.href + ')');
       location.href = 'https://app.heygen.com/avatar';
-      // Aguarda load
-      await sleep(3000);
+      // Aguarda navegacao + React app montar
+      await sleep(4000);
+    } else {
+      console.log('[DARKO LAB UI] textarea ja presente, sem navegacao necessaria');
     }
 
     // 2) Aguarda textarea de script aparecer (UI carregada)
     reportProgress(requestId, 'Aguardando UI HeyGen carregar...');
+    console.log('[DARKO LAB UI] aguardando textarea, location=', location.href);
     const textarea = await waitFor(
       () => findScriptTextarea(),
-      20000,
-      300,
+      45000,
+      400,
     );
-    if (!textarea) throw new Error('Textarea de script nao apareceu em 20s.');
+    if (!textarea) {
+      // Loga diagnostico pra debug
+      dumpScriptDiagnostics();
+      throw new Error(
+        'Textarea de script nao apareceu em 45s na ' + location.href +
+        '. Confira se a aba HeyGen esta em /avatar (Quick Create). ' +
+        'Abre F12 na aba HeyGen e me cola os logs [DARKO LAB UI diag].'
+      );
+    }
     console.log('[DARKO LAB UI] textarea de script encontrado');
 
     // 3) Seleciona motor (Avatar III / IV / V) - clica no botao do topo
@@ -850,13 +861,60 @@ function findScriptTextarea() {
     'textarea[placeholder*="script" i]',
     'textarea[placeholder*="paste" i]',
     'textarea[placeholder*="type" i]',
+    'textarea[placeholder*="aqui" i]',
+    'textarea[placeholder*="cole" i]',
+    '[data-testid*="script" i]',
+    '[data-testid*="textarea"]',
     'div[contenteditable="true"][role="textbox"]',
+    'div[contenteditable="true"][aria-label*="script" i]',
+    'div[contenteditable="true"]',
+    'textarea', // ultimo recurso: qualquer textarea visivel
   ];
   for (const sel of selectors) {
-    const el = document.querySelector(sel);
-    if (el && el.offsetParent !== null) return el;
+    const els = document.querySelectorAll(sel);
+    for (const el of els) {
+      if (el.offsetParent !== null) {
+        const rect = el.getBoundingClientRect();
+        // Tem que ser visivel + tamanho razoavel (> 200px largura)
+        if (rect.width > 200 && rect.height > 50) {
+          return el;
+        }
+      }
+    }
   }
   return null;
+}
+
+/**
+ * Log diagnostico - chama quando findScriptTextarea() falhar pra a gente
+ * ver o que tem no DOM e qual seletor faltou.
+ */
+function dumpScriptDiagnostics() {
+  console.log('[DARKO LAB UI diag] location:', location.href);
+  console.log('[DARKO LAB UI diag] readyState:', document.readyState);
+  const allTextareas = document.querySelectorAll('textarea');
+  console.log('[DARKO LAB UI diag] textareas count:', allTextareas.length);
+  for (const t of allTextareas) {
+    const rect = t.getBoundingClientRect();
+    console.log('[DARKO LAB UI diag] textarea:', {
+      placeholder: t.placeholder,
+      ariaLabel: t.getAttribute('aria-label'),
+      dataTestId: t.getAttribute('data-testid'),
+      visible: t.offsetParent !== null,
+      width: rect.width,
+      height: rect.height,
+    });
+  }
+  const editables = document.querySelectorAll('[contenteditable="true"]');
+  console.log('[DARKO LAB UI diag] contenteditables count:', editables.length);
+  for (const e of editables) {
+    console.log('[DARKO LAB UI diag] contenteditable:', {
+      role: e.getAttribute('role'),
+      ariaLabel: e.getAttribute('aria-label'),
+      tag: e.tagName,
+      visible: e.offsetParent !== null,
+    });
+  }
 }
 
 function findMotorButton(motor) {
