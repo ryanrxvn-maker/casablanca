@@ -824,15 +824,31 @@ async function runJob(requestId, payload) {
     // SIMPLE REQUEST: SEM Authorization/X-Requested-With pra evitar CORS
     // preflight bloqueado (cookie autentica via credentials: 'include').
     const simpleHeaders = { 'Content-Type': 'application/json' };
-    const generateEndpoints = [
-      'https://api2.heygen.com/v1/video.private.generate',
-      'https://api2.heygen.com/v2/video.private.generate',
-      'https://api2.heygen.com/v1/video.generate',
-      'https://api2.heygen.com/v2/video.generate',
-      'https://api2.heygen.com/v1/video.create',
-      'https://api2.heygen.com/v2/video.create',
+    // Detecta se eh talking_photo (avatar v3 photo) — HeyGen usa endpoint
+    // diferente pra esse tipo. Avatares com IDs de 32 hex chars geralmente
+    // sao talking_photos.
+    const isPhotoAvatar = /^[a-f0-9]{32}$/i.test(avatarId);
+    const generateEndpoints = isPhotoAvatar ? [
+      // talking_photo specific endpoints (avatares photo/v3)
+      'https://api2.heygen.com/v1/talking_photo_video.private.generate',
+      'https://api2.heygen.com/v2/talking_photo_video.private.generate',
+      'https://api2.heygen.com/v1/talking_photo.private.generate',
+      'https://api2.heygen.com/v1/photo_video.private.generate',
+      'https://api2.heygen.com/v3/video.generate',
+      'https://api2.heygen.com/v3/video/generate',
+      'https://api2.heygen.com/v1/avatar_video.private.generate',
+      'https://api2.heygen.com/v2/avatar_video.private.generate',
       'https://app.heygen.com/api/v2/video/generate',
-      'https://api.heygen.com/v2/video/generate', // ultimo recurso (Bearer)
+      'https://app.heygen.com/api/v3/video/generate',
+      'https://app.heygen.com/api/v1/video/generate',
+      'https://api2.heygen.com/v2/video.generate', // exige video_id (draft step)
+    ] : [
+      'https://api2.heygen.com/v1/avatar_video.private.generate',
+      'https://api2.heygen.com/v2/avatar_video.private.generate',
+      'https://api2.heygen.com/v3/video.generate',
+      'https://app.heygen.com/api/v2/video/generate',
+      'https://app.heygen.com/api/v3/video/generate',
+      'https://api2.heygen.com/v2/video.generate',
     ];
 
     let videoId = null;
@@ -847,8 +863,11 @@ async function runJob(requestId, payload) {
           body: JSON.stringify(generateBody),
         });
         const bodyText = await res.text().catch(() => '');
-        const snippet = bodyText.slice(0, 200);
-        console.log(`[DARKO LAB generate] ${url} -> ${res.status}: ${snippet}`);
+        // Se eh 200 ou 400 (endpoint existe), loga body INTEIRO pra debug
+        const snippet = (res.status === 200 || res.status === 400)
+          ? bodyText.slice(0, 1500)
+          : bodyText.slice(0, 200);
+        console.log(`[DARKO LAB generate] ${url} -> ${res.status} (${bodyText.length} bytes): ${snippet}`);
         attempts.push(`${url} ${res.status}`);
         if (res.status === 404) continue; // endpoint nao existe
         if (res.status === 401 || res.status === 403) continue; // sem auth nesse, tenta proximo
