@@ -196,27 +196,24 @@ async function listMyAvatars() {
     };
   }
 
-  // 2) Pra cada grupo, busca os looks (sequencial pra evitar deadlock)
-  console.log('[DARKO LAB] STEP 3: buscando looks de cada grupo...');
-  const looksByGroup = [];
-  let firstSampleLogged = false;
-  for (const g of groups) {
-    const groupId = g.id;
-    let foundLooks = [];
-    const lookEndpoints = [
-      `https://api2.heygen.com/v2/avatar_look.private.list?group_id=${groupId}&limit=50`,
-      `https://api2.heygen.com/v1/avatar_look.private.list?group_id=${groupId}&limit=50`,
-    ];
-    for (const url of lookEndpoints) {
+  // 2) Pra cada grupo, busca os looks EM PARALELO via v1 direto
+  // (v2 sempre da 404, descobrimos via debug — economiza ~50% do tempo)
+  console.log(
+    `[DARKO LAB] STEP 3: buscando looks de ${groups.length} grupos em PARALELO...`,
+  );
+  const t0 = performance.now();
+  const looksByGroup = await Promise.all(
+    groups.map(async (g) => {
+      const url = `https://api2.heygen.com/v1/avatar_look.private.list?group_id=${g.id}&limit=50`;
       try {
         const r = await fetchWithTimeout(
           url,
           { method: 'GET', credentials: 'include' },
-          4000,
+          5000,
         );
         if (!r.ok) {
-          console.warn(`[DARKO LAB] looks ${url}: HTTP ${r.status}`);
-          continue;
+          console.warn(`[DARKO LAB] grupo ${g.name}: HTTP ${r.status}`);
+          return { group: g, looks: [] };
         }
         const j = await r.json();
         const looks =
@@ -226,31 +223,23 @@ async function listMyAvatars() {
           (Array.isArray(j?.data) ? j.data : null) ??
           [];
         if (Array.isArray(looks)) {
-          console.log(
-            `[DARKO LAB]   grupo ${g.name ?? groupId}: ${looks.length} looks via ${url.includes('v2') ? 'v2' : 'v1'}`,
-          );
-          // Loga sample do primeiro look pra entender estrutura
-          if (!firstSampleLogged && looks.length > 0) {
-            console.log(
-              '[DARKO LAB] SAMPLE look (struct):',
-              JSON.stringify(looks[0]).slice(0, 800),
-            );
-            console.log(
-              '[DARKO LAB] SAMPLE look (keys):',
-              Object.keys(looks[0]).join(', '),
-            );
-            firstSampleLogged = true;
-          }
-          foundLooks = looks;
-          break;
+          return { group: g, looks };
         }
+        return { group: g, looks: [] };
       } catch (e) {
-        console.warn(`[DARKO LAB] looks ${url} ERR:`, e.message);
+        console.warn(`[DARKO LAB] grupo ${g.name} ERR:`, e.message);
+        return { group: g, looks: [] };
       }
-    }
-    looksByGroup.push({ group: g, looks: foundLooks });
+    }),
+  );
+  const t1 = performance.now();
+  console.log(
+    `[DARKO LAB] STEP 4: looks coletados em ${Math.round(t1 - t0)}ms`,
+  );
+  // Log de quantos looks por grupo
+  for (const { group, looks } of looksByGroup) {
+    console.log(`[DARKO LAB]   grupo ${group.name}: ${looks.length} looks`);
   }
-  console.log('[DARKO LAB] STEP 4: looks coletados pra todos os grupos');
 
   // 3) Aplaina em items individuais (1 entrada por look — fiel a UI HeyGen)
   const items = [];

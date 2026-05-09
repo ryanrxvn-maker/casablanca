@@ -186,9 +186,9 @@ export function listMyHeyGenAvatars(): Promise<{
         ok: false,
         avatars: [],
         error:
-          'Extensao nao respondeu em 60s. Abre F12 na aba app.heygen.com e me cola os logs do DARKO LAB.',
+          'Extensao nao respondeu em 30s. Abre F12 na aba app.heygen.com e me cola os logs do DARKO LAB.',
       });
-    }, 60000);
+    }, 30000);
   });
 }
 

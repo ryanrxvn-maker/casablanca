@@ -55,6 +55,7 @@ A extensao:
 
 ## Versao
 
+2.3.0 — looks em PARALELO (Promise.all) + skip v2 (sempre 404). Tempo de ~3min pra ~5s. 100 avatares carregam em segundos.
 2.2.3 — desembrulha wrapper { look_type, look } (HeyGen aninha o objeto real em .look) + log SAMPLE look REAL.
 2.2.2 — findIdField/findNameField/findThumbField (extrai de QUALQUER campo *_id/_key) + log SAMPLE look struct.
 2.2.1 — looks fetch sequencial (evita deadlock) + logs STEP-by-STEP pra debug.
