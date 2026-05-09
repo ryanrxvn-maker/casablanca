@@ -166,12 +166,13 @@ export default function DecupagemCopyPage() {
       }
 
       // Step 2: Send to server for transcription + matching
-      setStage('Enviando audio pro AssemblyAI (transcricao em pt)...');
+      setStage('Transcrevendo (Groq Whisper, fallback AAI)...');
       setProgress(0.3);
 
       const fd = new FormData();
       fd.append('audio', audio, 'audio.opus');
       fd.append('copy', copyText);
+      fd.append('provider', 'groq');
 
       abortRef.current = new AbortController();
       const res = await fetch('/api/decupagem-copy/match', {
@@ -181,7 +182,7 @@ export default function DecupagemCopyPage() {
       });
 
       const text = await res.text();
-      let json: { cuts?: Cut[]; error?: string };
+      let json: { cuts?: Cut[]; provider?: string; error?: string };
       try {
         json = JSON.parse(text);
       } catch {
@@ -201,7 +202,7 @@ export default function DecupagemCopyPage() {
 
       setCuts(json.cuts);
       setStage(
-        `${json.cuts.length} frase(s) alinhada(s). Cortando + concatenando...`,
+        `${json.cuts.length} frase(s) alinhada(s) (${json.provider ?? '?'}). Cortando + concatenando...`,
       );
       setProgress(0.5);
 
@@ -298,7 +299,7 @@ export default function DecupagemCopyPage() {
       description="Mande um video bruto de expert + a copy/script. A IA transcreve, alinha cada frase com a melhor take (mais fluente, sem repeticao/stutter) e devolve o video ja decupado na ordem da copy. AssemblyAI + FFmpeg WASM. 1 video por vez ate 800MB/40min."
     >
       <div className="flex flex-col gap-6">
-        <MissingKeyBanner services={['assemblyai']} />
+        <MissingKeyBanner services={['groq']} />
 
         <div>
           <label className="label-field">Video bruto</label>

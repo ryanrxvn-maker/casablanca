@@ -89,6 +89,7 @@ export default function TakeSplitterPage() {
     'takesplit:duration',
     null,
   );
+  const [useAi, setUseAi] = useToolState<boolean>('takesplit:useAi', false);
 
   // Probe metadata quando arquivo entra
   useEffect(() => {
@@ -137,7 +138,24 @@ export default function TakeSplitterPage() {
       setStatus('Carregando FFmpeg...');
       const result: Take[] = await splitVideoByScenes(
         file,
-        { threshold, minDurationSec: minDur },
+        {
+          threshold,
+          minDurationSec: minDur,
+          aiVerify: useAi
+            ? async (candidates) => {
+                const res = await fetch('/api/take-splitter/verify-cuts', {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({ candidates }),
+                });
+                const json = await res.json();
+                if (!res.ok) {
+                  throw new Error(json.error || 'Verificacao IA falhou.');
+                }
+                return json.verified ?? [];
+              }
+            : undefined,
+        },
         {
           onStage: (s) => setStatus(s),
           onProgress: (p: FFProgress) => setProgress(p.ratio),
@@ -314,6 +332,33 @@ export default function TakeSplitterPage() {
             Cortes detectados que gerariam takes mais curtos que esse valor sao
             fundidos com o seguinte (descarta falsos positivos tipo flash).
           </p>
+        </div>
+
+        {/* Modo IA — verificacao Haiku Vision */}
+        <div className="rounded-[12px] border border-line bg-bg-soft/30 p-3">
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              checked={useAi}
+              onChange={(e) => setUseAi(e.target.checked)}
+              disabled={processing}
+              className="mt-0.5 h-4 w-4 cursor-pointer accent-lime"
+            />
+            <div className="flex-1">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <span className="text-white">Verificacao IA (precisao maxima)</span>
+                <span className="mono rounded-full bg-purple-500/10 px-2 py-0.5 text-[10px] uppercase text-purple-300">
+                  ~$0.05 / 5min
+                </span>
+              </div>
+              <p className="mt-1 text-[11px] text-text-muted">
+                Claude Haiku Vision verifica cada corte detectado pelo scdet
+                comparando 1 frame antes/depois. Filtra falsos positivos (motion
+                blur, flash, transicoes) — so deixa cortes de cena REAIS.
+                Requer Anthropic key configurada.
+              </p>
+            </div>
+          </label>
         </div>
 
         <div className="flex flex-wrap gap-3">

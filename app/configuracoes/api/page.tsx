@@ -14,12 +14,21 @@ import { ToolShell } from '@/components/ToolShell';
  * so um indicador "configurada · ····xxxx".
  */
 
-type Service = 'anthropic' | 'assemblyai' | 'elevenlabs';
+type Service =
+  | 'anthropic'
+  | 'assemblyai'
+  | 'elevenlabs'
+  | 'heygen'
+  | 'replicate'
+  | 'groq';
 
 type SecretsStatus = {
   anthropic: { configured: boolean; last4: string | null };
   assemblyai: { configured: boolean; last4: string | null };
   elevenlabs: { configured: boolean; last4: string | null };
+  heygen: { configured: boolean; last4: string | null };
+  replicate: { configured: boolean; last4: string | null };
+  groq: { configured: boolean; last4: string | null };
   updatedAt: string | null;
 };
 
@@ -54,7 +63,48 @@ const META: Array<{
     link: 'https://elevenlabs.io/app/settings/api-keys',
     usedBy: 'Troca de Produto',
   },
+  {
+    id: 'heygen',
+    label: 'HeyGen',
+    helper:
+      'API key de avatares. Crie em app.heygen.com → API Keys.',
+    link: 'https://app.heygen.com/settings?tab=api',
+    usedBy: 'Mind Ads Suite (admin)',
+  },
+  {
+    id: 'replicate',
+    label: 'Replicate',
+    helper:
+      'API token (formato r8_...). Crie em replicate.com → Account → API tokens.',
+    link: 'https://replicate.com/account/api-tokens',
+    usedBy: 'Mind Ads Suite (admin)',
+  },
+  {
+    id: 'groq',
+    label: 'Groq (Whisper barato)',
+    helper:
+      'Token gsk_... — Whisper-large-v3 a ~$0.04/h (vs $0.45 AssemblyAI). Crie em console.groq.com → API Keys.',
+    link: 'https://console.groq.com/keys',
+    usedBy: 'Mind Ads Suite (tier eco/padrao)',
+  },
 ];
+
+const INIT_DRAFTS: Record<Service, string> = {
+  anthropic: '',
+  assemblyai: '',
+  elevenlabs: '',
+  heygen: '',
+  replicate: '',
+  groq: '',
+};
+const INIT_BUSY: Record<Service, boolean> = {
+  anthropic: false,
+  assemblyai: false,
+  elevenlabs: false,
+  heygen: false,
+  replicate: false,
+  groq: false,
+};
 
 export default function ApiKeysPage() {
   const [status, setStatus] = useState<SecretsStatus | null>(null);
@@ -66,16 +116,8 @@ export default function ApiKeysPage() {
   } | null>(null);
 
   // Inputs locais por service
-  const [drafts, setDrafts] = useState<Record<Service, string>>({
-    anthropic: '',
-    assemblyai: '',
-    elevenlabs: '',
-  });
-  const [busy, setBusy] = useState<Record<Service, boolean>>({
-    anthropic: false,
-    assemblyai: false,
-    elevenlabs: false,
-  });
+  const [drafts, setDrafts] = useState<Record<Service, string>>(INIT_DRAFTS);
+  const [busy, setBusy] = useState<Record<Service, boolean>>(INIT_BUSY);
 
   function flash(kind: 'ok' | 'err', msg: string) {
     setToast({ kind, msg });

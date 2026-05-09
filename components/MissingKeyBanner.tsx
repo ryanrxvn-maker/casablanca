@@ -3,12 +3,21 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
-type Service = 'anthropic' | 'assemblyai' | 'elevenlabs';
+type Service =
+  | 'anthropic'
+  | 'assemblyai'
+  | 'elevenlabs'
+  | 'heygen'
+  | 'replicate'
+  | 'groq';
 
 const LABEL: Record<Service, string> = {
   anthropic: 'Anthropic (Claude)',
   assemblyai: 'AssemblyAI',
   elevenlabs: 'ElevenLabs',
+  heygen: 'HeyGen',
+  replicate: 'Replicate',
+  groq: 'Groq (Whisper)',
 };
 
 /**

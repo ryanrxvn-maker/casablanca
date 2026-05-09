@@ -14,18 +14,37 @@ import { encryptSecret, lastFour } from '@/lib/secrets';
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 
-type Service = 'anthropic' | 'assemblyai' | 'elevenlabs';
-const VALID_SERVICES: Service[] = ['anthropic', 'assemblyai', 'elevenlabs'];
+type Service =
+  | 'anthropic'
+  | 'assemblyai'
+  | 'elevenlabs'
+  | 'heygen'
+  | 'replicate'
+  | 'groq';
+const VALID_SERVICES: Service[] = [
+  'anthropic',
+  'assemblyai',
+  'elevenlabs',
+  'heygen',
+  'replicate',
+  'groq',
+];
 
 const COL_KEY: Record<Service, string> = {
   anthropic: 'anthropic_key',
   assemblyai: 'assemblyai_key',
   elevenlabs: 'elevenlabs_key',
+  heygen: 'heygen_key',
+  replicate: 'replicate_key',
+  groq: 'groq_key',
 };
 const COL_LAST4: Record<Service, string> = {
   anthropic: 'anthropic_last4',
   assemblyai: 'assemblyai_last4',
   elevenlabs: 'elevenlabs_last4',
+  heygen: 'heygen_last4',
+  replicate: 'replicate_last4',
+  groq: 'groq_last4',
 };
 
 function jsonError(message: string, status = 500, detail?: string) {
@@ -46,7 +65,7 @@ export async function GET() {
     const { data, error } = await supabase
       .from('user_api_keys')
       .select(
-        'anthropic_last4, assemblyai_last4, elevenlabs_last4, updated_at, anthropic_key, assemblyai_key, elevenlabs_key',
+        'anthropic_last4, assemblyai_last4, elevenlabs_last4, heygen_last4, replicate_last4, groq_last4, updated_at, anthropic_key, assemblyai_key, elevenlabs_key, heygen_key, replicate_key, groq_key',
       )
       .eq('user_id', user.id)
       .maybeSingle();
@@ -65,6 +84,18 @@ export async function GET() {
       elevenlabs: {
         configured: !!data?.elevenlabs_key,
         last4: data?.elevenlabs_last4 ?? null,
+      },
+      heygen: {
+        configured: !!data?.heygen_key,
+        last4: data?.heygen_last4 ?? null,
+      },
+      replicate: {
+        configured: !!data?.replicate_key,
+        last4: data?.replicate_last4 ?? null,
+      },
+      groq: {
+        configured: !!data?.groq_key,
+        last4: data?.groq_last4 ?? null,
       },
       updatedAt: data?.updated_at ?? null,
     });

@@ -15,18 +15,30 @@ import { decryptSecret } from '@/lib/secrets';
  *   const apiKey = result.key; // plaintext, descartar apos uso
  */
 
-type Service = 'anthropic' | 'assemblyai' | 'elevenlabs';
+type Service =
+  | 'anthropic'
+  | 'assemblyai'
+  | 'elevenlabs'
+  | 'heygen'
+  | 'replicate'
+  | 'groq';
 
 const COLUMN_BY_SERVICE: Record<Service, string> = {
   anthropic: 'anthropic_key',
   assemblyai: 'assemblyai_key',
   elevenlabs: 'elevenlabs_key',
+  heygen: 'heygen_key',
+  replicate: 'replicate_key',
+  groq: 'groq_key',
 };
 
 const LABEL_BY_SERVICE: Record<Service, string> = {
   anthropic: 'Anthropic (Claude)',
   assemblyai: 'AssemblyAI',
   elevenlabs: 'ElevenLabs',
+  heygen: 'HeyGen',
+  replicate: 'Replicate',
+  groq: 'Groq (Whisper)',
 };
 
 export async function getUserKey(

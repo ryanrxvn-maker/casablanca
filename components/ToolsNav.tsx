@@ -10,8 +10,10 @@ import {
   IconCalculadora,
   IconCamuflagem,
   IconCompressor,
+  IconCopySRT,
   IconDecupageCopy,
   IconDecupagem,
+  IconHeyGenAuto,
   IconNormalizador,
   IconRemoverElementos,
   IconTakeSplitter,
@@ -85,6 +87,16 @@ export const AI_SUITE: RailItem[] = [
     href: '/tools/decupagem-copy',
     label: 'Decupagem por Copy',
     icon: <IconDecupageCopy />,
+  },
+  {
+    href: '/tools/copy-srt',
+    label: 'Copy → SRT',
+    icon: <IconCopySRT />,
+  },
+  {
+    href: '/tools/heygen-auto',
+    label: 'HeyGen Auto',
+    icon: <IconHeyGenAuto />,
   },
 ];
 

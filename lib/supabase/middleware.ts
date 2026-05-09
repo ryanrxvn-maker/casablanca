@@ -119,6 +119,13 @@ export async function updateSession(request: NextRequest) {
       url.pathname = '/tools';
       return NextResponse.redirect(url);
     }
+
+    // Mind Ads Suite — so admin acessa por enquanto
+    if (pathname.startsWith('/tools/mind-ads') && !isAdmin) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/tools';
+      return NextResponse.redirect(url);
+    }
   }
 
   return supabaseResponse;

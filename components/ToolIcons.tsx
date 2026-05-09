@@ -138,6 +138,18 @@ export function IconTrocaProduto(p: IconProps) {
   );
 }
 
+/** Copy → SRT — pagina de texto com simbolo de timestamp */
+export function IconCopySRT(p: IconProps) {
+  return (
+    <svg {...baseProps(p)}>
+      <rect x="4" y="3" width="12" height="18" rx="1.5" />
+      <path d="M7 7h6M7 10h6M7 13h4" opacity="0.7" />
+      <circle cx="18" cy="17" r="3.5" fill="none" />
+      <path d="M18 15v2l1.4 1" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** Decupagem com Copy — script + film alinhados por uma seta */
 export function IconDecupageCopy(p: IconProps) {
   return (
@@ -209,6 +221,23 @@ export function IconSparkle(p: IconProps) {
     <svg {...baseProps(p)}>
       <path
         d="M12 3l1.5 5L18 9.5l-4.5 1.5L12 16l-1.5-5L6 9.5l4.5-1.5L12 3z"
+        fill="currentColor"
+        stroke="none"
+      />
+    </svg>
+  );
+}
+
+/** HeyGen Auto Avatar — silhueta + ondas de fala automatizada */
+export function IconHeyGenAuto(p: IconProps) {
+  return (
+    <svg {...baseProps(p)}>
+      <circle cx="9" cy="8" r="3" />
+      <path d="M3 19v-1a4 4 0 014-4h4a4 4 0 014 4v1" />
+      <path d="M16 8c1.5 1 1.5 5 0 6" opacity="0.7" />
+      <path d="M18.5 6.5c2.5 1.7 2.5 7.3 0 9" opacity="0.5" />
+      <path
+        d="M20.5 3l0.4 1 1 0.4-1 0.4-0.4 1-0.4-1L19 4.4l1-0.4 0.5-1z"
         fill="currentColor"
         stroke="none"
       />

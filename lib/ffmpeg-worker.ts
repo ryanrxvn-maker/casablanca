@@ -673,9 +673,28 @@ function buildCutPoints(
   return out;
 }
 
+/**
+ * Callback opcional pra verificacao IA dos candidatos de corte.
+ * Recebe os timestamps detectados pelo scdet + 1 frame antes/depois de cada,
+ * retorna SUBSET aprovado. Usado pelo modo IA do Take Splitter pra filtrar
+ * falsos positivos do scdet.
+ */
+export type AiCutVerifyFn = (
+  candidates: Array<{
+    time: number;
+    frameBefore: string; // base64 data URL ou base64 puro
+    frameAfter: string;
+  }>,
+  onProgress?: (msg: string) => void,
+) => Promise<Array<{ time: number; isRealCut: boolean }>>;
+
 export async function splitVideoByScenes(
   file: Blob,
-  options: { threshold?: number; minDurationSec?: number } = {},
+  options: {
+    threshold?: number;
+    minDurationSec?: number;
+    aiVerify?: AiCutVerifyFn;
+  } = {},
   opts: RunOptions = {},
 ): Promise<Take[]> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
@@ -755,7 +774,58 @@ export async function splitVideoByScenes(
       throw new Error('Nao foi possivel ler a duracao do video.');
     }
 
-    const cuts = buildCutPoints(durationSec, sceneTimes, minDur);
+    let effectiveSceneTimes = sceneTimes;
+
+    // AI verify mode: extrai 1 frame antes/depois de cada scene time,
+    // manda pra callback (que vai chamar /api/take-splitter/verify-cuts),
+    // recebe a lista filtrada de cuts REAIS.
+    if (options.aiVerify && sceneTimes.length > 0) {
+      opts.onStage?.(
+        `IA verificando ${sceneTimes.length} candidatos (cuts falsos serao filtrados)...`,
+      );
+
+      const candidates: Array<{
+        time: number;
+        frameBefore: string;
+        frameAfter: string;
+      }> = [];
+
+      for (let i = 0; i < sceneTimes.length; i++) {
+        const t = sceneTimes[i];
+        const before = await extractSmallFrameAt(
+          ff,
+          inputName,
+          Math.max(0, t - 0.4),
+          `frame_b_${i}.jpg`,
+        );
+        const after = await extractSmallFrameAt(
+          ff,
+          inputName,
+          Math.min(durationSec - 0.05, t + 0.4),
+          `frame_a_${i}.jpg`,
+        );
+        candidates.push({
+          time: t,
+          frameBefore: await blobToBase64(before),
+          frameAfter: await blobToBase64(after),
+        });
+      }
+
+      const verifs = await options.aiVerify(candidates, (m) =>
+        opts.onStage?.(m),
+      );
+      const realSet = new Set(
+        verifs.filter((v) => v.isRealCut).map((v) => v.time.toFixed(3)),
+      );
+      effectiveSceneTimes = sceneTimes.filter((t) =>
+        realSet.has(t.toFixed(3)),
+      );
+      opts.onStage?.(
+        `IA aprovou ${effectiveSceneTimes.length}/${sceneTimes.length} cortes.`,
+      );
+    }
+
+    const cuts = buildCutPoints(durationSec, effectiveSceneTimes, minDur);
     const segments: Array<{ start: number; end: number }> = [];
     for (let i = 0; i < cuts.length - 1; i++) {
       segments.push({ start: cuts[i], end: cuts[i + 1] });
@@ -1072,6 +1142,46 @@ async function safeDelete(ff: FFmpeg, name: string) {
   }
 }
 
+/**
+ * Extrai um frame pequeno (largura 384px) num timestamp pra mandar pra IA.
+ * Reusa o FFmpeg ja carregado e o input ja escrito em memfs (nao recarrega
+ * o arquivo). Esta separado de extractFrameAt pra evitar I/O duplicado.
+ */
+async function extractSmallFrameAt(
+  ff: FFmpeg,
+  inputName: string,
+  timeSec: number,
+  outName: string,
+): Promise<Blob> {
+  await ff.exec([
+    '-ss', timeSec.toFixed(2),
+    '-i', inputName,
+    '-vframes', '1',
+    '-vf', 'scale=384:-2:flags=fast_bilinear',
+    '-q:v', '6',
+    outName,
+  ]);
+  const data = await ff.readFile(outName);
+  await safeDelete(ff, outName);
+  return toBlob(data, 'image/jpeg');
+}
+
+/** Blob -> base64 string (sem prefixo "data:..."). Browser only. */
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buf = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  // String.fromCharCode em chunks pra evitar stack overflow em frames grandes
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(
+      null,
+      Array.from(bytes.subarray(i, i + CHUNK)),
+    );
+  }
+  return typeof btoa !== 'undefined' ? btoa(binary) : '';
+}
+
 function withTimeout<T>(p: Promise<T>, ms: number, msg: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(msg + ' (apos ' + ms + 'ms)')), ms);
@@ -1127,4 +1237,321 @@ export function getFFmpegVariant(): 'st' | null {
 }
 export function supportsFFmpegMT(): boolean {
   return false;
+}
+
+// ---------- Mind Ads Suite — silence cut + montagem ---------------------
+//
+// Avatar vem do HeyGen com pausas naturais entre frases. A gente roda
+// silenceremove com tolerancia de 50ms (default) pra cortar so as pausas
+// muito longas (vicio de tempo morto, respiracao, etc) sem comer palavras.
+
+export async function removeAvatarSilences(
+  file: Blob,
+  toleranceSec = 0.05,
+  opts: RunOptions = {},
+): Promise<Blob> {
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const { fetchFile } = await import('@ffmpeg/util');
+
+  const inputName = 'avatar_in.' + guessExt(file, 'mp4');
+  const outputName = 'avatar_cut.mp4';
+  const progressHandler = wireProgress(ff, opts.onProgress);
+
+  // silenceremove com stop_periods=-1 remove TODOS os silencios, com
+  // stop_threshold em -32dB (ruido ambiente) e duracao minima do
+  // silencio configuravel.
+  const af =
+    `silenceremove=stop_periods=-1:stop_duration=${toleranceSec.toFixed(3)}:` +
+    `stop_threshold=-32dB:detection=peak,aresample=44100`;
+
+  try {
+    opts.onStage?.('Cortando silencios do avatar (tolerancia ' + toleranceSec + 's)...');
+    await ff.writeFile(inputName, await fetchFile(file));
+
+    // Re-encoda video junto pra os timestamps baterem com o audio cortado.
+    await ff.exec([
+      '-i', inputName,
+      '-af', af,
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-tune', 'fastdecode',
+      '-crf', '22',
+      '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
+      '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac',
+      '-b:a', '160k',
+      '-movflags', '+faststart',
+      outputName,
+    ]);
+    const data = await ff.readFile(outputName);
+    return toBlob(data, 'video/mp4');
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    await safeDelete(ff, inputName);
+    await safeDelete(ff, outputName);
+  }
+}
+
+// ---------- Mind Ads — montagem final ------------------------------------
+//
+// Recebe:
+//  - avatarBlob: video do HeyGen ja com silencios cortados (audio MASTER)
+//  - takeSegments: lista de takes com [start, end] em segundos NO AVATAR
+//    cortado, e tipo (avatar | broll) + opcional brollVideo
+//  - bgMusic: audio opcional pra colocar de fundo
+//  - bgVolume: 0..100 (default 20)
+//
+// Logica:
+//  - Pra cada take avatar: usa o segmento puro do avatar (video + audio)
+//  - Pra cada take broll: usa o brollVideo como video, mas o audio E o
+//    audio do avatar nesse intervalo (loop/scale do video se preciso)
+//  - Concatena todos os segmentos em ordem
+//  - Mixa bg music por baixo se fornecida (no track inteiro)
+
+export type MindAdsTakeSegment = {
+  n: number;
+  type: 'avatar' | 'broll';
+  startSec: number;
+  endSec: number;
+  brollVideo?: Blob; // obrigatorio se type === 'broll'
+};
+
+export type MindAdsMontageInput = {
+  avatar: Blob;
+  takes: MindAdsTakeSegment[];
+  bgMusic?: Blob | null;
+  bgVolume?: number; // 0..100
+  hookVideo?: Blob | null;
+  hookLayout?: 'fullscreen' | 'split' | 'react';
+};
+
+export async function mindAdsMontage(
+  input: MindAdsMontageInput,
+  opts: RunOptions = {},
+): Promise<Blob> {
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const { fetchFile } = await import('@ffmpeg/util');
+  const progressHandler = wireProgress(ff, opts.onProgress);
+
+  const avatarName = 'avatar.mp4';
+  const segmentNames: string[] = [];
+  const tempFiles: string[] = [avatarName];
+
+  try {
+    opts.onStage?.('Carregando avatar...');
+    await ff.writeFile(avatarName, await fetchFile(input.avatar));
+
+    // 1) Gera um arquivo MP4 por take (avatar slice OU broll com audio do avatar)
+    for (let i = 0; i < input.takes.length; i++) {
+      const take = input.takes[i];
+      const dur = Math.max(0.2, take.endSec - take.startSec);
+      const segName = `seg_${String(i).padStart(3, '0')}.mp4`;
+      segmentNames.push(segName);
+      tempFiles.push(segName);
+
+      opts.onStage?.(
+        `Montando take ${i + 1}/${input.takes.length} (${take.type}, ${dur.toFixed(1)}s)...`,
+      );
+
+      if (take.type === 'avatar') {
+        // Recorte direto do avatar
+        await ff.exec([
+          '-ss', take.startSec.toFixed(3),
+          '-to', take.endSec.toFixed(3),
+          '-i', avatarName,
+          '-c:v', 'libx264',
+          '-preset', 'ultrafast',
+          '-tune', 'fastdecode',
+          '-crf', '22',
+          '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
+          '-pix_fmt', 'yuv420p',
+          '-c:a', 'aac',
+          '-b:a', '160k',
+          '-r', '30',
+          '-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920',
+          segName,
+        ]);
+      } else {
+        // Broll: video da broll, audio do avatar nesse range
+        if (!take.brollVideo) {
+          throw new Error(
+            `Take ${take.n} marcado como broll mas sem video.`,
+          );
+        }
+        const brollName = `broll_${String(i).padStart(3, '0')}.mp4`;
+        tempFiles.push(brollName);
+        await ff.writeFile(brollName, await fetchFile(take.brollVideo));
+
+        // Estende o broll a duracao do take via tpad (freeze last frame)
+        // e trim ao final. Se broll for mais longo, trima.
+        const vfBroll =
+          `scale=1080:1920:force_original_aspect_ratio=increase,` +
+          `crop=1080:1920,` +
+          `tpad=stop_mode=clone:stop_duration=${dur.toFixed(3)},` +
+          `trim=duration=${dur.toFixed(3)},setpts=PTS-STARTPTS`;
+
+        await ff.exec([
+          // Input 0: broll video (sem audio)
+          '-i', brollName,
+          // Input 1: avatar — vamos extrair audio do range
+          '-ss', take.startSec.toFixed(3),
+          '-to', take.endSec.toFixed(3),
+          '-i', avatarName,
+          // Map: video do broll filtrado + audio do avatar
+          '-filter_complex',
+          `[0:v]${vfBroll}[v];[1:a]asetpts=PTS-STARTPTS[a]`,
+          '-map', '[v]',
+          '-map', '[a]',
+          '-c:v', 'libx264',
+          '-preset', 'ultrafast',
+          '-tune', 'fastdecode',
+          '-crf', '22',
+          '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
+          '-pix_fmt', 'yuv420p',
+          '-c:a', 'aac',
+          '-b:a', '160k',
+          '-r', '30',
+          segName,
+        ]);
+      }
+    }
+
+    // 2) Concat list pra concatenar todos os segmentos
+    const concatList = segmentNames.map((n) => `file '${n}'`).join('\n');
+    const concatName = 'concat.txt';
+    tempFiles.push(concatName);
+    await ff.writeFile(concatName, new TextEncoder().encode(concatList));
+
+    const concatedName = 'concated.mp4';
+    tempFiles.push(concatedName);
+
+    opts.onStage?.('Concatenando segmentos...');
+    await ff.exec([
+      '-f', 'concat',
+      '-safe', '0',
+      '-i', concatName,
+      '-c', 'copy',
+      '-movflags', '+faststart',
+      concatedName,
+    ]);
+
+    // 3) Hook video opcional no inicio (so suporta fullscreen por enquanto;
+    //    split/react ficam no proximo round — precisa de overlay timing)
+    let withHookName = concatedName;
+    if (input.hookVideo) {
+      const hookName = 'hook.mp4';
+      const hookProcessed = 'hook_proc.mp4';
+      const finalWithHook = 'with_hook.mp4';
+      tempFiles.push(hookName, hookProcessed, finalWithHook);
+
+      opts.onStage?.('Processando hook video...');
+      await ff.writeFile(hookName, await fetchFile(input.hookVideo));
+
+      // Padroniza hook video pra mesmo formato dos segmentos
+      await ff.exec([
+        '-i', hookName,
+        '-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920',
+        '-c:v', 'libx264',
+        '-preset', 'ultrafast',
+        '-crf', '22',
+        '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac',
+        '-b:a', '160k',
+        '-r', '30',
+        hookProcessed,
+      ]);
+
+      // Concat hook + concated
+      const concatList2 = `file '${hookProcessed}'\nfile '${concatedName}'`;
+      const concatName2 = 'concat2.txt';
+      tempFiles.push(concatName2);
+      await ff.writeFile(concatName2, new TextEncoder().encode(concatList2));
+
+      await ff.exec([
+        '-f', 'concat',
+        '-safe', '0',
+        '-i', concatName2,
+        '-c', 'copy',
+        '-movflags', '+faststart',
+        finalWithHook,
+      ]);
+
+      withHookName = finalWithHook;
+    }
+
+    // 4) Bg music opcional, mixada por cima do audio existente
+    let outputName = withHookName;
+    if (input.bgMusic) {
+      const bgName = 'bg.audio';
+      const finalWithBg = 'final.mp4';
+      tempFiles.push(bgName, finalWithBg);
+
+      opts.onStage?.('Mixando musica de fundo...');
+      await ff.writeFile(bgName, await fetchFile(input.bgMusic));
+      const bgVol = Math.max(0, Math.min(100, input.bgVolume ?? 20)) / 100;
+
+      await ff.exec([
+        '-i', withHookName,
+        '-stream_loop', '-1', // loop pra cobrir o video se a musica for menor
+        '-i', bgName,
+        '-filter_complex',
+        `[1:a]volume=${bgVol.toFixed(3)},aloop=loop=-1:size=2e9[bg];` +
+          `[0:a][bg]amix=inputs=2:duration=first:dropout_transition=2[a]`,
+        '-map', '0:v',
+        '-map', '[a]',
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        '-shortest',
+        '-movflags', '+faststart',
+        finalWithBg,
+      ]);
+      outputName = finalWithBg;
+    }
+
+    const data = await ff.readFile(outputName);
+    return toBlob(data, 'video/mp4');
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    for (const n of tempFiles) {
+      await safeDelete(ff, n);
+    }
+  }
+}
+
+/**
+ * Estima divisao de um avatar continuo em N takes baseado na proporcao do
+ * comprimento de copy de cada take em relacao ao total.
+ *
+ * Retorna [start, end] pra cada take em segundos no avatar.
+ *
+ * Premissa: o avatar fala todo o copy a um ritmo constante. Boa primeira
+ * aproximacao — refinamento futuro pode usar word-level timestamps do
+ * AssemblyAI pra precisao de palavra.
+ */
+export function estimateTakeBoundaries(
+  copyLengths: number[],
+  totalDurationSec: number,
+): Array<{ startSec: number; endSec: number }> {
+  const total = copyLengths.reduce((a, b) => a + b, 0);
+  if (total <= 0 || totalDurationSec <= 0) {
+    // fallback: divide igualmente
+    const each = totalDurationSec / Math.max(1, copyLengths.length);
+    return copyLengths.map((_, i) => ({
+      startSec: i * each,
+      endSec: (i + 1) * each,
+    }));
+  }
+  const result: Array<{ startSec: number; endSec: number }> = [];
+  let cursor = 0;
+  for (const len of copyLengths) {
+    const dur = (len / total) * totalDurationSec;
+    result.push({ startSec: cursor, endSec: cursor + dur });
+    cursor += dur;
+  }
+  // Garante que o ultimo termina exatamente em totalDurationSec
+  if (result.length > 0) {
+    result[result.length - 1].endSec = totalDurationSec;
+  }
+  return result;
 }
