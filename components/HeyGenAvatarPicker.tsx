@@ -380,9 +380,6 @@ export function HeyGenAvatarPicker({
                       <div className="truncate text-[12px] font-semibold text-white">
                         {l.name}
                       </div>
-                      <div className="mono text-[9px] uppercase text-text-muted">
-                        {l.type === 'photo' ? 'photo' : 'studio'} · v{l.version}
-                      </div>
                     </div>
                     {isSelected ? (
                       <div className="absolute right-1.5 top-1.5 rounded bg-lime px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-black">
@@ -412,9 +409,6 @@ export function HeyGenAvatarPicker({
           <div className="flex-1 min-w-0">
             <div className="truncate font-semibold">
               ✓ {selected.groupName ? `${selected.groupName} - ${selected.name}` : selected.name}
-            </div>
-            <div className="mono text-[9px] uppercase text-lime/60">
-              look v{selected.version} · {selected.type}
             </div>
           </div>
         </div>
