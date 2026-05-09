@@ -136,7 +136,12 @@ export function HeyGenAvatarPicker({
         </div>
       ) : error ? (
         <div className="mt-2 rounded-[10px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-[11px] text-red-300">
-          ⚠ {error}
+          <div>⚠ {error}</div>
+          <div className="mt-2 text-[10px] text-red-300/70">
+            <strong>Pra debug:</strong> abre app.heygen.com numa aba, F12 →
+            Console, procura linhas{' '}
+            <code className="mono">[DARKO LAB]</code> e me cola.
+          </div>
         </div>
       ) : (
         <div className="mt-2 text-[11px] text-text-muted">

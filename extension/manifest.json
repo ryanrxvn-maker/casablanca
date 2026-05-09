@@ -1,11 +1,14 @@
 {
   "manifest_version": 3,
   "name": "DARKO LAB — HeyGen Auto",
-  "version": "1.7.0",
+  "version": "1.9.0",
   "description": "Automatiza a geracao de avatares HeyGen direto da sua conta logada, integrado ao DARKO LAB.",
   "permissions": ["storage", "tabs", "scripting"],
   "host_permissions": [
     "https://app.heygen.com/*",
+    "https://api2.heygen.com/*",
+    "https://api.heygen.com/*",
+    "https://upload.heygen.com/*",
     "https://*.heygen.com/*",
     "https://*.heygen.ai/*",
     "https://*.vercel.app/*",

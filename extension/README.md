@@ -55,6 +55,8 @@ A extensao:
 
 ## Versao
 
+1.9.0 — endpoint REAL confirmado: api2.heygen.com/v2/avatar_group.private.list (subdominio correto).
+1.8.0 — fetch com timeout 6s + auth headers expandidos + log diagnostico + erros detalhados.
 1.7.0 — endpoints REAIS HeyGen confirmados (avatar_group.private.list + avatar_look.private.list).
 1.6.0 — listMyVoices (mesmo padrao avatares), avatar_style fixo "normal", logging endpoint usado.
 1.5.0 — fix syntax error (headers duplicado) + listMyAvatars (espelho fiel da biblioteca da conta).

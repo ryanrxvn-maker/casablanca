@@ -66,41 +66,48 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
  */
 async function listMyVoices() {
   const headers = getInternalAuthHeaders();
+  // Mesmo padrao dos avatares — api2.heygen.com primeiro
   const endpoints = [
+    'https://api2.heygen.com/v2/voice.list?limit=200&page=1',
+    'https://api2.heygen.com/v1/voice.list?limit=200&page=1',
+    'https://api2.heygen.com/v2/voices?limit=200',
     'https://app.heygen.com/api/v2/voice.list',
-    'https://app.heygen.com/api/v1/voice.list',
-    'https://app.heygen.com/api/v2/voices',
     'https://api.heygen.com/v2/voices',
   ];
-  let lastError = '';
+  const errors = [];
   for (const url of endpoints) {
     try {
-      const r = await fetch(url, {
-        method: 'GET',
-        credentials: 'include',
-        headers,
-      });
+      const r = await fetchWithTimeout(
+        url,
+        { method: 'GET', credentials: 'include', headers },
+        6000,
+      );
       if (r.status === 401 || r.status === 403) {
-        return { ok: false, error: 'Sessao expirada.', voices: [] };
-      }
-      if (!r.ok) {
-        lastError = `${url} → ${r.status}`;
+        errors.push(`${url} → ${r.status}`);
         continue;
       }
-      const json = await r.json().catch(() => null);
+      if (!r.ok) {
+        errors.push(`${url} → ${r.status}`);
+        continue;
+      }
+      const text = await r.text();
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        errors.push(`${url} → nao-JSON`);
+        continue;
+      }
       const voices = parseVoicesResponse(json);
-      console.log(
-        `[DARKO LAB] Voices loaded from ${url} (${voices.length} items)`,
-      );
       if (voices.length > 0) {
         return { ok: true, voices, source: url };
       }
-      lastError = `${url} retornou vazio`;
+      errors.push(`${url} → 0 itens`);
     } catch (e) {
-      lastError = `${url}: ${e.message ?? e}`;
+      errors.push(`${url} → ${e.name === 'AbortError' ? 'timeout' : e.message}`);
     }
   }
-  return { ok: false, error: lastError, voices: [] };
+  return { ok: false, error: errors.join(' | '), voices: [] };
 }
 
 function parseVoicesResponse(json) {
@@ -142,53 +149,70 @@ function parseVoicesResponse(json) {
 async function listMyAvatars() {
   const headers = getInternalAuthHeaders();
 
-  // Endpoints REAIS confirmados via DevTools no app.heygen.com
-  // (em ordem de preferencia — o site usa o primeiro)
+  // Endpoint REAL confirmado via DevTools: api2.heygen.com/v2/...
+  // Origin app.heygen.com aceito via CORS (Access-Control-Allow-Origin).
+  // Limit=200 traz tudo de uma vez (HeyGen aceita ate 200 por pagina).
   const endpoints = [
-    'https://app.heygen.com/api/v1/avatar_group.private.list?limit=200',
-    'https://app.heygen.com/api/v2/avatar_group.private.list?limit=200',
-    'https://app.heygen.com/api/v1/avatar_look.private.list?limit=200',
+    'https://api2.heygen.com/v2/avatar_group.private.list?limit=200&page=1',
+    'https://api2.heygen.com/v1/avatar_group.private.list?limit=200&page=1',
+    'https://api2.heygen.com/v2/avatar_group.private.list?limit=10&page=1',
+    'https://app.heygen.com/api/v2/avatar_group.private.list?limit=200&page=1',
     'https://app.heygen.com/api/v2/avatars',
     'https://api.heygen.com/v2/avatars',
   ];
 
-  let lastError = '';
+  const errors = [];
+  console.log('[DARKO LAB] listMyAvatars iniciando, headers:', Object.keys(headers));
+
   for (const url of endpoints) {
     try {
-      const r = await fetch(url, {
-        method: 'GET',
-        credentials: 'include',
-        headers,
-      });
+      const r = await fetchWithTimeout(
+        url,
+        { method: 'GET', credentials: 'include', headers },
+        6000,
+      );
+
       if (r.status === 401 || r.status === 403) {
-        return {
-          ok: false,
-          error: 'Sessao HeyGen expirada — faca login novamente.',
-          avatars: [],
-        };
-      }
-      if (!r.ok) {
-        lastError = `${url} → ${r.status}`;
+        errors.push(`${url} → ${r.status} (auth required)`);
         continue;
       }
-      const json = await r.json().catch(() => null);
+      if (!r.ok) {
+        errors.push(`${url} → ${r.status}`);
+        continue;
+      }
+
+      // Pega o body como texto primeiro. Se for HTML (redirect login) NAO e' o endpoint.
+      const text = await r.text();
+      let json;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        errors.push(`${url} → 200 mas resposta nao-JSON`);
+        continue;
+      }
+
       const items = parseAvatarsResponse(json);
       console.log(
-        `[DARKO LAB] Avatars loaded from ${url} (${items.length} items)`,
+        `[DARKO LAB] Avatars from ${url}: ${items.length} items`,
+        items.length === 0 ? 'rawData:' : '',
+        items.length === 0 ? json : '',
       );
+
       if (items.length > 0) {
         return { ok: true, avatars: items, source: url };
       }
-      lastError = `${url} retornou vazio`;
+      errors.push(`${url} → 200 OK mas 0 itens parseados`);
     } catch (e) {
-      lastError = `${url}: ${e.message ?? e}`;
+      const msg = e.name === 'AbortError' ? 'timeout 6s' : e.message ?? e;
+      errors.push(`${url} → ${msg}`);
     }
   }
 
   return {
     ok: false,
-    error: `Nenhum endpoint retornou avatares. ${lastError}`,
+    error: 'Nenhum endpoint funcionou. ' + errors.slice(0, 3).join(' | '),
     avatars: [],
+    debug: errors,
   };
 }
 
@@ -290,9 +314,11 @@ function parseAvatarsResponse(json) {
 async function testSession() {
   const headers = getInternalAuthHeaders();
   const endpoints = [
+    'https://api2.heygen.com/v1/user.info',
+    'https://api2.heygen.com/v2/user.info',
+    'https://api2.heygen.com/v1/user/info',
     'https://app.heygen.com/api/v1/user/info',
     'https://app.heygen.com/api/v2/user.info',
-    'https://app.heygen.com/api/v1/user.info',
   ];
   for (const url of endpoints) {
     try {
@@ -368,19 +394,49 @@ async function waitFor(predicate, timeoutMs = 15000, interval = 250) {
  * Tudo dentro do contexto autenticado da aba — nao consome a API publica.
  */
 function getInternalAuthHeaders() {
-  // HeyGen geralmente guarda token em localStorage('access_token') ou
-  // cookies sso. Como roda no contexto da aba, fetch vai propagar cookies.
-  const headers = { 'Content-Type': 'application/json' };
+  const headers = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
+  };
+  // HeyGen pode guardar token em varios lugares. Tentamos todos.
   try {
-    const token =
-      localStorage.getItem('access_token') ||
-      localStorage.getItem('token') ||
-      '';
+    const candidates = [
+      localStorage.getItem('access_token'),
+      localStorage.getItem('token'),
+      localStorage.getItem('heygen_token'),
+      localStorage.getItem('auth_token'),
+      localStorage.getItem('jwt'),
+      localStorage.getItem('id_token'),
+      sessionStorage.getItem('access_token'),
+      sessionStorage.getItem('token'),
+    ].filter(Boolean);
+
+    // Token raw (provavelmente JWT comecando com "eyJ") — usa o primeiro
+    const token = candidates.find((t) => /^[A-Za-z0-9._-]+$/.test(t));
     if (token) headers['Authorization'] = 'Bearer ' + token;
+
+    // Tambem tenta extrair x-csrf-token de cookies (se HeyGen usar)
+    const csrfMatch = document.cookie.match(/(?:^|;\s*)csrf[-_]?token=([^;]+)/i);
+    if (csrfMatch) headers['X-CSRF-Token'] = decodeURIComponent(csrfMatch[1]);
   } catch (e) {
     /* ignora */
   }
   return headers;
+}
+
+/**
+ * fetch com timeout explicito (5s default). Evita 1 endpoint lento
+ * comer todo o orcamento de tempo.
+ */
+async function fetchWithTimeout(url, opts, timeoutMs = 6000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...opts, signal: controller.signal });
+  } finally {
+    clearTimeout(id);
+  }
 }
 
 /**
@@ -462,13 +518,13 @@ async function runJob(requestId, payload) {
 
     reportProgress(requestId, 'Enviando job pro HeyGen...');
 
-    // Tenta endpoints INTERNOS primeiro (autenticam via cookie de sessao).
-    // Fallback pra v2 publica so se o user tiver API key configurada na sessao
-    // (improvavel — geralmente quem instala a extensao quer evitar API).
+    // api2.heygen.com confirmado via DevTools como dominio oficial das requests
+    // autenticadas via cookie. Usa esse primeiro.
     const generateEndpoints = [
+      'https://api2.heygen.com/v2/video.generate',
+      'https://api2.heygen.com/v1/video.generate',
+      'https://api2.heygen.com/v2/video/generate',
       'https://app.heygen.com/api/v2/video/generate',
-      'https://app.heygen.com/api/v1/video/generate',
-      'https://app.heygen.com/api/v1/video.generate',
       'https://api.heygen.com/v2/video/generate',
     ];
 
@@ -519,8 +575,9 @@ async function runJob(requestId, payload) {
     let lastPercent = 0;
 
     const statusEndpoints = [
+      `https://api2.heygen.com/v1/video_status.get?video_id=${encodeURIComponent(videoId)}`,
+      `https://api2.heygen.com/v2/video.status?video_id=${encodeURIComponent(videoId)}`,
       `https://app.heygen.com/api/v1/video_status.get?video_id=${encodeURIComponent(videoId)}`,
-      `https://app.heygen.com/api/v2/video.status?video_id=${encodeURIComponent(videoId)}`,
       `https://api.heygen.com/v1/video_status.get?video_id=${encodeURIComponent(videoId)}`,
     ];
 
@@ -612,11 +669,12 @@ async function uploadAudioToHeyGen(audioBase64, filename, headers) {
   delete uploadHeaders['Content-Type']; // deixa o browser setar com boundary
   uploadHeaders['Content-Type'] = mime;
 
-  // Internos primeiro (cookies da sessao) → upload publico → API publica
+  // api2.heygen.com primeiro (autenticado via cookies)
   const endpoints = [
-    'https://app.heygen.com/api/v1/upload/asset',
-    'https://app.heygen.com/api/v2/asset',
+    'https://api2.heygen.com/v1/asset',
+    'https://api2.heygen.com/v2/asset',
     'https://upload.heygen.com/v1/asset',
+    'https://app.heygen.com/api/v1/upload/asset',
     'https://api.heygen.com/v1/asset',
   ];
 
