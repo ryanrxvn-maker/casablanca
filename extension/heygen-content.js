@@ -817,48 +817,68 @@ async function runJob(requestId, payload) {
 
     reportProgress(requestId, 'Enviando job pro HeyGen...');
 
-    // api2.heygen.com confirmado via DevTools como dominio oficial das requests
-    // autenticadas via cookie. Usa esse primeiro.
+    // Padrao .private (api2.heygen.com) - mesma familia dos endpoints que ja
+    // confirmamos via cookies (avatar_group.private.list etc). Endpoints
+    // PUBLICOS (api.heygen.com/v2/video/generate) exigem Bearer API key e
+    // sempre dao 401 em cookie auth — deixados no fim como fallback ultimo.
+    // SIMPLE REQUEST: SEM Authorization/X-Requested-With pra evitar CORS
+    // preflight bloqueado (cookie autentica via credentials: 'include').
+    const simpleHeaders = { 'Content-Type': 'application/json' };
     const generateEndpoints = [
-      'https://api2.heygen.com/v2/video.generate',
+      'https://api2.heygen.com/v1/video.private.generate',
+      'https://api2.heygen.com/v2/video.private.generate',
       'https://api2.heygen.com/v1/video.generate',
-      'https://api2.heygen.com/v2/video/generate',
+      'https://api2.heygen.com/v2/video.generate',
+      'https://api2.heygen.com/v1/video.create',
+      'https://api2.heygen.com/v2/video.create',
       'https://app.heygen.com/api/v2/video/generate',
-      'https://api.heygen.com/v2/video/generate',
+      'https://api.heygen.com/v2/video/generate', // ultimo recurso (Bearer)
     ];
 
     let videoId = null;
-    let lastErrorDetail = '';
+    const attempts = [];
 
     for (const url of generateEndpoints) {
       try {
         const res = await fetch(url, {
           method: 'POST',
           credentials: 'include',
-          headers,
+          headers: simpleHeaders,
           body: JSON.stringify(generateBody),
         });
-        if (res.status === 401 || res.status === 403) {
-          lastErrorDetail = `Login expirado em ${url} (${res.status})`;
-          continue; // tenta proximo
-        }
-        if (!res.ok) {
-          const t = await res.text().catch(() => '');
-          lastErrorDetail = `${url} → ${res.status}: ${t.slice(0, 150)}`;
-          continue;
-        }
-        const json = await res.json().catch(() => null);
+        const bodyText = await res.text().catch(() => '');
+        const snippet = bodyText.slice(0, 200);
+        console.log(`[DARKO LAB generate] ${url} -> ${res.status}: ${snippet}`);
+        attempts.push(`${url} ${res.status}`);
+        if (res.status === 404) continue; // endpoint nao existe
+        if (res.status === 401 || res.status === 403) continue; // sem auth nesse, tenta proximo
+        if (!res.ok) continue;
+        let json = null;
+        try { json = JSON.parse(bodyText); } catch {}
         videoId =
           json?.data?.video_id ??
           json?.data?.id ??
           json?.video_id ??
           json?.id ??
           null;
-        if (videoId) break;
-        lastErrorDetail = `${url} sem video_id no body`;
+        if (videoId) {
+          console.log(`[DARKO LAB generate] SUCESSO em ${url}, video_id=${videoId}`);
+          break;
+        }
+        console.warn(`[DARKO LAB generate] ${url} 200 OK mas sem video_id no body`);
       } catch (e) {
-        lastErrorDetail = `${url}: ${e.message ?? e}`;
+        console.warn(`[DARKO LAB generate] ${url} THREW: ${e.message ?? e}`);
+        attempts.push(`${url} THREW`);
       }
+    }
+
+    if (!videoId) {
+      const summary = attempts.join(' | ');
+      throw new Error(
+        `HeyGen rejeitou a request. Todos endpoints testados: ${summary}. ` +
+        `Pra debug: na aba app.heygen.com, abra F12 -> Network, gere 1 video manualmente, ` +
+        `copie a URL completa do POST de generate e me mande.`
+      );
     }
 
     if (!videoId) {
