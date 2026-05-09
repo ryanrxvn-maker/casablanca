@@ -55,6 +55,7 @@ A extensao:
 
 ## Versao
 
+2.2.1 — looks fetch sequencial (evita deadlock) + logs STEP-by-STEP pra debug.
 2.2.0 — fix listing: data.avatar_groups (plural) + busca avatar_look.private.list por grupo (mostra cada look individual igual UI HeyGen).
 2.1.1 — simple request (sem headers customizados, evita CORS preflight) + log per-endpoint sempre.
 2.1.0 — endpoints em PARALELO (5s max em vez de 30s seq) + log diagnostico de keys da resposta.
