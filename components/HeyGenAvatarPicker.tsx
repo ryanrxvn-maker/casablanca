@@ -1,48 +1,49 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   listMyHeyGenAvatars,
   type LibraryAvatar,
+  type LibraryAvatarGroup,
 } from '@/lib/heygen-extension-bridge';
 
 /**
- * HeyGenAvatarPicker — espelho 1:1 da biblioteca de avatares da conta
- * HeyGen do user.
+ * HeyGenAvatarPicker - espelho 1:1 da biblioteca de avatares da conta
+ * HeyGen do user, com hierarquia AVATAR -> LOOKS (igual UI HeyGen).
  *
- * Como funciona:
- *   - Pede pra extensao (via bridge) listar os avatares da conta logada.
- *     A extensao chama o endpoint INTERNO do HeyGen com cookies de sessao,
- *     que retorna EXATAMENTE os mesmos avatares que aparecem em
- *     https://app.heygen.com/avatars (modal "Choose an Avatar").
- *   - User pode filtrar por nome localmente (instantaneo, sem rede).
- *   - Motor (III/IV/V) NAO filtra a busca — e' so um marcador pra hora
- *     de gerar (avatar_style no payload).
- *
- * Se a extensao nao estiver instalada, mostra mensagem clara.
+ * UI:
+ *   - Tela 1 (lista): grid de cards de AVATARES (Emma, Johan...) com thumb
+ *     do avatar, nome HeyGen exato, e badge "N looks".
+ *   - Tela 2 (looks): user clica num avatar -> drawer abre listando os looks
+ *     daquele avatar (Radiant Redhead, Photo Avatar, etc) pra selecao precisa.
+ *   - Selecionar um look retorna o look.id (que vai pro generate).
  */
 
 export type AvatarOption = {
-  id: string;
-  name: string;
+  id: string;          // ID do LOOK (passado pro generate HeyGen)
+  name: string;        // Nome do LOOK
   thumb: string | null;
   videoPreview: string | null;
   type: 'avatar' | 'photo';
   version: 'III' | 'IV' | 'V';
-  // Mantido por compat — sempre false (eliminamos a noção)
+  groupId?: string;
+  groupName?: string;  // Nome do AVATAR pai (Emma, Johan...)
+  // Compat
   premium?: boolean;
   gender?: string | null;
   isCustom?: boolean;
 };
 
-function libraryToOption(a: LibraryAvatar): AvatarOption {
+function lookToOption(l: LibraryAvatar): AvatarOption {
   return {
-    id: a.id,
-    name: a.name,
-    thumb: a.thumb,
-    videoPreview: a.videoPreview,
-    type: a.type,
-    version: a.version,
+    id: l.id,
+    name: l.name,
+    thumb: l.thumb,
+    videoPreview: l.videoPreview,
+    type: l.type,
+    version: l.version,
+    groupId: l.groupId,
+    groupName: l.groupName,
   };
 }
 
@@ -58,14 +59,14 @@ export function HeyGenAvatarPicker({
   setQuery: (s: string) => void;
   selected: AvatarOption | null;
   setSelected: (a: AvatarOption | null) => void;
-  // Mantido por compat com chamadas existentes — nao afeta busca
   motor?: 'III' | 'IV' | 'V';
   disabled?: boolean;
   label?: string;
 }) {
-  const [allAvatars, setAllAvatars] = useState<AvatarOption[]>([]);
+  const [groups, setGroups] = useState<LibraryAvatarGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [openGroupId, setOpenGroupId] = useState<string | null>(null);
 
   async function loadLibrary() {
     setLoading(true);
@@ -73,7 +74,7 @@ export function HeyGenAvatarPicker({
     try {
       const r = await listMyHeyGenAvatars();
       if (r.ok) {
-        setAllAvatars(r.avatars.map(libraryToOption));
+        setGroups(r.groups ?? []);
       } else {
         setError(
           r.error ??
@@ -87,17 +88,30 @@ export function HeyGenAvatarPicker({
     }
   }
 
-  // Carrega a biblioteca uma vez ao montar
   useEffect(() => {
     loadLibrary();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Filtro local (instantaneo) por nome
+  // Filtro: busca em nome do AVATAR ou nome do LOOK
   const q = query.trim().toLowerCase();
-  const filtered = q
-    ? allAvatars.filter((a) => a.name.toLowerCase().includes(q))
-    : allAvatars;
+  const filteredGroups = useMemo(() => {
+    if (!q) return groups;
+    return groups.filter((g) => {
+      if (g.name.toLowerCase().includes(q)) return true;
+      return g.looks.some((l) => l.name.toLowerCase().includes(q));
+    });
+  }, [groups, q]);
+
+  const totalLooks = useMemo(
+    () => groups.reduce((acc, g) => acc + g.looksCount, 0),
+    [groups],
+  );
+
+  const openGroup = useMemo(
+    () => groups.find((g) => g.id === openGroupId) ?? null,
+    [groups, openGroupId],
+  );
 
   return (
     <div>
@@ -118,8 +132,8 @@ export function HeyGenAvatarPicker({
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder={
-          allAvatars.length > 0
-            ? `Filtrar pelos seus ${allAvatars.length} avatares...`
+          groups.length > 0
+            ? `Filtrar pelos seus ${groups.length} avatares (${totalLooks} looks)...`
             : 'Carregando biblioteca...'
         }
         className="input-field"
@@ -145,50 +159,53 @@ export function HeyGenAvatarPicker({
         </div>
       ) : (
         <div className="mt-2 text-[11px] text-text-muted">
-          {filtered.length} de {allAvatars.length} avatares
+          {filteredGroups.length} de {groups.length} avatares · {totalLooks} looks total
         </div>
       )}
 
-      {filtered.length > 0 ? (
-        <div className="mt-3 grid max-h-96 gap-2 overflow-y-auto">
-          {filtered.map((a) => {
-            const active = selected?.id === a.id;
+      {/* Grid de AVATARES (igual UI "Choose an Avatar" do HeyGen) */}
+      {filteredGroups.length > 0 ? (
+        <div className="mt-3 grid max-h-[480px] grid-cols-3 gap-2 overflow-y-auto pr-1 sm:grid-cols-4 md:grid-cols-5">
+          {filteredGroups.map((g) => {
+            const isSelectedGroup = selected?.groupId === g.id;
             return (
               <button
-                key={a.id}
+                key={g.id}
                 type="button"
-                onClick={() => setSelected(a)}
+                onClick={() => setOpenGroupId(g.id)}
                 disabled={disabled}
                 className={
-                  'flex items-center gap-3 rounded-[12px] border px-3 py-2 text-left transition-all duration-200 active:scale-[0.99] ' +
-                  (active
-                    ? 'border-lime bg-lime/10 shadow-[0_0_14px_-4px_rgba(200,255,0,0.5)]'
-                    : 'border-line-strong bg-bg-soft/30 hover:border-lime')
+                  'group relative aspect-square overflow-hidden rounded-[12px] border text-left transition-all duration-200 hover:scale-[1.02] active:scale-[0.99] ' +
+                  (isSelectedGroup
+                    ? 'border-lime shadow-[0_0_18px_-4px_rgba(200,255,0,0.6)]'
+                    : 'border-line-strong hover:border-lime/60')
                 }
+                title={`${g.name} — ${g.looksCount} look${g.looksCount > 1 ? 's' : ''}`}
               >
-                {a.thumb ? (
+                {g.thumb ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
-                    src={a.thumb}
-                    alt={a.name}
-                    className="h-12 w-12 shrink-0 rounded-md object-cover"
+                    src={g.thumb}
+                    alt={g.name}
+                    className="absolute inset-0 h-full w-full object-cover"
                     loading="lazy"
                   />
                 ) : (
-                  <div className="h-12 w-12 shrink-0 rounded-md bg-line" />
+                  <div className="absolute inset-0 bg-line" />
                 )}
-                <div className="flex-1 min-w-0">
-                  <div className="truncate text-sm font-medium text-white">
-                    {a.name}
+                {/* Overlay dark */}
+                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent p-2">
+                  <div className="truncate text-[12px] font-semibold text-white">
+                    {g.name}
                   </div>
-                  <div className="mono text-[11px] uppercase text-text-muted">
-                    {a.type === 'photo' ? 'photo' : 'studio'} · v{a.version}
+                  <div className="mono text-[9px] uppercase text-text-muted">
+                    {g.looksCount} look{g.looksCount > 1 ? 's' : ''}
                   </div>
                 </div>
-                {active ? (
-                  <span className="mono shrink-0 text-xs text-lime">
-                    SELECIONADO
-                  </span>
+                {isSelectedGroup ? (
+                  <div className="absolute right-1.5 top-1.5 rounded bg-lime px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-black">
+                    Selecionado
+                  </div>
                 ) : null}
               </button>
             );
@@ -196,6 +213,94 @@ export function HeyGenAvatarPicker({
         </div>
       ) : null}
 
+      {/* Drawer dos LOOKS quando user clica num avatar */}
+      {openGroup ? (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center"
+          onClick={() => setOpenGroupId(null)}
+        >
+          <div
+            className="relative max-h-[85vh] w-full max-w-3xl overflow-y-auto rounded-t-[20px] border border-line-strong bg-bg-base p-4 sm:rounded-[20px]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center gap-3">
+              {openGroup.thumb ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={openGroup.thumb}
+                  alt={openGroup.name}
+                  className="h-10 w-10 shrink-0 rounded-full object-cover"
+                />
+              ) : null}
+              <div className="flex-1 min-w-0">
+                <div className="truncate text-lg font-semibold text-white">
+                  {openGroup.name}
+                </div>
+                <div className="mono text-[10px] uppercase text-text-muted">
+                  {openGroup.name}'s Looks · {openGroup.looksCount}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpenGroupId(null)}
+                className="rounded-md border border-line-strong bg-bg-soft px-3 py-1 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime"
+              >
+                Fechar
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {openGroup.looks.map((l) => {
+                const isSelected = selected?.id === l.id;
+                return (
+                  <button
+                    key={l.id}
+                    type="button"
+                    onClick={() => {
+                      setSelected(lookToOption(l));
+                      setOpenGroupId(null);
+                    }}
+                    disabled={disabled}
+                    className={
+                      'group relative aspect-[3/4] overflow-hidden rounded-[12px] border text-left transition-all duration-200 hover:scale-[1.02] active:scale-[0.99] ' +
+                      (isSelected
+                        ? 'border-lime shadow-[0_0_18px_-4px_rgba(200,255,0,0.6)]'
+                        : 'border-line-strong hover:border-lime/60')
+                    }
+                  >
+                    {l.thumb ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={l.thumb}
+                        alt={l.name}
+                        className="absolute inset-0 h-full w-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="absolute inset-0 bg-line" />
+                    )}
+                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-2">
+                      <div className="truncate text-[12px] font-semibold text-white">
+                        {l.name}
+                      </div>
+                      <div className="mono text-[9px] uppercase text-text-muted">
+                        {l.type === 'photo' ? 'photo' : 'studio'} · v{l.version}
+                      </div>
+                    </div>
+                    {isSelected ? (
+                      <div className="absolute right-1.5 top-1.5 rounded bg-lime px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-black">
+                        ✓ Use
+                      </div>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Pill do selecionado embaixo */}
       {selected ? (
         <div className="mt-3 flex items-center gap-3 rounded-[12px] border border-lime/30 bg-lime/5 px-3 py-2 text-xs text-lime">
           {selected.thumb ? (
@@ -207,10 +312,14 @@ export function HeyGenAvatarPicker({
               loading="lazy"
             />
           ) : null}
-          <span className="font-semibold">✓ {selected.name}</span>
-          <span className="mono ml-auto text-[10px] text-text-muted">
-            avatar v{selected.version}
-          </span>
+          <div className="flex-1 min-w-0">
+            <div className="truncate font-semibold">
+              ✓ {selected.groupName ? `${selected.groupName} — ${selected.name}` : selected.name}
+            </div>
+            <div className="mono text-[9px] uppercase text-lime/60">
+              look v{selected.version} · {selected.type}
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

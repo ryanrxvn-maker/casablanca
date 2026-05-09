@@ -145,17 +145,38 @@ export type LibraryAvatar = {
   videoPreview: string | null;
   type: 'avatar' | 'photo';
   version: 'III' | 'IV' | 'V';
+  // groupId/groupName so existem em avatars retornados via listMyHeyGenAvatars
+  // (extension v2.6.0+) - antes nao tinhamos hierarquia.
+  groupId?: string;
+  groupName?: string;
+};
+
+/**
+ * Avatar agrupado (espelho 1:1 da estrutura HeyGen "Choose an Avatar"):
+ * 1 entrada por AVATAR principal (Emma, Johan, etc.), com array de looks
+ * (variacoes/cenarios/angulos) aninhados. Cada look tem o id real usado
+ * na hora de gerar.
+ */
+export type LibraryAvatarGroup = {
+  id: string;
+  name: string;
+  thumb: string | null;
+  type: 'avatar' | 'photo';
+  version: 'III' | 'IV' | 'V';
+  looksCount: number;
+  looks: LibraryAvatar[];
 };
 
 export function listMyHeyGenAvatars(): Promise<{
   ok: boolean;
   avatars: LibraryAvatar[];
+  groups: LibraryAvatarGroup[];
   error?: string;
 }> {
   installListener();
   return new Promise((resolve) => {
     if (typeof window === 'undefined') {
-      resolve({ ok: false, avatars: [], error: 'Sem window.' });
+      resolve({ ok: false, avatars: [], groups: [], error: 'Sem window.' });
       return;
     }
     const requestId = `list_${Date.now()}_${Math.random()
@@ -178,6 +199,7 @@ export function listMyHeyGenAvatars(): Promise<{
         resolve({
           ok: !!ev.data.ok,
           avatars: Array.isArray(ev.data.avatars) ? ev.data.avatars : [],
+          groups: Array.isArray(ev.data.groups) ? ev.data.groups : [],
           error: ev.data.error ?? undefined,
         });
       }
@@ -193,6 +215,7 @@ export function listMyHeyGenAvatars(): Promise<{
       resolve({
         ok: false,
         avatars: [],
+        groups: [],
         error:
           'Extensao nao respondeu em 90s. Abre F12 na aba do DARKO LAB e cola os logs (procura "[DARKO LAB page]"). Tambem cola os logs da aba app.heygen.com.',
       });

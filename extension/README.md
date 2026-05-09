@@ -55,6 +55,8 @@ A extensao:
 
 ## Versao
 
+2.6.0 — hierarquia AVATAR (grupo) -> LOOKS espelhada da UI HeyGen "Choose an Avatar". Lista mostra os AVATARES (Emma, Johan, etc) com nome HeyGen exato + badge "N looks". Click abre drawer com todos os looks daquele avatar (Radiant Redhead, Photo Avatar, etc). Selecao retorna o look.id real usado pra geracao.
+2.5.1 — restore truncated background.js + bridge.js (service worker registration failed).
 2.5.0 — FIX CRITICO: campo `source` do payload (URL do endpoint HeyGen) sobrescrevia `source: 'darkolab-ext'` no envelope do postMessage. Page filtrava a msg fora silenciosamente -> timeout 90s. Fix em 2 lugares: (1) background renomeou `source` -> `apiSource` no payload; (2) bridge sendToPage agora poe `source: 'darkolab-ext'` DEPOIS do spread (defesa em profundidade pra qualquer payload futuro que tenha campo `source`).
 2.4.0 — diagnostic full-chain logs (page <-> bridge <-> background <-> heygen-content) pra rastrear onde a mensagem morre + page timeout 30s -> 90s.
 2.3.0 — looks em PARALELO (Promise.all) + skip v2 (sempre 404). Tempo de ~3min pra ~5s. 100 avatares carregam em segundos.

@@ -241,38 +241,56 @@ async function listMyAvatars() {
     console.log(`[DARKO LAB]   grupo ${group.name}: ${looks.length} looks`);
   }
 
-  // 3) Aplaina em items individuais (1 entrada por look — fiel a UI HeyGen)
+  // 3) Monta DUAS estruturas:
+  //    a) groups[] - hierarquico (1 entrada por avatar, com array de looks aninhados)
+  //    b) items[] - flat (1 entrada por look, p/ retrocompat + filtro instantaneo)
+  // O DARKO LAB usa groups pra UI hierarquica, e cada look tem groupId pra rastrear.
+  const groupsOut = [];
   const items = [];
   for (const { group, looks } of looksByGroup) {
+    const groupName = group.name ?? '(sem nome)';
+    const groupThumb =
+      group.preview_image ??
+      group.preview_image_url ??
+      group.thumbnail_url ??
+      null;
+    const groupVersion = detectAvatarVersion(group);
+    const groupType = group.is_photo || group.talking_photo_id ? 'photo' : 'avatar';
+
     if (looks.length === 0) {
-      // Grupo sem looks fetched — usa o grupo como single item
-      items.push({
+      // Grupo sem looks fetched - usa o grupo como single look item
+      const onlyLook = {
         id: group.id,
-        name: group.name ?? '(sem nome)',
-        thumb:
-          group.preview_image ??
-          group.preview_image_url ??
-          group.thumbnail_url ??
-          null,
+        name: groupName,
+        thumb: groupThumb,
         videoPreview: group.preview_video ?? group.preview_video_url ?? null,
-        type: group.is_photo || group.talking_photo_id ? 'photo' : 'avatar',
-        version: detectAvatarVersion(group),
+        type: groupType,
+        version: groupVersion,
+        groupId: group.id,
+        groupName,
+      };
+      groupsOut.push({
+        id: group.id,
+        name: groupName,
+        thumb: groupThumb,
+        type: groupType,
+        version: groupVersion,
+        looksCount: 1,
+        looks: [onlyLook],
       });
+      items.push(onlyLook);
       continue;
     }
-    // Tem looks — adiciona cada look como item separado
-    // HeyGen retorna cada look como wrapper { look_type, look } onde
-    // os dados reais estao em wrapper.look. Detectamos e desembrulhamos.
+
+    // Grupo com looks reais - extrai cada look
+    const groupLooks = [];
     for (const wrapper of looks) {
-      // Se tem campo "look" aninhado, e' o wrapper — usa o conteudo dele.
-      // Senao, usa o objeto direto.
       const look =
         wrapper && typeof wrapper === 'object' && wrapper.look
           ? wrapper.look
           : wrapper;
       const lookType = wrapper?.look_type ?? null;
 
-      // Loga sample do PRIMEIRO look REAL (apos desembrulhar) pra debug
       if (items.length === 0) {
         console.log(
           '[DARKO LAB] SAMPLE look REAL (struct):',
@@ -297,32 +315,56 @@ async function listMyAvatars() {
         }
         continue;
       }
-      items.push({
+      const lookName =
+        findNameField(look) ?? `${groupName} look ${groupLooks.length + 1}`;
+      const lookThumb = findThumbField(look) ?? groupThumb;
+      const lookVersion =
+        detectAvatarVersion(look) || groupVersion;
+      const lookTypeFinal =
+        look.talking_photo_id ||
+        look.is_photo ||
+        group.is_photo ||
+        lookType === 'photo'
+          ? 'photo'
+          : 'avatar';
+      const lookItem = {
         id,
-        name: findNameField(look) ?? group.name ?? `Look ${items.length + 1}`,
-        thumb: findThumbField(look) ?? group.preview_image ?? null,
+        name: lookName,
+        thumb: lookThumb,
         videoPreview:
           look.preview_video ??
           look.preview_video_url ??
           look.motion_preview_url ??
           null,
-        type:
-          look.talking_photo_id ||
-          look.is_photo ||
-          group.is_photo ||
-          lookType === 'photo'
-            ? 'photo'
-            : 'avatar',
-        version: detectAvatarVersion(look) || detectAvatarVersion(group),
+        type: lookTypeFinal,
+        version: lookVersion,
+        groupId: group.id,
+        groupName,
+      };
+      groupLooks.push(lookItem);
+      items.push(lookItem);
+    }
+
+    if (groupLooks.length > 0) {
+      // Thumb do grupo: prefere o primeiro look (ou o thumb do grupo)
+      const firstLookThumb = groupLooks[0].thumb;
+      groupsOut.push({
+        id: group.id,
+        name: groupName,
+        thumb: groupThumb ?? firstLookThumb,
+        type: groupType,
+        version: groupVersion,
+        looksCount: groupLooks.length,
+        looks: groupLooks,
       });
     }
   }
 
   console.log(
-    `[DARKO LAB] STEP 5: biblioteca completa: ${items.length} items (${groups.length} grupos)`,
+    `[DARKO LAB] STEP 5: biblioteca completa: ${items.length} looks em ${groupsOut.length} avatares`,
   );
 
-  // Dedup por id
+  // Dedup looks flat por id (defensivo)
   const seen = new Set();
   const dedup = items.filter((a) => {
     if (!a.id) return false;
@@ -331,10 +373,11 @@ async function listMyAvatars() {
     return true;
   });
 
-  console.log(`[DARKO LAB] STEP 6: retornando ${dedup.length} items unicos`);
+  console.log(`[DARKO LAB] STEP 6: retornando ${groupsOut.length} groups + ${dedup.length} flat looks`);
 
   return {
     ok: true,
+    groups: groupsOut,
     avatars: dedup,
     source: 'api2.heygen.com/v2/avatar_group.private.list + avatar_look.private.list',
   };
