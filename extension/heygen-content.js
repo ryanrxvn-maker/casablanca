@@ -29,6 +29,11 @@ const SELECTORS = {
 let currentJob = null;
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Ping pra background verificar que content script esta vivo
+  if (msg && msg.type === 'HG_PING') {
+    sendResponse({ ok: true, version: chrome.runtime.getManifest().version });
+    return false;
+  }
   if (msg && msg.type === 'HG_RUN_JOB') {
     runJob(msg.requestId, msg.payload).catch((err) => {
       reportError(msg.requestId, err?.message ?? String(err));

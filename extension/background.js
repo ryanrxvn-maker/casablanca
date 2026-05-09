@@ -227,12 +227,67 @@ async function waitForTabReady(tabId) {
   while (Date.now() < deadline) {
     try {
       const tab = await chrome.tabs.get(tabId);
-      if (tab.status === 'complete') return;
+      if (tab.status === 'complete') break;
     } catch {
       throw new Error('Aba HeyGen foi fechada.');
     }
     await new Promise((r) => setTimeout(r, 500));
   }
+  // Garante que o content script esta injetado e respondendo
+  await ensureContentScriptLoaded(tabId);
+}
+
+/**
+ * Garante que o content script esta carregado na aba HeyGen.
+ * Tenta um PING primeiro — se falhar, injeta manualmente via
+ * chrome.scripting.executeScript (resolve o caso classico de aba que foi
+ * aberta antes da extension ser instalada/atualizada).
+ */
+async function ensureContentScriptLoaded(tabId) {
+  // Tenta PING. Se responder, content script ja esta vivo.
+  try {
+    const resp = await Promise.race([
+      chrome.tabs.sendMessage(tabId, { type: 'HG_PING' }),
+      new Promise((_, rej) =>
+        setTimeout(() => rej(new Error('PING timeout')), 1500),
+      ),
+    ]);
+    if (resp?.ok) return true;
+  } catch (e) {
+    // Content script nao respondeu — vai injetar
+  }
+
+  // Tenta injetar manualmente
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['heygen-content.js'],
+    });
+    // Espera o script inicializar
+    await new Promise((r) => setTimeout(r, 1000));
+
+    // Confirma com PING
+    try {
+      const resp = await Promise.race([
+        chrome.tabs.sendMessage(tabId, { type: 'HG_PING' }),
+        new Promise((_, rej) =>
+          setTimeout(() => rej(new Error('PING timeout pos-inject')), 2000),
+        ),
+      ]);
+      if (resp?.ok) return true;
+    } catch (e) {
+      throw new Error(
+        'Content script injetado mas nao respondeu. Recarregue a aba app.heygen.com manualmente (F5).',
+      );
+    }
+  } catch (e) {
+    throw new Error(
+      'Falha ao injetar content script: ' +
+        (e?.message ?? e) +
+        '. Recarregue a aba app.heygen.com manualmente.',
+    );
+  }
+  return false;
 }
 
 // Se o user fecha a aba HeyGen no meio de um job, falha todos os jobs

@@ -26,15 +26,24 @@ const FILES = [
   'README.md',
 ];
 
+const ICONS = ['icon-16.png', 'icon-32.png', 'icon-48.png', 'icon-128.png'];
+
 export async function GET() {
   try {
     const baseDir = path.join(process.cwd(), 'extension');
-    const entries = await Promise.all(
+    const fileEntries = await Promise.all(
       FILES.map(async (name) => {
         const buf = await readFile(path.join(baseDir, name));
         return { name, data: new Uint8Array(buf) };
       }),
     );
+    const iconEntries = await Promise.all(
+      ICONS.map(async (name) => {
+        const buf = await readFile(path.join(baseDir, 'icons', name));
+        return { name: `icons/${name}`, data: new Uint8Array(buf) };
+      }),
+    );
+    const entries = [...fileEntries, ...iconEntries];
 
     const zip = await buildZip(entries);
     const arrayBuffer = await zip.arrayBuffer();
