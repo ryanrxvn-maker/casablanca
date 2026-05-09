@@ -148,13 +148,18 @@ async function handleTestSession(requestId, bridgeTabId) {
 }
 
 async function handleListAvatars(requestId, bridgeTabId) {
+  console.log('[DARKO LAB BG] >>> handleListAvatars START reqId=', requestId, 'bridgeTabId=', bridgeTabId);
   const tab = await findOrCreateHeyGenTab();
+  console.log('[DARKO LAB BG] heygen tab=', tab.id, 'url=', tab.url);
   await waitForTabReady(tab.id);
+  console.log('[DARKO LAB BG] heygen tab ready, sending HG_LIST_AVATARS to content script');
   try {
     const resp = await chrome.tabs.sendMessage(tab.id, {
       type: 'HG_LIST_AVATARS',
       requestId,
     });
+    console.log('[DARKO LAB BG] got resp from heygen content script: ok=', resp?.ok, 'avatars=', resp?.avatars?.length, 'err=', resp?.error);
+    console.log('[DARKO LAB BG] >>> calling reportToPage with HG_AVATARS_RESULT');
     reportToPage(bridgeTabId, requestId, 'HG_AVATARS_RESULT', {
       ok: !!resp?.ok,
       avatars: resp?.avatars ?? [],
@@ -162,6 +167,7 @@ async function handleListAvatars(requestId, bridgeTabId) {
       source: resp?.source ?? null,
     });
   } catch (e) {
+    console.error('[DARKO LAB BG] !!! sendMessage to heygen tab THREW:', e?.message ?? e);
     reportToPage(bridgeTabId, requestId, 'HG_AVATARS_RESULT', {
       ok: false,
       avatars: [],
@@ -208,7 +214,11 @@ async function handleGenerate(requestId, payload, bridgeTabId) {
 }
 
 function reportToPage(bridgeTabId, requestId, type, payload) {
-  if (!bridgeTabId) return;
+  if (!bridgeTabId) {
+    console.warn('[DARKO LAB BG] !!! reportToPage called WITHOUT bridgeTabId. type=', type, 'reqId=', requestId);
+    return;
+  }
+  console.log('[DARKO LAB BG] reportToPage -> tab', bridgeTabId, 'type=', type, 'reqId=', requestId);
   chrome.tabs
     .sendMessage(bridgeTabId, {
       source: 'darkolab-bg',
@@ -216,8 +226,11 @@ function reportToPage(bridgeTabId, requestId, type, payload) {
       requestId,
       payload,
     })
-    .catch(() => {
-      /* aba pode ter fechado */
+    .then(() => {
+      console.log('[DARKO LAB BG] reportToPage delivered OK to tab', bridgeTabId, 'type=', type);
+    })
+    .catch((err) => {
+      console.error('[DARKO LAB BG] !!! reportToPage FAILED to tab', bridgeTabId, 'type=', type, 'err=', err?.message ?? err);
     });
 }
 

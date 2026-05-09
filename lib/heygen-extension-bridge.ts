@@ -161,13 +161,20 @@ export function listMyHeyGenAvatars(): Promise<{
     const requestId = `list_${Date.now()}_${Math.random()
       .toString(36)
       .slice(2, 6)}`;
+    console.log('[DARKO LAB page] >>> listMyHeyGenAvatars start, requestId:', requestId);
     const handler = (ev: MessageEvent) => {
+      // Loga TUDO que chega de darkolab-ext pra debug
+      if (ev.data?.source === 'darkolab-ext') {
+        console.log('[DARKO LAB page] <-- got darkolab-ext msg:', ev.data?.type, 'reqId:', ev.data?.requestId, 'matches:', ev.data?.requestId === requestId);
+      }
       if (
         ev.data?.source === 'darkolab-ext' &&
         ev.data?.type === 'HG_AVATARS_RESULT' &&
         ev.data?.requestId === requestId
       ) {
         window.removeEventListener('message', handler);
+        clearTimeout(timeoutId);
+        console.log('[DARKO LAB page] <<< HG_AVATARS_RESULT match! ok=', ev.data.ok, 'count=', Array.isArray(ev.data.avatars) ? ev.data.avatars.length : 0);
         resolve({
           ok: !!ev.data.ok,
           avatars: Array.isArray(ev.data.avatars) ? ev.data.avatars : [],
@@ -180,15 +187,16 @@ export function listMyHeyGenAvatars(): Promise<{
       { source: 'darkolab', type: 'HG_LIST_AVATARS', requestId },
       '*',
     );
-    setTimeout(() => {
+    const timeoutId = setTimeout(() => {
       window.removeEventListener('message', handler);
+      console.warn('[DARKO LAB page] !!! TIMEOUT 90s — nenhuma resposta darkolab-ext com type HG_AVATARS_RESULT chegou pra reqId', requestId);
       resolve({
         ok: false,
         avatars: [],
         error:
-          'Extensao nao respondeu em 30s. Abre F12 na aba app.heygen.com e me cola os logs do DARKO LAB.',
+          'Extensao nao respondeu em 90s. Abre F12 na aba do DARKO LAB e cola os logs (procura "[DARKO LAB page]"). Tambem cola os logs da aba app.heygen.com.',
       });
-    }, 30000);
+    }, 90000);
   });
 }
 

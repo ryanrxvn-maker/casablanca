@@ -105,13 +105,15 @@
   // Listener pra mensagens do background → encaminha pra pagina
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg && msg.source === 'darkolab-bg') {
+      console.log('[DARKO LAB Bridge] <-- bg msg type=', msg.type, 'reqId=', msg.requestId, 'payload keys=', msg.payload ? Object.keys(msg.payload) : 'none');
       sendToPage({
         type: msg.type,
         requestId: msg.requestId,
         ...msg.payload,
       });
+      console.log('[DARKO LAB Bridge] --> postMessage darkolab-ext type=', msg.type, 'reqId=', msg.requestId);
     }
   });
 
-  console.log('[DARKO LAB Bridge] online v' + VERSION);
+  console.log('[DARKO LAB Bridge] online v' + VERSION + ' on ' + window.location.host);
 })();
