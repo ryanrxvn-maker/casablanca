@@ -199,6 +199,7 @@ async function listMyAvatars() {
   // 2) Pra cada grupo, busca os looks (sequencial pra evitar deadlock)
   console.log('[DARKO LAB] STEP 3: buscando looks de cada grupo...');
   const looksByGroup = [];
+  let firstSampleLogged = false;
   for (const g of groups) {
     const groupId = g.id;
     let foundLooks = [];
@@ -219,11 +220,27 @@ async function listMyAvatars() {
         }
         const j = await r.json();
         const looks =
-          j?.data?.avatar_looks ?? j?.data?.list ?? j?.data ?? [];
+          j?.data?.avatar_looks ??
+          j?.data?.avatar_look_list ??
+          j?.data?.list ??
+          (Array.isArray(j?.data) ? j.data : null) ??
+          [];
         if (Array.isArray(looks)) {
           console.log(
             `[DARKO LAB]   grupo ${g.name ?? groupId}: ${looks.length} looks via ${url.includes('v2') ? 'v2' : 'v1'}`,
           );
+          // Loga sample do primeiro look pra entender estrutura
+          if (!firstSampleLogged && looks.length > 0) {
+            console.log(
+              '[DARKO LAB] SAMPLE look (struct):',
+              JSON.stringify(looks[0]).slice(0, 800),
+            );
+            console.log(
+              '[DARKO LAB] SAMPLE look (keys):',
+              Object.keys(looks[0]).join(', '),
+            );
+            firstSampleLogged = true;
+          }
           foundLooks = looks;
           break;
         }
@@ -256,27 +273,22 @@ async function listMyAvatars() {
     }
     // Tem looks — adiciona cada look como item separado
     for (const look of looks) {
-      const id =
-        look.id ??
-        look.avatar_look_id ??
-        look.look_id ??
-        look.avatar_id ??
-        look.talking_photo_id;
-      if (!id) continue;
+      // Pega ID de qualquer campo que pareca ID (id, *_id, *Id, uuid, etc)
+      const id = findIdField(look);
+      if (!id) {
+        // Log de debug pra primeiro look sem ID
+        if (items.length === 0) {
+          console.warn(
+            '[DARKO LAB] look sem ID detectavel, keys:',
+            Object.keys(look).join(', '),
+          );
+        }
+        continue;
+      }
       items.push({
         id,
-        name:
-          look.name ??
-          look.avatar_name ??
-          group.name ??
-          `Look ${items.length + 1}`,
-        thumb:
-          look.preview_image ??
-          look.preview_image_url ??
-          look.normal_preview ??
-          look.thumbnail_url ??
-          group.preview_image ??
-          null,
+        name: findNameField(look) ?? group.name ?? `Look ${items.length + 1}`,
+        thumb: findThumbField(look) ?? group.preview_image ?? null,
         videoPreview:
           look.preview_video ??
           look.preview_video_url ??
@@ -331,6 +343,88 @@ function detectAvatarVersion(obj) {
     return 'IV';
   if (obj.talking_photo_id || obj.is_photo || obj.type === 'photo') return 'III';
   return 'IV';
+}
+
+/**
+ * Encontra qualquer campo que pareca um ID (id, *_id, *Id, uuid, key, ref).
+ * HeyGen usa nomes diferentes em endpoints diferentes (avatar_look_id,
+ * pose_id, image_key, look_uuid, etc).
+ */
+function findIdField(obj) {
+  if (!obj || typeof obj !== 'object') return null;
+  // Prioridade explicita pra campos conhecidos
+  const explicit = [
+    'avatar_look_id',
+    'look_id',
+    'avatar_id',
+    'talking_photo_id',
+    'photo_id',
+    'pose_id',
+    'image_key',
+    'id',
+    'uuid',
+  ];
+  for (const k of explicit) {
+    const v = obj[k];
+    if (v && typeof v === 'string' && v.length > 5) return v;
+  }
+  // Fallback: qualquer campo terminando em _id ou _key
+  for (const key of Object.keys(obj)) {
+    if (
+      key.endsWith('_id') ||
+      key.endsWith('Id') ||
+      key.endsWith('_key') ||
+      key === 'uuid'
+    ) {
+      const v = obj[key];
+      if (v && typeof v === 'string' && v.length > 5) return v;
+    }
+  }
+  return null;
+}
+
+/**
+ * Encontra qualquer campo que pareca nome.
+ */
+function findNameField(obj) {
+  if (!obj || typeof obj !== 'object') return null;
+  const fields = [
+    'avatar_look_name',
+    'look_name',
+    'avatar_name',
+    'name',
+    'display_name',
+    'title',
+    'pose_name',
+  ];
+  for (const k of fields) {
+    const v = obj[k];
+    if (v && typeof v === 'string') return v;
+  }
+  return null;
+}
+
+/**
+ * Encontra qualquer campo que pareca URL de thumbnail.
+ */
+function findThumbField(obj) {
+  if (!obj || typeof obj !== 'object') return null;
+  const fields = [
+    'preview_image',
+    'preview_image_url',
+    'normal_preview',
+    'thumbnail_url',
+    'thumbnail_image_url',
+    'image_url',
+    'avatar_image_url',
+    'cover_image_url',
+    'photo_url',
+  ];
+  for (const k of fields) {
+    const v = obj[k];
+    if (v && typeof v === 'string' && v.startsWith('http')) return v;
+  }
+  return null;
 }
 
 /**
