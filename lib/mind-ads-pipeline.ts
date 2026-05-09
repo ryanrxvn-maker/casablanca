@@ -299,7 +299,11 @@ export async function downloadAsBlob(
   mime = 'video/mp4',
 ): Promise<Blob> {
   const buf = await downloadAsBuffer(url, signal);
-  return new Blob([buf], { type: mime });
+  // Copia pra ArrayBuffer puro pra evitar typing issue
+  // (Uint8Array<ArrayBufferLike> nao satisfaz BlobPart em TS strict)
+  const copy = new Uint8Array(buf.length);
+  copy.set(buf);
+  return new Blob([copy.buffer], { type: mime });
 }
 
 /* ===========================================================
