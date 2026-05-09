@@ -71,7 +71,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
  */
 async function listMyVoices() {
   const headers = getInternalAuthHeaders();
-  // Mesmo padrao dos avatares — api2.heygen.com primeiro
   const endpoints = [
     'https://api2.heygen.com/v2/voice.list?limit=200&page=1',
     'https://api2.heygen.com/v1/voice.list?limit=200&page=1',
@@ -79,40 +78,37 @@ async function listMyVoices() {
     'https://app.heygen.com/api/v2/voice.list',
     'https://api.heygen.com/v2/voices',
   ];
-  const errors = [];
-  for (const url of endpoints) {
-    try {
-      const r = await fetchWithTimeout(
-        url,
-        { method: 'GET', credentials: 'include', headers },
-        6000,
-      );
-      if (r.status === 401 || r.status === 403) {
-        errors.push(`${url} → ${r.status}`);
-        continue;
-      }
-      if (!r.ok) {
-        errors.push(`${url} → ${r.status}`);
-        continue;
-      }
-      const text = await r.text();
-      let json;
+
+  // Paralelo — mesma estrategia dos avatares
+  const results = await Promise.all(
+    endpoints.map(async (url) => {
       try {
-        json = JSON.parse(text);
-      } catch {
-        errors.push(`${url} → nao-JSON`);
-        continue;
+        const r = await fetchWithTimeout(
+          url,
+          { method: 'GET', credentials: 'include', headers },
+          5000,
+        );
+        if (!r.ok) return { url, error: `${r.status}`, voices: null };
+        const text = await r.text();
+        const json = JSON.parse(text);
+        const voices = parseVoicesResponse(json);
+        return { url, voices };
+      } catch (e) {
+        return { url, error: e.name === 'AbortError' ? 'timeout' : e.message, voices: null };
       }
-      const voices = parseVoicesResponse(json);
-      if (voices.length > 0) {
-        return { ok: true, voices, source: url };
-      }
-      errors.push(`${url} → 0 itens`);
-    } catch (e) {
-      errors.push(`${url} → ${e.name === 'AbortError' ? 'timeout' : e.message}`);
+    }),
+  );
+
+  for (const r of results) {
+    if (r.voices && r.voices.length > 0) {
+      return { ok: true, voices: r.voices, source: r.url };
     }
   }
-  return { ok: false, error: errors.join(' | '), voices: [] };
+  return {
+    ok: false,
+    error: results.map((r) => `${r.url}: ${r.error ?? '0'}`).join(' | '),
+    voices: [],
+  };
 }
 
 function parseVoicesResponse(json) {
@@ -154,9 +150,6 @@ function parseVoicesResponse(json) {
 async function listMyAvatars() {
   const headers = getInternalAuthHeaders();
 
-  // Endpoint REAL confirmado via DevTools: api2.heygen.com/v2/...
-  // Origin app.heygen.com aceito via CORS (Access-Control-Allow-Origin).
-  // Limit=200 traz tudo de uma vez (HeyGen aceita ate 200 por pagina).
   const endpoints = [
     'https://api2.heygen.com/v2/avatar_group.private.list?limit=200&page=1',
     'https://api2.heygen.com/v1/avatar_group.private.list?limit=200&page=1',
@@ -166,56 +159,56 @@ async function listMyAvatars() {
     'https://api.heygen.com/v2/avatars',
   ];
 
-  const errors = [];
-  console.log('[DARKO LAB] listMyAvatars iniciando, headers:', Object.keys(headers));
+  console.log('[DARKO LAB] listMyAvatars (paralelo) iniciando');
 
-  for (const url of endpoints) {
-    try {
-      const r = await fetchWithTimeout(
-        url,
-        { method: 'GET', credentials: 'include', headers },
-        6000,
-      );
-
-      if (r.status === 401 || r.status === 403) {
-        errors.push(`${url} → ${r.status} (auth required)`);
-        continue;
-      }
-      if (!r.ok) {
-        errors.push(`${url} → ${r.status}`);
-        continue;
-      }
-
-      // Pega o body como texto primeiro. Se for HTML (redirect login) NAO e' o endpoint.
-      const text = await r.text();
-      let json;
+  // Roda TODAS em paralelo — primeira com items > 0 ganha.
+  // Timeout 5s por endpoint. Total max 5s em vez de ~30s sequencial.
+  const results = await Promise.all(
+    endpoints.map(async (url) => {
       try {
-        json = JSON.parse(text);
-      } catch {
-        errors.push(`${url} → 200 mas resposta nao-JSON`);
-        continue;
+        const r = await fetchWithTimeout(
+          url,
+          { method: 'GET', credentials: 'include', headers },
+          5000,
+        );
+        if (!r.ok) {
+          return { url, error: `${r.status}`, items: null };
+        }
+        const text = await r.text();
+        let json;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          return { url, error: 'nao-JSON', items: null };
+        }
+        const items = parseAvatarsResponse(json);
+        console.log(
+          `[DARKO LAB] ${url}: ${items.length} items, keys:`,
+          json ? Object.keys(json) : 'null',
+          json?.data ? 'data keys: ' + Object.keys(json.data).join(',') : '',
+        );
+        return { url, items, json };
+      } catch (e) {
+        const msg = e.name === 'AbortError' ? 'timeout 5s' : (e.message ?? String(e));
+        return { url, error: msg, items: null };
       }
+    }),
+  );
 
-      const items = parseAvatarsResponse(json);
-      console.log(
-        `[DARKO LAB] Avatars from ${url}: ${items.length} items`,
-        items.length === 0 ? 'rawData:' : '',
-        items.length === 0 ? json : '',
-      );
-
-      if (items.length > 0) {
-        return { ok: true, avatars: items, source: url };
-      }
-      errors.push(`${url} → 200 OK mas 0 itens parseados`);
-    } catch (e) {
-      const msg = e.name === 'AbortError' ? 'timeout 6s' : e.message ?? e;
-      errors.push(`${url} → ${msg}`);
+  // Pega o primeiro endpoint que retornou items > 0
+  for (const r of results) {
+    if (r.items && r.items.length > 0) {
+      return { ok: true, avatars: r.items, source: r.url };
     }
   }
 
+  // Nenhum funcionou — coleta erros + raw data pra debug
+  const errors = results.map((r) => `${r.url} → ${r.error ?? '0 items'}`);
+  console.warn('[DARKO LAB] Nenhum endpoint retornou avatares:', results);
+
   return {
     ok: false,
-    error: 'Nenhum endpoint funcionou. ' + errors.slice(0, 3).join(' | '),
+    error: 'Nenhum endpoint retornou. ' + errors.slice(0, 3).join(' | '),
     avatars: [],
     debug: errors,
   };

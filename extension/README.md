@@ -55,6 +55,7 @@ A extensao:
 
 ## Versao
 
+2.1.0 — endpoints em PARALELO (5s max em vez de 30s seq) + log diagnostico de keys da resposta.
 2.0.1 — icone do coelho DARKO LAB (16/32/48/128px).
 2.0.0 — content script auto-injection (resolve "Could not establish connection") + PING handshake.
 1.9.0 — endpoint REAL confirmado: api2.heygen.com/v2/avatar_group.private.list (subdominio correto).
