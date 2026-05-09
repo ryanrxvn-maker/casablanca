@@ -59,17 +59,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg && msg.type === 'HG_LIST_AVATARS') {
-    console.log('[DARKO LAB] >>> HG_LIST_AVATARS message received');
+    console.log('[DARKO LAB] >>> HG_LIST_AVATARS message received reqId=', msg.requestId);
+    // PUSH PATTERN: ack imediato + manda resultado via mensagem separada.
+    // Evita o bug de service worker do background hibernar durante o await
+    // (que fecha o port com 'channel closed before a response was received').
+    sendResponse({ accepted: true });
+    const reqId = msg.requestId;
     listMyAvatars()
       .then((res) => {
-        console.log('[DARKO LAB] <<< listMyAvatars resolved, sending response, items:', res?.avatars?.length);
-        sendResponse(res);
+        console.log('[DARKO LAB] <<< listMyAvatars done, pushing HG_TAB_AVATARS_RESULT items=', res?.avatars?.length);
+        chrome.runtime.sendMessage({
+          type: 'HG_TAB_AVATARS_RESULT',
+          requestId: reqId,
+          ok: !!res?.ok,
+          avatars: res?.avatars ?? [],
+          groups: res?.groups ?? [],
+          error: res?.error ?? null,
+          apiSource: res?.source ?? null,
+        }).catch((e) => console.warn('[DARKO LAB] push avatars sendMessage err:', e?.message ?? e));
       })
       .catch((e) => {
         console.error('[DARKO LAB] !!! listMyAvatars REJECTED:', e);
-        sendResponse({ ok: false, error: e?.message ?? String(e), avatars: [] });
+        chrome.runtime.sendMessage({
+          type: 'HG_TAB_AVATARS_RESULT',
+          requestId: reqId,
+          ok: false,
+          avatars: [],
+          groups: [],
+          error: e?.message ?? String(e),
+        }).catch(() => {});
       });
-    return true;
+    return false; // ja respondemos sync
   }
   if (msg && msg.type === 'HG_LIST_VOICES') {
     listMyVoices()

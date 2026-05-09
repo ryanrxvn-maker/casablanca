@@ -3,6 +3,9 @@
  */
 
 const activeJobs = new Map();
+// Map<requestId, { bridgeTabId, timeoutId }> pra correlacionar push do
+// content script (HG_TAB_AVATARS_RESULT) de volta com o requester original.
+const pendingListJobs = new Map();
 const HEYGEN_CREATE_URL = 'https://app.heygen.com/avatar';
 
 async function findOrCreateHeyGenTab() {
@@ -97,6 +100,25 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
+  if (msg.type === 'HG_TAB_AVATARS_RESULT') {
+    const job = pendingListJobs.get(msg.requestId);
+    if (job) {
+      clearTimeout(job.timeoutId);
+      pendingListJobs.delete(msg.requestId);
+      console.log('[DARKO LAB BG] <-- pushed AVATARS_RESULT reqId=', msg.requestId, 'avatars=', msg.avatars?.length, 'groups=', msg.groups?.length);
+      reportToPage(job.bridgeTabId, msg.requestId, 'HG_AVATARS_RESULT', {
+        ok: !!msg.ok,
+        avatars: msg.avatars ?? [],
+        groups: msg.groups ?? [],
+        error: msg.error ?? null,
+        apiSource: msg.apiSource ?? null,
+      });
+    } else {
+      console.warn('[DARKO LAB BG] !! recebido HG_TAB_AVATARS_RESULT sem job pendente reqId=', msg.requestId);
+    }
+    return false;
+  }
+
   if (msg.type === 'HG_TAB_ERROR') {
     const job = activeJobs.get(msg.requestId);
     if (job) {
@@ -137,30 +159,72 @@ async function handleListAvatars(requestId, bridgeTabId) {
   const tab = await findOrCreateHeyGenTab();
   console.log('[DARKO LAB BG] heygen tab=', tab.id, 'url=', tab.url);
   await waitForTabReady(tab.id);
-  console.log('[DARKO LAB BG] heygen tab ready, sending HG_LIST_AVATARS to content script');
+  console.log('[DARKO LAB BG] heygen tab ready, sending HG_LIST_AVATARS to content script (push pattern)');
+
+  // PUSH PATTERN: NAO fazemos await da resposta. Content script vai
+  // empurrar HG_TAB_AVATARS_RESULT via runtime.sendMessage quando tiver
+  // o resultado. Aqui a gente so 'envia' (fire-and-forget) e registra
+  // um job pendente que sera resolvido pelo handler de HG_TAB_AVATARS_RESULT.
+  // Isso evita o problema do SW do background hibernar durante o await
+  // (que fechava o port com 'channel closed before a response').
+
+  // Timeout de seguranca - se em 60s nao recebermos o push, falha.
+  const timeoutId = setTimeout(() => {
+    if (pendingListJobs.has(requestId)) {
+      console.warn('[DARKO LAB BG] !!! pending list job timeout 60s reqId=', requestId);
+      pendingListJobs.delete(requestId);
+      reportToPage(bridgeTabId, requestId, 'HG_AVATARS_RESULT', {
+        ok: false,
+        avatars: [],
+        groups: [],
+        error: 'Timeout 60s aguardando resposta do content script HeyGen.',
+      });
+    }
+  }, 60000);
+
+  pendingListJobs.set(requestId, { bridgeTabId, timeoutId });
+
   try {
-    const resp = await chrome.tabs.sendMessage(tab.id, {
-      type: 'HG_LIST_AVATARS',
-      requestId,
-    });
-    console.log('[DARKO LAB BG] got resp from heygen content script: ok=', resp?.ok, 'avatars=', resp?.avatars?.length, 'err=', resp?.error);
-    console.log('[DARKO LAB BG] >>> calling reportToPage with HG_AVATARS_RESULT');
-    reportToPage(bridgeTabId, requestId, 'HG_AVATARS_RESULT', {
-      ok: !!resp?.ok,
-      avatars: resp?.avatars ?? [],
-      error: resp?.error ?? null,
-      apiSource: resp?.source ?? null,
-    });
+    // Fire-and-forget. O sendResponse imediato do content script
+    // ({ accepted: true }) nao nos importa - o resultado real vem via push.
+    chrome.tabs.sendMessage(tab.id, { type: 'HG_LIST_AVATARS', requestId })
+      .then(() => {
+        console.log('[DARKO LAB BG] HG_LIST_AVATARS dispatched OK, aguardando push HG_TAB_AVATARS_RESULT...');
+      })
+      .catch((e) => {
+        // Erro ao DESPACHAR (raro - aba fechou antes da msg sair). Ignora
+        // o channel-closed (esperado pq retornamos sync no content). So se
+        // for algo realmente fatal vai cair aqui (No tab with id).
+        const m = e?.message ?? String(e);
+        if (m.includes('channel closed') || m.includes('listener indicated')) {
+          // Esperado - sendResponse({accepted:true}) feito sync, canal fecha. OK.
+          console.log('[DARKO LAB BG] dispatch ack channel-close (esperado), aguardando push...');
+        } else {
+          console.error('[DARKO LAB BG] !!! dispatch HG_LIST_AVATARS THREW:', m);
+          if (pendingListJobs.has(requestId)) {
+            clearTimeout(timeoutId);
+            pendingListJobs.delete(requestId);
+            reportToPage(bridgeTabId, requestId, 'HG_AVATARS_RESULT', {
+              ok: false,
+              avatars: [],
+              groups: [],
+              error: 'Aba HeyGen nao respondeu. Abra app.heygen.com e tente de novo. (' + m + ')',
+            });
+          }
+        }
+      });
   } catch (e) {
-    console.error('[DARKO LAB BG] !!! sendMessage to heygen tab THREW:', e?.message ?? e);
-    reportToPage(bridgeTabId, requestId, 'HG_AVATARS_RESULT', {
-      ok: false,
-      avatars: [],
-      error:
-        'Aba HeyGen nao respondeu. Abra app.heygen.com e tente de novo. (' +
-        (e?.message ?? '') +
-        ')',
-    });
+    console.error('[DARKO LAB BG] !!! handleListAvatars sync throw:', e?.message ?? e);
+    if (pendingListJobs.has(requestId)) {
+      clearTimeout(timeoutId);
+      pendingListJobs.delete(requestId);
+      reportToPage(bridgeTabId, requestId, 'HG_AVATARS_RESULT', {
+        ok: false,
+        avatars: [],
+        groups: [],
+        error: 'Erro inesperado: ' + (e?.message ?? String(e)),
+      });
+    }
   }
 }
 

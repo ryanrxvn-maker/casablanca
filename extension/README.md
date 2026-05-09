@@ -55,6 +55,7 @@ A extensao:
 
 ## Versao
 
+2.6.2 — push pattern: content script empurra HG_TAB_AVATARS_RESULT via runtime.sendMessage em vez de responder via sendResponse. Background fire-and-forget + listener correlado por requestId. Elimina o erro 'channel closed before a response was received' causado por SW background hibernando durante await chrome.tabs.sendMessage de operacoes longas (3s+).
 2.6.1 — guard contra injecao dupla do heygen-content.js (window.__darkolab_heygen_loaded__). Quando o content script era injetado 2x (manifest + auto-inject), os 2 listeners retornavam true e o canal fechava com "channel closed before a response was received" mesmo apos sendResponse ter sido chamado pelo primeiro.
 2.6.0 — hierarquia AVATAR (grupo) -> LOOKS espelhada da UI HeyGen "Choose an Avatar". Lista mostra os AVATARES (Emma, Johan, etc) com nome HeyGen exato + badge "N looks". Click abre drawer com todos os looks daquele avatar (Radiant Redhead, Photo Avatar, etc). Selecao retorna o look.id real usado pra geracao.
 2.5.1 — restore truncated background.js + bridge.js (service worker registration failed).
