@@ -152,81 +152,170 @@ function parseVoicesResponse(json) {
  * fiel no DARKO LAB.
  */
 async function listMyAvatars() {
-  const endpoints = [
-    'https://api2.heygen.com/v2/avatar_group.private.list?limit=200&page=1',
-    'https://api2.heygen.com/v1/avatar_group.private.list?limit=200&page=1',
-    'https://api2.heygen.com/v2/avatar_group.private.list?limit=10&page=1',
-    'https://app.heygen.com/api/v2/avatar_group.private.list?limit=200&page=1',
-    'https://app.heygen.com/api/v2/avatars',
-    'https://api.heygen.com/v2/avatars',
-  ];
+  console.log('[DARKO LAB] listMyAvatars iniciando');
 
-  console.log('[DARKO LAB] listMyAvatars (paralelo) iniciando');
+  // 1) Lista grupos da biblioteca via api2.heygen.com (cookies)
+  let groups = [];
+  try {
+    const r = await fetchWithTimeout(
+      'https://api2.heygen.com/v2/avatar_group.private.list?limit=200&page=1',
+      { method: 'GET', credentials: 'include' },
+      5000,
+    );
+    if (!r.ok) {
+      return {
+        ok: false,
+        error: `HeyGen retornou HTTP ${r.status} ao listar grupos.`,
+        avatars: [],
+      };
+    }
+    const json = await r.json();
+    groups = json?.data?.avatar_groups ?? [];
+    console.log(`[DARKO LAB] grupos: ${groups.length}`);
+  } catch (e) {
+    return {
+      ok: false,
+      error: 'Falha ao listar grupos: ' + (e.message ?? e),
+      avatars: [],
+    };
+  }
 
-  // SIMPLE REQUEST: sem headers customizados pra evitar CORS preflight.
-  // Cookies sao enviados via credentials: include. HeyGen autentica via cookie.
-  const results = await Promise.all(
-    endpoints.map(async (url) => {
-      try {
-        const r = await fetchWithTimeout(
-          url,
-          { method: 'GET', credentials: 'include' },
-          5000,
-        );
-        if (!r.ok) {
-          console.warn(`[DARKO LAB] FAIL ${url}: HTTP ${r.status}`);
-          return { url, error: `HTTP ${r.status}`, items: null };
-        }
-        const text = await r.text();
-        let json;
+  if (groups.length === 0) {
+    return {
+      ok: false,
+      error: 'Sua biblioteca esta vazia. Cadastre avatares em app.heygen.com.',
+      avatars: [],
+    };
+  }
+
+  // 2) Pra cada grupo, busca os looks (em paralelo) via avatar_look.private.list
+  const looksByGroup = await Promise.all(
+    groups.map(async (g) => {
+      const groupId = g.id;
+      // Endpoints possiveis pro list de looks
+      const lookEndpoints = [
+        `https://api2.heygen.com/v2/avatar_look.private.list?group_id=${groupId}&limit=50`,
+        `https://api2.heygen.com/v1/avatar_look.private.list?group_id=${groupId}&limit=50`,
+      ];
+      for (const url of lookEndpoints) {
         try {
-          json = JSON.parse(text);
-        } catch {
-          console.warn(`[DARKO LAB] FAIL ${url}: nao-JSON`);
-          return { url, error: 'nao-JSON', items: null };
-        }
-        const items = parseAvatarsResponse(json);
-        console.log(
-          `[DARKO LAB] OK ${url}: ${items.length} items, top-level keys: [${Object.keys(json || {}).join(', ')}]`,
-        );
-        if (json?.data) {
-          console.log(
-            `[DARKO LAB]   data keys: [${Object.keys(json.data).join(', ')}]`,
+          const r = await fetchWithTimeout(
+            url,
+            { method: 'GET', credentials: 'include' },
+            5000,
           );
+          if (!r.ok) continue;
+          const j = await r.json();
+          const looks =
+            j?.data?.avatar_looks ?? j?.data?.list ?? j?.data ?? [];
+          if (Array.isArray(looks)) {
+            console.log(
+              `[DARKO LAB] grupo ${g.name ?? groupId}: ${looks.length} looks`,
+            );
+            return { group: g, looks };
+          }
+        } catch {
+          /* tenta proximo */
         }
-        // Se 0 items mas response OK, loga primeira parte do JSON pra debug
-        if (items.length === 0) {
-          const preview = JSON.stringify(json).slice(0, 500);
-          console.log(`[DARKO LAB]   JSON preview: ${preview}`);
-        }
-        return { url, items, json };
-      } catch (e) {
-        const msg =
-          e.name === 'AbortError' ? 'timeout 5s' : e.message ?? String(e);
-        console.warn(`[DARKO LAB] EXC ${url}: ${msg}`);
-        return { url, error: msg, items: null };
       }
+      return { group: g, looks: [] };
     }),
   );
 
-  for (const r of results) {
-    if (r.items && r.items.length > 0) {
-      return { ok: true, avatars: r.items, source: r.url };
+  // 3) Aplaina em items individuais (1 entrada por look — fiel a UI HeyGen)
+  const items = [];
+  for (const { group, looks } of looksByGroup) {
+    if (looks.length === 0) {
+      // Grupo sem looks fetched — usa o grupo como single item
+      items.push({
+        id: group.id,
+        name: group.name ?? '(sem nome)',
+        thumb:
+          group.preview_image ??
+          group.preview_image_url ??
+          group.thumbnail_url ??
+          null,
+        videoPreview: group.preview_video ?? group.preview_video_url ?? null,
+        type: group.is_photo || group.talking_photo_id ? 'photo' : 'avatar',
+        version: detectAvatarVersion(group),
+      });
+      continue;
+    }
+    // Tem looks — adiciona cada look como item separado
+    for (const look of looks) {
+      const id =
+        look.id ??
+        look.avatar_look_id ??
+        look.look_id ??
+        look.avatar_id ??
+        look.talking_photo_id;
+      if (!id) continue;
+      items.push({
+        id,
+        name:
+          look.name ??
+          look.avatar_name ??
+          group.name ??
+          `Look ${items.length + 1}`,
+        thumb:
+          look.preview_image ??
+          look.preview_image_url ??
+          look.normal_preview ??
+          look.thumbnail_url ??
+          group.preview_image ??
+          null,
+        videoPreview:
+          look.preview_video ??
+          look.preview_video_url ??
+          look.motion_preview_url ??
+          null,
+        type:
+          look.talking_photo_id || look.is_photo || group.is_photo
+            ? 'photo'
+            : 'avatar',
+        version: detectAvatarVersion(look) || detectAvatarVersion(group),
+      });
     }
   }
 
-  const errors = results.map((r) => `${r.url} → ${r.error ?? '0 items'}`);
-  console.warn(
-    '[DARKO LAB] Nenhum endpoint retornou avatares. Detalhes:',
-    errors.join(' | '),
+  console.log(
+    `[DARKO LAB] biblioteca completa: ${items.length} items (${groups.length} grupos)`,
   );
 
+  // Dedup por id
+  const seen = new Set();
+  const dedup = items.filter((a) => {
+    if (!a.id) return false;
+    if (seen.has(a.id)) return false;
+    seen.add(a.id);
+    return true;
+  });
+
   return {
-    ok: false,
-    error: 'Nenhum endpoint retornou. ' + errors.slice(0, 3).join(' | '),
-    avatars: [],
-    debug: errors,
+    ok: true,
+    avatars: dedup,
+    source: 'api2.heygen.com/v2/avatar_group.private.list + avatar_look.private.list',
   };
+}
+
+function detectAvatarVersion(obj) {
+  if (!obj) return 'IV';
+  if (
+    obj.is_avatar_v3 ||
+    obj.is_v3 ||
+    obj.avatar_type === 'V' ||
+    obj.version === 'v3'
+  )
+    return 'V';
+  if (
+    obj.is_avatar_v2 ||
+    obj.is_v2 ||
+    obj.avatar_type === 'IV' ||
+    obj.version === 'v2'
+  )
+    return 'IV';
+  if (obj.talking_photo_id || obj.is_photo || obj.type === 'photo') return 'III';
+  return 'IV';
 }
 
 /**
