@@ -272,14 +272,37 @@ async function listMyAvatars() {
       continue;
     }
     // Tem looks — adiciona cada look como item separado
-    for (const look of looks) {
-      // Pega ID de qualquer campo que pareca ID (id, *_id, *Id, uuid, etc)
+    // HeyGen retorna cada look como wrapper { look_type, look } onde
+    // os dados reais estao em wrapper.look. Detectamos e desembrulhamos.
+    for (const wrapper of looks) {
+      // Se tem campo "look" aninhado, e' o wrapper — usa o conteudo dele.
+      // Senao, usa o objeto direto.
+      const look =
+        wrapper && typeof wrapper === 'object' && wrapper.look
+          ? wrapper.look
+          : wrapper;
+      const lookType = wrapper?.look_type ?? null;
+
+      // Loga sample do PRIMEIRO look REAL (apos desembrulhar) pra debug
+      if (items.length === 0) {
+        console.log(
+          '[DARKO LAB] SAMPLE look REAL (struct):',
+          JSON.stringify(look).slice(0, 800),
+        );
+        console.log(
+          '[DARKO LAB] SAMPLE look REAL (keys):',
+          Object.keys(look).join(', '),
+        );
+        if (lookType) {
+          console.log('[DARKO LAB] look_type detectado:', lookType);
+        }
+      }
+
       const id = findIdField(look);
       if (!id) {
-        // Log de debug pra primeiro look sem ID
         if (items.length === 0) {
           console.warn(
-            '[DARKO LAB] look sem ID detectavel, keys:',
+            '[DARKO LAB] look real sem ID detectavel, keys:',
             Object.keys(look).join(', '),
           );
         }
@@ -295,7 +318,10 @@ async function listMyAvatars() {
           look.motion_preview_url ??
           null,
         type:
-          look.talking_photo_id || look.is_photo || group.is_photo
+          look.talking_photo_id ||
+          look.is_photo ||
+          group.is_photo ||
+          lookType === 'photo'
             ? 'photo'
             : 'avatar',
         version: detectAvatarVersion(look) || detectAvatarVersion(group),
