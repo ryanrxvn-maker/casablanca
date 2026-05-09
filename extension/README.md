@@ -55,6 +55,8 @@ A extensao:
 
 ## Versao
 
+1.7.0 — endpoints REAIS HeyGen confirmados (avatar_group.private.list + avatar_look.private.list).
+1.6.0 — listMyVoices (mesmo padrao avatares), avatar_style fixo "normal", logging endpoint usado.
 1.5.0 — fix syntax error (headers duplicado) + listMyAvatars (espelho fiel da biblioteca da conta).
 1.4.0 — URL HeyGen corrigida (/avatar em vez de /create-video) + tab navigate fallback.
 1.3.0 — manifest permissivo (qualquer *.vercel.app + localhost).

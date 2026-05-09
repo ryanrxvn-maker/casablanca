@@ -51,7 +51,82 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       );
     return true;
   }
+  if (msg && msg.type === 'HG_LIST_VOICES') {
+    listMyVoices()
+      .then((res) => sendResponse(res))
+      .catch((e) =>
+        sendResponse({ ok: false, error: e?.message ?? String(e), voices: [] }),
+      );
+    return true;
+  }
 });
+
+/**
+ * Lista vozes da conta HeyGen (custom + favoritas) via cookies de sessao.
+ */
+async function listMyVoices() {
+  const headers = getInternalAuthHeaders();
+  const endpoints = [
+    'https://app.heygen.com/api/v2/voice.list',
+    'https://app.heygen.com/api/v1/voice.list',
+    'https://app.heygen.com/api/v2/voices',
+    'https://api.heygen.com/v2/voices',
+  ];
+  let lastError = '';
+  for (const url of endpoints) {
+    try {
+      const r = await fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+        headers,
+      });
+      if (r.status === 401 || r.status === 403) {
+        return { ok: false, error: 'Sessao expirada.', voices: [] };
+      }
+      if (!r.ok) {
+        lastError = `${url} → ${r.status}`;
+        continue;
+      }
+      const json = await r.json().catch(() => null);
+      const voices = parseVoicesResponse(json);
+      console.log(
+        `[DARKO LAB] Voices loaded from ${url} (${voices.length} items)`,
+      );
+      if (voices.length > 0) {
+        return { ok: true, voices, source: url };
+      }
+      lastError = `${url} retornou vazio`;
+    } catch (e) {
+      lastError = `${url}: ${e.message ?? e}`;
+    }
+  }
+  return { ok: false, error: lastError, voices: [] };
+}
+
+function parseVoicesResponse(json) {
+  if (!json) return [];
+  const items = [];
+  const list = json.data?.voices ?? json.data?.list ?? json.data ?? [];
+  if (Array.isArray(list)) {
+    for (const v of list) {
+      items.push({
+        id: v.voice_id ?? v.id,
+        name: v.name ?? v.display_name ?? '(sem nome)',
+        gender: v.gender ?? null,
+        language: v.language ?? v.locale ?? null,
+        previewAudio: v.preview_audio ?? v.preview_url ?? null,
+      });
+    }
+  }
+  // Dedup
+  const seen = new Set();
+  return items.filter((v) => {
+    if (!v.id) return false;
+    if (seen.has(v.id)) return false;
+    seen.add(v.id);
+    return true;
+  });
+}
 
 /**
  * Lista os avatares EXATAMENTE como aparecem na biblioteca da conta do user
@@ -67,10 +142,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 async function listMyAvatars() {
   const headers = getInternalAuthHeaders();
 
+  // Endpoints REAIS confirmados via DevTools no app.heygen.com
+  // (em ordem de preferencia — o site usa o primeiro)
   const endpoints = [
-    'https://app.heygen.com/api/v1/avatars/personalized.list',
-    'https://app.heygen.com/api/v2/avatar_group.list',
-    'https://app.heygen.com/api/v1/avatar.list',
+    'https://app.heygen.com/api/v1/avatar_group.private.list?limit=200',
+    'https://app.heygen.com/api/v2/avatar_group.private.list?limit=200',
+    'https://app.heygen.com/api/v1/avatar_look.private.list?limit=200',
     'https://app.heygen.com/api/v2/avatars',
     'https://api.heygen.com/v2/avatars',
   ];
@@ -96,6 +173,9 @@ async function listMyAvatars() {
       }
       const json = await r.json().catch(() => null);
       const items = parseAvatarsResponse(json);
+      console.log(
+        `[DARKO LAB] Avatars loaded from ${url} (${items.length} items)`,
+      );
       if (items.length > 0) {
         return { ok: true, avatars: items, source: url };
       }
@@ -114,73 +194,83 @@ async function listMyAvatars() {
 
 /**
  * Parser robusto pros varios formatos de resposta do HeyGen.
- * Cada endpoint retorna um shape diferente.
+ * Cada endpoint retorna um shape diferente — testamos todos os campos.
  */
 function parseAvatarsResponse(json) {
   if (!json) return [];
   const items = [];
 
-  // Formato v2/avatars: { data: { avatars: [...], talking_photos: [...] } }
-  if (json.data?.avatars && Array.isArray(json.data.avatars)) {
-    for (const a of json.data.avatars) {
-      items.push({
-        id: a.avatar_id ?? a.id,
-        name: a.avatar_name ?? a.name ?? '(sem nome)',
-        thumb:
-          a.preview_image_url ?? a.normal_preview ?? a.thumbnail_url ?? null,
-        videoPreview: a.preview_video_url ?? null,
-        type: 'avatar',
-        version: a.is_v3 ? 'V' : a.is_v2 ? 'IV' : 'III',
-      });
-    }
-  }
-  if (json.data?.talking_photos && Array.isArray(json.data.talking_photos)) {
-    for (const p of json.data.talking_photos) {
-      items.push({
-        id: p.talking_photo_id ?? p.id,
-        name: p.talking_photo_name ?? p.name ?? '(sem nome)',
-        thumb: p.preview_image_url ?? p.thumbnail_url ?? null,
-        videoPreview: null,
-        type: 'photo',
-        version: 'III',
-      });
-    }
+  function detectVersion(obj) {
+    // HeyGen marca a versao em diferentes campos dependendo do endpoint.
+    // is_avatar_v3 / is_v3 / type === 'avatar_v3' etc.
+    if (obj.is_avatar_v3 || obj.is_v3 || obj.avatar_type === 'V' || obj.version === 'v3') return 'V';
+    if (obj.is_avatar_v2 || obj.is_v2 || obj.avatar_type === 'IV' || obj.version === 'v2') return 'IV';
+    if (obj.talking_photo_id || obj.is_photo || obj.type === 'photo') return 'III';
+    return 'IV'; // default razoavel
   }
 
-  // Formato avatar_group: { data: { avatar_group_list: [{ avatars: [...] }] } }
-  if (json.data?.avatar_group_list) {
-    for (const g of json.data.avatar_group_list) {
-      if (Array.isArray(g.avatars)) {
+  function pushItem(obj, fallbackName) {
+    const id =
+      obj.avatar_id ??
+      obj.id ??
+      obj.talking_photo_id ??
+      obj.avatar_look_id ??
+      obj.look_id ??
+      obj.default_look?.id ??
+      obj.default_avatar_look_id ??
+      null;
+    if (!id) return;
+    items.push({
+      id,
+      name: obj.avatar_name ?? obj.name ?? fallbackName ?? '(sem nome)',
+      thumb:
+        obj.preview_image_url ??
+        obj.normal_preview ??
+        obj.thumbnail_url ??
+        obj.image_url ??
+        obj.thumbnail_image_url ??
+        obj.default_look?.preview_image_url ??
+        null,
+      videoPreview:
+        obj.preview_video_url ?? obj.default_look?.preview_video_url ?? null,
+      type: obj.talking_photo_id || obj.is_photo ? 'photo' : 'avatar',
+      version: detectVersion(obj),
+    });
+  }
+
+  // Formato avatar_group.private.list: { data: { avatar_group_list: [...] } }
+  // ou { data: { list: [...] } } ou { data: [...] }
+  const groups =
+    json.data?.avatar_group_list ??
+    json.data?.list ??
+    (Array.isArray(json.data) ? json.data : null) ??
+    json.data?.groups ??
+    [];
+
+  if (Array.isArray(groups)) {
+    for (const g of groups) {
+      // Cada grupo pode ter "avatars" (looks) ou ja vir flat
+      if (Array.isArray(g.avatars) && g.avatars.length > 0) {
         for (const a of g.avatars) {
-          items.push({
-            id: a.avatar_id ?? a.id,
-            name: a.avatar_name ?? a.name ?? g.name ?? '(sem nome)',
-            thumb:
-              a.preview_image_url ??
-              a.thumbnail_url ??
-              g.preview_image_url ??
-              null,
-            videoPreview: a.preview_video_url ?? null,
-            type: 'avatar',
-            version: a.is_v3 ? 'V' : a.is_v2 ? 'IV' : 'III',
-          });
+          pushItem(a, g.name ?? g.group_name);
         }
+      } else if (Array.isArray(g.looks) && g.looks.length > 0) {
+        for (const l of g.looks) {
+          pushItem(l, g.name ?? g.group_name);
+        }
+      } else {
+        // Grupo sem looks expandidos — usa o proprio grupo
+        pushItem(g, g.name ?? g.group_name);
       }
     }
   }
 
-  // Formato personalized.list: { data: [{...}] }
-  if (Array.isArray(json.data)) {
-    for (const a of json.data) {
-      items.push({
-        id: a.avatar_id ?? a.id ?? a.talking_photo_id,
-        name: a.avatar_name ?? a.name ?? '(sem nome)',
-        thumb: a.preview_image_url ?? a.thumbnail_url ?? null,
-        videoPreview: a.preview_video_url ?? null,
-        type: a.talking_photo_id ? 'photo' : 'avatar',
-        version: a.is_v3 ? 'V' : a.is_v2 ? 'IV' : 'III',
-      });
-    }
+  // Formato v2/avatars: { data: { avatars: [...], talking_photos: [...] } }
+  if (Array.isArray(json.data?.avatars)) {
+    for (const a of json.data.avatars) pushItem(a);
+  }
+  if (Array.isArray(json.data?.talking_photos)) {
+    for (const p of json.data.talking_photos) pushItem(p);
   }
 
   // Dedup por id
@@ -348,21 +438,27 @@ async function runJob(requestId, payload) {
         : { type: 'text', input_text: copy };
     }
 
+    // avatar_style "normal" funciona pra talking_photos e studio avatars.
+    // O "motor" (III/IV/V) e' propriedade do avatar_id em si — nao precisa
+    // mandar separado. Se o avatar foi gravado como Avatar V, ele JA e' V.
     const generateBody = {
       video_inputs: [
         {
           character: {
             type: 'avatar',
             avatar_id: avatarId,
-            avatar_style: motor === 'V' ? 'closeUp' : 'normal',
+            avatar_style: 'normal',
           },
           voice: voiceBlock,
           background: { type: 'color', value: '#0a0a0a' },
         },
       ],
       dimension: { width: 1080, height: 1920 },
-      title: partLabel ? `DARKO LAB ${partLabel}` : 'DARKO LAB Auto',
+      title: partLabel
+        ? `DARKO LAB ${partLabel} (motor ${motor})`
+        : `DARKO LAB Auto (motor ${motor})`,
     };
+    void motor; // motor e' label/info — nao influencia o payload diretamente
 
     reportProgress(requestId, 'Enviando job pro HeyGen...');
 
