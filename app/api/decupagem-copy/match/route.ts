@@ -42,11 +42,15 @@ export const maxDuration = 300;
 const AAI_BASE = 'https://api.assemblyai.com/v2';
 const GROQ_BASE = 'https://api.groq.com/openai/v1';
 
-const MARGIN_MS = 250;
+// Margem reduzida pra 120ms — suficiente pra cobrir erro do Whisper sem
+// invadir take adjacente (que poderia conter conteudo da mesma frase).
+const MARGIN_MS = 120;
 const MIN_WINDOW_RATIO = 0.7;
 const MAX_WINDOW_RATIO = 1.4;
 const TOP_K_PER_PHRASE = 6;
 const MIN_SCORE_TO_KEEP = 0.45;
+// TOL minimo no DP — antes era 200ms, permitia 200ms de overlap. Agora 0.
+const DP_TOL_MS = 0;
 
 type Word = {
   text: string;
@@ -513,8 +517,8 @@ function dpAssignWithSkip(
   const N = candidatesPerPhrase.length;
   if (N === 0) return [];
 
-  const SKIP_PENALTY = 0.5; // perder 0.5 pontos de score por phrase pulada
-  const TOL = 200;
+  const SKIP_PENALTY = 0.5;
+  const TOL = DP_TOL_MS;
 
   // dp[i][j] = melhor score acumulado se phrase i usa cand j (j=-1 significa skip)
   // Compactamos j=-1 como cand[length] (ultimo+1)
@@ -614,7 +618,6 @@ function dpAssignWithSkip(
 function matchCopyWindowed(copy: string, words: Word[]): Cut[] {
   if (words.length === 0) return [];
   const phrases = splitIntoPhrases(copy);
-  // Stemiza transcript inteiro UMA VEZ (cache)
   const transcriptStems = words.map((w) => {
     const t = tokenize(w.text)[0] ?? '';
     return stem(t);
@@ -633,11 +636,11 @@ function matchCopyWindowed(copy: string, words: Word[]): Cut[] {
 
   const optimal = dpAssignWithSkip(candidatesPerPhrase);
 
-  const cuts: Cut[] = [];
+  const rawCuts: Cut[] = [];
   for (let i = 0; i < phrases.length; i++) {
     const cand = optimal[i];
     if (!cand) continue;
-    cuts.push({
+    rawCuts.push({
       startMs: Math.max(0, cand.startMs - MARGIN_MS),
       endMs: cand.endMs + MARGIN_MS,
       copyPhrase: phrases[i],
@@ -648,5 +651,73 @@ function matchCopyWindowed(copy: string, words: Word[]): Cut[] {
     });
   }
 
-  return cuts;
+  // Pos-processamento: dedup cuts com overlap textual alto.
+  // Causa do bug anterior: speaker repetia mesma frase 2x consecutivas,
+  // matcher pegava 1 take pra frase i e a OUTRA take pra frase i+1
+  // (porque o transcript continha conteudo da frase i misturado).
+  // Aqui detectamos e removemos a duplicada.
+  const dedupedCuts = dedupOverlappingCuts(rawCuts);
+
+  // Tambem garante NO TIME OVERLAP — se cut[i].endMs > cut[i+1].startMs,
+  // ajusta pra eliminar overlap (corta ponto medio).
+  const finalCuts = enforceNoTimeOverlap(dedupedCuts);
+
+  return finalCuts;
+}
+
+/**
+ * Remove cuts consecutivos que tem mais de 60% de overlap textual.
+ * Mantem o de maior score.
+ */
+function dedupOverlappingCuts(cuts: Cut[]): Cut[] {
+  if (cuts.length <= 1) return cuts;
+
+  const result: Cut[] = [cuts[0]];
+  for (let i = 1; i < cuts.length; i++) {
+    const cur = cuts[i];
+    const prev = result[result.length - 1];
+
+    const curTokens = new Set(tokenize(cur.transcriptText).map(stem));
+    const prevTokens = new Set(tokenize(prev.transcriptText).map(stem));
+    let intersect = 0;
+    for (const t of curTokens) if (prevTokens.has(t)) intersect++;
+    const minSize = Math.min(curTokens.size, prevTokens.size);
+    const overlap = minSize > 0 ? intersect / minSize : 0;
+
+    if (overlap >= 0.6) {
+      // Sao redundantes — mantem o de maior score
+      if (cur.score > prev.score) {
+        result[result.length - 1] = cur;
+      }
+      // senao descarta cur
+    } else {
+      result.push(cur);
+    }
+  }
+  return result;
+}
+
+/**
+ * Garante que cuts consecutivos NAO se sobrepoem temporalmente.
+ * Se cut[i].endMs > cut[i+1].startMs, ajusta endMs do anterior pra ser o
+ * startMs do proximo - 50ms (gap minimo).
+ */
+function enforceNoTimeOverlap(cuts: Cut[]): Cut[] {
+  const result: Cut[] = [];
+  for (let i = 0; i < cuts.length; i++) {
+    const c = { ...cuts[i] };
+    if (i > 0) {
+      const prev = result[result.length - 1];
+      if (c.startMs < prev.endMs) {
+        // Overlap detectado — corta no ponto medio
+        const mid = Math.floor((prev.endMs + c.startMs) / 2);
+        prev.endMs = mid - 25;
+        c.startMs = mid + 25;
+      }
+    }
+    if (c.endMs > c.startMs + 100) {
+      result.push(c);
+    }
+  }
+  return result;
 }

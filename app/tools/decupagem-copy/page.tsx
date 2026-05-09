@@ -7,17 +7,14 @@ import { CostHint } from '@/components/CostHint';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { estimateDecupagemCopy } from '@/lib/cost-estimator';
 import { useToolState } from '@/components/ToolsStateProvider';
-import {
-  decodeAudioRobust,
-  detectSilences,
-  downloadBlob,
-} from '@/lib/audio-engine';
+import { downloadBlob } from '@/lib/audio-engine';
 import {
   cancelFFmpeg,
   cutVideoSegments,
   extractAudioForTranscription,
   isCancellationError,
   probeVideoMetadata,
+  removeAvatarSilences,
   type FFProgress,
 } from '@/lib/ffmpeg-worker';
 import { CancelButton } from '@/components/CancelButton';
@@ -207,59 +204,39 @@ export default function DecupagemCopyPage() {
       setProgress(0.5);
 
       // Step 3: Cut + concat with FFmpeg WASM
-      let segments = json.cuts.map((c) => ({
+      // NAO fazemos mais silence-split por cut — causava duplicacao quando
+      // o cut continha 2 takes consecutivas. Usamos cuts limpos do matcher.
+      const segments = json.cuts.map((c) => ({
         start: c.startMs / 1000,
         end: c.endMs / 1000,
       }));
 
-      // Step 3.1: Se removeSilence ativado, decoda audio + detecta
-      // silencios DENTRO de cada cut e divide em sub-cuts pulando os
-      // silencios. Mantem `silenceTolerance` de margem nos limites
-      // pra cortar natural (igual a ferramenta Decupagem).
-      if (removeSilence) {
-        setStage('Detectando silencios pra decupar...');
-        try {
-          const decoded = await decodeAudioRobust(file);
-          const allSilences = detectSilences(decoded);
-          const refined: typeof segments = [];
-          for (const seg of segments) {
-            const internal = allSilences.filter(
-              (s) => s.end > seg.start && s.start < seg.end,
-            );
-            if (internal.length === 0) {
-              refined.push(seg);
-              continue;
-            }
-            let cursor = seg.start;
-            for (const sil of internal) {
-              const silStart = Math.max(sil.start, seg.start) + silenceTolerance;
-              const silEnd = Math.min(sil.end, seg.end) - silenceTolerance;
-              if (silEnd > silStart) {
-                if (silStart > cursor) {
-                  refined.push({ start: cursor, end: silStart });
-                }
-                cursor = silEnd;
-              }
-            }
-            if (cursor < seg.end) {
-              refined.push({ start: cursor, end: seg.end });
-            }
-          }
-          segments = refined.filter((s) => s.end - s.start > 0.05);
-        } catch (silErr) {
-          console.warn('[silence-detect]', silErr);
-          // Falha em detectar silencios — segue com cuts originais
-        }
-      }
-
       setStage(
         `Cortando ${segments.length} segmento(s) e concatenando...`,
       );
-      const out = await cutVideoSegments(file, segments, {
+      let out = await cutVideoSegments(file, segments, {
         onStage: (s) => setStage(s),
         onProgress: (p: FFProgress) =>
-          setProgress(0.5 + p.ratio * 0.5),
+          setProgress(0.5 + p.ratio * 0.4),
       });
+
+      // Step 4: Silence removal GLOBAL no MP4 final (depois do concat).
+      // Remove pausas longas naturais entre frases sem dividir cuts.
+      // Tolerancia (silenceTolerance) define o que e' "longo demais".
+      if (removeSilence) {
+        setStage('Removendo silencios globais do video final...');
+        setProgress(0.9);
+        try {
+          out = await removeAvatarSilences(out, silenceTolerance, {
+            onStage: (s) => setStage(s),
+            onProgress: (p: FFProgress) =>
+              setProgress(0.9 + p.ratio * 0.1),
+          });
+        } catch (silErr) {
+          console.warn('[silence-remove-global]', silErr);
+          // Falha — segue com video sem silence removal
+        }
+      }
 
       const url = URL.createObjectURL(out);
       setResultUrl(url);
