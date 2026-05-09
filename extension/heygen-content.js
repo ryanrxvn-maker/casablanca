@@ -814,17 +814,22 @@ async function runJob(requestId, payload) {
     await pasteScriptIntoTextarea(textarea, copy);
     await sleep(500);
 
-    // 6) Clica Generate (seta no canto inferior direito)
+    // 6) ANTES de clicar Generate, snapshot dos video IDs existentes pra
+    //    detectar qual eh o NOVO depois.
+    reportProgress(requestId, 'Snapshot da conta...');
+    const snapshot = await snapshotExistingVideoIds();
+    console.log('[DARKO LAB UI] snapshot:', snapshot.ids.size, 'videos pre-existentes');
+
+    // 7) Clica Generate (seta no canto inferior direito)
     reportProgress(requestId, 'Clicando Generate...');
     const generateBtn = await waitFor(() => findGenerateButton(), 8000, 300);
     if (!generateBtn) throw new Error('Botao Generate nao encontrado.');
     console.log('[DARKO LAB UI] clicando Generate');
     clickElement(generateBtn);
 
-    // 7) Aguarda video processar - captura via Network XHR interception
-    //    OU via mudanca de URL pra /video/<id>
+    // 8) Aguarda video processar - poll video.list pra detectar video NOVO
     reportProgress(requestId, 'HeyGen processando...');
-    const videoUrl = await waitForVideoCompletion(requestId);
+    const videoUrl = await waitForVideoCompletion(requestId, snapshot);
     if (!videoUrl) throw new Error('Timeout aguardando video pronto.');
 
     reportProgress(requestId, 'Video pronto!', 100);
@@ -1051,61 +1056,178 @@ function clickElement(el) {
  *
  * Polar tudo em paralelo a cada 5s ate 15min.
  */
-async function waitForVideoCompletion(requestId) {
+/**
+ * Snapshot dos video IDs existentes na conta. Tiramos ANTES de clicar
+ * Generate, depois polamos pra detectar o NOVO video que aparece (eh o que
+ * a gente acabou de criar).
+ */
+async function snapshotExistingVideoIds() {
+  const ids = new Set();
+  // Tenta varios endpoints de listagem
+  const endpoints = [
+    'https://api2.heygen.com/v1/video.list?limit=20&page=1',
+    'https://api2.heygen.com/v2/video.list?limit=20&page=1',
+    'https://api2.heygen.com/v1/video.private.list?limit=20',
+    'https://api2.heygen.com/v1/pacific.video.list?limit=20',
+  ];
+  for (const url of endpoints) {
+    try {
+      const r = await fetch(url, { method: 'GET', credentials: 'include' });
+      if (!r.ok) continue;
+      const j = await r.json().catch(() => null);
+      const list = extractVideoList(j);
+      if (list && list.length > 0) {
+        console.log(`[DARKO LAB UI] snapshot via ${url}: ${list.length} videos`);
+        for (const v of list) {
+          const id = v?.video_id ?? v?.id ?? v?.uuid;
+          if (id) ids.add(id);
+        }
+        return { ids, listEndpoint: url };
+      }
+    } catch (e) {
+      /* tenta proximo */
+    }
+  }
+  return { ids, listEndpoint: null };
+}
+
+function extractVideoList(j) {
+  if (!j) return null;
+  const candidates = [
+    j?.data?.videos,
+    j?.data?.list,
+    j?.data?.video_list,
+    j?.data?.items,
+    j?.videos,
+    j?.list,
+    j?.items,
+    Array.isArray(j?.data) ? j.data : null,
+  ];
+  for (const c of candidates) {
+    if (Array.isArray(c)) return c;
+  }
+  return null;
+}
+
+async function waitForVideoCompletion(requestId, snapshot) {
   const deadline = Date.now() + 15 * 60 * 1000;
-  let lastUrl = location.href;
-  let videoId = null;
+  const beforeIds = snapshot?.ids ?? new Set();
+  const listEndpoint = snapshot?.listEndpoint;
+  let newVideoId = null;
+  let lastPercent = -1;
+
+  console.log(`[DARKO LAB UI] waitForVideoCompletion start, ${beforeIds.size} videos pre-existentes, listEndpoint=${listEndpoint}`);
 
   while (Date.now() < deadline) {
     if (currentJob !== requestId) throw new Error('Job foi cancelado.');
 
-    // a) Detecta video_id na URL
-    if (location.href !== lastUrl) {
-      lastUrl = location.href;
-      const m = location.href.match(/\/(?:video|share)\/([a-f0-9]{20,})/i);
-      if (m) {
-        videoId = m[1];
-        console.log('[DARKO LAB UI] video_id detectado na URL:', videoId);
+    // ESTRATEGIA 1: pola video.list pra achar video NOVO (criado depois do snapshot)
+    if (!newVideoId && listEndpoint) {
+      try {
+        const r = await fetch(listEndpoint, { method: 'GET', credentials: 'include' });
+        if (r.ok) {
+          const j = await r.json().catch(() => null);
+          const list = extractVideoList(j);
+          if (list) {
+            // Acha o primeiro video que NAO estava no snapshot
+            for (const v of list) {
+              const id = v?.video_id ?? v?.id ?? v?.uuid;
+              if (id && !beforeIds.has(id)) {
+                newVideoId = id;
+                console.log('[DARKO LAB UI] video NOVO detectado via list:', id);
+                break;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        /* continua */
       }
     }
 
-    // b) Procura <video> com src mp4 no DOM
+    // ESTRATEGIA 2: detecta videoId na URL (caso HeyGen redirecione)
+    if (!newVideoId) {
+      const m = location.href.match(/(?:video|share|projects?)[\/=]([a-f0-9]{20,})/i);
+      if (m) {
+        newVideoId = m[1];
+        console.log('[DARKO LAB UI] videoId detectado na URL:', newVideoId);
+      }
+    }
+
+    // ESTRATEGIA 3: procura <video> com mp4 no DOM
     const videos = document.querySelectorAll('video');
     for (const v of videos) {
-      const src = v.src || v.currentSrc;
-      if (src && /\.mp4(\?|$)/i.test(src)) {
+      const src = v.src || v.currentSrc || v.querySelector('source')?.src;
+      if (src && /\.mp4/i.test(src) && /heygen|cloudfront|amazonaws/i.test(src)) {
         console.log('[DARKO LAB UI] <video> com mp4 detectado:', src);
         return src;
       }
     }
 
-    // c) Se temos video_id, pola endpoint de status pra pegar URL CDN
-    if (videoId) {
-      const url = `https://api2.heygen.com/v1/video_status.get?video_id=${encodeURIComponent(videoId)}`;
-      try {
-        const r = await fetch(url, { method: 'GET', credentials: 'include' });
-        if (r.ok) {
-          const j = await r.json().catch(() => null);
-          const data = j?.data ?? j;
-          const status = String(data?.status ?? '').toLowerCase();
-          const videoUrl = data?.video_url ?? data?.video_url_caption ?? null;
-          if (data?.percent != null) {
-            reportProgress(requestId, `HeyGen processando... ${data.percent}%`, data.percent);
-          }
-          if (status === 'completed' && videoUrl) {
-            console.log('[DARKO LAB UI] video completed via API status, url:', videoUrl);
-            return videoUrl;
-          }
-          if (status === 'failed' || status === 'error') {
-            throw new Error('HeyGen reportou status failed.');
-          }
-        }
-      } catch (e) {
-        // ignora, continua poll
+    // ESTRATEGIA 4: procura qualquer link/href pra mp4 do CDN HeyGen
+    const allLinks = document.querySelectorAll('a[href*=".mp4"], [data-src*=".mp4"], [data-url*=".mp4"]');
+    for (const a of allLinks) {
+      const url = a.href || a.getAttribute('data-src') || a.getAttribute('data-url');
+      if (url && /heygen|cloudfront|amazonaws/i.test(url)) {
+        console.log('[DARKO LAB UI] link mp4 HeyGen detectado:', url);
+        return url;
       }
     }
 
-    await sleep(5000);
+    // Se ja temos video_id, pola status pra ver se ta pronto
+    if (newVideoId) {
+      const statusUrls = [
+        `https://api2.heygen.com/v1/video_status.get?video_id=${encodeURIComponent(newVideoId)}`,
+        `https://api2.heygen.com/v2/video_status.get?video_id=${encodeURIComponent(newVideoId)}`,
+        `https://api2.heygen.com/v1/video.private.get?video_id=${encodeURIComponent(newVideoId)}`,
+      ];
+      for (const url of statusUrls) {
+        try {
+          const r = await fetch(url, { method: 'GET', credentials: 'include' });
+          if (!r.ok) continue;
+          const j = await r.json().catch(() => null);
+          const data = j?.data ?? j;
+          const status = String(data?.status ?? '').toLowerCase();
+          const videoUrl =
+            data?.video_url ??
+            data?.video_url_caption ??
+            data?.cdn_url ??
+            data?.url ??
+            null;
+          const pct = data?.percent ?? data?.progress ?? null;
+          if (pct != null && pct !== lastPercent) {
+            lastPercent = pct;
+            reportProgress(requestId, `HeyGen processando... ${pct}%`, pct);
+          }
+          if (status === 'completed' || status === 'success' || status === 'done') {
+            if (videoUrl) {
+              console.log(`[DARKO LAB UI] video completed via ${url}, url:`, videoUrl);
+              return videoUrl;
+            }
+            // Sem URL no body - tenta fetch de download direto
+            const dlUrl = `https://api2.heygen.com/v1/video.download?video_id=${encodeURIComponent(newVideoId)}`;
+            try {
+              const dr = await fetch(dlUrl, { method: 'GET', credentials: 'include' });
+              if (dr.ok) {
+                const dj = await dr.json().catch(() => null);
+                const u = dj?.data?.url ?? dj?.url;
+                if (u) return u;
+              }
+            } catch {}
+            console.warn('[DARKO LAB UI] status completed mas sem video_url no body:', JSON.stringify(data).slice(0, 300));
+          }
+          if (status === 'failed' || status === 'error') {
+            throw new Error('HeyGen reportou status failed: ' + (data?.error_msg ?? status));
+          }
+          break; // pega so o primeiro endpoint que respondeu OK
+        } catch (e) {
+          if (String(e).includes('failed')) throw e;
+          /* tenta proximo */
+        }
+      }
+    }
+
+    await sleep(4000);
   }
   return null;
 }
