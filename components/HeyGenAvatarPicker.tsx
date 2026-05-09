@@ -17,6 +17,7 @@ export type AvatarOption = {
   gender: string | null;
   premium: boolean;
   type: 'avatar' | 'photo';
+  isCustom?: boolean;
 };
 
 export function HeyGenAvatarPicker({
@@ -24,6 +25,7 @@ export function HeyGenAvatarPicker({
   setQuery,
   selected,
   setSelected,
+  motor,
   disabled,
   label = 'Avatar (busca por nome)',
 }: {
@@ -31,35 +33,41 @@ export function HeyGenAvatarPicker({
   setQuery: (s: string) => void;
   selected: AvatarOption | null;
   setSelected: (a: AvatarOption | null) => void;
+  motor?: 'III' | 'IV' | 'V';
   disabled?: boolean;
   label?: string;
 }) {
   const [results, setResults] = useState<AvatarOption[]>([]);
   const [loading, setLoading] = useState(false);
+  const [total, setTotal] = useState(0);
 
   useEffect(() => {
-    if (!query.trim()) {
+    // Busca mesmo com query vazia se motor estiver setado
+    // (assim mostra a lista filtrada por motor antes do user digitar)
+    if (!query.trim() && !motor) {
       setResults([]);
       return;
     }
     const t = setTimeout(async () => {
       setLoading(true);
       try {
-        const res = await fetch(
-          `/api/heygen/avatars?q=${encodeURIComponent(query.trim())}`,
-        );
+        const params = new URLSearchParams();
+        if (query.trim()) params.set('q', query.trim());
+        if (motor) params.set('motor', motor);
+        const res = await fetch(`/api/heygen/avatars?${params.toString()}`);
         const json = await res.json();
         if (res.ok && Array.isArray(json.avatars)) {
           setResults(json.avatars);
+          setTotal(Number(json.total ?? 0));
         }
       } catch {
         /* ignora */
       } finally {
         setLoading(false);
       }
-    }, 350);
+    }, 200);
     return () => clearTimeout(t);
-  }, [query]);
+  }, [query, motor]);
 
   return (
     <div>
@@ -68,12 +76,27 @@ export function HeyGenAvatarPicker({
         type="text"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Digite o nome do avatar (ex: Maya, Lucas...)"
+        placeholder={
+          motor
+            ? `Avatar ${motor} — digite pra filtrar (deixa vazio pra ver todos)`
+            : 'Digite o nome do avatar (ex: Maya, Lucas...)'
+        }
         className="input-field"
         disabled={disabled}
       />
       {loading ? (
-        <div className="mt-2 text-[11px] text-text-muted">Buscando...</div>
+        <div className="mt-2 flex items-center gap-2 text-[11px] text-lime">
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-lime" />
+          </span>
+          Buscando no HeyGen...
+        </div>
+      ) : results.length > 0 ? (
+        <div className="mt-2 text-[11px] text-text-muted">
+          {results.length} de {total} avatares
+          {motor ? ` (motor ${motor})` : ''}
+        </div>
       ) : null}
       {results.length > 0 ? (
         <div className="mt-3 grid max-h-72 gap-2 overflow-y-auto">
@@ -104,13 +127,17 @@ export function HeyGenAvatarPicker({
                   <div className="h-12 w-12 shrink-0 rounded-md bg-line" />
                 )}
                 <div className="flex-1">
-                  <div className="text-sm font-medium text-white">
+                  <div className="flex items-center gap-2 text-sm font-medium text-white">
                     {a.name}
+                    {a.isCustom ? (
+                      <span className="mono rounded-full bg-lime/15 px-1.5 py-0 text-[9px] uppercase text-lime">
+                        custom
+                      </span>
+                    ) : null}
                   </div>
                   <div className="mono text-[11px] uppercase text-text-muted">
-                    {a.type === 'photo' ? 'photo' : 'avatar'}
+                    {a.type === 'photo' ? 'avatar III · photo' : a.premium ? 'avatar V · premium' : 'avatar IV · studio'}
                     {a.gender ? ' · ' + a.gender : ''}
-                    {a.premium ? ' · premium' : ''}
                   </div>
                 </div>
                 {active ? (

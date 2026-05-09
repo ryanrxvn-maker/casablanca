@@ -9,6 +9,7 @@ import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { useToolState } from '@/components/ToolsStateProvider';
 import {
   cancelFFmpeg,
+  concatAvatarParts,
   estimateTakeBoundaries,
   extractAudioForTranscription,
   isCancellationError,
@@ -35,6 +36,7 @@ import {
 import {
   detectExtension,
   generateAvatarPart,
+  splitCopyIntoParts,
   type ExtensionStatus,
 } from '@/lib/heygen-extension-bridge';
 import {
@@ -242,23 +244,54 @@ export default function MindAdsPage() {
         setStage('Usando avatar pre-pronto...');
         avatarBlob = avatarUpload;
       } else if (extStatus.connected) {
-        // Caminho preferido: extension automatiza usando sua sessao HeyGen
-        setStage('Extensao DARKO LAB gerando avatar (sem API)...');
-        const avatarUrl = await generateAvatarPart(
-          {
-            copy: fullCopy,
-            avatarId: selectedAvatar!.id,
-            voiceId:
-              overrideVoice && selectedVoice ? selectedVoice.id : undefined,
-            motor: avatarType,
-            partLabel: 'mind-ads-full',
-          },
-          (s) => setStage(`Extensao: ${s}`),
+        // Caminho preferido: extension automatiza usando sua sessao HeyGen.
+        // Divide copy em paragrafos (≤40s cada). Cada paragrafo = 1 geracao
+        // separada no Script-to-Video do HeyGen. Depois concat tudo.
+        const copyParts = splitCopyIntoParts(fullCopy, {
+          targetSec: 20,
+          minSec: 10,
+          maxSec: 35,
+        });
+        setStage(
+          `Extensao DARKO LAB gerando avatar — ${copyParts.length} parte(s)...`,
         );
+
+        const partUrls: string[] = [];
+        for (let i = 0; i < copyParts.length; i++) {
+          if (cancelRef.current) throw new CancelledError();
+          const partLabel = `parte${i + 1}`;
+          setStage(
+            `Gerando ${partLabel}/${copyParts.length} via HeyGen Script-to-Video...`,
+          );
+          const url = await generateAvatarPart(
+            {
+              copy: copyParts[i],
+              avatarId: selectedAvatar!.id,
+              voiceId:
+                overrideVoice && selectedVoice ? selectedVoice.id : undefined,
+              motor: avatarType,
+              partLabel,
+            },
+            (s) =>
+              setStage(`${partLabel} (${i + 1}/${copyParts.length}): ${s}`),
+          );
+          partUrls.push(url);
+        }
         if (cancelRef.current) throw new CancelledError();
 
-        setStage('Baixando avatar via proxy...');
-        avatarBlob = await downloadAsBlob(avatarUrl, signal, 'video/mp4');
+        setStage('Baixando partes via proxy...');
+        const partBlobs = await Promise.all(
+          partUrls.map((u) => downloadAsBlob(u, signal, 'video/mp4')),
+        );
+
+        if (partBlobs.length === 1) {
+          avatarBlob = partBlobs[0];
+        } else {
+          avatarBlob = await concatAvatarParts(partBlobs, {
+            onStage: (s) => setStage(s),
+            onProgress: (p) => setProgress(p.ratio),
+          });
+        }
       } else {
         // Fallback: API HeyGen (consome credito da API)
         setStage('HeyGen API iniciando geracao (extensao nao detectada)...');
@@ -634,29 +667,6 @@ export default function MindAdsPage() {
 
               {avatarSource === 'auto' ? (
                 <>
-                  <div className="mt-4 border-t border-line pt-4">
-                    <HeyGenAvatarPicker
-                      query={avatarQuery}
-                      setQuery={setAvatarQuery}
-                      selected={selectedAvatar}
-                      setSelected={setSelectedAvatar}
-                      disabled={processing}
-                      label="Avatar HeyGen (busca por nome com preview)"
-                    />
-                  </div>
-                  <div className="mt-4 border-t border-line pt-4">
-                    <HeyGenVoicePicker
-                      override={overrideVoice}
-                      setOverride={setOverrideVoice}
-                      query={voiceQuery}
-                      setQuery={setVoiceQuery}
-                      selected={selectedVoice}
-                      setSelected={setSelectedVoice}
-                      clonedVoices={clonedVoices}
-                      setClonedVoices={setClonedVoices}
-                      disabled={processing}
-                    />
-                  </div>
                   <div className="mt-4 flex flex-wrap gap-2 border-t border-line pt-4">
                     <span className="label-field !mb-0 mr-2 self-center">Motor:</span>
                     {(['III', 'IV', 'V'] as const).map((t) => {
@@ -678,6 +688,37 @@ export default function MindAdsPage() {
                         </button>
                       );
                     })}
+                  </div>
+                  <p className="mt-2 text-[11px] text-text-muted">
+                    {avatarType === 'III'
+                      ? '✓ Avatar III (Photo) — ilimitado, nao consome creditos'
+                      : avatarType === 'IV'
+                        ? 'Avatar IV (Studio) — creditos do plano'
+                        : 'Avatar V (Studio Plus / Premium) — creditos premium'}
+                  </p>
+                  <div className="mt-4 border-t border-line pt-4">
+                    <HeyGenAvatarPicker
+                      query={avatarQuery}
+                      setQuery={setAvatarQuery}
+                      selected={selectedAvatar}
+                      setSelected={setSelectedAvatar}
+                      motor={avatarType}
+                      disabled={processing}
+                      label={`Avatar ${avatarType} (busca filtrada por motor)`}
+                    />
+                  </div>
+                  <div className="mt-4 border-t border-line pt-4">
+                    <HeyGenVoicePicker
+                      override={overrideVoice}
+                      setOverride={setOverrideVoice}
+                      query={voiceQuery}
+                      setQuery={setVoiceQuery}
+                      selected={selectedVoice}
+                      setSelected={setSelectedVoice}
+                      clonedVoices={clonedVoices}
+                      setClonedVoices={setClonedVoices}
+                      disabled={processing}
+                    />
                   </div>
                 </>
               ) : (

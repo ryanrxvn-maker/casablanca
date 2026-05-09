@@ -55,6 +55,7 @@ A extensao:
 
 ## Versao
 
+1.4.0 — URL HeyGen corrigida (/avatar em vez de /create-video) + tab navigate fallback.
 1.3.0 — manifest permissivo (qualquer *.vercel.app + localhost).
 1.2.0 — botao "Testar conexao HeyGen" + endpoints internos priorizados.
 1.1.0 — modo audio (lipsync via upload) + texto-pra-video.

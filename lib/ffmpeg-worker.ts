@@ -1134,6 +1134,82 @@ function toBlob(data: Uint8Array | string, type: string): Blob {
   return new Blob([copy.buffer], { type });
 }
 
+/**
+ * Concat de varios MP4s gerados pelo HeyGen (cada parte = 1 paragrafo da
+ * copy gerado separado no Script-to-Video). Usa filter_complex pra garantir
+ * que codec/fps/resolucao bata mesmo se cada parte vier ligeiramente
+ * diferente do HeyGen.
+ *
+ * Saida: 1080x1920 30fps H.264 ultrafast.
+ */
+export async function concatAvatarParts(
+  parts: Blob[],
+  opts: RunOptions = {},
+): Promise<Blob> {
+  if (parts.length === 0) throw new Error('Nenhuma parte pra concatenar.');
+  if (parts.length === 1) return parts[0];
+
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const { fetchFile } = await import('@ffmpeg/util');
+  const progressHandler = wireProgress(ff, opts.onProgress);
+
+  const inputNames: string[] = [];
+  const outputName = 'concat_out.mp4';
+
+  try {
+    for (let i = 0; i < parts.length; i++) {
+      const name = `part_${String(i).padStart(3, '0')}.mp4`;
+      inputNames.push(name);
+      await ff.writeFile(name, await fetchFile(parts[i]));
+    }
+
+    // filter_complex com normalizacao: scale + fps + format pra todas as
+    // partes ficarem identicas, depois concat
+    const inputFlags: string[] = [];
+    inputNames.forEach((n) => {
+      inputFlags.push('-i', n);
+    });
+
+    const filterParts: string[] = [];
+    const concatInputs: string[] = [];
+    inputNames.forEach((_, i) => {
+      filterParts.push(
+        `[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,format=yuv420p,setpts=PTS-STARTPTS[v${i}]`,
+        `[${i}:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,asetpts=PTS-STARTPTS[a${i}]`,
+      );
+      concatInputs.push(`[v${i}][a${i}]`);
+    });
+    filterParts.push(
+      `${concatInputs.join('')}concat=n=${inputNames.length}:v=1:a=1[outv][outa]`,
+    );
+
+    opts.onStage?.(`Concatenando ${inputNames.length} partes do avatar...`);
+    await ff.exec([
+      ...inputFlags,
+      '-filter_complex',
+      filterParts.join(';'),
+      '-map', '[outv]',
+      '-map', '[outa]',
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-tune', 'fastdecode',
+      '-crf', '22',
+      '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
+      '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac',
+      '-b:a', '160k',
+      '-movflags', '+faststart',
+      outputName,
+    ]);
+    const data = await ff.readFile(outputName);
+    return toBlob(data, 'video/mp4');
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    for (const n of inputNames) await safeDelete(ff, n);
+    await safeDelete(ff, outputName);
+  }
+}
+
 async function safeDelete(ff: FFmpeg, name: string) {
   try {
     await ff.deleteFile(name);

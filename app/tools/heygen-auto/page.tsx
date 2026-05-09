@@ -128,7 +128,9 @@ export default function HeyGenAutoPage() {
       setParts([]);
       return;
     }
-    setParts(splitCopyIntoParts(copy, { maxSec: 20, minSec: 4 }));
+    setParts(
+      splitCopyIntoParts(copy, { targetSec: 20, minSec: 10, maxSec: 35 }),
+    );
   }, [copy, mode]);
 
   function cancel() {
@@ -405,8 +407,17 @@ export default function HeyGenAutoPage() {
                 setQuery={setAvatarQuery}
                 selected={selectedAvatar}
                 setSelected={setSelectedAvatar}
+                motor={motor}
                 disabled={processing}
+                label={`Avatar ${motor} (busca filtrada por motor)`}
               />
+              <p className="mt-2 text-[11px] text-text-muted">
+                {motor === 'III'
+                  ? '✓ Avatar III (Photo) — ilimitado no plano, nao consome creditos'
+                  : motor === 'IV'
+                    ? 'Avatar IV (Studio) — usa creditos do plano'
+                    : 'Avatar V (Studio Plus / Premium) — creditos premium'}
+              </p>
             </section>
 
             {mode === 'copy' ? (

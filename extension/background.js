@@ -12,14 +12,26 @@
  */
 
 const activeJobs = new Map();
-const HEYGEN_CREATE_URL = 'https://app.heygen.com/create-video';
+// URL correta da tela "Script to Video" no HeyGen (antes era /create-video que da 404)
+const HEYGEN_CREATE_URL = 'https://app.heygen.com/avatar';
 
 // Util: encontra ou cria aba HeyGen
 async function findOrCreateHeyGenTab() {
   const tabs = await chrome.tabs.query({
     url: ['https://app.heygen.com/*'],
   });
-  if (tabs.length > 0) return tabs[0];
+  if (tabs.length > 0) {
+    // Se a aba existente esta numa URL valida do HeyGen, reusa.
+    // Se esta no 404 ou em pagina invalida, navega ela pra /avatar.
+    const tab = tabs[0];
+    if (
+      tab.url &&
+      (tab.url.includes('/create-video') || tab.url.includes('/404'))
+    ) {
+      await chrome.tabs.update(tab.id, { url: HEYGEN_CREATE_URL });
+    }
+    return tab;
+  }
   return await chrome.tabs.create({
     url: HEYGEN_CREATE_URL,
     active: false,

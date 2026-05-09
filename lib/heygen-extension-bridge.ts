@@ -219,24 +219,45 @@ export async function audioFileToBase64(file: File): Promise<string> {
 /* ===================== Copy splitter ===================== */
 
 /**
- * Divide a copy em partes pra cada take ter ATE ~maxSec segundos quando
- * falado a 150 wpm (taxa media de avatar HeyGen). Nao corta no meio de
- * frase — sempre quebra em ponto/exclamacao/interrogacao OU em quebra de
- * paragrafo.
+ * Divide a copy em partes inteligente — busca equilibrio "sweet spot".
+ *
+ * REGRA #1 ABSOLUTA: JAMAIS CORTA UMA FRASE NO MEIO. Sentenca e sagrada.
+ *   Mesmo que isso signifique uma parte ficar acima do "max" sugerido,
+ *   PREFERIMOS preservar a sentenca inteira. Tempos sao guias, nao limites
+ *   rigidos.
+ *
+ * Sweet spot (so guias):
+ *   - TARGET: ~20s por parte (ideal pra dinamica de avatar HeyGen)
+ *   - MIN: 10s (evita parts picadas)
+ *   - MAX: 35s (evita avatar entrar em "reverse" / aparencia repetitiva)
  *
  * Algoritmo:
  *   1. Quebra por paragrafos (\n\n)
- *   2. Pra cada paragrafo, se ultrapassa maxSec, quebra em sentencas
- *   3. Junta sentencas pequenas consecutivas ate atingir minSec ou estourar
+ *   2. Pra cada paragrafo:
+ *      - Cabe em <= MAX → vira 1 parte intacta
+ *      - > MAX → divide so em boundary de SENTENCA (.!?), nunca no meio.
+ *        Calcula N = ceil(dur/TARGET) e tenta dividir em N chunks
+ *        equilibrados, sempre fechando em ponto/exclamacao/interrogacao.
+ *        Se uma unica sentenca > MAX, ela vira 1 parte sozinha (nao corta).
+ *      - < MIN → marca pra merge pos-processo
+ *   3. Pos-processo: parts < MIN mescladas com adjacente quando possivel,
+ *      preferindo a anterior. Se nao da pra mesclar sem estourar muito,
+ *      deixa curta mesmo — preserva a fala intacta.
  *
- * Resultado: lista de partes ordenadas, cada uma 1 take do avatar.
+ * Premissa: avatar HeyGen fala a ~150 wpm (2.5 wps).
  */
 export function splitCopyIntoParts(
   copy: string,
-  opts: { maxSec?: number; minSec?: number; wpm?: number } = {},
+  opts: {
+    targetSec?: number;
+    minSec?: number;
+    maxSec?: number;
+    wpm?: number;
+  } = {},
 ): string[] {
-  const maxSec = opts.maxSec ?? 20;
-  const minSec = opts.minSec ?? 4;
+  const target = opts.targetSec ?? 20;
+  const min = opts.minSec ?? 10;
+  const max = opts.maxSec ?? 35;
   const wpm = opts.wpm ?? 150;
 
   const wordsToSec = (text: string) => (countWords(text) / wpm) * 60;
@@ -249,37 +270,98 @@ export function splitCopyIntoParts(
   const parts: string[] = [];
 
   for (const para of paragraphs) {
-    if (wordsToSec(para) <= maxSec) {
+    const dur = wordsToSec(para);
+
+    if (dur <= max) {
+      // Cabe inteiro — vira 1 parte (mesmo se < min; pos-processo trata)
       parts.push(para);
       continue;
     }
-    // Paragrafo longo demais — quebra em sentencas
+
+    // Paragrafo longo — divide em N chunks balanceados, SEMPRE em
+    // boundary de sentenca. Nunca corta fala.
+    const numChunks = Math.max(2, Math.ceil(dur / target));
+    const chunkTarget = dur / numChunks;
+
     const sentences = splitSentences(para);
+
+    // Caso patologico: paragrafo inteiro e UMA frase sem pontuacao final.
+    // Nao da pra dividir respeitando boundary — vira 1 parte gigante.
+    // Preferimos isso a cortar fala.
+    if (sentences.length === 1) {
+      parts.push(para);
+      continue;
+    }
+
+    const chunks: string[] = [];
     let buf = '';
     for (const s of sentences) {
       const candidate = buf ? buf + ' ' + s : s;
-      if (wordsToSec(candidate) > maxSec && buf.length > 0) {
-        parts.push(buf);
+      const candidateDur = wordsToSec(candidate);
+      const bufDur = buf ? wordsToSec(buf) : 0;
+
+      // Se buf vazio, sempre adiciona (independe de tamanho)
+      if (!buf) {
+        buf = s;
+        continue;
+      }
+
+      // Decide: continuar acumulando OU fechar chunk e comecar novo?
+      // Fecha quando:
+      //   - Adicionar essa sentenca passa MUITO acima do chunkTarget
+      //     (>1.3x), OU
+      //   - O buf atual ja esta acima do chunkTarget e a sentenca nao
+      //     e tao curta que justifica continuar
+      const tooFar = candidateDur > chunkTarget * 1.3;
+      const bufAtTarget = bufDur >= chunkTarget * 0.85;
+
+      if (tooFar || bufAtTarget) {
+        chunks.push(buf);
         buf = s;
       } else {
         buf = candidate;
       }
     }
-    if (buf) parts.push(buf);
+    if (buf) chunks.push(buf);
+
+    parts.push(...chunks);
   }
 
-  // Pos-processo: junta partes muito curtas com a anterior
+  // Pos-processo: parts < min mescladas com adjacente.
+  // Estrategia: tenta mesclar com a ANTERIOR primeiro (mantem fluxo),
+  // depois com a proxima. Se nao da pra mesclar sem estourar max, deixa
+  // curta mesmo — preserva a fala intacta.
   const merged: string[] = [];
-  for (const p of parts) {
-    if (
-      merged.length > 0 &&
-      wordsToSec(p) < minSec &&
-      wordsToSec(merged[merged.length - 1] + ' ' + p) <= maxSec
-    ) {
-      merged[merged.length - 1] = merged[merged.length - 1] + ' ' + p;
-    } else {
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    const dur = wordsToSec(p);
+
+    if (dur >= min) {
       merged.push(p);
+      continue;
     }
+
+    // Parte curta — tenta merge com a anterior
+    if (merged.length > 0) {
+      const candidate = merged[merged.length - 1] + ' ' + p;
+      if (wordsToSec(candidate) <= max) {
+        merged[merged.length - 1] = candidate;
+        continue;
+      }
+    }
+
+    // Tenta merge com a proxima (lookahead)
+    if (i + 1 < parts.length) {
+      const candidate = p + ' ' + parts[i + 1];
+      if (wordsToSec(candidate) <= max) {
+        parts[i + 1] = candidate;
+        continue;
+      }
+    }
+
+    // Nao da pra mesclar sem estourar max — fica curta mesmo.
+    // Preferivel a cortar fala.
+    merged.push(p);
   }
 
   return merged;
