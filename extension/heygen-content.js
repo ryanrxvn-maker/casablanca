@@ -70,7 +70,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
  * Lista vozes da conta HeyGen (custom + favoritas) via cookies de sessao.
  */
 async function listMyVoices() {
-  const headers = getInternalAuthHeaders();
   const endpoints = [
     'https://api2.heygen.com/v2/voice.list?limit=200&page=1',
     'https://api2.heygen.com/v1/voice.list?limit=200&page=1',
@@ -79,21 +78,26 @@ async function listMyVoices() {
     'https://api.heygen.com/v2/voices',
   ];
 
-  // Paralelo — mesma estrategia dos avatares
+  // SIMPLE REQUEST sem headers — evita CORS preflight
   const results = await Promise.all(
     endpoints.map(async (url) => {
       try {
         const r = await fetchWithTimeout(
           url,
-          { method: 'GET', credentials: 'include', headers },
+          { method: 'GET', credentials: 'include' },
           5000,
         );
-        if (!r.ok) return { url, error: `${r.status}`, voices: null };
+        if (!r.ok) {
+          console.warn(`[DARKO LAB voice] FAIL ${url}: HTTP ${r.status}`);
+          return { url, error: `${r.status}`, voices: null };
+        }
         const text = await r.text();
         const json = JSON.parse(text);
         const voices = parseVoicesResponse(json);
+        console.log(`[DARKO LAB voice] OK ${url}: ${voices.length} voices`);
         return { url, voices };
       } catch (e) {
+        console.warn(`[DARKO LAB voice] EXC ${url}: ${e.message}`);
         return { url, error: e.name === 'AbortError' ? 'timeout' : e.message, voices: null };
       }
     }),
@@ -148,8 +152,6 @@ function parseVoicesResponse(json) {
  * fiel no DARKO LAB.
  */
 async function listMyAvatars() {
-  const headers = getInternalAuthHeaders();
-
   const endpoints = [
     'https://api2.heygen.com/v2/avatar_group.private.list?limit=200&page=1',
     'https://api2.heygen.com/v1/avatar_group.private.list?limit=200&page=1',
@@ -161,50 +163,63 @@ async function listMyAvatars() {
 
   console.log('[DARKO LAB] listMyAvatars (paralelo) iniciando');
 
-  // Roda TODAS em paralelo — primeira com items > 0 ganha.
-  // Timeout 5s por endpoint. Total max 5s em vez de ~30s sequencial.
+  // SIMPLE REQUEST: sem headers customizados pra evitar CORS preflight.
+  // Cookies sao enviados via credentials: include. HeyGen autentica via cookie.
   const results = await Promise.all(
     endpoints.map(async (url) => {
       try {
         const r = await fetchWithTimeout(
           url,
-          { method: 'GET', credentials: 'include', headers },
+          { method: 'GET', credentials: 'include' },
           5000,
         );
         if (!r.ok) {
-          return { url, error: `${r.status}`, items: null };
+          console.warn(`[DARKO LAB] FAIL ${url}: HTTP ${r.status}`);
+          return { url, error: `HTTP ${r.status}`, items: null };
         }
         const text = await r.text();
         let json;
         try {
           json = JSON.parse(text);
         } catch {
+          console.warn(`[DARKO LAB] FAIL ${url}: nao-JSON`);
           return { url, error: 'nao-JSON', items: null };
         }
         const items = parseAvatarsResponse(json);
         console.log(
-          `[DARKO LAB] ${url}: ${items.length} items, keys:`,
-          json ? Object.keys(json) : 'null',
-          json?.data ? 'data keys: ' + Object.keys(json.data).join(',') : '',
+          `[DARKO LAB] OK ${url}: ${items.length} items, top-level keys: [${Object.keys(json || {}).join(', ')}]`,
         );
+        if (json?.data) {
+          console.log(
+            `[DARKO LAB]   data keys: [${Object.keys(json.data).join(', ')}]`,
+          );
+        }
+        // Se 0 items mas response OK, loga primeira parte do JSON pra debug
+        if (items.length === 0) {
+          const preview = JSON.stringify(json).slice(0, 500);
+          console.log(`[DARKO LAB]   JSON preview: ${preview}`);
+        }
         return { url, items, json };
       } catch (e) {
-        const msg = e.name === 'AbortError' ? 'timeout 5s' : (e.message ?? String(e));
+        const msg =
+          e.name === 'AbortError' ? 'timeout 5s' : e.message ?? String(e);
+        console.warn(`[DARKO LAB] EXC ${url}: ${msg}`);
         return { url, error: msg, items: null };
       }
     }),
   );
 
-  // Pega o primeiro endpoint que retornou items > 0
   for (const r of results) {
     if (r.items && r.items.length > 0) {
       return { ok: true, avatars: r.items, source: r.url };
     }
   }
 
-  // Nenhum funcionou — coleta erros + raw data pra debug
   const errors = results.map((r) => `${r.url} → ${r.error ?? '0 items'}`);
-  console.warn('[DARKO LAB] Nenhum endpoint retornou avatares:', results);
+  console.warn(
+    '[DARKO LAB] Nenhum endpoint retornou avatares. Detalhes:',
+    errors.join(' | '),
+  );
 
   return {
     ok: false,
