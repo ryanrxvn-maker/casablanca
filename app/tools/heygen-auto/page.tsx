@@ -160,7 +160,8 @@ export default function HeyGenAutoPage() {
       return;
     }
 
-    let jobs: Array<{ label: string; copy: string; audio?: File }> = [];
+    type Job = { label: string; copy: string; audio?: File };
+    let jobs: Job[] = [];
     if (mode === 'copy') {
       if (parts.length === 0) {
         setError('Cola uma copy primeiro.');
@@ -256,7 +257,9 @@ export default function HeyGenAutoPage() {
         }
       }
 
-      await Promise.all(Array.from({ length: PARALLEL }, () => worker()));
+      const workers = [];
+      for (let w = 0; w < PARALLEL; w++) workers.push(worker());
+      await Promise.all(workers);
 
       const ok = collected.filter((r) => r && !r.videoUrl.startsWith('ERROR:')).length;
       const failed = jobs.length - ok;
@@ -610,5 +613,4 @@ export default function HeyGenAutoPage() {
                       >
                         <span>
                           <span className="mono text-lime">{r.label}</span>
-                          <span className="ml-2 text-text-muted">
-                            {vid ? `id ${vid.slice(0, 12)
+                          <span className="ml-2 text-text-
