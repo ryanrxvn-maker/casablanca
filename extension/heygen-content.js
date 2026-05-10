@@ -813,7 +813,7 @@ async function runJob(requestId, payload) {
   let generateClicked = false; // pra garantir click 1x
 
   try {
-    const { copy, avatarId, motor, partLabel } = payload;
+    const { copy, avatarId, motor, partLabel, avatarName, groupName } = payload;
 
     if (!avatarId) throw new Error('payload invalido: avatarId obrigatorio.');
     if (!copy) throw new Error('payload invalido: copy obrigatoria.');
@@ -868,7 +868,7 @@ async function runJob(requestId, payload) {
 
     // 4) Seleciona avatar via dialog "Choose an Avatar"
     reportProgress(requestId, 'Selecionando avatar...');
-    await selectAvatarInUI(avatarId);
+    await selectAvatarInUI(avatarId, avatarName ?? groupName);
 
     // 5) Cola script no textarea com React onChange trigger
     reportProgress(requestId, 'Colando script...');
@@ -1611,105 +1611,144 @@ function findGenerateButton() {
   return all[0].btn;
 }
 
-async function selectAvatarInUI(avatarId) {
-  // Procura algum botao/area que abra o dialog "Choose an Avatar"
-  // ou um seletor de avatar no painel direito.
-  // A estrategia mais simples: clicar no preview/thumb do avatar atual,
-  // que abre o dialog.
-  const triggers = [
-    'button[aria-label*="avatar" i]',
-    'button[aria-label*="choose" i]',
-    'button[aria-label*="customize" i]',
-    '[data-testid*="avatar" i]',
-  ];
-  let trigger = null;
-  for (const sel of triggers) {
-    const candidates = document.querySelectorAll(sel);
-    for (const el of candidates) {
-      if (el.offsetParent !== null && !el.disabled) {
-        trigger = el;
-        break;
-      }
-    }
-    if (trigger) break;
-  }
-  // Fallback: procura imagem/avatar grande no lado direito
-  if (!trigger) {
-    const imgs = Array.from(document.querySelectorAll('img'));
-    for (const img of imgs) {
-      const rect = img.getBoundingClientRect();
-      // Imagem grande no lado direito
-      if (
-        rect.width > 100 &&
-        rect.height > 100 &&
-        rect.right > window.innerWidth * 0.5
-      ) {
-        // Sobe ate achar um button/clickable
-        let p = img.parentElement;
-        while (p && p !== document.body) {
-          if (p.tagName === 'BUTTON' || p.getAttribute('role') === 'button') {
-            trigger = p;
-            break;
-          }
-          p = p.parentElement;
-        }
-        if (trigger) break;
-      }
-    }
-  }
+async function selectAvatarInUI(avatarId, avatarName) {
+  console.log('[DARKO LAB UI avatar] alvo avatarId=', avatarId, 'name=', avatarName);
 
+  // 1) Procura botao "Change Avatar" no composer (canto superior do preview do avatar)
+  let trigger = findButtonByText(['change avatar', 'change my avatar', 'choose avatar', 'select avatar']);
   if (!trigger) {
-    console.warn('[DARKO LAB UI] gatilho do dialog Choose an Avatar nao achado, seguindo com avatar atual');
+    // Fallback: procura imagem/area grande do avatar atual no lado direito
+    trigger = findAvatarPreviewClickable();
+  }
+  if (!trigger) {
+    console.warn('[DARKO LAB UI avatar] gatilho Change Avatar NAO achado - usando avatar atual (PROBLEMA: pode nao ser o que o user escolheu)');
     return;
   }
-
-  console.log('[DARKO LAB UI] abrindo dialog Choose an Avatar');
+  console.log('[DARKO LAB UI avatar] clicando trigger Change Avatar');
   clickElement(trigger);
-  await sleep(1200);
+  await sleep(1500);
 
-  // Procura o avatar pelo ID no dialog. Cada avatar geralmente eh um div/button
-  // com a imagem dentro. O HeyGen renderiza o look_id em algum data-* ou no key.
-  // Estrategia mais simples: clicar no avatar por POSICAO usando o ID na URL da img.
-  const avatarCards = document.querySelectorAll('[role="dialog"] button, [role="dialog"] [role="button"], [role="dialog"] img');
-  for (const card of avatarCards) {
-    let foundId = false;
-    // Verifica src de img dentro do card
-    const imgs = card.tagName === 'IMG' ? [card] : Array.from(card.querySelectorAll('img'));
-    for (const img of imgs) {
-      if (img.src && img.src.includes(avatarId)) {
-        foundId = true;
-        break;
-      }
-    }
-    if (foundId) {
-      // Sobe ate achar clickable
-      let target = card;
-      while (target && target.tagName !== 'BUTTON' && target.getAttribute('role') !== 'button') {
-        target = target.parentElement;
-        if (!target || target === document.body) break;
-      }
-      if (target) {
-        console.log('[DARKO LAB UI] avatar encontrado, clicando');
-        clickElement(target);
-        await sleep(1000);
+  // 2) Verifica se dialog de avatares abriu
+  let dialog = document.querySelector('[role="dialog"]');
+  if (!dialog) {
+    // Tenta de novo - pode ter aberto um menu Radix sem role
+    dialog = document.querySelector('[data-state="open"], [data-radix-popper-content-wrapper]');
+  }
+  if (!dialog) {
+    console.warn('[DARKO LAB UI avatar] dialog nao abriu apos click Change Avatar');
+  } else {
+    console.log('[DARKO LAB UI avatar] dialog/menu aberto');
+  }
 
-        // Pode aparecer um sub-dialog com "Use Avatar" - clicar
-        const useBtn = Array.from(document.querySelectorAll('button'))
-          .find((b) => /use\s*avatar/i.test(b.textContent || ''));
-        if (useBtn && useBtn.offsetParent !== null) {
-          console.log('[DARKO LAB UI] clicando "Use Avatar"');
-          clickElement(useBtn);
-          await sleep(800);
-        }
-        return;
-      }
+  // 3) Se tem search input, digita o nome do avatar pra filtrar
+  if (avatarName) {
+    const searchInput = document.querySelector(
+      'input[placeholder*="search" i], input[placeholder*="busc" i], input[type="search"]'
+    );
+    if (searchInput && searchInput.offsetParent !== null) {
+      console.log('[DARKO LAB UI avatar] digitando "', avatarName, '" no search');
+      searchInput.focus();
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(searchInput, avatarName);
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      searchInput.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(1500);
     }
   }
 
-  console.warn('[DARKO LAB UI] avatar', avatarId, 'nao achado no dialog. Fechando dialog e usando avatar atual.');
-  // Fecha o dialog (Esc ou click fora)
-  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-  await sleep(500);
+  // 4) Procura imagem com avatarId na URL e clica o card pai
+  const targetClicked = await clickAvatarCardByImageId(avatarId);
+  if (!targetClicked) {
+    console.warn('[DARKO LAB UI avatar] avatar com id', avatarId, 'NAO achado no dialog');
+    // Fecha dialog
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await sleep(500);
+    return;
+  }
+  await sleep(1200);
+
+  // 5) Pode ter aparecido sub-dialog com looks (caso grupo com >1 look) - clicar Use Avatar ou look
+  // Procura novamente o look pelo ID (mais especifico)
+  const useBtn = findButtonByText(['use avatar', 'use this avatar', 'select', 'apply']);
+  if (useBtn) {
+    console.log('[DARKO LAB UI avatar] clicando "Use Avatar"');
+    clickElement(useBtn);
+    await sleep(1000);
+  } else {
+    // Tenta clicar no look especifico de novo (caso grupo abriu sub-dialog)
+    await clickAvatarCardByImageId(avatarId);
+    await sleep(800);
+  }
+  console.log('[DARKO LAB UI avatar] selecao concluida');
+}
+
+/** Busca botao/clickable cuja textContent (lowercase) bata em alguma string da lista */
+function findButtonByText(textsLower) {
+  const all = Array.from(document.querySelectorAll('button, [role="button"], a, div[tabindex]'));
+  for (const el of all) {
+    if (el.offsetParent === null) continue;
+    if (el.disabled) continue;
+    const t = (el.textContent || '').trim().toLowerCase();
+    if (!t || t.length > 50) continue;
+    for (const target of textsLower) {
+      if (t === target || t.includes(target)) {
+        return el;
+      }
+    }
+  }
+  return null;
+}
+
+/** Acha imagem grande do avatar no lado direito + sobe pra clickable */
+function findAvatarPreviewClickable() {
+  const imgs = Array.from(document.querySelectorAll('img'));
+  for (const img of imgs) {
+    const rect = img.getBoundingClientRect();
+    if (
+      rect.width > 100 && rect.height > 100 &&
+      rect.right > window.innerWidth * 0.5
+    ) {
+      let p = img.parentElement;
+      while (p && p !== document.body) {
+        const cursor = window.getComputedStyle(p).cursor;
+        if (
+          p.tagName === 'BUTTON' ||
+          p.getAttribute('role') === 'button' ||
+          cursor === 'pointer'
+        ) return p;
+        p = p.parentElement;
+      }
+    }
+  }
+  return null;
+}
+
+/** Procura uma img cuja src contenha o avatarId, sobe pra clickable, clica */
+async function clickAvatarCardByImageId(avatarId) {
+  const imgs = Array.from(document.querySelectorAll('img'));
+  for (const img of imgs) {
+    if (img.offsetParent === null) continue;
+    if (!img.src || !img.src.includes(avatarId)) continue;
+    let target = img;
+    while (target && target !== document.body) {
+      const cursor = window.getComputedStyle(target).cursor;
+      if (
+        target.tagName === 'BUTTON' ||
+        target.getAttribute('role') === 'button' ||
+        cursor === 'pointer'
+      ) {
+        console.log('[DARKO LAB UI avatar] achou img com avatarId, clicando ancestor:', target.tagName);
+        clickElement(target);
+        return true;
+      }
+      target = target.parentElement;
+    }
+    // Sem ancestor clicavel - clica na propria img
+    console.log('[DARKO LAB UI avatar] clicando img direto');
+    clickElement(img);
+    return true;
+  }
+  return false;
 }
 
 async function pasteScriptIntoTextarea(textarea, text) {
@@ -2089,4 +2128,4 @@ async function uploadAudioToHeyGen(audioBase64, filename, headers) {
 
 console.log('[DARKO LAB HeyGen Content] online');
 
-} // fim do guard __darkolab_heygen_loaded__
+} // fim

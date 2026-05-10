@@ -253,24 +253,18 @@ async function handleGenerate(requestId, payload, bridgeTabId) {
     stage: 'Abrindo HeyGen...',
   });
 
-  // CRITICO: garantir que a aba esta em /avatar (Quick Create) ANTES de
-  // mandar HG_RUN_JOB. Se nao estiver, navega via chrome.tabs.update e
-  // aguarda load complete (content script vai se reinjectar). Se a
-  // navegacao fosse feita PELO content script via location.href, o script
-  // morreria e o job ficaria orfao.
-  let curTab = await chrome.tabs.get(tab.id);
-  const isOnAvatar = curTab.url && curTab.url.includes('app.heygen.com/avatar');
-  if (!isOnAvatar) {
-    console.log('[DARKO LAB BG] aba HeyGen nao esta em /avatar (atual:', curTab.url, '), navegando...');
-    reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', {
-      stage: 'Navegando HeyGen pra Quick Create...',
-    });
-    await chrome.tabs.update(tab.id, { url: 'https://app.heygen.com/avatar' });
-    // Aguarda load complete (status === 'complete')
-    await waitForTabComplete(tab.id, 30000);
-    // Espera React montar a UI
-    await new Promise((r) => setTimeout(r, 2500));
-  }
+  // CRITICO: SEMPRE navega pra /avatar fresh antes de cada dispatch.
+  // Apos clicar Generate, HeyGen muda a UI (mostra processing, esconde
+  // textarea, etc). Pra proximos trechos precisamos de UI limpa.
+  // Navegamos via chrome.tabs.update (sobrevive reload do content script).
+  reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', {
+    stage: 'Resetando HeyGen pra Quick Create limpa...',
+  });
+  console.log('[DARKO LAB BG] navegando pra /avatar pra UI limpa');
+  await chrome.tabs.update(tab.id, { url: 'https://app.heygen.com/avatar' });
+  await waitForTabComplete(tab.id, 30000);
+  // Espera React montar a UI + Quick Create render
+  await new Promise((r) => setTimeout(r, 3500));
 
   await waitForTabReady(tab.id);
 
