@@ -405,7 +405,12 @@ async function injectInterceptorIntoMainWorld(tabId) {
       func: () => {
         if (window.__darkolab_intercept_loaded__) return;
         window.__darkolab_intercept_loaded__ = true;
-        const URL_RE = /heygen\.com.*(?:video|generate|create)/i;
+        // Captura QUALQUER POST a heygen.com (mais amplo). Excluimos
+        // endpoints conhecidos de NAO-generate pra reduzir spam: tracking,
+        // metrics, log, analytics, recommendation, search, voices.list,
+        // avatar_group.private.list etc.
+        const HG_RE = /heygen\.(com|ai)/i;
+        const SKIP_RE = /(tracking|metrics|log|analytics|telemetry|recommend|search\.|voices?\.list|avatar_(group|look)\.private|user\.info|asset\.|file\.|upload\.|status\.|preview|notifi)/i;
         function emit(payload) {
           try {
             window.postMessage({ source: 'darkolab-injected', type: 'VIDEO_GENERATED', ts: Date.now(), ...payload }, '*');
@@ -413,20 +418,32 @@ async function injectInterceptorIntoMainWorld(tabId) {
         }
         function tryExtractId(j) {
           if (!j || typeof j !== 'object') return null;
-          return (j?.data?.video_id ?? j?.data?.id ?? j?.data?.uuid ?? j?.video_id ?? j?.id ?? j?.uuid ?? null);
+          return (
+            j?.data?.video_id ?? j?.data?.id ?? j?.data?.uuid ??
+            j?.video_id ?? j?.id ?? j?.uuid ??
+            j?.data?.task_id ?? j?.task_id ??
+            null
+          );
         }
         const origFetch = window.fetch;
         window.fetch = function (input, init) {
           const url = typeof input === 'string' ? input : input?.url || '';
           const method = ((init && init.method) || (typeof input === 'object' && input?.method) || 'GET').toUpperCase();
-          const isInteresting = method === 'POST' && URL_RE.test(url);
+          const isHG = HG_RE.test(url) && !SKIP_RE.test(url);
+          const isInteresting = method === 'POST' && isHG;
           const p = origFetch.apply(this, arguments);
           if (isInteresting) {
+            // Loga inicio pra debug (mostra TODAS POSTs HeyGen relevantes)
+            console.log('[DARKO LAB inject] POST capturado:', url);
             p.then(async (res) => {
               try {
-                if (!res || res.status >= 400) return;
+                if (!res) return;
                 const clone = res.clone();
-                const j = await clone.json().catch(() => null);
+                const text = await clone.text().catch(() => '');
+                console.log('[DARKO LAB inject] POST resp', url, 'status', res.status, 'body 200ch:', text.slice(0, 200));
+                if (res.status >= 400) return;
+                let j = null;
+                try { j = JSON.parse(text); } catch { return; }
                 const id = tryExtractId(j);
                 if (id) {
                   console.log('[DARKO LAB inject] fetch capturou video_id', id, 'via', url);

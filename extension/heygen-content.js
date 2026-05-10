@@ -885,7 +885,22 @@ async function runJob(requestId, payload) {
     reportProgress(requestId, 'Clicando Generate...');
     const generateBtn = await waitForOrNull(() => findGenerateButton(), 8000, 300);
     if (!generateBtn) throw new Error('Botao Generate nao encontrado.');
-    if (generateClicked) {
+    // GUARD anti-duplicacao: se ja houve um video gerado nos ultimos 90s
+    // (capturado pelo interceptor), REUSA esse video em vez de clicar
+    // Generate de novo. Isso protege contra:
+    //  a) User clicando Gerar 2x no DARKO LAB
+    //  b) Retry apos falha do motor
+    //  c) Qualquer race condition que cause 2 dispatch
+    const ANTI_DUP_WINDOW_MS = 90000;
+    const recentVideo = interceptedVideoIds
+      .filter((v) => Date.now() - v.ts < ANTI_DUP_WINDOW_MS)
+      .pop(); // pega o mais recente (ultimo do array)
+    if (recentVideo) {
+      console.warn('[DARKO LAB UI] !! Generate SKIP - video ja foi gerado nos ultimos 90s:', recentVideo.id, 'idade:', Math.round((Date.now() - recentVideo.ts)/1000) + 's');
+      console.warn('[DARKO LAB UI] !! Reusando esse video pra evitar duplicacao. Pra forcar nova geracao, espere 90s.');
+      // Marca generateClicked pra waitForInterceptedVideoId aceitar
+      generateClicked = true;
+    } else if (generateClicked) {
       console.warn('[DARKO LAB UI] generate JA foi clicado uma vez, skip duplo click');
     } else {
       console.log('[DARKO LAB UI] clicando Generate, aguardando interceptor capturar video_id...');
@@ -896,8 +911,10 @@ async function runJob(requestId, payload) {
     // 8) Aguarda inject.js interceptar a request POST de generate e
     //    capturar o video_id REAL retornado pela response. Garantia 100%
     //    de que eh o video que A GENTE gerou, nao outro user.
+    //    Aceita videos capturados ate 5s ANTES do clickStartTs (cobre caso
+    //    de race condition ou Generate ja em andamento).
     reportProgress(requestId, 'Aguardando HeyGen aceitar request...');
-    const myVideoId = await waitForInterceptedVideoId(clickStartTs, 30000);
+    const myVideoId = await waitForInterceptedVideoId(clickStartTs - 5000, 60000);
     if (!myVideoId) {
       throw new Error(
         'Nao consegui interceptar a request de generate em 30s. Verifica se ' +
