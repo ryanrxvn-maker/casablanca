@@ -50,12 +50,14 @@ function ThumbWithFallback({
   alt,
   className,
   eager,
+  onAllFailed,
 }: {
   primary: string | null;
   fallbacks: (string | null)[];
   alt: string;
   className: string;
   eager?: boolean;
+  onAllFailed?: () => void;
 }) {
   // Lista ordenada de URLs candidatas (sem nulls/duplicatas)
   const candidates = useMemo(() => {
@@ -107,6 +109,7 @@ function ThumbWithFallback({
           setIdx(idx + 1);
         } else {
           setAllFailed(true);
+          onAllFailed?.();
         }
       }}
     />
@@ -156,10 +159,29 @@ export function HeyGenAvatarPicker({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
+  const failedThumbsRef = useRef(0);
+  const lastReloadRef = useRef(0);
+
+  // Auto-reload se >30% das thumbs do grid principal falharem (URLs CloudFront
+  // expiraram). Throttle 2 min entre reloads pra nao loopar.
+  function reportThumbFailed() {
+    failedThumbsRef.current += 1;
+    const total = groups.length;
+    if (total === 0) return;
+    const failedPct = failedThumbsRef.current / total;
+    const elapsed = Date.now() - lastReloadRef.current;
+    if (failedPct > 0.3 && elapsed > 120_000 && !loading) {
+      console.log('[HeyGenAvatarPicker] >30% thumbs falharam, auto-recarregando biblioteca');
+      lastReloadRef.current = Date.now();
+      failedThumbsRef.current = 0;
+      loadLibrary();
+    }
+  }
 
   async function loadLibrary() {
     setLoading(true);
     setError(null);
+    failedThumbsRef.current = 0;
     try {
       const r = await listMyHeyGenAvatars();
       if (r.ok) {
@@ -292,6 +314,7 @@ export function HeyGenAvatarPicker({
                   alt={g.name}
                   className="absolute inset-0 h-full w-full object-cover"
                   eager={i < 12}
+                  onAllFailed={reportThumbFailed}
                 />
                 {/* Overlay dark */}
                 <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent p-2">

@@ -1108,7 +1108,7 @@ async function selectMotor(motor) {
   const target = `Avatar ${motor}`;
   console.log('[DARKO LAB UI motor] alvo=', target);
 
-  // Verifica se ja esta no motor certo (botao do toggle mostra Avatar X)
+  // Verifica se ja esta no motor certo (toggle mostra Avatar X)
   const currentBtn = findCurrentMotorToggle();
   if (currentBtn) {
     const t = (currentBtn.textContent || '').trim();
@@ -1119,22 +1119,40 @@ async function selectMotor(motor) {
     }
   }
 
-  // Abre o dropdown
-  if (currentBtn) {
-    console.log('[DARKO LAB UI motor] clicando dropdown atual pra abrir');
-    clickElement(currentBtn);
-    await sleep(700);
-  } else {
-    console.warn('[DARKO LAB UI motor] toggle atual nao achado, tentando achar motor btn direto');
-  }
+  // 3 tentativas pra abrir dropdown e clicar item
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    console.log(`[DARKO LAB UI motor] tentativa ${attempt}/3 abrir dropdown`);
 
-  // Procura o item do motor desejado dentro de qualquer dropdown/menu aberto
-  const item = await waitForOrNull(() => findMotorMenuItem(motor), 4000, 200);
-  if (item) {
-    console.log('[DARKO LAB UI motor] clicando item', target);
-    clickElement(item);
-    await sleep(800);
-    return true;
+    // Fecha qualquer popover/dropdown aberto antes (ESC)
+    if (attempt > 1) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await sleep(300);
+    }
+
+    const toggle = findCurrentMotorToggle();
+    if (toggle) {
+      console.log(`[DARKO LAB UI motor] clicando toggle (tentativa ${attempt})`);
+      clickElement(toggle);
+      await sleep(500 + attempt * 300); // espera mais a cada tentativa
+    } else {
+      console.warn('[DARKO LAB UI motor] toggle nao achado nessa tentativa');
+    }
+
+    // Procura item EM TODO o documento (incluindo portais Radix em document.body)
+    const item = await waitForOrNull(() => findMotorMenuItem(motor), 3000, 200);
+    if (item) {
+      console.log(`[DARKO LAB UI motor] item encontrado! Texto:`, (item.textContent || '').slice(0, 60));
+      clickElement(item);
+      await sleep(900);
+      // Verifica imediato se funcionou
+      const newToggle = findCurrentMotorToggle();
+      const newText = newToggle ? (newToggle.textContent || '').trim() : '';
+      if (newText.includes(target)) {
+        console.log('[DARKO LAB UI motor] sucesso na tentativa', attempt);
+        return true;
+      }
+      console.warn('[DARKO LAB UI motor] click foi mas toggle ainda nao mostra', target, '- retry');
+    }
   }
 
   console.warn('[DARKO LAB UI motor] item de menu nao achado em 4s, tentando fallback global');
@@ -1208,18 +1226,30 @@ function findCurrentMotorToggle() {
  */
 function findMotorMenuItem(motor) {
   const target = `Avatar ${motor}`;
-  // Items de menu/option em geral tem role specific ou sao em dialog/menu
-  const items = Array.from(document.querySelectorAll(
-    '[role="menuitem"], [role="option"], [role="menuitemradio"], [data-radix-collection-item]'
-  ));
+  // Items de menu - inclui Radix portal items renderizados em document.body
+  const sel = [
+    '[role="menuitem"]',
+    '[role="option"]',
+    '[role="menuitemradio"]',
+    '[role="menuitemcheckbox"]',
+    '[data-radix-collection-item]',
+    '[data-radix-popper-content-wrapper] *',
+    '[data-state="open"] [role="button"]',
+    '[data-state="open"] button',
+    '[cmdk-item]',
+  ].join(', ');
+  const items = Array.from(document.querySelectorAll(sel));
   for (const it of items) {
     if (it.offsetParent === null) continue;
+    if (it.children.length > 5) continue; // skip containers grandes
     const t = (it.textContent || '').trim();
-    // Match: comeca com "Avatar III" (pode ter "Premium" e descricao depois)
+    if (!t) continue;
+    if (t.length > 200) continue;
     if (t.startsWith(target)) {
-      // Garante que nao bate "Avatar IV" qd procurando "Avatar I" ou similar
+      // Garante que "Avatar III" nao bate "Avatar IV" (proximo char nao pode ser dig/letter)
       const next = t.charAt(target.length);
-      if (next === '' || next === ' ' || next === '\n' || /\W/.test(next)) {
+      if (next === '' || next === ' ' || next === '\n' || next === '\t' ||
+          next === 'P' /* "Premium" */ || /\W/.test(next)) {
         return it;
       }
     }
