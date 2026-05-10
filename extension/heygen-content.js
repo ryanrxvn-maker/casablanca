@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.0.10';
+const DARKO_EXT_VERSION = '4.0.11';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -1491,7 +1491,44 @@ async function proxyApiFetch({ url, method = 'GET', headers = {}, bodyText, body
   const r = await fetch(url, opts);
   let data;
   const ct = r.headers.get('content-type') || '';
-  if (ct.includes('json')) {
+  // NDJSON (newline-delimited JSON) — usado por endpoints de streaming
+  // como /v2/online/text_to_speech.stream. content-type: application/x-ndjson.
+  // CHECAR ANTES do .includes('json') porque "x-ndjson" tambem matchea "json".
+  if (/ndjson/i.test(ct)) {
+    try {
+      const txt = await r.text();
+      const lines = txt.split(/\r?\n/).filter((l) => l.trim().length > 0);
+      const chunks = [];
+      let parseErr = null;
+      for (const line of lines) {
+        try { chunks.push(JSON.parse(line)); }
+        catch (e) { parseErr = String(e?.message || e); }
+      }
+      // Assemblea audio dos chunks: tenta varios nomes de campo conhecidos
+      let assembled = '';
+      let audioUrlFromChunks = null;
+      for (const c of chunks) {
+        const b = c?.audio_bytes ?? c?.data?.audio_bytes ?? c?.audio ?? c?.audio_b64 ?? c?.chunk ?? c?.bytes;
+        if (b && typeof b === 'string') assembled += b;
+        const u = c?.audio_url ?? c?.url ?? c?.data?.audio_url;
+        if (u && typeof u === 'string' && !audioUrlFromChunks) audioUrlFromChunks = u;
+      }
+      data = {
+        _ndjson: chunks,
+        _ndjsonLines: lines.length,
+        _ndjsonParseErr: parseErr,
+        _bytesBase64: assembled || undefined,
+        _audioUrl: audioUrlFromChunks || undefined,
+        _rawPreview: txt.slice(0, 500),
+        _rawLength: txt.length,
+        _contentType: ct,
+        _extVersion: DARKO_EXT_VERSION,
+      };
+      console.log(`[DARKO LAB] proxy ndjson ${lines.length} lines, assembled=${assembled.length}B, audioUrl=${audioUrlFromChunks ? 'yes' : 'no'}`);
+    } catch (e) {
+      data = { _ndjsonError: String(e?.message || e), _contentType: ct, _extVersion: DARKO_EXT_VERSION };
+    }
+  } else if (ct.includes('json')) {
     try {
       data = await r.json();
       if (data && typeof data === 'object' && !Array.isArray(data)) {

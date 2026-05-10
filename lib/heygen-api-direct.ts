@@ -23,7 +23,7 @@ const API_BASE = 'https://api2.heygen.com';
 
 /** Versao MINIMA do content-script da extensao que essa lib precisa.
  *  Cada vez que mudamos protocolo proxy (campos novos), bumpamos isso. */
-export const REQUIRED_EXT_VERSION = '4.0.10';
+export const REQUIRED_EXT_VERSION = '4.0.11';
 
 /** Compara "4.0.10" vs "4.0.9" → true se atual >= minima */
 function isExtVersionOk(actual: string | undefined): boolean {
@@ -380,16 +380,22 @@ export async function ttsToFile(text: string, voiceId: string): Promise<File> {
     bodyText: JSON.stringify({ text, voice_id: voiceId, text_type: 'text' }),
   });
   if (!r.ok) {
-    throw new Error(`TTS falhou (${r.status}): ${r.body?.message ?? r.body?.msg ?? r.body?._text ?? ''}`);
+    throw new Error(`TTS falhou (${r.status}): ${r.body?.message ?? r.body?.msg ?? r.body?._text ?? r.body?._rawPreview ?? ''}`);
   }
-  // 1) Resposta binaria direta (proxy decodificou pra base64)
+  // 1) Bytes assemblados pelo proxy (binario direto OU ndjson com chunks)
   const binBase64 = r.body?._bytesBase64;
   if (binBase64) {
     const bytes = Uint8Array.from(atob(binBase64), (c) => c.charCodeAt(0));
-    const mime = r.body?._contentType || 'audio/mpeg';
+    const mime = (r.body?._contentType || '').includes('audio') ? r.body._contentType : 'audio/mpeg';
     return new File([bytes], 'tts.mp3', { type: mime });
   }
-  // 2) Legado: JSON com audio_bytes (base64) ou audio_url
+  // 2) audio_url extraido pelo proxy de chunks ndjson
+  if (r.body?._audioUrl) {
+    const ar = await fetch(r.body._audioUrl);
+    const buf = await ar.arrayBuffer();
+    return new File([new Uint8Array(buf)], 'tts.mp3', { type: 'audio/mpeg' });
+  }
+  // 3) Legado: JSON com audio_bytes (base64) ou audio_url
   const audioBytes = r.body?.audio_bytes ?? r.body?.data?.audio_bytes;
   if (audioBytes) {
     const bytes = Uint8Array.from(atob(audioBytes), (c) => c.charCodeAt(0));
@@ -401,11 +407,18 @@ export async function ttsToFile(text: string, voiceId: string): Promise<File> {
     const buf = await ar.arrayBuffer();
     return new File([new Uint8Array(buf)], 'tts.mp3', { type: 'audio/mpeg' });
   }
-  // 3) Diagnostico detalhado
+  // 4) Diagnostico detalhado: se proxy decodou ndjson mas sem audio reconhecido,
+  //    mostra primeiro chunk pro debug.
+  const ndjson = r.body?._ndjson;
+  if (Array.isArray(ndjson) && ndjson.length > 0) {
+    const sample = JSON.stringify(ndjson[0]).slice(0, 300);
+    throw new Error(`TTS ndjson ${ndjson.length} chunks sem campo audio reconhecido. Primeiro: ${sample}`);
+  }
   const keys = Object.keys(r.body ?? {}).join(',') || '(vazio)';
   const ct = r.body?._contentType || '?';
-  const preview = r.body?._text ? ` text="${String(r.body._text).slice(0, 200)}"` : '';
-  throw new Error(`TTS sem audio (status ${r.status}, ct=${ct}, keys=${keys})${preview}`);
+  const preview = r.body?._text ?? r.body?._rawPreview ?? '';
+  const previewStr = preview ? ` preview="${String(preview).slice(0, 200)}"` : '';
+  throw new Error(`TTS sem audio (status ${r.status}, ct=${ct}, keys=${keys})${previewStr}`);
 }
 
 /* ============= Criar video ============= */
@@ -605,39 +618,26 @@ export async function processJob(
     voiceId = found;
   }
 
-  onProgress?.('submitting', { msg: 'Submetendo texto direto (HeyGen TTS server-side)...' });
-  let created: { video_id: string; avatar_id: string };
-  try {
-    created = await createVideoWithText({
-      title: job.title,
-      avatarId: job.avatarId,
-      engine: job.engine,
-      text: job.text,
-      voiceId: voiceId!,
-      orientation: job.orientation,
-      resolution: job.resolution,
-      motionPrompt: job.motionPrompt,
-    });
-  } catch (textErr: any) {
-    // Fallback: tenta TTS-then-upload (caminho legado, normalmente quebrado)
-    console.warn('[DARKO LAB] text-direct falhou, tentando TTS+upload legado:', textErr?.message);
-    onProgress?.('tts', { msg: 'Fallback: TTS client-side...' });
-    const audioFile = await ttsToFile(job.text, voiceId!);
-    onProgress?.('upload', { msg: 'Preparando upload...' });
-    const audio = await uploadAudio(audioFile, {
-      onStep: (step, info) => onProgress?.(`upload-${step}`, info),
-    });
-    onProgress?.('submitting', { duration: audio.duration });
-    created = await createVideo({
-      title: job.title,
-      avatarId: job.avatarId,
-      engine: job.engine,
-      audio,
-      orientation: job.orientation,
-      resolution: job.resolution,
-      motionPrompt: job.motionPrompt,
-    });
-  }
+  // TTS via /v2/online/text_to_speech.stream (ndjson, parsed pelo proxy).
+  // Texto-direto pro submit (5 shapes) NAO funcionou nos testes, removido
+  // do fluxo principal pra nao gastar 5 API calls inuteis. Mantido como
+  // funcao exportada caso futuramente vejamos a shape correta.
+  onProgress?.('tts', { msg: 'Gerando audio TTS (voz original do avatar)...' });
+  const audioFile = await ttsToFile(job.text, voiceId!);
+  onProgress?.('upload', { msg: 'Preparando upload...' });
+  const audio = await uploadAudio(audioFile, {
+    onStep: (step, info) => onProgress?.(`upload-${step}`, info),
+  });
+  onProgress?.('submitting', { duration: audio.duration });
+  const created = await createVideo({
+    title: job.title,
+    avatarId: job.avatarId,
+    engine: job.engine,
+    audio,
+    orientation: job.orientation,
+    resolution: job.resolution,
+    motionPrompt: job.motionPrompt,
+  });
 
   if (job.title && job.title !== 'Avatar Video') {
     onProgress?.('renaming', { videoId: created.video_id });
