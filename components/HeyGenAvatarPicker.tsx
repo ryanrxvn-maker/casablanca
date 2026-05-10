@@ -24,6 +24,8 @@ export type AvatarOption = {
   premium?: boolean;
   gender?: string | null;
   isCustom?: boolean;
+  /** voice_id default ja embutido no payload do look (extension v4.0.13+) */
+  voiceId?: string | null;
 };
 
 function lookToOption(l: LibraryAvatar): AvatarOption {
@@ -36,6 +38,7 @@ function lookToOption(l: LibraryAvatar): AvatarOption {
     version: l.version,
     groupId: l.groupId,
     groupName: l.groupName,
+    voiceId: (l as any).voiceId ?? null,
   };
 }
 

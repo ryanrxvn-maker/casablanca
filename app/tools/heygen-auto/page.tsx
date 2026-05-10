@@ -230,12 +230,15 @@ export default function HeyGenAutoPage() {
         parallel: 3,
         mode,
         avatarId: selectedAvatar.id,
-        // Modo copy: undefined = processJob faz lookup do default voice do
-        // avatar (voz original). Override = usa a voz escolhida pelo user.
+        // Modo copy:
+        //  1) override marcado + voz escolhida → usa essa voz
+        //  2) selectedAvatar.voiceId presente (extension v4.0.13+) → voz do avatar
+        //  3) undefined → processJob faz lookup via API (fallback frageis pra
+        //     talking_photo, mas funciona pra avatares regulares)
         voiceId:
           mode === 'copy' && overrideVoice && selectedVoice
             ? selectedVoice.id
-            : undefined,
+            : (selectedAvatar.voiceId || undefined),
         motor,
         adNameSafe: safeName,
         isCancelled: () => cancelRef.current,

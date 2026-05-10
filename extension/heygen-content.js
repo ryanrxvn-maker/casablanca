@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.0.12';
+const DARKO_EXT_VERSION = '4.0.14';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -420,6 +420,14 @@ async function listMyAvatars() {
         version: lookVersion,
         groupId: group.id,
         groupName,
+        // Voz default ja embutida no payload do look — evita lookup posterior
+        // (endpoints de avatar.detail nao funcionam pra talking_photo)
+        voiceId:
+          look.voice_config?.voice_id ??
+          look.voice_item?.voice_id ??
+          look.default_voice_id ??
+          look.voice_id ??
+          null,
       };
       groupLooks.push(lookItem);
       items.push(lookItem);
