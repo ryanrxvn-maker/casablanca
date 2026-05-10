@@ -19,6 +19,7 @@ import {
   HeyGenAvatarPicker,
   type AvatarOption,
 } from '@/components/HeyGenAvatarPicker';
+import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
 import {
   HeyGenVoicePicker,
   type VoiceOption,
@@ -80,6 +81,18 @@ export default function HeyGenAutoPage() {
   const [copy, setCopy] = useToolState<string>('hgauto:copy', '');
   const [audioParts, setAudioParts] = useState<File[]>([]);
 
+  /* --------------- Modo Dinamico (multi-avatar por parte) --------------- */
+  const [dynamicMode, setDynamicMode] = useToolState<boolean>(
+    'hgauto:dynamic',
+    false,
+  );
+  // Per-part avatar override (null = usa selectedAvatar global). Indexado
+  // pela posicao da parte (text: ordem do split; audio: ordem do array).
+  const [partAvatars, setPartAvatars] = useState<(AvatarOption | null)[]>([]);
+  // Permutacao dos audios em modo dinamico (audioParts mantem ordem original
+  // do upload; audioOrder vira a permutacao de indices). Default = identidade.
+  const [audioOrder, setAudioOrder] = useState<number[]>([]);
+
   const [clonedVoices, setClonedVoices] = useToolState<ClonedVoice[]>(
     'hgauto:clonedVoices',
     [],
@@ -126,6 +139,24 @@ export default function HeyGenAutoPage() {
       splitCopyIntoParts(copy, { targetSec: 20, minSec: 10, maxSec: 35 }),
     );
   }, [copy, mode]);
+
+  /* --------------- Resize dos arrays per-part quando count muda --------------- */
+  useEffect(() => {
+    const n = mode === 'copy' ? parts.length : audioParts.length;
+    setPartAvatars((prev) => {
+      const next = prev.slice(0, n);
+      while (next.length < n) next.push(null);
+      return next;
+    });
+    setAudioOrder((prev) => {
+      if (mode !== 'audio') return [];
+      // Se contagem mudou, reseta pra ordem identidade
+      if (prev.length !== audioParts.length) {
+        return audioParts.map((_, i) => i);
+      }
+      return prev;
+    });
+  }, [mode, parts.length, audioParts.length]);
 
   function cancel() {
     cancelRef.current = true;
@@ -186,7 +217,13 @@ export default function HeyGenAutoPage() {
     }
     setStage(null);
 
-    type JobEntry = { label: string; copy?: string; audio?: File };
+    type JobEntry = {
+      label: string;
+      copy?: string;
+      audio?: File;
+      avatarId?: string;
+      voiceId?: string;
+    };
     let jobs: JobEntry[] = [];
     if (mode === 'copy') {
       if (parts.length === 0) {
@@ -201,22 +238,42 @@ export default function HeyGenAutoPage() {
         );
         return;
       }
-      jobs = parts.map((p, i) => ({
-        label: `parte${i + 1}`,
-        copy: p,
-      }));
+      jobs = parts.map((p, i) => {
+        const partAvatar = dynamicMode ? partAvatars[i] : null;
+        const effectiveAvatar = partAvatar || selectedAvatar;
+        return {
+          label: `parte${i + 1}`,
+          copy: p,
+          // Modo dinamico: cada parte usa seu avatar (com voiceId predefinido)
+          avatarId: dynamicMode ? effectiveAvatar?.id : undefined,
+          voiceId:
+            dynamicMode && !overrideVoice
+              ? (effectiveAvatar?.voiceId || undefined)
+              : undefined,
+        };
+      });
     } else {
       if (audioParts.length === 0) {
         setError('Faca upload de pelo menos um arquivo de audio.');
         return;
       }
-      const ordered = [...audioParts].sort((a, b) =>
-        a.name.localeCompare(b.name, 'pt', { numeric: true }),
-      );
-      jobs = ordered.map((a, i) => ({
-        label: `parte${i + 1}`,
-        audio: a,
-      }));
+      // Modo dinamico: usa permutacao explicita do user (audioOrder).
+      // Modo classico: ordena por filename (parte1, parte2...).
+      const orderedFiles = dynamicMode
+        ? audioOrder.map((idx) => audioParts[idx]).filter(Boolean)
+        : [...audioParts].sort((a, b) =>
+            a.name.localeCompare(b.name, 'pt', { numeric: true }),
+          );
+      jobs = orderedFiles.map((file, i) => {
+        const origIdx = dynamicMode ? audioOrder[i] : i;
+        const partAvatar = dynamicMode ? partAvatars[origIdx] : null;
+        const effectiveAvatar = partAvatar || selectedAvatar;
+        return {
+          label: `parte${i + 1}`,
+          audio: file,
+          avatarId: dynamicMode ? effectiveAvatar?.id : undefined,
+        };
+      });
     }
 
     cancelRef.current = false;
@@ -508,11 +565,163 @@ export default function HeyGenAutoPage() {
                   ) : null}
                   <div className="mt-2 rounded-[10px] border border-lime/30 bg-lime/5 px-3 py-2 text-[11px] text-lime/80">
                     ✓ Modo audio: a extensao envia cada arquivo pro HeyGen e
-                    gera o avatar usando esse audio (lipsync). Os arquivos sao
-                    processados na ordem dos nomes (parte1, parte2...).
+                    gera o avatar usando esse audio (lipsync).{' '}
+                    {dynamicMode
+                      ? 'Ordem CONTROLADA por voce (setas abaixo).'
+                      : 'Os arquivos sao processados na ordem dos nomes (parte1, parte2...).'}
                   </div>
                 </div>
               )}
+            </section>
+
+            {/* HeyGen Auto Dynamic — multi-avatar por parte */}
+            <section className="border-t border-line pt-6">
+              <label className="flex cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={dynamicMode}
+                  onChange={(e) => setDynamicMode(e.target.checked)}
+                  disabled={processing}
+                  className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-lime"
+                />
+                <div>
+                  <div className="text-sm font-semibold text-white">
+                    HeyGen Auto Dynamic{' '}
+                    <span className="mono ml-2 rounded-full border border-fuchsia-500/40 bg-fuchsia-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-fuchsia-300">
+                      multi-avatar
+                    </span>
+                  </div>
+                  <div className="mt-1 text-[11px] text-text-muted">
+                    Cada parte (texto OU audio) usa um avatar diferente. Voz de
+                    cada parte = a voz predefinida daquele avatar (a menos que
+                    voce marque{' '}
+                    <span className="text-lime/80">substituir voz</span> pra
+                    forcar uma voz fixa em todas).
+                  </div>
+                </div>
+              </label>
+
+              {dynamicMode && mode === 'copy' && parts.length > 0 ? (
+                <div className="mt-4 space-y-2">
+                  <div className="mono text-[10px] uppercase tracking-widest text-text-muted">
+                    Avatar por parte ({parts.length} take
+                    {parts.length === 1 ? '' : 's'})
+                  </div>
+                  {parts.map((p, i) => (
+                    <div
+                      key={i}
+                      className="flex items-start gap-2 rounded-[10px] border border-line bg-bg-soft/30 p-2"
+                    >
+                      <span className="mono mt-1 shrink-0 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase tracking-widest text-lime">
+                        #{i + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="line-clamp-2 text-[11px] text-text-muted">
+                          {p.slice(0, 140)}
+                          {p.length > 140 ? '…' : ''}
+                        </div>
+                        <div className="mt-2 max-w-[320px]">
+                          <CompactAvatarPicker
+                            selected={partAvatars[i] ?? null}
+                            setSelected={(a) => {
+                              setPartAvatars((prev) => {
+                                const next = [...prev];
+                                next[i] = a;
+                                return next;
+                              });
+                            }}
+                            fallback={selectedAvatar}
+                            disabled={processing}
+                            label={`Avatar pra parte ${i + 1}`}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {dynamicMode && mode === 'audio' && audioParts.length > 0 ? (
+                <div className="mt-4 space-y-2">
+                  <div className="mono text-[10px] uppercase tracking-widest text-text-muted">
+                    Audios — ordem + avatar por parte ({audioParts.length}{' '}
+                    arquivo{audioParts.length === 1 ? '' : 's'})
+                  </div>
+                  {audioOrder.map((origIdx, pos) => {
+                    const file = audioParts[origIdx];
+                    if (!file) return null;
+                    const moveSwap = (delta: number) => {
+                      const target = pos + delta;
+                      if (target < 0 || target >= audioOrder.length) return;
+                      setAudioOrder((prev) => {
+                        const next = [...prev];
+                        [next[pos], next[target]] = [next[target], next[pos]];
+                        return next;
+                      });
+                    };
+                    return (
+                      <div
+                        key={`${origIdx}-${file.name}`}
+                        className="flex items-center gap-2 rounded-[10px] border border-line bg-bg-soft/30 p-2"
+                      >
+                        <span className="mono shrink-0 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase tracking-widest text-lime">
+                          #{pos + 1}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-[11px] text-text-muted">
+                            {file.name}
+                          </div>
+                          <div className="mt-2 max-w-[320px]">
+                            <CompactAvatarPicker
+                              selected={partAvatars[origIdx] ?? null}
+                              setSelected={(a) => {
+                                setPartAvatars((prev) => {
+                                  const next = [...prev];
+                                  next[origIdx] = a;
+                                  return next;
+                                });
+                              }}
+                              fallback={selectedAvatar}
+                              disabled={processing}
+                              label={`Avatar pra parte ${pos + 1}`}
+                            />
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 flex-col gap-1">
+                          <button
+                            type="button"
+                            onClick={() => moveSwap(-1)}
+                            disabled={pos === 0 || processing}
+                            className="mono rounded border border-line-strong px-2 py-0.5 text-[10px] text-text-muted hover:border-lime hover:text-lime disabled:opacity-30"
+                            title="Subir"
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveSwap(1)}
+                            disabled={pos === audioOrder.length - 1 || processing}
+                            className="mono rounded border border-line-strong px-2 py-0.5 text-[10px] text-text-muted hover:border-lime hover:text-lime disabled:opacity-30"
+                            title="Descer"
+                          >
+                            ↓
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : null}
+
+              {dynamicMode &&
+              ((mode === 'copy' && parts.length === 0) ||
+                (mode === 'audio' && audioParts.length === 0)) ? (
+                <div className="mt-4 rounded-[10px] border border-line bg-bg-soft/30 px-3 py-2 text-[11px] text-text-muted">
+                  {mode === 'copy'
+                    ? 'Cole uma copy primeiro pra atribuir avatares por parte.'
+                    : 'Faca upload dos audios primeiro pra atribuir avatares por parte.'}
+                </div>
+              ) : null}
             </section>
 
             {/* Action */}

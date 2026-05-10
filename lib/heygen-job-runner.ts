@@ -12,6 +12,10 @@ export type RunnerJob = {
   label: string;
   copy?: string;
   audio?: File;
+  /** Modo dinamico: avatarId override por parte (cai pra opts.avatarId se ausente) */
+  avatarId?: string;
+  /** Modo dinamico: voiceId override por parte (cai pra opts.voiceId se ausente) */
+  voiceId?: string;
 };
 
 export type RunnerResult = {
@@ -59,14 +63,16 @@ export async function runHeyGenJobs(
       const label = job.label;
       try {
         opts.onProgress(`Disparando ${label} (${idx + 1}/${jobs.length})...`);
-        // Modo copy sem voiceId = processJob faz lookup automatico do default
-        // voice do avatar (voz original). Modo copy com voiceId = override.
+        // Per-job override (modo dinamico) > opts global > undefined (lookup auto)
+        const effectiveAvatarId = job.avatarId || opts.avatarId;
+        const effectiveVoiceId =
+          opts.mode === 'copy' ? (job.voiceId || opts.voiceId) : undefined;
         const input: ProcessJobInput = {
           file: opts.mode === 'audio' ? job.audio : undefined,
           text: opts.mode === 'copy' ? job.copy : undefined,
-          voiceId: opts.mode === 'copy' ? opts.voiceId : undefined,
+          voiceId: effectiveVoiceId,
           title: `${opts.adNameSafe}_${label}`,
-          avatarId: opts.avatarId,
+          avatarId: effectiveAvatarId,
           engine: motorToEngine(opts.motor),
           orientation: 'portrait',
         };

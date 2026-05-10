@@ -2,10 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  listMyHeyGenAvatars,
   type LibraryAvatar,
   type LibraryAvatarGroup,
 } from '@/lib/heygen-extension-bridge';
+import {
+  getLibrarySnapshot,
+  reloadLibrary,
+  subscribeLibrary,
+} from '@/lib/heygen-library-cache';
 
 /**
  * HeyGenAvatarPicker - espelho 1:1 da biblioteca de avatares da conta
@@ -158,9 +162,10 @@ export function HeyGenAvatarPicker({
   disabled?: boolean;
   label?: string;
 }) {
-  const [groups, setGroups] = useState<LibraryAvatarGroup[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [snap, setSnap] = useState(() => getLibrarySnapshot());
+  const groups = snap.groups;
+  const loading = snap.loading;
+  const error = snap.error;
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
   const failedThumbsRef = useRef(0);
   const lastReloadRef = useRef(0);
@@ -182,28 +187,19 @@ export function HeyGenAvatarPicker({
   }
 
   async function loadLibrary() {
-    setLoading(true);
-    setError(null);
     failedThumbsRef.current = 0;
-    try {
-      const r = await listMyHeyGenAvatars();
-      if (r.ok) {
-        setGroups(r.groups ?? []);
-      } else {
-        setError(
-          r.error ??
-            'Nao consegui ler a biblioteca. Verifique se a extensao esta instalada e voce esta logado em app.heygen.com.',
-        );
-      }
-    } catch (e) {
-      setError((e as Error).message ?? 'Falha ao listar avatares.');
-    } finally {
-      setLoading(false);
-    }
+    await reloadLibrary(true);
   }
 
+  // Subscribe ao cache singleton (compartilha com CompactAvatarPicker no
+  // modo dinamico — evita N fetches paralelos).
   useEffect(() => {
-    loadLibrary();
+    const update = () => setSnap({ ...getLibrarySnapshot() });
+    const unsub = subscribeLibrary(update);
+    if (groups.length === 0 && !loading) {
+      reloadLibrary(false);
+    }
+    return unsub;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
