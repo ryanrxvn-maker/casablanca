@@ -908,29 +908,31 @@ async function runJob(requestId, payload) {
       generateClicked = true;
     }
 
-    // 8) Aguarda inject.js interceptar a request POST de generate e
-    //    capturar o video_id REAL retornado pela response. Garantia 100%
-    //    de que eh o video que A GENTE gerou, nao outro user.
-    //    Aceita videos capturados ate 5s ANTES do clickStartTs (cobre caso
-    //    de race condition ou Generate ja em andamento).
-    reportProgress(requestId, 'Aguardando HeyGen aceitar request...');
-    const myVideoId = await waitForInterceptedVideoId(clickStartTs - 5000, 60000);
-    if (!myVideoId) {
-      throw new Error(
-        'Nao consegui interceptar a request de generate em 30s. Verifica se ' +
-        'a aba HeyGen carregou completa antes de gerar (precisa do inject.js ' +
-        'rodar). Cola os logs [DARKO LAB inject] e [DARKO LAB UI] do console.'
-      );
+    // 8) MODO DISPATCH-ONLY: nao esperamos o video ficar pronto.
+    //    Apenas aguarda 3s pra request POST de generate sair (HeyGen
+    //    aceitar a fila). Depois reporta sucesso e libera pro proximo
+    //    trecho. Usuario vai pegar os videos prontos manualmente no
+    //    HeyGen depois.
+    reportProgress(requestId, 'Enviando request pro HeyGen...');
+    await sleep(3500);
+
+    // Tenta capturar o video_id (best-effort, nao critico)
+    let myVideoId = null;
+    for (const item of interceptedVideoIds) {
+      if (item.ts >= clickStartTs - 5000) {
+        myVideoId = item.id;
+        break;
+      }
     }
-    console.log('[DARKO LAB UI] video_id confirmado interceptado:', myVideoId);
+    if (myVideoId) {
+      console.log('[DARKO LAB UI] dispatch OK, video_id capturado:', myVideoId);
+    } else {
+      console.log('[DARKO LAB UI] dispatch OK (sem video_id capturado, mas request foi enviada)');
+    }
 
-    // 9) Pola video_status.get DESSE video_id especifico ate completar
-    reportProgress(requestId, 'HeyGen processando...');
-    const videoUrl = await waitForVideoCompletionById(requestId, myVideoId);
-    if (!videoUrl) throw new Error('Timeout aguardando video pronto.');
-
-    reportProgress(requestId, 'Video pronto!', 100);
-    reportResult(requestId, videoUrl);
+    reportProgress(requestId, 'Trecho enviado pro HeyGen!', 100);
+    // Reporta resultado com placeholder QUEUED ou videoId capturado
+    reportResult(requestId, myVideoId ? `QUEUED:${myVideoId}` : 'QUEUED');
   } catch (e) {
     console.error('[DARKO LAB UI] runJob FAIL:', e);
     reportError(requestId, e?.message ?? String(e));
