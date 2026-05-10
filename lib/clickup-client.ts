@@ -1,6 +1,12 @@
 /**
- * Cliente ClickUp — todas as chamadas vao via /api/clickup/proxy
- * (server-side resolve CORS + adiciona Authorization).
+ * Cliente ClickUp — READ-ONLY.
+ *
+ * Todas as chamadas vao via /api/clickup/proxy (server-side resolve CORS +
+ * adiciona Authorization). O proxy bloqueia qualquer metodo != GET.
+ *
+ * REGRA: ClickUp Pilot JAMAIS altera tasks, comentarios, status, ou
+ * qualquer coisa no ClickUp do user. So leitura. Nunca expor PUT/POST/DELETE
+ * mesmo que pareca util — o proxy server-side rejeita 405.
  *
  * Token e armazenado em localStorage e enviado no header x-clickup-token.
  */
@@ -24,13 +30,14 @@ type ClickUpResp<T = any> = {
   body: T | { err?: string };
 };
 
-async function call<T = any>(path: string, method: string = 'GET', body?: unknown): Promise<ClickUpResp<T>> {
+/** GET-only por contrato. Proxy server-side rejeita qualquer outro metodo. */
+async function callGet<T = any>(path: string): Promise<ClickUpResp<T>> {
   const token = getClickUpToken();
   if (!token) return { ok: false, status: 401, body: { err: 'Token ClickUp nao configurado.' } as any };
   const r = await fetch('/api/clickup/proxy', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-clickup-token': token },
-    body: JSON.stringify({ path, method, body }),
+    body: JSON.stringify({ path, method: 'GET' }),
   });
   const j = await r.json().catch(() => null);
   return j as ClickUpResp<T>;
@@ -76,7 +83,7 @@ export type ClickUpTask = {
 
 /** GET /team — lista todos workspaces (chamado "team" na API antiga) */
 export async function listTeams(): Promise<ClickUpTeam[]> {
-  const r = await call<{ teams: ClickUpTeam[] }>('/team');
+  const r = await callGet<{ teams: ClickUpTeam[] }>('/team');
   if (!r.ok) throw new Error(`Falha listando teams (${r.status}): ${(r.body as any)?.err || JSON.stringify(r.body).slice(0, 200)}`);
   return (r.body as any).teams || [];
 }
@@ -101,7 +108,7 @@ export async function listTasks(
   if (opts.includeClosed) params.set('include_closed', 'true');
   if (opts.subtasks) params.set('subtasks', 'true');
   const qs = params.toString();
-  const r = await call<{ tasks: ClickUpTask[]; last_page: boolean }>(
+  const r = await callGet<{ tasks: ClickUpTask[]; last_page: boolean }>(
     `/team/${teamId}/task${qs ? '?' + qs : ''}`,
   );
   if (!r.ok) throw new Error(`Falha listando tasks (${r.status}): ${(r.body as any)?.err || JSON.stringify(r.body).slice(0, 200)}`);
@@ -113,7 +120,7 @@ export async function listTasks(
 
 /** GET /task/{task_id} — detalhes (com description completa) */
 export async function getTask(taskId: string): Promise<ClickUpTask> {
-  const r = await call<ClickUpTask>(`/task/${taskId}`);
+  const r = await callGet<ClickUpTask>(`/task/${taskId}`);
   if (!r.ok) throw new Error(`Falha get task (${r.status}): ${(r.body as any)?.err || JSON.stringify(r.body).slice(0, 200)}`);
   return r.body as ClickUpTask;
 }

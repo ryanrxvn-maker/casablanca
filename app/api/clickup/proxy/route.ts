@@ -1,12 +1,18 @@
 /**
- * Proxy server-side pra API do ClickUp.
+ * Proxy READ-ONLY server-side pra API do ClickUp.
+ *
+ * REGRA HARD: SO ACEITA GET. Qualquer outro metodo (POST/PUT/DELETE) e
+ * rejeitado com 405 ANTES de tocar a API ClickUp. Esse tool jamais
+ * pode alterar tasks, comentarios, status ou qualquer coisa no ClickUp
+ * do user. Read-only por design.
  *
  * Browser → Next API → ClickUp API. Resolve CORS e mantem token fora do
  * codigo client (token vem no header Authorization do request browser→server,
  * que vem do localStorage do user — ele controla a propria credencial).
  *
- * POST /api/clickup/proxy
- * body: { path: '/team', method: 'GET', body?: any }
+ * POST /api/clickup/proxy   (POST aqui = comando HTTP de transporte;
+ *                             o "method" no body so pode ser GET)
+ * body: { path: '/team', method: 'GET' }
  * headers: { 'x-clickup-token': 'pk_...' }
  */
 import { NextResponse } from 'next/server';
@@ -15,6 +21,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 const ALLOWED_HOSTS = ['api.clickup.com'];
+const ALLOWED_METHODS = new Set(['GET']);
 
 function jsonError(message: string, status = 400, detail?: string) {
   return NextResponse.json(
@@ -31,25 +38,28 @@ export async function POST(req: Request) {
     const json = await req.json().catch(() => null);
     if (!json) return jsonError('Body invalido (esperado JSON).');
 
-    const { path, method = 'GET', body } = json as { path?: string; method?: string; body?: unknown };
+    const { path, method = 'GET' } = json as { path?: string; method?: string };
     if (!path || typeof path !== 'string') return jsonError('path obrigatorio.');
     if (!path.startsWith('/')) return jsonError('path deve comecar com /.');
+
+    const upMethod = String(method).toUpperCase();
+    if (!ALLOWED_METHODS.has(upMethod)) {
+      return jsonError(
+        `Metodo ${upMethod} bloqueado. ClickUp Pilot e READ-ONLY — so GET permitido. Nunca alterar tasks/docs.`,
+        405,
+      );
+    }
 
     const url = new URL('https://api.clickup.com/api/v2' + path);
     if (!ALLOWED_HOSTS.includes(url.host)) return jsonError('Host nao permitido.');
 
-    const init: RequestInit = {
-      method: method.toUpperCase(),
+    const upstream = await fetch(url.toString(), {
+      method: 'GET',
       headers: {
         Authorization: token,
         'Content-Type': 'application/json',
       },
-    };
-    if (body !== undefined && method.toUpperCase() !== 'GET') {
-      init.body = JSON.stringify(body);
-    }
-
-    const upstream = await fetch(url.toString(), init);
+    });
     const text = await upstream.text();
     let data: unknown = text;
     const ct = upstream.headers.get('content-type') || '';
