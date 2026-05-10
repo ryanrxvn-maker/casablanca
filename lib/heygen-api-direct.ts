@@ -361,15 +361,32 @@ export async function ttsToFile(text: string, voiceId: string): Promise<File> {
     bodyText: JSON.stringify({ text, voice_id: voiceId, text_type: 'text' }),
   });
   if (!r.ok) {
-    throw new Error(`TTS falhou (${r.status}): ${r.body?.message ?? r.body?.msg ?? ''}`);
+    throw new Error(`TTS falhou (${r.status}): ${r.body?.message ?? r.body?.msg ?? r.body?._text ?? ''}`);
   }
-  // Body pode vir como audio_bytes (base64) ou audio_url
+  // 1) Resposta binaria direta (proxy decodificou pra base64)
+  const binBase64 = r.body?._bytesBase64;
+  if (binBase64) {
+    const bytes = Uint8Array.from(atob(binBase64), (c) => c.charCodeAt(0));
+    const mime = r.body?._contentType || 'audio/mpeg';
+    return new File([bytes], 'tts.mp3', { type: mime });
+  }
+  // 2) Legado: JSON com audio_bytes (base64) ou audio_url
   const audioBytes = r.body?.audio_bytes ?? r.body?.data?.audio_bytes;
-  if (!audioBytes) {
-    throw new Error('TTS resposta sem audio_bytes. Body keys: ' + Object.keys(r.body ?? {}).join(','));
+  if (audioBytes) {
+    const bytes = Uint8Array.from(atob(audioBytes), (c) => c.charCodeAt(0));
+    return new File([bytes], 'tts.mp3', { type: 'audio/mpeg' });
   }
-  const bytes = Uint8Array.from(atob(audioBytes), (c) => c.charCodeAt(0));
-  return new File([bytes], 'tts.mp3', { type: 'audio/mpeg' });
+  const audioUrl = r.body?.audio_url ?? r.body?.data?.audio_url ?? r.body?.data?.url;
+  if (audioUrl) {
+    const ar = await fetch(audioUrl);
+    const buf = await ar.arrayBuffer();
+    return new File([new Uint8Array(buf)], 'tts.mp3', { type: 'audio/mpeg' });
+  }
+  // 3) Diagnostico detalhado
+  const keys = Object.keys(r.body ?? {}).join(',') || '(vazio)';
+  const ct = r.body?._contentType || '?';
+  const preview = r.body?._text ? ` text="${String(r.body._text).slice(0, 200)}"` : '';
+  throw new Error(`TTS sem audio (status ${r.status}, ct=${ct}, keys=${keys})${preview}`);
 }
 
 /* ============= Criar video ============= */

@@ -1484,8 +1484,23 @@ async function proxyApiFetch({ url, method = 'GET', headers = {}, bodyText, body
   const ct = r.headers.get('content-type') || '';
   if (ct.includes('json')) {
     try { data = await r.json(); } catch { data = {}; }
+  } else if (/^(audio|video|image|application\/octet-stream)/i.test(ct)) {
+    try {
+      const buf = await r.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      // Chunked binary→string pra evitar string concat O(n^2) em audios grandes
+      const CHUNK = 0x8000;
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+      }
+      data = { _bytesBase64: btoa(bin), _contentType: ct, _byteLength: bytes.length };
+      console.log(`[DARKO LAB] proxy binary ${ct} ${bytes.length}B → base64`);
+    } catch (e) {
+      data = { _binaryError: String(e?.message || e), _contentType: ct };
+    }
   } else {
-    try { data = { _text: (await r.text()).slice(0, 2000) }; } catch { data = {}; }
+    try { data = { _text: (await r.text()).slice(0, 2000), _contentType: ct }; } catch { data = {}; }
   }
   return { status: r.status, ok: r.ok, body: data, _uploadedBytes: uploadedBytes };
 }
