@@ -25,10 +25,15 @@
 // "true" pra async response, Chrome fecha o canal com:
 //   "A listener indicated an asynchronous response by returning true, but
 //    the message channel closed before a response was received"
+// Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
+// no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
+// de proxy/protocolo pra forcar usuario a recarregar extensao.
+const DARKO_EXT_VERSION = '4.0.10';
 if (window.__darkolab_heygen_loaded__) {
-  console.log('[DARKO LAB] content script JA carregado — skip duplicate inject');
+  console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
   window.__darkolab_heygen_loaded__ = true;
+  console.log('[DARKO LAB] content script carregado v=' + DARKO_EXT_VERSION);
 
 // Pede pro background injetar o interceptor de fetch+XHR no MAIN WORLD
 // via chrome.scripting.executeScript (Manifest V3 - bypassa CSP do HeyGen
@@ -95,9 +100,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // PROXY: faz fetch a api2.heygen.com com cookies da aba HeyGen
     // (Origin = app.heygen.com). Retorna { status, ok, body, _uploadedBytes }.
     proxyApiFetch(msg.req).then((res) => sendResponse(res), (e) => {
-      sendResponse({ status: 0, ok: false, body: { message: String(e?.message || e) } });
+      sendResponse({ status: 0, ok: false, body: { message: String(e?.message || e), _extVersion: DARKO_EXT_VERSION } });
     });
     return true; // resposta async
+  }
+  if (msg && msg.type === 'HG_VERSION') {
+    sendResponse({ ok: true, version: DARKO_EXT_VERSION });
+    return true;
   }
   if (msg && msg.type === 'HG_LIST_AVATARS') {
     console.log('[DARKO LAB] >>> HG_LIST_AVATARS message received reqId=', msg.requestId);
@@ -1483,7 +1492,15 @@ async function proxyApiFetch({ url, method = 'GET', headers = {}, bodyText, body
   let data;
   const ct = r.headers.get('content-type') || '';
   if (ct.includes('json')) {
-    try { data = await r.json(); } catch { data = {}; }
+    try {
+      data = await r.json();
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+        data._contentType = ct;
+        data._extVersion = DARKO_EXT_VERSION;
+      }
+    } catch (e) {
+      data = { _jsonParseError: String(e?.message || e), _contentType: ct, _extVersion: DARKO_EXT_VERSION };
+    }
   } else if (/^(audio|video|image|application\/octet-stream)/i.test(ct)) {
     try {
       const buf = await r.arrayBuffer();
@@ -1494,13 +1511,18 @@ async function proxyApiFetch({ url, method = 'GET', headers = {}, bodyText, body
       for (let i = 0; i < bytes.length; i += CHUNK) {
         bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
       }
-      data = { _bytesBase64: btoa(bin), _contentType: ct, _byteLength: bytes.length };
+      data = { _bytesBase64: btoa(bin), _contentType: ct, _byteLength: bytes.length, _extVersion: DARKO_EXT_VERSION };
       console.log(`[DARKO LAB] proxy binary ${ct} ${bytes.length}B → base64`);
     } catch (e) {
-      data = { _binaryError: String(e?.message || e), _contentType: ct };
+      data = { _binaryError: String(e?.message || e), _contentType: ct, _extVersion: DARKO_EXT_VERSION };
     }
   } else {
-    try { data = { _text: (await r.text()).slice(0, 2000), _contentType: ct }; } catch { data = {}; }
+    try {
+      const txt = await r.text();
+      data = { _text: txt.slice(0, 2000), _textLength: txt.length, _contentType: ct, _extVersion: DARKO_EXT_VERSION };
+    } catch (e) {
+      data = { _readError: String(e?.message || e), _contentType: ct, _extVersion: DARKO_EXT_VERSION };
+    }
   }
   return { status: r.status, ok: r.ok, body: data, _uploadedBytes: uploadedBytes };
 }

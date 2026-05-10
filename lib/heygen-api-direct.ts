@@ -21,6 +21,25 @@
 
 const API_BASE = 'https://api2.heygen.com';
 
+/** Versao MINIMA do content-script da extensao que essa lib precisa.
+ *  Cada vez que mudamos protocolo proxy (campos novos), bumpamos isso. */
+export const REQUIRED_EXT_VERSION = '4.0.10';
+
+/** Compara "4.0.10" vs "4.0.9" → true se atual >= minima */
+function isExtVersionOk(actual: string | undefined): boolean {
+  if (!actual) return false;
+  const parse = (v: string) => v.split('.').map((n) => parseInt(n, 10) || 0);
+  const a = parse(actual);
+  const b = parse(REQUIRED_EXT_VERSION);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (x > y) return true;
+    if (x < y) return false;
+  }
+  return true;
+}
+
 type ApiReq = {
   url: string;
   method: 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -437,6 +456,87 @@ export async function createVideo(params: CreateVideoParams): Promise<{ video_id
   return r.body.data;
 }
 
+/* ============= Submit DIRETO com texto (HeyGen TTS server-side) ============= */
+
+export type CreateVideoWithTextParams = {
+  title: string;
+  avatarId: string;
+  engine: EngineKey;
+  text: string;
+  voiceId: string;
+  orientation?: 'portrait' | 'landscape' | 'square';
+  resolution?: '720p' | '1080p';
+  motionPrompt?: string;
+};
+
+/**
+ * Submete video com TEXTO + VOICE_ID direto, deixando HeyGen fazer TTS
+ * server-side. Tenta multiplas shapes de audio_data sequencialmente porque
+ * nao temos certeza de qual o /v2/avatar/shortcut/submit interno aceita.
+ *
+ * Se TODAS falharem, joga erro acumulado pra UI debugar.
+ */
+export async function createVideoWithText(
+  params: CreateVideoWithTextParams,
+): Promise<{ video_id: string; avatar_id: string }> {
+  const { title, avatarId, engine, text, voiceId, orientation = 'portrait', resolution, motionPrompt } = params;
+  const eng = ENGINES[engine];
+  if (!eng) throw new Error(`Motor desconhecido: ${engine}`);
+
+  const settings = eng.settings(avatarId);
+  if (motionPrompt && eng.supports_motion_prompt) {
+    settings.motion_prompt = motionPrompt;
+    settings.prompt = motionPrompt;
+  }
+
+  // Shapes possiveis pra audio_data em modo texto. Ordem do mais provavel
+  // pro menos provavel. Cada uma e tentada ate uma retornar 200.
+  const audioDataShapes: Array<Record<string, any>> = [
+    // Shape 1: padrao publico V2 do HeyGen (mais provavel)
+    { audio_type: 'text', input_text: text, voice_id: voiceId },
+    // Shape 2: variante "tts"
+    { audio_type: 'tts', input_text: text, voice_id: voiceId },
+    // Shape 3: variante com "text" em vez de "input_text"
+    { audio_type: 'text', text, voice_id: voiceId },
+    // Shape 4: voice nested
+    { audio_type: 'text', voice: { input_text: text, voice_id: voiceId } },
+    // Shape 5: script
+    { audio_type: 'script', input_text: text, voice_id: voiceId },
+  ];
+
+  const baseBody = {
+    video_title: title || 'Avatar Video',
+    video_orientation: orientation,
+    resolution: resolution || eng.default_resolution,
+    avatar_id: avatarId,
+    source_type: eng.source_type,
+    fit: 'cover',
+    avatar_settings: settings,
+    enable_caption: false,
+    create_new_avatar: false,
+  };
+
+  const errors: string[] = [];
+  for (let i = 0; i < audioDataShapes.length; i++) {
+    const audio_data = audioDataShapes[i];
+    const body = { ...baseBody, audio_data };
+    const r = await jsonCall('POST', '/v2/avatar/shortcut/submit', body);
+    if (r.ok && r.body?.data?.video_id) {
+      console.log(`[DARKO LAB] createVideoWithText shape #${i + 1} OK:`, audio_data);
+      return r.body.data;
+    }
+    const msg = r.body?.message ?? r.body?.msg ?? r.body?._text?.slice(0, 200) ?? '?';
+    errors.push(`shape#${i + 1}(${Object.keys(audio_data).join(',')})→${r.status}:${msg}`);
+    // Erros de validacao indicam shape errada → tenta proxima.
+    // Mas se erro for permissao/quota/avatar invalido, parar.
+    const fatalRe = /(permiss|forbidden|quota|credit|avatar.*invalid|avatar.*not.*found|avatar.*exist)/i;
+    if (fatalRe.test(String(msg))) {
+      throw new Error(`createVideoWithText fatal: ${msg}`);
+    }
+  }
+  throw new Error(`createVideoWithText: nenhuma shape aceita. Tentativas: ${errors.join(' | ')}`);
+}
+
 /* ============= Pipeline completo ============= */
 
 export type ProcessJobInput = {
@@ -456,44 +556,88 @@ export type ProcessJobInput = {
 export async function processJob(
   job: ProcessJobInput,
   { onProgress }: { onProgress?: (stage: string, info: any) => void } = {},
-): Promise<{ videoId: string; avatarId: string; audio: UploadedAudio }> {
-  // Modo TEXTO: gera TTS antes (com lookup automatico da voz default do avatar)
-  let audioFile: File;
+): Promise<{ videoId: string; avatarId: string; audio?: UploadedAudio }> {
+  // ============= MODO AUDIO: arquivo direto =============
   if (job.file) {
-    audioFile = job.file;
-  } else if (job.text) {
-    let voiceId = job.voiceId;
-    if (!voiceId) {
-      onProgress?.('voice-lookup', { msg: 'Buscando voz default do avatar...' });
-      const found = await getAvatarDefaultVoice(job.avatarId);
-      if (!found) {
-        throw new Error(
-          'Nao foi possivel descobrir a voz default desse avatar. Marque "Substituir voz padrao do avatar" e escolha uma voz manualmente.',
-        );
-      }
-      voiceId = found;
+    onProgress?.('upload', { msg: 'Preparando upload...' });
+    const audio = await uploadAudio(job.file, {
+      onStep: (step, info) => onProgress?.(`upload-${step}`, info),
+    });
+
+    onProgress?.('submitting', { duration: audio.duration });
+    const created = await createVideo({
+      title: job.title,
+      avatarId: job.avatarId,
+      engine: job.engine,
+      audio,
+      orientation: job.orientation,
+      resolution: job.resolution,
+      motionPrompt: job.motionPrompt,
+    });
+
+    if (job.title && job.title !== 'Avatar Video') {
+      onProgress?.('renaming', { videoId: created.video_id });
+      try {
+        await jsonCall('POST', '/v1/pacific/video.update', {
+          id: created.video_id,
+          params: { title: job.title },
+        });
+      } catch {}
     }
-    onProgress?.('tts', { msg: 'Gerando audio TTS (voz original do avatar)...' });
-    audioFile = await ttsToFile(job.text, voiceId);
-  } else {
+    onProgress?.('done', { videoId: created.video_id });
+    return { videoId: created.video_id, avatarId: created.avatar_id, audio };
+  }
+
+  // ============= MODO TEXTO: submete texto direto, HeyGen TTS server-side =============
+  if (!job.text) {
     throw new Error('processJob: precisa de `file` (audio) OU `text` (texto).');
   }
 
-  onProgress?.('upload', { msg: 'Preparando upload...' });
-  const audio = await uploadAudio(audioFile, {
-    onStep: (step, info) => onProgress?.(`upload-${step}`, info),
-  });
+  let voiceId = job.voiceId;
+  if (!voiceId) {
+    onProgress?.('voice-lookup', { msg: 'Buscando voz default do avatar...' });
+    const found = await getAvatarDefaultVoice(job.avatarId);
+    if (!found) {
+      throw new Error(
+        'Nao foi possivel descobrir a voz default desse avatar. Marque "Substituir voz padrao do avatar" e escolha uma voz manualmente.',
+      );
+    }
+    voiceId = found;
+  }
 
-  onProgress?.('submitting', { duration: audio.duration });
-  const created = await createVideo({
-    title: job.title,
-    avatarId: job.avatarId,
-    engine: job.engine,
-    audio,
-    orientation: job.orientation,
-    resolution: job.resolution,
-    motionPrompt: job.motionPrompt,
-  });
+  onProgress?.('submitting', { msg: 'Submetendo texto direto (HeyGen TTS server-side)...' });
+  let created: { video_id: string; avatar_id: string };
+  try {
+    created = await createVideoWithText({
+      title: job.title,
+      avatarId: job.avatarId,
+      engine: job.engine,
+      text: job.text,
+      voiceId: voiceId!,
+      orientation: job.orientation,
+      resolution: job.resolution,
+      motionPrompt: job.motionPrompt,
+    });
+  } catch (textErr: any) {
+    // Fallback: tenta TTS-then-upload (caminho legado, normalmente quebrado)
+    console.warn('[DARKO LAB] text-direct falhou, tentando TTS+upload legado:', textErr?.message);
+    onProgress?.('tts', { msg: 'Fallback: TTS client-side...' });
+    const audioFile = await ttsToFile(job.text, voiceId!);
+    onProgress?.('upload', { msg: 'Preparando upload...' });
+    const audio = await uploadAudio(audioFile, {
+      onStep: (step, info) => onProgress?.(`upload-${step}`, info),
+    });
+    onProgress?.('submitting', { duration: audio.duration });
+    created = await createVideo({
+      title: job.title,
+      avatarId: job.avatarId,
+      engine: job.engine,
+      audio,
+      orientation: job.orientation,
+      resolution: job.resolution,
+      motionPrompt: job.motionPrompt,
+    });
+  }
 
   if (job.title && job.title !== 'Avatar Video') {
     onProgress?.('renaming', { videoId: created.video_id });
@@ -504,7 +648,6 @@ export async function processJob(
       });
     } catch {}
   }
-
   onProgress?.('done', { videoId: created.video_id });
-  return { videoId: created.video_id, avatarId: created.avatar_id, audio };
+  return { videoId: created.video_id, avatarId: created.avatar_id };
 }

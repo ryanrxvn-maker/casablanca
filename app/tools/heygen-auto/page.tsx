@@ -14,6 +14,7 @@ import {
   type ExtensionStatus,
 } from '@/lib/heygen-extension-bridge';
 import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
+import { heygenApiFetch, REQUIRED_EXT_VERSION } from '@/lib/heygen-api-direct';
 import {
   HeyGenAvatarPicker,
   type AvatarOption,
@@ -151,6 +152,39 @@ export default function HeyGenAutoPage() {
       setError('Selecione um avatar primeiro.');
       return;
     }
+
+    // Checa versao da extensao via ping no proxy. Se < REQUIRED, force reload.
+    setStage('Checando versao da extensao...');
+    const ping = await heygenApiFetch({
+      url: 'https://api2.heygen.com/v1/pacific/account.get',
+      method: 'GET',
+    });
+    const detected = ping.body?._extVersion as string | undefined;
+    if (!detected) {
+      setError(
+        `Extensao com proxy desatualizado (sem _extVersion). RECARREGUE a extensao em chrome://extensions (botao reload no card DARKO LAB) e de refresh na aba do HeyGen. Versao requerida: ${REQUIRED_EXT_VERSION}.`,
+      );
+      setStage(null);
+      return;
+    }
+    const parse = (v: string) => v.split('.').map((n) => parseInt(n, 10) || 0);
+    const a = parse(detected);
+    const b = parse(REQUIRED_EXT_VERSION);
+    let ok = true;
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+      const x = a[i] ?? 0;
+      const y = b[i] ?? 0;
+      if (x > y) break;
+      if (x < y) { ok = false; break; }
+    }
+    if (!ok) {
+      setError(
+        `Extensao desatualizada: detectada v${detected}, requer >= v${REQUIRED_EXT_VERSION}. RECARREGUE em chrome://extensions e de refresh na aba do HeyGen.`,
+      );
+      setStage(null);
+      return;
+    }
+    setStage(null);
 
     type JobEntry = { label: string; copy?: string; audio?: File };
     let jobs: JobEntry[] = [];
