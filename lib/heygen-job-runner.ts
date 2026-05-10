@@ -59,11 +59,8 @@ export async function runHeyGenJobs(
       const label = job.label;
       try {
         opts.onProgress(`Disparando ${label} (${idx + 1}/${jobs.length})...`);
-        if (opts.mode === 'copy' && !opts.voiceId) {
-          throw new Error(
-            `${label}: modo texto precisa de voz selecionada (escolhe acima).`,
-          );
-        }
+        // Modo copy sem voiceId = processJob faz lookup automatico do default
+        // voice do avatar (voz original). Modo copy com voiceId = override.
         const input: ProcessJobInput = {
           file: opts.mode === 'audio' ? job.audio : undefined,
           text: opts.mode === 'copy' ? job.copy : undefined,

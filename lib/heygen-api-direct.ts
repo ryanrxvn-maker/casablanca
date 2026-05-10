@@ -282,6 +282,71 @@ export async function uploadAudio(
   return { audio_url: audioUrl, duration, words, text, asset_id: assetId };
 }
 
+/* ============= Lookup do default voice do avatar ============= */
+
+/**
+ * Descobre a voz default do avatar consultando endpoints internos da
+ * HeyGen na ordem mais provavel. Retorna null se nada for encontrado.
+ */
+export async function getAvatarDefaultVoice(
+  avatarId: string,
+): Promise<string | null> {
+  const tries: { path: string; pick: (d: any) => string | null | undefined }[] =
+    [
+      {
+        path: `/v2/avatar/details?id=${encodeURIComponent(avatarId)}`,
+        pick: (d) =>
+          d?.default_voice_id ??
+          d?.default_voice?.voice_id ??
+          d?.voice_id ??
+          d?.avatar?.default_voice_id ??
+          null,
+      },
+      {
+        path: `/v1/avatar.detail?id=${encodeURIComponent(avatarId)}`,
+        pick: (d) =>
+          d?.default_voice_id ??
+          d?.default_voice?.voice_id ??
+          d?.voice_id ??
+          null,
+      },
+      {
+        path: `/v2/avatar_group.detail?id=${encodeURIComponent(avatarId)}`,
+        pick: (d) =>
+          d?.default_voice_id ??
+          d?.default_voice?.voice_id ??
+          d?.voice_id ??
+          null,
+      },
+    ];
+  for (const t of tries) {
+    try {
+      const r = await jsonCall('GET', t.path);
+      if (r.ok) {
+        const v = t.pick(r.body?.data);
+        if (v && typeof v === 'string') return v;
+      }
+    } catch {
+      /* tenta proximo */
+    }
+  }
+  // Ultimo fallback: 1a voz da conta do user
+  try {
+    const r = await jsonCall('GET', '/v2/voice.list?limit=1');
+    if (r.ok) {
+      const v =
+        r.body?.data?.list?.[0]?.voice_id ??
+        r.body?.data?.voices?.[0]?.voice_id ??
+        r.body?.data?.[0]?.voice_id ??
+        null;
+      if (v && typeof v === 'string') return v;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 /* ============= TTS pra modo TEXTO ============= */
 
 /**
@@ -375,15 +440,26 @@ export async function processJob(
   job: ProcessJobInput,
   { onProgress }: { onProgress?: (stage: string, info: any) => void } = {},
 ): Promise<{ videoId: string; avatarId: string; audio: UploadedAudio }> {
-  // Modo TEXTO: gera TTS antes
+  // Modo TEXTO: gera TTS antes (com lookup automatico da voz default do avatar)
   let audioFile: File;
   if (job.file) {
     audioFile = job.file;
-  } else if (job.text && job.voiceId) {
-    onProgress?.('tts', { msg: 'Gerando audio TTS...' });
-    audioFile = await ttsToFile(job.text, job.voiceId);
+  } else if (job.text) {
+    let voiceId = job.voiceId;
+    if (!voiceId) {
+      onProgress?.('voice-lookup', { msg: 'Buscando voz default do avatar...' });
+      const found = await getAvatarDefaultVoice(job.avatarId);
+      if (!found) {
+        throw new Error(
+          'Nao foi possivel descobrir a voz default desse avatar. Marque "Substituir voz padrao do avatar" e escolha uma voz manualmente.',
+        );
+      }
+      voiceId = found;
+    }
+    onProgress?.('tts', { msg: 'Gerando audio TTS (voz original do avatar)...' });
+    audioFile = await ttsToFile(job.text, voiceId);
   } else {
-    throw new Error('processJob: precisa de `file` (audio) OU `text`+`voiceId` (texto).');
+    throw new Error('processJob: precisa de `file` (audio) OU `text` (texto).');
   }
 
   onProgress?.('upload', { msg: 'Preparando upload...' });

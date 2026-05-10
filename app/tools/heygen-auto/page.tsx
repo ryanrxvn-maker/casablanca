@@ -159,8 +159,12 @@ export default function HeyGenAutoPage() {
         setError('Cola uma copy primeiro.');
         return;
       }
-      if (!selectedVoice) {
-        setError('Modo copy precisa de uma voz selecionada.');
+      // Voz default = a voz original do avatar (lookup automatico no
+      // processJob). So passamos voiceId quando o user marcou "substituir".
+      if (overrideVoice && !selectedVoice) {
+        setError(
+          'Voce marcou "substituir voz" mas nao escolheu uma voz. Escolhe uma ou desmarca.',
+        );
         return;
       }
       jobs = parts.map((p, i) => ({
@@ -192,8 +196,12 @@ export default function HeyGenAutoPage() {
         parallel: 3,
         mode,
         avatarId: selectedAvatar.id,
+        // Modo copy: undefined = processJob faz lookup do default voice do
+        // avatar (voz original). Override = usa a voz escolhida pelo user.
         voiceId:
-          mode === 'copy' && selectedVoice ? selectedVoice.id : undefined,
+          mode === 'copy' && overrideVoice && selectedVoice
+            ? selectedVoice.id
+            : undefined,
         motor,
         adNameSafe: safeName,
         isCancelled: () => cancelRef.current,
