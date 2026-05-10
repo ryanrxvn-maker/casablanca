@@ -820,20 +820,24 @@ async function runJob(requestId, payload) {
 
     reportProgress(requestId, `Preparando ${partLabel ?? 'video'} via UI...`);
 
-    // 1) Verifica se textarea esta visivel. Se nao, ABORTA com erro claro.
-    //    NAO podemos fazer location.href aqui pq isso recarrega a aba e
-    //    mata o content script (currentJob orfao). A navegacao ja foi feita
-    //    pelo background.js antes de mandar HG_RUN_JOB pra ca.
+    // 1) Aguarda textarea visivel ate 30s (React HeyGen demora a montar).
+    //    Background.js ja navegou pra /avatar antes de chamar runJob.
     console.log('[DARKO LAB UI] runJob iniciando, location=', location.href);
-    if (!findScriptTextarea()) {
+    reportProgress(requestId, 'Aguardando UI HeyGen...');
+    const textarea = await waitForOrNull(
+      () => findScriptTextarea(),
+      30000,
+      400,
+    );
+    if (!textarea) {
+      dumpScriptDiagnostics();
       throw new Error(
-        'Textarea de script nao esta visivel em ' + location.href + '. ' +
-        'A automacao precisa que a aba HeyGen esteja em /avatar (Quick Create). ' +
-        'Abra app.heygen.com/avatar manualmente e tente de novo.'
+        'Textarea de script nao apareceu em 30s na ' + location.href +
+        '. Abre F12 na aba HeyGen e me cola os logs [DARKO LAB UI diag].'
       );
     }
-    console.log('[DARKO LAB UI] textarea encontrado, dimensoes:', textareaEarly.getBoundingClientRect().width, 'x', textareaEarly.getBoundingClientRect().height);
-    const textarea = textareaEarly;
+    const r = textarea.getBoundingClientRect();
+    console.log('[DARKO LAB UI] textarea encontrado, dimensoes:', r.width, 'x', r.height);
 
     // 3) Seleciona motor (Avatar III / IV / V) com VERIFICACAO obrigatoria.
     //    CRITICO: avatar IV/V consomem creditos pagos. Se a gente errou e
