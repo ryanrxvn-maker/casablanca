@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>HeyGen Automator</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header>
+    <div class="header-top">
+      <div class="header-brand">
+        <img src="icons/icon-48.png" alt="" class="header-logo" onerror="this.style.display='none'">
+        <h1>HeyGen Automator</h1>
+      </div>
+      <button id="open-support" class="header-link" title="Apoiar o criador">Apoiar</button>
+    </div>
+    <nav class="tabs">
+      <button data-tab="fila" class="active">Fila</button>
+      <button data-tab="avatares">Avatares</button>
+    </nav>
+  </header>
+
+  <main>
+
+    <!-- ── Fila ─────────────────────────────────────────────────────────── -->
+    <section id="tab-fila" class="tab active">
+      <div id="quota-box" class="quota-box hidden"></div>
+
+      <div class="bulk-toggle">
+        <label class="switch">
+          <input type="checkbox" id="bulk-mode" checked>
+          <span class="switch-slider"></span>
+        </label>
+        <div>
+          <div class="switch-label">Mesma config para todos</div>
+          <div class="switch-help">Aplicar avatar, motor e formato a todos os audios</div>
+        </div>
+      </div>
+
+      <div class="bulk-panel" id="bulk-panel">
+        <div class="field">
+          <label>Avatar</label>
+          <button type="button" class="avatar-picker-trigger" id="bulk-avatar-trigger">
+            <span class="avatar-picker-image"></span>
+            <span class="avatar-picker-name">(escolha)</span>
+            <span class="avatar-picker-caret">▼</span>
+          </button>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>Motor</label>
+            <select id="bulk-engine"></select>
+          </div>
+          <div class="field">
+            <label>Formato</label>
+            <select id="bulk-orientation">
+              <option value="portrait">9:16 vertical</option>
+              <option value="landscape">16:9 horizontal</option>
+              <option value="square">1:1 quadrado</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Qualidade</label>
+            <select id="bulk-resolution">
+              <option value="720p">720p</option>
+              <option value="1080p" selected>1080p</option>
+            </select>
+          </div>
+        </div>
+        <div class="field" id="bulk-prompt-field">
+          <label>Motion prompt <span class="help-inline">(Avatar IV/V) — descreva como o avatar deve se mover</span></label>
+          <textarea id="bulk-prompt" placeholder="Ex: speak with calm, occasional hand gestures"></textarea>
+        </div>
+      </div>
+
+      <div class="dropzone" id="dropzone">
+        <div class="dz-text">Arraste audios aqui<br><span class="hint">ou</span></div>
+        <button id="pick-files" class="primary">Selecionar arquivos</button>
+        <input type="file" id="file-input" multiple accept="audio/mp3,audio/wav,audio/mpeg,audio/x-wav,audio/mp4,audio/m4a,audio/aac,audio/ogg,audio/flac,.mp3,.wav,.m4a,.aac,.ogg,.flac" hidden>
+      </div>
+
+      <div class="queue-controls">
+        <span id="queue-count" class="status-msg">0 audios</span>
+        <label class="parallel-label" title="Quantos audios processar ao mesmo tempo">
+          <span>Paralelo:</span>
+          <select id="parallelism">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3" selected>3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+          </select>
+        </label>
+        <button id="start-queue" class="primary" disabled>Iniciar</button>
+        <button id="clear-queue">Limpar</button>
+      </div>
+
+      <ul id="queue-list" class="queue-list"></ul>
+
+      <div class="history-section">
+        <div class="history-head">
+          <button id="history-toggle" type="button" class="history-toggle">
+            <span class="history-arrow">▶</span>
+            <span>Histórico</span>
+            <span class="history-count" id="history-count">0</span>
+          </button>
+          <button id="history-open-heygen" type="button" class="history-mini" title="Abrir HeyGen em nova aba">Abrir HeyGen</button>
+          <button id="history-clear" type="button" class="history-mini">Limpar</button>
+        </div>
+        <ul id="history-list" class="history-list hidden"></ul>
+      </div>
+    </section>
+
+    <!-- ── Avatares ─────────────────────────────────────────────────────── -->
+    <section id="tab-avatares" class="tab">
+      <div class="toolbar">
+        <button id="refresh-avatars" class="primary">Detectar avatares</button>
+        <span id="avatars-status" class="status-msg"></span>
+      </div>
+      <p class="help">Configure motor + prompt padrao para cada avatar. Esses valores ficam pre-selecionados na fila.</p>
+      <div id="avatars-list" class="avatars-list"></div>
+    </section>
+
+  </main>
+
+  <!-- Picker compartilhado: posicionado dinamicamente abaixo do trigger ativo -->
+  <div class="avatar-picker-grid hidden" id="shared-avatar-grid"></div>
+
+  <!-- Modal Apoiar -->
+  <div id="support-modal" class="modal-overlay hidden" role="dialog" aria-labelledby="support-title">
+    <div class="modal-content">
+      <div class="modal-head">
+        <h2 id="support-title">Apoiar o criador</h2>
+        <button class="modal-close" id="support-close" type="button" aria-label="Fechar">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-hero">
+          <img src="icons/icon-128.png" alt="" class="modal-logo" onerror="this.style.display='none'">
+          <div class="modal-pitch">
+            <div class="modal-pitch-eyebrow">Vamos ser honestos:</div>
+            <div class="modal-pitch-headline">
+              Essa ferramenta <strong>poderia custar R$ 49/mês</strong>.
+              Tá grátis pra você.
+            </div>
+          </div>
+        </div>
+
+        <p class="modal-intro">
+          Cada lote que você roda aqui te poupa <strong>horas</strong> clicando
+          no painel da HeyGen. Eu trabalhei <strong>semanas</strong> pra isso
+          ficar redondo, sem bug, e continuar funcionando quando a HeyGen
+          atualiza a API.
+        </p>
+
+        <p class="modal-intro modal-intro-strong">
+          Não vou cobrar. <strong>Mas se ela te ajudou, retribui.</strong>
+          O que você quiser. Vai 100% pra mim, sem taxa, sem intermediário.
+        </p>
+
+        <div class="donation-anchors">
+          <div class="anchor"><span class="anchor-val">R$ 5</span><span class="anchor-lbl">um café</span></div>
+          <div class="anchor"><span class="anchor-val">R$ 20</span><span class="anchor-lbl">um almoço</span></div>
+          <div class="anchor"><span class="anchor-val">R$ 50+</span><span class="anchor-lbl">paga uma manutenção</span></div>
+        </div>
+
+        <div id="donation-card-container"></div>
+
+        <p class="modal-microcopy">
+          Doação não-obrigatória. A ferramenta vai continuar grátis com ou
+          sem PIX — mas seu apoio é o que mantém eu querendo atualizar.
+        </p>
+
+        <hr class="modal-sep">
+
+        <div class="author-card">
+          <div class="author-label">Quem fez essa porra</div>
+          <div class="author-handle" id="ig-handle">@seuhandle</div>
+          <button id="open-ig" class="btn-link" type="button">Seguir no Instagram</button>
+        </div>
+
+        <div class="modal-foot">
+          Versão <span id="modal-version">1.0.0</span> ·
+          <a href="#" id="open-license">Licença de uso</a> ·
+          <a href="#" id="reset-storage" class="modal-foot-danger">Resetar dados</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

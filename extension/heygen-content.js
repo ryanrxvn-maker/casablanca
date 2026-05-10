@@ -91,6 +91,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       );
     return true;
   }
+  if (msg && msg.type === 'HG_API_FETCH') {
+    // PROXY: faz fetch a api2.heygen.com com cookies da aba HeyGen
+    // (Origin = app.heygen.com). Retorna { status, ok, body, _uploadedBytes }.
+    proxyApiFetch(msg.req).then((res) => sendResponse(res), (e) => {
+      sendResponse({ status: 0, ok: false, body: { message: String(e?.message || e) } });
+    });
+    return true; // resposta async
+  }
   if (msg && msg.type === 'HG_LIST_AVATARS') {
     console.log('[DARKO LAB] >>> HG_LIST_AVATARS message received reqId=', msg.requestId);
     // PUSH PATTERN: ack imediato + manda resultado via mensagem separada.
@@ -1441,6 +1449,45 @@ function extractVideoList(j) {
   const candidates = [j?.data?.videos, j?.data?.list, j?.data?.video_list, j?.data?.items, j?.videos, j?.list, j?.items, Array.isArray(j?.data) ? j.data : null];
   for (const c of candidates) if (Array.isArray(c)) return c;
   return null;
+}
+
+
+
+
+/* ============= API Proxy (engenharia reversa de @euojeff.daily) ============= */
+
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+
+async function proxyApiFetch({ url, method = 'GET', headers = {}, bodyText, bodyBase64, bodyType }) {
+  const opts = { method, headers: { ...headers } };
+  let host = '';
+  try { host = new URL(url).host; } catch {}
+  if (host.endsWith('heygen.com') || host.endsWith('heygen.ai')) {
+    opts.credentials = 'include';
+  }
+  let uploadedBytes = 0;
+  if (bodyText !== undefined) {
+    opts.body = bodyText;
+    uploadedBytes = bodyText.length;
+  } else if (bodyBase64) {
+    const bytes = base64ToBytes(bodyBase64);
+    uploadedBytes = bytes.byteLength;
+    opts.body = new Blob([bytes], { type: bodyType || 'application/octet-stream' });
+  }
+  const r = await fetch(url, opts);
+  let data;
+  const ct = r.headers.get('content-type') || '';
+  if (ct.includes('json')) {
+    try { data = await r.json(); } catch { data = {}; }
+  } else {
+    try { data = { _text: (await r.text()).slice(0, 2000) }; } catch { data = {}; }
+  }
+  return { status: r.status, ok: r.ok, body: data, _uploadedBytes: uploadedBytes };
 }
 
 

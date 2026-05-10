@@ -26,7 +26,9 @@ export type HeygenJobPayload = {
   copy?: string;          // modo texto: copy a falar
   audioBase64?: string;   // modo audio: arquivo de audio em base64 (audio.mp3 / audio.wav)
   audioFilename?: string; // nome do arquivo (ex: "parte1.mp3")
-  avatarId: string;
+  avatarId: string;       // look_id especifico (passado pra match na img src)
+  avatarName?: string;    // nome do look ("Photo Avatar", "Radiant Redhead")
+  groupName?: string;     // nome do grupo HeyGen ("Emma", "Johan") - usado no search
   voiceId?: string;
   motor: 'III' | 'IV' | 'V';
   partLabel?: string;

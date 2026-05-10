@@ -54,6 +54,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'HG_API_FETCH') {
+    const requestId = msg.requestId;
+    handleApiFetch(requestId, msg.req, sender.tab?.id).catch((err) => {
+      reportToPage(sender.tab?.id, requestId, 'HG_API_RESULT', {
+        status: 0, ok: false, body: { message: err?.message ?? String(err) },
+      });
+    });
+    sendResponse({ accepted: true });
+    return true;
+  }
+
   if (msg.type === 'HG_INJECT_INTERCEPTOR') {
     const tabId = sender.tab?.id;
     // Responde IMEDIATO (sync) pra fechar o canal e nao gerar warning.
@@ -391,6 +402,24 @@ async function ensureContentScriptLoaded(tabId) {
  * via chrome.scripting.executeScript. Bypass do CSP do HeyGen e nao depende
  * de arquivo inject.js no disco.
  */
+async function handleApiFetch(requestId, req, bridgeTabId) {
+  console.log('[DARKO LAB BG] HG_API_FETCH', req.method, req.url?.slice(0, 80));
+  const tab = await findOrCreateHeyGenTab();
+  await waitForTabReady(tab.id);
+  try {
+    const res = await chrome.tabs.sendMessage(tab.id, { type: 'HG_API_FETCH', req });
+    reportToPage(bridgeTabId, requestId, 'HG_API_RESULT', {
+      status: res?.status ?? 0,
+      ok: !!res?.ok,
+      body: res?.body ?? null,
+    });
+  } catch (e) {
+    reportToPage(bridgeTabId, requestId, 'HG_API_RESULT', {
+      status: 0, ok: false, body: { message: 'Aba HeyGen nao respondeu: ' + (e?.message ?? '') },
+    });
+  }
+}
+
 async function injectInterceptorIntoMainWorld(tabId) {
   try {
     await chrome.scripting.executeScript({

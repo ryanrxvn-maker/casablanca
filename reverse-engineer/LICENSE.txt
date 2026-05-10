@@ -1,0 +1,124 @@
+================================================================
+                  HEYGEN AUTOMATOR — LICENÇA DE USO
+              (Não oficial — feito por @euojeff.daily)
+================================================================
+
+Copyright (c) 2026 — Autor original (titular dos direitos)
+Todos os direitos reservados.
+
+Esta extensão para Chrome ("Software") é fornecida GRATUITAMENTE
+para uso pessoal e profissional, sob as condições abaixo.
+
+
+----------------------------------------------------------------
+1. PERMITIDO
+----------------------------------------------------------------
+Você PODE, sem necessidade de pedir autorização:
+
+  a) Instalar e usar a extensão para gerar videos no HeyGen,
+     pessoalmente ou em sua empresa, inclusive comercialmente
+     (os videos gerados são SEUS — esta licença não restringe
+     o uso dos videos resultantes).
+
+  b) Compartilhar a extensão ORIGINAL e ÍNTEGRA (zip de
+     instalação ou link da Chrome Web Store), desde que
+     mantendo todos os arquivos, créditos e este LICENSE intactos.
+
+  c) Recomendar, divulgar e indicar a extensão a colegas,
+     em redes sociais, blogs, vídeos no YouTube etc.
+
+  d) Estudar o código-fonte para fins educacionais e pessoais.
+
+
+----------------------------------------------------------------
+2. PROIBIDO sem autorização escrita do autor
+----------------------------------------------------------------
+Você NÃO PODE, sob nenhuma hipótese:
+
+  a) Modificar o código e redistribuir como sua própria
+     ferramenta, com ou sem mudança de nome.
+
+  b) Vender, alugar, licenciar ou cobrar de qualquer forma
+     pelo acesso à extensão (incluindo "cursos pagos com a
+     ferramenta inclusa", planos de assinatura, ou paywalls
+     em qualquer formato).
+
+  c) Remover, alterar ou ocultar a marca, nome, logo, créditos
+     do autor ou este arquivo de licença.
+
+  d) Repackage com identidade visual diferente
+     ("white-labeling") para fazer parecer um produto seu.
+
+  e) Publicar fork ou versão derivada na Chrome Web Store
+     ou em qualquer outra loja de extensões.
+
+  f) Usar engenharia reversa do código com o propósito de
+     criar produto concorrente comercial.
+
+  g) Integrar a extensão em produto fechado de terceiros
+     ("OEM bundling") sem licenciamento prévio.
+
+
+----------------------------------------------------------------
+3. ISENÇÃO DE RESPONSABILIDADE
+----------------------------------------------------------------
+A EXTENSÃO É FORNECIDA "COMO ESTÁ", SEM GARANTIA DE QUALQUER
+TIPO, EXPRESSA OU IMPLÍCITA, INCLUINDO MAS NÃO LIMITADO ÀS
+GARANTIAS DE COMERCIABILIDADE, ADEQUAÇÃO A UM PROPÓSITO
+ESPECÍFICO E NÃO VIOLAÇÃO. EM NENHUMA HIPÓTESE O AUTOR SERÁ
+RESPONSÁVEL POR QUALQUER REIVINDICAÇÃO, DANO OU OUTRA
+RESPONSABILIDADE, SEJA EM AÇÃO DE CONTRATO, DELITO OU OUTRA
+FORMA, DECORRENTE DE OU EM CONEXÃO COM O SOFTWARE OU SEU USO,
+INCLUINDO (MAS NÃO SE LIMITANDO A):
+
+  - Bloqueios, suspensões ou banimentos de conta na HeyGen.
+  - Perda de dados, audios, videos ou trabalho.
+  - Falhas de API da HeyGen, mudanças de endpoint, alteração
+    de termos de serviço ou descontinuação do servico.
+  - Cobranças inesperadas, consumo de creditos ou quotas.
+  - Interrupção de serviço, downtime ou inoperância.
+  - Lucros cessantes ou prejuízos comerciais.
+
+VOCÊ usa esta extensão por sua conta e risco. É de sua
+responsabilidade ler e respeitar os Termos de Serviço da
+HeyGen Labs Inc.
+
+
+----------------------------------------------------------------
+4. AUSÊNCIA DE AFILIAÇÃO
+----------------------------------------------------------------
+Esta extensão NÃO é desenvolvida, endossada, patrocinada
+ou afiliada à HeyGen Labs Inc. ou qualquer empresa
+relacionada. "HeyGen" e logos correlatos são marcas
+registradas de seus respectivos proprietários e são
+mencionados aqui apenas para fins de identificação do
+serviço com o qual a extensão se integra.
+
+
+----------------------------------------------------------------
+5. VIOLAÇÃO DA LICENÇA
+----------------------------------------------------------------
+A violação dos termos descritos na seção 2 (PROIBIDO)
+constitui violação dos direitos autorais do autor e poderá
+ser objeto de medidas judiciais, incluindo mas não limitado a:
+
+  - Notificação extrajudicial (cease & desist).
+  - Pedidos de remoção (DMCA takedown) em hospedagens, lojas
+    de extensão e plataformas de pagamento.
+  - Ação judicial por danos materiais e morais.
+
+A continuidade do uso da extensão implica aceitação integral
+desta licença.
+
+
+----------------------------------------------------------------
+6. CONTATO
+----------------------------------------------------------------
+Para pedidos de licença comercial, parcerias ou esclarecimentos:
+
+  [Preencher com email/contato do autor]
+
+
+================================================================
+                    FIM DA LICENÇA
+================================================================

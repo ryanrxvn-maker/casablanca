@@ -17,6 +17,7 @@ import {
   testHeygenSession,
   type ExtensionStatus,
 } from '@/lib/heygen-extension-bridge';
+import { processJob, type EngineKey } from '@/lib/heygen-api-direct';
 import {
   HeyGenAvatarPicker,
   type AvatarOption,
@@ -191,62 +192,78 @@ export default function HeyGenAutoPage() {
     setProcessing(true);
 
     try {
-      const collected: PartResult[] = [];
-      for (let i = 0; i < jobs.length; i++) {
-        if (cancelRef.current) throw new Error('Cancelado.');
-        const job = jobs[i];
-        setStage(
-          `Gerando ${job.label} (${i + 1}/${jobs.length}) via extensao...`,
-        );
+      const collected: PartResult[] = new Array(jobs.length);
+      // MODO API DIRETA (v4.0.0) — usa processJob (engenharia reversa de
+      // @euojeff.daily). Pula totalmente UI automation. Cada trecho:
+      //   1. (texto) gera TTS via /v2/online/text_to_speech.stream
+      //   2. uploadAudio (4 passos: signed URL + S3 PUT + register + transcode + ASR)
+      //   3. createVideo (POST /v2/avatar/shortcut/submit)
+      // Paralelismo: 3 jobs simultaneos (HeyGen aceita ate 5).
+      const PARALLEL = 3;
+      const engineKey: EngineKey = motor === 'III' ? 'iii' : motor === 'IV' ? 'iv' : 'v';
+      const adNameSafe = (adName || 'avatar').replace(/[^a-zA-Z0-9_-]/g, '_');
 
-        // Modo audio: prepara base64 antes de chamar a extensao
-        let audioBase64: string | undefined;
-        let audioFilename: string | undefined;
-        if (mode === 'audio' && job.audio) {
-          setStage(
-            `Lendo ${job.label} (${(job.audio.size / 1024 / 1024).toFixed(1)}MB)...`,
-          );
-          audioBase64 = await audioFileToBase64(job.audio);
-          audioFilename = job.audio.name;
-        }
+      let cursor = 0;
+      const pickNext = () => {
+        if (cancelRef.current) return -1;
+        return cursor < jobs.length ? cursor++ : -1;
+      };
 
-        const videoUrl = await generateAvatarPart(
-          {
-            copy: mode === 'copy' ? job.copy : undefined,
-            audioBase64,
-            audioFilename,
-            avatarId: selectedAvatar.id,
-            voiceId:
+      async function worker() {
+        while (true) {
+          const idx = pickNext();
+          if (idx < 0) return;
+          const job = jobs[idx];
+          try {
+            setStage(`Disparando ${job.label} (${idx + 1}/${jobs.length})...`);
+            const voiceId =
               mode === 'copy' && overrideVoice && selectedVoice
                 ? selectedVoice.id
-                : undefined,
-            motor,
-            partLabel: job.label,
-          },
-          (s) => setStage(`${job.label}: ${s}`),
-        );
-
-        if (cancelRef.current) throw new Error('Cancelado.');
-
-        // Baixa via proxy (CORS-safe)
-        setStage(`Baixando ${job.label}...`);
-        const res = await fetch(
-          `/api/mind-ads/proxy?url=${encodeURIComponent(videoUrl)}`,
-        );
-        if (!res.ok) {
-          throw new Error(`Falha ao baixar ${job.label} via proxy.`);
+                : selectedVoice?.id ?? undefined;
+            if (mode === 'copy' && !voiceId) {
+              throw new Error(`${job.label}: modo texto precisa de voz selecionada (escolhe acima).`);
+            }
+            const result = await processJob(
+              {
+                file: mode === 'audio' ? job.audio : undefined,
+                text: mode === 'copy' ? job.copy : undefined,
+                voiceId: mode === 'copy' ? voiceId : undefined,
+                title: `${adNameSafe}_${job.label}`,
+                avatarId: selectedAvatar!.id,
+                engine: engineKey,
+                orientation: 'portrait',
+              },
+              {
+                onProgress: (stage) => setStage(`${job.label}: ${stage}`),
+              },
+            );
+            collected[idx] = {
+              index: idx + 1,
+              label: job.label,
+              videoUrl: `QUEUED:${result.videoId}`,
+              blob: new Blob(),
+            };
+          } catch (e) {
+            collected[idx] = {
+              index: idx + 1,
+              label: job.label,
+              videoUrl: `ERROR:${(e as Error).message ?? 'falha desconhecida'}`,
+              blob: new Blob(),
+            };
+            console.error(`[HeyGen Auto] Job ${job.label} falhou:`, e);
+          }
+          setResults(collected.filter(Boolean) as PartResult[]);
         }
-        const blob = await res.blob();
-        collected.push({
-          index: i + 1,
-          label: job.label,
-          videoUrl,
-          blob,
-        });
-        setResults([...collected]);
       }
 
-      setStage(null);
+      await Promise.all(Array.from({ length: PARALLEL }, () => worker()));
+
+      const ok = collected.filter((r) => r && !r.videoUrl.startsWith('ERROR:')).length;
+      const failed = jobs.length - ok;
+      setStage(
+        `${ok}/${jobs.length} trechos enviados pro HeyGen${failed > 0 ? ` (${failed} falharam)` : ''}. ` +
+          `Pega os mp4s prontos em app.heygen.com.`,
+      );
     } catch (e) {
       setError((e as Error).message ?? 'Falha desconhecida.');
       setStage(null);
@@ -273,7 +290,7 @@ export default function HeyGenAutoPage() {
       <main className="container-app flex-1 py-10">
         <ToolShell
           title="HeyGen Auto Avatar"
-          description="Automacao do HeyGen via extensao Chrome — gera o avatar parte por parte usando sua propria conta HeyGen (sem custo de API). Voce manda copy ou audios, recebe ZIP organizado por parte na ordem certa."
+          description="Automacao do HeyGen via extensao Chrome — DISPARA cada trecho pra gerar usando sua propria conta HeyGen (sem custo de API). Voce manda copy ou audios; a ferramenta divide em trechos, escolhe motor + avatar, cola script e clica Generate em cada um. Quando terminar de DISPARAR todos, voce pega os mp4s prontos no app.heygen.com."
         >
           {/* Status da extensao */}
           {!extLoading ? (
@@ -541,9 +558,14 @@ export default function HeyGenAutoPage() {
                 </button>
               )}
               {results.length > 0 && !processing ? (
-                <button onClick={downloadAllZip} className="btn-primary">
-                  Baixar ZIP organizado
-                </button>
+                <a
+                  href="https://app.heygen.com/avatar"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="btn-primary"
+                >
+                  Abrir HeyGen pra pegar os videos
+                </a>
               ) : null}
             </div>
 
@@ -565,41 +587,28 @@ export default function HeyGenAutoPage() {
               </div>
             ) : null}
 
-            {/* Resultados parciais */}
+            {/* Resultados - trechos enviados pro HeyGen */}
             {results.length > 0 ? (
               <div className="fade-in-up mt-2 rounded-[12px] border border-lime/30 bg-lime/5 p-4">
                 <h3 className="mb-2 text-sm font-semibold uppercase tracking-widest text-lime">
-                  ✓ {results.length} parte{results.length === 1 ? '' : 's'}{' '}
-                  pronta{results.length === 1 ? '' : 's'}
+                  ✓ {results.length} trecho{results.length === 1 ? '' : 's'}{' '}
+                  enviado{results.length === 1 ? '' : 's'} pro HeyGen
                 </h3>
+                <p className="mb-3 text-[11px] text-text-muted">
+                  HeyGen esta gerando agora. Quando terminar, abra
+                  app.heygen.com e baixe os mp4s da aba <strong>Recents</strong>.
+                </p>
                 <ul className="grid gap-1 text-xs">
-                  {results.map((r) => (
-                    <li
-                      key={r.label}
-                      className="flex items-center justify-between rounded-md border border-line bg-bg px-3 py-2"
-                    >
-                      <span>
-                        <span className="mono text-lime">{r.label}.mp4</span>
-                        <span className="ml-2 text-text-muted">
-                          {(r.blob.size / (1024 * 1024)).toFixed(1)} MB
-                        </span>
-                      </span>
-                      <button
-                        onClick={() =>
-                          downloadBlob(r.blob, `${safeName}_${r.label}.mp4`)
-                        }
-                        className="text-text-muted hover:text-lime"
+                  {results.map((r) => {
+                    const vid = r.videoUrl.startsWith('QUEUED:')
+                      ? r.videoUrl.slice(7)
+                      : null;
+                    return (
+                      <li
+                        key={r.label}
+                        className="flex items-center justify-between rounded-md border border-line bg-bg px-3 py-2"
                       >
-                        baixar
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </div>
-        </ToolShell>
-      </main>
-    </div>
-  );
-}
+                        <span>
+                          <span className="mono text-lime">{r.label}</span>
+                          <span className="ml-2 text-text-muted">
+                            {vid ? `id ${vid.slice(0, 12)

@@ -64,6 +64,19 @@
       return;
     }
 
+    if (data.type === 'HG_API_FETCH') {
+      const requestId = data.requestId;
+      chrome.runtime.sendMessage(
+        { type: 'HG_API_FETCH', requestId, req: data.req },
+        () => {
+          if (chrome.runtime.lastError) {
+            sendToPage({ type: 'HG_API_RESULT', requestId, status: 0, ok: false, body: { message: chrome.runtime.lastError.message } });
+          }
+        },
+      );
+      return;
+    }
+
     if (data.type === 'HG_LIST_AVATARS') {
       const requestId = data.requestId;
       chrome.runtime.sendMessage(

@@ -1,0 +1,75 @@
+═══════════════════════════════════════════════════════════════
+  COMO INSTALAR — Passo a passo (leva 1 minuto)
+═══════════════════════════════════════════════════════════════
+
+1) DESCOMPACTE este zip numa pasta no seu PC
+   (ex: C:\Users\SeuNome\Desktop\HeyGenAutomator)
+
+   ⚠️ NÃO clique 2 vezes no zip pra "instalar" — não funciona assim.
+   Você PRECISA extrair os arquivos pra uma pasta primeiro.
+   No Windows: clica direito no zip → "Extrair tudo".
+
+2) Abra o Google Chrome (ou Edge / Brave — qualquer Chromium)
+
+3) Cole isso na barra de endereço e tecle Enter:
+
+   chrome://extensions
+
+4) No canto SUPERIOR DIREITO da página, ative o
+   "MODO DO DESENVOLVEDOR" (chave/toggle)
+
+5) Aparecerão 3 botões novos no canto SUPERIOR ESQUERDO.
+   Clica em "Carregar sem compactação"
+
+6) Navega até a pasta onde você EXTRAIU os arquivos
+   (a que tem manifest.json, sidepanel.html, etc) e
+   clica em "Selecionar pasta"
+
+7) Pronto! O ícone azul HA aparece na barra de extensões.
+   Clica nele pra abrir o painel lateral.
+
+═══════════════════════════════════════════════════════════════
+  COMO USAR
+═══════════════════════════════════════════════════════════════
+
+1) Abre uma aba do HeyGen e faz login normalmente
+   (https://app.heygen.com)
+
+2) Clica no ícone azul HA na barra do Chrome
+   → painel abre do lado direito
+
+3) Vai na aba "Avatares" → clica "Detectar avatares"
+   (vai listar os avatares que você criou na HeyGen)
+
+4) Volta pra aba "Fila"
+5) Marca o avatar que vai usar (cima)
+6) Arrasta seus áudios na área pontilhada
+7) Aperta "Iniciar"
+
+═══════════════════════════════════════════════════════════════
+  DÚVIDAS / PROBLEMAS
+═══════════════════════════════════════════════════════════════
+
+❌ "Detectar avatares" dá erro
+   → Confirma que tem aba do HeyGen aberta E logada
+
+❌ "API 403"
+   → Faz logout e login de novo no HeyGen, recarrega a extensão
+
+❌ Geração trava em "Transcodificando"
+   → Áudio muito grande ou HeyGen lenta. Aguarda 5min ou cancela.
+
+❌ "Sem créditos pra Avatar IV/V"
+   → Você bateu o limite mensal pago. Use Avatar III (ilimitado)
+     ou compra créditos na HeyGen.
+
+═══════════════════════════════════════════════════════════════
+  CRIADOR
+═══════════════════════════════════════════════════════════════
+
+Feita por @euojeff.daily no Instagram.
+100% gratuita. Doações via PIX/MercadoPago dentro do botão
+"Apoiar" da própria extensão.
+
+Esta extensão NÃO é oficial nem afiliada à HeyGen Labs Inc.
+Use por sua conta e risco. Veja LICENSE.txt pra detalhes.
