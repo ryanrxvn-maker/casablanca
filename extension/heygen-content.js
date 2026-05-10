@@ -973,15 +973,22 @@ async function waitForInterceptedVideoId(clickStartTs, timeoutMs = 60000) {
       }
     }
 
-    // 3) FALLBACK apos 20s: scan da sidebar Recents pra detectar item NOVO
-    //    com 'just now' / 'a few seconds ago'. Pega o video_id do href.
-    if (!fallbackTried && Date.now() - clickStartTs > 20000) {
+    // 3) FALLBACK apos 15s: tenta DOM Recents
+    if (!fallbackTried && Date.now() - clickStartTs > 15000) {
       fallbackTried = true;
-      console.warn('[DARKO LAB UI] waitForInterceptedVideoId 20s sem captura - fallback DOM Recents');
+      console.warn('[DARKO LAB UI] waitForInterceptedVideoId 15s sem captura - fallback DOM Recents');
       const recentVid = scanRecentsForJustNow();
       if (recentVid) {
-        console.log('[DARKO LAB UI] FALLBACK: detectado video via Recents =', recentVid);
+        console.log('[DARKO LAB UI] FALLBACK Recents: detectado video =', recentVid);
         return recentVid;
+      }
+    }
+    // 4) FALLBACK FINAL apos 25s: API video.list pegando video newest da conta
+    if (Date.now() - clickStartTs > 25000) {
+      const newest = await findNewestVideoFromAccount(180000);
+      if (newest && newest.id) {
+        console.log('[DARKO LAB UI] FALLBACK API: usando video mais recente da conta =', newest.id, 'via', newest.endpoint);
+        return newest.id;
       }
     }
 
@@ -1020,6 +1027,47 @@ function scanRecentsForJustNow() {
     }
   }
   return bestMatch;
+}
+
+/**
+ * Fallback robusto: busca o video MAIS RECENTE da conta HeyGen via
+ * endpoints internos. Retorna { id, createdAt } se created_at <= maxAgeMs.
+ */
+async function findNewestVideoFromAccount(maxAgeMs = 180000) {
+  const endpoints = [
+    'https://api2.heygen.com/v1/video.list?limit=5&page=1',
+    'https://api2.heygen.com/v2/video.list?limit=5&page=1',
+    'https://api2.heygen.com/v1/pacific.video.list?limit=5',
+    'https://api2.heygen.com/v1/video_list.get?limit=5',
+    'https://app.heygen.com/api/v2/videos?limit=5',
+    'https://app.heygen.com/api/v1/video.list?limit=5',
+  ];
+  for (const url of endpoints) {
+    try {
+      const r = await fetch(url, { method: 'GET', credentials: 'include' });
+      if (!r.ok) continue;
+      const j = await r.json().catch(() => null);
+      const list = extractVideoList(j);
+      if (!list || list.length === 0) continue;
+      // Sort por created_at/create_time/timestamp DESC
+      list.sort((a, b) => {
+        const ta = a?.created_at ?? a?.create_time ?? a?.created ?? a?.timestamp ?? 0;
+        const tb = b?.created_at ?? b?.create_time ?? b?.created ?? b?.timestamp ?? 0;
+        return tb - ta;
+      });
+      const newest = list[0];
+      const id = newest?.video_id ?? newest?.id ?? newest?.uuid;
+      const createdRaw = newest?.created_at ?? newest?.create_time ?? newest?.created ?? 0;
+      // created_at do HeyGen pode ser em segundos ou ms - normaliza pra ms
+      const createdAt = createdRaw > 1e12 ? createdRaw : createdRaw * 1000;
+      const ageMs = createdAt > 0 ? Date.now() - createdAt : 0;
+      console.log(`[DARKO LAB UI] findNewestVideoFromAccount via ${url}: id=${id} ageMs=${Math.round(ageMs/1000)}s`);
+      if (id && (ageMs === 0 || ageMs <= maxAgeMs)) {
+        return { id, createdAt, endpoint: url };
+      }
+    } catch (e) { /* tenta proximo */ }
+  }
+  return null;
 }
 
 /**
@@ -1478,40 +1526,87 @@ async function clickWithAncestors(el) {
   return true;
 }
 
+/**
+ * Acha o botao de Generate (seta azul circular no CANTO INFERIOR DIREITO).
+ * NAO confundir com:
+ * - Botao Play/Pause de voice preview (▶)
+ * - Botao de microfone (Voice Input)
+ * - Botao Open in AI Studio (texto grande)
+ * - Botao mixer (settings icon)
+ *
+ * Estrategia: prioriza botao com background AZUL no canto extremo
+ * inferior direito, com SVG arrow UP.
+ */
 function findGenerateButton() {
-  // Botao de generate no canto inferior direito (seta)
-  // HeyGen usa varios atributos diferentes ao longo do tempo.
   const candidates = Array.from(document.querySelectorAll('button'));
-  // Por aria-label
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+  const all = [];
+
   for (const b of candidates) {
+    if (b.disabled) continue;
+    if (b.offsetParent === null) continue;
+    const rect = b.getBoundingClientRect();
+    if (rect.width < 30 || rect.height < 30) continue;
+    if (rect.width > 100 || rect.height > 100) continue; // exclui Open in AI Studio
+    // CANTO INFERIOR DIREITO especificamente
+    if (rect.right < W * 0.7) continue;
+    if (rect.bottom < H * 0.6) continue;
+
     const al = (b.getAttribute('aria-label') || '').toLowerCase();
-    if (al.includes('generate') || al.includes('submit') || al.includes('send')) {
-      if (!b.disabled && b.offsetParent !== null) return b;
-    }
-  }
-  // Por texto
-  for (const b of candidates) {
     const t = (b.textContent || '').trim().toLowerCase();
-    if (t === 'generate' || t === 'gerar' || t === 'submit') {
-      if (!b.disabled && b.offsetParent !== null) return b;
+    const dt = (b.getAttribute('data-testid') || '').toLowerCase();
+    const style = window.getComputedStyle(b);
+    const bg = style.backgroundColor || '';
+    // Azul/primary detection (rgb com B>R+50)
+    const m = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+    let isBlue = false;
+    if (m) {
+      const r = +m[1], g = +m[2], blue = +m[3];
+      isBlue = blue > 150 && blue > r + 30 && blue > g - 30;
     }
-  }
-  // Por SVG arrow up icon (botao circular comum no HeyGen)
-  for (const b of candidates) {
-    if (b.disabled || b.offsetParent === null) continue;
+
+    // SVG analysis
     const svg = b.querySelector('svg');
-    if (!svg) continue;
-    const html = svg.innerHTML.toLowerCase();
-    if (html.includes('arrow') || html.includes('m12') || html.includes('m4 12')) {
-      // botao com SVG de arrow
-      const rect = b.getBoundingClientRect();
-      // canto inferior direito
-      if (rect.right > window.innerWidth * 0.7 && rect.bottom > window.innerHeight * 0.5) {
-        return b;
-      }
+    let hasArrowUp = false;
+    let hasPlayIcon = false;
+    if (svg) {
+      const html = svg.innerHTML.toLowerCase();
+      // Arrow UP patterns
+      if (
+        html.includes('m12 19') || html.includes('m12 5') ||
+        html.includes('arrow') || html.includes('19v5') ||
+        html.includes('m5 12l7-7') || html.includes('m18 15l-6-6')
+      ) hasArrowUp = true;
+      // Play icon patterns (triangle): exclui
+      if (
+        html.includes('polygon') || html.includes('m8 5v14') ||
+        html.includes('play') || html.includes('triangle')
+      ) hasPlayIcon = true;
     }
+
+    let score = 0;
+    if (al.includes('generate') || al.includes('submit') || dt.includes('generate') || dt.includes('submit')) score += 100;
+    if (t === 'generate' || t === 'gerar' || t === 'submit') score += 80;
+    if (isBlue) score += 30;
+    if (hasArrowUp) score += 40;
+    if (hasPlayIcon) score -= 100; // PENALIZA play icon
+    if (al.includes('play') || al.includes('voice') || al.includes('preview')) score -= 100;
+    // Mais a direita = mais provavel de ser o Generate (que fica no canto)
+    score += Math.round((rect.right - W * 0.7) / (W * 0.3) * 20);
+
+    all.push({ btn: b, rect, score, info: { al, t: t.slice(0, 30), bg, isBlue, hasArrowUp, hasPlayIcon } });
   }
-  return null;
+
+  if (all.length === 0) return null;
+  all.sort((a, b) => b.score - a.score);
+  console.log(`[DARKO LAB UI] findGenerateButton: ${all.length} candidatos. Top 3:`,
+    all.slice(0, 3).map((c) => ({ score: c.score, ...c.info, x: Math.round(c.rect.left), y: Math.round(c.rect.top) }))
+  );
+  if (all[0].score < 0) {
+    console.warn('[DARKO LAB UI] findGenerateButton: top score negativo, possivel match errado');
+  }
+  return all[0].btn;
 }
 
 async function selectAvatarInUI(avatarId) {
