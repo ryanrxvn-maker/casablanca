@@ -176,21 +176,57 @@ export default function ClickUpPilotPage() {
     }
   }
 
+  /**
+   * Tenta extensao (le doc com sessao Google logada — funciona pra docs
+   * privados que voce tem acesso). Fallback: server fetch (so docs publicos).
+   */
+  function fetchDocViaExtension(url: string): Promise<{ ok: boolean; text?: string; error?: string }> {
+    return new Promise((resolve) => {
+      const requestId = `doc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const handler = (ev: MessageEvent) => {
+        if (
+          ev.data?.source === 'darkolab-ext' &&
+          ev.data?.type === 'HG_DOC_RESULT' &&
+          ev.data?.requestId === requestId
+        ) {
+          window.removeEventListener('message', handler);
+          clearTimeout(timeout);
+          resolve({ ok: !!ev.data.ok, text: ev.data.text, error: ev.data.error });
+        }
+      };
+      window.addEventListener('message', handler);
+      window.postMessage({ source: 'darkolab', type: 'HG_FETCH_DOC', requestId, url }, '*');
+      const timeout = setTimeout(() => {
+        window.removeEventListener('message', handler);
+        resolve({ ok: false, error: 'Timeout 30s — extensao nao respondeu (atualize pra v4.0.15+ e recarregue).' });
+      }, 30000);
+    });
+  }
+
   async function autoFetchDoc(url: string) {
     setFetchingDoc(true);
     setParseError(null);
     try {
+      // 1. Tenta via extensao (sessao Google logada — funciona pra doc privado)
+      const extR = await fetchDocViaExtension(url);
+      if (extR.ok && extR.text) {
+        setDocContent(extR.text);
+        setTimeout(() => runParser(extR.text || ''), 100);
+        return;
+      }
+      // 2. Fallback: server proxy (so docs publicos)
       const r = await fetch(`/api/docs/fetch?url=${encodeURIComponent(url)}`);
       const j = await r.json();
       if (!j.ok) {
-        setParseError(`Falha ao buscar doc: ${j.error || 'erro desconhecido'}`);
+        setParseError(
+          `Doc privado e extensao nao leu (${extR.error || 'erro'}). Servidor tambem falhou: ${j.error}. Cola manualmente abaixo.`,
+        );
         return;
       }
       setDocContent(j.text || '');
-      // Auto-parse depois de fetch
       setTimeout(() => runParser(j.text || ''), 100);
     } catch (e) {
-      setParseError(`Falha de rede: ${(e as Error)?.message}`);
+      setParseError(`Falha: ${(e as Error)?.message}`);
     } finally {
       setFetchingDoc(false);
     }

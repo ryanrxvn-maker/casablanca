@@ -77,6 +77,24 @@
       return;
     }
 
+    if (data.type === 'HG_FETCH_DOC') {
+      const requestId = data.requestId;
+      chrome.runtime.sendMessage(
+        { type: 'HG_FETCH_DOC', requestId, url: data.url },
+        () => {
+          if (chrome.runtime.lastError) {
+            sendToPage({
+              type: 'HG_DOC_RESULT',
+              requestId,
+              ok: false,
+              error: chrome.runtime.lastError.message ?? 'Background nao respondeu.',
+            });
+          }
+        },
+      );
+      return;
+    }
+
     if (data.type === 'HG_LIST_AVATARS') {
       const requestId = data.requestId;
       chrome.runtime.sendMessage(

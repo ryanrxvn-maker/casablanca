@@ -65,6 +65,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'HG_FETCH_DOC') {
+    // READ-ONLY: abre/reusa tab docs.google.com com a URL e le innerText
+    // via /mobilebasic (renderiza HTML completo). Devolve texto bruto.
+    const requestId = msg.requestId;
+    const docUrl = msg.url;
+    handleFetchDoc(requestId, docUrl, sender.tab?.id).catch((err) => {
+      reportToPage(sender.tab?.id, requestId, 'HG_DOC_RESULT', {
+        ok: false, error: err?.message ?? String(err),
+      });
+    });
+    sendResponse({ accepted: true });
+    return true;
+  }
+
   if (msg.type === 'HG_INJECT_INTERCEPTOR') {
     const tabId = sender.tab?.id;
     // Responde IMEDIATO (sync) pra fechar o canal e nao gerar warning.
@@ -541,6 +555,84 @@ async function injectInterceptorIntoMainWorld(tabId) {
   } catch (e) {
     console.error('[DARKO LAB BG] !!! injectInterceptorIntoMainWorld erro:', e?.message ?? e);
     return false;
+  }
+}
+
+/**
+ * READ-ONLY: abre tab em /mobilebasic do Google Doc, espera carregar,
+ * le innerText e retorna. Nunca escreve, edita ou comenta no doc.
+ */
+async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
+  try {
+    if (!docUrl || typeof docUrl !== 'string') {
+      reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', {
+        ok: false, error: 'docUrl invalida',
+      });
+      return;
+    }
+    // Extrai docId
+    const m = docUrl.match(/\/document\/d\/([a-zA-Z0-9_-]+)/);
+    if (!m) {
+      reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', {
+        ok: false, error: 'URL nao parece Google Doc valido',
+      });
+      return;
+    }
+    const docId = m[1];
+    const mobileUrl = `https://docs.google.com/document/d/${docId}/mobilebasic`;
+
+    // Cria tab inativa em mobilebasic
+    const tab = await chrome.tabs.create({ url: mobileUrl, active: false });
+    const newTabId = tab.id;
+    console.log('[DARKO LAB BG] HG_FETCH_DOC docId=', docId, 'tabId=', newTabId);
+
+    // Espera load completo (tab.status complete)
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Timeout 15s carregando doc')), 15000);
+      const listener = (changedTabId, changeInfo) => {
+        if (changedTabId === newTabId && changeInfo.status === 'complete') {
+          clearTimeout(timeout);
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+    });
+
+    // Pequena espera adicional pra react render
+    await new Promise(r => setTimeout(r, 1500));
+
+    // Le innerText
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId: newTabId },
+      func: () => ({
+        text: document.body.innerText,
+        title: document.title,
+        url: location.href,
+        isLogin: /accounts\.google\.com/.test(location.href),
+      }),
+    });
+
+    // Fecha a tab depois de ler
+    try { await chrome.tabs.remove(newTabId); } catch {}
+
+    if (result?.isLogin) {
+      reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', {
+        ok: false, error: 'Doc privado e nao logado no Google.',
+      });
+      return;
+    }
+
+    reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', {
+      ok: true,
+      text: result?.text || '',
+      title: result?.title || '',
+      length: (result?.text || '').length,
+    });
+  } catch (e) {
+    reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', {
+      ok: false, error: e?.message ?? String(e),
+    });
   }
 }
 
