@@ -3,6 +3,10 @@
 /.pnp
 .pnp.js
 
+# claude code session artifacts
+/.claude/scheduled_tasks.lock
+/.claude/worktrees/
+
 # testing
 /coverage
 
