@@ -46,6 +46,10 @@ import {
 
 type Motor = 'III' | 'IV' | 'V';
 type Mode = 'copy' | 'audio';
+type SessionTest = {
+  state: 'idle' | 'testing' | 'ok' | 'fail';
+  detail?: string;
+};
 
 type PartResult = {
   index: number;
@@ -88,10 +92,7 @@ export default function HeyGenAutoPage() {
     'hgauto:clonedVoices',
     [],
   );
-  const [sessionTest, setSessionTest] = useState<{
-    state: 'idle' | 'testing' | 'ok' | 'fail';
-    detail?: string;
-  }>({ state: 'idle' });
+  const [sessionTest, setSessionTest] = useState<SessionTest>({ state: 'idle' });
 
   const [parts, setParts] = useState<string[]>([]);
   const [results, setResults] = useState<PartResult[]>([]);
@@ -573,5 +574,4 @@ export default function HeyGenAutoPage() {
                       >
                         <span>
                           <span className="mono text-lime">{r.label}</span>
-                          <span className="ml-2 text-text-muted">
-                 
+                          <span className="ml-2 text-text
