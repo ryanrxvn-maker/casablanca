@@ -23,7 +23,7 @@ const API_BASE = 'https://api2.heygen.com';
 
 /** Versao MINIMA do content-script da extensao que essa lib precisa.
  *  Cada vez que mudamos protocolo proxy (campos novos), bumpamos isso. */
-export const REQUIRED_EXT_VERSION = '4.0.11';
+export const REQUIRED_EXT_VERSION = '4.0.12';
 
 /** Compara "4.0.10" vs "4.0.9" → true se atual >= minima */
 function isExtVersionOk(actual: string | undefined): boolean {
@@ -382,18 +382,22 @@ export async function ttsToFile(text: string, voiceId: string): Promise<File> {
   if (!r.ok) {
     throw new Error(`TTS falhou (${r.status}): ${r.body?.message ?? r.body?.msg ?? r.body?._text ?? r.body?._rawPreview ?? ''}`);
   }
-  // 1) Bytes assemblados pelo proxy (binario direto OU ndjson com chunks)
+  // 1) audio_url extraido pelo proxy de chunks ndjson (mais robusto que
+  //    decodar chunks — URL e signed CDN, garantia de bytes integros)
+  if (r.body?._audioUrl) {
+    const ar = await fetch(r.body._audioUrl);
+    if (ar.ok) {
+      const buf = await ar.arrayBuffer();
+      return new File([new Uint8Array(buf)], 'tts.mp3', { type: 'audio/mpeg' });
+    }
+    console.warn('[DARKO LAB] _audioUrl fetch falhou, caindo pra _bytesBase64');
+  }
+  // 2) Bytes assemblados pelo proxy (binario direto OU ndjson decodado)
   const binBase64 = r.body?._bytesBase64;
   if (binBase64) {
     const bytes = Uint8Array.from(atob(binBase64), (c) => c.charCodeAt(0));
     const mime = (r.body?._contentType || '').includes('audio') ? r.body._contentType : 'audio/mpeg';
     return new File([bytes], 'tts.mp3', { type: mime });
-  }
-  // 2) audio_url extraido pelo proxy de chunks ndjson
-  if (r.body?._audioUrl) {
-    const ar = await fetch(r.body._audioUrl);
-    const buf = await ar.arrayBuffer();
-    return new File([new Uint8Array(buf)], 'tts.mp3', { type: 'audio/mpeg' });
   }
   // 3) Legado: JSON com audio_bytes (base64) ou audio_url
   const audioBytes = r.body?.audio_bytes ?? r.body?.data?.audio_bytes;

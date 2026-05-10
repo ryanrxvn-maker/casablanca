@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.0.11';
+const DARKO_EXT_VERSION = '4.0.12';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -1504,27 +1504,59 @@ async function proxyApiFetch({ url, method = 'GET', headers = {}, bodyText, body
         try { chunks.push(JSON.parse(line)); }
         catch (e) { parseErr = String(e?.message || e); }
       }
-      // Assemblea audio dos chunks: tenta varios nomes de campo conhecidos
-      let assembled = '';
+      // Assemblea audio dos chunks: cada chunk tem audio_bytes em base64 SEPARADO
+      // (com padding '==' proprio). NAO da pra concatenar as strings base64
+      // direto — tem que decodificar cada uma pra bytes E concatenar os bytes.
+      const chunkByteArrays = [];
+      let totalBytes = 0;
       let audioUrlFromChunks = null;
+      let chunksWithAudio = 0;
       for (const c of chunks) {
         const b = c?.audio_bytes ?? c?.data?.audio_bytes ?? c?.audio ?? c?.audio_b64 ?? c?.chunk ?? c?.bytes;
-        if (b && typeof b === 'string') assembled += b;
+        if (b && typeof b === 'string') {
+          try {
+            const bin = atob(b);
+            const arr = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+            chunkByteArrays.push(arr);
+            totalBytes += arr.length;
+            chunksWithAudio++;
+          } catch (decodeErr) {
+            console.warn('[DARKO LAB] chunk base64 invalido, skip:', String(decodeErr?.message || decodeErr));
+          }
+        }
         const u = c?.audio_url ?? c?.url ?? c?.data?.audio_url;
         if (u && typeof u === 'string' && !audioUrlFromChunks) audioUrlFromChunks = u;
+      }
+      // Concatena bytes em um unico Uint8Array e re-encoda em base64 valido
+      let assembledBase64 = '';
+      if (chunkByteArrays.length > 0) {
+        const merged = new Uint8Array(totalBytes);
+        let off = 0;
+        for (const a of chunkByteArrays) { merged.set(a, off); off += a.length; }
+        // Chunked encode pra evitar call stack overflow em audios grandes
+        const CHUNK = 0x8000;
+        let bin = '';
+        for (let i = 0; i < merged.length; i += CHUNK) {
+          bin += String.fromCharCode.apply(null, merged.subarray(i, i + CHUNK));
+        }
+        assembledBase64 = btoa(bin);
       }
       data = {
         _ndjson: chunks,
         _ndjsonLines: lines.length,
+        _ndjsonChunksWithAudio: chunksWithAudio,
         _ndjsonParseErr: parseErr,
-        _bytesBase64: assembled || undefined,
+        _bytesBase64: assembledBase64 || undefined,
+        _byteLength: totalBytes,
         _audioUrl: audioUrlFromChunks || undefined,
         _rawPreview: txt.slice(0, 500),
         _rawLength: txt.length,
-        _contentType: ct,
+        _contentType: 'audio/mpeg',
+        _ndjsonOriginalCt: ct,
         _extVersion: DARKO_EXT_VERSION,
       };
-      console.log(`[DARKO LAB] proxy ndjson ${lines.length} lines, assembled=${assembled.length}B, audioUrl=${audioUrlFromChunks ? 'yes' : 'no'}`);
+      console.log(`[DARKO LAB] proxy ndjson ${lines.length} lines, ${chunksWithAudio} c/audio, decoded=${totalBytes}B, audioUrl=${audioUrlFromChunks ? 'yes' : 'no'}`);
     } catch (e) {
       data = { _ndjsonError: String(e?.message || e), _contentType: ct, _extVersion: DARKO_EXT_VERSION };
     }
