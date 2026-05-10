@@ -722,6 +722,17 @@ async function waitFor(predicate, timeoutMs = 15000, interval = 250) {
   throw new Error('Timeout esperando elemento.');
 }
 
+/** Igual waitFor mas retorna null em vez de throw - pra fallback chains */
+async function waitForOrNull(predicate, timeoutMs = 5000, interval = 200) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const v = predicate();
+    if (v) return v;
+    await sleep(interval);
+  }
+  return null;
+}
+
 /**
  * Tenta capturar a sessao do HeyGen pra fazer chamadas pra propria API
  * interna deles. Pega cookies + token salvo no localStorage.
@@ -825,7 +836,7 @@ async function runJob(requestId, payload) {
     // 2) Aguarda textarea de script aparecer (UI carregada)
     reportProgress(requestId, 'Aguardando UI HeyGen carregar...');
     console.log('[DARKO LAB UI] aguardando textarea, location=', location.href);
-    const textarea = await waitFor(
+    const textarea = await waitForOrNull(
       () => findScriptTextarea(),
       45000,
       400,
@@ -885,7 +896,7 @@ async function runJob(requestId, payload) {
 
     // 7) Clica Generate (seta no canto inferior direito)
     reportProgress(requestId, 'Clicando Generate...');
-    const generateBtn = await waitFor(() => findGenerateButton(), 8000, 300);
+    const generateBtn = await waitForOrNull(() => findGenerateButton(), 8000, 300);
     if (!generateBtn) throw new Error('Botao Generate nao encontrado.');
     if (generateClicked) {
       console.warn('[DARKO LAB UI] generate JA foi clicado uma vez, skip duplo click');
@@ -1118,7 +1129,7 @@ async function selectMotor(motor) {
   }
 
   // Procura o item do motor desejado dentro de qualquer dropdown/menu aberto
-  const item = await waitFor(() => findMotorMenuItem(motor), 4000, 200);
+  const item = await waitForOrNull(() => findMotorMenuItem(motor), 4000, 200);
   if (item) {
     console.log('[DARKO LAB UI motor] clicando item', target);
     clickElement(item);
@@ -1126,20 +1137,39 @@ async function selectMotor(motor) {
     return true;
   }
 
-  // Fallback: procura ANY clickable com texto Avatar X (visivel)
-  const allBtns = Array.from(document.querySelectorAll('button, [role="button"], [role="menuitem"], [role="option"]'));
+  console.warn('[DARKO LAB UI motor] item de menu nao achado em 4s, tentando fallback global');
+
+  // Fallback: procura ANY clickable com texto Avatar X visivel no DOM
+  // (item de menu em dropdown que nao tem role=menuitem padrao)
+  const allBtns = Array.from(document.querySelectorAll(
+    'button, [role="button"], [role="menuitem"], [role="option"], [role="menuitemradio"], div[tabindex], li'
+  ));
   for (const b of allBtns) {
     if (b.offsetParent === null) continue;
     const t = (b.textContent || '').trim();
-    if (t === target || t.startsWith(target + ' ') || t.startsWith(target + '\n')) {
-      console.log('[DARKO LAB UI motor] fallback - clicando button com texto:', t.slice(0, 50));
+    // Match exato ou comeco da string com Avatar X seguido de descricao
+    if (t === target || t.startsWith(target + ' ') || t.startsWith(target + '\n') ||
+        t.startsWith(target + 'Premium') || t.startsWith(target + '\t')) {
+      // Excluir o botao toggle (que ja eh visivel mas nao seleciona)
+      if (b === currentBtn) continue;
+      console.log('[DARKO LAB UI motor] fallback - clicando element com texto:', t.slice(0, 60));
       clickElement(b);
       await sleep(800);
       return true;
     }
   }
 
-  console.warn('[DARKO LAB UI motor] NAO conseguiu selecionar', target);
+  console.warn('[DARKO LAB UI motor] NAO conseguiu selecionar', target, '- tentou abrir dropdown mas item nao apareceu');
+  // Diagnostico: lista todos os elementos com "Avatar" no texto
+  const debug = Array.from(document.querySelectorAll('*'))
+    .filter((e) => e.children.length === 0 && /Avatar (III|IV|V)/.test((e.textContent || '').trim()))
+    .map((e) => ({
+      tag: e.tagName,
+      text: (e.textContent || '').trim().slice(0, 60),
+      visible: e.offsetParent !== null,
+    }))
+    .slice(0, 10);
+  console.log('[DARKO LAB UI motor diag] elementos com Avatar X no DOM:', debug);
   return false;
 }
 
@@ -1358,7 +1388,6 @@ async function pasteScriptIntoTextarea(textarea, text) {
 
 function clickElement(el) {
   if (!el) return;
-  // Dispara mouse events completos (alguns sites precisam)
   const rect = el.getBoundingClientRect();
   const opts = {
     bubbles: true,
@@ -1366,13 +1395,25 @@ function clickElement(el) {
     view: window,
     clientX: rect.left + rect.width / 2,
     clientY: rect.top + rect.height / 2,
+    button: 0,
+    buttons: 1,
   };
+  // Pointer events (Radix UI / shadcn / modern React libs precisam)
+  try {
+    el.dispatchEvent(new PointerEvent('pointerover', { ...opts, pointerType: 'mouse' }));
+    el.dispatchEvent(new PointerEvent('pointerenter', { ...opts, pointerType: 'mouse' }));
+    el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerType: 'mouse' }));
+    el.dispatchEvent(new PointerEvent('pointerup', { ...opts, pointerType: 'mouse' }));
+  } catch {}
+  // Mouse events (compat)
   el.dispatchEvent(new MouseEvent('mouseover', opts));
   el.dispatchEvent(new MouseEvent('mousedown', opts));
   el.dispatchEvent(new MouseEvent('mouseup', opts));
   el.dispatchEvent(new MouseEvent('click', opts));
   // Fallback nativo
-  if (typeof el.click === 'function') el.click();
+  if (typeof el.click === 'function') {
+    try { el.click(); } catch {}
+  }
 }
 
 /**
