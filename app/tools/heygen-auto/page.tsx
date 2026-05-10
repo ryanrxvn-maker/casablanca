@@ -154,11 +154,10 @@ export default function HeyGenAutoPage() {
         setError('Cola uma copy primeiro.');
         return null;
       }
-      const out = txtParts.map((p, i) => ({
-        label: 'parte' + (i + 1),
-        copy: p,
-        audio: undefined as File | undefined,
-      }));
+      const out: any[] = [];
+      for (let i = 0; i < txtParts.length; i++) {
+        out.push({ label: 'parte' + (i + 1), copy: txtParts[i] });
+      }
       return out;
     }
     if (aud.length === 0) {
@@ -168,11 +167,10 @@ export default function HeyGenAutoPage() {
     const ordered = [...aud].sort((a, b) =>
       a.name.localeCompare(b.name, 'pt', { numeric: true }),
     );
-    const out = ordered.map((a, i) => ({
-      label: 'parte' + (i + 1),
-      copy: '' as string | undefined,
-      audio: a as File | undefined,
-    }));
+    const out: any[] = [];
+    for (let i = 0; i < ordered.length; i++) {
+      out.push({ label: 'parte' + (i + 1), audio: ordered[i] });
+    }
     return out;
   }
 
@@ -576,4 +574,4 @@ export default function HeyGenAutoPage() {
                         <span>
                           <span className="mono text-lime">{r.label}</span>
                           <span className="ml-2 text-text-muted">
-        
+                 
