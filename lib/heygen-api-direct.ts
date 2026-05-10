@@ -23,7 +23,7 @@ const API_BASE = 'https://api2.heygen.com';
 
 /** Versao MINIMA do content-script da extensao que essa lib precisa.
  *  Cada vez que mudamos protocolo proxy (campos novos), bumpamos isso. */
-export const REQUIRED_EXT_VERSION = '4.0.12';
+export const REQUIRED_EXT_VERSION = '4.0.11';
 
 /** Compara "4.0.10" vs "4.0.9" → true se atual >= minima */
 function isExtVersionOk(actual: string | undefined): boolean {
