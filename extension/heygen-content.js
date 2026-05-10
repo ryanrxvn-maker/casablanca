@@ -832,26 +832,8 @@ async function runJob(requestId, payload) {
         'Abra app.heygen.com/avatar manualmente e tente de novo.'
       );
     }
-    console.log('[DARKO LAB UI] textarea presente - prosseguindo');
-
-    // 2) Aguarda textarea de script aparecer (UI carregada)
-    reportProgress(requestId, 'Aguardando UI HeyGen carregar...');
-    console.log('[DARKO LAB UI] aguardando textarea, location=', location.href);
-    const textarea = await waitForOrNull(
-      () => findScriptTextarea(),
-      45000,
-      400,
-    );
-    if (!textarea) {
-      // Loga diagnostico pra debug
-      dumpScriptDiagnostics();
-      throw new Error(
-        'Textarea de script nao apareceu em 45s na ' + location.href +
-        '. Confira se a aba HeyGen esta em /avatar (Quick Create). ' +
-        'Abre F12 na aba HeyGen e me cola os logs [DARKO LAB UI diag].'
-      );
-    }
-    console.log('[DARKO LAB UI] textarea de script encontrado');
+    console.log('[DARKO LAB UI] textarea encontrado, dimensoes:', textareaEarly.getBoundingClientRect().width, 'x', textareaEarly.getBoundingClientRect().height);
+    const textarea = textareaEarly;
 
     // 3) Seleciona motor (Avatar III / IV / V) com VERIFICACAO obrigatoria.
     //    CRITICO: avatar IV/V consomem creditos pagos. Se a gente errou e
