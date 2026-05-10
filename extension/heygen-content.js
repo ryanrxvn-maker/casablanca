@@ -757,13 +757,15 @@ async function fetchWithTimeout(url, opts, timeoutMs = 6000) {
  */
 async function runJob(requestId, payload) {
   if (currentJob) {
+    console.warn('[DARKO LAB UI] runJob ignorado - currentJob=', currentJob, 'novo reqId=', requestId);
     reportError(
       requestId,
-      'Outra geracao em andamento na mesma aba - aguarde finalizar.',
+      'Outra geracao em andamento - aguarde finalizar.',
     );
     return;
   }
   currentJob = requestId;
+  let generateClicked = false; // pra garantir click 1x
 
   try {
     const { copy, avatarId, motor, partLabel } = payload;
@@ -803,16 +805,30 @@ async function runJob(requestId, payload) {
     }
     console.log('[DARKO LAB UI] textarea de script encontrado');
 
-    // 3) Seleciona motor (Avatar III / IV / V) - clica no botao do topo
+    // 3) Seleciona motor (Avatar III / IV / V) com VERIFICACAO obrigatoria.
+    //    CRITICO: avatar IV/V consomem creditos pagos. Se a gente errou e
+    //    selecionou IV em vez de III, o user paga sem querer. Se nao
+    //    conseguir confirmar o motor exato, ABORTA.
     if (motor) {
       reportProgress(requestId, `Selecionando motor Avatar ${motor}...`);
-      const motorBtn = findMotorButton(motor);
-      if (motorBtn) {
-        console.log('[DARKO LAB UI] clicando motor', motor);
-        clickElement(motorBtn);
-        await sleep(800);
-      } else {
-        console.warn('[DARKO LAB UI] motor button Avatar', motor, 'nao achado - seguindo com motor atual');
+      const ok = await selectMotor(motor);
+      if (!ok) {
+        throw new Error(
+          `Nao consegui selecionar motor Avatar ${motor} no HeyGen. ` +
+          `Aborti pra nao gastar credito errado. Tente abrir manualmente ` +
+          `o seletor Avatar X no canto inferior do HeyGen e re-tentar.`
+        );
+      }
+      // Verifica APOS selecionar
+      await sleep(500);
+      const after = findCurrentMotorToggle();
+      const afterText = after ? (after.textContent || '').trim() : '';
+      console.log('[DARKO LAB UI motor] toggle apos selecionar:', afterText);
+      if (after && !afterText.includes(`Avatar ${motor}`)) {
+        throw new Error(
+          `Verificacao de motor falhou: queria Avatar ${motor} mas o toggle ` +
+          `mostra "${afterText.slice(0, 50)}". Aborti pra nao gastar credito errado.`
+        );
       }
     }
 
@@ -835,8 +851,13 @@ async function runJob(requestId, payload) {
     reportProgress(requestId, 'Clicando Generate...');
     const generateBtn = await waitFor(() => findGenerateButton(), 8000, 300);
     if (!generateBtn) throw new Error('Botao Generate nao encontrado.');
-    console.log('[DARKO LAB UI] clicando Generate');
-    clickElement(generateBtn);
+    if (generateClicked) {
+      console.warn('[DARKO LAB UI] generate JA foi clicado uma vez, skip duplo click');
+    } else {
+      console.log('[DARKO LAB UI] clicando Generate');
+      clickElement(generateBtn);
+      generateClicked = true;
+    }
 
     // 8) Aguarda video processar - poll video.list pra detectar video NOVO
     reportProgress(requestId, 'HeyGen processando...');
@@ -917,14 +938,114 @@ function dumpScriptDiagnostics() {
   }
 }
 
-function findMotorButton(motor) {
-  // Procura botoes que contenham texto "Avatar III", "Avatar IV", "Avatar V"
+/**
+ * Seleciona motor (Avatar III/IV/V) clicando no dropdown atual e depois
+ * no item correto do menu. HeyGen UI: tem botao "Avatar IV ^" no canto
+ * inferior que ABRE um dropdown com 3 opcoes (V/IV/III). Precisa abrir
+ * o dropdown E clicar no item exato.
+ */
+async function selectMotor(motor) {
   const target = `Avatar ${motor}`;
-  const buttons = Array.from(document.querySelectorAll('button, [role="button"], [role="tab"]'));
-  return buttons.find((b) => {
+  console.log('[DARKO LAB UI motor] alvo=', target);
+
+  // Verifica se ja esta no motor certo (botao do toggle mostra Avatar X)
+  const currentBtn = findCurrentMotorToggle();
+  if (currentBtn) {
+    const t = (currentBtn.textContent || '').trim();
+    console.log('[DARKO LAB UI motor] toggle atual mostra:', t);
+    if (t.includes(target)) {
+      console.log('[DARKO LAB UI motor] ja esta em', target, '- skip');
+      return true;
+    }
+  }
+
+  // Abre o dropdown
+  if (currentBtn) {
+    console.log('[DARKO LAB UI motor] clicando dropdown atual pra abrir');
+    clickElement(currentBtn);
+    await sleep(700);
+  } else {
+    console.warn('[DARKO LAB UI motor] toggle atual nao achado, tentando achar motor btn direto');
+  }
+
+  // Procura o item do motor desejado dentro de qualquer dropdown/menu aberto
+  const item = await waitFor(() => findMotorMenuItem(motor), 4000, 200);
+  if (item) {
+    console.log('[DARKO LAB UI motor] clicando item', target);
+    clickElement(item);
+    await sleep(800);
+    return true;
+  }
+
+  // Fallback: procura ANY clickable com texto Avatar X (visivel)
+  const allBtns = Array.from(document.querySelectorAll('button, [role="button"], [role="menuitem"], [role="option"]'));
+  for (const b of allBtns) {
+    if (b.offsetParent === null) continue;
     const t = (b.textContent || '').trim();
-    return t === target || t.startsWith(target + ' ') || t === target.toUpperCase();
-  });
+    if (t === target || t.startsWith(target + ' ') || t.startsWith(target + '\n')) {
+      console.log('[DARKO LAB UI motor] fallback - clicando button com texto:', t.slice(0, 50));
+      clickElement(b);
+      await sleep(800);
+      return true;
+    }
+  }
+
+  console.warn('[DARKO LAB UI motor] NAO conseguiu selecionar', target);
+  return false;
+}
+
+/**
+ * Acha o botao de toggle do motor atual (mostra "Avatar IV", "Avatar V",
+ * "Avatar III" + um icone de seta pra cima/baixo). Geralmente fica na
+ * barra inferior do composer Quick Create.
+ */
+function findCurrentMotorToggle() {
+  const buttons = Array.from(document.querySelectorAll('button'));
+  for (const b of buttons) {
+    if (b.offsetParent === null) continue;
+    const t = (b.textContent || '').trim();
+    // Match exato: "Avatar III", "Avatar IV", "Avatar V" (com possivel sufixo)
+    if (/^Avatar (III|IV|V)\b/.test(t) && t.length < 30) {
+      // Verifica se ta na area inferior (composer)
+      const rect = b.getBoundingClientRect();
+      if (rect.top > window.innerHeight * 0.5) {
+        return b;
+      }
+    }
+  }
+  // Fallback: pega qualquer botao com texto "Avatar III/IV/V"
+  for (const b of buttons) {
+    if (b.offsetParent === null) continue;
+    const t = (b.textContent || '').trim();
+    if (/^Avatar (III|IV|V)\b/.test(t) && t.length < 30) {
+      return b;
+    }
+  }
+  return null;
+}
+
+/**
+ * Procura item de menu correspondente ao motor dentro de um dropdown aberto.
+ */
+function findMotorMenuItem(motor) {
+  const target = `Avatar ${motor}`;
+  // Items de menu/option em geral tem role specific ou sao em dialog/menu
+  const items = Array.from(document.querySelectorAll(
+    '[role="menuitem"], [role="option"], [role="menuitemradio"], [data-radix-collection-item]'
+  ));
+  for (const it of items) {
+    if (it.offsetParent === null) continue;
+    const t = (it.textContent || '').trim();
+    // Match: comeca com "Avatar III" (pode ter "Premium" e descricao depois)
+    if (t.startsWith(target)) {
+      // Garante que nao bate "Avatar IV" qd procurando "Avatar I" ou similar
+      const next = t.charAt(target.length);
+      if (next === '' || next === ' ' || next === '\n' || /\W/.test(next)) {
+        return it;
+      }
+    }
+  }
+  return null;
 }
 
 function findGenerateButton() {
@@ -1119,14 +1240,24 @@ function clickElement(el) {
  * Generate, depois polamos pra detectar o NOVO video que aparece (eh o que
  * a gente acabou de criar).
  */
+/**
+ * Snapshot via DOM da sidebar Recents do HeyGen + API list fallback.
+ * Sidebar mostra "Avatar Video • just now / 1 minute ago" - quando aparece
+ * um item NOVO ou um existente vira "just now", esse eh o nosso video.
+ */
 async function snapshotExistingVideoIds() {
-  const ids = new Set();
-  // Tenta varios endpoints de listagem
+  // 1) Snapshot DOM Recents
+  const domIds = collectRecentsItemSignatures();
+  console.log('[DARKO LAB UI] snapshot DOM Recents:', domIds.size, 'items');
+
+  // 2) Snapshot API list (fallback - alguns endpoints podem nao estar disponiveis)
+  const apiIds = new Set();
+  let apiEndpoint = null;
   const endpoints = [
-    'https://api2.heygen.com/v1/video.list?limit=20&page=1',
-    'https://api2.heygen.com/v2/video.list?limit=20&page=1',
-    'https://api2.heygen.com/v1/video.private.list?limit=20',
-    'https://api2.heygen.com/v1/pacific.video.list?limit=20',
+    'https://api2.heygen.com/v1/video.list?limit=30&page=1',
+    'https://api2.heygen.com/v2/video.list?limit=30&page=1',
+    'https://api2.heygen.com/v1/video.private.list?limit=30',
+    'https://api2.heygen.com/v1/pacific.video.list?limit=30',
   ];
   for (const url of endpoints) {
     try {
@@ -1135,18 +1266,64 @@ async function snapshotExistingVideoIds() {
       const j = await r.json().catch(() => null);
       const list = extractVideoList(j);
       if (list && list.length > 0) {
-        console.log(`[DARKO LAB UI] snapshot via ${url}: ${list.length} videos`);
+        console.log(`[DARKO LAB UI] snapshot API via ${url}: ${list.length} videos`);
         for (const v of list) {
           const id = v?.video_id ?? v?.id ?? v?.uuid;
-          if (id) ids.add(id);
+          if (id) apiIds.add(id);
         }
-        return { ids, listEndpoint: url };
+        apiEndpoint = url;
+        break;
       }
-    } catch (e) {
-      /* tenta proximo */
+    } catch (e) { /* */ }
+  }
+  return { domIds, apiIds, apiEndpoint };
+}
+
+/**
+ * Coleta assinaturas (texto + href + data-*) dos items da sidebar Recents.
+ * Cada item eh tipo: 'Avatar Video|just now|<href>'.
+ */
+function collectRecentsItemSignatures() {
+  const set = new Set();
+  // Procura container que contenha "Recents" ou "RECENTS"
+  const candidates = document.querySelectorAll('a, [role="link"], li, [data-testid*="recent" i]');
+  for (const item of candidates) {
+    const text = (item.textContent || '').trim();
+    // Items recentes geralmente tem "Avatar Video", "Video sem titulo", etc + tempo
+    if (!/avatar video|video|untitled/i.test(text)) continue;
+    if (text.length > 100) continue; // evita capturar containers grandes
+    const href = item.getAttribute('href') || item.dataset?.href || '';
+    const sig = (text + '|' + href).slice(0, 200);
+    set.add(sig);
+  }
+  return set;
+}
+
+/**
+ * Tenta extrair video_id de um item da sidebar Recents (via href, data-id, etc).
+ */
+function extractVideoIdFromRecentsItem(el) {
+  if (!el) return null;
+  // 1) href
+  const href = el.getAttribute('href') || el.querySelector('a')?.getAttribute('href') || '';
+  const m = href.match(/(?:video|share|projects?)[\/=]([a-f0-9]{20,})/i);
+  if (m) return m[1];
+  // 2) data attrs
+  for (const attr of el.attributes || []) {
+    if (/^data-/.test(attr.name) && /^[a-f0-9]{20,}$/i.test(attr.value)) {
+      return attr.value;
     }
   }
-  return { ids, listEndpoint: null };
+  // 3) procura em filhos
+  const allEls = el.querySelectorAll('*');
+  for (const child of allEls) {
+    for (const attr of child.attributes || []) {
+      if (/^data-/.test(attr.name) && /^[a-f0-9]{20,}$/i.test(attr.value)) {
+        return attr.value;
+      }
+    }
+  }
+  return null;
 }
 
 function extractVideoList(j) {
@@ -1169,41 +1346,62 @@ function extractVideoList(j) {
 
 async function waitForVideoCompletion(requestId, snapshot) {
   const deadline = Date.now() + 15 * 60 * 1000;
-  const beforeIds = snapshot?.ids ?? new Set();
-  const listEndpoint = snapshot?.listEndpoint;
+  const beforeDomSigs = snapshot?.domIds ?? new Set();
+  const beforeApiIds = snapshot?.apiIds ?? new Set();
+  const apiEndpoint = snapshot?.apiEndpoint;
   let newVideoId = null;
   let lastPercent = -1;
 
-  console.log(`[DARKO LAB UI] waitForVideoCompletion start, ${beforeIds.size} videos pre-existentes, listEndpoint=${listEndpoint}`);
+  console.log(`[DARKO LAB UI] waitForVideoCompletion start. DOM: ${beforeDomSigs.size} items. API: ${beforeApiIds.size} videos via ${apiEndpoint}`);
 
   while (Date.now() < deadline) {
     if (currentJob !== requestId) throw new Error('Job foi cancelado.');
 
-    // ESTRATEGIA 1: pola video.list pra achar video NOVO (criado depois do snapshot)
-    if (!newVideoId && listEndpoint) {
+    // ESTRATEGIA 1: scan DOM Recents pra achar item NOVO
+    if (!newVideoId) {
+      const candidates = document.querySelectorAll('a, [role="link"], li, [data-testid*="recent" i]');
+      for (const item of candidates) {
+        const text = (item.textContent || '').trim();
+        if (!/avatar video|video|untitled/i.test(text)) continue;
+        if (text.length > 100) continue;
+        const href = item.getAttribute('href') || item.dataset?.href || '';
+        const sig = (text + '|' + href).slice(0, 200);
+        if (!beforeDomSigs.has(sig)) {
+          // Item NOVO encontrado na sidebar
+          const id = extractVideoIdFromRecentsItem(item);
+          if (id) {
+            newVideoId = id;
+            console.log('[DARKO LAB UI] video NOVO detectado via DOM Recents:', id, 'sig:', sig.slice(0, 60));
+            break;
+          }
+          // Mesmo sem ID, marcamos: indica que o video apareceu (item novo)
+          // Vamos continuar tentando achar o ID via API
+        }
+      }
+    }
+
+    // ESTRATEGIA 2: pola API video.list (fallback)
+    if (!newVideoId && apiEndpoint) {
       try {
-        const r = await fetch(listEndpoint, { method: 'GET', credentials: 'include' });
+        const r = await fetch(apiEndpoint, { method: 'GET', credentials: 'include' });
         if (r.ok) {
           const j = await r.json().catch(() => null);
           const list = extractVideoList(j);
           if (list) {
-            // Acha o primeiro video que NAO estava no snapshot
             for (const v of list) {
               const id = v?.video_id ?? v?.id ?? v?.uuid;
-              if (id && !beforeIds.has(id)) {
+              if (id && !beforeApiIds.has(id)) {
                 newVideoId = id;
-                console.log('[DARKO LAB UI] video NOVO detectado via list:', id);
+                console.log('[DARKO LAB UI] video NOVO detectado via API list:', id);
                 break;
               }
             }
           }
         }
-      } catch (e) {
-        /* continua */
-      }
+      } catch (e) { /* continua */ }
     }
 
-    // ESTRATEGIA 2: detecta videoId na URL (caso HeyGen redirecione)
+    // ESTRATEGIA 3: detecta videoId na URL (caso HeyGen redirecione)
     if (!newVideoId) {
       const m = location.href.match(/(?:video|share|projects?)[\/=]([a-f0-9]{20,})/i);
       if (m) {
