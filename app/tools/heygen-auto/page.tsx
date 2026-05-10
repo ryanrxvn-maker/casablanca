@@ -17,7 +17,7 @@ import {
   testHeygenSession,
   type ExtensionStatus,
 } from '@/lib/heygen-extension-bridge';
-import { processJob, type EngineKey } from '@/lib/heygen-api-direct';
+import { runHeyGenJobs } from '@/lib/heygen-job-runner';
 import {
   HeyGenAvatarPicker,
   type AvatarOption,
@@ -148,6 +148,31 @@ export default function HeyGenAutoPage() {
     });
   }
 
+  function buildJobs(
+    m: Mode,
+    txtParts: string[],
+    aud: File[],
+  ): { label: string; copy?: string; audio?: File }[] | null {
+    if (m === 'copy') {
+      if (txtParts.length === 0) {
+        setError('Cola uma copy primeiro.');
+        return null;
+      }
+      return txtParts.map((p, i) => ({ label: 'parte' + (i + 1), copy: p }));
+    }
+    if (aud.length === 0) {
+      setError('Faca upload de pelo menos um arquivo de audio.');
+      return null;
+    }
+    const ordered = [...aud].sort((a, b) =>
+      a.name.localeCompare(b.name, 'pt', { numeric: true }),
+    );
+    return ordered.map((a, i) => ({
+      label: 'parte' + (i + 1),
+      audio: a,
+    }));
+  }
+
   async function run() {
     if (!extStatus.connected) {
       setError(
@@ -160,32 +185,8 @@ export default function HeyGenAutoPage() {
       return;
     }
 
-    type Job = { label: string; copy: string; audio?: File };
-    let jobs: Job[] = [];
-    if (mode === 'copy') {
-      if (parts.length === 0) {
-        setError('Cola uma copy primeiro.');
-        return;
-      }
-      jobs = parts.map((p, i) => ({
-        label: `parte${i + 1}`,
-        copy: p,
-      }));
-    } else {
-      if (audioParts.length === 0) {
-        setError('Faca upload de pelo menos um arquivo de audio.');
-        return;
-      }
-      // Garante ordem natural por nome (parte1.mp3, parte2.mp3...)
-      const ordered = [...audioParts].sort((a, b) =>
-        a.name.localeCompare(b.name, 'pt', { numeric: true }),
-      );
-      jobs = ordered.map((a, i) => ({
-        label: `parte${i + 1}`,
-        copy: '',
-        audio: a,
-      }));
-    }
+    const jobs = buildJobs(mode, parts, audioParts);
+    if (!jobs) return;
 
     cancelRef.current = false;
     setError(null);
@@ -193,79 +194,37 @@ export default function HeyGenAutoPage() {
     setProcessing(true);
 
     try {
-      const collected: PartResult[] = new Array(jobs.length);
-      // MODO API DIRETA (v4.0.0) — usa processJob (engenharia reversa de
-      // @euojeff.daily). Pula totalmente UI automation. Cada trecho:
-      //   1. (texto) gera TTS via /v2/online/text_to_speech.stream
-      //   2. uploadAudio (4 passos: signed URL + S3 PUT + register + transcode + ASR)
-      //   3. createVideo (POST /v2/avatar/shortcut/submit)
-      // Paralelismo: 3 jobs simultaneos (HeyGen aceita ate 5).
-      const PARALLEL = 3;
-      const engineKey: EngineKey = motor === 'III' ? 'iii' : motor === 'IV' ? 'iv' : 'v';
       const adNameSafe = (adName || 'avatar').replace(/[^a-zA-Z0-9_-]/g, '_');
-
-      let cursor = 0;
-      const pickNext = () => {
-        if (cancelRef.current) return -1;
-        return cursor < jobs.length ? cursor++ : -1;
-      };
-
-      async function worker() {
-        while (true) {
-          const idx = pickNext();
-          if (idx < 0) return;
-          const job = jobs[idx];
-          try {
-            setStage(`Disparando ${job.label} (${idx + 1}/${jobs.length})...`);
-            const voiceId =
-              mode === 'copy' && overrideVoice && selectedVoice
-                ? selectedVoice.id
-                : selectedVoice?.id ?? undefined;
-            if (mode === 'copy' && !voiceId) {
-              throw new Error(`${job.label}: modo texto precisa de voz selecionada (escolhe acima).`);
-            }
-            const result = await processJob(
-              {
-                file: mode === 'audio' ? job.audio : undefined,
-                text: mode === 'copy' ? job.copy : undefined,
-                voiceId: mode === 'copy' ? voiceId : undefined,
-                title: `${adNameSafe}_${job.label}`,
-                avatarId: selectedAvatar!.id,
-                engine: engineKey,
-                orientation: 'portrait',
-              },
-              {
-                onProgress: (stage) => setStage(`${job.label}: ${stage}`),
-              },
-            );
-            collected[idx] = {
-              index: idx + 1,
-              label: job.label,
-              videoUrl: `QUEUED:${result.videoId}`,
-              blob: new Blob(),
-            };
-          } catch (e) {
-            collected[idx] = {
-              index: idx + 1,
-              label: job.label,
-              videoUrl: `ERROR:${(e as Error).message ?? 'falha desconhecida'}`,
-              blob: new Blob(),
-            };
-            console.error(`[HeyGen Auto] Job ${job.label} falhou:`, e);
-          }
-          setResults(collected.filter(Boolean) as PartResult[]);
-        }
-      }
-
-      const workers = [];
-      for (let w = 0; w < PARALLEL; w++) workers.push(worker());
-      await Promise.all(workers);
-
-      const ok = collected.filter((r) => r && !r.videoUrl.startsWith('ERROR:')).length;
+      const voiceId =
+        mode === 'copy' && overrideVoice && selectedVoice
+          ? selectedVoice.id
+          : selectedVoice?.id;
+      const collected: PartResult[] = [];
+      const results = await runHeyGenJobs(jobs, {
+        parallel: 3,
+        mode,
+        avatarId: selectedAvatar!.id,
+        voiceId,
+        motor,
+        adNameSafe,
+        isCancelled: () => cancelRef.current,
+        onProgress: setStage,
+        onResult: (r) => {
+          collected.push({
+            index: r.index,
+            label: r.label,
+            videoUrl: r.videoId ? `QUEUED:${r.videoId}` : `ERROR:${r.error || 'falha'}`,
+            blob: new Blob(),
+          });
+          setResults([...collected].sort((a, b) => a.index - b.index));
+        },
+      });
+      const ok = results.filter((r) => r.videoId).length;
       const failed = jobs.length - ok;
       setStage(
-        `${ok}/${jobs.length} trechos enviados pro HeyGen${failed > 0 ? ` (${failed} falharam)` : ''}. ` +
-          `Pega os mp4s prontos em app.heygen.com.`,
+        ok + '/' + jobs.length + ' trechos enviados pro HeyGen' +
+          (failed > 0 ? ' (' + failed + ' falharam)' : '') +
+          '. Pega os mp4s prontos em app.heygen.com.',
       );
     } catch (e) {
       setError((e as Error).message ?? 'Falha desconhecida.');
@@ -613,4 +572,6 @@ export default function HeyGenAutoPage() {
                       >
                         <span>
                           <span className="mono text-lime">{r.label}</span>
-                          <span className="ml-2 text-text-
+                          <span className="ml-2 text-text-muted">
+                            {vid ? `id ${vid.slice(0, 12)}...` : 'enviado'}
+                          </s
