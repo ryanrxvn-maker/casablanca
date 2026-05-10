@@ -26,6 +26,7 @@ import {
   type AvatarOption,
 } from '@/components/HeyGenAvatarPicker';
 import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
+import { getLibrarySnapshot, reloadLibrary } from '@/lib/heygen-library-cache';
 import {
   HeyGenVoicePicker,
   type VoiceOption,
@@ -133,6 +134,70 @@ export default function HeyGenAutoPage() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  /* --------------- Handoff de outras tools (ClickUp Pilot) --------------- */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('from') !== 'clickup-pilot') return;
+    const raw = sessionStorage.getItem('darkolab:heygen-auto:handoff');
+    if (!raw) return;
+    try {
+      const h = JSON.parse(raw) as {
+        adName?: string;
+        motor?: 'III' | 'IV' | 'V';
+        mode?: 'copy' | 'audio';
+        copy?: string;
+        dynamic?: boolean;
+        partAvatarIds?: (string | null)[];
+        partLabels?: string[];
+      };
+      if (h.adName) setAdName(h.adName);
+      if (h.motor) setMotor(h.motor);
+      if (h.mode) setMode(h.mode);
+      if (h.copy) setCopy(h.copy);
+      if (h.dynamic) setDynamicMode(true);
+      // Pre-popula partAvatars depois que groups loadarem (precisa do snapshot)
+      if (h.partAvatarIds && h.partAvatarIds.length > 0) {
+        const snap = getLibrarySnapshot();
+        const buildFromIds = () => {
+          const flat: AvatarOption[] = [];
+          for (const g of getLibrarySnapshot().groups) {
+            for (const l of g.looks) {
+              flat.push({
+                id: l.id,
+                name: l.name,
+                thumb: l.thumb,
+                videoPreview: l.videoPreview,
+                type: l.type,
+                version: l.version,
+                groupId: l.groupId,
+                groupName: l.groupName,
+                voiceId: (l as any).voiceId ?? null,
+              });
+            }
+          }
+          const mapped = (h.partAvatarIds || []).map((id) =>
+            id ? (flat.find((a) => a.id === id) || null) : null,
+          );
+          setPartAvatars(mapped);
+          // Selecionar o PRIMEIRO avatar como global (pra fallback de partes
+          // sem avatar especifico)
+          const firstWithAvatar = mapped.find((a) => a !== null);
+          if (firstWithAvatar) setSelectedAvatar(firstWithAvatar);
+        };
+        if (snap.groups.length > 0) buildFromIds();
+        else {
+          reloadLibrary(false).then(() => buildFromIds());
+        }
+      }
+      // Limpa handoff pra nao re-aplicar em refresh
+      sessionStorage.removeItem('darkolab:heygen-auto:handoff');
+    } catch (e) {
+      console.warn('[heygen-auto] handoff parse falhou:', e);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /* (avatar + voice search delegados aos componentes compartilhados) */

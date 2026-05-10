@@ -98,6 +98,11 @@ export const AI_SUITE: RailItem[] = [
     label: 'HeyGen Auto',
     icon: <IconHeyGenAuto />,
   },
+  {
+    href: '/tools/clickup-pilot',
+    label: 'ClickUp Pilot',
+    icon: <IconHeyGenAuto />,
+  },
 ];
 
 /**
