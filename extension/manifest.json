@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DARKO LAB — HeyGen Auto",
-  "version": "3.2.0",
+  "version": "3.2.1",
   "description": "Automatiza a geracao de avatares HeyGen direto da sua conta logada, integrado ao DARKO LAB.",
   "icons": {
     "16": "icons/icon-16.png",

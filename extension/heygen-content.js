@@ -1577,6 +1577,19 @@ async function pasteScriptIntoTextarea(textarea, text) {
 
 function clickElement(el) {
   if (!el) return;
+  // CRITICO: usa APENAS UM mecanismo de click pra evitar duplo trigger
+  // do React handler (que causaria 2 generates = 2x gasto de credito).
+  // Estrategia: usa el.click() nativo se disponivel (mais limpo, browser
+  // sintetiza tudo internamente). Pra elementos sem .click() (div), faz
+  // apenas pointerdown+pointerup+click (sequencia minima necessaria pro
+  // Radix/shadcn).
+  if (el.tagName === 'BUTTON' || (typeof el.click === 'function' && el.tagName !== 'DIV' && el.tagName !== 'SPAN')) {
+    try {
+      el.click();
+      return;
+    } catch {}
+  }
+  // DIV/SPAN: dispatch sintetico (sem chamar .click() pra nao duplicar)
   const rect = el.getBoundingClientRect();
   const opts = {
     bubbles: true,
@@ -1587,22 +1600,11 @@ function clickElement(el) {
     button: 0,
     buttons: 1,
   };
-  // Pointer events (Radix UI / shadcn / modern React libs precisam)
   try {
-    el.dispatchEvent(new PointerEvent('pointerover', { ...opts, pointerType: 'mouse' }));
-    el.dispatchEvent(new PointerEvent('pointerenter', { ...opts, pointerType: 'mouse' }));
     el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerType: 'mouse' }));
     el.dispatchEvent(new PointerEvent('pointerup', { ...opts, pointerType: 'mouse' }));
   } catch {}
-  // Mouse events (compat)
-  el.dispatchEvent(new MouseEvent('mouseover', opts));
-  el.dispatchEvent(new MouseEvent('mousedown', opts));
-  el.dispatchEvent(new MouseEvent('mouseup', opts));
   el.dispatchEvent(new MouseEvent('click', opts));
-  // Fallback nativo
-  if (typeof el.click === 'function') {
-    try { el.click(); } catch {}
-  }
 }
 
 /**

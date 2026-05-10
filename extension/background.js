@@ -405,6 +405,20 @@ async function injectInterceptorIntoMainWorld(tabId) {
       func: () => {
         if (window.__darkolab_intercept_loaded__) return;
         window.__darkolab_intercept_loaded__ = true;
+        // Dedup de captura: se 2 POST identicas (mesma URL) em <3s,
+        // emite VIDEO_GENERATED so 1x. Protege contra dispatch duplo do
+        // React/automacao.
+        const recentEmits = new Map(); // url -> ts
+        function shouldEmit(url, ts) {
+          const last = recentEmits.get(url);
+          if (last && ts - last < 3000) return false;
+          recentEmits.set(url, ts);
+          // Limpa entradas velhas (>60s)
+          for (const [k, v] of recentEmits) {
+            if (ts - v > 60000) recentEmits.delete(k);
+          }
+          return true;
+        }
         // Captura QUALQUER POST a heygen.com (mais amplo). Excluimos
         // endpoints conhecidos de NAO-generate pra reduzir spam: tracking,
         // metrics, log, analytics, recommendation, search, voices.list,
@@ -446,6 +460,10 @@ async function injectInterceptorIntoMainWorld(tabId) {
                 try { j = JSON.parse(text); } catch { return; }
                 const id = tryExtractId(j);
                 if (id) {
+                  if (!shouldEmit(url, Date.now())) {
+                    console.log('[DARKO LAB inject] DUP video_id capturado em <3s, IGNORADO:', id, 'via', url);
+                    return;
+                  }
                   console.log('[DARKO LAB inject] fetch capturou video_id', id, 'via', url);
                   emit({ video_id: id, url, source_method: 'fetch' });
                 }
@@ -475,6 +493,10 @@ async function injectInterceptorIntoMainWorld(tabId) {
               try { j = JSON.parse(text); } catch { return; }
               const id = tryExtractId(j);
               if (id) {
+                if (!shouldEmit(_url, Date.now())) {
+                  console.log('[DARKO LAB inject] DUP video_id (XHR) em <3s, IGNORADO:', id);
+                  return;
+                }
                 console.log('[DARKO LAB inject] XHR capturou video_id', id, 'via', _url);
                 emit({ video_id: id, url: _url, source_method: 'xhr' });
               }
