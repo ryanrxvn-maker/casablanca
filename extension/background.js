@@ -424,7 +424,9 @@ async function injectInterceptorIntoMainWorld(tabId) {
         // metrics, log, analytics, recommendation, search, voices.list,
         // avatar_group.private.list etc.
         const HG_RE = /heygen\.(com|ai)/i;
-        const SKIP_RE = /(tracking|metrics|log|analytics|telemetry|recommend|search\.|voices?\.list|avatar_(group|look)\.private|user\.info|asset\.|file\.|upload\.|status\.|preview|notifi)/i;
+        // SKIP so endpoints OBVIAMENTE nao-generate. Removido: status,
+        // preview, asset (alguns generates passam por esses padroes).
+        const SKIP_RE = /(\/v\d+\/(tracking|telemetry|analytics|metrics|log|notification|recommendation|search|voice\.list|avatar_group\.private|avatar_look\.private|user\.info|favorite))/i;
         function emit(payload) {
           try {
             window.postMessage({ source: 'darkolab-injected', type: 'VIDEO_GENERATED', ts: Date.now(), ...payload }, '*');

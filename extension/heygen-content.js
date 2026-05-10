@@ -946,18 +946,80 @@ async function runJob(requestId, payload) {
  * contenha video_id. So aceita events com timestamp >= clickStartTs (pra
  * nao pegar generate de outra pessoa que rodou antes).
  */
-async function waitForInterceptedVideoId(clickStartTs, timeoutMs = 30000) {
+async function waitForInterceptedVideoId(clickStartTs, timeoutMs = 60000) {
   const deadline = Date.now() + timeoutMs;
+  let lastLogTs = 0;
+  let fallbackTried = false;
+
   while (Date.now() < deadline) {
-    // Procura no buffer interceptedVideoIds o primeiro com ts >= clickStartTs
+    // 1) Procura no buffer interceptedVideoIds o primeiro com ts >= clickStartTs
     for (const item of interceptedVideoIds) {
       if (item.ts >= clickStartTs) {
+        console.log('[DARKO LAB UI] waitForInterceptedVideoId: ACHOU id=', item.id, 'via', item.url);
         return item.id;
       }
     }
-    await sleep(300);
+
+    // 2) Log periodico do estado do buffer (a cada 10s) pra debug
+    if (Date.now() - lastLogTs > 10000) {
+      lastLogTs = Date.now();
+      console.log(`[DARKO LAB UI] waitForInterceptedVideoId aguardando... buffer tem ${interceptedVideoIds.length} items, clickStartTs=${new Date(clickStartTs).toISOString()}`);
+      if (interceptedVideoIds.length > 0) {
+        console.log('[DARKO LAB UI] items no buffer:', interceptedVideoIds.map((i) => ({
+          id: i.id?.slice(0, 12) + '...',
+          tsAge: Math.round((Date.now() - i.ts) / 1000) + 's',
+          url: i.url?.slice(0, 80),
+        })));
+      }
+    }
+
+    // 3) FALLBACK apos 20s: scan da sidebar Recents pra detectar item NOVO
+    //    com 'just now' / 'a few seconds ago'. Pega o video_id do href.
+    if (!fallbackTried && Date.now() - clickStartTs > 20000) {
+      fallbackTried = true;
+      console.warn('[DARKO LAB UI] waitForInterceptedVideoId 20s sem captura - fallback DOM Recents');
+      const recentVid = scanRecentsForJustNow();
+      if (recentVid) {
+        console.log('[DARKO LAB UI] FALLBACK: detectado video via Recents =', recentVid);
+        return recentVid;
+      }
+    }
+
+    await sleep(500);
   }
+  console.warn('[DARKO LAB UI] waitForInterceptedVideoId TIMEOUT', timeoutMs, 'ms - 0 captures atribuiveis');
   return null;
+}
+
+/**
+ * Scan da sidebar Recents do HeyGen procurando item com 'just now' /
+ * 'seconds ago' (criado pela nossa automacao). Retorna video_id se achar.
+ */
+function scanRecentsForJustNow() {
+  // Procura todos elementos visiveis com texto contendo "ago", "now", "agora"
+  const all = document.querySelectorAll('a, [role="link"], li, div');
+  let bestMatch = null;
+  for (const el of all) {
+    if (el.offsetParent === null) continue;
+    const text = (el.textContent || '').trim().toLowerCase();
+    if (!text) continue;
+    // "just now", "a few seconds ago", "1 minute ago"
+    if (
+      text.includes('just now') ||
+      text.includes('seconds ago') ||
+      text.includes('1 minute ago') ||
+      text.includes('agora mesmo')
+    ) {
+      // Busca href com video_id
+      const href = el.getAttribute('href') || el.querySelector('a')?.getAttribute('href') || '';
+      const m = href.match(/(?:video|share|projects?)[\/=]([a-f0-9]{20,})/i);
+      if (m) {
+        bestMatch = m[1];
+        break;
+      }
+    }
+  }
+  return bestMatch;
 }
 
 /**
