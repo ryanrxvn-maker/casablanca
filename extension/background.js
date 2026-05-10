@@ -54,6 +54,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'HG_INJECT_INTERCEPTOR') {
+    const tabId = sender.tab?.id;
+    // Responde IMEDIATO (sync) pra fechar o canal e nao gerar warning.
+    try { sendResponse({ accepted: true }); } catch {}
+    if (tabId) {
+      injectInterceptorIntoMainWorld(tabId)
+        .then((ok) => {
+          console.log('[DARKO LAB BG] inject interceptor result tabId=', tabId, 'ok=', ok);
+        })
+        .catch((e) => {
+          console.error('[DARKO LAB BG] !!! inject interceptor THREW:', e?.message ?? e);
+        });
+    }
+    return; // sem return true (sync)
+  }
+
   if (msg.type === 'HG_LIST_AVATARS') {
     const requestId = msg.requestId;
     handleListAvatars(requestId, sender.tab?.id).catch((err) => {

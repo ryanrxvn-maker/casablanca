@@ -1135,20 +1135,47 @@ async function selectMotor(motor) {
       console.warn('[DARKO LAB UI motor] toggle nao achado nessa tentativa');
     }
 
-    // Procura item EM TODO o documento (incluindo portais Radix em document.body)
+    // Procura item EM TODO o documento (busca brute force por texto)
     const item = await waitForOrNull(() => findMotorMenuItem(motor), 3000, 200);
     if (item) {
       console.log(`[DARKO LAB UI motor] item encontrado! Texto:`, (item.textContent || '').slice(0, 60));
-      clickElement(item);
+      await clickWithAncestors(item);
       await sleep(900);
-      // Verifica imediato se funcionou
       const newToggle = findCurrentMotorToggle();
       const newText = newToggle ? (newToggle.textContent || '').trim() : '';
       if (newText.includes(target)) {
-        console.log('[DARKO LAB UI motor] sucesso na tentativa', attempt);
+        console.log('[DARKO LAB UI motor] sucesso (click) na tentativa', attempt);
         return true;
       }
-      console.warn('[DARKO LAB UI motor] click foi mas toggle ainda nao mostra', target, '- retry');
+      console.warn('[DARKO LAB UI motor] click foi mas toggle ainda nao mostra', target, '- tentando keyboard');
+
+      // KEYBOARD FALLBACK: ArrowDown + ArrowDown + Enter (etc) ate matchar
+      // Posicao do item desejado entre os 3 (V=0, IV=1, III=2 geralmente)
+      const order = { V: 0, IV: 1, III: 2 };
+      const targetIdx = order[motor] ?? 2;
+      // Tenta navegar pelo teclado: pressiona Down N vezes + Enter
+      for (let downs = 0; downs <= 4; downs++) {
+        document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+        await sleep(120);
+      }
+      // Volta pra cima e tenta a posicao certa
+      for (let ups = 0; ups <= 4; ups++) {
+        document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }));
+        await sleep(120);
+      }
+      // Agora desce ate o targetIdx
+      for (let downs = 0; downs < targetIdx + 1; downs++) {
+        document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+        await sleep(150);
+      }
+      document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+      await sleep(900);
+      const tk = findCurrentMotorToggle();
+      const tkText = tk ? (tk.textContent || '').trim() : '';
+      if (tkText.includes(target)) {
+        console.log('[DARKO LAB UI motor] sucesso (keyboard) na tentativa', attempt);
+        return true;
+      }
     }
   }
 
@@ -1221,37 +1248,82 @@ function findCurrentMotorToggle() {
 /**
  * Procura item de menu correspondente ao motor dentro de um dropdown aberto.
  */
+/**
+ * BRUTE FORCE: percorre todos elementos visiveis do DOM procurando aquele
+ * que contem EXATAMENTE 'Avatar III' (ou IV/V) como texto. HeyGen nao usa
+ * Radix com role=menuitem, entao seletores especificos falham. Aqui a gente
+ * pega o NODE MAIS ESPECIFICO (menos children) que tem o texto certo,
+ * fora do toggle atual.
+ */
 function findMotorMenuItem(motor) {
   const target = `Avatar ${motor}`;
-  // Items de menu - inclui Radix portal items renderizados em document.body
-  const sel = [
-    '[role="menuitem"]',
-    '[role="option"]',
-    '[role="menuitemradio"]',
-    '[role="menuitemcheckbox"]',
-    '[data-radix-collection-item]',
-    '[data-radix-popper-content-wrapper] *',
-    '[data-state="open"] [role="button"]',
-    '[data-state="open"] button',
-    '[cmdk-item]',
-  ].join(', ');
-  const items = Array.from(document.querySelectorAll(sel));
-  for (const it of items) {
-    if (it.offsetParent === null) continue;
-    if (it.children.length > 5) continue; // skip containers grandes
-    const t = (it.textContent || '').trim();
-    if (!t) continue;
-    if (t.length > 200) continue;
-    if (t.startsWith(target)) {
-      // Garante que "Avatar III" nao bate "Avatar IV" (proximo char nao pode ser dig/letter)
-      const next = t.charAt(target.length);
-      if (next === '' || next === ' ' || next === '\n' || next === '\t' ||
-          next === 'P' /* "Premium" */ || /\W/.test(next)) {
-        return it;
-      }
-    }
+  const currentToggle = findCurrentMotorToggle();
+  const candidates = [];
+
+  // Walker por todo o DOM, pegando elementos visiveis com texto certo
+  const all = document.querySelectorAll('div, button, li, span, a, [role]');
+  for (const el of all) {
+    if (el === currentToggle) continue;
+    if (currentToggle && currentToggle.contains(el)) continue;
+    if (el.offsetParent === null) continue;
+
+    // Texto direto (do proprio elemento + filhos imediatos), trim
+    const t = (el.textContent || '').trim();
+    if (!t || t.length > 250) continue;
+
+    // Tem que comecar com "Avatar III/IV/V" + (espaco|fim|Premium|outras letras OK)
+    if (!t.startsWith(target)) continue;
+    const next = t.charAt(target.length);
+    // Rejeita se proximo char eh digito/letra (ex: "Avatar IV" matchando "Avatar I")
+    if (next && /[0-9A-HJ-Za-hj-z]/.test(next)) continue;
+
+    // Tem que ter dimensao razoavel (pelo menos 50x20)
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 50 || rect.height < 20) continue;
+    if (rect.width > 800) continue; // exclui containers grandes
+
+    candidates.push({ el, depth: getDepth(el), childCount: el.querySelectorAll('*').length });
   }
-  return null;
+
+  if (candidates.length === 0) return null;
+
+  // Prefere o mais ESPECIFICO (menor childCount + maior depth - mais profundo)
+  candidates.sort((a, b) => {
+    if (a.childCount !== b.childCount) return a.childCount - b.childCount;
+    return b.depth - a.depth;
+  });
+  console.log(`[DARKO LAB UI motor] candidates pra ${target}:`, candidates.length, 'top:', {
+    tag: candidates[0].el.tagName,
+    children: candidates[0].childCount,
+    depth: candidates[0].depth,
+    text: (candidates[0].el.textContent || '').slice(0, 80),
+  });
+  return candidates[0].el;
+}
+
+function getDepth(el) {
+  let d = 0;
+  let p = el;
+  while (p && p !== document.body) { d++; p = p.parentElement; }
+  return d;
+}
+
+/**
+ * Tenta clicar UM elemento de varias formas. Se o click no proprio nao
+ * dispara handler, sobe pelos ancestrais e tenta neles tambem.
+ */
+async function clickWithAncestors(el) {
+  if (!el) return false;
+  el.scrollIntoView({ block: 'center', behavior: 'instant' });
+  await sleep(150);
+
+  // Tenta no proprio elemento + 4 ancestrais
+  let target = el;
+  for (let i = 0; i < 5 && target; i++) {
+    clickElement(target);
+    target = target.parentElement;
+  }
+  return true;
 }
 
 function findGenerateButton() {
