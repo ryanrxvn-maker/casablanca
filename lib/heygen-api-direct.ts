@@ -554,6 +554,101 @@ export async function createVideoWithText(
   throw new Error(`createVideoWithText: nenhuma shape aceita. Tentativas: ${errors.join(' | ')}`);
 }
 
+/* ============= Polling + download de videos prontos ============= */
+
+export type VideoStatus = {
+  videoId: string;
+  status: 'completed' | 'pending' | 'failed' | 'unknown';
+  videoUrl: string | null;
+  error?: string;
+};
+
+/**
+ * Pega status de N videos em UMA chamada (mais eficiente que 1 GET por video).
+ * Lista os ultimos N projects do user e cruza com os videoIds que queremos.
+ */
+export async function getVideosStatus(
+  videoIds: string[],
+): Promise<Record<string, VideoStatus>> {
+  // Limit: pega o suficiente pra cobrir requisicao (50 = ate 50 videos recentes)
+  const limit = Math.max(50, videoIds.length * 2);
+  const r = await jsonCall('GET', `/v1/project/items?limit=${limit}`);
+  const out: Record<string, VideoStatus> = {};
+  for (const id of videoIds) out[id] = { videoId: id, status: 'unknown', videoUrl: null };
+  if (!r.ok) return out;
+  const items: any[] = r.body?.data?.items || [];
+  for (const it of items) {
+    const id = it.video_id;
+    if (!id || !(id in out)) continue;
+    const st = String(it.status || '').toLowerCase();
+    let mapped: VideoStatus['status'] = 'unknown';
+    if (st === 'completed' || st === 'done' || st === 'success') mapped = 'completed';
+    else if (st === 'failed' || st === 'error') mapped = 'failed';
+    else if (st === '' || st === 'pending' || st === 'processing' || st === 'rendering' || it.status == null) mapped = 'pending';
+    out[id] = {
+      videoId: id,
+      status: mapped,
+      videoUrl: it.video_url || null,
+      error: it.error || it.failed_reason || undefined,
+    };
+  }
+  return out;
+}
+
+/**
+ * Polla repetidamente ate todos os videoIds estarem 'completed' ou 'failed',
+ * ou ate timeout. Chama onStatus a cada poll.
+ */
+export async function pollVideosUntilReady(
+  videoIds: string[],
+  opts: {
+    onStatus?: (statuses: Record<string, VideoStatus>) => void;
+    intervalMs?: number;
+    timeoutMs?: number;
+    isCancelled?: () => boolean;
+  } = {},
+): Promise<Record<string, VideoStatus>> {
+  const interval = opts.intervalMs ?? 8000;
+  const deadline = Date.now() + (opts.timeoutMs ?? 30 * 60 * 1000); // 30min default
+  while (true) {
+    if (opts.isCancelled?.()) {
+      throw new Error('Polling cancelado pelo user.');
+    }
+    const statuses = await getVideosStatus(videoIds);
+    opts.onStatus?.(statuses);
+    const allDone = videoIds.every((id) => {
+      const s = statuses[id]?.status;
+      return s === 'completed' || s === 'failed';
+    });
+    if (allDone) return statuses;
+    if (Date.now() > deadline) {
+      throw new Error('Timeout aguardando renderizacao. Alguns videos podem ainda estar processando — tenta de novo daqui uns minutos.');
+    }
+    await new Promise((r) => setTimeout(r, interval));
+  }
+}
+
+/**
+ * Baixa o MP4 de um videoUrl (CDN HeyGen). Tenta direct fetch primeiro;
+ * se falhar (CORS), routeia via proxy da extensao (que tem origin certo).
+ */
+export async function downloadVideoBytes(videoUrl: string): Promise<Uint8Array> {
+  try {
+    const r = await fetch(videoUrl);
+    if (r.ok) {
+      const buf = await r.arrayBuffer();
+      return new Uint8Array(buf);
+    }
+  } catch {
+    /* cai pro proxy */
+  }
+  const r = await heygenApiFetch({ url: videoUrl, method: 'GET' });
+  if (!r.ok) throw new Error(`Falha download (status ${r.status}): ${r.body?.message || r.body?._text?.slice(0, 100) || '?'}`);
+  const b64 = r.body?._bytesBase64;
+  if (!b64) throw new Error('Proxy nao retornou bytes do video. Body keys: ' + Object.keys(r.body || {}).join(','));
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+}
+
 /* ============= Pipeline completo ============= */
 
 export type ProcessJobInput = {

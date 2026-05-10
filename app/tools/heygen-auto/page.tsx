@@ -14,7 +14,13 @@ import {
   type ExtensionStatus,
 } from '@/lib/heygen-extension-bridge';
 import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
-import { heygenApiFetch, REQUIRED_EXT_VERSION } from '@/lib/heygen-api-direct';
+import {
+  heygenApiFetch,
+  REQUIRED_EXT_VERSION,
+  pollVideosUntilReady,
+  downloadVideoBytes,
+  type VideoStatus,
+} from '@/lib/heygen-api-direct';
 import {
   HeyGenAvatarPicker,
   type AvatarOption,
@@ -106,6 +112,12 @@ export default function HeyGenAutoPage() {
   const [error, setError] = useState<string | null>(null);
   const cancelRef = useRef<boolean>(false);
 
+  // Auto-download (polling + ZIP)
+  const [downloading, setDownloading] = useState(false);
+  const [downloadStage, setDownloadStage] = useState<string | null>(null);
+  const [downloadStatuses, setDownloadStatuses] = useState<Record<string, VideoStatus>>({});
+  const downloadCancelRef = useRef<boolean>(false);
+
   const safeName = (adName.trim() || 'heygen').replace(/[^a-z0-9_-]/gi, '_');
 
   /* --------------- Extension detection --------------- */
@@ -161,6 +173,84 @@ export default function HeyGenAutoPage() {
   function cancel() {
     cancelRef.current = true;
     setStage('Cancelando...');
+  }
+
+  function cancelDownload() {
+    downloadCancelRef.current = true;
+    setDownloadStage('Cancelando...');
+  }
+
+  async function downloadAllAsZip() {
+    const ready = results.filter((r) => r.videoId);
+    if (ready.length === 0) {
+      setError('Nenhuma parte com videoId. Gere as partes primeiro.');
+      return;
+    }
+    setError(null);
+    setDownloading(true);
+    downloadCancelRef.current = false;
+    setDownloadStatuses({});
+    setDownloadStage(`Aguardando renderizacao no HeyGen (${ready.length} partes)...`);
+
+    try {
+      const ids = ready.map((r) => r.videoId!) ;
+      const final = await pollVideosUntilReady(ids, {
+        intervalMs: 8000,
+        timeoutMs: 30 * 60 * 1000,
+        isCancelled: () => downloadCancelRef.current,
+        onStatus: (statuses) => {
+          setDownloadStatuses(statuses);
+          const done = Object.values(statuses).filter((s) => s.status === 'completed').length;
+          const failed = Object.values(statuses).filter((s) => s.status === 'failed').length;
+          setDownloadStage(
+            `Renderizando: ${done}/${ids.length} prontos${failed > 0 ? `, ${failed} falhou` : ''}...`,
+          );
+        },
+      });
+
+      if (downloadCancelRef.current) return;
+
+      // Baixa cada video + zipa. Sequencial pra nao saturar download (videos sao grandes).
+      const JSZip = (await import('jszip')).default;
+      const zip = new JSZip();
+      for (let i = 0; i < ready.length; i++) {
+        if (downloadCancelRef.current) return;
+        const part = ready[i];
+        const status = final[part.videoId!];
+        setDownloadStage(`Baixando parte ${i + 1}/${ready.length} (${part.label})...`);
+        if (status?.status !== 'completed' || !status.videoUrl) {
+          // Marca no ZIP como erro pra user saber
+          zip.file(`${part.label}_FAILED.txt`, `Status: ${status?.status || 'unknown'}\nErro: ${status?.error || 'sem video_url'}`);
+          continue;
+        }
+        try {
+          const bytes = await downloadVideoBytes(status.videoUrl);
+          zip.file(`${part.label}.mp4`, bytes);
+        } catch (e) {
+          zip.file(`${part.label}_DOWNLOAD_ERROR.txt`, String((e as Error)?.message || e));
+        }
+      }
+
+      setDownloadStage('Zipando...');
+      const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+      const filename = `${safeName}.zip`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      setDownloadStage(`✓ ZIP baixado: ${filename} (${(blob.size / (1024 * 1024)).toFixed(1)}MB)`);
+      setTimeout(() => setDownloadStage(null), 8000);
+    } catch (e) {
+      setError(`Falha no download: ${(e as Error)?.message || e}`);
+      setDownloadStage(null);
+    } finally {
+      setDownloading(false);
+      downloadCancelRef.current = false;
+    }
   }
 
   async function testSession() {
@@ -743,14 +833,28 @@ export default function HeyGenAutoPage() {
                 </button>
               )}
               {results.length > 0 && !processing ? (
-                <a
-                  href="https://app.heygen.com/projects"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn-primary"
-                >
-                  Abrir HeyGen Projects
-                </a>
+                <>
+                  {downloading ? (
+                    <CancelButton onClick={cancelDownload} label="Cancelar download" />
+                  ) : (
+                    <button
+                      onClick={downloadAllAsZip}
+                      className="btn-primary"
+                      disabled={results.filter((r) => r.videoId).length === 0}
+                      title={`Aguarda renderizacao + baixa MP4s + zipa em ${safeName}.zip`}
+                    >
+                      ⬇ Baixar tudo como ZIP ({safeName}.zip)
+                    </button>
+                  )}
+                  <a
+                    href="https://app.heygen.com/projects"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-[12px] border border-line-strong px-4 py-2.5 text-sm text-text-muted transition hover:border-lime hover:text-lime"
+                  >
+                    Abrir HeyGen Projects
+                  </a>
+                </>
               ) : null}
             </div>
 
@@ -769,6 +873,36 @@ export default function HeyGenAutoPage() {
                   </span>
                   <span className="mono uppercase tracking-widest">{stage}</span>
                 </div>
+              </div>
+            ) : null}
+
+            {/* Status do download em andamento */}
+            {downloadStage ? (
+              <div className="scan-line rounded-[12px] border border-fuchsia-500/40 bg-fuchsia-500/5 px-4 py-3 text-xs text-fuchsia-200">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-fuchsia-400 opacity-60" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-fuchsia-400" />
+                  </span>
+                  <span className="mono uppercase tracking-widest">{downloadStage}</span>
+                </div>
+                {Object.keys(downloadStatuses).length > 0 ? (
+                  <ul className="mt-2 grid gap-0.5 text-[10px] text-fuchsia-200/70">
+                    {results.filter((r) => r.videoId).map((r) => {
+                      const s = downloadStatuses[r.videoId!];
+                      const sym =
+                        s?.status === 'completed' ? '✓' :
+                        s?.status === 'failed' ? '✗' :
+                        s?.status === 'pending' ? '◷' : '?';
+                      return (
+                        <li key={r.label} className="mono">
+                          {sym} {r.label} — {s?.status ?? 'unknown'}
+                          {s?.error ? ` (${s.error.slice(0,80)})` : ''}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : null}
               </div>
             ) : null}
 
