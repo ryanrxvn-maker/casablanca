@@ -1114,4 +1114,334 @@ async function uploadAudioToHeyGen(audioBase64, filename, headers) {
 
 console.log('[DARKO LAB HeyGen Content] online');
 
+
+/* ============= UI Helpers (re-adicionadas v3.3.3) ============= */
+
+function findScriptTextarea() {
+  const sels = [
+    'textarea[placeholder*="script" i]',
+    'textarea[placeholder*="paste" i]',
+    'textarea[placeholder*="type" i]',
+    'textarea[placeholder*="aqui" i]',
+    'textarea[placeholder*="cole" i]',
+    'div[contenteditable="true"][role="textbox"]',
+    'div[contenteditable="true"]',
+    'textarea',
+  ];
+  for (const sel of sels) {
+    const els = document.querySelectorAll(sel);
+    for (const el of els) {
+      if (el.offsetParent !== null) {
+        const r = el.getBoundingClientRect();
+        if (r.width >= 100 && r.height >= 30) return el;
+      }
+    }
+  }
+  return null;
+}
+
+function dumpScriptDiagnostics() {
+  console.log('[DARKO LAB UI diag] location:', location.href);
+  console.log('[DARKO LAB UI diag] readyState:', document.readyState);
+  const tas = document.querySelectorAll('textarea');
+  console.log('[DARKO LAB UI diag] textareas count:', tas.length);
+  for (const t of tas) {
+    console.log('[DARKO LAB UI diag] textarea:', {
+      placeholder: t.placeholder,
+      ariaLabel: t.getAttribute('aria-label'),
+      visible: t.offsetParent !== null,
+    });
+  }
+}
+
+async function selectMotor(motor) {
+  const target = `Avatar ${motor}`;
+  console.log('[DARKO LAB UI motor] alvo=', target);
+  await dismissAnnouncementModals();
+  const currentBtn = findCurrentMotorToggle();
+  if (currentBtn) {
+    const t = (currentBtn.textContent || '').trim();
+    console.log('[DARKO LAB UI motor] toggle atual mostra:', t);
+    if (t.includes(target)) { console.log('[DARKO LAB UI motor] ja esta em', target); return true; }
+  }
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    console.log(`[DARKO LAB UI motor] tentativa ${attempt}/3 abrir dropdown`);
+    if (attempt > 1) {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await sleep(300);
+    }
+    const toggle = findCurrentMotorToggle();
+    if (toggle) {
+      console.log(`[DARKO LAB UI motor] clicando toggle (tentativa ${attempt})`);
+      clickElement(toggle);
+      await sleep(500 + attempt * 300);
+    }
+    const item = await waitForOrNull(() => findMotorMenuItem(motor), 3000, 200);
+    if (item) {
+      console.log(`[DARKO LAB UI motor] item encontrado:`, (item.textContent || '').slice(0, 60));
+      await clickWithAncestors(item);
+      await sleep(900);
+      const newToggle = findCurrentMotorToggle();
+      if (newToggle && (newToggle.textContent || '').includes(target)) {
+        console.log('[DARKO LAB UI motor] sucesso na tentativa', attempt);
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function findCurrentMotorToggle() {
+  const all = Array.from(document.querySelectorAll('button, [role="button"], div, span, a'));
+  let candidates = [];
+  for (const el of all) {
+    if (el.offsetParent === null) continue;
+    if (el.disabled) continue;
+    const t = (el.textContent || '').trim();
+    if (!/Avatar (III|IV|V)\b/.test(t)) continue;
+    if (t.length > 80) continue;
+    if (el.children.length > 5) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 50 || r.height < 20 || r.width > 400) continue;
+    if (r.top < window.innerHeight * 0.4) continue;
+    const style = window.getComputedStyle(el);
+    const isClickable = style.cursor === 'pointer' || el.tagName === 'BUTTON' || el.getAttribute('role') === 'button' || (el.className || '').includes('cursor-pointer');
+    candidates.push({ el, rect: r, isClickable });
+  }
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => (a.isClickable !== b.isClickable) ? (a.isClickable ? -1 : 1) : (b.rect.top - a.rect.top));
+  return candidates[0].el;
+}
+
+function findMotorMenuItem(motor) {
+  const target = `Avatar ${motor}`;
+  const currentToggle = findCurrentMotorToggle();
+  const candidates = [];
+  for (const el of document.querySelectorAll('div, button, li, span, a, [role]')) {
+    if (el === currentToggle || (currentToggle && currentToggle.contains(el))) continue;
+    if (el.offsetParent === null) continue;
+    const t = (el.textContent || '').trim();
+    if (!t || t.length > 250) continue;
+    if (!t.startsWith(target)) continue;
+    const next = t.charAt(target.length);
+    if (next && /[0-9A-HJ-Za-hj-z]/.test(next)) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 50 || r.height < 20 || r.width > 800) continue;
+    candidates.push({ el, depth: getDepth(el), childCount: el.querySelectorAll('*').length });
+  }
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => (a.childCount !== b.childCount) ? a.childCount - b.childCount : b.depth - a.depth);
+  return candidates[0].el;
+}
+
+function getDepth(el) {
+  let d = 0; let p = el;
+  while (p && p !== document.body) { d++; p = p.parentElement; }
+  return d;
+}
+
+async function clickWithAncestors(el) {
+  if (!el) return false;
+  el.scrollIntoView({ block: 'center', behavior: 'instant' });
+  await sleep(150);
+  let target = el;
+  for (let i = 0; i < 5 && target; i++) {
+    clickElement(target);
+    target = target.parentElement;
+  }
+  return true;
+}
+
+async function dismissAnnouncementModals() {
+  const dialogs = document.querySelectorAll('[role="dialog"], [data-state="open"]');
+  for (const d of dialogs) {
+    const buttons = d.querySelectorAll('button');
+    for (const b of buttons) {
+      const txt = (b.textContent || '').trim().toLowerCase();
+      if (b.offsetParent === null) continue;
+      const al = (b.getAttribute('aria-label') || '').toLowerCase();
+      if (al.includes('close') || al.includes('dismiss') || txt === '' || txt === 'close' || txt === 'skip' || txt === 'maybe later') {
+        const r = b.getBoundingClientRect();
+        if (r.width < 60 && r.height < 60) {
+          console.log('[DARKO LAB UI motor] fechando modal');
+          clickElement(b);
+          await sleep(400);
+        }
+      }
+    }
+  }
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await sleep(200);
+}
+
+function findGenerateButton() {
+  const candidates = Array.from(document.querySelectorAll('button'));
+  const W = window.innerWidth; const H = window.innerHeight;
+  const all = [];
+  for (const b of candidates) {
+    if (b.disabled || b.offsetParent === null) continue;
+    const r = b.getBoundingClientRect();
+    if (r.width < 30 || r.height < 30 || r.width > 100 || r.height > 100) continue;
+    if (r.right < W * 0.7 || r.bottom < H * 0.6) continue;
+    const al = (b.getAttribute('aria-label') || '').toLowerCase();
+    const t = (b.textContent || '').trim().toLowerCase();
+    const dt = (b.getAttribute('data-testid') || '').toLowerCase();
+    const bg = window.getComputedStyle(b).backgroundColor || '';
+    const m = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+    let isBlue = false;
+    if (m) { const r2=+m[1],g=+m[2],blue=+m[3]; isBlue = blue>150 && blue>r2+30 && blue>g-30; }
+    const svg = b.querySelector('svg');
+    let hasArrowUp = false; let hasPlayIcon = false;
+    if (svg) {
+      const html = svg.innerHTML.toLowerCase();
+      if (html.includes('m12 19') || html.includes('arrow') || html.includes('19v5') || html.includes('m5 12l7-7')) hasArrowUp = true;
+      if (html.includes('polygon') || html.includes('m8 5v14') || html.includes('play')) hasPlayIcon = true;
+    }
+    let score = 0;
+    if (al.includes('generate') || al.includes('submit') || dt.includes('generate')) score += 100;
+    if (t === 'generate' || t === 'gerar') score += 80;
+    if (isBlue) score += 30;
+    if (hasArrowUp) score += 40;
+    if (hasPlayIcon) score -= 100;
+    if (al.includes('play') || al.includes('voice') || al.includes('preview')) score -= 100;
+    score += Math.round((r.right - W * 0.7) / (W * 0.3) * 20);
+    all.push({ btn: b, score });
+  }
+  if (!all.length) return null;
+  all.sort((a, b) => b.score - a.score);
+  return all[0].btn;
+}
+
+async function pasteScriptIntoTextarea(textarea, text) {
+  textarea.focus();
+  if (textarea.tagName === 'TEXTAREA') {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+    setter.call(textarea, '');
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(100);
+    setter.call(textarea, text);
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    textarea.dispatchEvent(new Event('change', { bubbles: true }));
+  } else if (textarea.isContentEditable) {
+    textarea.innerHTML = '';
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(100);
+    document.execCommand('insertText', false, text);
+  }
+}
+
+function clickElement(el) {
+  if (!el) return;
+  if (el.tagName === 'BUTTON' || (typeof el.click === 'function' && el.tagName !== 'DIV' && el.tagName !== 'SPAN')) {
+    try { el.click(); return; } catch {}
+  }
+  const r = el.getBoundingClientRect();
+  const opts = { bubbles: true, cancelable: true, view: window, clientX: r.left + r.width/2, clientY: r.top + r.height/2, button: 0, buttons: 1 };
+  try {
+    el.dispatchEvent(new PointerEvent('pointerdown', { ...opts, pointerType: 'mouse' }));
+    el.dispatchEvent(new PointerEvent('pointerup', { ...opts, pointerType: 'mouse' }));
+  } catch {}
+  el.dispatchEvent(new MouseEvent('click', opts));
+}
+
+async function selectAvatarInUI(avatarId, avatarName, groupName) {
+  const grp = groupName || avatarName;
+  console.log('[DARKO LAB UI avatar] alvo avatarId=', avatarId, 'name=', avatarName, 'group=', grp);
+  let changeBtn = findButtonByText(['change avatar', 'change my avatar']);
+  if (!changeBtn) changeBtn = findAvatarPreviewClickable();
+  if (!changeBtn) { console.warn('[DARKO LAB UI avatar] NAO consegui abrir gallery'); return; }
+  console.log('[DARKO LAB UI avatar] clicando Change Avatar');
+  clickElement(changeBtn);
+  await sleep(1800);
+  if (grp) {
+    const card = findGalleryCardByName(grp);
+    if (card) { console.log('[DARKO LAB UI avatar] clicando card', grp); clickElement(card); await sleep(1800); }
+    else console.warn('[DARKO LAB UI avatar] card', grp, 'nao achado');
+  }
+  await sleep(800);
+  const lookOk = await clickAvatarCardByImageId(avatarId);
+  if (!lookOk) console.warn('[DARKO LAB UI avatar] look', avatarId, 'nao achado');
+  await sleep(1000);
+  const useBtn = findButtonByText(['use avatar', 'use this avatar', 'apply']);
+  if (useBtn) { console.log('[DARKO LAB UI avatar] clicando Use Avatar'); clickElement(useBtn); await sleep(1000); }
+  console.log('[DARKO LAB UI avatar] selecao concluida');
+}
+
+function findButtonByText(textsLower) {
+  const all = Array.from(document.querySelectorAll('button, [role="button"], a, div[tabindex]'));
+  for (const el of all) {
+    if (el.offsetParent === null || el.disabled) continue;
+    const t = (el.textContent || '').trim().toLowerCase();
+    if (!t || t.length > 50) continue;
+    for (const target of textsLower) {
+      if (t === target || t.includes(target)) return el;
+    }
+  }
+  return null;
+}
+
+function findAvatarPreviewClickable() {
+  for (const img of document.querySelectorAll('img')) {
+    const r = img.getBoundingClientRect();
+    if (r.width > 100 && r.height > 100 && r.right > window.innerWidth * 0.5) {
+      let p = img.parentElement;
+      while (p && p !== document.body) {
+        const c = window.getComputedStyle(p).cursor;
+        if (p.tagName === 'BUTTON' || p.getAttribute('role') === 'button' || c === 'pointer') return p;
+        p = p.parentElement;
+      }
+    }
+  }
+  return null;
+}
+
+function findGalleryCardByName(name) {
+  const target = name.toLowerCase().trim();
+  const candidates = [];
+  for (const el of document.querySelectorAll('div, button, [role="button"]')) {
+    if (el.offsetParent === null) continue;
+    const t = (el.textContent || '').trim().toLowerCase();
+    if (!t || t.length > 50) continue;
+    if (t !== target && !t.startsWith(target)) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 60 || r.height < 60 || r.width > 300) continue;
+    if (!el.querySelector('img')) continue;
+    let target_el = el;
+    while (target_el && target_el !== document.body) {
+      const c = window.getComputedStyle(target_el).cursor;
+      if (target_el.tagName === 'BUTTON' || target_el.getAttribute('role') === 'button' || c === 'pointer') break;
+      target_el = target_el.parentElement;
+    }
+    candidates.push({ el: target_el || el, exact: t === target });
+  }
+  if (!candidates.length) return null;
+  candidates.sort((a, b) => (b.exact ? 1 : 0) - (a.exact ? 1 : 0));
+  return candidates[0].el;
+}
+
+async function clickAvatarCardByImageId(avatarId) {
+  for (const img of document.querySelectorAll('img')) {
+    if (img.offsetParent === null) continue;
+    if (!img.src || !img.src.includes(avatarId)) continue;
+    let target = img;
+    while (target && target !== document.body) {
+      const c = window.getComputedStyle(target).cursor;
+      if (target.tagName === 'BUTTON' || target.getAttribute('role') === 'button' || c === 'pointer') {
+        clickElement(target); return true;
+      }
+      target = target.parentElement;
+    }
+    clickElement(img); return true;
+  }
+  return false;
+}
+
+function extractVideoList(j) {
+  if (!j) return null;
+  const candidates = [j?.data?.videos, j?.data?.list, j?.data?.video_list, j?.data?.items, j?.videos, j?.list, j?.items, Array.isArray(j?.data) ? j.data : null];
+  for (const c of candidates) if (Array.isArray(c)) return c;
+  return null;
+}
+
+
 } // fim do guard __darkolab_heygen_loaded__
