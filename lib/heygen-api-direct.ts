@@ -358,7 +358,7 @@ export async function ttsToFile(text: string, voiceId: string): Promise<File> {
     url: API_BASE + '/v2/online/text_to_speech.stream',
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    bodyText: JSON.stringify({ text, voice_id: voiceId }),
+    bodyText: JSON.stringify({ text, voice_id: voiceId, text_type: 'text' }),
   });
   if (!r.ok) {
     throw new Error(`TTS falhou (${r.status}): ${r.body?.message ?? r.body?.msg ?? ''}`);
