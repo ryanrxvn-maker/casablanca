@@ -30,6 +30,42 @@ if (window.__darkolab_heygen_loaded__) {
 } else {
   window.__darkolab_heygen_loaded__ = true;
 
+// Injeta inject.js no MAIN WORLD pra patchar fetch+XHR e capturar
+// video_id 100% certo do POST de generate (evita confusao com videos
+// gerados por outras pessoas na mesma conta).
+(function injectInterceptor() {
+  try {
+    const script = document.createElement('script');
+    script.src = chrome.runtime.getURL('inject.js');
+    script.onload = function () {
+      console.log('[DARKO LAB] inject.js carregado no main world');
+      this.remove();
+    };
+    script.onerror = function (e) {
+      console.warn('[DARKO LAB] falha ao carregar inject.js:', e);
+    };
+    (document.head || document.documentElement).appendChild(script);
+  } catch (e) {
+    console.warn('[DARKO LAB] erro ao injetar inject.js:', e);
+  }
+})();
+
+// Buffer dos video_ids interceptados pelo inject.js (ordem cronologica)
+const interceptedVideoIds = [];
+window.addEventListener('message', (ev) => {
+  const d = ev.data;
+  if (
+    d &&
+    typeof d === 'object' &&
+    d.source === 'darkolab-injected' &&
+    d.type === 'VIDEO_GENERATED' &&
+    d.video_id
+  ) {
+    console.log('[DARKO LAB] video_id interceptado:', d.video_id, 'via', d.source_method, '->', d.url);
+    interceptedVideoIds.push({ id: d.video_id, ts: d.ts, url: d.url });
+  }
+});
+
 const SELECTORS = {
   scriptTextarea:
     'textarea[placeholder*="script" i], textarea[placeholder*="texto" i], div[contenteditable="true"]',
@@ -841,11 +877,11 @@ async function runJob(requestId, payload) {
     await pasteScriptIntoTextarea(textarea, copy);
     await sleep(500);
 
-    // 6) ANTES de clicar Generate, snapshot dos video IDs existentes pra
-    //    detectar qual eh o NOVO depois.
-    reportProgress(requestId, 'Snapshot da conta...');
-    const snapshot = await snapshotExistingVideoIds();
-    console.log('[DARKO LAB UI] snapshot:', snapshot.ids.size, 'videos pre-existentes');
+    // 6) Marca o timestamp ANTES do click Generate. So consideramos
+    //    video_ids interceptados a partir desse momento (garante que NAO
+    //    confundimos com um generate de outra pessoa na mesma conta que
+    //    aconteceu antes).
+    const clickStartTs = Date.now();
 
     // 7) Clica Generate (seta no canto inferior direito)
     reportProgress(requestId, 'Clicando Generate...');
@@ -854,14 +890,28 @@ async function runJob(requestId, payload) {
     if (generateClicked) {
       console.warn('[DARKO LAB UI] generate JA foi clicado uma vez, skip duplo click');
     } else {
-      console.log('[DARKO LAB UI] clicando Generate');
+      console.log('[DARKO LAB UI] clicando Generate, aguardando interceptor capturar video_id...');
       clickElement(generateBtn);
       generateClicked = true;
     }
 
-    // 8) Aguarda video processar - poll video.list pra detectar video NOVO
+    // 8) Aguarda inject.js interceptar a request POST de generate e
+    //    capturar o video_id REAL retornado pela response. Garantia 100%
+    //    de que eh o video que A GENTE gerou, nao outro user.
+    reportProgress(requestId, 'Aguardando HeyGen aceitar request...');
+    const myVideoId = await waitForInterceptedVideoId(clickStartTs, 30000);
+    if (!myVideoId) {
+      throw new Error(
+        'Nao consegui interceptar a request de generate em 30s. Verifica se ' +
+        'a aba HeyGen carregou completa antes de gerar (precisa do inject.js ' +
+        'rodar). Cola os logs [DARKO LAB inject] e [DARKO LAB UI] do console.'
+      );
+    }
+    console.log('[DARKO LAB UI] video_id confirmado interceptado:', myVideoId);
+
+    // 9) Pola video_status.get DESSE video_id especifico ate completar
     reportProgress(requestId, 'HeyGen processando...');
-    const videoUrl = await waitForVideoCompletion(requestId, snapshot);
+    const videoUrl = await waitForVideoCompletionById(requestId, myVideoId);
     if (!videoUrl) throw new Error('Timeout aguardando video pronto.');
 
     reportProgress(requestId, 'Video pronto!', 100);
@@ -875,6 +925,105 @@ async function runJob(requestId, payload) {
 }
 
 /* ============= UI Helpers ============= */
+
+/**
+ * Aguarda o inject.js interceptar uma POST de generate cuja response
+ * contenha video_id. So aceita events com timestamp >= clickStartTs (pra
+ * nao pegar generate de outra pessoa que rodou antes).
+ */
+async function waitForInterceptedVideoId(clickStartTs, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    // Procura no buffer interceptedVideoIds o primeiro com ts >= clickStartTs
+    for (const item of interceptedVideoIds) {
+      if (item.ts >= clickStartTs) {
+        return item.id;
+      }
+    }
+    await sleep(300);
+  }
+  return null;
+}
+
+/**
+ * Pola video_status.get pra UM video_id especifico ate ele completar.
+ * Esse video_id veio do inject.js que interceptou a response da nossa
+ * propria request - 100% garantido que eh o nosso.
+ */
+async function waitForVideoCompletionById(requestId, videoId) {
+  const deadline = Date.now() + 15 * 60 * 1000; // 15min
+  let lastPercent = -1;
+
+  const statusUrls = [
+    `https://api2.heygen.com/v1/video_status.get?video_id=${encodeURIComponent(videoId)}`,
+    `https://api2.heygen.com/v2/video_status.get?video_id=${encodeURIComponent(videoId)}`,
+    `https://api2.heygen.com/v1/video.private.get?video_id=${encodeURIComponent(videoId)}`,
+  ];
+
+  while (Date.now() < deadline) {
+    if (currentJob !== requestId) throw new Error('Job foi cancelado.');
+
+    for (const url of statusUrls) {
+      try {
+        const r = await fetch(url, { method: 'GET', credentials: 'include' });
+        if (!r.ok) continue;
+        const j = await r.json().catch(() => null);
+        const data = j?.data ?? j;
+        const status = String(data?.status ?? '').toLowerCase();
+        const videoUrl =
+          data?.video_url ??
+          data?.video_url_caption ??
+          data?.cdn_url ??
+          data?.url ??
+          null;
+        const pct = data?.percent ?? data?.progress ?? null;
+        if (pct != null && pct !== lastPercent) {
+          lastPercent = pct;
+          reportProgress(requestId, `HeyGen processando... ${pct}%`, pct);
+        }
+        if (
+          status === 'completed' ||
+          status === 'success' ||
+          status === 'done'
+        ) {
+          if (videoUrl) {
+            console.log(`[DARKO LAB UI] video ${videoId} completed via ${url}, mp4:`, videoUrl);
+            return videoUrl;
+          }
+          // Fallback: tenta endpoint de download
+          for (const dlUrl of [
+            `https://api2.heygen.com/v1/video.download?video_id=${encodeURIComponent(videoId)}`,
+            `https://api2.heygen.com/v2/video.download?video_id=${encodeURIComponent(videoId)}`,
+          ]) {
+            try {
+              const dr = await fetch(dlUrl, { method: 'GET', credentials: 'include' });
+              if (dr.ok) {
+                const dj = await dr.json().catch(() => null);
+                const u = dj?.data?.url ?? dj?.url ?? dj?.data?.video_url;
+                if (u) {
+                  console.log('[DARKO LAB UI] mp4 via download endpoint:', u);
+                  return u;
+                }
+              }
+            } catch {}
+          }
+          console.warn(
+            '[DARKO LAB UI] status completed mas sem video_url em:',
+            JSON.stringify(data).slice(0, 400)
+          );
+        }
+        if (status === 'failed' || status === 'error') {
+          throw new Error('HeyGen reportou status failed: ' + (data?.error_msg ?? status));
+        }
+        break; // pegou primeira resposta valida, aguarda proximo poll
+      } catch (e) {
+        if (String(e).includes('failed')) throw e;
+      }
+    }
+    await sleep(4000);
+  }
+  return null;
+}
 
 function findScriptTextarea() {
   // Heygen usa textarea com placeholder "Type or paste your script here..."
