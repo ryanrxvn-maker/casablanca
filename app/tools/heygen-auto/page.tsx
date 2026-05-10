@@ -148,17 +148,18 @@ export default function HeyGenAutoPage() {
     });
   }
 
-  function buildJobs(
-    m: Mode,
-    txtParts: string[],
-    aud: File[],
-  ): { label: string; copy?: string; audio?: File }[] | null {
+  function buildJobs(m: Mode, txtParts: string[], aud: File[]) {
     if (m === 'copy') {
       if (txtParts.length === 0) {
         setError('Cola uma copy primeiro.');
         return null;
       }
-      return txtParts.map((p, i) => ({ label: 'parte' + (i + 1), copy: p }));
+      const out = txtParts.map((p, i) => ({
+        label: 'parte' + (i + 1),
+        copy: p,
+        audio: undefined as File | undefined,
+      }));
+      return out;
     }
     if (aud.length === 0) {
       setError('Faca upload de pelo menos um arquivo de audio.');
@@ -167,10 +168,12 @@ export default function HeyGenAutoPage() {
     const ordered = [...aud].sort((a, b) =>
       a.name.localeCompare(b.name, 'pt', { numeric: true }),
     );
-    return ordered.map((a, i) => ({
+    const out = ordered.map((a, i) => ({
       label: 'parte' + (i + 1),
-      audio: a,
+      copy: '' as string | undefined,
+      audio: a as File | undefined,
     }));
+    return out;
   }
 
   async function run() {
@@ -573,5 +576,4 @@ export default function HeyGenAutoPage() {
                         <span>
                           <span className="mono text-lime">{r.label}</span>
                           <span className="ml-2 text-text-muted">
-                            {vid ? `id ${vid.slice(0, 12)}...` : 'enviado'}
-                          </s
+        
