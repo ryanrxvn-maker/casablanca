@@ -167,6 +167,131 @@ export function parseAdSection(fullDocText: string, adIdOrPrefix: string): Parse
   };
 }
 
+/* ============= Convencao G[N] = Hook[N] (DARKO LAB briefings) ============= */
+
+/**
+ * Encontra todos os siblings AD<base>G<N>GL-<rest> dado um base ID
+ * (ex "AD139GL" → ["AD139G1GL-VFPB04", "AD139G2GL-VFPB04", ...]).
+ * Retorna em ordem numerica de N.
+ */
+export function findGSiblings(fullDocText: string, baseAdId: string): Array<{ gNum: number; heading: string; section: string }> {
+  if (!fullDocText) return [];
+  // Extrai a parte numerica + sufixo "GL" do base (ex AD139GL → "AD139", "GL")
+  const m = baseAdId.toUpperCase().match(/^(AD\d+)([A-Z]+)$/);
+  if (!m) return [];
+  const numPart = m[1]; // "AD139"
+  const suffix = m[2]; // "GL"
+  // Procura headings tipo "AD139G<N>GL-XXX"
+  const lines = fullDocText.split(/\r?\n/);
+  const re = new RegExp(`^${numPart}G(\\d+)${suffix}\\b`, 'i');
+  const found: Array<{ gNum: number; lineStart: number; heading: string }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    const mm = t.match(re);
+    if (mm) {
+      found.push({ gNum: parseInt(mm[1], 10), lineStart: i, heading: t });
+    }
+  }
+  // Pra cada heading, extrai conteudo ate o proximo AD heading
+  return found
+    .map((f) => {
+      let end = lines.length;
+      for (let i = f.lineStart + 1; i < lines.length; i++) {
+        const t = lines[i].trim();
+        if (/^AD\d+[A-Z0-9]*\s*-\s*[A-Z0-9]+/i.test(t)) { end = i; break; }
+      }
+      return {
+        gNum: f.gNum,
+        heading: f.heading,
+        section: lines.slice(f.lineStart, end).join('\n'),
+      };
+    })
+    .sort((a, b) => a.gNum - b.gNum);
+}
+
+/**
+ * Parse de um G[N] sibling: extrai hooks (linhas antes de "Body") + body
+ * (linhas depois). Cada linha nao-vazia antes de "Body" e tratada como
+ * 1 hook separado (cada uma vai virar 1 take).
+ */
+export function parseGSibling(section: string): { hooks: string[]; body: string } {
+  const lines = section.split(/\r?\n/);
+  // Pula header (primeira linha)
+  let bodyMarkerIdx = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (/^body$/i.test(lines[i].trim())) { bodyMarkerIdx = i; break; }
+  }
+  const beforeBody = bodyMarkerIdx >= 0 ? lines.slice(1, bodyMarkerIdx) : lines.slice(1);
+  const afterBody = bodyMarkerIdx >= 0 ? lines.slice(bodyMarkerIdx + 1) : [];
+  // Hooks = paragrafos nao-vazios antes de "Body"
+  const hooks: string[] = [];
+  let cur = '';
+  for (const line of beforeBody) {
+    if (line.trim()) {
+      cur += (cur ? '\n' : '') + line;
+    } else if (cur) {
+      hooks.push(cur.trim());
+      cur = '';
+    }
+  }
+  if (cur) hooks.push(cur.trim());
+  // Limpa markers tipo [dq], [dr] do fim
+  const cleanedHooks = hooks.map((h) => h.replace(/\s*\[[a-z]{1,3}\]\s*$/i, '').trim()).filter((h) => h.length > 0);
+  const body = afterBody.join('\n').trim().replace(/\s*\[[a-z]{1,3}\]/gi, '');
+  return { hooks: cleanedHooks, body };
+}
+
+export type ParsedDarkoBriefing = {
+  /** Base AD ID (ex "AD139GL") */
+  baseAdId: string;
+  /** Avatares extraidos da secao base (briefing) */
+  avatars: ParsedAvatar[];
+  /** Hooks em ordem: HOOK 1 (G1), HOOK 2 (G2), ... */
+  hooks: Array<{ label: string; text: string; sourceG: number }>;
+  /** Body (do sibling que tiver — geralmente o ultimo G) */
+  body: string | null;
+  /** G siblings encontrados (debug) */
+  gSiblings: Array<{ gNum: number; heading: string }>;
+};
+
+/**
+ * Parser completo dos docs DARKO LAB:
+ * 1. Acha secao base (AD139GL) → avatares
+ * 2. Acha todos siblings G[N] (G1, G2, ...) → cada um vira N hooks
+ * 3. Body = primeiro sibling que tiver "Body" marker (ou todos concatenados)
+ *
+ * Retorna estrutura pronta pra dispatch: hooks como takes individuais + body
+ * como bloco unico (ClickUp Pilot vai split em parts via splitCopyIntoParts).
+ */
+export function parseDarkoBriefing(fullDocText: string, baseAdId: string): ParsedDarkoBriefing | null {
+  const baseSection = findAdSection(fullDocText, baseAdId);
+  if (!baseSection) return null;
+  const avatars = parseAvatars(baseSection);
+  const siblings = findGSiblings(fullDocText, baseAdId);
+  const hooks: Array<{ label: string; text: string; sourceG: number }> = [];
+  let body: string | null = null;
+  for (const sib of siblings) {
+    const parsed = parseGSibling(sib.section);
+    for (const hookText of parsed.hooks) {
+      hooks.push({
+        label: `HOOK ${hooks.length + 1}`,
+        text: hookText,
+        sourceG: sib.gNum,
+      });
+    }
+    if (parsed.body && !body) {
+      body = parsed.body;
+    }
+  }
+  return {
+    baseAdId,
+    avatars,
+    hooks,
+    body,
+    gSiblings: siblings.map(s => ({ gNum: s.gNum, heading: s.heading })),
+  };
+}
+
 /** Match fuzzy de avatar HeyGen pelo username do briefing.
  *  Retorna o melhor candidato (ou null). */
 export function matchAvatar(

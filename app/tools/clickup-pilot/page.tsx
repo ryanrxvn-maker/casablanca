@@ -19,9 +19,12 @@ import {
 } from '@/lib/clickup-client';
 import {
   parseAdSection,
+  parseDarkoBriefing,
   matchAvatar,
   type ParsedAdSection,
+  type ParsedDarkoBriefing,
 } from '@/lib/copy-parser';
+import { splitCopyIntoParts } from '@/lib/heygen-extension-bridge';
 import {
   getLibrarySnapshot,
   reloadLibrary,
@@ -159,6 +162,7 @@ export default function ClickUpPilotPage() {
   const [taskDetail, setTaskDetail] = useState<ClickUpTask | null>(null);
   const [docContent, setDocContent] = useState('');
   const [parsed, setParsed] = useState<ParsedAdSection | null>(null);
+  const [briefing, setBriefing] = useState<ParsedDarkoBriefing | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
   const [fetchingDoc, setFetchingDoc] = useState(false);
 
@@ -235,28 +239,35 @@ export default function ClickUpPilotPage() {
   function runParser(textOverride?: string) {
     setParseError(null);
     setParsed(null);
+    setBriefing(null);
     const text = textOverride ?? docContent;
     if (!text.trim()) {
       setParseError('Cola o conteudo do doc OU usa o botao "Buscar doc automatico".');
       return;
     }
     if (!selectedTask) return;
-    // Identifica AD ID a partir do nome da task: ex "AD135GL - VFPB04"
+    // Identifica AD ID base a partir do nome da task: ex "AD139GL - VFPB04"
+    // Pega so a parte AD<num><letras> (sem o -VFPB04) pra match dos siblings
     const taskName = selectedTask.name;
-    const adIdMatch = taskName.match(/AD\d+[A-Z0-9]*\s*-\s*[A-Z0-9]+/i);
-    const adId = adIdMatch ? adIdMatch[0].toUpperCase() : taskName.toUpperCase().trim();
-    const result = parseAdSection(text, adId);
-    if (!result) {
-      // Tenta com prefixo (ex so "AD135GL")
-      const prefix = adId.split(/\s|-/)[0];
-      const r2 = parseAdSection(text, prefix);
-      if (!r2) {
-        setParseError(`Nao achei secao "${adId}" nem "${prefix}" no doc. Confere se a copy do AD ta no doc.`);
+    const baseMatch = taskName.match(/^(AD\d+[A-Z]+)\b/i);
+    const baseAdId = baseMatch ? baseMatch[1].toUpperCase() : null;
+    const fullAdMatch = taskName.match(/AD\d+[A-Z0-9]*\s*-\s*[A-Z0-9]+/i);
+    const fullAdId = fullAdMatch ? fullAdMatch[0].toUpperCase() : taskName.toUpperCase().trim();
+
+    // Parser 1 (legacy): secao base com avatares + parts auto-detectadas
+    const result = parseAdSection(text, fullAdId) || parseAdSection(text, fullAdId.split(/\s|-/)[0]);
+    if (result) setParsed(result);
+
+    // Parser 2 (novo): briefing DARKO LAB com convencao G[N] = Hook[N]
+    if (baseAdId) {
+      const b = parseDarkoBriefing(text, baseAdId);
+      if (b && (b.hooks.length > 0 || b.body)) {
+        setBriefing(b);
         return;
       }
-      setParsed(r2);
-    } else {
-      setParsed(result);
+    }
+    if (!result) {
+      setParseError(`Nao achei secao "${fullAdId}" no doc. Confere se a copy ta colada/buscada certo.`);
     }
   }
 
@@ -284,11 +295,14 @@ export default function ClickUpPilotPage() {
 
   /* ========== Plano de dispatch ========== */
   const dispatchPlan: DispatchPlan | null = useMemo(() => {
-    if (!parsed || !selectedTask) return null;
-    const adName = parsed.adId.replace(/[^a-z0-9_-]/gi, '_');
+    if (!selectedTask) return null;
+    // Avatares: prefere os do briefing (mais completos), fallback parsed
+    const avatarsSource = briefing?.avatars || parsed?.avatars || [];
+    const adNameSource = briefing?.baseAdId || parsed?.adId || selectedTask.name;
+    const adName = adNameSource.replace(/[^a-z0-9_-]/gi, '_');
     const matchedByRole: Record<string, { id: string; name: string }> = {};
     const unmatchedAvatars: string[] = [];
-    for (const av of parsed.avatars) {
+    for (const av of avatarsSource) {
       const m = matchAvatar(av.username, avatarCandidates);
       if (m && m.score >= 30) {
         matchedByRole[av.role.toLowerCase()] = { id: m.id, name: m.name };
@@ -296,39 +310,61 @@ export default function ClickUpPilotPage() {
         unmatchedAvatars.push(`${av.role}: @${av.username}`);
       }
     }
-    // Pra cada parte, escolhe avatar baseado em:
-    // 1. Se a parte menciona um role (ex "HOOK 1 - Doutor"), usa esse role
-    // 2. Senao, usa o PRIMEIRO avatar matchado (default)
     const firstMatched = Object.values(matchedByRole)[0] || null;
-    const parts = parsed.parts.map((p) => {
-      // Tenta detectar role na label da parte ("HOOK 1 - DOUTOR" etc)
-      let chosen: { id: string; name: string } | null = firstMatched;
-      const labelLower = p.label.toLowerCase();
+    function pickAvatarForText(text: string, label: string): { id: string; name: string } | null {
+      const labelLower = label.toLowerCase();
       for (const role of Object.keys(matchedByRole)) {
-        if (labelLower.includes(role.toLowerCase())) {
-          chosen = matchedByRole[role];
-          break;
-        }
+        if (labelLower.includes(role.toLowerCase())) return matchedByRole[role];
       }
-      // Tambem checa nas primeiras linhas do texto da parte
-      if (chosen === firstMatched) {
-        const firstLines = p.text.split(/\r?\n/).slice(0, 2).join(' ').toLowerCase();
-        for (const role of Object.keys(matchedByRole)) {
-          if (firstLines.includes(role)) {
-            chosen = matchedByRole[role];
-            break;
-          }
-        }
+      const firstLines = text.split(/\r?\n/).slice(0, 2).join(' ').toLowerCase();
+      for (const role of Object.keys(matchedByRole)) {
+        if (firstLines.includes(role.toLowerCase())) return matchedByRole[role];
       }
+      return firstMatched;
+    }
+
+    // Plano modo NOVO: briefing DARKO LAB com G[N] = Hook[N]
+    if (briefing && (briefing.hooks.length > 0 || briefing.body)) {
+      const planParts: DispatchPlan['parts'] = [];
+      for (const h of briefing.hooks) {
+        const av = pickAvatarForText(h.text, h.label);
+        planParts.push({
+          label: h.label,
+          text: h.text,
+          avatarId: av?.id || null,
+          avatarName: av?.name || null,
+        });
+      }
+      if (briefing.body) {
+        // Split do body em parts ~20s no Avatar III
+        const bodyParts = splitCopyIntoParts(briefing.body, { targetSec: 20, minSec: 10, maxSec: 35 });
+        bodyParts.forEach((bp, i) => {
+          const label = bodyParts.length === 1 ? 'BODY' : `BODY ${i + 1}`;
+          const av = pickAvatarForText(bp, label);
+          planParts.push({
+            label,
+            text: bp,
+            avatarId: av?.id || null,
+            avatarName: av?.name || null,
+          });
+        });
+      }
+      return { adName, parts: planParts, unmatchedAvatars };
+    }
+
+    // Fallback: parser legado (parts auto-detectadas)
+    if (!parsed) return null;
+    const parts = parsed.parts.map((p) => {
+      const av = pickAvatarForText(p.text, p.label);
       return {
         label: p.label,
         text: p.text,
-        avatarId: chosen?.id || null,
-        avatarName: chosen?.name || null,
+        avatarId: av?.id || null,
+        avatarName: av?.name || null,
       };
     });
     return { adName, parts, unmatchedAvatars };
-  }, [parsed, selectedTask, avatarCandidates]);
+  }, [briefing, parsed, selectedTask, avatarCandidates]);
 
   function dispatchToHeyGenAuto() {
     if (!dispatchPlan || dispatchPlan.parts.length === 0) {
@@ -612,10 +648,66 @@ export default function ClickUpPilotPage() {
                     </div>
                   ) : null}
 
-                  {parsed ? (
+                  {briefing ? (
+                    <div className="mt-4 rounded-[10px] border border-fuchsia-500/40 bg-fuchsia-500/5 p-3">
+                      <div className="mono text-[10px] uppercase tracking-widest text-fuchsia-200">
+                        ✓ Briefing DARKO LAB: {briefing.baseAdId} ({briefing.gSiblings.length} G siblings)
+                      </div>
+                      <div className="mt-2 grid gap-2">
+                        <div className="text-[11px]">
+                          <strong className="text-white">Avatares ({briefing.avatars.length}):</strong>
+                          <ul className="mt-1 grid gap-1">
+                            {briefing.avatars.map((a) => {
+                              const m = matchAvatar(a.username, avatarCandidates);
+                              const ok = m && m.score >= 30;
+                              return (
+                                <li key={a.username} className="mono text-[11px]">
+                                  {ok ? (
+                                    <span className="text-lime">✓ {a.role}: @{a.username} → {m.name} ({m.groupName})</span>
+                                  ) : (
+                                    <span className="text-red-300">✗ {a.role}: @{a.username} — pendente</span>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                        <div className="text-[11px]">
+                          <strong className="text-white">Hooks (G siblings → 1 take cada):</strong>
+                          <ul className="mt-1 grid gap-1">
+                            {briefing.hooks.map((h, i) => (
+                              <li key={i} className="rounded border border-line bg-bg/40 px-2 py-1">
+                                <div className="mono text-[10px] uppercase tracking-widest text-fuchsia-200">
+                                  {h.label} (de G{h.sourceG})
+                                </div>
+                                <div className="mt-0.5 text-text-muted line-clamp-2">{h.text.slice(0, 200)}{h.text.length > 200 ? '…' : ''}</div>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                        {briefing.body ? (
+                          <div className="text-[11px]">
+                            <strong className="text-white">Body (split em ~20s no Avatar III):</strong>
+                            <div className="mt-1 rounded border border-line bg-bg/40 px-2 py-1">
+                              <div className="text-text-muted line-clamp-3">{briefing.body.slice(0, 280)}{briefing.body.length > 280 ? '…' : ''}</div>
+                              <div className="mono mt-1 text-[10px] text-text-muted">
+                                {briefing.body.length} chars — split estimado em {splitCopyIntoParts(briefing.body, {targetSec: 20, minSec: 10, maxSec: 35}).length} takes
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-text-muted">
+                            ⚠ Sem body neste briefing — so hooks viram lipsync.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {parsed && !briefing ? (
                     <div className="mt-4 rounded-[10px] border border-lime/30 bg-lime/5 p-3">
                       <div className="mono text-[10px] uppercase tracking-widest text-lime">
-                        ✓ Parsed: {parsed.adId}
+                        ✓ Parsed (legacy): {parsed.adId}
                       </div>
 
                       <div className="mt-3 grid gap-2">
