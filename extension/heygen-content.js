@@ -1192,16 +1192,25 @@ async function selectMotor(motor) {
   }
 
   console.warn('[DARKO LAB UI motor] NAO conseguiu selecionar', target, '- tentou abrir dropdown mas item nao apareceu');
-  // Diagnostico: lista todos os elementos com "Avatar" no texto
+  // Diagnostico DETALHADO: lista TODOS elementos visiveis com Avatar III/IV/V
   const debug = Array.from(document.querySelectorAll('*'))
-    .filter((e) => e.children.length === 0 && /Avatar (III|IV|V)/.test((e.textContent || '').trim()))
-    .map((e) => ({
-      tag: e.tagName,
-      text: (e.textContent || '').trim().slice(0, 60),
-      visible: e.offsetParent !== null,
-    }))
-    .slice(0, 10);
-  console.log('[DARKO LAB UI motor diag] elementos com Avatar X no DOM:', debug);
+    .filter((e) => /Avatar (III|IV|V)\b/.test((e.textContent || '').trim()))
+    .map((e) => {
+      const r = e.getBoundingClientRect();
+      return {
+        tag: e.tagName,
+        cls: (e.className || '').toString().slice(0, 50),
+        children: e.children.length,
+        text: (e.textContent || '').trim().slice(0, 80),
+        visible: e.offsetParent !== null,
+        x: Math.round(r.left),
+        y: Math.round(r.top),
+        w: Math.round(r.width),
+        h: Math.round(r.height),
+      };
+    })
+    .slice(0, 15);
+  console.log('[DARKO LAB UI motor diag] elementos com Avatar X no DOM:', JSON.stringify(debug, null, 2));
   return false;
 }
 
@@ -1211,28 +1220,25 @@ async function selectMotor(motor) {
  * barra inferior do composer Quick Create.
  */
 function findCurrentMotorToggle() {
-  const buttons = Array.from(document.querySelectorAll('button'));
+  // Procura QUALQUER button visivel com texto contendo 'Avatar III/IV/V'.
+  // Texto pode comecar com 'IV' (icone) ou outros prefixos - usa includes.
+  const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+  let candidates = [];
   for (const b of buttons) {
     if (b.offsetParent === null) continue;
+    if (b.disabled) continue;
     const t = (b.textContent || '').trim();
-    // Match exato: "Avatar III", "Avatar IV", "Avatar V" (com possivel sufixo)
-    if (/^Avatar (III|IV|V)\b/.test(t) && t.length < 30) {
-      // Verifica se ta na area inferior (composer)
-      const rect = b.getBoundingClientRect();
-      if (rect.top > window.innerHeight * 0.5) {
-        return b;
-      }
-    }
+    if (!/Avatar (III|IV|V)\b/.test(t)) continue;
+    if (t.length > 80) continue; // exclui containers grandes
+    const rect = b.getBoundingClientRect();
+    if (rect.width < 30 || rect.height < 20) continue;
+    candidates.push({ el: b, rect, text: t });
   }
-  // Fallback: pega qualquer botao com texto "Avatar III/IV/V"
-  for (const b of buttons) {
-    if (b.offsetParent === null) continue;
-    const t = (b.textContent || '').trim();
-    if (/^Avatar (III|IV|V)\b/.test(t) && t.length < 30) {
-      return b;
-    }
-  }
-  return null;
+  if (candidates.length === 0) return null;
+  // Prefere o mais inferior (composer fica embaixo)
+  candidates.sort((a, b) => b.rect.top - a.rect.top);
+  console.log(`[DARKO LAB UI motor] findCurrentMotorToggle: ${candidates.length} candidatos, top: "${candidates[0].text.slice(0, 50)}"`);
+  return candidates[0].el;
 }
 
 /**
