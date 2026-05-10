@@ -160,6 +160,7 @@ export default function ClickUpPilotPage() {
   const [docContent, setDocContent] = useState('');
   const [parsed, setParsed] = useState<ParsedAdSection | null>(null);
   const [parseError, setParseError] = useState<string | null>(null);
+  const [fetchingDoc, setFetchingDoc] = useState(false);
 
   async function openTask(t: ClickUpTask) {
     setSelectedTask(t);
@@ -175,11 +176,32 @@ export default function ClickUpPilotPage() {
     }
   }
 
-  function runParser() {
+  async function autoFetchDoc(url: string) {
+    setFetchingDoc(true);
+    setParseError(null);
+    try {
+      const r = await fetch(`/api/docs/fetch?url=${encodeURIComponent(url)}`);
+      const j = await r.json();
+      if (!j.ok) {
+        setParseError(`Falha ao buscar doc: ${j.error || 'erro desconhecido'}`);
+        return;
+      }
+      setDocContent(j.text || '');
+      // Auto-parse depois de fetch
+      setTimeout(() => runParser(j.text || ''), 100);
+    } catch (e) {
+      setParseError(`Falha de rede: ${(e as Error)?.message}`);
+    } finally {
+      setFetchingDoc(false);
+    }
+  }
+
+  function runParser(textOverride?: string) {
     setParseError(null);
     setParsed(null);
-    if (!docContent.trim()) {
-      setParseError('Cola o conteudo do doc primeiro.');
+    const text = textOverride ?? docContent;
+    if (!text.trim()) {
+      setParseError('Cola o conteudo do doc OU usa o botao "Buscar doc automatico".');
       return;
     }
     if (!selectedTask) return;
@@ -187,13 +209,13 @@ export default function ClickUpPilotPage() {
     const taskName = selectedTask.name;
     const adIdMatch = taskName.match(/AD\d+[A-Z0-9]*\s*-\s*[A-Z0-9]+/i);
     const adId = adIdMatch ? adIdMatch[0].toUpperCase() : taskName.toUpperCase().trim();
-    const result = parseAdSection(docContent, adId);
+    const result = parseAdSection(text, adId);
     if (!result) {
       // Tenta com prefixo (ex so "AD135GL")
       const prefix = adId.split(/\s|-/)[0];
-      const r2 = parseAdSection(docContent, prefix);
+      const r2 = parseAdSection(text, prefix);
       if (!r2) {
-        setParseError(`Nao achei secao "${adId}" nem "${prefix}" no doc colado. Confere se a copy do AD ta no doc.`);
+        setParseError(`Nao achei secao "${adId}" nem "${prefix}" no doc. Confere se a copy do AD ta no doc.`);
         return;
       }
       setParsed(r2);
@@ -288,10 +310,15 @@ export default function ClickUpPilotPage() {
       motor: 'III',
       mode: 'copy',
       dynamic: true,
-      // Concat text como copy unica + per-part avatars enviados via dynamic
-      copy: dispatchPlan.parts.map((p) => p.text).join('\n\n'),
-      partAvatarIds: dispatchPlan.parts.map((p) => p.avatarId),
+      // Passa partes EXATAS do parser (texto + label + avatar). HeyGen Auto
+      // usa direto, sem re-split. Isso garante que mapping avatar↔parte
+      // sobreviva e que HOOK 1, HOOK 2, BODY virem partes separadas como
+      // o parser identificou.
+      partTexts: dispatchPlan.parts.map((p) => p.text),
       partLabels: dispatchPlan.parts.map((p) => p.label),
+      partAvatarIds: dispatchPlan.parts.map((p) => p.avatarId),
+      // Tambem manda copy concat como fallback
+      copy: dispatchPlan.parts.map((p) => p.text).join('\n\n'),
     };
     sessionStorage.setItem('darkolab:heygen-auto:handoff', JSON.stringify(handoff));
     router.push('/tools/heygen-auto?from=clickup-pilot');
@@ -483,25 +510,42 @@ export default function ClickUpPilotPage() {
                       </div>
                     );
                     return (
-                      <div className="mb-3 text-[11px]">
-                        <div className="mono uppercase tracking-widest text-text-muted mb-1">
+                      <div className="mb-3">
+                        <div className="mono mb-1 text-[10px] uppercase tracking-widest text-text-muted">
                           Docs encontrados:
                         </div>
-                        <ul className="grid gap-1">
-                          {links.map((u) => (
-                            <li key={u}>
-                              <a href={u} target="_blank" rel="noopener noreferrer" className="text-lime hover:underline break-all">
-                                {u}
-                              </a>
-                            </li>
-                          ))}
+                        <ul className="grid gap-1.5">
+                          {links.map((u) => {
+                            const isGdocs = /docs\.google\.com/.test(u);
+                            return (
+                              <li key={u} className="flex flex-wrap items-center gap-2 text-[11px]">
+                                <a href={u} target="_blank" rel="noopener noreferrer" className="break-all text-lime hover:underline">
+                                  {u.length > 80 ? u.slice(0, 80) + '…' : u}
+                                </a>
+                                {isGdocs ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => autoFetchDoc(u)}
+                                    disabled={fetchingDoc}
+                                    className="mono shrink-0 rounded border border-fuchsia-500/40 bg-fuchsia-500/10 px-2 py-0.5 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:border-fuchsia-500 hover:bg-fuchsia-500/20 disabled:opacity-50"
+                                    title="Fetch read-only via Google Docs export. Doc precisa estar 'Qualquer pessoa com link pode ver'."
+                                  >
+                                    {fetchingDoc ? 'Buscando...' : '⬇ Buscar automatico'}
+                                  </button>
+                                ) : null}
+                              </li>
+                            );
+                          })}
                         </ul>
+                        <div className="mono mt-1.5 text-[9px] uppercase tracking-widest text-text-muted">
+                          Auto-fetch funciona se doc estiver com sharing 'qualquer pessoa com link pode ver'. Senao, cola manualmente abaixo.
+                        </div>
                       </div>
                     );
                   })()}
 
                   <div className="mb-2 mono text-[10px] uppercase tracking-widest text-text-muted">
-                    Cola aqui o conteudo do doc (Ctrl+A → Ctrl+C no Google Docs)
+                    OU cola aqui o conteudo (Ctrl+A → Ctrl+C no Google Docs)
                   </div>
                   <textarea
                     value={docContent}
@@ -513,12 +557,17 @@ export default function ClickUpPilotPage() {
                   <div className="mt-2 flex flex-wrap gap-2">
                     <button
                       type="button"
-                      onClick={runParser}
+                      onClick={() => runParser()}
                       disabled={!docContent.trim()}
                       className="btn-primary"
                     >
                       Parsear copy
                     </button>
+                    {docContent.length > 0 ? (
+                      <span className="mono self-center text-[10px] text-text-muted">
+                        {docContent.length} chars carregados
+                      </span>
+                    ) : null}
                   </div>
 
                   {parseError ? (

@@ -107,6 +107,9 @@ export default function HeyGenAutoPage() {
   const [sessionTest, setSessionTest] = useState<SessionTest>({ state: 'idle' });
 
   const [parts, setParts] = useState<string[]>([]);
+  // Quando vem do ClickUp Pilot com partes ja parseadas (HOOK 1, HOOK 2, BODY),
+  // bypassa o auto-split. Reset via "Limpar override" ou troca de copy/mode.
+  const [forcedParts, setForcedParts] = useState<{ label: string; text: string }[] | null>(null);
   const [results, setResults] = useState<PartResult[]>([]);
   const [processing, setProcessing] = useState(false);
   const [stage, setStage] = useState<string | null>(null);
@@ -152,12 +155,23 @@ export default function HeyGenAutoPage() {
         dynamic?: boolean;
         partAvatarIds?: (string | null)[];
         partLabels?: string[];
+        partTexts?: string[];
       };
       if (h.adName) setAdName(h.adName);
       if (h.motor) setMotor(h.motor);
       if (h.mode) setMode(h.mode);
       if (h.copy) setCopy(h.copy);
       if (h.dynamic) setDynamicMode(true);
+      // Forca partes EXATAS do parser (HOOK 1, HOOK 2, BODY) em vez de
+      // re-split. Mantem mapping consistente com partAvatars.
+      if (h.partTexts && h.partTexts.length > 0) {
+        setForcedParts(
+          h.partTexts.map((text, i) => ({
+            label: h.partLabels?.[i] || `parte${i + 1}`,
+            text,
+          })),
+        );
+      }
       // Pre-popula partAvatars depois que groups loadarem (precisa do snapshot)
       if (h.partAvatarIds && h.partAvatarIds.length > 0) {
         const snap = getLibrarySnapshot();
@@ -208,6 +222,11 @@ export default function HeyGenAutoPage() {
       setParts([]);
       return;
     }
+    // Forced parts (do ClickUp Pilot) sobrescreve auto-split
+    if (forcedParts && forcedParts.length > 0) {
+      setParts(forcedParts.map((p) => p.text));
+      return;
+    }
     if (!copy.trim()) {
       setParts([]);
       return;
@@ -215,7 +234,7 @@ export default function HeyGenAutoPage() {
     setParts(
       splitCopyIntoParts(copy, { targetSec: 20, minSec: 10, maxSec: 35 }),
     );
-  }, [copy, mode]);
+  }, [copy, mode, forcedParts]);
 
   /* --------------- Resize dos arrays per-part quando count muda --------------- */
   useEffect(() => {
@@ -680,9 +699,24 @@ export default function HeyGenAutoPage() {
 
               {mode === 'copy' ? (
                 <div className="mt-4">
+                  {forcedParts && forcedParts.length > 0 ? (
+                    <div className="mb-2 flex items-center justify-between rounded-[10px] border border-fuchsia-500/40 bg-fuchsia-500/10 px-3 py-2 text-[11px]">
+                      <span className="text-fuchsia-200">
+                        ⚙ Partes vindas do <strong>ClickUp Pilot</strong> (split do parser preservado: {forcedParts.map(p => p.label).join(', ')})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setForcedParts(null)}
+                        className="mono shrink-0 rounded border border-fuchsia-500/40 px-2 py-0.5 text-[9px] uppercase tracking-widest text-fuchsia-200 hover:border-red-500/60 hover:text-red-300"
+                        disabled={processing}
+                      >
+                        Limpar override
+                      </button>
+                    </div>
+                  ) : null}
                   <textarea
                     value={copy}
-                    onChange={(e) => setCopy(e.target.value)}
+                    onChange={(e) => { setCopy(e.target.value); if (forcedParts) setForcedParts(null); }}
                     placeholder="Cole aqui a copy completa. A ferramenta vai dividir em takes de ~20s sem cortar frase."
                     rows={10}
                     className="input-field resize-y font-mono text-sm"
