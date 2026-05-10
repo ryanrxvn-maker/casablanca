@@ -245,12 +245,32 @@ async function handleListAvatars(requestId, bridgeTabId) {
 }
 
 async function handleGenerate(requestId, payload, bridgeTabId) {
+  console.log('[DARKO LAB BG] handleGenerate START reqId=', requestId);
   const tab = await findOrCreateHeyGenTab();
   activeJobs.set(requestId, { tabId: tab.id, payload, bridgeTabId });
 
   reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', {
     stage: 'Abrindo HeyGen...',
   });
+
+  // CRITICO: garantir que a aba esta em /avatar (Quick Create) ANTES de
+  // mandar HG_RUN_JOB. Se nao estiver, navega via chrome.tabs.update e
+  // aguarda load complete (content script vai se reinjectar). Se a
+  // navegacao fosse feita PELO content script via location.href, o script
+  // morreria e o job ficaria orfao.
+  let curTab = await chrome.tabs.get(tab.id);
+  const isOnAvatar = curTab.url && curTab.url.includes('app.heygen.com/avatar');
+  if (!isOnAvatar) {
+    console.log('[DARKO LAB BG] aba HeyGen nao esta em /avatar (atual:', curTab.url, '), navegando...');
+    reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', {
+      stage: 'Navegando HeyGen pra Quick Create...',
+    });
+    await chrome.tabs.update(tab.id, { url: 'https://app.heygen.com/avatar' });
+    // Aguarda load complete (status === 'complete')
+    await waitForTabComplete(tab.id, 30000);
+    // Espera React montar a UI
+    await new Promise((r) => setTimeout(r, 2500));
+  }
 
   await waitForTabReady(tab.id);
 
@@ -264,6 +284,7 @@ async function handleGenerate(requestId, payload, bridgeTabId) {
       requestId,
       payload,
     });
+    console.log('[DARKO LAB BG] HG_RUN_JOB despachado pra tab', tab.id);
   } catch (e) {
     activeJobs.delete(requestId);
     reportToPage(bridgeTabId, requestId, 'HG_ERROR', {
@@ -273,6 +294,24 @@ async function handleGenerate(requestId, payload, bridgeTabId) {
         ')',
     });
   }
+}
+
+/**
+ * Aguarda tab.status === 'complete' (load finished). Retorna true se OK,
+ * false se timeout.
+ */
+async function waitForTabComplete(tabId, timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const t = await chrome.tabs.get(tabId);
+      if (t.status === 'complete') return true;
+    } catch {
+      return false; // aba fechada
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  return false;
 }
 
 function reportToPage(bridgeTabId, requestId, type, payload) {

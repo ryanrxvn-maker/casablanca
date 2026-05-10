@@ -681,6 +681,7 @@ async function testSession() {
 }
 
 function reportProgress(requestId, stage, percent) {
+  console.log('[DARKO LAB UI progress]', stage, percent != null ? `(${percent}%)` : '');
   chrome.runtime.sendMessage({
     type: 'HG_TAB_PROGRESS',
     requestId,
@@ -819,16 +820,19 @@ async function runJob(requestId, payload) {
 
     reportProgress(requestId, `Preparando ${partLabel ?? 'video'} via UI...`);
 
-    // 1) Se ja temos textarea visivel, nao navega - estamos numa tela boa.
-    //    Senao, vai pra /avatar (Quick Create).
+    // 1) Verifica se textarea esta visivel. Se nao, ABORTA com erro claro.
+    //    NAO podemos fazer location.href aqui pq isso recarrega a aba e
+    //    mata o content script (currentJob orfao). A navegacao ja foi feita
+    //    pelo background.js antes de mandar HG_RUN_JOB pra ca.
+    console.log('[DARKO LAB UI] runJob iniciando, location=', location.href);
     if (!findScriptTextarea()) {
-      console.log('[DARKO LAB UI] sem textarea, navegando pra /avatar (era ' + location.href + ')');
-      location.href = 'https://app.heygen.com/avatar';
-      // Aguarda navegacao + React app montar
-      await sleep(4000);
-    } else {
-      console.log('[DARKO LAB UI] textarea ja presente, sem navegacao necessaria');
+      throw new Error(
+        'Textarea de script nao esta visivel em ' + location.href + '. ' +
+        'A automacao precisa que a aba HeyGen esteja em /avatar (Quick Create). ' +
+        'Abra app.heygen.com/avatar manualmente e tente de novo.'
+      );
     }
+    console.log('[DARKO LAB UI] textarea presente - prosseguindo');
 
     // 2) Aguarda textarea de script aparecer (UI carregada)
     reportProgress(requestId, 'Aguardando UI HeyGen carregar...');
