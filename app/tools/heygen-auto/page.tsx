@@ -7,17 +7,13 @@ import { ToolShell } from '@/components/ToolShell';
 import { CancelButton } from '@/components/CancelButton';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { useToolState } from '@/components/ToolsStateProvider';
-import { buildZip } from '@/lib/zip-builder';
-import { downloadBlob } from '@/lib/audio-engine';
 import {
-  audioFileToBase64,
   detectExtension,
-  generateAvatarPart,
   splitCopyIntoParts,
   testHeygenSession,
   type ExtensionStatus,
 } from '@/lib/heygen-extension-bridge';
-import { runHeyGenJobs } from '@/lib/heygen-job-runner';
+import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
 import {
   HeyGenAvatarPicker,
   type AvatarOption,
@@ -51,12 +47,7 @@ type SessionTest = {
   detail?: string;
 };
 
-type PartResult = {
-  index: number;
-  label: string;
-  videoUrl: string;
-  blob: Blob;
-};
+type PartResult = RunnerResult;
 
 export default function HeyGenAutoPage() {
   const [extStatus, setExtStatus] = useState<ExtensionStatus>({
@@ -149,32 +140,6 @@ export default function HeyGenAutoPage() {
     });
   }
 
-  function buildJobs(m: Mode, txtParts: string[], aud: File[]) {
-    if (m === 'copy') {
-      if (txtParts.length === 0) {
-        setError('Cola uma copy primeiro.');
-        return null;
-      }
-      const out: any[] = [];
-      for (let i = 0; i < txtParts.length; i++) {
-        out.push({ label: 'parte' + (i + 1), copy: txtParts[i] });
-      }
-      return out;
-    }
-    if (aud.length === 0) {
-      setError('Faca upload de pelo menos um arquivo de audio.');
-      return null;
-    }
-    const ordered = [...aud].sort((a, b) =>
-      a.name.localeCompare(b.name, 'pt', { numeric: true }),
-    );
-    const out: any[] = [];
-    for (let i = 0; i < ordered.length; i++) {
-      out.push({ label: 'parte' + (i + 1), audio: ordered[i] });
-    }
-    return out;
-  }
-
   async function run() {
     if (!extStatus.connected) {
       setError(
@@ -187,8 +152,34 @@ export default function HeyGenAutoPage() {
       return;
     }
 
-    const jobs = buildJobs(mode, parts, audioParts);
-    if (!jobs) return;
+    type JobEntry = { label: string; copy?: string; audio?: File };
+    let jobs: JobEntry[] = [];
+    if (mode === 'copy') {
+      if (parts.length === 0) {
+        setError('Cola uma copy primeiro.');
+        return;
+      }
+      if (!selectedVoice) {
+        setError('Modo copy precisa de uma voz selecionada.');
+        return;
+      }
+      jobs = parts.map((p, i) => ({
+        label: `parte${i + 1}`,
+        copy: p,
+      }));
+    } else {
+      if (audioParts.length === 0) {
+        setError('Faca upload de pelo menos um arquivo de audio.');
+        return;
+      }
+      const ordered = [...audioParts].sort((a, b) =>
+        a.name.localeCompare(b.name, 'pt', { numeric: true }),
+      );
+      jobs = ordered.map((a, i) => ({
+        label: `parte${i + 1}`,
+        audio: a,
+      }));
+    }
 
     cancelRef.current = false;
     setError(null);
@@ -196,38 +187,24 @@ export default function HeyGenAutoPage() {
     setProcessing(true);
 
     try {
-      const adNameSafe = (adName || 'avatar').replace(/[^a-zA-Z0-9_-]/g, '_');
-      const voiceId =
-        mode === 'copy' && overrideVoice && selectedVoice
-          ? selectedVoice.id
-          : selectedVoice?.id;
       const collected: PartResult[] = [];
-      const results = await runHeyGenJobs(jobs, {
+      const finalResults = await runHeyGenJobs(jobs, {
         parallel: 3,
         mode,
-        avatarId: selectedAvatar!.id,
-        voiceId,
+        avatarId: selectedAvatar.id,
+        voiceId:
+          mode === 'copy' && selectedVoice ? selectedVoice.id : undefined,
         motor,
-        adNameSafe,
+        adNameSafe: safeName,
         isCancelled: () => cancelRef.current,
-        onProgress: setStage,
+        onProgress: (msg) => setStage(msg),
         onResult: (r) => {
-          collected.push({
-            index: r.index,
-            label: r.label,
-            videoUrl: r.videoId ? `QUEUED:${r.videoId}` : `ERROR:${r.error || 'falha'}`,
-            blob: new Blob(),
-          });
+          collected.push(r);
           setResults([...collected].sort((a, b) => a.index - b.index));
         },
       });
-      const ok = results.filter((r) => r.videoId).length;
-      const failed = jobs.length - ok;
-      setStage(
-        ok + '/' + jobs.length + ' trechos enviados pro HeyGen' +
-          (failed > 0 ? ' (' + failed + ' falharam)' : '') +
-          '. Pega os mp4s prontos em app.heygen.com.',
-      );
+      setResults([...finalResults].sort((a, b) => a.index - b.index));
+      setStage(null);
     } catch (e) {
       setError((e as Error).message ?? 'Falha desconhecida.');
       setStage(null);
@@ -237,16 +214,6 @@ export default function HeyGenAutoPage() {
     }
   }
 
-  async function downloadAllZip() {
-    if (results.length === 0) return;
-    const entries = results.map((r) => ({
-      name: `${safeName}_${r.label}.mp4`,
-      data: r.blob,
-    }));
-    const zip = await buildZip(entries);
-    await downloadBlob(zip, `${safeName}_avatares.zip`);
-  }
-
   return (
     <div className="flex min-h-screen flex-col">
       <Heartbeat />
@@ -254,7 +221,7 @@ export default function HeyGenAutoPage() {
       <main className="container-app flex-1 py-10">
         <ToolShell
           title="HeyGen Auto Avatar"
-          description="Automacao do HeyGen via extensao Chrome — DISPARA cada trecho pra gerar usando sua propria conta HeyGen (sem custo de API). Voce manda copy ou audios; a ferramenta divide em trechos, escolhe motor + avatar, cola script e clica Generate em cada um. Quando terminar de DISPARAR todos, voce pega os mp4s prontos no app.heygen.com."
+          description="Automacao do HeyGen via extensao Chrome — gera o avatar parte por parte usando sua propria conta HeyGen (sem custo de API). Voce manda copy ou audios, recebe ZIP organizado por parte na ordem certa."
         >
           {/* Status da extensao */}
           {!extLoading ? (
@@ -523,12 +490,12 @@ export default function HeyGenAutoPage() {
               )}
               {results.length > 0 && !processing ? (
                 <a
-                  href="https://app.heygen.com/avatar"
+                  href="https://app.heygen.com/projects"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="btn-primary"
                 >
-                  Abrir HeyGen pra pegar os videos
+                  Abrir HeyGen Projects
                 </a>
               ) : null}
             </div>
@@ -551,27 +518,47 @@ export default function HeyGenAutoPage() {
               </div>
             ) : null}
 
-            {/* Resultados - trechos enviados pro HeyGen */}
+            {/* Resultados parciais — modo dispatch only */}
             {results.length > 0 ? (
               <div className="fade-in-up mt-2 rounded-[12px] border border-lime/30 bg-lime/5 p-4">
                 <h3 className="mb-2 text-sm font-semibold uppercase tracking-widest text-lime">
-                  ✓ {results.length} trecho{results.length === 1 ? '' : 's'}{' '}
-                  enviado{results.length === 1 ? '' : 's'} pro HeyGen
+                  {results.filter((r) => r.error == null).length}/{results.length}{' '}
+                  parte{results.length === 1 ? '' : 's'} disparada
+                  {results.length === 1 ? '' : 's'} no HeyGen
                 </h3>
-                <p className="mb-3 text-[11px] text-text-muted">
-                  HeyGen esta gerando agora. Quando terminar, abra
-                  app.heygen.com e baixe os mp4s da aba <strong>Recents</strong>.
+                <p className="mb-2 text-[11px] text-text-muted">
+                  A geracao roda na fila do HeyGen. Acompanhe na sua pagina
+                  Projects e baixe quando ficar pronto.
                 </p>
                 <ul className="grid gap-1 text-xs">
-                  {results.map((r) => {
-                    const vid = r.videoUrl.startsWith('QUEUED:')
-                      ? r.videoUrl.slice(7)
-                      : null;
-                    return (
-                      <li
-                        key={r.label}
-                        className="flex items-center justify-between rounded-md border border-line bg-bg px-3 py-2"
-                      >
-                        <span>
-                          <span className="mono text-lime">{r.label}</span>
-                          <span className="ml-2 text-text
+                  {results.map((r) => (
+                    <li
+                      key={r.label}
+                      className="flex items-center justify-between rounded-md border border-line bg-bg px-3 py-2"
+                    >
+                      <span>
+                        <span className="mono text-lime">{r.label}</span>
+                        {r.videoId ? (
+                          <span className="ml-2 text-text-muted">
+                            id: {r.videoId.slice(0, 12)}...
+                          </span>
+                        ) : null}
+                      </span>
+                      {r.error ? (
+                        <span className="text-[11px] text-red-300">
+                          ✗ {r.error}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-lime">✓ disparado</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        </ToolShell>
+      </main>
+    </div>
+  );
+}
