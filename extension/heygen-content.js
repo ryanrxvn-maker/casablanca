@@ -1095,6 +1095,9 @@ async function selectMotor(motor) {
   const target = `Avatar ${motor}`;
   console.log('[DARKO LAB UI motor] alvo=', target);
 
+  // Fecha modais de anuncio (ex: 'Introducing Avatar V') que sequestram a UI
+  await dismissAnnouncementModals();
+
   // Verifica se ja esta no motor certo (toggle mostra Avatar X)
   const currentBtn = findCurrentMotorToggle();
   if (currentBtn) {
@@ -1220,25 +1223,99 @@ async function selectMotor(motor) {
  * barra inferior do composer Quick Create.
  */
 function findCurrentMotorToggle() {
-  // Procura QUALQUER button visivel com texto contendo 'Avatar III/IV/V'.
-  // Texto pode comecar com 'IV' (icone) ou outros prefixos - usa includes.
-  const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+  // O toggle do HeyGen NAO eh button - eh um <div> com cursor-pointer.
+  // Tem que estar na area inferior da tela (composer = barra debaixo).
+  // EVITA pegar badges do header/anuncios (y < 200px).
+  const all = Array.from(document.querySelectorAll('button, [role="button"], div, span, a'));
   let candidates = [];
-  for (const b of buttons) {
-    if (b.offsetParent === null) continue;
-    if (b.disabled) continue;
-    const t = (b.textContent || '').trim();
+  for (const el of all) {
+    if (el.offsetParent === null) continue;
+    if (el.disabled) continue;
+    const t = (el.textContent || '').trim();
     if (!/Avatar (III|IV|V)\b/.test(t)) continue;
-    if (t.length > 80) continue; // exclui containers grandes
-    const rect = b.getBoundingClientRect();
-    if (rect.width < 30 || rect.height < 20) continue;
-    candidates.push({ el: b, rect, text: t });
+    if (t.length > 80) continue;
+    if (el.children.length > 5) continue; // exclui containers
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 50 || rect.height < 20) continue;
+    if (rect.width > 400) continue;
+    // EXCLUI badges no topo (anuncio/header) - so aceita y > metade da tela
+    if (rect.top < window.innerHeight * 0.4) continue;
+    // Prefere elementos com cursor-pointer (toggle clicavel)
+    const style = window.getComputedStyle(el);
+    const isClickable =
+      style.cursor === 'pointer' ||
+      el.tagName === 'BUTTON' ||
+      el.getAttribute('role') === 'button' ||
+      (el.className || '').includes('cursor-pointer');
+    candidates.push({ el, rect, text: t, isClickable });
   }
-  if (candidates.length === 0) return null;
-  // Prefere o mais inferior (composer fica embaixo)
-  candidates.sort((a, b) => b.rect.top - a.rect.top);
-  console.log(`[DARKO LAB UI motor] findCurrentMotorToggle: ${candidates.length} candidatos, top: "${candidates[0].text.slice(0, 50)}"`);
+  if (candidates.length === 0) {
+    console.warn('[DARKO LAB UI motor] findCurrentMotorToggle: 0 candidatos validos (todos no topo da tela ou nao clicaveis)');
+    return null;
+  }
+  // Sort: prefere clicaveis primeiro, depois mais inferior (Y maior)
+  candidates.sort((a, b) => {
+    if (a.isClickable !== b.isClickable) return a.isClickable ? -1 : 1;
+    return b.rect.top - a.rect.top;
+  });
+  console.log(`[DARKO LAB UI motor] findCurrentMotorToggle: ${candidates.length} candidatos, top: "${candidates[0].text.slice(0, 50)}" y=${Math.round(candidates[0].rect.top)} clickable=${candidates[0].isClickable}`);
   return candidates[0].el;
+}
+
+/**
+ * Fecha modais de anuncio do HeyGen (ex: "Introducing Avatar V") que
+ * sequestram a UI e bloqueiam clicks no toggle real do motor.
+ * Procura botao X / Close / Skip / 'Maybe later' e clica.
+ */
+async function dismissAnnouncementModals() {
+  // 1) Procura botoes de fechar
+  const closeSelectors = [
+    'button[aria-label*="close" i]',
+    'button[aria-label*="dismiss" i]',
+    '[role="dialog"] button[aria-label*="close" i]',
+  ];
+  for (const sel of closeSelectors) {
+    const els = document.querySelectorAll(sel);
+    for (const el of els) {
+      if (el.offsetParent !== null) {
+        console.log('[DARKO LAB UI motor] fechando modal via close button');
+        clickElement(el);
+        await sleep(400);
+      }
+    }
+  }
+  // 2) Procura botao SVG X dentro de dialog
+  const dialogs = document.querySelectorAll('[role="dialog"], [data-state="open"]');
+  for (const d of dialogs) {
+    const buttons = d.querySelectorAll('button');
+    for (const b of buttons) {
+      const txt = (b.textContent || '').trim().toLowerCase();
+      if (b.offsetParent === null) continue;
+      // Botao com X (svg) ou texto Close/Skip/Later
+      if (
+        txt === '' /* so SVG */ ||
+        txt === 'close' ||
+        txt === 'skip' ||
+        txt === 'maybe later' ||
+        txt === 'later' ||
+        txt === 'x' ||
+        txt === 'dismiss'
+      ) {
+        const rect = b.getBoundingClientRect();
+        // Botao top-right (X icon)
+        if (rect.width < 60 && rect.height < 60) {
+          console.log('[DARKO LAB UI motor] fechando dialog via X/close button:', txt || '(svg)');
+          clickElement(b);
+          await sleep(400);
+        }
+      }
+    }
+  }
+  // 3) Press Escape pra fechar qualquer overlay restante
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  await sleep(300);
+  document.body?.dispatchEvent?.(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  await sleep(200);
 }
 
 /**
