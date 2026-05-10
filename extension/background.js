@@ -337,6 +337,94 @@ async function ensureContentScriptLoaded(tabId) {
   return false;
 }
 
+/**
+ * Injeta o interceptor de fetch+XHR diretamente no MAIN WORLD da aba HeyGen
+ * via chrome.scripting.executeScript. Bypass do CSP do HeyGen e nao depende
+ * de arquivo inject.js no disco.
+ */
+async function injectInterceptorIntoMainWorld(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: () => {
+        if (window.__darkolab_intercept_loaded__) return;
+        window.__darkolab_intercept_loaded__ = true;
+        const URL_RE = /heygen\.com.*(?:video|generate|create)/i;
+        function emit(payload) {
+          try {
+            window.postMessage({ source: 'darkolab-injected', type: 'VIDEO_GENERATED', ts: Date.now(), ...payload }, '*');
+          } catch (e) {}
+        }
+        function tryExtractId(j) {
+          if (!j || typeof j !== 'object') return null;
+          return (j?.data?.video_id ?? j?.data?.id ?? j?.data?.uuid ?? j?.video_id ?? j?.id ?? j?.uuid ?? null);
+        }
+        const origFetch = window.fetch;
+        window.fetch = function (input, init) {
+          const url = typeof input === 'string' ? input : input?.url || '';
+          const method = ((init && init.method) || (typeof input === 'object' && input?.method) || 'GET').toUpperCase();
+          const isInteresting = method === 'POST' && URL_RE.test(url);
+          const p = origFetch.apply(this, arguments);
+          if (isInteresting) {
+            p.then(async (res) => {
+              try {
+                if (!res || res.status >= 400) return;
+                const clone = res.clone();
+                const j = await clone.json().catch(() => null);
+                const id = tryExtractId(j);
+                if (id) {
+                  console.log('[DARKO LAB inject] fetch capturou video_id', id, 'via', url);
+                  emit({ video_id: id, url, source_method: 'fetch' });
+                }
+              } catch (e) {}
+            }).catch(() => {});
+          }
+          return p;
+        };
+        const OrigXHR = window.XMLHttpRequest;
+        function PatchedXHR() {
+          const xhr = new OrigXHR();
+          let _url = '';
+          let _method = '';
+          const origOpen = xhr.open;
+          xhr.open = function (method, url) {
+            _method = String(method || '').toUpperCase();
+            _url = String(url || '');
+            return origOpen.apply(this, arguments);
+          };
+          xhr.addEventListener('load', function () {
+            try {
+              if (_method !== 'POST' || !URL_RE.test(_url)) return;
+              if (this.status >= 400) return;
+              const text = this.responseText;
+              if (!text) return;
+              let j = null;
+              try { j = JSON.parse(text); } catch { return; }
+              const id = tryExtractId(j);
+              if (id) {
+                console.log('[DARKO LAB inject] XHR capturou video_id', id, 'via', _url);
+                emit({ video_id: id, url: _url, source_method: 'xhr' });
+              }
+            } catch (e) {}
+          });
+          return xhr;
+        }
+        PatchedXHR.prototype = OrigXHR.prototype;
+        for (const k in OrigXHR) {
+          try { PatchedXHR[k] = OrigXHR[k]; } catch (e) {}
+        }
+        window.XMLHttpRequest = PatchedXHR;
+        console.log('[DARKO LAB inject] fetch+XHR patched (via executeScript MAIN world)');
+      },
+    });
+    return true;
+  } catch (e) {
+    console.error('[DARKO LAB BG] !!! injectInterceptorIntoMainWorld erro:', e?.message ?? e);
+    return false;
+  }
+}
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   for (const [requestId, job] of activeJobs.entries()) {
     if (job.tabId === tabId) {

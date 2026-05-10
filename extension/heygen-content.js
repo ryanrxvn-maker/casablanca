@@ -30,23 +30,20 @@ if (window.__darkolab_heygen_loaded__) {
 } else {
   window.__darkolab_heygen_loaded__ = true;
 
-// Injeta inject.js no MAIN WORLD pra patchar fetch+XHR e capturar
-// video_id 100% certo do POST de generate (evita confusao com videos
-// gerados por outras pessoas na mesma conta).
-(function injectInterceptor() {
+// Pede pro background injetar o interceptor de fetch+XHR no MAIN WORLD
+// via chrome.scripting.executeScript (Manifest V3 - bypassa CSP do HeyGen
+// e nao precisa de inject.js no disco).
+(function requestInterceptorInjection() {
   try {
-    const script = document.createElement('script');
-    script.src = chrome.runtime.getURL('inject.js');
-    script.onload = function () {
-      console.log('[DARKO LAB] inject.js carregado no main world');
-      this.remove();
-    };
-    script.onerror = function (e) {
-      console.warn('[DARKO LAB] falha ao carregar inject.js:', e);
-    };
-    (document.head || document.documentElement).appendChild(script);
+    chrome.runtime.sendMessage({ type: 'HG_INJECT_INTERCEPTOR' }, () => {
+      if (chrome.runtime.lastError) {
+        console.warn('[DARKO LAB] background nao respondeu pra inject:', chrome.runtime.lastError.message);
+      } else {
+        console.log('[DARKO LAB] background ack pra inject interceptor');
+      }
+    });
   } catch (e) {
-    console.warn('[DARKO LAB] erro ao injetar inject.js:', e);
+    console.warn('[DARKO LAB] erro pedindo inject ao background:', e);
   }
 })();
 
