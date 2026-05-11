@@ -40,6 +40,7 @@ import {
 import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
 import { CompactVoiceSelector } from '@/components/CompactVoiceSelector';
 import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
+import { recallByVoiceName, rememberPairing, normalizeVoiceName } from '@/lib/voice-avatar-memory';
 
 /**
  * ClickUp Pilot — cerebro de automacao
@@ -531,6 +532,10 @@ export default function ClickUpPilotPage() {
             av.videoFileId = resolveVideoFileId(av.username, docR.driveLinks);
           }
           // 4. Monta roleSlots — UM por avatar do briefing, mesmo se sem match
+          //    Order de prioridade pra fechar o slot:
+          //    a) matchAvatar score >= 30 (voice_name_exact / name match / fuzzy)
+          //    b) memoria voice↔avatar (user ja pareou voz `@x` com avatar Y antes)
+          //    c) pendente
           const roleSlots: RoleSlot[] = [];
           for (const av of briefing.avatars) {
             const m = matchAvatar(av.username, avatarCandidates);
@@ -548,19 +553,40 @@ export default function ClickUpPilotPage() {
                 voiceOverride: null,
                 matchedBy: m.matchedBy || 'fuzzy',
               });
-            } else {
-              roleSlots.push({
-                role: av.role,
-                username: av.username,
-                briefingFileId,
-                avatarId: null,
-                avatarName: null,
-                avatarThumb: null,
-                avatarVoiceId: null,
-                voiceOverride: null,
-                matchedBy: null,
-              });
+              continue;
             }
+            // (b) Tenta memoria: copy diz @x.mp4 → busca memoria pra voz "x"
+            const recalled = recallByVoiceName(av.username);
+            if (recalled) {
+              // Confirma que avatar ainda existe na biblioteca
+              const candFull = avatarCandidates.find(c => c.id === recalled.avatarId);
+              if (candFull) {
+                roleSlots.push({
+                  role: av.role,
+                  username: av.username,
+                  briefingFileId,
+                  avatarId: recalled.avatarId,
+                  avatarName: recalled.avatarName,
+                  avatarThumb: candFull.thumb || null,
+                  avatarVoiceId: recalled.voiceId,
+                  voiceOverride: null,
+                  matchedBy: 'memory',
+                });
+                continue;
+              }
+            }
+            // (c) Pendente
+            roleSlots.push({
+              role: av.role,
+              username: av.username,
+              briefingFileId,
+              avatarId: null,
+              avatarName: null,
+              avatarThumb: null,
+              avatarVoiceId: null,
+              voiceOverride: null,
+              matchedBy: null,
+            });
           }
           // partTemplates: cada parte tem um 'matchByRole' — qual role preencher
           // na hora de gerar o plan final. Default = primeiro role.
@@ -1037,13 +1063,27 @@ export default function ClickUpPilotPage() {
     }
   }
 
-  /** Atualiza UM roleSlot da task. Usado quando user troca avatar OU voz. */
+  /** Atualiza UM roleSlot da task. Usado quando user troca avatar OU voz.
+   *  Side-effect: salva memoria voice↔avatar quando ambos estao definidos +
+   *  matchedBy nao e 'memory' (evita loop de re-salvar a mesma memoria). */
   function updateRoleSlot(taskId: string, roleIdx: number, patch: Partial<RoleSlot>) {
     setTaskAnalyses((prev) => {
       const a = prev[taskId];
       if (!a?.roleSlots) return prev;
       const newSlots = a.roleSlots.map((s, i) => i === roleIdx ? { ...s, ...patch } : s);
       const allHaveAvatar = newSlots.every((s) => s.avatarId);
+      const updated = newSlots[roleIdx];
+      // Salva memoria: voz usada (override OU padrao do avatar) → avatarId
+      const effectiveVoiceId = updated.voiceOverride?.id || updated.avatarVoiceId;
+      const effectiveVoiceName = updated.voiceOverride?.name || normalizeVoiceName(updated.username);
+      if (updated.avatarId && updated.avatarName && effectiveVoiceId && effectiveVoiceName && updated.matchedBy !== 'memory') {
+        rememberPairing({
+          voiceName: effectiveVoiceName,
+          voiceId: effectiveVoiceId,
+          avatarId: updated.avatarId,
+          avatarName: updated.avatarName,
+        });
+      }
       return { ...prev, [taskId]: { ...a, roleSlots: newSlots, status: allHaveAvatar ? 'ready' : 'partial' } };
     });
   }
@@ -1817,7 +1857,7 @@ export default function ClickUpPilotPage() {
                                               />
                                               <div className="flex-1 min-w-0">
                                                 <div className="mono text-[9px] uppercase tracking-widest text-blue-200">
-                                                  preview do video que o copy pediu
+                                                  preview avatar (apenas)
                                                 </div>
                                                 <div className="text-[11px] text-text-muted">@{slot.username}.mp4</div>
                                                 {hasAnthropic === false ? (

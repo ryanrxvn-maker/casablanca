@@ -228,6 +228,30 @@ export function IconSparkle(p: IconProps) {
   );
 }
 
+/** ClickUp Pilot — checkmark de task + cursor de pilotagem (raio direcional)
+ *  Visual de "pilot" controlando uma task: cursor que vira raio + lista de itens. */
+export function IconClickUpPilot(p: IconProps) {
+  return (
+    <svg {...baseProps(p)}>
+      {/* Checklist de tasks */}
+      <rect x="3" y="4" width="10" height="16" rx="1.5" />
+      <path d="M5.5 8h5M5.5 12h5M5.5 16h3" opacity="0.7" />
+      {/* Checkmarks pequenos nas tasks (3 marcas) */}
+      <path d="M5.5 8l-0.6 0.6M5.5 12l-0.6 0.6" strokeWidth="1" opacity="0.5" />
+      {/* Cursor/pilot raio direcionado */}
+      <path d="M16 6l5 5-3 1-1 3-5-5 4-4z" fill="currentColor" stroke="currentColor" />
+      {/* Linha de "trilha" */}
+      <path d="M14 12l-2 2" opacity="0.5" strokeDasharray="1.5 1.5" />
+      {/* Sparkle de automacao no canto */}
+      <path
+        d="M21.5 17l0.4 1 1 0.4-1 0.4-0.4 1-0.4-1L20 18.4l1-0.4 0.5-1z"
+        fill="currentColor"
+        stroke="none"
+      />
+    </svg>
+  );
+}
+
 /** HeyGen Auto Avatar — silhueta + ondas de fala automatizada */
 export function IconHeyGenAuto(p: IconProps) {
   return (

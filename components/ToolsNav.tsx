@@ -9,6 +9,7 @@ import {
   IconAutoBroll,
   IconCalculadora,
   IconCamuflagem,
+  IconClickUpPilot,
   IconCompressor,
   IconCopySRT,
   IconDecupageCopy,
@@ -101,7 +102,7 @@ export const AI_SUITE: RailItem[] = [
   {
     href: '/tools/clickup-pilot',
     label: 'ClickUp Pilot',
-    icon: <IconHeyGenAuto />,
+    icon: <IconClickUpPilot />,
   },
 ];
 
