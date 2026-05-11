@@ -65,6 +65,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'HG_RELOAD_SELF') {
+    // Pagina pede pra extensao se reinstalar (re-le manifest + scripts)
+    // Util pra updates futuros: page detecta versao velha → page chama
+    // HG_RELOAD_SELF → extensao se reinicia → user nao precisa abrir
+    // chrome://extensions e clicar reload manualmente.
+    try { sendResponse({ accepted: true }); } catch {}
+    setTimeout(() => {
+      try { chrome.runtime.reload(); } catch (e) {
+        console.error('[DARKO LAB BG] reload self falhou:', e?.message);
+      }
+    }, 100);
+    return;
+  }
+
   if (msg.type === 'HG_FETCH_DOC') {
     // READ-ONLY: abre/reusa tab docs.google.com com a URL e le innerText
     // via /mobilebasic (renderiza HTML completo). Devolve texto bruto.

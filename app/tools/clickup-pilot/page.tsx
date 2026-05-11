@@ -60,6 +60,21 @@ type DispatchPlan = {
   unmatchedAvatars: string[];
 };
 
+type TaskAnalysis = {
+  taskId: string;
+  taskName: string;
+  status: 'pending' | 'analyzing' | 'ready' | 'partial' | 'error';
+  baseAdId?: string;
+  hookCount?: number;
+  bodyPartsCount?: number;
+  totalParts?: number;
+  avatarsTotal?: number;
+  avatarsMatched?: number;
+  unmatchedAvatars?: string[];
+  error?: string;
+  plan?: DispatchPlan;
+};
+
 export default function ClickUpPilotPage() {
   const router = useRouter();
 
@@ -134,6 +149,27 @@ export default function ClickUpPilotPage() {
   const [tasks, setTasks] = useState<ClickUpTask[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(false);
 
+  /* ========== Modo BATCH (selecao multipla + analise previa) ========== */
+  const [bulkMode, setBulkMode] = useToolState<boolean>('clickup:bulkMode', false);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [taskAnalyses, setTaskAnalyses] = useState<Record<string, TaskAnalysis>>({});
+  const [analyzing, setAnalyzing] = useState(false);
+
+  function toggleTaskSelected(id: string) {
+    setSelectedTaskIds((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  }
+  function selectAllTasks() {
+    setSelectedTaskIds(new Set(tasks.map((t) => t.id)));
+  }
+  function clearSelected() {
+    setSelectedTaskIds(new Set());
+    setTaskAnalyses({});
+  }
+
   async function loadTasks() {
     if (!selectedTeam || !selectedEditor) {
       setError('Escolhe team + editor primeiro.');
@@ -205,6 +241,138 @@ export default function ClickUpPilotPage() {
         resolve({ ok: false, error: 'Timeout 30s — extensao nao respondeu (atualize pra v4.0.15+ e recarregue).' });
       }, 30000);
     });
+  }
+
+  /** Analisa N tasks em paralelo (max 3): pega doc, parsea, monta plano. */
+  async function analyzeSelected() {
+    if (selectedTaskIds.size === 0) {
+      setError('Selecione pelo menos uma task primeiro.');
+      return;
+    }
+    setError(null);
+    setAnalyzing(true);
+    const targets = tasks.filter((t) => selectedTaskIds.has(t.id));
+    // Init status pendente pra todos
+    setTaskAnalyses(() => {
+      const init: Record<string, TaskAnalysis> = {};
+      for (const t of targets) {
+        init[t.id] = { taskId: t.id, taskName: t.name, status: 'pending' };
+      }
+      return init;
+    });
+
+    const PARALLEL = 3;
+    let cursor = 0;
+    async function worker() {
+      while (cursor < targets.length) {
+        const idx = cursor++;
+        const task = targets[idx];
+        setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'analyzing' } }));
+        try {
+          // 1. Pega detalhes da task → encontra doc URL no custom field "DOC DA COPY"
+          const det = await getTask(task.id);
+          const docField = (det.custom_fields || ([] as any[])).find((f: any) => /DOC DA COPY/i.test(f.name || ''));
+          const docUrl = docField?.value || extractDocLinks(det.description || det.text_content)[0];
+          if (!docUrl) {
+            setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: 'Sem doc URL (custom field "DOC DA COPY" vazio + sem link na descricao)' } }));
+            continue;
+          }
+          // 2. Fetch doc via extensao (sessao Google logada)
+          const docR = await fetchDocViaExtension(docUrl);
+          if (!docR.ok || !docR.text) {
+            setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: `Doc fetch: ${docR.error || 'sem texto'}` } }));
+            continue;
+          }
+          // 3. Parse: encontra base AD ID + briefing
+          const baseMatch = task.name.match(/^(AD\d+[A-Z]+)\b/i);
+          const baseAdId = baseMatch ? baseMatch[1].toUpperCase() : null;
+          if (!baseAdId) {
+            setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: 'Nome da task nao tem AD ID (ex AD139GL)' } }));
+            continue;
+          }
+          const briefing = parseDarkoBriefing(docR.text, baseAdId);
+          if (!briefing || (briefing.hooks.length === 0 && !briefing.body)) {
+            setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: `Parser nao achou hooks nem body pra ${baseAdId} no doc` } }));
+            continue;
+          }
+          // 4. Monta plano de dispatch
+          const matchedByRole: Record<string, { id: string; name: string }> = {};
+          const unmatched: string[] = [];
+          for (const av of briefing.avatars) {
+            const m = matchAvatar(av.username, avatarCandidates);
+            if (m && m.score >= 30) matchedByRole[av.role.toLowerCase()] = { id: m.id, name: m.name };
+            else unmatched.push(`${av.role}: @${av.username}`);
+          }
+          const firstMatched = Object.values(matchedByRole)[0] || null;
+          function pickAvatar(text: string, label: string) {
+            const ll = label.toLowerCase();
+            for (const r of Object.keys(matchedByRole)) if (ll.includes(r)) return matchedByRole[r];
+            const fl = text.split(/\r?\n/).slice(0, 2).join(' ').toLowerCase();
+            for (const r of Object.keys(matchedByRole)) if (fl.includes(r)) return matchedByRole[r];
+            return firstMatched;
+          }
+          const planParts: DispatchPlan['parts'] = [];
+          for (const h of briefing.hooks) {
+            const av = pickAvatar(h.text, h.label);
+            planParts.push({ label: h.label, text: h.text, avatarId: av?.id || null, avatarName: av?.name || null });
+          }
+          if (briefing.body) {
+            const bps = splitCopyIntoParts(briefing.body, { targetSec: 20, minSec: 10, maxSec: 35 });
+            bps.forEach((bp, i) => {
+              const label = bps.length === 1 ? 'BODY' : `BODY ${i + 1}`;
+              const av = pickAvatar(bp, label);
+              planParts.push({ label, text: bp, avatarId: av?.id || null, avatarName: av?.name || null });
+            });
+          }
+          const plan: DispatchPlan = {
+            adName: briefing.baseAdId.replace(/[^a-z0-9_-]/gi, '_'),
+            parts: planParts,
+            unmatchedAvatars: unmatched,
+          };
+          const allHaveAvatar = planParts.every((p) => p.avatarId);
+          setTaskAnalyses((prev) => ({
+            ...prev,
+            [task.id]: {
+              ...prev[task.id],
+              status: allHaveAvatar ? 'ready' : 'partial',
+              baseAdId,
+              hookCount: briefing.hooks.length,
+              bodyPartsCount: briefing.body ? splitCopyIntoParts(briefing.body, { targetSec: 20, minSec: 10, maxSec: 35 }).length : 0,
+              totalParts: planParts.length,
+              avatarsTotal: briefing.avatars.length,
+              avatarsMatched: briefing.avatars.length - unmatched.length,
+              unmatchedAvatars: unmatched,
+              plan,
+            },
+          }));
+        } catch (e) {
+          setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: (e as Error)?.message || 'erro' } }));
+        }
+      }
+    }
+    const workers = Array.from({ length: PARALLEL }, () => worker());
+    await Promise.all(workers);
+    setAnalyzing(false);
+  }
+
+  /** Dispara via HeyGen Auto a partir de um plano ja analisado */
+  function dispatchPlanToHeyGen(plan: DispatchPlan) {
+    if (plan.parts.some((p) => !p.avatarId)) {
+      setError(`Plano tem parte(s) sem avatar. Cria os avatares pendentes primeiro.`);
+      return;
+    }
+    const handoff = {
+      adName: plan.adName,
+      motor: 'III',
+      mode: 'copy',
+      dynamic: true,
+      partTexts: plan.parts.map((p) => p.text),
+      partLabels: plan.parts.map((p) => p.label),
+      partAvatarIds: plan.parts.map((p) => p.avatarId),
+      copy: plan.parts.map((p) => p.text).join('\n\n'),
+    };
+    sessionStorage.setItem('darkolab:heygen-auto:handoff', JSON.stringify(handoff));
+    router.push('/tools/heygen-auto?from=clickup-pilot');
   }
 
   async function autoFetchDoc(url: string) {
@@ -516,18 +684,59 @@ export default function ClickUpPilotPage() {
               {/* Lista de tasks */}
               {tasks.length > 0 ? (
                 <section>
-                  <h2 className="label-field !mb-3">Tasks ({tasks.length})</h2>
-                  <ul className="grid gap-2">
-                    {tasks.map((t) => {
-                      const isOpen = selectedTask?.id === t.id;
-                      return (
-                        <li key={t.id}>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="label-field !mb-0">Tasks ({tasks.length})</h2>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="mono flex cursor-pointer items-center gap-1.5 text-[10px] uppercase tracking-widest text-text-muted">
+                        <input
+                          type="checkbox"
+                          checked={bulkMode}
+                          onChange={(e) => { setBulkMode(e.target.checked); if (!e.target.checked) clearSelected(); }}
+                          className="h-3.5 w-3.5 cursor-pointer accent-fuchsia-400"
+                        />
+                        Modo BATCH
+                      </label>
+                      {bulkMode ? (
+                        <>
                           <button
                             type="button"
-                            onClick={() => openTask(t)}
+                            onClick={selectAllTasks}
+                            className="mono rounded-md border border-line-strong px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
+                          >
+                            Selecionar todas
+                          </button>
+                          <button
+                            type="button"
+                            onClick={clearSelected}
+                            disabled={selectedTaskIds.size === 0}
+                            className="mono rounded-md border border-line-strong px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300 disabled:opacity-40"
+                          >
+                            Limpar
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                  </div>
+                  <ul className="grid gap-2">
+                    {tasks.map((t) => {
+                      const isOpen = !bulkMode && selectedTask?.id === t.id;
+                      const isChecked = bulkMode && selectedTaskIds.has(t.id);
+                      return (
+                        <li key={t.id} className="flex items-center gap-2">
+                          {bulkMode ? (
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleTaskSelected(t.id)}
+                              className="h-4 w-4 shrink-0 cursor-pointer accent-fuchsia-400"
+                            />
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => bulkMode ? toggleTaskSelected(t.id) : openTask(t)}
                             className={
-                              'w-full rounded-[10px] border px-3 py-2 text-left text-sm transition ' +
-                              (isOpen
+                              'flex-1 rounded-[10px] border px-3 py-2 text-left text-sm transition ' +
+                              (isOpen || isChecked
                                 ? 'border-lime bg-lime/10'
                                 : 'border-line bg-bg-soft/40 hover:border-lime/60')
                             }
@@ -553,11 +762,84 @@ export default function ClickUpPilotPage() {
                       );
                     })}
                   </ul>
+
+                  {bulkMode && selectedTaskIds.size > 0 ? (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-[10px] border border-fuchsia-500/40 bg-fuchsia-500/10 p-3">
+                      <span className="mono flex-1 text-[11px] text-fuchsia-200">
+                        ⚙ {selectedTaskIds.size} task{selectedTaskIds.size === 1 ? '' : 's'} selecionada{selectedTaskIds.size === 1 ? '' : 's'} pra analisar
+                      </span>
+                      <button
+                        type="button"
+                        onClick={analyzeSelected}
+                        disabled={analyzing}
+                        className="btn-primary"
+                      >
+                        {analyzing ? 'Analisando...' : `🔍 Analisar selecionadas (${selectedTaskIds.size})`}
+                      </button>
+                    </div>
+                  ) : null}
+
+                  {/* Preview previsibilidade — antes de iniciar */}
+                  {bulkMode && Object.keys(taskAnalyses).length > 0 ? (
+                    <div className="mt-4">
+                      <div className="mono mb-2 text-[10px] uppercase tracking-widest text-text-muted">
+                        Previsibilidade — o que vai ser disparado
+                      </div>
+                      <ul className="grid gap-2">
+                        {Object.values(taskAnalyses).map((a) => {
+                          const sym = a.status === 'ready' ? '✓' : a.status === 'partial' ? '⚠' : a.status === 'error' ? '✗' : a.status === 'analyzing' ? '◷' : '·';
+                          const color = a.status === 'ready' ? 'border-lime/40 bg-lime/5' :
+                                         a.status === 'partial' ? 'border-yellow-500/40 bg-yellow-500/5' :
+                                         a.status === 'error' ? 'border-red-500/40 bg-red-500/5' :
+                                         'border-line bg-bg-soft/30';
+                          return (
+                            <li key={a.taskId} className={`rounded-[10px] border ${color} p-3 text-[11px]`}>
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="mono text-xs text-white">
+                                  {sym} {a.taskName}
+                                </span>
+                                {a.status === 'ready' || a.status === 'partial' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => a.plan && dispatchPlanToHeyGen(a.plan)}
+                                    disabled={a.status === 'partial'}
+                                    className="mono shrink-0 rounded border border-lime bg-lime/20 px-3 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30 disabled:opacity-40"
+                                    title={a.status === 'partial' ? 'Tem avatar pendente — cria primeiro no HeyGen' : 'Abre HeyGen Auto Dynamic com tudo pre-preenchido'}
+                                  >
+                                    ▶ Disparar
+                                  </button>
+                                ) : null}
+                              </div>
+                              {a.status === 'ready' || a.status === 'partial' ? (
+                                <div className="mt-1 grid gap-0.5 text-text-muted">
+                                  <div className="mono text-[10px]">
+                                    {a.totalParts} takes ({a.hookCount} hook{(a.hookCount ?? 0) === 1 ? '' : 's'} + {a.bodyPartsCount} body split{(a.bodyPartsCount ?? 0) === 1 ? '' : 's'}) — Avatar III
+                                  </div>
+                                  <div className="mono text-[10px]">
+                                    Avatares: {a.avatarsMatched}/{a.avatarsTotal} matched
+                                    {(a.unmatchedAvatars?.length ?? 0) > 0 ? (
+                                      <span className="text-yellow-300"> · pendente: {a.unmatchedAvatars!.join(', ')}</span>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              ) : null}
+                              {a.status === 'error' ? (
+                                <div className="mt-1 text-red-300">{a.error}</div>
+                              ) : null}
+                              {a.status === 'analyzing' ? (
+                                <div className="mt-1 text-text-muted">analisando...</div>
+                              ) : null}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ) : null}
                 </section>
               ) : null}
 
-              {/* Detalhe da task selecionada */}
-              {selectedTask ? (
+              {/* Detalhe da task selecionada (so em modo single, nao bulk) */}
+              {!bulkMode && selectedTask ? (
                 <section className="rounded-[12px] border border-line bg-bg-soft/30 p-4">
                   <div className="mb-3 flex items-center justify-between">
                     <h3 className="mono text-sm uppercase tracking-widest text-lime">

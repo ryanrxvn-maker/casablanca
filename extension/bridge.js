@@ -77,6 +77,12 @@
       return;
     }
 
+    if (data.type === 'HG_RELOAD_SELF') {
+      chrome.runtime.sendMessage({ type: 'HG_RELOAD_SELF' });
+      // Sem resposta — extensao vai reiniciar, perde a conexao
+      return;
+    }
+
     if (data.type === 'HG_FETCH_DOC') {
       const requestId = data.requestId;
       chrome.runtime.sendMessage(
