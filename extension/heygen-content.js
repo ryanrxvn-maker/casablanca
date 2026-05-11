@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.1.0';
+const DARKO_EXT_VERSION = '4.1.1';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -248,6 +248,11 @@ async function cloneVoice(payload, onProgress) {
         filename,
         file_type: mimeType,
         file_size: bytes.length,
+        // is_video: true se mimeType ou filename indicar video. False = audio puro.
+        // Nos extraimos audio do video antes do upload no bridge do DARKO LAB
+        // (ffmpeg-worker.extractAudio), entao isso aqui sempre vai ser false
+        // — mas mantemos a logica resiliente caso futuro mude.
+        is_video: /^video\//.test(mimeType) || /\.(mp4|mov|webm|mkv)$/i.test(filename),
       }),
     },
     15000,
