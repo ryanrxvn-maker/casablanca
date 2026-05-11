@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.1.5';
+const DARKO_EXT_VERSION = '4.1.6';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -324,7 +324,8 @@ async function cloneVoice(payload, onProgress) {
   // === STEP 3: create voice clone ===
   onProgress?.({ stage: 'create', percent: 55, message: 'Criando clone no HeyGen...' });
   const createBody = {
-    name: displayName,
+    voice_name: displayName,     // <-- nome correto (descoberto iter 6)
+    name: displayName,           // <-- alias pra safety
     file_url: fileUrl,           // <-- nome correto (descoberto iter 5)
     audio_url: fileUrl,          // <-- alias pra safety
     request_source: 'IVC',
