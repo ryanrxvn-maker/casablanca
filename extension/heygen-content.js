@@ -428,6 +428,15 @@ async function listMyAvatars() {
           look.default_voice_id ??
           look.voice_id ??
           null,
+        // voice_name geralmente e o @username do material original clonado
+        // (ex: '@marcella.malvar2'). Critico pra avatar matching no ClickUp
+        // Pilot (briefings referenciam avatares por @username, nao por nome
+        // do avatar HeyGen — que pode ser qualquer coisa tipo "Johan").
+        voiceName:
+          look.voice_name ??
+          look.voice_config?.voice_name ??
+          look.voice_item?.voice_name ??
+          null,
       };
       groupLooks.push(lookItem);
       items.push(lookItem);

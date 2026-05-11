@@ -450,12 +450,17 @@ export default function ClickUpPilotPage() {
     // eslint-disable-next-line
   }, []);
 
-  // Flat avatar candidates pra matcher
+  // Flat avatar candidates pra matcher (incluindo voice_name pra matching)
   const avatarCandidates = useMemo(() => {
-    const flat: Array<{ id: string; name: string; groupName: string }> = [];
+    const flat: Array<{ id: string; name: string; groupName: string; voiceName?: string | null }> = [];
     for (const g of librarySnap.groups) {
       for (const l of g.looks) {
-        flat.push({ id: l.id, name: l.name, groupName: g.name });
+        flat.push({
+          id: l.id,
+          name: l.name,
+          groupName: g.name,
+          voiceName: (l as any).voiceName ?? null,
+        });
       }
     }
     return flat;

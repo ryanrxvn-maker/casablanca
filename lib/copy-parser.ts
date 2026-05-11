@@ -293,30 +293,72 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string): Parse
 }
 
 /** Match fuzzy de avatar HeyGen pelo username do briefing.
+ *  Estrategia em ordem de prioridade:
+ *   1. voice_name exato (descontando .mp4 e numero de versao) → score 200
+ *   2. voice_name fuzzy (mesmo nome base, versao diferente: marcella.malvar1
+ *      vs marcella.malvar2) → score 150
+ *   3. nome/grupo do avatar contem username inteiro → 100
+ *   4. nome/grupo do avatar contem 1+ token (renato, martins) → 30/token
  *  Retorna o melhor candidato (ou null). */
 export function matchAvatar(
   username: string,
-  candidates: Array<{ id: string; name: string; groupName?: string }>,
-): { id: string; name: string; groupName?: string; score: number } | null {
+  candidates: Array<{ id: string; name: string; groupName?: string; voiceName?: string | null }>,
+): { id: string; name: string; groupName?: string; score: number; matchedBy?: 'voice_name_exact' | 'voice_name_fuzzy' | 'name_contains' | 'name_tokens' } | null {
   if (!username || !candidates.length) return null;
   const u = username.toLowerCase().replace(/[^a-z0-9]/g, '');
-  let best: { c: typeof candidates[0]; score: number } | null = null;
+  // Tira numero de versao do final pra comparar nucleo (marcella.malvar2 → marcella.malvar)
+  const stripVer = (s: string) => s.toLowerCase().replace(/^@/, '').replace(/\.mp4$|\.mov$/i, '').replace(/\d+$/, '');
+  const usernameCore = stripVer(username);
+  const usernameCoreNorm = usernameCore.replace(/[^a-z0-9]/g, '');
+
+  let best: { c: typeof candidates[0]; score: number; matchedBy: any } | null = null;
   for (const c of candidates) {
-    const haystack = `${c.name} ${c.groupName || ''}`.toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (!haystack) continue;
     let score = 0;
-    if (haystack.includes(u)) score = 100; // username inteiro presente
-    else {
-      // Quebra username em tokens (renato + martins) e ve quantos batem
-      const tokens = username.toLowerCase().split(/[._-]+|(?=\d)/).filter((t) => t.length >= 3);
-      for (const t of tokens) {
-        const tn = t.replace(/[^a-z0-9]/g, '');
-        if (tn && haystack.includes(tn)) score += 30;
+    let matchedBy: any = null;
+
+    // 1+2. voice_name match (super forte)
+    if (c.voiceName) {
+      const vn = c.voiceName.toLowerCase().replace(/^@/, '').replace(/\.mp4$|\.mov$/i, '');
+      const vnNorm = vn.replace(/[^a-z0-9]/g, '');
+      const vnCore = stripVer(vn).replace(/[^a-z0-9]/g, '');
+      // Exato (incluindo versao): @marcella.malvar2 == @marcella.malvar2
+      if (vnNorm === u) {
+        score = 200;
+        matchedBy = 'voice_name_exact';
+      }
+      // Fuzzy: mesmo core, versao diferente: marcella.malvar1 vs marcella.malvar2
+      else if (vnCore && usernameCoreNorm && vnCore === usernameCoreNorm) {
+        score = 150;
+        matchedBy = 'voice_name_fuzzy';
+      }
+      // Tambem reconhece @user.malvar dentro do voice_name
+      else if (vnNorm && (vnNorm.includes(u) || u.includes(vnNorm))) {
+        score = 140;
+        matchedBy = 'voice_name_fuzzy';
       }
     }
+
+    // 3+4. Fallback: nome + grupo
+    if (score === 0) {
+      const haystack = `${c.name} ${c.groupName || ''}`.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (haystack) {
+        if (haystack.includes(u)) {
+          score = 100;
+          matchedBy = 'name_contains';
+        } else {
+          const tokens = username.toLowerCase().split(/[._-]+|(?=\d)/).filter((t) => t.length >= 3);
+          for (const t of tokens) {
+            const tn = t.replace(/[^a-z0-9]/g, '');
+            if (tn && haystack.includes(tn)) score += 30;
+          }
+          if (score > 0) matchedBy = 'name_tokens';
+        }
+      }
+    }
+
     if (score > 0 && (!best || score > best.score)) {
-      best = { c, score };
+      best = { c, score, matchedBy };
     }
   }
-  return best ? { ...best.c, score: best.score } : null;
+  return best ? { ...best.c, score: best.score, matchedBy: best.matchedBy } : null;
 }

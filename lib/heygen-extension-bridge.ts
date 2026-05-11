@@ -153,6 +153,9 @@ export type LibraryAvatar = {
   groupName?: string;
   /** voice_id default ja embutido (extension v4.0.14+) */
   voiceId?: string | null;
+  /** voice_name (geralmente @username do material clonado) — extension v4.0.17+
+   *  Critico pra avatar matching: briefings referenciam @username, nao nome do avatar */
+  voiceName?: string | null;
 };
 
 /**

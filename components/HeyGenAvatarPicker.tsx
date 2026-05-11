@@ -30,6 +30,9 @@ export type AvatarOption = {
   isCustom?: boolean;
   /** voice_id default ja embutido no payload do look (extension v4.0.13+) */
   voiceId?: string | null;
+  /** voice_name (geralmente @username do material clonado) — extension v4.0.17+
+   *  Usado pelo matchAvatar pra cruzar com referencias @user dos briefings. */
+  voiceName?: string | null;
 };
 
 function lookToOption(l: LibraryAvatar): AvatarOption {
@@ -43,6 +46,7 @@ function lookToOption(l: LibraryAvatar): AvatarOption {
     groupId: l.groupId,
     groupName: l.groupName,
     voiceId: (l as any).voiceId ?? null,
+    voiceName: (l as any).voiceName ?? null,
   };
 }
 
