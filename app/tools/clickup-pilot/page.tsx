@@ -26,6 +26,12 @@ import {
   type ParsedDarkoBriefing,
 } from '@/lib/copy-parser';
 import { splitCopyIntoParts } from '@/lib/heygen-extension-bridge';
+import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
+import {
+  pollVideosUntilReady,
+  downloadVideoBytes,
+  type VideoStatus,
+} from '@/lib/heygen-api-direct';
 import {
   getLibrarySnapshot,
   reloadLibrary,
@@ -93,6 +99,21 @@ type DispatchPlan = {
     matchedBy?: string;
   }>;
   unmatchedAvatars: string[];
+};
+
+type BatchTaskState = {
+  taskId: string;
+  taskName: string;
+  baseAdId: string;
+  /** queued | dispatching | rendering | downloading | done | failed */
+  phase: 'queued' | 'dispatching' | 'rendering' | 'downloading' | 'done' | 'failed';
+  /** Per-part status durante dispatch (parteN: error|null) */
+  parts: Array<{ label: string; videoId: string | null; videoStatus?: VideoStatus['status']; error?: string | null; renamedTo: string }>;
+  message?: string;
+  startedAt: number;
+  finishedAt?: number;
+  zipBlobUrl?: string; // gerado quando completo
+  zipFilename?: string;
 };
 
 type RoleSlot = {
@@ -411,6 +432,9 @@ export default function ClickUpPilotPage() {
     }
     setError(null);
     setAnalyzing(true);
+    // Force reload library — pega avatares recem criados (user pode ter
+    // acabado de criar voice clones alinhadas com nomes do briefing)
+    await reloadLibrary(true);
     const targets = tasks.filter((t) => selectedTaskIds.has(t.id));
     // Init status pendente pra todos
     setTaskAnalyses(() => {
@@ -535,6 +559,195 @@ export default function ClickUpPilotPage() {
     const workers = Array.from({ length: PARALLEL }, () => worker());
     await Promise.all(workers);
     setAnalyzing(false);
+  }
+
+  /** Batch state — tasks rodando em background (dispatch + poll + download + zip) */
+  const [batchStates, setBatchStates] = useState<Record<string, BatchTaskState>>({});
+  const batchCancelRef = useRef<Record<string, boolean>>({});
+
+  /** Renomeia label do parser pra naming Portuguese pedido pelo user:
+   *  HOOK 1 → GANCHO1.mp4, HOOK 2 → GANCHO2.mp4
+   *  BODY → PARTE.mp4, BODY 1 → PARTE1.mp4 */
+  function labelToFilename(label: string): string {
+    const up = label.toUpperCase().trim();
+    let m = up.match(/^HOOK\s*(\d+)?$/);
+    if (m) return `GANCHO${m[1] || '1'}.mp4`;
+    m = up.match(/^GANCHO\s*(\d+)?$/);
+    if (m) return `GANCHO${m[1] || '1'}.mp4`;
+    m = up.match(/^BODY\s*(\d+)?$/);
+    if (m) return `PARTE${m[1] || ''}.mp4`;
+    m = up.match(/^PARTE\s*(\d+)?$/);
+    if (m) return `PARTE${m[1] || ''}.mp4`;
+    // Fallback: sanitize label
+    return up.replace(/[^A-Z0-9]/g, '_') + '.mp4';
+  }
+
+  /** Roda 1 task end-to-end em background:
+   *  1. Dispatch via runHeyGenJobs (TTS + upload + submit por parte)
+   *  2. Poll videos until ready
+   *  3. Download MP4 + zipar com nomes GANCHO/PARTE
+   *  4. Salva blob URL no state pra download manual depois */
+  async function runTaskInBackground(taskId: string) {
+    const a = taskAnalyses[taskId];
+    if (!a) return;
+    const plan = buildPlan(a);
+    if (!plan) return;
+    const partsLen = plan.parts.length;
+    const adNameClean = (a.baseAdId || a.taskName).replace(/[^A-Z0-9]/gi, '_');
+
+    setBatchStates((prev) => ({
+      ...prev,
+      [taskId]: {
+        taskId, taskName: a.taskName, baseAdId: a.baseAdId || a.taskName,
+        phase: 'dispatching',
+        parts: plan.parts.map((p: any) => ({ label: p.label, videoId: null, renamedTo: labelToFilename(p.label) })),
+        startedAt: Date.now(),
+        message: 'TTS + upload + submit por parte...',
+      },
+    }));
+
+    try {
+      // 1. Dispatch via runHeyGenJobs (re-usa toda logica do HeyGen Auto runner)
+      const jobs = plan.parts.map((p: any) => ({
+        label: p.label,
+        copy: p.text,
+        avatarId: p.avatarId!,
+        voiceId: p.voiceId,
+      }));
+      const results = await runHeyGenJobs(jobs, {
+        parallel: 3,
+        mode: 'copy',
+        avatarId: plan.parts[0]?.avatarId || '',
+        voiceId: undefined,
+        motor: 'III',
+        adNameSafe: adNameClean,
+        isCancelled: () => !!batchCancelRef.current[taskId],
+        onProgress: () => {},
+        onResult: (r) => {
+          setBatchStates((prev) => {
+            const s = prev[taskId];
+            if (!s) return prev;
+            const newParts = s.parts.map((p, i) => i + 1 === r.index ? { ...p, videoId: r.videoId, error: r.error } : p);
+            return { ...prev, [taskId]: { ...s, parts: newParts } };
+          });
+        },
+      });
+
+      const failed = results.filter((r) => r.error);
+      const validIds = results.filter((r) => r.videoId).map((r) => r.videoId!);
+      if (validIds.length === 0) {
+        setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: `Todos disparos falharam: ${failed[0]?.error || '?'}`, finishedAt: Date.now() } }));
+        return;
+      }
+
+      markDispatched(taskId);
+
+      // 2. Poll status ate todos prontos (ou alguns falharem)
+      setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'rendering', message: `Aguardando renderizacao no HeyGen (${validIds.length} videos)...` } }));
+      const finalStatuses = await pollVideosUntilReady(validIds, {
+        intervalMs: 8000,
+        timeoutMs: 30 * 60 * 1000,
+        isCancelled: () => !!batchCancelRef.current[taskId],
+        onStatus: (st) => {
+          const done = Object.values(st).filter((s) => s.status === 'completed').length;
+          setBatchStates((prev) => {
+            const s = prev[taskId];
+            if (!s) return prev;
+            const newParts = s.parts.map((p) => {
+              const ps = p.videoId ? st[p.videoId] : null;
+              return ps ? { ...p, videoStatus: ps.status } : p;
+            });
+            return { ...prev, [taskId]: { ...s, parts: newParts, message: `Renderizando: ${done}/${validIds.length} prontos` } };
+          });
+        },
+      });
+
+      // 3. Download + zip — iterate por results (mesma ordem das parts no plan)
+      setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'downloading', message: `Baixando + zipando ${validIds.length} videos...` } }));
+      const JSZip = (await import('jszip')).default;
+      const zip = new JSZip();
+      let downloaded = 0;
+      for (let i = 0; i < results.length; i++) {
+        if (batchCancelRef.current[taskId]) break;
+        const r = results[i];
+        const part = plan.parts[i];
+        const fname = labelToFilename(part.label);
+        const fnameBase = fname.replace('.mp4', '');
+        if (!r.videoId) {
+          zip.file(`${fnameBase}_NAO_DISPAROU.txt`, `Erro no dispatch: ${r.error || 'sem detalhes'}`);
+          continue;
+        }
+        const status = finalStatuses[r.videoId];
+        if (status?.status !== 'completed' || !status.videoUrl) {
+          zip.file(`${fnameBase}_NAO_RENDERIZOU.txt`, `Status: ${status?.status || '?'}\n${status?.error || ''}`);
+          continue;
+        }
+        try {
+          const bytes = await downloadVideoBytes(status.videoUrl);
+          zip.file(fname, bytes);
+          downloaded++;
+          setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], message: `Baixando: ${downloaded}/${validIds.length}` } }));
+        } catch (e) {
+          zip.file(`${fnameBase}_DOWNLOAD_ERROR.txt`, String((e as Error)?.message));
+        }
+      }
+
+      const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+      const filename = `${adNameClean}.zip`;
+      const url = URL.createObjectURL(blob);
+      setBatchStates((prev) => ({
+        ...prev,
+        [taskId]: {
+          ...prev[taskId],
+          phase: 'done',
+          message: `Pronto: ${downloaded}/${validIds.length} videos · ${(blob.size / (1024 * 1024)).toFixed(1)}MB`,
+          finishedAt: Date.now(),
+          zipBlobUrl: url,
+          zipFilename: filename,
+        },
+      }));
+    } catch (e) {
+      setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: (e as Error)?.message || 'erro', finishedAt: Date.now() } }));
+    }
+  }
+
+  /** Inicia batch: filtra tasks selecionadas que estao 'ready' + roda em
+   *  paralelo (max 2 simultaneas pra nao saturar HeyGen) */
+  async function startBatch() {
+    const ready = Array.from(selectedTaskIds).filter((id) => taskAnalyses[id]?.status === 'ready');
+    if (ready.length === 0) {
+      setError('Nenhuma task ready selecionada. Confira que avatares + voz estao OK.');
+      return;
+    }
+    setError(null);
+    // Dispara em paralelo (max 2 — cada uma usa 3 workers internos)
+    const queue = [...ready];
+    const PARALLEL = 2;
+    const workers: Promise<void>[] = [];
+    for (let i = 0; i < PARALLEL; i++) {
+      workers.push((async () => {
+        while (queue.length > 0) {
+          const taskId = queue.shift()!;
+          await runTaskInBackground(taskId);
+        }
+      })());
+    }
+    await Promise.all(workers);
+  }
+
+  function cancelTaskBatch(taskId: string) {
+    batchCancelRef.current[taskId] = true;
+  }
+
+  function downloadZip(taskId: string) {
+    const s = batchStates[taskId];
+    if (!s?.zipBlobUrl || !s.zipFilename) return;
+    const a = document.createElement('a');
+    a.href = s.zipBlobUrl;
+    a.download = s.zipFilename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   }
 
   /** Atualiza UM roleSlot da task. Usado quando user troca avatar OU voz. */
@@ -998,16 +1211,87 @@ export default function ClickUpPilotPage() {
                   {bulkMode && selectedTaskIds.size > 0 ? (
                     <div className="mt-3 flex flex-wrap items-center gap-2 rounded-[10px] border border-fuchsia-500/40 bg-fuchsia-500/10 p-3">
                       <span className="mono flex-1 text-[11px] text-fuchsia-200">
-                        ⚙ {selectedTaskIds.size} task{selectedTaskIds.size === 1 ? '' : 's'} selecionada{selectedTaskIds.size === 1 ? '' : 's'} pra analisar
+                        ⚙ {selectedTaskIds.size} selecionada{selectedTaskIds.size === 1 ? '' : 's'}
+                        {(() => {
+                          const ready = Array.from(selectedTaskIds).filter(id => taskAnalyses[id]?.status === 'ready').length;
+                          return ready > 0 ? ` · ${ready} ready pra disparar` : '';
+                        })()}
                       </span>
                       <button
                         type="button"
                         onClick={analyzeSelected}
                         disabled={analyzing}
-                        className="btn-primary"
+                        className="mono rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime disabled:opacity-50"
                       >
-                        {analyzing ? 'Analisando...' : `🔍 Analisar selecionadas (${selectedTaskIds.size})`}
+                        {analyzing ? 'Analisando...' : `🔍 Analisar (${selectedTaskIds.size})`}
                       </button>
+                      {(() => {
+                        const ready = Array.from(selectedTaskIds).filter(id => taskAnalyses[id]?.status === 'ready');
+                        if (ready.length === 0) return null;
+                        return (
+                          <button
+                            type="button"
+                            onClick={startBatch}
+                            className="btn-primary"
+                            title="Roda em background: TTS + upload + submit + poll + zip — sem precisar acompanhar"
+                          >
+                            ▶ Iniciar {ready.length} task{ready.length === 1 ? '' : 's'} em background
+                          </button>
+                        );
+                      })()}
+                    </div>
+                  ) : null}
+
+                  {/* Painel batch — tasks rodando ou completas */}
+                  {Object.keys(batchStates).length > 0 ? (
+                    <div className="mt-4 rounded-[12px] border border-fuchsia-500/40 bg-fuchsia-500/5 p-3">
+                      <div className="mono mb-2 text-[10px] uppercase tracking-widest text-fuchsia-200">
+                        Batch em andamento ({Object.keys(batchStates).length})
+                      </div>
+                      <ul className="grid gap-2">
+                        {Object.values(batchStates).sort((a, b) => b.startedAt - a.startedAt).map((b) => {
+                          const phaseLabel = ({ queued: '⏳ na fila', dispatching: '🚀 disparando', rendering: '⚙ renderizando', downloading: '⬇ baixando', done: '✅ pronto', failed: '✗ falhou' })[b.phase];
+                          const phaseColor = b.phase === 'done' ? 'text-lime border-lime/40 bg-lime/10' : b.phase === 'failed' ? 'text-red-300 border-red-500/40 bg-red-500/10' : 'text-fuchsia-200 border-fuchsia-500/30 bg-fuchsia-500/5';
+                          const partsDispatched = b.parts.filter(p => p.videoId).length;
+                          const partsRendered = b.parts.filter(p => p.videoStatus === 'completed').length;
+                          return (
+                            <li key={b.taskId} className={`rounded-[10px] border ${phaseColor} p-2`}>
+                              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                                <span className="mono">
+                                  <strong className="text-white">{b.taskName}</strong>
+                                  <span className="ml-2">{phaseLabel}</span>
+                                </span>
+                                <div className="flex items-center gap-1.5">
+                                  {b.phase === 'done' && b.zipBlobUrl ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => downloadZip(b.taskId)}
+                                      className="mono rounded border border-lime bg-lime/20 px-2 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30"
+                                    >
+                                      ⬇ {b.zipFilename}
+                                    </button>
+                                  ) : null}
+                                  {b.phase !== 'done' && b.phase !== 'failed' ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => cancelTaskBatch(b.taskId)}
+                                      className="mono rounded border border-line-strong px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
+                                    >
+                                      cancelar
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </div>
+                              <div className="mono mt-1 text-[10px] text-text-muted">
+                                {b.parts.length} partes · disparadas: {partsDispatched}/{b.parts.length}{b.phase !== 'dispatching' ? ` · renderizadas: ${partsRendered}/${partsDispatched}` : ''}
+                              </div>
+                              {b.message ? (
+                                <div className="mono mt-0.5 text-[10px] text-text-muted">{b.message}</div>
+                              ) : null}
+                            </li>
+                          );
+                        })}
+                      </ul>
                     </div>
                   ) : null}
 

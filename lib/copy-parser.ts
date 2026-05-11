@@ -295,67 +295,60 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string): Parse
 }
 
 /** Match fuzzy de avatar HeyGen pelo username do briefing.
- *  Estrategia em ordem de prioridade:
- *   1. voice_name exato (descontando .mp4 e numero de versao) → score 200
- *   2. voice_name fuzzy (mesmo nome base, versao diferente: marcella.malvar1
- *      vs marcella.malvar2) → score 150
- *   3. nome/grupo do avatar contem username inteiro → 100
- *   4. nome/grupo do avatar contem 1+ token (renato, martins) → 30/token
- *  Retorna o melhor candidato (ou null). */
+ *  Estrategia em ordem de prioridade (score):
+ *   220 voice_name_exact: voice_name == @username (igual depois de normalizar)
+ *   210 name_exact: avatar.name == @username
+ *   200 group_exact: avatar.groupName == @username
+ *   180 voice_name_contains: voice_name contem username (com @ ou .mp4)
+ *   170 name_contains: avatar.name contem username
+ *   150 voice_name_fuzzy: mesmo core (versao diferente: malvar1 vs malvar2)
+ *   140 group_contains: avatar.groupName contem username
+ *   100 nome+grupo concat contem username
+ *    30 tokens partidos (renato, martins) — fraco, ultimo recurso
+ *
+ *  Voltamos o melhor candidato (ou null).
+ *  Threshold de aceite: >= 100 (so confiavel). User selecionou avatar com
+ *  exato mesmo nome do briefing? Deve bater 100% via uma das exact paths. */
 export function matchAvatar(
   username: string,
   candidates: Array<{ id: string; name: string; groupName?: string; voiceName?: string | null }>,
-): { id: string; name: string; groupName?: string; score: number; matchedBy?: 'voice_name_exact' | 'voice_name_fuzzy' | 'name_contains' | 'name_tokens' } | null {
+): { id: string; name: string; groupName?: string; score: number; matchedBy?: 'voice_name_exact' | 'voice_name_fuzzy' | 'name_exact' | 'name_contains' | 'group_exact' | 'group_contains' | 'name_tokens' | 'voice_name_contains' } | null {
   if (!username || !candidates.length) return null;
-  const u = username.toLowerCase().replace(/[^a-z0-9]/g, '');
-  // Tira numero de versao do final pra comparar nucleo (marcella.malvar2 → marcella.malvar)
+  // Normaliza username: tira @, .mp4/.mov, mantem letras+digitos
+  const norm = (s: string) => s.toLowerCase().replace(/^@/, '').replace(/\.mp4$|\.mov$/i, '').replace(/[^a-z0-9]/g, '');
   const stripVer = (s: string) => s.toLowerCase().replace(/^@/, '').replace(/\.mp4$|\.mov$/i, '').replace(/\d+$/, '');
-  const usernameCore = stripVer(username);
-  const usernameCoreNorm = usernameCore.replace(/[^a-z0-9]/g, '');
+  const u = norm(username);
+  const uCore = norm(stripVer(username));
 
   let best: { c: typeof candidates[0]; score: number; matchedBy: any } | null = null;
   for (const c of candidates) {
     let score = 0;
     let matchedBy: any = null;
 
-    // 1+2. voice_name match (super forte)
-    if (c.voiceName) {
-      const vn = c.voiceName.toLowerCase().replace(/^@/, '').replace(/\.mp4$|\.mov$/i, '');
-      const vnNorm = vn.replace(/[^a-z0-9]/g, '');
-      const vnCore = stripVer(vn).replace(/[^a-z0-9]/g, '');
-      // Exato (incluindo versao): @marcella.malvar2 == @marcella.malvar2
-      if (vnNorm === u) {
-        score = 200;
-        matchedBy = 'voice_name_exact';
-      }
-      // Fuzzy: mesmo core, versao diferente: marcella.malvar1 vs marcella.malvar2
-      else if (vnCore && usernameCoreNorm && vnCore === usernameCoreNorm) {
-        score = 150;
-        matchedBy = 'voice_name_fuzzy';
-      }
-      // Tambem reconhece @user.malvar dentro do voice_name
-      else if (vnNorm && (vnNorm.includes(u) || u.includes(vnNorm))) {
-        score = 140;
-        matchedBy = 'voice_name_fuzzy';
-      }
-    }
+    const vn = c.voiceName || '';
+    const vnNorm = norm(vn);
+    const vnCore = norm(stripVer(vn));
+    const nm = norm(c.name || '');
+    const gn = norm(c.groupName || '');
 
-    // 3+4. Fallback: nome + grupo
-    if (score === 0) {
-      const haystack = `${c.name} ${c.groupName || ''}`.toLowerCase().replace(/[^a-z0-9]/g, '');
-      if (haystack) {
-        if (haystack.includes(u)) {
-          score = 100;
-          matchedBy = 'name_contains';
-        } else {
-          const tokens = username.toLowerCase().split(/[._-]+|(?=\d)/).filter((t) => t.length >= 3);
-          for (const t of tokens) {
-            const tn = t.replace(/[^a-z0-9]/g, '');
-            if (tn && haystack.includes(tn)) score += 30;
-          }
-          if (score > 0) matchedBy = 'name_tokens';
-        }
+    // EXACT matches (220-200) — usuario nomeou identico ao briefing
+    if (vnNorm && vnNorm === u) { score = 220; matchedBy = 'voice_name_exact'; }
+    else if (nm && nm === u) { score = 210; matchedBy = 'name_exact'; }
+    else if (gn && gn === u) { score = 200; matchedBy = 'group_exact'; }
+    // CONTAINS matches (180-140) — substring de qualquer lado
+    else if (vnNorm && (vnNorm.includes(u) || u.includes(vnNorm))) { score = 180; matchedBy = 'voice_name_contains'; }
+    else if (nm && (nm.includes(u) || u.includes(nm))) { score = 170; matchedBy = 'name_contains'; }
+    else if (vnCore && uCore && vnCore === uCore) { score = 150; matchedBy = 'voice_name_fuzzy'; }
+    else if (gn && (gn.includes(u) || u.includes(gn))) { score = 140; matchedBy = 'group_contains'; }
+    else {
+      // Tokens (30/token, fraco)
+      const haystack = `${nm} ${gn}`;
+      const tokens = username.toLowerCase().split(/[._-]+|(?=\d)/).filter((t) => t.length >= 3);
+      for (const t of tokens) {
+        const tn = norm(t);
+        if (tn && haystack.includes(tn)) score += 30;
       }
+      if (score > 0) matchedBy = 'name_tokens';
     }
 
     if (score > 0 && (!best || score > best.score)) {
