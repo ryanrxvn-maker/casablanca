@@ -2,8 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Header } from '@/components/Header';
-import { Heartbeat } from '@/components/Heartbeat';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
 import {
@@ -41,6 +39,8 @@ import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
 import { CompactVoiceSelector } from '@/components/CompactVoiceSelector';
 import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
 import { recallByVoiceName, rememberPairing, normalizeVoiceName } from '@/lib/voice-avatar-memory';
+import { Toggle3D } from '@/components/Toggle3D';
+import { getPilotTeam, setPilotTeam, getPilotEditor, setPilotEditor } from '@/lib/clickup-pilot-config';
 
 /**
  * ClickUp Pilot — cerebro de automacao
@@ -191,6 +191,15 @@ export default function ClickUpPilotPage() {
    *  fica desativado com link direto pra /configuracoes/api. */
   const [hasAnthropic, setHasAnthropic] = useState<boolean | null>(null);
 
+  /* ========== Modos (toggles 3D antes de analisar) ========== */
+  /** IA Search ON: roda visual match automatico em todo slot pendente apos analyze */
+  const [iaSearchMode, setIaSearchMode] = useToolState<boolean>('clickup-pilot:iaSearchMode', false);
+  /** Camuflagem ON: gera 3a pasta zip com versoes montadas+camufladas no audio */
+  const [camuflagemMode, setCamuflagemMode] = useToolState<boolean>('clickup-pilot:camuflagemMode', false);
+  /** Audio WHITE pra camuflagem (file blob nao persiste — volta toda sessao) */
+  const [camuflagemWhite, setCamuflagemWhite] = useState<File | null>(null);
+  const [camuflagemVolume, setCamuflagemVolume] = useToolState<number>('clickup-pilot:camuflagemVolume', 30);
+
   useEffect(() => {
     const t = getClickUpToken();
     setHasToken(!!t);
@@ -225,16 +234,18 @@ export default function ClickUpPilotPage() {
     setSelectedTask(null);
   }
 
-  /* ========== Teams + members ========== */
+  /* ========== Teams + members ==========
+   *  Workspace + Editor agora persistem em localStorage via clickup-pilot-config
+   *  pra sincronizar com /configuracoes/clickup-pilot. */
   const [teams, setTeams] = useState<ClickUpTeam[]>([]);
-  const [selectedTeam, setSelectedTeam] = useToolState<string | null>(
-    'clickup:teamId',
-    null,
-  );
-  const [selectedEditor, setSelectedEditor] = useToolState<string | null>(
-    'clickup:editorId',
-    null,
-  );
+  const [selectedTeam, setSelectedTeamState] = useState<string | null>(null);
+  const [selectedEditor, setSelectedEditorState] = useState<string | null>(null);
+  const setSelectedTeam = (v: string | null) => { setSelectedTeamState(v); setPilotTeam(v); };
+  const setSelectedEditor = (v: string | null) => { setSelectedEditorState(v); setPilotEditor(v); };
+  useEffect(() => {
+    setSelectedTeamState(getPilotTeam());
+    setSelectedEditorState(getPilotEditor());
+  }, []);
   const [loadingTeams, setLoadingTeams] = useState(false);
   // User autenticado (auto-fetch via /v2/user). Critico pra workspaces com
   // permissao limitada que nao retornam membros — usamos esse ID como editor.
@@ -633,6 +644,16 @@ export default function ClickUpPilotPage() {
     }
     const workers = Array.from({ length: PARALLEL }, () => worker());
     await Promise.all(workers);
+    // IA Search MODE: roda visual match auto pra todo slot pendente que tem briefingFileId
+    if (iaSearchMode && hasAnthropic !== false) {
+      setAnalyzing(false);
+      // Coleta tasks que sobraram com pendentes
+      const targetIds = targets.map((t) => t.id);
+      for (const taskId of targetIds) {
+        await runVisualMatchAllPendingForTask(taskId);
+      }
+      return;
+    }
     setAnalyzing(false);
   }
 
@@ -1348,63 +1369,45 @@ export default function ClickUpPilotPage() {
   function clearError() { setError(null); setErrorAction(null); }
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <Heartbeat />
-      <Header />
-      <main className="container-app flex-1 py-10">
-        <ToolShell
-          title="ClickUp Pilot"
-          description="Cerebro de automacao: le suas tasks no ClickUp, identifica avatares + copy do briefing, e dispara lipsync no HeyGen Auto Dynamic. Motor III sempre (sem custo de creditos)."
-        >
-          {/* Token setup */}
-          {showTokenSetup ? (
-            <div className="mb-5 rounded-[12px] border border-fuchsia-500/40 bg-fuchsia-500/5 px-4 py-3 text-sm">
-              <div className="mb-2 font-semibold text-fuchsia-200">
-                Configurar token ClickUp
-              </div>
-              <p className="mb-2 text-[11px] text-text-muted">
-                Pega seu token em{' '}
-                <a
-                  href="https://app.clickup.com/settings/apps"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-lime hover:underline"
-                >
-                  app.clickup.com → Settings → Apps → API Token
+    <>
+      <ToolShell
+        title="ClickUp Pilot"
+        description="Cerebro de automacao: le suas tasks no ClickUp, identifica avatares + copy do briefing, e dispara lipsync no HeyGen Auto Dynamic. Motor III sempre (sem custo de creditos)."
+      >
+          {/* Setup status — todo o config (token + workspace + editor + status filter)
+           *  fica em /configuracoes/clickup-pilot. Aqui so mostramos um chip status. */}
+          {(() => {
+            const setupOK = hasToken && selectedTeam && selectedEditor;
+            if (setupOK) {
+              return (
+                <div className="mb-5 flex items-center justify-between rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-2 text-xs">
+                  <span className="text-lime">
+                    ✓ Setup OK
+                    <span className="ml-2 text-text-muted">
+                      · {currentTeam?.name || '?'} · {editors.find(u => String(u.id) === selectedEditor)?.username || authUser?.username || '?'}
+                    </span>
+                  </span>
+                  <a
+                    href="/configuracoes/clickup-pilot"
+                    className="rounded-md border border-line-strong px-2 py-0.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
+                  >
+                    Configurar
+                  </a>
+                </div>
+              );
+            }
+            return (
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-fuchsia-500/40 bg-fuchsia-500/5 px-4 py-3 text-xs">
+                <span className="text-fuchsia-200">
+                  ⚙ Configure ClickUp Pilot pra comecar — {!hasToken ? 'falta token' : 'falta workspace/editor'}
+                </span>
+                <a href="/configuracoes/clickup-pilot" className="btn-primary !py-1 !px-3 !text-xs">
+                  Ir pras configuracoes →
                 </a>
-                . Comeca com <code className="mono text-fuchsia-200">pk_</code>. Salvo
-                no localStorage do seu browser.
-              </p>
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  value={tokenInput}
-                  onChange={(e) => setTokenInput(e.target.value)}
-                  placeholder="pk_..."
-                  className="input-field flex-1"
-                />
-                <button
-                  type="button"
-                  onClick={saveToken}
-                  disabled={!tokenInput.trim()}
-                  className="btn-primary"
-                >
-                  Salvar
-                </button>
               </div>
-            </div>
-          ) : (
-            <div className="mb-5 flex items-center justify-between rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-2 text-xs">
-              <span className="text-lime">✓ Token ClickUp configurado</span>
-              <button
-                type="button"
-                onClick={clearToken}
-                className="rounded-md border border-line-strong px-2 py-0.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
-              >
-                Limpar
-              </button>
-            </div>
-          )}
+            );
+          })()}
+          {/* (Token UI movido pra /configuracoes/clickup-pilot) */}
 
           {error ? (
             <div className="mb-4 error-shake flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300">
@@ -1428,47 +1431,72 @@ export default function ClickUpPilotPage() {
             </div>
           ) : null}
 
-          {hasToken ? (
+          {hasToken && selectedTeam && selectedEditor ? (
             <div className="grid gap-6">
-              {/* Team + Editor pickers */}
+              {/* Modos + Carregar tasks (UI principal enxuta) */}
               <section>
-                <h2 className="label-field !mb-3">Workspace + Editor</h2>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <select
-                    value={selectedTeam || ''}
-                    onChange={(e) => { setSelectedTeam(e.target.value); setSelectedEditor(null); setTasks([]); }}
-                    disabled={loadingTeams}
-                    className="input-field"
-                  >
-                    <option value="">— Workspace —</option>
-                    {teams.map((t) => (
-                      <option key={t.id} value={t.id}>{t.name} ({t.members.length} membros)</option>
-                    ))}
-                  </select>
-                  <select
-                    value={selectedEditor || ''}
-                    onChange={(e) => { setSelectedEditor(e.target.value); setTasks([]); }}
-                    disabled={!currentTeam}
-                    className="input-field"
-                  >
-                    <option value="">— Editor —</option>
-                    {editors.map((u) => (
-                      <option key={u.id} value={u.id}>{u.username}</option>
-                    ))}
-                  </select>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Toggle3D
+                    on={iaSearchMode}
+                    onChange={setIaSearchMode}
+                    label="IA Search"
+                    hint={hasAnthropic === false ? 'Falta chave Anthropic' : 'Vision pra avatares pendentes'}
+                    variant="cyan"
+                    icon={<span className="text-base">🤖</span>}
+                  />
+                  <Toggle3D
+                    on={camuflagemMode}
+                    onChange={setCamuflagemMode}
+                    label="Camuflagem"
+                    hint="Gera 3a pasta com audio camuflado"
+                    variant="fuchsia"
+                    icon={<span className="text-base">🎭</span>}
+                  />
                 </div>
-                <div className="mt-3 flex flex-wrap items-center gap-2">
+
+                {/* Camuflagem inputs — so quando ON */}
+                {camuflagemMode ? (
+                  <div className="mt-3 rounded-[12px] border border-fuchsia-500/30 bg-fuchsia-500/5 p-3">
+                    <div className="mono mb-2 text-[10px] uppercase tracking-widest text-fuchsia-200">
+                      Audio WHITE pra camuflagem
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-[1fr_140px] items-center">
+                      <input
+                        type="file"
+                        accept="audio/*,video/*"
+                        onChange={(e) => setCamuflagemWhite(e.target.files?.[0] || null)}
+                        className="input-field text-xs"
+                      />
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="range"
+                          min={5}
+                          max={100}
+                          value={camuflagemVolume}
+                          onChange={(e) => setCamuflagemVolume(Number(e.target.value))}
+                          className="flex-1 accent-fuchsia-400"
+                        />
+                        <span className="mono w-10 text-right text-[11px] text-fuchsia-200">{camuflagemVolume}%</span>
+                      </div>
+                    </div>
+                    <p className="mono mt-2 text-[9px] uppercase tracking-widest text-text-muted">
+                      Aceita audio (mp3/wav) OU video (extrai audio). Volume = % do nivel padrao.
+                    </p>
+                  </div>
+                ) : null}
+
+                <div className="mt-4 flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={loadTasks}
-                    disabled={!selectedTeam || !selectedEditor || loadingTasks}
+                    disabled={loadingTasks}
                     className="btn-primary"
                   >
                     {loadingTasks ? 'Carregando...' : 'Carregar tasks'}
                   </button>
-                  <span className="mono text-[10px] uppercase tracking-widest text-text-muted">
-                    Filtra status: editar / editando vídeo · <a href="/configuracoes" className="text-lime hover:underline">customizar</a>
-                  </span>
+                  <a href="/configuracoes/clickup-pilot" className="mono text-[10px] uppercase tracking-widest text-text-muted hover:text-lime">
+                    Configurar workspace, editor e filtros →
+                  </a>
                 </div>
               </section>
 
@@ -2190,8 +2218,7 @@ export default function ClickUpPilotPage() {
               ) : null}
             </div>
           ) : null}
-        </ToolShell>
-      </main>
-    </div>
+      </ToolShell>
+    </>
   );
 }
