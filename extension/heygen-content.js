@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.1.6';
+const DARKO_EXT_VERSION = '4.1.7';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -351,39 +351,42 @@ async function cloneVoice(payload, onProgress) {
     throw new Error(`create HTTP ${createResp.status}: ${errBody.slice(0, 300)}`);
   }
   const createJson = await createResp.json();
-  const voiceIdImmediate = createJson?.data?.voice_id;
-  const callbackId = createJson?.data?.callback_id || createJson?.data?.id;
-  console.log('[DARKO LAB voice clone] create resp', { voiceIdImmediate, callbackId, keys: Object.keys(createJson?.data || {}) });
+  const createData = createJson?.data || {};
+  const voiceIdImmediate = createData.voice_id;
+  // HeyGen retorna `job_id` no response (descoberto iter 7). Fallback
+  // resiliente em varios nomes (varia por endpoint version).
+  const callbackId = createData.job_id || createData.callback_id || createData.id;
+  console.log('[DARKO LAB voice clone] create resp', { voiceIdImmediate, callbackId, keys: Object.keys(createData) });
 
   // === STEP 4: poll status ===
   if (voiceIdImmediate) {
-    // Alguns retornam o voice_id ja pronto
     onProgress?.({ stage: 'done', percent: 100, message: 'Pronto' });
     return { voiceId: voiceIdImmediate, voiceName: displayName };
   }
-  if (!callbackId) throw new Error('Sem callback_id nem voice_id no response do create: ' + JSON.stringify(createJson).slice(0, 300));
+  if (!callbackId) throw new Error('Sem job_id/callback_id/voice_id no response do create. Keys: ' + Object.keys(createData).join(','));
 
   for (let attempt = 0; attempt < VOICE_CLONE_POLL_MAX_ATTEMPTS; attempt++) {
     await new Promise((r) => setTimeout(r, VOICE_CLONE_POLL_INTERVAL_MS));
     const percent = 60 + Math.min(35, attempt * 1.5);
     onProgress?.({ stage: 'polling', percent, message: `Aguardando processamento (${attempt + 1}/${VOICE_CLONE_POLL_MAX_ATTEMPTS})...` });
-    const statusResp = await fetchWithTimeout(
-      `https://api2.heygen.com/v1/voice/voice_clone/create_status?callback_id=${encodeURIComponent(callbackId)}`,
-      { method: 'GET', credentials: 'include' },
-      10000,
-    ).catch((e) => { console.warn('[DARKO LAB voice clone] poll err:', e); return null; });
+    // Manda job_id E callback_id (mesma value) — HeyGen aceita um ou outro
+    // dependendo da versao do endpoint
+    const statusUrl = `https://api2.heygen.com/v1/voice/voice_clone/create_status?job_id=${encodeURIComponent(callbackId)}&callback_id=${encodeURIComponent(callbackId)}`;
+    const statusResp = await fetchWithTimeout(statusUrl, { method: 'GET', credentials: 'include' }, 10000)
+      .catch((e) => { console.warn('[DARKO LAB voice clone] poll err:', e); return null; });
     if (!statusResp || !statusResp.ok) continue;
     const statusJson = await statusResp.json().catch(() => null);
-    const status = statusJson?.data?.status;
-    const vid = statusJson?.data?.voice_id;
-    console.log('[DARKO LAB voice clone] poll', attempt, 'status=', status, 'voice_id=', vid);
-    if (status === 'completed' || status === 'ready' || status === 'success') {
-      if (!vid) throw new Error('Status completed mas sem voice_id: ' + JSON.stringify(statusJson).slice(0, 300));
+    const sd = statusJson?.data || {};
+    const status = String(sd.status || sd.state || '').toLowerCase();
+    const vid = sd.voice_id || sd.id;
+    console.log('[DARKO LAB voice clone] poll', attempt, 'status=', status, 'voice_id=', vid, 'keys=', Object.keys(sd).join(','));
+    if (status === 'completed' || status === 'ready' || status === 'success' || status === 'done') {
+      if (!vid) throw new Error('Status completed mas sem voice_id. Keys: ' + Object.keys(sd).join(','));
       onProgress?.({ stage: 'done', percent: 100, message: 'Pronto' });
       return { voiceId: vid, voiceName: displayName };
     }
     if (status === 'failed' || status === 'error') {
-      throw new Error('HeyGen voice clone falhou: ' + JSON.stringify(statusJson).slice(0, 300));
+      throw new Error('HeyGen voice clone falhou: status=' + status + ' msg=' + (sd.error_msg || sd.message || 'sem detalhes'));
     }
   }
   throw new Error('Voice clone timeout — HeyGen nao respondeu completed em 6min');
