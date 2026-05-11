@@ -218,14 +218,39 @@ export function findGSiblings(fullDocText: string, baseAdId: string): Array<{ gN
  */
 const KNOWN_ROLES_RE = /^(Mulher|Homem|Doutor[a]?|Voz|Narrador[a]?|Avatar|Locutor[a]?)\s*:/i;
 
+/** Tenta extrair role da linha. Retorna 'Mulher', 'Homem', 'Doutor', etc
+ *  ou null. Usado pra propagar identidade do speaker pra metadata.
+ *
+ *  Match patterns:
+ *   "Mulher:"                       → "Mulher"
+ *   "Mulher: @x.mp4"                → "Mulher"
+ *   "Mulher: Texto direto"          → "Mulher"
+ *   "Voz do Homem:" / "Voz Off:"    → "Voz do Homem" / "Voz Off"
+ *   "@x.mp4" (mention solo)         → null (sem role explicito)
+ *
+ *  Aceita roles de 1-3 palavras antes do ":" (cobre "Voz do Homem", "Voz Off").
+ */
+function detectRoleFromLine(line: string): string | null {
+  const t = line.trim();
+  // "Palavra:" / "Palavra Palavra:" / "Palavra Palavra Palavra:" — opcionalmente seguido de mention/texto
+  const m = t.match(/^([A-Za-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ]+){0,2})\s*:/);
+  if (!m) return null;
+  const role = m[1].trim();
+  // Filtro: roles validos sao palavras curtas (< 30 chars). Frases comuns tipo
+  // "Hoje:" sao improvaveis num briefing, mas se vier "Eu disse: blah" rejeita
+  // por seguranca (mais de 3 palavras antes do : ja excluido pelo regex).
+  if (role.length > 30) return null;
+  return role;
+}
+
 /** Linha que e SO um role label (ex "Mulher:") ou role + mention (ex "Mulher: @x.mp4")
  *  ou so um mention solo (ex "@manualdohomemsolo1.mp4"). Descartar inteira. */
 function isPureRoleOrMentionLine(line: string): boolean {
   const t = line.trim();
-  // "Mulher:" — palavra unica + ":"
-  if (/^[A-Za-zÀ-ÿ]+\s*:\s*$/.test(t)) return true;
-  // "Mulher: @x.mp4" — role + mention (com ou sem .mp4)
-  if (/^[A-Za-zÀ-ÿ]+\s*:\s*[^@\w]*@[\w._-]+(\.(mp4|mov))?\s*$/i.test(t)) return true;
+  // "Mulher:" / "Voz do Homem:" — 1-3 palavras + ":"
+  if (/^[A-Za-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ]+){0,2}\s*:\s*$/.test(t)) return true;
+  // "Mulher: @x.mp4" / "Voz do Homem: @x.mp4" — role + mention
+  if (/^[A-Za-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ]+){0,2}\s*:\s*[^@\w]*@[\w._-]+(\.(mp4|mov))?\s*$/i.test(t)) return true;
   // "@x.mp4" — so mention
   if (/^@[\w._-]+(\.(mp4|mov))?\s*$/i.test(t)) return true;
   return false;
@@ -242,21 +267,26 @@ function stripLeadingRoleLabel(line: string): string | null {
 
 /** Extrai bloco de texto pulando linha de role (se houver) e markers [a-z].
  *  PRESERVA paragrafos (linhas vazias) pra que body splitter possa quebrar
- *  certinho depois. */
-function extractTextBlock(rawLines: string[]): string {
+ *  certinho depois. Tambem RETORNA o role detectado (pra dispatch saber
+ *  qual avatar fala esse bloco) — esse e o ponto critico: descartamos a
+ *  linha de role do texto pra TTS, mas guardamos a info em metadata. */
+function extractTextBlock(rawLines: string[]): { text: string; role: string | null } {
   const lines = [...rawLines];
   // Skip leading empty lines
   while (lines.length && !lines[0].trim()) lines.shift();
-  if (!lines.length) return '';
+  if (!lines.length) return { text: '', role: null };
 
+  let detectedRole: string | null = null;
   const first = lines[0].trim();
   if (isPureRoleOrMentionLine(first)) {
-    // Linha role pura — descarta inteira
+    // Linha role pura — captura role antes de descartar
+    detectedRole = detectRoleFromLine(first);
     lines.shift();
   } else {
     // Pode ser "Mulher: texto..." — corta so o prefixo role
     const stripped = stripLeadingRoleLabel(first);
     if (stripped !== null) {
+      detectedRole = detectRoleFromLine(first);
       if (stripped === '') {
         lines.shift();
       } else {
@@ -268,7 +298,7 @@ function extractTextBlock(rawLines: string[]): string {
   while (lines.length && !lines[0].trim()) lines.shift();
 
   const cleaned = lines.join('\n').replace(/\s*\[[a-z]{1,3}\]/gi, '');
-  return cleaned.trim();
+  return { text: cleaned.trim(), role: detectedRole };
 }
 
 /**
@@ -289,7 +319,10 @@ function extractTextBlock(rawLines: string[]): string {
  *   Homem:                           ← role (descartada)
  *   Texto do body completo.
  */
-export function parseGSibling(section: string): { hook: string | null; body: string | null } {
+export function parseGSibling(section: string): {
+  hook: { text: string; role: string | null } | null;
+  body: { text: string; role: string | null } | null;
+} {
   const lines = section.split(/\r?\n/);
   let bodyMarkerIdx = -1;
   for (let i = 1; i < lines.length; i++) {
@@ -299,7 +332,10 @@ export function parseGSibling(section: string): { hook: string | null; body: str
   const afterBody = bodyMarkerIdx >= 0 ? lines.slice(bodyMarkerIdx + 1) : [];
   const hook = extractTextBlock(beforeBody);
   const body = extractTextBlock(afterBody);
-  return { hook: hook || null, body: body || null };
+  return {
+    hook: hook.text ? hook : null,
+    body: body.text ? body : null,
+  };
 }
 
 export type ParsedDarkoBriefing = {
@@ -307,10 +343,14 @@ export type ParsedDarkoBriefing = {
   baseAdId: string;
   /** Avatares extraidos da secao base (briefing) */
   avatars: ParsedAvatar[];
-  /** Hooks em ordem: HOOK 1 (G1), HOOK 2 (G2), ... */
-  hooks: Array<{ label: string; text: string; sourceG: number }>;
+  /** Hooks em ordem: HOOK 1 (G1), HOOK 2 (G2), ...
+   *  role = quem fala (extraido da linha "Mulher:"/"Homem:"/etc do briefing).
+   *  Pode ser null se nao havia indicacao explicita. Usado pra mapear avatar. */
+  hooks: Array<{ label: string; text: string; sourceG: number; role: string | null }>;
   /** Body (do sibling que tiver — geralmente o ultimo G) */
   body: string | null;
+  /** Quem fala o body (extraido da linha apos "Body" marker — geralmente "Homem"). */
+  bodyRole: string | null;
   /** G siblings encontrados (debug) */
   gSiblings: Array<{ gNum: number; heading: string }>;
 };
@@ -329,8 +369,9 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string): Parse
   if (!baseSection) return null;
   const avatars = parseAvatars(baseSection);
   const siblings = findGSiblings(fullDocText, baseAdId);
-  const hooks: Array<{ label: string; text: string; sourceG: number }> = [];
+  const hooks: ParsedDarkoBriefing['hooks'] = [];
   let body: string | null = null;
+  let bodyRole: string | null = null;
   for (const sib of siblings) {
     const parsed = parseGSibling(sib.section);
     // CADA SIBLING = EXATAMENTE 1 HOOK (mesmo que tenha multiplos paragrafos).
@@ -339,14 +380,16 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string): Parse
     if (parsed.hook) {
       hooks.push({
         label: `HOOK ${sib.gNum}`,
-        text: parsed.hook,
+        text: parsed.hook.text,
         sourceG: sib.gNum,
+        role: parsed.hook.role,
       });
     }
     // Body geralmente esta no ultimo sibling. Sobrescreve pra pegar o ultimo
     // (caso mais de um sibling tenha body — improvavel mas seguro).
     if (parsed.body) {
-      body = parsed.body;
+      body = parsed.body.text;
+      bodyRole = parsed.body.role;
     }
   }
   return {
@@ -354,6 +397,7 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string): Parse
     avatars,
     hooks,
     body,
+    bodyRole,
     gSiblings: siblings.map(s => ({ gNum: s.gNum, heading: s.heading })),
   };
 }

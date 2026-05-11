@@ -634,9 +634,29 @@ export default function ClickUpPilotPage() {
             });
           }
           // partTemplates: cada parte tem um 'matchByRole' — qual role preencher
-          // na hora de gerar o plan final. Default = primeiro role.
+          // na hora de gerar o plan final.
+          //
+          // Estrategia (em ordem de prioridade):
+          //   1. detectedRole do parser (linha "Mulher:"/"Homem:"/"Voz do Homem:" do briefing
+          //      — descartada do texto pra TTS, mas preservada como metadata)
+          //   2. Label da parte contem nome do role (ex BODY HOMEM)
+          //   3. Primeiras 2 linhas do texto mencionam o role (legacy)
+          //   4. Primeiro role do briefing (fallback fraco)
           const firstRole = roleSlots[0]?.role.toLowerCase() || null;
-          function pickRoleForText(text: string, label: string): string | null {
+          function pickRoleForText(text: string, label: string, detectedRole: string | null): string | null {
+            if (detectedRole) {
+              const dr = detectedRole.toLowerCase().trim();
+              // Match exato primeiro
+              for (const slot of roleSlots) {
+                if (slot.role.toLowerCase().trim() === dr) return slot.role.toLowerCase();
+              }
+              // Fuzzy: detectedRole contem ou e contido por slot.role
+              // (ex "Voz do Homem" vs "Voz do Homem", "Homem" vs "Homem")
+              for (const slot of roleSlots) {
+                const sl = slot.role.toLowerCase().trim();
+                if (sl.includes(dr) || dr.includes(sl)) return slot.role.toLowerCase();
+              }
+            }
             const ll = label.toLowerCase();
             for (const slot of roleSlots) {
               if (ll.includes(slot.role.toLowerCase())) return slot.role.toLowerCase();
@@ -649,12 +669,13 @@ export default function ClickUpPilotPage() {
           }
           const partTemplates: TaskAnalysis['partTemplates'] = [];
           for (const h of briefing.hooks) {
-            partTemplates.push({ label: h.label, text: h.text, matchByRole: pickRoleForText(h.text, h.label) });
+            partTemplates.push({ label: h.label, text: h.text, matchByRole: pickRoleForText(h.text, h.label, h.role) });
           }
           const bodyParts = briefing.body ? splitCopyIntoParts(briefing.body, { targetSec: 20, minSec: 10, maxSec: 35 }) : [];
           bodyParts.forEach((bp, i) => {
             const label = bodyParts.length === 1 ? 'BODY' : `BODY ${i + 1}`;
-            partTemplates.push({ label, text: bp, matchByRole: pickRoleForText(bp, label) });
+            // Todas as parts do body herdam o mesmo bodyRole (split nao muda speaker)
+            partTemplates.push({ label, text: bp, matchByRole: pickRoleForText(bp, label, briefing.bodyRole) });
           });
           const allHaveAvatar = roleSlots.every((s) => s.avatarId);
           setTaskAnalyses((prev) => ({
@@ -1430,7 +1451,16 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       }
     }
     const firstMatched = Object.values(matchedByRole)[0] || null;
-    function pickAvatarForText(text: string, label: string): { id: string; name: string } | null {
+    function pickAvatarForText(text: string, label: string, detectedRole: string | null = null): { id: string; name: string } | null {
+      // Prioridade 1: role detectado pelo parser (linha "Mulher:"/"Homem:"/etc
+      // do briefing, descartada do texto). Match exato primeiro, depois fuzzy.
+      if (detectedRole) {
+        const dr = detectedRole.toLowerCase().trim();
+        if (matchedByRole[dr]) return matchedByRole[dr];
+        for (const role of Object.keys(matchedByRole)) {
+          if (role === dr || role.includes(dr) || dr.includes(role)) return matchedByRole[role];
+        }
+      }
       const labelLower = label.toLowerCase();
       for (const role of Object.keys(matchedByRole)) {
         if (labelLower.includes(role.toLowerCase())) return matchedByRole[role];
@@ -1446,7 +1476,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     if (briefing && (briefing.hooks.length > 0 || briefing.body)) {
       const planParts: DispatchPlan['parts'] = [];
       for (const h of briefing.hooks) {
-        const av = pickAvatarForText(h.text, h.label);
+        const av = pickAvatarForText(h.text, h.label, h.role);
         planParts.push({
           label: h.label,
           text: h.text,
@@ -1455,11 +1485,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         });
       }
       if (briefing.body) {
-        // Split do body em parts ~20s no Avatar III
+        // Split do body em parts ~20s no Avatar III (todas herdam bodyRole)
         const bodyParts = splitCopyIntoParts(briefing.body, { targetSec: 20, minSec: 10, maxSec: 35 });
         bodyParts.forEach((bp, i) => {
           const label = bodyParts.length === 1 ? 'BODY' : `BODY ${i + 1}`;
-          const av = pickAvatarForText(bp, label);
+          const av = pickAvatarForText(bp, label, briefing.bodyRole);
           planParts.push({
             label,
             text: bp,
