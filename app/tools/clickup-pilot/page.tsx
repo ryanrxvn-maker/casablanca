@@ -88,6 +88,31 @@ function markDispatched(taskId: string) {
   localStorage.setItem(DISPATCHED_KEY, JSON.stringify(m));
 }
 
+/** Persist batchStates entre reloads. zipBlobUrl nao sobrevive
+ *  (Blob fica na memoria, e revogado no fechamento) — entao salva
+ *  tudo menos isso. Permite retomar polling/download apos reload. */
+const BATCH_STATE_KEY = 'darkolab:clickup-pilot:batches';
+function persistBatchStates(states: Record<string, unknown>) {
+  if (typeof window === 'undefined') return;
+  try {
+    const sanitized: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(states)) {
+      const { zipBlobUrl, ...rest } = v as { zipBlobUrl?: string; [key: string]: unknown };
+      sanitized[k] = rest;
+    }
+    localStorage.setItem(BATCH_STATE_KEY, JSON.stringify(sanitized));
+  } catch {}
+}
+function loadPersistedBatchStates(): Record<string, unknown> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(BATCH_STATE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
 type DispatchPlan = {
   adName: string;
   parts: Array<{
@@ -589,6 +614,27 @@ export default function ClickUpPilotPage() {
   const [batchStates, setBatchStates] = useState<Record<string, BatchTaskState>>({});
   const batchCancelRef = useRef<Record<string, boolean>>({});
 
+  /** Restore persisted batch states no mount. Marca como "interrompido" qualquer
+   *  batch que estava rodando — videos podem ja ter renderizado no HeyGen.
+   *  Mostra botao "Retomar" pra re-poll + download. */
+  useEffect(() => {
+    const persisted = loadPersistedBatchStates() as Record<string, BatchTaskState>;
+    if (Object.keys(persisted).length === 0) return;
+    const restored: Record<string, BatchTaskState> = {};
+    for (const [taskId, state] of Object.entries(persisted)) {
+      const wasRunning = state.phase !== 'done' && state.phase !== 'failed';
+      restored[taskId] = wasRunning
+        ? { ...state, phase: 'failed', message: '⚠ Pagina foi recarregada durante o run. Click Retomar pra re-checar status no HeyGen.' }
+        : state;
+    }
+    setBatchStates(restored);
+  }, []);
+
+  /** Persist batchStates a cada mudanca pra sobreviver reload. */
+  useEffect(() => {
+    persistBatchStates(batchStates);
+  }, [batchStates]);
+
   /** Tick a cada 1s pra atualizar elapsed time nas batches rodando.
    *  So roda quando ha batch nao finalizada — evita re-render constante. */
   const [nowTick, setNowTick] = useState(Date.now());
@@ -763,6 +809,101 @@ export default function ClickUpPilotPage() {
       }));
     } catch (e) {
       setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: (e as Error)?.message || 'erro', finishedAt: Date.now() } }));
+    }
+  }
+
+  /** Retoma batch que foi interrompida por reload da pagina. Usa videoIds
+   *  ja persistidos pra re-poll status no HeyGen + re-baixar + zipar. Pula
+   *  TTS+upload+submit que ja foram feitos. */
+  async function resumeTaskBatch(taskId: string) {
+    const state = batchStates[taskId];
+    if (!state) return;
+    const validParts = state.parts.filter((p) => p.videoId);
+    if (validParts.length === 0) {
+      setError('Sem videoIds salvos pra retomar — task tem que ser disparada do zero.');
+      return;
+    }
+    batchCancelRef.current[taskId] = false;
+    const adNameClean = state.baseAdId.replace(/[^A-Z0-9]/gi, '_');
+    const validIds = validParts.map((p) => p.videoId!);
+
+    setBatchStates((prev) => ({
+      ...prev,
+      [taskId]: { ...prev[taskId], phase: 'rendering', message: `Re-checando status de ${validIds.length} videos no HeyGen...`, finishedAt: undefined },
+    }));
+
+    try {
+      const finalStatuses = await pollVideosUntilReady(validIds, {
+        intervalMs: 8000,
+        timeoutMs: 30 * 60 * 1000,
+        isCancelled: () => !!batchCancelRef.current[taskId],
+        onStatus: (st) => {
+          const done = Object.values(st).filter((s) => s.status === 'completed').length;
+          setBatchStates((prev) => {
+            const s = prev[taskId];
+            if (!s) return prev;
+            const newParts = s.parts.map((p) => {
+              const ps = p.videoId ? st[p.videoId] : null;
+              return ps ? { ...p, videoStatus: ps.status } : p;
+            });
+            return { ...prev, [taskId]: { ...s, parts: newParts, message: `Renderizando: ${done}/${validIds.length} prontos` } };
+          });
+        },
+      });
+
+      setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'downloading', message: `Baixando + zipando ${validIds.length} videos...` } }));
+      const JSZip = (await import('jszip')).default;
+      const zip = new JSZip();
+      let downloaded = 0;
+      const downloadOne = async (idx: number) => {
+        if (batchCancelRef.current[taskId]) return;
+        const part = state.parts[idx];
+        if (!part.videoId) {
+          zip.file(`${part.renamedTo.replace('.mp4', '')}_NAO_DISPAROU.txt`, `Erro: ${part.error || 'sem videoId'}`);
+          return;
+        }
+        const status = finalStatuses[part.videoId];
+        if (status?.status !== 'completed' || !status.videoUrl) {
+          zip.file(`${part.renamedTo.replace('.mp4', '')}_NAO_RENDERIZOU.txt`, `Status: ${status?.status || '?'}\n${status?.error || ''}`);
+          return;
+        }
+        try {
+          const bytes = await downloadVideoBytes(status.videoUrl);
+          zip.file(part.renamedTo, bytes);
+          downloaded++;
+          setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], message: `Baixando: ${downloaded}/${validIds.length}` } }));
+        } catch (e) {
+          zip.file(`${part.renamedTo.replace('.mp4', '')}_DOWNLOAD_ERROR.txt`, String((e as Error)?.message));
+        }
+      };
+      const queue = state.parts.map((_, i) => i);
+      const dlWorkers: Promise<void>[] = [];
+      for (let w = 0; w < 3; w++) {
+        dlWorkers.push((async () => {
+          while (queue.length > 0) {
+            const idx = queue.shift()!;
+            await downloadOne(idx);
+          }
+        })());
+      }
+      await Promise.all(dlWorkers);
+
+      const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+      const filename = `${adNameClean}.zip`;
+      const url = URL.createObjectURL(blob);
+      setBatchStates((prev) => ({
+        ...prev,
+        [taskId]: {
+          ...prev[taskId],
+          phase: 'done',
+          message: `Pronto: ${downloaded}/${validIds.length} videos · ${(blob.size / (1024 * 1024)).toFixed(1)}MB`,
+          finishedAt: Date.now(),
+          zipBlobUrl: url,
+          zipFilename: filename,
+        },
+      }));
+    } catch (e) {
+      setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: `Retomar falhou: ${(e as Error)?.message || 'erro'}`, finishedAt: Date.now() } }));
     }
   }
 
@@ -1460,7 +1601,43 @@ export default function ClickUpPilotPage() {
                                       ⬇ {b.zipFilename}
                                     </a>
                                   ) : null}
-                                  {b.phase !== 'done' && b.phase !== 'failed' ? (
+                                  {b.phase === 'done' && !b.zipBlobUrl && b.parts.some(p => p.videoId) ? (
+                                    // Estado restaurado de localStorage — blob nao sobrevive reload, oferece re-baixar
+                                    <button
+                                      type="button"
+                                      onClick={() => resumeTaskBatch(b.taskId)}
+                                      className="mono rounded border border-cyan-500/60 bg-cyan-500/15 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25"
+                                      title="ZIP foi perdido no reload — re-baixa videos do HeyGen"
+                                    >
+                                      🔄 Re-baixar zip
+                                    </button>
+                                  ) : null}
+                                  {b.phase === 'failed' && b.parts.some(p => p.videoId) ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => resumeTaskBatch(b.taskId)}
+                                      className="mono rounded border border-cyan-500/60 bg-cyan-500/15 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25"
+                                      title="Re-checa status no HeyGen (videos podem estar prontos) + baixa"
+                                    >
+                                      🔄 Retomar
+                                    </button>
+                                  ) : null}
+                                  {b.phase === 'done' || b.phase === 'failed' ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (b.zipBlobUrl) { try { URL.revokeObjectURL(b.zipBlobUrl); } catch {} }
+                                        setBatchStates((prev) => {
+                                          const { [b.taskId]: _, ...rest } = prev;
+                                          return rest;
+                                        });
+                                      }}
+                                      className="mono rounded border border-line-strong px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
+                                      title="Remove esta entrada do painel"
+                                    >
+                                      ✕
+                                    </button>
+                                  ) : (
                                     <button
                                       type="button"
                                       onClick={() => cancelTaskBatch(b.taskId)}
@@ -1468,7 +1645,7 @@ export default function ClickUpPilotPage() {
                                     >
                                       cancelar
                                     </button>
-                                  ) : null}
+                                  )}
                                 </div>
                               </div>
                               <div className="mono mt-1 text-[10px] text-text-muted">
