@@ -90,12 +90,29 @@ function classifyParts(parts: Array<{ label: string; blob: Blob | null }>) {
   return { hooks, bodies };
 }
 
-/** Roda pipeline completa. Retorna lista de versoes prontas (1 por hook).
- *  Se nao tem hook (so body), gera 1 versao com baseAdId + corpo decupado. */
-export async function runPostPipeline(input: PipelineInputs): Promise<AssembledPart[]> {
+export type PipelineResult = {
+  /** Items finais (1 por HOOK, ou 1 so se sem HOOKs). Pode ter erros parciais. */
+  items: AssembledPart[];
+  /** Diagnostico: o que classifyParts encontrou nos labels recebidos */
+  diagnostics: {
+    totalParts: number;
+    hooksFound: number;
+    bodiesFound: number;
+    unrecognizedLabels: string[];
+    /** Mensagem-resumo amigavel pra mostrar no UI */
+    summary: string;
+  };
+};
+
+/** Roda pipeline completa. SEMPRE retorna info diagnostica — mesmo quando
+ *  nao consegue produzir nada, explica por que. */
+export async function runPostPipeline(input: PipelineInputs): Promise<PipelineResult> {
   const { baseAdId, parts, camuflagem, whiteAudio, camuflagemVolume = 30, keepSilenceSec = 0.05, onProgress } = input;
   const { hooks, bodies } = classifyParts(parts);
   const out: AssembledPart[] = [];
+  const unrecognized = parts.filter((p, i) => !hooks.includes(i) && !bodies.includes(i)).map((p) => p.label);
+
+  console.log('[clickup-pilot-pipeline] start', { baseAdId, totalParts: parts.length, hooks: hooks.length, bodies: bodies.length, unrecognized, camuflagem });
 
   // Sem hooks → 1 versao so do body (se tiver). Se nao tem body tambem, retorna vazio.
   const groupings: Array<{ hookIdx: number | null; gNum: number }> = [];
@@ -106,6 +123,14 @@ export async function runPostPipeline(input: PipelineInputs): Promise<AssembledP
   }
 
   const total = groupings.length;
+  if (total === 0) {
+    const summary = `Nenhum HOOK ou BODY identificado nas ${parts.length} partes. Labels recebidas: ${parts.map(p=>p.label).join(', ')}`;
+    console.warn('[clickup-pilot-pipeline]', summary);
+    return {
+      items: [],
+      diagnostics: { totalParts: parts.length, hooksFound: 0, bodiesFound: 0, unrecognizedLabels: unrecognized, summary },
+    };
+  }
 
   // === Stage 1: ASSEMBLE (HOOK[N] + BODYs concatenados) ===
   for (let g = 0; g < groupings.length; g++) {
@@ -116,6 +141,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<AssembledP
     const piecesIdx: number[] = [];
     if (hookIdx !== null) piecesIdx.push(hookIdx);
     piecesIdx.push(...bodies);
+    console.log(`[clickup-pilot-pipeline] assemble ${filename}: pecas=${piecesIdx.length}`, piecesIdx.map(i=>parts[i]?.label));
 
     const blobs: Blob[] = [];
     let assembleErr: string | undefined;
@@ -128,6 +154,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<AssembledP
       blobs.push(p.blob);
     }
     if (assembleErr || blobs.length === 0) {
+      console.warn(`[clickup-pilot-pipeline] assemble ${filename}: SKIP - ${assembleErr || 'sem partes'}`);
       out.push({ filename, rawAssembled: blobs[0] || new Blob(), errors: { assemble: assembleErr || 'sem partes' } });
       continue;
     }
@@ -135,7 +162,9 @@ export async function runPostPipeline(input: PipelineInputs): Promise<AssembledP
     let assembled: Blob;
     try {
       assembled = await concatAvatarParts(blobs);
+      console.log(`[clickup-pilot-pipeline] assemble ${filename}: OK ${(assembled.size/(1024*1024)).toFixed(1)}MB`);
     } catch (e) {
+      console.error(`[clickup-pilot-pipeline] assemble ${filename}: FAIL`, e);
       out.push({ filename, rawAssembled: new Blob(), errors: { assemble: (e as Error)?.message || 'falha no concat' } });
       continue;
     }
@@ -151,12 +180,15 @@ export async function runPostPipeline(input: PipelineInputs): Promise<AssembledP
       const audioBuf = await decodeAudioRobust(item.rawAssembled);
       const silences = detectSilences(audioBuf);
       const segments = computeSpeechSegments(silences, audioBuf.duration, keepSilenceSec);
+      console.log(`[clickup-pilot-pipeline] decup ${item.filename}: ${silences.length} silencios, ${segments.length} segmentos de fala`);
       if (segments.length === 0) {
         item.errors = { ...item.errors, decupagem: 'Sem fala detectada' };
         continue;
       }
       item.decupado = await cutVideoSegments(item.rawAssembled, segments);
+      console.log(`[clickup-pilot-pipeline] decup ${item.filename}: OK ${(item.decupado.size/(1024*1024)).toFixed(1)}MB`);
     } catch (e) {
+      console.error(`[clickup-pilot-pipeline] decup ${item.filename}: FAIL`, e);
       item.errors = { ...item.errors, decupagem: (e as Error)?.message || 'falha decupagem' };
     }
   }
@@ -178,10 +210,12 @@ export async function runPostPipeline(input: PipelineInputs): Promise<AssembledP
           whiteBlob = await extractAudio(whiteAudio);
         }
       } catch (e) {
+        console.error(`[clickup-pilot-pipeline] camu extractAudio(white): FAIL`, e);
         for (const item of out) {
           item.errors = { ...item.errors, camuflagem: 'Falha extraindo audio do video WHITE: ' + (e as Error)?.message };
         }
-        return out;
+        const summary = `${out.length} montagens · ${out.filter(i=>i.decupado).length} decupados · 0 camuflados (white falhou)`;
+        return { items: out, diagnostics: { totalParts: parts.length, hooksFound: hooks.length, bodiesFound: bodies.length, unrecognizedLabels: unrecognized, summary } };
       }
 
       for (let g = 0; g < out.length; g++) {
@@ -196,7 +230,9 @@ export async function runPostPipeline(input: PipelineInputs): Promise<AssembledP
           const camuWav = await camuflar({ black: blackAudio, white: whiteBlob, volumePercent: camuflagemVolume });
           // Substitui audio no video
           item.camuflado = await muxAudioIntoVideo(source, camuWav);
+          console.log(`[clickup-pilot-pipeline] camu ${item.filename}: OK`);
         } catch (e) {
+          console.error(`[clickup-pilot-pipeline] camu ${item.filename}: FAIL`, e);
           item.errors = { ...item.errors, camuflagem: (e as Error)?.message || 'falha camuflagem' };
         }
       }
@@ -204,7 +240,11 @@ export async function runPostPipeline(input: PipelineInputs): Promise<AssembledP
   }
 
   onProgress?.({ stage: 'done', doneCount: total, totalCount: total });
-  return out;
+  const decupCount = out.filter(i=>i.decupado).length;
+  const camuCount = out.filter(i=>i.camuflado).length;
+  const summary = `${out.length} montagens · ${decupCount} decupados${camuflagem ? ` · ${camuCount} camuflados` : ''}`;
+  console.log('[clickup-pilot-pipeline] DONE', summary);
+  return { items: out, diagnostics: { totalParts: parts.length, hooksFound: hooks.length, bodiesFound: bodies.length, unrecognizedLabels: unrecognized, summary } };
 }
 
 /** Helper local — derivado de app/tools/decupagem/page.tsx pra evitar import
