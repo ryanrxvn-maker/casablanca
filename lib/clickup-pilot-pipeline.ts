@@ -19,7 +19,7 @@
  */
 
 import { decodeAudioRobust, detectSilences } from './audio-engine';
-import { concatAvatarParts, cutVideoSegments, muxAudioIntoVideo, extractAudio } from './ffmpeg-worker';
+import { concatAvatarParts, concatVideosFast, cutVideoSegments, muxAudioIntoVideo, extractAudio } from './ffmpeg-worker';
 import { camuflar } from './camuflagem';
 
 export type AssembledPart = {
@@ -159,37 +159,82 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       continue;
     }
 
+    // Tenta fast concat (5-10x mais rapido) primeiro. Mas fast concat sem
+    // re-encode pode produzir output corrompido se codec/dimensao divergem
+    // entre as partes (raro com HeyGen mesmo avatar, mas acontece). Por isso
+    // a validacao real fica no proximo loop (decupagem) que tenta decodificar
+    // o audio — se falhar, re-faz assemble com re-encode pesado.
     let assembled: Blob;
+    let usedFastPath = false;
     try {
-      assembled = await concatAvatarParts(blobs);
-      console.log(`[clickup-pilot-pipeline] assemble ${filename}: OK ${(assembled.size/(1024*1024)).toFixed(1)}MB`);
+      const tFast = Date.now();
+      try {
+        assembled = await concatVideosFast(blobs);
+        usedFastPath = true;
+        console.log(`[clickup-pilot-pipeline] assemble ${filename}: FAST OK ${(assembled.size/(1024*1024)).toFixed(1)}MB em ${((Date.now()-tFast)/1000).toFixed(1)}s`);
+      } catch (fastErr) {
+        console.warn(`[clickup-pilot-pipeline] assemble ${filename}: fast FALHOU (${(fastErr as Error)?.message?.slice(0,80)}), tentando re-encode...`);
+        const tSlow = Date.now();
+        assembled = await concatAvatarParts(blobs);
+        console.log(`[clickup-pilot-pipeline] assemble ${filename}: SLOW OK ${(assembled.size/(1024*1024)).toFixed(1)}MB em ${((Date.now()-tSlow)/1000).toFixed(1)}s`);
+      }
     } catch (e) {
-      console.error(`[clickup-pilot-pipeline] assemble ${filename}: FAIL`, e);
+      console.error(`[clickup-pilot-pipeline] assemble ${filename}: FAIL (ambos paths)`, e);
       out.push({ filename, rawAssembled: new Blob(), errors: { assemble: (e as Error)?.message || 'falha no concat' } });
       continue;
     }
-    out.push({ filename, rawAssembled: assembled });
+    out.push({ filename, rawAssembled: assembled, _usedFastPath: usedFastPath } as AssembledPart & { _usedFastPath: boolean });
   }
 
-  // === Stage 2: DECUPAGEM ===
+  // === Stage 2: DECUPAGEM (com retry de assemble se fast produziu lixo) ===
   for (let g = 0; g < out.length; g++) {
-    const item = out[g];
+    const item = out[g] as AssembledPart & { _usedFastPath?: boolean };
     if (!item.rawAssembled || item.errors?.assemble) continue;
     onProgress?.({ stage: 'decupando', currentFilename: item.filename, doneCount: g, totalCount: total });
-    try {
-      const audioBuf = await decodeAudioRobust(item.rawAssembled);
-      const silences = detectSilences(audioBuf);
-      const segments = computeSpeechSegments(silences, audioBuf.duration, keepSilenceSec);
-      console.log(`[clickup-pilot-pipeline] decup ${item.filename}: ${silences.length} silencios, ${segments.length} segmentos de fala`);
-      if (segments.length === 0) {
-        item.errors = { ...item.errors, decupagem: 'Sem fala detectada' };
-        continue;
+
+    const tryDecup = async (source: Blob): Promise<{ ok: true; decupado: Blob } | { ok: false; reason: string }> => {
+      try {
+        const audioBuf = await decodeAudioRobust(source);
+        const silences = detectSilences(audioBuf);
+        const segments = computeSpeechSegments(silences, audioBuf.duration, keepSilenceSec);
+        console.log(`[clickup-pilot-pipeline] decup ${item.filename}: ${silences.length} silencios, ${segments.length} segmentos de fala`);
+        if (segments.length === 0) return { ok: false, reason: 'Sem fala detectada' };
+        const decupado = await cutVideoSegments(source, segments);
+        return { ok: true, decupado };
+      } catch (e) {
+        return { ok: false, reason: (e as Error)?.message || 'falha decupagem' };
       }
-      item.decupado = await cutVideoSegments(item.rawAssembled, segments);
+    };
+
+    let res = await tryDecup(item.rawAssembled);
+
+    // Se fast concat foi usado e decupagem falhou (provavelmente arquivo
+    // mal-formado), re-faz assemble com re-encode + retenta decupagem
+    if (!res.ok && item._usedFastPath) {
+      console.warn(`[clickup-pilot-pipeline] decup ${item.filename}: fast deu output bogus (${res.reason.slice(0,80)}), re-fazendo assemble com re-encode...`);
+      try {
+        const { hookIdx } = groupings[g];
+        const piecesIdx: number[] = [];
+        if (hookIdx !== null) piecesIdx.push(hookIdx);
+        piecesIdx.push(...bodies);
+        const blobs = piecesIdx.map(i => parts[i].blob!).filter(Boolean);
+        const tSlow = Date.now();
+        const reAssembled = await concatAvatarParts(blobs);
+        console.log(`[clickup-pilot-pipeline] re-assemble ${item.filename}: SLOW OK em ${((Date.now()-tSlow)/1000).toFixed(1)}s`);
+        item.rawAssembled = reAssembled;
+        item._usedFastPath = false;
+        res = await tryDecup(reAssembled);
+      } catch (e) {
+        console.error(`[clickup-pilot-pipeline] re-assemble ${item.filename}: FAIL`, e);
+      }
+    }
+
+    if (res.ok) {
+      item.decupado = res.decupado;
       console.log(`[clickup-pilot-pipeline] decup ${item.filename}: OK ${(item.decupado.size/(1024*1024)).toFixed(1)}MB`);
-    } catch (e) {
-      console.error(`[clickup-pilot-pipeline] decup ${item.filename}: FAIL`, e);
-      item.errors = { ...item.errors, decupagem: (e as Error)?.message || 'falha decupagem' };
+    } else {
+      console.error(`[clickup-pilot-pipeline] decup ${item.filename}: FAIL`, res.reason);
+      item.errors = { ...item.errors, decupagem: res.reason };
     }
   }
 

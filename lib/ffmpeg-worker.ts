@@ -1210,6 +1210,58 @@ export async function concatAvatarParts(
   }
 }
 
+/**
+ * Concat rapido sem re-encode (concat demuxer). 5-10x mais rapido que
+ * concatAvatarParts pra videos do mesmo codec/resolucao (caso comum: todos
+ * vindos do HeyGen com mesmo avatar). Se os videos divergem em codec/
+ * dimensao, ffmpeg pode falhar — caller deve cair no concatAvatarParts.
+ *
+ * Usa o "concat demuxer" via lista txt + -c copy (zero re-encode).
+ */
+export async function concatVideosFast(
+  parts: Blob[],
+  opts: RunOptions = {},
+): Promise<Blob> {
+  if (parts.length === 0) throw new Error('Nenhuma parte pra concatenar.');
+  if (parts.length === 1) return parts[0];
+
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const { fetchFile } = await import('@ffmpeg/util');
+  const progressHandler = wireProgress(ff, opts.onProgress);
+
+  const inputNames: string[] = [];
+  const listName = 'concat_list.txt';
+  const outputName = 'concat_fast_out.mp4';
+
+  try {
+    for (let i = 0; i < parts.length; i++) {
+      const name = `fast_part_${String(i).padStart(3, '0')}.mp4`;
+      inputNames.push(name);
+      await ff.writeFile(name, await fetchFile(parts[i]));
+    }
+    // Lista pra concat demuxer: uma linha "file '<name>'" por parte
+    const list = inputNames.map((n) => `file '${n}'`).join('\n');
+    await ff.writeFile(listName, new TextEncoder().encode(list));
+
+    opts.onStage?.(`Concat rapido (${inputNames.length} partes, sem re-encode)...`);
+    await ff.exec([
+      '-f', 'concat',
+      '-safe', '0',
+      '-i', listName,
+      '-c', 'copy',
+      '-movflags', '+faststart',
+      outputName,
+    ]);
+    const data = await ff.readFile(outputName);
+    return toBlob(data, 'video/mp4');
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    for (const n of inputNames) await safeDelete(ff, n);
+    await safeDelete(ff, listName);
+    await safeDelete(ff, outputName);
+  }
+}
+
 async function safeDelete(ff: FFmpeg, name: string) {
   try {
     await ff.deleteFile(name);
