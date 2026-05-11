@@ -164,6 +164,9 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     // entre as partes (raro com HeyGen mesmo avatar, mas acontece). Por isso
     // a validacao real fica no proximo loop (decupagem) que tenta decodificar
     // o audio — se falhar, re-faz assemble com re-encode pesado.
+    // Fast-path: concat sem re-encode (5-10x mais rapido). Funciona pra HeyGen
+    // MP4s do mesmo avatar. Se output for invalido (decupagem nao consegue
+    // decodar), Stage 2 detecta e refaz com slow re-encode.
     let assembled: Blob;
     let usedFastPath = false;
     try {
@@ -208,8 +211,8 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
 
     let res = await tryDecup(item.rawAssembled);
 
-    // Se fast concat foi usado e decupagem falhou (provavelmente arquivo
-    // mal-formado), re-faz assemble com re-encode + retenta decupagem
+    // Se fast concat foi usado e decupagem falhou (output sem timestamps validos),
+    // re-faz assemble com re-encode + retenta decupagem
     if (!res.ok && item._usedFastPath) {
       console.warn(`[clickup-pilot-pipeline] decup ${item.filename}: fast deu output bogus (${res.reason.slice(0,80)}), re-fazendo assemble com re-encode...`);
       try {

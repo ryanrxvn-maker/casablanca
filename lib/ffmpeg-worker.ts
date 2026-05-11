@@ -1244,11 +1244,16 @@ export async function concatVideosFast(
     await ff.writeFile(listName, new TextEncoder().encode(list));
 
     opts.onStage?.(`Concat rapido (${inputNames.length} partes, sem re-encode)...`);
+    // -fflags +genpts: regenera timestamps (essencial pra Web Audio API decodar
+    //   o audio do output - sem isso o audio decode falha em concat demuxer)
+    // -avoid_negative_ts make_zero: forca primeiro timestamp = 0
     await ff.exec([
+      '-fflags', '+genpts',
       '-f', 'concat',
       '-safe', '0',
       '-i', listName,
       '-c', 'copy',
+      '-avoid_negative_ts', 'make_zero',
       '-movflags', '+faststart',
       outputName,
     ]);

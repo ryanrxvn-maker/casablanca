@@ -12,8 +12,8 @@ export const config = {
      * - _next/static (build assets)
      * - _next/image
      * - favicon.ico
-     * - arquivos com extensão (imagens etc.)
+     * - arquivos estaticos (imagens + audio + video — public/ assets nao precisam de auth)
      */
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp4|mov|webm|mp3|wav|m4a|ogg)$).*)',
   ],
 };
