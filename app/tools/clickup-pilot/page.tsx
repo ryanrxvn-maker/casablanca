@@ -23,7 +23,7 @@ import {
   type ParsedAdSection,
   type ParsedDarkoBriefing,
 } from '@/lib/copy-parser';
-import { splitCopyIntoParts } from '@/lib/heygen-extension-bridge';
+import { splitCopyIntoParts, cloneVoiceViaExtension } from '@/lib/heygen-extension-bridge';
 import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
 import {
   pollVideosUntilReady,
@@ -1551,6 +1551,42 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   const [errorAction, setErrorAction] = useState<{ label: string; href: string } | null>(null);
   function clearError() { setError(null); setErrorAction(null); }
 
+  /** Estado por slot do clone de voz em andamento.
+   *  Key: `${taskId}:${sIdx}` → { stage, percent, message } */
+  const [cloningVoice, setCloningVoice] = useState<Record<string, { stage: string; percent: number; message: string }>>({});
+
+  /** Dispara clone de voz pro slot. Aceita audio (mp3/wav) ou video.
+   *  No ready: seta voiceOverride no slot e adiciona voz na library cache. */
+  async function handleCloneVoiceForSlot(taskId: string, sIdx: number, file: File) {
+    const key = `${taskId}:${sIdx}`;
+    setCloningVoice((prev) => ({ ...prev, [key]: { stage: 'starting', percent: 0, message: 'Iniciando...' } }));
+    try {
+      const res = await cloneVoiceViaExtension(file, {
+        removeBackgroundNoise: true,
+        removeBackgroundMusic: true,
+        onProgress: (stage, percent, message) => {
+          setCloningVoice((prev) => ({
+            ...prev,
+            [key]: { stage, percent: percent ?? prev[key]?.percent ?? 0, message: message || '' },
+          }));
+        },
+      });
+      if (!res.ok) {
+        setError(`Falha ao clonar voz: ${res.error}`);
+        setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
+        return;
+      }
+      // Sucesso — seta voiceOverride no slot + recarrega biblioteca pra cache atualizar
+      updateRoleSlot(taskId, sIdx, { voiceOverride: { id: res.voiceId, name: res.voiceName } });
+      // Recarrega lista de avatares/vozes (cache) — voz nova aparece pro user
+      reloadLibrary().catch(() => {});
+      setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
+    } catch (e) {
+      setError(`Falha ao clonar voz: ${(e as Error)?.message || 'erro desconhecido'}`);
+      setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
+    }
+  }
+
   return (
     <>
       <ToolShell
@@ -2134,13 +2170,49 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
                                                     · {effectiveVoiceLabel}
                                                   </span>
                                                   {noVoice && !slot.voiceOverride ? (
-                                                    <span className="text-red-300">⚠ avatar sem voz padrao — escolha uma voz custom</span>
+                                                    <span className="text-red-300">⚠ avatar sem voz padrao — escolha uma voz custom OU clone uma nova</span>
                                                   ) : null}
                                                 </div>
                                                 <CompactVoiceSelector
                                                   selected={slot.voiceOverride}
                                                   setSelected={(v) => updateRoleSlot(a.taskId, sIdx, { voiceOverride: v })}
                                                 />
+                                                {/* Clone voice — aparece se cloning em andamento OU se botao foi clicado.
+                                                 *  File picker programatico: clica no botao → abre file input invisivel. */}
+                                                {(() => {
+                                                  const cloneKey = `${a.taskId}:${sIdx}`;
+                                                  const cloning = cloningVoice[cloneKey];
+                                                  if (cloning) {
+                                                    return (
+                                                      <div className="mt-1 rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-1.5">
+                                                        <div className="mono text-[9px] uppercase tracking-widest text-cyan-200">
+                                                          🎤 Clonando voz · {cloning.stage} · {Math.round(cloning.percent)}%
+                                                        </div>
+                                                        {cloning.message ? (
+                                                          <div className="text-[10px] text-text-muted mt-0.5">{cloning.message}</div>
+                                                        ) : null}
+                                                        <div className="mt-1 h-1 rounded bg-bg/60 overflow-hidden">
+                                                          <div className="h-full bg-cyan-400 transition-all" style={{ width: `${cloning.percent}%` }} />
+                                                        </div>
+                                                      </div>
+                                                    );
+                                                  }
+                                                  return (
+                                                    <label className="mono mt-1 inline-flex items-center gap-1 self-start rounded border border-fuchsia-500/40 bg-fuchsia-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20 cursor-pointer">
+                                                      🎤 Clonar voz nova (audio ou video)
+                                                      <input
+                                                        type="file"
+                                                        accept="audio/mp3,audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/m4a,audio/x-m4a,video/mp4,video/quicktime,video/webm,.mp3,.wav,.m4a,.mp4,.mov,.webm"
+                                                        className="hidden"
+                                                        onChange={(e) => {
+                                                          const f = e.target.files?.[0];
+                                                          e.target.value = '';
+                                                          if (f) handleCloneVoiceForSlot(a.taskId, sIdx, f);
+                                                        }}
+                                                      />
+                                                    </label>
+                                                  );
+                                                })()}
                                               </div>
                                             ) : null}
                                           </div>

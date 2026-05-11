@@ -277,6 +277,131 @@ export function testHeygenSession(): Promise<{
   });
 }
 
+/* ============================== VOICE CLONE ==============================
+ * Clona uma voz no HeyGen a partir de arquivo de audio (mp3/wav) OU video
+ * (mp4/mov/webm). Pra video, extrai audio antes via ffmpeg-worker pra
+ * reduzir upload.
+ *
+ * Nome do clone vem do filename SEM extensao (ex: "marcella.malvar2.mp4"
+ * → clone chamado "marcella.malvar2"). HeyGen aceita ate ~50 chars.
+ *
+ * Flags noise/music ligadas por default (user quer clean).
+ *
+ * Retorna { voiceId, voiceName } quando ready, OU error string.
+ */
+
+export type CloneVoiceOptions = {
+  /** Override do display name (default = filename sem extensao) */
+  displayName?: string;
+  removeBackgroundNoise?: boolean;
+  removeBackgroundMusic?: boolean;
+  /** ISO code: "pt", "en", etc. Auto se omitir */
+  language?: string | null;
+  /** Callback de progresso 0..100 */
+  onProgress?: (stage: string, percent?: number, message?: string) => void;
+};
+
+export type CloneVoiceResult = {
+  ok: true;
+  voiceId: string;
+  voiceName: string;
+} | {
+  ok: false;
+  error: string;
+};
+
+/** Deriva nome do clone a partir do filename: strip extensao + lower */
+function filenameToDisplayName(file: File): string {
+  const base = file.name.replace(/\.[^.]+$/, '');
+  return base.trim();
+}
+
+/** Converte Blob audio em base64 sem prefixo data: */
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buf = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)));
+  }
+  return btoa(binary);
+}
+
+/** Clona voz no HeyGen via extension. Extrai audio se for video. */
+export async function cloneVoiceViaExtension(
+  file: File,
+  opts: CloneVoiceOptions = {},
+): Promise<CloneVoiceResult> {
+  installListener();
+  if (typeof window === 'undefined') {
+    return { ok: false, error: 'Sem window — bridge so funciona client-side.' };
+  }
+
+  const isVideo = (file.type || '').startsWith('video/') ||
+    /\.(mp4|mov|webm|mkv)$/i.test(file.name);
+  const displayName = (opts.displayName || filenameToDisplayName(file)).slice(0, 50);
+
+  let audioBlob: Blob = file;
+  let mimeType = file.type || 'audio/wav';
+  let filename = file.name;
+
+  // Extrai audio se for video — reduz upload e HeyGen aceita audio puro
+  if (isVideo) {
+    opts.onProgress?.('extract_audio', 2, 'Extraindo audio do video...');
+    try {
+      const { extractAudio } = await import('./ffmpeg-worker');
+      audioBlob = await extractAudio(file);
+      mimeType = 'audio/wav';
+      filename = file.name.replace(/\.(mp4|mov|webm|mkv)$/i, '.wav');
+    } catch (e) {
+      return { ok: false, error: 'Falha ao extrair audio do video: ' + (e as Error)?.message };
+    }
+  }
+
+  opts.onProgress?.('encode', 4, 'Codificando audio...');
+  const audioBase64 = await blobToBase64(audioBlob);
+
+  // SEM TIMEOUT no DARKO LAB side — extension faz seu proprio timeout 6min
+  return new Promise((resolve) => {
+    const requestId = `clone_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const handler = (ev: MessageEvent) => {
+      if (ev.data?.source !== 'darkolab-ext') return;
+      if (ev.data?.requestId !== requestId) return;
+      if (ev.data?.type === 'HG_CLONE_VOICE_PROGRESS') {
+        opts.onProgress?.(String(ev.data.stage || ''), Number(ev.data.percent) || undefined, String(ev.data.message || ''));
+        return;
+      }
+      if (ev.data?.type === 'HG_CLONE_VOICE_RESULT') {
+        window.removeEventListener('message', handler);
+        if (ev.data.ok && ev.data.voiceId) {
+          resolve({ ok: true, voiceId: String(ev.data.voiceId), voiceName: String(ev.data.voiceName || displayName) });
+        } else {
+          resolve({ ok: false, error: String(ev.data.error || 'Erro desconhecido') });
+        }
+      }
+    };
+    window.addEventListener('message', handler);
+    window.postMessage(
+      {
+        source: 'darkolab',
+        type: 'HG_CLONE_VOICE',
+        requestId,
+        payload: {
+          audioBase64,
+          filename,
+          displayName,
+          mimeType,
+          removeBackgroundNoise: opts.removeBackgroundNoise ?? true,
+          removeBackgroundMusic: opts.removeBackgroundMusic ?? true,
+          language: opts.language ?? null,
+        },
+      },
+      '*',
+    );
+  });
+}
+
 /**
  * Cancela uma job em andamento (best-effort — extension pode estar com a
  * geracao no HeyGen ja em progresso e nao da pra abortar).

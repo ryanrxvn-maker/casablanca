@@ -6,6 +6,8 @@ const activeJobs = new Map();
 // Map<requestId, { bridgeTabId, timeoutId }> pra correlacionar push do
 // content script (HG_TAB_AVATARS_RESULT) de volta com o requester original.
 const pendingListJobs = new Map();
+// Voice clone pendentes: { bridgeTabId, timeoutId }
+const pendingCloneJobs = new Map();
 const HEYGEN_CREATE_URL = 'https://app.heygen.com/avatar';
 
 async function findOrCreateHeyGenTab() {
@@ -124,6 +126,45 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     sendResponse({ accepted: true });
     return true;
+  }
+
+  if (msg.type === 'HG_CLONE_VOICE') {
+    const requestId = msg.requestId;
+    handleCloneVoice(requestId, msg.payload, sender.tab?.id).catch((err) => {
+      reportToPage(sender.tab?.id, requestId, 'HG_CLONE_VOICE_RESULT', {
+        ok: false,
+        error: err?.message ?? String(err),
+      });
+    });
+    sendResponse({ accepted: true });
+    return true;
+  }
+
+  if (msg.type === 'HG_TAB_CLONE_VOICE_PROGRESS') {
+    const job = pendingCloneJobs.get(msg.requestId);
+    if (job) {
+      reportToPage(job.bridgeTabId, msg.requestId, 'HG_CLONE_VOICE_PROGRESS', {
+        stage: msg.stage,
+        percent: msg.percent,
+        message: msg.message,
+      });
+    }
+    return false;
+  }
+
+  if (msg.type === 'HG_TAB_CLONE_VOICE_RESULT') {
+    const job = pendingCloneJobs.get(msg.requestId);
+    if (job) {
+      clearTimeout(job.timeoutId);
+      pendingCloneJobs.delete(msg.requestId);
+      reportToPage(job.bridgeTabId, msg.requestId, 'HG_CLONE_VOICE_RESULT', {
+        ok: !!msg.ok,
+        voiceId: msg.voiceId,
+        voiceName: msg.voiceName,
+        error: msg.error ?? null,
+      });
+    }
+    return false;
   }
 
   if (msg.type === 'HG_CANCEL') {
@@ -281,6 +322,54 @@ async function handleListAvatars(requestId, bridgeTabId) {
         ok: false,
         avatars: [],
         groups: [],
+        error: 'Erro inesperado: ' + (e?.message ?? String(e)),
+      });
+    }
+  }
+}
+
+async function handleCloneVoice(requestId, payload, bridgeTabId) {
+  console.log('[DARKO LAB BG] >>> handleCloneVoice START reqId=', requestId, 'name=', payload?.displayName);
+  const tab = await findOrCreateHeyGenTab();
+  await waitForTabReady(tab.id);
+
+  // Timeout 6min — clone pode demorar 30-120s
+  const timeoutId = setTimeout(() => {
+    if (pendingCloneJobs.has(requestId)) {
+      console.warn('[DARKO LAB BG] !!! clone job timeout 6min reqId=', requestId);
+      pendingCloneJobs.delete(requestId);
+      reportToPage(bridgeTabId, requestId, 'HG_CLONE_VOICE_RESULT', {
+        ok: false,
+        error: 'Timeout 6min aguardando voice clone do HeyGen.',
+      });
+    }
+  }, 360000);
+  pendingCloneJobs.set(requestId, { bridgeTabId, timeoutId });
+
+  try {
+    chrome.tabs.sendMessage(tab.id, { type: 'HG_CLONE_VOICE', requestId, payload })
+      .catch((e) => {
+        const m = e?.message ?? String(e);
+        if (m.includes('channel closed') || m.includes('listener indicated')) {
+          // Esperado — content script retornou sync ack
+        } else {
+          console.error('[DARKO LAB BG] !!! dispatch HG_CLONE_VOICE THREW:', m);
+          if (pendingCloneJobs.has(requestId)) {
+            clearTimeout(timeoutId);
+            pendingCloneJobs.delete(requestId);
+            reportToPage(bridgeTabId, requestId, 'HG_CLONE_VOICE_RESULT', {
+              ok: false,
+              error: 'Aba HeyGen nao respondeu. Abre app.heygen.com e tenta de novo. (' + m + ')',
+            });
+          }
+        }
+      });
+  } catch (e) {
+    if (pendingCloneJobs.has(requestId)) {
+      clearTimeout(timeoutId);
+      pendingCloneJobs.delete(requestId);
+      reportToPage(bridgeTabId, requestId, 'HG_CLONE_VOICE_RESULT', {
+        ok: false,
         error: 'Erro inesperado: ' + (e?.message ?? String(e)),
       });
     }

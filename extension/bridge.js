@@ -117,6 +117,25 @@
           }
         },
       );
+      return;
+    }
+
+    if (data.type === 'HG_CLONE_VOICE') {
+      const requestId = data.requestId;
+      chrome.runtime.sendMessage(
+        { type: 'HG_CLONE_VOICE', requestId, payload: data.payload },
+        () => {
+          if (chrome.runtime.lastError) {
+            sendToPage({
+              type: 'HG_CLONE_VOICE_RESULT',
+              requestId,
+              ok: false,
+              error: chrome.runtime.lastError.message ?? 'Background nao respondeu.',
+            });
+          }
+        },
+      );
+      return;
     }
   });
 

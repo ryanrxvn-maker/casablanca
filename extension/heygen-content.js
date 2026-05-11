@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.0.14';
+const DARKO_EXT_VERSION = '4.1.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -149,7 +149,205 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       );
     return true;
   }
+  if (msg && msg.type === 'HG_CLONE_VOICE') {
+    // PUSH PATTERN: ack imediato + manda resultado via mensagem separada
+    // (clone pode demorar 20-60s e SW background hiberna no await).
+    sendResponse({ accepted: true });
+    const reqId = msg.requestId;
+    cloneVoice(msg.payload, (progress) => {
+      chrome.runtime.sendMessage({
+        type: 'HG_TAB_CLONE_VOICE_PROGRESS',
+        requestId: reqId,
+        stage: progress.stage,
+        percent: progress.percent,
+        message: progress.message,
+      }).catch(() => {});
+    })
+      .then((res) => {
+        chrome.runtime.sendMessage({
+          type: 'HG_TAB_CLONE_VOICE_RESULT',
+          requestId: reqId,
+          ok: true,
+          voiceId: res.voiceId,
+          voiceName: res.voiceName,
+        }).catch(() => {});
+      })
+      .catch((e) => {
+        console.error('[DARKO LAB voice clone] FAIL:', e);
+        chrome.runtime.sendMessage({
+          type: 'HG_TAB_CLONE_VOICE_RESULT',
+          requestId: reqId,
+          ok: false,
+          error: e?.message ?? String(e),
+        }).catch(() => {});
+      });
+    return false;
+  }
 });
+
+/* ============================ VOICE CLONE ============================
+ * Fluxo (4 endpoints, descobertos via engenharia reversa do bundle
+ * voice-mB23DmLV.js do HeyGen — Nov/2025):
+ *
+ *   1. POST /v1/pacific/voice_clone/voice.get_upload_url
+ *      Body: { request_source: 'IVC', ... }
+ *      Resp: { data: { upload_url, file_url, ... } }
+ *
+ *   2. PUT <upload_url>
+ *      Body: <binary do audio>
+ *      Headers: Content-Type apropriado
+ *
+ *   3. POST /v2/voice/voice_clone/create
+ *      Body: { name, audio_url, ... denoise/remove flags ... }
+ *      Resp: { data: { voice_id | callback_id } }
+ *
+ *   4. GET /v1/voice/voice_clone/create_status?callback_id=...
+ *      Poll ate status === 'completed' / 'ready'.
+ *
+ * Aceita audio (mp3/wav) OU video (mp4/mov/webm) — HeyGen extrai audio
+ * server-side. Se for video, ainda preferimos extrair audio antes via
+ * ffmpeg-worker do DARKO LAB pra reduzir bytes uploaded.
+ *
+ * Flags noise/music: removeBackgroundNoise + removeBackgroundMusic
+ * mapeiam pros campos `denoise` / `remove_background_music` do HeyGen
+ * (nomes inferidos — se quebrar, ajustar a partir de erro 400). */
+
+const VOICE_CLONE_POLL_INTERVAL_MS = 3000;
+const VOICE_CLONE_POLL_MAX_ATTEMPTS = 120; // 6 min total
+
+async function cloneVoice(payload, onProgress) {
+  const {
+    audioBase64,
+    filename = 'voice.wav',
+    displayName,
+    mimeType = 'audio/wav',
+    removeBackgroundNoise = true,
+    removeBackgroundMusic = true,
+    language = null,
+  } = payload || {};
+
+  if (!audioBase64) throw new Error('Sem audio (audioBase64 vazio).');
+  if (!displayName) throw new Error('Sem displayName (nome do clone).');
+
+  // Decode base64 → Uint8Array
+  const bin = atob(audioBase64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  console.log('[DARKO LAB voice clone] start', { filename, displayName, sizeBytes: bytes.length, removeBackgroundNoise, removeBackgroundMusic });
+
+  // === STEP 1: get_upload_url ===
+  onProgress?.({ stage: 'get_upload_url', percent: 5, message: 'Pedindo URL de upload...' });
+  const uploadUrlResp = await fetchWithTimeout(
+    'https://api2.heygen.com/v1/pacific/voice_clone/voice.get_upload_url',
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        request_source: 'IVC',
+        filename,
+        file_type: mimeType,
+        file_size: bytes.length,
+      }),
+    },
+    15000,
+  );
+  if (!uploadUrlResp.ok) {
+    const errBody = await uploadUrlResp.text().catch(() => '');
+    throw new Error(`get_upload_url HTTP ${uploadUrlResp.status}: ${errBody.slice(0, 300)}`);
+  }
+  const uploadUrlJson = await uploadUrlResp.json();
+  const uploadUrl = uploadUrlJson?.data?.upload_url
+    || uploadUrlJson?.data?.put_url
+    || uploadUrlJson?.data?.url;
+  const fileUrl = uploadUrlJson?.data?.file_url
+    || uploadUrlJson?.data?.audio_url
+    || uploadUrlJson?.data?.asset_url
+    || uploadUrlJson?.data?.url;
+  if (!uploadUrl) throw new Error('Sem upload_url no response: ' + JSON.stringify(uploadUrlJson).slice(0, 300));
+  console.log('[DARKO LAB voice clone] got upload_url, fileUrl=', fileUrl?.slice(0, 100));
+
+  // === STEP 2: PUT no S3 ===
+  onProgress?.({ stage: 'upload', percent: 20, message: `Subindo ${(bytes.length / (1024 * 1024)).toFixed(1)}MB pro S3...` });
+  const putResp = await fetchWithTimeout(
+    uploadUrl,
+    {
+      method: 'PUT',
+      body: bytes,
+      headers: { 'Content-Type': mimeType },
+    },
+    120000, // 2 min pra upload
+  );
+  if (!putResp.ok) {
+    const errBody = await putResp.text().catch(() => '');
+    throw new Error(`PUT S3 HTTP ${putResp.status}: ${errBody.slice(0, 300)}`);
+  }
+  console.log('[DARKO LAB voice clone] PUT OK');
+
+  // === STEP 3: create voice clone ===
+  onProgress?.({ stage: 'create', percent: 55, message: 'Criando clone no HeyGen...' });
+  const createBody = {
+    name: displayName,
+    audio_url: fileUrl,
+    request_source: 'IVC',
+  };
+  // Flags pra remover ruido/musica de fundo — nomes inferidos do bundle
+  if (removeBackgroundNoise) createBody.denoise = true;
+  if (removeBackgroundMusic) createBody.remove_background_music = true;
+  if (language) createBody.language = language;
+
+  const createResp = await fetchWithTimeout(
+    'https://api2.heygen.com/v2/voice/voice_clone/create',
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(createBody),
+    },
+    30000,
+  );
+  if (!createResp.ok) {
+    const errBody = await createResp.text().catch(() => '');
+    throw new Error(`create HTTP ${createResp.status}: ${errBody.slice(0, 300)}`);
+  }
+  const createJson = await createResp.json();
+  const voiceIdImmediate = createJson?.data?.voice_id;
+  const callbackId = createJson?.data?.callback_id || createJson?.data?.id;
+  console.log('[DARKO LAB voice clone] create resp', { voiceIdImmediate, callbackId, keys: Object.keys(createJson?.data || {}) });
+
+  // === STEP 4: poll status ===
+  if (voiceIdImmediate) {
+    // Alguns retornam o voice_id ja pronto
+    onProgress?.({ stage: 'done', percent: 100, message: 'Pronto' });
+    return { voiceId: voiceIdImmediate, voiceName: displayName };
+  }
+  if (!callbackId) throw new Error('Sem callback_id nem voice_id no response do create: ' + JSON.stringify(createJson).slice(0, 300));
+
+  for (let attempt = 0; attempt < VOICE_CLONE_POLL_MAX_ATTEMPTS; attempt++) {
+    await new Promise((r) => setTimeout(r, VOICE_CLONE_POLL_INTERVAL_MS));
+    const percent = 60 + Math.min(35, attempt * 1.5);
+    onProgress?.({ stage: 'polling', percent, message: `Aguardando processamento (${attempt + 1}/${VOICE_CLONE_POLL_MAX_ATTEMPTS})...` });
+    const statusResp = await fetchWithTimeout(
+      `https://api2.heygen.com/v1/voice/voice_clone/create_status?callback_id=${encodeURIComponent(callbackId)}`,
+      { method: 'GET', credentials: 'include' },
+      10000,
+    ).catch((e) => { console.warn('[DARKO LAB voice clone] poll err:', e); return null; });
+    if (!statusResp || !statusResp.ok) continue;
+    const statusJson = await statusResp.json().catch(() => null);
+    const status = statusJson?.data?.status;
+    const vid = statusJson?.data?.voice_id;
+    console.log('[DARKO LAB voice clone] poll', attempt, 'status=', status, 'voice_id=', vid);
+    if (status === 'completed' || status === 'ready' || status === 'success') {
+      if (!vid) throw new Error('Status completed mas sem voice_id: ' + JSON.stringify(statusJson).slice(0, 300));
+      onProgress?.({ stage: 'done', percent: 100, message: 'Pronto' });
+      return { voiceId: vid, voiceName: displayName };
+    }
+    if (status === 'failed' || status === 'error') {
+      throw new Error('HeyGen voice clone falhou: ' + JSON.stringify(statusJson).slice(0, 300));
+    }
+  }
+  throw new Error('Voice clone timeout — HeyGen nao respondeu completed em 6min');
+}
 
 /**
  * Lista vozes da conta HeyGen (custom + favoritas) via cookies de sessao.
