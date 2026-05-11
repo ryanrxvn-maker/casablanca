@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { Brand } from './Brand';
+import { ClickUpPilotButton } from './ClickUpPilotButton';
 import { createClient } from '@/lib/supabase/client';
 
 type Profile = {
@@ -88,6 +89,9 @@ export function Header() {
     <header className="sticky top-0 z-30 border-b border-line bg-bg/80 backdrop-blur-md">
       <div className="container-app flex h-16 items-center justify-between">
         <Brand />
+
+        <div className="flex items-center gap-3">
+          <ClickUpPilotButton />
 
         <div className="relative" ref={menuRef}>
           <button
@@ -193,6 +197,7 @@ export function Header() {
               </nav>
             </div>
           ) : null}
+        </div>
         </div>
       </div>
     </header>

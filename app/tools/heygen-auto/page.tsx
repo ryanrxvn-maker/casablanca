@@ -7,6 +7,9 @@ import { ToolShell } from '@/components/ToolShell';
 import { CancelButton } from '@/components/CancelButton';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { useToolState } from '@/components/ToolsStateProvider';
+import { Toggle3D } from '@/components/Toggle3D';
+import { extractAudio, muxAudioIntoVideo } from '@/lib/ffmpeg-worker';
+import { camuflar } from '@/lib/camuflagem';
 import {
   detectExtension,
   splitCopyIntoParts,
@@ -92,6 +95,17 @@ export default function HeyGenAutoPage() {
   const [dynamicMode, setDynamicMode] = useToolState<boolean>(
     'hgauto:dynamic',
     false,
+  );
+
+  /* --------------- Modo Camuflagem (3a pasta com audio camuflado) --------- */
+  const [camuflagemMode, setCamuflagemMode] = useToolState<boolean>(
+    'hgauto:camuflagem',
+    false,
+  );
+  const [camuflagemWhite, setCamuflagemWhite] = useState<File | null>(null);
+  const [camuflagemVolume, setCamuflagemVolume] = useToolState<number>(
+    'hgauto:camuflagemVol',
+    30,
   );
   // Per-part avatar override (null = usa selectedAvatar global). Indexado
   // pela posicao da parte (text: ordem do split; audio: ordem do array).
@@ -306,23 +320,27 @@ export default function HeyGenAutoPage() {
       if (downloadCancelRef.current) return;
 
       // Baixa cada video + zipa. Sequencial pra nao saturar download (videos sao grandes).
+      // Mantem refs aos blobs em memoria pra rodar camuflagem apos zipar.
       const JSZip = (await import('jszip')).default;
       const zip = new JSZip();
+      const partBlobs: Array<{ label: string; blob: Blob | null }> = [];
       for (let i = 0; i < ready.length; i++) {
         if (downloadCancelRef.current) return;
         const part = ready[i];
         const status = final[part.videoId!];
         setDownloadStage(`Baixando parte ${i + 1}/${ready.length} (${part.label})...`);
         if (status?.status !== 'completed' || !status.videoUrl) {
-          // Marca no ZIP como erro pra user saber
           zip.file(`${part.label}_FAILED.txt`, `Status: ${status?.status || 'unknown'}\nErro: ${status?.error || 'sem video_url'}`);
+          partBlobs.push({ label: part.label, blob: null });
           continue;
         }
         try {
           const bytes = await downloadVideoBytes(status.videoUrl);
           zip.file(`${part.label}.mp4`, bytes);
+          partBlobs.push({ label: part.label, blob: new Blob([bytes as BlobPart], { type: 'video/mp4' }) });
         } catch (e) {
           zip.file(`${part.label}_DOWNLOAD_ERROR.txt`, String((e as Error)?.message || e));
+          partBlobs.push({ label: part.label, blob: null });
         }
       }
 
@@ -337,7 +355,49 @@ export default function HeyGenAutoPage() {
       a.click();
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 5000);
-      setDownloadStage(`✓ ZIP baixado: ${filename} (${(blob.size / (1024 * 1024)).toFixed(1)}MB)`);
+
+      // === CAMUFLAGEM (modo opcional): gera 2a ZIP com cada take camuflado ===
+      if (camuflagemMode && camuflagemWhite) {
+        setDownloadStage('Aplicando camuflagem em cada take...');
+        try {
+          // Extrai audio do WHITE (suporta video tambem)
+          let whiteBlob: Blob = camuflagemWhite;
+          if ((camuflagemWhite.type || '').startsWith('video/') || /\.(mp4|mov|webm|mkv)$/i.test(camuflagemWhite.name)) {
+            whiteBlob = await extractAudio(camuflagemWhite);
+          }
+          const zipCamu = new JSZip();
+          let camuOk = 0;
+          for (let i = 0; i < partBlobs.length; i++) {
+            const p = partBlobs[i];
+            if (!p.blob) continue;
+            setDownloadStage(`Camuflando ${i + 1}/${partBlobs.length} (${p.label})...`);
+            try {
+              const blackAudio = await extractAudio(p.blob);
+              const camuWav = await camuflar({ black: blackAudio, white: whiteBlob, volumePercent: camuflagemVolume });
+              const camuVid = await muxAudioIntoVideo(p.blob, camuWav);
+              zipCamu.file(`${p.label}_camuflado.mp4`, camuVid);
+              camuOk++;
+            } catch (e) {
+              zipCamu.file(`${p.label}_CAMUFLAGEM_ERROR.txt`, String((e as Error)?.message || e));
+            }
+          }
+          const blobCamu = await zipCamu.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+          const filenameCamu = `${safeName}_camuflado.zip`;
+          const urlCamu = URL.createObjectURL(blobCamu);
+          const a2 = document.createElement('a');
+          a2.href = urlCamu;
+          a2.download = filenameCamu;
+          document.body.appendChild(a2);
+          a2.click();
+          document.body.removeChild(a2);
+          setTimeout(() => URL.revokeObjectURL(urlCamu), 5000);
+          setDownloadStage(`✓ ZIPs prontos: ${filename} + ${filenameCamu} (${camuOk}/${partBlobs.filter(p => p.blob).length} camuflados)`);
+        } catch (e) {
+          setDownloadStage(`⚠ Takes OK · camuflagem falhou: ${(e as Error)?.message}`);
+        }
+      } else {
+        setDownloadStage(`✓ ZIP baixado: ${filename} (${(blob.size / (1024 * 1024)).toFixed(1)}MB)`);
+      }
       setTimeout(() => setDownloadStage(null), 8000);
     } catch (e) {
       setError(`Falha no download: ${(e as Error)?.message || e}`);
@@ -772,6 +832,56 @@ export default function HeyGenAutoPage() {
                   </div>
                 </div>
               )}
+            </section>
+
+            {/* Modo Camuflagem — gera 2a ZIP com cada take camuflado no audio */}
+            <section className="border-t border-line pt-6">
+              <h2 className="label-field !mb-3">Modos extra</h2>
+              <Toggle3D
+                on={camuflagemMode}
+                onChange={setCamuflagemMode}
+                label="Camuflagem"
+                hint="Gera 2a pasta ZIP com cada take + audio camuflado"
+                variant="fuchsia"
+                icon={<span className="text-base">🎭</span>}
+              />
+              {camuflagemMode ? (
+                <div className="mt-3 rounded-[12px] border border-fuchsia-500/30 bg-fuchsia-500/5 p-3">
+                  <div className="mono mb-2 text-[10px] uppercase tracking-widest text-fuchsia-200">
+                    Audio WHITE pra camuflagem (audio OU video — extrai audio se video)
+                  </div>
+                  <div className="grid items-center gap-2 sm:grid-cols-[1fr_140px]">
+                    <input
+                      type="file"
+                      accept="audio/*,video/*"
+                      onChange={(e) => setCamuflagemWhite(e.target.files?.[0] || null)}
+                      className="input-field text-xs"
+                      disabled={processing || downloading}
+                    />
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="range"
+                        min={5}
+                        max={100}
+                        value={camuflagemVolume}
+                        onChange={(e) => setCamuflagemVolume(Number(e.target.value))}
+                        className="flex-1 accent-fuchsia-400"
+                        disabled={processing || downloading}
+                      />
+                      <span className="mono w-10 text-right text-[11px] text-fuchsia-200">{camuflagemVolume}%</span>
+                    </div>
+                  </div>
+                  {camuflagemWhite ? (
+                    <div className="mt-2 text-[11px] text-fuchsia-200">
+                      ✓ {camuflagemWhite.name} ({(camuflagemWhite.size / (1024 * 1024)).toFixed(1)}MB)
+                    </div>
+                  ) : (
+                    <div className="mt-2 text-[11px] text-text-muted">
+                      ⚠ Sem WHITE: a camuflagem nao roda. Selecione um arquivo.
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </section>
 
             {/* HeyGen Auto Dynamic — multi-avatar por parte */}
