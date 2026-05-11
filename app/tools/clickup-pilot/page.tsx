@@ -12,6 +12,7 @@ import {
   listTeams,
   listTasks,
   getTask,
+  getCurrentUser,
   extractDocLinks,
   type ClickUpTeam,
   type ClickUpTask,
@@ -46,14 +47,17 @@ import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
  * 7. Dispara via HeyGen Auto Dynamic com motor III
  */
 
+// IMPORTANTE: ClickUp API e case-sensitive nos status. Os status reais vem
+// lowercase com acento ('editando vídeo'). Lowercase aqui = match direto.
 const DEFAULT_EDIT_STATUSES = [
-  'EDITAR VIDEO',
-  'EDITAR VÍDEO',
-  'EDITANDO VIDEO',
-  'EDITANDO VÍDEO',
-  'REVISAO VIDEO',
-  'REVISÃO VÍDEO',
-  'REVISAO VÍDEO',
+  'editar video',
+  'editar vídeo',
+  'editando video',
+  'editando vídeo',
+  'revisao video',
+  'revisão vídeo',
+  'revisao vídeo',
+  'implementar',
 ];
 
 type DispatchPlan = {
@@ -128,15 +132,34 @@ export default function ClickUpPilotPage() {
     null,
   );
   const [loadingTeams, setLoadingTeams] = useState(false);
+  // User autenticado (auto-fetch via /v2/user). Critico pra workspaces com
+  // permissao limitada que nao retornam membros — usamos esse ID como editor.
+  const [authUser, setAuthUser] = useState<ClickUpUser | null>(null);
 
   async function loadTeams() {
     if (!hasToken) return;
     setLoadingTeams(true);
     setError(null);
     try {
-      const ts = await listTeams();
+      // Carrega user E teams em paralelo
+      const [me, ts] = await Promise.all([
+        getCurrentUser().catch(() => null),
+        listTeams(),
+      ]);
+      if (me) setAuthUser(me);
       setTeams(ts);
-      if (ts.length > 0 && !selectedTeam) setSelectedTeam(ts[0].id);
+      // Auto-pick: prefere team com nome que contem 'B2c' OU o que tem mais
+      // membros visiveis OU o primeiro
+      if (ts.length > 0 && (!selectedTeam || !ts.find(t => t.id === selectedTeam))) {
+        const b2c = ts.find(t => /b2c/i.test(t.name || ''));
+        const byMembers = [...ts].sort((a, b) => (b.members?.length || 0) - (a.members?.length || 0))[0];
+        const picked = b2c || byMembers || ts[0];
+        setSelectedTeam(picked.id);
+      }
+      // Auto-pick editor: o user autenticado (mesmo que dropdown esteja vazio)
+      if (me && !selectedEditor) {
+        setSelectedEditor(String(me.id));
+      }
     } catch (e) {
       setError(`Falha ao carregar teams: ${(e as Error)?.message}`);
     } finally {
@@ -145,10 +168,25 @@ export default function ClickUpPilotPage() {
   }
   useEffect(() => { if (hasToken) loadTeams(); /* eslint-disable-next-line */ }, [hasToken]);
 
+  // Migra filter velho UPPERCASE pra novo lowercase (API e case-sensitive)
+  useEffect(() => {
+    if (statusFilter && /[A-Z]/.test(statusFilter) && !/[a-z]/.test(statusFilter)) {
+      // Filter atual e tudo uppercase — substitui pelo default lowercase
+      setStatusFilter(DEFAULT_EDIT_STATUSES.join(','));
+    }
+    // eslint-disable-next-line
+  }, []);
+
   const currentTeam = useMemo(() => teams.find((t) => t.id === selectedTeam) || null, [teams, selectedTeam]);
   const editors: ClickUpUser[] = useMemo(() => {
-    return (currentTeam?.members || []).map((m) => m.user).sort((a, b) => a.username.localeCompare(b.username));
-  }, [currentTeam]);
+    const fromTeam = (currentTeam?.members || []).map((m) => m.user);
+    // Garante que o auth user esta na lista mesmo se workspace nao retornar
+    // membros (workspaces grandes podem nao expor membros pra tokens limitados)
+    if (authUser && !fromTeam.find((u) => u.id === authUser.id)) {
+      fromTeam.push(authUser);
+    }
+    return fromTeam.sort((a, b) => a.username.localeCompare(b.username));
+  }, [currentTeam, authUser]);
 
   /* ========== Tasks ========== */
   const [statusFilter, setStatusFilter] = useToolState<string>(
@@ -195,6 +233,32 @@ export default function ClickUpPilotPage() {
         subtasks: false,
       });
       setTasks(r.tasks);
+      if (r.tasks.length === 0) {
+        // Tenta sem filtro de status — talvez o editor tenha tasks mas com
+        // status fora dos defaults
+        const r2 = await listTasks(selectedTeam, {
+          assigneeIds: [selectedEditor],
+          page: 0,
+          subtasks: false,
+        });
+        if (r2.tasks.length > 0) {
+          // Coleta status existentes pra mostrar pro user
+          const statusCounts = new Map<string, number>();
+          for (const t of r2.tasks) {
+            const s = t.status?.status || '?';
+            statusCounts.set(s, (statusCounts.get(s) || 0) + 1);
+          }
+          const breakdown = Array.from(statusCounts.entries())
+            .sort((a, b) => b[1] - a[1])
+            .map(([s, c]) => `${s} (${c})`)
+            .join(', ');
+          setError(
+            `0 tasks com filtros atuais, mas o editor TEM ${r2.tasks.length} tasks sem filtro. Status disponiveis: ${breakdown}. Edita o filtro acima OU usa esses status.`,
+          );
+        } else {
+          setError(`Editor sem tasks neste workspace. Confira se selecionou o workspace certo (atual: ${currentTeam?.name}).`);
+        }
+      }
     } catch (e) {
       setError(`Falha ao listar tasks: ${(e as Error)?.message}`);
     } finally {

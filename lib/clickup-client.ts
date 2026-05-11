@@ -89,6 +89,15 @@ export type ClickUpTask = {
 
 /* ============= Endpoints ============= */
 
+/** GET /user — info do user autenticado (id, username, email).
+ *  Critico: workspaces com permissao limitada nao retornam membros, entao
+ *  precisamos saber quem 'eu sou' independentemente da listagem do team. */
+export async function getCurrentUser(): Promise<ClickUpUser> {
+  const r = await callGet<{ user: ClickUpUser }>('/user');
+  if (!r.ok) throw new Error(`Falha get user (${r.status}): ${(r.body as any)?.err || JSON.stringify(r.body).slice(0, 200)}`);
+  return (r.body as any).user;
+}
+
 /** GET /team — lista todos workspaces (chamado "team" na API antiga) */
 export async function listTeams(): Promise<ClickUpTeam[]> {
   const r = await callGet<{ teams: ClickUpTeam[] }>('/team');
