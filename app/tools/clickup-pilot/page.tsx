@@ -41,6 +41,7 @@ import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
 import { recallByVoiceName, rememberPairing, normalizeVoiceName } from '@/lib/voice-avatar-memory';
 import { Toggle3D } from '@/components/Toggle3D';
 import { getPilotTeam, setPilotTeam, getPilotEditor, setPilotEditor } from '@/lib/clickup-pilot-config';
+import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
 
 /**
  * ClickUp Pilot — cerebro de automacao
@@ -98,7 +99,12 @@ function persistBatchStates(states: Record<string, unknown>) {
   try {
     const sanitized: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(states)) {
-      const { zipBlobUrl, ...rest } = v as { zipBlobUrl?: string; [key: string]: unknown };
+      const { zipBlobUrl, montadoZipUrl, camufladoZipUrl, ...rest } = v as {
+        zipBlobUrl?: string;
+        montadoZipUrl?: string;
+        camufladoZipUrl?: string;
+        [key: string]: unknown;
+      };
       sanitized[k] = rest;
     }
     localStorage.setItem(BATCH_STATE_KEY, JSON.stringify(sanitized));
@@ -131,15 +137,22 @@ type BatchTaskState = {
   taskId: string;
   taskName: string;
   baseAdId: string;
-  /** queued | dispatching | rendering | downloading | done | failed */
-  phase: 'queued' | 'dispatching' | 'rendering' | 'downloading' | 'done' | 'failed';
+  /** queued | dispatching | rendering | downloading | post (concat+decupagem+camo) | done | failed */
+  phase: 'queued' | 'dispatching' | 'rendering' | 'downloading' | 'post' | 'done' | 'failed';
   /** Per-part status durante dispatch (parteN: error|null) */
   parts: Array<{ label: string; videoId: string | null; videoStatus?: VideoStatus['status']; error?: string | null; renamedTo: string }>;
   message?: string;
   startedAt: number;
   finishedAt?: number;
-  zipBlobUrl?: string; // gerado quando completo
+  /** ZIP 1 — takes individuais (sempre gerado) */
+  zipBlobUrl?: string;
   zipFilename?: string;
+  /** ZIP 2 — versoes montadas HOOK[N]+BODY decupadas (gerado se decupagem OK) */
+  montadoZipUrl?: string;
+  montadoZipName?: string;
+  /** ZIP 3 — versoes montadas + camuflagem (gerado se modo camuflagem ON) */
+  camufladoZipUrl?: string;
+  camufladoZipName?: string;
 };
 
 type RoleSlot = {
@@ -722,10 +735,9 @@ export default function ClickUpPilotPage() {
     const partsLen = plan.parts.length;
     const adNameClean = (a.baseAdId || a.taskName).replace(/[^A-Z0-9]/gi, '_');
 
-    // Re-run da mesma task: revoga blob URL antigo pra nao vazar memoria
-    const prevBlobUrl = batchStates[taskId]?.zipBlobUrl;
-    if (prevBlobUrl) {
-      try { URL.revokeObjectURL(prevBlobUrl); } catch {}
+    // Re-run da mesma task: revoga blob URLs antigos pra nao vazar memoria
+    for (const url of [batchStates[taskId]?.zipBlobUrl, batchStates[taskId]?.montadoZipUrl, batchStates[taskId]?.camufladoZipUrl]) {
+      if (url) { try { URL.revokeObjectURL(url); } catch {} }
     }
     // Limpa flag de cancel de runs anteriores
     batchCancelRef.current[taskId] = false;
@@ -797,11 +809,12 @@ export default function ClickUpPilotPage() {
         },
       });
 
-      // 3. Download + zip em paralelo (3 simultaneos) — videos HeyGen sao
-      //    grandes, sequencial ficava lento. Pool resolve sem saturar a rede.
-      setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'downloading', message: `Baixando + zipando ${validIds.length} videos...` } }));
+      // 3. Download em paralelo (3 simultaneos) + coleta blobs em memoria pra
+      //    pipeline pos-producao (concat + decupagem + camuflagem).
+      setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'downloading', message: `Baixando ${validIds.length} videos...` } }));
       const JSZip = (await import('jszip')).default;
       const zip = new JSZip();
+      const partBlobs: Array<{ label: string; blob: Blob | null }> = plan.parts.map((p: any) => ({ label: p.label, blob: null }));
       let downloaded = 0;
       const downloadOne = async (i: number) => {
         if (batchCancelRef.current[taskId]) return;
@@ -821,6 +834,7 @@ export default function ClickUpPilotPage() {
         try {
           const bytes = await downloadVideoBytes(status.videoUrl);
           zip.file(fname, bytes);
+          partBlobs[i] = { label: part.label, blob: new Blob([bytes as BlobPart], { type: 'video/mp4' }) };
           downloaded++;
           setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], message: `Baixando: ${downloaded}/${validIds.length}` } }));
         } catch (e) {
@@ -840,18 +854,106 @@ export default function ClickUpPilotPage() {
       }
       await Promise.all(dlWorkers);
 
-      const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
-      const filename = `${adNameClean}.zip`;
-      const url = URL.createObjectURL(blob);
+      // ZIP 1 — takes individuais
+      const takesBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+      const takesFilename = `${adNameClean}_takes.zip`;
+      const takesUrl = URL.createObjectURL(takesBlob);
+
+      // === Stage 4: PIPELINE pos-producao (concat + decupagem [+ camuflagem]) ===
+      setBatchStates((prev) => ({
+        ...prev,
+        [taskId]: {
+          ...prev[taskId],
+          phase: 'post',
+          message: 'Montando + decupando' + (camuflagemMode ? ' + camuflando...' : '...'),
+          zipBlobUrl: takesUrl,
+          zipFilename: takesFilename,
+        },
+      }));
+
+      let assembled: Awaited<ReturnType<typeof runPostPipeline>> = [];
+      try {
+        assembled = await runPostPipeline({
+          baseAdId: a.baseAdId || a.taskName,
+          parts: partBlobs,
+          decupagem: true,
+          camuflagem: camuflagemMode,
+          whiteAudio: camuflagemMode ? camuflagemWhite : null,
+          camuflagemVolume,
+          onProgress: (p) => {
+            setBatchStates((prev) => ({
+              ...prev,
+              [taskId]: { ...prev[taskId], message: `${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}` },
+            }));
+          },
+        });
+      } catch (e) {
+        // Pipeline falhou — pelo menos o zip de takes ja esta pronto
+        setBatchStates((prev) => ({
+          ...prev,
+          [taskId]: {
+            ...prev[taskId],
+            phase: 'done',
+            message: `Takes OK · pipeline falhou: ${(e as Error)?.message}`,
+            finishedAt: Date.now(),
+          },
+        }));
+        return;
+      }
+
+      // ZIP 2 — versoes montadas + decupadas
+      let montadoUrl: string | undefined;
+      let montadoName: string | undefined;
+      const decupadosOk = assembled.filter((it) => it.decupado);
+      if (decupadosOk.length > 0) {
+        const zipMont = new JSZip();
+        for (const item of assembled) {
+          if (item.decupado) {
+            zipMont.file(item.filename, item.decupado);
+          } else if (item.errors?.decupagem || item.errors?.assemble) {
+            zipMont.file(`${item.filename.replace('.mp4', '')}_ERRO.txt`,
+              `Assemble: ${item.errors?.assemble || 'OK'}\nDecupagem: ${item.errors?.decupagem || 'OK'}`);
+          }
+        }
+        const blob2 = await zipMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+        montadoName = `${adNameClean}_montado_decupado.zip`;
+        montadoUrl = URL.createObjectURL(blob2);
+      }
+
+      // ZIP 3 — versoes camufladas (se modo ON)
+      let camuUrl: string | undefined;
+      let camuName: string | undefined;
+      if (camuflagemMode) {
+        const camufladosOk = assembled.filter((it) => it.camuflado);
+        if (camufladosOk.length > 0) {
+          const zipCamu = new JSZip();
+          for (const item of assembled) {
+            if (item.camuflado) {
+              zipCamu.file(item.filename.replace('.mp4', '_camuflado.mp4'), item.camuflado);
+            } else if (item.errors?.camuflagem) {
+              zipCamu.file(`${item.filename.replace('.mp4', '')}_CAMUFLAGEM_ERRO.txt`, item.errors.camuflagem);
+            }
+          }
+          const blob3 = await zipCamu.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+          camuName = `${adNameClean}_camuflado.zip`;
+          camuUrl = URL.createObjectURL(blob3);
+        }
+      }
+
+      const totalSize = takesBlob.size + (montadoUrl ? assembled.reduce((n, it) => n + (it.decupado?.size || 0), 0) : 0);
       setBatchStates((prev) => ({
         ...prev,
         [taskId]: {
           ...prev[taskId],
           phase: 'done',
-          message: `Pronto: ${downloaded}/${validIds.length} videos · ${(blob.size / (1024 * 1024)).toFixed(1)}MB`,
+          message: `Pronto: ${downloaded} takes${montadoUrl ? ` + ${decupadosOk.length} montados` : ''}${camuUrl ? ` + camuflagem` : ''} · ${(totalSize / (1024 * 1024)).toFixed(1)}MB`,
           finishedAt: Date.now(),
-          zipBlobUrl: url,
-          zipFilename: filename,
+          zipBlobUrl: takesUrl,
+          zipFilename: takesFilename,
+          montadoZipUrl: montadoUrl,
+          montadoZipName: montadoName,
+          camufladoZipUrl: camuUrl,
+          camufladoZipName: camuName,
         },
       }));
     } catch (e) {
@@ -1643,7 +1745,7 @@ export default function ClickUpPilotPage() {
                       </div>
                       <ul className="grid gap-2">
                         {Object.values(batchStates).sort((a, b) => b.startedAt - a.startedAt).map((b) => {
-                          const phaseLabel = ({ queued: '⏳ na fila', dispatching: '🚀 disparando', rendering: '⚙ renderizando', downloading: '⬇ baixando', done: '✅ pronto', failed: '✗ falhou' })[b.phase];
+                          const phaseLabel = ({ queued: '⏳ na fila', dispatching: '🚀 disparando', rendering: '⚙ renderizando', downloading: '⬇ baixando', post: '✂ pos-producao', done: '✅ pronto', failed: '✗ falhou' })[b.phase];
                           const phaseColor = b.phase === 'done' ? 'text-lime border-lime/40 bg-lime/10' : b.phase === 'failed' ? 'text-red-300 border-red-500/40 bg-red-500/10' : 'text-fuchsia-200 border-fuchsia-500/30 bg-fuchsia-500/5';
                           const partsDispatched = b.parts.filter(p => p.videoId).length;
                           const partsRendered = b.parts.filter(p => p.videoStatus === 'completed').length;
@@ -1659,14 +1761,35 @@ export default function ClickUpPilotPage() {
                                   <span className="ml-2">{phaseLabel}</span>
                                   <span className="ml-2 text-text-muted">· {elapsedLabel}</span>
                                 </span>
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex flex-wrap items-center gap-1.5">
                                   {b.phase === 'done' && b.zipBlobUrl ? (
                                     <a
                                       href={b.zipBlobUrl}
                                       download={b.zipFilename}
                                       className="mono rounded border border-lime bg-lime/20 px-2 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30"
+                                      title="Pasta com os takes individuais (HOOK1.mp4, BODY1.mp4, etc)"
                                     >
-                                      ⬇ {b.zipFilename}
+                                      ⬇ takes
+                                    </a>
+                                  ) : null}
+                                  {b.phase === 'done' && b.montadoZipUrl ? (
+                                    <a
+                                      href={b.montadoZipUrl}
+                                      download={b.montadoZipName}
+                                      className="mono rounded border border-cyan-500/60 bg-cyan-500/20 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/30"
+                                      title="Versoes ja montadas (HOOK[N]+BODY) e decupadas — prontas pra publicacao"
+                                    >
+                                      ⬇ montados
+                                    </a>
+                                  ) : null}
+                                  {b.phase === 'done' && b.camufladoZipUrl ? (
+                                    <a
+                                      href={b.camufladoZipUrl}
+                                      download={b.camufladoZipName}
+                                      className="mono rounded border border-fuchsia-500/60 bg-fuchsia-500/20 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/30"
+                                      title="Versoes montadas + audio camuflado (inversao de fase)"
+                                    >
+                                      ⬇ camuflados
                                     </a>
                                   ) : null}
                                   {b.phase === 'done' && !b.zipBlobUrl && b.parts.some(p => p.videoId) ? (
@@ -1694,7 +1817,9 @@ export default function ClickUpPilotPage() {
                                     <button
                                       type="button"
                                       onClick={() => {
-                                        if (b.zipBlobUrl) { try { URL.revokeObjectURL(b.zipBlobUrl); } catch {} }
+                                        for (const url of [b.zipBlobUrl, b.montadoZipUrl, b.camufladoZipUrl]) {
+                                          if (url) { try { URL.revokeObjectURL(url); } catch {} }
+                                        }
                                         setBatchStates((prev) => {
                                           const { [b.taskId]: _, ...rest } = prev;
                                           return rest;
