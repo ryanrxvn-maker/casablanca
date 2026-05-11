@@ -32,6 +32,7 @@ import {
   subscribeLibrary,
 } from '@/lib/heygen-library-cache';
 import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
+import { CompactVoiceSelector } from '@/components/CompactVoiceSelector';
 import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
 
 /**
@@ -59,6 +60,27 @@ const DEFAULT_EDIT_STATUSES = [
   'editando vídeo',
 ];
 const STATUS_FILTER_KEY = 'darkolab:clickup-pilot:statuses';
+const DISPATCHED_KEY = 'darkolab:clickup-pilot:dispatched';
+
+/** Carrega map de tasks ja disparadas: {taskId: timestamp} */
+function getDispatchedMap(): Record<string, number> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(DISPATCHED_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+function getDispatchedAt(taskId: string): number | null {
+  return getDispatchedMap()[taskId] ?? null;
+}
+function markDispatched(taskId: string) {
+  if (typeof window === 'undefined') return;
+  const m = getDispatchedMap();
+  m[taskId] = Date.now();
+  localStorage.setItem(DISPATCHED_KEY, JSON.stringify(m));
+}
 
 type DispatchPlan = {
   adName: string;
@@ -73,6 +95,22 @@ type DispatchPlan = {
   unmatchedAvatars: string[];
 };
 
+type RoleSlot = {
+  /** "Doutor", "Mulher", etc — role do briefing */
+  role: string;
+  /** "@binhoted1" — username bruto do briefing */
+  username: string;
+  /** Avatar HeyGen escolhido (null = pendente, user precisa selecionar) */
+  avatarId: string | null;
+  avatarName: string | null;
+  avatarThumb: string | null;
+  avatarVoiceId: string | null;
+  /** Se != null, sobrescreve avatarVoiceId — voz custom escolhida pelo user */
+  voiceOverride: { id: string; name: string } | null;
+  /** Como matchamos: 'voice_name_exact' | 'voice_name_fuzzy' | 'name_contains' | 'name_tokens' | 'manual' | null */
+  matchedBy: string | null;
+};
+
 type TaskAnalysis = {
   taskId: string;
   taskName: string;
@@ -81,11 +119,13 @@ type TaskAnalysis = {
   hookCount?: number;
   bodyPartsCount?: number;
   totalParts?: number;
-  avatarsTotal?: number;
-  avatarsMatched?: number;
-  unmatchedAvatars?: string[];
+  /** Cada avatar do briefing — usuario controla individualmente */
+  roleSlots: RoleSlot[];
+  /** Body splits + hooks que viram partes (sem avatar — populado a partir de roleSlots) */
+  partTemplates: Array<{ label: string; text: string; matchByRole: string | null }>;
   error?: string;
-  plan?: DispatchPlan;
+  /** Quando disparou pra HeyGen (timestamp) — null se ainda nao */
+  dispatchedAt?: number | null;
 };
 
 export default function ClickUpPilotPage() {
@@ -376,7 +416,7 @@ export default function ClickUpPilotPage() {
     setTaskAnalyses(() => {
       const init: Record<string, TaskAnalysis> = {};
       for (const t of targets) {
-        init[t.id] = { taskId: t.id, taskName: t.name, status: 'pending' };
+        init[t.id] = { taskId: t.id, taskName: t.name, status: 'pending', roleSlots: [], partTemplates: [] };
       }
       return init;
     });
@@ -415,89 +455,64 @@ export default function ClickUpPilotPage() {
             setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: `Parser nao achou hooks nem body pra ${baseAdId} no doc` } }));
             continue;
           }
-          // 3.5. Resolve Drive file IDs pros avatares (pra visual match)
+          // 3.5. Resolve Drive file IDs pros avatares (pra visual match futuro)
           for (const av of briefing.avatars) {
             av.videoFileId = resolveVideoFileId(av.username, docR.driveLinks);
           }
-          // 4. Monta plano de dispatch
-          // PRIORIDADE: visual match (Claude vision) > voice_name > nome fuzzy
-          const matchedByRole: Record<string, { id: string; name: string; thumb?: string | null; matchedBy?: string }> = {};
-          const unmatched: string[] = [];
+          // 4. Monta roleSlots — UM por avatar do briefing, mesmo se sem match
+          const roleSlots: RoleSlot[] = [];
           for (const av of briefing.avatars) {
-            // Visual match primeiro se tem fileId (Drive thumbnail funciona pra
-            // qualquer doc que voce tem acesso na sessao Google atual)
-            if (av.videoFileId && avatarCandidates.length > 0) {
-              const refUrl = `https://drive.google.com/thumbnail?id=${av.videoFileId}&sz=w400`;
-              const cand20 = avatarCandidates.slice(0, 20).map(c => ({ id: c.id, name: c.name, groupName: c.groupName, thumbUrl: c.thumb || '' })).filter(c => c.thumbUrl);
-              if (cand20.length > 0) {
-                const visual = await visualMatchAvatar(refUrl, cand20);
-                if (visual) {
-                  const candFull = avatarCandidates.find(c => c.id === visual.id);
-                  matchedByRole[av.role.toLowerCase()] = {
-                    id: visual.id,
-                    name: visual.name,
-                    thumb: candFull?.thumb,
-                    matchedBy: `visual (${visual.confidence})`,
-                  };
-                  continue;
-                }
-              }
-            }
-            // Fallback: voice_name + nome fuzzy
             const m = matchAvatar(av.username, avatarCandidates);
             if (m && m.score >= 30) {
               const candFull = avatarCandidates.find(c => c.id === m.id);
-              matchedByRole[av.role.toLowerCase()] = {
-                id: m.id,
-                name: m.name,
-                thumb: candFull?.thumb,
+              roleSlots.push({
+                role: av.role,
+                username: av.username,
+                avatarId: m.id,
+                avatarName: m.name,
+                avatarThumb: candFull?.thumb || null,
+                avatarVoiceId: candFull?.voiceId || null,
+                voiceOverride: null,
                 matchedBy: m.matchedBy || 'fuzzy',
-              };
+              });
             } else {
-              unmatched.push(`${av.role}: @${av.username}`);
+              // Pendente: slot vazio que user vai preencher
+              roleSlots.push({
+                role: av.role,
+                username: av.username,
+                avatarId: null,
+                avatarName: null,
+                avatarThumb: null,
+                avatarVoiceId: null,
+                voiceOverride: null,
+                matchedBy: null,
+              });
             }
           }
-          const firstMatched = Object.values(matchedByRole)[0] || null;
-          function pickAvatar(text: string, label: string) {
+          // partTemplates: cada parte tem um 'matchByRole' — qual role preencher
+          // na hora de gerar o plan final. Default = primeiro role.
+          const firstRole = roleSlots[0]?.role.toLowerCase() || null;
+          function pickRoleForText(text: string, label: string): string | null {
             const ll = label.toLowerCase();
-            for (const r of Object.keys(matchedByRole)) if (ll.includes(r)) return matchedByRole[r];
+            for (const slot of roleSlots) {
+              if (ll.includes(slot.role.toLowerCase())) return slot.role.toLowerCase();
+            }
             const fl = text.split(/\r?\n/).slice(0, 2).join(' ').toLowerCase();
-            for (const r of Object.keys(matchedByRole)) if (fl.includes(r)) return matchedByRole[r];
-            return firstMatched;
+            for (const slot of roleSlots) {
+              if (fl.includes(slot.role.toLowerCase())) return slot.role.toLowerCase();
+            }
+            return firstRole;
           }
-          const planParts: DispatchPlan['parts'] = [];
+          const partTemplates: TaskAnalysis['partTemplates'] = [];
           for (const h of briefing.hooks) {
-            const av = pickAvatar(h.text, h.label);
-            planParts.push({
-              label: h.label,
-              text: h.text,
-              avatarId: av?.id || null,
-              avatarName: av?.name || null,
-              avatarThumb: (av as any)?.thumb || null,
-              matchedBy: (av as any)?.matchedBy,
-            });
+            partTemplates.push({ label: h.label, text: h.text, matchByRole: pickRoleForText(h.text, h.label) });
           }
-          if (briefing.body) {
-            const bps = splitCopyIntoParts(briefing.body, { targetSec: 20, minSec: 10, maxSec: 35 });
-            bps.forEach((bp, i) => {
-              const label = bps.length === 1 ? 'BODY' : `BODY ${i + 1}`;
-              const av = pickAvatar(bp, label);
-              planParts.push({
-                label,
-                text: bp,
-                avatarId: av?.id || null,
-                avatarName: av?.name || null,
-                avatarThumb: (av as any)?.thumb || null,
-                matchedBy: (av as any)?.matchedBy,
-              });
-            });
-          }
-          const plan: DispatchPlan = {
-            adName: briefing.baseAdId.replace(/[^a-z0-9_-]/gi, '_'),
-            parts: planParts,
-            unmatchedAvatars: unmatched,
-          };
-          const allHaveAvatar = planParts.every((p) => p.avatarId);
+          const bodyParts = briefing.body ? splitCopyIntoParts(briefing.body, { targetSec: 20, minSec: 10, maxSec: 35 }) : [];
+          bodyParts.forEach((bp, i) => {
+            const label = bodyParts.length === 1 ? 'BODY' : `BODY ${i + 1}`;
+            partTemplates.push({ label, text: bp, matchByRole: pickRoleForText(bp, label) });
+          });
+          const allHaveAvatar = roleSlots.every((s) => s.avatarId);
           setTaskAnalyses((prev) => ({
             ...prev,
             [task.id]: {
@@ -505,12 +520,11 @@ export default function ClickUpPilotPage() {
               status: allHaveAvatar ? 'ready' : 'partial',
               baseAdId,
               hookCount: briefing.hooks.length,
-              bodyPartsCount: briefing.body ? splitCopyIntoParts(briefing.body, { targetSec: 20, minSec: 10, maxSec: 35 }).length : 0,
-              totalParts: planParts.length,
-              avatarsTotal: briefing.avatars.length,
-              avatarsMatched: briefing.avatars.length - unmatched.length,
-              unmatchedAvatars: unmatched,
-              plan,
+              bodyPartsCount: bodyParts.length,
+              totalParts: partTemplates.length,
+              roleSlots,
+              partTemplates,
+              dispatchedAt: getDispatchedAt(task.id),
             },
           }));
         } catch (e) {
@@ -523,55 +537,71 @@ export default function ClickUpPilotPage() {
     setAnalyzing(false);
   }
 
-  /** Substitui um avatar em todas as partes da task que usavam o oldAvatarId.
-   *  User pode trocar o avatar suggested pelo correto antes de disparar. */
-  function swapAvatarInTask(taskId: string, oldAvatarId: string, newAvatar: AvatarOption | null) {
+  /** Atualiza UM roleSlot da task. Usado quando user troca avatar OU voz. */
+  function updateRoleSlot(taskId: string, roleIdx: number, patch: Partial<RoleSlot>) {
     setTaskAnalyses((prev) => {
       const a = prev[taskId];
-      if (!a?.plan) return prev;
-      const updatedParts = a.plan.parts.map((p) => {
-        if (p.avatarId === oldAvatarId) {
-          return {
-            ...p,
-            avatarId: newAvatar?.id || null,
-            avatarName: newAvatar?.name || null,
-            avatarThumb: newAvatar?.thumb || null,
-            matchedBy: 'manual',
-          };
-        }
-        return p;
-      });
-      const newPlan: DispatchPlan = { ...a.plan, parts: updatedParts };
-      const allHaveAvatar = updatedParts.every((p) => p.avatarId);
-      const matchedCount = a.avatarsTotal ?? 0; // mantemos o count original
-      return {
-        ...prev,
-        [taskId]: {
-          ...a,
-          plan: newPlan,
-          status: allHaveAvatar ? 'ready' : 'partial',
-        },
-      };
+      if (!a?.roleSlots) return prev;
+      const newSlots = a.roleSlots.map((s, i) => i === roleIdx ? { ...s, ...patch } : s);
+      const allHaveAvatar = newSlots.every((s) => s.avatarId);
+      return { ...prev, [taskId]: { ...a, roleSlots: newSlots, status: allHaveAvatar ? 'ready' : 'partial' } };
     });
   }
 
-  /** Dispara via HeyGen Auto a partir de um plano ja analisado */
-  function dispatchPlanToHeyGen(plan: DispatchPlan) {
-    if (plan.parts.some((p) => !p.avatarId)) {
-      setError(`Plano tem parte(s) sem avatar. Cria os avatares pendentes primeiro.`);
+  /** Constroi DispatchPlan a partir dos roleSlots + partTemplates da task */
+  function buildPlan(a: TaskAnalysis): DispatchPlan | null {
+    if (!a.roleSlots || !a.partTemplates) return null;
+    const slotsByRole: Record<string, RoleSlot> = {};
+    for (const s of a.roleSlots) slotsByRole[s.role.toLowerCase()] = s;
+    const firstSlot = a.roleSlots[0];
+    const adName = (a.baseAdId || a.taskName).replace(/[^a-z0-9_-]/gi, '_');
+    const parts = a.partTemplates.map((pt) => {
+      const slot = (pt.matchByRole && slotsByRole[pt.matchByRole]) || firstSlot;
+      return {
+        label: pt.label,
+        text: pt.text,
+        avatarId: slot?.avatarId || null,
+        avatarName: slot?.avatarName || null,
+        avatarThumb: slot?.avatarThumb || null,
+        matchedBy: slot?.matchedBy || undefined,
+        // voiceId: override > avatar default
+        voiceId: slot?.voiceOverride?.id || slot?.avatarVoiceId || null,
+      };
+    });
+    const unmatchedAvatars = a.roleSlots.filter(s => !s.avatarId).map(s => `${s.role}: @${s.username}`);
+    return { adName, parts: parts as any, unmatchedAvatars };
+  }
+
+  /** Dispara UMA task pra HeyGen Auto Dynamic */
+  function dispatchTaskToHeyGen(taskId: string) {
+    const a = taskAnalyses[taskId];
+    if (!a) return;
+    const plan = buildPlan(a);
+    if (!plan || plan.parts.some((p: any) => !p.avatarId)) {
+      setError(`Tem avatar sem selecionar. Click no slot e escolhe.`);
       return;
+    }
+    // Se ja foi disparada antes, confirma
+    if (a.dispatchedAt) {
+      const when = new Date(a.dispatchedAt).toLocaleString('pt-BR');
+      if (!confirm(`Esta task foi disparada antes em ${when}.\n\nVai disparar de novo? (vai criar mais ${plan.parts.length} videos no HeyGen)`)) {
+        return;
+      }
     }
     const handoff = {
       adName: plan.adName,
       motor: 'III',
       mode: 'copy',
       dynamic: true,
-      partTexts: plan.parts.map((p) => p.text),
-      partLabels: plan.parts.map((p) => p.label),
-      partAvatarIds: plan.parts.map((p) => p.avatarId),
-      copy: plan.parts.map((p) => p.text).join('\n\n'),
+      partTexts: plan.parts.map((p: any) => p.text),
+      partLabels: plan.parts.map((p: any) => p.label),
+      partAvatarIds: plan.parts.map((p: any) => p.avatarId),
+      partVoiceIds: plan.parts.map((p: any) => p.voiceId), // NOVO: voz por parte
+      copy: plan.parts.map((p: any) => p.text).join('\n\n'),
     };
     sessionStorage.setItem('darkolab:heygen-auto:handoff', JSON.stringify(handoff));
+    markDispatched(taskId);
+    setTaskAnalyses(prev => ({ ...prev, [taskId]: { ...prev[taskId], dispatchedAt: Date.now() } }));
     router.push('/tools/heygen-auto?from=clickup-pilot');
   }
 
@@ -1003,74 +1033,100 @@ export default function ClickUpPilotPage() {
                                 {a.status === 'ready' || a.status === 'partial' ? (
                                   <button
                                     type="button"
-                                    onClick={() => a.plan && dispatchPlanToHeyGen(a.plan)}
+                                    onClick={() => dispatchTaskToHeyGen(a.taskId)}
                                     disabled={a.status === 'partial'}
                                     className="mono shrink-0 rounded border border-lime bg-lime/20 px-3 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30 disabled:opacity-40"
-                                    title={a.status === 'partial' ? 'Tem avatar pendente — cria primeiro no HeyGen' : 'Abre HeyGen Auto Dynamic com tudo pre-preenchido'}
+                                    title={a.status === 'partial' ? 'Tem avatar pendente — escolhe um abaixo' : (a.dispatchedAt ? 'Ja disparada antes — vai pedir confirmacao' : 'Abre HeyGen Auto Dynamic com tudo pre-preenchido')}
                                   >
-                                    ▶ Disparar
+                                    ▶ {a.dispatchedAt ? 'Disparar de novo' : 'Disparar'}
                                   </button>
                                 ) : null}
                               </div>
                               {a.status === 'ready' || a.status === 'partial' ? (
                                 <div className="mt-1 grid gap-1 text-text-muted">
-                                  <div className="mono text-[10px]">
-                                    {a.totalParts} takes ({a.hookCount} hook{(a.hookCount ?? 0) === 1 ? '' : 's'} + {a.bodyPartsCount} body split{(a.bodyPartsCount ?? 0) === 1 ? '' : 's'}) — Avatar III
+                                  <div className="mono text-[10px] flex flex-wrap items-center gap-2">
+                                    <span>{a.totalParts} takes ({a.hookCount} hook{(a.hookCount ?? 0) === 1 ? '' : 's'} + {a.bodyPartsCount} body split{(a.bodyPartsCount ?? 0) === 1 ? '' : 's'}) — Avatar III</span>
+                                    {a.dispatchedAt ? (
+                                      <span className="rounded-full border border-fuchsia-500/40 bg-fuchsia-500/10 px-2 py-0.5 text-fuchsia-300">
+                                        ⚠ ja disparada {new Date(a.dispatchedAt).toLocaleDateString('pt-BR')}
+                                      </span>
+                                    ) : null}
                                   </div>
-                                  {/* Avatares unicos selecionados — clicaveis pra trocar antes de disparar */}
-                                  {a.plan ? (
-                                    <div className="mt-1.5 grid gap-1.5">
-                                      <div className="mono text-[9px] uppercase tracking-widest text-text-muted">
-                                        Avatares (clica pra trocar antes de disparar)
-                                      </div>
-                                      {Array.from(new Map(a.plan.parts.filter(p => p.avatarId).map(p => [p.avatarId, p])).values()).map((p) => {
-                                        // Quantos partes desse avatar existem no plano
-                                        const usedInParts = a.plan!.parts.filter(pp => pp.avatarId === p.avatarId).length;
-                                        // AvatarOption pra passar pro CompactAvatarPicker
-                                        const candFull = avatarCandidates.find(c => c.id === p.avatarId);
-                                        const selected: AvatarOption | null = candFull ? {
-                                          id: candFull.id,
-                                          name: candFull.name,
-                                          thumb: candFull.thumb || null,
-                                          videoPreview: null,
-                                          type: 'photo',
-                                          version: 'III',
-                                          groupName: candFull.groupName,
-                                          voiceId: candFull.voiceId,
-                                          voiceName: candFull.voiceName,
-                                        } : null;
-                                        const noVoice = !candFull?.voiceId;
-                                        return (
-                                          <div key={p.avatarId} className="grid gap-0.5">
-                                            <div className="mono flex flex-wrap items-center gap-2 text-[9px] uppercase tracking-widest text-text-muted">
-                                              <span>usado em {usedInParts} parte{usedInParts === 1 ? '' : 's'}</span>
-                                              {p.matchedBy ? (
-                                                <span className={p.matchedBy === 'manual' ? 'text-lime' : 'text-fuchsia-300'}>
-                                                  · matched: {p.matchedBy}
-                                                </span>
-                                              ) : null}
-                                              {noVoice ? (
-                                                <span className="text-red-300">⚠ sem voz padrao — dispatch vai falhar (escolha outro look com voz)</span>
-                                              ) : null}
-                                            </div>
-                                            <div className="max-w-[400px]">
-                                              <CompactAvatarPicker
-                                                selected={selected}
-                                                setSelected={(newAv) => swapAvatarInTask(a.taskId, p.avatarId!, newAv)}
-                                                disabled={false}
-                                                label="Trocar avatar dessas partes"
-                                              />
-                                            </div>
+                                  {/* RoleSlots — UM por avatar do briefing, mesmo se sem match */}
+                                  <div className="mt-1.5 grid gap-2">
+                                    <div className="mono text-[9px] uppercase tracking-widest text-text-muted">
+                                      Avatares do briefing ({a.roleSlots.length}) — selecione cada um e a voz
+                                    </div>
+                                    {a.roleSlots.map((slot, sIdx) => {
+                                      const partsCount = (a.partTemplates || []).filter(p => p.matchByRole === slot.role.toLowerCase()).length;
+                                      const candFull = slot.avatarId ? avatarCandidates.find(c => c.id === slot.avatarId) : null;
+                                      const selected: AvatarOption | null = candFull ? {
+                                        id: candFull.id,
+                                        name: candFull.name,
+                                        thumb: candFull.thumb || null,
+                                        videoPreview: null,
+                                        type: 'photo',
+                                        version: 'III',
+                                        groupName: candFull.groupName,
+                                        voiceId: candFull.voiceId,
+                                        voiceName: candFull.voiceName,
+                                      } : null;
+                                      const noVoice = slot.avatarId && !slot.avatarVoiceId && !slot.voiceOverride;
+                                      const effectiveVoiceLabel = slot.voiceOverride?.name || (slot.avatarVoiceId ? 'voz padrao do avatar' : noVoice ? 'sem voz' : '?');
+                                      return (
+                                        <div key={sIdx} className="rounded-[10px] border border-line-strong bg-bg/50 p-2">
+                                          <div className="mono flex flex-wrap items-center gap-2 text-[9px] uppercase tracking-widest">
+                                            <span className="rounded-full bg-lime/15 px-2 py-0.5 text-lime">{slot.role}</span>
+                                            <span className="text-text-muted">briefing: @{slot.username}</span>
+                                            <span className="text-text-muted">· {partsCount} parte{partsCount === 1 ? '' : 's'}</span>
+                                            {slot.matchedBy ? (
+                                              <span className={slot.matchedBy === 'manual' ? 'text-lime' : 'text-fuchsia-300'}>
+                                                · matched: {slot.matchedBy}
+                                              </span>
+                                            ) : (
+                                              <span className="text-red-300">· PENDENTE — escolha o avatar abaixo</span>
+                                            )}
                                           </div>
-                                        );
-                                      })}
-                                    </div>
-                                  ) : null}
-                                  {(a.unmatchedAvatars?.length ?? 0) > 0 ? (
-                                    <div className="mono text-[10px] text-yellow-300">
-                                      ⚠ pendente: {a.unmatchedAvatars!.join(', ')}
-                                    </div>
-                                  ) : null}
+                                          <div className="mt-2 grid gap-2">
+                                            <div className="grid gap-0.5">
+                                              <div className="mono text-[9px] uppercase tracking-widest text-text-muted">avatar</div>
+                                              <div className="max-w-[400px]">
+                                                <CompactAvatarPicker
+                                                  selected={selected}
+                                                  setSelected={(newAv) => updateRoleSlot(a.taskId, sIdx, {
+                                                    avatarId: newAv?.id || null,
+                                                    avatarName: newAv?.name || null,
+                                                    avatarThumb: newAv?.thumb || null,
+                                                    avatarVoiceId: (newAv as any)?.voiceId || null,
+                                                    matchedBy: 'manual',
+                                                  })}
+                                                  disabled={false}
+                                                  label={`Avatar pra ${slot.role}`}
+                                                />
+                                              </div>
+                                            </div>
+                                            {slot.avatarId ? (
+                                              <div className="grid gap-0.5">
+                                                <div className="mono text-[9px] uppercase tracking-widest text-text-muted flex items-center gap-2">
+                                                  <span>voz</span>
+                                                  <span className={slot.voiceOverride ? 'text-lime' : noVoice ? 'text-red-300' : 'text-text-muted'}>
+                                                    · {effectiveVoiceLabel}
+                                                  </span>
+                                                  {noVoice && !slot.voiceOverride ? (
+                                                    <span className="text-red-300">⚠ avatar sem voz padrao — escolha uma voz custom</span>
+                                                  ) : null}
+                                                </div>
+                                                <CompactVoiceSelector
+                                                  selected={slot.voiceOverride}
+                                                  setSelected={(v) => updateRoleSlot(a.taskId, sIdx, { voiceOverride: v })}
+                                                />
+                                              </div>
+                                            ) : null}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
                               ) : null}
                               {a.status === 'error' ? (

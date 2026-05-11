@@ -156,6 +156,9 @@ export default function HeyGenAutoPage() {
         partAvatarIds?: (string | null)[];
         partLabels?: string[];
         partTexts?: string[];
+        /** ClickUp Pilot pode enviar voiceId por parte (override). Se any
+         *  parte tem voiceId !== null, usa override mode no HeyGen Auto. */
+        partVoiceIds?: (string | null)[];
       };
       if (h.adName) setAdName(h.adName);
       if (h.motor) setMotor(h.motor);
@@ -192,9 +195,17 @@ export default function HeyGenAutoPage() {
               });
             }
           }
-          const mapped = (h.partAvatarIds || []).map((id) =>
-            id ? (flat.find((a) => a.id === id) || null) : null,
-          );
+          const mapped = (h.partAvatarIds || []).map((id, i) => {
+            if (!id) return null;
+            const av = flat.find((a) => a.id === id) || null;
+            // ClickUp Pilot pode enviar voiceId override por parte. Quando
+            // presente, sobrescreve o voiceId padrao do avatar pra ESSA parte.
+            const overrideVoice = h.partVoiceIds?.[i];
+            if (av && overrideVoice) {
+              return { ...av, voiceId: overrideVoice };
+            }
+            return av;
+          });
           setPartAvatars(mapped);
           // Selecionar o PRIMEIRO avatar como global (pra fallback de partes
           // sem avatar especifico)
