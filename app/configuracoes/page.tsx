@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { ToolShell } from '@/components/ToolShell';
 import { createClient } from '@/lib/supabase/client';
+import { ClickUpPilotStatusSection } from '@/components/ClickUpPilotStatusSection';
 
 /**
  * /configuracoes — Configuracoes de login.
@@ -283,6 +284,9 @@ export default function ConfiguracoesPage() {
                 </button>
               </div>
             </section>
+
+            {/* ------ ClickUp Pilot — status filter ------ */}
+            <ClickUpPilotStatusSection flash={flash} />
 
             {/* ------ Zona perigosa ------ */}
             <section className="border-t border-line pt-6">

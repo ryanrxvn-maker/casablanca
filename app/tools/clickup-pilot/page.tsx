@@ -49,16 +49,16 @@ import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
 
 // IMPORTANTE: ClickUp API e case-sensitive nos status. Os status reais vem
 // lowercase com acento ('editando vídeo'). Lowercase aqui = match direto.
+// Default mostra so tasks pra editar/editando — revisao = video pronto,
+// implementar = pre-edit, ambos nao precisam do Pilot. User pode customizar
+// em /configuracoes se time usa nomes diferentes.
 const DEFAULT_EDIT_STATUSES = [
   'editar video',
   'editar vídeo',
   'editando video',
   'editando vídeo',
-  'revisao video',
-  'revisão vídeo',
-  'revisao vídeo',
-  'implementar',
 ];
+const STATUS_FILTER_KEY = 'darkolab:clickup-pilot:statuses';
 
 type DispatchPlan = {
   adName: string;
@@ -189,10 +189,24 @@ export default function ClickUpPilotPage() {
   }, [currentTeam, authUser]);
 
   /* ========== Tasks ========== */
-  const [statusFilter, setStatusFilter] = useToolState<string>(
-    'clickup:statuses',
-    DEFAULT_EDIT_STATUSES.join(','),
-  );
+  // Status filter agora vive em localStorage (compartilhado com /configuracoes
+  // onde o user edita). Default reset garante que filter velho uppercase
+  // saia automaticamente.
+  const [statusFilter, setStatusFilterRaw] = useState(DEFAULT_EDIT_STATUSES.join(','));
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const stored = localStorage.getItem(STATUS_FILTER_KEY);
+    if (stored && /[a-z]/.test(stored)) {
+      setStatusFilterRaw(stored);
+    } else {
+      // Sem nada salvo OU filter velho UPPERCASE — usa default e salva
+      localStorage.setItem(STATUS_FILTER_KEY, DEFAULT_EDIT_STATUSES.join(','));
+    }
+  }, []);
+  function setStatusFilter(v: string) {
+    setStatusFilterRaw(v);
+    if (typeof window !== 'undefined') localStorage.setItem(STATUS_FILTER_KEY, v);
+  }
   const [tasks, setTasks] = useState<ClickUpTask[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(false);
 
@@ -855,14 +869,6 @@ export default function ClickUpPilotPage() {
                   </select>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <input
-                    type="text"
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    placeholder="Status (csv)"
-                    className="input-field flex-1 min-w-[260px]"
-                    title="Lista CSV dos status que filtram. Default: status 'pra editar'."
-                  />
                   <button
                     type="button"
                     onClick={loadTasks}
@@ -871,6 +877,9 @@ export default function ClickUpPilotPage() {
                   >
                     {loadingTasks ? 'Carregando...' : 'Carregar tasks'}
                   </button>
+                  <span className="mono text-[10px] uppercase tracking-widest text-text-muted">
+                    Filtra status: editar / editando vídeo · <a href="/configuracoes" className="text-lime hover:underline">customizar</a>
+                  </span>
                 </div>
               </section>
 
