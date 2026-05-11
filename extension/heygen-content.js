@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.1.1';
+const DARKO_EXT_VERSION = '4.1.2';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -262,15 +262,22 @@ async function cloneVoice(payload, onProgress) {
     throw new Error(`get_upload_url HTTP ${uploadUrlResp.status}: ${errBody.slice(0, 300)}`);
   }
   const uploadUrlJson = await uploadUrlResp.json();
-  const uploadUrl = uploadUrlJson?.data?.upload_url
-    || uploadUrlJson?.data?.put_url
-    || uploadUrlJson?.data?.url;
-  const fileUrl = uploadUrlJson?.data?.file_url
-    || uploadUrlJson?.data?.audio_url
-    || uploadUrlJson?.data?.asset_url
-    || uploadUrlJson?.data?.url;
-  if (!uploadUrl) throw new Error('Sem upload_url no response: ' + JSON.stringify(uploadUrlJson).slice(0, 300));
-  console.log('[DARKO LAB voice clone] got upload_url, fileUrl=', fileUrl?.slice(0, 100));
+  // HeyGen retorna `file_upload_url` (URL S3 presigned com query params de auth)
+  // e tipicamente algum field tipo `key`, `file_path`, ou `file_url` pro caminho
+  // final. Fallback resiliente em todos.
+  const d = uploadUrlJson?.data || {};
+  const uploadUrl = d.file_upload_url || d.upload_url || d.put_url || d.url;
+  // file_url = URL final do arquivo apos upload (S3 sem signature). Se o
+  // HeyGen nao retornar um separado, derivamos do file_upload_url tirando
+  // os query params (?X-Amz-...).
+  const fileUrl = d.file_url
+    || d.audio_url
+    || d.asset_url
+    || d.file_path
+    || d.key
+    || (uploadUrl ? uploadUrl.split('?')[0] : null);
+  if (!uploadUrl) throw new Error('Sem upload_url no response. Keys: ' + Object.keys(d).join(','));
+  console.log('[DARKO LAB voice clone] got upload_url, fileUrl=', fileUrl?.slice(0, 100), 'allKeys=', Object.keys(d).join(','));
 
   // === STEP 2: PUT no S3 ===
   onProgress?.({ stage: 'upload', percent: 20, message: `Subindo ${(bytes.length / (1024 * 1024)).toFixed(1)}MB pro S3...` });
