@@ -113,15 +113,20 @@ export function ToolsNav() {
   const isAi = AI_SUITE.some(
     (it) => pathname === it.href || pathname.startsWith(it.href + '/'),
   );
-  const active: Suite = isAi ? 'ai' : 'base';
-  const items = active === 'ai' ? AI_SUITE : BASE_SUITE;
+  const isBase = BASE_SUITE.some(
+    (it) => pathname === it.href || pathname.startsWith(it.href + '/'),
+  );
+  // active=null quando pathname nao pertence a nenhum suite — ex: ClickUp Pilot
+  // (ferramenta especial acessada pelo top-bar, fora de Base/AI)
+  const active: Suite | null = isAi ? 'ai' : isBase ? 'base' : null;
+  const items = active === 'ai' ? AI_SUITE : active === 'base' ? BASE_SUITE : null;
 
   return (
     <>
       <div className="border-b border-line bg-bg/50 backdrop-blur-sm">
         <div className="container-app flex items-center justify-between py-4">
           <span className="hidden text-[11px] uppercase tracking-widest text-text-muted md:inline">
-            {active === 'ai' ? 'AI Suite' : 'Base Suite'}
+            {active === 'ai' ? 'AI Suite' : active === 'base' ? 'Base Suite' : ''}
           </span>
           <SuiteSwitcher
             active={active}
@@ -129,12 +134,14 @@ export function ToolsNav() {
             aiHref={AI_SUITE[0].href}
           />
           <span className="hidden text-[11px] uppercase tracking-widest text-text-muted md:inline">
-            {items.length} {items.length === 1 ? 'ferramenta' : 'ferramentas'}
+            {items ? `${items.length} ${items.length === 1 ? 'ferramenta' : 'ferramentas'}` : ''}
           </span>
         </div>
       </div>
 
-      <ToolRail items={items} />
+      {/* Rail so aparece quando esta numa pagina de suite. ClickUp Pilot (que
+       *  nao pertence a Base nem AI) renderiza sem rail — UI fica limpa. */}
+      {items ? <ToolRail items={items} /> : null}
     </>
   );
 }

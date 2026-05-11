@@ -21,7 +21,8 @@ export function SuiteSwitcher({
   baseHref,
   aiHref,
 }: {
-  active: Suite;
+  /** `null` = nenhum suite ativo (ex: pagina especial fora de Base/AI como ClickUp Pilot) */
+  active: Suite | null;
   baseHref: string;
   aiHref: string;
 }) {
@@ -38,12 +39,18 @@ export function SuiteSwitcher({
       role="tablist"
       aria-label="Alternar entre Base Suite e AI Suite"
     >
-      {/* Thumb animado (destaque lime deslizante) */}
+      {/* Thumb animado (destaque lime deslizante). Quando active=null,
+       *  some completamente (opacity-0 + scale-0) — nenhuma das duas
+       *  opcoes fica marcada. */}
       <span
         aria-hidden
         className={
-          'suite-thumb absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-full bg-lime shadow-[0_0_0_1px_rgba(200,255,0,0.3),0_0_28px_-4px_rgba(200,255,0,0.65)] transition-transform duration-[420ms] ease-[cubic-bezier(.5,1.6,.3,1)] ' +
-          (active === 'ai' ? 'translate-x-full' : 'translate-x-0')
+          'suite-thumb absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-full bg-lime shadow-[0_0_0_1px_rgba(200,255,0,0.3),0_0_28px_-4px_rgba(200,255,0,0.65)] transition-all duration-[420ms] ease-[cubic-bezier(.5,1.6,.3,1)] ' +
+          (active === null
+            ? 'scale-0 opacity-0'
+            : active === 'ai'
+            ? 'translate-x-full'
+            : 'translate-x-0')
         }
       />
 
