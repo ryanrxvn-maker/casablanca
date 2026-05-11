@@ -507,6 +507,21 @@ export default function ClickUpPilotPage() {
     // Force reload library — pega avatares recem criados (user pode ter
     // acabado de criar voice clones alinhadas com nomes do briefing)
     await reloadLibrary(true);
+    // Carrega lista de vozes HeyGen pra resolver auto @username -> voiceId
+    // (caso o copy diga @x.mp4 e exista voz "@x" no HeyGen mesmo sem
+    //  pareamento previo de memoria — voz vai como override no slot)
+    let voiceLibrary: Array<{ id: string; name: string }> = [];
+    try {
+      const r = await fetch('/api/heygen/voices?lang=pt');
+      if (r.ok) {
+        const j = await r.json();
+        if (Array.isArray(j.voices)) voiceLibrary = j.voices;
+      }
+    } catch {}
+    const voiceByNorm = new Map<string, { id: string; name: string }>();
+    for (const v of voiceLibrary) {
+      voiceByNorm.set(normalizeVoiceName(v.name), { id: v.id, name: v.name });
+    }
     const targets = tasks.filter((t) => selectedTaskIds.has(t.id));
     // Init status pendente pra todos
     setTaskAnalyses(() => {
@@ -559,11 +574,15 @@ export default function ClickUpPilotPage() {
           //    Order de prioridade pra fechar o slot:
           //    a) matchAvatar score >= 30 (voice_name_exact / name match / fuzzy)
           //    b) memoria voice↔avatar (user ja pareou voz `@x` com avatar Y antes)
-          //    c) pendente
+          //    c) voiceLibrary lookup: voz `@x` existe no HeyGen mas user nao pareou
+          //       ainda — usa como voiceOverride pro slot (avatar ainda pendente)
+          //    d) pendente sem voz
           const roleSlots: RoleSlot[] = [];
           for (const av of briefing.avatars) {
             const m = matchAvatar(av.username, avatarCandidates);
             const briefingFileId = av.videoFileId || null;
+            // Voz auto-resolvida da biblioteca por nome (independente de match de avatar)
+            const voiceFromLib = voiceByNorm.get(normalizeVoiceName(av.username)) || null;
             if (m && m.score >= 30) {
               const candFull = avatarCandidates.find(c => c.id === m.id);
               roleSlots.push({
@@ -574,7 +593,8 @@ export default function ClickUpPilotPage() {
                 avatarName: m.name,
                 avatarThumb: candFull?.thumb || null,
                 avatarVoiceId: candFull?.voiceId || null,
-                voiceOverride: null,
+                // Se avatar nao tem voz default mas existe voz "@x" na lib, usa como override
+                voiceOverride: !candFull?.voiceId && voiceFromLib ? voiceFromLib : null,
                 matchedBy: m.matchedBy || 'fuzzy',
               });
               continue;
@@ -599,7 +619,8 @@ export default function ClickUpPilotPage() {
                 continue;
               }
             }
-            // (c) Pendente
+            // (c)/(d) Pendente de avatar — mas se voz "@x" existe na lib,
+            //          ja pre-seleciona como override (user so precisa achar avatar)
             roleSlots.push({
               role: av.role,
               username: av.username,
@@ -608,7 +629,7 @@ export default function ClickUpPilotPage() {
               avatarName: null,
               avatarThumb: null,
               avatarVoiceId: null,
-              voiceOverride: null,
+              voiceOverride: voiceFromLib,
               matchedBy: null,
             });
           }
