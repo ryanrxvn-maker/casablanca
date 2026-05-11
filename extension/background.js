@@ -766,10 +766,17 @@ async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
       }, 30000);
       if (r.ok) {
         html = await r.text();
-        // Se redirecionou pro login, vai vir HTML do Google login
-        if (/<title>Sign in|accounts\.google\.com/i.test(html.slice(0, 2000))) {
+        const head = html.slice(0, 5000);
+        // Detecta paginas de erro do Google (200 OK mas conteudo invalido)
+        if (/<title>Sign in|accounts\.google\.com|google-account-redirect/i.test(head)) {
           html = null;
-          exportErr = 'redirected_to_login';
+          exportErr = 'doc_privado_login_necessario';
+        } else if (/o arquivo que voc[eê] solicitou n[aã]o existe|the file you requested does not exist|<title>Erro/i.test(head)) {
+          html = null;
+          exportErr = 'doc_nao_existe_ou_sem_permissao';
+        } else if (/voc[eê] precisa de permiss[aã]o|you need (permission|access)|request access/i.test(head)) {
+          html = null;
+          exportErr = 'doc_sem_permissao_de_acesso';
         }
       } else {
         exportErr = `HTTP ${r.status}`;
@@ -791,9 +798,20 @@ async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
       return;
     }
 
+    // Erros que NAO se beneficiam de fallback tab (doc nao existe ou sem
+    // permissao — fallback ia abrir tab visivel e timeoutar). Retorna direto.
+    if (exportErr === 'doc_nao_existe_ou_sem_permissao' || exportErr === 'doc_sem_permissao_de_acesso') {
+      reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', {
+        ok: false,
+        error: exportErr === 'doc_nao_existe_ou_sem_permissao'
+          ? 'Doc nao existe ou voce nao tem permissao (URL pode estar errado no ClickUp)'
+          : 'Doc privado — peca permissao de acesso pro owner no Google Docs',
+      });
+      return;
+    }
+
     // === ESTRATEGIA 2 (FALLBACK): tab mobilebasic ===
-    // So se export falhar (raro — quando doc nao tem permissao de export
-    // mas user pode ver, etc). Aqui abre tab inativa BACKGROUND, scrape, fecha.
+    // So se export falhar por motivo recuperavel (ex login_necessario).
     console.warn('[DARKO LAB BG] export falhou (', exportErr, '), fallback tab method');
     const mobileUrl = `https://docs.google.com/document/d/${docId}/mobilebasic`;
     const tab = await chrome.tabs.create({ url: mobileUrl, active: false });
