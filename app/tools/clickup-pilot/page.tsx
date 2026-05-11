@@ -1283,6 +1283,56 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     });
   }
 
+  /** Adiciona slot vazio pro user escolher manualmente avatar + voz.
+   *  Critico quando parser nao detectou avatar no briefing — user nunca
+   *  fica travado, sempre pode adicionar manualmente. */
+  function addManualRoleSlot(taskId: string) {
+    setTaskAnalyses((prev) => {
+      const a = prev[taskId];
+      if (!a) return prev;
+      const slots = a.roleSlots || [];
+      const idx = slots.length + 1;
+      const role = `Avatar ${idx}`;
+      const newSlot: RoleSlot = {
+        role,
+        username: `manual${idx}`,
+        briefingFileId: null,
+        avatarId: null,
+        avatarName: null,
+        avatarThumb: null,
+        avatarVoiceId: null,
+        voiceOverride: null,
+        matchedBy: null,
+      };
+      return {
+        ...prev,
+        [taskId]: {
+          ...a,
+          roleSlots: [...slots, newSlot],
+          status: 'partial',
+        },
+      };
+    });
+  }
+
+  /** Remove um slot manual/auto-detectado */
+  function removeRoleSlot(taskId: string, roleIdx: number) {
+    setTaskAnalyses((prev) => {
+      const a = prev[taskId];
+      if (!a?.roleSlots) return prev;
+      const newSlots = a.roleSlots.filter((_, i) => i !== roleIdx);
+      const allHaveAvatar = newSlots.length > 0 && newSlots.every((s) => s.avatarId);
+      return {
+        ...prev,
+        [taskId]: {
+          ...a,
+          roleSlots: newSlots,
+          status: newSlots.length === 0 ? 'partial' : allHaveAvatar ? 'ready' : 'partial',
+        },
+      };
+    });
+  }
+
   /** Constroi DispatchPlan a partir dos roleSlots + partTemplates da task */
   function buildPlan(a: TaskAnalysis): DispatchPlan | null {
     if (!a.roleSlots || !a.partTemplates) return null;
@@ -2052,8 +2102,19 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
                                   {/* RoleSlots — UM por avatar do briefing, mesmo se sem match */}
                                   <div className="mt-1.5 grid gap-2">
                                     <div className="mono text-[9px] uppercase tracking-widest text-text-muted">
-                                      Avatares do briefing ({a.roleSlots.length}) — selecione cada um e a voz
+                                      Avatares ({a.roleSlots.length}) — selecione cada um e a voz
                                     </div>
+                                    {a.roleSlots.length === 0 ? (
+                                      <div className="rounded-[10px] border border-yellow-500/40 bg-yellow-500/5 p-3 text-[11px]">
+                                        <div className="mono text-[9px] uppercase tracking-widest text-yellow-200">
+                                          ⚠ Nenhum avatar identificado automaticamente
+                                        </div>
+                                        <div className="mt-1 text-text-muted">
+                                          O parser nao achou linha &quot;Avatar:&quot; com @username no doc.
+                                          Clica abaixo pra adicionar manualmente e escolher avatar + voz.
+                                        </div>
+                                      </div>
+                                    ) : null}
                                     {a.roleSlots.map((slot, sIdx) => {
                                       const partsCount = (a.partTemplates || []).filter(p => p.matchByRole === slot.role.toLowerCase()).length;
                                       const candFull = slot.avatarId ? avatarCandidates.find(c => c.id === slot.avatarId) : null;
@@ -2114,6 +2175,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
                                             ) : (
                                               <span className="text-red-300">· PENDENTE — escolha o avatar abaixo OU click 🤖 IA SEARCH</span>
                                             )}
+                                            <button
+                                              type="button"
+                                              onClick={() => removeRoleSlot(a.taskId, sIdx)}
+                                              className="ml-auto rounded-full px-1.5 py-0.5 text-text-muted hover:bg-red-500/10 hover:text-red-300"
+                                              title="Remover este slot"
+                                            >
+                                              ×
+                                            </button>
                                           </div>
                                           {/* Thumb do video do briefing (sempre visivel pra user identificar) */}
                                           {briefingThumbUrl ? (
@@ -2219,6 +2288,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
                                         </div>
                                       );
                                     })}
+                                    {/* SEMPRE permite adicionar avatar manual — quando parser
+                                     *  falha OU quando user quer adicionar mais um speaker */}
+                                    <button
+                                      type="button"
+                                      onClick={() => addManualRoleSlot(a.taskId)}
+                                      className="mono rounded-[10px] border border-dashed border-line-strong bg-bg/30 py-2 px-3 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime/40 hover:bg-lime/5 hover:text-lime transition"
+                                    >
+                                      + adicionar avatar manualmente
+                                    </button>
                                   </div>
                                 </div>
                               ) : null}
