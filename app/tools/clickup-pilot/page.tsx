@@ -572,9 +572,9 @@ export default function ClickUpPilotPage() {
     // eslint-disable-next-line
   }, []);
 
-  // Flat avatar candidates pra matcher (incluindo voice_name + thumb pra visual)
+  // Flat avatar candidates pra matcher (incluindo voice_name, voiceId, thumb)
   const avatarCandidates = useMemo(() => {
-    const flat: Array<{ id: string; name: string; groupName: string; voiceName?: string | null; thumb?: string | null }> = [];
+    const flat: Array<{ id: string; name: string; groupName: string; voiceName?: string | null; voiceId?: string | null; thumb?: string | null }> = [];
     for (const g of librarySnap.groups) {
       for (const l of g.looks) {
         flat.push({
@@ -582,6 +582,7 @@ export default function ClickUpPilotPage() {
           name: l.name,
           groupName: g.name,
           voiceName: (l as any).voiceName ?? null,
+          voiceId: (l as any).voiceId ?? null,
           thumb: l.thumb ?? null,
         });
       }
@@ -962,17 +963,21 @@ export default function ClickUpPilotPage() {
                                           type: 'photo',
                                           version: 'III',
                                           groupName: candFull.groupName,
-                                          voiceId: null,
+                                          voiceId: candFull.voiceId,
                                           voiceName: candFull.voiceName,
                                         } : null;
+                                        const noVoice = !candFull?.voiceId;
                                         return (
                                           <div key={p.avatarId} className="grid gap-0.5">
-                                            <div className="mono flex items-center gap-2 text-[9px] uppercase tracking-widest text-text-muted">
+                                            <div className="mono flex flex-wrap items-center gap-2 text-[9px] uppercase tracking-widest text-text-muted">
                                               <span>usado em {usedInParts} parte{usedInParts === 1 ? '' : 's'}</span>
                                               {p.matchedBy ? (
                                                 <span className={p.matchedBy === 'manual' ? 'text-lime' : 'text-fuchsia-300'}>
                                                   · matched: {p.matchedBy}
                                                 </span>
+                                              ) : null}
+                                              {noVoice ? (
+                                                <span className="text-red-300">⚠ sem voz padrao — dispatch vai falhar (escolha outro look com voz)</span>
                                               ) : null}
                                             </div>
                                             <div className="max-w-[400px]">
