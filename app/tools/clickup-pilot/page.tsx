@@ -1268,13 +1268,13 @@ export default function ClickUpPilotPage() {
                                 </span>
                                 <div className="flex items-center gap-1.5">
                                   {b.phase === 'done' && b.zipBlobUrl ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => downloadZip(b.taskId)}
+                                    <a
+                                      href={b.zipBlobUrl}
+                                      download={b.zipFilename}
                                       className="mono rounded border border-lime bg-lime/20 px-2 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30"
                                     >
                                       ⬇ {b.zipFilename}
-                                    </button>
+                                    </a>
                                   ) : null}
                                   {b.phase !== 'done' && b.phase !== 'failed' ? (
                                     <button
