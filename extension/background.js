@@ -10,6 +10,16 @@ const pendingListJobs = new Map();
 const pendingCloneJobs = new Map();
 const HEYGEN_CREATE_URL = 'https://app.heygen.com/avatar';
 
+async function fetchWithTimeout(url, opts, timeoutMs = 30000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...opts, signal: controller.signal });
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 async function findOrCreateHeyGenTab() {
   const tabs = await chrome.tabs.query({
     url: ['https://app.heygen.com/*'],
@@ -669,33 +679,128 @@ async function injectInterceptorIntoMainWorld(tabId) {
  * READ-ONLY: abre tab em /mobilebasic do Google Doc, espera carregar,
  * le innerText e retorna. Nunca escreve, edita ou comenta no doc.
  */
+/** Parse HTML exportado do Google Docs em background SW.
+ *  SW nao tem DOMParser, entao fazemos regex puro:
+ *   - Strip tags pra texto
+ *   - Extrai links {text, fileId} de `<a href="...drive..."> texto </a>`
+ *  Preserva quebras de linha (P + BR) e listas. */
+function parseGoogleDocsHtml(html) {
+  if (!html) return { text: '', driveLinks: [] };
+
+  // === DRIVE LINKS ===
+  // Pega <a href="<url drive>" ...>texto</a> com captura do file ID
+  const driveLinks = [];
+  const seen = new Set();
+  const linkRe = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = linkRe.exec(html)) !== null) {
+    const href = m[1];
+    // Google Docs envolve URL real em redirect: https://www.google.com/url?q=<real>&...
+    let realUrl = href;
+    const redirMatch = href.match(/[?&]q=([^&]+)/);
+    if (redirMatch) {
+      try { realUrl = decodeURIComponent(redirMatch[1]); } catch {}
+    }
+    const fileMatch = realUrl.match(/\/file\/d\/([a-zA-Z0-9_-]{15,})/);
+    if (!fileMatch) continue;
+    const fileId = fileMatch[1];
+    // Strip HTML do texto do link
+    const linkText = m[2].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').trim();
+    const key = `${fileId}::${linkText}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    driveLinks.push({ text: linkText, fileId });
+  }
+
+  // === TEXTO ===
+  // Insere quebras antes de blocos
+  let text = html
+    .replace(/<\/(p|div|li|h[1-6]|br)>/gi, '\n')
+    .replace(/<br\s*\/?>/gi, '\n');
+  // Remove style/script
+  text = text.replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<script[\s\S]*?<\/script>/gi, '');
+  // Strip todas tags
+  text = text.replace(/<[^>]+>/g, '');
+  // Decode entities comuns
+  text = text
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)));
+  // Collapse newlines triplas+
+  text = text.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+/g, ' ').replace(/ ?\n ?/g, '\n').trim();
+
+  return { text, driveLinks };
+}
+
+/** Fetcha Google Doc SEM ABRIR TAB usando export?format=html.
+ *  Funciona desde que o user esteja logado (cookies da sessao Google
+ *  vao automaticamente via host_permissions da extension).
+ *  Mais rapido + invisivel + paralelizavel. */
 async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
   try {
     if (!docUrl || typeof docUrl !== 'string') {
-      reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', {
-        ok: false, error: 'docUrl invalida',
-      });
+      reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', { ok: false, error: 'docUrl invalida' });
       return;
     }
-    // Extrai docId
     const m = docUrl.match(/\/document\/d\/([a-zA-Z0-9_-]+)/);
     if (!m) {
-      reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', {
-        ok: false, error: 'URL nao parece Google Doc valido',
-      });
+      reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', { ok: false, error: 'URL nao parece Google Doc valido' });
       return;
     }
     const docId = m[1];
-    const mobileUrl = `https://docs.google.com/document/d/${docId}/mobilebasic`;
 
-    // Cria tab inativa em mobilebasic
+    // === ESTRATEGIA 1: export?format=html (sem abrir tab) ===
+    const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=html`;
+    console.log('[DARKO LAB BG] HG_FETCH_DOC docId=', docId, 'via export (invisible)');
+    let html = null;
+    let exportErr = null;
+    try {
+      const r = await fetchWithTimeout(exportUrl, {
+        method: 'GET',
+        credentials: 'include',
+        redirect: 'follow',
+      }, 30000);
+      if (r.ok) {
+        html = await r.text();
+        // Se redirecionou pro login, vai vir HTML do Google login
+        if (/<title>Sign in|accounts\.google\.com/i.test(html.slice(0, 2000))) {
+          html = null;
+          exportErr = 'redirected_to_login';
+        }
+      } else {
+        exportErr = `HTTP ${r.status}`;
+      }
+    } catch (e) {
+      exportErr = (e?.message || String(e));
+    }
+
+    if (html) {
+      const parsed = parseGoogleDocsHtml(html);
+      console.log('[DARKO LAB BG] HG_FETCH_DOC via export OK textLen=', parsed.text.length, 'links=', parsed.driveLinks.length);
+      reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', {
+        ok: true,
+        text: parsed.text,
+        length: parsed.text.length,
+        driveLinks: parsed.driveLinks,
+        source: 'export_html',
+      });
+      return;
+    }
+
+    // === ESTRATEGIA 2 (FALLBACK): tab mobilebasic ===
+    // So se export falhar (raro — quando doc nao tem permissao de export
+    // mas user pode ver, etc). Aqui abre tab inativa BACKGROUND, scrape, fecha.
+    console.warn('[DARKO LAB BG] export falhou (', exportErr, '), fallback tab method');
+    const mobileUrl = `https://docs.google.com/document/d/${docId}/mobilebasic`;
     const tab = await chrome.tabs.create({ url: mobileUrl, active: false });
     const newTabId = tab.id;
-    console.log('[DARKO LAB BG] HG_FETCH_DOC docId=', docId, 'tabId=', newTabId);
 
-    // Espera load completo (tab.status complete)
     await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Timeout 15s carregando doc')), 15000);
+      const timeout = setTimeout(() => reject(new Error('Timeout 30s carregando doc (fallback)')), 30000);
       const listener = (changedTabId, changeInfo) => {
         if (changedTabId === newTabId && changeInfo.status === 'complete') {
           clearTimeout(timeout);
@@ -705,13 +810,8 @@ async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
       };
       chrome.tabs.onUpdated.addListener(listener);
     });
-
-    // Pequena espera adicional pra react render
     await new Promise(r => setTimeout(r, 1500));
 
-    // Le innerText + extrai links Drive (essenciais pra visual match de avatares:
-    // briefings tem '@username.mp4' que linka pra video em Drive — file ID
-    // permite buscar thumbnail e comparar visual com biblioteca HeyGen)
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: newTabId },
       func: () => {
@@ -723,38 +823,30 @@ async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
             if (!m) return null;
             return { text, fileId: m[1] };
           })
-          .filter((x) => x !== null);
+          .filter(Boolean);
         return {
           text: document.body.innerText,
-          title: document.title,
-          url: location.href,
           isLogin: /accounts\.google\.com/.test(location.href),
           driveLinks: links,
         };
       },
     });
 
-    // Fecha a tab depois de ler
     try { await chrome.tabs.remove(newTabId); } catch {}
 
     if (result?.isLogin) {
-      reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', {
-        ok: false, error: 'Doc privado e nao logado no Google.',
-      });
+      reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', { ok: false, error: 'Doc privado e nao logado no Google.' });
       return;
     }
-
     reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', {
       ok: true,
       text: result?.text || '',
-      title: result?.title || '',
       length: (result?.text || '').length,
       driveLinks: result?.driveLinks || [],
+      source: 'tab_fallback',
     });
   } catch (e) {
-    reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', {
-      ok: false, error: e?.message ?? String(e),
-    });
+    reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', { ok: false, error: e?.message ?? String(e) });
   }
 }
 
