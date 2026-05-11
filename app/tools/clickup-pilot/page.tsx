@@ -760,6 +760,10 @@ export default function ClickUpPilotPage() {
     document.body.removeChild(a);
   }
 
+  /** Cache de resultados visual match (key = briefingFileId) — evita
+   *  re-spend API se o user re-analisa ou roda batch IA Search */
+  const visualCacheRef = useRef<Record<string, { matched: { id: string; name: string; groupName?: string } | null; confidence: string; reason: string }>>({});
+
   /** Roda visual match (Claude vision) pra UM slot. Compara thumb do briefing
    *  com todas as thumbs da biblioteca HeyGen, pega o melhor visual match. */
   const [visualMatching, setVisualMatching] = useState<Record<string, boolean>>({});
@@ -774,42 +778,59 @@ export default function ClickUpPilotPage() {
     setVisualMatching((p) => ({ ...p, [key]: true }));
     setError(null);
     try {
-      const refUrl = `https://drive.google.com/thumbnail?id=${slot.briefingFileId}&sz=w400`;
-      const cands = avatarCandidates
-        .filter((c) => c.thumb)
-        .slice(0, 20)
-        .map((c) => ({ id: c.id, name: c.name, groupName: c.groupName, thumbUrl: c.thumb! }));
-      if (cands.length === 0) {
-        setError('Biblioteca vazia ou sem thumbs.');
+      // Cache check primeiro — evita re-spend API se ja rodou pra esse fileId
+      const cached = visualCacheRef.current[slot.briefingFileId];
+      let result = cached;
+      if (!result) {
+        const refUrl = `https://drive.google.com/thumbnail?id=${slot.briefingFileId}&sz=w400`;
+        const cands = avatarCandidates
+          .filter((c) => c.thumb)
+          .slice(0, 20)
+          .map((c) => ({ id: c.id, name: c.name, groupName: c.groupName, thumbUrl: c.thumb! }));
+        if (cands.length === 0) {
+          setError('Biblioteca vazia ou sem thumbs.');
+          return;
+        }
+        const r = await fetch('/api/avatar-visual-match', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ referenceImageUrl: refUrl, candidates: cands }),
+        });
+        const j = await r.json();
+        if (!j.ok) {
+          setError(`IA Search falhou: ${j.error || j.detail || 'erro desconhecido'}`);
+          return;
+        }
+        result = { matched: j.matched, confidence: j.confidence, reason: j.reason };
+        visualCacheRef.current[slot.briefingFileId] = result;
+      }
+      if (!result.matched) {
+        setError(`IA Search: Claude nao identificou match visual confiavel. Confianca: ${result.confidence}. ${result.reason || ''}`);
         return;
       }
-      const r = await fetch('/api/avatar-visual-match', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ referenceImageUrl: refUrl, candidates: cands }),
-      });
-      const j = await r.json();
-      if (!j.ok) {
-        setError(`IA Search falhou: ${j.error || j.detail || 'erro desconhecido'}`);
-        return;
-      }
-      if (!j.matched) {
-        setError(`IA Search: Claude analisou ${cands.length} avatares e nao identificou match visual confiavel. Confianca: ${j.confidence}. ${j.reason || ''}`);
-        return;
-      }
-      // Aplica match no slot
-      const candFull = avatarCandidates.find((c) => c.id === j.matched.id);
+      const candFull = avatarCandidates.find((c) => c.id === result.matched!.id);
       updateRoleSlot(taskId, roleIdx, {
-        avatarId: j.matched.id,
-        avatarName: j.matched.name,
+        avatarId: result.matched.id,
+        avatarName: result.matched.name,
         avatarThumb: candFull?.thumb || null,
         avatarVoiceId: candFull?.voiceId || null,
-        matchedBy: `visual (${j.confidence})`,
+        matchedBy: `visual (${result.confidence})`,
       });
     } catch (e) {
       setError(`IA Search erro: ${(e as Error)?.message}`);
     } finally {
       setVisualMatching((p) => ({ ...p, [key]: false }));
+    }
+  }
+
+  /** Roda IA Search em todos os slots pendentes da task em sequencia */
+  async function runVisualMatchAllPendingForTask(taskId: string) {
+    const a = taskAnalyses[taskId];
+    if (!a?.roleSlots) return;
+    const pendingIdxs = a.roleSlots.map((s, i) => s.avatarId === null && s.briefingFileId ? i : -1).filter(i => i >= 0);
+    if (pendingIdxs.length === 0) return;
+    for (const idx of pendingIdxs) {
+      await runVisualMatchForSlot(taskId, idx);
     }
   }
 
@@ -1289,6 +1310,28 @@ export default function ClickUpPilotPage() {
                         {analyzing ? 'Analisando...' : `🔍 Analisar (${selectedTaskIds.size})`}
                       </button>
                       {(() => {
+                        // Total slots pendentes (sem avatar) com briefingFileId nas tasks selecionadas
+                        const pendingSlots = Array.from(selectedTaskIds).reduce((sum, id) => {
+                          const a = taskAnalyses[id];
+                          return sum + (a?.roleSlots?.filter(s => !s.avatarId && s.briefingFileId).length || 0);
+                        }, 0);
+                        if (pendingSlots === 0) return null;
+                        return (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              for (const id of Array.from(selectedTaskIds)) {
+                                await runVisualMatchAllPendingForTask(id);
+                              }
+                            }}
+                            className="mono rounded-md border border-cyan-500/40 bg-cyan-500/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/20"
+                            title="Claude vision identifica avatares pendentes comparando thumbs do briefing com biblioteca HeyGen"
+                          >
+                            🤖 IA Search ({pendingSlots} pendentes)
+                          </button>
+                        );
+                      })()}
+                      {(() => {
                         const ready = Array.from(selectedTaskIds).filter(id => taskAnalyses[id]?.status === 'ready');
                         if (ready.length === 0) return null;
                         return (
@@ -1377,6 +1420,16 @@ export default function ClickUpPilotPage() {
                                 <span className="mono text-xs text-white">
                                   {sym} {a.taskName}
                                 </span>
+                                {a.status === 'partial' && a.roleSlots?.some(s => !s.avatarId && s.briefingFileId) ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => runVisualMatchAllPendingForTask(a.taskId)}
+                                    className="mono shrink-0 rounded border border-cyan-500/40 bg-cyan-500/10 px-3 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/20"
+                                    title="Roda Claude vision em todos os avatares pendentes desta task pra tentar achar match visual"
+                                  >
+                                    🤖 IA Search pendentes ({a.roleSlots.filter(s => !s.avatarId && s.briefingFileId).length})
+                                  </button>
+                                ) : null}
                                 {a.status === 'ready' || a.status === 'partial' ? (
                                   <button
                                     type="button"
