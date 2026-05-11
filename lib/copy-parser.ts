@@ -212,35 +212,94 @@ export function findGSiblings(fullDocText: string, baseAdId: string): Array<{ gN
 }
 
 /**
- * Parse de um G[N] sibling: extrai hooks (linhas antes de "Body") + body
- * (linhas depois). Cada linha nao-vazia antes de "Body" e tratada como
- * 1 hook separado (cada uma vai virar 1 take).
+ * Roles conhecidos do briefing DARKO LAB. Quando aparece num bloco de texto
+ * antes do conteudo (ou inline), e DESCARTADO — e identificacao de QUEM fala,
+ * nao parte da fala.
  */
-export function parseGSibling(section: string): { hooks: string[]; body: string } {
+const KNOWN_ROLES_RE = /^(Mulher|Homem|Doutor[a]?|Voz|Narrador[a]?|Avatar|Locutor[a]?)\s*:/i;
+
+/** Linha que e SO um role label (ex "Mulher:") ou role + mention (ex "Mulher: @x.mp4")
+ *  ou so um mention solo (ex "@manualdohomemsolo1.mp4"). Descartar inteira. */
+function isPureRoleOrMentionLine(line: string): boolean {
+  const t = line.trim();
+  // "Mulher:" — palavra unica + ":"
+  if (/^[A-Za-zÀ-ÿ]+\s*:\s*$/.test(t)) return true;
+  // "Mulher: @x.mp4" — role + mention (com ou sem .mp4)
+  if (/^[A-Za-zÀ-ÿ]+\s*:\s*[^@\w]*@[\w._-]+(\.(mp4|mov))?\s*$/i.test(t)) return true;
+  // "@x.mp4" — so mention
+  if (/^@[\w._-]+(\.(mp4|mov))?\s*$/i.test(t)) return true;
+  return false;
+}
+
+/** Se a linha comeca com role conhecido + texto na mesma linha
+ *  (ex "Mulher: Eu nao to..."), retorna apenas o texto. Caso contrario null. */
+function stripLeadingRoleLabel(line: string): string | null {
+  const m = line.match(KNOWN_ROLES_RE);
+  if (!m) return null;
+  const after = line.slice(m[0].length).trim();
+  return after || ''; // string vazia significa "era role line pura"
+}
+
+/** Extrai bloco de texto pulando linha de role (se houver) e markers [a-z].
+ *  PRESERVA paragrafos (linhas vazias) pra que body splitter possa quebrar
+ *  certinho depois. */
+function extractTextBlock(rawLines: string[]): string {
+  const lines = [...rawLines];
+  // Skip leading empty lines
+  while (lines.length && !lines[0].trim()) lines.shift();
+  if (!lines.length) return '';
+
+  const first = lines[0].trim();
+  if (isPureRoleOrMentionLine(first)) {
+    // Linha role pura — descarta inteira
+    lines.shift();
+  } else {
+    // Pode ser "Mulher: texto..." — corta so o prefixo role
+    const stripped = stripLeadingRoleLabel(first);
+    if (stripped !== null) {
+      if (stripped === '') {
+        lines.shift();
+      } else {
+        lines[0] = stripped;
+      }
+    }
+  }
+  // Skip leading empty novamente
+  while (lines.length && !lines[0].trim()) lines.shift();
+
+  const cleaned = lines.join('\n').replace(/\s*\[[a-z]{1,3}\]/gi, '');
+  return cleaned.trim();
+}
+
+/**
+ * Parse de um G[N] sibling DARKO LAB.
+ *
+ * REGRA: cada G[N] = 1 HOOK UNICO (mesmo que multi-paragrafo). Body opcional
+ * vem depois do marker "Body". Linha de role (Mulher:/Homem:/etc) e descartada
+ * — e identificacao de quem fala, nao texto da copy.
+ *
+ * Estrutura esperada:
+ *   AD<base>G<N><suffix>-<rest>     ← heading (ja consumido pelo caller)
+ *   Mulher:                          ← role (descartada)
+ *   Texto do hook paragrafo 1.
+ *
+ *   Texto do hook paragrafo 2.       ← MESMO hook, multi-paragrafo
+ *
+ *   Body                             ← marker opcional
+ *   Homem:                           ← role (descartada)
+ *   Texto do body completo.
+ */
+export function parseGSibling(section: string): { hook: string | null; body: string | null } {
   const lines = section.split(/\r?\n/);
-  // Pula header (primeira linha)
   let bodyMarkerIdx = -1;
   for (let i = 1; i < lines.length; i++) {
     if (/^body$/i.test(lines[i].trim())) { bodyMarkerIdx = i; break; }
   }
   const beforeBody = bodyMarkerIdx >= 0 ? lines.slice(1, bodyMarkerIdx) : lines.slice(1);
   const afterBody = bodyMarkerIdx >= 0 ? lines.slice(bodyMarkerIdx + 1) : [];
-  // Hooks = paragrafos nao-vazios antes de "Body"
-  const hooks: string[] = [];
-  let cur = '';
-  for (const line of beforeBody) {
-    if (line.trim()) {
-      cur += (cur ? '\n' : '') + line;
-    } else if (cur) {
-      hooks.push(cur.trim());
-      cur = '';
-    }
-  }
-  if (cur) hooks.push(cur.trim());
-  // Limpa markers tipo [dq], [dr] do fim
-  const cleanedHooks = hooks.map((h) => h.replace(/\s*\[[a-z]{1,3}\]\s*$/i, '').trim()).filter((h) => h.length > 0);
-  const body = afterBody.join('\n').trim().replace(/\s*\[[a-z]{1,3}\]/gi, '');
-  return { hooks: cleanedHooks, body };
+  const hook = extractTextBlock(beforeBody);
+  const body = extractTextBlock(afterBody);
+  return { hook: hook || null, body: body || null };
 }
 
 export type ParsedDarkoBriefing = {
@@ -274,14 +333,19 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string): Parse
   let body: string | null = null;
   for (const sib of siblings) {
     const parsed = parseGSibling(sib.section);
-    for (const hookText of parsed.hooks) {
+    // CADA SIBLING = EXATAMENTE 1 HOOK (mesmo que tenha multiplos paragrafos).
+    // Hook num = sourceG (G1 → HOOK 1, G2 → HOOK 2, etc). Garante alinhamento
+    // 1:1 com a nomenclatura do briefing — NUNCA infla a contagem de hooks.
+    if (parsed.hook) {
       hooks.push({
-        label: `HOOK ${hooks.length + 1}`,
-        text: hookText,
+        label: `HOOK ${sib.gNum}`,
+        text: parsed.hook,
         sourceG: sib.gNum,
       });
     }
-    if (parsed.body && !body) {
+    // Body geralmente esta no ultimo sibling. Sobrescreve pra pegar o ultimo
+    // (caso mais de um sibling tenha body — improvavel mas seguro).
+    if (parsed.body) {
       body = parsed.body;
     }
   }

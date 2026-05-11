@@ -2061,18 +2061,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
                                               />
                                               <div className="flex-1 min-w-0">
                                                 <div className="mono text-[9px] uppercase tracking-widest text-blue-200">
-                                                  preview avatar (apenas)
+                                                  preview avatar
                                                 </div>
                                                 <div className="text-[11px] text-text-muted">@{slot.username}.mp4</div>
-                                                {hasAnthropic === false ? (
-                                                  <a
-                                                    href="/configuracoes/api"
-                                                    className="mono mt-1 inline-block rounded border border-yellow-500/40 bg-yellow-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-yellow-200 hover:bg-yellow-500/20"
-                                                    title="IA Search precisa de chave Anthropic. Click pra configurar."
-                                                  >
-                                                    🔧 Configurar Anthropic pra usar IA SEARCH
-                                                  </a>
-                                                ) : (
+                                                {hasAnthropic !== false ? (
                                                   <button
                                                     type="button"
                                                     onClick={() => runVisualMatchForSlot(a.taskId, sIdx)}
@@ -2082,7 +2074,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
                                                   >
                                                     {isVisualSearching ? '🔍 buscando...' : '🤖 IA SEARCH (vision)'}
                                                   </button>
-                                                )}
+                                                ) : null}
                                               </div>
                                             </div>
                                           ) : null}
@@ -2290,7 +2282,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
                           </ul>
                         </div>
                         <div className="text-[11px]">
-                          <strong className="text-white">Hooks (G siblings → 1 take cada):</strong>
+                          <strong className="text-white">Hooks ({briefing.hooks.length} {briefing.hooks.length === 1 ? 'hook' : 'hooks'}):</strong>
                           <ul className="mt-1 grid gap-1">
                             {briefing.hooks.map((h, i) => (
                               <li key={i} className="rounded border border-line bg-bg/40 px-2 py-1">

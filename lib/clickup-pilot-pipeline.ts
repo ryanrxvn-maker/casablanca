@@ -115,11 +115,17 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   console.log('[clickup-pilot-pipeline] start', { baseAdId, totalParts: parts.length, hooks: hooks.length, bodies: bodies.length, unrecognized, camuflagem });
 
   // Sem hooks → 1 versao so do body (se tiver). Se nao tem body tambem, retorna vazio.
+  // gNum vem do LABEL do hook (HOOK 1 → 1, HOOK 3 → 3) pra preservar nomenclatura
+  // do briefing — mesmo com gaps tipo G1+G3 sem G2, o output sai com numero correto.
   const groupings: Array<{ hookIdx: number | null; gNum: number }> = [];
   if (hooks.length === 0) {
     if (bodies.length > 0) groupings.push({ hookIdx: null, gNum: 1 });
   } else {
-    hooks.forEach((idx, i) => groupings.push({ hookIdx: idx, gNum: i + 1 }));
+    hooks.forEach((idx, i) => {
+      const m = parts[idx].label.toUpperCase().match(/^(?:HOOK|GANCHO)\s*(\d+)/);
+      const gNum = m ? parseInt(m[1], 10) : i + 1;
+      groupings.push({ hookIdx: idx, gNum });
+    });
   }
 
   const total = groupings.length;
