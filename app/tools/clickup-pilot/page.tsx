@@ -2316,8 +2316,13 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
                           <ul className="mt-1 grid gap-1">
                             {briefing.hooks.map((h, i) => (
                               <li key={i} className="rounded border border-line bg-bg/40 px-2 py-1">
-                                <div className="mono text-[10px] uppercase tracking-widest text-fuchsia-200">
-                                  {h.label} (de G{h.sourceG})
+                                <div className="mono text-[10px] uppercase tracking-widest text-fuchsia-200 flex items-center gap-2">
+                                  <span>{h.label} (de G{h.sourceG})</span>
+                                  {h.role ? (
+                                    <span className="rounded border border-cyan-500/40 bg-cyan-500/10 px-1.5 py-0.5 text-cyan-200">fala: {h.role}</span>
+                                  ) : (
+                                    <span className="rounded border border-yellow-500/40 bg-yellow-500/10 px-1.5 py-0.5 text-yellow-200">sem role</span>
+                                  )}
                                 </div>
                                 <div className="mt-0.5 text-text-muted line-clamp-2">{h.text.slice(0, 200)}{h.text.length > 200 ? '…' : ''}</div>
                               </li>
@@ -2326,7 +2331,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
                         </div>
                         {briefing.body ? (
                           <div className="text-[11px]">
-                            <strong className="text-white">Body (split em ~20s no Avatar III):</strong>
+                            <strong className="text-white flex items-center gap-2">
+                              <span>Body (split em ~20s no Avatar III):</span>
+                              {briefing.bodyRole ? (
+                                <span className="mono rounded border border-cyan-500/40 bg-cyan-500/10 px-1.5 py-0.5 text-[10px] text-cyan-200">fala: {briefing.bodyRole}</span>
+                              ) : (
+                                <span className="mono rounded border border-yellow-500/40 bg-yellow-500/10 px-1.5 py-0.5 text-[10px] text-yellow-200">sem role</span>
+                              )}
+                            </strong>
                             <div className="mt-1 rounded border border-line bg-bg/40 px-2 py-1">
                               <div className="text-text-muted line-clamp-3">{briefing.body.slice(0, 280)}{briefing.body.length > 280 ? '…' : ''}</div>
                               <div className="mono mt-1 text-[10px] text-text-muted">
