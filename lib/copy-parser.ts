@@ -20,6 +20,8 @@ export type ParsedAvatar = {
   username: string;
   /** linha completa pra debug */
   raw: string;
+  /** Drive file ID do video referenciado (preenchido externamente apos parse) */
+  videoFileId?: string | null;
 };
 
 export type ParsedPart = {

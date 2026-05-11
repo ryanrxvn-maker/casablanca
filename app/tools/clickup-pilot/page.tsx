@@ -56,7 +56,14 @@ const DEFAULT_EDIT_STATUSES = [
 
 type DispatchPlan = {
   adName: string;
-  parts: Array<{ label: string; text: string; avatarId: string | null; avatarName: string | null }>;
+  parts: Array<{
+    label: string;
+    text: string;
+    avatarId: string | null;
+    avatarName: string | null;
+    avatarThumb?: string | null;
+    matchedBy?: string;
+  }>;
   unmatchedAvatars: string[];
 };
 
@@ -219,8 +226,10 @@ export default function ClickUpPilotPage() {
   /**
    * Tenta extensao (le doc com sessao Google logada — funciona pra docs
    * privados que voce tem acesso). Fallback: server fetch (so docs publicos).
+   * Retorna tambem driveLinks: links pra videos em Drive citados no doc
+   * (necessarios pra visual match de avatares).
    */
-  function fetchDocViaExtension(url: string): Promise<{ ok: boolean; text?: string; error?: string }> {
+  function fetchDocViaExtension(url: string): Promise<{ ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string }> }> {
     return new Promise((resolve) => {
       const requestId = `doc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       const handler = (ev: MessageEvent) => {
@@ -231,7 +240,7 @@ export default function ClickUpPilotPage() {
         ) {
           window.removeEventListener('message', handler);
           clearTimeout(timeout);
-          resolve({ ok: !!ev.data.ok, text: ev.data.text, error: ev.data.error });
+          resolve({ ok: !!ev.data.ok, text: ev.data.text, error: ev.data.error, driveLinks: ev.data.driveLinks });
         }
       };
       window.addEventListener('message', handler);
@@ -241,6 +250,37 @@ export default function ClickUpPilotPage() {
         resolve({ ok: false, error: 'Timeout 30s — extensao nao respondeu (atualize pra v4.0.15+ e recarregue).' });
       }, 30000);
     });
+  }
+
+  /** Resolve username pra Drive file ID pesquisando driveLinks por match de texto.
+   *  '@marcella.malvar2' procura link cujo texto contem 'marcella.malvar2.mp4'. */
+  function resolveVideoFileId(username: string, driveLinks: Array<{ text: string; fileId: string }> | undefined): string | null {
+    if (!driveLinks || driveLinks.length === 0) return null;
+    const u = username.toLowerCase().replace(/^@/, '').replace(/\.mp4$|\.mov$/, '');
+    for (const link of driveLinks) {
+      const t = link.text.toLowerCase();
+      if (t.includes(u)) return link.fileId;
+    }
+    return null;
+  }
+
+  /** Visual match via Claude vision API (~5s, $0.005). Retorna avatar matched ou null */
+  async function visualMatchAvatar(
+    refImageUrl: string,
+    candidates: Array<{ id: string; name: string; groupName?: string; thumbUrl: string }>,
+  ): Promise<{ id: string; name: string; groupName?: string; confidence: string; reason: string } | null> {
+    try {
+      const r = await fetch('/api/avatar-visual-match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ referenceImageUrl: refImageUrl, candidates }),
+      });
+      const j = await r.json();
+      if (!j.ok || !j.matched) return null;
+      return { ...j.matched, confidence: j.confidence, reason: j.reason };
+    } catch {
+      return null;
+    }
   }
 
   /** Analisa N tasks em paralelo (max 3): pega doc, parsea, monta plano. */
@@ -277,7 +317,7 @@ export default function ClickUpPilotPage() {
             setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: 'Sem doc URL (custom field "DOC DA COPY" vazio + sem link na descricao)' } }));
             continue;
           }
-          // 2. Fetch doc via extensao (sessao Google logada)
+          // 2. Fetch doc via extensao (sessao Google logada) + Drive links pros videos
           const docR = await fetchDocViaExtension(docUrl);
           if (!docR.ok || !docR.text) {
             setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: `Doc fetch: ${docR.error || 'sem texto'}` } }));
@@ -295,13 +335,47 @@ export default function ClickUpPilotPage() {
             setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: `Parser nao achou hooks nem body pra ${baseAdId} no doc` } }));
             continue;
           }
+          // 3.5. Resolve Drive file IDs pros avatares (pra visual match)
+          for (const av of briefing.avatars) {
+            av.videoFileId = resolveVideoFileId(av.username, docR.driveLinks);
+          }
           // 4. Monta plano de dispatch
-          const matchedByRole: Record<string, { id: string; name: string }> = {};
+          // PRIORIDADE: visual match (Claude vision) > voice_name > nome fuzzy
+          const matchedByRole: Record<string, { id: string; name: string; thumb?: string | null; matchedBy?: string }> = {};
           const unmatched: string[] = [];
           for (const av of briefing.avatars) {
+            // Visual match primeiro se tem fileId (Drive thumbnail funciona pra
+            // qualquer doc que voce tem acesso na sessao Google atual)
+            if (av.videoFileId && avatarCandidates.length > 0) {
+              const refUrl = `https://drive.google.com/thumbnail?id=${av.videoFileId}&sz=w400`;
+              const cand20 = avatarCandidates.slice(0, 20).map(c => ({ id: c.id, name: c.name, groupName: c.groupName, thumbUrl: c.thumb || '' })).filter(c => c.thumbUrl);
+              if (cand20.length > 0) {
+                const visual = await visualMatchAvatar(refUrl, cand20);
+                if (visual) {
+                  const candFull = avatarCandidates.find(c => c.id === visual.id);
+                  matchedByRole[av.role.toLowerCase()] = {
+                    id: visual.id,
+                    name: visual.name,
+                    thumb: candFull?.thumb,
+                    matchedBy: `visual (${visual.confidence})`,
+                  };
+                  continue;
+                }
+              }
+            }
+            // Fallback: voice_name + nome fuzzy
             const m = matchAvatar(av.username, avatarCandidates);
-            if (m && m.score >= 30) matchedByRole[av.role.toLowerCase()] = { id: m.id, name: m.name };
-            else unmatched.push(`${av.role}: @${av.username}`);
+            if (m && m.score >= 30) {
+              const candFull = avatarCandidates.find(c => c.id === m.id);
+              matchedByRole[av.role.toLowerCase()] = {
+                id: m.id,
+                name: m.name,
+                thumb: candFull?.thumb,
+                matchedBy: m.matchedBy || 'fuzzy',
+              };
+            } else {
+              unmatched.push(`${av.role}: @${av.username}`);
+            }
           }
           const firstMatched = Object.values(matchedByRole)[0] || null;
           function pickAvatar(text: string, label: string) {
@@ -314,14 +388,28 @@ export default function ClickUpPilotPage() {
           const planParts: DispatchPlan['parts'] = [];
           for (const h of briefing.hooks) {
             const av = pickAvatar(h.text, h.label);
-            planParts.push({ label: h.label, text: h.text, avatarId: av?.id || null, avatarName: av?.name || null });
+            planParts.push({
+              label: h.label,
+              text: h.text,
+              avatarId: av?.id || null,
+              avatarName: av?.name || null,
+              avatarThumb: (av as any)?.thumb || null,
+              matchedBy: (av as any)?.matchedBy,
+            });
           }
           if (briefing.body) {
             const bps = splitCopyIntoParts(briefing.body, { targetSec: 20, minSec: 10, maxSec: 35 });
             bps.forEach((bp, i) => {
               const label = bps.length === 1 ? 'BODY' : `BODY ${i + 1}`;
               const av = pickAvatar(bp, label);
-              planParts.push({ label, text: bp, avatarId: av?.id || null, avatarName: av?.name || null });
+              planParts.push({
+                label,
+                text: bp,
+                avatarId: av?.id || null,
+                avatarName: av?.name || null,
+                avatarThumb: (av as any)?.thumb || null,
+                matchedBy: (av as any)?.matchedBy,
+              });
             });
           }
           const plan: DispatchPlan = {
@@ -450,9 +538,9 @@ export default function ClickUpPilotPage() {
     // eslint-disable-next-line
   }, []);
 
-  // Flat avatar candidates pra matcher (incluindo voice_name pra matching)
+  // Flat avatar candidates pra matcher (incluindo voice_name + thumb pra visual)
   const avatarCandidates = useMemo(() => {
-    const flat: Array<{ id: string; name: string; groupName: string; voiceName?: string | null }> = [];
+    const flat: Array<{ id: string; name: string; groupName: string; voiceName?: string | null; thumb?: string | null }> = [];
     for (const g of librarySnap.groups) {
       for (const l of g.looks) {
         flat.push({
@@ -460,6 +548,7 @@ export default function ClickUpPilotPage() {
           name: l.name,
           groupName: g.name,
           voiceName: (l as any).voiceName ?? null,
+          thumb: l.thumb ?? null,
         });
       }
     }
@@ -816,16 +905,36 @@ export default function ClickUpPilotPage() {
                                 ) : null}
                               </div>
                               {a.status === 'ready' || a.status === 'partial' ? (
-                                <div className="mt-1 grid gap-0.5 text-text-muted">
+                                <div className="mt-1 grid gap-1 text-text-muted">
                                   <div className="mono text-[10px]">
                                     {a.totalParts} takes ({a.hookCount} hook{(a.hookCount ?? 0) === 1 ? '' : 's'} + {a.bodyPartsCount} body split{(a.bodyPartsCount ?? 0) === 1 ? '' : 's'}) — Avatar III
                                   </div>
-                                  <div className="mono text-[10px]">
-                                    Avatares: {a.avatarsMatched}/{a.avatarsTotal} matched
-                                    {(a.unmatchedAvatars?.length ?? 0) > 0 ? (
-                                      <span className="text-yellow-300"> · pendente: {a.unmatchedAvatars!.join(', ')}</span>
-                                    ) : null}
-                                  </div>
+                                  {/* Thumbnails dos avatares unicos selecionados */}
+                                  {a.plan ? (
+                                    <div className="mt-1 flex flex-wrap gap-1.5">
+                                      {Array.from(new Map(a.plan.parts.filter(p => p.avatarId).map(p => [p.avatarId, p])).values()).map((p) => (
+                                        <div key={p.avatarId} className="flex items-center gap-1.5 rounded-full border border-lime/30 bg-lime/5 py-0.5 pl-0.5 pr-2">
+                                          {p.avatarThumb ? (
+                                            // eslint-disable-next-line @next/next/no-img-element
+                                            <img src={p.avatarThumb} alt={p.avatarName || ''} className="h-6 w-6 rounded-full object-cover" referrerPolicy="no-referrer" />
+                                          ) : (
+                                            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-bg text-[9px] font-bold">{(p.avatarName||'?')[0]}</div>
+                                          )}
+                                          <div className="text-[10px]">
+                                            <div className="text-white leading-tight">{p.avatarName}</div>
+                                            {p.matchedBy ? (
+                                              <div className="mono text-[8px] uppercase tracking-widest text-text-muted">{p.matchedBy}</div>
+                                            ) : null}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                  {(a.unmatchedAvatars?.length ?? 0) > 0 ? (
+                                    <div className="mono text-[10px] text-yellow-300">
+                                      ⚠ pendente: {a.unmatchedAvatars!.join(', ')}
+                                    </div>
+                                  ) : null}
                                 </div>
                               ) : null}
                               {a.status === 'error' ? (

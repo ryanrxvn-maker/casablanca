@@ -616,15 +616,29 @@ async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
     // Pequena espera adicional pra react render
     await new Promise(r => setTimeout(r, 1500));
 
-    // Le innerText
+    // Le innerText + extrai links Drive (essenciais pra visual match de avatares:
+    // briefings tem '@username.mp4' que linka pra video em Drive — file ID
+    // permite buscar thumbnail e comparar visual com biblioteca HeyGen)
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: newTabId },
-      func: () => ({
-        text: document.body.innerText,
-        title: document.title,
-        url: location.href,
-        isLogin: /accounts\.google\.com/.test(location.href),
-      }),
+      func: () => {
+        const links = Array.from(document.querySelectorAll('a'))
+          .map((a) => {
+            const text = (a.textContent || '').trim();
+            const href = a.href || '';
+            const m = href.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+            if (!m) return null;
+            return { text, fileId: m[1] };
+          })
+          .filter((x) => x !== null);
+        return {
+          text: document.body.innerText,
+          title: document.title,
+          url: location.href,
+          isLogin: /accounts\.google\.com/.test(location.href),
+          driveLinks: links,
+        };
+      },
     });
 
     // Fecha a tab depois de ler
@@ -642,6 +656,7 @@ async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
       text: result?.text || '',
       title: result?.title || '',
       length: (result?.text || '').length,
+      driveLinks: result?.driveLinks || [],
     });
   } catch (e) {
     reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', {
