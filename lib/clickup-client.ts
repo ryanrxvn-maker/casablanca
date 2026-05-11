@@ -64,6 +64,13 @@ export type ClickUpStatus = {
   type: string;
 };
 
+export type ClickUpCustomField = {
+  id: string;
+  name: string;
+  type: string;
+  value?: any;
+};
+
 export type ClickUpTask = {
   id: string;
   name: string;
@@ -77,6 +84,7 @@ export type ClickUpTask = {
   list?: { id: string; name: string };
   folder?: { id: string; name: string };
   space?: { id: string; name: string };
+  custom_fields?: ClickUpCustomField[];
 };
 
 /* ============= Endpoints ============= */
