@@ -30,6 +30,8 @@ import {
   reloadLibrary,
   subscribeLibrary,
 } from '@/lib/heygen-library-cache';
+import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
+import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
 
 /**
  * ClickUp Pilot — cerebro de automacao
@@ -441,6 +443,38 @@ export default function ClickUpPilotPage() {
     const workers = Array.from({ length: PARALLEL }, () => worker());
     await Promise.all(workers);
     setAnalyzing(false);
+  }
+
+  /** Substitui um avatar em todas as partes da task que usavam o oldAvatarId.
+   *  User pode trocar o avatar suggested pelo correto antes de disparar. */
+  function swapAvatarInTask(taskId: string, oldAvatarId: string, newAvatar: AvatarOption | null) {
+    setTaskAnalyses((prev) => {
+      const a = prev[taskId];
+      if (!a?.plan) return prev;
+      const updatedParts = a.plan.parts.map((p) => {
+        if (p.avatarId === oldAvatarId) {
+          return {
+            ...p,
+            avatarId: newAvatar?.id || null,
+            avatarName: newAvatar?.name || null,
+            avatarThumb: newAvatar?.thumb || null,
+            matchedBy: 'manual',
+          };
+        }
+        return p;
+      });
+      const newPlan: DispatchPlan = { ...a.plan, parts: updatedParts };
+      const allHaveAvatar = updatedParts.every((p) => p.avatarId);
+      const matchedCount = a.avatarsTotal ?? 0; // mantemos o count original
+      return {
+        ...prev,
+        [taskId]: {
+          ...a,
+          plan: newPlan,
+          status: allHaveAvatar ? 'ready' : 'partial',
+        },
+      };
+    });
   }
 
   /** Dispara via HeyGen Auto a partir de um plano ja analisado */
@@ -909,25 +943,49 @@ export default function ClickUpPilotPage() {
                                   <div className="mono text-[10px]">
                                     {a.totalParts} takes ({a.hookCount} hook{(a.hookCount ?? 0) === 1 ? '' : 's'} + {a.bodyPartsCount} body split{(a.bodyPartsCount ?? 0) === 1 ? '' : 's'}) — Avatar III
                                   </div>
-                                  {/* Thumbnails dos avatares unicos selecionados */}
+                                  {/* Avatares unicos selecionados — clicaveis pra trocar antes de disparar */}
                                   {a.plan ? (
-                                    <div className="mt-1 flex flex-wrap gap-1.5">
-                                      {Array.from(new Map(a.plan.parts.filter(p => p.avatarId).map(p => [p.avatarId, p])).values()).map((p) => (
-                                        <div key={p.avatarId} className="flex items-center gap-1.5 rounded-full border border-lime/30 bg-lime/5 py-0.5 pl-0.5 pr-2">
-                                          {p.avatarThumb ? (
-                                            // eslint-disable-next-line @next/next/no-img-element
-                                            <img src={p.avatarThumb} alt={p.avatarName || ''} className="h-6 w-6 rounded-full object-cover" referrerPolicy="no-referrer" />
-                                          ) : (
-                                            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-bg text-[9px] font-bold">{(p.avatarName||'?')[0]}</div>
-                                          )}
-                                          <div className="text-[10px]">
-                                            <div className="text-white leading-tight">{p.avatarName}</div>
-                                            {p.matchedBy ? (
-                                              <div className="mono text-[8px] uppercase tracking-widest text-text-muted">{p.matchedBy}</div>
-                                            ) : null}
+                                    <div className="mt-1.5 grid gap-1.5">
+                                      <div className="mono text-[9px] uppercase tracking-widest text-text-muted">
+                                        Avatares (clica pra trocar antes de disparar)
+                                      </div>
+                                      {Array.from(new Map(a.plan.parts.filter(p => p.avatarId).map(p => [p.avatarId, p])).values()).map((p) => {
+                                        // Quantos partes desse avatar existem no plano
+                                        const usedInParts = a.plan!.parts.filter(pp => pp.avatarId === p.avatarId).length;
+                                        // AvatarOption pra passar pro CompactAvatarPicker
+                                        const candFull = avatarCandidates.find(c => c.id === p.avatarId);
+                                        const selected: AvatarOption | null = candFull ? {
+                                          id: candFull.id,
+                                          name: candFull.name,
+                                          thumb: candFull.thumb || null,
+                                          videoPreview: null,
+                                          type: 'photo',
+                                          version: 'III',
+                                          groupName: candFull.groupName,
+                                          voiceId: null,
+                                          voiceName: candFull.voiceName,
+                                        } : null;
+                                        return (
+                                          <div key={p.avatarId} className="grid gap-0.5">
+                                            <div className="mono flex items-center gap-2 text-[9px] uppercase tracking-widest text-text-muted">
+                                              <span>usado em {usedInParts} parte{usedInParts === 1 ? '' : 's'}</span>
+                                              {p.matchedBy ? (
+                                                <span className={p.matchedBy === 'manual' ? 'text-lime' : 'text-fuchsia-300'}>
+                                                  · matched: {p.matchedBy}
+                                                </span>
+                                              ) : null}
+                                            </div>
+                                            <div className="max-w-[400px]">
+                                              <CompactAvatarPicker
+                                                selected={selected}
+                                                setSelected={(newAv) => swapAvatarInTask(a.taskId, p.avatarId!, newAv)}
+                                                disabled={false}
+                                                label="Trocar avatar dessas partes"
+                                              />
+                                            </div>
                                           </div>
-                                        </div>
-                                      ))}
+                                        );
+                                      })}
                                     </div>
                                   ) : null}
                                   {(a.unmatchedAvatars?.length ?? 0) > 0 ? (
