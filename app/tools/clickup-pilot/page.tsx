@@ -160,10 +160,24 @@ export default function ClickUpPilotPage() {
   const [hasToken, setHasToken] = useState(false);
   const [showTokenSetup, setShowTokenSetup] = useState(false);
 
+  /* ========== Anthropic key (pra IA Search visual) ==========
+   *  Pre-flight: verifica se user configurou a chave. Se nao, IA Search
+   *  fica desativado com link direto pra /configuracoes/api. */
+  const [hasAnthropic, setHasAnthropic] = useState<boolean | null>(null);
+
   useEffect(() => {
     const t = getClickUpToken();
     setHasToken(!!t);
     if (!t) setShowTokenSetup(true);
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/user/secrets')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (alive && j) setHasAnthropic(!!j?.anthropic?.configured); })
+      .catch(() => { if (alive) setHasAnthropic(false); });
+    return () => { alive = false; };
   }, []);
 
   function saveToken() {
@@ -772,11 +786,17 @@ export default function ClickUpPilotPage() {
     const slot = a?.roleSlots?.[roleIdx];
     if (!slot?.briefingFileId) {
       setError('Sem fileId do video do briefing — Claude precisa de uma imagem de referencia.');
+      setErrorAction(null);
+      return;
+    }
+    if (hasAnthropic === false) {
+      setError('Configure sua chave Anthropic (Claude) pra usar IA Search visual.');
+      setErrorAction({ label: 'Configurar chave', href: '/configuracoes/api' });
       return;
     }
     const key = `${taskId}:${roleIdx}`;
     setVisualMatching((p) => ({ ...p, [key]: true }));
-    setError(null);
+    clearError();
     try {
       // Cache check primeiro — evita re-spend API se ja rodou pra esse fileId
       const cached = visualCacheRef.current[slot.briefingFileId];
@@ -789,6 +809,7 @@ export default function ClickUpPilotPage() {
           .map((c) => ({ id: c.id, name: c.name, groupName: c.groupName, thumbUrl: c.thumb! }));
         if (cands.length === 0) {
           setError('Biblioteca vazia ou sem thumbs.');
+          setErrorAction(null);
           return;
         }
         const r = await fetch('/api/avatar-visual-match', {
@@ -796,9 +817,17 @@ export default function ClickUpPilotPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ referenceImageUrl: refUrl, candidates: cands }),
         });
-        const j = await r.json();
-        if (!j.ok) {
-          setError(`IA Search falhou: ${j.error || j.detail || 'erro desconhecido'}`);
+        const j = await r.json().catch(() => null);
+        if (!r.ok || !j?.ok) {
+          // missingKey marca chave Anthropic nao configurada — oferece link direto
+          if (j?.missingKey === 'anthropic') {
+            setHasAnthropic(false);
+            setError('Configure sua chave Anthropic (Claude) pra usar IA Search visual.');
+            setErrorAction({ label: 'Configurar chave', href: '/configuracoes/api' });
+            return;
+          }
+          setError(`IA Search falhou: ${j?.error || j?.detail || `HTTP ${r.status}`}`);
+          setErrorAction(null);
           return;
         }
         result = { matched: j.matched, confidence: j.confidence, reason: j.reason };
@@ -806,6 +835,7 @@ export default function ClickUpPilotPage() {
       }
       if (!result.matched) {
         setError(`IA Search: Claude nao identificou match visual confiavel. Confianca: ${result.confidence}. ${result.reason || ''}`);
+        setErrorAction(null);
         return;
       }
       const candFull = avatarCandidates.find((c) => c.id === result.matched!.id);
@@ -818,6 +848,7 @@ export default function ClickUpPilotPage() {
       });
     } catch (e) {
       setError(`IA Search erro: ${(e as Error)?.message}`);
+      setErrorAction(null);
     } finally {
       setVisualMatching((p) => ({ ...p, [key]: false }));
     }
@@ -1100,6 +1131,9 @@ export default function ClickUpPilotPage() {
 
   /* ========== UI ========== */
   const [error, setError] = useState<string | null>(null);
+  /** Acao opcional ao lado do erro (ex: "Configurar chave" → /configuracoes/api) */
+  const [errorAction, setErrorAction] = useState<{ label: string; href: string } | null>(null);
+  function clearError() { setError(null); setErrorAction(null); }
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -1161,8 +1195,24 @@ export default function ClickUpPilotPage() {
           )}
 
           {error ? (
-            <div className="mb-4 error-shake rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300">
-              {error}
+            <div className="mb-4 error-shake flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300">
+              <span className="flex-1">{error}</span>
+              {errorAction ? (
+                <a
+                  href={errorAction.href}
+                  className="mono shrink-0 rounded border border-lime/60 bg-lime/15 px-3 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/25"
+                >
+                  {errorAction.label} →
+                </a>
+              ) : null}
+              <button
+                type="button"
+                onClick={clearError}
+                className="mono shrink-0 rounded border border-line-strong px-2 py-0.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60"
+                aria-label="Fechar erro"
+              >
+                ✕
+              </button>
             </div>
           ) : null}
 
@@ -1316,6 +1366,17 @@ export default function ClickUpPilotPage() {
                           return sum + (a?.roleSlots?.filter(s => !s.avatarId && s.briefingFileId).length || 0);
                         }, 0);
                         if (pendingSlots === 0) return null;
+                        if (hasAnthropic === false) {
+                          return (
+                            <a
+                              href="/configuracoes/api"
+                              className="mono rounded-md border border-yellow-500/40 bg-yellow-500/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-yellow-200 hover:bg-yellow-500/20"
+                              title="IA Search precisa de chave Anthropic"
+                            >
+                              🔧 Configurar Anthropic pra IA Search ({pendingSlots} pendentes)
+                            </a>
+                          );
+                        }
                         return (
                           <button
                             type="button"
@@ -1421,14 +1482,24 @@ export default function ClickUpPilotPage() {
                                   {sym} {a.taskName}
                                 </span>
                                 {a.status === 'partial' && a.roleSlots?.some(s => !s.avatarId && s.briefingFileId) ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => runVisualMatchAllPendingForTask(a.taskId)}
-                                    className="mono shrink-0 rounded border border-cyan-500/40 bg-cyan-500/10 px-3 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/20"
-                                    title="Roda Claude vision em todos os avatares pendentes desta task pra tentar achar match visual"
-                                  >
-                                    🤖 IA Search pendentes ({a.roleSlots.filter(s => !s.avatarId && s.briefingFileId).length})
-                                  </button>
+                                  hasAnthropic === false ? (
+                                    <a
+                                      href="/configuracoes/api"
+                                      className="mono shrink-0 rounded border border-yellow-500/40 bg-yellow-500/10 px-3 py-1 text-[10px] uppercase tracking-widest text-yellow-200 hover:bg-yellow-500/20"
+                                      title="IA Search precisa de chave Anthropic"
+                                    >
+                                      🔧 Configurar Anthropic
+                                    </a>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => runVisualMatchAllPendingForTask(a.taskId)}
+                                      className="mono shrink-0 rounded border border-cyan-500/40 bg-cyan-500/10 px-3 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/20"
+                                      title="Roda Claude vision em todos os avatares pendentes desta task pra tentar achar match visual"
+                                    >
+                                      🤖 IA Search pendentes ({a.roleSlots.filter(s => !s.avatarId && s.briefingFileId).length})
+                                    </button>
+                                  )
                                 ) : null}
                                 {a.status === 'ready' || a.status === 'partial' ? (
                                   <button
@@ -1485,9 +1556,35 @@ export default function ClickUpPilotPage() {
                                             <span className="text-text-muted">briefing: @{slot.username}</span>
                                             <span className="text-text-muted">· {partsCount} parte{partsCount === 1 ? '' : 's'}</span>
                                             {slot.matchedBy ? (
-                                              <span className={slot.matchedBy === 'manual' ? 'text-lime' : slot.matchedBy.startsWith('visual') ? 'text-cyan-300' : 'text-fuchsia-300'}>
-                                                · matched: {slot.matchedBy}
-                                              </span>
+                                              (() => {
+                                                // Visual match: extrai confianca pra colorir o pill
+                                                const isVisual = slot.matchedBy.startsWith('visual');
+                                                const conf = isVisual ? (slot.matchedBy.match(/\((alta|media|baixa)\)/i)?.[1]?.toLowerCase() || '') : '';
+                                                const baseColor = slot.matchedBy === 'manual'
+                                                  ? 'text-lime'
+                                                  : isVisual ? 'text-cyan-300' : 'text-fuchsia-300';
+                                                const confPill = conf === 'alta'
+                                                  ? 'border-lime/60 bg-lime/15 text-lime'
+                                                  : conf === 'media'
+                                                  ? 'border-yellow-500/60 bg-yellow-500/15 text-yellow-200'
+                                                  : conf === 'baixa'
+                                                  ? 'border-red-500/60 bg-red-500/15 text-red-300'
+                                                  : '';
+                                                const label = isVisual ? 'matched: visual' : `matched: ${slot.matchedBy}`;
+                                                return (
+                                                  <span className={`flex items-center gap-1 ${baseColor}`}>
+                                                    <span>· {label}</span>
+                                                    {conf ? (
+                                                      <span
+                                                        className={`rounded-full border px-1.5 py-0 ${confPill}`}
+                                                        title={conf === 'alta' ? 'Alta confianca — match visual confiavel' : conf === 'media' ? 'Media confianca — confira manualmente' : 'Baixa confianca — provavelmente errado, troque manualmente'}
+                                                      >
+                                                        {conf === 'alta' ? '✓ alta' : conf === 'media' ? '⚠ media' : '✗ baixa'}
+                                                      </span>
+                                                    ) : null}
+                                                  </span>
+                                                );
+                                              })()
                                             ) : (
                                               <span className="text-red-300">· PENDENTE — escolha o avatar abaixo OU click 🤖 IA SEARCH</span>
                                             )}
@@ -1507,15 +1604,25 @@ export default function ClickUpPilotPage() {
                                                   preview do video que o copy pediu
                                                 </div>
                                                 <div className="text-[11px] text-text-muted">@{slot.username}.mp4</div>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => runVisualMatchForSlot(a.taskId, sIdx)}
-                                                  disabled={isVisualSearching}
-                                                  className="mono mt-1 rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-50"
-                                                  title="Claude vision compara essa thumb com toda biblioteca HeyGen e escolhe o melhor match visual"
-                                                >
-                                                  {isVisualSearching ? '🔍 buscando...' : '🤖 IA SEARCH (vision)'}
-                                                </button>
+                                                {hasAnthropic === false ? (
+                                                  <a
+                                                    href="/configuracoes/api"
+                                                    className="mono mt-1 inline-block rounded border border-yellow-500/40 bg-yellow-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-yellow-200 hover:bg-yellow-500/20"
+                                                    title="IA Search precisa de chave Anthropic. Click pra configurar."
+                                                  >
+                                                    🔧 Configurar Anthropic pra usar IA SEARCH
+                                                  </a>
+                                                ) : (
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => runVisualMatchForSlot(a.taskId, sIdx)}
+                                                    disabled={isVisualSearching}
+                                                    className="mono mt-1 rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-50"
+                                                    title="Claude vision compara essa thumb com toda biblioteca HeyGen e escolhe o melhor match visual"
+                                                  >
+                                                    {isVisualSearching ? '🔍 buscando...' : '🤖 IA SEARCH (vision)'}
+                                                  </button>
+                                                )}
                                               </div>
                                             </div>
                                           ) : null}
