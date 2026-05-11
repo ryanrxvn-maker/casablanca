@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.1.2';
+const DARKO_EXT_VERSION = '4.1.3';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -280,19 +280,32 @@ async function cloneVoice(payload, onProgress) {
   console.log('[DARKO LAB voice clone] got upload_url, fileUrl=', fileUrl?.slice(0, 100), 'allKeys=', Object.keys(d).join(','));
 
   // === STEP 2: PUT no S3 ===
+  // S3 presigned URL valida signature contra TODOS os headers inclusos em
+  // X-Amz-SignedHeaders. Se o HeyGen assinou apenas 'host', NAO podemos
+  // mandar Content-Type (signature mismatch). Detectamos dinamicamente.
+  let signedHeaders = '';
+  try {
+    const u = new URL(uploadUrl);
+    signedHeaders = (u.searchParams.get('X-Amz-SignedHeaders') || '').toLowerCase();
+  } catch {}
+  const putHeaders = {};
+  if (signedHeaders.includes('content-type')) {
+    putHeaders['Content-Type'] = mimeType;
+  }
+  console.log('[DARKO LAB voice clone] PUT signedHeaders=', signedHeaders, 'sending headers=', Object.keys(putHeaders));
   onProgress?.({ stage: 'upload', percent: 20, message: `Subindo ${(bytes.length / (1024 * 1024)).toFixed(1)}MB pro S3...` });
   const putResp = await fetchWithTimeout(
     uploadUrl,
     {
       method: 'PUT',
       body: bytes,
-      headers: { 'Content-Type': mimeType },
+      headers: putHeaders,
     },
     120000, // 2 min pra upload
   );
   if (!putResp.ok) {
     const errBody = await putResp.text().catch(() => '');
-    throw new Error(`PUT S3 HTTP ${putResp.status}: ${errBody.slice(0, 300)}`);
+    throw new Error(`PUT S3 HTTP ${putResp.status} (signedHeaders=${signedHeaders}): ${errBody.slice(0, 300)}`);
   }
   console.log('[DARKO LAB voice clone] PUT OK');
 
