@@ -1474,6 +1474,23 @@ export default function ClickUpPilotPage() {
                               <div className="mono mt-1 text-[10px] text-text-muted">
                                 {b.parts.length} partes · disparadas: {partsDispatched}/{b.parts.length}{b.phase !== 'dispatching' ? ` · renderizadas: ${partsRendered}/${partsDispatched}` : ''}
                               </div>
+                              {/* Progress bar visual — peso por fase: 30% dispatch, 60% render, 10% download */}
+                              {b.phase !== 'failed' ? (() => {
+                                const dispatchProgress = b.parts.length > 0 ? partsDispatched / b.parts.length : 0;
+                                const renderProgress = partsDispatched > 0 ? partsRendered / partsDispatched : 0;
+                                const downloadProgress = b.phase === 'done' ? 1 : (b.phase === 'downloading' ? 0.5 : 0);
+                                const totalPct = b.phase === 'done' ? 100 :
+                                  Math.round((dispatchProgress * 30 + renderProgress * 60 + downloadProgress * 10));
+                                const barColor = b.phase === 'done' ? 'bg-lime' : 'bg-fuchsia-400';
+                                return (
+                                  <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-bg-soft/60">
+                                    <div
+                                      className={`h-full ${barColor} transition-all duration-300`}
+                                      style={{ width: `${Math.min(100, Math.max(2, totalPct))}%` }}
+                                    />
+                                  </div>
+                                );
+                              })() : null}
                               {b.message ? (
                                 <div className="mono mt-0.5 text-[10px] text-text-muted">{b.message}</div>
                               ) : null}
