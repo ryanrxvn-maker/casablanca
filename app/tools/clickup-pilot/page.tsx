@@ -686,25 +686,26 @@ export default function ClickUpPilotPage() {
         },
       });
 
-      // 3. Download + zip — iterate por results (mesma ordem das parts no plan)
+      // 3. Download + zip em paralelo (3 simultaneos) — videos HeyGen sao
+      //    grandes, sequencial ficava lento. Pool resolve sem saturar a rede.
       setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'downloading', message: `Baixando + zipando ${validIds.length} videos...` } }));
       const JSZip = (await import('jszip')).default;
       const zip = new JSZip();
       let downloaded = 0;
-      for (let i = 0; i < results.length; i++) {
-        if (batchCancelRef.current[taskId]) break;
+      const downloadOne = async (i: number) => {
+        if (batchCancelRef.current[taskId]) return;
         const r = results[i];
         const part = plan.parts[i];
         const fname = labelToFilename(part.label);
         const fnameBase = fname.replace('.mp4', '');
         if (!r.videoId) {
           zip.file(`${fnameBase}_NAO_DISPAROU.txt`, `Erro no dispatch: ${r.error || 'sem detalhes'}`);
-          continue;
+          return;
         }
         const status = finalStatuses[r.videoId];
         if (status?.status !== 'completed' || !status.videoUrl) {
           zip.file(`${fnameBase}_NAO_RENDERIZOU.txt`, `Status: ${status?.status || '?'}\n${status?.error || ''}`);
-          continue;
+          return;
         }
         try {
           const bytes = await downloadVideoBytes(status.videoUrl);
@@ -714,7 +715,19 @@ export default function ClickUpPilotPage() {
         } catch (e) {
           zip.file(`${fnameBase}_DOWNLOAD_ERROR.txt`, String((e as Error)?.message));
         }
+      };
+      const queue = results.map((_, i) => i);
+      const DL_PARALLEL = 3;
+      const dlWorkers: Promise<void>[] = [];
+      for (let w = 0; w < DL_PARALLEL; w++) {
+        dlWorkers.push((async () => {
+          while (queue.length > 0) {
+            const idx = queue.shift()!;
+            await downloadOne(idx);
+          }
+        })());
       }
+      await Promise.all(dlWorkers);
 
       const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
       const filename = `${adNameClean}.zip`;
@@ -1392,20 +1405,6 @@ export default function ClickUpPilotPage() {
                           </button>
                         );
                       })()}
-                      {(() => {
-                        const ready = Array.from(selectedTaskIds).filter(id => taskAnalyses[id]?.status === 'ready');
-                        if (ready.length === 0) return null;
-                        return (
-                          <button
-                            type="button"
-                            onClick={startBatch}
-                            className="btn-primary"
-                            title="Roda em background: TTS + upload + submit + poll + zip — sem precisar acompanhar"
-                          >
-                            ▶ Iniciar {ready.length} task{ready.length === 1 ? '' : 's'} em background
-                          </button>
-                        );
-                      })()}
                     </div>
                   ) : null}
 
@@ -1678,6 +1677,36 @@ export default function ClickUpPilotPage() {
                           );
                         })}
                       </ul>
+                      {/* Start batch — abaixo da lista, mais perto das tasks ready (CTA principal).
+                       *  Usa selectedTaskIds porque startBatch filtra por isso — UI tem que bater. */}
+                      {(() => {
+                        const selected = Array.from(selectedTaskIds);
+                        const readyIds = selected.filter((id) => taskAnalyses[id]?.status === 'ready');
+                        const partialIds = selected.filter((id) => taskAnalyses[id]?.status === 'partial');
+                        if (readyIds.length === 0 && partialIds.length === 0) return null;
+                        return (
+                          <div className="sticky bottom-2 z-10 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-lime/40 bg-bg/95 p-3 shadow-[0_0_30px_-10px_rgba(200,255,0,0.4)] backdrop-blur">
+                            <span className="mono text-[11px] text-text-muted">
+                              {readyIds.length > 0 ? (
+                                <span className="text-lime">✓ {readyIds.length} ready</span>
+                              ) : null}
+                              {readyIds.length > 0 && partialIds.length > 0 ? <span className="text-text-muted"> · </span> : null}
+                              {partialIds.length > 0 ? (
+                                <span className="text-yellow-300">⚠ {partialIds.length} pendente{partialIds.length === 1 ? '' : 's'} (resolva acima pra incluir)</span>
+                              ) : null}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={startBatch}
+                              disabled={readyIds.length === 0}
+                              className="btn-primary disabled:opacity-40"
+                              title={readyIds.length === 0 ? 'Nenhuma task ready ainda' : 'Roda em background: TTS + upload + submit + poll + zip'}
+                            >
+                              ▶ Iniciar {readyIds.length} task{readyIds.length === 1 ? '' : 's'} em background
+                            </button>
+                          </div>
+                        );
+                      })()}
                     </div>
                   ) : null}
                 </section>
