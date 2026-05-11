@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.1.3';
+const DARKO_EXT_VERSION = '4.1.4';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -281,16 +281,28 @@ async function cloneVoice(payload, onProgress) {
 
   // === STEP 2: PUT no S3 ===
   // S3 presigned URL valida signature contra TODOS os headers inclusos em
-  // X-Amz-SignedHeaders. Se o HeyGen assinou apenas 'host', NAO podemos
-  // mandar Content-Type (signature mismatch). Detectamos dinamicamente.
+  // X-Amz-SignedHeaders. HeyGen assina tipicamente:
+  //   host;x-amz-server-side-encryption
+  // Precisamos enviar EXATAMENTE esses (host vai automatico, mas o
+  // x-amz-server-side-encryption = AES256 precisa ser explicito).
+  // Se algum header signed nao for mandado OU mandado com valor diferente,
+  // S3 retorna 403 SignatureDoesNotMatch.
   let signedHeaders = '';
   try {
     const u = new URL(uploadUrl);
     signedHeaders = (u.searchParams.get('X-Amz-SignedHeaders') || '').toLowerCase();
   } catch {}
   const putHeaders = {};
-  if (signedHeaders.includes('content-type')) {
-    putHeaders['Content-Type'] = mimeType;
+  const signedList = signedHeaders.split(';').map(s => s.trim()).filter(Boolean);
+  for (const sh of signedList) {
+    if (sh === 'host') continue; // browser manda automatico
+    if (sh === 'content-type') putHeaders['Content-Type'] = mimeType;
+    else if (sh === 'x-amz-server-side-encryption') putHeaders['x-amz-server-side-encryption'] = 'AES256';
+    else if (sh === 'content-length') {} // browser calcula
+    else if (sh.startsWith('x-amz-')) {
+      // Header AWS desconhecido — log mas nao manda (talvez quebre)
+      console.warn('[DARKO LAB voice clone] header signed desconhecido:', sh);
+    }
   }
   console.log('[DARKO LAB voice clone] PUT signedHeaders=', signedHeaders, 'sending headers=', Object.keys(putHeaders));
   onProgress?.({ stage: 'upload', percent: 20, message: `Subindo ${(bytes.length / (1024 * 1024)).toFixed(1)}MB pro S3...` });
