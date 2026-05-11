@@ -589,6 +589,16 @@ export default function ClickUpPilotPage() {
   const [batchStates, setBatchStates] = useState<Record<string, BatchTaskState>>({});
   const batchCancelRef = useRef<Record<string, boolean>>({});
 
+  /** Tick a cada 1s pra atualizar elapsed time nas batches rodando.
+   *  So roda quando ha batch nao finalizada — evita re-render constante. */
+  const [nowTick, setNowTick] = useState(Date.now());
+  useEffect(() => {
+    const hasRunning = Object.values(batchStates).some((b) => b.phase !== 'done' && b.phase !== 'failed');
+    if (!hasRunning) return;
+    const id = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [batchStates]);
+
   /** Renomeia label do parser pra naming Portuguese pedido pelo user:
    *  HOOK 1 → GANCHO1.mp4, HOOK 2 → GANCHO2.mp4
    *  BODY → PARTE.mp4, BODY 1 → PARTE1.mp4 */
@@ -618,6 +628,14 @@ export default function ClickUpPilotPage() {
     if (!plan) return;
     const partsLen = plan.parts.length;
     const adNameClean = (a.baseAdId || a.taskName).replace(/[^A-Z0-9]/gi, '_');
+
+    // Re-run da mesma task: revoga blob URL antigo pra nao vazar memoria
+    const prevBlobUrl = batchStates[taskId]?.zipBlobUrl;
+    if (prevBlobUrl) {
+      try { URL.revokeObjectURL(prevBlobUrl); } catch {}
+    }
+    // Limpa flag de cancel de runs anteriores
+    batchCancelRef.current[taskId] = false;
 
     setBatchStates((prev) => ({
       ...prev,
@@ -1420,12 +1438,17 @@ export default function ClickUpPilotPage() {
                           const phaseColor = b.phase === 'done' ? 'text-lime border-lime/40 bg-lime/10' : b.phase === 'failed' ? 'text-red-300 border-red-500/40 bg-red-500/10' : 'text-fuchsia-200 border-fuchsia-500/30 bg-fuchsia-500/5';
                           const partsDispatched = b.parts.filter(p => p.videoId).length;
                           const partsRendered = b.parts.filter(p => p.videoStatus === 'completed').length;
+                          const elapsedMs = (b.finishedAt || nowTick) - b.startedAt;
+                          const elapsedMin = Math.floor(elapsedMs / 60000);
+                          const elapsedSec = Math.floor((elapsedMs % 60000) / 1000);
+                          const elapsedLabel = elapsedMin > 0 ? `${elapsedMin}m${String(elapsedSec).padStart(2, '0')}s` : `${elapsedSec}s`;
                           return (
                             <li key={b.taskId} className={`rounded-[10px] border ${phaseColor} p-2`}>
                               <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
                                 <span className="mono">
                                   <strong className="text-white">{b.taskName}</strong>
                                   <span className="ml-2">{phaseLabel}</span>
+                                  <span className="ml-2 text-text-muted">· {elapsedLabel}</span>
                                 </span>
                                 <div className="flex items-center gap-1.5">
                                   {b.phase === 'done' && b.zipBlobUrl ? (
