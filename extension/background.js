@@ -12,16 +12,20 @@ async function findOrCreateHeyGenTab() {
   const tabs = await chrome.tabs.query({
     url: ['https://app.heygen.com/*'],
   });
-  if (tabs.length > 0) {
-    const tab = tabs[0];
+  // Prefere uma aba INATIVA (background). Nunca mexer numa aba que o user
+  // esteja olhando — nesse caso cria uma nova aba inativa exclusiva pra
+  // automacao, pra todo o trabalho rodar invisivel.
+  const inactive = tabs.find((t) => t.active === false);
+  if (inactive) {
     if (
-      tab.url &&
-      (tab.url.includes('/create-video') || tab.url.includes('/404'))
+      inactive.url &&
+      (inactive.url.includes('/create-video') || inactive.url.includes('/404'))
     ) {
-      await chrome.tabs.update(tab.id, { url: HEYGEN_CREATE_URL });
+      await chrome.tabs.update(inactive.id, { url: HEYGEN_CREATE_URL });
     }
-    return tab;
+    return inactive;
   }
+  // Se so existem abas ativas, NAO mexer nelas — cria uma fresh inativa
   return await chrome.tabs.create({
     url: HEYGEN_CREATE_URL,
     active: false,

@@ -1,27 +1,63 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import { IconClickUpPilot } from './ToolIcons';
+
+const BATCH_STATE_KEY = 'darkolab:clickup-pilot:batches';
+
+/** Le batchStates do localStorage e retorna true se ha pelo menos UMA task
+ *  rodando em background (phase != done && != failed). Usado pra acender o
+ *  badge "ATIVO" no botao do top-bar. */
+function readActiveBatchCount(): number {
+  if (typeof window === 'undefined') return 0;
+  try {
+    const raw = localStorage.getItem(BATCH_STATE_KEY);
+    if (!raw) return 0;
+    const states = JSON.parse(raw) as Record<string, { phase?: string }>;
+    let n = 0;
+    for (const s of Object.values(states)) {
+      if (s.phase && s.phase !== 'done' && s.phase !== 'failed') n++;
+    }
+    return n;
+  } catch {
+    return 0;
+  }
+}
 
 /**
  * Botao especial 3D animado pra ClickUp Pilot — fica no top-bar do lado
  * do dropdown do user (em vez de so na sidebar das ferramentas).
  *
- * Visual:
- * - Pill com gradient lime->cyan, glow profundo, bevel 3D
- * - Hover: scale + glow intensifica + sparkle pulsa
- * - Click: depth (scale down)
- * - Quando voce ja esta na pagina /tools/clickup-pilot: borda lime full + sticker "ATIVO"
- *
- * Tecnologia visual:
- * - Background gradient com radial glow
- * - Borda double-layer (outer ring + inner shadow)
- * - Icon flutua com animation
+ * O badge "ATIVO" aparece SO quando ha task rodando em background no Pilot
+ * (phase pos != done/failed). Acessar a pagina nao acende o badge — ele
+ * indica processamento ativo, nao localizacao do user.
  */
 export function ClickUpPilotButton() {
-  const pathname = usePathname();
-  const active = pathname?.startsWith('/tools/clickup-pilot') ?? false;
+  const [activeBatches, setActiveBatches] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    function check() {
+      if (!alive) return;
+      setActiveBatches(readActiveBatchCount());
+    }
+    // Initial + poll a cada 3s (cheap, localStorage read e instantaneo)
+    check();
+    const id = setInterval(check, 3000);
+    // Tambem escuta storage event pra atualizar instantaneamente entre tabs
+    function onStorage(e: StorageEvent) {
+      if (e.key === BATCH_STATE_KEY) check();
+    }
+    window.addEventListener('storage', onStorage);
+    return () => {
+      alive = false;
+      clearInterval(id);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
+
+  const active = activeBatches > 0;
 
   return (
     <Link
@@ -72,26 +108,25 @@ export function ClickUpPilotButton() {
         ClickUp Pilot
       </span>
 
-      {/* Sticker ATIVO */}
+      {/* Sticker ATIVO so quando ha batch rodando */}
       {active ? (
-        <span className="relative z-10 mono ml-1 rounded-full bg-lime/30 px-1.5 py-0.5 text-[8px] uppercase tracking-widest text-lime">
-          ATIVO
-        </span>
-      ) : (
         <span
-          aria-hidden
-          className="relative z-10 mono hidden rounded-full bg-cyan-400/15 px-1.5 py-0.5 text-[8px] uppercase tracking-widest text-cyan-300 md:inline-block"
+          className="relative z-10 mono ml-1 rounded-full bg-lime/30 px-1.5 py-0.5 text-[8px] uppercase tracking-widest text-lime"
+          title={`${activeBatches} task${activeBatches === 1 ? '' : 's'} rodando em background`}
         >
-          AUTO
+          {activeBatches > 1 ? `${activeBatches} ATIVOS` : 'ATIVO'}
         </span>
-      )}
+      ) : null}
 
-      {/* Sparkle decorativo no canto */}
+      {/* Sparkle decorativo no canto — sempre presente mas mais brilhante quando ativo */}
       <span
         aria-hidden
-        className="pointer-events-none absolute -right-0.5 -top-0.5 h-2 w-2 animate-pulse rounded-full bg-lime opacity-80"
+        className={
+          'pointer-events-none absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-lime ' +
+          (active ? 'animate-pulse opacity-80' : 'opacity-40')
+        }
         style={{
-          boxShadow: '0 0 8px rgba(200,255,0,0.8)',
+          boxShadow: active ? '0 0 8px rgba(200,255,0,0.8)' : '0 0 4px rgba(200,255,0,0.4)',
           animationDuration: '2.4s',
         }}
       />

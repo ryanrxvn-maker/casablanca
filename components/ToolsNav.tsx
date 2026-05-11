@@ -9,7 +9,6 @@ import {
   IconAutoBroll,
   IconCalculadora,
   IconCamuflagem,
-  IconClickUpPilot,
   IconCompressor,
   IconCopySRT,
   IconDecupageCopy,
@@ -99,11 +98,8 @@ export const AI_SUITE: RailItem[] = [
     label: 'HeyGen Auto',
     icon: <IconHeyGenAuto />,
   },
-  {
-    href: '/tools/clickup-pilot',
-    label: 'ClickUp Pilot',
-    icon: <IconClickUpPilot />,
-  },
+  // ClickUp Pilot fica no botao especial 3D do top-bar (ClickUpPilotButton).
+  // Nao duplicar aqui no rail pra evitar dois botoes pra mesma coisa.
 ];
 
 /**

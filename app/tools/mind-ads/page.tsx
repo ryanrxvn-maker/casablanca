@@ -1,8 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Header } from '@/components/Header';
-import { Heartbeat } from '@/components/Heartbeat';
 import { ToolShell } from '@/components/ToolShell';
 import { CancelButton } from '@/components/CancelButton';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
@@ -462,14 +460,11 @@ export default function MindAdsPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <Heartbeat />
-      <Header />
-      <main className="container-app flex-1 py-10">
-        <ToolShell
-          title="Mind Ads Suite"
-          description="Megazord. Voce manda copy + nicho + avatar HeyGen, a Mind Ads gera o anuncio completo: avatar falando + b-rolls IA + montagem + SRT. Pipeline em 6 etapas (Claude → HeyGen → Replicate Nano Banana Pro → Wan 2.1 → FFmpeg → AssemblyAI). Acesso restrito ao admin."
-        >
+    <>
+      <ToolShell
+        title="Mind Ads Suite"
+        description="Megazord. Voce manda copy + nicho + avatar HeyGen, a Mind Ads gera o anuncio completo: avatar falando + b-rolls IA + montagem + SRT. Pipeline em 6 etapas (Claude → HeyGen → Replicate Nano Banana Pro → Wan 2.1 → FFmpeg → AssemblyAI). Acesso restrito ao admin."
+      >
           <div className="mb-6 rounded-[12px] border border-yellow-500/40 bg-yellow-500/5 px-4 py-3">
             <div className="flex items-start gap-2">
               <span className="text-yellow-300">⚡</span>
@@ -992,9 +987,8 @@ export default function MindAdsPage() {
               </div>
             ) : null}
           </div>
-        </ToolShell>
-      </main>
-    </div>
+      </ToolShell>
+    </>
   );
 }
 

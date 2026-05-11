@@ -1,8 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Header } from '@/components/Header';
-import { Heartbeat } from '@/components/Heartbeat';
 import { ToolShell } from '@/components/ToolShell';
 import { CancelButton } from '@/components/CancelButton';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
@@ -562,14 +560,11 @@ export default function HeyGenAutoPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <Heartbeat />
-      <Header />
-      <main className="container-app flex-1 py-10">
-        <ToolShell
-          title="HeyGen Auto Avatar"
-          description="Automacao do HeyGen via extensao Chrome — gera o avatar parte por parte usando sua propria conta HeyGen (sem custo de API). Voce manda copy ou audios, recebe ZIP organizado por parte na ordem certa."
-        >
+    <>
+      <ToolShell
+        title="HeyGen Auto Avatar"
+        description="Automacao do HeyGen via extensao Chrome — gera o avatar parte por parte usando sua propria conta HeyGen (sem custo de API). Voce manda copy ou audios, recebe ZIP organizado por parte na ordem certa."
+      >
           {/* Status da extensao */}
           {!extLoading ? (
             extStatus.connected ? (
@@ -1165,8 +1160,7 @@ export default function HeyGenAutoPage() {
               </div>
             ) : null}
           </div>
-        </ToolShell>
-      </main>
-    </div>
+      </ToolShell>
+    </>
   );
 }
