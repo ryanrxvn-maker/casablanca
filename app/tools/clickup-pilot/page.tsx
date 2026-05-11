@@ -217,10 +217,7 @@ export default function ClickUpPilotPage() {
         const picked = b2c || byMembers || ts[0];
         setSelectedTeam(picked.id);
       }
-      // Auto-pick editor: o user autenticado (mesmo que dropdown esteja vazio)
-      if (me && !selectedEditor) {
-        setSelectedEditor(String(me.id));
-      }
+      // Auto-pick editor handled in separate useEffect (avoid race with state)
     } catch (e) {
       setError(`Falha ao carregar teams: ${(e as Error)?.message}`);
     } finally {
@@ -228,6 +225,14 @@ export default function ClickUpPilotPage() {
     }
   }
   useEffect(() => { if (hasToken) loadTeams(); /* eslint-disable-next-line */ }, [hasToken]);
+
+  // Quando authUser carrega + nao tem editor selecionado: auto-pick o user
+  useEffect(() => {
+    if (authUser && !selectedEditor) {
+      setSelectedEditor(String(authUser.id));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authUser]);
 
   // Migra filter velho UPPERCASE pra novo lowercase (API e case-sensitive)
   useEffect(() => {
