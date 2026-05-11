@@ -121,6 +121,9 @@ type RoleSlot = {
   role: string;
   /** "@binhoted1" — username bruto do briefing */
   username: string;
+  /** Drive file ID do video referenciado no briefing (preview do avatar
+   *  que o copy quer). Permite mostrar thumb pra user identificar quem e. */
+  briefingFileId: string | null;
   /** Avatar HeyGen escolhido (null = pendente, user precisa selecionar) */
   avatarId: string | null;
   avatarName: string | null;
@@ -128,7 +131,7 @@ type RoleSlot = {
   avatarVoiceId: string | null;
   /** Se != null, sobrescreve avatarVoiceId — voz custom escolhida pelo user */
   voiceOverride: { id: string; name: string } | null;
-  /** Como matchamos: 'voice_name_exact' | 'voice_name_fuzzy' | 'name_contains' | 'name_tokens' | 'manual' | null */
+  /** Como matchamos: 'voice_name_exact' | 'voice_name_fuzzy' | 'name_contains' | 'name_tokens' | 'manual' | 'visual' | null */
   matchedBy: string | null;
 };
 
@@ -492,11 +495,13 @@ export default function ClickUpPilotPage() {
           const roleSlots: RoleSlot[] = [];
           for (const av of briefing.avatars) {
             const m = matchAvatar(av.username, avatarCandidates);
+            const briefingFileId = av.videoFileId || null;
             if (m && m.score >= 30) {
               const candFull = avatarCandidates.find(c => c.id === m.id);
               roleSlots.push({
                 role: av.role,
                 username: av.username,
+                briefingFileId,
                 avatarId: m.id,
                 avatarName: m.name,
                 avatarThumb: candFull?.thumb || null,
@@ -505,10 +510,10 @@ export default function ClickUpPilotPage() {
                 matchedBy: m.matchedBy || 'fuzzy',
               });
             } else {
-              // Pendente: slot vazio que user vai preencher
               roleSlots.push({
                 role: av.role,
                 username: av.username,
+                briefingFileId,
                 avatarId: null,
                 avatarName: null,
                 avatarThumb: null,
@@ -753,6 +758,59 @@ export default function ClickUpPilotPage() {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+  }
+
+  /** Roda visual match (Claude vision) pra UM slot. Compara thumb do briefing
+   *  com todas as thumbs da biblioteca HeyGen, pega o melhor visual match. */
+  const [visualMatching, setVisualMatching] = useState<Record<string, boolean>>({});
+  async function runVisualMatchForSlot(taskId: string, roleIdx: number) {
+    const a = taskAnalyses[taskId];
+    const slot = a?.roleSlots?.[roleIdx];
+    if (!slot?.briefingFileId) {
+      setError('Sem fileId do video do briefing — Claude precisa de uma imagem de referencia.');
+      return;
+    }
+    const key = `${taskId}:${roleIdx}`;
+    setVisualMatching((p) => ({ ...p, [key]: true }));
+    setError(null);
+    try {
+      const refUrl = `https://drive.google.com/thumbnail?id=${slot.briefingFileId}&sz=w400`;
+      const cands = avatarCandidates
+        .filter((c) => c.thumb)
+        .slice(0, 20)
+        .map((c) => ({ id: c.id, name: c.name, groupName: c.groupName, thumbUrl: c.thumb! }));
+      if (cands.length === 0) {
+        setError('Biblioteca vazia ou sem thumbs.');
+        return;
+      }
+      const r = await fetch('/api/avatar-visual-match', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ referenceImageUrl: refUrl, candidates: cands }),
+      });
+      const j = await r.json();
+      if (!j.ok) {
+        setError(`IA Search falhou: ${j.error || j.detail || 'erro desconhecido'}`);
+        return;
+      }
+      if (!j.matched) {
+        setError(`IA Search: Claude analisou ${cands.length} avatares e nao identificou match visual confiavel. Confianca: ${j.confidence}. ${j.reason || ''}`);
+        return;
+      }
+      // Aplica match no slot
+      const candFull = avatarCandidates.find((c) => c.id === j.matched.id);
+      updateRoleSlot(taskId, roleIdx, {
+        avatarId: j.matched.id,
+        avatarName: j.matched.name,
+        avatarThumb: candFull?.thumb || null,
+        avatarVoiceId: candFull?.voiceId || null,
+        matchedBy: `visual (${j.confidence})`,
+      });
+    } catch (e) {
+      setError(`IA Search erro: ${(e as Error)?.message}`);
+    } finally {
+      setVisualMatching((p) => ({ ...p, [key]: false }));
+    }
   }
 
   /** Atualiza UM roleSlot da task. Usado quando user troca avatar OU voz. */
@@ -1362,6 +1420,11 @@ export default function ClickUpPilotPage() {
                                       } : null;
                                       const noVoice = slot.avatarId && !slot.avatarVoiceId && !slot.voiceOverride;
                                       const effectiveVoiceLabel = slot.voiceOverride?.name || (slot.avatarVoiceId ? 'voz padrao do avatar' : noVoice ? 'sem voz' : '?');
+                                      const visualKey = `${a.taskId}:${sIdx}`;
+                                      const isVisualSearching = visualMatching[visualKey];
+                                      const briefingThumbUrl = slot.briefingFileId
+                                        ? `https://drive.google.com/thumbnail?id=${slot.briefingFileId}&sz=w200`
+                                        : null;
                                       return (
                                         <div key={sIdx} className="rounded-[10px] border border-line-strong bg-bg/50 p-2">
                                           <div className="mono flex flex-wrap items-center gap-2 text-[9px] uppercase tracking-widest">
@@ -1369,16 +1432,43 @@ export default function ClickUpPilotPage() {
                                             <span className="text-text-muted">briefing: @{slot.username}</span>
                                             <span className="text-text-muted">· {partsCount} parte{partsCount === 1 ? '' : 's'}</span>
                                             {slot.matchedBy ? (
-                                              <span className={slot.matchedBy === 'manual' ? 'text-lime' : 'text-fuchsia-300'}>
+                                              <span className={slot.matchedBy === 'manual' ? 'text-lime' : slot.matchedBy.startsWith('visual') ? 'text-cyan-300' : 'text-fuchsia-300'}>
                                                 · matched: {slot.matchedBy}
                                               </span>
                                             ) : (
-                                              <span className="text-red-300">· PENDENTE — escolha o avatar abaixo</span>
+                                              <span className="text-red-300">· PENDENTE — escolha o avatar abaixo OU click 🤖 IA SEARCH</span>
                                             )}
                                           </div>
+                                          {/* Thumb do video do briefing (sempre visivel pra user identificar) */}
+                                          {briefingThumbUrl ? (
+                                            <div className="mt-2 flex items-center gap-3 rounded-[8px] border border-blue-500/30 bg-blue-500/5 p-2">
+                                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                                              <img
+                                                src={briefingThumbUrl}
+                                                alt={slot.username}
+                                                className="h-16 w-16 shrink-0 rounded-full object-cover"
+                                                referrerPolicy="no-referrer"
+                                              />
+                                              <div className="flex-1 min-w-0">
+                                                <div className="mono text-[9px] uppercase tracking-widest text-blue-200">
+                                                  preview do video que o copy pediu
+                                                </div>
+                                                <div className="text-[11px] text-text-muted">@{slot.username}.mp4</div>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => runVisualMatchForSlot(a.taskId, sIdx)}
+                                                  disabled={isVisualSearching}
+                                                  className="mono mt-1 rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-50"
+                                                  title="Claude vision compara essa thumb com toda biblioteca HeyGen e escolhe o melhor match visual"
+                                                >
+                                                  {isVisualSearching ? '🔍 buscando...' : '🤖 IA SEARCH (vision)'}
+                                                </button>
+                                              </div>
+                                            </div>
+                                          ) : null}
                                           <div className="mt-2 grid gap-2">
                                             <div className="grid gap-0.5">
-                                              <div className="mono text-[9px] uppercase tracking-widest text-text-muted">avatar</div>
+                                              <div className="mono text-[9px] uppercase tracking-widest text-text-muted">avatar HeyGen escolhido</div>
                                               <div className="max-w-[400px]">
                                                 <CompactAvatarPicker
                                                   selected={selected}
