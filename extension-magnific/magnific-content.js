@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.0.0';
+const DARKO_MG_VERSION = '3.1.0';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -211,6 +211,16 @@ async function handleRunPipeline(payload, onProgress) {
 
   if (!takes.length) throw new Error('Sem takes.');
 
+  // PHASE 0: SAFETY — confirma is_unlimited_mode_enabled=true.
+  // Se nao estiver, ABORTA antes de qualquer execute (NUNCA gastar creditos).
+  onProgress({ phase: 'safety', percent: 1, message: 'Verificando Unlimited mode...' });
+  const us = await fetchJson('/app/api/unlimited-status');
+  if (us.json && us.json.is_unlimited_mode_enabled === false) {
+    throw new Error('Unlimited mode DESLIGADO no Magnific. Aborte pra nao gastar creditos.');
+  }
+  const walletBefore = await fetchJson('/app/api/wallet');
+  const creditsBefore = walletBefore.json?.credits ?? null;
+
   // PHASE 1: Space
   onProgress({ phase: 'space', percent: 2, message: 'Garantindo Space...' });
   const space = passedSpaceId
@@ -299,10 +309,20 @@ async function handleRunPipeline(payload, onProgress) {
     },
   );
 
+  // PHASE 5: SAFETY POST-CHECK — confere se credits NAO diminuiram (Unlimited ativo)
+  const walletAfter = await fetchJson('/app/api/wallet');
+  const creditsAfter = walletAfter.json?.credits ?? null;
+  const creditDelta = creditsBefore !== null && creditsAfter !== null
+    ? creditsBefore - creditsAfter
+    : null;
+
   onProgress({ phase: 'done', percent: 100, message: 'Pipeline completa.' });
   return {
     spaceId: space.spaceId,
     spaceUrl: space.url,
+    creditDelta,
+    creditsBefore,
+    creditsAfter,
     results: pairs.map((p) => ({
       idx: p.idx,
       imageUrl: p.imageUrl || null,
@@ -504,38 +524,71 @@ async function createImageGenNode() {
   return newId;
 }
 
+/**
+ * VALIDADO AO VIVO (v3.1): 3 cliques pra criar Video Generator conectado.
+ *   1. Click no output handle (.vue-flow__handle-output) — abre popup "Generated image"
+ *   2. Click no botao "Add" dentro do popup — abre search com Image Generator / Video Generator / etc.
+ *   3. Click no item "Video Generator" — cria novo node ja conectado por edge
+ */
 async function createVideoGenNodeViaOutputHandle(imageNodeId) {
   const before = collectVisibleNodes();
   const node = findNodeElement(imageNodeId);
   if (!node) throw new Error('Image node nao achado: ' + imageNodeId);
-  // Output handle: dentro do node, classe vue-flow__handle ou ".handle-source"
-  // Identificacao: aria-label "Add" ou classe contendo "output" ou icone "image"
-  const handle = node.querySelector('.vue-flow__handle-right, .vue-flow__handle.source, [class*="handle"][class*="source"], [class*="output"]');
-  if (handle) {
-    clickRealElement(handle);
-  } else {
-    // Fallback: tenta clicar no botao "+" da direita do node
-    const plusBtn = node.querySelector('button[aria-label*="add" i], button[title*="add" i]');
-    if (plusBtn) clickRealElement(plusBtn);
-  }
-  // Aguarda popup com lista (Image Generator / Video Generator / etc.)
+
+  // Step 1: Output handle (validado: `.vue-flow__handle-output`)
+  const handle = node.querySelector(
+    '.vue-flow__handle-output, .vue-flow__handle.source, .vue-flow__handle-right',
+  );
+  if (!handle) throw new Error('Output handle nao encontrado no node ' + imageNodeId);
+  clickRealElement(handle);
   await sleep(500);
-  // Click "Video Generator" na lista
+
+  // Step 2: Popup "Generated image / No connections / Add"
+  const addBtn = await waitFor(() => {
+    const all = document.querySelectorAll('button,[role=button]');
+    for (const b of all) {
+      const t = (b.textContent || '').trim();
+      if (/^add$/i.test(t)) {
+        const r = b.getBoundingClientRect();
+        // O Add fica em popover flutuante perto do handle (lado direito do node)
+        if (r.width > 30 && r.width < 200) return b;
+      }
+    }
+    return null;
+  }, 4000);
+  clickRealElement(addBtn);
+  await sleep(500);
+
+  // Step 3: Search popup com lista de tipos de node
   const opt = await waitFor(() => {
-    const all = Array.from(document.querySelectorAll('button,[role=option],[role=menuitem],div,li'));
+    const all = Array.from(document.querySelectorAll('button,[role=option],[role=menuitem],div,li,span'));
     return all.find((e) => {
       const t = (e.textContent || '').trim();
-      if (t.length > 30) return null;
-      return /^video\s*generator$/i.test(t);
+      return /^video\s*generator$/i.test(t) && t.length < 30;
     });
   }, 6000);
   clickRealElement(opt);
+  // O opt pode ser um span filho — sobe ate o container clicavel
+  let parent = opt.parentElement;
+  for (let k = 0; k < 4 && parent; k++) {
+    if (parent.matches('button,[role=option],[role=menuitem],li,[role=button]')) {
+      clickRealElement(parent);
+      break;
+    }
+    parent = parent.parentElement;
+  }
+
   const newId = await waitFor(() => {
     const now = collectVisibleNodes();
     const diff = now.filter((u) => u !== imageNodeId && !before.includes(u));
+    // Filter: o uuid que termina como Video Generator (vai ter span "Video Generator" dentro)
+    for (const id of diff) {
+      const n = findNodeElement(id);
+      if (n && /video\s*generator/i.test(n.textContent || '')) return id;
+    }
     return diff[0] || null;
   }, 6000);
-  await sleep(400);
+  await sleep(500);
   return newId;
 }
 
@@ -614,20 +667,28 @@ function modelDisplayName(internalId) {
   return map[internalId] || internalId;
 }
 
+/**
+ * VALIDADO AO VIVO (v3.1): seleciona modelo via dropdown + search.
+ *   1. Click no botao do modelo atual (texto "Auto" / "Kling 2.5" / "Google...")
+ *   2. Digita termo de busca (ex: "kling" ou "nano") via dispatch de InputEvent
+ *   3. Click no item da lista que match com displayName (suporta suffix "New")
+ *
+ * IMPORTANTE: o item da lista pode ter ∞ icon — preferir items COM ∞ (unlimited),
+ * pulando os sem ∞ (ex: pular Kling 3.0 New e clicar Kling 2.5 ∞).
+ */
 async function selectModelInNode(node, displayName) {
-  // Abre dropdown — botao com texto "Auto" OU nome de algum modelo OU label MODEL
   const dropdown = await waitFor(() => {
     const all = node.querySelectorAll('button,[role=button]');
     for (const b of all) {
       const t = (b.textContent || '').trim();
-      // O dropdown atual mostra o modelo selecionado ("Auto" ou nome anterior)
-      if (/^(auto|google|kling|flux|cinematic|classic|imagen|nano|gpt|seedream|recraft|veo|sora|seedance|runway|pixverse|minimax|ltx)/i.test(t) && t.length < 30) return b;
+      if (/^(auto|google|kling|flux|cinematic|classic|imagen|nano|gpt|seedream|recraft|veo|sora|seedance|runway|pixverse|minimax|ltx|wan|grok|openai|bytedance|fal-|fal\s)/i.test(t) && t.length < 35) return b;
     }
     return null;
   }, 3000);
   clickRealElement(dropdown);
-  await sleep(400);
-  // Busca o input de search no popup
+  await sleep(450);
+
+  // Search input
   const input = await waitFor(() => {
     const ins = document.querySelectorAll('input[type="text"],input[placeholder*="earch" i],input[placeholder*="usca" i]');
     for (const i of ins) {
@@ -638,28 +699,33 @@ async function selectModelInNode(node, displayName) {
   }, 3000);
   input.focus();
   input.value = '';
-  // Digite chunk inicial pro filtro funcionar
   const chunk = displayName.split(' ')[0]; // "Google" / "Kling" / "Nano"
-  for (const ch of chunk) {
+  for (const ch of chunk.toLowerCase()) {
     input.value += ch;
     input.dispatchEvent(new InputEvent('input', { bubbles: true, data: ch, inputType: 'insertText' }));
   }
-  await sleep(500);
-  // Encontra opcao com o nome
+  await sleep(550);
+
+  // Encontra o item — preferir o que tem ∞ icon (unlimited)
   const opt = await waitFor(() => {
     const all = Array.from(document.querySelectorAll('div,li,button,[role=option]'));
-    return all.find((e) => {
+    const matches = all.filter((e) => {
       const t = (e.textContent || '').trim();
-      // permite suffix "New" — texto pode ser "Google Nano Banana 2New"
-      return t === displayName || t === displayName + 'New' || t.startsWith(displayName);
+      // texto pode vir como "Google Nano Banana 2" OU "Google Nano Banana 2New" OU "Kling 2.5"
+      return t === displayName ||
+             t === displayName + 'New' ||
+             t.startsWith(displayName) && t.length < displayName.length + 10;
     });
+    // Preferir items pequenos (linhas de menu, nao containers grandes)
+    matches.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
+    return matches[0] || null;
   }, 4000);
   clickRealElement(opt);
-  await sleep(500);
+  await sleep(550);
 }
 
 async function selectAspectInNode(node, aspect) {
-  // Dropdown atual mostra ratio tipo "1:1", "16:9", "9:16", "Auto"
+  // Dropdown atual mostra "1:1", "16:9", "9:16", "Auto", etc.
   const dd = await waitFor(() => {
     const all = node.querySelectorAll('button,[role=button]');
     for (const b of all) {
@@ -668,53 +734,65 @@ async function selectAspectInNode(node, aspect) {
     }
     return null;
   }, 3000);
+  if ((dd.textContent || '').trim() === aspect) return; // ja esta no aspect desejado
   clickRealElement(dd);
-  await sleep(300);
+  await sleep(350);
   const opt = await waitFor(() => {
     const all = Array.from(document.querySelectorAll('div,li,button,[role=option]'));
-    return all.find((e) => (e.textContent || '').trim() === aspect);
+    // Preferir items pequenos (linha de menu, nao container)
+    const matches = all.filter((e) => (e.textContent || '').trim() === aspect);
+    matches.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
+    return matches[0] || null;
   }, 3000);
   clickRealElement(opt);
-  await sleep(300);
+  await sleep(350);
 }
 
 async function selectQualityInNode(node, qualityLabel) {
-  // Dropdown mostra "1K", "2K", "720p", "1080p" etc.
+  // Dropdown mostra "1K", "2K", "4K", "720p", "1080p", "Auto", etc.
   const dd = await waitFor(() => {
     const all = node.querySelectorAll('button,[role=button]');
     for (const b of all) {
       const t = (b.textContent || '').trim();
-      if (/^(1k|2k|4k|512|720p|1080p|sd|hd)$/i.test(t)) return b;
+      if (/^(auto|1k|2k|4k|512|720p|1080p|sd|hd)$/i.test(t)) return b;
     }
     return null;
   }, 3000);
+  if ((dd.textContent || '').trim().toLowerCase() === qualityLabel.toLowerCase()) return;
   clickRealElement(dd);
-  await sleep(300);
+  await sleep(350);
   const opt = await waitFor(() => {
     const all = Array.from(document.querySelectorAll('div,li,button,[role=option]'));
-    return all.find((e) => (e.textContent || '').trim().toLowerCase() === qualityLabel.toLowerCase());
+    const matches = all.filter((e) => (e.textContent || '').trim().toLowerCase() === qualityLabel.toLowerCase());
+    matches.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
+    return matches[0] || null;
   }, 3000);
   clickRealElement(opt);
-  await sleep(300);
+  await sleep(350);
 }
 
 async function selectDurationInNode(node, seconds) {
+  // Validado live: texto do botao = "5s" / "10s" (sem hifen)
+  // Mas alguns modelos podem mostrar range "5-6"" — aceitar ambos.
   const dd = await waitFor(() => {
     const all = node.querySelectorAll('button,[role=button]');
     for (const b of all) {
       const t = (b.textContent || '').trim();
-      if (/^\d+s$/.test(t)) return b;
+      if (/^\d+(-\d+)?s?["']?$/.test(t)) return b;
     }
     return null;
   }, 3000);
+  if ((dd.textContent || '').trim() === seconds + 's') return;
   clickRealElement(dd);
-  await sleep(300);
+  await sleep(350);
   const opt = await waitFor(() => {
     const all = Array.from(document.querySelectorAll('div,li,button,[role=option]'));
-    return all.find((e) => (e.textContent || '').trim() === seconds + 's');
+    const matches = all.filter((e) => (e.textContent || '').trim() === seconds + 's');
+    matches.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
+    return matches[0] || null;
   }, 3000);
   clickRealElement(opt);
-  await sleep(300);
+  await sleep(350);
 }
 
 /** Confirma Unlimited ON. Abre sidebar settings, checa pill "ON"/"OFF" e clica se OFF. */
