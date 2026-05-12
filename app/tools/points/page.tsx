@@ -379,80 +379,39 @@ export default function PointsPage() {
                 <div className="mt-2 rounded border border-cyan-500/30 bg-cyan-500/5 p-3 text-[11px]">
                   <div className="mono mb-2 text-[10px] uppercase tracking-widest text-cyan-300">// DEBUG SYNC CLICKUP</div>
 
-                  {/* Workspace selector */}
-                  {availableTeams.length > 1 ? (
-                    <div className="mb-3 rounded border border-yellow-500/40 bg-yellow-500/5 p-2">
-                      <div className="mono mb-1 text-[10px] uppercase tracking-widest text-yellow-200">
-                        Workspace ativo (selecionado: {debugInfo.selectedTeamId})
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
+                  {/* Header enxuto: workspace + listas excluidas + atrasadas */}
+                  <div className="mb-2 text-[10px] text-text-muted flex flex-wrap gap-x-3 gap-y-1">
+                    {availableTeams.length > 1 ? (
+                      <span>
+                        Workspace:
                         {availableTeams.map((t) => (
                           <button
                             key={t.id}
                             type="button"
                             onClick={() => selectTeam(t.id)}
-                            className={`mono rounded px-2 py-1 text-[10px] ${t.id === debugInfo.selectedTeamId ? 'bg-lime/20 border border-lime/60 text-lime' : 'bg-bg/40 border border-line-strong text-text-muted hover:border-lime/40'}`}
+                            className={`mono ml-1.5 rounded px-1.5 py-0.5 text-[9px] ${t.id === debugInfo.selectedTeamId ? 'bg-lime/20 text-lime border border-lime/40' : 'bg-bg/40 text-text-muted border border-line-strong hover:border-lime/40'}`}
                           >
-                            {t.name} <span className="opacity-60">({t.id})</span>
+                            {t.name}
                           </button>
                         ))}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="space-y-1 text-text-muted">
-                    <div>User: <span className="text-white">{debugInfo.userName} (id {debugInfo.userId})</span></div>
-                    <div>Workspace: <span className="text-white">{debugInfo.selectedTeamId}</span></div>
-                    <div>Inicio do mes: <span className="text-white">{debugInfo.firstOfMonth}</span></div>
-                    <div>Total tasks suas (qualquer status): <span className="text-white">{debugInfo.totalTasksMine}</span></div>
-                    <div>CONCLUIDAS este mes (status closed/done): <span className="text-white">{debugInfo.completedThisMonth}</span></div>
-                    <div>Com campo PESO: <span className="text-white">{debugInfo.countedTasks}</span></div>
-                    <div>Soma PESO concluidas: <span className="text-cyan-300 font-bold">{debugInfo.totalPoints} pts</span></div>
-                    <div>Atrasadas (overdue): <span className="text-white">{debugInfo.overdueTasks} tasks · {debugInfo.overdueSum} pts</span></div>
+                      </span>
+                    ) : null}
+                    {(debugInfo.listsFound || []).filter((e: any) => !e[1].included).length > 0 ? (
+                      <span>
+                        Listas excluidas (TESTES/sandbox/etc):
+                        {(debugInfo.listsFound || []).filter((e: any) => !e[1].included).map((entry: any) => (
+                          <span key={entry[0]} className="mono ml-1.5 rounded border border-red-500/40 bg-red-500/10 px-1.5 py-0.5 text-[9px] text-red-300">
+                            {entry[0]} ({entry[1].count})
+                          </span>
+                        ))}
+                      </span>
+                    ) : null}
+                    <span>Atrasadas: <span className="text-yellow-200 font-bold">{debugInfo.overdueTasks} = {debugInfo.overdueSum}pts</span></span>
                   </div>
-
-                  {/* Statuses encontrados — debug pra entender labels do workflow */}
-                  {(debugInfo.statusesFound || []).length > 0 ? (
-                    <div className="mt-3">
-                      <div className="mono mb-1 text-[10px] uppercase tracking-widest text-cyan-300">// STATUSES NAS SUAS TASKS</div>
-                      <div className="grid grid-cols-2 gap-1">
-                        {debugInfo.statusesFound.map((entry: any) => {
-                          const [label, count] = entry;
-                          const isClosedType = /\[closed\]|\[done\]/i.test(label);
-                          return (
-                            <div key={label} className={`rounded px-2 py-1 text-[10px] ${isClosedType ? 'bg-lime/10 text-lime' : 'bg-bg/40 text-text-muted'}`}>
-                              <span className="mono">{label}</span> <span className="opacity-60">({count})</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {/* Lists encontradas — marca excluidas em vermelho */}
-                  {(debugInfo.listsFound || []).length > 0 ? (
-                    <div className="mt-3">
-                      <div className="mono mb-1 text-[10px] uppercase tracking-widest text-cyan-300">// LISTS DAS SUAS TASKS</div>
-                      <div className="grid grid-cols-2 gap-1">
-                        {debugInfo.listsFound.map((entry: any) => {
-                          const [name, info] = entry;
-                          return (
-                            <div key={name} className={`rounded px-2 py-1 text-[10px] ${info.included ? 'bg-lime/10 text-lime' : 'bg-red-500/10 text-red-300'}`}>
-                              <span className="mono">{name}</span> <span className="opacity-60">({info.count})</span>
-                              {!info.included ? <span className="ml-1 text-[9px] uppercase">← excluida</span> : null}
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <div className="mt-1 text-[10px] text-text-muted">
-                        Listas excluidas batem com /teste|testes|sandbox|draft|exemplo/i (regra widget Pontuacao).
-                      </div>
-                    </div>
-                  ) : null}
 
                   {/* Erros agregados */}
                   {(debugInfo.errors || []).length > 0 ? (
-                    <div className="mt-3 rounded border border-red-500/40 bg-red-500/5 p-2 text-red-300">
+                    <div className="mt-2 rounded border border-red-500/40 bg-red-500/5 p-2 text-red-300">
                       <div className="mono text-[10px] uppercase tracking-widest mb-1">// ERROS</div>
                       {debugInfo.errors.map((e: string, i: number) => (
                         <div key={i} className="font-mono text-[10px]">{e}</div>
@@ -460,39 +419,20 @@ export default function PointsPage() {
                     </div>
                   ) : null}
 
-                  {/* Sample tasks com peso */}
+                  {/* Sample tasks com peso — main info que o user pediu */}
                   {(debugInfo.sampleScoreTasks || []).length > 0 ? (
                     <div className="mt-3">
-                      <div className="mono mb-1 text-[10px] uppercase tracking-widest text-cyan-300">// SAMPLE TASKS COM PESO</div>
+                      <div className="mono mb-1 text-[10px] uppercase tracking-widest text-cyan-300">// TASKS QUE SOMARAM ({debugInfo.countedTasks})</div>
                       <div className="space-y-1">
                         {debugInfo.sampleScoreTasks.map((t: any, i: number) => (
-                          <div key={i} className="rounded bg-bg/40 px-2 py-1 text-[11px] flex items-center justify-between">
+                          <div key={i} className="rounded bg-bg/40 px-2 py-1 text-[11px] flex items-center justify-between gap-2">
                             <span className="truncate flex-1">{t.name}</span>
-                            <span className="mono text-cyan-200 ml-2 text-[9px] uppercase">{t.list}</span>
-                            <span className="mono text-text-muted ml-2">{t.status}</span>
-                            <span className="mono text-text-muted ml-2">{t.closed || '?'}</span>
+                            <span className="mono text-text-muted ml-2 text-[10px]">{t.closed || '?'}</span>
                             <span className="mono text-lime ml-2 font-bold">{t.peso}pts</span>
                           </div>
                         ))}
                       </div>
                     </div>
-                  ) : null}
-
-                  <div className="mt-3 mono text-[10px] uppercase tracking-widest text-cyan-300">// CUSTOM FIELDS (nome × qtd tasks)</div>
-                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-[300px] overflow-y-auto">
-                    {(debugInfo.customFieldsFound || []).map((entry: any) => {
-                      const [name, count] = entry;
-                      const isPointsField = /\b(peso|pontos?|points?|score|valor|nota)\b/i.test(name);
-                      return (
-                        <div key={name} className={`rounded px-2 py-1 ${isPointsField ? 'bg-lime/10 border border-lime/40 text-lime' : 'bg-bg/40 text-text-muted'}`}>
-                          <span className="mono">{name}</span> <span className="opacity-60">({count})</span>
-                          {isPointsField ? <span className="ml-2 text-[9px] uppercase tracking-widest">← MATCH</span> : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {(debugInfo.customFieldsFound || []).length === 0 ? (
-                    <div className="mt-2 text-red-300">⚠ Zero custom fields encontrados. Token pode nao ter acesso a este workspace, OU tasks deste workspace nao tem custom fields.</div>
                   ) : null}
                 </div>
               ) : null}
