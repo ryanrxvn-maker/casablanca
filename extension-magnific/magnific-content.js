@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.1.2';
+const DARKO_MG_VERSION = '3.1.3';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -420,15 +420,27 @@ async function waitFor(predicate, timeoutMs = 30000, pollMs = 150) {
 
 // ---- Space management ----
 
+/**
+ * VALIDADO LIVE (v3.1.3): body precisa ser APENAS {name}.
+ *   - {type:'board'} -> "The selected type is invalid"
+ *   - {type:'spaces'} -> "The selected type is invalid"
+ *   - {name:'X'} sem type -> 201 com data.uuid
+ *
+ * Response shape: { data: { uuid, name, type:'space', metadata:{space_creation_id}, ... } }
+ */
 async function ensureSpaceWithName(name) {
-  // Tenta REST primeiro (rapido)
   const r = await fetchJson('/app/api/spaces', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name: name || 'DARKO LAB', type: 'board' }),
+    body: JSON.stringify({ name: name || 'DARKO LAB' }),
   }, 15000);
   if (r.ok && r.json) {
-    const id = r.json.id || r.json?.data?.id || r.json?.space_id;
+    const id =
+      r.json?.data?.uuid ||
+      r.json?.uuid ||
+      r.json?.id ||
+      r.json?.data?.id ||
+      r.json?.space_id;
     if (id) return { spaceId: id, url: spaceURL(id) };
   }
   // Fallback DOM
@@ -540,30 +552,62 @@ async function createTakePair({
 }
 
 /**
- * VALIDADO AO VIVO (v3.1): cria Image Generator via 2 cliques:
- *   1. Click no botao "+" do toolbar esquerdo — abre painel "All Tools"
- *      com BASICS (Text / Image Generator / Video Generator / etc.)
- *   2. Click no item "Image Generator" (DIV nao button)
+ * VALIDADO AO VIVO (v3.1.3): cria Image Generator via 2 caminhos:
  *
- * IMPORTANTE: Magnific dropa o novo node no centro do viewport. Cada
- * novo node default Nano Banana Pro + 1:1 + 1K (precisa configurar).
+ *   PATH A (space vazio): card "Image Generator" visivel no centro -> click direto
+ *   PATH B (space com nodes): click "+" toolbar esquerdo -> click DIV "Image Generator"
+ *
+ * Tenta primeiro PATH A (mais rapido). Se nao achar card, faz PATH B.
+ * Cada novo node default Nano Banana Pro + 1:1 + 1K (precisa configurar).
  */
 async function createImageGenNode() {
   const before = collectVisibleNodes();
-  // Step 1: Click "+" left toolbar — varias possibilidades de seletor
+
+  // PATH A — empty-state card "Image Generator" (DIV/section grande no centro)
+  const card = (() => {
+    const all = document.querySelectorAll('div,section,[role=button],button');
+    for (const e of all) {
+      const t = (e.textContent || '').trim();
+      // Card tem "Image Generator" + descricao curta tipo "Generate images from a text prompt"
+      if (/^Image Generator/.test(t) && t.length < 80 && /text prompt|text-to|prompt/.test(t)) {
+        const r = e.getBoundingClientRect();
+        if (r.width > 100 && r.height > 60) return e;
+      }
+    }
+    return null;
+  })();
+  if (card) {
+    clickRealElement(card);
+    await sleep(600);
+    const newId = await waitFor(() => {
+      const now = collectVisibleNodes();
+      const diff = now.filter((u) => !before.includes(u));
+      for (const id of diff) {
+        const n = findNodeElement(id);
+        if (n && /Image Generator/.test(n.textContent || '')) return id;
+      }
+      return diff[0] || null;
+    }, 8000);
+    await sleep(500);
+    return newId;
+  }
+
+  // PATH B — toolbar "+" + panel
   const plusBtn = await waitFor(() => {
-    // Procura botao com SVG de "+" do tipo MenuBar, OU aria-label add
     const all = document.querySelectorAll('button,[role=button]');
     for (const b of all) {
       const aria = (b.getAttribute('aria-label') || '').toLowerCase();
       const title = (b.getAttribute('title') || '').toLowerCase();
-      if (/^add$|^plus$|add.*tool|add.*node/.test(aria + ' ' + title)) return b;
-      // Fallback: botao redondo pequeno na left toolbar (x < 80)
+      if (/^add$|^plus$|add.*tool|add.*node|all\s*tools/.test(aria + ' ' + title)) return b;
+      // Fallback: botao redondo pequeno na left toolbar (x < 80) com SVG
       const r = b.getBoundingClientRect();
       if (r.x < 80 && r.width < 50 && r.width > 20 && r.height > 20) {
-        // Tem que ter SVG dentro (icone)
         const svg = b.querySelector('svg');
-        if (svg && r.y > 200 && r.y < 350) return b;
+        if (svg && r.y > 200 && r.y < 700) {
+          // Skip se ja sabemos que e play (geralmente o segundo ou terceiro)
+          // O "+" e sempre o PRIMEIRO botao na toolbar (mais alto na ordem y)
+          return b;
+        }
       }
     }
     return null;
@@ -571,14 +615,12 @@ async function createImageGenNode() {
   clickRealElement(plusBtn);
   await sleep(600);
 
-  // Step 2: Click "Image Generator" no painel (DIV)
   const opt = await waitFor(() => {
     const all = Array.from(document.querySelectorAll('div,li,button,[role=option],[role=menuitem],span'));
     const matches = all.filter((e) => {
       const t = (e.textContent || '').trim();
       return t === 'Image Generator' && (e.getBoundingClientRect().width > 20);
     });
-    // Preferir o mais a esquerda (no painel side)
     matches.sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x);
     return matches[0] || null;
   }, 5000);
@@ -587,7 +629,6 @@ async function createImageGenNode() {
   const newId = await waitFor(() => {
     const now = collectVisibleNodes();
     const diff = now.filter((u) => !before.includes(u));
-    // Filter: o novo node deve ter "Image Generator" no titulo
     for (const id of diff) {
       const n = findNodeElement(id);
       if (n && /Image Generator/.test(n.textContent || '')) return id;
@@ -869,38 +910,59 @@ async function selectDurationInNode(node, seconds) {
   await sleep(350);
 }
 
-/** Confirma Unlimited ON. Abre sidebar settings, checa pill "ON"/"OFF" e clica se OFF. */
+/**
+ * VALIDADO LIVE (v3.1.3): Confirma que o toggle ∞ Unlimited do nodo esta
+ * ATIVO (icon laranja `rgb(249, 115, 22)`). Se estiver OFF (cor diferente),
+ * clica pra ligar.
+ *
+ * O seletor exato e: `button[data-cy="unlimited-mode-toggle-button"]`.
+ * O estado e detectado pela cor do SVG `use[href="#cdn-infinity"]` dentro:
+ *   - ATIVO = computed color/fill = rgb(249, 115, 22) (orange-500)
+ *   - INATIVO = qualquer outra cor (gray/white)
+ *
+ * IMPORTANTE: mesmo com toggle ON, se `force_credits: true` no payload do
+ * workflow_execute, o backend COBRA creditos. Sempre usar `force_credits: false`.
+ */
 async function ensureUnlimitedON(node, uuid) {
-  // Acha o icone de Settings no node (o ⚙ ao lado da quality)
-  const settingsBtn = node.querySelector('button[aria-label*="setting" i], button[title*="setting" i]');
+  // Abre settings sidebar via icon ⚙ dentro do node (svg use href="#cdn-settings")
+  const settingsBtn = (() => {
+    const uses = node.querySelectorAll('svg use');
+    for (const u of uses) {
+      const h = u.getAttribute('href') || u.getAttribute('xlink:href') || '';
+      if (h === '#cdn-settings') return u.closest('button');
+    }
+    return null;
+  })();
   if (settingsBtn) {
     clickRealElement(settingsBtn);
     await sleep(700);
   }
-  // Agora a sidebar tem botao "ON" ou "OFF"
+
+  // Procura o toggle pelo data-cy estavel
   let toggle = null;
   try {
     toggle = await waitFor(() => {
-      const all = document.querySelectorAll('button,[role=button]');
-      for (const b of all) {
-        const t = (b.textContent || '').trim();
-        if (/^on$|^off$/i.test(t)) {
-          const r = b.getBoundingClientRect();
-          if (r.x > window.innerWidth * 0.6) return b; // sidebar esta no lado direito
-        }
-      }
-      return null;
+      return document.querySelector('button[data-cy="unlimited-mode-toggle-button"]');
     }, 3000);
   } catch {}
-  if (toggle && /off/i.test(toggle.textContent || '')) {
-    clickRealElement(toggle);
-    await sleep(500);
+  if (toggle) {
+    const svg = toggle.querySelector('svg');
+    const fill = svg ? getComputedStyle(svg).fill : '';
+    // orange-500 = rgb(249, 115, 22). Outras cores = OFF/inactive
+    const isOn = /249,\s*115,\s*22/.test(fill);
+    if (!isOn) {
+      clickRealElement(toggle);
+      await sleep(500);
+    }
   }
-  // Fecha sidebar se ela ainda esta aberta
-  const closeBtn = document.querySelector('aside button[aria-label*="close" i], aside button[title*="close" i], [class*="sidebar"] button[aria-label*="close" i]');
+  // Fecha sidebar — clica novamente no settings ou no X
+  const closeBtn = document.querySelector('button[aria-label*="close" i]');
   if (closeBtn) {
-    clickRealElement(closeBtn);
-    await sleep(300);
+    const r = closeBtn.getBoundingClientRect();
+    if (r.x > window.innerWidth * 0.6) {
+      clickRealElement(closeBtn);
+      await sleep(300);
+    }
   }
 }
 
@@ -925,7 +987,7 @@ async function executeWorkflow(startNodeId, spaceId) {
       startNodeId,
       runSingular: true,
       runDownstream: false,
-      force_credits: true,
+      force_credits: false, // CRITICAL: true forca cobranca mesmo com Unlimited ON. false respeita Unlimited.
       experiments: false,
     }),
   }, 30000);
