@@ -2631,6 +2631,23 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                             <div className="mono text-[10px] uppercase tracking-widest text-cyan-200">{av.avaCode}</div>
                                             <div className="text-[11px] text-text-muted">@{av.username}.mp4</div>
                                             <div className="mono text-[9px] uppercase tracking-widest text-yellow-300 mt-0.5">→ saída: {a.vaBriefing!.baseAdId.replace(/\s+/g, '')}-{av.avaCode}.mp4</div>
+                                            <div className="mt-1 flex flex-wrap gap-1">
+                                              {av.fileId ? (
+                                                <a
+                                                  href={`https://drive.google.com/uc?export=download&id=${av.fileId}`}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="mono rounded border border-lime/40 bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime hover:bg-lime/20"
+                                                  title="Baixa o arquivo do Drive deixado pelo copywriter pra esse avatar"
+                                                >
+                                                  ↓ Baixar
+                                                </a>
+                                              ) : (
+                                                <span className="mono rounded border border-text-muted/40 bg-bg/40 px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted" title="Sem link Drive detectado no doc — copywriter pode nao ter deixado">
+                                                  sem link drive
+                                                </span>
+                                              )}
+                                            </div>
                                           </div>
                                         </div>
                                         <div className="mt-2 max-w-[400px]">
