@@ -479,6 +479,209 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string): Parse
   };
 }
 
+/* ============================ VARIACAO DE AVATAR (VA) ============================
+ *
+ * Briefings VA tem estrutura DIFERENTE dos comuns:
+ *   - 1 unico Gancho + 1 Body (mesma copy pra todos avatares)
+ *   - N avatares de VARIACAO (2-10), cada um gera 1 video final
+ *   - NAO usa TTS — gera lipsync com voz extraida do video original do AD
+ *   - Opcional: depoimento com avatar adicional
+ *
+ * Formato do doc:
+ *   AD31G1VN - ME - Variação de avatar - SILAS    ← header com 'Variação de avatar'
+ *   Link do ad: 📎 AD31G1VN-ME.mp4                ← video original (extrai voz daqui)
+ *
+ *   Instruções para edição: ...
+ *
+ *   AD31G1VN-ME-AVA03                              ← nomenclatura avatar variacao 1
+ *   Avatar lara.mp4
+ *
+ *   AD31G1VN-ME-AVA04                              ← nomenclatura avatar variacao 2
+ *   Avatar 7508150707225251077.mp4
+ *
+ *   Gancho                                         ← UNICO gancho (texto pra info, voz vem do AD)
+ *   [texto do gancho]
+ *
+ *   Body                                           ← UNICO body
+ *   [texto do body]
+ *
+ *   Depoimento com avatar: 📎 omsteve.mp4         ← opcional
+ *   [texto do depoimento]
+ *
+ * Output esperado da ferramenta: ZIP com
+ *   AD31G1VN-ME-AVA03.mp4 (lipsync video original + avatar lara)
+ *   AD31G1VN-ME-AVA04.mp4 (lipsync video original + avatar 7508...)
+ *   (opcional) AD31G1VN-ME-DEPOIMENTO-AVA<X>.mp4 (depoimento)
+ */
+
+export type VAAvatar = {
+  /** Numero da variacao (3 → AVA03) */
+  avaNum: number;
+  /** Codigo completo: 'AVA03', 'AVA04' */
+  avaCode: string;
+  /** Username sem extensao (ex 'lara', '7508150707225251077') */
+  username: string;
+  /** Drive file ID se houver link na linha */
+  fileId: string | null;
+};
+
+export type ParsedVABriefing = {
+  /** Base AD ID, ex 'AD31G1VN-ME' */
+  baseAdId: string;
+  /** Filename do video original referenciado (ex 'AD31G1VN-ME.mp4') */
+  linkAdFilename: string | null;
+  /** Drive file ID do video original (se link Drive presente) */
+  linkAdFileId: string | null;
+  /** Avatares de variacao em ordem (2-10) */
+  avatares: VAAvatar[];
+  /** Texto do unico Gancho */
+  hookText: string;
+  /** Texto do unico Body */
+  bodyText: string;
+  /** Texto do depoimento (opcional) */
+  depoimentoText: string | null;
+  /** Avatar do depoimento (opcional) */
+  depoimentoUsername: string | null;
+  depoimentoFileId: string | null;
+};
+
+/** Detecta se uma task ou doc e do tipo Variacao de Avatar.
+ *  Check: nome contem 'Variação de avatar' OU comeca com 'VA -'/'VA-' */
+export function isVATask(taskName: string): boolean {
+  if (!taskName) return false;
+  if (/^VA\s*[-–—]/i.test(taskName.trim())) return true;
+  if (/varia[cç][aã]o\s+de\s+avatar/i.test(taskName)) return true;
+  return false;
+}
+
+/** Parse VA briefing. Retorna null se nao for VA detectavel. */
+export function parseVABriefing(
+  fullDocText: string,
+  baseAdIdOrTaskName: string,
+  driveLinks: Array<{ text: string; fileId: string }> = [],
+): ParsedVABriefing | null {
+  if (!fullDocText) return null;
+  const lines = fullDocText.split(/\r?\n/);
+
+  // 1. Detecta header VA: linha que contem 'Variação de avatar'
+  let vaHeaderIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/varia[cç][aã]o\s+de\s+avatar/i.test(lines[i])) {
+      vaHeaderIdx = i;
+      break;
+    }
+  }
+  if (vaHeaderIdx < 0) return null;
+
+  // 2. Extrai base AD ID — primeira parte do header antes de "- Variação"
+  // Ex: "AD31G1VN - ME - Variação de avatar - SILAS" → "AD31G1VN - ME"
+  const header = lines[vaHeaderIdx].trim();
+  const baseMatch = header.match(/^(.+?)\s*[-–—]\s*varia[cç][aã]o/i);
+  const baseAdId = baseMatch ? baseMatch[1].trim() : baseAdIdOrTaskName;
+
+  // 3. Link do AD: linha "Link do ad: <filename>" ou similar
+  let linkAdFilename: string | null = null;
+  let linkAdFileId: string | null = null;
+  for (let i = vaHeaderIdx; i < Math.min(vaHeaderIdx + 15, lines.length); i++) {
+    const t = lines[i].trim();
+    const m = t.match(/^link\s+do\s+ad\s*[:\-]\s*[^a-zA-Z0-9]*([a-zA-Z0-9_.\-]+\.(?:mp4|mov))/i);
+    if (m) {
+      linkAdFilename = m[1];
+      // Tenta achar fileId nos driveLinks pelo texto
+      const dl = driveLinks.find((d) => d.text.includes(linkAdFilename!) || d.text === linkAdFilename);
+      if (dl) linkAdFileId = dl.fileId;
+      break;
+    }
+  }
+
+  // 4. Avatares de variacao: linhas tipo "<base>-AVA<NN>" seguidas de "Avatar <filename>"
+  // Tambem aceita: AVAxx + Avatar @username.mp4
+  const avatares: VAAvatar[] = [];
+  const seenAvaCodes = new Set<string>();
+  for (let i = vaHeaderIdx; i < lines.length; i++) {
+    const t = lines[i].trim();
+    // Match codigo AVA: base + -AVA<NN>
+    const avaCodeMatch = t.match(/^(?:.*[-–—]\s*)?AVA\s*(\d+)\b/i);
+    if (!avaCodeMatch) continue;
+    const avaNum = parseInt(avaCodeMatch[1], 10);
+    const avaCode = `AVA${String(avaNum).padStart(2, '0')}`;
+    if (seenAvaCodes.has(avaCode)) continue;
+    // Procura linha seguinte (1-3 linhas abaixo) com "Avatar <filename>" ou "@<file>"
+    let username: string | null = null;
+    let fileId: string | null = null;
+    for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+      const nl = lines[j].trim();
+      if (!nl) continue;
+      // "Avatar lara.mp4" ou "Avatar @x.mp4" ou "@x.mp4"
+      const m = nl.match(/^(?:Avatar\s*)?[^@a-z0-9]*@?([a-zA-Z0-9_][a-zA-Z0-9._-]+?)(?:\.(?:mp4|mov))?\s*$/i);
+      if (m && m[1].length >= 3 && !/^AD\d+/i.test(m[1])) {
+        username = m[1];
+        const dl = driveLinks.find((d) => d.text.includes(username!));
+        if (dl) fileId = dl.fileId;
+        break;
+      }
+    }
+    if (!username) continue;
+    seenAvaCodes.add(avaCode);
+    avatares.push({ avaNum, avaCode, username, fileId });
+  }
+
+  // 5. Gancho (texto): seccao apos "Gancho" ate proxima heading (Body/Depoimento)
+  let hookText = '';
+  const gIdx = lines.findIndex((l, i) => i > vaHeaderIdx && /^gancho\s*$/i.test(l.trim()));
+  if (gIdx >= 0) {
+    let end = lines.length;
+    for (let i = gIdx + 1; i < lines.length; i++) {
+      const t = lines[i].trim();
+      if (/^body\s*$/i.test(t) || /^depoimento\b/i.test(t)) { end = i; break; }
+    }
+    hookText = lines.slice(gIdx + 1, end).join('\n').trim().replace(/\s*\[[a-z]{1,3}\]/gi, '');
+  }
+
+  // 6. Body
+  let bodyText = '';
+  const bIdx = lines.findIndex((l, i) => i > vaHeaderIdx && /^body\s*$/i.test(l.trim()));
+  if (bIdx >= 0) {
+    let end = lines.length;
+    for (let i = bIdx + 1; i < lines.length; i++) {
+      const t = lines[i].trim();
+      if (/^depoimento\b/i.test(t)) { end = i; break; }
+    }
+    bodyText = lines.slice(bIdx + 1, end).join('\n').trim().replace(/\s*\[[a-z]{1,3}\]/gi, '');
+  }
+
+  // 7. Depoimento (opcional)
+  let depoimentoText: string | null = null;
+  let depoimentoUsername: string | null = null;
+  let depoimentoFileId: string | null = null;
+  const dIdx = lines.findIndex((l, i) => i > vaHeaderIdx && /^depoimento\s+com\s+avatar\s*[:\-]/i.test(l.trim()));
+  if (dIdx >= 0) {
+    const depLine = lines[dIdx].trim();
+    const mUser = depLine.match(/depoimento\s+com\s+avatar\s*[:\-]\s*[^@a-z0-9]*@?([a-zA-Z0-9_][a-zA-Z0-9._-]+?)(?:\.(?:mp4|mov))?\s*$/i);
+    if (mUser) {
+      depoimentoUsername = mUser[1];
+      const dl = driveLinks.find((d) => d.text.includes(depoimentoUsername!));
+      if (dl) depoimentoFileId = dl.fileId;
+    }
+    depoimentoText = lines.slice(dIdx + 1).join('\n').trim().replace(/\s*\[[a-z]{1,3}\]/gi, '');
+  }
+
+  // Validacao minima: precisa ter pelo menos 1 avatar + hook OU body
+  if (avatares.length === 0 || (!hookText && !bodyText)) return null;
+
+  return {
+    baseAdId,
+    linkAdFilename,
+    linkAdFileId,
+    avatares,
+    hookText,
+    bodyText,
+    depoimentoText,
+    depoimentoUsername,
+    depoimentoFileId,
+  };
+}
+
 /** Match fuzzy de avatar HeyGen pelo username do briefing.
  *  Estrategia em ordem de prioridade (score):
  *   220 voice_name_exact: voice_name == @username (igual depois de normalizar)

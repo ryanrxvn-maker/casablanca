@@ -20,8 +20,11 @@ import {
   parseAdSection,
   parseDarkoBriefing,
   matchAvatar,
+  isVATask,
+  parseVABriefing,
   type ParsedAdSection,
   type ParsedDarkoBriefing,
+  type ParsedVABriefing,
 } from '@/lib/copy-parser';
 import { splitCopyIntoParts, cloneVoiceViaExtension } from '@/lib/heygen-extension-bridge';
 import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
@@ -192,6 +195,10 @@ type TaskAnalysis = {
   /** Se essa task e sibling G1/G2 que compartilhou analise com primary,
    *  guarda ID do primary. UI mostra como "↔ compartilhada com AD144G1GL" */
   sharedWithPrimaryId?: string;
+  /** Tasks Variacao de Avatar: pipeline diferente (lipsync por audio do
+   *  AD original, N avatares de variacao). Quando presente, UI renderiza
+   *  alternativa em vez do fluxo normal. */
+  vaBriefing?: ParsedVABriefing;
 };
 
 export default function ClickUpPilotPage() {
@@ -615,7 +622,35 @@ export default function ClickUpPilotPage() {
             setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: `Doc fetch: ${docR.error || 'sem texto'}` } }));
             continue;
           }
-          // 3. Parse: encontra base AD ID + briefing
+          // 2.5 VARIACAO DE AVATAR: detector + parser dedicado
+          // Tasks 'VA - ...' OU docs com 'Variação de avatar' tem pipeline
+          // diferente (lipsync por audio do AD original, N avatares).
+          // Roda parser VA primeiro — se detectado, marca como ready e pula
+          // o fluxo normal de hooks/body/avatares.
+          if (isVATask(task.name) || /varia[cç][aã]o\s+de\s+avatar/i.test(docR.text || '')) {
+            const vaBriefing = parseVABriefing(docR.text, task.name, docR.driveLinks || []);
+            if (vaBriefing) {
+              const siblings = siblingMap.get(task.id) || [task.id];
+              setTaskAnalyses((prev) => {
+                const next = { ...prev };
+                for (const sid of siblings) {
+                  next[sid] = {
+                    ...prev[sid],
+                    status: 'partial',  // VA precisa escolher avatares HeyGen antes de disparar
+                    baseAdId: vaBriefing.baseAdId,
+                    vaBriefing,
+                    dispatchedAt: getDispatchedAt(sid),
+                  };
+                }
+                return next;
+              });
+              continue;
+            }
+            // Detectou VA mas parser falhou → erro estruturado
+            setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: 'Task parece VA mas parser falhou em extrair avatares/hook/body' } }));
+            continue;
+          }
+          // 3. Parse: encontra base AD ID + briefing (fluxo normal nao-VA)
           const baseMatch = task.name.match(/^(AD\d+[A-Z]+)\b/i);
           const baseAdId = baseMatch ? baseMatch[1].toUpperCase() : null;
           if (!baseAdId) {
@@ -2178,7 +2213,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
                                     </button>
                                   )
                                 ) : null}
-                                {a.status === 'ready' || a.status === 'partial' ? (
+                                {a.vaBriefing ? (
+                                  <span
+                                    className="mono shrink-0 rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200"
+                                    title="Variacao de Avatar: pipeline diferente (lipsync por audio do AD original)"
+                                  >
+                                    📹 VA · {a.vaBriefing.avatares.length} avatar{a.vaBriefing.avatares.length === 1 ? '' : 'es'}
+                                  </span>
+                                ) : (a.status === 'ready' || a.status === 'partial') ? (
                                   <button
                                     type="button"
                                     onClick={() => dispatchTaskToHeyGen(a.taskId)}
@@ -2190,7 +2232,82 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
                                   </button>
                                 ) : null}
                               </div>
-                              {a.status === 'ready' || a.status === 'partial' ? (
+                              {/* RENDER VARIACAO DE AVATAR — pipeline diferente */}
+                              {a.vaBriefing ? (
+                                <div className="mt-1 grid gap-2">
+                                  <div className="rounded-[10px] border border-cyan-500/40 bg-cyan-500/5 p-3">
+                                    <div className="mono mb-2 text-[10px] uppercase tracking-widest text-cyan-200">
+                                      📹 Variação de Avatar · {a.vaBriefing.baseAdId}
+                                    </div>
+                                    <div className="text-[11px] text-text-muted">
+                                      Pipeline diferente: lipsync usa a voz do AD original (sem TTS).
+                                      Gera <strong className="text-cyan-300">{a.vaBriefing.avatares.length} vídeo{a.vaBriefing.avatares.length === 1 ? '' : 's'} final{a.vaBriefing.avatares.length === 1 ? '' : 'is'}</strong>
+                                      {a.vaBriefing.depoimentoText ? ' + 1 depoimento' : ''}.
+                                    </div>
+                                    {a.vaBriefing.linkAdFilename ? (
+                                      <div className="mt-2 mono text-[10px] flex items-center gap-2">
+                                        <span className="text-text-muted">AD original:</span>
+                                        <span className="rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-cyan-200">📎 {a.vaBriefing.linkAdFilename}</span>
+                                        {a.vaBriefing.linkAdFileId ? (
+                                          <span className="mono text-[9px] uppercase tracking-widest text-lime">✓ Drive ID detectado</span>
+                                        ) : (
+                                          <span className="mono text-[9px] uppercase tracking-widest text-yellow-300">⚠ Sem Drive ID — link não detectado</span>
+                                        )}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                  {/* Avatares de variacao */}
+                                  <div className="mono text-[9px] uppercase tracking-widest text-text-muted">
+                                    Avatares de variação ({a.vaBriefing.avatares.length}) — cada um gera 1 vídeo final
+                                  </div>
+                                  {a.vaBriefing.avatares.map((av) => {
+                                    const thumbUrl = av.fileId ? `https://drive.google.com/thumbnail?id=${av.fileId}&sz=w200` : null;
+                                    return (
+                                      <div key={av.avaCode} className="rounded-[10px] border border-line-strong bg-bg/50 p-2 flex items-center gap-3">
+                                        {thumbUrl ? (
+                                          /* eslint-disable-next-line @next/next/no-img-element */
+                                          <img src={thumbUrl} alt={av.username} className="h-12 w-12 shrink-0 rounded-full object-cover" referrerPolicy="no-referrer" />
+                                        ) : (
+                                          <div className="h-12 w-12 shrink-0 rounded-full bg-cyan-500/10 flex items-center justify-center mono text-[10px] text-cyan-300">{av.avaCode}</div>
+                                        )}
+                                        <div className="flex-1 min-w-0">
+                                          <div className="mono text-[10px] uppercase tracking-widest text-cyan-200">{av.avaCode}</div>
+                                          <div className="text-[11px] text-text-muted">@{av.username}.mp4</div>
+                                          <div className="mono text-[9px] uppercase tracking-widest text-yellow-300 mt-0.5">→ saída: {a.vaBriefing!.baseAdId.replace(/\s+/g, '')}-{av.avaCode}.mp4</div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                  {/* Hook + body preview */}
+                                  {a.vaBriefing.hookText ? (
+                                    <details className="rounded-[10px] border border-line bg-bg/40 p-2">
+                                      <summary className="mono cursor-pointer text-[10px] uppercase tracking-widest text-lime">Gancho ({a.vaBriefing.hookText.length} chars)</summary>
+                                      <div className="mt-1.5 text-[11px] text-text-muted whitespace-pre-wrap">{a.vaBriefing.hookText.slice(0, 400)}{a.vaBriefing.hookText.length > 400 ? '…' : ''}</div>
+                                    </details>
+                                  ) : null}
+                                  {a.vaBriefing.bodyText ? (
+                                    <details className="rounded-[10px] border border-line bg-bg/40 p-2">
+                                      <summary className="mono cursor-pointer text-[10px] uppercase tracking-widest text-fuchsia-300">Body ({a.vaBriefing.bodyText.length} chars)</summary>
+                                      <div className="mt-1.5 text-[11px] text-text-muted whitespace-pre-wrap">{a.vaBriefing.bodyText.slice(0, 600)}{a.vaBriefing.bodyText.length > 600 ? '…' : ''}</div>
+                                    </details>
+                                  ) : null}
+                                  {/* Depoimento opcional */}
+                                  {a.vaBriefing.depoimentoText ? (
+                                    <div className="rounded-[10px] border border-fuchsia-500/40 bg-fuchsia-500/5 p-2">
+                                      <div className="mono mb-1 text-[10px] uppercase tracking-widest text-fuchsia-200 flex items-center gap-2">
+                                        <span>🎭 Depoimento com avatar</span>
+                                        {a.vaBriefing.depoimentoUsername ? <span className="rounded border border-fuchsia-500/40 px-1.5 py-0.5">@{a.vaBriefing.depoimentoUsername}</span> : null}
+                                      </div>
+                                      <div className="text-[11px] text-text-muted line-clamp-3">{a.vaBriefing.depoimentoText.slice(0, 280)}{a.vaBriefing.depoimentoText.length > 280 ? '…' : ''}</div>
+                                    </div>
+                                  ) : null}
+                                  <div className="rounded-[10px] border border-yellow-500/40 bg-yellow-500/5 p-3 text-[11px] text-yellow-200">
+                                    ⏳ Pipeline VA em desenvolvimento (Fase B). UI já identifica e mostra previsibilidade —
+                                    falta implementar download do AD original, extração de áudio, split sem cortar fala,
+                                    dispatch por avatar e mount final.
+                                  </div>
+                                </div>
+                              ) : a.status === 'ready' || a.status === 'partial' ? (
                                 <div className="mt-1 grid gap-1 text-text-muted">
                                   <div className="mono text-[10px] flex flex-wrap items-center gap-2">
                                     <span>{a.totalParts} takes ({a.hookCount} hook{(a.hookCount ?? 0) === 1 ? '' : 's'} + {a.bodyPartsCount} body split{(a.bodyPartsCount ?? 0) === 1 ? '' : 's'}) — Avatar III</span>
