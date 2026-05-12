@@ -82,7 +82,6 @@ export default function PointsPage() {
     try {
       const teams = await listTeams();
       setAvailableTeams(teams.map((t: any) => ({ id: t.id, name: t.name })));
-      // Workspace: user-selecionado OU primeiro
       const teamId = selectedTeamId || teams[0]?.id;
       if (!teamId) { setPointsError('Sem teams ClickUp.'); return; }
       const me = await getCurrentUser();
@@ -91,7 +90,8 @@ export default function PointsPage() {
 
       type Task = Awaited<ReturnType<typeof listTasksAll>>[number];
 
-      // ESTRATEGIA 1: tasks com assignee = me, mes atual
+      // ESTRATEGIA ULTRA-ROBUSTA: pega TODAS tasks do user no team
+      // (sem date filter pra nao perder nada) + filtra client-side
       const tryFetch = async (label: string, opts: any): Promise<Task[]> => {
         try {
           const r = await listTasksAll(teamId, opts);
@@ -105,64 +105,57 @@ export default function PointsPage() {
         }
       };
 
-      const [withAssignee, withoutAssignee, allClosedMonth] = await Promise.all([
-        tryFetch('assignee=me + includeClosed + dateUpdatedGt=mes', {
-          assigneeIds: [String(me.id)], subtasks: false, includeClosed: true, dateUpdatedGt: firstOfMonth,
-        }),
-        tryFetch('SEM assignee + includeClosed + dateUpdatedGt=mes (fallback)', {
-          subtasks: false, includeClosed: true, dateUpdatedGt: firstOfMonth,
-        }),
-        tryFetch('assignee=me + dateClosedGt=mes', {
-          assigneeIds: [String(me.id)], subtasks: false, includeClosed: true, dateClosedGt: firstOfMonth,
-        }),
-      ]);
+      // Pega TUDO assignee=me incluindo subtarefas + fechadas
+      const allMine = await tryFetch('TODAS tasks assignee=me (incluindo subtasks+closed)', {
+        assigneeIds: [String(me.id)],
+        subtasks: true,
+        includeClosed: true,
+      });
 
-      // Junta + dedup
-      const seen = new Set<string>();
-      const allTasks: Task[] = [];
-      for (const arr of [withAssignee, withoutAssignee, allClosedMonth]) {
-        for (const t of arr) {
-          if (seen.has(t.id)) continue;
-          seen.add(t.id);
-          // Se veio sem assignee filter, mantem so as que o user e responsavel
-          const assigneeIds = (t.assignees || []).map((a: any) => String(a.id));
-          if (!assigneeIds.includes(String(me.id))) continue;
-          allTasks.push(t);
-        }
-      }
-
-      // Coleta TODOS nomes de custom fields pra debug
+      // Coleta TODOS nomes de custom fields
       const allFieldNames = new Map<string, number>();
-      for (const t of allTasks) {
+      for (const t of allMine) {
         for (const f of (t.custom_fields || [])) {
           allFieldNames.set(f.name || '?', (allFieldNames.get(f.name || '?') || 0) + 1);
         }
       }
       const fieldNamesList = Array.from(allFieldNames.entries()).sort((a, b) => b[1] - a[1]);
 
-      // Filtra: tasks fechadas/done/atualizadas este mes
-      const monthTasks = allTasks.filter((t) => {
-        const closed = Number(t.date_closed) || 0;
-        const done = Number(t.date_done) || 0;
-        const updated = Number(t.date_updated) || 0;
-        return closed >= firstOfMonth || done >= firstOfMonth || updated >= firstOfMonth;
+      // Identifica statuses unicos pra debug
+      const statusCounts = new Map<string, number>();
+      for (const t of allMine) {
+        const key = `${t.status?.status || '?'} [${t.status?.type || '?'}]`;
+        statusCounts.set(key, (statusCounts.get(key) || 0) + 1);
+      }
+      const statusList = Array.from(statusCounts.entries()).sort((a, b) => b[1] - a[1]);
+
+      // Tasks CONCLUIDAS este mes (replica widget Pontuacao):
+      //   - status.type === 'closed' OU 'done'
+      //   - date_closed BETWEEN firstOfMonth AND now
+      const completedThisMonth = allMine.filter((t) => {
+        const stype = (t.status?.type || '').toLowerCase();
+        const isClosed = stype === 'closed' || stype === 'done';
+        const closedTs = Number(t.date_closed) || 0;
+        const doneTs = Number(t.date_done) || 0;
+        const completionTs = closedTs || doneTs;
+        return isClosed && completionTs >= firstOfMonth;
       });
 
-      // Regex match: aceita PESO, PONTOS, POINTS, SCORE, VALOR, NOTA
-      const fieldMatcher = /\b(peso|pontos?|points?|score|valor|nota)\b/i;
+      // Match PESO field (priority over alternativas)
+      const fieldMatcher = /^(peso|pontos?|points?|score)$/i;
       let total = 0;
       let countedTasks = 0;
       const matchedFieldName: Record<string, number> = {};
       const sampleScoreTasks: Array<{ name: string; status: string; peso: number; closed: string | null }> = [];
-      for (const t of monthTasks) {
-        const matchedField = (t.custom_fields || []).find((f: any) => fieldMatcher.test(f.name || ''));
+      for (const t of completedThisMonth) {
+        const matchedField = (t.custom_fields || []).find((f: any) => fieldMatcher.test((f.name || '').trim()));
         if (matchedField?.value != null) {
           const val = parseFloat(String(matchedField.value));
           if (!isNaN(val)) {
             total += val;
             countedTasks++;
             matchedFieldName[matchedField.name] = (matchedFieldName[matchedField.name] || 0) + 1;
-            if (sampleScoreTasks.length < 10) {
+            if (sampleScoreTasks.length < 15) {
               const closedTs = Number(t.date_closed);
               sampleScoreTasks.push({
                 name: t.name,
@@ -175,29 +168,43 @@ export default function PointsPage() {
         }
       }
 
+      // Tasks atrasadas (debug — equivale ao 17.2 do print do user)
+      const overdueTasks = allMine.filter((t) => {
+        const stype = (t.status?.type || '').toLowerCase();
+        if (stype === 'closed' || stype === 'done') return false;
+        const due = Number(t.due_date) || 0;
+        return due > 0 && due < Date.now();
+      });
+      let overdueSum = 0;
+      for (const t of overdueTasks) {
+        const field = (t.custom_fields || []).find((f: any) => fieldMatcher.test((f.name || '').trim()));
+        if (field?.value != null) {
+          const v = parseFloat(String(field.value));
+          if (!isNaN(v)) overdueSum += v;
+        }
+      }
+
       const debug = {
         teams: teams.map((t: any) => ({ id: t.id, name: t.name })),
         selectedTeamId: teamId,
         userId: me.id,
         userName: me.username,
         firstOfMonth: new Date(firstOfMonth).toISOString().slice(0, 10),
-        totalTasks: allTasks.length,
-        monthTasks: monthTasks.length,
-        countByStrategy: {
-          withAssignee: withAssignee.length,
-          withoutAssignee: withoutAssignee.length,
-          allClosedMonth: allClosedMonth.length,
-        },
+        totalTasksMine: allMine.length,
+        completedThisMonth: completedThisMonth.length,
+        overdueTasks: overdueTasks.length,
+        overdueSum: Math.round(overdueSum * 100) / 100,
+        statusesFound: statusList.slice(0, 20),
         customFieldsFound: fieldNamesList.slice(0, 40),
         matchedField: matchedFieldName,
         countedTasks,
-        totalPoints: total,
+        totalPoints: Math.round(total * 100) / 100,
         sampleScoreTasks,
         errors,
       };
       console.log('[points] DEBUG:', debug);
       setDebugInfo(debug);
-      setCurrentPoints(total);
+      setCurrentPoints(Math.round(total * 100) / 100);
     } catch (e) {
       setPointsError((e as Error)?.message || 'Erro fetch pontos');
     } finally {
@@ -335,7 +342,7 @@ export default function PointsPage() {
                 onClick={() => setShowDebug((v) => !v)}
                 className="mono text-[10px] uppercase tracking-widest text-text-muted hover:text-cyan-300"
               >
-                {showDebug ? '▼' : '▶'} debug ({debugInfo.totalTasks} tasks · {debugInfo.monthTasks} este mes · {debugInfo.countedTasks} com campo de pontos)
+                {showDebug ? '▼' : '▶'} debug ({debugInfo.totalTasksMine} tasks suas · {debugInfo.completedThisMonth} concluídas este mes · {debugInfo.countedTasks} com PESO · atrasadas: {debugInfo.overdueTasks} = {debugInfo.overdueSum}pts)
               </button>
               {showDebug ? (
                 <div className="mt-2 rounded border border-cyan-500/30 bg-cyan-500/5 p-3 text-[11px]">
@@ -364,18 +371,32 @@ export default function PointsPage() {
 
                   <div className="space-y-1 text-text-muted">
                     <div>User: <span className="text-white">{debugInfo.userName} (id {debugInfo.userId})</span></div>
-                    <div>Workspace selecionado: <span className="text-white">{debugInfo.selectedTeamId}</span></div>
+                    <div>Workspace: <span className="text-white">{debugInfo.selectedTeamId}</span></div>
                     <div>Inicio do mes: <span className="text-white">{debugInfo.firstOfMonth}</span></div>
-                    <div>Estrategias:
-                      <span className="ml-2 text-white">com assignee=me: {debugInfo.countByStrategy?.withAssignee}</span> ·
-                      <span className="ml-2 text-white">sem assignee filter: {debugInfo.countByStrategy?.withoutAssignee}</span> ·
-                      <span className="ml-2 text-white">date_closed: {debugInfo.countByStrategy?.allClosedMonth}</span>
-                    </div>
-                    <div>Total tasks (eu sou assignee): <span className="text-white">{debugInfo.totalTasks}</span></div>
-                    <div>Tasks no mes (closed/done/updated): <span className="text-white">{debugInfo.monthTasks}</span></div>
-                    <div>Tasks com campo de pontos: <span className="text-white">{debugInfo.countedTasks}</span></div>
-                    <div>Soma final: <span className="text-cyan-300 font-bold">{debugInfo.totalPoints} pts</span></div>
+                    <div>Total tasks suas (qualquer status): <span className="text-white">{debugInfo.totalTasksMine}</span></div>
+                    <div>CONCLUIDAS este mes (status closed/done): <span className="text-white">{debugInfo.completedThisMonth}</span></div>
+                    <div>Com campo PESO: <span className="text-white">{debugInfo.countedTasks}</span></div>
+                    <div>Soma PESO concluidas: <span className="text-cyan-300 font-bold">{debugInfo.totalPoints} pts</span></div>
+                    <div>Atrasadas (overdue): <span className="text-white">{debugInfo.overdueTasks} tasks · {debugInfo.overdueSum} pts</span></div>
                   </div>
+
+                  {/* Statuses encontrados — debug pra entender labels do workflow */}
+                  {(debugInfo.statusesFound || []).length > 0 ? (
+                    <div className="mt-3">
+                      <div className="mono mb-1 text-[10px] uppercase tracking-widest text-cyan-300">// STATUSES NAS SUAS TASKS</div>
+                      <div className="grid grid-cols-2 gap-1">
+                        {debugInfo.statusesFound.map((entry: any) => {
+                          const [label, count] = entry;
+                          const isClosedType = /\[closed\]|\[done\]/i.test(label);
+                          return (
+                            <div key={label} className={`rounded px-2 py-1 text-[10px] ${isClosedType ? 'bg-lime/10 text-lime' : 'bg-bg/40 text-text-muted'}`}>
+                              <span className="mono">{label}</span> <span className="opacity-60">({count})</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
 
                   {/* Erros agregados */}
                   {(debugInfo.errors || []).length > 0 ? (
