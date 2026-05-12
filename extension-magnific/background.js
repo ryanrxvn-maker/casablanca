@@ -107,9 +107,9 @@ async function handleForward(msg, bridgeTabId) {
     MG_GENERATE_IMAGE: 240000,   // 4min
     MG_ANIMATE_IMAGE: 720000,    // 12min
     MG_DOWNLOAD_ASSET: 120000,
-    // Pipeline batch: 30 takes * (1min image + 5min video) = ~3h teorico, mas com
-    // concorrencia 12 imagens + 6 videos cai pra ~30min. Damos 2h de margem.
-    MG_RUN_PIPELINE: 7200000,
+    // Pipeline batch: 30 takes em relaxed mode (com 12 paralelos imagens + 6 paralelos
+    // videos) pode levar 1-2h. Damos 4h de margem.
+    MG_RUN_PIPELINE: 14400000,
   };
   const timeoutMs = timeouts[msg.type] || 60000;
 

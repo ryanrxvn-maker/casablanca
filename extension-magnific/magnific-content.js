@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.1.5';
+const DARKO_MG_VERSION = '3.1.6';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -311,7 +311,8 @@ async function handleRunPipeline(payload, onProgress) {
         const { workflowRunId } = await executeWorkflow(pair.imageNodeId, space.spaceId);
         pair.imageRunId = workflowRunId;
         const expectedImgPrompt = takes.find((t) => (t.idx ?? 0) === pair.idx)?.imagePrompt || '';
-        const url = await waitForNodeImage(pair.imageNodeId, 240000, expectedImgPrompt);
+        // Relaxed mode pode demorar 5-7 min cada imagem quando ha 12 paralelos
+        const url = await waitForNodeImage(pair.imageNodeId, 600000, expectedImgPrompt);
         pair.imageUrl = url;
         pair.imageStatus = 'ok';
       } catch (e) {
@@ -339,7 +340,8 @@ async function handleRunPipeline(payload, onProgress) {
         pair.videoRunId = workflowRunId;
         // Passa videoPrompt pra match exato no assets endpoint (filename = prompt)
         const expectedPrompt = takes.find((t) => (t.idx ?? 0) === pair.idx)?.videoPrompt || '';
-        const url = await waitForNodeVideo(pair.videoNodeId, 720000, expectedPrompt);
+        // Relaxed mode + Kling em batch pode passar de 10min cada video
+        const url = await waitForNodeVideo(pair.videoNodeId, 900000, expectedPrompt);
         pair.videoUrl = url;
         pair.videoStatus = 'ok';
       } catch (e) {
