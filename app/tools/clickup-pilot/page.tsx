@@ -677,6 +677,33 @@ export default function ClickUpPilotPage() {
             const taskAvaNums = extractAvaNumsFromTaskName(task.name);
             const vaBriefing = parseVABriefing(docR.text, task.name, docR.driveLinks || [], taskAvaNums);
             if (vaBriefing) {
+              // MATCH AGGRESSIVO de avatar fileId via driveLinks.
+              // Caso parseVABriefing nao tenha resolvido (text dos links nao
+              // bate exato), tenta:
+              //  1. Match parcial: filename contem username OU username contem filename
+              //  2. Match por nucleus (strip digitos e mp4)
+              const allLinks = docR.driveLinks || [];
+              for (const av of vaBriefing.avatares) {
+                if (av.fileId) continue;
+                const target = av.username.toLowerCase().replace(/\.(mp4|mov)$/i, '');
+                const targetCore = target.replace(/\d+$/, ''); // 'manualdohomemsolo2' → 'manualdohomemsolo'
+                // 1. Match direto: text contem target
+                let match = allLinks.find((d: any) => {
+                  const t = (d.text || '').toLowerCase();
+                  return t.includes(target);
+                });
+                // 2. Match nucleus
+                if (!match && targetCore.length > 4) {
+                  match = allLinks.find((d: any) => {
+                    const t = (d.text || '').toLowerCase().replace(/\.(mp4|mov)$/i, '').replace(/\d+$/, '');
+                    return t === targetCore || t.includes(targetCore) || targetCore.includes(t);
+                  });
+                }
+                if (match) {
+                  av.fileId = match.fileId;
+                  console.log(`[clickup-pilot] VA: resolved avatar ${av.avaCode} (@${av.username}) → ${match.fileId} via aggressive match`);
+                }
+              }
               // AUTO-RESOLVE DRIVE ID DO AD ORIGINAL via pasta CRIATIVOS
               // Quando o parser nao achou linkAdFileId mas tem linkAdFilename,
               // procura pasta CRIATIVOS (link no topo do doc) + lista files +
