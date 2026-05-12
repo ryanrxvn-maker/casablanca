@@ -1,30 +1,40 @@
 /**
  * Motor de avatar (III/IV/V) — config global por task e estimativa
- * de creditos.
+ * de creditos REAIS HeyGen (descoberto via /v1/payment/product, 12/05/2026):
+ *
+ *   Avatar V/IV: 1 minuto = 20 creditos
+ *   Avatar III:  0 creditos (unlimited_regular no plano Creator+)
  *
  * Modos:
  *  - 'global': UM motor pra todos os takes (default III)
  *  - 'percent': distribui aleatoriamente respeitando porcentagens
- *    (60% III + 40% IV = 6 takes III + 4 takes IV em 10 totais)
  *  - 'individual': cada take/avatar tem seu motor (definido no slot)
- *
- * Custo estimado (creditos por take):
- *  - III: 0 (gratuito na maioria dos planos)
- *  - IV:  1 (premium — consome creditos)
- *  - V:   3 (premium+, qualidade maxima — consome mais)
- * Valores podem ser ajustados em CREDIT_COST sem mudar a logica.
  */
 
 export type Motor = 'III' | 'IV' | 'V';
 
 export const MOTORS: Motor[] = ['III', 'IV', 'V'];
 
-/** Custo em creditos por take. Pode ser ajustado conforme plano do user. */
+/** Custo em creditos por MINUTO de video gerado (HeyGen oficial).
+ *  Avatar III roda em unlimited_regular slots (separado do credit pack). */
+export const CREDIT_COST_PER_MIN: Record<Motor, number> = {
+  III: 0,   // gratuito (consome priority slot, nao credit)
+  IV: 20,   // 1 min = 20 creditos
+  V: 20,    // 1 min = 20 creditos (mesmo custo)
+};
+
+/** @deprecated mantido pra retrocompatibilidade. Calcula custo por take
+ *  assumindo duracao default de 30s (0.5 min). Use estimateCost() com
+ *  averageTakeSeconds pra valores precisos. */
 export const CREDIT_COST: Record<Motor, number> = {
   III: 0,
-  IV: 1,
-  V: 3,
+  IV: 10,  // 30s × 20/min = 10
+  V: 10,
 };
+
+/** Duracao media estimada por take (segundos) — usado quando user nao
+ *  informa duracao real. 30s eh tipico em videos curtos do user. */
+export const DEFAULT_TAKE_SECONDS = 30;
 
 export type MotorModeGlobal = { kind: 'global'; motor: Motor };
 export type MotorModePercent = { kind: 'percent'; percent: Record<Motor, number> };
@@ -107,18 +117,43 @@ export function resolveMotors(
   return shuffleSeeded(out, opts.seed || 'default');
 }
 
-/** Calcula custo total em creditos pra um plano de takes. */
-export function calculateCost(motors: Motor[]): { total: number; byMotor: Record<Motor, number> } {
+/** Calcula custo total em creditos baseado em duracoes por take.
+ *  motors[i] = motor do take i. takeSeconds[i] = duracao do take i (default 30s).
+ *  Custo = sum(duration_min_i × CREDIT_COST_PER_MIN[motor_i]) */
+export function calculateCost(
+  motors: Motor[],
+  takeSeconds?: number[],
+): { total: number; byMotor: Record<Motor, number>; minutesByMotor: Record<Motor, number> } {
   const byMotor: Record<Motor, number> = { III: 0, IV: 0, V: 0 };
-  for (const m of motors) byMotor[m]++;
-  const total = byMotor.III * CREDIT_COST.III + byMotor.IV * CREDIT_COST.IV + byMotor.V * CREDIT_COST.V;
-  return { total, byMotor };
+  const minutesByMotor: Record<Motor, number> = { III: 0, IV: 0, V: 0 };
+  for (let i = 0; i < motors.length; i++) {
+    const m = motors[i];
+    const sec = takeSeconds?.[i] ?? DEFAULT_TAKE_SECONDS;
+    const min = sec / 60;
+    byMotor[m]++;
+    minutesByMotor[m] += min;
+  }
+  // Round pra cima pq HeyGen cobra por minuto iniciado (assumindo)
+  const total =
+    Math.ceil(minutesByMotor.III * CREDIT_COST_PER_MIN.III) +
+    Math.ceil(minutesByMotor.IV * CREDIT_COST_PER_MIN.IV) +
+    Math.ceil(minutesByMotor.V * CREDIT_COST_PER_MIN.V);
+  return { total, byMotor, minutesByMotor };
 }
 
-/** Calcula custo a partir do config + numero de takes (sem precisar resolver array). */
-export function estimateCost(config: MotorConfig, takeCount: number, slotIds?: string[]): { total: number; byMotor: Record<Motor, number> } {
-  const motors = resolveMotors(config, takeCount, { slotIds, seed: 'preview' });
-  return calculateCost(motors);
+/** Estimativa de custo a partir do config + numero de takes.
+ *  Aceita takeSeconds ou averageTakeSeconds (uniforme pra todos os takes). */
+export function estimateCost(
+  config: MotorConfig,
+  takeCount: number,
+  opts: { slotIds?: string[]; takeSeconds?: number[]; averageTakeSeconds?: number } = {},
+): { total: number; byMotor: Record<Motor, number>; minutesByMotor: Record<Motor, number> } {
+  const motors = resolveMotors(config, takeCount, { slotIds: opts.slotIds, seed: 'preview' });
+  const takeSeconds = opts.takeSeconds
+    ?? (opts.averageTakeSeconds != null
+        ? Array(takeCount).fill(opts.averageTakeSeconds)
+        : undefined);
+  return calculateCost(motors, takeSeconds);
 }
 
 /** Shuffle Fisher-Yates deterministico (hash da seed → PRNG). */

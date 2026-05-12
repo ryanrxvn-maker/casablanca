@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { MOTORS, CREDIT_COST, estimateCost, sanitizePercent, type Motor, type MotorConfig } from '@/lib/motor-config';
+import { MOTORS, CREDIT_COST_PER_MIN, DEFAULT_TAKE_SECONDS, estimateCost, sanitizePercent, type Motor, type MotorConfig } from '@/lib/motor-config';
 import { useHeyGenCredits } from '@/lib/use-heygen-credits';
 
 /**
@@ -27,7 +27,9 @@ export function MotorConfigPicker({
   slotIds?: string[];
 }) {
   const [collapsed, setCollapsed] = useState(false);
-  const cost = estimateCost(config, takeCount, slotIds);
+  // Duracao media por take em segundos (default 30s — pode ajustar)
+  const [averageTakeSeconds, setAverageTakeSeconds] = useState<number>(DEFAULT_TAKE_SECONDS);
+  const cost = estimateCost(config, takeCount, { slotIds, averageTakeSeconds });
   const { credits, loading: loadingCredits, refresh: refreshCredits } = useHeyGenCredits(true);
 
   const planCreditAvail = credits?.plan_credit?.amount ?? null;
@@ -58,7 +60,7 @@ export function MotorConfigPicker({
                 ? 'border border-yellow-500/40 bg-yellow-500/10 text-yellow-200'
                 : 'border border-red-500/40 bg-red-500/10 text-red-300')
             }
-            title={`Custo estimado: III=${cost.byMotor.III}×0 + IV=${cost.byMotor.IV}×${CREDIT_COST.IV} + V=${cost.byMotor.V}×${CREDIT_COST.V} = ${cost.total} creditos`}
+            title={`HeyGen oficial: 1 min Avatar V/IV = 20 créditos · III free. Total previa: ${cost.total}c`}
           >
             {cost.total === 0 ? '✓ Free' : `${cost.total} créd`}
           </span>
@@ -124,11 +126,11 @@ export function MotorConfigPicker({
                             : 'border-fuchsia-500/60 bg-fuchsia-500/20 text-fuchsia-200'
                           : 'border-line-strong bg-bg/40 text-text-muted hover:border-cyan-500/40')
                       }
-                      title={CREDIT_COST[m] === 0 ? 'Gratuito' : `${CREDIT_COST[m]} créditos/take`}
+                      title={CREDIT_COST_PER_MIN[m] === 0 ? 'Gratuito (unlimited_regular)' : `Avatar ${m}: ${CREDIT_COST_PER_MIN[m]} créditos por minuto`}
                     >
                       Avatar {m}
                       <div className="mono text-[8px] opacity-70 mt-0.5">
-                        {CREDIT_COST[m] === 0 ? 'free' : `${CREDIT_COST[m]} créd/take`}
+                        {CREDIT_COST_PER_MIN[m] === 0 ? 'free' : `${CREDIT_COST_PER_MIN[m]}c/min`}
                       </div>
                     </button>
                   );
@@ -157,7 +159,7 @@ export function MotorConfigPicker({
                             : 'bg-fuchsia-500/10 text-fuchsia-200')
                         }
                       >
-                        {m} ({CREDIT_COST[m]}c)
+                        {m} ({CREDIT_COST_PER_MIN[m]}c/min)
                       </span>
                       <input
                         type="range"
@@ -211,24 +213,46 @@ export function MotorConfigPicker({
             </div>
           ) : null}
 
-          {/* Resumo creditos */}
+          {/* Duracao media por take (afeta calculo de creditos) */}
+          <div className="flex items-center gap-2 rounded border border-line/40 bg-bg/40 px-3 py-2">
+            <span className="mono shrink-0 text-[10px] uppercase tracking-widest text-text-muted">
+              Duracao media por take:
+            </span>
+            <input
+              type="range"
+              min={10}
+              max={120}
+              step={5}
+              value={averageTakeSeconds}
+              onChange={(e) => setAverageTakeSeconds(Number(e.target.value))}
+              className="flex-1 accent-cyan-400"
+            />
+            <span className="mono w-14 shrink-0 text-right text-[10px] font-bold text-cyan-300">
+              {averageTakeSeconds}s
+            </span>
+          </div>
+
+          {/* Resumo creditos — HeyGen cobra por MINUTO de video */}
           <div className="rounded border border-line/40 bg-bg/40 px-3 py-2 text-[11px]">
             <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">
-              Previa de custo ({takeCount} takes)
+              Previa de custo ({takeCount} takes × {averageTakeSeconds}s = {(takeCount * averageTakeSeconds / 60).toFixed(1)} min)
             </div>
             <div className="flex flex-wrap gap-2">
               <span className="mono text-lime">
-                III: {cost.byMotor.III} {cost.byMotor.III === 1 ? 'take' : 'takes'} (free)
+                III: {cost.byMotor.III} {cost.byMotor.III === 1 ? 'take' : 'takes'} ({cost.minutesByMotor.III.toFixed(1)}min · free)
               </span>
               <span className="mono text-yellow-200">
-                IV: {cost.byMotor.IV} {cost.byMotor.IV === 1 ? 'take' : 'takes'} ({cost.byMotor.IV * CREDIT_COST.IV}c)
+                IV: {cost.byMotor.IV} {cost.byMotor.IV === 1 ? 'take' : 'takes'} ({cost.minutesByMotor.IV.toFixed(1)}min · {Math.ceil(cost.minutesByMotor.IV * CREDIT_COST_PER_MIN.IV)}c)
               </span>
               <span className="mono text-fuchsia-200">
-                V: {cost.byMotor.V} {cost.byMotor.V === 1 ? 'take' : 'takes'} ({cost.byMotor.V * CREDIT_COST.V}c)
+                V: {cost.byMotor.V} {cost.byMotor.V === 1 ? 'take' : 'takes'} ({cost.minutesByMotor.V.toFixed(1)}min · {Math.ceil(cost.minutesByMotor.V * CREDIT_COST_PER_MIN.V)}c)
               </span>
               <span className="ml-auto mono font-bold text-cyan-300">
                 ≈ {cost.total} créditos
               </span>
+            </div>
+            <div className="mt-1 text-[9px] text-text-muted">
+              HeyGen oficial: Avatar V/IV = <strong>20 créditos por minuto</strong>. Avatar III = free (consome priority slot).
             </div>
           </div>
 
@@ -327,7 +351,7 @@ export function MotorSlotPicker({
             key={m}
             type="button"
             onClick={() => setMotor(m)}
-            title={CREDIT_COST[m] === 0 ? `Avatar ${m} · gratuito` : `Avatar ${m} · ${CREDIT_COST[m]} créditos/take`}
+            title={CREDIT_COST_PER_MIN[m] === 0 ? `Avatar ${m} · gratuito` : `Avatar ${m} · ${CREDIT_COST_PER_MIN[m]} créditos por minuto`}
             className={
               'mono px-2 py-1 text-[10px] uppercase tracking-widest transition ' +
               (active
