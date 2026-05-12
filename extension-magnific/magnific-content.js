@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.1.3';
+const DARKO_MG_VERSION = '3.1.4';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -100,7 +100,14 @@ async function fetchBuffer(url, timeoutMs = 120000) {
   const ctrl = new AbortController();
   const tid = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const r = await fetch(url, { credentials: 'include', signal: ctrl.signal });
+    // URLs assinados de pikaso.cdnpk.net usam signed-token; credentials:'include'
+    // pode falhar com CORS. Tenta 'omit' primeiro (signed), depois 'include' como
+    // fallback pra endpoints same-origin.
+    const isSignedCdn = /pikaso\.cdnpk\.net|cdnpk\.net/i.test(url);
+    const r = await fetch(url, {
+      credentials: isSignedCdn ? 'omit' : 'include',
+      signal: ctrl.signal,
+    });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     return await r.arrayBuffer();
   } finally {
@@ -303,7 +310,8 @@ async function handleRunPipeline(payload, onProgress) {
         await selectNodeAndEnsureUnlimited(pair.imageNodeId);
         const { workflowRunId } = await executeWorkflow(pair.imageNodeId, space.spaceId);
         pair.imageRunId = workflowRunId;
-        const url = await waitForNodeImage(pair.imageNodeId, 240000);
+        const expectedImgPrompt = takes.find((t) => (t.idx ?? 0) === pair.idx)?.imagePrompt || '';
+        const url = await waitForNodeImage(pair.imageNodeId, 240000, expectedImgPrompt);
         pair.imageUrl = url;
         pair.imageStatus = 'ok';
       } catch (e) {
@@ -329,7 +337,9 @@ async function handleRunPipeline(payload, onProgress) {
         await selectNodeAndEnsureUnlimited(pair.videoNodeId);
         const { workflowRunId } = await executeWorkflow(pair.videoNodeId, space.spaceId);
         pair.videoRunId = workflowRunId;
-        const url = await waitForNodeVideo(pair.videoNodeId, 720000);
+        // Passa videoPrompt pra match exato no assets endpoint (filename = prompt)
+        const expectedPrompt = takes.find((t) => (t.idx ?? 0) === pair.idx)?.videoPrompt || '';
+        const url = await waitForNodeVideo(pair.videoNodeId, 720000, expectedPrompt);
         pair.videoUrl = url;
         pair.videoStatus = 'ok';
       } catch (e) {
@@ -997,34 +1007,106 @@ async function executeWorkflow(startNodeId, spaceId) {
 
 // ---- Wait for renders ----
 
-async function waitForNodeImage(uuid, timeoutMs) {
-  return await waitFor(() => {
-    const node = findNodeElement(uuid);
-    if (!node) return null;
-    const imgs = node.querySelectorAll('img');
-    for (const im of imgs) {
-      const s = im.src || '';
-      if (/pikaso\.cdnpk\.net\/private\/production\//.test(s) && !/placeholder|spaces-cover/i.test(s)) {
-        return s;
+async function waitForNodeImage(uuid, timeoutMs, expectedPrompt) {
+  // Pass 1: DOM polling
+  try {
+    return await waitFor(() => {
+      const node = findNodeElement(uuid);
+      if (!node) return null;
+      const imgs = node.querySelectorAll('img');
+      for (const im of imgs) {
+        const s = im.src || '';
+        if (/pikaso\.cdnpk\.net\/private\/production\/\d+\/render\./.test(s) &&
+            !/placeholder|spaces-cover/i.test(s)) {
+          return s;
+        }
       }
+      return null;
+    }, timeoutMs, 1500);
+  } catch {}
+
+  // Pass 2: assets endpoint canonical (image)
+  const r = await fetchJson(
+    '/app/api/projects/workspaces/assets?page=1&per_page=20&file_type=image&order_direction=desc&user_id=' +
+      (getUserIdSync() || '') +
+      '&lang=en_US',
+  );
+  if (r.ok && r.json) {
+    const items = Array.isArray(r.json) ? r.json : (r.json.data || r.json.items || []);
+    if (expectedPrompt) {
+      const match = items.find((it) => (it.filename || '').trim() === expectedPrompt.trim());
+      if (match?.download_url) return match.download_url;
     }
-    return null;
-  }, timeoutMs, 1500);
+    if (items[0]?.download_url) return items[0].download_url;
+  }
+  throw new Error('Timeout/sem asset imagem.');
 }
 
-async function waitForNodeVideo(uuid, timeoutMs) {
-  return await waitFor(() => {
-    const node = findNodeElement(uuid);
-    if (!node) return null;
-    const vids = node.querySelectorAll('video, source');
-    for (const v of vids) {
-      const s = v.src || v.currentSrc || '';
-      if (/\.mp4/i.test(s) && /cdnpk|pikaso|magnific/i.test(s)) return s;
-    }
-    const a = node.querySelector('a[href*=".mp4"]');
-    if (a) return a.href;
-    return null;
-  }, timeoutMs, 2000);
+/**
+ * VALIDADO LIVE (v3.1.4): waitForNodeVideo agora tem 2 estrategias:
+ *   1. DOM polling: detecta `img[src*="start_frame.jpg"]` dentro do node
+ *      (Vue Flow desmonta o <video> quando off-screen, mas mantem o
+ *      thumbnail). Quando start_frame existe, o MP4 ja foi renderizado.
+ *   2. Quando start_frame detected, busca o canonical MP4 via
+ *      `/app/api/projects/workspaces/assets?file_type=video&order_direction=desc`
+ *      e retorna o `download_url` (signed URL com token).
+ *
+ * Fallback: se start_frame nao aparece em N segundos mas o user pode estar
+ * com node off-screen, polling do assets endpoint sozinho (busca por
+ * `filename` matching prompt).
+ */
+async function waitForNodeVideo(uuid, timeoutMs, expectedPrompt) {
+  // Pass 1: DOM polling — detecta render
+  let frameUrl = null;
+  try {
+    frameUrl = await waitFor(() => {
+      const node = findNodeElement(uuid);
+      if (!node) return null;
+      // direct <video>/<source>
+      const vids = node.querySelectorAll('video, source');
+      for (const v of vids) {
+        const s = v.src || v.currentSrc || '';
+        if (/\.mp4/i.test(s) && /cdnpk|pikaso|magnific/i.test(s)) return s;
+      }
+      // <img src="...start_frame.jpg"> indica MP4 rendered
+      const imgs = node.querySelectorAll('img');
+      for (const im of imgs) {
+        const s = im.src || '';
+        if (/pikaso\.cdnpk\.net\/private\/production\/\d+\/start_frame\./.test(s)) return s;
+      }
+      // <a href*=".mp4">
+      const a = node.querySelector('a[href*=".mp4"]');
+      if (a) return a.href;
+      return null;
+    }, timeoutMs, 2000);
+  } catch {
+    // ignora — vai pro pass 2
+  }
+
+  // Se o que retornou ja e .mp4, devolve direto
+  if (frameUrl && /\.mp4/i.test(frameUrl)) return frameUrl;
+
+  // Pass 2: pega download_url canonical via assets endpoint
+  // Procura o asset com filename == expectedPrompt (sao salvos com o prompt)
+  // OU pega o mais recente (ordem desc).
+  const r = await fetchJson(
+    '/app/api/projects/workspaces/assets?page=1&per_page=20&file_type=video&order_direction=desc&user_id=' +
+      (getUserIdSync() || '') +
+      '&lang=en_US',
+  );
+  if (!r.ok || !r.json) throw new Error('assets list HTTP ' + r.status);
+  const items = Array.isArray(r.json) ? r.json : (r.json.data || r.json.items || []);
+  if (items.length === 0) throw new Error('Sem assets video.');
+
+  // Match por filename (prompt)
+  if (expectedPrompt) {
+    const match = items.find((it) => (it.filename || '').trim() === expectedPrompt.trim());
+    if (match && match.download_url) return match.download_url;
+  }
+  // Fallback: mais recente
+  const latest = items[0];
+  if (latest && latest.download_url) return latest.download_url;
+  throw new Error('Sem download_url no asset mais recente.');
 }
 
 // ---- Concurrency ----
