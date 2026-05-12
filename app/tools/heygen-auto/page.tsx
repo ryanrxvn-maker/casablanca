@@ -89,6 +89,36 @@ export default function HeyGenAutoPage() {
   const [copy, setCopy] = useToolState<string>('hgauto:copy', '');
   const [audioParts, setAudioParts] = useState<File[]>([]);
 
+  /* ----- Modo ESTRUTURADO (multi-hook + body) — feature parity com clickup-pilot ----- */
+  /** Quando ON: substitui o textarea/audioParts unicos por inputs separados
+   *  pra cada HOOK (1-10) + 1 BODY opcional. Cada hook vira 1 take.
+   *  Body e splitado em ~20s pra cada take. Output final: 3 ZIPs igual clickup-pilot
+   *  (takes individuais, montados HOOK[N]+BODY decupados, camuflados opcional). */
+  const [structuredMode, setStructuredMode] = useToolState<boolean>(
+    'hgauto:structured',
+    false,
+  );
+  type StructuredInput = { text: string; audio: File | null };
+  const [structuredHooks, setStructuredHooks] = useState<StructuredInput[]>([
+    { text: '', audio: null },
+  ]);
+  const [structuredBody, setStructuredBody] = useState<{ enabled: boolean; text: string; audio: File | null }>({
+    enabled: true,
+    text: '',
+    audio: null,
+  });
+
+  /** ZIPs finais do pipeline pos-producao (montado/decupado/camuflado) */
+  const [pipelineZips, setPipelineZips] = useState<{
+    takesUrl?: string;
+    takesName?: string;
+    montadoUrl?: string;
+    montadoName?: string;
+    camufladoUrl?: string;
+    camufladoName?: string;
+    diagnosticMsg?: string;
+  }>({});
+
   /* --------------- Modo Dinamico (multi-avatar por parte) --------------- */
   const [dynamicMode, setDynamicMode] = useToolState<boolean>(
     'hgauto:dynamic',
@@ -245,6 +275,18 @@ export default function HeyGenAutoPage() {
       setParts([]);
       return;
     }
+    // Modo estruturado: parts = [HOOK 1, HOOK 2, ..., BODY split 1, BODY split 2, ...]
+    if (structuredMode) {
+      const arr: string[] = [];
+      for (const h of structuredHooks) {
+        if (h.text.trim()) arr.push(h.text);
+      }
+      if (structuredBody.enabled && structuredBody.text.trim()) {
+        arr.push(...splitCopyIntoParts(structuredBody.text, { targetSec: 20, minSec: 10, maxSec: 35 }));
+      }
+      setParts(arr);
+      return;
+    }
     // Forced parts (do ClickUp Pilot) sobrescreve auto-split
     if (forcedParts && forcedParts.length > 0) {
       setParts(forcedParts.map((p) => p.text));
@@ -257,7 +299,7 @@ export default function HeyGenAutoPage() {
     setParts(
       splitCopyIntoParts(copy, { targetSec: 20, minSec: 10, maxSec: 35 }),
     );
-  }, [copy, mode, forcedParts]);
+  }, [copy, mode, forcedParts, structuredMode, structuredHooks, structuredBody]);
 
   /* --------------- Resize dos arrays per-part quando count muda --------------- */
   useEffect(() => {
@@ -342,9 +384,9 @@ export default function HeyGenAutoPage() {
         }
       }
 
-      setDownloadStage('Zipando...');
+      setDownloadStage('Zipando takes...');
       const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
-      const filename = `${safeName}.zip`;
+      const filename = `${safeName}_takes.zip`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -354,7 +396,77 @@ export default function HeyGenAutoPage() {
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 5000);
 
-      // === CAMUFLAGEM (modo opcional): gera 2a ZIP com cada take camuflado ===
+      // === PIPELINE POS-PRODUCAO (modo estruturado): gera ZIP montado HOOK[N]+BODY decupados ===
+      // Usa o mesmo runPostPipeline do clickup-pilot. So roda em modo estruturado
+      // porque depende de labels HOOK/BODY corretos (no modo legado labels sao "parte1/2..."
+      // que nao se enquadram nem como hook nem body — pipeline retorna vazio).
+      let pipeMontadoUrl: string | undefined;
+      let pipeMontadoName: string | undefined;
+      let pipeDiagnostic: string | undefined;
+      if (structuredMode && partBlobs.some(p => p.blob)) {
+        setDownloadStage('Montando HOOK+BODY decupados (pipeline)...');
+        try {
+          const { runPostPipeline } = await import('@/lib/clickup-pilot-pipeline');
+          const pipeRes = await runPostPipeline({
+            baseAdId: safeName,
+            parts: partBlobs,
+            decupagem: true,
+            camuflagem: false, // camuflagem fica no zip dedicado abaixo
+            onProgress: (p) => {
+              setDownloadStage(`${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}`);
+            },
+          });
+          pipeDiagnostic = pipeRes.diagnostics.summary;
+          // Monta ZIP com decupados (ou raw assembled se decupagem falhou)
+          const zipMont = new JSZip();
+          for (const item of pipeRes.items) {
+            if (item.decupado) {
+              zipMont.file(item.filename, item.decupado);
+            } else if (item.rawAssembled && item.rawAssembled.size > 0 && !item.errors?.assemble) {
+              zipMont.file(item.filename.replace('.mp4', '_sem_decupagem.mp4'), item.rawAssembled);
+              zipMont.file(`${item.filename.replace('.mp4', '')}_DECUPAGEM_ERRO.txt`, item.errors?.decupagem || 'erro desconhecido');
+            } else {
+              zipMont.file(`${item.filename.replace('.mp4', '')}_ERRO.txt`,
+                `Assemble: ${item.errors?.assemble || 'OK'}\nDecupagem: ${item.errors?.decupagem || 'OK'}`);
+            }
+          }
+          zipMont.file('_DIAGNOSTICO.txt',
+`Pipeline pos-producao - HeyGen Auto
+====================================
+${pipeRes.diagnostics.summary}
+
+Total partes: ${pipeRes.diagnostics.totalParts}
+Hooks identificados: ${pipeRes.diagnostics.hooksFound}
+Bodies identificados: ${pipeRes.diagnostics.bodiesFound}
+Labels nao reconhecidas: ${pipeRes.diagnostics.unrecognizedLabels.join(', ') || 'nenhuma'}
+
+Items finais:
+${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'ERRO ('+it.errors.assemble+')' : 'OK'} | decupagem=${it.errors?.decupagem ? 'ERRO ('+it.errors.decupagem+')' : (it.decupado ? 'OK ('+(it.decupado.size/(1024*1024)).toFixed(1)+'MB)' : '?')}`).join('\n')}`);
+          const blobMont = await zipMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+          pipeMontadoName = `${safeName}_montado_decupado.zip`;
+          pipeMontadoUrl = URL.createObjectURL(blobMont);
+          // Auto-download
+          const am = document.createElement('a');
+          am.href = pipeMontadoUrl;
+          am.download = pipeMontadoName;
+          document.body.appendChild(am);
+          am.click();
+          document.body.removeChild(am);
+          setPipelineZips((prev) => ({
+            ...prev,
+            takesUrl: url,
+            takesName: filename,
+            montadoUrl: pipeMontadoUrl,
+            montadoName: pipeMontadoName,
+            diagnosticMsg: pipeDiagnostic,
+          }));
+        } catch (e) {
+          console.error('[hgauto pipeline] falhou:', e);
+          setError(`Takes OK · pipeline montagem FALHOU: ${(e as Error)?.message}`);
+        }
+      }
+
+      // === CAMUFLAGEM (modo opcional): gera 3a ZIP com cada take camuflado ===
       if (camuflagemMode && camuflagemWhite) {
         setDownloadStage('Aplicando camuflagem em cada take...');
         try {
@@ -468,9 +580,22 @@ export default function HeyGenAutoPage() {
       voiceId?: string;
     };
     let jobs: JobEntry[] = [];
+    // Estruturado: precisa montar lista de labels coerentes (HOOK 1, HOOK 2, BODY 1, ...)
+    // pra que o pipeline pos-prod (runPostPipeline) saiba quem e hook vs body
+    function makeStructuredLabel(idx: number): string {
+      if (!structuredMode) return `parte${idx + 1}`;
+      const hookCount = structuredHooks.filter((h) => mode === 'copy' ? h.text.trim() : h.audio).length;
+      if (idx < hookCount) return `HOOK ${idx + 1}`;
+      const bodyIdx = idx - hookCount;
+      // Se body for 1 split, label = BODY; senao BODY 1, BODY 2, ...
+      const totalParts = parts.length;
+      const bodyTotal = totalParts - hookCount;
+      if (bodyTotal === 1) return 'BODY';
+      return `BODY ${bodyIdx + 1}`;
+    }
     if (mode === 'copy') {
       if (parts.length === 0) {
-        setError('Cola uma copy primeiro.');
+        setError(structuredMode ? 'Preenche pelo menos 1 HOOK.' : 'Cola uma copy primeiro.');
         return;
       }
       // Voz default = a voz original do avatar (lookup automatico no
@@ -485,7 +610,7 @@ export default function HeyGenAutoPage() {
         const partAvatar = dynamicMode ? partAvatars[i] : null;
         const effectiveAvatar = partAvatar || selectedAvatar;
         return {
-          label: `parte${i + 1}`,
+          label: makeStructuredLabel(i),
           copy: p,
           // Modo dinamico: cada parte usa seu avatar (com voiceId predefinido)
           avatarId: dynamicMode ? effectiveAvatar?.id : undefined,
@@ -496,27 +621,49 @@ export default function HeyGenAutoPage() {
         };
       });
     } else {
-      if (audioParts.length === 0) {
-        setError('Faca upload de pelo menos um arquivo de audio.');
-        return;
-      }
-      // Modo dinamico: usa permutacao explicita do user (audioOrder).
-      // Modo classico: ordena por filename (parte1, parte2...).
-      const orderedFiles = dynamicMode
-        ? audioOrder.map((idx) => audioParts[idx]).filter(Boolean)
-        : [...audioParts].sort((a, b) =>
-            a.name.localeCompare(b.name, 'pt', { numeric: true }),
-          );
-      jobs = orderedFiles.map((file, i) => {
-        const origIdx = dynamicMode ? audioOrder[i] : i;
-        const partAvatar = dynamicMode ? partAvatars[origIdx] : null;
-        const effectiveAvatar = partAvatar || selectedAvatar;
-        return {
-          label: `parte${i + 1}`,
+      // Modo estruturado audio: hooks[].audio + body.audio
+      if (structuredMode) {
+        const hookFiles = structuredHooks.map((h) => h.audio).filter((f): f is File => !!f);
+        const bodyFile = structuredBody.enabled ? structuredBody.audio : null;
+        if (hookFiles.length === 0 && !bodyFile) {
+          setError('Faca upload de pelo menos 1 audio de hook OU body.');
+          return;
+        }
+        jobs = hookFiles.map((file, i) => ({
+          label: `HOOK ${i + 1}`,
           audio: file,
-          avatarId: dynamicMode ? effectiveAvatar?.id : undefined,
-        };
-      });
+          avatarId: dynamicMode ? selectedAvatar?.id : undefined,
+        }));
+        if (bodyFile) {
+          jobs.push({
+            label: 'BODY',
+            audio: bodyFile,
+            avatarId: dynamicMode ? selectedAvatar?.id : undefined,
+          });
+        }
+      } else {
+        if (audioParts.length === 0) {
+          setError('Faca upload de pelo menos um arquivo de audio.');
+          return;
+        }
+        // Modo dinamico: usa permutacao explicita do user (audioOrder).
+        // Modo classico: ordena por filename (parte1, parte2...).
+        const orderedFiles = dynamicMode
+          ? audioOrder.map((idx) => audioParts[idx]).filter(Boolean)
+          : [...audioParts].sort((a, b) =>
+              a.name.localeCompare(b.name, 'pt', { numeric: true }),
+            );
+        jobs = orderedFiles.map((file, i) => {
+          const origIdx = dynamicMode ? audioOrder[i] : i;
+          const partAvatar = dynamicMode ? partAvatars[origIdx] : null;
+          const effectiveAvatar = partAvatar || selectedAvatar;
+          return {
+            label: `parte${i + 1}`,
+            audio: file,
+            avatarId: dynamicMode ? effectiveAvatar?.id : undefined,
+          };
+        });
+      }
     }
 
     cancelRef.current = false;
@@ -732,6 +879,17 @@ export default function HeyGenAutoPage() {
 
             {/* Modo: copy ou audio */}
             <section className="border-t border-line pt-6">
+              <Toggle3D
+                on={structuredMode}
+                onChange={setStructuredMode}
+                label="Modo estruturado (Hook + Body)"
+                hint="Inputs separados por HOOK (ate 10) + BODY. Output 3 ZIPs igual ClickUp Pilot: takes, montado/decupado, camuflado opcional"
+                variant="lime"
+                icon={<span className="text-base">📦</span>}
+              />
+            </section>
+
+            <section className="border-t border-line pt-6">
               <h2 className="label-field !mb-3">Modo de input</h2>
               <div className="flex gap-2">
                 {(
@@ -763,7 +921,128 @@ export default function HeyGenAutoPage() {
                 })}
               </div>
 
-              {mode === 'copy' ? (
+              {structuredMode ? (
+                <div className="mt-4 grid gap-3">
+                  <div className="mono text-[10px] uppercase tracking-widest text-text-muted">
+                    Hooks ({structuredHooks.length}/10) — cada um vira 1 take final
+                  </div>
+                  {structuredHooks.map((h, hi) => (
+                    <div key={hi} className="rounded-[10px] border border-lime/30 bg-lime/5 p-3">
+                      <div className="mono flex items-center justify-between mb-2 text-[10px] uppercase tracking-widest text-lime">
+                        <span>HOOK {hi + 1}</span>
+                        {structuredHooks.length > 1 ? (
+                          <button
+                            type="button"
+                            onClick={() => setStructuredHooks((prev) => prev.filter((_, i) => i !== hi))}
+                            disabled={processing}
+                            className="rounded-full px-2 py-0.5 text-text-muted hover:bg-red-500/10 hover:text-red-300"
+                            title="Remover este hook"
+                          >
+                            × remover
+                          </button>
+                        ) : null}
+                      </div>
+                      {mode === 'copy' ? (
+                        <textarea
+                          value={h.text}
+                          onChange={(e) =>
+                            setStructuredHooks((prev) =>
+                              prev.map((p, i) => (i === hi ? { ...p, text: e.target.value } : p)),
+                            )
+                          }
+                          placeholder={`Texto do HOOK ${hi + 1} (uma frase tipica de chamariz, ~15-25s)`}
+                          rows={3}
+                          className="input-field resize-y font-mono text-sm"
+                          disabled={processing}
+                        />
+                      ) : (
+                        <div className="grid gap-2">
+                          <input
+                            type="file"
+                            accept="audio/*"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0] || null;
+                              setStructuredHooks((prev) =>
+                                prev.map((p, i) => (i === hi ? { ...p, audio: f } : p)),
+                              );
+                            }}
+                            className="input-field file:mr-3 file:rounded-md file:border-0 file:bg-lime file:px-3 file:py-1 file:text-xs file:font-semibold file:text-black"
+                            disabled={processing}
+                          />
+                          {h.audio ? (
+                            <div className="text-[11px] text-text-muted">📎 {h.audio.name} ({(h.audio.size / (1024 * 1024)).toFixed(2)}MB)</div>
+                          ) : null}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {structuredHooks.length < 10 ? (
+                    <button
+                      type="button"
+                      onClick={() => setStructuredHooks((prev) => [...prev, { text: '', audio: null }])}
+                      disabled={processing}
+                      className="mono rounded-[10px] border border-dashed border-line-strong bg-bg/30 py-2 px-3 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime/40 hover:bg-lime/5 hover:text-lime transition disabled:opacity-50"
+                    >
+                      + adicionar hook ({structuredHooks.length}/10)
+                    </button>
+                  ) : (
+                    <div className="mono text-[10px] uppercase tracking-widest text-text-muted text-center py-2">
+                      Limite de 10 hooks atingido
+                    </div>
+                  )}
+
+                  {/* Body opcional */}
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="hgauto-body-enabled"
+                      checked={structuredBody.enabled}
+                      onChange={(e) => setStructuredBody((p) => ({ ...p, enabled: e.target.checked }))}
+                      disabled={processing}
+                      className="h-4 w-4 cursor-pointer accent-fuchsia-400"
+                    />
+                    <label htmlFor="hgauto-body-enabled" className="mono cursor-pointer text-[10px] uppercase tracking-widest text-fuchsia-200">
+                      Incluir BODY (texto/audio que vai depois de cada hook no video montado)
+                    </label>
+                  </div>
+                  {structuredBody.enabled ? (
+                    <div className="rounded-[10px] border border-fuchsia-500/30 bg-fuchsia-500/5 p-3">
+                      <div className="mono mb-2 text-[10px] uppercase tracking-widest text-fuchsia-200">BODY</div>
+                      {mode === 'copy' ? (
+                        <textarea
+                          value={structuredBody.text}
+                          onChange={(e) => setStructuredBody((p) => ({ ...p, text: e.target.value }))}
+                          placeholder="Texto do BODY completo. Sera splitado em takes de ~20s sem cortar frase."
+                          rows={6}
+                          className="input-field resize-y font-mono text-sm"
+                          disabled={processing}
+                        />
+                      ) : (
+                        <div className="grid gap-2">
+                          <input
+                            type="file"
+                            accept="audio/*"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0] || null;
+                              setStructuredBody((p) => ({ ...p, audio: f }));
+                            }}
+                            className="input-field file:mr-3 file:rounded-md file:border-0 file:bg-fuchsia-500 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-white"
+                            disabled={processing}
+                          />
+                          {structuredBody.audio ? (
+                            <div className="text-[11px] text-text-muted">📎 {structuredBody.audio.name} ({(structuredBody.audio.size / (1024 * 1024)).toFixed(2)}MB)</div>
+                          ) : null}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+
+                  <div className="mono rounded-[10px] border border-lime/30 bg-lime/5 px-3 py-2 text-[11px] text-lime">
+                    📦 Output: 3 ZIPs (takes individuais + montados HOOK[N]+BODY decupados{camuflagemMode ? ' + camuflados' : ''}).
+                    Cada hook vira 1 video final {structuredBody.enabled ? '(com o body anexado)' : '(sem body)'}.
+                  </div>
+                </div>
+              ) : mode === 'copy' ? (
                 <div className="mt-4">
                   {forcedParts && forcedParts.length > 0 ? (
                     <div className="mb-2 flex items-center justify-between rounded-[10px] border border-fuchsia-500/40 bg-fuchsia-500/10 px-3 py-2 text-[11px]">
