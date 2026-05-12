@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "DARKO LAB — Magnific Auto",
-  "version": "1.0.0",
-  "description": "DARKO LAB Magnific — automacao de B-Rolls via Freepik Spaces (Nano Banana + Kling 2.5). Plano Premium+ obrigatorio.",
+  "version": "2.0.0",
+  "description": "DARKO LAB Magnific Auto v2.0 — endpoints REAIS mapeados via reverse-engineering. POST /app/api/spaces/{id}/workflows/execute + DOM automation pra criar nodes (Image Generator + Video Generator Kling 2.5/2.6). Premium+ obrigatorio.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",

@@ -118,7 +118,7 @@ export async function runMagnificPipeline(
     spaceName,
     takes,
     imageModel = 'nano-banana-2',
-    videoModel = 'kling-2.5',
+    videoModel = 'kling-25',
     imageConcurrency = 12,
     videoConcurrency = 6,
     existingSpaceId,

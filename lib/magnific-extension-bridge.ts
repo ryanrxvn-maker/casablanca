@@ -26,8 +26,10 @@ export type MagnificExtensionStatus =
   | { connected: true; version: string }
   | { connected: false };
 
-export type ImageModel = 'nano-banana-2' | 'nano-banana-pro';
-export type VideoModel = 'kling-2.5';
+export type ImageModel = 'nano-banana-2' | 'nano-banana-pro' | 'text-to-image-fast' | 'text-to-image-flux';
+// Kling ids reais descobertos via /app/api/video/ai-models:
+//   kling-25 (Kling 2.5) | kling-26 (Kling 2.6) | kling-21 | kling-21-master | kling-omni1
+export type VideoModel = 'kling-25' | 'kling-26' | 'kling-21' | 'kling-21-master' | 'kling-omni1';
 
 export type ProgressFn = (stage: string, percent: number, message: string) => void;
 

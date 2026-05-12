@@ -142,7 +142,7 @@ export default function AutoBrollPage() {
           spaceName: adName.trim() || 'DARKO_LAB_BROLLS',
           takes: parsedTakes,
           imageModel,
-          videoModel: 'kling-2.5',
+          videoModel: 'kling-25',
         },
         {
           signal: abortRef.current.signal,
