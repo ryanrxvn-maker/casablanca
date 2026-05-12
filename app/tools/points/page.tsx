@@ -58,6 +58,8 @@ export default function PointsPage() {
   const [currentPoints, setCurrentPoints] = useState<number | null>(null);
   const [loadingPoints, setLoadingPoints] = useState(false);
   const [pointsError, setPointsError] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<any>(null);
+  const [showDebug, setShowDebug] = useState(false);
 
   async function fetchPoints() {
     if (!getClickUpToken()) {
@@ -66,43 +68,86 @@ export default function PointsPage() {
     }
     setLoadingPoints(true);
     setPointsError(null);
+    setDebugInfo(null);
     try {
       const teams = await listTeams();
       const teamId = teams[0]?.id;
       if (!teamId) { setPointsError('Sem teams ClickUp.'); return; }
       const me = await getCurrentUser();
-      // FIX (12/05/2026): bugs anteriores —
-      //   1. listTasks SO retornava page 0 (max 100 tasks)
-      //   2. NAO incluia tasks fechadas (includeClosed era false)
-      //   3. Filtrava por date_created — tasks CRIADAS antes do mes mas
-      //      FECHADAS no mes nao contavam.
-      // Correto: tasks FECHADAS este mes (date_closed_gt = inicio mes)
-      // com pagina automatica + includeClosed=true.
       const now = new Date();
       const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-      const tasks = await listTasksAll(teamId, {
-        assigneeIds: [String(me.id)],
-        subtasks: false,
-        includeClosed: true,
-        dateClosedGt: firstOfMonth,
+
+      // Estrategia tripla — tenta tres filtros em paralelo, pega a maior soma
+      // (alguns workflows fecham via 'closed', outros via 'done', outros nem
+      // fecham — usam 'updated' como proxy):
+      type Task = Awaited<ReturnType<typeof listTasksAll>>[number];
+      const [closedTasks, doneTasks, updatedTasks] = await Promise.all<Task[]>([
+        listTasksAll(teamId, { assigneeIds: [String(me.id)], subtasks: false, includeClosed: true, dateClosedGt: firstOfMonth }).catch(() => [] as Task[]),
+        listTasksAll(teamId, { assigneeIds: [String(me.id)], subtasks: false, includeClosed: true }).catch(() => [] as Task[]),
+        listTasksAll(teamId, { assigneeIds: [String(me.id)], subtasks: false, includeClosed: true, dateUpdatedGt: firstOfMonth }).catch(() => [] as Task[]),
+      ]);
+
+      // Junta tudo (dedup por id)
+      const seen = new Set<string>();
+      const allTasks: Task[] = [];
+      for (const arr of [closedTasks, doneTasks, updatedTasks]) {
+        for (const t of arr) {
+          if (seen.has(t.id)) continue;
+          seen.add(t.id);
+          allTasks.push(t);
+        }
+      }
+
+      // Coleta TODOS nomes de custom fields pra debug
+      const allFieldNames = new Map<string, number>();
+      for (const t of allTasks) {
+        for (const f of (t.custom_fields || [])) {
+          allFieldNames.set(f.name || '?', (allFieldNames.get(f.name || '?') || 0) + 1);
+        }
+      }
+      const fieldNamesList = Array.from(allFieldNames.entries()).sort((a, b) => b[1] - a[1]);
+
+      // Filtra: tasks fechadas OU done OU atualizadas este mes
+      const monthTasks = allTasks.filter((t) => {
+        const closed = Number(t.date_closed) || 0;
+        const done = Number(t.date_done) || 0;
+        const updated = Number(t.date_updated) || 0;
+        return closed >= firstOfMonth || done >= firstOfMonth || updated >= firstOfMonth;
       });
-      // Custom field PESO/PONTOS/POINTS: soma valor numerico
+
+      // Regex MAIS PERMISSIVO: aceita variantes
+      const fieldMatcher = /\b(peso|pontos?|points?|score|valor|nota|points\s*do\s*mes)\b/i;
       let total = 0;
       let countedTasks = 0;
-      for (const t of tasks) {
-        // Double-check: deve estar fechada este mes
-        const closed = Number(t.date_closed) || 0;
-        if (closed === 0 || closed < firstOfMonth) continue;
-        const peso = (t.custom_fields || []).find((f: any) => /^(peso|pontos|points|score)$/i.test(f.name || ''));
-        if (peso?.value != null) {
-          const val = parseFloat(String(peso.value));
+      const matchedFieldName: Record<string, number> = {};
+      for (const t of monthTasks) {
+        const matchedField = (t.custom_fields || []).find((f: any) => fieldMatcher.test(f.name || ''));
+        if (matchedField?.value != null) {
+          const val = parseFloat(String(matchedField.value));
           if (!isNaN(val)) {
             total += val;
             countedTasks++;
+            matchedFieldName[matchedField.name] = (matchedFieldName[matchedField.name] || 0) + 1;
           }
         }
       }
-      console.log(`[points] Carregadas ${tasks.length} tasks fechadas este mes, ${countedTasks} com PESO/PONTOS, total=${total}`);
+
+      const debug = {
+        userId: me.id,
+        teamId,
+        firstOfMonth: new Date(firstOfMonth).toISOString().slice(0, 10),
+        totalTasks: allTasks.length,
+        monthTasks: monthTasks.length,
+        closedThisMonth: closedTasks.length,
+        updatedThisMonth: updatedTasks.length,
+        customFieldsFound: fieldNamesList.slice(0, 30),
+        matchedField: matchedFieldName,
+        countedTasks,
+        totalPoints: total,
+      };
+      console.log('[points] DEBUG:', debug);
+      console.log('[points] Custom field names disponiveis (top 30):', fieldNamesList);
+      setDebugInfo(debug);
       setCurrentPoints(total);
     } catch (e) {
       setPointsError((e as Error)?.message || 'Erro fetch pontos');
@@ -224,6 +269,58 @@ export default function PointsPage() {
           {pointsError ? (
             <div className="mt-3 rounded border border-red-500/40 bg-red-500/5 px-3 py-2 text-[11px] text-red-300">
               {pointsError}
+            </div>
+          ) : null}
+
+          {/* DEBUG: mostra TODOS custom fields ClickUp pra user descobrir qual eh o campo de pontos */}
+          {debugInfo ? (
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => setShowDebug((v) => !v)}
+                className="mono text-[10px] uppercase tracking-widest text-text-muted hover:text-cyan-300"
+              >
+                {showDebug ? '▼' : '▶'} debug ({debugInfo.totalTasks} tasks · {debugInfo.monthTasks} este mes · {debugInfo.countedTasks} com campo de pontos)
+              </button>
+              {showDebug ? (
+                <div className="mt-2 rounded border border-cyan-500/30 bg-cyan-500/5 p-3 text-[11px]">
+                  <div className="mono mb-2 text-[10px] uppercase tracking-widest text-cyan-300">// DEBUG SYNC CLICKUP</div>
+                  <div className="space-y-1 text-text-muted">
+                    <div>User ID: <span className="text-white">{debugInfo.userId}</span></div>
+                    <div>Team ID: <span className="text-white">{debugInfo.teamId}</span></div>
+                    <div>Inicio do mes: <span className="text-white">{debugInfo.firstOfMonth}</span></div>
+                    <div>Total tasks carregadas: <span className="text-white">{debugInfo.totalTasks}</span></div>
+                    <div>Tasks no mes (closed/done/updated): <span className="text-white">{debugInfo.monthTasks}</span></div>
+                    <div>Tasks fechadas este mes: <span className="text-white">{debugInfo.closedThisMonth}</span></div>
+                    <div>Tasks atualizadas este mes: <span className="text-white">{debugInfo.updatedThisMonth}</span></div>
+                    <div>Tasks com campo de pontos identificado: <span className="text-white">{debugInfo.countedTasks}</span></div>
+                    <div>Soma final: <span className="text-cyan-300 font-bold">{debugInfo.totalPoints} pts</span></div>
+                  </div>
+                  <div className="mt-3 mono text-[10px] uppercase tracking-widest text-cyan-300">// CUSTOM FIELDS ENCONTRADOS (nome × qtd tasks)</div>
+                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-[300px] overflow-y-auto">
+                    {(debugInfo.customFieldsFound || []).map((entry: any) => {
+                      const [name, count] = entry;
+                      const isPointsField = /\b(peso|pontos?|points?|score|valor|nota)\b/i.test(name);
+                      return (
+                        <div key={name} className={`rounded px-2 py-1 ${isPointsField ? 'bg-lime/10 border border-lime/40 text-lime' : 'bg-bg/40 text-text-muted'}`}>
+                          <span className="mono">{name}</span> <span className="opacity-60">({count})</span>
+                          {isPointsField ? <span className="ml-2 text-[9px] uppercase tracking-widest">← MATCH</span> : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {(debugInfo.customFieldsFound || []).length === 0 ? (
+                    <div className="mt-2 text-red-300">Nenhum custom field encontrado em nenhuma task. Confirme que o token tem permissao de ler tasks.</div>
+                  ) : null}
+                  {Object.keys(debugInfo.matchedField || {}).length === 0 && (debugInfo.customFieldsFound || []).length > 0 ? (
+                    <div className="mt-3 rounded border border-yellow-500/40 bg-yellow-500/10 p-2 text-yellow-200 text-[11px]">
+                      ⚠ Nenhum dos campos acima bateu com o regex de pontos.<br/>
+                      Regex atual: <code className="mono">/\b(peso|pontos?|points?|score|valor|nota)\b/i</code><br/>
+                      Me diga qual nome EXATO usa pra pontos no seu ClickUp e ajusto.
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>
