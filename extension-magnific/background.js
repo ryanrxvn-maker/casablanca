@@ -69,6 +69,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     'MG_TEST_SESSION', 'MG_GET_PLAN', 'MG_CREATE_SPACE',
     'MG_GENERATE_IMAGE', 'MG_ANIMATE_IMAGE', 'MG_LIST_GENERATIONS',
     'MG_DOWNLOAD_ASSET',
+    'MG_RUN_PIPELINE', // v3.0 batch entrypoint
   ];
   if (FORWARD.includes(msg.type)) {
     sendResponse({ accepted: true });
@@ -103,9 +104,12 @@ async function handleForward(msg, bridgeTabId) {
 
   // Timeout maximo por tipo
   const timeouts = {
-    MG_GENERATE_IMAGE: 180000,   // 3min
-    MG_ANIMATE_IMAGE: 600000,    // 10min (video Kling demora)
+    MG_GENERATE_IMAGE: 240000,   // 4min
+    MG_ANIMATE_IMAGE: 720000,    // 12min
     MG_DOWNLOAD_ASSET: 120000,
+    // Pipeline batch: 30 takes * (1min image + 5min video) = ~3h teorico, mas com
+    // concorrencia 12 imagens + 6 videos cai pra ~30min. Damos 2h de margem.
+    MG_RUN_PIPELINE: 7200000,
   };
   const timeoutMs = timeouts[msg.type] || 60000;
 

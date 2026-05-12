@@ -52,6 +52,7 @@
     if (data.type === 'MG_ANIMATE_IMAGE') return route('MG_ANIMATE_IMAGE', { payload: data.payload });
     if (data.type === 'MG_LIST_GENERATIONS') return route('MG_LIST_GENERATIONS', { payload: data.payload });
     if (data.type === 'MG_DOWNLOAD_ASSET') return route('MG_DOWNLOAD_ASSET', { payload: data.payload });
+    if (data.type === 'MG_RUN_PIPELINE') return route('MG_RUN_PIPELINE', { payload: data.payload });
   });
 
   chrome.runtime.onMessage.addListener((msg) => {

@@ -397,26 +397,21 @@ ou texto livre:
 }
 
 function TakeRow({ t }: { t: TakeState }) {
-  let badge: { label: string; color: string };
+  let badge: { label: string; color: string } = { label: 'idle', color: 'text-text-muted' };
   let percent = 0;
   let detail = '';
   switch (t.status) {
     case 'idle':
       badge = { label: 'idle', color: 'text-text-muted' };
       break;
-    case 'image-pending':
-      badge = { label: 'img', color: 'text-cyan-300' };
+    case 'running':
+      badge = { label: t.phase || 'run', color: 'text-cyan-300' };
       percent = t.percent;
       detail = t.message;
       break;
     case 'image-done':
       badge = { label: 'img-ok', color: 'text-cyan-400' };
       percent = 100;
-      break;
-    case 'video-pending':
-      badge = { label: 'video', color: 'text-amber-300' };
-      percent = t.percent;
-      detail = t.message;
       break;
     case 'video-done':
       badge = { label: 'video-ok', color: 'text-amber-400' };

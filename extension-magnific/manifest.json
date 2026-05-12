@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "DARKO LAB — Magnific Auto",
-  "version": "2.0.0",
-  "description": "DARKO LAB Magnific Auto v2.0 — endpoints REAIS mapeados via reverse-engineering. POST /app/api/spaces/{id}/workflows/execute + DOM automation pra criar nodes (Image Generator + Video Generator Kling 2.5/2.6). Premium+ obrigatorio.",
+  "version": "3.0.0",
+  "description": "DARKO LAB Magnific Auto v3.0 — batch pipeline orquestrada (N pares Image+Video conectados). Nano Banana 2 + Kling 2.5, 9:16, 1K/720p, 10s, sempre Unlimited ON. NUNCA gasta creditos. 12 imagens + 6 videos simultaneos.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",

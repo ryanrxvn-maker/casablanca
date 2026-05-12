@@ -273,6 +273,72 @@ export function downloadMagnificAsset(url: string): Promise<{ base64: string; si
   });
 }
 
+// ============ MG_RUN_PIPELINE (entrypoint v3.0) ============
+
+export type PipelineTake = {
+  idx: number;
+  imagePrompt: string;
+  videoPrompt?: string;
+};
+
+export type PipelineRunPayload = {
+  spaceName: string;
+  spaceId?: string;
+  takes: PipelineTake[];
+  imageModel?: ImageModel;
+  videoModel?: VideoModel;
+  imageConcurrency?: number;
+  videoConcurrency?: number;
+  aspect?: '9:16' | '16:9' | '1:1';
+  imageQuality?: '1K' | '2K';
+  videoQuality?: '720p' | '1080p';
+  videoDuration?: 5 | 10;
+};
+
+export type PipelineRunResult = {
+  spaceId: string;
+  spaceUrl: string;
+  results: Array<{
+    idx: number;
+    imageUrl: string | null;
+    videoUrl: string | null;
+    imageStatus: string;
+    videoStatus: string | null;
+    error: string | null;
+  }>;
+};
+
+export function runMagnificPipelineExt(
+  payload: PipelineRunPayload,
+  onProgress?: ProgressFn,
+): Promise<PipelineRunResult> {
+  installListener();
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      reject(new Error('Sem window.'));
+      return;
+    }
+    const requestId = newRequestId('pipe');
+    pending.set(requestId, {
+      resolveType: 'MG_RUN_PIPELINE_RESULT',
+      progressType: 'MG_RUN_PIPELINE_PROGRESS',
+      resolve: (d) =>
+        resolve({
+          spaceId: String(d.spaceId ?? ''),
+          spaceUrl: String(d.spaceUrl ?? ''),
+          results: Array.isArray(d.results) ? d.results : [],
+        }),
+      reject,
+      onProgress,
+    });
+    window.postMessage(
+      { source: PAGE_SRC, type: 'MG_RUN_PIPELINE', requestId, payload },
+      '*',
+    );
+    // sem timeout — bg cuida (pipeline pode demorar muito com 30+ takes)
+  });
+}
+
 /** Util: converte base64 -> Blob (no browser). */
 export function base64ToBlob(base64: string, mime = 'application/octet-stream'): Blob {
   const binary = atob(base64);
