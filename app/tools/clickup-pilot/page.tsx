@@ -227,6 +227,12 @@ export default function ClickUpPilotPage() {
   /** Audio WHITE pra camuflagem (file blob nao persiste — volta toda sessao) */
   const [camuflagemWhite, setCamuflagemWhite] = useState<File | null>(null);
   const [camuflagemVolume, setCamuflagemVolume] = useToolState<number>('clickup-pilot:camuflagemVolume', 30);
+  /** Only Magnific: pula HeyGen, dispara so B-Rolls Magnific (Nano Banana + Kling 2.5).
+   *  Tasks viram pacote ZIP de take1.mp4...takeN.mp4 sem avatar. */
+  const [onlyMagnificMode, setOnlyMagnificMode] = useToolState<boolean>('clickup-pilot:onlyMagnific', false);
+  /** More Magnific: alem do HeyGen normal, gera B-Rolls extras Magnific pra complementar.
+   *  Adiciona pasta /broll/ no ZIP final com takes Kling 2.5. */
+  const [moreMagnificMode, setMoreMagnificMode] = useToolState<boolean>('clickup-pilot:moreMagnific', false);
 
   useEffect(() => {
     const t = getClickUpToken();
@@ -1766,6 +1772,32 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     router.push('/tools/heygen-auto?from=clickup-pilot');
   }
 
+  /** Dispatch p/ Auto B-Rolls (Magnific). Empacota handoff com taskName +
+   *  copy bruta — /tools/auto-broll abre e o user cola/auto-gera os prompts. */
+  function dispatchTaskToMagnific(taskId: string) {
+    const a = taskAnalyses[taskId];
+    if (!a) return;
+    const plan = buildPlan(a);
+    if (!plan) {
+      setError('Sem plano valido pra dispatch Magnific.');
+      return;
+    }
+    // Junta toda a copy do plano pra servir de fonte de prompts (user pode
+    // gerar os prompts no Claude do proprio LLM dele e colar)
+    const fullCopy = plan.parts.map((p: any) => p.text).join('\n\n');
+    const handoff = {
+      source: 'clickup-pilot',
+      adName: plan.adName,
+      copy: fullCopy,
+      partLabels: plan.parts.map((p: any) => p.label),
+      mode: onlyMagnificMode ? 'only-magnific' : 'more-magnific',
+    };
+    sessionStorage.setItem('darkolab:auto-broll:handoff', JSON.stringify(handoff));
+    const siblings = getSiblingTaskIds(taskId);
+    for (const sid of siblings) markDispatched(sid);
+    router.push('/tools/auto-broll?from=clickup-pilot');
+  }
+
   async function autoFetchDoc(url: string) {
     setFetchingDoc(true);
     setParseError(null);
@@ -2319,7 +2351,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
             <div className="grid gap-6">
               {/* Modos + Carregar tasks (UI principal enxuta) */}
               <section>
-                <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <Toggle3D
                     on={iaSearchMode}
                     onChange={setIaSearchMode}
@@ -2335,6 +2367,22 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                     hint="Gera 3a pasta com audio camuflado"
                     variant="fuchsia"
                     icon={<span className="text-base">🎭</span>}
+                  />
+                  <Toggle3D
+                    on={onlyMagnificMode}
+                    onChange={(v) => { setOnlyMagnificMode(v); if (v) setMoreMagnificMode(false); }}
+                    label="Only Magnific"
+                    hint="Pula HeyGen — so B-Rolls (Nano + Kling)"
+                    variant="lime"
+                    icon={<span className="text-base">🍌</span>}
+                  />
+                  <Toggle3D
+                    on={moreMagnificMode}
+                    onChange={(v) => { setMoreMagnificMode(v); if (v) setOnlyMagnificMode(false); }}
+                    label="More Magnific"
+                    hint="HeyGen + B-Rolls extras Magnific"
+                    variant="cyan"
+                    icon={<span className="text-base">➕</span>}
                   />
                 </div>
 
@@ -2872,15 +2920,40 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                     📹 VA · {a.vaBriefing.avatares.length} avatar{a.vaBriefing.avatares.length === 1 ? '' : 'es'}
                                   </span>
                                 ) : (a.status === 'ready' || a.status === 'partial') ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => dispatchTaskToHeyGen(a.taskId)}
-                                    disabled={a.status === 'partial'}
-                                    className="mono shrink-0 rounded border border-lime bg-lime/20 px-3 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30 disabled:opacity-40"
-                                    title={a.status === 'partial' ? 'Tem avatar pendente — escolhe um abaixo' : (a.dispatchedAt ? 'Ja disparada antes — vai pedir confirmacao' : 'Abre HeyGen Auto Dynamic com tudo pre-preenchido')}
-                                  >
-                                    ▶ {a.dispatchedAt ? 'Disparar de novo' : 'Disparar'}
-                                  </button>
+                                  <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                                    {onlyMagnificMode ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => dispatchTaskToMagnific(a.taskId)}
+                                        className="mono rounded border border-lime bg-lime/20 px-3 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30"
+                                        title="Pula HeyGen — abre Auto B-Rolls (Nano Banana + Kling 2.5)"
+                                      >
+                                        🍌 Magnific only
+                                      </button>
+                                    ) : (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => dispatchTaskToHeyGen(a.taskId)}
+                                          disabled={a.status === 'partial'}
+                                          className="mono rounded border border-lime bg-lime/20 px-3 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30 disabled:opacity-40"
+                                          title={a.status === 'partial' ? 'Tem avatar pendente — escolhe um abaixo' : (a.dispatchedAt ? 'Ja disparada antes — vai pedir confirmacao' : 'Abre HeyGen Auto Dynamic com tudo pre-preenchido')}
+                                        >
+                                          ▶ {a.dispatchedAt ? 'Disparar de novo' : 'Disparar'}
+                                        </button>
+                                        {moreMagnificMode ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => dispatchTaskToMagnific(a.taskId)}
+                                            className="mono rounded border border-cyan-500/60 bg-cyan-500/15 px-3 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25"
+                                            title="Gera B-Rolls Magnific extras (Nano Banana + Kling 2.5)"
+                                          >
+                                            ➕ B-Rolls
+                                          </button>
+                                        ) : null}
+                                      </>
+                                    )}
+                                  </div>
                                 ) : null}
                               </div>
                               {/* RENDER VARIACAO DE AVATAR — pipeline diferente */}
