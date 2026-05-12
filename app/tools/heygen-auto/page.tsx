@@ -89,15 +89,11 @@ export default function HeyGenAutoPage() {
   const [copy, setCopy] = useToolState<string>('hgauto:copy', '');
   const [audioParts, setAudioParts] = useState<File[]>([]);
 
-  /* ----- Modo ESTRUTURADO (multi-hook + body) — feature parity com clickup-pilot ----- */
-  /** Quando ON: substitui o textarea/audioParts unicos por inputs separados
-   *  pra cada HOOK (1-10) + 1 BODY opcional. Cada hook vira 1 take.
-   *  Body e splitado em ~20s pra cada take. Output final: 3 ZIPs igual clickup-pilot
-   *  (takes individuais, montados HOOK[N]+BODY decupados, camuflados opcional). */
-  const [structuredMode, setStructuredMode] = useToolState<boolean>(
-    'hgauto:structured',
-    false,
-  );
+  /* ----- Inputs estruturados (multi-hook + body) — feature parity com clickup-pilot ----- */
+  /** SEMPRE ativo. Inputs separados pra cada HOOK (1-10) + 1 BODY opcional.
+   *  Cada hook vira 1 take. Body e splitado em ~20s pra cada take.
+   *  Output final: 3 ZIPs igual clickup-pilot (takes individuais, montados
+   *  HOOK[N]+BODY decupados, camuflados opcional). */
   type StructuredInput = { text: string; audio: File | null };
   const [structuredHooks, setStructuredHooks] = useState<StructuredInput[]>([
     { text: '', audio: null },
@@ -269,37 +265,28 @@ export default function HeyGenAutoPage() {
 
   /* (avatar + voice search delegados aos componentes compartilhados) */
 
-  /* --------------- Copy split preview --------------- */
+  /* --------------- Parts preview (sempre estruturado) --------------- */
   useEffect(() => {
     if (mode !== 'copy') {
       setParts([]);
       return;
     }
-    // Modo estruturado: parts = [HOOK 1, HOOK 2, ..., BODY split 1, BODY split 2, ...]
-    if (structuredMode) {
-      const arr: string[] = [];
-      for (const h of structuredHooks) {
-        if (h.text.trim()) arr.push(h.text);
-      }
-      if (structuredBody.enabled && structuredBody.text.trim()) {
-        arr.push(...splitCopyIntoParts(structuredBody.text, { targetSec: 20, minSec: 10, maxSec: 35 }));
-      }
-      setParts(arr);
-      return;
-    }
-    // Forced parts (do ClickUp Pilot) sobrescreve auto-split
+    // Forced parts (do ClickUp Pilot) sobrescreve inputs estruturados.
+    // Mantido pra compat — o handoff popula partTexts ja splitados.
     if (forcedParts && forcedParts.length > 0) {
       setParts(forcedParts.map((p) => p.text));
       return;
     }
-    if (!copy.trim()) {
-      setParts([]);
-      return;
+    // Estruturado: parts = [HOOK 1, HOOK 2, ..., BODY split 1, BODY split 2, ...]
+    const arr: string[] = [];
+    for (const h of structuredHooks) {
+      if (h.text.trim()) arr.push(h.text);
     }
-    setParts(
-      splitCopyIntoParts(copy, { targetSec: 20, minSec: 10, maxSec: 35 }),
-    );
-  }, [copy, mode, forcedParts, structuredMode, structuredHooks, structuredBody]);
+    if (structuredBody.enabled && structuredBody.text.trim()) {
+      arr.push(...splitCopyIntoParts(structuredBody.text, { targetSec: 20, minSec: 10, maxSec: 35 }));
+    }
+    setParts(arr);
+  }, [mode, forcedParts, structuredHooks, structuredBody]);
 
   /* --------------- Resize dos arrays per-part quando count muda --------------- */
   useEffect(() => {
@@ -396,14 +383,12 @@ export default function HeyGenAutoPage() {
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 5000);
 
-      // === PIPELINE POS-PRODUCAO (modo estruturado): gera ZIP montado HOOK[N]+BODY decupados ===
-      // Usa o mesmo runPostPipeline do clickup-pilot. So roda em modo estruturado
-      // porque depende de labels HOOK/BODY corretos (no modo legado labels sao "parte1/2..."
-      // que nao se enquadram nem como hook nem body — pipeline retorna vazio).
+      // === PIPELINE POS-PRODUCAO: gera ZIP montado HOOK[N]+BODY decupados ===
+      // Usa o mesmo runPostPipeline do clickup-pilot.
       let pipeMontadoUrl: string | undefined;
       let pipeMontadoName: string | undefined;
       let pipeDiagnostic: string | undefined;
-      if (structuredMode && partBlobs.some(p => p.blob)) {
+      if (partBlobs.some(p => p.blob)) {
         setDownloadStage('Montando HOOK+BODY decupados (pipeline)...');
         try {
           const { runPostPipeline } = await import('@/lib/clickup-pilot-pipeline');
@@ -580,14 +565,16 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
       voiceId?: string;
     };
     let jobs: JobEntry[] = [];
-    // Estruturado: precisa montar lista de labels coerentes (HOOK 1, HOOK 2, BODY 1, ...)
-    // pra que o pipeline pos-prod (runPostPipeline) saiba quem e hook vs body
+    // Labels coerentes (HOOK 1, HOOK 2, BODY 1, ...) pra que o pipeline
+    // pos-prod (runPostPipeline) saiba quem e hook vs body
     function makeStructuredLabel(idx: number): string {
-      if (!structuredMode) return `parte${idx + 1}`;
+      // Se handoff do clickup-pilot, ja vem labelado em forcedParts
+      if (forcedParts && forcedParts.length > 0 && forcedParts[idx]) {
+        return forcedParts[idx].label;
+      }
       const hookCount = structuredHooks.filter((h) => mode === 'copy' ? h.text.trim() : h.audio).length;
       if (idx < hookCount) return `HOOK ${idx + 1}`;
       const bodyIdx = idx - hookCount;
-      // Se body for 1 split, label = BODY; senao BODY 1, BODY 2, ...
       const totalParts = parts.length;
       const bodyTotal = totalParts - hookCount;
       if (bodyTotal === 1) return 'BODY';
@@ -595,7 +582,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     }
     if (mode === 'copy') {
       if (parts.length === 0) {
-        setError(structuredMode ? 'Preenche pelo menos 1 HOOK.' : 'Cola uma copy primeiro.');
+        setError('Preenche pelo menos 1 HOOK.');
         return;
       }
       // Voz default = a voz original do avatar (lookup automatico no
@@ -621,47 +608,23 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
         };
       });
     } else {
-      // Modo estruturado audio: hooks[].audio + body.audio
-      if (structuredMode) {
-        const hookFiles = structuredHooks.map((h) => h.audio).filter((f): f is File => !!f);
-        const bodyFile = structuredBody.enabled ? structuredBody.audio : null;
-        if (hookFiles.length === 0 && !bodyFile) {
-          setError('Faca upload de pelo menos 1 audio de hook OU body.');
-          return;
-        }
-        jobs = hookFiles.map((file, i) => ({
-          label: `HOOK ${i + 1}`,
-          audio: file,
+      // Modo audio: hooks[].audio + body.audio
+      const hookFiles = structuredHooks.map((h) => h.audio).filter((f): f is File => !!f);
+      const bodyFile = structuredBody.enabled ? structuredBody.audio : null;
+      if (hookFiles.length === 0 && !bodyFile) {
+        setError('Faca upload de pelo menos 1 audio de hook OU body.');
+        return;
+      }
+      jobs = hookFiles.map((file, i) => ({
+        label: `HOOK ${i + 1}`,
+        audio: file,
+        avatarId: dynamicMode ? selectedAvatar?.id : undefined,
+      }));
+      if (bodyFile) {
+        jobs.push({
+          label: 'BODY',
+          audio: bodyFile,
           avatarId: dynamicMode ? selectedAvatar?.id : undefined,
-        }));
-        if (bodyFile) {
-          jobs.push({
-            label: 'BODY',
-            audio: bodyFile,
-            avatarId: dynamicMode ? selectedAvatar?.id : undefined,
-          });
-        }
-      } else {
-        if (audioParts.length === 0) {
-          setError('Faca upload de pelo menos um arquivo de audio.');
-          return;
-        }
-        // Modo dinamico: usa permutacao explicita do user (audioOrder).
-        // Modo classico: ordena por filename (parte1, parte2...).
-        const orderedFiles = dynamicMode
-          ? audioOrder.map((idx) => audioParts[idx]).filter(Boolean)
-          : [...audioParts].sort((a, b) =>
-              a.name.localeCompare(b.name, 'pt', { numeric: true }),
-            );
-        jobs = orderedFiles.map((file, i) => {
-          const origIdx = dynamicMode ? audioOrder[i] : i;
-          const partAvatar = dynamicMode ? partAvatars[origIdx] : null;
-          const effectiveAvatar = partAvatar || selectedAvatar;
-          return {
-            label: `parte${i + 1}`,
-            audio: file,
-            avatarId: dynamicMode ? effectiveAvatar?.id : undefined,
-          };
         });
       }
     }
@@ -879,17 +842,6 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
 
             {/* Modo: copy ou audio */}
             <section className="border-t border-line pt-6">
-              <Toggle3D
-                on={structuredMode}
-                onChange={setStructuredMode}
-                label="Modo estruturado (Hook + Body)"
-                hint="Inputs separados por HOOK (ate 10) + BODY. Output 3 ZIPs igual ClickUp Pilot: takes, montado/decupado, camuflado opcional"
-                variant="lime"
-                icon={<span className="text-base">📦</span>}
-              />
-            </section>
-
-            <section className="border-t border-line pt-6">
               <h2 className="label-field !mb-3">Modo de input</h2>
               <div className="flex gap-2">
                 {(
@@ -921,8 +873,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                 })}
               </div>
 
-              {structuredMode ? (
-                <div className="mt-4 grid gap-3">
+              <div className="mt-4 grid gap-3">
                   <div className="mono text-[10px] uppercase tracking-widest text-text-muted">
                     Hooks ({structuredHooks.length}/10) — cada um vira 1 take final
                   </div>
@@ -1042,70 +993,21 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                     Cada hook vira 1 video final {structuredBody.enabled ? '(com o body anexado)' : '(sem body)'}.
                   </div>
                 </div>
-              ) : mode === 'copy' ? (
-                <div className="mt-4">
-                  {forcedParts && forcedParts.length > 0 ? (
-                    <div className="mb-2 flex items-center justify-between rounded-[10px] border border-fuchsia-500/40 bg-fuchsia-500/10 px-3 py-2 text-[11px]">
-                      <span className="text-fuchsia-200">
-                        ⚙ Partes vindas do <strong>ClickUp Pilot</strong> (split do parser preservado: {forcedParts.map(p => p.label).join(', ')})
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setForcedParts(null)}
-                        className="mono shrink-0 rounded border border-fuchsia-500/40 px-2 py-0.5 text-[9px] uppercase tracking-widest text-fuchsia-200 hover:border-red-500/60 hover:text-red-300"
-                        disabled={processing}
-                      >
-                        Limpar override
-                      </button>
-                    </div>
-                  ) : null}
-                  <textarea
-                    value={copy}
-                    onChange={(e) => { setCopy(e.target.value); if (forcedParts) setForcedParts(null); }}
-                    placeholder="Cole aqui a copy completa. A ferramenta vai dividir em takes de ~20s sem cortar frase."
-                    rows={10}
-                    className="input-field resize-y font-mono text-sm"
-                    disabled={processing}
-                  />
-                  {parts.length > 0 ? (
-                    <div className="mt-3 rounded-[10px] border border-line bg-bg-soft/40 px-3 py-2 text-[11px] text-text-muted">
-                      <strong className="text-lime">
-                        {parts.length} take{parts.length === 1 ? '' : 's'}
-                      </strong>{' '}
-                      ({parts.length} arquivo
-                      {parts.length === 1 ? '' : 's'} no ZIP final). Cada um
-                      sera 1 video gerado pelo HeyGen via extensao.
-                    </div>
-                  ) : null}
-                </div>
-              ) : (
-                <div className="mt-4">
-                  <input
-                    type="file"
-                    accept="audio/*"
-                    multiple
-                    onChange={(e) =>
-                      setAudioParts(Array.from(e.target.files ?? []))
-                    }
-                    className="input-field file:mr-3 file:rounded-md file:border-0 file:bg-lime file:px-3 file:py-1 file:text-xs file:font-semibold file:text-black"
-                    disabled={processing}
-                  />
-                  {audioParts.length > 0 ? (
-                    <div className="mt-2 text-[11px] text-text-muted">
-                      {audioParts.length} arquivo
-                      {audioParts.length === 1 ? '' : 's'} —{' '}
-                      {audioParts.map((a) => a.name).join(', ')}
-                    </div>
-                  ) : null}
-                  <div className="mt-2 rounded-[10px] border border-lime/30 bg-lime/5 px-3 py-2 text-[11px] text-lime/80">
-                    ✓ Modo audio: a extensao envia cada arquivo pro HeyGen e
-                    gera o avatar usando esse audio (lipsync).{' '}
-                    {dynamicMode
-                      ? 'Ordem CONTROLADA por voce (setas abaixo).'
-                      : 'Os arquivos sao processados na ordem dos nomes (parte1, parte2...).'}
+                {forcedParts && forcedParts.length > 0 ? (
+                  <div className="mt-3 flex items-center justify-between rounded-[10px] border border-fuchsia-500/40 bg-fuchsia-500/10 px-3 py-2 text-[11px]">
+                    <span className="text-fuchsia-200">
+                      ⚙ Partes vindas do <strong>ClickUp Pilot</strong> ({forcedParts.map(p => p.label).join(', ')}) — sobrescreveram os inputs estruturados
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setForcedParts(null)}
+                      className="mono shrink-0 rounded border border-fuchsia-500/40 px-2 py-0.5 text-[9px] uppercase tracking-widest text-fuchsia-200 hover:border-red-500/60 hover:text-red-300"
+                      disabled={processing}
+                    >
+                      Limpar override
+                    </button>
                   </div>
-                </div>
-              )}
+                ) : null}
             </section>
 
             {/* Modo Camuflagem — gera 2a ZIP com cada take camuflado no audio */}
