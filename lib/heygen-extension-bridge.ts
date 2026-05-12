@@ -400,6 +400,68 @@ function encodeWAV(audioBuffer: AudioBuffer): Blob {
   return new Blob([buf], { type: 'audio/wav' });
 }
 
+/* ============================ HEYGEN CREDITS ============================
+ * Pega saldo de creditos HeyGen via extension (cookies sessao).
+ * Cache em memoria de 30s pra evitar bater o endpoint demais. */
+
+export type HeyGenCredits = {
+  ok: boolean;
+  error?: string;
+  /** Creditos pagos do plano — usado pra Avatar IV/V */
+  plan_credit?: { amount: number; total: number };
+  /** Slots Avatar III prioritarios (rapido) — limite mensal separado */
+  unlimited_regular?: { amount: number; total: number };
+  plan_name?: string | null;
+  tier?: string | null;
+  is_unlimited?: boolean;
+  is_paid?: boolean;
+  left_days?: number | null;
+  expired_ts?: number | null;
+  monthly_priority?: { count: number; limit: number };
+  usage?: {
+    paid_videos_last_14_days: number;
+    paid_videos_since_billing: number;
+    next_renewal_ts: number | null;
+    last_billing_ts: number | null;
+  };
+};
+
+let creditsCache: { value: HeyGenCredits; fetchedAt: number } | null = null;
+const CREDITS_CACHE_MS = 30000;
+
+export async function getHeyGenCredits(opts: { force?: boolean } = {}): Promise<HeyGenCredits> {
+  installListener();
+  if (!opts.force && creditsCache && Date.now() - creditsCache.fetchedAt < CREDITS_CACHE_MS) {
+    return creditsCache.value;
+  }
+  if (typeof window === 'undefined') {
+    return { ok: false, error: 'sem window' };
+  }
+  return new Promise((resolve) => {
+    const requestId = `cred_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const handler = (ev: MessageEvent) => {
+      if (ev.data?.source !== 'darkolab-ext') return;
+      if (ev.data?.requestId !== requestId) return;
+      if (ev.data?.type === 'HG_CREDITS_RESULT') {
+        window.removeEventListener('message', handler);
+        const v = ev.data as HeyGenCredits;
+        creditsCache = { value: v, fetchedAt: Date.now() };
+        resolve(v);
+      }
+    };
+    window.addEventListener('message', handler);
+    window.postMessage(
+      { source: 'darkolab', type: 'HG_GET_CREDITS', requestId },
+      '*',
+    );
+    // Timeout 20s
+    setTimeout(() => {
+      window.removeEventListener('message', handler);
+      resolve({ ok: false, error: 'timeout 20s' });
+    }, 20000);
+  });
+}
+
 /** Heuristica simples de deteccao de lingua — usa Web Speech API se
  *  disponivel (Chrome desktop). Retorna ISO code ou null. */
 export async function detectAudioLanguage(file: File): Promise<{ lang: 'pt' | 'en' | 'other' | 'unknown'; confidence: number }> {

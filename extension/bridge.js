@@ -120,6 +120,24 @@
       return;
     }
 
+    if (data.type === 'HG_GET_CREDITS') {
+      const requestId = data.requestId;
+      chrome.runtime.sendMessage(
+        { type: 'HG_GET_CREDITS', requestId },
+        () => {
+          if (chrome.runtime.lastError) {
+            sendToPage({
+              type: 'HG_CREDITS_RESULT',
+              requestId,
+              ok: false,
+              error: chrome.runtime.lastError.message ?? 'Background nao respondeu.',
+            });
+          }
+        },
+      );
+      return;
+    }
+
     if (data.type === 'HG_DRIVE_LIST_FOLDER') {
       const requestId = data.requestId;
       chrome.runtime.sendMessage(

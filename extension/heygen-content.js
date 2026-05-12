@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.8.0';
+const DARKO_EXT_VERSION = '4.9.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -147,6 +147,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch((e) =>
         sendResponse({ ok: false, error: e?.message ?? String(e), voices: [] }),
       );
+    return true;
+  }
+  if (msg && msg.type === 'HG_GET_CREDITS') {
+    getHeyGenCredits()
+      .then((res) => sendResponse(res))
+      .catch((e) => sendResponse({ ok: false, error: e?.message ?? String(e) }));
     return true;
   }
   if (msg && msg.type === 'HG_CLONE_VOICE') {
@@ -405,6 +411,69 @@ async function cloneVoice(payload, onProgress) {
 /**
  * Lista vozes da conta HeyGen (custom + favoritas) via cookies de sessao.
  */
+/**
+ * Pega saldo de creditos HeyGen via /v1/pacific/account.get (cookies sessao).
+ * Retorna:
+ *   plan_credit.amount / .total — creditos pagos do plano (pra Avatar IV/V)
+ *   unlimited_regular.amount / .total — slots "priority" Avatar III
+ *   plan_name, tier, is_unlimited, is_paid, left_days, expired_ts
+ *   monthly_priority: { count, limit } — videos priority deste mes
+ *   usage: { paid_videos_last_14_days, paid_videos_since_billing, next_renewal }
+ */
+async function getHeyGenCredits() {
+  const out = { ok: true };
+  try {
+    const r1 = await fetchWithTimeout(
+      'https://api2.heygen.com/v1/pacific/account.get?include_ff=true',
+      { method: 'GET', credentials: 'include' },
+      8000,
+    );
+    if (!r1.ok) throw new Error('account.get HTTP ' + r1.status);
+    const j1 = await r1.json();
+    const upv = j1?.data?.space_info?.user_plan_v2 || {};
+    const planCredit = upv?.available_quota_v2?.plan_credit || upv?.addon_quota?.plan_credit || {};
+    const unlimitedReg = upv?.available_quota_v2?.unlimited_regular || upv?.addon_quota?.unlimited_regular || {};
+    out.plan_credit = { amount: planCredit.amount ?? 0, total: planCredit.total ?? 0 };
+    out.unlimited_regular = { amount: unlimitedReg.amount ?? 0, total: unlimitedReg.total ?? 0 };
+    out.plan_name = upv.plan_name || null;
+    out.tier = upv.tier || null;
+    out.is_unlimited = !!upv.is_unlimited;
+    out.is_paid = !!upv.is_paid;
+    out.left_days = upv.left_days ?? null;
+    out.expired_ts = upv.expired_ts ?? null;
+  } catch (e) {
+    out.account_error = e.message;
+  }
+  try {
+    const r2 = await fetchWithTimeout(
+      'https://api2.heygen.com/v1/video_history/monthly_priority_video_count',
+      { method: 'GET', credentials: 'include' },
+      5000,
+    );
+    if (r2.ok) {
+      const j2 = await r2.json();
+      out.monthly_priority = { count: j2?.data?.count ?? 0, limit: j2?.data?.limit ?? 0 };
+    }
+  } catch {}
+  try {
+    const r3 = await fetchWithTimeout(
+      'https://api2.heygen.com/v1/account/usage',
+      { method: 'GET', credentials: 'include' },
+      5000,
+    );
+    if (r3.ok) {
+      const j3 = await r3.json();
+      out.usage = {
+        paid_videos_last_14_days: j3?.data?.paid_videos_created_last_14_days ?? 0,
+        paid_videos_since_billing: j3?.data?.paid_videos_created_since_last_billing_cycle ?? 0,
+        next_renewal_ts: j3?.data?.next_renewal_date ?? null,
+        last_billing_ts: j3?.data?.last_billing_cycle_date ?? null,
+      };
+    }
+  } catch {}
+  return out;
+}
+
 async function listMyVoices() {
   const endpoints = [
     'https://api2.heygen.com/v2/voice.list?limit=200&page=1',

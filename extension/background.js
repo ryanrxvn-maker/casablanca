@@ -138,6 +138,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'HG_GET_CREDITS') {
+    const requestId = msg.requestId;
+    handleGetCredits(requestId, sender.tab?.id).catch((err) => {
+      reportToPage(sender.tab?.id, requestId, 'HG_CREDITS_RESULT', {
+        ok: false,
+        error: err?.message ?? String(err),
+      });
+    });
+    sendResponse({ accepted: true });
+    return true;
+  }
+
   if (msg.type === 'HG_DRIVE_LIST_FOLDER') {
     // Lista arquivos dentro de uma pasta Drive via cookies (sem OAuth).
     // Usado pra auto-resolver fileId de filenames mencionados no doc.
@@ -366,6 +378,25 @@ async function handleListAvatars(requestId, bridgeTabId) {
         error: 'Erro inesperado: ' + (e?.message ?? String(e)),
       });
     }
+  }
+}
+
+/** Pega saldo de creditos HeyGen via content-script (cookies sessao).
+ *  Retorna { ok, plan_credit, unlimited_regular, plan_name, tier, ... }
+ *  Usado pelo MotorConfigPicker pra mostrar saldo + warning se preview
+ *  vai exceder saldo. */
+async function handleGetCredits(requestId, bridgeTabId) {
+  console.log('[DARKO LAB BG] >>> handleGetCredits reqId=', requestId);
+  const tab = await findOrCreateHeyGenTab();
+  await waitForTabReady(tab.id);
+  try {
+    const res = await chrome.tabs.sendMessage(tab.id, { type: 'HG_GET_CREDITS' });
+    reportToPage(bridgeTabId, requestId, 'HG_CREDITS_RESULT', res);
+  } catch (e) {
+    reportToPage(bridgeTabId, requestId, 'HG_CREDITS_RESULT', {
+      ok: false,
+      error: 'Aba HeyGen nao respondeu: ' + (e?.message ?? String(e)),
+    });
   }
 }
 
