@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.7.1';
+const DARKO_EXT_VERSION = '4.8.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -1098,37 +1098,31 @@ async function runJob(requestId, payload) {
   let generateClicked = false; // pra garantir click 1x
 
   try {
-    const { copy, audioBase64, audioFilename, avatarId, motor, partLabel, avatarName, groupName } = payload;
+    const { copy, avatarId, motor, partLabel, avatarName, groupName } = payload;
 
     if (!avatarId) throw new Error('payload invalido: avatarId obrigatorio.');
-    const isAudioMode = !!audioBase64;
-    if (!isAudioMode && !copy) throw new Error('payload invalido: copy ou audioBase64 obrigatorio.');
+    if (!copy) throw new Error('payload invalido: copy obrigatoria. (Pra modo audio use processJob da API direta, NAO runJob via UI.)');
 
-    reportProgress(requestId, `Preparando ${partLabel ?? 'video'} via UI${isAudioMode ? ' (modo AUDIO)' : ''}...`);
+    reportProgress(requestId, `Preparando ${partLabel ?? 'video'} via UI...`);
 
     // 1) Aguarda textarea visivel ate 30s (React HeyGen demora a montar).
-    //    No audio mode textarea pode nao aparecer (file input toma o lugar),
-    //    entao SO falha se for text mode.
-    console.log('[DARKO LAB UI] runJob iniciando, location=', location.href, 'mode=', isAudioMode ? 'AUDIO' : 'TEXT');
+    //    Background.js ja navegou pra /avatar antes de chamar runJob.
+    console.log('[DARKO LAB UI] runJob iniciando, location=', location.href);
     reportProgress(requestId, 'Aguardando UI HeyGen...');
     const textarea = await waitForOrNull(
       () => findScriptTextarea(),
-      isAudioMode ? 8000 : 30000,
+      30000,
       400,
     );
-    if (!textarea && !isAudioMode) {
+    if (!textarea) {
       dumpScriptDiagnostics();
       throw new Error(
         'Textarea de script nao apareceu em 30s na ' + location.href +
         '. Abre F12 na aba HeyGen e me cola os logs [DARKO LAB UI diag].'
       );
     }
-    if (textarea) {
-      const r = textarea.getBoundingClientRect();
-      console.log('[DARKO LAB UI] textarea encontrado, dimensoes:', r.width, 'x', r.height);
-    } else {
-      console.log('[DARKO LAB UI] textarea ausente (esperado em audio mode), seguindo...');
-    }
+    const r = textarea.getBoundingClientRect();
+    console.log('[DARKO LAB UI] textarea encontrado, dimensoes:', r.width, 'x', r.height);
 
     // 3) Seleciona motor (Avatar III / IV / V) com VERIFICACAO obrigatoria.
     //    CRITICO: avatar IV/V consomem creditos pagos. Se a gente errou e
@@ -1161,27 +1155,9 @@ async function runJob(requestId, payload) {
     reportProgress(requestId, `Selecionando ${groupName ?? 'avatar'}...`);
     await selectAvatarInUI(avatarId, avatarName, groupName);
 
-    // 5) Cola script OU upload audio
-    if (isAudioMode) {
-      reportProgress(requestId, 'Switching pra audio mode...');
-      const switched = await switchToAudioMode();
-      if (!switched) {
-        throw new Error(
-          'Nao consegui ativar modo Audio na UI HeyGen. ' +
-          'Tente abrir manualmente o tab/botao Audio (ao lado do Script) ' +
-          'e rodar novamente. F12 logs [DARKO LAB UI audio].'
-        );
-      }
-      await sleep(700);
-      reportProgress(requestId, 'Fazendo upload do audio...');
-      await uploadAudioToScriptArea(audioBase64, audioFilename || `${partLabel || 'audio'}.wav`);
-      // Espera HeyGen processar o upload (mostra preview/duracao)
-      reportProgress(requestId, 'Aguardando upload completar...');
-      await waitForAudioUploadComplete(60000);
-    } else {
-      reportProgress(requestId, 'Colando script...');
-      await pasteScriptIntoTextarea(textarea, copy);
-    }
+    // 5) Cola script no textarea com React onChange trigger
+    reportProgress(requestId, 'Colando script...');
+    await pasteScriptIntoTextarea(textarea, copy);
     await sleep(500);
 
     // 6) Marca o timestamp ANTES do click Generate. So consideramos
@@ -1639,23 +1615,13 @@ async function pasteScriptIntoTextarea(textarea, text) {
   }
 }
 
-/* ============= AUDIO MODE HELPERS (v4.7+) ===========================
- * Fluxo VERIFICADO ao vivo (12/05/2026) no app.heygen.com/avatar:
- *  1. Quick Create tem botao DIV role="button" textContent="Upload"
- *     (e irmao "Record") posicionados no topo direito da textarea area.
- *  2. Click no "Upload" abre [role="dialog"] com tw-z-50 (modal centrado).
- *  3. Modal tem 2 tabs BUTTON role="tab": "Record Audio" e "Upload Audio".
- *     "Upload Audio" e selecionada por DEFAULT.
- *  4. Dentro do modal: input[type="file"] (hidden) accept=audio.
- *  5. Set files via DataTransfer + dispatch 'change' → modal mostra
- *     "Uploading...", processa, modal FECHA AUTOMATICAMENTE quando OK.
- *  6. Apos modal fechar, audio carregado fica selecionado, Generate
- *     habilita.
+/* ============= AUDIO MODE (legacy helpers v4.7.x) ===================
+ * NAO USADOS no fluxo atual. Audio mode no DARKO LAB roda via API
+ * direta usando processJob() em lib/heygen-api-direct.ts (mesmo path
+ * do /tools/heygen-auto). Helpers ficam aqui caso futuro queiramos
+ * mexer via UI, mas runJob() so trata MODO TEXTO agora.
  */
 
-/** Procura o botao DIV[role=button] com texto exato "Upload" (ao lado
- *  do "Record"). NAO confunde com botoes maiores que tenham "Upload"
- *  como parte do texto. */
 function findUploadAudioToggle() {
   const all = Array.from(document.querySelectorAll('div[role="button"], button'));
   for (const el of all) {

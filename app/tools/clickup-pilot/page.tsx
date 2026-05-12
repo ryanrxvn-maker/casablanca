@@ -2026,43 +2026,37 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: p.stage, percent: p.percent, message: p.message } }));
         },
         dispatchAudioTake: async ({ avatarId, audioBytes, audioFilename, label }) => {
-          // Base64 encode
-          let binary = '';
-          const CHUNK = 0x8000;
-          for (let i = 0; i < audioBytes.length; i += CHUNK) {
-            binary += String.fromCharCode.apply(null, Array.from(audioBytes.subarray(i, i + CHUNK)));
-          }
-          const audioBase64 = btoa(binary);
-          // Dispatch HeyGen audio mode → retorna "QUEUED" ou "QUEUED:videoId"
-          const queuedResult = await generateAvatarPart({
-            audioBase64,
-            audioFilename,
+          // MESMO fluxo do /tools/heygen-auto (modo audio):
+          // 1. processJob: faz upload do audio direto via HeyGen API (sem UI)
+          //    + cria video → retorna videoId imediato
+          // 2. pollVideosUntilReady: aguarda HeyGen renderizar
+          // 3. downloadVideoBytes: baixa o MP4 final
+          // Nada de UI automation — tudo via API direta com cookies sessao.
+          const { processJob } = await import('@/lib/heygen-api-direct');
+          const file = new File([audioBytes as BlobPart], audioFilename || `${label}.wav`, { type: 'audio/wav' });
+          const job = await processJob({
+            file,
             avatarId,
-            motor: 'III',
-            partLabel: label,
+            title: `${va.baseAdId.replace(/\s+/g, '')}_${label}`,
+            engine: 'iii',
+            orientation: 'portrait',
+          }, {
+            onProgress: (stage: string) => {
+              console.log(`[VA dispatch ${label}] ${stage}`);
+            },
           });
-          // Extrai videoId do "QUEUED:videoId"
-          let videoId: string | null = null;
-          if (queuedResult.startsWith('QUEUED:')) {
-            videoId = queuedResult.slice(7);
-          } else if (queuedResult.startsWith('http')) {
-            // Algumas versoes podem ja retornar URL direta — usa
-            const bytes = await downloadVideoBytes(queuedResult);
-            return new Blob([bytes as BlobPart], { type: 'video/mp4' });
+          if (!job.videoId) {
+            throw new Error('processJob nao retornou videoId.');
           }
-          if (!videoId) {
-            throw new Error('Dispatch nao retornou videoId. Resultado: ' + queuedResult.slice(0, 100));
-          }
-          // Poll status ate completed
-          const statuses = await pollVideosUntilReady([videoId], {
+          // Poll ate completed
+          const statuses = await pollVideosUntilReady([job.videoId], {
             intervalMs: 8000,
             timeoutMs: 30 * 60 * 1000,
           });
-          const st = statuses[videoId];
+          const st = statuses[job.videoId];
           if (!st || st.status !== 'completed' || !st.videoUrl) {
-            throw new Error(`Video nao renderizou (status=${st?.status}): ${st?.error || 'sem detalhes'}`);
+            throw new Error(`Video ${label} nao renderizou (status=${st?.status}): ${st?.error || 'sem detalhes'}`);
           }
-          // Download bytes do video gerado
           const bytes = await downloadVideoBytes(st.videoUrl);
           return new Blob([bytes as BlobPart], { type: 'video/mp4' });
         },
