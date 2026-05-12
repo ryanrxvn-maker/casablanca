@@ -405,15 +405,37 @@ export default function ClickUpPilotPage() {
    *  Usado pelo botao X em cada card da previsibilidade — user pode
    *  limpar uma sem ter que "Limpar tudo". */
   function removeTaskFromAnalysis(taskId: string) {
+    // Remove tambem TODAS siblings (G1/G2 etc) que compartilharam analise
+    // com essa task primary OU eram primary dela
     setTaskAnalyses((prev) => {
       const next = { ...prev };
-      delete next[taskId];
+      // Acha siblings ligados: a propria + as que compartilham com ela
+      const toDelete = new Set<string>([taskId]);
+      const target = prev[taskId];
+      if (target?.sharedWithPrimaryId) {
+        // Essa e sibling — remove o primary tambem
+        toDelete.add(target.sharedWithPrimaryId);
+      }
+      for (const a of Object.values(prev)) {
+        if (a.sharedWithPrimaryId && toDelete.has(a.sharedWithPrimaryId)) {
+          toDelete.add(a.taskId);
+        }
+      }
+      for (const id of toDelete) delete next[id];
       return next;
     });
-    // Tambem desmarca da selecao
     setSelectedTaskIds((prev) => {
       const n = new Set(prev);
-      n.delete(taskId);
+      // Mesma logica de siblings — desmarca todos do grupo
+      const target = taskAnalyses[taskId];
+      const toRemove = new Set<string>([taskId]);
+      if (target?.sharedWithPrimaryId) toRemove.add(target.sharedWithPrimaryId);
+      for (const a of Object.values(taskAnalyses)) {
+        if (a.sharedWithPrimaryId && toRemove.has(a.sharedWithPrimaryId)) {
+          toRemove.add(a.taskId);
+        }
+      }
+      for (const id of toRemove) n.delete(id);
       return n;
     });
   }
@@ -561,14 +583,45 @@ export default function ClickUpPilotPage() {
     });
   }
 
+  /** Normaliza string pra match flexivel: remove acentos, espacos, pontuacao,
+   *  case insensitive. 'Dr. Marco Túlio' → 'drmarcotulio' */
+  function normalizeForMatch(s: string): string {
+    return s
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '') // strip diacriticos
+      .toLowerCase()
+      .replace(/\.(mp4|mov)$/i, '')
+      .replace(/[^\w]/g, ''); // strip espacos, pontos, hifens, etc
+  }
+
   /** Resolve username pra Drive file ID pesquisando driveLinks por match de texto.
-   *  '@marcella.malvar2' procura link cujo texto contem 'marcella.malvar2.mp4'. */
+   *  Estrategias (em ordem):
+   *   1. Match exato normalizado: 'omédicodoshomens' → driveLink text inclui 'omedicodoshomens'
+   *   2. Nucleus match (strip digitos finais): 'manualdohomemsolo2' → 'manualdohomemsolo'
+   *   3. Inverso: o text do link inclui o username normalizado
+   *
+   *  '@marcella.malvar2' procura link cujo texto contem 'marcellamalvar2'.
+   *  'Dr. Marco Túlio' procura 'drmarcotulio'.
+   *  'omédicodoshomens' procura 'omedicodoshomens'. */
   function resolveVideoFileId(username: string, driveLinks: Array<{ text: string; fileId: string }> | undefined): string | null {
     if (!driveLinks || driveLinks.length === 0) return null;
-    const u = username.toLowerCase().replace(/^@/, '').replace(/\.mp4$|\.mov$/, '');
+    const u = normalizeForMatch(username.replace(/^@/, ''));
+    if (u.length < 3) return null;
+    const uNoTrailDigits = u.replace(/\d+$/, ''); // 'manualdohomemsolo2' → 'manualdohomemsolo'
+
+    // 1. Match direto: text normalizado contem username
     for (const link of driveLinks) {
-      const t = link.text.toLowerCase();
+      const t = normalizeForMatch(link.text);
       if (t.includes(u)) return link.fileId;
+    }
+    // 2. Match por nucleus (sem digitos finais nem extensao)
+    if (uNoTrailDigits.length >= 4) {
+      for (const link of driveLinks) {
+        const t = normalizeForMatch(link.text).replace(/\d+$/, '');
+        if (t === uNoTrailDigits || t.includes(uNoTrailDigits) || uNoTrailDigits.includes(t)) {
+          return link.fileId;
+        }
+      }
     }
     return null;
   }
@@ -2672,17 +2725,38 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                         Previsibilidade — o que vai ser disparado
                       </div>
                       <ul className="grid gap-2">
-                        {Object.values(taskAnalyses).map((a) => {
+                        {Object.values(taskAnalyses)
+                          // Filtra siblings G2/G3 que ja foram analisadas como parte do
+                          // primary (G1) — assim aparece UM card so por base task (G1+G2 = 1 card)
+                          .filter((a) => !a.sharedWithPrimaryId)
+                          .map((a) => {
                           const sym = a.status === 'ready' ? '✓' : a.status === 'partial' ? '⚠' : a.status === 'error' ? '✗' : a.status === 'analyzing' ? '◷' : '·';
                           const color = a.status === 'ready' ? 'border-lime/40 bg-lime/5' :
                                          a.status === 'partial' ? 'border-yellow-500/40 bg-yellow-500/5' :
                                          a.status === 'error' ? 'border-red-500/40 bg-red-500/5' :
                                          'border-line bg-bg-soft/30';
+                          // Acha os siblings que compartilham essa analise (G2, G3, etc)
+                          const sharedSiblings = Object.values(taskAnalyses).filter(
+                            (s) => s.sharedWithPrimaryId === a.taskId
+                          );
+                          // Extrai a parte G1/G2/etc do nome de cada sibling pra mostrar agrupado
+                          const allGSuffixes = [a, ...sharedSiblings].map((s) => {
+                            const m = s.taskName.match(/G(\d+)\s*$/i);
+                            return m ? `G${m[1]}` : null;
+                          }).filter(Boolean);
+                          const displayName = sharedSiblings.length > 0
+                            ? a.taskName.replace(/\s*[-–—]\s*G\d+\s*$/i, '').trim()
+                            : a.taskName;
                           return (
                             <li key={a.taskId} className={`rounded-[10px] border ${color} p-3 text-[11px]`}>
                               <div className="flex items-center justify-between gap-2">
-                                <span className="mono text-xs text-white flex items-center gap-2">
-                                  {sym} {a.taskName}
+                                <span className="mono text-xs text-white flex items-center gap-2 flex-wrap">
+                                  {sym} {displayName}
+                                  {sharedSiblings.length > 0 ? (
+                                    <span className="mono rounded border border-cyan-500/40 bg-cyan-500/10 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200" title="Task agrupada — G1 + G2 sao a mesma task no ClickUp, gerada 1x com 2 hooks + 1 body">
+                                      {allGSuffixes.join(' + ')} · 1 task
+                                    </span>
+                                  ) : null}
                                 </span>
                                 <button
                                   type="button"

@@ -142,11 +142,15 @@ export function parseAvatars(section: string): ParsedAvatar[] {
   // Onde <username> e:
   //   a. @user (com ou sem .mp4/.mov)
   //   b. user.mp4 ou user.mov (sem @, mas com extensao OBRIGATORIA)
+  //   c. Display name com espacos + .mp4 (ex: "Dr. Marco Túlio.mp4")
+  //
+  // Role aceita ' - ' DENTRO (ex: "Homem - Ator pornô", "Doutor - Caixa de Pergunta",
+  // "João - Homem Depoimento"). Acentos via À-ÿ.
   //
   // CRITICAL: tem que ter @ OU .mp4/.mov pra evitar match em narrativa
   // tipo "Mulher: voce ja sentiu..." que pega "voce" como username.
   // Cauda: parens, traco ou comentario opcional apos o filename.
-  const reFullLine = /^[\s•\-*\d.)\]]*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s()0-9]{0,58}?):\s*(?:@([A-Za-z0-9][\w._-]{2,})(?:\.(?:mp4|mov))?|([A-Za-z0-9][\w._-]{2,})\.(?:mp4|mov))(?:\s*[\s\-(.,].*)?$/i;
+  const reFullLine = /^[\s•\-*\d.)\]]*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s()0-9\-]{0,58}?):\s*[^@a-zA-ZÀ-ÿ0-9_]*(?:@([A-Za-zÀ-ÿ0-9_][\w.À-ÿ_-]{2,})(?:\.(?:mp4|mov))?|([A-Za-zÀ-ÿ][\wÀ-ÿ.\s_-]{2,}?)\.(?:mp4|mov))\s*(?:[\s\-(.,].*)?$/i;
 
   // Regex 2: linha com SO @username (sem role), tipo "@manualdohomemsolo.mp4"
   const reOnlyMention = /^[\s•\-*\d.)\]]*@([A-Za-z0-9][\w._-]+?)(?:\.(?:mp4|mov))?\s*$/i;
@@ -177,7 +181,8 @@ export function parseAvatars(section: string): ParsedAvatar[] {
     const m1 = trimmed.match(reFullLine);
     if (m1) {
       const role = m1[1].trim();
-      const username = (m1[2] || m1[3] || '').trim();
+      // Strip extensao .mp4/.mov caso o regex greedy tenha incluido
+      let username = (m1[2] || m1[3] || '').trim().replace(/\.(mp4|mov)$/i, '');
       if (isPlausibleAvatarRole(role) &&
           username.length >= 3 &&
           !/^(http|https|www|exemplo|ex)$/i.test(username) &&
@@ -327,10 +332,10 @@ export function parseAdSection(fullDocText: string, adIdOrPrefix: string): Parse
 export function parseGlobalAvatarLink(section: string): { role: string; username: string } | null {
   const lines = section.split(/\r?\n/);
 
-  // Regex pra filename de avatar: @opcional + chars (incluindo acentos)
-  // Aceita username sem extensao se houver @ presente
-  const filenameRe = /^[^@a-zA-ZÀ-ÿ0-9]*@?([a-zA-ZÀ-ÿ0-9_][a-zA-ZÀ-ÿ0-9._-]+?)(?:\.(?:mp4|mov))(\s|$)/i;
-  const filenameWithAtRe = /^[^@a-zA-ZÀ-ÿ0-9]*@([a-zA-ZÀ-ÿ0-9_][a-zA-ZÀ-ÿ0-9._-]+?)(?:\.(?:mp4|mov))?(\s|$)/i;
+  // Regex pra filename de avatar: @opcional + chars (incluindo acentos + espacos)
+  // Aceita: @user.mp4 / user.mp4 / Dr. Marco Túlio.mp4 / @username (sem ext)
+  const filenameRe = /^[^@a-zA-ZÀ-ÿ0-9]*@?([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ0-9._\s-]+?)(?:\.(?:mp4|mov))(?:\s|$)/i;
+  const filenameWithAtRe = /^[^@a-zA-ZÀ-ÿ0-9]*@([a-zA-ZÀ-ÿ0-9_][a-zA-ZÀ-ÿ0-9._-]+?)(?:\.(?:mp4|mov))?(?:\s|$)/i;
 
   // Pattern de header: "Link do avatar:" (varia: "Avatar do video:", etc)
   const headerRe = /^(?:link\s+do\s+avatar|avatar\s+do\s+video|avatar\s+global|avatar\s+padr[aã]o|link\s+avatar)\s*[:\-]?\s*(.*)$/i;
