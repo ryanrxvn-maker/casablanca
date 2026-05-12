@@ -319,15 +319,57 @@ export function parseAdSection(fullDocText: string, adIdOrPrefix: string): Parse
  *  Ex doc AD15VN - PRPB06:
  *    "Link do avatar:  omédicodoshomens.mp4"
  *  → { role: 'Avatar', username: 'omédicodoshomens' }
+ *
+ *  Tambem aceita formato 2-linhas (Google Docs em tabela):
+ *    Linha N:   "Link do avatar:"
+ *    Linha N+1: "omédicodoshomens.mp4"  ← filename pode ser um <a> link
  */
 export function parseGlobalAvatarLink(section: string): { role: string; username: string } | null {
   const lines = section.split(/\r?\n/);
-  for (const line of lines) {
-    const t = line.trim();
-    // "Link do avatar: <filename>" — com ou sem @, .mp4/.mov opcional
-    const m = t.match(/^link\s+do\s+avatar\s*[:\-]\s*[^@a-z0-9]*@?([a-zA-ZÀ-ÿ0-9_][a-zA-ZÀ-ÿ0-9._-]+?)(?:\.(?:mp4|mov))?\s*$/i);
-    if (m) {
-      return { role: 'Avatar', username: m[1] };
+
+  // Regex pra filename de avatar: @opcional + chars (incluindo acentos)
+  // Aceita username sem extensao se houver @ presente
+  const filenameRe = /^[^@a-zA-ZÀ-ÿ0-9]*@?([a-zA-ZÀ-ÿ0-9_][a-zA-ZÀ-ÿ0-9._-]+?)(?:\.(?:mp4|mov))(\s|$)/i;
+  const filenameWithAtRe = /^[^@a-zA-ZÀ-ÿ0-9]*@([a-zA-ZÀ-ÿ0-9_][a-zA-ZÀ-ÿ0-9._-]+?)(?:\.(?:mp4|mov))?(\s|$)/i;
+
+  // Pattern de header: "Link do avatar:" (varia: "Avatar do video:", etc)
+  const headerRe = /^(?:link\s+do\s+avatar|avatar\s+do\s+video|avatar\s+global|avatar\s+padr[aã]o|link\s+avatar)\s*[:\-]?\s*(.*)$/i;
+
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (!t) continue;
+    const mh = t.match(headerRe);
+    if (!mh) continue;
+    // Header detectado. Procura o filename:
+    //  a) Mesmo line, apos o ':' (mais comum)
+    //  b) Proxima(s) linha(s) — caso tabela/multi-line do Google Docs
+    const restOfLine = mh[1].trim();
+    if (restOfLine) {
+      const m = restOfLine.match(filenameRe) || restOfLine.match(filenameWithAtRe);
+      if (m && m[1]) {
+        const u = m[1].trim();
+        if (u.length >= 3 && !/^(http|https|www|drive|google)$/i.test(u)) {
+          return { role: 'Avatar', username: u };
+        }
+      }
+    }
+    // Procura nas proximas 3 linhas
+    for (let j = i + 1; j <= Math.min(i + 3, lines.length - 1); j++) {
+      const next = lines[j].trim();
+      if (!next) continue;
+      // Pula linhas de "Instruções:", "Atenção:", etc
+      if (/^(instru[cç][oõ]es|aten[cç][aã]o|observa[cç][aã]o|caixinha)/i.test(next)) break;
+      // Pula linhas de URL (drive.google.com link de referencia, nao do avatar)
+      if (/^https?:\/\//.test(next)) continue;
+      const m = next.match(filenameRe) || next.match(filenameWithAtRe);
+      if (m && m[1]) {
+        const u = m[1].trim();
+        if (u.length >= 3 && !/^(http|https|www|drive|google)$/i.test(u)) {
+          return { role: 'Avatar', username: u };
+        }
+      }
+      // Se a linha N+1 nao for filename nem vazia, para
+      break;
     }
   }
   return null;
