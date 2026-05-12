@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DARKO LAB — HeyGen Auto",
-  "version": "4.4.1",
+  "version": "4.4.2",
   "description": "DARKO LAB HeyGen — API direta (engenharia reversa) + Docs reader read-only. Audio + texto via TTS, paralelismo 3 jobs.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -22,6 +22,10 @@
     "https://*.heygen.com/*",
     "https://*.heygen.ai/*",
     "https://docs.google.com/*",
+    "https://drive.google.com/*",
+    "https://drive.usercontent.google.com/*",
+    "https://*.googleusercontent.com/*",
+    "https://www.googleapis.com/*",
     "https://*.vercel.app/*",
     "http://localhost/*",
     "http://localhost:*/*"
