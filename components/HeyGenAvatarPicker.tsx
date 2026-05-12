@@ -437,7 +437,7 @@ export function HeyGenAvatarPicker({
                   {openGroup.name}
                 </div>
                 <div className="mono text-[10px] uppercase text-text-muted">
-                  {openGroup.name}'s Looks · {openGroup.looksCount}
+                  {openGroup.name}&apos;s Looks · {openGroup.looksCount}
                 </div>
               </div>
               <button
