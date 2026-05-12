@@ -1945,6 +1945,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     }
 
     setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: 'download', percent: 0, message: 'Baixando AD original do Drive...' } }));
+    const vaStartedAt = Date.now();
 
     try {
       // 1. Download AD via extension
@@ -2021,8 +2022,52 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
       // Marca como disparada
       const siblings = getSiblingTaskIds(taskId);
       for (const sid of siblings) markDispatched(sid);
+      // Persist no historico DARKO LAB Lipsync History
+      try {
+        const VA_KEY = 'darkolab:va-pipeline:history';
+        const hist = (() => {
+          try { return JSON.parse(localStorage.getItem(VA_KEY) || '[]'); } catch { return []; }
+        })();
+        hist.push({
+          taskId,
+          taskName: a.taskName,
+          baseAdId: va.baseAdId,
+          avatares: pipeRes.items.map((it: any, i: number) => ({
+            avaCode: va.avatares[i]?.avaCode || `AVA${i+1}`,
+            username: va.avatares[i]?.username || '?',
+            status: it.blob ? 'done' : 'failed',
+          })),
+          startedAt: vaStartedAt,
+          finishedAt: Date.now(),
+          zipName,
+        });
+        localStorage.setItem(VA_KEY, JSON.stringify(hist.slice(-200)));
+      } catch {}
     } catch (e) {
       setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: 'error', percent: 0, message: 'Erro', error: (e as Error)?.message || String(e) } }));
+      try {
+        const VA_KEY = 'darkolab:va-pipeline:history';
+        const hist = (() => {
+          try { return JSON.parse(localStorage.getItem(VA_KEY) || '[]'); } catch { return []; }
+        })();
+        const a = taskAnalyses[taskId];
+        const va = a?.vaBriefing;
+        if (va) {
+          hist.push({
+            taskId,
+            taskName: a.taskName,
+            baseAdId: va.baseAdId,
+            avatares: va.avatares.map((av: any) => ({
+              avaCode: av.avaCode,
+              username: av.username,
+              status: 'failed',
+            })),
+            startedAt: vaStartedAt,
+            finishedAt: Date.now(),
+          });
+          localStorage.setItem(VA_KEY, JSON.stringify(hist.slice(-200)));
+        }
+      } catch {}
     }
   }
 
