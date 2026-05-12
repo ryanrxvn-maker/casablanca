@@ -21,7 +21,7 @@ import {
   consecutiveStreak,
   type MonthHistory,
 } from '@/lib/points-system';
-import { getClickUpToken, listTeams, listTasks, getCurrentUser } from '@/lib/clickup-client';
+import { getClickUpToken, listTeams, listTasksAll, getCurrentUser } from '@/lib/clickup-client';
 
 /**
  * Sistema de Pontos DARKO LAB.
@@ -71,24 +71,38 @@ export default function PointsPage() {
       const teamId = teams[0]?.id;
       if (!teamId) { setPointsError('Sem teams ClickUp.'); return; }
       const me = await getCurrentUser();
-      // Lista TODAS tasks do mes corrente (sem filtro de status)
-      // ClickUp date_created_gt = unix ms do dia 1 do mes
+      // FIX (12/05/2026): bugs anteriores —
+      //   1. listTasks SO retornava page 0 (max 100 tasks)
+      //   2. NAO incluia tasks fechadas (includeClosed era false)
+      //   3. Filtrava por date_created — tasks CRIADAS antes do mes mas
+      //      FECHADAS no mes nao contavam.
+      // Correto: tasks FECHADAS este mes (date_closed_gt = inicio mes)
+      // com pagina automatica + includeClosed=true.
       const now = new Date();
       const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-      // listTasks nao tem date_created direto — pega tudo + filtra
-      const r = await listTasks(teamId, { assigneeIds: [String(me.id)], page: 0, subtasks: false });
-      // Custom field PESO: soma valor numerico
+      const tasks = await listTasksAll(teamId, {
+        assigneeIds: [String(me.id)],
+        subtasks: false,
+        includeClosed: true,
+        dateClosedGt: firstOfMonth,
+      });
+      // Custom field PESO/PONTOS/POINTS: soma valor numerico
       let total = 0;
-      for (const t of r.tasks) {
-        // So inclui tasks deste mes (created OU updated)
-        const created = Number(t.date_created) || 0;
-        if (created > 0 && created < firstOfMonth) continue;
-        const peso = (t.custom_fields || []).find((f: any) => /^peso$|^pontos$|^points$/i.test(f.name || ''));
+      let countedTasks = 0;
+      for (const t of tasks) {
+        // Double-check: deve estar fechada este mes
+        const closed = Number(t.date_closed) || 0;
+        if (closed === 0 || closed < firstOfMonth) continue;
+        const peso = (t.custom_fields || []).find((f: any) => /^(peso|pontos|points|score)$/i.test(f.name || ''));
         if (peso?.value != null) {
           const val = parseFloat(String(peso.value));
-          if (!isNaN(val)) total += val;
+          if (!isNaN(val)) {
+            total += val;
+            countedTasks++;
+          }
         }
       }
+      console.log(`[points] Carregadas ${tasks.length} tasks fechadas este mes, ${countedTasks} com PESO/PONTOS, total=${total}`);
       setCurrentPoints(total);
     } catch (e) {
       setPointsError((e as Error)?.message || 'Erro fetch pontos');

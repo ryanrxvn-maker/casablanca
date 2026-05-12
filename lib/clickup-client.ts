@@ -80,6 +80,9 @@ export type ClickUpTask = {
   text_content?: string;
   due_date?: string;
   date_created?: string;
+  date_updated?: string;
+  date_closed?: string | null;
+  date_done?: string | null;
   priority?: { id: string; priority: 'urgent' | 'high' | 'normal' | 'low'; color: string; orderindex: string } | null;
   assignees: ClickUpUser[];
   list?: { id: string; name: string };
@@ -117,6 +120,13 @@ export async function listTasks(
     includeClosed?: boolean;
     /** subtasks default false */
     subtasks?: boolean;
+    /** Filtros de data (unix ms) — server-side, evita pegar tasks irrelevantes */
+    dateClosedGt?: number;
+    dateClosedLt?: number;
+    dateUpdatedGt?: number;
+    dateUpdatedLt?: number;
+    dateCreatedGt?: number;
+    dateCreatedLt?: number;
   } = {},
 ): Promise<{ tasks: ClickUpTask[]; lastPage: boolean }> {
   const params = new URLSearchParams();
@@ -125,6 +135,12 @@ export async function listTasks(
   if (opts.page !== undefined) params.set('page', String(opts.page));
   if (opts.includeClosed) params.set('include_closed', 'true');
   if (opts.subtasks) params.set('subtasks', 'true');
+  if (opts.dateClosedGt != null) params.set('date_closed_gt', String(opts.dateClosedGt));
+  if (opts.dateClosedLt != null) params.set('date_closed_lt', String(opts.dateClosedLt));
+  if (opts.dateUpdatedGt != null) params.set('date_updated_gt', String(opts.dateUpdatedGt));
+  if (opts.dateUpdatedLt != null) params.set('date_updated_lt', String(opts.dateUpdatedLt));
+  if (opts.dateCreatedGt != null) params.set('date_created_gt', String(opts.dateCreatedGt));
+  if (opts.dateCreatedLt != null) params.set('date_created_lt', String(opts.dateCreatedLt));
   const qs = params.toString();
   const r = await callGet<{ tasks: ClickUpTask[]; last_page: boolean }>(
     `/team/${teamId}/task${qs ? '?' + qs : ''}`,
@@ -134,6 +150,21 @@ export async function listTasks(
     tasks: (r.body as any).tasks || [],
     lastPage: !!(r.body as any).last_page,
   };
+}
+
+/** Lista TODAS tasks paginando automaticamente ate lastPage. Cap 50 paginas
+ *  pra nao loop infinito. */
+export async function listTasksAll(
+  teamId: string,
+  opts: Parameters<typeof listTasks>[1] = {},
+): Promise<ClickUpTask[]> {
+  const out: ClickUpTask[] = [];
+  for (let page = 0; page < 50; page++) {
+    const r = await listTasks(teamId, { ...opts, page });
+    out.push(...r.tasks);
+    if (r.lastPage || r.tasks.length === 0) break;
+  }
+  return out;
 }
 
 /** GET /task/{task_id} — detalhes (com description completa) */

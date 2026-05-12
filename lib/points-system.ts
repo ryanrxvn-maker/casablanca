@@ -39,8 +39,9 @@ export const POINTS_TIERS: PointsTier[] = [
     bonusBRL: 4000,
     englishName: 'ROOKIE',
     slogan: 'First blood. The empire starts here.',
-    primaryColor: '#A1A1AA',     // zinc-400
-    secondaryColor: '#71717A',   // zinc-500
+    // Carbon fiber black: cinza escuro com brilho metalico
+    primaryColor: '#27272A',     // zinc-800 (carbon dark)
+    secondaryColor: '#52525B',   // zinc-600 (carbon highlight)
     sizeLevel: 1,
   },
   {
@@ -48,8 +49,9 @@ export const POINTS_TIERS: PointsTier[] = [
     bonusBRL: 6000,
     englishName: 'ELITE',
     slogan: 'Above the average. They notice you now.',
-    primaryColor: '#22D3EE',     // cyan-400
-    secondaryColor: '#0891B2',   // cyan-600
+    // Silver ornate: prata polida
+    primaryColor: '#E5E7EB',     // gray-200 (silver shine)
+    secondaryColor: '#9CA3AF',   // gray-400 (silver shadow)
     sizeLevel: 2,
   },
   {
@@ -57,8 +59,9 @@ export const POINTS_TIERS: PointsTier[] = [
     bonusBRL: 8000,
     englishName: 'CHAMPION',
     slogan: 'You decide your own salary now. Keep going.',
-    primaryColor: '#A855F7',     // purple-500
-    secondaryColor: '#7E22CE',   // purple-700
+    // Gold ornate: ouro polido com tons quentes
+    primaryColor: '#FCD34D',     // amber-300 (gold bright)
+    secondaryColor: '#B45309',   // amber-700 (gold deep)
     sizeLevel: 3,
   },
   {
@@ -66,8 +69,9 @@ export const POINTS_TIERS: PointsTier[] = [
     bonusBRL: 10000,
     englishName: 'LEGEND',
     slogan: 'Legends are not born — they are forged in monthly grind.',
-    primaryColor: '#FBBF24',     // amber-400 (gold)
-    secondaryColor: '#D97706',   // amber-600
+    // Diamond pink/iridescent + wings (mais elaborado)
+    primaryColor: '#FBCFE8',     // pink-200 (diamond pink)
+    secondaryColor: '#F472B6',   // pink-400 (diamond glow)
     sizeLevel: 5,
   },
 ];
