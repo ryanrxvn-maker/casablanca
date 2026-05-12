@@ -867,7 +867,14 @@ function parseGoogleDocsHtml(html) {
   if (!html) return { text: '', driveLinks: [] };
 
   // === DRIVE LINKS ===
-  // Pega <a href="<url drive>" ...>texto</a> com captura do file ID
+  // Pega <a href="<url>" ...>texto</a> com captura de IDs Drive de TODOS formatos:
+  //   /file/d/<ID>/...           (arquivo)
+  //   /drive/folders/<ID>        (pasta)
+  //   /folderview?id=<ID>        (pasta variacao)
+  //   /open?id=<ID>              (qualquer item)
+  //   /document/d/<ID>/...       (doc)
+  //   docs.google.com/spreadsheets/d/<ID>/...  (sheet)
+  //   /presentation/d/<ID>/...   (slides)
   const driveLinks = [];
   const seen = new Set();
   const linkRe = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
@@ -880,15 +887,33 @@ function parseGoogleDocsHtml(html) {
     if (redirMatch) {
       try { realUrl = decodeURIComponent(redirMatch[1]); } catch {}
     }
-    const fileMatch = realUrl.match(/\/file\/d\/([a-zA-Z0-9_-]{15,})/);
-    if (!fileMatch) continue;
-    const fileId = fileMatch[1];
+    // Tenta varios patterns em ordem de prioridade
+    const patterns = [
+      /\/file\/d\/([a-zA-Z0-9_-]{15,})/,           // arquivo Drive
+      /\/drive\/folders\/([a-zA-Z0-9_-]{15,})/,    // pasta Drive
+      /\/folderview\?id=([a-zA-Z0-9_-]{15,})/,     // pasta variacao
+      /\/document\/d\/([a-zA-Z0-9_-]{15,})/,       // doc
+      /\/spreadsheets\/d\/([a-zA-Z0-9_-]{15,})/,   // sheet
+      /\/presentation\/d\/([a-zA-Z0-9_-]{15,})/,   // slides
+      /[?&]id=([a-zA-Z0-9_-]{15,})/,                // generico
+    ];
+    let fileId = null;
+    let isFolder = false;
+    for (const re of patterns) {
+      const fileMatch = realUrl.match(re);
+      if (fileMatch) {
+        fileId = fileMatch[1];
+        isFolder = /folder/i.test(realUrl);
+        break;
+      }
+    }
+    if (!fileId) continue;
     // Strip HTML do texto do link
     const linkText = m[2].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').trim();
     const key = `${fileId}::${linkText}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    driveLinks.push({ text: linkText, fileId });
+    driveLinks.push({ text: linkText, fileId, isFolder });
   }
 
   // === TEXTO ===
