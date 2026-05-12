@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.6.1';
+const DARKO_EXT_VERSION = '4.7.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -1098,31 +1098,37 @@ async function runJob(requestId, payload) {
   let generateClicked = false; // pra garantir click 1x
 
   try {
-    const { copy, avatarId, motor, partLabel, avatarName, groupName } = payload;
+    const { copy, audioBase64, audioFilename, avatarId, motor, partLabel, avatarName, groupName } = payload;
 
     if (!avatarId) throw new Error('payload invalido: avatarId obrigatorio.');
-    if (!copy) throw new Error('payload invalido: copy obrigatoria.');
+    const isAudioMode = !!audioBase64;
+    if (!isAudioMode && !copy) throw new Error('payload invalido: copy ou audioBase64 obrigatorio.');
 
-    reportProgress(requestId, `Preparando ${partLabel ?? 'video'} via UI...`);
+    reportProgress(requestId, `Preparando ${partLabel ?? 'video'} via UI${isAudioMode ? ' (modo AUDIO)' : ''}...`);
 
     // 1) Aguarda textarea visivel ate 30s (React HeyGen demora a montar).
-    //    Background.js ja navegou pra /avatar antes de chamar runJob.
-    console.log('[DARKO LAB UI] runJob iniciando, location=', location.href);
+    //    No audio mode textarea pode nao aparecer (file input toma o lugar),
+    //    entao SO falha se for text mode.
+    console.log('[DARKO LAB UI] runJob iniciando, location=', location.href, 'mode=', isAudioMode ? 'AUDIO' : 'TEXT');
     reportProgress(requestId, 'Aguardando UI HeyGen...');
     const textarea = await waitForOrNull(
       () => findScriptTextarea(),
-      30000,
+      isAudioMode ? 8000 : 30000,
       400,
     );
-    if (!textarea) {
+    if (!textarea && !isAudioMode) {
       dumpScriptDiagnostics();
       throw new Error(
         'Textarea de script nao apareceu em 30s na ' + location.href +
         '. Abre F12 na aba HeyGen e me cola os logs [DARKO LAB UI diag].'
       );
     }
-    const r = textarea.getBoundingClientRect();
-    console.log('[DARKO LAB UI] textarea encontrado, dimensoes:', r.width, 'x', r.height);
+    if (textarea) {
+      const r = textarea.getBoundingClientRect();
+      console.log('[DARKO LAB UI] textarea encontrado, dimensoes:', r.width, 'x', r.height);
+    } else {
+      console.log('[DARKO LAB UI] textarea ausente (esperado em audio mode), seguindo...');
+    }
 
     // 3) Seleciona motor (Avatar III / IV / V) com VERIFICACAO obrigatoria.
     //    CRITICO: avatar IV/V consomem creditos pagos. Se a gente errou e
@@ -1155,9 +1161,27 @@ async function runJob(requestId, payload) {
     reportProgress(requestId, `Selecionando ${groupName ?? 'avatar'}...`);
     await selectAvatarInUI(avatarId, avatarName, groupName);
 
-    // 5) Cola script no textarea com React onChange trigger
-    reportProgress(requestId, 'Colando script...');
-    await pasteScriptIntoTextarea(textarea, copy);
+    // 5) Cola script OU upload audio
+    if (isAudioMode) {
+      reportProgress(requestId, 'Switching pra audio mode...');
+      const switched = await switchToAudioMode();
+      if (!switched) {
+        throw new Error(
+          'Nao consegui ativar modo Audio na UI HeyGen. ' +
+          'Tente abrir manualmente o tab/botao Audio (ao lado do Script) ' +
+          'e rodar novamente. F12 logs [DARKO LAB UI audio].'
+        );
+      }
+      await sleep(700);
+      reportProgress(requestId, 'Fazendo upload do audio...');
+      await uploadAudioToScriptArea(audioBase64, audioFilename || `${partLabel || 'audio'}.wav`);
+      // Espera HeyGen processar o upload (mostra preview/duracao)
+      reportProgress(requestId, 'Aguardando upload completar...');
+      await waitForAudioUploadComplete(60000);
+    } else {
+      reportProgress(requestId, 'Colando script...');
+      await pasteScriptIntoTextarea(textarea, copy);
+    }
     await sleep(500);
 
     // 6) Marca o timestamp ANTES do click Generate. So consideramos
@@ -1613,6 +1637,148 @@ async function pasteScriptIntoTextarea(textarea, text) {
     await sleep(100);
     document.execCommand('insertText', false, text);
   }
+}
+
+/* ============= AUDIO MODE HELPERS (v4.7+) ============= */
+
+/** Procura tab/botao que ativa modo audio. HeyGen Quick Create tem um
+ *  seletor entre 'Type Script' / 'Voice Clone' / 'Upload Audio' / 'Audio'.
+ *  Tenta varias variantes de texto + atributos. */
+async function switchToAudioMode() {
+  console.log('[DARKO LAB UI audio] procurando tab/botao audio...');
+  const candidates = [];
+  // 1. Tabs / botoes com texto que indica audio
+  const audioTexts = [
+    'upload audio', 'use audio', 'audio file', 'audio upload',
+    'upload an audio', 'voice clone', 'use my voice', 'audio',
+    'subir audio', 'enviar audio',
+  ];
+  const allInteractive = document.querySelectorAll('button, [role="tab"], [role="button"], a, div[tabindex], span[tabindex]');
+  for (const el of allInteractive) {
+    if (el.offsetParent === null) continue;
+    const txt = (el.textContent || '').trim().toLowerCase();
+    const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+    const fullText = txt + ' ' + aria;
+    // Bloqueia controles do AVATAR PICKER que podem ter texto "voice"
+    if (fullText.includes('change avatar') || fullText.includes('preview')) continue;
+    for (const target of audioTexts) {
+      if (fullText.includes(target)) {
+        const r = el.getBoundingClientRect();
+        if (r.width < 5 || r.height < 5) continue;
+        // Score: prefere elementos curtos (tabs > paragrafos)
+        const score = 100 - txt.length;
+        candidates.push({ el, score, txt: txt.slice(0, 50) });
+        break;
+      }
+    }
+  }
+  if (candidates.length === 0) {
+    console.warn('[DARKO LAB UI audio] nenhum candidato encontrado. DOM scan:');
+    const sample = Array.from(document.querySelectorAll('button')).slice(0, 30).map((b) => (b.textContent || '').trim().slice(0, 40));
+    console.warn('  buttons sample:', sample);
+    return false;
+  }
+  candidates.sort((a, b) => b.score - a.score);
+  console.log('[DARKO LAB UI audio] candidates:', candidates.slice(0, 5).map((c) => c.txt));
+  // Tenta clicar nos top 3
+  for (const c of candidates.slice(0, 3)) {
+    console.log('[DARKO LAB UI audio] clicando candidato:', c.txt);
+    clickElement(c.el);
+    await sleep(900);
+    // Verifica se apareceu file input ou drop zone
+    if (findAudioFileInput() || findAudioDropZone()) {
+      console.log('[DARKO LAB UI audio] modo audio ativado via:', c.txt);
+      return true;
+    }
+  }
+  // Tenta find pelo file input direto (caso modo audio ja esteja ativo por default)
+  if (findAudioFileInput()) {
+    console.log('[DARKO LAB UI audio] file input ja presente sem precisar trocar tab');
+    return true;
+  }
+  console.warn('[DARKO LAB UI audio] nenhum click trouxe file input');
+  return false;
+}
+
+/** Encontra <input type="file"> de audio na pagina. */
+function findAudioFileInput() {
+  const inputs = document.querySelectorAll('input[type="file"]');
+  for (const inp of inputs) {
+    const accept = (inp.getAttribute('accept') || '').toLowerCase();
+    // Aceita audio explicito ou input sem accept (Quick Create pode aceitar tudo)
+    if (accept.includes('audio') || accept.includes('mp3') || accept.includes('wav') || accept === '' || accept === '*/*') {
+      return inp;
+    }
+  }
+  return null;
+}
+
+/** Encontra drop zone (div com 'drag and drop' ou similar). */
+function findAudioDropZone() {
+  const all = document.querySelectorAll('div, label');
+  for (const el of all) {
+    if (el.offsetParent === null) continue;
+    const txt = (el.textContent || '').trim().toLowerCase();
+    if (txt.length > 200) continue;
+    if (txt.includes('drag') && (txt.includes('drop') || txt.includes('audio'))) {
+      return el;
+    }
+    if (txt.includes('arraste') || txt.includes('solte')) {
+      return el;
+    }
+  }
+  return null;
+}
+
+/** Upload de audio: encontra file input + dispara change com File. */
+async function uploadAudioToScriptArea(audioBase64, filename) {
+  const fileInput = await waitForOrNull(() => findAudioFileInput(), 8000, 200);
+  if (!fileInput) {
+    throw new Error('File input de audio nao encontrado apos switch. F12: cole o HTML da area de script pra eu ver o seletor.');
+  }
+  console.log('[DARKO LAB UI audio] file input encontrado, fazendo upload...');
+  // Decodifica base64 → Uint8Array → File
+  const bin = atob(audioBase64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const ext = (filename || '').toLowerCase().match(/\.(\w+)$/)?.[1] || 'wav';
+  const mime = ext === 'mp3' ? 'audio/mpeg' : ext === 'm4a' ? 'audio/mp4' : 'audio/wav';
+  const file = new File([bytes], filename || 'audio.wav', { type: mime });
+  // Dispara via DataTransfer (forma padrao pra programatic file upload)
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  fileInput.files = dt.files;
+  fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+  console.log('[DARKO LAB UI audio] file dispatched:', filename, 'size:', bytes.length);
+}
+
+/** Aguarda HeyGen processar o upload — heuristica: procura indicador
+ *  de progresso/sucesso (texto com duracao do audio em segundos). */
+async function waitForAudioUploadComplete(timeoutMs = 60000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    // Heuristica: se houver text "X.Xs" / "X:XX" perto do upload area, upload completou
+    const indicators = document.querySelectorAll('span, div, p');
+    for (const el of indicators) {
+      if (el.offsetParent === null) continue;
+      const txt = (el.textContent || '').trim();
+      if (txt.length > 80) continue;
+      // Match "1.2s", "0:23", "1:23" sozinho na linha → indicador de audio carregado
+      if (/^\d+\.?\d*\s*s$/i.test(txt) || /^\d{1,2}:\d{2}$/.test(txt)) {
+        console.log('[DARKO LAB UI audio] upload OK, indicador:', txt);
+        return true;
+      }
+    }
+    // Tambem checa botao Generate ativado (nao disabled)
+    const gen = findGenerateButton();
+    if (gen && !gen.disabled && gen.getAttribute('aria-disabled') !== 'true') {
+      console.log('[DARKO LAB UI audio] generate button habilitado, assumindo upload OK');
+      return true;
+    }
+    await sleep(500);
+  }
+  console.warn('[DARKO LAB UI audio] waitForAudioUploadComplete timeout. Continua mesmo assim.');
+  return false;
 }
 
 function clickElement(el) {

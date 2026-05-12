@@ -2033,16 +2033,37 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             binary += String.fromCharCode.apply(null, Array.from(audioBytes.subarray(i, i + CHUNK)));
           }
           const audioBase64 = btoa(binary);
-          // Dispatch HeyGen audio mode
-          const videoUrl = await generateAvatarPart({
+          // Dispatch HeyGen audio mode → retorna "QUEUED" ou "QUEUED:videoId"
+          const queuedResult = await generateAvatarPart({
             audioBase64,
             audioFilename,
             avatarId,
             motor: 'III',
             partLabel: label,
           });
+          // Extrai videoId do "QUEUED:videoId"
+          let videoId: string | null = null;
+          if (queuedResult.startsWith('QUEUED:')) {
+            videoId = queuedResult.slice(7);
+          } else if (queuedResult.startsWith('http')) {
+            // Algumas versoes podem ja retornar URL direta — usa
+            const bytes = await downloadVideoBytes(queuedResult);
+            return new Blob([bytes as BlobPart], { type: 'video/mp4' });
+          }
+          if (!videoId) {
+            throw new Error('Dispatch nao retornou videoId. Resultado: ' + queuedResult.slice(0, 100));
+          }
+          // Poll status ate completed
+          const statuses = await pollVideosUntilReady([videoId], {
+            intervalMs: 8000,
+            timeoutMs: 30 * 60 * 1000,
+          });
+          const st = statuses[videoId];
+          if (!st || st.status !== 'completed' || !st.videoUrl) {
+            throw new Error(`Video nao renderizou (status=${st?.status}): ${st?.error || 'sem detalhes'}`);
+          }
           // Download bytes do video gerado
-          const bytes = await downloadVideoBytes(videoUrl);
+          const bytes = await downloadVideoBytes(st.videoUrl);
           return new Blob([bytes as BlobPart], { type: 'video/mp4' });
         },
       });
