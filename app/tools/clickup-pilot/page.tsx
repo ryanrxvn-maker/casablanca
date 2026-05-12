@@ -42,6 +42,8 @@ import {
 import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
 import { CompactVoiceSelector } from '@/components/CompactVoiceSelector';
 import { VoiceCloneTrigger } from '@/components/VoiceCloneTrigger';
+import { MotorConfigPicker, MotorSlotPicker } from '@/components/MotorConfigPicker';
+import { defaultMotorConfig, resolveMotors, type MotorConfig, type Motor } from '@/lib/motor-config';
 import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
 import { recallByVoiceName, rememberPairing, normalizeVoiceName } from '@/lib/voice-avatar-memory';
 import { Toggle3D } from '@/components/Toggle3D';
@@ -365,6 +367,13 @@ export default function ClickUpPilotPage() {
   const [bulkMode, setBulkMode] = useToolState<boolean>('clickup:bulkMode', false);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
   const [taskAnalyses, setTaskAnalyses] = useState<Record<string, TaskAnalysis>>({});
+
+  // Motor config por task (III/IV/V — global, %, individual)
+  const [motorConfigs, setMotorConfigs] = useState<Record<string, MotorConfig>>({});
+  const getMotorConfig = (taskId: string): MotorConfig => motorConfigs[taskId] || defaultMotorConfig();
+  const setMotorConfigForTask = (taskId: string, cfg: MotorConfig) => {
+    setMotorConfigs((prev) => ({ ...prev, [taskId]: cfg }));
+  };
   const [analyzing, setAnalyzing] = useState(false);
 
   function toggleTaskSelected(id: string) {
@@ -1123,18 +1132,26 @@ export default function ClickUpPilotPage() {
 
     try {
       // 1. Dispatch via runHeyGenJobs (re-usa toda logica do HeyGen Auto runner)
-      const jobs = plan.parts.map((p: any) => ({
+      // MOTOR: resolve per-part baseado em motorConfig (global/percent/individual)
+      const motorCfg = getMotorConfig(taskId);
+      const motorsPerPart = resolveMotors(motorCfg, plan.parts.length, {
+        slotIds: plan.parts.map((p: any) => `${p.label}`),
+        seed: taskId,
+      });
+      console.log(`[clickup-pilot] motor config (${motorCfg.kind}): ${motorsPerPart.join(', ')}`);
+      const jobs = plan.parts.map((p: any, i: number) => ({
         label: p.label,
         copy: p.text,
         avatarId: p.avatarId!,
         voiceId: p.voiceId,
+        motor: motorsPerPart[i], // <-- override per job
       }));
       const results = await runHeyGenJobs(jobs, {
         parallel: 3,
         mode: 'copy',
         avatarId: plan.parts[0]?.avatarId || '',
         voiceId: undefined,
-        motor: 'III',
+        motor: motorCfg.kind === 'global' ? motorCfg.motor : 'III', // fallback global; per-job vence
         adNameSafe: adNameClean,
         isCancelled: () => !!batchCancelRef.current[taskId],
         onProgress: () => {},
@@ -2802,6 +2819,19 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   × Remover
                                 </button>
                               </div>
+
+                              {/* MOTOR CONFIG — Avatar III/IV/V picker */}
+                              {a.status === 'ready' || a.status === 'partial' ? (
+                                <div className="mt-2">
+                                  <MotorConfigPicker
+                                    config={getMotorConfig(a.taskId)}
+                                    setConfig={(cfg) => setMotorConfigForTask(a.taskId, cfg)}
+                                    takeCount={(a.partTemplates?.length || 0) || (a.totalParts || 0) || (a.roleSlots?.length || 0)}
+                                    slotIds={(a.partTemplates || []).map((p: any, i: number) => p.label || `t${i}`)}
+                                  />
+                                </div>
+                              ) : null}
+
                               <div className="mt-1 flex items-center justify-between gap-2">
                                 <span></span>
                                 {a.status === 'partial' && a.roleSlots?.some(s => !s.avatarId && s.briefingFileId) ? (

@@ -15,6 +15,8 @@ import {
   type ExtensionStatus,
 } from '@/lib/heygen-extension-bridge';
 import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
+import { MotorConfigPicker } from '@/components/MotorConfigPicker';
+import { defaultMotorConfig, resolveMotors, type MotorConfig } from '@/lib/motor-config';
 import {
   heygenApiFetch,
   REQUIRED_EXT_VERSION,
@@ -67,6 +69,8 @@ export default function HeyGenAutoPage() {
 
   const [adName, setAdName] = useToolState<string>('hgauto:adName', '');
   const [motor, setMotor] = useToolState<Motor>('hgauto:motor', 'IV');
+  // Motor config avancado (global/percent/individual) — sobrepoe `motor` se usado
+  const [motorConfig, setMotorConfig] = useToolState<MotorConfig>('hgauto:motorConfig', { kind: 'global', motor: 'III' });
   const [mode, setMode] = useToolState<Mode>('hgauto:mode', 'copy');
   const [avatarQuery, setAvatarQuery] = useToolState<string>(
     'hgauto:avatarQuery',
@@ -635,21 +639,24 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     setProcessing(true);
 
     try {
+      // Motor por job: usa motorConfig se ativo, senao cai pro motor global legacy
+      const motorsPerPart = resolveMotors(motorConfig, jobs.length, {
+        slotIds: jobs.map((j) => j.label),
+        seed: safeName,
+      });
+      console.log(`[heygen-auto] motor config (${motorConfig.kind}): ${motorsPerPart.join(', ')}`);
+      const jobsWithMotor = jobs.map((j, i) => ({ ...j, motor: motorsPerPart[i] }));
+
       const collected: PartResult[] = [];
-      const finalResults = await runHeyGenJobs(jobs, {
+      const finalResults = await runHeyGenJobs(jobsWithMotor, {
         parallel: 3,
         mode,
         avatarId: selectedAvatar.id,
-        // Modo copy:
-        //  1) override marcado + voz escolhida → usa essa voz
-        //  2) selectedAvatar.voiceId presente (extension v4.0.13+) → voz do avatar
-        //  3) undefined → processJob faz lookup via API (fallback frageis pra
-        //     talking_photo, mas funciona pra avatares regulares)
         voiceId:
           mode === 'copy' && overrideVoice && selectedVoice
             ? selectedVoice.id
             : (selectedAvatar.voiceId || undefined),
-        motor,
+        motor: motorConfig.kind === 'global' ? motorConfig.motor : motor, // fallback per-job vence
         adNameSafe: safeName,
         isCancelled: () => cancelRef.current,
         onProgress: (msg) => setStage(msg),
@@ -774,30 +781,18 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
               />
             </section>
 
-            {/* Motor */}
+            {/* Motor — picker avancado (global/percent/individual + previa creditos) */}
             <section className="border-t border-line pt-6">
-              <h2 className="label-field !mb-3">Motor do avatar</h2>
-              <div className="flex flex-wrap gap-2">
-                {(['III', 'IV', 'V'] as const).map((m) => {
-                  const active = motor === m;
-                  return (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => setMotor(m)}
-                      disabled={processing}
-                      className={
-                        'rounded-[12px] px-5 py-2.5 text-sm transition-all duration-200 active:scale-[0.97] ' +
-                        (active
-                          ? 'bg-lime font-semibold text-black shadow-[0_0_18px_-4px_rgba(200,255,0,0.6)]'
-                          : 'border border-line-strong text-text-muted hover:border-lime hover:text-white')
-                      }
-                    >
-                      Avatar {m}
-                    </button>
-                  );
-                })}
-              </div>
+              <h2 className="label-field !mb-3">Motor do avatar (com previsibilidade de créditos)</h2>
+              <MotorConfigPicker
+                config={motorConfig}
+                setConfig={setMotorConfig}
+                takeCount={mode === 'audio' ? audioParts.length : parts.length}
+                slotIds={mode === 'audio'
+                  ? audioParts.map((_, i) => `HOOK${i + 1}`)
+                  : parts.map((_, i) => `PART${i + 1}`)
+                }
+              />
             </section>
 
             {/* Avatar — biblioteca real da conta HeyGen via extensao */}

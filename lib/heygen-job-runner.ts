@@ -16,6 +16,9 @@ export type RunnerJob = {
   avatarId?: string;
   /** Modo dinamico: voiceId override por parte (cai pra opts.voiceId se ausente) */
   voiceId?: string;
+  /** Override de motor por job — vence opts.motor. Permite mix de
+   *  III/IV/V dentro do mesmo batch (config 'percent' ou 'individual'). */
+  motor?: 'III' | 'IV' | 'V';
 };
 
 export type RunnerResult = {
@@ -67,13 +70,14 @@ export async function runHeyGenJobs(
         const effectiveAvatarId = job.avatarId || opts.avatarId;
         const effectiveVoiceId =
           opts.mode === 'copy' ? (job.voiceId || opts.voiceId) : undefined;
+        const effectiveMotor = job.motor || opts.motor;
         const input: ProcessJobInput = {
           file: opts.mode === 'audio' ? job.audio : undefined,
           text: opts.mode === 'copy' ? job.copy : undefined,
           voiceId: effectiveVoiceId,
           title: `${opts.adNameSafe}_${label}`,
           avatarId: effectiveAvatarId,
-          engine: motorToEngine(opts.motor),
+          engine: motorToEngine(effectiveMotor),
           orientation: 'portrait',
         };
         const result = await processJob(input, {
