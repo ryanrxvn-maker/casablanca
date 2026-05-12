@@ -721,15 +721,42 @@ function parseGoogleDocsHtml(html) {
   text = text.replace(/<style[\s\S]*?<\/style>/gi, '').replace(/<script[\s\S]*?<\/script>/gi, '');
   // Strip todas tags
   text = text.replace(/<[^>]+>/g, '');
-  // Decode entities comuns
+  // Decode HTML entities — tabela completa pra PT-BR + ASCII basicas.
+  // Google Docs HTML export usa entities (&ccedil;, &atilde;, etc) em vez
+  // de UTF-8 direto, especialmente em headers de paragrafo.
+  const NAMED_ENTITIES = {
+    'nbsp': ' ', 'amp': '&', 'lt': '<', 'gt': '>', 'quot': '"', 'apos': "'",
+    // Latim acentuado minusculas
+    'aacute': 'á', 'eacute': 'é', 'iacute': 'í', 'oacute': 'ó', 'uacute': 'ú',
+    'agrave': 'à', 'egrave': 'è', 'igrave': 'ì', 'ograve': 'ò', 'ugrave': 'ù',
+    'acirc':  'â', 'ecirc':  'ê', 'icirc':  'î', 'ocirc':  'ô', 'ucirc':  'û',
+    'atilde': 'ã', 'ntilde': 'ñ', 'otilde': 'õ',
+    'auml':   'ä', 'euml':   'ë', 'iuml':   'ï', 'ouml':   'ö', 'uuml':   'ü',
+    'aring':  'å', 'aelig':  'æ', 'ccedil': 'ç', 'oslash': 'ø', 'szlig': 'ß',
+    'yacute': 'ý', 'yuml':   'ÿ',
+    // Latim acentuado maiusculas
+    'Aacute': 'Á', 'Eacute': 'É', 'Iacute': 'Í', 'Oacute': 'Ó', 'Uacute': 'Ú',
+    'Agrave': 'À', 'Egrave': 'È', 'Igrave': 'Ì', 'Ograve': 'Ò', 'Ugrave': 'Ù',
+    'Acirc':  'Â', 'Ecirc':  'Ê', 'Icirc':  'Î', 'Ocirc':  'Ô', 'Ucirc':  'Û',
+    'Atilde': 'Ã', 'Ntilde': 'Ñ', 'Otilde': 'Õ',
+    'Auml':   'Ä', 'Euml':   'Ë', 'Iuml':   'Ï', 'Ouml':   'Ö', 'Uuml':   'Ü',
+    'Aring':  'Å', 'AElig':  'Æ', 'Ccedil': 'Ç', 'Oslash': 'Ø',
+    'Yacute': 'Ý',
+    // Pontuacao tipografica comum
+    'lsquo': '‘', 'rsquo': '’', 'ldquo': '“', 'rdquo': '”',
+    'sbquo': '‚', 'bdquo': '„',
+    'ndash': '–', 'mdash': '—',
+    'hellip': '…', 'middot': '·',
+    'laquo': '«', 'raquo': '»',
+    'copy': '©', 'reg': '®', 'trade': '™',
+    'deg':  '°', 'plusmn': '±',
+    // Espacos especiais
+    'ensp': ' ', 'emsp': ' ', 'thinsp': ' ', 'zwnj': '‌', 'zwj': '‍',
+  };
   text = text
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)));
+    .replace(/&([a-zA-Z]+);/g, (raw, name) => NAMED_ENTITIES[name] ?? raw)
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
   // Collapse newlines triplas+
   text = text.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+/g, ' ').replace(/ ?\n ?/g, '\n').trim();
 
