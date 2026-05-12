@@ -1,14 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { HeyGenAvatarPicker, type AvatarOption } from './HeyGenAvatarPicker';
 
 /**
  * Picker compacto pra usar inline em listas (modo dinamico).
  *
- * Mostra: thumb pequena + nome do avatar selecionado + botao "Trocar".
- * Clicando "Trocar" abre o HeyGenAvatarPicker em overlay modal. Compartilha
- * o cache singleton da biblioteca, entao nao re-busca avatares.
+ * Abre como DROPDOWN ancorado no botao trigger (NAO modal central).
+ * Posicao calculada com getBoundingClientRect — se nao couber abaixo,
+ * abre acima. Assim "segue o scroll" do user, aparecendo perto de onde
+ * ele clicou independente de quao baixo na pagina ele estava.
  */
 export function CompactAvatarPicker({
   selected,
@@ -26,17 +27,86 @@ export function CompactAvatarPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [pos, setPos] = useState<{ top: number; left: number; width: number; maxH: number; placement: 'below' | 'above' } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
   const display = selected ?? fallback ?? null;
+
+  const PANEL_W = 720;  // largura desejada
+  const PANEL_H = 540;  // altura desejada
+
+  const computePos = () => {
+    const btn = btnRef.current;
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const spaceBelow = vh - r.bottom - 12;
+    const spaceAbove = r.top - 12;
+    const placement = spaceBelow >= 320 || spaceBelow >= spaceAbove ? 'below' : 'above';
+    const maxH = Math.min(PANEL_H, Math.max(spaceBelow, spaceAbove) - 8);
+    const width = Math.min(PANEL_W, vw - 24);
+    // Tenta alinhar a esquerda no botao; corrige se overflow
+    let left = r.left;
+    if (left + width > vw - 12) left = vw - width - 12;
+    if (left < 12) left = 12;
+    const top = placement === 'below' ? r.bottom + 6 : Math.max(12, r.top - maxH - 6);
+    setPos({ top, left, width, maxH, placement });
+  };
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    computePos();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = () => computePos();
+    const onResize = () => computePos();
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [open]);
+
+  // Fecha em click fora
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (popRef.current?.contains(t)) return;
+      if (btnRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    // Atraso pra nao fechar imediato no proprio click que abriu
+    const id = setTimeout(() => document.addEventListener('mousedown', onDoc), 0);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener('mousedown', onDoc);
+    };
+  }, [open]);
+
+  // Esc fecha
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
 
   return (
     <>
       <button
+        ref={btnRef}
         type="button"
-        onClick={() => !disabled && setOpen(true)}
+        onClick={() => !disabled && setOpen((o) => !o)}
         disabled={disabled}
         className={
           'group flex w-full items-center gap-2 rounded-[10px] border border-line-strong bg-bg-soft/40 px-2 py-1.5 text-left transition hover:border-lime hover:bg-lime/5 disabled:opacity-50 ' +
-          (selected ? 'border-lime/40' : '')
+          (selected ? 'border-lime/40 ' : '') +
+          (open ? 'border-lime' : '')
         }
         title={display?.name ?? 'Escolher avatar'}
       >
@@ -64,52 +134,45 @@ export function CompactAvatarPicker({
           )}
         </div>
         <span className="mono shrink-0 rounded-full border border-line-strong px-1.5 py-0.5 text-[8px] uppercase tracking-widest text-text-muted group-hover:border-lime group-hover:text-lime">
-          Trocar
+          {open ? 'Fechar' : 'Trocar'}
         </span>
       </button>
 
-      {open ? (
+      {open && pos ? (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-4 sm:items-center"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setOpen(false);
-          }}
+          ref={popRef}
+          className="fixed z-[60] overflow-hidden rounded-[14px] border border-lime/40 bg-bg shadow-[0_12px_40px_-6px_rgba(0,0,0,0.6),0_0_28px_-12px_rgba(200,255,0,0.4)]"
+          style={{ top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxH }}
         >
-          <div className="relative max-h-[85vh] w-full max-w-3xl overflow-y-auto rounded-[16px] border border-lime/30 bg-bg p-4 shadow-[0_0_40px_-10px_rgba(200,255,0,0.4)]">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="mono text-xs uppercase tracking-widest text-lime">
-                {label ?? 'Escolher avatar pra essa parte'}
-              </h3>
-              <div className="flex items-center gap-2">
-                {selected ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelected(null);
-                      setOpen(false);
-                    }}
-                    className="rounded-md border border-line-strong px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
-                  >
-                    Voltar pro padrao
-                  </button>
-                ) : null}
+          <div className="flex items-center justify-between border-b border-line/40 bg-bg-soft/40 px-3 py-2">
+            <h3 className="mono text-[10px] uppercase tracking-widest text-lime">
+              {label ?? 'Escolher avatar'}
+            </h3>
+            <div className="flex items-center gap-1.5">
+              {selected ? (
                 <button
                   type="button"
-                  onClick={() => setOpen(false)}
-                  className="rounded-md border border-line-strong px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
+                  onClick={() => { setSelected(null); setOpen(false); }}
+                  className="rounded-md border border-line-strong px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
                 >
-                  Fechar
+                  Voltar pro padrao
                 </button>
-              </div>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-md border border-line-strong px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
+              >
+                ✕
+              </button>
             </div>
+          </div>
+          <div className="overflow-y-auto p-3" style={{ maxHeight: pos.maxH - 44 }}>
             <HeyGenAvatarPicker
               query={query}
               setQuery={setQuery}
               selected={selected}
-              setSelected={(a) => {
-                setSelected(a);
-                setOpen(false);
-              }}
+              setSelected={(a) => { setSelected(a); setOpen(false); }}
               disabled={false}
               label="Biblioteca"
             />

@@ -1,13 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 type VoiceOption = { id: string; name: string; gender?: string | null; language?: string | null };
 
 /**
- * Picker de voz compacto pra usar inline em listas.
- * Default null = usar voz padrao do avatar. Click pra abrir modal +
- * escolher voz custom (override). Reset volta pra null.
+ * Picker de voz compacto — abre como DROPDOWN ancorado no botao
+ * (segue o scroll). Default null = usar voz padrao do avatar.
  *
  * Reusa /api/heygen/voices que ja existe no projeto.
  */
@@ -22,6 +21,66 @@ export function CompactVoiceSelector({
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<VoiceOption[]>([]);
   const [loading, setLoading] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number; maxH: number } | null>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+
+  const PANEL_W = 480;
+  const PANEL_H = 460;
+
+  const computePos = () => {
+    const btn = btnRef.current;
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const spaceBelow = vh - r.bottom - 12;
+    const spaceAbove = r.top - 12;
+    const placement = spaceBelow >= 280 || spaceBelow >= spaceAbove ? 'below' : 'above';
+    const maxH = Math.min(PANEL_H, Math.max(spaceBelow, spaceAbove) - 8);
+    const width = Math.min(PANEL_W, vw - 24);
+    let left = r.left;
+    if (left + width > vw - 12) left = vw - width - 12;
+    if (left < 12) left = 12;
+    const top = placement === 'below' ? r.bottom + 6 : Math.max(12, r.top - maxH - 6);
+    setPos({ top, left, width, maxH });
+  };
+
+  useLayoutEffect(() => { if (open) computePos(); }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = () => computePos();
+    const onResize = () => computePos();
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (popRef.current?.contains(t)) return;
+      if (btnRef.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const id = setTimeout(() => document.addEventListener('mousedown', onDoc), 0);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener('mousedown', onDoc);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -40,11 +99,13 @@ export function CompactVoiceSelector({
   return (
     <>
       <button
+        ref={btnRef}
         type="button"
-        onClick={() => setOpen(true)}
+        onClick={() => setOpen((o) => !o)}
         className={
           'group flex w-full max-w-[400px] items-center gap-2 rounded-[10px] border border-line-strong bg-bg-soft/40 px-2 py-1.5 text-left transition hover:border-lime hover:bg-lime/5 ' +
-          (selected ? 'border-lime/40' : '')
+          (selected ? 'border-lime/40 ' : '') +
+          (open ? 'border-lime' : '')
         }
         title={selected?.name ?? 'Voz padrao do avatar'}
       >
@@ -62,37 +123,38 @@ export function CompactVoiceSelector({
           ) : null}
         </div>
         <span className="mono shrink-0 rounded-full border border-line-strong px-1.5 py-0.5 text-[8px] uppercase tracking-widest text-text-muted group-hover:border-lime group-hover:text-lime">
-          Trocar
+          {open ? 'Fechar' : 'Trocar'}
         </span>
       </button>
 
-      {open ? (
+      {open && pos ? (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-4 sm:items-center"
-          onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
+          ref={popRef}
+          className="fixed z-[60] overflow-hidden rounded-[14px] border border-lime/40 bg-bg shadow-[0_12px_40px_-6px_rgba(0,0,0,0.6),0_0_28px_-12px_rgba(200,255,0,0.4)]"
+          style={{ top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxH }}
         >
-          <div className="relative max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-[16px] border border-lime/30 bg-bg p-4 shadow-[0_0_40px_-10px_rgba(200,255,0,0.4)]">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="mono text-xs uppercase tracking-widest text-lime">Escolher voz custom</h3>
-              <div className="flex items-center gap-2">
-                {selected ? (
-                  <button
-                    type="button"
-                    onClick={() => { setSelected(null); setOpen(false); }}
-                    className="rounded-md border border-line-strong px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
-                  >
-                    Voltar pra voz padrao
-                  </button>
-                ) : null}
+          <div className="flex items-center justify-between border-b border-line/40 bg-bg-soft/40 px-3 py-2">
+            <h3 className="mono text-[10px] uppercase tracking-widest text-lime">Escolher voz custom</h3>
+            <div className="flex items-center gap-1.5">
+              {selected ? (
                 <button
                   type="button"
-                  onClick={() => setOpen(false)}
-                  className="rounded-md border border-line-strong px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
+                  onClick={() => { setSelected(null); setOpen(false); }}
+                  className="rounded-md border border-line-strong px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
                 >
-                  Fechar
+                  Voltar pra padrao
                 </button>
-              </div>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="rounded-md border border-line-strong px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
+              >
+                ✕
+              </button>
             </div>
+          </div>
+          <div className="p-3 overflow-y-auto" style={{ maxHeight: pos.maxH - 44 }}>
             <input
               type="text"
               value={query}
