@@ -185,58 +185,109 @@ export default function AutoBrollPage() {
       description="Cole os prompts (JSON do Claude do seu LLM, ou texto livre). A extensao Magnific gera N imagens (Nano Banana 2/Pro) + N videos (Kling 2.5) e empacota tudo em ZIP."
     >
       <div className="grid gap-5">
-        {/* Extension status */}
-        <div className="rounded-xl border border-line bg-bg-soft/40 p-4">
-          <div className="mb-2 flex items-center justify-between gap-2 flex-wrap">
-            <div className="text-sm font-semibold uppercase tracking-wide text-text-muted">
-              Extension DARKO LAB Magnific Auto
+        {/* Extension status / install banner */}
+        {extStatus.connected ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-3 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2 w-2 shrink-0">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
+              </span>
+              <span className="text-lime">
+                Extensao DARKO LAB Magnific v{extStatus.version}
+              </span>
+              {sessionOk?.ok ? (
+                <span className="mono ml-2 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
+                  ✓ {sessionOk.detail || 'sessao OK'}
+                </span>
+              ) : sessionOk && !sessionOk.ok ? (
+                <span className="mono ml-2 rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] uppercase text-red-300">
+                  ✗ {sessionOk.detail}
+                </span>
+              ) : null}
             </div>
             <div className="flex items-center gap-2">
-              {extStatus.connected ? (
-                <span className="rounded-full bg-lime-soft px-2 py-0.5 text-xs font-medium text-lime">
-                  conectada v{extStatus.version}
-                </span>
-              ) : (
-                <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-xs text-red-300">
-                  nao detectada
-                </span>
-              )}
               <button
                 type="button"
                 onClick={() => detectMagnificExtension().then(setExtStatus)}
-                className="btn-secondary text-xs"
+                className="rounded-md border border-line-strong bg-bg-soft px-3 py-1 text-[11px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime"
               >
                 Re-checar
               </button>
               <button
                 type="button"
                 onClick={handleTestSession}
-                disabled={!extStatus.connected || testingSession}
-                className="btn-secondary text-xs"
+                disabled={testingSession}
+                className="rounded-md border border-line-strong bg-bg-soft px-3 py-1 text-[11px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime disabled:opacity-50"
               >
                 {testingSession ? 'Testando...' : 'Testar sessao Magnific'}
               </button>
             </div>
           </div>
-          {sessionOk && (
-            <div
-              className={`mt-2 rounded-md border px-3 py-2 text-xs ${
-                sessionOk.ok
-                  ? 'border-lime/40 bg-lime/5 text-lime'
-                  : 'border-red-500/40 bg-red-500/10 text-red-300'
-              }`}
-            >
-              {sessionOk.ok
-                ? `Sessao OK. Endpoint: ${sessionOk.detail ?? 'detectado'}`
-                : `Falha: ${sessionOk.detail ?? 'sem detalhe'}`}
+        ) : (
+          <div className="rounded-[12px] border border-yellow-500/40 bg-yellow-500/10 px-4 py-3">
+            <div className="flex items-start gap-2">
+              <span className="text-yellow-300">⚠</span>
+              <div className="flex-1 text-xs text-yellow-300/90">
+                <strong className="text-yellow-300">
+                  Extensao DARKO LAB Magnific nao instalada
+                </strong>
+                . Voce precisa dela pra gerar B-Rolls (a automacao usa
+                sua conta Magnific Premium+ logada, em modo Unlimited —
+                <span className="text-lime font-semibold"> NUNCA gasta creditos</span>).
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <a
+                    href="/api/extension-magnific/download"
+                    download
+                    className="rounded-md border border-lime bg-lime/20 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-lime transition hover:bg-lime/30"
+                  >
+                    ⬇ Baixar darkolab-magnific-extension.zip
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => detectMagnificExtension().then(setExtStatus)}
+                    className="rounded-md border border-line-strong bg-bg-soft px-3 py-1.5 text-[11px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
+                  >
+                    Ja instalei — re-checar
+                  </button>
+                </div>
+                <details className="mt-3" open>
+                  <summary className="cursor-pointer text-yellow-300/80 hover:text-yellow-200 select-none">
+                    Como instalar (passo a passo)
+                  </summary>
+                  <ol className="mt-2 list-decimal space-y-1 pl-5 text-yellow-300/80">
+                    <li>
+                      Baixa o pacote da extensao:{' '}
+                      <a
+                        href="/api/extension-magnific/download"
+                        className="underline hover:text-lime"
+                        download
+                      >
+                        darkolab-magnific-extension.zip
+                      </a>
+                    </li>
+                    <li>Descompacta numa pasta no seu computador</li>
+                    <li>
+                      Abre <code className="mono">chrome://extensions</code>
+                    </li>
+                    <li>
+                      Liga &quot;Modo de desenvolvedor&quot; (canto superior direito)
+                    </li>
+                    <li>
+                      Clica &quot;Carregar sem compactacao&quot; e seleciona a pasta
+                    </li>
+                    <li>
+                      Faz login no <code className="mono">www.magnific.com</code> em outra aba (Premium+)
+                    </li>
+                    <li>
+                      Volta aqui — a extensao deve aparecer como conectada
+                    </li>
+                  </ol>
+                </details>
+              </div>
             </div>
-          )}
-          <p className="mt-2 text-xs text-text-muted">
-            Plano Premium+ obrigatorio. Nano Banana 1K + Kling 2.5 720p sao{' '}
-            <span className="text-lime">ilimitados</span> nesse plano (nao consome
-            creditos).
-          </p>
-        </div>
+          </div>
+        )}
 
         {/* Inputs */}
         <div className="grid gap-3 md:grid-cols-2">
