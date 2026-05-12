@@ -138,12 +138,15 @@ export function parseAvatars(section: string): ParsedAvatar[] {
   const out: ParsedAvatar[] = [];
   const lines = section.split(/\r?\n/);
 
-  // Regex 1: linha completa "[prefixo opcional] Role: [@]username[.mp4] [comentario opcional]"
-  // Prefixo: "1." | "1)" | "-" | "*" | "•" (opcional)
-  // Role: 1+ palavras com letras/espaco/parens
-  // Filename: @opcional + chars validos + .mp4/.mov opcional
-  // Cauda: qualquer coisa apos (parens, traco, comentario)
-  const reFullLine = /^[\s•\-*\d.)\]]*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s()0-9]{0,58}?):\s*[^@\w]*@?([A-Za-z0-9][\w._-]+?)(?:\.(?:mp4|mov))?(?:\s*[\s\-(.,].*)?$/i;
+  // Regex 1: linha completa "[prefixo opcional] Role: <username>"
+  // Onde <username> e:
+  //   a. @user (com ou sem .mp4/.mov)
+  //   b. user.mp4 ou user.mov (sem @, mas com extensao OBRIGATORIA)
+  //
+  // CRITICAL: tem que ter @ OU .mp4/.mov pra evitar match em narrativa
+  // tipo "Mulher: voce ja sentiu..." que pega "voce" como username.
+  // Cauda: parens, traco ou comentario opcional apos o filename.
+  const reFullLine = /^[\s•\-*\d.)\]]*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s()0-9]{0,58}?):\s*(?:@([A-Za-z0-9][\w._-]{2,})(?:\.(?:mp4|mov))?|([A-Za-z0-9][\w._-]{2,})\.(?:mp4|mov))(?:\s*[\s\-(.,].*)?$/i;
 
   // Regex 2: linha com SO @username (sem role), tipo "@manualdohomemsolo.mp4"
   const reOnlyMention = /^[\s•\-*\d.)\]]*@([A-Za-z0-9][\w._-]+?)(?:\.(?:mp4|mov))?\s*$/i;
@@ -169,11 +172,12 @@ export function parseAvatars(section: string): ParsedAvatar[] {
     // Pula linhas que parecem ser comentarios pesados (urls, etc)
     if (/^https?:\/\//.test(trimmed)) continue;
 
-    // Tentativa 1: linha completa "Role: @user.mp4"
+    // Tentativa 1: linha completa "Role: @user[.mp4]" OU "Role: user.mp4"
+    // Grupo 2 = username com @, Grupo 3 = username sem @ (com extensao obrigatoria)
     const m1 = trimmed.match(reFullLine);
     if (m1) {
       const role = m1[1].trim();
-      const username = m1[2].trim();
+      const username = (m1[2] || m1[3] || '').trim();
       if (isPlausibleAvatarRole(role) &&
           username.length >= 3 &&
           !/^(http|https|www|exemplo|ex)$/i.test(username) &&

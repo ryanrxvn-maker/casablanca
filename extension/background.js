@@ -534,58 +534,18 @@ async function handleDownloadDrive(requestId, fileId, bridgeTabId) {
     }
   }
 
-  // Estrategia 4: chrome.downloads API — funcionamento garantido (browser nativo)
-  // Usa quando fetch falha totalmente. Pega o blob via fetch da URL final.
+  // Estrategia 4: retry uc + confirm=t (forca confirm sem token)
   if (!bytes) {
-    try {
-      console.log('[DARKO LAB BG v4.6] tentando chrome.downloads fallback');
-      const downloadUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=t`;
-      const downloadId = await new Promise((resolve, reject) => {
-        chrome.downloads.download(
-          { url: downloadUrl, conflictAction: 'uniquify', saveAs: false },
-          (id) => {
-            if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
-            else resolve(id);
-          },
-        );
-      });
-      // Aguarda completion
-      const downloaded = await new Promise((resolve) => {
-        const checkInterval = setInterval(async () => {
-          const items = await chrome.downloads.search({ id: downloadId });
-          const item = items?.[0];
-          if (!item) return;
-          if (item.state === 'complete') {
-            clearInterval(checkInterval);
-            resolve(item);
-          } else if (item.state === 'interrupted') {
-            clearInterval(checkInterval);
-            resolve(null);
-          }
-        }, 1000);
-        setTimeout(() => { clearInterval(checkInterval); resolve(null); }, 600000);
-      });
-      if (downloaded && downloaded.filename) {
-        // Le arquivo do disco via fetch file://
-        try {
-          const fileUrl = 'file://' + downloaded.filename.replace(/\\/g, '/');
-          const fr = await fetch(fileUrl);
-          if (fr.ok) {
-            const buf = await fr.arrayBuffer();
-            bytes = new Uint8Array(buf);
-            console.log('[DARKO LAB BG v4.6] OK via chrome.downloads, bytes=', bytes.length);
-          } else {
-            errors.push(`chrome.downloads file:// fetch HTTP ${fr.status}`);
-          }
-        } catch (e) {
-          errors.push(`chrome.downloads file:// fetch: ${e?.message || e}`);
-        }
-      } else {
-        errors.push('chrome.downloads: download interrupted ou timeout');
-      }
-    } catch (e) {
-      errors.push(`chrome.downloads exception: ${e?.message || e}`);
-    }
+    res = await tryFetch(`https://drive.google.com/uc?export=download&id=${fileId}&confirm=t`);
+    if (res.bytes) { bytes = res.bytes; console.log('[DARKO LAB BG v4.6] OK via uc+confirm=t'); }
+    else errors.push(`uc+confirm=t: ${res.err}`);
+  }
+
+  // Estrategia 5: open=share format
+  if (!bytes) {
+    res = await tryFetch(`https://drive.google.com/u/0/uc?id=${fileId}&export=download&confirm=t`);
+    if (res.bytes) { bytes = res.bytes; console.log('[DARKO LAB BG v4.6] OK via /u/0/uc'); }
+    else errors.push(`u/0/uc: ${res.err}`);
   }
 
   if (!bytes) {

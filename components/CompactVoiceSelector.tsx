@@ -35,9 +35,20 @@ export function CompactVoiceSelector({
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     const width = Math.min(PANEL_W, vw - 24);
-    const maxH = Math.min(PANEL_H, vh - 40);
-    const idealTop = r.top - 30;
-    const top = Math.max(20, Math.min(vh - maxH - 20, idealTop));
+    const SPACING = 8;
+    const spaceBelow = vh - r.bottom - SPACING;
+    const spaceAbove = r.top - SPACING;
+    const targetH = Math.min(PANEL_H, vh - 40);
+    let top: number;
+    let maxH: number;
+    if (spaceBelow >= 280 || spaceBelow >= spaceAbove) {
+      maxH = Math.min(targetH, spaceBelow);
+      top = r.bottom + SPACING;
+    } else {
+      maxH = Math.min(targetH, spaceAbove);
+      top = r.top - maxH - SPACING;
+    }
+    if (top < 12) top = 12;
     let left = r.left + r.width / 2 - width / 2;
     if (left + width > vw - 12) left = vw - width - 12;
     if (left < 12) left = 12;

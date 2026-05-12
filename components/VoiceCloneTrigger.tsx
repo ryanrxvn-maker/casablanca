@@ -85,9 +85,17 @@ export function VoiceCloneTrigger({
     const vh = window.innerHeight;
     const W = Math.min(380, vw - 24);
     const H_EST = 460;
-    const maxH = Math.min(H_EST, vh - 40);
-    const idealTop = r.top - 30;
-    const top = Math.max(20, Math.min(vh - maxH - 20, idealTop));
+    const SPACING = 8;
+    const spaceBelow = vh - r.bottom - SPACING;
+    const spaceAbove = r.top - SPACING;
+    let top: number;
+    if (spaceBelow >= 320 || spaceBelow >= spaceAbove) {
+      top = r.bottom + SPACING;
+    } else {
+      const h = Math.min(H_EST, spaceAbove);
+      top = r.top - h - SPACING;
+    }
+    if (top < 12) top = 12;
     let left = r.left + r.width / 2 - W / 2;
     if (left + W > vw - 12) left = vw - W - 12;
     if (left < 12) left = 12;

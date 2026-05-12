@@ -42,19 +42,27 @@ export function CompactAvatarPicker({
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     const width = Math.min(PANEL_W, vw - 24);
-    // Centra o popup VERTICALMENTE no viewport — sempre aparece "na frente"
-    // do usuario independente de onde ele scrollou. Pequeno offset baseado
-    // no botao pra parecer ancorado mas sempre visivel.
-    const maxH = Math.min(PANEL_H, vh - 40);
-    // Preferimos colocar o topo um pouco acima da linha do botao, mas
-    // garantir que o popup inteiro fique dentro do viewport.
-    const idealTop = r.top - 40;
-    const top = Math.max(20, Math.min(vh - maxH - 20, idealTop));
-    // Centra HORIZONTALMENTE no botao, mas clamp dentro do viewport
+    const SPACING = 8;
+    const spaceBelow = vh - r.bottom - SPACING;
+    const spaceAbove = r.top - SPACING;
+    const targetH = Math.min(PANEL_H, vh - 40);
+    let top: number;
+    let maxH: number;
+    let placement: 'below' | 'above';
+    if (spaceBelow >= 320 || spaceBelow >= spaceAbove) {
+      placement = 'below';
+      maxH = Math.min(targetH, spaceBelow);
+      top = r.bottom + SPACING;
+    } else {
+      placement = 'above';
+      maxH = Math.min(targetH, spaceAbove);
+      top = r.top - maxH - SPACING;
+    }
+    if (top < 12) top = 12;
     let left = r.left + r.width / 2 - width / 2;
     if (left + width > vw - 12) left = vw - width - 12;
     if (left < 12) left = 12;
-    setPos({ top, left, width, maxH, placement: 'below' });
+    setPos({ top, left, width, maxH, placement });
   };
 
   useLayoutEffect(() => {
