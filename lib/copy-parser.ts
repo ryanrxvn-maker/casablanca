@@ -107,15 +107,11 @@ const NON_AVATAR_PREFIXES = [
 function isPlausibleAvatarRole(role: string): boolean {
   const r = role.trim();
   if (r.length === 0 || r.length > 60) return false;
-  // Bloqueia prefixos de metadados (Voz, Referencia, etc)
+  // Bloqueia prefixos de metadados (Voz, Referencia, etc) — INCLUSIVE
+  // 'Voz do Homem', 'Voz da Mulher', etc. Esses sao referencias de VOZ
+  // pra TTS, NAO avatares visuais separados (user esclareceu 12/05/2026).
   for (const re of NON_AVATAR_PREFIXES) {
-    if (re.test(r)) {
-      // "Voz do Homem" e excecao: e role com mention de avatar, nao
-      // referencia. Detectado via filename mention que a regex global
-      // captura. Aqui so excluimos "Voz: <ref-id>" sem @username.
-      if (/^voz\s+(do|da|de)\s+\w+/i.test(r)) continue;
-      return false;
-    }
+    if (re.test(r)) return false;
   }
   return true;
 }
@@ -244,6 +240,27 @@ export function parseAdSection(fullDocText: string, adIdOrPrefix: string): Parse
     parts: parseParts(section),
     rawSection: section,
   };
+}
+
+/** Detecta linha 'Link do avatar: <file>.mp4' (formato alternativo usado em
+ *  alguns ADs onde o avatar GLOBAL da copy inteira eh declarado no topo,
+ *  sem 'Avatar:' por hook). Retorna {role: 'Avatar', username} ou null.
+ *
+ *  Ex doc AD15VN - PRPB06:
+ *    "Link do avatar:  omédicodoshomens.mp4"
+ *  → { role: 'Avatar', username: 'omédicodoshomens' }
+ */
+export function parseGlobalAvatarLink(section: string): { role: string; username: string } | null {
+  const lines = section.split(/\r?\n/);
+  for (const line of lines) {
+    const t = line.trim();
+    // "Link do avatar: <filename>" — com ou sem @, .mp4/.mov opcional
+    const m = t.match(/^link\s+do\s+avatar\s*[:\-]\s*[^@a-z0-9]*@?([a-zA-ZÀ-ÿ0-9_][a-zA-ZÀ-ÿ0-9._-]+?)(?:\.(?:mp4|mov))?\s*$/i);
+    if (m) {
+      return { role: 'Avatar', username: m[1] };
+    }
+  }
+  return null;
 }
 
 /* ============= Convencao G[N] = Hook[N] (DARKO LAB briefings) ============= */
@@ -444,7 +461,15 @@ export type ParsedDarkoBriefing = {
 export function parseDarkoBriefing(fullDocText: string, baseAdId: string): ParsedDarkoBriefing | null {
   const baseSection = findAdSection(fullDocText, baseAdId);
   if (!baseSection) return null;
-  const avatars = parseAvatars(baseSection);
+  let avatars = parseAvatars(baseSection);
+  // Fallback: alguns ADs usam 'Link do avatar: <file>' em vez de 'Avatar:'
+  // — vira avatar GLOBAL da copy (todos hooks + body desse avatar).
+  if (avatars.length === 0) {
+    const global = parseGlobalAvatarLink(baseSection);
+    if (global) {
+      avatars = [{ role: global.role, username: global.username, raw: `Link do avatar: ${global.username}.mp4` }];
+    }
+  }
   const siblings = findGSiblings(fullDocText, baseAdId);
   const hooks: ParsedDarkoBriefing['hooks'] = [];
   let body: string | null = null;
@@ -554,11 +579,47 @@ export function isVATask(taskName: string): boolean {
   return false;
 }
 
-/** Parse VA briefing. Retorna null se nao for VA detectavel. */
+/** Extrai os codigos AVA mencionados na NOMENCLATURA da task.
+ *
+ * Ex: 'VA - AD03G1VN - PRPB06 - AVA05 e 06 - Silas' → [5, 6]
+ *     'VA - AD02G1VN - PRPB06 - AVA03 e 04 - Silas' → [3, 4]
+ *     'VA - AD10G1VN - AVA01, 02 e 03 - SILAS'      → [1, 2, 3]
+ *     'AD138GL - VFPB04'                            → [] (nao tem AVAs)
+ *
+ * User esclareceu (12/05/2026): nome da task DELIMITA quais AVAs gerar,
+ * mesmo que o doc tenha mais. Se task diz "AVA05 e 06", so esses 2 saem
+ * — outros do doc sao ignorados. */
+export function extractAvaNumsFromTaskName(taskName: string): number[] {
+  if (!taskName) return [];
+  // Match completo: "AVA<num>" no taskName + numeros adicionais separados por
+  // 'e', ',' ou '/'. Ex: "AVA05 e 06" → captura 5 e depois 06.
+  // Strategy: encontra TODOS numeros que seguem AVA ou seguem o anterior via 'e'/'/' /','.
+  // Simples: extrai segmento entre "AVA" e o proximo elemento da task name (delimitado por dash).
+  const m = taskName.match(/AVA\s*([\d\s,e/]+?)(?:\s*[-–—]|$)/i);
+  if (!m) return [];
+  const segment = m[1];
+  // Acha todos numeros no segmento
+  const nums: number[] = [];
+  const numRe = /(\d+)/g;
+  let nm;
+  while ((nm = numRe.exec(segment)) !== null) {
+    const n = parseInt(nm[1], 10);
+    if (!isNaN(n) && n > 0 && n < 100) nums.push(n);
+  }
+  // Dedup + sort
+  return Array.from(new Set(nums)).sort((a, b) => a - b);
+}
+
+/** Parse VA briefing. Retorna null se nao for VA detectavel.
+ *
+ *  IMPORTANTE: aceita filterAvaNums pra restringir quais AVAs vao pro
+ *  resultado. Quando a task name diz "AVA05 e 06", so esses 2 retornam
+ *  (mesmo que o doc tenha AVA01-06). User esclareceu 12/05/2026. */
 export function parseVABriefing(
   fullDocText: string,
   baseAdIdOrTaskName: string,
   driveLinks: Array<{ text: string; fileId: string }> = [],
+  filterAvaNums: number[] = [],
 ): ParsedVABriefing | null {
   if (!fullDocText) return null;
   const lines = fullDocText.split(/\r?\n/);
@@ -596,7 +657,7 @@ export function parseVABriefing(
 
   // 4. Avatares de variacao: linhas tipo "<base>-AVA<NN>" seguidas de "Avatar <filename>"
   // Tambem aceita: AVAxx + Avatar @username.mp4
-  const avatares: VAAvatar[] = [];
+  const allAvatares: VAAvatar[] = [];
   const seenAvaCodes = new Set<string>();
   for (let i = vaHeaderIdx; i < lines.length; i++) {
     const t = lines[i].trim();
@@ -623,8 +684,14 @@ export function parseVABriefing(
     }
     if (!username) continue;
     seenAvaCodes.add(avaCode);
-    avatares.push({ avaNum, avaCode, username, fileId });
+    allAvatares.push({ avaNum, avaCode, username, fileId });
   }
+
+  // FILTRO: se task name diz quais AVAs gerar (ex 'AVA05 e 06'), restringe.
+  // Sem filterAvaNums OR filter vazio: passa todos.
+  const avatares = filterAvaNums.length > 0
+    ? allAvatares.filter((a) => filterAvaNums.includes(a.avaNum))
+    : allAvatares;
 
   // 5. Gancho (texto): seccao apos "Gancho" ate proxima heading (Body/Depoimento)
   let hookText = '';

@@ -22,6 +22,7 @@ import {
   matchAvatar,
   isVATask,
   parseVABriefing,
+  extractAvaNumsFromTaskName,
   type ParsedAdSection,
   type ParsedDarkoBriefing,
   type ParsedVABriefing,
@@ -373,10 +374,45 @@ export default function ClickUpPilotPage() {
       // (todas Gs compartilham o mesmo doc, so analisamos 1x mesmo).
       const siblings = getSiblingTaskIds(id);
       const isCurrentlySelected = n.has(id);
+      const newlySelected: string[] = [];
       for (const sid of siblings) {
-        if (isCurrentlySelected) n.delete(sid);
-        else n.add(sid);
+        if (isCurrentlySelected) {
+          n.delete(sid);
+        } else if (!n.has(sid)) {
+          n.add(sid);
+          newlySelected.push(sid);
+        }
       }
+      // Auto-analyze: se selecionou tasks novas E ja ha outras tasks analisadas
+      // (ou ja existe taskAnalyses pra alguma da selecao), dispara analyze
+      // automaticamente das novas. Evita user ter que clicar "Analisar (N)"
+      // a cada nova task que adiciona.
+      if (!isCurrentlySelected && newlySelected.length > 0 && Object.keys(taskAnalyses).length > 0) {
+        // Defer setTimeout pra esperar setSelectedTaskIds aplicar
+        setTimeout(() => {
+          const unanalyzed = newlySelected.filter((id) => !taskAnalyses[id]);
+          if (unanalyzed.length > 0 && !analyzing) {
+            analyzeSelected();
+          }
+        }, 100);
+      }
+      return n;
+    });
+  }
+
+  /** Remove uma task individual do batch state (estado analisado).
+   *  Usado pelo botao X em cada card da previsibilidade — user pode
+   *  limpar uma sem ter que "Limpar tudo". */
+  function removeTaskFromAnalysis(taskId: string) {
+    setTaskAnalyses((prev) => {
+      const next = { ...prev };
+      delete next[taskId];
+      return next;
+    });
+    // Tambem desmarca da selecao
+    setSelectedTaskIds((prev) => {
+      const n = new Set(prev);
+      n.delete(taskId);
       return n;
     });
   }
@@ -634,7 +670,12 @@ export default function ClickUpPilotPage() {
           // Roda parser VA primeiro — se detectado, marca como ready e pula
           // o fluxo normal de hooks/body/avatares.
           if (isVATask(task.name) || /varia[cç][aã]o\s+de\s+avatar/i.test(docR.text || '')) {
-            const vaBriefing = parseVABriefing(docR.text, task.name, docR.driveLinks || []);
+            // Extrai quais AVAs estao indicados na NOMENCLATURA da task
+            // (ex 'VA - AD03G1VN - ... - AVA05 e 06 - Silas' → [5, 6]).
+            // Se task indicar AVAs especificas, parser SO retorna esses
+            // (mesmo que doc tenha mais).
+            const taskAvaNums = extractAvaNumsFromTaskName(task.name);
+            const vaBriefing = parseVABriefing(docR.text, task.name, docR.driveLinks || [], taskAvaNums);
             if (vaBriefing) {
               const siblings = siblingMap.get(task.id) || [task.id];
               setTaskAnalyses((prev) => {
@@ -2446,8 +2487,16 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                           return (
                             <li key={a.taskId} className={`rounded-[10px] border ${color} p-3 text-[11px]`}>
                               <div className="flex items-center justify-between gap-2">
-                                <span className="mono text-xs text-white">
+                                <span className="mono text-xs text-white flex items-center gap-2">
                                   {sym} {a.taskName}
+                                  <button
+                                    type="button"
+                                    onClick={() => removeTaskFromAnalysis(a.taskId)}
+                                    className="rounded-full border border-line-strong px-1.5 py-0 text-[9px] text-text-muted hover:border-red-500/60 hover:bg-red-500/10 hover:text-red-300"
+                                    title="Remover esta task da previsibilidade (também desmarca da seleção)"
+                                  >
+                                    ×
+                                  </button>
                                 </span>
                                 {a.status === 'partial' && a.roleSlots?.some(s => !s.avatarId && s.briefingFileId) ? (
                                   hasAnthropic === false ? (
@@ -2722,35 +2771,56 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                               ×
                                             </button>
                                           </div>
-                                          {/* Thumb do video do briefing (sempre visivel pra user identificar) */}
-                                          {briefingThumbUrl ? (
-                                            <div className="mt-2 flex items-center gap-3 rounded-[8px] border border-blue-500/30 bg-blue-500/5 p-2">
-                                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                                          {/* Preview avatar SEMPRE visivel (thumb se Drive ID detectado, placeholder caso contrario) */}
+                                          <div className="mt-2 flex items-center gap-3 rounded-[8px] border border-blue-500/30 bg-blue-500/5 p-2">
+                                            {briefingThumbUrl ? (
+                                              /* eslint-disable-next-line @next/next/no-img-element */
                                               <img
                                                 src={briefingThumbUrl}
                                                 alt={slot.username}
-                                                className="h-16 w-16 shrink-0 rounded-full object-cover"
+                                                className="h-16 w-16 shrink-0 rounded-full object-cover bg-bg/40"
                                                 referrerPolicy="no-referrer"
                                               />
-                                              <div className="flex-1 min-w-0">
-                                                <div className="mono text-[9px] uppercase tracking-widest text-blue-200">
-                                                  preview avatar
-                                                </div>
-                                                <div className="text-[11px] text-text-muted">@{slot.username}.mp4</div>
-                                                {hasAnthropic !== false ? (
+                                            ) : (
+                                              <div className="h-16 w-16 shrink-0 rounded-full bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-200 mono text-[8px] uppercase tracking-widest text-center px-1">
+                                                sem<br/>thumb
+                                              </div>
+                                            )}
+                                            <div className="flex-1 min-w-0">
+                                              <div className="mono text-[9px] uppercase tracking-widest text-blue-200">
+                                                preview avatar
+                                              </div>
+                                              <div className="text-[11px] text-text-muted">@{slot.username}.mp4</div>
+                                              <div className="mt-1 flex flex-wrap gap-1">
+                                                {slot.briefingFileId ? (
+                                                  <a
+                                                    href={`https://drive.google.com/uc?export=download&id=${slot.briefingFileId}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="mono rounded border border-lime/40 bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime hover:bg-lime/20"
+                                                    title="Baixa o arquivo do Drive deixado pelo copywriter pra esse avatar"
+                                                  >
+                                                    ↓ Baixar
+                                                  </a>
+                                                ) : (
+                                                  <span className="mono rounded border border-text-muted/40 bg-bg/40 px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted" title="Sem link Drive detectado no doc — copywriter pode nao ter deixado">
+                                                    sem link drive
+                                                  </span>
+                                                )}
+                                                {hasAnthropic !== false && slot.briefingFileId ? (
                                                   <button
                                                     type="button"
                                                     onClick={() => runVisualMatchForSlot(a.taskId, sIdx)}
                                                     disabled={isVisualSearching}
-                                                    className="mono mt-1 rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-50"
+                                                    className="mono rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-50"
                                                     title="Claude vision compara essa thumb com toda biblioteca HeyGen e escolhe o melhor match visual"
                                                   >
-                                                    {isVisualSearching ? '🔍 buscando...' : '🤖 IA SEARCH (vision)'}
+                                                    {isVisualSearching ? '🔍 buscando...' : '🤖 IA SEARCH'}
                                                   </button>
                                                 ) : null}
                                               </div>
                                             </div>
-                                          ) : null}
+                                          </div>
                                           <div className="mt-2 grid gap-2">
                                             <div className="grid gap-0.5">
                                               <div className="mono text-[9px] uppercase tracking-widest text-text-muted">avatar HeyGen escolhido</div>
