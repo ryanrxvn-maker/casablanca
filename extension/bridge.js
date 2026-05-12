@@ -138,6 +138,24 @@
       return;
     }
 
+    if (data.type === 'HG_CREATE_PHOTO_AVATAR') {
+      const requestId = data.requestId;
+      chrome.runtime.sendMessage(
+        { type: 'HG_CREATE_PHOTO_AVATAR', requestId, payload: data.payload },
+        () => {
+          if (chrome.runtime.lastError) {
+            sendToPage({
+              type: 'HG_PHOTO_AVATAR_RESULT',
+              requestId,
+              ok: false,
+              error: chrome.runtime.lastError.message ?? 'Background nao respondeu.',
+            });
+          }
+        },
+      );
+      return;
+    }
+
     if (data.type === 'HG_DRIVE_LIST_FOLDER') {
       const requestId = data.requestId;
       chrome.runtime.sendMessage(

@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.9.0';
+const DARKO_EXT_VERSION = '4.10.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -154,6 +154,38 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .then((res) => sendResponse(res))
       .catch((e) => sendResponse({ ok: false, error: e?.message ?? String(e) }));
     return true;
+  }
+  if (msg && msg.type === 'HG_CREATE_PHOTO_AVATAR') {
+    // PUSH PATTERN: ack imediato + manda resultado via mensagem separada
+    sendResponse({ accepted: true });
+    const reqId = msg.requestId;
+    createPhotoAvatar(msg.payload, (progress) => {
+      chrome.runtime.sendMessage({
+        type: 'HG_TAB_PHOTO_AVATAR_PROGRESS',
+        requestId: reqId,
+        stage: progress.stage,
+        percent: progress.percent,
+        message: progress.message,
+      }).catch(() => {});
+    })
+      .then((res) => {
+        chrome.runtime.sendMessage({
+          type: 'HG_TAB_PHOTO_AVATAR_RESULT',
+          requestId: reqId,
+          ok: true,
+          ...res,
+        }).catch(() => {});
+      })
+      .catch((e) => {
+        console.error('[DARKO LAB photo avatar] FAIL:', e);
+        chrome.runtime.sendMessage({
+          type: 'HG_TAB_PHOTO_AVATAR_RESULT',
+          requestId: reqId,
+          ok: false,
+          error: e?.message ?? String(e),
+        }).catch(() => {});
+      });
+    return false;
   }
   if (msg && msg.type === 'HG_CLONE_VOICE') {
     // PUSH PATTERN: ack imediato + manda resultado via mensagem separada
@@ -472,6 +504,180 @@ async function getHeyGenCredits() {
     }
   } catch {}
   return out;
+}
+
+/**
+ * Cria Photo Avatar persistente no HeyGen a partir de uma imagem.
+ *
+ * Fluxo (descoberto via interceptor + endpoints conhecidos):
+ *   1. POST /v2/photo_avatar/upload_url  →  upload_url assinada S3
+ *   2. PUT na S3                        →  imagem subida
+ *   3. POST /v2/photo_avatar/create      →  avatar_id + group_id
+ *   4. Poll status                       →  ate ready
+ *
+ * Como endpoints podem variar, tenta cascata: v2 → v1 → talking_photo
+ * fallback. Marca como BETA ate user confirmar live.
+ *
+ * IMPORTANTE: cada Photo Avatar consome 1 slot (instant avatar slots).
+ * User tem total 5 + remaining 5 nos testes (12/05/2026).
+ */
+async function createPhotoAvatar(payload, onProgress) {
+  const { imageBase64, imageMime = 'image/png', imageName = 'avatar.png', avatarName = 'DARKO Avatar' } = payload || {};
+  if (!imageBase64) throw new Error('Sem imageBase64.');
+  if (!avatarName) throw new Error('Sem avatarName.');
+
+  // Decode base64 → Uint8Array
+  const bin = atob(imageBase64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  console.log('[DARKO LAB photo avatar] start name=', avatarName, 'bytes=', bytes.length, 'mime=', imageMime);
+
+  // === STEP 1: get upload URL ===
+  onProgress?.({ stage: 'upload_url', percent: 5, message: 'Pedindo URL upload imagem...' });
+  const uploadUrlEndpoints = [
+    'https://api2.heygen.com/v2/photo_avatar/upload_url',
+    'https://api2.heygen.com/v1/photo_avatar/upload_url',
+    'https://api2.heygen.com/v1/pacific/photo_avatar/upload_url',
+  ];
+  let uploadUrl = null, fileUrl = null, lastErr = '';
+  for (const ep of uploadUrlEndpoints) {
+    try {
+      const r = await fetchWithTimeout(ep, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: imageName,
+          file_type: imageMime,
+          file_size: bytes.length,
+          request_source: 'PHOTO_AVATAR',
+        }),
+      }, 15000);
+      if (!r.ok) { lastErr = `${ep}: HTTP ${r.status}`; continue; }
+      const j = await r.json();
+      const d = j?.data || {};
+      uploadUrl = d.file_upload_url || d.upload_url || d.put_url || d.url;
+      fileUrl = d.file_url || d.asset_url || (uploadUrl ? uploadUrl.split('?')[0] : null);
+      if (uploadUrl) {
+        console.log('[DARKO LAB photo avatar] upload_url via', ep);
+        break;
+      }
+    } catch (e) {
+      lastErr = `${ep}: ${e.message}`;
+    }
+  }
+  if (!uploadUrl) throw new Error('Nenhum endpoint de upload_url respondeu. ' + lastErr);
+
+  // === STEP 2: PUT na S3 ===
+  onProgress?.({ stage: 'upload', percent: 20, message: `Subindo imagem (${(bytes.length / 1024).toFixed(0)}KB)...` });
+  let signedHeaders = '';
+  try {
+    const u = new URL(uploadUrl);
+    signedHeaders = (u.searchParams.get('X-Amz-SignedHeaders') || '').toLowerCase();
+  } catch {}
+  const putHeaders = {};
+  for (const sh of signedHeaders.split(';').map(s => s.trim()).filter(Boolean)) {
+    if (sh === 'host' || sh === 'content-length') continue;
+    if (sh === 'content-type') putHeaders['Content-Type'] = imageMime;
+    else if (sh === 'x-amz-server-side-encryption') putHeaders['x-amz-server-side-encryption'] = 'AES256';
+  }
+  const putResp = await fetchWithTimeout(uploadUrl, {
+    method: 'PUT',
+    body: bytes,
+    headers: putHeaders,
+  }, 60000);
+  if (!putResp.ok) {
+    const errBody = await putResp.text().catch(() => '');
+    throw new Error(`PUT S3 imagem HTTP ${putResp.status}: ${errBody.slice(0, 200)}`);
+  }
+  console.log('[DARKO LAB photo avatar] PUT OK fileUrl=', fileUrl?.slice(0, 100));
+
+  // === STEP 3: create photo avatar ===
+  onProgress?.({ stage: 'create', percent: 50, message: 'Criando Photo Avatar no HeyGen...' });
+  const createEndpoints = [
+    'https://api2.heygen.com/v2/photo_avatar/create',
+    'https://api2.heygen.com/v1/photo_avatar/create',
+    'https://api2.heygen.com/v2/avatar_group/create',
+    'https://api2.heygen.com/v1/avatar_group/create',
+  ];
+  const createBody = {
+    name: avatarName,
+    avatar_name: avatarName,
+    image_url: fileUrl,
+    image_key: fileUrl,
+    file_url: fileUrl,
+    asset_url: fileUrl,
+    request_source: 'PHOTO_AVATAR',
+  };
+  let avatarId = null, groupId = null, lookId = null, jobId = null;
+  for (const ep of createEndpoints) {
+    try {
+      const r = await fetchWithTimeout(ep, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(createBody),
+      }, 30000);
+      if (!r.ok) {
+        const errBody = await r.text().catch(() => '');
+        lastErr = `${ep}: HTTP ${r.status} ${errBody.slice(0, 150)}`;
+        continue;
+      }
+      const j = await r.json();
+      const d = j?.data || {};
+      avatarId = d.avatar_id || d.id || d.photo_avatar_id || d.look_id;
+      groupId = d.group_id || d.avatar_group_id || d.photo_avatar_group_id;
+      lookId = d.look_id || d.avatar_look_id || avatarId;
+      jobId = d.job_id || d.callback_id || d.task_id;
+      if (avatarId || jobId) {
+        console.log('[DARKO LAB photo avatar] create via', ep, '→', { avatarId, groupId, lookId, jobId });
+        break;
+      }
+    } catch (e) {
+      lastErr = `${ep}: ${e.message}`;
+    }
+  }
+  if (!avatarId && !jobId) throw new Error('Nenhum endpoint create funcionou. ' + lastErr);
+
+  // === STEP 4: poll status (se tem job_id) ===
+  if (!avatarId && jobId) {
+    onProgress?.({ stage: 'polling', percent: 70, message: 'Aguardando processamento (pode demorar 30-90s)...' });
+    const statusEndpoints = [
+      `https://api2.heygen.com/v2/photo_avatar/${jobId}`,
+      `https://api2.heygen.com/v1/photo_avatar/${jobId}`,
+      `https://api2.heygen.com/v1/photo_avatar/create_status?job_id=${encodeURIComponent(jobId)}`,
+    ];
+    for (let attempt = 0; attempt < 60; attempt++) { // 60×3s = 3min
+      await new Promise(r => setTimeout(r, 3000));
+      onProgress?.({ stage: 'polling', percent: 70 + Math.min(25, attempt), message: `Aguardando avatar pronto (${attempt + 1}/60)...` });
+      for (const ep of statusEndpoints) {
+        try {
+          const r = await fetchWithTimeout(ep, { method: 'GET', credentials: 'include' }, 8000);
+          if (!r.ok) continue;
+          const j = await r.json();
+          const d = j?.data || {};
+          const status = String(d.status || d.state || '').toLowerCase();
+          const vid = d.avatar_id || d.id || d.photo_avatar_id;
+          if (status === 'completed' || status === 'ready' || status === 'success' || vid) {
+            avatarId = vid;
+            groupId = d.group_id || groupId;
+            lookId = d.look_id || avatarId;
+            break;
+          }
+          if (status === 'failed' || status === 'error') {
+            throw new Error('HeyGen reportou photo avatar failed: ' + (d.error_msg || d.message || 'sem detalhes'));
+          }
+        } catch (e) {
+          if (String(e.message).includes('photo avatar failed')) throw e;
+        }
+      }
+      if (avatarId) break;
+    }
+    if (!avatarId) throw new Error('Timeout 3min aguardando avatar processar.');
+  }
+
+  onProgress?.({ stage: 'done', percent: 100, message: 'Avatar criado: ' + avatarId });
+  return { avatarId, groupId, lookId };
 }
 
 async function listMyVoices() {

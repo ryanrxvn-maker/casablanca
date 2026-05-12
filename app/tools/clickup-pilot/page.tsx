@@ -44,6 +44,7 @@ import { CompactVoiceSelector } from '@/components/CompactVoiceSelector';
 import { VoiceCloneTrigger } from '@/components/VoiceCloneTrigger';
 import { MotorConfigPicker, MotorSlotPicker } from '@/components/MotorConfigPicker';
 import { defaultMotorConfig, resolveMotors, type MotorConfig, type Motor } from '@/lib/motor-config';
+import { AvatarFirstSlot } from '@/components/AvatarFirstSlot';
 import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
 import { recallByVoiceName, rememberPairing, normalizeVoiceName } from '@/lib/voice-avatar-memory';
 import { Toggle3D } from '@/components/Toggle3D';
@@ -373,6 +374,13 @@ export default function ClickUpPilotPage() {
   const getMotorConfig = (taskId: string): MotorConfig => motorConfigs[taskId] || defaultMotorConfig();
   const setMotorConfigForTask = (taskId: string, cfg: MotorConfig) => {
     setMotorConfigs((prev) => ({ ...prev, [taskId]: cfg }));
+  };
+
+  // Avatar First — toggle per slot (key = `${taskId}:${slotIdx}`)
+  const [avatarFirstEnabled, setAvatarFirstEnabled] = useState<Record<string, boolean>>({});
+  const isAvatarFirstEnabled = (taskId: string, sIdx: number) => !!avatarFirstEnabled[`${taskId}:${sIdx}`];
+  const setAvatarFirstFor = (taskId: string, sIdx: number, enabled: boolean) => {
+    setAvatarFirstEnabled((prev) => ({ ...prev, [`${taskId}:${sIdx}`]: enabled }));
   };
   const [analyzing, setAnalyzing] = useState(false);
 
@@ -3175,6 +3183,26 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                             </div>
                                           </div>
                                           <div className="mt-2 grid gap-2">
+                                            {/* Avatar First — toggle pra criar avatar via upload (Photo to Video) */}
+                                            <AvatarFirstSlot
+                                              slotKey={`${a.taskId}:${sIdx}`}
+                                              briefingUsername={slot.username}
+                                              enabled={isAvatarFirstEnabled(a.taskId, sIdx)}
+                                              setEnabled={(v) => setAvatarFirstFor(a.taskId, sIdx, v)}
+                                              onComplete={(r) => {
+                                                // Avatar criado — auto-seleciona no slot
+                                                updateRoleSlot(a.taskId, sIdx, {
+                                                  avatarId: r.avatarId,
+                                                  avatarName: r.avatarName,
+                                                  avatarThumb: null, // sera populado quando library reload
+                                                  avatarVoiceId: r.voiceId,
+                                                  voiceOverride: { id: r.voiceId, name: r.voiceName },
+                                                  matchedBy: 'avatar_first',
+                                                });
+                                                // Recarrega biblioteca pra avatar aparecer no picker
+                                                reloadLibrary().catch(() => {});
+                                              }}
+                                            />
                                             <div className="grid gap-0.5">
                                               <div className="mono text-[9px] uppercase tracking-widest text-text-muted">avatar HeyGen escolhido</div>
                                               <div className="max-w-[400px]">

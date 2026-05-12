@@ -400,6 +400,72 @@ function encodeWAV(audioBuffer: AudioBuffer): Blob {
   return new Blob([buf], { type: 'audio/wav' });
 }
 
+/* ============================ PHOTO AVATAR CREATE ============================
+ * Cria Photo Avatar persistente no HeyGen a partir de imagem. Usado
+ * pelo Avatar First mode (avatar nao existe na biblioteca, user upa foto). */
+
+export type CreatePhotoAvatarOptions = {
+  image: File;
+  avatarName: string;
+  onProgress?: (stage: string, percent?: number, message?: string) => void;
+};
+
+export type CreatePhotoAvatarResult =
+  | { ok: true; avatarId: string; groupId?: string; lookId?: string }
+  | { ok: false; error: string };
+
+export async function createPhotoAvatarViaExtension(
+  opts: CreatePhotoAvatarOptions,
+): Promise<CreatePhotoAvatarResult> {
+  installListener();
+  if (typeof window === 'undefined') return { ok: false, error: 'sem window' };
+
+  // Encode image em base64
+  const buf = await opts.image.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)));
+  }
+  const imageBase64 = btoa(binary);
+
+  return new Promise((resolve) => {
+    const requestId = `pa_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const handler = (ev: MessageEvent) => {
+      if (ev.data?.source !== 'darkolab-ext') return;
+      if (ev.data?.requestId !== requestId) return;
+      if (ev.data?.type === 'HG_PHOTO_AVATAR_PROGRESS') {
+        opts.onProgress?.(String(ev.data.stage || ''), Number(ev.data.percent) || undefined, String(ev.data.message || ''));
+        return;
+      }
+      if (ev.data?.type === 'HG_PHOTO_AVATAR_RESULT') {
+        window.removeEventListener('message', handler);
+        if (ev.data.ok && ev.data.avatarId) {
+          resolve({ ok: true, avatarId: String(ev.data.avatarId), groupId: ev.data.groupId, lookId: ev.data.lookId });
+        } else {
+          resolve({ ok: false, error: String(ev.data.error || 'Falha desconhecida') });
+        }
+      }
+    };
+    window.addEventListener('message', handler);
+    window.postMessage(
+      {
+        source: 'darkolab',
+        type: 'HG_CREATE_PHOTO_AVATAR',
+        requestId,
+        payload: {
+          imageBase64,
+          imageMime: opts.image.type || 'image/png',
+          imageName: opts.image.name || 'avatar.png',
+          avatarName: opts.avatarName,
+        },
+      },
+      '*',
+    );
+  });
+}
+
 /* ============================ HEYGEN CREDITS ============================
  * Pega saldo de creditos HeyGen via extension (cookies sessao).
  * Cache em memoria de 30s pra evitar bater o endpoint demais. */

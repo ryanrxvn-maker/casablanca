@@ -8,6 +8,7 @@ const activeJobs = new Map();
 const pendingListJobs = new Map();
 // Voice clone pendentes: { bridgeTabId, timeoutId }
 const pendingCloneJobs = new Map();
+const pendingPhotoAvatarJobs = new Map();
 const HEYGEN_CREATE_URL = 'https://app.heygen.com/avatar';
 
 async function fetchWithTimeout(url, opts, timeoutMs = 30000) {
@@ -150,6 +151,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'HG_CREATE_PHOTO_AVATAR') {
+    sendResponse({ accepted: true });
+    const requestId = msg.requestId;
+    handleCreatePhotoAvatar(requestId, msg.payload, sender.tab?.id).catch((err) => {
+      reportToPage(sender.tab?.id, requestId, 'HG_PHOTO_AVATAR_RESULT', {
+        ok: false,
+        error: err?.message ?? String(err),
+      });
+    });
+    return false;
+  }
+
   if (msg.type === 'HG_DRIVE_LIST_FOLDER') {
     // Lista arquivos dentro de uma pasta Drive via cookies (sem OAuth).
     // Usado pra auto-resolver fileId de filenames mencionados no doc.
@@ -214,6 +227,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         ok: !!msg.ok,
         voiceId: msg.voiceId,
         voiceName: msg.voiceName,
+        error: msg.error ?? null,
+      });
+    }
+    return false;
+  }
+
+  if (msg.type === 'HG_TAB_PHOTO_AVATAR_PROGRESS') {
+    const job = pendingPhotoAvatarJobs.get(msg.requestId);
+    if (job) {
+      reportToPage(job.bridgeTabId, msg.requestId, 'HG_PHOTO_AVATAR_PROGRESS', {
+        stage: msg.stage,
+        percent: msg.percent,
+        message: msg.message,
+      });
+    }
+    return false;
+  }
+
+  if (msg.type === 'HG_TAB_PHOTO_AVATAR_RESULT') {
+    const job = pendingPhotoAvatarJobs.get(msg.requestId);
+    if (job) {
+      clearTimeout(job.timeoutId);
+      pendingPhotoAvatarJobs.delete(msg.requestId);
+      reportToPage(job.bridgeTabId, msg.requestId, 'HG_PHOTO_AVATAR_RESULT', {
+        ok: !!msg.ok,
+        avatarId: msg.avatarId,
+        groupId: msg.groupId,
+        lookId: msg.lookId,
         error: msg.error ?? null,
       });
     }
@@ -654,6 +695,47 @@ async function handleCloneVoice(requestId, payload, bridgeTabId) {
       reportToPage(bridgeTabId, requestId, 'HG_CLONE_VOICE_RESULT', {
         ok: false,
         error: 'Erro inesperado: ' + (e?.message ?? String(e)),
+      });
+    }
+  }
+}
+
+async function handleCreatePhotoAvatar(requestId, payload, bridgeTabId) {
+  console.log('[DARKO LAB BG] >>> handleCreatePhotoAvatar reqId=', requestId);
+  const tab = await findOrCreateHeyGenTab();
+  await waitForTabReady(tab.id);
+  const timeoutId = setTimeout(() => {
+    if (pendingPhotoAvatarJobs.has(requestId)) {
+      pendingPhotoAvatarJobs.delete(requestId);
+      reportToPage(bridgeTabId, requestId, 'HG_PHOTO_AVATAR_RESULT', {
+        ok: false,
+        error: 'Timeout 5min aguardando photo avatar create.',
+      });
+    }
+  }, 300000);
+  pendingPhotoAvatarJobs.set(requestId, { bridgeTabId, timeoutId });
+  try {
+    chrome.tabs.sendMessage(tab.id, { type: 'HG_CREATE_PHOTO_AVATAR', requestId, payload })
+      .catch((e) => {
+        const m = e?.message ?? String(e);
+        if (!m.includes('channel closed') && !m.includes('listener indicated')) {
+          if (pendingPhotoAvatarJobs.has(requestId)) {
+            clearTimeout(timeoutId);
+            pendingPhotoAvatarJobs.delete(requestId);
+            reportToPage(bridgeTabId, requestId, 'HG_PHOTO_AVATAR_RESULT', {
+              ok: false,
+              error: 'Aba HeyGen nao respondeu: ' + m,
+            });
+          }
+        }
+      });
+  } catch (e) {
+    if (pendingPhotoAvatarJobs.has(requestId)) {
+      clearTimeout(timeoutId);
+      pendingPhotoAvatarJobs.delete(requestId);
+      reportToPage(bridgeTabId, requestId, 'HG_PHOTO_AVATAR_RESULT', {
+        ok: false,
+        error: 'Erro: ' + (e?.message ?? String(e)),
       });
     }
   }
