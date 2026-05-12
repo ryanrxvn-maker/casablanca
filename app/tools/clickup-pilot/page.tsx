@@ -189,6 +189,9 @@ type TaskAnalysis = {
   error?: string;
   /** Quando disparou pra HeyGen (timestamp) — null se ainda nao */
   dispatchedAt?: number | null;
+  /** Se essa task e sibling G1/G2 que compartilhou analise com primary,
+   *  guarda ID do primary. UI mostra como "↔ compartilhada com AD144G1GL" */
+  sharedWithPrimaryId?: string;
 };
 
 export default function ClickUpPilotPage() {
@@ -352,7 +355,15 @@ export default function ClickUpPilotPage() {
   function toggleTaskSelected(id: string) {
     setSelectedTaskIds((prev) => {
       const n = new Set(prev);
-      if (n.has(id)) n.delete(id); else n.add(id);
+      // Auto-toggle siblings G1/G2/etc do mesmo grupo: se marca G1,
+      // tambem marca todas Gs. Evita confusao de "esqueci G2"
+      // (todas Gs compartilham o mesmo doc, so analisamos 1x mesmo).
+      const siblings = getSiblingTaskIds(id);
+      const isCurrentlySelected = n.has(id);
+      for (const sid of siblings) {
+        if (isCurrentlySelected) n.delete(sid);
+        else n.add(sid);
+      }
       return n;
     });
   }
@@ -362,6 +373,41 @@ export default function ClickUpPilotPage() {
   function clearSelected() {
     setSelectedTaskIds(new Set());
     setTaskAnalyses({});
+  }
+
+  /** Extrai a "chave base" da task name pra detectar siblings G1/G2/etc.
+   *  Ex: "AD15VN - PRPB06 - G1" → "AD15VN - PRPB06"
+   *      "AD15VN - PRPB06 - G2" → "AD15VN - PRPB06"  (mesma chave = sibling)
+   *      "AD144GL - VFPB04"      → "AD144GL - VFPB04" (sem sufixo G)
+   *  Tasks com mesma chave compartilham o MESMO doc → analisar 1x evita
+   *  dispatch duplicado.
+   */
+  function extractBaseTaskKey(taskName: string): string {
+    // Tira sufixo " - G<N>" (case insensitive, com espacos variando)
+    return taskName.replace(/\s*[-–—]\s*G\d+\s*$/i, '').trim();
+  }
+
+  /** Mapa baseKey → tasks que compartilham (computed) */
+  const taskSiblingGroups = useMemo(() => {
+    const groups = new Map<string, ClickUpTask[]>();
+    for (const t of tasks) {
+      const key = extractBaseTaskKey(t.name);
+      const arr = groups.get(key) || [];
+      arr.push(t);
+      groups.set(key, arr);
+    }
+    return groups;
+  }, [tasks]);
+
+  /** Retorna os IDs de TODAS tasks no mesmo grupo G1/G2/G3 da task dada
+   *  (inclui a propria). Quando tasks compartilham doc, processamos 1x e
+   *  marcamos todas como dispatched. */
+  function getSiblingTaskIds(taskId: string): string[] {
+    const t = tasks.find((x) => x.id === taskId);
+    if (!t) return [taskId];
+    const key = extractBaseTaskKey(t.name);
+    const siblings = taskSiblingGroups.get(key) || [t];
+    return siblings.map((s) => s.id);
   }
 
   async function loadTasks() {
@@ -522,11 +568,26 @@ export default function ClickUpPilotPage() {
     for (const v of voiceLibrary) {
       voiceByNorm.set(normalizeVoiceName(v.name), { id: v.id, name: v.name });
     }
-    const targets = tasks.filter((t) => selectedTaskIds.has(t.id));
-    // Init status pendente pra todos
+    const allSelected = tasks.filter((t) => selectedTaskIds.has(t.id));
+    // DEDUP G1/G2: tasks com mesmo baseTaskKey compartilham o doc.
+    // So precisamos analisar uma — as siblings copiam o resultado.
+    const seenKeys = new Set<string>();
+    const targets: typeof allSelected = [];
+    const siblingMap = new Map<string, string[]>(); // primary task id → all sibling ids
+    for (const t of allSelected) {
+      const key = extractBaseTaskKey(t.name);
+      if (!seenKeys.has(key)) {
+        seenKeys.add(key);
+        targets.push(t);
+        // Inclui todas as Gs do mesmo key que estao selecionadas
+        const siblings = allSelected.filter((s) => extractBaseTaskKey(s.name) === key).map((s) => s.id);
+        siblingMap.set(t.id, siblings);
+      }
+    }
+    // Init status pendente pra TODAS (inclui siblings nao-primary pra UI mostrar consistente)
     setTaskAnalyses(() => {
       const init: Record<string, TaskAnalysis> = {};
-      for (const t of targets) {
+      for (const t of allSelected) {
         init[t.id] = { taskId: t.id, taskName: t.name, status: 'pending', roleSlots: [], partTemplates: [] };
       }
       return init;
@@ -678,22 +739,38 @@ export default function ClickUpPilotPage() {
             partTemplates.push({ label, text: bp, matchByRole: pickRoleForText(bp, label, briefing.bodyRole) });
           });
           const allHaveAvatar = roleSlots.every((s) => s.avatarId);
-          setTaskAnalyses((prev) => ({
-            ...prev,
-            [task.id]: {
-              ...prev[task.id],
-              status: allHaveAvatar ? 'ready' : 'partial',
-              baseAdId,
-              hookCount: briefing.hooks.length,
-              bodyPartsCount: bodyParts.length,
-              totalParts: partTemplates.length,
-              roleSlots,
-              partTemplates,
-              dispatchedAt: getDispatchedAt(task.id),
-            },
-          }));
+          // Propaga o mesmo resultado pra TODAS siblings G1/G2 do grupo
+          // (compartilham o doc — ja analisamos uma vez).
+          const siblings = siblingMap.get(task.id) || [task.id];
+          setTaskAnalyses((prev) => {
+            const next = { ...prev };
+            for (const sid of siblings) {
+              next[sid] = {
+                ...prev[sid],
+                status: allHaveAvatar ? 'ready' : 'partial',
+                baseAdId,
+                hookCount: briefing.hooks.length,
+                bodyPartsCount: bodyParts.length,
+                totalParts: partTemplates.length,
+                roleSlots,
+                partTemplates,
+                dispatchedAt: getDispatchedAt(sid),
+                // Marca siblings como "compartilhada com primary"
+                sharedWithPrimaryId: sid === task.id ? undefined : task.id,
+              };
+            }
+            return next;
+          });
         } catch (e) {
-          setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: (e as Error)?.message || 'erro' } }));
+          // Erro propaga pra todos siblings tambem
+          const siblings = siblingMap.get(task.id) || [task.id];
+          setTaskAnalyses((prev) => {
+            const next = { ...prev };
+            for (const sid of siblings) {
+              next[sid] = { ...prev[sid], status: 'error', error: (e as Error)?.message || 'erro' };
+            }
+            return next;
+          });
         }
       }
     }
@@ -829,7 +906,9 @@ export default function ClickUpPilotPage() {
         return;
       }
 
-      markDispatched(taskId);
+      // Marca a task primary + TODAS siblings G1/G2 do mesmo grupo como
+      // disparadas (compartilham o mesmo conteudo)
+      for (const sid of getSiblingTaskIds(taskId)) markDispatched(sid);
 
       // 2. Poll status ate todos prontos (ou alguns falharem)
       setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'rendering', message: `Aguardando renderizacao no HeyGen (${validIds.length} videos)...` } }));
@@ -1385,8 +1464,16 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       copy: plan.parts.map((p: any) => p.text).join('\n\n'),
     };
     sessionStorage.setItem('darkolab:heygen-auto:handoff', JSON.stringify(handoff));
-    markDispatched(taskId);
-    setTaskAnalyses(prev => ({ ...prev, [taskId]: { ...prev[taskId], dispatchedAt: Date.now() } }));
+    // Marca task + siblings G1/G2 como disparadas (compartilham conteudo)
+    const siblings = getSiblingTaskIds(taskId);
+    for (const sid of siblings) markDispatched(sid);
+    setTaskAnalyses(prev => {
+      const next = { ...prev };
+      for (const sid of siblings) {
+        if (next[sid]) next[sid] = { ...next[sid], dispatchedAt: Date.now() };
+      }
+      return next;
+    });
     router.push('/tools/heygen-auto?from=clickup-pilot');
   }
 
@@ -1809,6 +1896,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
                     {tasks.map((t) => {
                       const isOpen = !bulkMode && selectedTask?.id === t.id;
                       const isChecked = bulkMode && selectedTaskIds.has(t.id);
+                      const baseKey = extractBaseTaskKey(t.name);
+                      const siblingsAll = taskSiblingGroups.get(baseKey) || [t];
+                      const hasSiblings = siblingsAll.length > 1;
+                      const gSuffix = t.name.match(/\s*[-–—]\s*(G\d+)\s*$/i)?.[1] || null;
                       return (
                         <li key={t.id} className="flex items-center gap-2">
                           {bulkMode ? (
@@ -1830,7 +1921,17 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
                             }
                           >
                             <div className="flex items-center justify-between gap-2">
-                              <span className="mono text-xs text-lime">{t.name}</span>
+                              <span className="mono text-xs text-lime flex items-center gap-2">
+                                {t.name}
+                                {hasSiblings && gSuffix ? (
+                                  <span
+                                    className="mono rounded-full border border-cyan-500/40 bg-cyan-500/10 px-1.5 py-0.5 text-[8px] uppercase tracking-widest text-cyan-200"
+                                    title={`Tasks irmas (mesma copy): ${siblingsAll.map(s => s.name.match(/G\d+\s*$/i)?.[0] || '?').filter(Boolean).join(' + ')}. Selecionar uma marca todas — analisamos 1x.`}
+                                  >
+                                    🔗 grupo {siblingsAll.length}Gs
+                                  </span>
+                                ) : null}
+                              </span>
                               <span
                                 className="mono rounded-full px-2 py-0.5 text-[9px] uppercase tracking-widest"
                                 style={{ backgroundColor: t.status?.color + '33', color: t.status?.color }}

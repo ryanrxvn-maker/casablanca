@@ -74,25 +74,102 @@ export function findAdSection(text: string, adIdOrPrefix: string): string | null
   return lines.slice(startIdx, endIdx).join('\n');
 }
 
-/** Extrai avatares mencionados no formato "Role: @username.mp4" ou "Role: @username" */
+/** Lista de prefixos de role que NAO sao avatares — sao metadados sobre
+ *  voz/referencia/instrucao que aparecem em briefings DARKO LAB.
+ *
+ *  Exemplos do briefing real (AD144GL):
+ *    "Voz: AD600VN[T]-VFPB02-AVA02.mp4"           ← REFERENCIA voz pra TTS
+ *    "Referência: AD600VN[T]-VFPB02-AVA02.mp4"    ← REFERENCIA visual
+ *    "Atenção na Voz: Gerar..."                    ← INSTRUCAO
+ *    "Caixinha de perguntas: Doutor, quem..."      ← UI ELEMENT
+ *    "Avatar fala: Doutor..."                      ← INSTRUCAO de dialogo
+ *
+ *  Esses NAO devem virar slots de avatar. */
+const NON_AVATAR_PREFIXES = [
+  /^voz\b/i,                              // "Voz:", "Voz da Mulher:"...
+                                          // CUIDADO: "Voz do Homem:" PODE ser avatar
+                                          // — diferenciamos via mention @x.mp4 presente
+                                          // ou nao no value
+  /^refer[eê]ncia\b/i,                    // "Referência:"
+  /^aten[cç][aã]o\b/i,                    // "Atenção na Voz:"
+  /^caixinha\b/i,                         // "Caixinha de perguntas:"
+  /^avatar fala\b/i,                      // "Avatar fala:"
+  /^instru[cç][oõ]es?\b/i,                // "Instruções para edição:"
+  /^observa[cç][aã]o\b/i,                 // "Observação:"
+  /^nota\b/i,                             // "Nota:"
+  /^obs\b/i,                              // "OBS:"
+];
+
+/** Heuristica: o que parece role label valido pra avatar?
+ *  Aceita ate 4 palavras + opcional parentesis ("Leandro (Homem depoimento)").
+ *  Ex validos: "Mulher", "Homem", "Doutor", "Voz do Homem", "Leandro (Homem depoimento)",
+ *              "Mulher (Esposa de Leandro)", "Narrador" */
+function isPlausibleAvatarRole(role: string): boolean {
+  const r = role.trim();
+  if (r.length === 0 || r.length > 60) return false;
+  // Bloqueia prefixos de metadados (Voz, Referencia, etc)
+  for (const re of NON_AVATAR_PREFIXES) {
+    if (re.test(r)) {
+      // "Voz do Homem" e excecao: e role com mention de avatar, nao
+      // referencia. Detectado via filename mention que a regex global
+      // captura. Aqui so excluimos "Voz: <ref-id>" sem @username.
+      if (/^voz\s+(do|da|de)\s+\w+/i.test(r)) continue;
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Extrai avatares mencionados em formato flexivel.
+ *
+ *  Formatos aceitos:
+ *    "Mulher: @vivian.lamounier1.mp4"
+ *    "Doutor: thethaetresmyarena.mp4"                  ← sem @
+ *    "Leandro (Homem depoimento): @kiko.urso3.mp4"     ← role com parens
+ *    "Mulher (Esposa de Leandro): @anapaulalima.mp4"
+ *    "Voz do Homem: @manualdohomemsolo2.mp4"           ← role com prep
+ *
+ *  Filtra metadados ("Voz:", "Referência:", "Atenção:", "Caixinha:",
+ *  "Avatar fala:", "Instruções:", "Observação:") que aparecem em briefings
+ *  mas NAO sao avatares. */
 export function parseAvatars(section: string): ParsedAvatar[] {
   const out: ParsedAvatar[] = [];
   const lines = section.split(/\r?\n/);
-  // Procura linhas "Role: @username..." (com ou sem .mp4)
-  // Tambem aceita emojis (🎬) e variacoes
-  const re = /^([\wÀ-ÿ ]+?):\s*[^@\w]*@([\w._-]+?)(?:\.mp4|\.mov)?\s*$/i;
+
+  // Regex permissivo: aceita filename com ou sem @, com .mp4/.mov opcional.
+  // Role: 1-4 palavras + opcional (parens).
+  // Mention: @ opcional, depois caracteres validos de filename.
+  const re = /^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s()]{0,58}?):\s*[^@\w]*@?([A-Za-z0-9][\w._-]+?)(?:\.mp4|\.mov)?\s*$/i;
+
   for (const line of lines) {
     const trimmed = line.trim();
+    if (!trimmed) continue;
     const m = trimmed.match(re);
-    if (m) {
-      const role = m[1].trim();
-      const username = m[2].trim();
-      // Skip falsos positivos comuns
-      if (/^(http|https|www|exemplo|ex)$/i.test(username)) continue;
-      out.push({ role, username, raw: trimmed });
-    }
+    if (!m) continue;
+    const role = m[1].trim();
+    const username = m[2].trim();
+
+    // Filtros de qualidade:
+    if (!isPlausibleAvatarRole(role)) continue;
+    if (/^(http|https|www|exemplo|ex)$/i.test(username)) continue;
+    // username muito curto = provavel falso positivo
+    if (username.length < 3) continue;
+    // username so com digitos = NAO e mention de avatar
+    if (/^\d+$/.test(username)) continue;
+    // Bloqueia padroes de referencia conhecidos (AD<num>VN[T]-VFPBxx-AVAxx)
+    if (/^AD\d+VN/i.test(username)) continue;
+
+    out.push({ role, username, raw: trimmed });
   }
-  return out;
+
+  // Dedup por (role + username): se mesma combinacao aparecer 2x, mantem 1
+  const seen = new Set<string>();
+  return out.filter((a) => {
+    const k = `${a.role.toLowerCase()}::${a.username.toLowerCase()}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
 }
 
 /**
