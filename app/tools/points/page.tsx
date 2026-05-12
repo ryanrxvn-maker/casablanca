@@ -82,35 +82,43 @@ export default function PointsPage() {
     try {
       const teams = await listTeams();
       setAvailableTeams(teams.map((t: any) => ({ id: t.id, name: t.name })));
-      const teamId = selectedTeamId || teams[0]?.id;
-      if (!teamId) { setPointsError('Sem teams ClickUp.'); return; }
+
+      type Task = Awaited<ReturnType<typeof listTasksAll>>[number];
+
       const me = await getCurrentUser();
       const now = new Date();
       const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
 
-      type Task = Awaited<ReturnType<typeof listTasksAll>>[number];
-
-      // ESTRATEGIA ULTRA-ROBUSTA: pega TODAS tasks do user no team
-      // (sem date filter pra nao perder nada) + filtra client-side
-      const tryFetch = async (label: string, opts: any): Promise<Task[]> => {
+      const tryFetchTeam = async (teamId: string): Promise<Task[]> => {
         try {
-          const r = await listTasksAll(teamId, opts);
-          console.log(`[points fetch] "${label}" → ${r.length} tasks`);
-          return r;
+          return await listTasksAll(teamId, {
+            assigneeIds: [String(me.id)],
+            subtasks: true,
+            includeClosed: true,
+          });
         } catch (e: any) {
-          const msg = e?.message || String(e);
-          console.warn(`[points fetch] "${label}" THREW:`, msg);
-          errors.push(`"${label}": ${msg.slice(0, 120)}`);
+          errors.push(`team ${teamId}: ${(e?.message || String(e)).slice(0, 120)}`);
           return [];
         }
       };
 
-      // Pega TUDO assignee=me incluindo subtarefas + fechadas
-      const allMine = await tryFetch('TODAS tasks assignee=me (incluindo subtasks+closed)', {
-        assigneeIds: [String(me.id)],
-        subtasks: true,
-        includeClosed: true,
-      });
+      // AUTO-DETECT workspace: usa selecionado OU testa TODOS teams + pega o com mais tasks suas
+      let teamId: string;
+      let allMine: Task[] = [];
+      if (selectedTeamId) {
+        teamId = selectedTeamId;
+        allMine = await tryFetchTeam(teamId);
+      } else {
+        // Testa cada team em paralelo, pega o com mais tasks
+        const results = await Promise.all(
+          teams.map(async (t: any) => ({ team: t, tasks: await tryFetchTeam(t.id) }))
+        );
+        const best = results.sort((a, b) => b.tasks.length - a.tasks.length)[0];
+        teamId = best?.team?.id || teams[0]?.id;
+        allMine = best?.tasks || [];
+        console.log('[points] auto-selected team:', best?.team?.name, '(' + allMine.length + ' tasks)');
+      }
+      if (!teamId) { setPointsError('Sem teams ClickUp.'); return; }
 
       // Coleta TODOS nomes de custom fields
       const allFieldNames = new Map<string, number>();
@@ -129,24 +137,45 @@ export default function PointsPage() {
       }
       const statusList = Array.from(statusCounts.entries()).sort((a, b) => b[1] - a[1]);
 
+      // Listas EXCLUIDAS dos pontos (validado live 12/05/2026):
+      //   widget Pontuacao IGNORA tasks de listas tipo "TESTES" pq sao
+      //   tasks experimentais. Ex: task "MEPB02 - RITUAL BUDISTA" peso=15
+      //   na lista TESTES nao soma. Excluimos por regex no nome.
+      const EXCLUDED_LIST_REGEX = /\b(teste|testes|test|sandbox|draft|rascunho|exemplo)\b/i;
+
       // Tasks CONCLUIDAS este mes (replica widget Pontuacao):
       //   - status.type === 'closed' OU 'done'
       //   - date_closed BETWEEN firstOfMonth AND now
+      //   - list.name NAO bate EXCLUDED_LIST_REGEX
       const completedThisMonth = allMine.filter((t) => {
         const stype = (t.status?.type || '').toLowerCase();
         const isClosed = stype === 'closed' || stype === 'done';
         const closedTs = Number(t.date_closed) || 0;
         const doneTs = Number(t.date_done) || 0;
         const completionTs = closedTs || doneTs;
-        return isClosed && completionTs >= firstOfMonth;
+        if (!isClosed || completionTs < firstOfMonth) return false;
+        // Exclui listas TESTES/sandbox/etc
+        const listName = (t.list?.name || '').toLowerCase();
+        if (EXCLUDED_LIST_REGEX.test(listName)) return false;
+        return true;
       });
+
+      // Lists ENCONTRADAS pra debug (mostra excluidas em vermelho)
+      const listsFound = new Map<string, { count: number; included: boolean }>();
+      for (const t of allMine) {
+        const name = t.list?.name || '?';
+        const cur = listsFound.get(name) || { count: 0, included: !EXCLUDED_LIST_REGEX.test(name) };
+        cur.count++;
+        listsFound.set(name, cur);
+      }
+      const listsList = Array.from(listsFound.entries()).sort((a, b) => b[1].count - a[1].count);
 
       // Match PESO field (priority over alternativas)
       const fieldMatcher = /^(peso|pontos?|points?|score)$/i;
       let total = 0;
       let countedTasks = 0;
       const matchedFieldName: Record<string, number> = {};
-      const sampleScoreTasks: Array<{ name: string; status: string; peso: number; closed: string | null }> = [];
+      const sampleScoreTasks: Array<{ name: string; status: string; peso: number; closed: string | null; list: string }> = [];
       for (const t of completedThisMonth) {
         const matchedField = (t.custom_fields || []).find((f: any) => fieldMatcher.test((f.name || '').trim()));
         if (matchedField?.value != null) {
@@ -162,6 +191,7 @@ export default function PointsPage() {
                 status: t.status?.status || '?',
                 peso: val,
                 closed: closedTs ? new Date(closedTs).toISOString().slice(0, 10) : null,
+                list: t.list?.name || '?',
               });
             }
           }
@@ -195,6 +225,7 @@ export default function PointsPage() {
         overdueTasks: overdueTasks.length,
         overdueSum: Math.round(overdueSum * 100) / 100,
         statusesFound: statusList.slice(0, 20),
+        listsFound: listsList.slice(0, 20),
         customFieldsFound: fieldNamesList.slice(0, 40),
         matchedField: matchedFieldName,
         countedTasks,
@@ -398,6 +429,27 @@ export default function PointsPage() {
                     </div>
                   ) : null}
 
+                  {/* Lists encontradas — marca excluidas em vermelho */}
+                  {(debugInfo.listsFound || []).length > 0 ? (
+                    <div className="mt-3">
+                      <div className="mono mb-1 text-[10px] uppercase tracking-widest text-cyan-300">// LISTS DAS SUAS TASKS</div>
+                      <div className="grid grid-cols-2 gap-1">
+                        {debugInfo.listsFound.map((entry: any) => {
+                          const [name, info] = entry;
+                          return (
+                            <div key={name} className={`rounded px-2 py-1 text-[10px] ${info.included ? 'bg-lime/10 text-lime' : 'bg-red-500/10 text-red-300'}`}>
+                              <span className="mono">{name}</span> <span className="opacity-60">({info.count})</span>
+                              {!info.included ? <span className="ml-1 text-[9px] uppercase">← excluida</span> : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="mt-1 text-[10px] text-text-muted">
+                        Listas excluidas batem com /teste|testes|sandbox|draft|exemplo/i (regra widget Pontuacao).
+                      </div>
+                    </div>
+                  ) : null}
+
                   {/* Erros agregados */}
                   {(debugInfo.errors || []).length > 0 ? (
                     <div className="mt-3 rounded border border-red-500/40 bg-red-500/5 p-2 text-red-300">
@@ -416,6 +468,7 @@ export default function PointsPage() {
                         {debugInfo.sampleScoreTasks.map((t: any, i: number) => (
                           <div key={i} className="rounded bg-bg/40 px-2 py-1 text-[11px] flex items-center justify-between">
                             <span className="truncate flex-1">{t.name}</span>
+                            <span className="mono text-cyan-200 ml-2 text-[9px] uppercase">{t.list}</span>
                             <span className="mono text-text-muted ml-2">{t.status}</span>
                             <span className="mono text-text-muted ml-2">{t.closed || '?'}</span>
                             <span className="mono text-lime ml-2 font-bold">{t.peso}pts</span>
