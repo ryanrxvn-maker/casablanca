@@ -157,6 +157,7 @@ export function HeyGenAvatarPicker({
   setSelected,
   disabled,
   label = 'Avatar (sua biblioteca HeyGen)',
+  inlineMode = false,
 }: {
   query: string;
   setQuery: (s: string) => void;
@@ -165,6 +166,10 @@ export function HeyGenAvatarPicker({
   motor?: 'III' | 'IV' | 'V';
   disabled?: boolean;
   label?: string;
+  /** Se true, renderiza looks INLINE (substitui o grid de avatares) ao
+   *  inves de abrir modal separado. Usado pelo CompactAvatarPicker (que
+   *  ja é um popup ancorado). */
+  inlineMode?: boolean;
 }) {
   const [snap, setSnap] = useState(() => getLibrarySnapshot());
   const groups = snap.groups;
@@ -290,8 +295,75 @@ export function HeyGenAvatarPicker({
         </div>
       )}
 
+      {/* Inline mode: quando um avatar foi aberto, mostra LOOKS no lugar
+       *  do grid de avatares (com botao "voltar"). Sem segundo modal. */}
+      {inlineMode && openGroup ? (
+        <div className="mt-3">
+          <div className="mb-2 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setOpenGroupId(null)}
+              className="mono rounded-md border border-line-strong bg-bg-soft px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
+            >
+              ← Voltar
+            </button>
+            <div className="h-7 w-7 shrink-0 overflow-hidden rounded-full">
+              <ThumbWithFallback
+                primary={openGroup.thumb}
+                fallbacks={openGroup.looks.map((l) => l.thumb)}
+                alt={openGroup.name}
+                className="h-full w-full object-cover"
+                eager
+              />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="truncate text-sm font-semibold text-white">{openGroup.name}</div>
+              <div className="mono text-[9px] uppercase text-text-muted">{openGroup.looksCount} look{openGroup.looksCount > 1 ? 's' : ''}</div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {openGroup.looks.map((l) => {
+              const isSelected = selected?.id === l.id;
+              return (
+                <button
+                  key={l.id}
+                  type="button"
+                  onClick={() => {
+                    setSelected(lookToOption(l));
+                    setOpenGroupId(null);
+                  }}
+                  disabled={disabled}
+                  className={
+                    'group relative aspect-[3/4] overflow-hidden rounded-[10px] border text-left transition-all duration-200 hover:scale-[1.02] active:scale-[0.99] ' +
+                    (isSelected
+                      ? 'border-lime shadow-[0_0_14px_-4px_rgba(200,255,0,0.6)]'
+                      : 'border-line-strong hover:border-lime/60')
+                  }
+                >
+                  <ThumbWithFallback
+                    primary={l.thumb}
+                    fallbacks={[openGroup.thumb]}
+                    alt={l.name}
+                    className="absolute inset-0 h-full w-full object-cover"
+                    eager
+                  />
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-1.5">
+                    <div className="truncate text-[11px] font-semibold text-white">{l.name}</div>
+                  </div>
+                  {isSelected ? (
+                    <div className="absolute right-1 top-1 rounded bg-lime px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-black">
+                      ✓ Use
+                    </div>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
       {/* Grid de AVATARES (igual UI "Choose an Avatar" do HeyGen) */}
-      {filteredGroups.length > 0 ? (
+      {(!inlineMode || !openGroup) && filteredGroups.length > 0 ? (
         <div className="mt-3 grid max-h-[480px] grid-cols-3 gap-2 overflow-y-auto pr-1 sm:grid-cols-4 md:grid-cols-5">
           {filteredGroups.map((g, i) => {
             const isSelectedGroup = selected?.groupId === g.id;
@@ -339,8 +411,9 @@ export function HeyGenAvatarPicker({
         </div>
       ) : null}
 
-      {/* Drawer dos LOOKS quando user clica num avatar */}
-      {openGroup ? (
+      {/* Drawer dos LOOKS — so abre como modal se NAO for inlineMode.
+       *  No inlineMode os looks aparecem inline acima (substituem o grid). */}
+      {!inlineMode && openGroup ? (
         <div
           className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center"
           onClick={() => setOpenGroupId(null)}

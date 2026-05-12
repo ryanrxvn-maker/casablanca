@@ -41,17 +41,20 @@ export function CompactAvatarPicker({
     const r = btn.getBoundingClientRect();
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const spaceBelow = vh - r.bottom - 12;
-    const spaceAbove = r.top - 12;
-    const placement = spaceBelow >= 320 || spaceBelow >= spaceAbove ? 'below' : 'above';
-    const maxH = Math.min(PANEL_H, Math.max(spaceBelow, spaceAbove) - 8);
     const width = Math.min(PANEL_W, vw - 24);
-    // Tenta alinhar a esquerda no botao; corrige se overflow
-    let left = r.left;
+    // Centra o popup VERTICALMENTE no viewport — sempre aparece "na frente"
+    // do usuario independente de onde ele scrollou. Pequeno offset baseado
+    // no botao pra parecer ancorado mas sempre visivel.
+    const maxH = Math.min(PANEL_H, vh - 40);
+    // Preferimos colocar o topo um pouco acima da linha do botao, mas
+    // garantir que o popup inteiro fique dentro do viewport.
+    const idealTop = r.top - 40;
+    const top = Math.max(20, Math.min(vh - maxH - 20, idealTop));
+    // Centra HORIZONTALMENTE no botao, mas clamp dentro do viewport
+    let left = r.left + r.width / 2 - width / 2;
     if (left + width > vw - 12) left = vw - width - 12;
     if (left < 12) left = 12;
-    const top = placement === 'below' ? r.bottom + 6 : Math.max(12, r.top - maxH - 6);
-    setPos({ top, left, width, maxH, placement });
+    setPos({ top, left, width, maxH, placement: 'below' });
   };
 
   useLayoutEffect(() => {
@@ -175,6 +178,7 @@ export function CompactAvatarPicker({
               setSelected={(a) => { setSelected(a); setOpen(false); }}
               disabled={false}
               label="Biblioteca"
+              inlineMode
             />
           </div>
         </div>

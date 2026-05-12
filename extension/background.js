@@ -451,78 +451,156 @@ async function handleDownloadDrive(requestId, fileId, bridgeTabId) {
     reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_RESULT', { ok: false, error: 'fileId invalido' });
     return;
   }
-  try {
-    // Tenta endpoints SEM auth (cookies da sessao). googleapis.com requer
-    // OAuth, entao foi removido. Strategy:
-    //   1. uc?export=download&id=<ID>&confirm=t — funciona pra qualquer tamanho
-    //   2. Se retornar HTML de confirmacao (warning de virus pra arquivos
-    //      > 100MB), parseia o form action + confirm token + retry
-    //   3. drive.usercontent.google.com — endpoint novo do Drive (Q4 2023)
-    const tryFetch = async (url) => {
-      console.log('[DARKO LAB BG] HG_DOWNLOAD_DRIVE tentando', url);
+  console.log('[DARKO LAB BG v4.6] HG_DOWNLOAD_DRIVE start fileId=', fileId);
+  const errors = [];
+
+  // Helper que tenta fetch + parseia HTML de confirmacao se vier
+  const tryFetch = async (url) => {
+    console.log('[DARKO LAB BG v4.6] fetch tentando', url.slice(0, 120));
+    try {
       const r = await fetchWithTimeout(url, {
         method: 'GET',
         credentials: 'include',
         redirect: 'follow',
-      }, 600000); // 10min pra videos grandes
-      if (!r.ok) return { err: `HTTP ${r.status}` };
+      }, 600000);
+      if (!r.ok) return { err: `HTTP ${r.status}`, finalUrl: r.url };
       const buf = await r.arrayBuffer();
-      // Sanity check: HTML de confirmacao tem ~5KB, MP4 tem >100KB
-      if (buf.byteLength < 50000) {
-        const head = new Uint8Array(buf.slice(0, 2000));
+      // HTML de confirmacao costuma ser <100KB; MP4 e bem maior
+      if (buf.byteLength < 100000) {
+        const head = new Uint8Array(buf.slice(0, 3000));
         const headText = new TextDecoder().decode(head);
         if (/<html|<!DOCTYPE/i.test(headText)) {
-          // Procura form de confirmacao (arquivos grandes ou virus warning)
           const allText = new TextDecoder().decode(new Uint8Array(buf));
           const confirmMatch = allText.match(/confirm=([0-9A-Za-z_-]+)/);
           const uuidMatch = allText.match(/uuid=([0-9a-f-]+)/);
-          if (confirmMatch || uuidMatch) {
+          // Form action url pode estar la
+          const formAction = allText.match(/action="([^"]+download[^"]*)"/);
+          if (confirmMatch || uuidMatch || formAction) {
             return {
               err: 'needs_confirm',
               confirm: confirmMatch?.[1],
               uuid: uuidMatch?.[1],
+              formAction: formAction?.[1],
+              finalUrl: r.url,
             };
           }
-          if (/sign in|signin/i.test(headText)) {
-            return { err: 'redirect_login (file privado OU user nao logado)' };
+          if (/sign in|signin|accounts\.google/i.test(headText)) {
+            return { err: 'redirect_login (file privado OU user nao logado)', finalUrl: r.url };
           }
-          return { err: 'HTML response (file pode estar deletado OU sem permissao)' };
+          return { err: 'HTML response (file deletado OU sem permissao)', finalUrl: r.url };
         }
       }
-      return { bytes: new Uint8Array(buf) };
-    };
+      return { bytes: new Uint8Array(buf), finalUrl: r.url };
+    } catch (e) {
+      return { err: 'fetch_exception: ' + (e?.message || e), finalUrl: url };
+    }
+  };
 
-    let bytes = null;
-    let lastErr = '';
-    // 1. Primeira tentativa: uc?export=download
-    let res = await tryFetch(`https://drive.google.com/uc?export=download&id=${fileId}`);
-    if (res.bytes) {
-      bytes = res.bytes;
-    } else if (res.err === 'needs_confirm' && res.confirm) {
-      // 2. Retry com confirm token (arquivos > 100MB)
-      console.log('[DARKO LAB BG] HG_DOWNLOAD_DRIVE precisa de confirm token:', res.confirm);
-      res = await tryFetch(`https://drive.google.com/uc?export=download&id=${fileId}&confirm=${res.confirm}${res.uuid ? `&uuid=${res.uuid}` : ''}`);
-      if (res.bytes) bytes = res.bytes;
-      else lastErr = `uc com confirm token: ${res.err}`;
+  // Estrategia 1: drive.google.com/uc — funciona pra files pequenos
+  let bytes = null;
+  let res = await tryFetch(`https://drive.google.com/uc?export=download&id=${fileId}`);
+  if (res.bytes) {
+    bytes = res.bytes;
+    console.log('[DARKO LAB BG v4.6] OK via uc, bytes=', bytes.length);
+  } else if (res.err === 'needs_confirm') {
+    errors.push(`uc: needs confirm (${res.confirm || res.uuid || 'no token'})`);
+    console.log('[DARKO LAB BG v4.6] uc needs confirm', { confirm: res.confirm, uuid: res.uuid });
+    // Estrategia 2: retry com confirm + uuid (arquivos > ~100MB)
+    if (res.confirm || res.uuid) {
+      const params = new URLSearchParams({ id: fileId, export: 'download' });
+      if (res.confirm) params.set('confirm', res.confirm);
+      if (res.uuid) params.set('uuid', res.uuid);
+      res = await tryFetch(`https://drive.google.com/uc?${params}`);
+      if (res.bytes) { bytes = res.bytes; console.log('[DARKO LAB BG v4.6] OK via uc+confirm'); }
+      else errors.push(`uc+confirm: ${res.err}`);
+    }
+  } else {
+    errors.push(`uc: ${res.err}`);
+  }
+
+  // Estrategia 3: drive.usercontent.google.com — endpoint moderno do Drive (Q4 2023+)
+  if (!bytes) {
+    res = await tryFetch(`https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=t`);
+    if (res.bytes) { bytes = res.bytes; console.log('[DARKO LAB BG v4.6] OK via usercontent'); }
+    else if (res.err === 'needs_confirm' && (res.confirm || res.uuid)) {
+      const params = new URLSearchParams({ id: fileId, export: 'download', authuser: '0' });
+      if (res.confirm) params.set('confirm', res.confirm);
+      if (res.uuid) params.set('uuid', res.uuid);
+      res = await tryFetch(`https://drive.usercontent.google.com/download?${params}`);
+      if (res.bytes) { bytes = res.bytes; console.log('[DARKO LAB BG v4.6] OK via usercontent+confirm'); }
+      else errors.push(`usercontent+confirm: ${res.err}`);
     } else {
-      lastErr = `uc?export=download: ${res.err}`;
+      errors.push(`usercontent: ${res.err}`);
     }
-    // 3. Fallback: drive.usercontent.google.com
-    if (!bytes) {
-      res = await tryFetch(`https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=t`);
-      if (res.bytes) bytes = res.bytes;
-      else lastErr = `usercontent: ${res.err}; ${lastErr}`;
-    }
-    if (!bytes) {
-      reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_RESULT', {
-        ok: false,
-        error: 'Drive download falhou: ' + lastErr + '. Verifique se o file existe + voce tem acesso.',
+  }
+
+  // Estrategia 4: chrome.downloads API — funcionamento garantido (browser nativo)
+  // Usa quando fetch falha totalmente. Pega o blob via fetch da URL final.
+  if (!bytes) {
+    try {
+      console.log('[DARKO LAB BG v4.6] tentando chrome.downloads fallback');
+      const downloadUrl = `https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=t`;
+      const downloadId = await new Promise((resolve, reject) => {
+        chrome.downloads.download(
+          { url: downloadUrl, conflictAction: 'uniquify', saveAs: false },
+          (id) => {
+            if (chrome.runtime.lastError) reject(chrome.runtime.lastError);
+            else resolve(id);
+          },
+        );
       });
-      return;
+      // Aguarda completion
+      const downloaded = await new Promise((resolve) => {
+        const checkInterval = setInterval(async () => {
+          const items = await chrome.downloads.search({ id: downloadId });
+          const item = items?.[0];
+          if (!item) return;
+          if (item.state === 'complete') {
+            clearInterval(checkInterval);
+            resolve(item);
+          } else if (item.state === 'interrupted') {
+            clearInterval(checkInterval);
+            resolve(null);
+          }
+        }, 1000);
+        setTimeout(() => { clearInterval(checkInterval); resolve(null); }, 600000);
+      });
+      if (downloaded && downloaded.filename) {
+        // Le arquivo do disco via fetch file://
+        try {
+          const fileUrl = 'file://' + downloaded.filename.replace(/\\/g, '/');
+          const fr = await fetch(fileUrl);
+          if (fr.ok) {
+            const buf = await fr.arrayBuffer();
+            bytes = new Uint8Array(buf);
+            console.log('[DARKO LAB BG v4.6] OK via chrome.downloads, bytes=', bytes.length);
+          } else {
+            errors.push(`chrome.downloads file:// fetch HTTP ${fr.status}`);
+          }
+        } catch (e) {
+          errors.push(`chrome.downloads file:// fetch: ${e?.message || e}`);
+        }
+      } else {
+        errors.push('chrome.downloads: download interrupted ou timeout');
+      }
+    } catch (e) {
+      errors.push(`chrome.downloads exception: ${e?.message || e}`);
     }
-    console.log(`[DARKO LAB BG] HG_DOWNLOAD_DRIVE OK fileId=${fileId} bytes=${bytes.length}`);
-    // Converte pra base64 chunked (postMessage tem limite, mas pra videos
-    // <200MB single shot funciona)
+  }
+
+  if (!bytes) {
+    reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_RESULT', {
+      ok: false,
+      error: 'Drive download falhou em todas estrategias. ' +
+        'Verifique: (1) extension reloaded em chrome://extensions, ' +
+        '(2) file existe + voce tem acesso, ' +
+        '(3) voce esta logado no Google. Detalhes: ' + errors.join(' | '),
+    });
+    return;
+  }
+
+  console.log(`[DARKO LAB BG v4.6] HG_DOWNLOAD_DRIVE OK fileId=${fileId} bytes=${bytes.length}`);
+  try {
     let binary = '';
     const CHUNK = 0x8000;
     for (let i = 0; i < bytes.length; i += CHUNK) {
@@ -537,7 +615,7 @@ async function handleDownloadDrive(requestId, fileId, bridgeTabId) {
   } catch (e) {
     reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_RESULT', {
       ok: false,
-      error: e?.message ?? String(e),
+      error: 'Falha ao codificar bytes em base64: ' + (e?.message || e),
     });
   }
 }

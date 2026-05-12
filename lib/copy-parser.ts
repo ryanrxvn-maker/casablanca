@@ -118,12 +118,18 @@ function isPlausibleAvatarRole(role: string): boolean {
 
 /** Extrai avatares mencionados em formato flexivel.
  *
- *  Formatos aceitos:
- *    "Mulher: @vivian.lamounier1.mp4"
- *    "Doutor: thethaetresmyarena.mp4"                  ← sem @
- *    "Leandro (Homem depoimento): @kiko.urso3.mp4"     ← role com parens
- *    "Mulher (Esposa de Leandro): @anapaulalima.mp4"
- *    "Voz do Homem: @manualdohomemsolo2.mp4"           ← role com prep
+ *  Formatos aceitos (em ordem de prioridade):
+ *    1. "Mulher: @vivian.lamounier1.mp4"                 — role: @user.mp4
+ *    2. "Doutor: thethaetresmyarena.mp4"                 — sem @
+ *    3. "Leandro (Homem depoimento): @kiko.urso3.mp4"    — role com parens
+ *    4. "Mulher (Esposa de Leandro): @anapaulalima.mp4"
+ *    5. "Voz do Homem: @manualdohomemsolo2.mp4"          — role com prep
+ *    6. "1. Doutor: @x.mp4"                              — prefixo numerico
+ *    7. "- Mulher: @x.mp4"                               — prefixo bullet
+ *    8. "Avatar 1: @x.mp4" / "Avatar 2: @y"              — role genérico
+ *    9. "Doutor: @kiko.urso3.mp4 (10s)"                  — comentario apos
+ *   10. "@kiko.urso3.mp4" sozinho na linha                — sem role, infere "Avatar"
+ *   11. Role na linha N + @user na linha N+1 (multi-line)
  *
  *  Filtra metadados ("Voz:", "Referência:", "Atenção:", "Caixinha:",
  *  "Avatar fala:", "Instruções:", "Observação:") que aparecem em briefings
@@ -132,30 +138,90 @@ export function parseAvatars(section: string): ParsedAvatar[] {
   const out: ParsedAvatar[] = [];
   const lines = section.split(/\r?\n/);
 
-  // Regex permissivo: aceita filename com ou sem @, com .mp4/.mov opcional.
-  // Role: 1-4 palavras + opcional (parens).
-  // Mention: @ opcional, depois caracteres validos de filename.
-  const re = /^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s()]{0,58}?):\s*[^@\w]*@?([A-Za-z0-9][\w._-]+?)(?:\.mp4|\.mov)?\s*$/i;
+  // Regex 1: linha completa "[prefixo opcional] Role: [@]username[.mp4] [comentario opcional]"
+  // Prefixo: "1." | "1)" | "-" | "*" | "•" (opcional)
+  // Role: 1+ palavras com letras/espaco/parens
+  // Filename: @opcional + chars validos + .mp4/.mov opcional
+  // Cauda: qualquer coisa apos (parens, traco, comentario)
+  const reFullLine = /^[\s•\-*\d.)\]]*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s()0-9]{0,58}?):\s*[^@\w]*@?([A-Za-z0-9][\w._-]+?)(?:\.(?:mp4|mov))?(?:\s*[\s\-(.,].*)?$/i;
 
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const m = trimmed.match(re);
-    if (!m) continue;
-    const role = m[1].trim();
-    const username = m[2].trim();
+  // Regex 2: linha com SO @username (sem role), tipo "@manualdohomemsolo.mp4"
+  const reOnlyMention = /^[\s•\-*\d.)\]]*@([A-Za-z0-9][\w._-]+?)(?:\.(?:mp4|mov))?\s*$/i;
 
-    // Filtros de qualidade:
-    if (!isPlausibleAvatarRole(role)) continue;
-    if (/^(http|https|www|exemplo|ex)$/i.test(username)) continue;
-    // username muito curto = provavel falso positivo
-    if (username.length < 3) continue;
-    // username so com digitos = NAO e mention de avatar
-    if (/^\d+$/.test(username)) continue;
-    // Bloqueia padroes de referencia conhecidos (AD<num>VN[T]-VFPBxx-AVAxx)
-    if (/^AD\d+VN/i.test(username)) continue;
+  // Regex 3: linha que e SO um role (role unique without value), tipo "Doutor:" ou "Mulher (Esposa):"
+  const reRoleOnly = /^[\s•\-*\d.)\]]*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s()]{0,58}?):\s*$/i;
 
-    out.push({ role, username, raw: trimmed });
+  // Estado pra multi-line: role detectado, esperando @ na linha seguinte
+  let pendingRole: string | null = null;
+  let pendingRoleLine = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) {
+      // Linha em branco invalida pending role
+      if (pendingRole) {
+        pendingRole = null;
+        pendingRoleLine = -1;
+      }
+      continue;
+    }
+
+    // Pula linhas que parecem ser comentarios pesados (urls, etc)
+    if (/^https?:\/\//.test(trimmed)) continue;
+
+    // Tentativa 1: linha completa "Role: @user.mp4"
+    const m1 = trimmed.match(reFullLine);
+    if (m1) {
+      const role = m1[1].trim();
+      const username = m1[2].trim();
+      if (isPlausibleAvatarRole(role) &&
+          username.length >= 3 &&
+          !/^(http|https|www|exemplo|ex)$/i.test(username) &&
+          !/^\d+$/.test(username) &&
+          !/^AD\d+VN/i.test(username)) {
+        out.push({ role, username, raw: trimmed });
+        pendingRole = null;
+        pendingRoleLine = -1;
+        continue;
+      }
+    }
+
+    // Tentativa 2: @username sozinho na linha — se temos pending role, casa
+    const m2 = trimmed.match(reOnlyMention);
+    if (m2) {
+      const username = m2[1].trim();
+      if (username.length >= 3 &&
+          !/^(http|https|www|exemplo|ex)$/i.test(username) &&
+          !/^\d+$/.test(username) &&
+          !/^AD\d+VN/i.test(username)) {
+        let role = pendingRole;
+        // Se nao tem pending role, infere "Avatar"
+        if (!role || (i - pendingRoleLine) > 2) {
+          role = 'Avatar';
+        }
+        out.push({ role, username, raw: trimmed });
+        pendingRole = null;
+        pendingRoleLine = -1;
+        continue;
+      }
+    }
+
+    // Tentativa 3: role only (ex "Doutor:") — guarda pra proxima linha
+    const m3 = trimmed.match(reRoleOnly);
+    if (m3) {
+      const role = m3[1].trim();
+      if (isPlausibleAvatarRole(role)) {
+        pendingRole = role;
+        pendingRoleLine = i;
+        continue;
+      }
+    }
+
+    // Nada deu match — invalida pending role apos 2 linhas
+    if (pendingRole && (i - pendingRoleLine) > 2) {
+      pendingRole = null;
+      pendingRoleLine = -1;
+    }
   }
 
   // Dedup por (role + username): se mesma combinacao aparecer 2x, mantem 1

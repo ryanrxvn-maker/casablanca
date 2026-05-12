@@ -34,15 +34,13 @@ export function CompactVoiceSelector({
     const r = btn.getBoundingClientRect();
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const spaceBelow = vh - r.bottom - 12;
-    const spaceAbove = r.top - 12;
-    const placement = spaceBelow >= 280 || spaceBelow >= spaceAbove ? 'below' : 'above';
-    const maxH = Math.min(PANEL_H, Math.max(spaceBelow, spaceAbove) - 8);
     const width = Math.min(PANEL_W, vw - 24);
-    let left = r.left;
+    const maxH = Math.min(PANEL_H, vh - 40);
+    const idealTop = r.top - 30;
+    const top = Math.max(20, Math.min(vh - maxH - 20, idealTop));
+    let left = r.left + r.width / 2 - width / 2;
     if (left + width > vw - 12) left = vw - width - 12;
     if (left < 12) left = 12;
-    const top = placement === 'below' ? r.bottom + 6 : Math.max(12, r.top - maxH - 6);
     setPos({ top, left, width, maxH });
   };
 
@@ -185,7 +183,7 @@ export function CompactVoiceSelector({
                 </button>
               ))}
               {!loading && results.length === 0 && query ? (
-                <div className="text-[11px] text-text-muted">Nenhuma voz encontrada pra "{query}".</div>
+                <div className="text-[11px] text-text-muted">Nenhuma voz encontrada pra &quot;{query}&quot;.</div>
               ) : null}
             </div>
           </div>

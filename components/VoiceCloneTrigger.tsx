@@ -83,10 +83,12 @@ export function VoiceCloneTrigger({
     const r = btn.getBoundingClientRect();
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const W = Math.min(360, vw - 24);
-    const spaceBelow = vh - r.bottom - 12;
-    const top = spaceBelow >= 280 ? r.bottom + 6 : Math.max(12, r.top - 280 - 6);
-    let left = r.left;
+    const W = Math.min(380, vw - 24);
+    const H_EST = 460;
+    const maxH = Math.min(H_EST, vh - 40);
+    const idealTop = r.top - 30;
+    const top = Math.max(20, Math.min(vh - maxH - 20, idealTop));
+    let left = r.left + r.width / 2 - W / 2;
     if (left + W > vw - 12) left = vw - W - 12;
     if (left < 12) left = 12;
     setPos({ top, left, width: W });
