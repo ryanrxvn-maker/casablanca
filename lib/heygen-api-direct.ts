@@ -595,6 +595,63 @@ export async function getVideosStatus(
   return out;
 }
 
+/** Lista videos da conta HeyGen com paginacao. Retention de 60 dias (limit
+ *  imposto pelo HeyGen). Mais novos primeiro. */
+export type HistoryVideo = {
+  videoId: string;
+  name: string;
+  status: VideoStatus['status'];
+  videoUrl: string | null;
+  thumbUrl: string | null;
+  durationSec: number | null;
+  createdAt: number; // unix ms
+  error?: string;
+};
+
+export async function listMyVideos(opts: {
+  limit?: number;
+  page?: number;
+} = {}): Promise<{ items: HistoryVideo[]; hasMore: boolean; totalLoaded: number }> {
+  const limit = opts.limit ?? 50;
+  const page = opts.page ?? 1;
+  // Tenta varios endpoints — HeyGen tem inconsistencia entre v1/v2
+  const candidates = [
+    `/v1/pacific/video.list?limit=${limit}&page=${page}`,
+    `/v1/video.list?limit=${limit}&page=${page}`,
+    `/v2/video.list?limit=${limit}&page=${page}`,
+    `/v1/project/items?limit=${limit}&item_types=heygen_video&sort_key=created_ts&sort_order=desc`,
+  ];
+  for (const path of candidates) {
+    const r = await jsonCall('GET', path);
+    if (!r.ok) continue;
+    const data = r.body?.data;
+    const rawList: any[] = data?.list || data?.items || data?.videos || (Array.isArray(data) ? data : []);
+    if (!Array.isArray(rawList) || rawList.length === 0) continue;
+    const items: HistoryVideo[] = rawList.map((it) => {
+      const st = String(it.status || it.state || '').toLowerCase();
+      let status: VideoStatus['status'] = 'unknown';
+      if (st === 'completed' || st === 'done' || st === 'success') status = 'completed';
+      else if (st === 'failed' || st === 'error') status = 'failed';
+      else if (st === 'pending' || st === 'processing' || st === 'rendering') status = 'pending';
+      // Created timestamp pode vir em ms ou s (epoch)
+      let createdAt = Number(it.created_ts || it.created_at || it.created || 0);
+      if (createdAt > 0 && createdAt < 10_000_000_000) createdAt *= 1000;
+      return {
+        videoId: String(it.video_id || it.id || ''),
+        name: String(it.video_title || it.title || it.name || '(sem nome)'),
+        status,
+        videoUrl: it.video_url || it.url || null,
+        thumbUrl: it.thumbnail_url || it.thumb_url || it.cover_image_url || null,
+        durationSec: typeof it.duration === 'number' ? it.duration : (typeof it.duration_seconds === 'number' ? it.duration_seconds : null),
+        createdAt,
+        error: it.error || it.failed_reason || undefined,
+      };
+    }).filter((v) => v.videoId);
+    return { items, hasMore: items.length >= limit, totalLoaded: items.length };
+  }
+  return { items: [], hasMore: false, totalLoaded: 0 };
+}
+
 /**
  * Polla repetidamente ate todos os videoIds estarem 'completed' ou 'failed',
  * ou ate timeout. Chama onStatus a cada poll.

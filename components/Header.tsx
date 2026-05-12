@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { Brand } from './Brand';
 import { ClickUpPilotButton } from './ClickUpPilotButton';
+import { HeyGenHistoryButton } from './HeyGenHistoryButton';
 import { createClient } from '@/lib/supabase/client';
 
 type Profile = {
@@ -91,6 +92,7 @@ export function Header() {
         <Brand />
 
         <div className="flex items-center gap-3">
+          <HeyGenHistoryButton />
           <ClickUpPilotButton />
 
         <div className="relative" ref={menuRef}>

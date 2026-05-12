@@ -56,7 +56,7 @@ export type PipelineInputs = {
   /** Volume da camuflagem 5..100 (% do nivel padrao) */
   camuflagemVolume?: number;
   /** Tolerancia de silencio em segundos (margem mantida nas bordas — preserva
-   *  inicio/fim de palavras pra nao cortar nada) */
+   *  inicio/fim de palavras pra nao cortar nada). Default 0.12s. */
   keepSilenceSec?: number;
   /** Callback de progresso */
   onProgress?: (p: PipelineProgress) => void;
@@ -107,7 +107,10 @@ export type PipelineResult = {
 /** Roda pipeline completa. SEMPRE retorna info diagnostica — mesmo quando
  *  nao consegue produzir nada, explica por que. */
 export async function runPostPipeline(input: PipelineInputs): Promise<PipelineResult> {
-  const { baseAdId, parts, camuflagem, whiteAudio, camuflagemVolume = 30, keepSilenceSec = 0.05, onProgress } = input;
+  // keepSilenceSec=0.12: margem mantida nas bordas das fala. Era 0.05 (muito
+  // agressivo, video ficava entrecortado). 0.12 da pausa natural entre takes
+  // sem soar robotico — feedback do user em 12/05/2026.
+  const { baseAdId, parts, camuflagem, whiteAudio, camuflagemVolume = 30, keepSilenceSec = 0.12, onProgress } = input;
   const { hooks, bodies } = classifyParts(parts);
   const out: AssembledPart[] = [];
   const unrecognized = parts.filter((p, i) => !hooks.includes(i) && !bodies.includes(i)).map((p) => p.label);
