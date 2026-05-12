@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.7.0';
+const DARKO_EXT_VERSION = '4.7.1';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -1639,104 +1639,112 @@ async function pasteScriptIntoTextarea(textarea, text) {
   }
 }
 
-/* ============= AUDIO MODE HELPERS (v4.7+) ============= */
+/* ============= AUDIO MODE HELPERS (v4.7+) ===========================
+ * Fluxo VERIFICADO ao vivo (12/05/2026) no app.heygen.com/avatar:
+ *  1. Quick Create tem botao DIV role="button" textContent="Upload"
+ *     (e irmao "Record") posicionados no topo direito da textarea area.
+ *  2. Click no "Upload" abre [role="dialog"] com tw-z-50 (modal centrado).
+ *  3. Modal tem 2 tabs BUTTON role="tab": "Record Audio" e "Upload Audio".
+ *     "Upload Audio" e selecionada por DEFAULT.
+ *  4. Dentro do modal: input[type="file"] (hidden) accept=audio.
+ *  5. Set files via DataTransfer + dispatch 'change' → modal mostra
+ *     "Uploading...", processa, modal FECHA AUTOMATICAMENTE quando OK.
+ *  6. Apos modal fechar, audio carregado fica selecionado, Generate
+ *     habilita.
+ */
 
-/** Procura tab/botao que ativa modo audio. HeyGen Quick Create tem um
- *  seletor entre 'Type Script' / 'Voice Clone' / 'Upload Audio' / 'Audio'.
- *  Tenta varias variantes de texto + atributos. */
-async function switchToAudioMode() {
-  console.log('[DARKO LAB UI audio] procurando tab/botao audio...');
-  const candidates = [];
-  // 1. Tabs / botoes com texto que indica audio
-  const audioTexts = [
-    'upload audio', 'use audio', 'audio file', 'audio upload',
-    'upload an audio', 'voice clone', 'use my voice', 'audio',
-    'subir audio', 'enviar audio',
-  ];
-  const allInteractive = document.querySelectorAll('button, [role="tab"], [role="button"], a, div[tabindex], span[tabindex]');
-  for (const el of allInteractive) {
+/** Procura o botao DIV[role=button] com texto exato "Upload" (ao lado
+ *  do "Record"). NAO confunde com botoes maiores que tenham "Upload"
+ *  como parte do texto. */
+function findUploadAudioToggle() {
+  const all = Array.from(document.querySelectorAll('div[role="button"], button'));
+  for (const el of all) {
     if (el.offsetParent === null) continue;
-    const txt = (el.textContent || '').trim().toLowerCase();
-    const aria = (el.getAttribute('aria-label') || '').toLowerCase();
-    const fullText = txt + ' ' + aria;
-    // Bloqueia controles do AVATAR PICKER que podem ter texto "voice"
-    if (fullText.includes('change avatar') || fullText.includes('preview')) continue;
-    for (const target of audioTexts) {
-      if (fullText.includes(target)) {
-        const r = el.getBoundingClientRect();
-        if (r.width < 5 || r.height < 5) continue;
-        // Score: prefere elementos curtos (tabs > paragrafos)
-        const score = 100 - txt.length;
-        candidates.push({ el, score, txt: txt.slice(0, 50) });
-        break;
-      }
-    }
+    const txt = (el.textContent || '').trim();
+    if (txt !== 'Upload') continue;
+    const r = el.getBoundingClientRect();
+    // E o botaozinho do Quick Create (compacto, ~36x36 ate ~120x60)
+    if (r.width < 20 || r.height < 20 || r.width > 200 || r.height > 100) continue;
+    return el;
   }
-  if (candidates.length === 0) {
-    console.warn('[DARKO LAB UI audio] nenhum candidato encontrado. DOM scan:');
-    const sample = Array.from(document.querySelectorAll('button')).slice(0, 30).map((b) => (b.textContent || '').trim().slice(0, 40));
-    console.warn('  buttons sample:', sample);
-    return false;
-  }
-  candidates.sort((a, b) => b.score - a.score);
-  console.log('[DARKO LAB UI audio] candidates:', candidates.slice(0, 5).map((c) => c.txt));
-  // Tenta clicar nos top 3
-  for (const c of candidates.slice(0, 3)) {
-    console.log('[DARKO LAB UI audio] clicando candidato:', c.txt);
-    clickElement(c.el);
-    await sleep(900);
-    // Verifica se apareceu file input ou drop zone
-    if (findAudioFileInput() || findAudioDropZone()) {
-      console.log('[DARKO LAB UI audio] modo audio ativado via:', c.txt);
-      return true;
-    }
-  }
-  // Tenta find pelo file input direto (caso modo audio ja esteja ativo por default)
-  if (findAudioFileInput()) {
-    console.log('[DARKO LAB UI audio] file input ja presente sem precisar trocar tab');
-    return true;
-  }
-  console.warn('[DARKO LAB UI audio] nenhum click trouxe file input');
-  return false;
+  return null;
 }
 
-/** Encontra <input type="file"> de audio na pagina. */
+/** Click no botao "Upload" pra abrir o modal Upload Audio. */
+async function switchToAudioMode() {
+  console.log('[DARKO LAB UI audio] procurando botao Upload...');
+  // Aguarda o botao aparecer (UI HeyGen pode demorar a montar)
+  const uploadBtn = await waitForOrNull(() => findUploadAudioToggle(), 10000, 300);
+  if (!uploadBtn) {
+    console.warn('[DARKO LAB UI audio] botao Upload NAO encontrado. Sample buttons:');
+    const sample = Array.from(document.querySelectorAll('button, [role="button"]'))
+      .filter((b) => b.offsetParent !== null)
+      .slice(0, 20)
+      .map((b) => (b.textContent || '').trim().slice(0, 40));
+    console.warn('  sample:', sample);
+    return false;
+  }
+  const r = uploadBtn.getBoundingClientRect();
+  console.log('[DARKO LAB UI audio] clicando Upload em', r.left, r.top);
+  clickElement(uploadBtn);
+  // Aguarda o modal abrir
+  const modal = await waitForOrNull(() => findUploadModal(), 5000, 200);
+  if (!modal) {
+    console.warn('[DARKO LAB UI audio] modal Upload Audio nao abriu apos click');
+    return false;
+  }
+  console.log('[DARKO LAB UI audio] modal aberto.');
+  // Garante que "Upload Audio" tab esta selecionada (e default mas safety)
+  await sleep(300);
+  const uploadTab = Array.from(modal.querySelectorAll('button[role="tab"]'))
+    .find((b) => (b.textContent || '').trim() === 'Upload Audio');
+  if (uploadTab && uploadTab.getAttribute('aria-selected') !== 'true') {
+    console.log('[DARKO LAB UI audio] Upload Audio tab nao ativa, clicando...');
+    clickElement(uploadTab);
+    await sleep(400);
+  }
+  return true;
+}
+
+/** Encontra o modal [role="dialog"] da Upload Audio. */
+function findUploadModal() {
+  const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
+  for (const d of dialogs) {
+    if (d.offsetParent === null) continue;
+    const txt = d.textContent || '';
+    // Modal de upload de audio sempre tem essa string
+    if (/Upload\s+Audio/i.test(txt) || /Record\s+Audio/i.test(txt)) {
+      return d;
+    }
+  }
+  return null;
+}
+
+/** Encontra <input type="file"> dentro do modal de upload (hidden). */
 function findAudioFileInput() {
+  const modal = findUploadModal();
+  if (modal) {
+    const inp = modal.querySelector('input[type="file"]');
+    if (inp) return inp;
+  }
+  // Fallback: input file em qualquer lugar com accept=audio
   const inputs = document.querySelectorAll('input[type="file"]');
   for (const inp of inputs) {
     const accept = (inp.getAttribute('accept') || '').toLowerCase();
-    // Aceita audio explicito ou input sem accept (Quick Create pode aceitar tudo)
-    if (accept.includes('audio') || accept.includes('mp3') || accept.includes('wav') || accept === '' || accept === '*/*') {
+    if (accept.includes('audio') || accept.includes('mp3') || accept.includes('wav')) {
       return inp;
     }
   }
   return null;
 }
 
-/** Encontra drop zone (div com 'drag and drop' ou similar). */
-function findAudioDropZone() {
-  const all = document.querySelectorAll('div, label');
-  for (const el of all) {
-    if (el.offsetParent === null) continue;
-    const txt = (el.textContent || '').trim().toLowerCase();
-    if (txt.length > 200) continue;
-    if (txt.includes('drag') && (txt.includes('drop') || txt.includes('audio'))) {
-      return el;
-    }
-    if (txt.includes('arraste') || txt.includes('solte')) {
-      return el;
-    }
-  }
-  return null;
-}
-
-/** Upload de audio: encontra file input + dispara change com File. */
+/** Upload de audio: encontra file input dentro do modal + dispara change. */
 async function uploadAudioToScriptArea(audioBase64, filename) {
   const fileInput = await waitForOrNull(() => findAudioFileInput(), 8000, 200);
   if (!fileInput) {
-    throw new Error('File input de audio nao encontrado apos switch. F12: cole o HTML da area de script pra eu ver o seletor.');
+    throw new Error('Input file de audio nao encontrado apos abrir modal. Tente: F12 console + cole logs [DARKO LAB UI audio].');
   }
-  console.log('[DARKO LAB UI audio] file input encontrado, fazendo upload...');
+  console.log('[DARKO LAB UI audio] file input encontrado dentro do modal, fazendo upload...');
   // Decodifica base64 → Uint8Array → File
   const bin = atob(audioBase64);
   const bytes = new Uint8Array(bin.length);
@@ -1744,7 +1752,7 @@ async function uploadAudioToScriptArea(audioBase64, filename) {
   const ext = (filename || '').toLowerCase().match(/\.(\w+)$/)?.[1] || 'wav';
   const mime = ext === 'mp3' ? 'audio/mpeg' : ext === 'm4a' ? 'audio/mp4' : 'audio/wav';
   const file = new File([bytes], filename || 'audio.wav', { type: mime });
-  // Dispara via DataTransfer (forma padrao pra programatic file upload)
+  // DataTransfer + change event (formato padrao pra programmatic file upload em React)
   const dt = new DataTransfer();
   dt.items.add(file);
   fileInput.files = dt.files;
@@ -1752,28 +1760,49 @@ async function uploadAudioToScriptArea(audioBase64, filename) {
   console.log('[DARKO LAB UI audio] file dispatched:', filename, 'size:', bytes.length);
 }
 
-/** Aguarda HeyGen processar o upload — heuristica: procura indicador
- *  de progresso/sucesso (texto com duracao do audio em segundos). */
-async function waitForAudioUploadComplete(timeoutMs = 60000) {
+/** Aguarda upload completar. Modal FECHA automaticamente apos OK
+ *  (verificado live). Tambem aceita 'Uploading...' sumir como sucesso. */
+async function waitForAudioUploadComplete(timeoutMs = 120000) {
   const deadline = Date.now() + timeoutMs;
+  let lastUploading = Date.now();
   while (Date.now() < deadline) {
-    // Heuristica: se houver text "X.Xs" / "X:XX" perto do upload area, upload completou
-    const indicators = document.querySelectorAll('span, div, p');
-    for (const el of indicators) {
-      if (el.offsetParent === null) continue;
-      const txt = (el.textContent || '').trim();
-      if (txt.length > 80) continue;
-      // Match "1.2s", "0:23", "1:23" sozinho na linha → indicador de audio carregado
-      if (/^\d+\.?\d*\s*s$/i.test(txt) || /^\d{1,2}:\d{2}$/.test(txt)) {
-        console.log('[DARKO LAB UI audio] upload OK, indicador:', txt);
-        return true;
-      }
-    }
-    // Tambem checa botao Generate ativado (nao disabled)
-    const gen = findGenerateButton();
-    if (gen && !gen.disabled && gen.getAttribute('aria-disabled') !== 'true') {
-      console.log('[DARKO LAB UI audio] generate button habilitado, assumindo upload OK');
+    const modal = findUploadModal();
+    if (!modal) {
+      // Modal fechou → upload OK
+      console.log('[DARKO LAB UI audio] modal fechou, upload OK');
       return true;
+    }
+    const txt = modal.textContent || '';
+    const uploadingShown = /Uploading\.\.\./i.test(txt);
+    if (uploadingShown) lastUploading = Date.now();
+    // Texto de erro
+    if (/upload failed|invalid|corrupted|nao suportado|not supported/i.test(txt)) {
+      throw new Error('HeyGen reportou erro no upload de audio. Modal text: ' + txt.slice(0, 200));
+    }
+    // Se "Uploading..." sumiu mas modal continua aberto, aguarda mais 3s entao
+    // tenta selecionar o audio recem-uploaded da lista
+    if (!uploadingShown && Date.now() - lastUploading > 3000) {
+      console.log('[DARKO LAB UI audio] Uploading sumiu, modal aberto — tentando selecionar audio recem-uploaded');
+      // Procura o item mais recente na lista (geralmente primeiro)
+      const items = modal.querySelectorAll('button, [role="button"], li');
+      for (const it of items) {
+        const itxt = (it.textContent || '').trim();
+        if (/\d{1,2}:\d{2}/.test(itxt) && /just now|seconds ago|agora/i.test(itxt)) {
+          clickElement(it);
+          await sleep(500);
+          break;
+        }
+      }
+      // Procura botao Use/Apply pra confirmar
+      const useBtn = Array.from(modal.querySelectorAll('button')).find((b) => {
+        const t = (b.textContent || '').trim().toLowerCase();
+        return t === 'use' || t === 'apply' || t === 'use audio' || t === 'select' || t === 'confirm';
+      });
+      if (useBtn) {
+        console.log('[DARKO LAB UI audio] clicando Use/Apply');
+        clickElement(useBtn);
+        await sleep(800);
+      }
     }
     await sleep(500);
   }
