@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
+import { BackgroundTasksButton } from './BackgroundTasksButton';
 import { Brand } from './Brand';
 import { ClickUpPilotButton } from './ClickUpPilotButton';
 import { HeyGenHistoryButton } from './HeyGenHistoryButton';
@@ -94,6 +95,7 @@ export function Header() {
 
         <div className="flex items-center gap-3">
           <PointsButton />
+          <BackgroundTasksButton />
           <HeyGenHistoryButton />
           <ClickUpPilotButton />
 

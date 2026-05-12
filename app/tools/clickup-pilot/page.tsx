@@ -969,6 +969,46 @@ export default function ClickUpPilotPage() {
     persistBatchStates(batchStates);
   }, [batchStates]);
 
+  /** Escuta flags de cancelamento vindos da pagina /tools/background.
+   *  Quando user clica "Cancelar" la, gravamos taskId em
+   *  localStorage['darkolab:clickup-pilot:cancel'] — aqui pegamos pelo
+   *  storage event (entre abas) ou pelo polling abaixo. */
+  useEffect(() => {
+    const CANCEL_KEY = 'darkolab:clickup-pilot:cancel';
+    const consumeCancels = () => {
+      try {
+        const raw = localStorage.getItem(CANCEL_KEY);
+        if (!raw) return;
+        const map = JSON.parse(raw) as Record<string, number>;
+        const ids = Object.keys(map);
+        if (ids.length === 0) return;
+        for (const id of ids) {
+          if (!batchCancelRef.current[id]) {
+            batchCancelRef.current[id] = true;
+            setBatchStates((prev) => {
+              const cur = prev[id];
+              if (!cur) return prev;
+              if (cur.phase === 'done' || cur.phase === 'failed') return prev;
+              return { ...prev, [id]: { ...cur, phase: 'failed', message: 'Cancelado pelo user (background page)', finishedAt: Date.now() } };
+            });
+          }
+        }
+        // Limpa o flag depois de processar
+        localStorage.setItem(CANCEL_KEY, '{}');
+      } catch {}
+    };
+    consumeCancels();
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === CANCEL_KEY) consumeCancels();
+    };
+    window.addEventListener('storage', onStorage);
+    const id = setInterval(consumeCancels, 2000);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      clearInterval(id);
+    };
+  }, []);
+
   /** Tick a cada 1s pra atualizar elapsed time nas batches rodando.
    *  So roda quando ha batch nao finalizada — evita re-render constante. */
   const [nowTick, setNowTick] = useState(Date.now());
