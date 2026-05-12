@@ -6,7 +6,6 @@ import { useEffect, useRef, useState } from 'react';
 import { BackgroundTasksButton } from './BackgroundTasksButton';
 import { Brand } from './Brand';
 import { ClickUpPilotButton } from './ClickUpPilotButton';
-import { HeyGenHistoryButton } from './HeyGenHistoryButton';
 import { LipsyncHistoryButton } from './LipsyncHistoryButton';
 import { PointsButton } from './PointsButton';
 import { createClient } from '@/lib/supabase/client';
@@ -98,7 +97,6 @@ export function Header() {
           <PointsButton />
           <BackgroundTasksButton />
           <LipsyncHistoryButton />
-          <HeyGenHistoryButton />
           <ClickUpPilotButton />
 
         <div className="relative" ref={menuRef}>

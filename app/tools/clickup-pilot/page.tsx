@@ -1228,6 +1228,13 @@ export default function ClickUpPilotPage() {
       const takesBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
       const takesFilename = `${adNameClean}_takes.zip`;
       const takesUrl = URL.createObjectURL(takesBlob);
+      // Persiste em IndexedDB pra sobreviver reload
+      try {
+        const { saveZip } = await import('@/lib/zip-store');
+        await saveZip(`batch:${taskId}:takes`, takesBlob, takesFilename);
+      } catch (e) {
+        console.warn('[batch] falha salvando ZIP takes em IndexedDB:', e);
+      }
 
       // === Stage 4: PIPELINE pos-producao (concat + decupagem [+ camuflagem]) ===
       setBatchStates((prev) => ({
@@ -1312,6 +1319,10 @@ pra ver os erros detalhados [clickup-pilot-pipeline].`);
         const blob2 = await zipMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
         montadoName = `${adNameClean}_montado_decupado.zip`;
         montadoUrl = URL.createObjectURL(blob2);
+        try {
+          const { saveZip } = await import('@/lib/zip-store');
+          await saveZip(`batch:${taskId}:montado`, blob2, montadoName);
+        } catch (e) { console.warn('[batch] save montado IDB:', e); }
       }
 
       // ZIP 3 — versoes camufladas. Cria sempre que modo ON (mesmo se 0
@@ -1338,6 +1349,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         const blob3 = await zipCamu.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
         camuName = `${adNameClean}_camuflado.zip`;
         camuUrl = URL.createObjectURL(blob3);
+        try {
+          const { saveZip } = await import('@/lib/zip-store');
+          await saveZip(`batch:${taskId}:camo`, blob3, camuName);
+        } catch (e) { console.warn('[batch] save camo IDB:', e); }
       }
 
       const totalSize = takesBlob.size + (montadoUrl ? assembled.reduce((n, it) => n + (it.decupado?.size || it.rawAssembled?.size || 0), 0) : 0);
@@ -2086,6 +2101,11 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
       const adName = va.baseAdId.replace(/\s+/g, '');
       const zipName = `${adName}_VA.zip`;
       const zipUrl = URL.createObjectURL(zipBlob);
+      // Persist em IndexedDB pra sobreviver reload
+      try {
+        const { saveZip } = await import('@/lib/zip-store');
+        await saveZip(`va:${taskId}:zip`, zipBlob, zipName);
+      } catch (e) { console.warn('[va] save zip IDB:', e); }
 
       setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: 'done', percent: 100, message: `Pronto: ${pipeRes.summary}`, zipUrl, zipName } }));
       // Marca como disparada

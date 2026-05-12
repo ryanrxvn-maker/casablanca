@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ToolShell } from '@/components/ToolShell';
+import { loadZip, listZipKeys, deleteZip as deleteZipFromStore } from '@/lib/zip-store';
 
 /**
  * DARKO LAB Lipsync History — todos os lipsyncs feitos pela aplicacao,
@@ -402,15 +403,43 @@ export default function LipsyncHistoryPage() {
                               ↓ {z.label}
                             </a>
                           ))}
-                          {e.zipsLost.map((label, i) => (
-                            <span
-                              key={i}
-                              className="mono rounded border border-text-muted/30 bg-bg/30 px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted"
-                              title="ZIP foi gerado nessa sessao mas a Blob URL nao persiste em reload. Re-gere via ClickUp Pilot."
-                            >
-                              {label} (perdido)
-                            </span>
-                          ))}
+                          {e.zipsLost.map((label, i) => {
+                            // Tenta IndexedDB: key depende do tipo
+                            const idbKey = e.kind === 'batch'
+                              ? `batch:${(e.raw as BatchTaskState).taskId}:${label === 'takes' ? 'takes' : label === 'montado/decupado' ? 'montado' : 'camo'}`
+                              : `va:${(e.raw as VAHistoryEntry).taskId}:zip`;
+                            return (
+                              <button
+                                key={i}
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    const rec = await loadZip(idbKey);
+                                    if (!rec) {
+                                      alert('ZIP nao encontrado no IndexedDB (gerado em sessao muito antiga ou IDB foi limpo).');
+                                      return;
+                                    }
+                                    // Cria <a> temporario pra download
+                                    const a = document.createElement('a');
+                                    a.href = rec.blobUrl;
+                                    a.download = rec.filename;
+                                    document.body.appendChild(a);
+                                    a.click();
+                                    setTimeout(() => {
+                                      document.body.removeChild(a);
+                                      URL.revokeObjectURL(rec.blobUrl);
+                                    }, 100);
+                                  } catch (err: any) {
+                                    alert('Erro carregando ZIP: ' + (err?.message || err));
+                                  }
+                                }}
+                                className="mono rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/20"
+                                title="Carrega ZIP do IndexedDB (persistido entre reloads)"
+                              >
+                                ↓ {label} (do disco)
+                              </button>
+                            );
+                          })}
                         </div>
                       ) : null}
 

@@ -61,6 +61,15 @@ export default function PointsPage() {
   const [debugInfo, setDebugInfo] = useState<any>(null);
   const [showDebug, setShowDebug] = useState(false);
 
+  // Workspace selecionado pelo user (persiste no localStorage)
+  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  const [availableTeams, setAvailableTeams] = useState<Array<{ id: string; name: string }>>([]);
+
+  useEffect(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('darkolab:points:teamId') : null;
+    if (saved) setSelectedTeamId(saved);
+  }, []);
+
   async function fetchPoints() {
     if (!getClickUpToken()) {
       setPointsError('Configure o token ClickUp em /tools/clickup-pilot primeiro.');
@@ -69,31 +78,55 @@ export default function PointsPage() {
     setLoadingPoints(true);
     setPointsError(null);
     setDebugInfo(null);
+    const errors: string[] = [];
     try {
       const teams = await listTeams();
-      const teamId = teams[0]?.id;
+      setAvailableTeams(teams.map((t: any) => ({ id: t.id, name: t.name })));
+      // Workspace: user-selecionado OU primeiro
+      const teamId = selectedTeamId || teams[0]?.id;
       if (!teamId) { setPointsError('Sem teams ClickUp.'); return; }
       const me = await getCurrentUser();
       const now = new Date();
       const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
 
-      // Estrategia tripla — tenta tres filtros em paralelo, pega a maior soma
-      // (alguns workflows fecham via 'closed', outros via 'done', outros nem
-      // fecham — usam 'updated' como proxy):
       type Task = Awaited<ReturnType<typeof listTasksAll>>[number];
-      const [closedTasks, doneTasks, updatedTasks] = await Promise.all<Task[]>([
-        listTasksAll(teamId, { assigneeIds: [String(me.id)], subtasks: false, includeClosed: true, dateClosedGt: firstOfMonth }).catch(() => [] as Task[]),
-        listTasksAll(teamId, { assigneeIds: [String(me.id)], subtasks: false, includeClosed: true }).catch(() => [] as Task[]),
-        listTasksAll(teamId, { assigneeIds: [String(me.id)], subtasks: false, includeClosed: true, dateUpdatedGt: firstOfMonth }).catch(() => [] as Task[]),
+
+      // ESTRATEGIA 1: tasks com assignee = me, mes atual
+      const tryFetch = async (label: string, opts: any): Promise<Task[]> => {
+        try {
+          const r = await listTasksAll(teamId, opts);
+          console.log(`[points fetch] "${label}" → ${r.length} tasks`);
+          return r;
+        } catch (e: any) {
+          const msg = e?.message || String(e);
+          console.warn(`[points fetch] "${label}" THREW:`, msg);
+          errors.push(`"${label}": ${msg.slice(0, 120)}`);
+          return [];
+        }
+      };
+
+      const [withAssignee, withoutAssignee, allClosedMonth] = await Promise.all([
+        tryFetch('assignee=me + includeClosed + dateUpdatedGt=mes', {
+          assigneeIds: [String(me.id)], subtasks: false, includeClosed: true, dateUpdatedGt: firstOfMonth,
+        }),
+        tryFetch('SEM assignee + includeClosed + dateUpdatedGt=mes (fallback)', {
+          subtasks: false, includeClosed: true, dateUpdatedGt: firstOfMonth,
+        }),
+        tryFetch('assignee=me + dateClosedGt=mes', {
+          assigneeIds: [String(me.id)], subtasks: false, includeClosed: true, dateClosedGt: firstOfMonth,
+        }),
       ]);
 
-      // Junta tudo (dedup por id)
+      // Junta + dedup
       const seen = new Set<string>();
       const allTasks: Task[] = [];
-      for (const arr of [closedTasks, doneTasks, updatedTasks]) {
+      for (const arr of [withAssignee, withoutAssignee, allClosedMonth]) {
         for (const t of arr) {
           if (seen.has(t.id)) continue;
           seen.add(t.id);
+          // Se veio sem assignee filter, mantem so as que o user e responsavel
+          const assigneeIds = (t.assignees || []).map((a: any) => String(a.id));
+          if (!assigneeIds.includes(String(me.id))) continue;
           allTasks.push(t);
         }
       }
@@ -107,7 +140,7 @@ export default function PointsPage() {
       }
       const fieldNamesList = Array.from(allFieldNames.entries()).sort((a, b) => b[1] - a[1]);
 
-      // Filtra: tasks fechadas OU done OU atualizadas este mes
+      // Filtra: tasks fechadas/done/atualizadas este mes
       const monthTasks = allTasks.filter((t) => {
         const closed = Number(t.date_closed) || 0;
         const done = Number(t.date_done) || 0;
@@ -115,11 +148,12 @@ export default function PointsPage() {
         return closed >= firstOfMonth || done >= firstOfMonth || updated >= firstOfMonth;
       });
 
-      // Regex MAIS PERMISSIVO: aceita variantes
-      const fieldMatcher = /\b(peso|pontos?|points?|score|valor|nota|points\s*do\s*mes)\b/i;
+      // Regex match: aceita PESO, PONTOS, POINTS, SCORE, VALOR, NOTA
+      const fieldMatcher = /\b(peso|pontos?|points?|score|valor|nota)\b/i;
       let total = 0;
       let countedTasks = 0;
       const matchedFieldName: Record<string, number> = {};
+      const sampleScoreTasks: Array<{ name: string; status: string; peso: number; closed: string | null }> = [];
       for (const t of monthTasks) {
         const matchedField = (t.custom_fields || []).find((f: any) => fieldMatcher.test(f.name || ''));
         if (matchedField?.value != null) {
@@ -128,25 +162,40 @@ export default function PointsPage() {
             total += val;
             countedTasks++;
             matchedFieldName[matchedField.name] = (matchedFieldName[matchedField.name] || 0) + 1;
+            if (sampleScoreTasks.length < 10) {
+              const closedTs = Number(t.date_closed);
+              sampleScoreTasks.push({
+                name: t.name,
+                status: t.status?.status || '?',
+                peso: val,
+                closed: closedTs ? new Date(closedTs).toISOString().slice(0, 10) : null,
+              });
+            }
           }
         }
       }
 
       const debug = {
+        teams: teams.map((t: any) => ({ id: t.id, name: t.name })),
+        selectedTeamId: teamId,
         userId: me.id,
-        teamId,
+        userName: me.username,
         firstOfMonth: new Date(firstOfMonth).toISOString().slice(0, 10),
         totalTasks: allTasks.length,
         monthTasks: monthTasks.length,
-        closedThisMonth: closedTasks.length,
-        updatedThisMonth: updatedTasks.length,
-        customFieldsFound: fieldNamesList.slice(0, 30),
+        countByStrategy: {
+          withAssignee: withAssignee.length,
+          withoutAssignee: withoutAssignee.length,
+          allClosedMonth: allClosedMonth.length,
+        },
+        customFieldsFound: fieldNamesList.slice(0, 40),
         matchedField: matchedFieldName,
         countedTasks,
         totalPoints: total,
+        sampleScoreTasks,
+        errors,
       };
       console.log('[points] DEBUG:', debug);
-      console.log('[points] Custom field names disponiveis (top 30):', fieldNamesList);
       setDebugInfo(debug);
       setCurrentPoints(total);
     } catch (e) {
@@ -154,6 +203,12 @@ export default function PointsPage() {
     } finally {
       setLoadingPoints(false);
     }
+  }
+
+  function selectTeam(id: string) {
+    setSelectedTeamId(id);
+    if (typeof window !== 'undefined') localStorage.setItem('darkolab:points:teamId', id);
+    fetchPoints();
   }
 
   useEffect(() => {
@@ -272,7 +327,7 @@ export default function PointsPage() {
             </div>
           ) : null}
 
-          {/* DEBUG: mostra TODOS custom fields ClickUp pra user descobrir qual eh o campo de pontos */}
+          {/* DEBUG completo */}
           {debugInfo ? (
             <div className="mt-3">
               <button
@@ -285,18 +340,71 @@ export default function PointsPage() {
               {showDebug ? (
                 <div className="mt-2 rounded border border-cyan-500/30 bg-cyan-500/5 p-3 text-[11px]">
                   <div className="mono mb-2 text-[10px] uppercase tracking-widest text-cyan-300">// DEBUG SYNC CLICKUP</div>
+
+                  {/* Workspace selector */}
+                  {availableTeams.length > 1 ? (
+                    <div className="mb-3 rounded border border-yellow-500/40 bg-yellow-500/5 p-2">
+                      <div className="mono mb-1 text-[10px] uppercase tracking-widest text-yellow-200">
+                        Workspace ativo (selecionado: {debugInfo.selectedTeamId})
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {availableTeams.map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            onClick={() => selectTeam(t.id)}
+                            className={`mono rounded px-2 py-1 text-[10px] ${t.id === debugInfo.selectedTeamId ? 'bg-lime/20 border border-lime/60 text-lime' : 'bg-bg/40 border border-line-strong text-text-muted hover:border-lime/40'}`}
+                          >
+                            {t.name} <span className="opacity-60">({t.id})</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className="space-y-1 text-text-muted">
-                    <div>User ID: <span className="text-white">{debugInfo.userId}</span></div>
-                    <div>Team ID: <span className="text-white">{debugInfo.teamId}</span></div>
+                    <div>User: <span className="text-white">{debugInfo.userName} (id {debugInfo.userId})</span></div>
+                    <div>Workspace selecionado: <span className="text-white">{debugInfo.selectedTeamId}</span></div>
                     <div>Inicio do mes: <span className="text-white">{debugInfo.firstOfMonth}</span></div>
-                    <div>Total tasks carregadas: <span className="text-white">{debugInfo.totalTasks}</span></div>
+                    <div>Estrategias:
+                      <span className="ml-2 text-white">com assignee=me: {debugInfo.countByStrategy?.withAssignee}</span> ·
+                      <span className="ml-2 text-white">sem assignee filter: {debugInfo.countByStrategy?.withoutAssignee}</span> ·
+                      <span className="ml-2 text-white">date_closed: {debugInfo.countByStrategy?.allClosedMonth}</span>
+                    </div>
+                    <div>Total tasks (eu sou assignee): <span className="text-white">{debugInfo.totalTasks}</span></div>
                     <div>Tasks no mes (closed/done/updated): <span className="text-white">{debugInfo.monthTasks}</span></div>
-                    <div>Tasks fechadas este mes: <span className="text-white">{debugInfo.closedThisMonth}</span></div>
-                    <div>Tasks atualizadas este mes: <span className="text-white">{debugInfo.updatedThisMonth}</span></div>
-                    <div>Tasks com campo de pontos identificado: <span className="text-white">{debugInfo.countedTasks}</span></div>
+                    <div>Tasks com campo de pontos: <span className="text-white">{debugInfo.countedTasks}</span></div>
                     <div>Soma final: <span className="text-cyan-300 font-bold">{debugInfo.totalPoints} pts</span></div>
                   </div>
-                  <div className="mt-3 mono text-[10px] uppercase tracking-widest text-cyan-300">// CUSTOM FIELDS ENCONTRADOS (nome × qtd tasks)</div>
+
+                  {/* Erros agregados */}
+                  {(debugInfo.errors || []).length > 0 ? (
+                    <div className="mt-3 rounded border border-red-500/40 bg-red-500/5 p-2 text-red-300">
+                      <div className="mono text-[10px] uppercase tracking-widest mb-1">// ERROS</div>
+                      {debugInfo.errors.map((e: string, i: number) => (
+                        <div key={i} className="font-mono text-[10px]">{e}</div>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {/* Sample tasks com peso */}
+                  {(debugInfo.sampleScoreTasks || []).length > 0 ? (
+                    <div className="mt-3">
+                      <div className="mono mb-1 text-[10px] uppercase tracking-widest text-cyan-300">// SAMPLE TASKS COM PESO</div>
+                      <div className="space-y-1">
+                        {debugInfo.sampleScoreTasks.map((t: any, i: number) => (
+                          <div key={i} className="rounded bg-bg/40 px-2 py-1 text-[11px] flex items-center justify-between">
+                            <span className="truncate flex-1">{t.name}</span>
+                            <span className="mono text-text-muted ml-2">{t.status}</span>
+                            <span className="mono text-text-muted ml-2">{t.closed || '?'}</span>
+                            <span className="mono text-lime ml-2 font-bold">{t.peso}pts</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="mt-3 mono text-[10px] uppercase tracking-widest text-cyan-300">// CUSTOM FIELDS (nome × qtd tasks)</div>
                   <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1 max-h-[300px] overflow-y-auto">
                     {(debugInfo.customFieldsFound || []).map((entry: any) => {
                       const [name, count] = entry;
@@ -310,14 +418,7 @@ export default function PointsPage() {
                     })}
                   </div>
                   {(debugInfo.customFieldsFound || []).length === 0 ? (
-                    <div className="mt-2 text-red-300">Nenhum custom field encontrado em nenhuma task. Confirme que o token tem permissao de ler tasks.</div>
-                  ) : null}
-                  {Object.keys(debugInfo.matchedField || {}).length === 0 && (debugInfo.customFieldsFound || []).length > 0 ? (
-                    <div className="mt-3 rounded border border-yellow-500/40 bg-yellow-500/10 p-2 text-yellow-200 text-[11px]">
-                      ⚠ Nenhum dos campos acima bateu com o regex de pontos.<br/>
-                      Regex atual: <code className="mono">/\b(peso|pontos?|points?|score|valor|nota)\b/i</code><br/>
-                      Me diga qual nome EXATO usa pra pontos no seu ClickUp e ajusto.
-                    </div>
+                    <div className="mt-2 text-red-300">⚠ Zero custom fields encontrados. Token pode nao ter acesso a este workspace, OU tasks deste workspace nao tem custom fields.</div>
                   ) : null}
                 </div>
               ) : null}
