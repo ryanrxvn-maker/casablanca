@@ -1727,6 +1727,145 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  Key: `${taskId}:${sIdx}` → { stage, percent, message } */
   const [cloningVoice, setCloningVoice] = useState<Record<string, { stage: string; percent: number; message: string }>>({});
 
+  /** VA: avatar HeyGen escolhido por avaCode pra cada task VA.
+   *  Key: `${taskId}:${avaCode}` → AvatarOption */
+  const [vaAvatarChoice, setVaAvatarChoice] = useState<Record<string, AvatarOption | null>>({});
+  /** VA: URL/Drive ID do AD original (input manual quando parser nao detecta).
+   *  Key: taskId → string */
+  const [vaAdUrl, setVaAdUrl] = useState<Record<string, string>>({});
+  /** VA: estado do pipeline em execucao.
+   *  Key: taskId → { stage, percent, message, result? } */
+  const [vaPipelineState, setVaPipelineState] = useState<Record<string, { stage: string; percent: number; message: string; zipUrl?: string; zipName?: string; error?: string }>>({});
+
+  /** Extrai Drive file ID de uma URL Drive (varios formatos suportados) */
+  function extractDriveFileId(input: string): string | null {
+    if (!input) return null;
+    const trimmed = input.trim();
+    // ID puro (25-50 chars alfanum-_)
+    if (/^[a-zA-Z0-9_-]{20,60}$/.test(trimmed)) return trimmed;
+    // URL formats: /file/d/<ID>/  /open?id=<ID>  /uc?id=<ID>
+    const patterns = [
+      /\/file\/d\/([a-zA-Z0-9_-]{20,60})/,
+      /[?&]id=([a-zA-Z0-9_-]{20,60})/,
+      /\/d\/([a-zA-Z0-9_-]{20,60})/,
+    ];
+    for (const re of patterns) {
+      const m = trimmed.match(re);
+      if (m) return m[1];
+    }
+    return null;
+  }
+
+  /** Roda o pipeline VA pra uma task — orquestra download AD → split audio
+   *  → dispatch HeyGen audio mode por avatar → mount → ZIP final. */
+  async function runVAPipelineForTask(taskId: string) {
+    const a = taskAnalyses[taskId];
+    if (!a?.vaBriefing) {
+      setError('Task nao e VA.');
+      return;
+    }
+    const va = a.vaBriefing;
+    // Resolve Drive ID: prefere parsed do briefing, fallback pra input manual
+    const adUrlInput = vaAdUrl[taskId] || '';
+    const driveId = va.linkAdFileId || extractDriveFileId(adUrlInput);
+    if (!driveId) {
+      setError('Sem Drive ID do AD original. Cola a URL do video no campo abaixo.');
+      return;
+    }
+    // Verifica que TODOS avatares tem AvatarOption escolhido
+    const missingAvas: string[] = [];
+    for (const av of va.avatares) {
+      if (!vaAvatarChoice[`${taskId}:${av.avaCode}`]?.id) {
+        missingAvas.push(av.avaCode);
+      }
+    }
+    if (missingAvas.length > 0) {
+      setError(`Escolha o avatar HeyGen pra: ${missingAvas.join(', ')}`);
+      return;
+    }
+
+    setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: 'download', percent: 0, message: 'Baixando AD original do Drive...' } }));
+
+    try {
+      // 1. Download AD via extension
+      const { downloadDriveFileViaExtension } = await import('@/lib/heygen-extension-bridge');
+      const dl = await downloadDriveFileViaExtension(driveId);
+      if (!dl.ok) throw new Error('Drive download: ' + dl.error);
+      setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: 'download', percent: 10, message: `Baixado ${(dl.size / (1024 * 1024)).toFixed(1)}MB. Iniciando pipeline...` } }));
+
+      // 2. Pipeline (extract audio + split + dispatch + mount)
+      const { runVAPipeline } = await import('@/lib/va-pipeline');
+      const { generateAvatarPart } = await import('@/lib/heygen-extension-bridge');
+      const { downloadVideoBytes } = await import('@/lib/heygen-api-direct');
+
+      const avatares = va.avatares.map((av) => {
+        const choice = vaAvatarChoice[`${taskId}:${av.avaCode}`]!;
+        return { avaCode: av.avaCode, avatarId: choice.id, avatarName: choice.name };
+      });
+
+      const pipeRes = await runVAPipeline({
+        baseAdId: va.baseAdId.replace(/\s+/g, ''),
+        adVideoBytes: dl.bytes,
+        avatares,
+        onProgress: (p) => {
+          setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: p.stage, percent: p.percent, message: p.message } }));
+        },
+        dispatchAudioTake: async ({ avatarId, audioBytes, audioFilename, label }) => {
+          // Base64 encode
+          let binary = '';
+          const CHUNK = 0x8000;
+          for (let i = 0; i < audioBytes.length; i += CHUNK) {
+            binary += String.fromCharCode.apply(null, Array.from(audioBytes.subarray(i, i + CHUNK)));
+          }
+          const audioBase64 = btoa(binary);
+          // Dispatch HeyGen audio mode
+          const videoUrl = await generateAvatarPart({
+            audioBase64,
+            audioFilename,
+            avatarId,
+            motor: 'III',
+            partLabel: label,
+          });
+          // Download bytes do video gerado
+          const bytes = await downloadVideoBytes(videoUrl);
+          return new Blob([bytes as BlobPart], { type: 'video/mp4' });
+        },
+      });
+
+      // 3. Monta ZIP final
+      setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: 'zip', percent: 95, message: 'Zipando vídeos finais...' } }));
+      const JSZip = (await import('jszip')).default;
+      const zip = new JSZip();
+      for (const item of pipeRes.items) {
+        if (item.blob) {
+          zip.file(item.filename, item.blob);
+        } else {
+          zip.file(`${item.filename.replace('.mp4', '')}_ERRO.txt`, item.error || 'falha sem detalhes');
+        }
+      }
+      zip.file('_DIAGNOSTICO.txt',
+`Pipeline VA - relatorio
+========================
+${pipeRes.summary}
+Audio segments: ${pipeRes.audioSegmentCount}
+
+Items:
+${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error || 'sem detalhes')+')'}`).join('\n')}
+`);
+      const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+      const adName = va.baseAdId.replace(/\s+/g, '');
+      const zipName = `${adName}_VA.zip`;
+      const zipUrl = URL.createObjectURL(zipBlob);
+
+      setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: 'done', percent: 100, message: `Pronto: ${pipeRes.summary}`, zipUrl, zipName } }));
+      // Marca como disparada
+      const siblings = getSiblingTaskIds(taskId);
+      for (const sid of siblings) markDispatched(sid);
+    } catch (e) {
+      setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: 'error', percent: 0, message: 'Erro', error: (e as Error)?.message || String(e) } }));
+    }
+  }
+
   /** Dispara clone de voz pro slot. Aceita audio (mp3/wav) ou video.
    *  No ready: seta voiceOverride no slot e adiciona voz na library cache. */
   async function handleCloneVoiceForSlot(taskId: string, sIdx: number, file: File) {
@@ -2262,22 +2401,87 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
                                   </div>
                                   {a.vaBriefing.avatares.map((av) => {
                                     const thumbUrl = av.fileId ? `https://drive.google.com/thumbnail?id=${av.fileId}&sz=w200` : null;
+                                    const choiceKey = `${a.taskId}:${av.avaCode}`;
+                                    const chosen = vaAvatarChoice[choiceKey] || null;
                                     return (
-                                      <div key={av.avaCode} className="rounded-[10px] border border-line-strong bg-bg/50 p-2 flex items-center gap-3">
-                                        {thumbUrl ? (
-                                          /* eslint-disable-next-line @next/next/no-img-element */
-                                          <img src={thumbUrl} alt={av.username} className="h-12 w-12 shrink-0 rounded-full object-cover" referrerPolicy="no-referrer" />
-                                        ) : (
-                                          <div className="h-12 w-12 shrink-0 rounded-full bg-cyan-500/10 flex items-center justify-center mono text-[10px] text-cyan-300">{av.avaCode}</div>
-                                        )}
-                                        <div className="flex-1 min-w-0">
-                                          <div className="mono text-[10px] uppercase tracking-widest text-cyan-200">{av.avaCode}</div>
-                                          <div className="text-[11px] text-text-muted">@{av.username}.mp4</div>
-                                          <div className="mono text-[9px] uppercase tracking-widest text-yellow-300 mt-0.5">→ saída: {a.vaBriefing!.baseAdId.replace(/\s+/g, '')}-{av.avaCode}.mp4</div>
+                                      <div key={av.avaCode} className="rounded-[10px] border border-line-strong bg-bg/50 p-2">
+                                        <div className="flex items-center gap-3">
+                                          {thumbUrl ? (
+                                            /* eslint-disable-next-line @next/next/no-img-element */
+                                            <img src={thumbUrl} alt={av.username} className="h-12 w-12 shrink-0 rounded-full object-cover" referrerPolicy="no-referrer" />
+                                          ) : (
+                                            <div className="h-12 w-12 shrink-0 rounded-full bg-cyan-500/10 flex items-center justify-center mono text-[10px] text-cyan-300">{av.avaCode}</div>
+                                          )}
+                                          <div className="flex-1 min-w-0">
+                                            <div className="mono text-[10px] uppercase tracking-widest text-cyan-200">{av.avaCode}</div>
+                                            <div className="text-[11px] text-text-muted">@{av.username}.mp4</div>
+                                            <div className="mono text-[9px] uppercase tracking-widest text-yellow-300 mt-0.5">→ saída: {a.vaBriefing!.baseAdId.replace(/\s+/g, '')}-{av.avaCode}.mp4</div>
+                                          </div>
+                                        </div>
+                                        <div className="mt-2 max-w-[400px]">
+                                          <CompactAvatarPicker
+                                            selected={chosen}
+                                            setSelected={(newAv) => setVaAvatarChoice((prev) => ({ ...prev, [choiceKey]: newAv }))}
+                                            disabled={!!vaPipelineState[a.taskId] && vaPipelineState[a.taskId].stage !== 'error' && vaPipelineState[a.taskId].stage !== 'done'}
+                                            label={`Avatar HeyGen pra ${av.avaCode}`}
+                                          />
                                         </div>
                                       </div>
                                     );
                                   })}
+                                  {/* Input Drive URL (so se parser nao detectou) */}
+                                  {!a.vaBriefing.linkAdFileId ? (
+                                    <div className="rounded-[10px] border border-yellow-500/40 bg-yellow-500/5 p-3">
+                                      <div className="mono mb-1 text-[9px] uppercase tracking-widest text-yellow-200">
+                                        Drive URL do AD original (parser nao achou auto)
+                                      </div>
+                                      <input
+                                        type="text"
+                                        placeholder="Cole a URL do video Drive (ex https://drive.google.com/file/d/XXX/view)"
+                                        value={vaAdUrl[a.taskId] || ''}
+                                        onChange={(e) => setVaAdUrl((prev) => ({ ...prev, [a.taskId]: e.target.value }))}
+                                        className="input-field font-mono text-xs"
+                                        disabled={!!vaPipelineState[a.taskId] && vaPipelineState[a.taskId].stage !== 'error' && vaPipelineState[a.taskId].stage !== 'done'}
+                                      />
+                                      {vaAdUrl[a.taskId] && extractDriveFileId(vaAdUrl[a.taskId]) ? (
+                                        <div className="mono mt-1 text-[9px] uppercase tracking-widest text-lime">✓ Drive ID extraido: {extractDriveFileId(vaAdUrl[a.taskId])}</div>
+                                      ) : vaAdUrl[a.taskId] ? (
+                                        <div className="mono mt-1 text-[9px] uppercase tracking-widest text-red-300">✗ URL invalida — formato esperado: drive.google.com/file/d/XXX/view</div>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
+                                  {/* Pipeline state + botao iniciar */}
+                                  {vaPipelineState[a.taskId] ? (
+                                    <div className="rounded-[10px] border border-cyan-500/40 bg-cyan-500/5 p-3">
+                                      <div className="mono text-[9px] uppercase tracking-widest text-cyan-200 flex items-center gap-2">
+                                        <span>📹 Pipeline VA · {vaPipelineState[a.taskId].stage} · {Math.round(vaPipelineState[a.taskId].percent)}%</span>
+                                      </div>
+                                      <div className="text-[11px] text-text-muted mt-1">{vaPipelineState[a.taskId].message}</div>
+                                      <div className="mt-1 h-1 rounded bg-bg/60 overflow-hidden">
+                                        <div className="h-full bg-cyan-400 transition-all" style={{ width: `${vaPipelineState[a.taskId].percent}%` }} />
+                                      </div>
+                                      {vaPipelineState[a.taskId].error ? (
+                                        <div className="mt-2 text-[11px] text-red-300">✗ {vaPipelineState[a.taskId].error}</div>
+                                      ) : null}
+                                      {vaPipelineState[a.taskId].zipUrl ? (
+                                        <a
+                                          href={vaPipelineState[a.taskId].zipUrl}
+                                          download={vaPipelineState[a.taskId].zipName}
+                                          className="mono mt-2 inline-block rounded border border-lime bg-lime/20 px-3 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30"
+                                        >
+                                          📦 Baixar ZIP ({vaPipelineState[a.taskId].zipName})
+                                        </a>
+                                      ) : null}
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      onClick={() => runVAPipelineForTask(a.taskId)}
+                                      className="mono rounded-[10px] border border-cyan-500 bg-cyan-500/20 py-2 px-3 text-[11px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/30 transition"
+                                    >
+                                      ▶ Iniciar Pipeline VA ({a.vaBriefing.avatares.length} avatares)
+                                    </button>
+                                  )}
                                   {/* Hook + body preview */}
                                   {a.vaBriefing.hookText ? (
                                     <details className="rounded-[10px] border border-line bg-bg/40 p-2">
@@ -2301,10 +2505,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
                                       <div className="text-[11px] text-text-muted line-clamp-3">{a.vaBriefing.depoimentoText.slice(0, 280)}{a.vaBriefing.depoimentoText.length > 280 ? '…' : ''}</div>
                                     </div>
                                   ) : null}
-                                  <div className="rounded-[10px] border border-yellow-500/40 bg-yellow-500/5 p-3 text-[11px] text-yellow-200">
-                                    ⏳ Pipeline VA em desenvolvimento (Fase B). UI já identifica e mostra previsibilidade —
-                                    falta implementar download do AD original, extração de áudio, split sem cortar fala,
-                                    dispatch por avatar e mount final.
+                                  <div className="rounded-[10px] border border-lime/40 bg-lime/5 p-3 text-[11px] text-lime">
+                                    ✓ Pipeline VA ativo: baixa AD original, extrai voz, splita sem cortar fala,
+                                    dispara HeyGen audio mode por avatar, monta + ZIP final automatico.
                                   </div>
                                 </div>
                               ) : a.status === 'ready' || a.status === 'partial' ? (

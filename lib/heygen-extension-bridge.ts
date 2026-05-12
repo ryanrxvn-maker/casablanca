@@ -402,6 +402,48 @@ export async function cloneVoiceViaExtension(
   });
 }
 
+/* ============================ DRIVE DOWNLOAD ============================
+ * Baixa MP4 de Drive via extension (cookies sessao Google). Usado pelo
+ * pipeline VA pra pegar o video do AD original e extrair audio. */
+
+export async function downloadDriveFileViaExtension(fileId: string): Promise<{
+  ok: true;
+  bytes: Uint8Array;
+  size: number;
+} | { ok: false; error: string }> {
+  installListener();
+  if (typeof window === 'undefined') return { ok: false, error: 'sem window' };
+  return new Promise((resolve) => {
+    const requestId = `dl_drive_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const handler = (ev: MessageEvent) => {
+      if (ev.data?.source !== 'darkolab-ext') return;
+      if (ev.data?.requestId !== requestId) return;
+      if (ev.data?.type === 'HG_DRIVE_DOWNLOAD_RESULT') {
+        window.removeEventListener('message', handler);
+        if (!ev.data.ok) {
+          resolve({ ok: false, error: String(ev.data.error || 'download falhou') });
+          return;
+        }
+        try {
+          const binary = atob(String(ev.data.base64 || ''));
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+          resolve({ ok: true, bytes, size: bytes.length });
+        } catch (e) {
+          resolve({ ok: false, error: 'decode base64: ' + (e as Error)?.message });
+        }
+      }
+    };
+    window.addEventListener('message', handler);
+    window.postMessage({ source: 'darkolab', type: 'HG_DOWNLOAD_DRIVE', requestId, fileId }, '*');
+    // Timeout 10min — video grande pode demorar
+    setTimeout(() => {
+      window.removeEventListener('message', handler);
+      resolve({ ok: false, error: 'timeout 10min download Drive' });
+    }, 600000);
+  });
+}
+
 /**
  * Cancela uma job em andamento (best-effort — extension pode estar com a
  * geracao no HeyGen ja em progresso e nao da pra abortar).

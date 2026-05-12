@@ -138,6 +138,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'HG_DOWNLOAD_DRIVE') {
+    // Download Drive file (mp4) via uc?export=download — usa cookies da sessao Google
+    // do user pra acessar arquivos compartilhados/proprios. Retorna ArrayBuffer.
+    const requestId = msg.requestId;
+    const fileId = msg.fileId;
+    handleDownloadDrive(requestId, fileId, sender.tab?.id).catch((err) => {
+      reportToPage(sender.tab?.id, requestId, 'HG_DRIVE_DOWNLOAD_RESULT', {
+        ok: false,
+        error: err?.message ?? String(err),
+      });
+    });
+    sendResponse({ accepted: true });
+    return true;
+  }
+
   if (msg.type === 'HG_CLONE_VOICE') {
     const requestId = msg.requestId;
     handleCloneVoice(requestId, msg.payload, sender.tab?.id).catch((err) => {
@@ -335,6 +350,81 @@ async function handleListAvatars(requestId, bridgeTabId) {
         error: 'Erro inesperado: ' + (e?.message ?? String(e)),
       });
     }
+  }
+}
+
+/** Download MP4 do Google Drive via cookies da sessao do user.
+ *  Usa o endpoint uc?export=download que funciona com cookies (sem OAuth).
+ *  Pra arquivos grandes (>100MB), Drive intercepta com pagina de confirmacao —
+ *  o param confirm=t bypassa. Retorna ArrayBuffer pra page via base64 (CHUNKED). */
+async function handleDownloadDrive(requestId, fileId, bridgeTabId) {
+  if (!fileId || typeof fileId !== 'string') {
+    reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_RESULT', { ok: false, error: 'fileId invalido' });
+    return;
+  }
+  try {
+    // Tenta varios endpoints — Drive muda esses URLs ocasionalmente
+    const urls = [
+      `https://drive.google.com/uc?export=download&id=${fileId}&confirm=t`,
+      `https://drive.usercontent.google.com/download?id=${fileId}&export=download&confirm=t`,
+      `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+    ];
+    let bytes = null;
+    let lastErr = '';
+    for (const url of urls) {
+      try {
+        const r = await fetchWithTimeout(url, {
+          method: 'GET',
+          credentials: 'include',
+          redirect: 'follow',
+        }, 300000); // 5min pra videos grandes
+        if (!r.ok) {
+          lastErr = `${url.split('?')[0]}: HTTP ${r.status}`;
+          continue;
+        }
+        const buf = await r.arrayBuffer();
+        // Sanity check: video MP4 minimo deve ter mais que 10KB
+        if (buf.byteLength < 10000) {
+          // Pode ser HTML de erro/confirmacao — tenta proxima URL
+          const head = new Uint8Array(buf.slice(0, 200));
+          const headText = new TextDecoder().decode(head);
+          if (/<html/i.test(headText) || /sign in/i.test(headText)) {
+            lastErr = `${url.split('?')[0]}: HTML redirect (precisa login OU file privado)`;
+            continue;
+          }
+        }
+        bytes = new Uint8Array(buf);
+        console.log(`[DARKO LAB BG] HG_DOWNLOAD_DRIVE OK fileId=${fileId} via ${url.split('?')[0]} bytes=${bytes.length}`);
+        break;
+      } catch (e) {
+        lastErr = `${url.split('?')[0]}: ${e?.message || e}`;
+      }
+    }
+    if (!bytes) {
+      reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_RESULT', {
+        ok: false,
+        error: 'Todos endpoints falharam: ' + lastErr,
+      });
+      return;
+    }
+    // Converte pra base64 chunked (postMessage tem limite, mas pra videos
+    // <200MB single shot funciona)
+    let binary = '';
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)));
+    }
+    const base64 = btoa(binary);
+    reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_RESULT', {
+      ok: true,
+      base64,
+      size: bytes.length,
+    });
+  } catch (e) {
+    reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_RESULT', {
+      ok: false,
+      error: e?.message ?? String(e),
+    });
   }
 }
 

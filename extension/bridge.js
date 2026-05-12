@@ -120,6 +120,24 @@
       return;
     }
 
+    if (data.type === 'HG_DOWNLOAD_DRIVE') {
+      const requestId = data.requestId;
+      chrome.runtime.sendMessage(
+        { type: 'HG_DOWNLOAD_DRIVE', requestId, fileId: data.fileId },
+        () => {
+          if (chrome.runtime.lastError) {
+            sendToPage({
+              type: 'HG_DRIVE_DOWNLOAD_RESULT',
+              requestId,
+              ok: false,
+              error: chrome.runtime.lastError.message ?? 'Background nao respondeu.',
+            });
+          }
+        },
+      );
+      return;
+    }
+
     if (data.type === 'HG_CLONE_VOICE') {
       const requestId = data.requestId;
       chrome.runtime.sendMessage(
