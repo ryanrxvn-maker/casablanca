@@ -138,6 +138,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'HG_DRIVE_LIST_FOLDER') {
+    // Lista arquivos dentro de uma pasta Drive via cookies (sem OAuth).
+    // Usado pra auto-resolver fileId de filenames mencionados no doc.
+    const requestId = msg.requestId;
+    const folderId = msg.folderId;
+    handleDriveListFolder(requestId, folderId, sender.tab?.id).catch((err) => {
+      reportToPage(sender.tab?.id, requestId, 'HG_DRIVE_LIST_FOLDER_RESULT', {
+        ok: false,
+        error: err?.message ?? String(err),
+        files: [],
+      });
+    });
+    sendResponse({ accepted: true });
+    return true;
+  }
+
   if (msg.type === 'HG_DOWNLOAD_DRIVE') {
     // Download Drive file (mp4) via uc?export=download — usa cookies da sessao Google
     // do user pra acessar arquivos compartilhados/proprios. Retorna ArrayBuffer.
@@ -350,6 +366,79 @@ async function handleListAvatars(requestId, bridgeTabId) {
         error: 'Erro inesperado: ' + (e?.message ?? String(e)),
       });
     }
+  }
+}
+
+/** Lista arquivos dentro de uma pasta Drive sem precisar de OAuth.
+ *  Usa o endpoint embeddedfolderview que retorna HTML com lista de items
+ *  (precisa user logado — cookies vao automaticamente). Parseia HTML pra
+ *  extrair { fileId, name, isFolder } de cada item.
+ *
+ *  Critico pro pipeline VA: o user normalmente referencia o arquivo do AD
+ *  apenas pelo nome (ex 'AD10G1VN-PRPB06.mp4'), nao pela URL. A pasta
+ *  CRIATIVOS no topo do doc tem o link real. Listamos essa pasta + match
+ *  por filename. */
+async function handleDriveListFolder(requestId, folderId, bridgeTabId) {
+  if (!folderId || typeof folderId !== 'string') {
+    reportToPage(bridgeTabId, requestId, 'HG_DRIVE_LIST_FOLDER_RESULT', { ok: false, error: 'folderId invalido', files: [] });
+    return;
+  }
+  try {
+    // Endpoint mais robusto: embeddedfolderview retorna HTML simples mesmo
+    // sem OAuth, contanto que o user tenha acesso via session cookies.
+    const url = `https://drive.google.com/embeddedfolderview?id=${folderId}#grid`;
+    const r = await fetchWithTimeout(url, {
+      method: 'GET',
+      credentials: 'include',
+    }, 30000);
+    if (!r.ok) {
+      reportToPage(bridgeTabId, requestId, 'HG_DRIVE_LIST_FOLDER_RESULT', {
+        ok: false,
+        error: `HTTP ${r.status}`,
+        files: [],
+      });
+      return;
+    }
+    const html = await r.text();
+    // Parser HTML simples via regex. Cada item tem padrao:
+    //   <a href="https://drive.google.com/file/d/<ID>/view"...>
+    //   ... <div class="flip-entry-title">NOME</div> ...
+    // Estrategia: extrai todos pares (fileId, title) em ordem de aparicao.
+    const files = [];
+    const seen = new Set();
+    // Captura fileId + title-like text proximo
+    // Padrao 1: pares <a><div>...</div></a> ao redor de cada arquivo
+    const itemRe = /<a[^>]*href="[^"]*\/file\/d\/([a-zA-Z0-9_-]{15,})[^"]*"[^>]*>[\s\S]{0,400}?<div[^>]*class="flip-entry-title"[^>]*>([^<]+)<\/div>/gi;
+    let m;
+    while ((m = itemRe.exec(html)) !== null) {
+      const fileId = m[1];
+      const name = m[2].replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').replace(/&#39;/g, "'").trim();
+      if (!seen.has(fileId) && name) {
+        seen.add(fileId);
+        files.push({ fileId, name, isFolder: false });
+      }
+    }
+    // Tambem pega pastas dentro
+    const folderRe = /<a[^>]*href="[^"]*\/folders\/([a-zA-Z0-9_-]{15,})[^"]*"[^>]*>[\s\S]{0,400}?<div[^>]*class="flip-entry-title"[^>]*>([^<]+)<\/div>/gi;
+    while ((m = folderRe.exec(html)) !== null) {
+      const id = m[1];
+      const name = m[2].replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').trim();
+      if (!seen.has(id) && name) {
+        seen.add(id);
+        files.push({ fileId: id, name, isFolder: true });
+      }
+    }
+    console.log(`[DARKO LAB BG] HG_DRIVE_LIST_FOLDER ${folderId}: ${files.length} items`);
+    reportToPage(bridgeTabId, requestId, 'HG_DRIVE_LIST_FOLDER_RESULT', {
+      ok: true,
+      files,
+    });
+  } catch (e) {
+    reportToPage(bridgeTabId, requestId, 'HG_DRIVE_LIST_FOLDER_RESULT', {
+      ok: false,
+      error: e?.message ?? String(e),
+      files: [],
+    });
   }
 }
 

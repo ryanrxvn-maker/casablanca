@@ -406,6 +406,39 @@ export async function cloneVoiceViaExtension(
  * Baixa MP4 de Drive via extension (cookies sessao Google). Usado pelo
  * pipeline VA pra pegar o video do AD original e extrair audio. */
 
+/** Lista arquivos dentro de uma pasta Drive via extension (cookies sessao).
+ *  Usado pra auto-resolver fileId quando o doc so referencia o filename
+ *  do AD (ex 'AD10G1VN-PRPB06.mp4') sem URL — lista a pasta CRIATIVOS
+ *  do briefing + match por nome. */
+export async function listDriveFolderViaExtension(folderId: string): Promise<{
+  ok: true;
+  files: Array<{ fileId: string; name: string; isFolder: boolean }>;
+} | { ok: false; error: string; files: [] }> {
+  installListener();
+  if (typeof window === 'undefined') return { ok: false, error: 'sem window', files: [] };
+  return new Promise((resolve) => {
+    const requestId = `lf_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const handler = (ev: MessageEvent) => {
+      if (ev.data?.source !== 'darkolab-ext') return;
+      if (ev.data?.requestId !== requestId) return;
+      if (ev.data?.type === 'HG_DRIVE_LIST_FOLDER_RESULT') {
+        window.removeEventListener('message', handler);
+        if (ev.data.ok) {
+          resolve({ ok: true, files: Array.isArray(ev.data.files) ? ev.data.files : [] });
+        } else {
+          resolve({ ok: false, error: String(ev.data.error || 'list failed'), files: [] });
+        }
+      }
+    };
+    window.addEventListener('message', handler);
+    window.postMessage({ source: 'darkolab', type: 'HG_DRIVE_LIST_FOLDER', requestId, folderId }, '*');
+    setTimeout(() => {
+      window.removeEventListener('message', handler);
+      resolve({ ok: false, error: 'timeout 30s list folder', files: [] });
+    }, 30000);
+  });
+}
+
 export async function downloadDriveFileViaExtension(fileId: string): Promise<{
   ok: true;
   bytes: Uint8Array;

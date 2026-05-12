@@ -120,6 +120,25 @@
       return;
     }
 
+    if (data.type === 'HG_DRIVE_LIST_FOLDER') {
+      const requestId = data.requestId;
+      chrome.runtime.sendMessage(
+        { type: 'HG_DRIVE_LIST_FOLDER', requestId, folderId: data.folderId },
+        () => {
+          if (chrome.runtime.lastError) {
+            sendToPage({
+              type: 'HG_DRIVE_LIST_FOLDER_RESULT',
+              requestId,
+              ok: false,
+              error: chrome.runtime.lastError.message ?? 'Background nao respondeu.',
+              files: [],
+            });
+          }
+        },
+      );
+      return;
+    }
+
     if (data.type === 'HG_DOWNLOAD_DRIVE') {
       const requestId = data.requestId;
       chrome.runtime.sendMessage(

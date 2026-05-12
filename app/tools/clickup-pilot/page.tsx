@@ -677,6 +677,52 @@ export default function ClickUpPilotPage() {
             const taskAvaNums = extractAvaNumsFromTaskName(task.name);
             const vaBriefing = parseVABriefing(docR.text, task.name, docR.driveLinks || [], taskAvaNums);
             if (vaBriefing) {
+              // AUTO-RESOLVE DRIVE ID DO AD ORIGINAL via pasta CRIATIVOS
+              // Quando o parser nao achou linkAdFileId mas tem linkAdFilename,
+              // procura pasta CRIATIVOS (link no topo do doc) + lista files +
+              // match por nome. Critico pra pipeline VA funcionar.
+              if (!vaBriefing.linkAdFileId && vaBriefing.linkAdFilename && docR.driveLinks?.length) {
+                // Procura pasta com texto 'CRIATIVOS' ou 'criativos'
+                const criativosFolder = docR.driveLinks.find((d: any) => /criativos/i.test(d.text || ''));
+                if (criativosFolder) {
+                  console.log(`[clickup-pilot] VA: auto-resolving Drive ID via folder ${criativosFolder.fileId} for ${vaBriefing.linkAdFilename}`);
+                  try {
+                    const { listDriveFolderViaExtension } = await import('@/lib/heygen-extension-bridge');
+                    const folderRes = await listDriveFolderViaExtension(criativosFolder.fileId);
+                    if (folderRes.ok) {
+                      const target = vaBriefing.linkAdFilename.toLowerCase().replace(/\.(mp4|mov)$/i, '');
+                      // Match exato OU contains
+                      const match = folderRes.files.find((f) => {
+                        const fn = f.name.toLowerCase().replace(/\.(mp4|mov)$/i, '');
+                        return fn === target || fn.includes(target) || target.includes(fn);
+                      });
+                      if (match) {
+                        vaBriefing.linkAdFileId = match.fileId;
+                        console.log(`[clickup-pilot] VA: matched ${match.name} → ${match.fileId}`);
+                      } else {
+                        console.warn(`[clickup-pilot] VA: '${target}' nao achou na pasta (${folderRes.files.length} files): ${folderRes.files.slice(0, 5).map(f => f.name).join(', ')}`);
+                      }
+                    } else {
+                      console.warn(`[clickup-pilot] VA: list folder falhou: ${folderRes.error}`);
+                    }
+                  } catch (e) {
+                    console.warn(`[clickup-pilot] VA: auto-resolve threw:`, e);
+                  }
+                }
+                // Tambem tenta achar diretamente nos driveLinks (caso o link
+                // esteja em outro lugar do doc, nao como pasta)
+                if (!vaBriefing.linkAdFileId) {
+                  const target = vaBriefing.linkAdFilename.toLowerCase().replace(/\.(mp4|mov)$/i, '');
+                  const direct = docR.driveLinks.find((d: any) => {
+                    const t = (d.text || '').toLowerCase();
+                    return t.includes(target) || (target.length > 5 && t.includes(target.slice(0, -2)));
+                  });
+                  if (direct) {
+                    vaBriefing.linkAdFileId = direct.fileId;
+                    console.log(`[clickup-pilot] VA: direct match in driveLinks → ${direct.fileId}`);
+                  }
+                }
+              }
               const siblings = siblingMap.get(task.id) || [task.id];
               setTaskAnalyses((prev) => {
                 const next = { ...prev };
@@ -2489,15 +2535,18 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                               <div className="flex items-center justify-between gap-2">
                                 <span className="mono text-xs text-white flex items-center gap-2">
                                   {sym} {a.taskName}
-                                  <button
-                                    type="button"
-                                    onClick={() => removeTaskFromAnalysis(a.taskId)}
-                                    className="rounded-full border border-line-strong px-1.5 py-0 text-[9px] text-text-muted hover:border-red-500/60 hover:bg-red-500/10 hover:text-red-300"
-                                    title="Remover esta task da previsibilidade (também desmarca da seleção)"
-                                  >
-                                    ×
-                                  </button>
                                 </span>
+                                <button
+                                  type="button"
+                                  onClick={() => removeTaskFromAnalysis(a.taskId)}
+                                  className="mono shrink-0 rounded-md border border-red-500/50 bg-red-500/10 px-2.5 py-1 text-[10px] uppercase tracking-widest text-red-300 hover:bg-red-500/25 hover:border-red-500"
+                                  title="Remove esta task da previsibilidade (também desmarca da seleção). Pode adicionar de novo depois."
+                                >
+                                  × Remover
+                                </button>
+                              </div>
+                              <div className="mt-1 flex items-center justify-between gap-2">
+                                <span></span>
                                 {a.status === 'partial' && a.roleSlots?.some(s => !s.avatarId && s.briefingFileId) ? (
                                   hasAnthropic === false ? (
                                     <a
