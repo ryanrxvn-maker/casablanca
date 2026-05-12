@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.1.0';
+const DARKO_MG_VERSION = '3.1.1';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -503,24 +503,62 @@ async function createTakePair({
   return { imageNodeId, videoNodeId };
 }
 
+/**
+ * VALIDADO AO VIVO (v3.1): cria Image Generator via 2 cliques:
+ *   1. Click no botao "+" do toolbar esquerdo — abre painel "All Tools"
+ *      com BASICS (Text / Image Generator / Video Generator / etc.)
+ *   2. Click no item "Image Generator" (DIV nao button)
+ *
+ * IMPORTANTE: Magnific dropa o novo node no centro do viewport. Cada
+ * novo node default Nano Banana Pro + 1:1 + 1K (precisa configurar).
+ */
 async function createImageGenNode() {
   const before = collectVisibleNodes();
-  // Clica botao "Image Generator" do toolbar — pode aparecer em sidebar de tools
-  // Tenta varios padroes
-  const btn = await waitFor(() => {
-    const cands = Array.from(document.querySelectorAll('button, [role=button]'));
-    return cands.find((b) => {
-      const t = ((b.textContent || '') + ' ' + (b.getAttribute('aria-label') || '') + ' ' + (b.getAttribute('title') || '')).toLowerCase();
-      return /image\s*generator/.test(t) && !/video/i.test(t);
+  // Step 1: Click "+" left toolbar — varias possibilidades de seletor
+  const plusBtn = await waitFor(() => {
+    // Procura botao com SVG de "+" do tipo MenuBar, OU aria-label add
+    const all = document.querySelectorAll('button,[role=button]');
+    for (const b of all) {
+      const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+      const title = (b.getAttribute('title') || '').toLowerCase();
+      if (/^add$|^plus$|add.*tool|add.*node/.test(aria + ' ' + title)) return b;
+      // Fallback: botao redondo pequeno na left toolbar (x < 80)
+      const r = b.getBoundingClientRect();
+      if (r.x < 80 && r.width < 50 && r.width > 20 && r.height > 20) {
+        // Tem que ter SVG dentro (icone)
+        const svg = b.querySelector('svg');
+        if (svg && r.y > 200 && r.y < 350) return b;
+      }
+    }
+    return null;
+  }, 6000);
+  clickRealElement(plusBtn);
+  await sleep(600);
+
+  // Step 2: Click "Image Generator" no painel (DIV)
+  const opt = await waitFor(() => {
+    const all = Array.from(document.querySelectorAll('div,li,button,[role=option],[role=menuitem],span'));
+    const matches = all.filter((e) => {
+      const t = (e.textContent || '').trim();
+      return t === 'Image Generator' && (e.getBoundingClientRect().width > 20);
     });
-  }, 8000);
-  clickRealElement(btn);
+    // Preferir o mais a esquerda (no painel side)
+    matches.sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x);
+    return matches[0] || null;
+  }, 5000);
+  clickRealElement(opt);
+
   const newId = await waitFor(() => {
     const now = collectVisibleNodes();
     const diff = now.filter((u) => !before.includes(u));
+    // Filter: o novo node deve ter "Image Generator" no titulo
+    for (const id of diff) {
+      const n = findNodeElement(id);
+      if (n && /Image Generator/.test(n.textContent || '')) return id;
+    }
     return diff[0] || null;
-  }, 6000);
-  await sleep(400);
+  }, 8000);
+  await sleep(500);
   return newId;
 }
 
