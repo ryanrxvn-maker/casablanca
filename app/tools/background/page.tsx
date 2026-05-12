@@ -190,7 +190,7 @@ export default function BackgroundTasksPage() {
   }
 
   return (
-    <ToolShell title="background tasks" tagline="Fila de batches do ClickUp Pilot — persiste reload, cancelavel">
+    <ToolShell title="background tasks" description="Fila de batches do ClickUp Pilot — persiste reload, cancelavel">
       <div className="space-y-4">
         {/* Top — contadores + acoes */}
         <div className="flex flex-wrap items-center gap-3 rounded-[14px] border border-line-strong bg-bg-soft/30 p-3">

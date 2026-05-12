@@ -242,7 +242,7 @@ export default function LipsyncHistoryPage() {
   }, [entries]);
 
   return (
-    <ToolShell title="lipsync history" tagline="Todos os lipsyncs gerados pelo DARKO LAB — batches + VA">
+    <ToolShell title="lipsync history" description="Todos os lipsyncs gerados pelo DARKO LAB — batches + VA">
       <div className="space-y-4">
         {/* Stats */}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">

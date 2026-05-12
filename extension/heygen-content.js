@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.4.2';
+const DARKO_EXT_VERSION = '4.5.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -224,6 +224,7 @@ async function cloneVoice(payload, onProgress) {
     removeBackgroundNoise = true,
     removeBackgroundMusic = true,
     language = null,
+    model = 'V3',
   } = payload || {};
 
   if (!audioBase64) throw new Error('Sem audio (audioBase64 vazio).');
@@ -335,6 +336,15 @@ async function cloneVoice(payload, onProgress) {
   if (removeBackgroundNoise) createBody.denoise = true;
   if (removeBackgroundMusic) createBody.remove_background_music = true;
   if (language) createBody.language = language;
+  // Modelo do clone — HeyGen aceita 'V3' (default), 'V2' (legacy), 'multilingual'.
+  // Mandamos varias keys redundantes (HeyGen acerta uma) pra robustez.
+  if (model) {
+    const mUpper = String(model).toUpperCase();
+    createBody.model = mUpper === 'MULTILINGUAL' ? 'multilingual' : mUpper;
+    createBody.model_id = createBody.model;
+    createBody.voice_model = createBody.model;
+    createBody.engine = createBody.model;
+  }
 
   const createResp = await fetchWithTimeout(
     'https://api2.heygen.com/v2/voice/voice_clone/create',

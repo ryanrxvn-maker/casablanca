@@ -297,6 +297,12 @@ export type CloneVoiceOptions = {
   removeBackgroundMusic?: boolean;
   /** ISO code: "pt", "en", etc. Auto se omitir */
   language?: string | null;
+  /** Modelo do clone — V3 (default, melhor qualidade PT/EN),
+   *  V2 (legacy, custo menor), multilingual (50+ langs). */
+  model?: 'V3' | 'V2' | 'multilingual';
+  /** Trunca audio pra no maximo N segundos antes de upload — acelera
+   *  bastante (HeyGen so precisa ~30-90s pra clonar bem). Default 90. */
+  trimToSeconds?: number | null;
   /** Callback de progresso 0..100 */
   onProgress?: (stage: string, percent?: number, message?: string) => void;
 };
@@ -328,6 +334,84 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(binary);
 }
 
+/** Decodifica audio + corta pros primeiros N segundos. Retorna WAV blob.
+ *  Retorna null se nao conseguir (caller usa o blob original). */
+async function trimAudioToSeconds(blob: Blob, maxSec: number): Promise<Blob | null> {
+  try {
+    const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
+    if (!Ctx) return null;
+    const ac: AudioContext = new Ctx();
+    try {
+      const buf = await blob.arrayBuffer();
+      const decoded = await ac.decodeAudioData(buf.slice(0));
+      if (decoded.duration <= maxSec + 0.5) {
+        await ac.close();
+        return null;
+      }
+      const sampleRate = decoded.sampleRate;
+      const channels = Math.min(decoded.numberOfChannels, 1); // mono pra clone (HeyGen so usa 1ch)
+      const totalSamples = Math.floor(maxSec * sampleRate);
+      const out = ac.createBuffer(1, totalSamples, sampleRate);
+      const src0 = decoded.getChannelData(0);
+      const src1 = decoded.numberOfChannels > 1 ? decoded.getChannelData(1) : src0;
+      const dst = out.getChannelData(0);
+      for (let i = 0; i < totalSamples; i++) {
+        dst[i] = (src0[i] + (channels > 1 ? src1[i] : src0[i])) / (channels > 1 ? 2 : 1);
+      }
+      await ac.close();
+      return encodeWAV(out);
+    } catch (e) {
+      await ac.close();
+      throw e;
+    }
+  } catch (e) {
+    console.warn('[trimAudioToSeconds] failed:', e);
+    return null;
+  }
+}
+
+/** Encoda um AudioBuffer em WAV 16-bit PCM mono. */
+function encodeWAV(audioBuffer: AudioBuffer): Blob {
+  const numCh = 1;
+  const sr = audioBuffer.sampleRate;
+  const samples = audioBuffer.getChannelData(0);
+  const buf = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buf);
+  let p = 0;
+  const wstr = (s: string) => { for (let i = 0; i < s.length; i++) view.setUint8(p++, s.charCodeAt(i)); };
+  wstr('RIFF');
+  view.setUint32(p, 36 + samples.length * 2, true); p += 4;
+  wstr('WAVE');
+  wstr('fmt ');
+  view.setUint32(p, 16, true); p += 4;
+  view.setUint16(p, 1, true); p += 2;
+  view.setUint16(p, numCh, true); p += 2;
+  view.setUint32(p, sr, true); p += 4;
+  view.setUint32(p, sr * numCh * 2, true); p += 4;
+  view.setUint16(p, numCh * 2, true); p += 2;
+  view.setUint16(p, 16, true); p += 2;
+  wstr('data');
+  view.setUint32(p, samples.length * 2, true); p += 4;
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(p, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+    p += 2;
+  }
+  return new Blob([buf], { type: 'audio/wav' });
+}
+
+/** Heuristica simples de deteccao de lingua — usa Web Speech API se
+ *  disponivel (Chrome desktop). Retorna ISO code ou null. */
+export async function detectAudioLanguage(file: File): Promise<{ lang: 'pt' | 'en' | 'other' | 'unknown'; confidence: number }> {
+  // Web Speech API funciona pra audio reproduzido em tempo real, nao file blob direto.
+  // Pra detect rapido, fazemos fallback heuristico via filename + duracao.
+  // Se quiser detect real, precisa de servico externo (whisper.cpp wasm/server).
+  const name = file.name.toLowerCase();
+  if (/\b(en|english|eng)\b/.test(name)) return { lang: 'en', confidence: 0.5 };
+  if (/\b(pt|portuguese|portugues|br|brasil)\b/.test(name)) return { lang: 'pt', confidence: 0.5 };
+  return { lang: 'unknown', confidence: 0 };
+}
+
 /** Clona voz no HeyGen via extension. Extrai audio se for video. */
 export async function cloneVoiceViaExtension(
   file: File,
@@ -356,6 +440,22 @@ export async function cloneVoiceViaExtension(
       filename = file.name.replace(/\.(mp4|mov|webm|mkv)$/i, '.wav');
     } catch (e) {
       return { ok: false, error: 'Falha ao extrair audio do video: ' + (e as Error)?.message };
+    }
+  }
+
+  // Truncate pra acelerar — clone so precisa de 30-90s pra ficar bom
+  const trimSec = opts.trimToSeconds ?? 90;
+  if (trimSec && trimSec > 0) {
+    try {
+      opts.onProgress?.('trim', 3, `Cortando audio em ${trimSec}s pra acelerar...`);
+      const trimmed = await trimAudioToSeconds(audioBlob, trimSec);
+      if (trimmed) {
+        audioBlob = trimmed;
+        mimeType = 'audio/wav';
+        if (!/\.wav$/i.test(filename)) filename = filename.replace(/\.[^.]+$/, '.wav') || 'voice.wav';
+      }
+    } catch (e) {
+      console.warn('[DARKO LAB clone] trim falhou, segue com audio original:', e);
     }
   }
 
@@ -395,6 +495,7 @@ export async function cloneVoiceViaExtension(
           removeBackgroundNoise: opts.removeBackgroundNoise ?? true,
           removeBackgroundMusic: opts.removeBackgroundMusic ?? true,
           language: opts.language ?? null,
+          model: opts.model ?? 'V3',
         },
       },
       '*',

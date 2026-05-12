@@ -41,6 +41,7 @@ import {
 } from '@/lib/heygen-library-cache';
 import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
 import { CompactVoiceSelector } from '@/components/CompactVoiceSelector';
+import { VoiceCloneTrigger } from '@/components/VoiceCloneTrigger';
 import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
 import { recallByVoiceName, rememberPairing, normalizeVoiceName } from '@/lib/voice-avatar-memory';
 import { Toggle3D } from '@/components/Toggle3D';
@@ -2073,34 +2074,69 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
 
   /** Dispara clone de voz pro slot. Aceita audio (mp3/wav) ou video.
    *  No ready: seta voiceOverride no slot e adiciona voz na library cache. */
-  async function handleCloneVoiceForSlot(taskId: string, sIdx: number, file: File) {
+  async function handleCloneVoiceForSlot(
+    taskId: string,
+    sIdx: number,
+    file: File,
+    opts?: {
+      model?: 'V3' | 'V2' | 'multilingual';
+      language?: 'pt' | 'en' | 'es' | 'auto';
+      trimToSeconds?: number;
+      removeBackgroundNoise?: boolean;
+      removeBackgroundMusic?: boolean;
+    },
+  ) {
     const key = `${taskId}:${sIdx}`;
     setCloningVoice((prev) => ({ ...prev, [key]: { stage: 'starting', percent: 0, message: 'Iniciando...' } }));
-    try {
-      const res = await cloneVoiceViaExtension(file, {
-        removeBackgroundNoise: true,
-        removeBackgroundMusic: true,
-        onProgress: (stage, percent, message) => {
-          setCloningVoice((prev) => ({
-            ...prev,
-            [key]: { stage, percent: percent ?? prev[key]?.percent ?? 0, message: message || '' },
-          }));
-        },
-      });
-      if (!res.ok) {
-        setError(`Falha ao clonar voz: ${res.error}`);
+    // Retry ate 2x em falhas transientes (rede, timeout)
+    const MAX_ATTEMPTS = 2;
+    let lastError = '';
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const res = await cloneVoiceViaExtension(file, {
+          removeBackgroundNoise: opts?.removeBackgroundNoise ?? true,
+          removeBackgroundMusic: opts?.removeBackgroundMusic ?? true,
+          model: opts?.model ?? 'V3',
+          language: opts?.language && opts.language !== 'auto' ? opts.language : null,
+          trimToSeconds: opts?.trimToSeconds ?? 90,
+          onProgress: (stage, percent, message) => {
+            setCloningVoice((prev) => ({
+              ...prev,
+              [key]: {
+                stage,
+                percent: percent ?? prev[key]?.percent ?? 0,
+                message: (attempt > 1 ? `(tentativa ${attempt}) ` : '') + (message || ''),
+              },
+            }));
+          },
+        });
+        if (!res.ok) {
+          lastError = res.error;
+          // Falhas que valem retry: rede, timeout, HTTP 5xx
+          if (attempt < MAX_ATTEMPTS && /timeout|network|HTTP 5|fetch|nao respondeu/i.test(res.error)) {
+            await new Promise((r) => setTimeout(r, 2000));
+            continue;
+          }
+          setError(`Falha ao clonar voz: ${res.error}`);
+          setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
+          return;
+        }
+        // SUCESSO — auto-select da voz no slot
+        updateRoleSlot(taskId, sIdx, { voiceOverride: { id: res.voiceId, name: res.voiceName } });
+        // Recarrega biblioteca pra voz nova aparecer no picker
+        reloadLibrary().catch(() => {});
         setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
         return;
+      } catch (e) {
+        lastError = (e as Error)?.message || String(e);
+        if (attempt < MAX_ATTEMPTS) {
+          await new Promise((r) => setTimeout(r, 2000));
+          continue;
+        }
       }
-      // Sucesso — seta voiceOverride no slot + recarrega biblioteca pra cache atualizar
-      updateRoleSlot(taskId, sIdx, { voiceOverride: { id: res.voiceId, name: res.voiceName } });
-      // Recarrega lista de avatares/vozes (cache) — voz nova aparece pro user
-      reloadLibrary().catch(() => {});
-      setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
-    } catch (e) {
-      setError(`Falha ao clonar voz: ${(e as Error)?.message || 'erro desconhecido'}`);
-      setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
     }
+    setError(`Falha ao clonar voz apos ${MAX_ATTEMPTS} tentativas: ${lastError}`);
+    setCloningVoice((prev) => { const c = { ...prev }; delete c[key]; return c; });
   }
 
   return (
@@ -3053,19 +3089,15 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                                     );
                                                   }
                                                   return (
-                                                    <label className="mono mt-1 inline-flex items-center gap-1 self-start rounded border border-fuchsia-500/40 bg-fuchsia-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20 cursor-pointer">
-                                                      🎤 Clonar voz nova (audio ou video)
-                                                      <input
-                                                        type="file"
-                                                        accept="audio/mp3,audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/m4a,audio/x-m4a,video/mp4,video/quicktime,video/webm,.mp3,.wav,.m4a,.mp4,.mov,.webm"
-                                                        className="hidden"
-                                                        onChange={(e) => {
-                                                          const f = e.target.files?.[0];
-                                                          e.target.value = '';
-                                                          if (f) handleCloneVoiceForSlot(a.taskId, sIdx, f);
-                                                        }}
-                                                      />
-                                                    </label>
+                                                    <VoiceCloneTrigger
+                                                      onSubmit={(picked) => handleCloneVoiceForSlot(a.taskId, sIdx, picked.file, {
+                                                        model: picked.model,
+                                                        language: picked.language,
+                                                        trimToSeconds: picked.trimToSeconds,
+                                                        removeBackgroundNoise: picked.removeBackgroundNoise,
+                                                        removeBackgroundMusic: picked.removeBackgroundMusic,
+                                                      })}
+                                                    />
                                                   );
                                                 })()}
                                               </div>
