@@ -19,17 +19,25 @@ export function MotorConfigPicker({
   setConfig,
   takeCount,
   slotIds,
+  takeSeconds,
 }: {
   config: MotorConfig;
   setConfig: (c: MotorConfig) => void;
   takeCount: number;
   /** IDs dos slots quando modo individual. */
   slotIds?: string[];
+  /** Duracoes individuais por take em segundos (calculadas da copy/audio).
+   *  Se omitido, assume DEFAULT_TAKE_SECONDS pra cada take.
+   *  Caller eh responsavel por estimar via estimateSecondsFromText. */
+  takeSeconds?: number[];
 }) {
   const [collapsed, setCollapsed] = useState(false);
-  // Duracao media por take em segundos (default 30s — pode ajustar)
-  const [averageTakeSeconds, setAverageTakeSeconds] = useState<number>(DEFAULT_TAKE_SECONDS);
-  const cost = estimateCost(config, takeCount, { slotIds, averageTakeSeconds });
+  // Duracao: usa array per-take quando disponivel (calculado da copy/audio),
+  // senao DEFAULT_TAKE_SECONDS uniforme
+  const hasRealDurations = !!takeSeconds && takeSeconds.length === takeCount && takeSeconds.some(s => s > 0);
+  const totalSeconds = hasRealDurations ? takeSeconds!.reduce((a, b) => a + b, 0) : takeCount * DEFAULT_TAKE_SECONDS;
+  const averageTakeSeconds = takeCount > 0 ? Math.round(totalSeconds / takeCount) : DEFAULT_TAKE_SECONDS;
+  const cost = estimateCost(config, takeCount, hasRealDurations ? { slotIds, takeSeconds } : { slotIds, averageTakeSeconds });
   const { credits, loading: loadingCredits, refresh: refreshCredits } = useHeyGenCredits(true);
 
   const planCreditAvail = credits?.plan_credit?.amount ?? null;
@@ -213,23 +221,23 @@ export function MotorConfigPicker({
             </div>
           ) : null}
 
-          {/* Duracao media por take (afeta calculo de creditos) */}
+          {/* Duracao automatica — calculada da copy (ou audio real) */}
           <div className="flex items-center gap-2 rounded border border-line/40 bg-bg/40 px-3 py-2">
             <span className="mono shrink-0 text-[10px] uppercase tracking-widest text-text-muted">
-              Duracao media por take:
+              {hasRealDurations ? 'Duracao real (lida da copy):' : 'Duracao estimada (sem copy ainda):'}
             </span>
-            <input
-              type="range"
-              min={10}
-              max={120}
-              step={5}
-              value={averageTakeSeconds}
-              onChange={(e) => setAverageTakeSeconds(Number(e.target.value))}
-              className="flex-1 accent-cyan-400"
-            />
-            <span className="mono w-14 shrink-0 text-right text-[10px] font-bold text-cyan-300">
-              {averageTakeSeconds}s
+            <span className="ml-auto mono text-[11px] font-bold text-cyan-300">
+              {totalSeconds.toFixed(0)}s total · {averageTakeSeconds}s media
             </span>
+            {hasRealDurations ? (
+              <span className="mono rounded border border-lime/40 bg-lime/10 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-lime">
+                ✓ auto
+              </span>
+            ) : (
+              <span className="mono rounded border border-yellow-500/40 bg-yellow-500/10 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-yellow-200">
+                ⚠ default
+              </span>
+            )}
           </div>
 
           {/* Resumo creditos — HeyGen cobra por MINUTO de video */}

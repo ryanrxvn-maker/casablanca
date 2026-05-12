@@ -36,6 +36,43 @@ export const CREDIT_COST: Record<Motor, number> = {
  *  informa duracao real. 30s eh tipico em videos curtos do user. */
 export const DEFAULT_TAKE_SECONDS = 30;
 
+/** Words por minuto tipico TTS HeyGen em PT-BR.
+ *  Calibrado em testes reais: voices padrao falam ~145 wpm em portugues,
+ *  voices clonadas com pitch alto podem chegar a ~170. Default conservador 150. */
+export const TTS_WORDS_PER_MINUTE = 150;
+
+/** Estima duracao em segundos de uma copy via contagem de palavras + TTS WPM.
+ *  Aceita texto OR areeglo de takes; retorna soma ou per-take.
+ *
+ *  Ex: 75 palavras / 150 wpm × 60 = 30 segundos
+ *
+ *  Pra audio mode (file ja tem duracao real), use audioBlob.duration direto. */
+export function estimateSecondsFromText(text: string, wpm: number = TTS_WORDS_PER_MINUTE): number {
+  if (!text) return 0;
+  // Conta palavras (split em whitespace, descarta tokens vazios)
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  if (words === 0) return 0;
+  return Math.round((words / wpm) * 60);
+}
+
+/** Pra modo audio, pega duracao real do File via decodeAudioData. */
+export async function estimateSecondsFromAudio(file: File): Promise<number> {
+  if (typeof window === 'undefined') return DEFAULT_TAKE_SECONDS;
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const audio = new Audio(url);
+    audio.onloadedmetadata = () => {
+      const dur = audio.duration || DEFAULT_TAKE_SECONDS;
+      URL.revokeObjectURL(url);
+      resolve(Math.round(dur));
+    };
+    audio.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(DEFAULT_TAKE_SECONDS);
+    };
+  });
+}
+
 export type MotorModeGlobal = { kind: 'global'; motor: Motor };
 export type MotorModePercent = { kind: 'percent'; percent: Record<Motor, number> };
 export type MotorModeIndividual = { kind: 'individual'; perSlot: Record<string, Motor> };

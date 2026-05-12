@@ -43,7 +43,7 @@ import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
 import { CompactVoiceSelector } from '@/components/CompactVoiceSelector';
 import { VoiceCloneTrigger } from '@/components/VoiceCloneTrigger';
 import { MotorConfigPicker, MotorSlotPicker } from '@/components/MotorConfigPicker';
-import { defaultMotorConfig, resolveMotors, type MotorConfig, type Motor } from '@/lib/motor-config';
+import { defaultMotorConfig, resolveMotors, estimateSecondsFromText, type MotorConfig, type Motor } from '@/lib/motor-config';
 import { AvatarFirstSlot } from '@/components/AvatarFirstSlot';
 import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
 import { recallByVoiceName, rememberPairing, normalizeVoiceName } from '@/lib/voice-avatar-memory';
@@ -2836,6 +2836,8 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                     setConfig={(cfg) => setMotorConfigForTask(a.taskId, cfg)}
                                     takeCount={(a.partTemplates?.length || 0) || (a.totalParts || 0) || (a.roleSlots?.length || 0)}
                                     slotIds={(a.partTemplates || []).map((p: any, i: number) => p.label || `t${i}`)}
+                                    // Calcula duracoes reais lendo a copy de cada parte (palavras / 150 wpm)
+                                    takeSeconds={(a.partTemplates || []).map((p: any) => estimateSecondsFromText(p.text || ''))}
                                   />
                                 </div>
                               ) : null}

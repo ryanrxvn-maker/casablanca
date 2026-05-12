@@ -16,7 +16,8 @@ import {
 } from '@/lib/heygen-extension-bridge';
 import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
 import { MotorConfigPicker } from '@/components/MotorConfigPicker';
-import { defaultMotorConfig, resolveMotors, type MotorConfig } from '@/lib/motor-config';
+import { defaultMotorConfig, resolveMotors, estimateSecondsFromText, estimateSecondsFromAudio, type MotorConfig } from '@/lib/motor-config';
+import { AvatarFirstSlot } from '@/components/AvatarFirstSlot';
 import {
   heygenApiFetch,
   REQUIRED_EXT_VERSION,
@@ -92,6 +93,23 @@ export default function HeyGenAutoPage() {
 
   const [copy, setCopy] = useToolState<string>('hgauto:copy', '');
   const [audioParts, setAudioParts] = useState<File[]>([]);
+  // Duracoes reais dos audios (lidas quando audioParts muda)
+  const [audioPartsSeconds, setAudioPartsSeconds] = useState<number[]>([]);
+  // Avatar First toggle (avatar nao existe na biblioteca, cria via foto+audio)
+  const [avatarFirstEnabled, setAvatarFirstEnabled] = useState(false);
+
+  // Calcula duracoes reais dos audios em paralelo
+  useEffect(() => {
+    let cancelled = false;
+    if (audioParts.length === 0) {
+      setAudioPartsSeconds([]);
+      return;
+    }
+    Promise.all(audioParts.map((f) => estimateSecondsFromAudio(f))).then((durs) => {
+      if (!cancelled) setAudioPartsSeconds(durs);
+    });
+    return () => { cancelled = true; };
+  }, [audioParts]);
 
   /* ----- Inputs estruturados (multi-hook + body) — feature parity com clickup-pilot ----- */
   /** SEMPRE ativo. Inputs separados pra cada HOOK (1-10) + 1 BODY opcional.
@@ -792,6 +810,39 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                   ? audioParts.map((_, i) => `HOOK${i + 1}`)
                   : parts.map((_, i) => `PART${i + 1}`)
                 }
+                takeSeconds={mode === 'copy'
+                  ? parts.map((text) => estimateSecondsFromText(text))
+                  : audioPartsSeconds
+                }
+              />
+            </section>
+
+            {/* Avatar First — pra quando avatar nao existe na biblioteca */}
+            <section className="border-t border-line pt-6">
+              <h2 className="label-field !mb-3">Avatar First (opcional)</h2>
+              <AvatarFirstSlot
+                slotKey="hgauto-main"
+                briefingUsername={adName || 'avatar'}
+                enabled={avatarFirstEnabled}
+                setEnabled={setAvatarFirstEnabled}
+                onComplete={(r) => {
+                  // Auto-seleciona o avatar criado
+                  setSelectedAvatar({
+                    id: r.avatarId,
+                    name: r.avatarName,
+                    thumb: null,
+                    videoPreview: null,
+                    type: 'photo',
+                    version: 'III',
+                    voiceId: r.voiceId,
+                    voiceName: r.voiceName,
+                  } as any);
+                  // Reseta voice override pra usar a clonada
+                  if (selectedVoice == null) {
+                    setSelectedVoice({ id: r.voiceId, name: r.voiceName } as any);
+                  }
+                }}
+                disabled={processing}
               />
             </section>
 
