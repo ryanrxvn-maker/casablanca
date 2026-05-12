@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.1.1';
+const DARKO_MG_VERSION = '3.1.2';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -42,13 +42,49 @@ if (window.__darkolab_magnific_loaded__) {
 
 // ========================= NETWORK =========================
 
+/**
+ * CRITICAL (descoberto live v3.1.2): Magnific retorna SPA HTML (302 ou 200 com
+ * <!DOCTYPE>) em endpoints REST se nao mandar `Accept: application/json` +
+ * `X-Requested-With: XMLHttpRequest`. Com esses headers, retorna JSON real.
+ * Sem isso, parseJSON falha e tudo quebra silenciosamente.
+ *
+ * Tambem injeta `?lang=en_US&user_id=<id>` por default se o path nao tem query
+ * (a UI usa esses params em TODOS requests).
+ */
+const MG_DEFAULT_HEADERS = {
+  'accept': 'application/json',
+  'x-requested-with': 'XMLHttpRequest',
+};
+
+let __darkoUserId = null;
+function getUserIdSync() {
+  if (__darkoUserId) return __darkoUserId;
+  // Try parse from any analytics URL in the DOM/perf entries
+  try {
+    const perfEntries = performance.getEntriesByType('resource');
+    for (const e of perfEntries) {
+      const m = (e.name || '').match(/[?&]user_id=(\d+)/);
+      if (m) { __darkoUserId = m[1]; return m[1]; }
+    }
+  } catch {}
+  return null;
+}
+
+function withDefaultQuery(path) {
+  if (path.includes('?')) return path;
+  const uid = getUserIdSync();
+  return path + (uid ? `?lang=en_US&user_id=${uid}` : '?lang=en_US');
+}
+
 async function fetchJson(path, opts = {}, timeoutMs = 15000) {
   const ctrl = new AbortController();
   const tid = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const r = await fetch(path, {
+    const url = withDefaultQuery(path);
+    const r = await fetch(url, {
       ...opts,
       credentials: 'include',
+      headers: { ...MG_DEFAULT_HEADERS, ...(opts.headers || {}) },
       signal: ctrl.signal,
     });
     const txt = await r.text();

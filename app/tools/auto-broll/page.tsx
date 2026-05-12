@@ -206,23 +206,14 @@ export default function AutoBrollPage() {
                 </span>
               ) : null}
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => detectMagnificExtension().then(setExtStatus)}
-                className="rounded-md border border-line-strong bg-bg-soft px-3 py-1 text-[11px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime"
-              >
-                Re-checar
-              </button>
-              <button
-                type="button"
-                onClick={handleTestSession}
-                disabled={testingSession}
-                className="rounded-md border border-line-strong bg-bg-soft px-3 py-1 text-[11px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime disabled:opacity-50"
-              >
-                {testingSession ? 'Testando...' : 'Testar sessao Magnific'}
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={handleTestSession}
+              disabled={testingSession}
+              className="rounded-md border border-line-strong bg-bg-soft px-3 py-1 text-[11px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime disabled:opacity-50"
+            >
+              {testingSession ? 'Testando...' : 'Testar sessao Magnific'}
+            </button>
           </div>
         ) : (
           <div className="rounded-[12px] border border-yellow-500/40 bg-yellow-500/10 px-4 py-3">
@@ -232,26 +223,9 @@ export default function AutoBrollPage() {
                 <strong className="text-yellow-300">
                   Extensao DARKO LAB Magnific nao instalada
                 </strong>
-                . Voce precisa dela pra gerar B-Rolls (a automacao usa
-                sua conta Magnific Premium+ logada, em modo Unlimited —
-                <span className="text-lime font-semibold"> NUNCA gasta creditos</span>).
-                <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <a
-                    href="/api/extension-magnific/download"
-                    download
-                    className="rounded-md border border-lime bg-lime/20 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-lime transition hover:bg-lime/30"
-                  >
-                    ⬇ Baixar darkolab-magnific-extension.zip
-                  </a>
-                  <button
-                    type="button"
-                    onClick={() => detectMagnificExtension().then(setExtStatus)}
-                    className="rounded-md border border-line-strong bg-bg-soft px-3 py-1.5 text-[11px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
-                  >
-                    Ja instalei — re-checar
-                  </button>
-                </div>
-                <details className="mt-3" open>
+                . Voce precisa dela pra gerar B-Rolls (usa sua conta
+                Magnific Premium+ logada — NUNCA gasta creditos).
+                <details className="mt-2">
                   <summary className="cursor-pointer text-yellow-300/80 hover:text-yellow-200 select-none">
                     Como instalar (passo a passo)
                   </summary>
@@ -266,22 +240,18 @@ export default function AutoBrollPage() {
                         darkolab-magnific-extension.zip
                       </a>
                     </li>
-                    <li>Descompacta numa pasta no seu computador</li>
+                    <li>Descompacta numa pasta</li>
                     <li>
                       Abre <code className="mono">chrome://extensions</code>
                     </li>
-                    <li>
-                      Liga &quot;Modo de desenvolvedor&quot; (canto superior direito)
-                    </li>
+                    <li>Liga &quot;Modo de desenvolvedor&quot;</li>
                     <li>
                       Clica &quot;Carregar sem compactacao&quot; e seleciona a pasta
                     </li>
                     <li>
-                      Faz login no <code className="mono">www.magnific.com</code> em outra aba (Premium+)
+                      Faz login no <code className="mono">www.magnific.com</code> (Premium+)
                     </li>
-                    <li>
-                      Volta aqui — a extensao deve aparecer como conectada
-                    </li>
+                    <li>Volta aqui — extensao auto-detecta</li>
                   </ol>
                 </details>
               </div>
