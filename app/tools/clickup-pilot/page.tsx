@@ -336,6 +336,12 @@ export default function ClickUpPilotPage() {
   // onde o user edita). Default reset garante que filter velho uppercase
   // saia automaticamente.
   const [statusFilter, setStatusFilterRaw] = useState(DEFAULT_EDIT_STATUSES.join(','));
+
+  // Filtros de data + prioridade (client-side, aplicados depois de listTasks)
+  type DateFilter = 'all' | 'today' | 'overdue' | 'next7' | 'next30';
+  type PriorityFilter = 'all' | 'urgent' | 'high';
+  const [dateFilter, setDateFilter] = useState<DateFilter>('all');
+  const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('all');
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const stored = localStorage.getItem(STATUS_FILTER_KEY);
@@ -2066,8 +2072,81 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                       ) : null}
                     </div>
                   </div>
+                  {/* Filtros de data + prioridade */}
+                  <div className="mb-3 grid gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="mono text-[9px] uppercase tracking-widest text-text-muted">Período:</span>
+                      {([
+                        { id: 'all' as const, label: 'Todos' },
+                        { id: 'today' as const, label: 'Hoje' },
+                        { id: 'overdue' as const, label: '⚠ Atrasadas' },
+                        { id: 'next7' as const, label: 'Próx 7d' },
+                        { id: 'next30' as const, label: 'Próx 30d' },
+                      ]).map((f) => (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => setDateFilter(f.id)}
+                          className={
+                            'mono rounded-md px-2 py-1 text-[10px] uppercase tracking-widest transition ' +
+                            (dateFilter === f.id
+                              ? 'border border-lime bg-lime/20 text-lime'
+                              : 'border border-line-strong text-text-muted hover:border-lime hover:text-white')
+                          }
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="mono text-[9px] uppercase tracking-widest text-text-muted">Prioridade:</span>
+                      {([
+                        { id: 'all' as const, label: 'Todas' },
+                        { id: 'urgent' as const, label: '🔴 Urgent' },
+                        { id: 'high' as const, label: '🟠 High' },
+                      ]).map((f) => (
+                        <button
+                          key={f.id}
+                          type="button"
+                          onClick={() => setPriorityFilter(f.id)}
+                          className={
+                            'mono rounded-md px-2 py-1 text-[10px] uppercase tracking-widest transition ' +
+                            (priorityFilter === f.id
+                              ? 'border border-fuchsia-500 bg-fuchsia-500/20 text-fuchsia-200'
+                              : 'border border-line-strong text-text-muted hover:border-fuchsia-500 hover:text-white')
+                          }
+                        >
+                          {f.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <ul className="grid gap-2">
-                    {tasks.map((t) => {
+                    {tasks
+                      .filter((t) => {
+                        // Aplica filtros client-side
+                        if (priorityFilter !== 'all' && t.priority?.priority !== priorityFilter) return false;
+                        if (dateFilter !== 'all') {
+                          const due = t.due_date ? Number(t.due_date) : 0;
+                          if (!due) return dateFilter === 'overdue' ? false : false; // sem due_date nao se enquadra
+                          const now = Date.now();
+                          const DAY = 24 * 60 * 60 * 1000;
+                          const today = new Date();
+                          today.setHours(0, 0, 0, 0);
+                          const tomorrow = today.getTime() + DAY;
+                          if (dateFilter === 'today') {
+                            if (due < today.getTime() || due >= tomorrow) return false;
+                          } else if (dateFilter === 'overdue') {
+                            if (due >= today.getTime()) return false;
+                          } else if (dateFilter === 'next7') {
+                            if (due < now || due > now + 7 * DAY) return false;
+                          } else if (dateFilter === 'next30') {
+                            if (due < now || due > now + 30 * DAY) return false;
+                          }
+                        }
+                        return true;
+                      })
+                      .map((t) => {
                       const isOpen = !bulkMode && selectedTask?.id === t.id;
                       const isChecked = bulkMode && selectedTaskIds.has(t.id);
                       const baseKey = extractBaseTaskKey(t.name);
@@ -2095,7 +2174,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                             }
                           >
                             <div className="flex items-center justify-between gap-2">
-                              <span className="mono text-xs text-lime flex items-center gap-2">
+                              <span className="mono text-xs text-lime flex items-center gap-2 flex-wrap">
                                 {t.name}
                                 {hasSiblings && gSuffix ? (
                                   <span
@@ -2105,6 +2184,44 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                     🔗 grupo {siblingsAll.length}Gs
                                   </span>
                                 ) : null}
+                                {t.priority?.priority === 'urgent' ? (
+                                  <span className="mono rounded-full border border-red-500/60 bg-red-500/20 px-1.5 py-0.5 text-[8px] uppercase tracking-widest text-red-300">
+                                    🔴 urgent
+                                  </span>
+                                ) : t.priority?.priority === 'high' ? (
+                                  <span className="mono rounded-full border border-orange-500/60 bg-orange-500/20 px-1.5 py-0.5 text-[8px] uppercase tracking-widest text-orange-300">
+                                    🟠 high
+                                  </span>
+                                ) : null}
+                                {(() => {
+                                  const due = t.due_date ? Number(t.due_date) : 0;
+                                  if (!due) return null;
+                                  const now = Date.now();
+                                  const DAY = 24 * 60 * 60 * 1000;
+                                  const today = new Date();
+                                  today.setHours(0, 0, 0, 0);
+                                  const tomorrow = today.getTime() + DAY;
+                                  const dueDate = new Date(due);
+                                  let label = '';
+                                  let cls = 'text-text-muted border-line bg-bg/40';
+                                  if (due < today.getTime()) {
+                                    const daysAgo = Math.floor((today.getTime() - due) / DAY);
+                                    label = `⚠ ${daysAgo}d atrasada`;
+                                    cls = 'text-red-300 border-red-500/60 bg-red-500/15';
+                                  } else if (due < tomorrow) {
+                                    label = '📅 hoje';
+                                    cls = 'text-amber-300 border-amber-400/60 bg-amber-400/15';
+                                  } else {
+                                    const daysAhead = Math.ceil((due - now) / DAY);
+                                    label = daysAhead <= 7 ? `📅 ${daysAhead}d` : dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+                                    cls = daysAhead <= 3 ? 'text-cyan-200 border-cyan-500/40 bg-cyan-500/10' : 'text-text-muted border-line-strong bg-bg/40';
+                                  }
+                                  return (
+                                    <span className={`mono rounded-full border px-1.5 py-0.5 text-[8px] uppercase tracking-widest ${cls}`}>
+                                      {label}
+                                    </span>
+                                  );
+                                })()}
                               </span>
                               <span
                                 className="mono rounded-full px-2 py-0.5 text-[9px] uppercase tracking-widest"

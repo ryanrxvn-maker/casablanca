@@ -80,6 +80,7 @@ export type ClickUpTask = {
   text_content?: string;
   due_date?: string;
   date_created?: string;
+  priority?: { id: string; priority: 'urgent' | 'high' | 'normal' | 'low'; color: string; orderindex: string } | null;
   assignees: ClickUpUser[];
   list?: { id: string; name: string };
   folder?: { id: string; name: string };
