@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.4.9';
+const DARKO_MG_VERSION = '3.4.10';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -1409,12 +1409,14 @@ async function createImageGenNode() {
 }
 
 async function waitForNewNode(beforeIds) {
+  // v3.4.10: 8s → 25s. Magnific tem 504s intermitentes hoje + Liveblocks
+  // hidratacao pode demorar pra novos nodes aparecerem no DOM.
   const newId = await waitFor(() => {
     const now = collectVisibleNodes();
     const diff = now.filter((u) => !beforeIds.includes(u));
     return diff[0] || null;
-  }, 8000);
-  await sleep(500);
+  }, 25000);
+  await sleep(700);
   return newId;
 }
 
