@@ -45,6 +45,13 @@
       sendToPage({ type: 'MG_PONG', version: VERSION });
       return;
     }
+    if (data.type === 'MG_SELF_RELOAD') {
+      // v3.4.2: forward to background which calls chrome.runtime.reload()
+      chrome.runtime.sendMessage({ type: 'MG_SELF_RELOAD' }, (resp) => {
+        sendToPage({ type: 'MG_SELF_RELOAD_RESULT', ok: !!resp?.ok, willReload: !!resp?.willReload });
+      });
+      return;
+    }
     if (data.type === 'MG_TEST_SESSION') return route('MG_TEST_SESSION');
     if (data.type === 'MG_GET_PLAN') return route('MG_GET_PLAN');
     if (data.type === 'MG_CREATE_SPACE') return route('MG_CREATE_SPACE', { payload: data.payload });

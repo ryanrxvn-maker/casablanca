@@ -135,6 +135,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
+  // v3.4.2: SELF-RELOAD — bridge ou page pede a extension pra recarregar-se.
+  // chrome.runtime.reload() reinicia o service worker E re-injeta todos os
+  // content scripts. Util quando shippado nova versao e usuario nao quer ir
+  // em chrome://extensions clicar Reload manualmente.
+  if (msg.type === 'MG_SELF_RELOAD') {
+    sendResponse({ ok: true, willReload: true });
+    setTimeout(() => {
+      try { chrome.runtime.reload(); } catch (e) { console.error('[BG] reload failed:', e); }
+    }, 100);
+    return false;
+  }
+
   // Forward generic — todos handlers passam pelo content-script
   const FORWARD = [
     'MG_TEST_SESSION', 'MG_GET_PLAN', 'MG_CREATE_SPACE',
