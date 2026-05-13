@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.2.1';
+const DARKO_MG_VERSION = '3.2.2';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -386,8 +386,8 @@ async function handleRunPipeline(payload, onProgress) {
     imageConcurrency,
     async (pair) => {
       try {
-        // LOCK v3.1.7: re-verify ANTES do execute (caso usuario tenha editado o node)
-        const vImg = verifyImg(pair.imageNodeId);
+        // LOCK v3.2.2: re-verify ANTES do execute (auto-seleciona node pra ler botoes)
+        const vImg = await verifyImg(pair.imageNodeId);
         if (!vImg.ok) {
           throw new Error(`LOCK_PREEXECUTE img pair#${pair.idx}: missing=[${vImg.missing.join(', ')}]`);
         }
@@ -420,8 +420,8 @@ async function handleRunPipeline(payload, onProgress) {
     videoConcurrency,
     async (pair) => {
       try {
-        // LOCK v3.1.7: re-verify ANTES do execute video
-        const vVid = verifyVid(pair.videoNodeId);
+        // LOCK v3.2.2: re-verify ANTES do execute video (auto-seleciona node)
+        const vVid = await verifyVid(pair.videoNodeId);
         if (!vVid.ok) {
           throw new Error(`LOCK_PREEXECUTE vid pair#${pair.idx}: missing=[${vVid.missing.join(', ')}]`);
         }
@@ -562,9 +562,10 @@ async function handleRunPipelineFromTemplate(payload, onProgress) {
   const useImages = imageNodes.slice(0, takes.length);
 
   // PHASE 3b: verifica LOCK em cada image gen do template (defensive)
+  // v3.2.2: verifyImg agora async (auto-seleciona pra Vue Flow expor botoes)
   onProgress({ phase: 'verify-img-lock', percent: 13, message: 'Verificando LOCK das image gens...' });
   for (let i = 0; i < useImages.length; i++) {
-    const v = verifyImg(useImages[i].imageNodeId);
+    const v = await verifyImg(useImages[i].imageNodeId);
     if (!v.ok) {
       throw new Error(
         `TEMPLATE LOCK image#${i + 1}: missing=[${v.missing.join(', ')}] btns=[${v.btns.join(', ')}]. ` +
@@ -652,7 +653,7 @@ async function handleRunPipelineFromTemplate(payload, onProgress) {
     imageConcurrency,
     async (pair) => {
       try {
-        const vImg = verifyImg(pair.imageNodeId);
+        const vImg = await verifyImg(pair.imageNodeId);
         if (!vImg.ok) throw new Error(`LOCK_PREEXECUTE img pair#${pair.idx}: missing=[${vImg.missing.join(', ')}]`);
         await selectNodeAndEnsureUnlimited(pair.imageNodeId);
         const { workflowRunId } = await executeWorkflow(pair.imageNodeId, space.spaceId);
@@ -682,7 +683,7 @@ async function handleRunPipelineFromTemplate(payload, onProgress) {
     async (pair) => {
       try {
         // Re-verify LOCK + FORBIDDEN models 1 ultima vez antes de bater o trigger.
-        const vVid = verifyVid(pair.videoNodeId);
+        const vVid = await verifyVid(pair.videoNodeId);
         if (!vVid.ok) {
           throw new Error(
             `LOCK_PREEXECUTE vid pair#${pair.idx}: ` +
@@ -973,9 +974,15 @@ async function findVisibleByText(rx, scope = document, timeoutMs = 4000) {
 
 // ---- Create configured pair (Image Generator + Video Generator connected) ----
 
-// ========================= LOCK VERIFIERS (v3.1.7) =========================
+// ========================= LOCK VERIFIERS (v3.2.2 — async + auto-select) =========================
+//
+// CRITICAL FINDING (v3.2.2, validado live): Magnific Vue Flow renderiza os botoes
+// de config (model/aspect/quality/duration) APENAS quando o node esta SELECTED.
+// Quando deselecionado: 0 botoes no DOM. Por isso TODA chamada de verify precisa
+// chamar `selectNodeForEdit(uuid)` antes de ler os botoes — caso contrario reporta
+// missing em tudo (falso negativo).
 
-/** Coleta TODOS os botoes visiveis do node (texto trimmed, <35 chars). */
+/** Coleta TODOS os botoes visiveis do node (texto trimmed, <35 chars). SYNC. */
 function nodeButtons(uuid) {
   const n = findNodeElement(uuid);
   if (!n) return [];
@@ -986,10 +993,11 @@ function nodeButtons(uuid) {
 }
 
 /**
- * Verifica se um IMAGE node tem o LOCK config correto (model + aspect + quality).
- * Retorna { ok: bool, btns: string[], missing: string[] }.
+ * Verifica IMAGE node — auto-seleciona antes de ler botoes.
+ * ASYNC: chama selectNodeForEdit(uuid) primeiro pra Vue Flow renderizar os botoes.
  */
-function verifyImg(uuid) {
+async function verifyImg(uuid) {
+  try { await selectNodeForEdit(uuid); } catch {}
   const btns = nodeButtons(uuid);
   const expected = [IMAGE_MODEL_LOCK, IMAGE_ASPECT_LOCK, IMAGE_QUALITY_LOCK];
   const missing = expected.filter((e) => !btns.includes(e));
@@ -997,15 +1005,16 @@ function verifyImg(uuid) {
 }
 
 /**
- * Verifica se um VIDEO node tem o LOCK config correto (model + aspect + quality + duration)
- * E TAMBEM checa que NENHUM modelo proibido (Seedance, Veo, Runway, ...) esta selecionado.
+ * Verifica VIDEO node — auto-seleciona antes de ler botoes.
+ * Inclui FORBIDDEN_VIDEO_MODELS check (Seedance/Veo/Runway/etc).
  *
- * PARANOIA ABSOLUTA — directive do user: "JAMAIS USAR OUTRA IA DE VIDEO QUE NAO SEJA
- * O KLING 2.5 720P unlimited. TENHA CERTEZA DISSO ABSOLUTA."
+ * PARANOIA ABSOLUTA — directive do user: "JAMAIS USAR OUTRA IA DE VIDEO QUE NAO
+ * SEJA O KLING 2.5 720P unlimited. TENHA CERTEZA DISSO ABSOLUTA."
  *
- * Retorna { ok: bool, btns: string[], missing: string[], forbidden: string[] }.
+ * ASYNC: chama selectNodeForEdit primeiro pra Vue Flow expor os botoes ocultos.
  */
-function verifyVid(uuid) {
+async function verifyVid(uuid) {
+  try { await selectNodeForEdit(uuid); } catch {}
   const btns = nodeButtons(uuid);
   const allowedDurations = ['10s', '5s'];
   const missing = [];
@@ -1014,7 +1023,6 @@ function verifyVid(uuid) {
   if (!btns.includes(VIDEO_QUALITY_LOCK)) missing.push(`quality!=${VIDEO_QUALITY_LOCK}`);
   if (!allowedDurations.some((d) => btns.includes(d))) missing.push(`duration!=[10s|5s]`);
 
-  // PARANOIA: forbidden video models (Seedance, Veo, Runway, ...)
   const forbidden = FORBIDDEN_VIDEO_MODELS.filter((m) => btns.includes(m));
   if (forbidden.length > 0) {
     missing.push(`FORBIDDEN_MODEL_DETECTED=[${forbidden.join(', ')}]`);
@@ -1040,7 +1048,7 @@ async function configureWithLockRetry(fn, verify, label, pairIdx) {
       console.warn(`[LOCK] pair#${pairIdx} ${label} configure attempt ${r + 1} threw:`, e.message);
     }
     await sleep(LOCK_RETRY_SLEEP_MS);
-    lastVerify = verify();
+    lastVerify = await verify();  // v3.2.2: verify async (auto-selects node first)
     console.log(`[LOCK] pair#${pairIdx} ${label} verify attempt ${r + 1}:`, lastVerify);
     if (lastVerify.ok) return lastVerify;
   }
