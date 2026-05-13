@@ -71,6 +71,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     'MG_DOWNLOAD_ASSET',
     'MG_RUN_PIPELINE',          // v3.0 batch entrypoint
     'MG_RUN_PIPELINE_TEMPLATE', // v3.2.0 template entrypoint
+    'MG_CREATE_TEMPLATE_SPACE', // v3.3.0 template auto-builder
   ];
   if (FORWARD.includes(msg.type)) {
     sendResponse({ accepted: true });
@@ -112,6 +113,7 @@ async function handleForward(msg, bridgeTabId) {
     // videos) pode levar 1-2h. Damos 4h de margem.
     MG_RUN_PIPELINE: 14400000,
     MG_RUN_PIPELINE_TEMPLATE: 14400000, // 4h (mesma janela)
+    MG_CREATE_TEMPLATE_SPACE: 1800000,  // 30min (50 image gens em sequencia)
   };
   const timeoutMs = timeouts[msg.type] || 60000;
 

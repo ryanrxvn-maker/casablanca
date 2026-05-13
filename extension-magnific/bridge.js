@@ -54,6 +54,7 @@
     if (data.type === 'MG_DOWNLOAD_ASSET') return route('MG_DOWNLOAD_ASSET', { payload: data.payload });
     if (data.type === 'MG_RUN_PIPELINE') return route('MG_RUN_PIPELINE', { payload: data.payload });
     if (data.type === 'MG_RUN_PIPELINE_TEMPLATE') return route('MG_RUN_PIPELINE_TEMPLATE', { payload: data.payload });
+    if (data.type === 'MG_CREATE_TEMPLATE_SPACE') return route('MG_CREATE_TEMPLATE_SPACE', { payload: data.payload });
   });
 
   chrome.runtime.onMessage.addListener((msg) => {

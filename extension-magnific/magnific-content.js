@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.2.3';
+const DARKO_MG_VERSION = '3.3.0';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -197,6 +197,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     MG_TEST_SESSION: handleTestSession,
     MG_GET_PLAN: handleGetPlan,
     MG_CREATE_SPACE: handleCreateSpace,
+    MG_CREATE_TEMPLATE_SPACE: handleCreateTemplateSpace, // v3.3.0 — builds template auto
     MG_RUN_PIPELINE: handleRunPipeline,
     MG_RUN_PIPELINE_TEMPLATE: handleRunPipelineFromTemplate, // v3.2.0
     MG_GENERATE_IMAGE: handleGenerateImage,
@@ -275,6 +276,91 @@ async function handleGetPlan() {
 
 async function handleCreateSpace(payload) {
   return await ensureSpaceWithName((payload || {}).name);
+}
+
+/**
+ * v3.3.0 — Cria um TEMPLATE SPACE automaticamente: novo space + N image gens
+ * (Nano Banana 2 + 9:16 + 1K + Unlimited ON) com LOCK aplicado em cada um.
+ *
+ * payload: {
+ *   name?: string (default: 'DARKO_TEMPLATE_<N>_NANO_<ISO>'),
+ *   pairs?: number (default: 50, max: 100),
+ * }
+ *
+ * Returns: { spaceId, url, imageGenIds: string[], failed: Array<{idx,error}> }
+ *
+ * O space resultante e usado como input em MG_RUN_PIPELINE_TEMPLATE. Cada take
+ * vai pegar um image gen disponivel, colar o prompt, criar video gen via output
+ * handle com Kling 2.5 LOCK on-demand.
+ */
+async function handleCreateTemplateSpace(payload, onProgress) {
+  const { name, pairs = 50 } = payload || {};
+  if (pairs < 1 || pairs > 100) {
+    throw new Error('pairs deve estar entre 1 e 100');
+  }
+
+  onProgress({ phase: 'safety', percent: 1, message: 'Verificando Unlimited mode...' });
+  const us = await fetchJson('/app/api/unlimited-status');
+  if (us.json && us.json.is_unlimited_mode_enabled === false) {
+    throw new Error('Unlimited mode DESLIGADO no Magnific. Liga antes de criar template.');
+  }
+
+  // Phase 1: cria space
+  onProgress({ phase: 'space', percent: 3, message: 'Criando space...' });
+  const finalName = name || `DARKO_TEMPLATE_${pairs}_NANO_${new Date().toISOString().slice(0, 16).replace(/[T:]/g, '-')}`;
+  const space = await ensureSpaceWithName(finalName);
+  await navigateToSpace(space.spaceId);
+  await sleep(3500);
+
+  // Phase 2: cria N image gens em loop sequencial (Vue Flow popup race condition
+  // se rodar paralelo). Cada image gen e configurada com Nano Banana 2 LOCK.
+  const imageGenIds = [];
+  const failed = [];
+  for (let i = 0; i < pairs; i++) {
+    const percent = 5 + Math.round((i / pairs) * 90);
+    onProgress({
+      phase: 'building',
+      percent,
+      message: `Image gen ${i + 1}/${pairs} (Nano Banana 2 + 9:16 + 1K)...`,
+    });
+    try {
+      // 2a) Cria image gen
+      const imageNodeId = await createImageGenNode();
+
+      // 2b) Configura LOCK (Nano Banana 2 + 9:16 + 1K + Unlimited) com retry+verify
+      await configureWithLockRetry(
+        () => configureImageGenNode(imageNodeId, {
+          model: 'nano-banana-2',
+          aspect: '9:16',
+          quality: '1K',
+        }),
+        () => verifyImg(imageNodeId),
+        'img',
+        i + 1,
+      );
+
+      imageGenIds.push(imageNodeId);
+    } catch (e) {
+      console.error(`[TEMPLATE_BUILDER] image gen ${i + 1} falhou:`, e);
+      failed.push({ idx: i + 1, error: e.message });
+      // Continua mesmo se 1 falhar — template parcial e melhor que zero
+    }
+  }
+
+  onProgress({
+    phase: 'done',
+    percent: 100,
+    message: `Template criado: ${imageGenIds.length}/${pairs} image gens OK${failed.length ? `, ${failed.length} falhas` : ''}`,
+  });
+
+  return {
+    spaceId: space.spaceId,
+    url: space.url,
+    name: finalName,
+    imageGenIds,
+    pairs: imageGenIds.length,
+    failed,
+  };
 }
 
 async function handleDownloadAsset(payload) {

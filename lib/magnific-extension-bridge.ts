@@ -339,6 +339,61 @@ export function runMagnificPipelineExt(
   });
 }
 
+// ============ MG_CREATE_TEMPLATE_SPACE (v3.3.0) ============
+//
+// Cria automaticamente um TEMPLATE SPACE com N image gens (Nano Banana 2 +
+// 9:16 + 1K + Unlimited ON). Cada image gen e LOCK-verified. Pipeline depois
+// duplica esse template e usa cada image gen pra criar 1 video gen Kling 2.5
+// on-demand por take.
+
+export type CreateTemplatePayload = {
+  name?: string;
+  pairs?: number; // default 50, max 100
+};
+
+export type CreateTemplateResult = {
+  spaceId: string;
+  url: string;
+  name: string;
+  imageGenIds: string[];
+  pairs: number;
+  failed: Array<{ idx: number; error: string }>;
+};
+
+export function createMagnificTemplate(
+  payload: CreateTemplatePayload,
+  onProgress?: ProgressFn,
+): Promise<CreateTemplateResult> {
+  installListener();
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      reject(new Error('Sem window.'));
+      return;
+    }
+    const requestId = newRequestId('tplbuild');
+    pending.set(requestId, {
+      resolveType: 'MG_CREATE_TEMPLATE_SPACE_RESULT',
+      progressType: 'MG_CREATE_TEMPLATE_SPACE_PROGRESS',
+      resolve: (d) =>
+        resolve({
+          spaceId: String(d.spaceId ?? ''),
+          url: String(d.url ?? ''),
+          name: String(d.name ?? ''),
+          imageGenIds: Array.isArray(d.imageGenIds) ? d.imageGenIds : [],
+          pairs: Number(d.pairs ?? 0),
+          failed: Array.isArray(d.failed) ? d.failed : [],
+        }),
+      reject,
+      onProgress,
+    });
+    window.postMessage(
+      { source: PAGE_SRC, type: 'MG_CREATE_TEMPLATE_SPACE', requestId, payload },
+      '*',
+    );
+    // sem timeout — extensao tem 30min, pode demorar
+  });
+}
+
 // ============ MG_RUN_PIPELINE_TEMPLATE (v3.2.0) ============
 //
 // Roda pipeline a partir de um TEMPLATE SPACE pre-criado.

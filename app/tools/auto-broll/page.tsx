@@ -5,6 +5,7 @@ import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { CancelButton } from '@/components/CancelButton';
 import {
+  createMagnificTemplate,
   detectMagnificExtension,
   testMagnificSession,
   type MagnificExtensionStatus,
@@ -59,6 +60,10 @@ export default function AutoBrollPage() {
     'mgAuto:tplSpaceId',
     '',
   );
+  // v3.3.0 — Template Builder state
+  const [buildingTemplate, setBuildingTemplate] = useState<boolean>(false);
+  const [templateBuildProgress, setTemplateBuildProgress] = useState<string | null>(null);
+  const [templatePairsToCreate, setTemplatePairsToCreate] = useToolState<number>('mgAuto:tplPairs', 50);
   const [processing, setProcessing] = useToolState<boolean>(
     'mgAuto:processing',
     false,
@@ -117,6 +122,39 @@ export default function AutoBrollPage() {
       videoPrompt: it.videoPrompt || globalMotion || '',
     }));
   }, [rawPrompts, globalMotion]);
+
+  async function handleCreateTemplate() {
+    if (!extStatus.connected) {
+      setError('Extension Magnific nao detectada.');
+      return;
+    }
+    if (buildingTemplate || processing) return;
+    if (templatePairsToCreate < 1 || templatePairsToCreate > 100) {
+      setError('Pairs deve estar entre 1 e 100.');
+      return;
+    }
+    setError(null);
+    setBuildingTemplate(true);
+    setTemplateBuildProgress('Iniciando...');
+    try {
+      const r = await createMagnificTemplate(
+        { pairs: templatePairsToCreate },
+        (_stage, percent, message) => {
+          setTemplateBuildProgress(`${percent}% — ${message}`);
+        },
+      );
+      // Auto-fill UUID no input TURBO MODE
+      setTemplateSpaceId(r.spaceId);
+      setTemplateBuildProgress(
+        `OK: ${r.pairs} image gens criadas em "${r.name}" (UUID auto-preenchido)${r.failed.length ? `, ${r.failed.length} falhas` : ''}`,
+      );
+    } catch (e) {
+      setError(`Falha ao criar template: ${(e as Error).message}`);
+      setTemplateBuildProgress(null);
+    } finally {
+      setBuildingTemplate(false);
+    }
+  }
 
   async function handleTestSession() {
     setTestingSession(true);
@@ -331,7 +369,7 @@ ou texto livre:
           />
         </label>
 
-        {/* v3.2.0 — TEMPLATE SPACE TURBO */}
+        {/* v3.3.0 — TEMPLATE SPACE TURBO + AUTO BUILDER */}
         <div className="rounded-[12px] border border-fuchsia-400/40 bg-fuchsia-400/5 p-3">
           <label className="block">
             <span className="label-field flex items-center gap-2">
@@ -351,21 +389,54 @@ ou texto livre:
               type="text"
               value={templateSpaceId}
               onChange={(e) => setTemplateSpaceId(e.target.value)}
-              placeholder="Cola UUID de space template pre-criado com >= N pares Kling 2.5 LOCK (deixa vazio pra modo classico)"
+              placeholder="Cola UUID, ou clica 'Criar template auto' embaixo (deixa vazio pra modo classico)"
               className="input-field font-mono text-xs"
-              disabled={processing}
+              disabled={processing || buildingTemplate}
             />
-            <div className="mt-1 text-xs text-text-muted">
-              <strong className="text-fuchsia-300">TURBO:</strong> duplica template (50 image gens) → atribui prompts
-              → cria video gen Kling 2.5 LOCK on-demand → dispara.
-              {' '}
-              <strong className="text-text">SETUP MANUAL UMA VEZ:</strong> cria space com <strong>SO 50 IMAGE GENS</strong>{' '}
-              (Nano Banana 2 + 9:16 + 1K + Unlimited ON, prompts vazios — SEM video gens). Cola o UUID aqui.
-              {' '}
-              <strong className="text-lime">GARANTIA ABSOLUTA:</strong> a extensao v3.2.1 BLOQUEIA Seedance/Veo/Runway/Kling 2.6
-              etc — se qualquer modelo proibido for detectado num video node, batch ABORTA antes do dispatch (zero gasto credito).
-            </div>
           </label>
+
+          {/* Auto-builder row */}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-text-muted">Auto-builder:</span>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={templatePairsToCreate}
+              onChange={(e) => setTemplatePairsToCreate(Math.max(1, Math.min(100, Number(e.target.value) || 50)))}
+              className="input-field w-20 text-xs"
+              disabled={processing || buildingTemplate}
+              title="Quantos image gens criar (1-100)"
+            />
+            <span className="text-xs text-text-muted">image gens</span>
+            <button
+              type="button"
+              onClick={handleCreateTemplate}
+              disabled={processing || buildingTemplate || !extStatus.connected}
+              className={
+                'rounded-[8px] border px-3 py-1.5 text-xs font-semibold transition ' +
+                (buildingTemplate
+                  ? 'border-fuchsia-400 bg-fuchsia-400/30 text-fuchsia-100 cursor-wait'
+                  : 'border-fuchsia-400 bg-fuchsia-400/10 text-fuchsia-200 hover:bg-fuchsia-400/20')
+              }
+            >
+              {buildingTemplate ? 'Construindo...' : '🪄 Criar template auto'}
+            </button>
+          </div>
+
+          {templateBuildProgress && (
+            <div className="mt-2 rounded-[6px] border border-fuchsia-400/30 bg-fuchsia-400/5 px-2 py-1 font-mono text-[11px] text-fuchsia-200">
+              {templateBuildProgress}
+            </div>
+          )}
+
+          <div className="mt-2 text-xs text-text-muted">
+            <strong className="text-fuchsia-300">TURBO:</strong> duplica template → atribui prompts → cria video gen Kling 2.5 LOCK on-demand → dispara.
+            {' '}
+            <strong className="text-text">SETUP:</strong> clica "🪄 Criar template auto" pra extension construir N image gens (Nano Banana 2 + 9:16 + 1K + Unlimited ON) e auto-preencher o UUID aqui.
+            {' '}
+            <strong className="text-lime">GARANTIA ABSOLUTA:</strong> v3.2.3+ BLOQUEIA Seedance/Veo/Runway/Kling 2.6 etc — modelo errado num video node = batch ABORTA antes do dispatch (zero gasto credito).
+          </div>
         </div>
 
         {error && (
