@@ -20,6 +20,7 @@
 
 import { decodeAudioRobust, detectSilences } from './audio-engine';
 import { extractAudio, concatAvatarParts, concatVideosFast, cutVideoSegments } from './ffmpeg-worker';
+import { isolateVoice, type VoiceIsolatorMode } from './voice-isolator';
 
 export type VAPipelineAvatar = {
   /** AVA01, AVA02, ... — usado no filename de output */
@@ -56,10 +57,28 @@ export type VAPipelineInput = {
   }) => Promise<Blob>;
   /** Cancelado? */
   isCancelled?: () => boolean;
+  /** Voice isolation antes do split (CRITICO pra lipsync nao ficar
+   *  horrivel quando AD original tem musica/SFX). Default TRUE.
+   *  - true: aplica isolateVoice() apos extractAudio
+   *  - false: usa audio raw (NAO RECOMENDADO — lipsync vai mixar voz+musica) */
+  useVoiceIsolation?: boolean;
+  /** Modo do voice isolator. Default 'auto' (detecta stereo/mono).
+   *  - 'auto': stereo→CCE, mono→bandpass
+   *  - 'center': forca CCE (so use se confirmado stereo bem mixado)
+   *  - 'bandpass': so highpass+lowpass+compand
+   *  - 'aggressive': denoise + compand mais pesado (audio sujo) */
+  voiceIsolatorMode?: VoiceIsolatorMode;
 };
 
 export type VAPipelineProgress = {
-  stage: 'extract_audio' | 'split_audio' | 'dispatch' | 'mount' | 'zip' | 'done';
+  stage:
+    | 'extract_audio'
+    | 'isolate_voice'   // novo: voice isolation pre-split pra lipsync limpo
+    | 'split_audio'
+    | 'dispatch'
+    | 'mount'
+    | 'zip'
+    | 'done';
   message: string;
   percent: number;
   avatarIdx?: number;
@@ -183,7 +202,47 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
   const adVideoBlob = input.adVideoBytes instanceof Blob
     ? input.adVideoBytes
     : new Blob([input.adVideoBytes as BlobPart], { type: 'video/mp4' });
-  const audioBlob = await extractAudio(adVideoBlob);
+  const rawAudioBlob = await extractAudio(adVideoBlob);
+
+  // 1.5. Voice isolation — CRITICO pra lipsync limpo (sem musica/SFX/ruido)
+  // Default true. Pra desligar (debug): useVoiceIsolation:false na input.
+  const useVoiceIsolation = input.useVoiceIsolation !== false;
+  let audioBlob: Blob = rawAudioBlob;
+  if (useVoiceIsolation) {
+    progress({
+      stage: 'isolate_voice',
+      message: 'Isolando voz (removendo musica/SFX/ruido)...',
+      percent: 10,
+    });
+    try {
+      audioBlob = await isolateVoice(rawAudioBlob, {
+        mode: input.voiceIsolatorMode ?? 'auto',
+        format: 'wav',
+        onProgress: (p) => {
+          progress({
+            stage: 'isolate_voice',
+            message: `Isolando voz (${Math.round(p.ratio * 100)}%)...`,
+            percent: 10 + Math.round(p.ratio * 4),
+          });
+        },
+      });
+      progress({
+        stage: 'isolate_voice',
+        message: 'Voz isolada — lipsync vai usar audio limpo.',
+        percent: 14,
+      });
+    } catch (e) {
+      // Se isolation falhar, NAO aborta: usa audio raw com warning.
+      // Pior caso = lipsync com musica (estado atual), mas pipeline nao quebra.
+      console.warn('[va-pipeline] voice isolation falhou, usando audio raw:', e);
+      progress({
+        stage: 'isolate_voice',
+        message: 'Voice isolation falhou — seguindo com audio raw (lipsync pode ficar misturado).',
+        percent: 14,
+      });
+      audioBlob = rawAudioBlob;
+    }
+  }
 
   // 2. Decode + detect silencios + plan boundaries
   progress({ stage: 'split_audio', message: 'Analisando silencios pra split sem cortar fala...', percent: 15 });
