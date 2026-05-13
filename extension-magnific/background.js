@@ -135,6 +135,45 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
+  // v3.4.7: REAL MOUSE CLICK via chrome.debugger CDP.
+  // Content script chama isso quando dispatched events nao funcionam (dropdown options
+  // do Magnific). Background attaches debugger pro tab + dispatches Input.dispatchMouseEvent
+  // que simula REAL mouse click (mesmo que MCP/Chrome devtools fazem).
+  if (msg.type === 'MG_REAL_CLICK') {
+    const tabId = sender.tab?.id;
+    const { x, y } = msg.payload || {};
+    if (!tabId || typeof x !== 'number' || typeof y !== 'number') {
+      sendResponse({ ok: false, error: 'invalid tabId/coords' });
+      return false;
+    }
+    (async () => {
+      const target = { tabId };
+      try {
+        // Try attach (may already be attached, that's fine)
+        try { await chrome.debugger.attach(target, '1.3'); } catch (e) {
+          if (!/already/i.test(e?.message || '')) {
+            // re-throw if not "already attached"
+            throw e;
+          }
+        }
+        // Move + press + release at coords (REAL mouse click)
+        await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+          type: 'mouseMoved', x, y, button: 'none', buttons: 0, clickCount: 0
+        });
+        await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+          type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1
+        });
+        await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+          type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1
+        });
+        sendResponse({ ok: true });
+      } catch (e) {
+        sendResponse({ ok: false, error: e?.message || String(e) });
+      }
+    })();
+    return true; // keep channel open for async sendResponse
+  }
+
   // v3.4.2: SELF-RELOAD — bridge ou page pede a extension pra recarregar-se.
   // chrome.runtime.reload() reinicia o service worker E re-injeta todos os
   // content scripts. Util quando shippado nova versao e usuario nao quer ir

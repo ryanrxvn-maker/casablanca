@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.4.6';
+const DARKO_MG_VERSION = '3.4.7';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -1106,6 +1106,37 @@ function findNodeElement(uuid) {
 
 // ---- Generic UI helpers ----
 
+/**
+ * v3.4.7 REAL MOUSE CLICK via chrome.debugger CDP — usa o background SW pra
+ * disparar real click no tab atual. Necessario pra dropdown options do Magnific
+ * (dispatched events nao funcionam — validado live).
+ *
+ * @param {Element} el - elemento DOM a clicar
+ * @returns {Promise<boolean>} true se click foi disparado com sucesso
+ */
+async function clickViaCDP(el) {
+  if (!el) return false;
+  try {
+    const r = el.getBoundingClientRect();
+    if (!r || r.width === 0) return false;
+    const x = Math.round(r.x + r.width / 2);
+    const y = Math.round(r.y + r.height / 2);
+    return await new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: 'MG_REAL_CLICK', payload: { x, y } }, (resp) => {
+        if (chrome.runtime.lastError) {
+          console.warn('[clickViaCDP] lastError:', chrome.runtime.lastError.message);
+          resolve(false);
+          return;
+        }
+        resolve(!!resp?.ok);
+      });
+    });
+  } catch (e) {
+    console.warn('[clickViaCDP] error:', e?.message);
+    return false;
+  }
+}
+
 function clickRealElement(el) {
   if (!el) return false;
   // v3.4.5: STRATEGY HYBRIDA pra Vue Flow + dropdown options funcionarem ambos.
@@ -1675,14 +1706,25 @@ async function selectModelInNode(node, displayName) {
     throw new Error('Option "' + displayName + '" not found after typing');
   }
 
-  // Step 6: click option (multi-strategy)
-  SMLog('6) clicking option');
-  // Try clicking the deepest target (text node parent) AND the option itself AND its clickable ancestor
+  // Step 6: click option via CDP REAL CLICK (v3.4.7)
+  // dispatched events nao funcionam pra dropdown options do Magnific (validado live).
+  // Usa chrome.debugger Input.dispatchMouseEvent via background — REAL click identico
+  // a user clicando.
+  SMLog('6) clicking option via CDP REAL CLICK');
   const clickable = opt.closest('button,[role=option],[role=menuitem],li,a') || opt;
-  SMLog('6) clickable ancestor:', clickable.tagName + (clickable !== opt ? ' (parent of opt)' : ''));
-  clickRealElement(clickable);
+  SMLog('6) clickable target:', clickable.tagName);
+  // Scroll into view antes do real click (coords usadas pelo CDP sao viewport-relative)
+  clickable.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  await sleep(200);
+  const cdpOk = await clickViaCDP(clickable);
+  SMLog('6) CDP click result:', cdpOk);
+  if (!cdpOk) {
+    // Fallback: dispatched events (mesmo que provavelmente nao funcione)
+    SMLog('6) CDP falhou, fallback dispatched events');
+    clickRealElement(clickable);
+  }
   await sleep(900);
-  SMLog('6) DONE — sleep completed');
+  SMLog('6) DONE');
 }
 
 async function selectAspectInNode(node, aspect) {
@@ -1696,24 +1738,29 @@ async function selectAspectInNode(node, aspect) {
     return null;
   }, 4000);
   if ((dd.textContent || '').trim() === aspect) return;
-  clickRealElement(dd);
-  await sleep(400);
+  // v3.4.7: real click pro dropdown trigger tambem (consistente)
+  await clickViaCDP(dd) || clickRealElement(dd);
+  await sleep(500);
   const opt = await waitFor(() => {
     const all = Array.from(document.querySelectorAll('div,li,button,[role=option]'));
     const matches = all.filter((e) => {
       if (e.offsetParent === null) return false;
-      if (e.getBoundingClientRect().width < 5 || e.getBoundingClientRect().width > 200) return false;
+      const r = e.getBoundingClientRect();
+      if (r.width < 5 || r.width > 200) return false;
       return (e.textContent || '').trim() === aspect;
     });
     matches.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
     return matches[0] || null;
   }, 3000);
-  clickRealElement(opt);
-  await sleep(400);
+  const clickable = opt.closest('button,[role=option],[role=menuitem],li,a') || opt;
+  clickable.scrollIntoView({ block: 'nearest' });
+  await sleep(150);
+  const cdpOk = await clickViaCDP(clickable);
+  if (!cdpOk) clickRealElement(clickable);
+  await sleep(500);
 }
 
 async function selectQualityInNode(node, qualityLabel) {
-  // Dropdown mostra "1K", "2K", "4K", "720p", "1080p", "Auto", etc.
   const dd = await waitFor(() => {
     const all = node.querySelectorAll('button,[role=button]');
     for (const b of all) {
@@ -1723,16 +1770,20 @@ async function selectQualityInNode(node, qualityLabel) {
     return null;
   }, 3000);
   if ((dd.textContent || '').trim().toLowerCase() === qualityLabel.toLowerCase()) return;
-  clickRealElement(dd);
-  await sleep(350);
+  await clickViaCDP(dd) || clickRealElement(dd);
+  await sleep(450);
   const opt = await waitFor(() => {
     const all = Array.from(document.querySelectorAll('div,li,button,[role=option]'));
     const matches = all.filter((e) => (e.textContent || '').trim().toLowerCase() === qualityLabel.toLowerCase());
     matches.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
     return matches[0] || null;
   }, 3000);
-  clickRealElement(opt);
-  await sleep(350);
+  const clickable = opt.closest('button,[role=option],[role=menuitem],li,a') || opt;
+  clickable.scrollIntoView({ block: 'nearest' });
+  await sleep(150);
+  const cdpOk = await clickViaCDP(clickable);
+  if (!cdpOk) clickRealElement(clickable);
+  await sleep(450);
 }
 
 async function selectDurationInNode(node, seconds) {
@@ -1746,20 +1797,25 @@ async function selectDurationInNode(node, seconds) {
     return null;
   }, 4000);
   if ((dd.textContent || '').trim() === seconds + 's') return;
-  clickRealElement(dd);
-  await sleep(400);
+  await clickViaCDP(dd) || clickRealElement(dd);
+  await sleep(500);
   const opt = await waitFor(() => {
     const all = Array.from(document.querySelectorAll('div,li,button,[role=option]'));
     const matches = all.filter((e) => {
       if (e.offsetParent === null) return false;
-      if (e.getBoundingClientRect().width < 5 || e.getBoundingClientRect().width > 200) return false;
+      const r = e.getBoundingClientRect();
+      if (r.width < 5 || r.width > 200) return false;
       return (e.textContent || '').trim() === seconds + 's';
     });
     matches.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
     return matches[0] || null;
   }, 3000);
-  clickRealElement(opt);
-  await sleep(400);
+  const clickable = opt.closest('button,[role=option],[role=menuitem],li,a') || opt;
+  clickable.scrollIntoView({ block: 'nearest' });
+  await sleep(150);
+  const cdpOk = await clickViaCDP(clickable);
+  if (!cdpOk) clickRealElement(clickable);
+  await sleep(500);
 }
 
 /**
