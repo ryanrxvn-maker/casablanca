@@ -213,7 +213,7 @@ export async function runMagnificPipeline(
     try {
       const { base64, size } = await downloadMagnificAsset(s.videoUrl);
       const blob = base64ToBlob(base64, 'video/mp4');
-      filesForZip.push({ name: `take${s.idx}.mp4`, data: blob });
+      filesForZip.push({ name: `parte${s.idx}.mp4`, data: blob });
       manifest.push({
         idx: s.idx,
         imagePrompt: takes[i].imagePrompt,
