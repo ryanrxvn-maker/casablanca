@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "DARKO LAB — Magnific Auto",
-  "version": "3.3.1",
-  "description": "DARKO LAB Magnific Auto v3.3.1 — ROBUSTEZ: (1) findOrCreateMagnificTab prefere TAB ATIVO (foco) + multi-tier ranking, evita rotear pra tab CDP-controlled. (2) ensureContentLoaded faz double-PING + chrome.scripting.executeScript + verify pos-inject — se falhar, erro CLARO ao inves de stall mudo. (3) fetchJson retry exponencial em 502/503/504/429/timeout (Magnific instavel em horario de pico). + Template auto-builder + LOCK Kling 2.5.",
+  "version": "3.3.2",
+  "description": "DARKO LAB Magnific Auto v3.3.2 — FIX CRITICO: handleForward agora envolve TUDO em try/catch (findOrCreateMagnificTab, waitForTabComplete, ensureContentLoaded) — antes ensureContentLoaded throw virava unhandled rejection e user via stall mudo. + Heartbeat 60s pro primeiro progress (se content script nao iniciar, ABORTA com erro claro + instrucao 'F5 na aba Magnific'). + Retry exponencial fetchJson 504/timeout + tab routing inteligente + LOCK Kling 2.5.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",

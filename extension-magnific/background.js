@@ -163,6 +163,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'MG_TAB_PROGRESS') {
     const job = pendingJobs.get(msg.requestId);
     if (job) {
+      // v3.3.2: clear setup heartbeat assim que chega primeiro progress
+      if (!job.firstProgressAt) {
+        job.firstProgressAt = Date.now();
+        if (job.heartbeatId) { clearTimeout(job.heartbeatId); job.heartbeatId = null; }
+      }
       reportToPage(job.bridgeTabId, msg.requestId, msg.progressType, msg.payload);
     }
     return false;
@@ -171,58 +176,91 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 async function handleForward(msg, bridgeTabId) {
   const requestId = msg.requestId;
-  const tab = await findOrCreateMagnificTab();
-  await waitForTabComplete(tab.id);
-  await ensureContentLoaded(tab.id);
 
-  // Timeout maximo por tipo
-  const timeouts = {
-    MG_GENERATE_IMAGE: 240000,   // 4min
-    MG_ANIMATE_IMAGE: 720000,    // 12min
-    MG_DOWNLOAD_ASSET: 120000,
-    // Pipeline batch: 30 takes em relaxed mode (com 12 paralelos imagens + 6 paralelos
-    // videos) pode levar 1-2h. Damos 4h de margem.
-    MG_RUN_PIPELINE: 14400000,
-    MG_RUN_PIPELINE_TEMPLATE: 14400000, // 4h (mesma janela)
-    MG_CREATE_TEMPLATE_SPACE: 1800000,  // 30min (50 image gens em sequencia)
-  };
-  const timeoutMs = timeouts[msg.type] || 60000;
-
-  const timeoutId = setTimeout(() => {
-    if (pendingJobs.has(requestId)) {
-      pendingJobs.delete(requestId);
-      reportToPage(bridgeTabId, requestId, msg.type + '_RESULT', {
-        ok: false,
-        error: `Timeout ${timeoutMs / 1000}s no ${msg.type}.`,
-      });
-    }
-  }, timeoutMs);
-  pendingJobs.set(requestId, { bridgeTabId, timeoutId });
-
+  // v3.3.2 ROBUSTEZ TOTAL: TUDO dentro de try/catch.
+  // Antes (v3.3.1): se findOrCreateMagnificTab / waitForTabComplete / ensureContentLoaded
+  // lancasse, o erro virava unhandled promise rejection e o user via STALL MUDO.
+  // Agora: erro propaga 100% pro user via reportToPage.
   try {
+    const tab = await findOrCreateMagnificTab();
+    await waitForTabComplete(tab.id);
+    await ensureContentLoaded(tab.id);
+
+    // Timeout maximo por tipo
+    const timeouts = {
+      MG_GENERATE_IMAGE: 240000,
+      MG_ANIMATE_IMAGE: 720000,
+      MG_DOWNLOAD_ASSET: 120000,
+      MG_RUN_PIPELINE: 14400000,
+      MG_RUN_PIPELINE_TEMPLATE: 14400000,
+      MG_CREATE_TEMPLATE_SPACE: 1800000,
+    };
+    const timeoutMs = timeouts[msg.type] || 60000;
+
+    const timeoutId = setTimeout(() => {
+      if (pendingJobs.has(requestId)) {
+        pendingJobs.delete(requestId);
+        reportToPage(bridgeTabId, requestId, msg.type + '_RESULT', {
+          ok: false,
+          error: `Timeout ${timeoutMs / 1000}s no ${msg.type}.`,
+        });
+      }
+    }, timeoutMs);
+    pendingJobs.set(requestId, { bridgeTabId, timeoutId });
+
+    // v3.3.2: aguarda heartbeat de progress dentro de SETUP_HEARTBEAT_MS — se
+    // nao chegar nenhum progress nesse tempo, ABORTA com erro claro. Isso evita
+    // o stall de 4h se o content script for messageado mas nao processar.
+    const SETUP_HEARTBEAT_MS = 60000; // 60s pra ver ALGUM progress de Phase 0/1
+    const heartbeatId = setTimeout(() => {
+      if (pendingJobs.has(requestId)) {
+        const job = pendingJobs.get(requestId);
+        if (!job.firstProgressAt) {
+          clearTimeout(job.timeoutId);
+          pendingJobs.delete(requestId);
+          reportToPage(bridgeTabId, requestId, msg.type + '_RESULT', {
+            ok: false,
+            error:
+              `SETUP_HEARTBEAT_TIMEOUT (${SETUP_HEARTBEAT_MS / 1000}s sem progress). ` +
+              `Causa provavel: content script nao iniciou ou Magnific nao respondeu. ` +
+              `Solucao: F5 na aba Magnific + retry. Se persistir, abre DevTools (F12) na aba Magnific Console pra ver erros.`,
+          });
+        }
+      }
+    }, SETUP_HEARTBEAT_MS);
+    const job = pendingJobs.get(requestId);
+    if (job) { job.heartbeatId = heartbeatId; }
+
     chrome.tabs.sendMessage(tab.id, {
       type: msg.type,
       requestId,
       payload: msg.payload,
     }).catch((e) => {
       if (pendingJobs.has(requestId)) {
-        clearTimeout(timeoutId);
+        const j = pendingJobs.get(requestId);
+        clearTimeout(j.timeoutId);
+        if (j.heartbeatId) clearTimeout(j.heartbeatId);
         pendingJobs.delete(requestId);
         reportToPage(bridgeTabId, requestId, msg.type + '_RESULT', {
           ok: false,
-          error: 'Aba Magnific nao respondeu: ' + (e?.message ?? String(e)),
+          error:
+            'Aba Magnific nao recebeu mensagem (' + (e?.message ?? String(e)) + '). ' +
+            'Solucao: F5 na aba Magnific (content script pode estar morto apos reload da extension).',
         });
       }
     });
   } catch (e) {
+    // ensureContentLoaded / findOrCreateMagnificTab THROW chegam aqui
     if (pendingJobs.has(requestId)) {
-      clearTimeout(timeoutId);
+      const j = pendingJobs.get(requestId);
+      clearTimeout(j.timeoutId);
+      if (j.heartbeatId) clearTimeout(j.heartbeatId);
       pendingJobs.delete(requestId);
-      reportToPage(bridgeTabId, requestId, msg.type + '_RESULT', {
-        ok: false,
-        error: 'Erro: ' + (e?.message ?? String(e)),
-      });
     }
+    reportToPage(bridgeTabId, requestId, msg.type + '_RESULT', {
+      ok: false,
+      error: 'Setup falhou: ' + (e?.message ?? String(e)),
+    });
   }
 }
 
