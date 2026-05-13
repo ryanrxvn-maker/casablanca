@@ -135,6 +135,48 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
+  // v3.5.1: REAL MOUSE CLICK via chrome.debugger CDP — usado SO pra option click
+  // em dropdown (Magnific bloqueou dispatched events com isTrusted check). LOCK
+  // garante que nada seja dispatched se Kling 2.5 nao for selecionado.
+  if (msg.type === 'MG_REAL_CLICK') {
+    const tabId = sender.tab?.id;
+    const { x, y } = msg.payload || {};
+    if (!tabId || typeof x !== 'number' || typeof y !== 'number') {
+      sendResponse({ ok: false, error: 'invalid tabId/coords' });
+      return false;
+    }
+    (async () => {
+      const target = { tabId };
+      let attached = false;
+      try {
+        try { await chrome.debugger.attach(target, '1.3'); attached = true; } catch (e) {
+          if (/already/i.test(e?.message || '')) {
+            attached = true;
+          } else {
+            throw e;
+          }
+        }
+        await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+          type: 'mouseMoved', x, y, button: 'none', buttons: 0, clickCount: 0
+        });
+        await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+          type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1
+        });
+        await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+          type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1
+        });
+        sendResponse({ ok: true });
+      } catch (e) {
+        sendResponse({ ok: false, error: e?.message || String(e) });
+      } finally {
+        if (attached) {
+          try { await chrome.debugger.detach(target); } catch {}
+        }
+      }
+    })();
+    return true;
+  }
+
   // v3.4.2: SELF-RELOAD — bridge ou page pede a extension pra recarregar-se.
   // chrome.runtime.reload() reinicia o service worker E re-injeta todos os
   // content scripts. Util quando shippado nova versao e usuario nao quer ir

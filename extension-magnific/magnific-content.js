@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.5.0';
+const DARKO_MG_VERSION = '3.5.1';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -512,91 +512,107 @@ async function handleRunPipeline(payload, onProgress) {
     }
   }
 
-  // PHASE 3: Imagens em ondas de imageConcurrency (default 12)
-  onProgress({ phase: 'image-batch', percent: 32, message: `Disparando imagens (concorrencia ${imageConcurrency})...` });
-  await runWithConcurrency(
-    pairs.filter((p) => p.status === 'setup-ok'),
-    imageConcurrency,
-    async (pair) => {
-      try {
-        // SIMPLIFIED v3.4.0: removido pre-execute LOCK check que adicionava
-        // delay e podia travar. selectModelInNode strict match ja garantiu
-        // Kling 2.5 / Nano Banana 2. force_credits:false protege wallet.
-        await selectNodeAndEnsureUnlimited(pair.imageNodeId);
-        const { workflowRunId } = await executeWorkflow(pair.imageNodeId, space.spaceId);
-        pair.imageRunId = workflowRunId;
-        const expectedImgPrompt = takes.find((t) => (t.idx ?? 0) === pair.idx)?.imagePrompt || '';
-        // Relaxed mode pode demorar 5-7 min cada imagem quando ha 12 paralelos
-        const url = await waitForNodeImage(pair.imageNodeId, 600000, expectedImgPrompt);
-        pair.imageUrl = url;
-        pair.imageStatus = 'ok';
-      } catch (e) {
-        pair.imageStatus = 'failed';
-        pair.imageError = e.message;
-      }
-      onProgress({
-        phase: 'image-batch',
-        percent: 32 + Math.round((pairs.filter((p) => p.imageStatus === 'ok').length / pairs.length) * 30),
-        message: `Imagens prontas: ${pairs.filter((p) => p.imageStatus === 'ok').length}/${pairs.length}`,
-      });
-    },
-  );
+  // ========================================================================
+  // PHASE 3+4 INTERLEAVED (v3.5.1) — per user directive:
+  //   "imagem pronta = anima imediatamente no kling, nao espera todas"
+  // Semaforos: 12 image slots, 6 video slots (Kling 2.5 limite real)
+  // Cada par roda independente: dispatch image → wait image done → dispatch
+  // video → wait video done. 12 pares em paralelo, mas video gen entra em
+  // queue de 6 slots maximos.
+  // ========================================================================
+  const setupOkPairs = pairs.filter((p) => p.status === 'setup-ok');
+  onProgress({ phase: 'pipeline', percent: 32, message: `Iniciando ${setupOkPairs.length} pares (12 img + 6 vid simultaneos)...` });
 
-  // PHASE 4: Videos em ondas de videoConcurrency (default 6)
-  const animatable = pairs.filter((p) => p.imageStatus === 'ok' && p.videoNodeId);
-  onProgress({ phase: 'video-batch', percent: 62, message: `Disparando videos Kling (concorrencia ${videoConcurrency})...` });
-  await runWithConcurrency(
-    animatable,
-    videoConcurrency,
-    async (pair) => {
-      try {
-        // v3.4.4 SAFETY CRITICA: VERIFICA KLING 2.5 ANTES DE DISPARAR VIDEO.
-        // User reportou: 'Seedance 1.5 Pro foi disparado, isso gasta creditos!'
-        // selectModelInNode pode falhar e selecionar Seedance ao inves de Kling.
-        // SOLUCAO: NUNCA dispara workflow_execute sem confirmar Kling 2.5 visivel
-        // E nenhum FORBIDDEN_VIDEO_MODELS no node. Se nao bater, ABORTA esse take.
-        await selectNodeForEdit(pair.videoNodeId);
-        await sleep(400);
-        const btns = nodeButtons(pair.videoNodeId);
-        const hasKling25 = btns.includes('Kling 2.5');
-        const forbidden = FORBIDDEN_VIDEO_MODELS.filter((m) => btns.includes(m));
-        if (!hasKling25 || forbidden.length > 0) {
-          throw new Error(
-            `KLING_LOCK_ABORT pair#${pair.idx}: ` +
-            (hasKling25 ? '' : '[Kling 2.5 NAO selecionado] ') +
-            (forbidden.length ? `[FORBIDDEN=${forbidden.join(',')}] ` : '') +
-            `btns=[${btns.join(',')}]`
-          );
-        }
-        // Verificacao adicional: aspect 9:16 ou Auto (inherit), quality 720p
-        const hasAspect = btns.includes('9:16') || btns.includes('Auto');
-        const has720p = btns.includes('720p');
-        if (!hasAspect || !has720p) {
-          throw new Error(
-            `LOCK_ABORT pair#${pair.idx} config errada: aspect=${hasAspect}, 720p=${has720p} btns=[${btns.join(',')}]`
-          );
-        }
+  // Video semaphore — limita 6 simultaneos
+  let videoActive = 0;
+  const videoQueue = [];
+  const acquireVideoSlot = () => new Promise((resolve) => {
+    if (videoActive < 6) { videoActive++; resolve(); }
+    else videoQueue.push(resolve);
+  });
+  const releaseVideoSlot = () => {
+    videoActive--;
+    if (videoQueue.length > 0) { videoActive++; videoQueue.shift()(); }
+  };
 
-        await selectNodeAndEnsureUnlimited(pair.videoNodeId);
-        const { workflowRunId } = await executeWorkflow(pair.videoNodeId, space.spaceId);
-        pair.videoRunId = workflowRunId;
-        const expectedPrompt = takes.find((t) => (t.idx ?? 0) === pair.idx)?.videoPrompt || '';
-        const url = await waitForNodeVideo(pair.videoNodeId, 900000, expectedPrompt);
-        pair.videoUrl = url;
-        pair.videoStatus = 'ok';
-      } catch (e) {
-        pair.videoStatus = 'failed';
-        pair.videoError = e.message;
-        console.error(`[VIDEO LOCK pair#${pair.idx}]`, e.message);
+  const reportProgress = () => {
+    const imgOk = pairs.filter((p) => p.imageStatus === 'ok').length;
+    const vidOk = pairs.filter((p) => p.videoStatus === 'ok').length;
+    const imgFail = pairs.filter((p) => p.imageStatus === 'failed').length;
+    const vidFail = pairs.filter((p) => p.videoStatus === 'failed').length;
+    const percent = 32 + Math.round(((imgOk + vidOk * 2) / (setupOkPairs.length * 3)) * 65);
+    onProgress({
+      phase: 'pipeline',
+      percent: Math.min(percent, 97),
+      message: `IMG ${imgOk}/${setupOkPairs.length} (${imgFail} falha) · VID Kling 2.5 ${vidOk}/${setupOkPairs.length} (${vidFail} falha)`,
+    });
+  };
+
+  async function processPair(pair) {
+    // STEP A: dispatch IMAGE workflow (Nano Banana 2)
+    try {
+      await selectNodeAndEnsureUnlimited(pair.imageNodeId);
+      const { workflowRunId: imgRunId } = await executeWorkflow(pair.imageNodeId, space.spaceId);
+      pair.imageRunId = imgRunId;
+      const expectedImgPrompt = takes.find((t) => (t.idx ?? 0) === pair.idx)?.imagePrompt || '';
+      const url = await waitForNodeImage(pair.imageNodeId, 600000, expectedImgPrompt);
+      pair.imageUrl = url;
+      pair.imageStatus = 'ok';
+      reportProgress();
+    } catch (e) {
+      pair.imageStatus = 'failed';
+      pair.imageError = e.message;
+      reportProgress();
+      return; // Sem imagem, sem video
+    }
+
+    // STEP B: image pronta → adquire video slot (max 6) → dispatch VIDEO
+    if (!pair.videoNodeId) {
+      pair.videoStatus = 'skipped';
+      return;
+    }
+    await acquireVideoSlot();
+    try {
+      // LOCK v3.4.4 — verifica Kling 2.5 antes de dispatch (zero risco Seedance)
+      await selectNodeForEdit(pair.videoNodeId);
+      await sleep(400);
+      const btns = nodeButtons(pair.videoNodeId);
+      const hasKling25 = btns.includes('Kling 2.5');
+      const forbidden = FORBIDDEN_VIDEO_MODELS.filter((m) => btns.includes(m));
+      if (!hasKling25 || forbidden.length > 0) {
+        throw new Error(
+          `KLING_LOCK_ABORT pair#${pair.idx}: ` +
+          (hasKling25 ? '' : '[Kling 2.5 NAO selecionado] ') +
+          (forbidden.length ? `[FORBIDDEN=${forbidden.join(',')}] ` : '') +
+          `btns=[${btns.join(',')}]`
+        );
       }
-      const done = pairs.filter((p) => p.videoStatus === 'ok').length;
-      onProgress({
-        phase: 'video-batch',
-        percent: 62 + Math.round((done / animatable.length) * 35),
-        message: `Videos prontos: ${done}/${animatable.length}`,
-      });
-    },
-  );
+      const hasAspect = btns.includes('9:16') || btns.includes('Auto');
+      const has720p = btns.includes('720p');
+      if (!hasAspect || !has720p) {
+        throw new Error(`LOCK_ABORT pair#${pair.idx} config errada: aspect=${hasAspect}, 720p=${has720p}`);
+      }
+
+      await selectNodeAndEnsureUnlimited(pair.videoNodeId);
+      const { workflowRunId: vidRunId } = await executeWorkflow(pair.videoNodeId, space.spaceId);
+      pair.videoRunId = vidRunId;
+      const expectedPrompt = takes.find((t) => (t.idx ?? 0) === pair.idx)?.videoPrompt || '';
+      const vidUrl = await waitForNodeVideo(pair.videoNodeId, 900000, expectedPrompt);
+      pair.videoUrl = vidUrl;
+      pair.videoStatus = 'ok';
+      reportProgress();
+    } catch (e) {
+      pair.videoStatus = 'failed';
+      pair.videoError = e.message;
+      console.error(`[VIDEO LOCK pair#${pair.idx}]`, e.message);
+      reportProgress();
+    } finally {
+      releaseVideoSlot();
+    }
+  }
+
+  // Roda todos os pares em paralelo (max imageConcurrency=12 simultaneos)
+  await runWithConcurrency(setupOkPairs, imageConcurrency, processPair);
 
   // PHASE 5: SAFETY POST-CHECK — confere se credits NAO diminuiram (Unlimited ativo)
   const walletAfter = await fetchJson('/app/api/wallet');
@@ -1126,11 +1142,29 @@ async function pressEnterOnInput(input) {
 }
 
 /**
- * Backwards-compat helper — agora um no-op (CDP foi removido v3.4.9).
- * Mantido pra outras chamadas nao quebrarem; sempre returns false → fallback
- * pra clickRealElement.
+ * v3.5.1: REAL MOUSE CLICK via chrome.debugger CDP — pra option clicks em
+ * dropdowns Magnific (que bloqueou dispatched events com isTrusted check).
  */
-async function clickViaCDP() { return false; }
+async function clickViaCDP(el) {
+  if (!el) return false;
+  try {
+    const r = el.getBoundingClientRect();
+    if (!r || r.width === 0) return false;
+    const x = Math.round(r.x + r.width / 2);
+    const y = Math.round(r.y + r.height / 2);
+    return await new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: 'MG_REAL_CLICK', payload: { x, y } }, (resp) => {
+        if (chrome.runtime.lastError) {
+          resolve(false);
+          return;
+        }
+        resolve(!!resp?.ok);
+      });
+    });
+  } catch {
+    return false;
+  }
+}
 
 function clickRealElement(el) {
   if (!el) return false;
@@ -1703,19 +1737,24 @@ async function selectModelInNode(node, displayName) {
     throw new Error('Option "' + displayName + '" not found after typing');
   }
 
-  // Step 6: v3.4.9 KEYBOARD NAV — press Enter no search input (typed "kling")
-  // pra selecionar o primeiro match highlighted (= Kling 2.5).
-  // Dispatched mouse clicks nao funcionam em dropdown options (validado live).
-  // Mouse click real via chrome.debugger introduzia side effects.
-  // Keyboard Enter is reliable e standard pra searchable dropdowns.
-  SMLog('6) pressing Enter on search input to select highlighted option');
-  await pressEnterOnInput(input);
+  // Step 6: v3.5.1 — TRIPLE STRATEGY:
+  // 1) chrome.debugger CDP real mouse click (most reliable, but bypasses Vue isTrusted check)
+  // 2) Keyboard Enter on search input (fallback)
+  // 3) dispatched events (last resort)
+  // LOCK ainda valida apos: zero risco de dispatch errado mesmo se todos falharem.
+  SMLog('6) clicking option via CDP REAL MOUSE');
+  const clickable = opt.closest('button,[role=option],[role=menuitem],li,a') || opt;
+  clickable.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  await sleep(200);
+  const cdpOk = await clickViaCDP(clickable);
+  SMLog('6) CDP click result:', cdpOk);
+  if (!cdpOk) {
+    SMLog('6) CDP falhou, fallback Enter');
+    await pressEnterOnInput(input);
+    await sleep(300);
+    SMLog('6) Enter fallback fired');
+  }
   await sleep(700);
-  SMLog('6) Enter pressed, sleeping');
-
-  // Fallback: tentar mouse click se Enter nao funcionar (verifica state depois)
-  // O proprio configureWithLockRetry / pre-execute LOCK pega se selecao falhar.
-  await sleep(300);
   SMLog('6) DONE');
 }
 
