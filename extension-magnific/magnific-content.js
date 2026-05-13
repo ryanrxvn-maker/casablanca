@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.2.2';
+const DARKO_MG_VERSION = '3.2.3';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -71,8 +71,13 @@ const LOCK_RETRY_SLEEP_MS = 600;
 // PARANOIA ABSOLUTA — nunca, NUNCA disparar nada que NAO seja Kling 2.5.
 // Se qualquer um desses nomes aparecer como botao visivel num node de video,
 // o LOCK falha e o batch e abortado. Lista derivada de /app/api/video/ai-models.
+//
+// NOTA v3.2.3: 'Auto' REMOVIDO desta lista — descoberto live que 'Auto' aparece
+// como botao no node como ASPECT SETTING (aspect=inherit-from-input), NAO como
+// nome de modelo. Aspect Auto + input 9:16 = video output 9:16 ✓. Modelo real
+// e sempre validado por verifyVid via `btns.includes(VIDEO_MODEL_LOCK)` que
+// e strict equality em 'Kling 2.5'.
 const FORBIDDEN_VIDEO_MODELS = [
-  'Auto',                       // pega o "auto" do Magnific (pode cair em qualquer modelo)
   'Seedance 1.5 Pro',           // o bug observado live na 30-pair stress
   'Seedance 1.5',
   'Seedance',
@@ -1011,15 +1016,23 @@ async function verifyImg(uuid) {
  * PARANOIA ABSOLUTA — directive do user: "JAMAIS USAR OUTRA IA DE VIDEO QUE NAO
  * SEJA O KLING 2.5 720P unlimited. TENHA CERTEZA DISSO ABSOLUTA."
  *
+ * Validacao live (v3.2.3, espaco real): video gen mostra botoes como
+ *   ["Kling 2.5", "Auto" (=aspect inherit), "10s", "720p"]
+ * Aspect "Auto" = inherit from input image. Como image gen LOCK garante 9:16,
+ * video output e sempre 9:16. Por isso aceitamos aspect = '9:16' OU 'Auto'.
+ * Pos-execucao, aspect button vira "716 × 1284" (dim real do output), mas
+ * verifyVid roda PRE-execute entao isso nao e issue.
+ *
  * ASYNC: chama selectNodeForEdit primeiro pra Vue Flow expor os botoes ocultos.
  */
 async function verifyVid(uuid) {
   try { await selectNodeForEdit(uuid); } catch {}
   const btns = nodeButtons(uuid);
   const allowedDurations = ['10s', '5s'];
+  const allowedAspects = [VIDEO_ASPECT_LOCK, 'Auto']; // 9:16 ou Auto (inherit from 9:16 input)
   const missing = [];
   if (!btns.includes(VIDEO_MODEL_LOCK)) missing.push(`model!=${VIDEO_MODEL_LOCK}`);
-  if (!btns.includes(VIDEO_ASPECT_LOCK)) missing.push(`aspect!=${VIDEO_ASPECT_LOCK}`);
+  if (!allowedAspects.some((a) => btns.includes(a))) missing.push(`aspect!=[9:16|Auto]`);
   if (!btns.includes(VIDEO_QUALITY_LOCK)) missing.push(`quality!=${VIDEO_QUALITY_LOCK}`);
   if (!allowedDurations.some((d) => btns.includes(d))) missing.push(`duration!=[10s|5s]`);
 

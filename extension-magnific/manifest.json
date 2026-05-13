@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "DARKO LAB — Magnific Auto",
-  "version": "3.2.2",
-  "description": "DARKO LAB Magnific Auto v3.2.2 — FIX CRITICO: verifyImg/verifyVid agora async + auto-seleciona node antes de ler botoes (descoberto live: Magnific Vue Flow esconde botoes config quando node nao esta selecionado). LOCK + FORBIDDEN_VIDEO_MODELS guard funciona corretamente agora. Template com 50 image gens pre-criadas + video gen on-demand Kling 2.5 LOCK.",
+  "version": "3.2.3",
+  "description": "DARKO LAB Magnific Auto v3.2.3 — FIX descoberto live: aspect 'Auto' (inherit-from-input) e VALIDO quando input image gen e 9:16. 'Auto' removido de FORBIDDEN_VIDEO_MODELS (e botao de aspect, nao nome de modelo). LOCK aspect aceita '9:16' OR 'Auto'. Provado com node real (Kling 2.5 + 720p + 10s + Auto-aspect → 716x1284 output 9:16).",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
