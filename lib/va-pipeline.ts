@@ -19,8 +19,9 @@
  */
 
 import { decodeAudioRobust, detectSilences } from './audio-engine';
-import { extractAudio, concatAvatarParts, concatVideosFast, cutVideoSegments } from './ffmpeg-worker';
+import { extractAudio, concatAvatarParts, concatVideosFast, cutVideoSegments, overlaySegmentsOnVideo } from './ffmpeg-worker';
 import { isolateVoice, type VoiceIsolatorMode } from './voice-isolator';
+import { detectFacePresence, type SegmentFaceResult } from './face-detector';
 
 export type VAPipelineAvatar = {
   /** AVA01, AVA02, ... — usado no filename de output */
@@ -68,15 +69,28 @@ export type VAPipelineInput = {
    *  - 'bandpass': so highpass+lowpass+compand
    *  - 'aggressive': denoise + compand mais pesado (audio sujo) */
   voiceIsolatorMode?: VoiceIsolatorMode;
+  /** SMART MODE: detecta face em cada segmento do video original, e
+   *  substitui APENAS os segmentos com avatar (face presente). B-rolls
+   *  ficam intactos. Output: 1 MP4 final por avatar com swap aplicado.
+   *  - true: ativa smart mode (default false)
+   *  - threshold default: 0.5 (50% dos frames sampled tem face = "tem avatar")
+   *  - samples per segment default: 5 */
+  smartMode?: boolean;
+  /** Threshold (0-1) de face ratio pra considerar segmento "tem avatar" */
+  smartModeThreshold?: number;
+  /** Samples por segmento na deteccao de face (default 5) */
+  smartModeSamplesPerSegment?: number;
 };
 
 export type VAPipelineProgress = {
   stage:
     | 'extract_audio'
-    | 'isolate_voice'   // novo: voice isolation pre-split pra lipsync limpo
+    | 'isolate_voice'   // voice isolation pre-split pra lipsync limpo
     | 'split_audio'
+    | 'detect_faces'    // SMART MODE: face detection nos segmentos
     | 'dispatch'
     | 'mount'
+    | 'assemble_smart'  // SMART MODE: overlay lipsync no video original
     | 'zip'
     | 'done';
   message: string;
@@ -92,6 +106,14 @@ export type VAPipelineResult = {
   audioSegmentCount: number;
   /** Resumo */
   summary: string;
+  /** SMART MODE stats (so preenchido se smartMode:true) */
+  smartModeStats?: {
+    totalSegments: number;
+    swapSegments: number;       // segmentos com face detectada
+    keepSegments: number;       // segmentos sem face (b-roll mantido)
+    fallbackSegments: number;   // segmentos com fallback "assume talking"
+    detectorFailed: boolean;    // se MediaPipe nao carregou
+  };
 };
 
 /* ============================== AUDIO SPLIT ============================== */
@@ -251,12 +273,86 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
   const boundaries = planAudioSplitBoundaries(audioBuffer.duration, silences, targetSec, minSec, maxSec);
   progress({ stage: 'split_audio', message: `Split planejado: ${boundaries.length} segmentos`, percent: 20 });
 
-  // 3. Slice cada segmento em WAV
-  const segmentWavs: Uint8Array[] = boundaries.map((b) => sliceAudioBufferToWAV(audioBuffer, b.start, b.end));
+  // 3. SMART MODE: face detection nos segmentos do video original
+  const smartMode = input.smartMode === true;
+  let faceResults: SegmentFaceResult[] = [];
+  let smartModeStats: VAPipelineResult['smartModeStats'] | undefined;
+  let activeSwapBoundaries: typeof boundaries = boundaries;
+  let swapIndices: number[] = boundaries.map((_, i) => i); // por default, todos
+
+  if (smartMode) {
+    progress({
+      stage: 'detect_faces',
+      message: `Smart Mode: detectando face em ${boundaries.length} segmentos...`,
+      percent: 22,
+    });
+    try {
+      faceResults = await detectFacePresence({
+        videoBlob: adVideoBlob,
+        segments: boundaries.map((b) => ({ start: b.start, end: b.end })),
+        samplesPerSegment: input.smartModeSamplesPerSegment ?? 5,
+        threshold: input.smartModeThreshold ?? 0.5,
+        isCancelled: input.isCancelled,
+        onProgress: (done, total, msg) => {
+          progress({
+            stage: 'detect_faces',
+            message: msg,
+            percent: 22 + Math.round((done / total) * 8),
+          });
+        },
+      });
+      const fallbackCount = faceResults.filter((r) => r.reason === 'fallback_assume_talking' || r.reason === 'detector_failed').length;
+      const swapCount = faceResults.filter((r) => r.hasAvatar).length;
+      smartModeStats = {
+        totalSegments: faceResults.length,
+        swapSegments: swapCount,
+        keepSegments: faceResults.length - swapCount,
+        fallbackSegments: fallbackCount,
+        detectorFailed: faceResults.every((r) => r.reason === 'detector_failed'),
+      };
+      // Filter swap boundaries
+      swapIndices = faceResults.filter((r) => r.hasAvatar).map((r) => r.segmentIdx);
+      activeSwapBoundaries = swapIndices.map((i) => boundaries[i]);
+      progress({
+        stage: 'detect_faces',
+        message: `Smart Mode: ${swapCount}/${boundaries.length} segmentos com avatar (${faceResults.length - swapCount} b-rolls mantidos)`,
+        percent: 30,
+      });
+      if (activeSwapBoundaries.length === 0) {
+        // Nada pra trocar — output = original.
+        progress({ stage: 'done', message: 'Smart Mode: nenhum segmento com avatar detectado. Output = original.', percent: 100 });
+        return {
+          items: input.avatares.map((av) => ({
+            avaCode: av.avaCode,
+            filename: `${input.baseAdId}-${av.avaCode}-smart.mp4`,
+            blob: adVideoBlob, // copia original
+          })),
+          audioSegmentCount: 0,
+          summary: 'Smart Mode: zero swap (nenhum segmento com face). Output = original.',
+          smartModeStats,
+        };
+      }
+    } catch (e) {
+      // Face detection completamente falhou — fallback: assume todos talking
+      console.warn('[va-pipeline] face detection falhou (fallback):', e);
+      smartModeStats = {
+        totalSegments: boundaries.length,
+        swapSegments: boundaries.length,
+        keepSegments: 0,
+        fallbackSegments: boundaries.length,
+        detectorFailed: true,
+      };
+    }
+  }
+
+  // 3.1. Slice cada segmento em WAV (apenas dos segmentos a serem trocados em smart mode)
+  const segmentWavs: Uint8Array[] = activeSwapBoundaries.map((b) =>
+    sliceAudioBufferToWAV(audioBuffer, b.start, b.end),
+  );
 
   // 4. Pra cada avatar, dispatcha cada segmento + monta
   const items: VAPipelineResult['items'] = [];
-  const totalDispatches = input.avatares.length * boundaries.length;
+  const totalDispatches = input.avatares.length * activeSwapBoundaries.length;
   let dispatchDone = 0;
 
   for (let ai = 0; ai < input.avatares.length; ai++) {
@@ -303,7 +399,37 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
       continue;
     }
 
-    // Mount: concat na ordem
+    if (smartMode) {
+      // SMART MODE: overlay cada lipsync no video original no timestamp exato.
+      // Output: 1 MP4 mesma duracao do original, com avatar trocado apenas onde
+      // tem face (b-rolls intactos). Cut puro, frame-perfect.
+      const smartFilename = `${input.baseAdId}-${av.avaCode}-smart.mp4`;
+      progress({
+        stage: 'assemble_smart',
+        message: `${av.avaCode} · overlay smart: ${videoBlobs.length} segmentos no original...`,
+        percent: 80 + (ai / input.avatares.length) * 15,
+        avatarIdx: ai,
+      });
+      try {
+        const overlays = activeSwapBoundaries.map((b, idx) => ({
+          start: b.start,
+          end: b.end,
+          video: videoBlobs[idx] as Blob,
+        }));
+        const finalVideo = await overlaySegmentsOnVideo(adVideoBlob, overlays);
+        items.push({ avaCode: av.avaCode, filename: smartFilename, blob: finalVideo });
+      } catch (e) {
+        items.push({
+          avaCode: av.avaCode,
+          filename: smartFilename,
+          blob: null,
+          error: 'smart overlay: ' + (e as Error)?.message,
+        });
+      }
+      continue;
+    }
+
+    // Mount classico: concat na ordem (sem smart mode)
     progress({
       stage: 'mount',
       message: `Montando ${av.avaCode} (${videoBlobs.length} takes)...`,
@@ -325,6 +451,8 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
   }
 
   progress({ stage: 'done', message: 'Pipeline concluido', percent: 100 });
-  const summary = `${items.filter((i) => i.blob).length}/${items.length} avatares OK · ${segmentWavs.length} takes por avatar`;
-  return { items, audioSegmentCount: segmentWavs.length, summary };
+  const summary = smartMode
+    ? `${items.filter((i) => i.blob).length}/${items.length} avatares OK · Smart Mode: ${activeSwapBoundaries.length}/${boundaries.length} segmentos trocados`
+    : `${items.filter((i) => i.blob).length}/${items.length} avatares OK · ${segmentWavs.length} takes por avatar`;
+  return { items, audioSegmentCount: segmentWavs.length, summary, smartModeStats };
 }

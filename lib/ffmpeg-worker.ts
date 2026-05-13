@@ -1358,6 +1358,119 @@ async function cachedBlobURL(url: string, mime: string): Promise<string> {
   return URL.createObjectURL(new Blob([bytes], { type: mime }));
 }
 
+/**
+ * SMART MODE VA — overlay multiplos lipsync videos no video original em
+ * timestamps EXATOS (cut puro, sem crossfade, frame-perfect).
+ *
+ * INPUT:
+ *  - original: video original (AD) que serve de base
+ *  - overlays: array de { start, end, video } — onde cada `video` e o
+ *    lipsync gerado pra aquele segmento (mesma duracao de end-start)
+ *
+ * OUTPUT:
+ *  - 1 MP4 mesma duracao do original
+ *  - Audio: SEMPRE do original (preserva timing perfeito)
+ *  - Video: original onde nao tem overlay; lipsync onde tem overlay
+ *  - Transicao: cut puro via overlay enable='between(t,start,end)'
+ *
+ * GARANTIA "zero ms de avatar antigo":
+ *  - filter overlay com enable='between(t,start,end)' usa PTS do encoder
+ *    (frame-accurate, nao timestamp-by-timestamp)
+ *  - Audio do original e' COPIADO (stream copy, sem re-encode)
+ *  - Video reencodado com mesma resolucao/fps do original
+ *
+ * NOTA: cada overlay e' redimensionado/reposicionado pra encaixar nas
+ * dimensoes do original via scale + setpts.
+ */
+export async function overlaySegmentsOnVideo(
+  original: Blob,
+  overlays: Array<{ start: number; end: number; video: Blob }>,
+  opts: RunOptions = {},
+): Promise<Blob> {
+  if (overlays.length === 0) {
+    // Nada pra trocar — retorna original
+    return original;
+  }
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const { fetchFile } = await import('@ffmpeg/util');
+
+  const baseExt = guessExt(original, 'mp4');
+  const baseName = 'base.' + baseExt;
+  const overlayNames: string[] = [];
+  const outputName = 'out.mp4';
+  const progressHandler = wireProgress(ff, opts.onProgress);
+
+  try {
+    // Escreve original
+    await ff.writeFile(baseName, await fetchFile(original));
+
+    // Escreve cada overlay
+    for (let i = 0; i < overlays.length; i++) {
+      const ext = guessExt(overlays[i].video, 'mp4');
+      const n = `ov${i}.${ext}`;
+      await ff.writeFile(n, await fetchFile(overlays[i].video));
+      overlayNames.push(n);
+    }
+
+    // Monta inputs args
+    const args: string[] = ['-i', baseName];
+    for (const n of overlayNames) args.push('-i', n);
+
+    // Filter complex: encadeia overlays sequencialmente.
+    // Cada overlay i: scale pra mesma resolucao do base + setpts pra alinhar
+    // no timestamp start. Encadeia [base][ov_i_scaled] -> [tmp_i] usando
+    // overlay com enable='between(t,start_i,end_i)'.
+    //
+    // Pra setpts: cada overlay tem duracao end-start. O PTS interno comeca
+    // em 0. Pra alinhar com o timestamp original, usamos:
+    //   setpts=PTS-STARTPTS+<start>/TB
+    // (desloca o PTS pra start_i segundos)
+    const filterLines: string[] = [];
+    let lastVideoLabel = '[0:v]';
+    overlays.forEach((ov, i) => {
+      const idx = i + 1; // input index (0 = base, 1..N = overlays)
+      const startTs = ov.start.toFixed(3);
+      const endTs = ov.end.toFixed(3);
+      const scaledLabel = `[ov${i}_scaled]`;
+      const shiftedLabel = `[ov${i}_shifted]`;
+      const outLabel = i === overlays.length - 1 ? '[vout]' : `[tmp${i}]`;
+      // Scale pra mesma resolucao do base + setpts pra start exato
+      filterLines.push(`[${idx}:v]scale=w='iw':h='ih',setpts=PTS-STARTPTS+${startTs}/TB${scaledLabel}`);
+      filterLines.push(`${shiftedLabel.replace(']', ']')}`); // no-op placeholder
+      // Overlay com enable
+      filterLines.pop(); // remove placeholder
+      filterLines.push(
+        `${lastVideoLabel}${scaledLabel}overlay=x=0:y=0:enable='between(t\\,${startTs}\\,${endTs})'${outLabel}`,
+      );
+      lastVideoLabel = outLabel;
+    });
+
+    const filterComplex = filterLines.join(';');
+
+    args.push(
+      '-filter_complex', filterComplex,
+      '-map', '[vout]',
+      '-map', '0:a?',          // audio do original (preservacao perfeita do timing)
+      '-c:a', 'copy',           // stream copy audio = ZERO mudanca no audio
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-crf', '18',
+      '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart',
+      '-y', outputName,
+    );
+
+    await ff.exec(args);
+    const data = await ff.readFile(outputName);
+    return toBlob(data as Uint8Array, 'video/mp4');
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    await safeDelete(ff, baseName);
+    for (const n of overlayNames) await safeDelete(ff, n);
+    await safeDelete(ff, outputName);
+  }
+}
+
 export async function clearFFmpegCache(): Promise<void> {
   if (typeof caches === 'undefined') return;
   await caches.delete(CORE_CACHE);

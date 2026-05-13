@@ -48,6 +48,7 @@ import { AvatarFirstSlot } from '@/components/AvatarFirstSlot';
 import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
 import { recallByVoiceName, rememberPairing, normalizeVoiceName } from '@/lib/voice-avatar-memory';
 import { Toggle3D } from '@/components/Toggle3D';
+import { ToggleRound3D, WirelessIcon } from '@/components/ToggleRound3D';
 import { getPilotTeam, setPilotTeam, getPilotEditor, setPilotEditor } from '@/lib/clickup-pilot-config';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
 
@@ -2022,6 +2023,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   /** VA: estado do pipeline em execucao.
    *  Key: taskId → { stage, percent, message, result? } */
   const [vaPipelineState, setVaPipelineState] = useState<Record<string, { stage: string; percent: number; message: string; zipUrl?: string; zipName?: string; error?: string }>>({});
+  /** VA: SMART MODE per task — detecta face no AD original e troca apenas
+   *  segmentos com avatar visivel (b-rolls intactos). Key: taskId → boolean */
+  const [vaSmartMode, setVaSmartMode] = useState<Record<string, boolean>>({});
 
   /** Extrai Drive file ID de uma URL Drive (varios formatos suportados) */
   function extractDriveFileId(input: string): string | null {
@@ -2094,6 +2098,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         baseAdId: va.baseAdId.replace(/\s+/g, ''),
         adVideoBytes: dl.bytes,
         avatares,
+        smartMode: !!vaSmartMode[taskId],
         onProgress: (p) => {
           setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: p.stage, percent: p.percent, message: p.message } }));
         },
@@ -3076,13 +3081,23 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       ) : null}
                                     </div>
                                   ) : (
-                                    <button
-                                      type="button"
-                                      onClick={() => runVAPipelineForTask(a.taskId)}
-                                      className="mono rounded-[10px] border border-cyan-500 bg-cyan-500/20 py-2 px-3 text-[11px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/30 transition"
-                                    >
-                                      ▶ Iniciar Pipeline VA ({a.vaBriefing.avatares.length} avatares)
-                                    </button>
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() => runVAPipelineForTask(a.taskId)}
+                                        className="mono flex-1 rounded-[10px] border border-cyan-500 bg-cyan-500/20 py-2 px-3 text-[11px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/30 transition"
+                                      >
+                                        ▶ Iniciar Pipeline VA ({a.vaBriefing.avatares.length} avatares){vaSmartMode[a.taskId] ? ' · SMART' : ''}
+                                      </button>
+                                      <ToggleRound3D
+                                        on={!!vaSmartMode[a.taskId]}
+                                        onChange={(v) => setVaSmartMode((prev) => ({ ...prev, [a.taskId]: v }))}
+                                        icon={<WirelessIcon className="h-5 w-5" />}
+                                        title={vaSmartMode[a.taskId] ? 'Smart Mode ON · detecta face + troca so onde tem avatar' : 'Ativar Smart Mode (detecta face + troca avatar so onde aparece, b-rolls intactos)'}
+                                        variant="lime"
+                                        size="md"
+                                      />
+                                    </div>
                                   )}
                                   {/* Hook + body preview */}
                                   {a.vaBriefing.hookText ? (
