@@ -148,15 +148,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     (async () => {
       const target = { tabId };
+      let attached = false;
       try {
-        // Try attach (may already be attached, that's fine)
-        try { await chrome.debugger.attach(target, '1.3'); } catch (e) {
-          if (!/already/i.test(e?.message || '')) {
-            // re-throw if not "already attached"
+        try { await chrome.debugger.attach(target, '1.3'); attached = true; } catch (e) {
+          if (/already/i.test(e?.message || '')) {
+            attached = true; // ja estava attached
+          } else {
             throw e;
           }
         }
-        // Move + press + release at coords (REAL mouse click)
         await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
           type: 'mouseMoved', x, y, button: 'none', buttons: 0, clickCount: 0
         });
@@ -169,6 +169,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: true });
       } catch (e) {
         sendResponse({ ok: false, error: e?.message || String(e) });
+      } finally {
+        // v3.4.8: SEMPRE detach apos cada click — banner amarelo "being debugged"
+        // afeta viewport e DOM coords. Detach remove o banner e libera o tab.
+        if (attached) {
+          try { await chrome.debugger.detach(target); } catch {}
+        }
       }
     })();
     return true; // keep channel open for async sendResponse

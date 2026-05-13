@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DARKO LAB — Magnific Auto",
-  "version": "3.4.7",
+  "version": "3.4.8",
   "description": "DARKO LAB Magnific Auto v3.4.7 — REAL MOUSE CLICK via chrome.debugger: dispatched events nao registravam em dropdown options do Magnific (validado live). Agora usa CDP Input.dispatchMouseEvent (real click identico a user) pra clicar opcoes de model/aspect/quality/duration. + SPA navigate + strict Kling 2.5 LOCK + tab routing + retry 504 + heartbeat + self-reload.",
   "icons": {
     "16": "icons/icon-16.png",
