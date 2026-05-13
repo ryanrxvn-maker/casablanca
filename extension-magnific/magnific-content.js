@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.3.0';
+const DARKO_MG_VERSION = '3.3.1';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -144,24 +144,67 @@ function withDefaultQuery(path) {
   return path + (uid ? `?lang=en_US&user_id=${uid}` : '?lang=en_US');
 }
 
-async function fetchJson(path, opts = {}, timeoutMs = 15000) {
-  const ctrl = new AbortController();
-  const tid = setTimeout(() => ctrl.abort(), timeoutMs);
-  try {
-    const url = withDefaultQuery(path);
-    const r = await fetch(url, {
-      ...opts,
-      credentials: 'include',
-      headers: { ...MG_DEFAULT_HEADERS, ...(opts.headers || {}) },
-      signal: ctrl.signal,
-    });
-    const txt = await r.text();
-    let json = null;
-    try { json = JSON.parse(txt); } catch {}
-    return { ok: r.ok, status: r.status, json, raw: txt.slice(0, 800) };
-  } finally {
-    clearTimeout(tid);
+/**
+ * v3.3.1 ROBUSTEZ: fetchJson com retry exponencial pra erros transientes do
+ * Magnific (504, 502, 503, 429, timeouts). Magnific tem episodios de
+ * Gateway Timeout em horario de pico — pipeline travava mudo antes.
+ *
+ * Retorna { ok, status, json, raw, retriedTimes? }.
+ */
+async function fetchJson(path, opts = {}, timeoutMs = 15000, maxRetries = 4) {
+  const url = withDefaultQuery(path);
+  let lastError = null;
+  let lastStatus = 0;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const r = await fetch(url, {
+        ...opts,
+        credentials: 'include',
+        headers: { ...MG_DEFAULT_HEADERS, ...(opts.headers || {}) },
+        signal: ctrl.signal,
+      });
+      const txt = await r.text();
+      let json = null;
+      try { json = JSON.parse(txt); } catch {}
+      const result = { ok: r.ok, status: r.status, json, raw: txt.slice(0, 800) };
+      if (attempt > 0) result.retriedTimes = attempt;
+
+      // Retry on transient backend errors
+      if (r.status === 502 || r.status === 503 || r.status === 504 || r.status === 429) {
+        lastStatus = r.status;
+        if (attempt < maxRetries) {
+          const wait = Math.min(15000, 1000 * Math.pow(2, attempt)) + Math.random() * 500;
+          console.warn(`[fetchJson] HTTP ${r.status} on ${path} — retry ${attempt + 1}/${maxRetries} in ${Math.round(wait)}ms`);
+          await sleep(wait);
+          continue;
+        }
+      }
+      return result;
+    } catch (e) {
+      lastError = e;
+      const isAbort = e?.name === 'AbortError';
+      if (attempt < maxRetries) {
+        const wait = Math.min(15000, 1000 * Math.pow(2, attempt)) + Math.random() * 500;
+        console.warn(`[fetchJson] ${isAbort ? 'TIMEOUT' : 'ERROR'} on ${path} — retry ${attempt + 1}/${maxRetries} in ${Math.round(wait)}ms`);
+        await sleep(wait);
+        continue;
+      }
+    } finally {
+      clearTimeout(tid);
+    }
   }
+
+  // Exhausted all retries
+  return {
+    ok: false,
+    status: lastStatus || 0,
+    json: null,
+    raw: lastError ? String(lastError.message || lastError) : `HTTP ${lastStatus} apos ${maxRetries} retries`,
+    retriedTimes: maxRetries,
+  };
 }
 
 async function fetchBuffer(url, timeoutMs = 120000) {

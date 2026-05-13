@@ -22,9 +22,45 @@ function reportToPage(bridgeTabId, requestId, type, payload) {
   }).catch(() => {});
 }
 
+/**
+ * v3.3.1 ROBUSTEZ: encontra TAB ATIVO/VISIVEL Magnific de preferencia.
+ * Ordem de prioridade:
+ *   1. Tab active=true (foco em sua janela)
+ *   2. Tab que responde MG_PING (content script vivo)
+ *   3. Cria novo se nada serve
+ */
 async function findOrCreateMagnificTab() {
   const existing = await chrome.tabs.query({ url: 'https://www.magnific.com/app/*' });
-  if (existing.length > 0) return existing[0];
+
+  // Tier 1: active tab (foco do usuario) — content script provavelmente vivo
+  const active = existing.find((t) => t.active);
+  if (active) {
+    console.log('[DARKO BG] Usando active Magnific tab:', active.id);
+    return active;
+  }
+
+  // Tier 2: testa cada tab via PING; usa o primeiro que responder
+  for (const t of existing) {
+    try {
+      const r = await Promise.race([
+        chrome.tabs.sendMessage(t.id, { type: 'MG_PING' }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('ping timeout')), 1000)),
+      ]);
+      if (r?.ok) {
+        console.log('[DARKO BG] Tab Magnific viva (PING ok):', t.id);
+        return t;
+      }
+    } catch {}
+  }
+
+  // Tier 3: pega qualquer tab existente (vamos tentar injetar)
+  if (existing.length > 0) {
+    console.log('[DARKO BG] Usando primeira Magnific tab (nenhuma ativa, sem PING):', existing[0].id);
+    return existing[0];
+  }
+
+  // Tier 4: cria nova tab
+  console.log('[DARKO BG] Criando nova Magnific tab...');
   const tab = await chrome.tabs.create({ url: 'https://www.magnific.com/app/spaces', active: false });
   await new Promise((r) => setTimeout(r, 4000));
   return tab;
@@ -42,7 +78,12 @@ async function waitForTabComplete(tabId, timeoutMs = 30000) {
   return false;
 }
 
+/**
+ * v3.3.1 ROBUSTEZ: injeta content script + verifica que pegou via second PING.
+ * Se falhar mesmo apos injecao, throw error claro pro user ver no UI.
+ */
 async function ensureContentLoaded(tabId) {
+  // First PING — content script ja vivo?
   try {
     const r = await Promise.race([
       chrome.tabs.sendMessage(tabId, { type: 'MG_PING' }),
@@ -50,9 +91,39 @@ async function ensureContentLoaded(tabId) {
     ]);
     if (r?.ok) return true;
   } catch {}
-  await chrome.scripting.executeScript({ target: { tabId }, files: ['magnific-content.js'] });
-  await new Promise((r) => setTimeout(r, 1000));
-  return true;
+
+  // Force-inject via chrome.scripting (works on most tabs, including some CDP-attached)
+  try {
+    await chrome.scripting.executeScript({ target: { tabId }, files: ['magnific-content.js'] });
+  } catch (e) {
+    console.error('[DARKO BG] chrome.scripting.executeScript falhou:', e);
+    throw new Error(
+      `Nao consegui injetar content script no tab Magnific (${tabId}). ` +
+      `Causa provavel: tab esta sendo controlada por DevTools/CDP ou foi fechada. ` +
+      `Solucao: refresh manual da aba Magnific (F5).`,
+    );
+  }
+  await new Promise((r) => setTimeout(r, 1500));
+
+  // Second PING — confirma que injecao pegou
+  try {
+    const r = await Promise.race([
+      chrome.tabs.sendMessage(tabId, { type: 'MG_PING' }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('post-inject ping timeout')), 3000)),
+    ]);
+    if (r?.ok) {
+      console.log('[DARKO BG] Content script injetado com sucesso (tab ' + tabId + ')');
+      return true;
+    }
+  } catch (e) {
+    console.warn('[DARKO BG] Post-inject PING falhou:', e?.message);
+  }
+
+  throw new Error(
+    `Content script injetado mas nao responde no tab Magnific (${tabId}). ` +
+    `Causa provavel: pagina nao terminou de carregar OU CDP isolation impede injecao. ` +
+    `Solucao: abre/foca a aba Magnific manualmente e da F5.`,
+  );
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
