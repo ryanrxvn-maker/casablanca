@@ -431,11 +431,15 @@ ou texto livre:
           )}
 
           <div className="mt-2 text-xs text-text-muted">
-            <strong className="text-fuchsia-300">TURBO:</strong> duplica template → atribui prompts → cria video gen Kling 2.5 LOCK on-demand → dispara.
+            <strong className="text-fuchsia-300">v3.5.0 TEMPLATE-FULL:</strong> Magnific bloqueou clicks programaticos em dropdowns.
+            Agora REQUER que voce monte UMA VEZ um template space MANUAL com 50 pares Image+Video JA configurados.
             {' '}
-            <strong className="text-text">SETUP:</strong> clica "🪄 Criar template auto" pra extension construir N image gens (Nano Banana 2 + 9:16 + 1K + Unlimited ON) e auto-preencher o UUID aqui.
-            {' '}
-            <strong className="text-lime">GARANTIA ABSOLUTA:</strong> v3.2.3+ BLOQUEIA Seedance/Veo/Runway/Kling 2.6 etc — modelo errado num video node = batch ABORTA antes do dispatch (zero gasto credito).
+            <strong className="text-lime">SETUP UMA VEZ (~1h):</strong>
+            <br/>1. Cria 1 space "DARKO_TEMPLATE_50_FULL"
+            <br/>2. Adiciona 50 Image Gens (Nano Banana 2 + 9:16 + 1K + Unlimited ON)
+            <br/>3. Em cada um, click no output handle → "Video Generator" → configura Kling 2.5 + 9:16 + 720p + 10s + Unlimited ON
+            <br/>4. Cola o UUID acima ↑
+            <br/>5. Pipelines futuros: 100% automaticos (so duplica template + cola prompts + dispara)
           </div>
         </div>
 

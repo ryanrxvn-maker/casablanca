@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.4.10';
+const DARKO_MG_VERSION = '3.5.0';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -663,6 +663,25 @@ async function handleRunPipeline(payload, onProgress) {
  * + 9:16 + 1K + Unlimited ON, prompts vazios) e salva o uuid.
  */
 async function handleRunPipelineFromTemplate(payload, onProgress) {
+  // ========================================================================
+  // v3.5.0 TEMPLATE-FULL: template DEVE ter PARES COMPLETOS pre-configurados
+  // (Image Gen + Video Gen ja conectados, JA com Nano Banana 2 + Kling 2.5 +
+  // 9:16 + 1K + 720p + 10s + Unlimited ON em todos).
+  //
+  // Automacao SO faz:
+  //   1. Duplica template (REST API — provado funcionar)
+  //   2. Enumerate PARES (image + video conectados por position)
+  //   3. setPromptByUuid em ambos (image prompt + video prompt)
+  //   4. workflow_execute via REST (imagens em wave + videos em wave)
+  //   5. waitForRender + download MP4s + ZIP
+  //
+  // NAO faz mais: createImageGenNode, createVideoGenNodeViaOutputHandle,
+  // configureXxxNode, selectModelInNode — TUDO removido porque Magnific
+  // mudou e dispatched events nao mais registram em dropdown options.
+  //
+  // SETUP MANUAL UMA VEZ (~1 hora): user constroi 1 template space com 50
+  // pares pre-configurados, salva o UUID. Pipelines futuros sao 100% automatic.
+  // ========================================================================
   const {
     templateSpaceId,
     newSpaceName,
@@ -671,14 +690,14 @@ async function handleRunPipelineFromTemplate(payload, onProgress) {
     videoConcurrency = 6,
   } = payload || {};
 
-  if (!templateSpaceId) throw new Error('TEMPLATE: templateSpaceId obrigatorio (cria template manual com 50 image gens)');
+  if (!templateSpaceId) throw new Error('TEMPLATE: templateSpaceId obrigatorio. Cria 1 template space manual com pares Image+Video ja configurados (Nano Banana 2 + Kling 2.5 LOCK).');
   if (!takes.length) throw new Error('TEMPLATE: sem takes.');
 
-  // PHASE 0: SAFETY — Unlimited mode
+  // PHASE 0: SAFETY
   onProgress({ phase: 'safety', percent: 1, message: 'Verificando Unlimited mode...' });
   const us = await fetchJson('/app/api/unlimited-status');
   if (us.json && us.json.is_unlimited_mode_enabled === false) {
-    throw new Error('Unlimited mode DESLIGADO no Magnific. Aborte pra nao gastar creditos.');
+    throw new Error('Unlimited mode DESLIGADO no Magnific. Liga antes pra nao gastar creditos.');
   }
   const walletBefore = await fetchJson('/app/api/wallet');
   const creditsBefore = walletBefore.json?.credits ?? null;
@@ -687,114 +706,74 @@ async function handleRunPipelineFromTemplate(payload, onProgress) {
   onProgress({ phase: 'duplicate', percent: 3, message: `Duplicando template ${templateSpaceId.slice(0, 8)}...` });
   const finalName = newSpaceName || `DARKO RUN ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
   const space = await duplicateSpaceFrom(templateSpaceId, finalName);
-  onProgress({ phase: 'duplicate', percent: 6, message: `Clone: ${space.spaceId.slice(0, 8)} (${finalName})` });
+  onProgress({ phase: 'duplicate', percent: 6, message: `Clone criado: ${space.spaceId.slice(0, 8)}` });
 
-  // PHASE 2: Navega no clone e espera Liveblocks hidratar
+  // PHASE 2: Navega no clone
   await navigateToSpace(space.spaceId);
   onProgress({ phase: 'hydrate', percent: 8, message: 'Aguardando Liveblocks hidratar nodes...' });
   await sleep(4000);
   await waitFor(() => collectVisibleNodes().length >= 2, 30000);
-  await sleep(2500);
+  await sleep(3000);
 
-  // PHASE 3: Enumera image gens disponiveis
-  onProgress({ phase: 'enumerate', percent: 11, message: 'Enumerando image gens do template...' });
-  let imageNodes = enumerateImageNodesInOrder();
-  console.log('[TEMPLATE] image gens enumerados:', imageNodes.length);
+  // PHASE 3: Enumerate PARES (image + video gen)
+  onProgress({ phase: 'enumerate', percent: 11, message: 'Enumerando pares do template...' });
+  const imageNodes = enumerateImageNodesInOrder();
+  const videoNodes = enumerateVideoNodesInOrder();
+  console.log('[TEMPLATE-FULL] image gens:', imageNodes.length, 'video gens:', videoNodes.length);
 
   if (imageNodes.length < takes.length) {
-    await sleep(3000);
-    imageNodes = enumerateImageNodesInOrder();
+    throw new Error(`TEMPLATE: so ${imageNodes.length} image gens, precisa ${takes.length}. Adiciona mais image gens.`);
   }
-  if (imageNodes.length < takes.length) {
-    throw new Error(
-      `TEMPLATE: so ${imageNodes.length} image gens disponiveis, precisa ${takes.length}. Cria mais image gens no template.`
-    );
-  }
-  const useImages = imageNodes.slice(0, takes.length);
-
-  // PHASE 3b: verifica LOCK em cada image gen do template (defensive)
-  // v3.2.2: verifyImg agora async (auto-seleciona pra Vue Flow expor botoes)
-  onProgress({ phase: 'verify-img-lock', percent: 13, message: 'Verificando LOCK das image gens...' });
-  for (let i = 0; i < useImages.length; i++) {
-    const v = await verifyImg(useImages[i].imageNodeId);
-    if (!v.ok) {
-      throw new Error(
-        `TEMPLATE LOCK image#${i + 1}: missing=[${v.missing.join(', ')}] btns=[${v.btns.join(', ')}]. ` +
-        `Template precisa Nano Banana 2 + 9:16 + 1K em todas image gens. Recria template.`
-      );
-    }
+  if (videoNodes.length < takes.length) {
+    throw new Error(`TEMPLATE: so ${videoNodes.length} video gens, precisa ${takes.length}. Adiciona mais video gens.`);
   }
 
-  // PHASE 4: SETUP — cola prompt na image, cria video gen via output handle,
-  // configura Kling 2.5 LOCK com retry, cola prompt no video.
-  // SEQUENCIAL: typing rapido + Vue Flow popup sob carga = race condition.
-  // Se QUALQUER take cair em LOCK_VIOLATION (Seedance, modelo errado, etc),
-  // ABORTA batch ANTES de qualquer workflow_execute.
-  onProgress({ phase: 'setup', percent: 15, message: `Configurando ${takes.length} pares (LOCK Kling 2.5)...` });
+  // Pareia image+video por position (image LEFT, video RIGHT, similar Y)
   const pairs = [];
-  let lockViolated = null;
+  const usedVideos = new Set();
+  for (let i = 0; i < takes.length; i++) {
+    const img = imageNodes[i];
+    let bestVid = null;
+    let bestDelta = Infinity;
+    for (const vid of videoNodes) {
+      if (usedVideos.has(vid.videoNodeId)) continue;
+      if (vid.x <= img.x) continue; // video must be to the RIGHT
+      const dy = Math.abs(vid.y - img.y);
+      if (dy < bestDelta) { bestDelta = dy; bestVid = vid; }
+    }
+    if (!bestVid || bestDelta > 200) {
+      throw new Error(`TEMPLATE: nao achei video gen pareado pro image gen #${i + 1} (delta=${bestDelta}px). Template malformado?`);
+    }
+    usedVideos.add(bestVid.videoNodeId);
+    pairs.push({
+      idx: takes[i].idx ?? i + 1,
+      imageNodeId: img.imageNodeId,
+      videoNodeId: bestVid.videoNodeId,
+      status: 'paired',
+    });
+  }
+  onProgress({ phase: 'enumerate', percent: 14, message: `${pairs.length} pares enumerados` });
+
+  // PHASE 4: SETUP — APENAS cola prompts (nada de configurar nodes — template ja config)
+  onProgress({ phase: 'setup', percent: 16, message: `Colando prompts em ${takes.length} pares...` });
   for (let i = 0; i < takes.length; i++) {
     const take = takes[i];
-    const pairIdx = take.idx ?? i + 1;
-    const imageNodeId = useImages[i].imageNodeId;
+    const pair = pairs[i];
     try {
-      // 4a) Cola image prompt no image node pre-criado
-      await setNodePromptByUuid(imageNodeId, take.imagePrompt || '');
-
-      // 4b) Cria video gen via output handle (popup → "Video Generator")
-      const videoNodeId = await createVideoGenNodeViaOutputHandle(imageNodeId);
-
-      // 4c) Cola video/motion prompt
+      await setNodePromptByUuid(pair.imageNodeId, take.imagePrompt || '');
       if (take.videoPrompt) {
-        await setNodePromptByUuid(videoNodeId, take.videoPrompt);
+        await setNodePromptByUuid(pair.videoNodeId, take.videoPrompt);
       }
-
-      // 4d) Configura Kling 2.5 720p 9:16 10s com LOCK retry+verify+forbidden check.
-      // ABSOLUTA garantia que nada alem de Kling 2.5 seja selecionado.
-      await configureWithLockRetry(
-        () => configureVideoGenNode(videoNodeId, {
-          model: 'kling-25',          // HARD-CODED LOCK
-          aspect: '9:16',
-          quality: '720p',
-          duration: (take.videoDuration === 5 || take.videoDuration === '5s') ? 5 : 10,
-        }),
-        () => verifyVid(videoNodeId), // CHECA FORBIDDEN_VIDEO_MODELS tambem
-        'vid',
-        pairIdx,
-      );
-
-      pairs.push({
-        idx: pairIdx,
-        imageNodeId,
-        videoNodeId,
-        status: 'setup-ok',
-      });
+      pair.status = 'setup-ok';
     } catch (e) {
-      pairs.push({
-        idx: pairIdx,
-        imageNodeId,
-        status: 'setup-failed',
-        error: e.message,
-      });
-      if (e.lockViolation) {
-        lockViolated = e;
-        break;
-      }
+      pair.status = 'setup-failed';
+      pair.error = e.message;
     }
     onProgress({
       phase: 'setup',
-      percent: 15 + Math.round(((i + 1) / takes.length) * 18),
-      message: `Par ${i + 1}/${takes.length} configurado`,
+      percent: 16 + Math.round(((i + 1) / takes.length) * 16),
+      message: `Prompts ${i + 1}/${takes.length}: ${pair.status}`,
     });
-  }
-
-  if (lockViolated) {
-    const msg =
-      `LOCK ABORT TEMPLATE: ${lockViolated.message}. ` +
-      `Batch cancelado — NENHUM workflow_execute disparado. ` +
-      `Provavel: Magnific sob carga retornou modelo errado (Seedance) no dropdown. Recarrega a aba Magnific e roda de novo.`;
-    onProgress({ phase: 'error', percent: 33, message: msg });
-    throw new Error(msg);
   }
 
   // PHASE 5: Imagens em ondas (concorrencia 12)
@@ -1071,6 +1050,21 @@ function enumerateImageNodesInOrder() {
   }
   imgs.sort((a, b) => (a.y - b.y) || (a.x - b.x));
   return imgs;
+}
+
+function enumerateVideoNodesInOrder() {
+  const wrappers = Array.from(document.querySelectorAll('[data-id]'));
+  const vids = [];
+  for (const w of wrappers) {
+    const id = w.getAttribute('data-id') || '';
+    if (!/^[a-f0-9-]{30,}$/.test(id)) continue;
+    const isVid = !!w.querySelector('[data-cy="space-node-video-generator"]');
+    if (!isVid) continue;
+    const rect = w.getBoundingClientRect();
+    vids.push({ videoNodeId: id, y: rect.y, x: rect.x });
+  }
+  vids.sort((a, b) => (a.y - b.y) || (a.x - b.x));
+  return vids;
 }
 
 async function createSpaceViaDOM(name) {
