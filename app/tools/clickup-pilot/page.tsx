@@ -3057,47 +3057,95 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       ) : null}
                                     </div>
                                   ) : null}
-                                  {/* Pipeline state + botao iniciar */}
-                                  {vaPipelineState[a.taskId] ? (
+                                  {/* SMART MODE TOGGLE — sempre visivel (antes/durante/depois do pipeline)
+                                      pra user poder ligar e re-rodar */}
+                                  <div className={
+                                    'flex items-center gap-3 rounded-[10px] border p-3 transition-all ' +
+                                    (vaSmartMode[a.taskId]
+                                      ? 'border-lime/60 bg-lime/10'
+                                      : 'border-line bg-bg-soft/30')
+                                  }>
+                                    <ToggleRound3D
+                                      on={!!vaSmartMode[a.taskId]}
+                                      onChange={(v) => setVaSmartMode((prev) => ({ ...prev, [a.taskId]: v }))}
+                                      icon={<WirelessIcon className="h-5 w-5" />}
+                                      title={vaSmartMode[a.taskId] ? 'Smart Mode ON · detecta face + troca so onde tem avatar' : 'Ativar Smart Mode (detecta face + troca avatar so onde aparece, b-rolls intactos)'}
+                                      variant="lime"
+                                      size="md"
+                                    />
+                                    <div className="flex-1">
+                                      <div className={'mono text-[11px] font-bold uppercase tracking-widest ' + (vaSmartMode[a.taskId] ? 'text-lime' : 'text-text-muted')}>
+                                        Smart Mode · {vaSmartMode[a.taskId] ? 'ON' : 'OFF'}
+                                      </div>
+                                      <div className="mono mt-0.5 text-[9px] uppercase tracking-widest text-text-muted">
+                                        {vaSmartMode[a.taskId]
+                                          ? 'Detecta face no AD original e troca SO onde tem avatar (b-rolls intactos)'
+                                          : 'Ative pra troca cirurgica: avatar so onde aparece, b-rolls preservados'}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Pipeline state OU botao iniciar/re-run */}
+                                  {vaPipelineState[a.taskId] && vaPipelineState[a.taskId].stage !== 'done' && !vaPipelineState[a.taskId].error ? (
+                                    // EM ANDAMENTO — so progress, sem botao
                                     <div className="rounded-[10px] border border-cyan-500/40 bg-cyan-500/5 p-3">
                                       <div className="mono text-[9px] uppercase tracking-widest text-cyan-200 flex items-center gap-2">
                                         <span>📹 Pipeline VA · {vaPipelineState[a.taskId].stage} · {Math.round(vaPipelineState[a.taskId].percent)}%</span>
+                                        {vaSmartMode[a.taskId] ? <span className="rounded bg-lime/20 px-1.5 py-0.5 text-lime">SMART</span> : null}
                                       </div>
                                       <div className="text-[11px] text-text-muted mt-1">{vaPipelineState[a.taskId].message}</div>
                                       <div className="mt-1 h-1 rounded bg-bg/60 overflow-hidden">
                                         <div className="h-full bg-cyan-400 transition-all" style={{ width: `${vaPipelineState[a.taskId].percent}%` }} />
                                       </div>
-                                      {vaPipelineState[a.taskId].error ? (
-                                        <div className="mt-2 text-[11px] text-red-300">✗ {vaPipelineState[a.taskId].error}</div>
-                                      ) : null}
-                                      {vaPipelineState[a.taskId].zipUrl ? (
-                                        <a
-                                          href={vaPipelineState[a.taskId].zipUrl}
-                                          download={vaPipelineState[a.taskId].zipName}
-                                          className="mono mt-2 inline-block rounded border border-lime bg-lime/20 px-3 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30"
-                                        >
-                                          📦 Baixar ZIP ({vaPipelineState[a.taskId].zipName})
-                                        </a>
-                                      ) : null}
                                     </div>
                                   ) : (
-                                    <div className="flex items-center gap-2">
+                                    <>
+                                      {/* DONE / ERROR / NUNCA RODOU — mostra botao */}
+                                      {vaPipelineState[a.taskId] ? (
+                                        <div className={
+                                          'rounded-[10px] border p-3 ' +
+                                          (vaPipelineState[a.taskId].error ? 'border-red-500/40 bg-red-500/5' : 'border-lime/40 bg-lime/5')
+                                        }>
+                                          <div className={'mono text-[9px] uppercase tracking-widest flex items-center gap-2 ' + (vaPipelineState[a.taskId].error ? 'text-red-200' : 'text-lime')}>
+                                            <span>📹 Pipeline VA · {vaPipelineState[a.taskId].stage} · {Math.round(vaPipelineState[a.taskId].percent)}%</span>
+                                          </div>
+                                          <div className="text-[11px] text-text-muted mt-1">{vaPipelineState[a.taskId].message}</div>
+                                          {vaPipelineState[a.taskId].error ? (
+                                            <div className="mt-2 text-[11px] text-red-300">✗ {vaPipelineState[a.taskId].error}</div>
+                                          ) : null}
+                                          {vaPipelineState[a.taskId].zipUrl ? (
+                                            <a
+                                              href={vaPipelineState[a.taskId].zipUrl}
+                                              download={vaPipelineState[a.taskId].zipName}
+                                              className="mono mt-2 inline-block rounded border border-lime bg-lime/20 px-3 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30"
+                                            >
+                                              📦 Baixar ZIP ({vaPipelineState[a.taskId].zipName})
+                                            </a>
+                                          ) : null}
+                                        </div>
+                                      ) : null}
                                       <button
                                         type="button"
-                                        onClick={() => runVAPipelineForTask(a.taskId)}
-                                        className="mono flex-1 rounded-[10px] border border-cyan-500 bg-cyan-500/20 py-2 px-3 text-[11px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/30 transition"
+                                        onClick={() => {
+                                          // Limpa state anterior pra permitir re-run
+                                          setVaPipelineState((prev) => {
+                                            const n = { ...prev };
+                                            delete n[a.taskId];
+                                            return n;
+                                          });
+                                          runVAPipelineForTask(a.taskId);
+                                        }}
+                                        className={
+                                          'mono w-full rounded-[10px] border py-2 px-3 text-[11px] uppercase tracking-widest transition ' +
+                                          (vaSmartMode[a.taskId]
+                                            ? 'border-lime bg-lime/20 text-lime hover:bg-lime/30'
+                                            : 'border-cyan-500 bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30')
+                                        }
                                       >
-                                        ▶ Iniciar Pipeline VA ({a.vaBriefing.avatares.length} avatares){vaSmartMode[a.taskId] ? ' · SMART' : ''}
+                                        {vaPipelineState[a.taskId]?.zipUrl ? '🔁 Re-rodar Pipeline VA' : '▶ Iniciar Pipeline VA'}
+                                        {' '}({a.vaBriefing.avatares.length} avatares){vaSmartMode[a.taskId] ? ' · SMART' : ''}
                                       </button>
-                                      <ToggleRound3D
-                                        on={!!vaSmartMode[a.taskId]}
-                                        onChange={(v) => setVaSmartMode((prev) => ({ ...prev, [a.taskId]: v }))}
-                                        icon={<WirelessIcon className="h-5 w-5" />}
-                                        title={vaSmartMode[a.taskId] ? 'Smart Mode ON · detecta face + troca so onde tem avatar' : 'Ativar Smart Mode (detecta face + troca avatar so onde aparece, b-rolls intactos)'}
-                                        variant="lime"
-                                        size="md"
-                                      />
-                                    </div>
+                                    </>
                                   )}
                                   {/* Hook + body preview */}
                                   {a.vaBriefing.hookText ? (

@@ -227,35 +227,39 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
   const rawAudioBlob = await extractAudio(adVideoBlob);
 
   // 1.5. Voice isolation — CRITICO pra lipsync limpo (sem musica/SFX/ruido)
-  // Default true. Pra desligar (debug): useVoiceIsolation:false na input.
+  // Default true + mode 'aggressive' (denoise pesado pra ADs com musica forte).
+  // Pra desligar (debug): useVoiceIsolation:false. Pra modo conservador: voiceIsolatorMode:'auto'.
   const useVoiceIsolation = input.useVoiceIsolation !== false;
   let audioBlob: Blob = rawAudioBlob;
   if (useVoiceIsolation) {
+    // VA tem musica de fundo quase SEMPRE. Default 'aggressive' = afftdn pesado +
+    // compand agressivo + center extraction quando stereo. Se user sobrescrever,
+    // respeita.
+    const isolatorMode = input.voiceIsolatorMode ?? 'aggressive';
     progress({
       stage: 'isolate_voice',
-      message: 'Isolando voz (removendo musica/SFX/ruido)...',
+      message: `Isolando voz (modo ${isolatorMode})...`,
       percent: 10,
     });
     try {
       audioBlob = await isolateVoice(rawAudioBlob, {
-        mode: input.voiceIsolatorMode ?? 'auto',
+        mode: isolatorMode,
         format: 'wav',
         onProgress: (p) => {
           progress({
             stage: 'isolate_voice',
-            message: `Isolando voz (${Math.round(p.ratio * 100)}%)...`,
+            message: `Isolando voz · ${isolatorMode} · ${Math.round(p.ratio * 100)}%`,
             percent: 10 + Math.round(p.ratio * 4),
           });
         },
       });
       progress({
         stage: 'isolate_voice',
-        message: 'Voz isolada — lipsync vai usar audio limpo.',
+        message: `Voz isolada (${isolatorMode}) — lipsync vai usar audio limpo.`,
         percent: 14,
       });
     } catch (e) {
       // Se isolation falhar, NAO aborta: usa audio raw com warning.
-      // Pior caso = lipsync com musica (estado atual), mas pipeline nao quebra.
       console.warn('[va-pipeline] voice isolation falhou, usando audio raw:', e);
       progress({
         stage: 'isolate_voice',

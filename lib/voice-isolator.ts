@@ -71,33 +71,44 @@ function buildFilterChain(mode: Exclude<VoiceIsolatorMode, 'auto'>): string {
   const filters: string[] = [];
 
   if (mode === 'center' || mode === 'aggressive') {
-    // Center channel extraction: (L+R)/2
+    // Center channel extraction: (L+R)/2 — vocals geralmente mixadas no centro
     filters.push('pan=mono|c0=0.5*FL+0.5*FR');
   }
 
-  // Voice frequency band: 80Hz - 8000Hz
-  filters.push('highpass=f=80');
-  filters.push('lowpass=f=8000');
-
-  // FFT denoise — agressivo no aggressive mode
+  // Voice frequency band: 100Hz - 6500Hz (mais agressivo em aggressive)
   if (mode === 'aggressive') {
-    filters.push('afftdn=nr=20:nf=-30:tn=1');
+    // Banda mais apertada — corta mais bass + mais highs
+    filters.push('highpass=f=100');
+    filters.push('lowpass=f=6500');
+    // Notch nos sub-bass tipicos de kick drum
+    filters.push('highpass=f=60');
+  } else {
+    filters.push('highpass=f=80');
+    filters.push('lowpass=f=8000');
+  }
+
+  // FFT denoise — MUITO agressivo no aggressive mode
+  if (mode === 'aggressive') {
+    // 2 passos: 1 forte pra musica, 1 cleanup
+    filters.push('afftdn=nr=30:nf=-40:tn=1');
+    filters.push('afftdn=nr=20:nf=-35:tn=1');
   } else {
     filters.push('afftdn=nr=12:nf=-25');
   }
 
-  // De-esser (reduce harsh sibilance) — usa highpass + lowpass split
-  // Simples: skip de-esser pra não complicar, compand cuida disso
-
-  // Dynamic compression — lift vocals
+  // Dynamic compression — lift vocals mais que tudo
   if (mode === 'aggressive') {
-    filters.push('compand=attacks=0.03:decays=0.4:points=-90/-90|-60/-40|-25/-12|0/-4');
+    // Compressao MUITO mais agressiva: lift voz abaixo de -30dB pra perto de -10dB
+    // Comprime tudo acima de -10 pra evitar clipping
+    filters.push('compand=attacks=0.02:decays=0.3:points=-90/-90|-70/-50|-40/-18|-20/-10|0/-3');
+    // Segundo compander pra "esmagar" sinais transientes (kick, snare residuais)
+    filters.push('acompressor=threshold=-18dB:ratio=6:attack=5:release=80');
   } else {
     filters.push('compand=attacks=0.05:decays=0.5:points=-90/-90|-70/-50|-30/-15|0/-5');
   }
 
-  // Loudness normalization (EBU R128 broadcast standard)
-  filters.push('loudnorm=I=-16:LRA=11:TP=-1.5');
+  // Loudness normalization (EBU R128 broadcast standard) — voz no nivel ideal
+  filters.push('loudnorm=I=-14:LRA=8:TP=-1.5');
 
   return filters.join(',');
 }
