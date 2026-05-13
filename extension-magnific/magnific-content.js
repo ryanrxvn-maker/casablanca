@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.4.5';
+const DARKO_MG_VERSION = '3.4.6';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -1591,55 +1591,98 @@ function modelDisplayName(internalId) {
  * pulando os sem ∞ (ex: pular Kling 3.0 New e clicar Kling 2.5 ∞).
  */
 async function selectModelInNode(node, displayName) {
-  // Dropdown atual = botao do modelo selecionado. So pega VISIVEL.
+  const SMLog = (m, x) => console.log('[selectModel ' + displayName + '] ' + m, x !== undefined ? x : '');
+
+  // Step 1: find dropdown button
+  SMLog('1) finding dropdown button');
   const dropdown = await waitFor(() => {
     const all = node.querySelectorAll('button,[role=button]');
     for (const b of all) {
-      if (b.offsetParent === null) continue; // skip hidden
+      if (b.offsetParent === null) continue;
       const t = (b.textContent || '').trim();
       if (/^(auto|google|kling|flux|cinematic|classic|imagen|nano|gpt|seedream|recraft|veo|sora|seedance|runway|pixverse|minimax|ltx|wan|grok|openai|bytedance|fal-|fal\s)/i.test(t) && t.length < 35) return b;
     }
     return null;
   }, 4000);
+  SMLog('1) dropdown found, text=', (dropdown?.textContent || '').trim());
+
+  // Step 2: click dropdown
+  SMLog('2) clicking dropdown');
   clickRealElement(dropdown);
-  await sleep(500);
-
-  const input = await waitFor(() => {
-    const ins = document.querySelectorAll('input[type="text"],input[placeholder*="earch" i],input[placeholder*="usca" i]');
-    for (const i of ins) {
-      if (i.offsetParent === null) continue;
-      const r = i.getBoundingClientRect();
-      if (r.width > 80 && r.height > 10) return i;
-    }
-    return null;
-  }, 3000);
-  input.focus();
-  input.value = '';
-  const chunk = displayName.split(' ')[0].toLowerCase();
-  for (const ch of chunk) {
-    input.value += ch;
-    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: ch, inputType: 'insertText' }));
-  }
-  await sleep(600);
-
-  // SO items VISIVEIS (offsetParent !== null) e com width > 20.
-  // LOCK v3.1.7: match STRICT — apenas equality exato OU equality + 'New' badge.
-  // Removido `startsWith` que abria caminho pra Seedance 1.5 Pro virar "Kling 2.5 Pro"
-  // por engano em casos extremos. Sort por length pega o menor (defesa contra
-  // resultado nao-filtrado ainda mostrando lista cheia).
-  const opt = await waitFor(() => {
-    const all = Array.from(document.querySelectorAll('div,li,button,[role=option]'));
-    const matches = all.filter((e) => {
-      if (e.offsetParent === null) return false;
-      if (e.getBoundingClientRect().width < 20) return false;
-      const t = (e.textContent || '').trim();
-      return t === displayName || t === displayName + 'New';
-    });
-    matches.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
-    return matches[0] || null;
-  }, 5000);
-  clickRealElement(opt);
   await sleep(700);
+
+  // Step 3: confirm dropdown opened (look for search input)
+  SMLog('3) finding search input');
+  let input;
+  try {
+    input = await waitFor(() => {
+      const ins = document.querySelectorAll('input[type="text"],input[placeholder*="earch" i],input[placeholder*="usca" i]');
+      for (const i of ins) {
+        if (i.offsetParent === null) continue;
+        const r = i.getBoundingClientRect();
+        if (r.width > 80 && r.height > 10) return i;
+      }
+      return null;
+    }, 3000);
+    SMLog('3) search input found, placeholder=', input?.placeholder);
+  } catch (e) {
+    SMLog('3) ERROR: search input not found — dropdown may not have opened', e.message);
+    throw new Error('Dropdown did not open after click — input not found');
+  }
+
+  // Step 4: type search term
+  const chunk = displayName.split(' ')[0].toLowerCase();
+  SMLog('4) typing "' + chunk + '"');
+  input.focus();
+  // Use native setter pra disparar Vue/React reactive listeners
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+  setter.call(input, '');
+  input.dispatchEvent(new InputEvent('input', { bubbles: true, data: '', inputType: 'deleteContent' }));
+  for (const ch of chunk) {
+    const newVal = input.value + ch;
+    setter.call(input, newVal);
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: ch, inputType: 'insertText' }));
+    await sleep(50);
+  }
+  await sleep(800);
+  SMLog('4) input.value after typing=', input.value);
+
+  // Step 5: find option
+  SMLog('5) finding option ' + displayName);
+  let opt;
+  try {
+    opt = await waitFor(() => {
+      const all = Array.from(document.querySelectorAll('div,li,button,[role=option]'));
+      const matches = all.filter((e) => {
+        if (e.offsetParent === null) return false;
+        if (e.getBoundingClientRect().width < 20) return false;
+        const t = (e.textContent || '').trim();
+        return t === displayName || t === displayName + 'New';
+      });
+      matches.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
+      return matches[0] || null;
+    }, 5000);
+    SMLog('5) option found, tag=' + opt.tagName + ' text=' + (opt.textContent || '').trim().slice(0, 50));
+  } catch (e) {
+    SMLog('5) ERROR: option not found', e.message);
+    // Diagnostic: what options DID show up?
+    const visible = Array.from(document.querySelectorAll('div,li,button,[role=option]'))
+      .filter(e => e.offsetParent !== null && e.getBoundingClientRect().width > 20)
+      .map(e => (e.textContent || '').trim())
+      .filter(t => t && t.length < 50 && t.length > 2)
+      .slice(0, 30);
+    SMLog('5) DIAGNOSTIC visible options:', visible);
+    throw new Error('Option "' + displayName + '" not found after typing');
+  }
+
+  // Step 6: click option (multi-strategy)
+  SMLog('6) clicking option');
+  // Try clicking the deepest target (text node parent) AND the option itself AND its clickable ancestor
+  const clickable = opt.closest('button,[role=option],[role=menuitem],li,a') || opt;
+  SMLog('6) clickable ancestor:', clickable.tagName + (clickable !== opt ? ' (parent of opt)' : ''));
+  clickRealElement(clickable);
+  await sleep(900);
+  SMLog('6) DONE — sleep completed');
 }
 
 async function selectAspectInNode(node, aspect) {
