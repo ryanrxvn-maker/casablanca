@@ -356,11 +356,14 @@ ou texto livre:
               disabled={processing}
             />
             <div className="mt-1 text-xs text-text-muted">
-              <strong className="text-fuchsia-300">TURBO:</strong> duplica space template + atribui prompts + dispara.
-              Pula race condition Seedance. Setup ~20s ao inves de ~5min.
+              <strong className="text-fuchsia-300">TURBO:</strong> duplica template (50 image gens) → atribui prompts
+              → cria video gen Kling 2.5 LOCK on-demand → dispara.
               {' '}
-              <strong className="text-text">SETUP:</strong> cria 1x manual um space com 50+ pares Image→Video
-              usando v3.1.7+ LOCK (Kling 2.5 + Nano Banana 2 + 9:16 + 720p + 10s) → cola o UUID aqui.
+              <strong className="text-text">SETUP MANUAL UMA VEZ:</strong> cria space com <strong>SO 50 IMAGE GENS</strong>{' '}
+              (Nano Banana 2 + 9:16 + 1K + Unlimited ON, prompts vazios — SEM video gens). Cola o UUID aqui.
+              {' '}
+              <strong className="text-lime">GARANTIA ABSOLUTA:</strong> a extensao v3.2.1 BLOQUEIA Seedance/Veo/Runway/Kling 2.6
+              etc — se qualquer modelo proibido for detectado num video node, batch ABORTA antes do dispatch (zero gasto credito).
             </div>
           </label>
         </div>
