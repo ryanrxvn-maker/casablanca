@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.4.2';
+const DARKO_MG_VERSION = '3.4.3';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -151,7 +151,7 @@ function withDefaultQuery(path) {
  *
  * Retorna { ok, status, json, raw, retriedTimes? }.
  */
-async function fetchJson(path, opts = {}, timeoutMs = 15000, maxRetries = 4) {
+async function fetchJson(path, opts = {}, timeoutMs = 8000, maxRetries = 3) {
   const url = withDefaultQuery(path);
   let lastError = null;
   let lastStatus = 0;
@@ -452,23 +452,35 @@ async function handleRunPipeline(payload, onProgress) {
 
   if (!takes.length) throw new Error('Sem takes.');
 
+  console.log('[DARKO Pipeline] v' + DARKO_MG_VERSION + ' iniciando — ' + takes.length + ' takes, space=' + spaceName);
+
   // PHASE 0: SAFETY — confirma is_unlimited_mode_enabled=true.
-  // Se nao estiver, ABORTA antes de qualquer execute (NUNCA gastar creditos).
+  console.log('[DARKO Pipeline] Phase 0a: unlimited-status');
   onProgress({ phase: 'safety', percent: 1, message: 'Verificando Unlimited mode...' });
   const us = await fetchJson('/app/api/unlimited-status');
+  console.log('[DARKO Pipeline] Phase 0a result:', { ok: us.ok, status: us.status, retried: us.retriedTimes });
   if (us.json && us.json.is_unlimited_mode_enabled === false) {
     throw new Error('Unlimited mode DESLIGADO no Magnific. Aborte pra nao gastar creditos.');
   }
+  console.log('[DARKO Pipeline] Phase 0b: wallet');
   const walletBefore = await fetchJson('/app/api/wallet');
+  console.log('[DARKO Pipeline] Phase 0b result:', { ok: walletBefore.ok, status: walletBefore.status, credits: walletBefore.json?.credits });
   const creditsBefore = walletBefore.json?.credits ?? null;
 
   // PHASE 1: Space
+  console.log('[DARKO Pipeline] Phase 1: ensureSpaceWithName "' + spaceName + '"');
   onProgress({ phase: 'space', percent: 2, message: 'Garantindo Space...' });
   const space = passedSpaceId
     ? { spaceId: passedSpaceId, url: spaceURL(passedSpaceId) }
     : await ensureSpaceWithName(spaceName);
+  console.log('[DARKO Pipeline] Phase 1 result: space=' + space.spaceId);
+
+  console.log('[DARKO Pipeline] Phase 1b: navigateToSpace');
   await navigateToSpace(space.spaceId);
+  console.log('[DARKO Pipeline] Phase 1b: navigate complete, current url=' + location.pathname);
+
   await sleep(2500); // SPA hydrate
+  console.log('[DARKO Pipeline] Phase 2: setup pares iniciando');
 
   // PHASE 2: Setup todos os pares (image + video conectado)
   // SIMPLIFIED v3.4.0: removido LOCK_VIOLATION abort total — se 1 par falha,
@@ -1231,17 +1243,38 @@ async function createTakePair({
   videoQuality  = '720p';
   videoDuration = (videoDuration === 5 || videoDuration === '5s') ? 5 : 10;
 
+  // v3.4.3 GRANULAR LOGGING — abrir DevTools (F12) no tab Magnific pra ver
+  const log = (step, extra) => console.log(`[DARKO TakePair #${pairIdx}] ${step}`, extra || '');
+
   // 1) Cria Image Generator node + cola prompt + configura
+  log('1a) createImageGenNode start');
   const imageNodeId = await createImageGenNode();
+  log('1a) imageNodeId=', imageNodeId);
+
+  log('1b) setNodePromptByUuid image');
   await setNodePromptByUuid(imageNodeId, imagePrompt);
+  log('1b) prompt OK');
+
+  log('1c) configureImageGenNode (Nano Banana 2/9:16/1K)');
   await configureImageGenNode(imageNodeId, { model: imageModel, aspect, quality: imageQuality });
+  log('1c) image configured OK');
 
   // 2) Cria Video Generator via output handle + cola prompt + configura Kling 2.5
+  log('2a) createVideoGenNodeViaOutputHandle');
   const videoNodeId = await createVideoGenNodeViaOutputHandle(imageNodeId);
-  if (videoPrompt) await setNodePromptByUuid(videoNodeId, videoPrompt);
+  log('2a) videoNodeId=', videoNodeId);
+
+  if (videoPrompt) {
+    log('2b) setNodePromptByUuid video');
+    await setNodePromptByUuid(videoNodeId, videoPrompt);
+    log('2b) video prompt OK');
+  }
+
+  log('2c) configureVideoGenNode (Kling 2.5/9:16/720p/' + videoDuration + 's)');
   await configureVideoGenNode(videoNodeId, {
     model: videoModel, aspect, quality: videoQuality, duration: videoDuration,
   });
+  log('2c) video configured OK — pair complete');
 
   return { imageNodeId, videoNodeId };
 }
