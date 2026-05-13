@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.3.2';
+const DARKO_MG_VERSION = '3.4.0';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -471,11 +471,9 @@ async function handleRunPipeline(payload, onProgress) {
   await sleep(2500); // SPA hydrate
 
   // PHASE 2: Setup todos os pares (image + video conectado)
-  // LOCK v3.1.7: se QUALQUER par cair em LOCK_VIOLATION, ABORTA o batch inteiro
-  // ANTES de chegar em executeWorkflow. Garante que nunca disparamos com modelo
-  // errado. force_credits:false ja protege wallet, mas LOCK protege correctness.
+  // SIMPLIFIED v3.4.0: removido LOCK_VIOLATION abort total — se 1 par falha,
+  // segue com os outros. selectModelInNode strict match ja garante Kling 2.5.
   const pairs = [];
-  let lockViolated = null;
   for (let i = 0; i < takes.length; i++) {
     const take = takes[i];
     const setupPercent = 5 + Math.round((i / takes.length) * 25);
@@ -499,18 +497,7 @@ async function handleRunPipeline(payload, onProgress) {
         percent: setupPercent,
         message: `Falha setup take ${i + 1}: ${e.message}`,
       });
-      // LOCK_VIOLATION = abort total — nunca disparar workflow com config errada
-      if (e.lockViolation) {
-        lockViolated = e;
-        break;
-      }
     }
-  }
-
-  if (lockViolated) {
-    const msg = `LOCK ABORT: ${lockViolated.message}. Batch cancelado — nenhum execute disparado. Recarrega a aba Magnific e roda de novo.`;
-    onProgress({ phase: 'error', percent: 30, message: msg });
-    throw new Error(msg);
   }
 
   // PHASE 3: Imagens em ondas de imageConcurrency (default 12)
@@ -520,12 +507,9 @@ async function handleRunPipeline(payload, onProgress) {
     imageConcurrency,
     async (pair) => {
       try {
-        // LOCK v3.2.2: re-verify ANTES do execute (auto-seleciona node pra ler botoes)
-        const vImg = await verifyImg(pair.imageNodeId);
-        if (!vImg.ok) {
-          throw new Error(`LOCK_PREEXECUTE img pair#${pair.idx}: missing=[${vImg.missing.join(', ')}]`);
-        }
-        // CONFIRMA UNLIMITED ON antes de executar (NUNCA gasta creditos)
+        // SIMPLIFIED v3.4.0: removido pre-execute LOCK check que adicionava
+        // delay e podia travar. selectModelInNode strict match ja garantiu
+        // Kling 2.5 / Nano Banana 2. force_credits:false protege wallet.
         await selectNodeAndEnsureUnlimited(pair.imageNodeId);
         const { workflowRunId } = await executeWorkflow(pair.imageNodeId, space.spaceId);
         pair.imageRunId = workflowRunId;
@@ -554,11 +538,7 @@ async function handleRunPipeline(payload, onProgress) {
     videoConcurrency,
     async (pair) => {
       try {
-        // LOCK v3.2.2: re-verify ANTES do execute video (auto-seleciona node)
-        const vVid = await verifyVid(pair.videoNodeId);
-        if (!vVid.ok) {
-          throw new Error(`LOCK_PREEXECUTE vid pair#${pair.idx}: missing=[${vVid.missing.join(', ')}]`);
-        }
+        // SIMPLIFIED v3.4.0: removido pre-execute LOCK check
         await selectNodeAndEnsureUnlimited(pair.videoNodeId);
         const { workflowRunId } = await executeWorkflow(pair.videoNodeId, space.spaceId);
         pair.videoRunId = workflowRunId;
@@ -1213,40 +1193,31 @@ async function createTakePair({
   aspect, imageQuality, videoQuality, videoDuration,
   pairIdx = 0,
 }) {
-  // LOCK v3.1.7: forca Kling 2.5 + Nano Banana 2 + 9:16 + 720p/1K independente do payload
+  // SIMPLIFIED v3.4.0: forca Kling 2.5 + Nano Banana 2 + 9:16 + 720p/1K (LOCK
+  // continua sendo enforced no selectModelInNode via STRICT equality match).
+  // Removido configureWithLockRetry wrapping — adicionava 60s+ overhead que
+  // travava pipeline com user reportando 'antes funcionava'. O selectModelInNode
+  // ja faz strict equality match (sem startsWith fuzzy), entao Kling 2.5 nao vai
+  // ser confundido com Seedance/etc. Se algo der errado, o catch externo
+  // marca o pair como failed e segue.
   imageModel    = 'nano-banana-2';
   videoModel    = 'kling-25';
   aspect        = '9:16';
   imageQuality  = '1K';
   videoQuality  = '720p';
-  // duration: aceita o que veio do payload se for 5 ou 10, senao 10
   videoDuration = (videoDuration === 5 || videoDuration === '5s') ? 5 : 10;
 
-  // 1) Cria Image Generator node
+  // 1) Cria Image Generator node + cola prompt + configura
   const imageNodeId = await createImageGenNode();
   await setNodePromptByUuid(imageNodeId, imagePrompt);
+  await configureImageGenNode(imageNodeId, { model: imageModel, aspect, quality: imageQuality });
 
-  // 1b) Configure + retry+verify (ABORTA pair se LOCK violado apos 3 tries)
-  await configureWithLockRetry(
-    () => configureImageGenNode(imageNodeId, { model: imageModel, aspect, quality: imageQuality }),
-    () => verifyImg(imageNodeId),
-    'img',
-    pairIdx,
-  );
-
-  // 2) Cria Video Generator via output handle (popup) — conexao auto
+  // 2) Cria Video Generator via output handle + cola prompt + configura Kling 2.5
   const videoNodeId = await createVideoGenNodeViaOutputHandle(imageNodeId);
   if (videoPrompt) await setNodePromptByUuid(videoNodeId, videoPrompt);
-
-  // 2b) Configure + retry+verify
-  await configureWithLockRetry(
-    () => configureVideoGenNode(videoNodeId, {
-      model: videoModel, aspect, quality: videoQuality, duration: videoDuration,
-    }),
-    () => verifyVid(videoNodeId),
-    'vid',
-    pairIdx,
-  );
+  await configureVideoGenNode(videoNodeId, {
+    model: videoModel, aspect, quality: videoQuality, duration: videoDuration,
+  });
 
   return { imageNodeId, videoNodeId };
 }

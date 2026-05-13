@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "DARKO LAB — Magnific Auto",
-  "version": "3.3.2",
-  "description": "DARKO LAB Magnific Auto v3.3.2 — FIX CRITICO: handleForward agora envolve TUDO em try/catch (findOrCreateMagnificTab, waitForTabComplete, ensureContentLoaded) — antes ensureContentLoaded throw virava unhandled rejection e user via stall mudo. + Heartbeat 60s pro primeiro progress (se content script nao iniciar, ABORTA com erro claro + instrucao 'F5 na aba Magnific'). + Retry exponencial fetchJson 504/timeout + tab routing inteligente + LOCK Kling 2.5.",
+  "version": "3.4.0",
+  "description": "DARKO LAB Magnific Auto v3.4.0 — SIMPLIFICADO: removida complexidade LOCK retry/verify/pre-execute que travava pipeline (user reportou 'antes funcionava'). Mantido: selectModelInNode STRICT equality match (era o fix real do bug Seedance). Mantido: tab routing inteligente + retry fetchJson 504 + heartbeat + total try/catch. Pipeline volta ao fluxo simples Phase 1→5 sem overhead de verifies.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
