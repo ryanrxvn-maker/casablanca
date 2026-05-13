@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.4.3';
+const DARKO_MG_VERSION = '3.4.4';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -550,19 +550,44 @@ async function handleRunPipeline(payload, onProgress) {
     videoConcurrency,
     async (pair) => {
       try {
-        // SIMPLIFIED v3.4.0: removido pre-execute LOCK check
+        // v3.4.4 SAFETY CRITICA: VERIFICA KLING 2.5 ANTES DE DISPARAR VIDEO.
+        // User reportou: 'Seedance 1.5 Pro foi disparado, isso gasta creditos!'
+        // selectModelInNode pode falhar e selecionar Seedance ao inves de Kling.
+        // SOLUCAO: NUNCA dispara workflow_execute sem confirmar Kling 2.5 visivel
+        // E nenhum FORBIDDEN_VIDEO_MODELS no node. Se nao bater, ABORTA esse take.
+        await selectNodeForEdit(pair.videoNodeId);
+        await sleep(400);
+        const btns = nodeButtons(pair.videoNodeId);
+        const hasKling25 = btns.includes('Kling 2.5');
+        const forbidden = FORBIDDEN_VIDEO_MODELS.filter((m) => btns.includes(m));
+        if (!hasKling25 || forbidden.length > 0) {
+          throw new Error(
+            `KLING_LOCK_ABORT pair#${pair.idx}: ` +
+            (hasKling25 ? '' : '[Kling 2.5 NAO selecionado] ') +
+            (forbidden.length ? `[FORBIDDEN=${forbidden.join(',')}] ` : '') +
+            `btns=[${btns.join(',')}]`
+          );
+        }
+        // Verificacao adicional: aspect 9:16 ou Auto (inherit), quality 720p
+        const hasAspect = btns.includes('9:16') || btns.includes('Auto');
+        const has720p = btns.includes('720p');
+        if (!hasAspect || !has720p) {
+          throw new Error(
+            `LOCK_ABORT pair#${pair.idx} config errada: aspect=${hasAspect}, 720p=${has720p} btns=[${btns.join(',')}]`
+          );
+        }
+
         await selectNodeAndEnsureUnlimited(pair.videoNodeId);
         const { workflowRunId } = await executeWorkflow(pair.videoNodeId, space.spaceId);
         pair.videoRunId = workflowRunId;
-        // Passa videoPrompt pra match exato no assets endpoint (filename = prompt)
         const expectedPrompt = takes.find((t) => (t.idx ?? 0) === pair.idx)?.videoPrompt || '';
-        // Relaxed mode + Kling em batch pode passar de 10min cada video
         const url = await waitForNodeVideo(pair.videoNodeId, 900000, expectedPrompt);
         pair.videoUrl = url;
         pair.videoStatus = 'ok';
       } catch (e) {
         pair.videoStatus = 'failed';
         pair.videoError = e.message;
+        console.error(`[VIDEO LOCK pair#${pair.idx}]`, e.message);
       }
       const done = pairs.filter((p) => p.videoStatus === 'ok').length;
       onProgress({
@@ -1459,11 +1484,49 @@ async function configureImageGenNode(uuid, { model, aspect, quality }) {
 }
 
 async function configureVideoGenNode(uuid, { model, aspect, quality, duration }) {
-  await selectNodeForEdit(uuid);
-  const node = findNodeElement(uuid);
-  if (!node) throw new Error('Video node sumiu: ' + uuid);
+  // v3.4.4 CRITICAL: SELECT MODEL com RETRY ate Kling 2.5 selecionado e nenhum
+  // FORBIDDEN detectado. Antes (v3.4.0): selectModelInNode 1x e seguia. Resultado:
+  // Magnific selecionava Seedance 1.5 Pro automaticamente (default video-from-image)
+  // e a verificacao nunca acontecia. Agora retry ate 5x. Se 5x falhar, THROW.
 
-  await selectModelInNode(node, modelDisplayName(model));
+  const targetDisplayName = modelDisplayName(model);
+  const MAX_MODEL_RETRIES = 5;
+  let modelOk = false;
+  let lastBtns = [];
+
+  for (let attempt = 0; attempt < MAX_MODEL_RETRIES; attempt++) {
+    await selectNodeForEdit(uuid);
+    const node = findNodeElement(uuid);
+    if (!node) throw new Error('Video node sumiu: ' + uuid);
+
+    try {
+      await selectModelInNode(node, targetDisplayName);
+    } catch (e) {
+      console.warn(`[configureVid] selectModel attempt ${attempt + 1} threw:`, e.message);
+    }
+
+    // Re-select node + ler botoes pra confirmar
+    await selectNodeForEdit(uuid);
+    await sleep(500);
+    lastBtns = nodeButtons(uuid);
+    const hasTarget = lastBtns.includes(targetDisplayName);
+    const forbidden = FORBIDDEN_VIDEO_MODELS.filter((m) => lastBtns.includes(m));
+
+    if (hasTarget && forbidden.length === 0) {
+      modelOk = true;
+      console.log(`[configureVid] model OK (attempt ${attempt + 1}):`, targetDisplayName);
+      break;
+    }
+    console.warn(`[configureVid] attempt ${attempt + 1} bad: hasTarget=${hasTarget}, forbidden=[${forbidden.join(',')}], btns=[${lastBtns.join(',')}]`);
+  }
+
+  if (!modelOk) {
+    throw new Error(
+      `MODEL_LOCK_FAIL: nao consegui selecionar ${targetDisplayName} apos ${MAX_MODEL_RETRIES} tentativas. ` +
+      `btns=[${lastBtns.join(',')}]. NUNCA disparar video com modelo errado (Seedance = gasta credito).`
+    );
+  }
+
   await selectNodeForEdit(uuid);
   await selectAspectInNode(findNodeElement(uuid), aspect);
   if (quality) {
