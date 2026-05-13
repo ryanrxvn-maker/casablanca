@@ -51,6 +51,14 @@ export default function AutoBrollPage() {
     'mgAuto:motion',
     '',
   );
+  // v3.2.0 — TEMPLATE SPACE: se setado, duplica este space pre-criado (com N
+  // pares Kling 2.5 LOCK ja configurados) e atribui prompts. Pula race condition
+  // Seedance e corta setup de ~5min pra ~20s. Vazio = modo classico (cria nodes
+  // do zero com v3.1.7 LOCK).
+  const [templateSpaceId, setTemplateSpaceId] = useToolState<string>(
+    'mgAuto:tplSpaceId',
+    '',
+  );
   const [processing, setProcessing] = useToolState<boolean>(
     'mgAuto:processing',
     false,
@@ -143,6 +151,7 @@ export default function AutoBrollPage() {
           takes: parsedTakes,
           imageModel,
           videoModel: 'kling-25',
+          templateSpaceId: templateSpaceId.trim() || undefined,
         },
         {
           signal: abortRef.current.signal,
@@ -321,6 +330,40 @@ ou texto livre:
             disabled={processing}
           />
         </label>
+
+        {/* v3.2.0 — TEMPLATE SPACE TURBO */}
+        <div className="rounded-[12px] border border-fuchsia-400/40 bg-fuchsia-400/5 p-3">
+          <label className="block">
+            <span className="label-field flex items-center gap-2">
+              <span className="text-fuchsia-300">TURBO MODE · Template Space UUID</span>
+              <span
+                className={
+                  'rounded-full border px-2 py-0.5 text-[10px] font-bold ' +
+                  (templateSpaceId.trim()
+                    ? 'border-fuchsia-400 bg-fuchsia-400/20 text-fuchsia-200'
+                    : 'border-line bg-bg-soft text-text-muted')
+                }
+              >
+                {templateSpaceId.trim() ? 'ON' : 'OFF'}
+              </span>
+            </span>
+            <input
+              type="text"
+              value={templateSpaceId}
+              onChange={(e) => setTemplateSpaceId(e.target.value)}
+              placeholder="Cola UUID de space template pre-criado com >= N pares Kling 2.5 LOCK (deixa vazio pra modo classico)"
+              className="input-field font-mono text-xs"
+              disabled={processing}
+            />
+            <div className="mt-1 text-xs text-text-muted">
+              <strong className="text-fuchsia-300">TURBO:</strong> duplica space template + atribui prompts + dispara.
+              Pula race condition Seedance. Setup ~20s ao inves de ~5min.
+              {' '}
+              <strong className="text-text">SETUP:</strong> cria 1x manual um space com 50+ pares Image→Video
+              usando v3.1.7+ LOCK (Kling 2.5 + Nano Banana 2 + 9:16 + 720p + 10s) → cola o UUID aqui.
+            </div>
+          </label>
+        </div>
 
         {error && (
           <div

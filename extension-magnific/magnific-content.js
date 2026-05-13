@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.1.7';
+const DARKO_MG_VERSION = '3.2.0';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -158,6 +158,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     MG_GET_PLAN: handleGetPlan,
     MG_CREATE_SPACE: handleCreateSpace,
     MG_RUN_PIPELINE: handleRunPipeline,
+    MG_RUN_PIPELINE_TEMPLATE: handleRunPipelineFromTemplate, // v3.2.0
     MG_GENERATE_IMAGE: handleGenerateImage,
     MG_ANIMATE_IMAGE: handleAnimateImage,
     MG_DOWNLOAD_ASSET: handleDownloadAsset,
@@ -436,6 +437,215 @@ async function handleRunPipeline(payload, onProgress) {
   };
 }
 
+// ========================= PIPELINE BATCH (TEMPLATE MODE v3.2.0) =========================
+
+/**
+ * Roda o pipeline a partir de um TEMPLATE SPACE pre-criado com N pares
+ * Image→Video ja configurados (Kling 2.5 + Nano Banana 2 + LOCK contracts).
+ *
+ * VANTAGEM: pula TODA a fase "criar nodes + configurar modelos" (a fase que
+ * deu race condition Seedance na 30-pair stress test). So duplica o template,
+ * navega no clone, atribui prompts aos N pares na ordem, e dispara.
+ *
+ * payload: {
+ *   templateSpaceId: string (REQUIRED — UUID do space template pre-criado),
+ *   newSpaceName?: string,
+ *   takes: [{ idx, imagePrompt, videoPrompt }],
+ *   imageConcurrency?: 12,
+ *   videoConcurrency?: 6,
+ *   strictLock?: true (re-verifica LOCK em cada par antes de assign),
+ * }
+ *
+ * SETUP MANUAL UMA VEZ: usuario cria template com 50+ pares usando v3.1.7 LOCK
+ * (que garante Kling 2.5 + Nano Banana 2 + 9:16 + 720p + 10s) e salva o uuid.
+ */
+async function handleRunPipelineFromTemplate(payload, onProgress) {
+  const {
+    templateSpaceId,
+    newSpaceName,
+    takes = [],
+    imageConcurrency = 12,
+    videoConcurrency = 6,
+    strictLock = true,
+  } = payload || {};
+
+  if (!templateSpaceId) throw new Error('TEMPLATE: templateSpaceId obrigatorio (cria template manual primeiro com v3.1.7)');
+  if (!takes.length) throw new Error('TEMPLATE: sem takes.');
+
+  // PHASE 0: SAFETY — Unlimited mode
+  onProgress({ phase: 'safety', percent: 1, message: 'Verificando Unlimited mode...' });
+  const us = await fetchJson('/app/api/unlimited-status');
+  if (us.json && us.json.is_unlimited_mode_enabled === false) {
+    throw new Error('Unlimited mode DESLIGADO no Magnific. Aborte pra nao gastar creditos.');
+  }
+  const walletBefore = await fetchJson('/app/api/wallet');
+  const creditsBefore = walletBefore.json?.credits ?? null;
+
+  // PHASE 1: Duplica template
+  onProgress({ phase: 'duplicate', percent: 3, message: `Duplicando template ${templateSpaceId.slice(0, 8)}...` });
+  const finalName = newSpaceName || `DARKO RUN ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+  const space = await duplicateSpaceFrom(templateSpaceId, finalName);
+  onProgress({ phase: 'duplicate', percent: 6, message: `Clone criado: ${space.spaceId.slice(0, 8)} (${finalName})` });
+
+  // PHASE 2: Navega no clone e espera Liveblocks hidratar todos os nodes
+  await navigateToSpace(space.spaceId);
+  onProgress({ phase: 'hydrate', percent: 8, message: 'Aguardando Liveblocks hidratar nodes...' });
+  await sleep(4000); // canvas hydrate
+  // Espera ate ver pelo menos 2 nodes (signal de hidratacao parcial)
+  await waitFor(() => collectVisibleNodes().length >= 2, 30000);
+  await sleep(2500); // extra hydrate buffer
+
+  // PHASE 3: Enumera pares e valida LOCK
+  onProgress({ phase: 'enumerate', percent: 12, message: 'Enumerando pares do template...' });
+  let availablePairs = enumeratePairsInOrder();
+  console.log('[TEMPLATE] pares enumerados:', availablePairs.length);
+
+  if (availablePairs.length < takes.length) {
+    // Tenta uma vez mais apos sleep extra
+    await sleep(3000);
+    availablePairs = enumeratePairsInOrder();
+  }
+  if (availablePairs.length < takes.length) {
+    throw new Error(
+      `TEMPLATE: so ${availablePairs.length} pares disponiveis no template, mas precisa ${takes.length}. Cria mais pares no template.`
+    );
+  }
+
+  // Pega so os primeiros N pares (ordem top-to-bottom)
+  const usePairs = availablePairs.slice(0, takes.length);
+
+  // Verifica LOCK em cada par antes de assignar (defensive — template DEVE estar correto)
+  if (strictLock) {
+    onProgress({ phase: 'verify-lock', percent: 14, message: 'Verificando LOCK nos pares...' });
+    for (let i = 0; i < usePairs.length; i++) {
+      const p = usePairs[i];
+      const vi = verifyImg(p.imageNodeId);
+      const vv = verifyVid(p.videoNodeId);
+      if (!vi.ok || !vv.ok) {
+        throw new Error(
+          `TEMPLATE LOCK violation pair#${i + 1}: img missing=[${vi.missing.join(', ')}] vid missing=[${vv.missing.join(', ')}]. Recria template com v3.1.7 LOCK.`
+        );
+      }
+    }
+  }
+
+  // PHASE 4: Assigna prompts em cada par (sequencial — typing rapido sobrecarrega Liveblocks)
+  onProgress({ phase: 'assign', percent: 16, message: `Atribuindo prompts em ${takes.length} pares...` });
+  const pairs = [];
+  for (let i = 0; i < takes.length; i++) {
+    const take = takes[i];
+    const tplPair = usePairs[i];
+    try {
+      await assignPromptsToPair(
+        { imageNodeId: tplPair.imageNodeId, videoNodeId: tplPair.videoNodeId },
+        take.imagePrompt,
+        take.videoPrompt || '',
+      );
+      pairs.push({
+        idx: take.idx ?? i + 1,
+        imageNodeId: tplPair.imageNodeId,
+        videoNodeId: tplPair.videoNodeId,
+        status: 'setup-ok',
+      });
+    } catch (e) {
+      pairs.push({
+        idx: take.idx ?? i + 1,
+        status: 'setup-failed',
+        error: e.message,
+      });
+    }
+    onProgress({
+      phase: 'assign',
+      percent: 16 + Math.round(((i + 1) / takes.length) * 14),
+      message: `Prompt ${i + 1}/${takes.length} atribuido`,
+    });
+  }
+
+  // PHASE 5: Imagens em ondas
+  onProgress({ phase: 'image-batch', percent: 32, message: `Disparando imagens (concorrencia ${imageConcurrency})...` });
+  await runWithConcurrency(
+    pairs.filter((p) => p.status === 'setup-ok'),
+    imageConcurrency,
+    async (pair) => {
+      try {
+        // Re-verify LOCK antes do execute (caso Liveblocks tenha sumido com config)
+        const vImg = verifyImg(pair.imageNodeId);
+        if (!vImg.ok) throw new Error(`LOCK_PREEXECUTE img pair#${pair.idx}: missing=[${vImg.missing.join(', ')}]`);
+        await selectNodeAndEnsureUnlimited(pair.imageNodeId);
+        const { workflowRunId } = await executeWorkflow(pair.imageNodeId, space.spaceId);
+        pair.imageRunId = workflowRunId;
+        const expectedImgPrompt = takes.find((t) => (t.idx ?? 0) === pair.idx)?.imagePrompt || '';
+        const url = await waitForNodeImage(pair.imageNodeId, 600000, expectedImgPrompt);
+        pair.imageUrl = url;
+        pair.imageStatus = 'ok';
+      } catch (e) {
+        pair.imageStatus = 'failed';
+        pair.imageError = e.message;
+      }
+      onProgress({
+        phase: 'image-batch',
+        percent: 32 + Math.round((pairs.filter((p) => p.imageStatus === 'ok').length / pairs.length) * 30),
+        message: `Imagens prontas: ${pairs.filter((p) => p.imageStatus === 'ok').length}/${pairs.length}`,
+      });
+    },
+  );
+
+  // PHASE 6: Videos em ondas
+  const animatable = pairs.filter((p) => p.imageStatus === 'ok' && p.videoNodeId);
+  onProgress({ phase: 'video-batch', percent: 62, message: `Disparando videos Kling (concorrencia ${videoConcurrency})...` });
+  await runWithConcurrency(
+    animatable,
+    videoConcurrency,
+    async (pair) => {
+      try {
+        const vVid = verifyVid(pair.videoNodeId);
+        if (!vVid.ok) throw new Error(`LOCK_PREEXECUTE vid pair#${pair.idx}: missing=[${vVid.missing.join(', ')}]`);
+        await selectNodeAndEnsureUnlimited(pair.videoNodeId);
+        const { workflowRunId } = await executeWorkflow(pair.videoNodeId, space.spaceId);
+        pair.videoRunId = workflowRunId;
+        const expectedPrompt = takes.find((t) => (t.idx ?? 0) === pair.idx)?.videoPrompt || '';
+        const url = await waitForNodeVideo(pair.videoNodeId, 900000, expectedPrompt);
+        pair.videoUrl = url;
+        pair.videoStatus = 'ok';
+      } catch (e) {
+        pair.videoStatus = 'failed';
+        pair.videoError = e.message;
+      }
+      const done = pairs.filter((p) => p.videoStatus === 'ok').length;
+      onProgress({
+        phase: 'video-batch',
+        percent: 62 + Math.round((done / Math.max(1, animatable.length)) * 35),
+        message: `Videos prontos: ${done}/${animatable.length}`,
+      });
+    },
+  );
+
+  // PHASE 7: Wallet check
+  const walletAfter = await fetchJson('/app/api/wallet');
+  const creditsAfter = walletAfter.json?.credits ?? null;
+  const creditDelta = creditsBefore !== null && creditsAfter !== null
+    ? creditsBefore - creditsAfter
+    : null;
+
+  onProgress({ phase: 'done', percent: 100, message: 'Template pipeline completa.' });
+  return {
+    spaceId: space.spaceId,
+    spaceUrl: space.url,
+    templateSpaceId,
+    creditDelta,
+    creditsBefore,
+    creditsAfter,
+    results: pairs.map((p) => ({
+      idx: p.idx,
+      imageUrl: p.imageUrl || null,
+      videoUrl: p.videoUrl || null,
+      imageStatus: p.imageStatus || p.status,
+      videoStatus: p.videoStatus || null,
+      error: p.error || p.imageError || p.videoError || null,
+    })),
+  };
+}
+
 // ========================= LEGACY HANDLERS (single take) =========================
 
 async function handleGenerateImage(payload, onProgress) {
@@ -520,6 +730,122 @@ async function navigateToSpace(spaceId) {
   location.href = spaceURL(spaceId);
   await sleep(3500);
   await waitFor(() => currentSpaceId() === spaceId, 12000);
+}
+
+// ========================= TEMPLATE SPACE (v3.2.0) =========================
+//
+// DESCOBERTO LIVE (este sessao): Magnific tem POST /api/spaces/{id}/duplicate
+// que clona um space inteiro (nodes + edges + config). Endpoint exato:
+//
+//   POST /app/api/spaces/{sourceUuid}/duplicate?lang=en_US&user_id=<id>
+//   body: {} (empty JSON works)
+//   resp: 200 { message, status:'completed', source_board:{uuid,name},
+//               is_remix:false, is_template:false,
+//               optimistic_board: { uuid, name, metadata:{is_duplicate:true,...} } }
+//
+// Rename: PUT /app/api/spaces/{newUuid} body={name:'...'} -> 200 { data:{...} }
+//
+// IMPORTANTE: Magnific usa Liveblocks pra sync collaborative state. Nodes/edges
+// nao vem no GET /spaces/{id} — eles sao hidratados do Liveblocks room state
+// quando a page carrega. Por isso enumeratePairsInOrder TEM que ser DOM-based
+// (apos navigateToSpace + sleep pra hidratacao terminar).
+
+async function duplicateSpaceFrom(sourceUuid, newName = null) {
+  const r = await fetchJson(`/app/api/spaces/${sourceUuid}/duplicate`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+  }, 30000);
+  if (!r.ok || !r.json) {
+    throw new Error(`duplicateSpaceFrom: HTTP ${r.status} raw=${r.raw}`);
+  }
+  const newUuid = r.json?.optimistic_board?.uuid ||
+                  r.json?.data?.uuid ||
+                  r.json?.board?.uuid;
+  if (!newUuid) throw new Error('duplicateSpaceFrom: sem uuid no response');
+  if (newName) {
+    try { await renameSpace(newUuid, newName); } catch (e) {
+      console.warn('[Template] rename falhou (nao crítico):', e.message);
+    }
+  }
+  return { spaceId: newUuid, url: spaceURL(newUuid) };
+}
+
+async function renameSpace(spaceUuid, newName) {
+  const r = await fetchJson(`/app/api/spaces/${spaceUuid}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: newName }),
+  }, 10000);
+  if (!r.ok) throw new Error(`renameSpace: HTTP ${r.status} raw=${r.raw}`);
+  return r.json;
+}
+
+/**
+ * Enumera os pares Image→Video do template space duplicado.
+ *
+ * STRATEGY: Como edges nao vivem no DOM como queryable elements (Vue Flow
+ * usa SVG renderizado em <canvas> ou layer separada), pareamos por POSICAO:
+ *   1) Pega todos image-generator nodes via [data-cy="space-node-image-generator"]
+ *   2) Pega todos video-generator nodes via [data-cy="space-node-video-generator"]
+ *   3) Ordena ambos por Y top-to-bottom (cada par fica em row similar)
+ *   4) Para cada image_i, video_i e o video no mesmo "row" (Y delta minimo)
+ *
+ * Premissa do TEMPLATE: usuario cria pares em ORDEM VERTICAL via output handle
+ * (cada video nasce ao lado/direita do image, mesma Y). Layout estavel apos
+ * duplicate. Funciona pra 50 pares grid vertical.
+ *
+ * Retorna: [{imageNodeId, videoNodeId, y}, ...] ordenado top-to-bottom.
+ */
+function enumeratePairsInOrder() {
+  const wrappers = Array.from(document.querySelectorAll('[data-id]'));
+  const imgs = [];
+  const vids = [];
+  for (const w of wrappers) {
+    const id = w.getAttribute('data-id') || '';
+    if (!/^[a-f0-9-]{30,}$/.test(id)) continue;
+    const img = w.querySelector('[data-cy="space-node-image-generator"]');
+    const vid = w.querySelector('[data-cy="space-node-video-generator"]');
+    if (!img && !vid) continue;
+    const rect = w.getBoundingClientRect();
+    if (img) imgs.push({ id, y: rect.y, x: rect.x });
+    if (vid) vids.push({ id, y: rect.y, x: rect.x });
+  }
+  imgs.sort((a, b) => a.y - b.y);
+  vids.sort((a, b) => a.y - b.y);
+
+  const pairs = [];
+  // Para cada image, acha o video com Y mais proximo (delta <= 80px) que ainda
+  // nao foi pareado. Se nao achar, par incompleto (descartar).
+  const usedVids = new Set();
+  for (const img of imgs) {
+    let best = null;
+    let bestDelta = Infinity;
+    for (const vid of vids) {
+      if (usedVids.has(vid.id)) continue;
+      // Video tem que estar a DIREITA do image (X maior)
+      if (vid.x <= img.x) continue;
+      const dy = Math.abs(vid.y - img.y);
+      if (dy < bestDelta) { bestDelta = dy; best = vid; }
+    }
+    if (best && bestDelta <= 80) {
+      usedVids.add(best.id);
+      pairs.push({ imageNodeId: img.id, videoNodeId: best.id, y: img.y });
+    }
+  }
+  pairs.sort((a, b) => a.y - b.y);
+  return pairs;
+}
+
+/**
+ * Atribui prompts (image + video) num par ja existente.
+ * Reutiliza setNodePromptByUuid + selectNodeForEdit (validados v3.1.5).
+ */
+async function assignPromptsToPair({ imageNodeId, videoNodeId }, imagePrompt, videoPrompt) {
+  await setNodePromptByUuid(imageNodeId, imagePrompt || '');
+  if (videoPrompt) {
+    await setNodePromptByUuid(videoNodeId, videoPrompt);
+  }
 }
 
 async function createSpaceViaDOM(name) {

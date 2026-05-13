@@ -69,7 +69,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     'MG_TEST_SESSION', 'MG_GET_PLAN', 'MG_CREATE_SPACE',
     'MG_GENERATE_IMAGE', 'MG_ANIMATE_IMAGE', 'MG_LIST_GENERATIONS',
     'MG_DOWNLOAD_ASSET',
-    'MG_RUN_PIPELINE', // v3.0 batch entrypoint
+    'MG_RUN_PIPELINE',          // v3.0 batch entrypoint
+    'MG_RUN_PIPELINE_TEMPLATE', // v3.2.0 template entrypoint
   ];
   if (FORWARD.includes(msg.type)) {
     sendResponse({ accepted: true });
@@ -110,6 +111,7 @@ async function handleForward(msg, bridgeTabId) {
     // Pipeline batch: 30 takes em relaxed mode (com 12 paralelos imagens + 6 paralelos
     // videos) pode levar 1-2h. Damos 4h de margem.
     MG_RUN_PIPELINE: 14400000,
+    MG_RUN_PIPELINE_TEMPLATE: 14400000, // 4h (mesma janela)
   };
   const timeoutMs = timeouts[msg.type] || 60000;
 

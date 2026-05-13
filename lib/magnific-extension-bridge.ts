@@ -339,6 +339,67 @@ export function runMagnificPipelineExt(
   });
 }
 
+// ============ MG_RUN_PIPELINE_TEMPLATE (v3.2.0) ============
+//
+// Roda pipeline a partir de um TEMPLATE SPACE pre-criado.
+// VANTAGEM: pula fase node-creation inteira — duplica template, atribui prompts,
+// dispara. Elimina race condition Seedance (modelo errado sob carga) e reduz
+// setup de ~5min pra ~20s.
+//
+// SETUP MANUAL: usuario cria 1x um space com N (>= takes) pares Kling 2.5 LOCK
+// usando extension v3.1.7+ e salva o uuid.
+
+export type PipelineTemplatePayload = {
+  templateSpaceId: string;        // UUID do space template
+  newSpaceName?: string;          // default: "DARKO RUN <iso-datetime>"
+  takes: PipelineTake[];
+  imageConcurrency?: number;
+  videoConcurrency?: number;
+  strictLock?: boolean;            // default true — verifica LOCK em cada par antes
+};
+
+export type PipelineTemplateResult = PipelineRunResult & {
+  templateSpaceId: string;
+  creditDelta: number | null;
+  creditsBefore: number | null;
+  creditsAfter: number | null;
+};
+
+export function runMagnificPipelineTemplateExt(
+  payload: PipelineTemplatePayload,
+  onProgress?: ProgressFn,
+): Promise<PipelineTemplateResult> {
+  installListener();
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      reject(new Error('Sem window.'));
+      return;
+    }
+    const requestId = newRequestId('tpl');
+    pending.set(requestId, {
+      resolveType: 'MG_RUN_PIPELINE_TEMPLATE_RESULT',
+      progressType: 'MG_RUN_PIPELINE_TEMPLATE_PROGRESS',
+      resolve: (d) =>
+        resolve({
+          spaceId: String(d.spaceId ?? ''),
+          spaceUrl: String(d.spaceUrl ?? ''),
+          templateSpaceId: String(d.templateSpaceId ?? payload.templateSpaceId),
+          creditDelta: d.creditDelta ?? null,
+          creditsBefore: d.creditsBefore ?? null,
+          creditsAfter: d.creditsAfter ?? null,
+          results: Array.isArray(d.results) ? d.results : [],
+        }),
+      reject,
+      onProgress,
+    });
+    window.postMessage(
+      { source: PAGE_SRC, type: 'MG_RUN_PIPELINE_TEMPLATE', requestId, payload },
+      '*',
+    );
+    // sem timeout
+  });
+}
+
 /** Util: converte base64 -> Blob (no browser). */
 export function base64ToBlob(base64: string, mime = 'application/octet-stream'): Blob {
   const binary = atob(base64);

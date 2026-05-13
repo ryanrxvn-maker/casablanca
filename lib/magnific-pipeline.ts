@@ -16,6 +16,7 @@ import {
   base64ToBlob,
   downloadMagnificAsset,
   runMagnificPipelineExt,
+  runMagnificPipelineTemplateExt,
   type ImageModel,
   type PipelineRunResult,
   type ProgressFn,
@@ -45,6 +46,12 @@ export type MagnificPipelineConfig = {
   videoQuality?: '720p' | '1080p';
   /** Duracao em s do video (10s = limite Kling unlimited) */
   videoDuration?: 5 | 10;
+  /**
+   * v3.2.0: TEMPLATE MODE — se setado, duplica este space (deve ter >= takes
+   * pares Kling 2.5 LOCK pre-configurados) ao inves de criar do zero. Pula
+   * race condition Seedance + corta setup de ~5min pra ~20s.
+   */
+  templateSpaceId?: string;
 };
 
 export type TakeState =
@@ -99,6 +106,7 @@ export async function runMagnificPipeline(
     imageQuality = '1K',
     videoQuality = '720p',
     videoDuration = 10,
+    templateSpaceId,
   } = cfg;
   const { onProgress, signal } = cb;
 
@@ -120,31 +128,53 @@ export async function runMagnificPipeline(
 
   emit({ message: 'Disparando pipeline na extension Magnific...', phase: 'starting', percent: 0 });
 
-  // Chama o entrypoint batch da extension
+  // Chama o entrypoint batch da extension — TEMPLATE mode vs classic
   let pipeRes: PipelineRunResult;
   try {
-    pipeRes = await runMagnificPipelineExt(
-      {
-        spaceName,
-        spaceId: existingSpaceId,
-        takes: takes.map((t) => ({
-          idx: t.idx,
-          imagePrompt: t.imagePrompt,
-          videoPrompt: t.videoPrompt || '',
-        })),
-        imageModel,
-        videoModel,
-        imageConcurrency,
-        videoConcurrency,
-        aspect,
-        imageQuality,
-        videoQuality,
-        videoDuration,
-      },
-      (stage, percent, message) => {
-        emit({ phase: stage, percent, message });
-      },
-    );
+    if (templateSpaceId) {
+      // v3.2.0: duplica template + atribui prompts + dispara
+      const r = await runMagnificPipelineTemplateExt(
+        {
+          templateSpaceId,
+          newSpaceName: spaceName,
+          takes: takes.map((t) => ({
+            idx: t.idx,
+            imagePrompt: t.imagePrompt,
+            videoPrompt: t.videoPrompt || '',
+          })),
+          imageConcurrency,
+          videoConcurrency,
+          strictLock: true,
+        },
+        (stage, percent, message) => {
+          emit({ phase: 'tpl:' + stage, percent, message });
+        },
+      );
+      pipeRes = r;
+    } else {
+      pipeRes = await runMagnificPipelineExt(
+        {
+          spaceName,
+          spaceId: existingSpaceId,
+          takes: takes.map((t) => ({
+            idx: t.idx,
+            imagePrompt: t.imagePrompt,
+            videoPrompt: t.videoPrompt || '',
+          })),
+          imageModel,
+          videoModel,
+          imageConcurrency,
+          videoConcurrency,
+          aspect,
+          imageQuality,
+          videoQuality,
+          videoDuration,
+        },
+        (stage, percent, message) => {
+          emit({ phase: stage, percent, message });
+        },
+      );
+    }
   } catch (e) {
     return {
       ok: false,
