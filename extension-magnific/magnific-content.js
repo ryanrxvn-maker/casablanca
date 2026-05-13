@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.1.6';
+const DARKO_MG_VERSION = '3.1.7';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -39,6 +39,34 @@ if (window.__darkolab_magnific_loaded__) {
   window.__darkolab_magnific_version = DARKO_MG_VERSION;
   console.log('[DARKO Magnific Content] online v=' + DARKO_MG_VERSION);
 }
+
+// ========================= KLING 2.5 LOCK (v3.1.7) =========================
+//
+// User directive: "SEMPRE SELECIONAR KLING 2.5 720P, NUNCA OUTRA NO SPACES DO MAGNIFIC"
+//
+// Bug observado live (30-pair stress test em a1c3ff03-27a3-4217-a700-a526b98a7c2b):
+// pares 7 e 8 acabaram configurados com Seedance 1.5 Pro ao inves de Kling 2.5,
+// mesmo com selectModelInNode(node, 'Kling 2.5') chamado. Sob carga (12 paralelos)
+// o dispatchEvent do search input as vezes nao filtrava em tempo e a primeira
+// opcao visivel (Seedance, default do Magnific) era selecionada.
+//
+// Fix v3.1.7: verifyImg/verifyVid checa os botoes visiveis do node DEPOIS de cada
+// configure. Se nao bater com o LOCK, retry 3x. Se falhar 3x, ABORTA todo o batch
+// (NUNCA dispara workflow_execute com config errada).
+//
+// Safety extra: force_credits:false no execute body ja protege wallet, mas LOCK
+// e correctness — vide pra evitar disparo Seedance que ia falhar/sair com lixo.
+
+const VIDEO_MODEL_LOCK    = 'Kling 2.5';
+const VIDEO_QUALITY_LOCK  = '720p';
+const VIDEO_ASPECT_LOCK   = '9:16';
+const VIDEO_DURATION_LOCK = '10s';   // permitido tambem: '5s'
+const IMAGE_MODEL_LOCK    = 'Google Nano Banana 2';
+const IMAGE_ASPECT_LOCK   = '9:16';
+const IMAGE_QUALITY_LOCK  = '1K';
+
+const LOCK_MAX_RETRIES = 3;
+const LOCK_RETRY_SLEEP_MS = 600;
 
 // ========================= NETWORK =========================
 
@@ -273,7 +301,11 @@ async function handleRunPipeline(payload, onProgress) {
   await sleep(2500); // SPA hydrate
 
   // PHASE 2: Setup todos os pares (image + video conectado)
+  // LOCK v3.1.7: se QUALQUER par cair em LOCK_VIOLATION, ABORTA o batch inteiro
+  // ANTES de chegar em executeWorkflow. Garante que nunca disparamos com modelo
+  // errado. force_credits:false ja protege wallet, mas LOCK protege correctness.
   const pairs = [];
+  let lockViolated = null;
   for (let i = 0; i < takes.length; i++) {
     const take = takes[i];
     const setupPercent = 5 + Math.round((i / takes.length) * 25);
@@ -287,6 +319,7 @@ async function handleRunPipeline(payload, onProgress) {
         imagePrompt: take.imagePrompt,
         videoPrompt: take.videoPrompt || '',
         imageModel, videoModel, aspect, imageQuality, videoQuality, videoDuration,
+        pairIdx: take.idx ?? i + 1,
       });
       pairs.push({ idx: take.idx ?? i + 1, ...pair, status: 'setup-ok' });
     } catch (e) {
@@ -296,7 +329,18 @@ async function handleRunPipeline(payload, onProgress) {
         percent: setupPercent,
         message: `Falha setup take ${i + 1}: ${e.message}`,
       });
+      // LOCK_VIOLATION = abort total — nunca disparar workflow com config errada
+      if (e.lockViolation) {
+        lockViolated = e;
+        break;
+      }
     }
+  }
+
+  if (lockViolated) {
+    const msg = `LOCK ABORT: ${lockViolated.message}. Batch cancelado — nenhum execute disparado. Recarrega a aba Magnific e roda de novo.`;
+    onProgress({ phase: 'error', percent: 30, message: msg });
+    throw new Error(msg);
   }
 
   // PHASE 3: Imagens em ondas de imageConcurrency (default 12)
@@ -306,6 +350,11 @@ async function handleRunPipeline(payload, onProgress) {
     imageConcurrency,
     async (pair) => {
       try {
+        // LOCK v3.1.7: re-verify ANTES do execute (caso usuario tenha editado o node)
+        const vImg = verifyImg(pair.imageNodeId);
+        if (!vImg.ok) {
+          throw new Error(`LOCK_PREEXECUTE img pair#${pair.idx}: missing=[${vImg.missing.join(', ')}]`);
+        }
         // CONFIRMA UNLIMITED ON antes de executar (NUNCA gasta creditos)
         await selectNodeAndEnsureUnlimited(pair.imageNodeId);
         const { workflowRunId } = await executeWorkflow(pair.imageNodeId, space.spaceId);
@@ -335,6 +384,11 @@ async function handleRunPipeline(payload, onProgress) {
     videoConcurrency,
     async (pair) => {
       try {
+        // LOCK v3.1.7: re-verify ANTES do execute video
+        const vVid = verifyVid(pair.videoNodeId);
+        if (!vVid.ok) {
+          throw new Error(`LOCK_PREEXECUTE vid pair#${pair.idx}: missing=[${vVid.missing.join(', ')}]`);
+        }
         await selectNodeAndEnsureUnlimited(pair.videoNodeId);
         const { workflowRunId } = await executeWorkflow(pair.videoNodeId, space.spaceId);
         pair.videoRunId = workflowRunId;
@@ -544,21 +598,122 @@ async function findVisibleByText(rx, scope = document, timeoutMs = 4000) {
 
 // ---- Create configured pair (Image Generator + Video Generator connected) ----
 
+// ========================= LOCK VERIFIERS (v3.1.7) =========================
+
+/** Coleta TODOS os botoes visiveis do node (texto trimmed, <35 chars). */
+function nodeButtons(uuid) {
+  const n = findNodeElement(uuid);
+  if (!n) return [];
+  return Array.from(n.querySelectorAll('button'))
+    .filter((b) => b.offsetParent !== null)
+    .map((b) => (b.textContent || '').trim())
+    .filter((t) => t && t.length < 35);
+}
+
+/**
+ * Verifica se um IMAGE node tem o LOCK config correto (model + aspect + quality).
+ * Retorna { ok: bool, btns: string[], missing: string[] }.
+ */
+function verifyImg(uuid) {
+  const btns = nodeButtons(uuid);
+  const expected = [IMAGE_MODEL_LOCK, IMAGE_ASPECT_LOCK, IMAGE_QUALITY_LOCK];
+  const missing = expected.filter((e) => !btns.includes(e));
+  return { ok: missing.length === 0, btns, missing };
+}
+
+/**
+ * Verifica se um VIDEO node tem o LOCK config correto (model + aspect + quality + duration).
+ * Retorna { ok: bool, btns: string[], missing: string[] }.
+ *
+ * Aceita VIDEO_DURATION_LOCK ('10s') OU '5s' como duration valida (user pode preferir 5s
+ * pra economizar tempo Relaxed Mode). Modelo, aspect e quality sao STRICT.
+ */
+function verifyVid(uuid) {
+  const btns = nodeButtons(uuid);
+  const allowedDurations = ['10s', '5s'];
+  const missing = [];
+  if (!btns.includes(VIDEO_MODEL_LOCK)) missing.push(`model!=${VIDEO_MODEL_LOCK}`);
+  if (!btns.includes(VIDEO_ASPECT_LOCK)) missing.push(`aspect!=${VIDEO_ASPECT_LOCK}`);
+  if (!btns.includes(VIDEO_QUALITY_LOCK)) missing.push(`quality!=${VIDEO_QUALITY_LOCK}`);
+  if (!allowedDurations.some((d) => btns.includes(d))) missing.push(`duration!=[10s|5s]`);
+  return { ok: missing.length === 0, btns, missing };
+}
+
+/**
+ * Executa fn() com retry. Apos cada execucao chama verify() — se ok retorna.
+ * Se nao ok apos LOCK_MAX_RETRIES, throw com detalhe dos botoes encontrados.
+ *
+ * @param {Function} fn - configure step (async)
+ * @param {Function} verify - returns { ok, btns, missing }
+ * @param {string} label - 'img' | 'vid' pra log
+ * @param {number} pairIdx - 1-based
+ */
+async function configureWithLockRetry(fn, verify, label, pairIdx) {
+  let lastVerify = null;
+  for (let r = 0; r < LOCK_MAX_RETRIES; r++) {
+    try {
+      await fn();
+    } catch (e) {
+      console.warn(`[LOCK] pair#${pairIdx} ${label} configure attempt ${r + 1} threw:`, e.message);
+    }
+    await sleep(LOCK_RETRY_SLEEP_MS);
+    lastVerify = verify();
+    console.log(`[LOCK] pair#${pairIdx} ${label} verify attempt ${r + 1}:`, lastVerify);
+    if (lastVerify.ok) return lastVerify;
+  }
+  // Falhou LOCK_MAX_RETRIES vezes — throw com detalhe pro handleRunPipeline abortar
+  const err = new Error(
+    `LOCK_VIOLATION pair#${pairIdx} ${label}: missing=[${lastVerify.missing.join(', ')}] btns=[${lastVerify.btns.join(', ')}]`,
+  );
+  err.lockViolation = true;
+  err.lockLabel = label;
+  err.lockPair = pairIdx;
+  err.lockBtns = lastVerify.btns;
+  err.lockMissing = lastVerify.missing;
+  throw err;
+}
+
+// ---- Create configured pair (Image Generator + Video Generator connected) ----
+
 async function createTakePair({
   imagePrompt, videoPrompt, imageModel, videoModel,
   aspect, imageQuality, videoQuality, videoDuration,
+  pairIdx = 0,
 }) {
+  // LOCK v3.1.7: forca Kling 2.5 + Nano Banana 2 + 9:16 + 720p/1K independente do payload
+  imageModel    = 'nano-banana-2';
+  videoModel    = 'kling-25';
+  aspect        = '9:16';
+  imageQuality  = '1K';
+  videoQuality  = '720p';
+  // duration: aceita o que veio do payload se for 5 ou 10, senao 10
+  videoDuration = (videoDuration === 5 || videoDuration === '5s') ? 5 : 10;
+
   // 1) Cria Image Generator node
   const imageNodeId = await createImageGenNode();
   await setNodePromptByUuid(imageNodeId, imagePrompt);
-  await configureImageGenNode(imageNodeId, { model: imageModel, aspect, quality: imageQuality });
+
+  // 1b) Configure + retry+verify (ABORTA pair se LOCK violado apos 3 tries)
+  await configureWithLockRetry(
+    () => configureImageGenNode(imageNodeId, { model: imageModel, aspect, quality: imageQuality }),
+    () => verifyImg(imageNodeId),
+    'img',
+    pairIdx,
+  );
 
   // 2) Cria Video Generator via output handle (popup) — conexao auto
   const videoNodeId = await createVideoGenNodeViaOutputHandle(imageNodeId);
   if (videoPrompt) await setNodePromptByUuid(videoNodeId, videoPrompt);
-  await configureVideoGenNode(videoNodeId, {
-    model: videoModel, aspect, quality: videoQuality, duration: videoDuration,
-  });
+
+  // 2b) Configure + retry+verify
+  await configureWithLockRetry(
+    () => configureVideoGenNode(videoNodeId, {
+      model: videoModel, aspect, quality: videoQuality, duration: videoDuration,
+    }),
+    () => verifyVid(videoNodeId),
+    'vid',
+    pairIdx,
+  );
 
   return { imageNodeId, videoNodeId };
 }
@@ -816,22 +971,24 @@ async function selectModelInNode(node, displayName) {
   }
   await sleep(600);
 
-  // SO items VISIVEIS (offsetParent !== null) e com width > 20
+  // SO items VISIVEIS (offsetParent !== null) e com width > 20.
+  // LOCK v3.1.7: match STRICT — apenas equality exato OU equality + 'New' badge.
+  // Removido `startsWith` que abria caminho pra Seedance 1.5 Pro virar "Kling 2.5 Pro"
+  // por engano em casos extremos. Sort por length pega o menor (defesa contra
+  // resultado nao-filtrado ainda mostrando lista cheia).
   const opt = await waitFor(() => {
     const all = Array.from(document.querySelectorAll('div,li,button,[role=option]'));
     const matches = all.filter((e) => {
       if (e.offsetParent === null) return false;
       if (e.getBoundingClientRect().width < 20) return false;
       const t = (e.textContent || '').trim();
-      return t === displayName ||
-             t === displayName + 'New' ||
-             (t.startsWith(displayName) && t.length < displayName.length + 10);
+      return t === displayName || t === displayName + 'New';
     });
     matches.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
     return matches[0] || null;
-  }, 4000);
+  }, 5000);
   clickRealElement(opt);
-  await sleep(600);
+  await sleep(700);
 }
 
 async function selectAspectInNode(node, aspect) {

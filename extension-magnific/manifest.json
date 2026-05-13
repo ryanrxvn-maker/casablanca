@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "DARKO LAB — Magnific Auto",
-  "version": "3.1.6",
-  "description": "DARKO LAB Magnific Auto v3.1 — seletores DOM validados ao vivo. Output-handle click → Add btn → Video Generator (conexao auto). Pre-check is_unlimited_mode_enabled=true. Kling 2.5 + Nano Banana 2 ilimitados confirmados (credit delta = 0).",
+  "version": "3.1.7",
+  "description": "DARKO LAB Magnific Auto v3.1.7 — KLING 2.5 LOCK: verifica modelo/aspect/quality/duration nos pares, retry 3x, ABORTA batch inteiro se qualquer par configurar errado. Garante NUNCA disparar com Seedance/outro modelo por engano. Pre-check is_unlimited_mode_enabled=true mantido.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
