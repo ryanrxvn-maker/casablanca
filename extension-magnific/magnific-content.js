@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.4.8';
+const DARKO_MG_VERSION = '3.4.9';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -1107,35 +1107,36 @@ function findNodeElement(uuid) {
 // ---- Generic UI helpers ----
 
 /**
- * v3.4.7 REAL MOUSE CLICK via chrome.debugger CDP — usa o background SW pra
- * disparar real click no tab atual. Necessario pra dropdown options do Magnific
- * (dispatched events nao funcionam — validado live).
+ * v3.4.9 KEYBOARD NAVIGATION — dropdowns Magnific filtram busca por texto e
+ * highlight o primeiro match. Apertar Enter no search input seleciona o
+ * highlighted (= primeiro filtered match). Substitui mouse click que nao
+ * funcionava em option items.
  *
- * @param {Element} el - elemento DOM a clicar
- * @returns {Promise<boolean>} true se click foi disparado com sucesso
+ * @param {HTMLInputElement} input - input element do search
+ * @returns {Promise<boolean>}
  */
-async function clickViaCDP(el) {
-  if (!el) return false;
+async function pressEnterOnInput(input) {
+  if (!input || input.tagName !== 'INPUT') return false;
   try {
-    const r = el.getBoundingClientRect();
-    if (!r || r.width === 0) return false;
-    const x = Math.round(r.x + r.width / 2);
-    const y = Math.round(r.y + r.height / 2);
-    return await new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: 'MG_REAL_CLICK', payload: { x, y } }, (resp) => {
-        if (chrome.runtime.lastError) {
-          console.warn('[clickViaCDP] lastError:', chrome.runtime.lastError.message);
-          resolve(false);
-          return;
-        }
-        resolve(!!resp?.ok);
-      });
-    });
+    input.focus();
+    // Dispatch keydown + keypress + keyup pra cobrir todos os listeners
+    const opts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true, cancelable: true };
+    input.dispatchEvent(new KeyboardEvent('keydown', opts));
+    input.dispatchEvent(new KeyboardEvent('keypress', opts));
+    input.dispatchEvent(new KeyboardEvent('keyup', opts));
+    return true;
   } catch (e) {
-    console.warn('[clickViaCDP] error:', e?.message);
+    console.warn('[pressEnterOnInput] error:', e?.message);
     return false;
   }
 }
+
+/**
+ * Backwards-compat helper — agora um no-op (CDP foi removido v3.4.9).
+ * Mantido pra outras chamadas nao quebrarem; sempre returns false → fallback
+ * pra clickRealElement.
+ */
+async function clickViaCDP() { return false; }
 
 function clickRealElement(el) {
   if (!el) return false;
@@ -1706,24 +1707,19 @@ async function selectModelInNode(node, displayName) {
     throw new Error('Option "' + displayName + '" not found after typing');
   }
 
-  // Step 6: click option via CDP REAL CLICK (v3.4.7)
-  // dispatched events nao funcionam pra dropdown options do Magnific (validado live).
-  // Usa chrome.debugger Input.dispatchMouseEvent via background — REAL click identico
-  // a user clicando.
-  SMLog('6) clicking option via CDP REAL CLICK');
-  const clickable = opt.closest('button,[role=option],[role=menuitem],li,a') || opt;
-  SMLog('6) clickable target:', clickable.tagName);
-  // Scroll into view antes do real click (coords usadas pelo CDP sao viewport-relative)
-  clickable.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  await sleep(200);
-  const cdpOk = await clickViaCDP(clickable);
-  SMLog('6) CDP click result:', cdpOk);
-  if (!cdpOk) {
-    // Fallback: dispatched events (mesmo que provavelmente nao funcione)
-    SMLog('6) CDP falhou, fallback dispatched events');
-    clickRealElement(clickable);
-  }
-  await sleep(900);
+  // Step 6: v3.4.9 KEYBOARD NAV — press Enter no search input (typed "kling")
+  // pra selecionar o primeiro match highlighted (= Kling 2.5).
+  // Dispatched mouse clicks nao funcionam em dropdown options (validado live).
+  // Mouse click real via chrome.debugger introduzia side effects.
+  // Keyboard Enter is reliable e standard pra searchable dropdowns.
+  SMLog('6) pressing Enter on search input to select highlighted option');
+  await pressEnterOnInput(input);
+  await sleep(700);
+  SMLog('6) Enter pressed, sleeping');
+
+  // Fallback: tentar mouse click se Enter nao funcionar (verifica state depois)
+  // O proprio configureWithLockRetry / pre-execute LOCK pega se selecao falhar.
+  await sleep(300);
   SMLog('6) DONE');
 }
 
