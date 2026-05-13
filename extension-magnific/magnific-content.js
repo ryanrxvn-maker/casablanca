@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.4.4';
+const DARKO_MG_VERSION = '3.4.5';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -1108,16 +1108,43 @@ function findNodeElement(uuid) {
 
 function clickRealElement(el) {
   if (!el) return false;
-  // Dispatcha pointer + mouse events (Vue Flow as vezes ignora click puro)
-  const r = el.getBoundingClientRect();
-  const x = r.x + r.width / 2;
-  const y = r.y + r.height / 2;
-  const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 };
-  el.dispatchEvent(new PointerEvent('pointerdown', opts));
-  el.dispatchEvent(new MouseEvent('mousedown', opts));
-  el.dispatchEvent(new PointerEvent('pointerup', opts));
-  el.dispatchEvent(new MouseEvent('mouseup', opts));
-  el.dispatchEvent(new MouseEvent('click', opts));
+  // v3.4.5: STRATEGY HYBRIDA pra Vue Flow + dropdown options funcionarem ambos.
+  // Antes: dispatchEvent puro causava Vue Flow TypeError 'Cannot read property document of null'
+  // E mesmo quando passava, dropdown options nao registravam o click no Vue (state nao mudava).
+  // Agora: usar nativo el.click() PRIMEIRO (que Vue Router/components reconhecem), depois
+  // fallback pra pointer events com pointerId valido pra Vue Flow nao crashar.
+  try {
+    const r = el.getBoundingClientRect();
+    const x = r.x + r.width / 2;
+    const y = r.y + r.height / 2;
+    const opts = {
+      bubbles: true,
+      cancelable: true,
+      clientX: x,
+      clientY: y,
+      button: 0,
+      buttons: 1,
+      pointerId: 1,        // Vue Flow crashava sem pointerId
+      pointerType: 'mouse',
+      isPrimary: true,
+    };
+
+    // Tier 1: focus + nativo .click() (Vue handles via DOM click delegation)
+    try { if (typeof el.focus === 'function') el.focus({ preventScroll: true }); } catch {}
+    el.dispatchEvent(new PointerEvent('pointerover', opts));
+    el.dispatchEvent(new PointerEvent('pointerenter', opts));
+    el.dispatchEvent(new MouseEvent('mouseover', opts));
+    el.dispatchEvent(new MouseEvent('mouseenter', opts));
+    el.dispatchEvent(new PointerEvent('pointerdown', opts));
+    el.dispatchEvent(new MouseEvent('mousedown', opts));
+    el.dispatchEvent(new PointerEvent('pointerup', opts));
+    el.dispatchEvent(new MouseEvent('mouseup', opts));
+    el.dispatchEvent(new MouseEvent('click', opts));
+    // Native click() depois — alguns frameworks Vue precisam disso pra reactive state mudar
+    if (typeof el.click === 'function') el.click();
+  } catch (e) {
+    console.warn('[clickRealElement] erro mas continuando:', e.message);
+  }
   return true;
 }
 
