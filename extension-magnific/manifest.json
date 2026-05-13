@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "DARKO LAB — Magnific Auto",
-  "version": "3.4.0",
-  "description": "DARKO LAB Magnific Auto v3.4.0 — SIMPLIFICADO: removida complexidade LOCK retry/verify/pre-execute que travava pipeline (user reportou 'antes funcionava'). Mantido: selectModelInNode STRICT equality match (era o fix real do bug Seedance). Mantido: tab routing inteligente + retry fetchJson 504 + heartbeat + total try/catch. Pipeline volta ao fluxo simples Phase 1→5 sem overhead de verifies.",
+  "version": "3.4.1",
+  "description": "DARKO LAB Magnific Auto v3.4.1 — FIX FINAL: navigateToSpace agora usa history.pushState + popstate event (SPA-friendly) ao inves de location.href HARD navigation que MATAVA o script async em execucao. Antes: 'Garantindo Space...' eterno. Agora: pipeline progride normal Phase 1→5. + Strict equality Kling 2.5 + tab routing + retry 504 + heartbeat 60s.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",

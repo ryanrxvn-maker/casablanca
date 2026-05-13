@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.4.0';
+const DARKO_MG_VERSION = '3.4.1';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -927,13 +927,37 @@ async function ensureSpaceWithName(name) {
   return await createSpaceViaDOM(name);
 }
 
+/**
+ * v3.4.1 FIX CRITICO: navega no SPA Magnific SEM hard-reload.
+ *
+ * Antes (v3.4.0 e anteriores): usava location.href = newUrl que dispara HARD
+ * NAVIGATION → mata script async em execucao → todos os awaits seguintes
+ * morrem → user via "Garantindo Space..." eterno.
+ *
+ * Agora: history.pushState + dispatch popstate event. Vue Flow SPA pega o
+ * route change e re-render sem reload. Script async sobrevive intacto.
+ */
 async function navigateToSpace(spaceId) {
   if (currentSpaceId() === spaceId) return;
+
+  // SPA-friendly navigation: pushState + popstate event
   history.pushState({}, '', spaceURL(spaceId));
-  // SPAs como Vue/Vite as vezes nao reagem a pushState; force reload
-  location.href = spaceURL(spaceId);
-  await sleep(3500);
-  await waitFor(() => currentSpaceId() === spaceId, 12000);
+  window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
+
+  // Espera o SPA reagir e atualizar a URL real
+  await sleep(500);
+  try {
+    await waitFor(() => currentSpaceId() === spaceId, 8000);
+  } catch (e) {
+    // SPA nao pegou pushState — fallback pra navigation (sera fatal pro script,
+    // mas o user precisa saber que isso aconteceu).
+    console.warn('[navigateToSpace] SPA nao reagiu a pushState, fallback hard nav (script vai morrer)');
+    location.href = spaceURL(spaceId);
+    await sleep(3500);
+  }
+
+  // Da tempo do Liveblocks hidratar nodes do novo space
+  await sleep(2000);
 }
 
 // ========================= TEMPLATE SPACE (v3.2.0) =========================
