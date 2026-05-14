@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.5.1';
+const DARKO_MG_VERSION = '3.5.2';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -1758,95 +1758,137 @@ async function selectModelInNode(node, displayName) {
   SMLog('6) DONE');
 }
 
-async function selectAspectInNode(node, aspect) {
-  const dd = await waitFor(() => {
-    const all = node.querySelectorAll('button,[role=button]');
-    for (const b of all) {
-      if (b.offsetParent === null) continue;
-      const t = (b.textContent || '').trim();
-      if (/^(auto|\d+:\d+)$/.test(t)) return b;
+/**
+ * v3.5.2 — selectAspect/Quality/Duration HARDENED with retry+verify+verbose log.
+ * Same proven approach as selectModelInNode: triple-click strategy + 5x retry.
+ *
+ * User feedback: "Kling 2.5 e 720p funcionaram, 9:16 e 10s nao. PRECISO QUE
+ * CONSIGA SELECIONAR PERFEITAMENTE COMO Kling 2.5 e 720p". Esse fix.
+ */
+async function selectOptionRobust(node, targetText, dropdownMatcher, label) {
+  const SOL = (m, x) => console.log('[selectOpt ' + label + '=' + targetText + '] ' + m, x !== undefined ? x : '');
+  const MAX_RETRY = 5;
+
+  for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
+    SOL('attempt ' + attempt + '/5');
+
+    // Step 1: find dropdown button
+    const dd = await waitFor(() => {
+      const all = node.querySelectorAll('button,[role=button]');
+      for (const b of all) {
+        if (b.offsetParent === null) continue;
+        const t = (b.textContent || '').trim();
+        if (dropdownMatcher(t)) return b;
+      }
+      return null;
+    }, 5000);
+    const currentText = (dd.textContent || '').trim();
+    SOL('found dropdown, current=', currentText);
+
+    // Already selected?
+    if (currentText.toLowerCase() === targetText.toLowerCase()) {
+      SOL('already selected, done');
+      return true;
     }
-    return null;
-  }, 4000);
-  if ((dd.textContent || '').trim() === aspect) return;
-  // v3.4.7: real click pro dropdown trigger tambem (consistente)
-  await clickViaCDP(dd) || clickRealElement(dd);
-  await sleep(500);
-  const opt = await waitFor(() => {
-    const all = Array.from(document.querySelectorAll('div,li,button,[role=option]'));
-    const matches = all.filter((e) => {
-      if (e.offsetParent === null) return false;
-      const r = e.getBoundingClientRect();
-      if (r.width < 5 || r.width > 200) return false;
-      return (e.textContent || '').trim() === aspect;
-    });
-    matches.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
-    return matches[0] || null;
-  }, 3000);
-  const clickable = opt.closest('button,[role=option],[role=menuitem],li,a') || opt;
-  clickable.scrollIntoView({ block: 'nearest' });
-  await sleep(150);
-  const cdpOk = await clickViaCDP(clickable);
-  if (!cdpOk) clickRealElement(clickable);
-  await sleep(500);
+
+    // Step 2: click dropdown to open (CDP real click)
+    const ddCdp = await clickViaCDP(dd);
+    if (!ddCdp) clickRealElement(dd);
+    SOL('dropdown clicked, cdp=', ddCdp);
+    await sleep(700);
+
+    // Step 3: find option
+    let opt = null;
+    try {
+      opt = await waitFor(() => {
+        const all = Array.from(document.querySelectorAll('div,li,button,[role=option],[role=menuitem],span'));
+        const matches = all.filter((e) => {
+          if (e.offsetParent === null) return false;
+          const r = e.getBoundingClientRect();
+          if (r.width < 5) return false;
+          if (r.height < 5 || r.height > 100) return false;
+          const t = (e.textContent || '').trim();
+          return t === targetText || t.toLowerCase() === targetText.toLowerCase();
+        });
+        // Sort by length asc (shortest match preferred — defends against unfiltered list)
+        matches.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
+        return matches[0] || null;
+      }, 5000);
+      SOL('option found, tag=' + opt.tagName + ' rect=', JSON.stringify(opt.getBoundingClientRect()));
+    } catch (e) {
+      SOL('option NOT found:', e.message);
+      // Diagnostic: list visible options
+      const visible = Array.from(document.querySelectorAll('div,li,button,[role=option],span'))
+        .filter(e => e.offsetParent !== null && e.getBoundingClientRect().width > 5 && e.getBoundingClientRect().height > 5 && e.getBoundingClientRect().height < 100)
+        .map(e => (e.textContent || '').trim())
+        .filter(t => t && t.length < 30 && t.length > 0)
+        .slice(0, 20);
+      SOL('visible options:', visible);
+      // Close dropdown + try again
+      document.body.click();
+      await sleep(500);
+      continue;
+    }
+
+    // Step 4: click option (CDP real click — bypass isTrusted check)
+    const clickable = opt.closest('button,[role=option],[role=menuitem],li,a') || opt;
+    clickable.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    await sleep(200);
+    const cdpOk = await clickViaCDP(clickable);
+    SOL('option clicked, cdp=', cdpOk);
+    if (!cdpOk) clickRealElement(clickable);
+    await sleep(800);
+
+    // Step 5: verify selection actually applied
+    const newDd = await waitFor(() => {
+      const all = node.querySelectorAll('button,[role=button]');
+      for (const b of all) {
+        if (b.offsetParent === null) continue;
+        const t = (b.textContent || '').trim();
+        if (dropdownMatcher(t)) return b;
+      }
+      return null;
+    }, 3000);
+    const newText = (newDd.textContent || '').trim();
+    SOL('after click, dropdown text=', newText);
+
+    if (newText.toLowerCase() === targetText.toLowerCase()) {
+      SOL('SUCCESS on attempt ' + attempt);
+      return true;
+    }
+
+    SOL('still ' + newText + ', retry');
+    await sleep(500);
+  }
+
+  throw new Error(`selectOption FAIL after ${MAX_RETRY} attempts: dropdown nao mudou pra "${targetText}"`);
+}
+
+async function selectAspectInNode(node, aspect) {
+  await selectOptionRobust(
+    node,
+    aspect,
+    (t) => /^(auto|\d+:\d+)$/.test(t) && t.length < 10,
+    'aspect'
+  );
 }
 
 async function selectQualityInNode(node, qualityLabel) {
-  const dd = await waitFor(() => {
-    const all = node.querySelectorAll('button,[role=button]');
-    for (const b of all) {
-      const t = (b.textContent || '').trim();
-      if (/^(auto|1k|2k|4k|512|720p|1080p|sd|hd)$/i.test(t)) return b;
-    }
-    return null;
-  }, 3000);
-  if ((dd.textContent || '').trim().toLowerCase() === qualityLabel.toLowerCase()) return;
-  await clickViaCDP(dd) || clickRealElement(dd);
-  await sleep(450);
-  const opt = await waitFor(() => {
-    const all = Array.from(document.querySelectorAll('div,li,button,[role=option]'));
-    const matches = all.filter((e) => (e.textContent || '').trim().toLowerCase() === qualityLabel.toLowerCase());
-    matches.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
-    return matches[0] || null;
-  }, 3000);
-  const clickable = opt.closest('button,[role=option],[role=menuitem],li,a') || opt;
-  clickable.scrollIntoView({ block: 'nearest' });
-  await sleep(150);
-  const cdpOk = await clickViaCDP(clickable);
-  if (!cdpOk) clickRealElement(clickable);
-  await sleep(450);
+  await selectOptionRobust(
+    node,
+    qualityLabel,
+    (t) => /^(auto|1k|2k|4k|512|720p|1080p|sd|hd)$/i.test(t),
+    'quality'
+  );
 }
 
 async function selectDurationInNode(node, seconds) {
-  const dd = await waitFor(() => {
-    const all = node.querySelectorAll('button,[role=button]');
-    for (const b of all) {
-      if (b.offsetParent === null) continue;
-      const t = (b.textContent || '').trim();
-      if (/^\d+(-\d+)?s?["']?$/.test(t)) return b;
-    }
-    return null;
-  }, 4000);
-  if ((dd.textContent || '').trim() === seconds + 's') return;
-  await clickViaCDP(dd) || clickRealElement(dd);
-  await sleep(500);
-  const opt = await waitFor(() => {
-    const all = Array.from(document.querySelectorAll('div,li,button,[role=option]'));
-    const matches = all.filter((e) => {
-      if (e.offsetParent === null) return false;
-      const r = e.getBoundingClientRect();
-      if (r.width < 5 || r.width > 200) return false;
-      return (e.textContent || '').trim() === seconds + 's';
-    });
-    matches.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
-    return matches[0] || null;
-  }, 3000);
-  const clickable = opt.closest('button,[role=option],[role=menuitem],li,a') || opt;
-  clickable.scrollIntoView({ block: 'nearest' });
-  await sleep(150);
-  const cdpOk = await clickViaCDP(clickable);
-  if (!cdpOk) clickRealElement(clickable);
-  await sleep(500);
+  await selectOptionRobust(
+    node,
+    seconds + 's',
+    (t) => /^\d+(-\d+)?s?["']?$/.test(t),
+    'duration'
+  );
 }
 
 /**

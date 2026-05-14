@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DARKO LAB — Magnific Auto",
-  "version": "3.5.1",
+  "version": "3.5.2",
   "description": "DARKO LAB Magnific Auto v3.5.1 — FLUXO INTELIGENTE: abandona template, retorna fluxo classico mas com SEMAFOROS 12 img + 6 vid e INTERLEAVED (image done = anima imediato, nao espera todas). chrome.debugger CDP volta SO pra option click em selectModelInNode (Kling 2.5 dropdown). LOCK + FORBIDDEN garantem zero Seedance dispatch.",
   "icons": {
     "16": "icons/icon-16.png",
