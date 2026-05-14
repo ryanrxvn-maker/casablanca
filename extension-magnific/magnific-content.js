@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.5.2';
+const DARKO_MG_VERSION = '3.5.3';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -1561,10 +1561,14 @@ async function configureImageGenNode(uuid, { model, aspect, quality }) {
   if (!node) throw new Error('Node sumiu apos select: ' + uuid);
 
   await selectModelInNode(node, modelDisplayName(model));
+  // v3.5.3: SETTLE apos selectModel — Vue Flow re-renderiza dropdowns.
+  await sleep(1200);
   // Apos selectModel um popup ficou aberto — re-seleciona o node pra fechar
   await selectNodeForEdit(uuid);
+  await sleep(600);
   await selectAspectInNode(findNodeElement(uuid), aspect);
   if (quality && quality !== '1K') {
+    await sleep(500);
     await selectNodeForEdit(uuid);
     await selectQualityInNode(findNodeElement(uuid), quality);
   }
@@ -1616,13 +1620,21 @@ async function configureVideoGenNode(uuid, { model, aspect, quality, duration })
     );
   }
 
+  // v3.5.3: SETTLE DELAY apos selecionar modelo. Magnific re-renderiza o node
+  // (mostra/esconde dropdowns conforme modelo selecionado: Kling 2.5 mostra
+  // duration+aspect+quality, outros modelos podem nao mostrar). Sem esse delay,
+  // selectAspectInNode tenta achar dropdown antes do re-render → matcher falha.
+  await sleep(1200);
   await selectNodeForEdit(uuid);
+  await sleep(600);
   await selectAspectInNode(findNodeElement(uuid), aspect);
   if (quality) {
+    await sleep(500);
     await selectNodeForEdit(uuid);
     await selectQualityInNode(findNodeElement(uuid), quality);
   }
   if (duration) {
+    await sleep(500);
     await selectNodeForEdit(uuid);
     await selectDurationInNode(findNodeElement(uuid), duration);
   }
@@ -1759,45 +1771,65 @@ async function selectModelInNode(node, displayName) {
 }
 
 /**
- * v3.5.2 — selectAspect/Quality/Duration HARDENED with retry+verify+verbose log.
- * Same proven approach as selectModelInNode: triple-click strategy + 5x retry.
+ * v3.5.3 — selectOptionRobust HARDENED v2:
+ *   - Timeouts maiores (dropdown wait 8s, option wait 8s, verify 5s)
+ *   - Settle 1500ms apos clicar option (Vue Flow re-render demora)
+ *   - Diagnostic dump COMPLETO de TODOS os botoes do node se matcher falhar
+ *   - Verify aceita "contains" (texto pode incluir prefixo/sufixo extra)
+ *   - 7 retries em vez de 5
  *
  * User feedback: "Kling 2.5 e 720p funcionaram, 9:16 e 10s nao. PRECISO QUE
- * CONSIGA SELECIONAR PERFEITAMENTE COMO Kling 2.5 e 720p". Esse fix.
+ * CONSIGA SELECIONAR PERFEITAMENTE". v3.5.2 falhou. v3.5.3 finalmente robusto.
  */
 async function selectOptionRobust(node, targetText, dropdownMatcher, label) {
   const SOL = (m, x) => console.log('[selectOpt ' + label + '=' + targetText + '] ' + m, x !== undefined ? x : '');
-  const MAX_RETRY = 5;
+  const MAX_RETRY = 7;
+  const tt = targetText.toLowerCase();
 
   for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
-    SOL('attempt ' + attempt + '/5');
+    SOL('attempt ' + attempt + '/' + MAX_RETRY);
 
-    // Step 1: find dropdown button
-    const dd = await waitFor(() => {
-      const all = node.querySelectorAll('button,[role=button]');
-      for (const b of all) {
-        if (b.offsetParent === null) continue;
-        const t = (b.textContent || '').trim();
-        if (dropdownMatcher(t)) return b;
-      }
-      return null;
-    }, 5000);
+    // Step 1: find dropdown button (8s — node UI re-render pode demorar apos selectModel)
+    let dd;
+    try {
+      dd = await waitFor(() => {
+        const all = node.querySelectorAll('button,[role=button]');
+        for (const b of all) {
+          if (b.offsetParent === null) continue;
+          const t = (b.textContent || '').trim();
+          if (dropdownMatcher(t)) return b;
+        }
+        return null;
+      }, 8000);
+    } catch (e) {
+      // Diagnostic: dump TODOS os botoes do node pra entender por que matcher falhou
+      const allBtns = Array.from(node.querySelectorAll('button,[role=button]'))
+        .filter(b => b.offsetParent !== null)
+        .map(b => (b.textContent || '').trim())
+        .filter(t => t && t.length < 60);
+      SOL('DROPDOWN matcher FAIL — visible buttons in node:', allBtns);
+      if (attempt === MAX_RETRY) throw new Error('Dropdown ' + label + ' nao encontrado (matcher falhou); btns=' + allBtns.join(' | '));
+      await sleep(700);
+      continue;
+    }
     const currentText = (dd.textContent || '').trim();
     SOL('found dropdown, current=', currentText);
 
-    // Already selected?
-    if (currentText.toLowerCase() === targetText.toLowerCase()) {
-      SOL('already selected, done');
+    // Already selected? (loose match — texto pode ter sufixo/prefixo)
+    if (currentText.toLowerCase() === tt || currentText.toLowerCase().includes(tt)) {
+      SOL('already selected (or contains target), done');
       return true;
     }
 
     // Step 2: click dropdown to open (CDP real click)
+    dd.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    await sleep(150);
     const ddCdp = await clickViaCDP(dd);
     if (!ddCdp) clickRealElement(dd);
     SOL('dropdown clicked, cdp=', ddCdp);
-    await sleep(700);
+    await sleep(900);
 
-    // Step 3: find option
+    // Step 3: find option (8s — pode ter animacao de abrir)
     let opt = null;
     try {
       opt = await waitFor(() => {
@@ -1808,12 +1840,12 @@ async function selectOptionRobust(node, targetText, dropdownMatcher, label) {
           if (r.width < 5) return false;
           if (r.height < 5 || r.height > 100) return false;
           const t = (e.textContent || '').trim();
-          return t === targetText || t.toLowerCase() === targetText.toLowerCase();
+          return t === targetText || t.toLowerCase() === tt;
         });
         // Sort by length asc (shortest match preferred — defends against unfiltered list)
         matches.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
         return matches[0] || null;
-      }, 5000);
+      }, 8000);
       SOL('option found, tag=' + opt.tagName + ' rect=', JSON.stringify(opt.getBoundingClientRect()));
     } catch (e) {
       SOL('option NOT found:', e.message);
@@ -1822,43 +1854,52 @@ async function selectOptionRobust(node, targetText, dropdownMatcher, label) {
         .filter(e => e.offsetParent !== null && e.getBoundingClientRect().width > 5 && e.getBoundingClientRect().height > 5 && e.getBoundingClientRect().height < 100)
         .map(e => (e.textContent || '').trim())
         .filter(t => t && t.length < 30 && t.length > 0)
-        .slice(0, 20);
+        .slice(0, 30);
       SOL('visible options:', visible);
       // Close dropdown + try again
       document.body.click();
-      await sleep(500);
+      await sleep(700);
       continue;
     }
 
     // Step 4: click option (CDP real click — bypass isTrusted check)
     const clickable = opt.closest('button,[role=option],[role=menuitem],li,a') || opt;
     clickable.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    await sleep(200);
+    await sleep(250);
     const cdpOk = await clickViaCDP(clickable);
     SOL('option clicked, cdp=', cdpOk);
     if (!cdpOk) clickRealElement(clickable);
-    await sleep(800);
+    // v3.5.3: settle MAIS LONGO (Vue Flow re-renderiza node, dropdown text muda async)
+    await sleep(1500);
 
-    // Step 5: verify selection actually applied
-    const newDd = await waitFor(() => {
-      const all = node.querySelectorAll('button,[role=button]');
-      for (const b of all) {
-        if (b.offsetParent === null) continue;
-        const t = (b.textContent || '').trim();
-        if (dropdownMatcher(t)) return b;
-      }
-      return null;
-    }, 3000);
+    // Step 5: verify selection actually applied (5s — Vue Flow render lento)
+    let newDd;
+    try {
+      newDd = await waitFor(() => {
+        const all = node.querySelectorAll('button,[role=button]');
+        for (const b of all) {
+          if (b.offsetParent === null) continue;
+          const t = (b.textContent || '').trim();
+          if (dropdownMatcher(t)) return b;
+        }
+        return null;
+      }, 5000);
+    } catch (e) {
+      SOL('VERIFY: nao achou dropdown pos-click (matcher falhou pos-update)');
+      await sleep(700);
+      continue;
+    }
     const newText = (newDd.textContent || '').trim();
     SOL('after click, dropdown text=', newText);
 
-    if (newText.toLowerCase() === targetText.toLowerCase()) {
+    // Aceita match exato OU "contains" (UI pode adicionar sufixos/icones)
+    if (newText.toLowerCase() === tt || newText.toLowerCase().includes(tt)) {
       SOL('SUCCESS on attempt ' + attempt);
       return true;
     }
 
     SOL('still ' + newText + ', retry');
-    await sleep(500);
+    await sleep(700);
   }
 
   throw new Error(`selectOption FAIL after ${MAX_RETRY} attempts: dropdown nao mudou pra "${targetText}"`);

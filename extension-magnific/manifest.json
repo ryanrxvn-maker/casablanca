@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "DARKO LAB — Magnific Auto",
-  "version": "3.5.2",
-  "description": "DARKO LAB Magnific Auto v3.5.1 — FLUXO INTELIGENTE: abandona template, retorna fluxo classico mas com SEMAFOROS 12 img + 6 vid e INTERLEAVED (image done = anima imediato, nao espera todas). chrome.debugger CDP volta SO pra option click em selectModelInNode (Kling 2.5 dropdown). LOCK + FORBIDDEN garantem zero Seedance dispatch.",
+  "version": "3.5.3",
+  "description": "DARKO LAB Magnific Auto v3.5.3 — selectOptionRobust HARDENED v2: timeouts 8s, settle 1500ms, contains-match no verify, settle 1200ms apos selectModel pra Vue Flow re-renderizar dropdowns aspect/quality/duration. Fix definitivo pra 9:16 e 10s nao selecionarem.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
