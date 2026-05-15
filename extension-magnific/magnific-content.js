@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.5.53';
+const DARKO_MG_VERSION = '3.5.54';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -1703,14 +1703,16 @@ async function reconnectImageToVideo(imageNodeId, videoNodeId) {
  * refaz o take). NUNCA deixa passar vídeo sem a linha da imagem.
  */
 async function ensureEdgeImageToVideo(imageNodeId, videoNodeId, pairIdx) {
-  // v3.5.52 — 6 tentativas (era 4). Settle extra no 1º par (canvas instável
-  // no início = bug observado: take 1 quebrava). reconnectImageToVideo agora
-  // retorna false se handles fora de tela → essa tentativa NÃO conta como
-  // sucesso, faz retry com mais scroll/settle.
-  const MAX = 6;
+  // v3.5.54 — FAIL-FAST no take 1. O user confirmou: take 1 SEMPRE quebra a
+  // linha e a reconexão NÃO conserta ele — só o auto-retry (recriar Image
+  // Generator) conserta, e isso funciona normal. Então pro par #1 não vale
+  // gastar ~2min tentando reconectar: 2 tentativas RÁPIDAS (sem settle
+  // extra) → throw rápido → o retry recria o take 1 (que funciona). Pares
+  // 2+ mantêm a lógica robusta (6 tentativas) — eles conectam certo.
+  const MAX = (pairIdx === 1) ? 2 : 6;
   for (let attempt = 1; attempt <= MAX; attempt++) {
-    // 1º par precisa de mais tempo pro canvas/handles estabilizarem
-    const extra = (pairIdx === 1) ? 600 : 0;
+    // pair #1: ZERO settle extra (fail-fast). Pares 2+: idem (já era 0).
+    const extra = 0;
     await selectNodeForEdit(videoNodeId);
     await sleep(250 + extra);
     const before = __edgeCount();
