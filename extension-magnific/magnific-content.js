@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.5.51';
+const DARKO_MG_VERSION = '3.5.52';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -1629,17 +1629,27 @@ async function positionNode(uuid, targetX, targetY) {
  * input handle do vídeo, recriando o edge. Verifica por contagem.
  */
 async function reconnectImageToVideo(imageNodeId, videoNodeId) {
+  // v3.5.52 — BUG do take 1: o handle de SAÍDA da imagem precisa estar
+  // renderizado/on-screen pro drag começar certo. Antes só o vídeo era
+  // trazido pro viewport; a imagem do 1º par ficava fora → drag errado →
+  // edge no handle errado. Agora trazemos a IMAGEM pro viewport primeiro,
+  // depois o vídeo, e validamos coords on-screen antes de arrastar.
+  try { await selectNodeForEdit(imageNodeId); } catch {}
+  await sleep(250);
+  try { await selectNodeForEdit(videoNodeId); } catch {}
+  await sleep(250);
   const imgNode = findNodeElement(imageNodeId);
   const vidNode = findNodeElement(videoNodeId);
-  if (!imgNode || !vidNode) return false;
+  if (!imgNode || !vidNode) { console.warn('[reconnect] node sumiu'); return false; }
 
-  // output handle (source, lado direito da imagem)
+  // output handle SOURCE da imagem (Vue Flow: .source). Seletores precisos
+  // primeiro; SEM o ":not(.source)" largo que pegava handle errado.
   const outH = imgNode.querySelector(
-    '[data-cy="output-handle-output"], .vue-flow__handle-output, .vue-flow__handle.source, .vue-flow__handle-right',
+    '[data-cy="output-handle-output"], .vue-flow__handle.source, .vue-flow__handle-output, .vue-flow__handle-right',
   );
-  // input handle (target, lado esquerdo do vídeo)
+  // input handle TARGET do vídeo (Vue Flow: .target). Preciso, sem fallback largo.
   const inH = vidNode.querySelector(
-    '[data-cy="input-handle-input"], .vue-flow__handle-input, .vue-flow__handle.target, .vue-flow__handle-left, .vue-flow__handle:not(.source)',
+    '[data-cy="input-handle-input"], .vue-flow__handle.target, .vue-flow__handle-input, .vue-flow__handle-left',
   );
   if (!outH || !inH) {
     console.warn('[reconnect] handle não achado out=' + !!outH + ' in=' + !!inH);
@@ -1647,6 +1657,17 @@ async function reconnectImageToVideo(imageNodeId, videoNodeId) {
   }
   const oR = outH.getBoundingClientRect();
   const iR = inH.getBoundingClientRect();
+  // valida coords on-screen e handles renderizados (width>0). Se inválido,
+  // retorna false → ensureEdge faz retry (com mais settle/scroll).
+  const onScreen = (r) =>
+    r && r.width > 0 && r.height > 0 &&
+    r.x >= 0 && r.y >= 0 &&
+    r.x <= window.innerWidth && r.y <= window.innerHeight;
+  if (!onScreen(oR) || !onScreen(iR)) {
+    console.warn('[reconnect] handle fora de tela out=' + JSON.stringify({x:oR.x|0,y:oR.y|0,w:oR.width|0}) +
+      ' in=' + JSON.stringify({x:iR.x|0,y:iR.y|0,w:iR.width|0}) + ' — retry');
+    return false;
+  }
   const sx = oR.x + oR.width / 2, sy = oR.y + oR.height / 2;
   const tx = iR.x + iR.width / 2, ty = iR.y + iR.height / 2;
 
@@ -1682,29 +1703,39 @@ async function reconnectImageToVideo(imageNodeId, videoNodeId) {
  * refaz o take). NUNCA deixa passar vídeo sem a linha da imagem.
  */
 async function ensureEdgeImageToVideo(imageNodeId, videoNodeId, pairIdx) {
-  for (let attempt = 1; attempt <= 4; attempt++) {
+  // v3.5.52 — 6 tentativas (era 4). Settle extra no 1º par (canvas instável
+  // no início = bug observado: take 1 quebrava). reconnectImageToVideo agora
+  // retorna false se handles fora de tela → essa tentativa NÃO conta como
+  // sucesso, faz retry com mais scroll/settle.
+  const MAX = 6;
+  for (let attempt = 1; attempt <= MAX; attempt++) {
+    // 1º par precisa de mais tempo pro canvas/handles estabilizarem
+    const extra = (pairIdx === 1) ? 600 : 0;
     await selectNodeForEdit(videoNodeId);
-    await sleep(200);
+    await sleep(250 + extra);
     const before = __edgeCount();
-    // Heurística: se já há edges suficientes assume conectado e valida via
-    // re-drag idempotente só quando suspeito. Aqui forçamos verificação:
-    // tenta reconectar; se contagem subir, é porque estava solto e
-    // consertamos; se não subir e já havia edge, ok.
-    const okBtn = reconnectImageToVideo;
-    await okBtn(imageNodeId, videoNodeId);
-    await sleep(400);
+    const dragged = await reconnectImageToVideo(imageNodeId, videoNodeId);
+    await sleep(500 + extra);
     const after = __edgeCount();
-    // Conectado se: a reconexão criou um edge novo (estava solto, consertou)
-    // OU já existia edge (after===before>0 e o drag não duplicou).
+
+    if (!dragged) {
+      // handles não estavam prontos/on-screen — NÃO conta, retry com pausa maior
+      console.warn(`[ensureEdge] pair#${pairIdx} drag não executou (attempt ${attempt}/${MAX}) — re-scroll+retry`);
+      await sleep(800 + extra);
+      continue;
+    }
+    // drag executou com handles válidos. Edge OK se:
+    //  - criou edge novo (after>before: estava solto, consertou), OU
+    //  - já existia e Vue Flow deduplicou (after===before E before>0)
     if (after > before || (before > 0 && after >= before)) {
       console.log(`[ensureEdge] pair#${pairIdx} edge OK (attempt ${attempt}, ${before}→${after})`);
       return true;
     }
-    console.warn(`[ensureEdge] pair#${pairIdx} sem edge (attempt ${attempt}, ${before}→${after}) — retry`);
-    await sleep(500);
+    console.warn(`[ensureEdge] pair#${pairIdx} drag ok mas sem edge (attempt ${attempt}, ${before}→${after}) — retry`);
+    await sleep(600 + extra);
   }
   throw new Error('EDGE_RECONNECT_FAIL pair#' + pairIdx +
-    ': não consegui reconectar image→video após troca de modelo — take vai pro auto-retry (nunca gera vídeo solto).');
+    ': não consegui reconectar image→video após ' + MAX + ' tentativas — take vai pro auto-retry (nunca gera vídeo solto).');
 }
 
 async function createTakePair({
