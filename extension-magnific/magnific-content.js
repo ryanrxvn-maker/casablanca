@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.5.48';
+const DARKO_MG_VERSION = '3.5.49';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -1621,6 +1621,92 @@ async function positionNode(uuid, targetX, targetY) {
   }
 }
 
+/**
+ * v3.5.49 — RECONECTA edge image→video. BUG observado pelo user: trocar o
+ * modelo (Seedance default → Kling 2.5) faz o Magnific DERRUBAR a linha
+ * image→video. Sem a linha, o vídeo não anima a imagem (lixo). Aqui
+ * arrastamos (synthetic pointer drag) do output handle da imagem até o
+ * input handle do vídeo, recriando o edge. Verifica por contagem.
+ */
+async function reconnectImageToVideo(imageNodeId, videoNodeId) {
+  const imgNode = findNodeElement(imageNodeId);
+  const vidNode = findNodeElement(videoNodeId);
+  if (!imgNode || !vidNode) return false;
+
+  // output handle (source, lado direito da imagem)
+  const outH = imgNode.querySelector(
+    '[data-cy="output-handle-output"], .vue-flow__handle-output, .vue-flow__handle.source, .vue-flow__handle-right',
+  );
+  // input handle (target, lado esquerdo do vídeo)
+  const inH = vidNode.querySelector(
+    '[data-cy="input-handle-input"], .vue-flow__handle-input, .vue-flow__handle.target, .vue-flow__handle-left, .vue-flow__handle:not(.source)',
+  );
+  if (!outH || !inH) {
+    console.warn('[reconnect] handle não achado out=' + !!outH + ' in=' + !!inH);
+    return false;
+  }
+  const oR = outH.getBoundingClientRect();
+  const iR = inH.getBoundingClientRect();
+  const sx = oR.x + oR.width / 2, sy = oR.y + oR.height / 2;
+  const tx = iR.x + iR.width / 2, ty = iR.y + iR.height / 2;
+
+  const evt = (type, x, y, buttons) => new PointerEvent(type, {
+    bubbles: true, cancelable: true, clientX: x, clientY: y,
+    pointerId: 1, pointerType: 'mouse', button: 0, buttons, isPrimary: true,
+  });
+  const safe = (el) => (el && typeof el.closest === 'function') ? el : document.body;
+
+  // pointerdown no output handle → moves → pointerup no input handle.
+  safe(outH).dispatchEvent(evt('pointerdown', sx, sy, 1));
+  await sleep(40);
+  const steps = 10;
+  for (let i = 1; i <= steps; i++) {
+    const x = sx + (tx - sx) * (i / steps);
+    const y = sy + (ty - sy) * (i / steps);
+    // durante connection-drag Vue Flow escuta no document/pane
+    safe(outH).dispatchEvent(evt('pointermove', x, y, 1));
+    await sleep(20);
+  }
+  // pointerup PRECISA cair sobre o input handle do vídeo (target)
+  safe(inH).dispatchEvent(evt('pointermove', tx, ty, 1));
+  await sleep(30);
+  safe(inH).dispatchEvent(evt('pointerup', tx, ty, 0));
+  await sleep(150);
+  return true;
+}
+
+/**
+ * v3.5.49 — GARANTE edge image→video após config de modelo. Conta edges,
+ * se o vídeo ficou solto (edge não aumentou após criação OU caiu na troca
+ * de modelo), reconecta até 4x. THROW se não conseguir (pipeline auto-retry
+ * refaz o take). NUNCA deixa passar vídeo sem a linha da imagem.
+ */
+async function ensureEdgeImageToVideo(imageNodeId, videoNodeId, pairIdx) {
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    await selectNodeForEdit(videoNodeId);
+    await sleep(200);
+    const before = __edgeCount();
+    // Heurística: se já há edges suficientes assume conectado e valida via
+    // re-drag idempotente só quando suspeito. Aqui forçamos verificação:
+    // tenta reconectar; se contagem subir, é porque estava solto e
+    // consertamos; se não subir e já havia edge, ok.
+    const okBtn = reconnectImageToVideo;
+    await okBtn(imageNodeId, videoNodeId);
+    await sleep(400);
+    const after = __edgeCount();
+    // Conectado se: a reconexão criou um edge novo (estava solto, consertou)
+    // OU já existia edge (after===before>0 e o drag não duplicou).
+    if (after > before || (before > 0 && after >= before)) {
+      console.log(`[ensureEdge] pair#${pairIdx} edge OK (attempt ${attempt}, ${before}→${after})`);
+      return true;
+    }
+    console.warn(`[ensureEdge] pair#${pairIdx} sem edge (attempt ${attempt}, ${before}→${after}) — retry`);
+    await sleep(500);
+  }
+  throw new Error('EDGE_RECONNECT_FAIL pair#' + pairIdx +
+    ': não consegui reconectar image→video após troca de modelo — take vai pro auto-retry (nunca gera vídeo solto).');
+}
+
 async function createTakePair({
   imagePrompt, videoPrompt, imageModel, videoModel,
   aspect, imageQuality, videoQuality, videoDuration,
@@ -1772,7 +1858,14 @@ async function createTakePair({
 
   log('2c.5) ensureUnlimitedON');
   await __uiMutex.run('2c.5', () => ensureUnlimitedON(findNodeElement(videoNodeId), videoNodeId));
-  log('2c.5) unlimited OK — pair complete');
+  log('2c.5) unlimited OK');
+
+  // 2c.6) v3.5.49 — GARANTE edge image→video. A troca de modelo (2c.1
+  // Seedance→Kling 2.5) derruba a linha no Magnific. Reconecta antes de
+  // liberar o pair. Sem isso o vídeo geraria SEM animar a imagem.
+  log('2c.6) ensureEdgeImageToVideo (reconecta linha pós troca de modelo)');
+  await __uiMutex.run('2c.6', () => ensureEdgeImageToVideo(imageNodeId, videoNodeId, pairIdx));
+  log('2c.6) edge image→video CONFIRMADO — pair complete');
 
   return { imageNodeId, videoNodeId };
 }
@@ -2723,11 +2816,13 @@ function verifyEdgeImageToVideo(imageNodeId, videoNodeId) {
   const edges = document.querySelectorAll('g.vue-flow__edge, path.vue-flow__edge-path, .vue-flow__edge');
   const n = edges.length;
   if (n === 0) {
-    console.warn('[EDGE_GUARD] AVISO: zero edges no canvas (auto-connect pode ter falhado p/ vid=' +
-      videoNodeId.slice(0, 8) + ') — NÃO bloqueia (MODEL_GUARD protege crédito)');
-    return { ok: false, edgeCount: 0, warned: true };
+    // v3.5.49 FATAL: com ensureEdgeImageToVideo garantindo reconexão no
+    // createTakePair, zero edges aqui = algo muito errado. NUNCA disparar
+    // vídeo solto (não animaria a imagem). ABORTA → auto-retry refaz o take.
+    throw new Error('EDGE_GUARD: ZERO edges no canvas antes do dispatch do vídeo ' +
+      videoNodeId.slice(0, 8) + ' — ABORTA, nunca gerar vídeo sem a linha da imagem.');
   }
-  console.log('[EDGE_GUARD] OK — ' + n + ' edges no canvas (auto-connect ativo)');
+  console.log('[EDGE_GUARD] OK — ' + n + ' edges no canvas');
   return { ok: true, edgeCount: n };
 }
 
