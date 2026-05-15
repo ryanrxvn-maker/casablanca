@@ -145,11 +145,34 @@ async function findOrCreateMagnificTab() {
     return existing[0];
   }
 
-  // Tier 4: NENHUMA aba Magnific existe. Cria nova ATIVA (precisa carregar
-  // o SPA — load inicial em aba não-ativa seria throttled). ÚNICO momento
-  // de foco. Recomendado: deixe 1 aba Magnific logada aberta numa janela
-  // separada ANTES de disparar → cai no Tier 1 = zero foco roubado.
-  console.log('[DARKO BG] Nenhuma aba Magnific — criando nova (ativa, load inicial)...');
+  // Tier 4 (v3.5.53): NENHUMA aba Magnific — cria JANELA SEPARADA não-focada.
+  // focused:false → NÃO rouba o foco da sua janela de trabalho.
+  // state:'normal' (não minimizada) → a aba é a ATIVA dessa janela e fica
+  // visibilityState 'visible' = NÃO throttled = pipeline roda normal (provado
+  // no v3.5.52 que a lógica tab-active-only funciona). Você trabalha na sua
+  // janela; essa fica por baixo gerando. NÃO minimize essa janela.
+  console.log('[DARKO BG] Nenhuma aba Magnific — criando JANELA separada (não-focada)...');
+  try {
+    const win = await chrome.windows.create({
+      url: 'https://www.magnific.com/app/spaces',
+      focused: false,
+      state: 'normal',
+      width: 1280,
+      height: 900,
+      top: 40,
+      left: 40,
+    });
+    const wtab = win && win.tabs && win.tabs[0];
+    if (wtab) {
+      // garante que a aba é a ativa da janela nova (não throttla)
+      try { await chrome.tabs.update(wtab.id, { active: true }); } catch {}
+      await new Promise((r) => setTimeout(r, 6000));
+      return wtab;
+    }
+  } catch (e) {
+    console.warn('[DARKO BG] windows.create falhou, fallback aba ativa:', e && e.message);
+  }
+  // Fallback: se windows.create indisponível, aba ativa na janela atual
   const tab = await chrome.tabs.create({ url: 'https://www.magnific.com/app/spaces', active: true });
   await new Promise((r) => setTimeout(r, 4000));
   return tab;
