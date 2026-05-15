@@ -196,8 +196,17 @@ export default function AutoBrollPage() {
           onProgress: (p) => setProgress(p),
         },
       );
-      if (r.ok && r.zipBlob && r.zipName) {
+      if (r.ok && r.complete && r.zipBlob && r.zipName) {
+        // v3.5.43: ZIP só libera quando TODOS os takes geraram (após auto-retry).
         setZipReady({ blob: r.zipBlob, name: r.zipName });
+      } else if (r.complete === false) {
+        // Caso extremo: auto-retry esgotou e ainda faltou. NÃO baixa parcial.
+        const miss = (r.missingIdxs || []).join(', ');
+        setError(
+          `ZIP não liberado — ainda faltou take(s): ${miss || '?'} ` +
+            `(${r.successCount}/${parsedTakes.length} prontos) mesmo após auto-retry. ` +
+            'Rode de novo: o pipeline reaproveita o mesmo space e completa só os faltantes.',
+        );
       } else {
         setError(
           `Pipeline finalizou sem MP4s. Sucesso=${r.successCount} / Falhas=${r.failedCount}. ` +
