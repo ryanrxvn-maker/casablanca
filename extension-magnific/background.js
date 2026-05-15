@@ -111,15 +111,19 @@ async function findOrCreateMagnificTab() {
   // Verdade dura: pra FUNCIONAR a aba precisa estar focada/foreground. O
   // edge-fix (v3.5.49) e a serialização continuam — só o foco voltou.
 
-  // Tier 1: active tab — foca janela tb (garante não-throttled)
+  // v3.5.51 — Tier 1-3: NÃO rouba foco de janela. Só garante que a aba
+  // Magnific seja a ATIVA da janela dela (tabs.update active:true). Se o
+  // user deixar essa janela aberta (não minimizada, pode estar atrás),
+  // a aba fica 'visible' = NÃO throttled = pipeline roda, ZERO interrupção.
+
+  // Tier 1: já é a aba ativa da janela dela — usa direto, nada a fazer
   const active = existing.find((t) => t.active);
   if (active) {
-    console.log('[DARKO BG] Usando active Magnific tab:', active.id);
-    try { await chrome.windows.update(active.windowId, { focused: true }); } catch {}
+    console.log('[DARKO BG] Usando active Magnific tab (sem roubar foco):', active.id);
     return active;
   }
 
-  // Tier 2: PING; usa o primeiro vivo + traz pro foreground
+  // Tier 2: PING; ativa a aba NA janela dela (sem focar a janela)
   for (const t of existing) {
     try {
       const r = await Promise.race([
@@ -129,22 +133,23 @@ async function findOrCreateMagnificTab() {
       if (r?.ok) {
         console.log('[DARKO BG] Tab Magnific viva (PING ok):', t.id);
         try { await chrome.tabs.update(t.id, { active: true }); } catch {}
-        try { await chrome.windows.update(t.windowId, { focused: true }); } catch {}
         return t;
       }
     } catch {}
   }
 
-  // Tier 3: qualquer tab existente + foreground
+  // Tier 3: qualquer tab existente — ativa na janela dela (sem focar janela)
   if (existing.length > 0) {
     console.log('[DARKO BG] Usando primeira Magnific tab:', existing[0].id);
     try { await chrome.tabs.update(existing[0].id, { active: true }); } catch {}
-    try { await chrome.windows.update(existing[0].windowId, { focused: true }); } catch {}
     return existing[0];
   }
 
-  // Tier 4: cria nova tab ATIVA (foreground — config que funciona)
-  console.log('[DARKO BG] Criando nova Magnific tab (ativa/foreground)...');
+  // Tier 4: NENHUMA aba Magnific existe. Cria nova ATIVA (precisa carregar
+  // o SPA — load inicial em aba não-ativa seria throttled). ÚNICO momento
+  // de foco. Recomendado: deixe 1 aba Magnific logada aberta numa janela
+  // separada ANTES de disparar → cai no Tier 1 = zero foco roubado.
+  console.log('[DARKO BG] Nenhuma aba Magnific — criando nova (ativa, load inicial)...');
   const tab = await chrome.tabs.create({ url: 'https://www.magnific.com/app/spaces', active: true });
   await new Promise((r) => setTimeout(r, 4000));
   return tab;
@@ -401,20 +406,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (job.heartbeatId) { clearTimeout(job.heartbeatId); job.heartbeatId = null; }
         persistJob(msg.requestId, job);
       }
-      // v3.5.50 — RESTAURADO re-focus periódico (comportamento PROVADO
-      // v3.5.46 que funcionou). Chrome throttla aba não-focada → pipeline
-      // trava. Re-foca a cada ~10s pra manter velocidade e o pipeline
-      // efetivamente progredir. (Trade-off conhecido: a aba vem pro foco às
-      // vezes — é o preço de FUNCIONAR; SPA pesado throttled não roda.)
+      // v3.5.51 — re-focus periódico SÓ no nível ABA, NUNCA janela. Mantém
+      // a aba Magnific ATIVA na janela dela (= visibilityState 'visible' se a
+      // janela não estiver minimizada = NÃO throttled = pipeline progride),
+      // mas NÃO chama windows.update(focused) → NÃO sequestra a tela do user.
+      // Requisito: a janela da automação deve ficar ABERTA (não minimizada);
+      // pode estar atrás da janela de trabalho do user. Resolve exatamente o
+      // cenário "trabalho em outra janela sem ser interrompido".
       const senderTabId = sender.tab?.id;
       if (senderTabId) {
         const now = Date.now();
         if (!job.lastFocusAt || (now - job.lastFocusAt > 10000)) {
           job.lastFocusAt = now;
           chrome.tabs.update(senderTabId, { active: true }).catch(() => {});
-          if (sender.tab?.windowId != null) {
-            chrome.windows.update(sender.tab.windowId, { focused: true }).catch(() => {});
-          }
+          // SEM windows.update(focused) — não interrompe o user em outra janela
         }
       }
       reportToPage(job.bridgeTabId, msg.requestId, msg.progressType, msg.payload);
