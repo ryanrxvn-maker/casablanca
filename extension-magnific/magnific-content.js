@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.5.40';
+const DARKO_MG_VERSION = '3.5.44';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -1950,67 +1950,134 @@ async function selectNodeForEdit(uuid) {
  *   2. Click no botao "Add" dentro do popup — abre search com Image Generator / Video Generator / etc.
  *   3. Click no item "Video Generator" — cria novo node ja conectado por edge
  */
+function __edgeCount() {
+  return document.querySelectorAll('g.vue-flow__edge, path.vue-flow__edge-path, .vue-flow__edge').length;
+}
+
+async function __deleteNodeById(uuid) {
+  try {
+    const n = findNodeElement(uuid);
+    if (!n) return;
+    await selectNodeForEdit(uuid);
+    await sleep(150);
+    try { n.click(); } catch {}
+    await sleep(150);
+    // Backspace/Delete remove o node selecionado no Vue Flow
+    const tgt = n && typeof n.closest === 'function' ? n : document.body;
+    for (const key of ['Delete', 'Backspace']) {
+      tgt.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true }));
+      tgt.dispatchEvent(new KeyboardEvent('keyup', { key, code: key, bubbles: true }));
+      await sleep(200);
+      if (!findNodeElement(uuid)) break;
+    }
+  } catch (e) { console.warn('[__deleteNodeById] falha:', e && e.message); }
+}
+
+/**
+ * v3.5.44 EDGE-GUARANTEED: cria o Video Generator via output handle da imagem
+ * (que auto-conecta o edge). VERIFICA via contagem de edges que a conexão
+ * image→video foi criada. Se NÃO foi (video órfão), deleta o node solto e
+ * REFAZ — até 3x. NUNCA retorna um video sem edge. User: "JAMAIS gerar video
+ * separado do image generate sem ligação — todos devem fluir perfeito".
+ */
 async function createVideoGenNodeViaOutputHandle(imageNodeId) {
-  const before = collectVisibleNodes();
-  const node = findNodeElement(imageNodeId);
-  if (!node) throw new Error('Image node nao achado: ' + imageNodeId);
+  const MAX_ATTEMPTS = 3;
+  let lastOrphan = null;
 
-  // Step 1: Output handle — validado data-cy `output-handle-output`
-  await selectNodeForEdit(imageNodeId);
-  const handle = node.querySelector(
-    '[data-cy="output-handle-output"], .vue-flow__handle-output, .vue-flow__handle.source, .vue-flow__handle-right',
-  );
-  if (!handle) throw new Error('Output handle nao encontrado no node ' + imageNodeId);
-  clickRealElement(handle);
-  await sleep(500);
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    // limpa órfão da tentativa anterior antes de refazer
+    if (lastOrphan) { await __deleteNodeById(lastOrphan); lastOrphan = null; await sleep(300); }
 
-  // Step 2: Popup "Generated image / No connections / Add"
-  const addBtn = await waitFor(() => {
-    const all = document.querySelectorAll('button,[role=button]');
-    for (const b of all) {
-      const t = (b.textContent || '').trim();
-      if (/^add$/i.test(t)) {
-        const r = b.getBoundingClientRect();
-        // O Add fica em popover flutuante perto do handle (lado direito do node)
-        if (r.width > 30 && r.width < 200) return b;
+    const before = collectVisibleNodes();
+    const edgesBefore = __edgeCount();
+    const node = findNodeElement(imageNodeId);
+    if (!node) throw new Error('Image node nao achado: ' + imageNodeId);
+
+    // Step 1: Output handle — validado data-cy `output-handle-output`
+    await selectNodeForEdit(imageNodeId);
+    const handle = node.querySelector(
+      '[data-cy="output-handle-output"], .vue-flow__handle-output, .vue-flow__handle.source, .vue-flow__handle-right',
+    );
+    if (!handle) throw new Error('Output handle nao encontrado no node ' + imageNodeId);
+    clickRealElement(handle);
+    await sleep(500);
+
+    // Step 2: Popup "Generated image / No connections / Add"
+    let addBtn;
+    try {
+      addBtn = await waitFor(() => {
+        const all = document.querySelectorAll('button,[role=button]');
+        for (const b of all) {
+          const t = (b.textContent || '').trim();
+          if (/^add$/i.test(t)) {
+            const r = b.getBoundingClientRect();
+            if (r.width > 30 && r.width < 200) return b;
+          }
+        }
+        return null;
+      }, 4000);
+    } catch (e) {
+      console.warn(`[createVidNode] attempt ${attempt}: Add popup não abriu — retry`);
+      continue;
+    }
+    clickRealElement(addBtn);
+    await sleep(500);
+
+    // Step 3: Search popup com lista de tipos de node
+    let opt;
+    try {
+      opt = await waitFor(() => {
+        const all = Array.from(document.querySelectorAll('button,[role=option],[role=menuitem],div,li,span'));
+        return all.find((e) => {
+          const t = (e.textContent || '').trim();
+          return /^video\s*generator$/i.test(t) && t.length < 30;
+        });
+      }, 6000);
+    } catch (e) {
+      console.warn(`[createVidNode] attempt ${attempt}: opção 'Video Generator' não apareceu — retry`);
+      continue;
+    }
+    clickRealElement(opt);
+    let parent = opt.parentElement;
+    for (let k = 0; k < 4 && parent; k++) {
+      if (parent.matches('button,[role=option],[role=menuitem],li,[role=button]')) {
+        clickRealElement(parent);
+        break;
       }
+      parent = parent.parentElement;
     }
-    return null;
-  }, 4000);
-  clickRealElement(addBtn);
-  await sleep(500);
 
-  // Step 3: Search popup com lista de tipos de node
-  const opt = await waitFor(() => {
-    const all = Array.from(document.querySelectorAll('button,[role=option],[role=menuitem],div,li,span'));
-    return all.find((e) => {
-      const t = (e.textContent || '').trim();
-      return /^video\s*generator$/i.test(t) && t.length < 30;
-    });
-  }, 6000);
-  clickRealElement(opt);
-  // O opt pode ser um span filho — sobe ate o container clicavel
-  let parent = opt.parentElement;
-  for (let k = 0; k < 4 && parent; k++) {
-    if (parent.matches('button,[role=option],[role=menuitem],li,[role=button]')) {
-      clickRealElement(parent);
-      break;
+    let newId = null;
+    try {
+      newId = await waitFor(() => {
+        const now = collectVisibleNodes();
+        const diff = now.filter((u) => u !== imageNodeId && !before.includes(u));
+        for (const id of diff) {
+          const n = findNodeElement(id);
+          if (n && /video\s*generator/i.test(n.textContent || '')) return id;
+        }
+        return diff[0] || null;
+      }, 6000);
+    } catch (e) {
+      console.warn(`[createVidNode] attempt ${attempt}: video node não apareceu — retry`);
+      continue;
     }
-    parent = parent.parentElement;
+    await sleep(600);
+
+    // VERIFICA edge criado: contagem deve ter aumentado (output-handle
+    // auto-conecta). Se não aumentou → video órfão → deleta e refaz.
+    const edgesAfter = __edgeCount();
+    if (edgesAfter > edgesBefore) {
+      console.log(`[createVidNode] OK attempt ${attempt}: video ${String(newId).slice(0,8)} conectado (edges ${edgesBefore}→${edgesAfter})`);
+      return newId;
+    }
+    console.warn(`[createVidNode] attempt ${attempt}: video ${String(newId).slice(0,8)} SEM edge (${edgesBefore}→${edgesAfter}) — deleta órfão + retry`);
+    lastOrphan = newId;
   }
 
-  const newId = await waitFor(() => {
-    const now = collectVisibleNodes();
-    const diff = now.filter((u) => u !== imageNodeId && !before.includes(u));
-    // Filter: o uuid que termina como Video Generator (vai ter span "Video Generator" dentro)
-    for (const id of diff) {
-      const n = findNodeElement(id);
-      if (n && /video\s*generator/i.test(n.textContent || '')) return id;
-    }
-    return diff[0] || null;
-  }, 6000);
-  await sleep(500);
-  return newId;
+  if (lastOrphan) { await __deleteNodeById(lastOrphan); }
+  throw new Error('EDGE_CREATE_FAIL: não consegui criar Video Generator CONECTADO à imagem ' +
+    String(imageNodeId).slice(0,8) + ' após ' + MAX_ATTEMPTS + ' tentativas — take vai pro auto-retry (nunca gera video solto).');
 }
 
 /**
@@ -2263,7 +2330,8 @@ async function selectModelInNode(node, displayName) {
     input.dispatchEvent(new InputEvent('input', { bubbles: true, data: ch, inputType: 'insertText' }));
     await sleep(15); // v3.5.29 ULTRA: 25→15
   }
-  await sleep(250); // v3.5.29 ULTRA: 450→250 (wait pra options filtrar)
+  await sleep(500); // v3.5.41 RELIABILITY: restaurado (ULTRA 250 era flaky —
+  // Vue precisa filtrar+renderizar options antes do match). Confiável > rápido.
   SMLog('4) input.value after typing=', input.value);
 
   // Step 5: find option
@@ -2302,7 +2370,7 @@ async function selectModelInNode(node, displayName) {
   SMLog('6) clicking option via CDP REAL MOUSE');
   const clickable = opt.closest('button,[role=option],[role=menuitem],li,a') || opt;
   clickable.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  await sleep(80); // v3.5.29 ULTRA: 150→80
+  await sleep(150); // v3.5.41 RELIABILITY: restaurado (ULTRA 80 era flaky)
   const cdpOk = await clickViaCDP(clickable);
   SMLog('6) CDP click result:', cdpOk);
   if (!cdpOk) {
@@ -2311,7 +2379,9 @@ async function selectModelInNode(node, displayName) {
     await sleep(200);
     SMLog('6) Enter fallback fired');
   }
-  await sleep(350); // v3.5.29 ULTRA: 600→350
+  await sleep(700); // v3.5.41 RELIABILITY CRÍTICO: restaurado (ULTRA 350 era
+  // flaky — Vue do Magnific precisa commitar a troca de modelo após o clique;
+  // sem isso o node fica Seedance e o MODEL_GUARD aborta o vídeo).
 
   SMLog('6) DONE');
 }

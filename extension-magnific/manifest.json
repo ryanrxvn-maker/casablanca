@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "DARKO LAB — Magnific Auto",
-  "version": "3.5.40",
-  "description": "DARKO LAB Magnific Auto v3.5.40 — CREDIT-PREVIEW GATE definitivo. scanCreditCostPreview() roda ANTES de cada executeWorkflow (imagem E vídeo): lê UI do node e ABORTA se detectar QUALQUER preview de custo em créditos (só dispara se Unlimited/sem-custo). Camadas mantidas: USERSNAP SHIM main-world (v3.5.38) + MODEL_GUARD Kling 2.5 estrito + resolução 720p/1K LOD-tolerante + EDGE non-fatal + force_credits:false. Garantia máxima zero-crédito: na dúvida ABORTA, nunca dispara com custo.",
+  "version": "3.5.44",
+  "description": "DARKO LAB Magnific Auto v3.5.44 — EDGE-GUARANTEED + BACKGROUND. (1) createVideoGenNodeViaOutputHandle verifica edge por contagem; se video nasceu solto, deleta órfão e refaz até 3x — NUNCA gera video sem linha da imagem. (2) Removido TODO roubo de foco (findOrCreateMagnificTab + re-focus periódico): Magnific roda 100% em background, aba nunca é trazida pro foco. Mantém v3.5.41 (3 settles Kling) + CREDIT-PREVIEW GATE + MODEL_GUARD + USERSNAP SHIM + force_credits:false. Zero-crédito intacto.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",

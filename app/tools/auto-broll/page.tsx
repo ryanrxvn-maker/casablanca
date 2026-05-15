@@ -1,11 +1,10 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { CancelButton } from '@/components/CancelButton';
 import {
-  createMagnificTemplate,
   detectMagnificExtension,
   testMagnificSession,
   type MagnificExtensionStatus,
@@ -19,21 +18,39 @@ import {
 } from '@/lib/magnific-pipeline';
 
 /**
- * Magnific Auto B-Rolls (substitui o Auto B-Roll antigo via Claude API).
+ * Magnific Auto B-Rolls — MULTI-JOB.
  *
- * Fluxo:
- *  1) User cola prompts (JSON do Claude DO PROPRIO USER, ou texto livre)
- *  2) Parser local detecta N takes (sem chamar Claude API daqui)
- *  3) Extension "DARKO LAB Magnific Auto" dispara:
- *     - Nano Banana 2/Pro p/ cada imagem (12 simultaneas)
- *     - Kling 2.5 p/ cada video (6 simultaneos)
- *  4) Pipeline baixa MP4s e empacota ZIP com take1.mp4...takeN.mp4 + manifest.json
- *
- * Plano Premium+ obrigatorio no Magnific (Kling 2.5 720p + Nano Banana 1K
- * ilimitados nao consomem creditos).
+ *  1) User cola 1+ listas JSON (cada lista = 1 nicho/job independente)
+ *  2) Cada job dispara SEPARADO: cria seu PRÓPRIO space no Magnific
+ *  3) Extension gera Nano Banana (1K 9:16) + Kling 2.5 (720p 9:16) — zero crédito
+ *  4) Roda 100% em SEGUNDO PLANO (a aba Magnific NÃO abre na sua tela)
+ *  5) Botão 3D por job: abre o Space DAQUELE job se quiser ver o processo
+ *  6) ZIP por job só libera quando TODOS os takes geraram (auto-retry interno)
  */
 
 type ImageModelChoice = 'nano-banana-2' | 'nano-banana-pro';
+
+type Job = {
+  id: string;
+  name: string;
+  raw: string;
+  status: 'idle' | 'running' | 'done' | 'error';
+  progress: PipelineProgress | null;
+  error: string | null;
+  zip: { blob: Blob; name: string } | null;
+};
+
+function newJob(name = ''): Job {
+  return {
+    id: 'job_' + Math.random().toString(36).slice(2, 9),
+    name,
+    raw: '',
+    status: 'idle',
+    progress: null,
+    error: null,
+    zip: null,
+  };
+}
 
 export default function AutoBrollPage() {
   const [extStatus, setExtStatus] = useState<MagnificExtensionStatus>({
@@ -42,40 +59,16 @@ export default function AutoBrollPage() {
   const [sessionOk, setSessionOk] = useState<null | { ok: boolean; detail?: string }>(null);
   const [testingSession, setTestingSession] = useState(false);
 
-  const [adName, setAdName] = useToolState<string>('mgAuto:adName', '');
-  const [rawPrompts, setRawPrompts] = useToolState<string>('mgAuto:raw', '');
   const [imageModel, setImageModel] = useToolState<ImageModelChoice>(
     'mgAuto:imgModel',
     'nano-banana-2',
   );
-  const [globalMotion, setGlobalMotion] = useToolState<string>(
-    'mgAuto:motion',
-    '',
-  );
-  // v3.2.0 — TEMPLATE SPACE: se setado, duplica este space pre-criado (com N
-  // pares Kling 2.5 LOCK ja configurados) e atribui prompts. Pula race condition
-  // Seedance e corta setup de ~5min pra ~20s. Vazio = modo classico (cria nodes
-  // do zero com v3.1.7 LOCK).
-  const [templateSpaceId, setTemplateSpaceId] = useToolState<string>(
-    'mgAuto:tplSpaceId',
-    '',
-  );
-  // v3.3.0 — Template Builder state
-  const [buildingTemplate, setBuildingTemplate] = useState<boolean>(false);
-  const [templateBuildProgress, setTemplateBuildProgress] = useState<string | null>(null);
-  const [templatePairsToCreate, setTemplatePairsToCreate] = useToolState<number>('mgAuto:tplPairs', 50);
-  const [processing, setProcessing] = useToolState<boolean>(
-    'mgAuto:processing',
-    false,
-  );
-  const [progress, setProgress] = useState<PipelineProgress | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [zipReady, setZipReady] = useState<{ blob: Blob; name: string } | null>(
-    null,
-  );
-  const abortRef = useRef<AbortController | null>(null);
+  const [globalMotion, setGlobalMotion] = useToolState<string>('mgAuto:motion', '');
 
-  // Detect extension on mount + le handoff do clickup-pilot (se houver)
+  const [jobs, setJobs] = useState<Job[]>([newJob()]);
+  const abortRefs = useRef<Record<string, AbortController | null>>({});
+
+  // Detect extension on mount + handoff do clickup-pilot (preenche 1º job)
   useEffect(() => {
     let cancelled = false;
     detectMagnificExtension().then((s) => {
@@ -84,23 +77,19 @@ export default function AutoBrollPage() {
     try {
       const raw = sessionStorage.getItem('darkolab:auto-broll:handoff');
       if (raw) {
-        const ho = JSON.parse(raw) as {
-          adName?: string;
-          copy?: string;
-          mode?: string;
-        };
-        if (ho.adName) setAdName(ho.adName);
-        // Pre-popula rawPrompts com a copy concatenada como SUGESTAO — o user
-        // ainda precisa rodar no Claude dele e colar de volta os prompts.
-        // Damos um header explicativo:
-        if (ho.copy) {
-          const header =
-            `# COPY DO AD ${ho.adName ?? ''}\n` +
-            `# Cole no seu Claude/LLM e peça pra gerar prompts Nano Banana 2 (3-5s).\n` +
-            `# Depois cole o JSON resultante aqui.\n` +
-            `# Modo: ${ho.mode ?? 'only-magnific'}\n\n` +
-            ho.copy;
-          setRawPrompts(header);
+        const ho = JSON.parse(raw) as { adName?: string; copy?: string; mode?: string };
+        if (ho.copy || ho.adName) {
+          setJobs((prev) => {
+            const j = [...prev];
+            j[0] = {
+              ...j[0],
+              name: ho.adName || j[0].name,
+              raw: ho.copy
+                ? `# COPY DO AD ${ho.adName ?? ''}\n# Cole no seu Claude e gere os prompts. Cole o JSON aqui.\n\n${ho.copy}`
+                : j[0].raw,
+            };
+            return j;
+          });
         }
         sessionStorage.removeItem('darkolab:auto-broll:handoff');
       }
@@ -113,54 +102,21 @@ export default function AutoBrollPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const parsedTakes = useMemo<MagnificTakeInput[]>(() => {
-    if (!rawPrompts.trim()) return [];
-    const t = parseMagnificPrompts(rawPrompts);
-    // Aplica motion global se take nao tem
-    return t.map((it) => ({
+  const patchJob = (id: string, patch: Partial<Job>) =>
+    setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)));
+
+  const parseJob = (raw: string): MagnificTakeInput[] => {
+    if (!raw.trim()) return [];
+    return parseMagnificPrompts(raw).map((it) => ({
       ...it,
       videoPrompt: it.videoPrompt || globalMotion || '',
     }));
-  }, [rawPrompts, globalMotion]);
-
-  async function handleCreateTemplate() {
-    if (!extStatus.connected) {
-      setError('Extension Magnific nao detectada.');
-      return;
-    }
-    if (buildingTemplate || processing) return;
-    if (templatePairsToCreate < 1 || templatePairsToCreate > 100) {
-      setError('Pairs deve estar entre 1 e 100.');
-      return;
-    }
-    setError(null);
-    setBuildingTemplate(true);
-    setTemplateBuildProgress('Iniciando...');
-    try {
-      const r = await createMagnificTemplate(
-        { pairs: templatePairsToCreate },
-        (_stage, percent, message) => {
-          setTemplateBuildProgress(`${percent}% — ${message}`);
-        },
-      );
-      // Auto-fill UUID no input TURBO MODE
-      setTemplateSpaceId(r.spaceId);
-      setTemplateBuildProgress(
-        `OK: ${r.pairs} image gens criadas em "${r.name}" (UUID auto-preenchido)${r.failed.length ? `, ${r.failed.length} falhas` : ''}`,
-      );
-    } catch (e) {
-      setError(`Falha ao criar template: ${(e as Error).message}`);
-      setTemplateBuildProgress(null);
-    } finally {
-      setBuildingTemplate(false);
-    }
-  }
+  };
 
   async function handleTestSession() {
     setTestingSession(true);
     try {
-      const r = await testMagnificSession();
-      setSessionOk(r);
+      setSessionOk(await testMagnificSession());
     } catch (e) {
       setSessionOk({ ok: false, detail: (e as Error).message });
     } finally {
@@ -168,80 +124,97 @@ export default function AutoBrollPage() {
     }
   }
 
-  async function handleRun() {
+  async function runJob(job: Job) {
     if (!extStatus.connected) {
-      setError('Extension Magnific nao detectada. Instale e recarregue.');
+      patchJob(job.id, { error: 'Extension Magnific não detectada.' });
       return;
     }
-    if (!parsedTakes.length) {
-      setError('Sem prompts validos. Cole o JSON/texto e tente de novo.');
+    const takes = parseJob(job.raw);
+    if (!takes.length) {
+      patchJob(job.id, { error: 'Sem prompts válidos nesta lista.' });
       return;
     }
-    setError(null);
-    setProgress(null);
-    setZipReady(null);
-    setProcessing(true);
-    abortRef.current = new AbortController();
+    const ac = new AbortController();
+    abortRefs.current[job.id] = ac;
+    patchJob(job.id, { status: 'running', error: null, zip: null, progress: null });
     try {
       const r = await runMagnificPipeline(
         {
-          spaceName: adName.trim() || 'DARKO_LAB_BROLLS',
-          takes: parsedTakes,
+          spaceName: job.name.trim() || `DARKO_BROLLS_${job.id}`,
+          takes,
           imageModel,
           videoModel: 'kling-25',
-          templateSpaceId: templateSpaceId.trim() || undefined,
+          // SEM templateSpaceId / spaceId → cada job cria SEU PRÓPRIO space
         },
         {
-          signal: abortRef.current.signal,
-          onProgress: (p) => setProgress(p),
+          signal: ac.signal,
+          onProgress: (p) => patchJob(job.id, { progress: p }),
         },
       );
       if (r.ok && r.complete && r.zipBlob && r.zipName) {
-        // v3.5.43: ZIP só libera quando TODOS os takes geraram (após auto-retry).
-        setZipReady({ blob: r.zipBlob, name: r.zipName });
+        patchJob(job.id, { status: 'done', zip: { blob: r.zipBlob, name: r.zipName } });
       } else if (r.complete === false) {
-        // Caso extremo: auto-retry esgotou e ainda faltou. NÃO baixa parcial.
         const miss = (r.missingIdxs || []).join(', ');
-        setError(
-          `ZIP não liberado — ainda faltou take(s): ${miss || '?'} ` +
-            `(${r.successCount}/${parsedTakes.length} prontos) mesmo após auto-retry. ` +
-            'Rode de novo: o pipeline reaproveita o mesmo space e completa só os faltantes.',
-        );
+        patchJob(job.id, {
+          status: 'error',
+          error: `Ainda faltou take(s) ${miss || '?'} (${r.successCount}/${takes.length}) mesmo após auto-retry. Rode de novo — reaproveita o mesmo space e completa só os faltantes.`,
+        });
       } else {
-        setError(
-          `Pipeline finalizou sem MP4s. Sucesso=${r.successCount} / Falhas=${r.failedCount}. ` +
-            'Provavel: endpoints reais do Magnific ainda nao mapeados. F12 na aba magnific.com -> Network -> capture um generate manual e me cole o cURL.',
-        );
+        patchJob(job.id, {
+          status: 'error',
+          error: `Finalizou sem MP4s (sucesso=${r.successCount}/falhas=${r.failedCount}).`,
+        });
       }
     } catch (e) {
-      setError((e as Error).message);
+      patchJob(job.id, { status: 'error', error: (e as Error).message });
     } finally {
-      setProcessing(false);
-      abortRef.current = null;
+      abortRefs.current[job.id] = null;
     }
   }
 
-  function handleCancel() {
-    abortRef.current?.abort();
+  function cancelJob(id: string) {
+    abortRefs.current[id]?.abort();
+    patchJob(id, { status: 'idle' });
   }
 
-  function downloadZip() {
-    if (!zipReady) return;
-    const url = URL.createObjectURL(zipReady.blob);
+  function downloadZip(job: Job) {
+    if (!job.zip) return;
+    const url = URL.createObjectURL(job.zip.blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = zipReady.name;
+    a.download = job.zip.name;
     a.click();
     URL.revokeObjectURL(url);
   }
 
+  function openSpace3D(job: Job) {
+    const u = job.progress?.spaceUrl;
+    if (u) window.open(u, '_blank', 'noopener,noreferrer');
+  }
+
+  function addJob() {
+    setJobs((prev) => [...prev, newJob()]);
+  }
+  function removeJob(id: string) {
+    abortRefs.current[id]?.abort();
+    setJobs((prev) => (prev.length <= 1 ? prev : prev.filter((j) => j.id !== id)));
+  }
+
+  function runAll() {
+    jobs.forEach((j) => {
+      if (j.status !== 'running' && parseJob(j.raw).length > 0) runJob(j);
+    });
+  }
+
+  const anyRunning = jobs.some((j) => j.status === 'running');
+
   return (
     <ToolShell
       title="Magnific Auto B-Rolls"
-      description="Cole os prompts (JSON do Claude do seu LLM, ou texto livre). A extensao Magnific gera N imagens (Nano Banana 2/Pro) + N videos (Kling 2.5) e empacota tudo em ZIP."
+      description="Cole 1+ listas JSON (cada lista = 1 nicho = 1 job independente, com seu próprio Space). Roda 100% em segundo plano. Nano Banana 1K + Kling 2.5 720p — zero crédito."
     >
       <div className="grid gap-5">
-        {/* Extension status / install banner */}
+        {/* Extension status */}
         {extStatus.connected ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-3 text-sm">
             <div className="flex items-center gap-2">
@@ -250,11 +223,11 @@ export default function AutoBrollPage() {
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
               </span>
               <span className="text-lime">
-                Extensao DARKO LAB Magnific v{extStatus.version}
+                Extensão DARKO LAB Magnific v{extStatus.version}
               </span>
               {sessionOk?.ok ? (
                 <span className="mono ml-2 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
-                  ✓ {sessionOk.detail || 'sessao OK'}
+                  ✓ {sessionOk.detail || 'sessão OK'}
                 </span>
               ) : sessionOk && !sessionOk.ok ? (
                 <span className="mono ml-2 rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] uppercase text-red-300">
@@ -268,7 +241,7 @@ export default function AutoBrollPage() {
               disabled={testingSession}
               className="rounded-md border border-line-strong bg-bg-soft px-3 py-1 text-[11px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime disabled:opacity-50"
             >
-              {testingSession ? 'Testando...' : 'Testar sessao Magnific'}
+              {testingSession ? 'Testando...' : 'Testar sessão Magnific'}
             </button>
           </div>
         ) : (
@@ -277,17 +250,17 @@ export default function AutoBrollPage() {
               <span className="text-yellow-300">⚠</span>
               <div className="flex-1 text-xs text-yellow-300/90">
                 <strong className="text-yellow-300">
-                  Extensao DARKO LAB Magnific nao instalada
+                  Extensão DARKO LAB Magnific não instalada
                 </strong>
-                . Voce precisa dela pra gerar B-Rolls (usa sua conta
-                Magnific Premium+ logada — NUNCA gasta creditos).
+                . Você precisa dela pra gerar B-Rolls (usa sua conta Magnific
+                Premium+ logada — NUNCA gasta créditos).
                 <details className="mt-2">
                   <summary className="cursor-pointer text-yellow-300/80 hover:text-yellow-200 select-none">
                     Como instalar (passo a passo)
                   </summary>
                   <ol className="mt-2 list-decimal space-y-1 pl-5 text-yellow-300/80">
                     <li>
-                      Baixa o pacote da extensao:{' '}
+                      Baixa o pacote:{' '}
                       <a
                         href="/api/extension-magnific/download"
                         className="underline hover:text-lime"
@@ -301,13 +274,11 @@ export default function AutoBrollPage() {
                       Abre <code className="mono">chrome://extensions</code>
                     </li>
                     <li>Liga &quot;Modo de desenvolvedor&quot;</li>
+                    <li>&quot;Carregar sem compactação&quot; → seleciona a pasta</li>
                     <li>
-                      Clica &quot;Carregar sem compactacao&quot; e seleciona a pasta
+                      Login no <code className="mono">www.magnific.com</code> (Premium+)
                     </li>
-                    <li>
-                      Faz login no <code className="mono">www.magnific.com</code> (Premium+)
-                    </li>
-                    <li>Volta aqui — extensao auto-detecta</li>
+                    <li>Volta aqui — extensão auto-detecta</li>
                   </ol>
                 </details>
               </div>
@@ -315,247 +286,235 @@ export default function AutoBrollPage() {
           </div>
         )}
 
-        {/* Inputs */}
+        {/* Config global (aplica a todos os jobs) */}
         <div className="grid gap-3 md:grid-cols-2">
-          <label className="block">
-            <span className="label-field">Codigo do AD / Space</span>
-            <input
-              type="text"
-              value={adName}
-              onChange={(e) => setAdName(e.target.value)}
-              placeholder="Ex: AD15VN-PRPB06"
-              className="input-field"
-              disabled={processing}
-            />
-          </label>
           <label className="block">
             <span className="label-field">Modelo de imagem</span>
             <select
               value={imageModel}
               onChange={(e) => setImageModel(e.target.value as ImageModelChoice)}
               className="input-field"
-              disabled={processing}
+              disabled={anyRunning}
             >
               <option value="nano-banana-2">Nano Banana 2 (1K, ilimitado)</option>
               <option value="nano-banana-pro">Nano Banana Pro (1K, ilimitado)</option>
             </select>
           </label>
+          <label className="block">
+            <span className="label-field">Motion default (opcional, Kling 2.5)</span>
+            <input
+              type="text"
+              value={globalMotion}
+              onChange={(e) => setGlobalMotion(e.target.value)}
+              placeholder="Ex: slow camera push-in, soft handheld motion"
+              className="input-field"
+              disabled={anyRunning}
+            />
+          </label>
         </div>
+
+        {/* JOBS — cada lista JSON dispara separada, com seu próprio Space */}
+        <div className="grid gap-4">
+          {jobs.map((job, idx) => (
+            <JobCard
+              key={job.id}
+              job={job}
+              index={idx}
+              total={jobs.length}
+              extConnected={extStatus.connected}
+              takesCount={parseJob(job.raw).length}
+              onName={(v) => patchJob(job.id, { name: v })}
+              onRaw={(v) => patchJob(job.id, { raw: v })}
+              onRun={() => runJob(job)}
+              onCancel={() => cancelJob(job.id)}
+              onRemove={() => removeJob(job.id)}
+              onDownload={() => downloadZip(job)}
+              onOpenSpace={() => openSpace3D(job)}
+            />
+          ))}
+        </div>
+
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={addJob}
+            disabled={anyRunning}
+            className="rounded-[8px] border border-line-strong bg-bg-soft px-4 py-2 text-sm font-semibold text-text-muted transition hover:border-lime hover:text-lime disabled:opacity-50"
+          >
+            + Adicionar outro JSON (novo job/space)
+          </button>
+          {jobs.length > 1 && (
+            <button
+              type="button"
+              onClick={runAll}
+              disabled={!extStatus.connected || anyRunning}
+              className="btn-primary"
+            >
+              Disparar TODOS os {jobs.length} jobs
+            </button>
+          )}
+        </div>
+      </div>
+    </ToolShell>
+  );
+}
+
+function JobCard({
+  job,
+  index,
+  total,
+  extConnected,
+  takesCount,
+  onName,
+  onRaw,
+  onRun,
+  onCancel,
+  onRemove,
+  onDownload,
+  onOpenSpace,
+}: {
+  job: Job;
+  index: number;
+  total: number;
+  extConnected: boolean;
+  takesCount: number;
+  onName: (v: string) => void;
+  onRaw: (v: string) => void;
+  onRun: () => void;
+  onCancel: () => void;
+  onRemove: () => void;
+  onDownload: () => void;
+  onOpenSpace: () => void;
+}) {
+  const running = job.status === 'running';
+  const p = job.progress;
+  const hasSpace = !!p?.spaceUrl;
+
+  return (
+    <div className="rounded-[14px] border border-line bg-bg-soft/40 p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <span className="mono text-xs font-bold uppercase tracking-widest text-lime">
+          JOB {index + 1}/{total}
+        </span>
+        <div className="flex items-center gap-2">
+          {/* BOTÃO 3D — abre o Space DESTE job (só se quiser ver o processo) */}
+          <button
+            type="button"
+            onClick={onOpenSpace}
+            disabled={!hasSpace}
+            title={
+              hasSpace
+                ? 'Abre o Space deste job no Magnific (nova aba). O processo já roda em segundo plano — isto é só pra você acompanhar se quiser.'
+                : 'O Space aparece aqui assim que o job começar'
+            }
+            className={
+              'group relative inline-flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 text-xs font-bold transition-all ' +
+              (hasSpace
+                ? 'border border-cyan-300/60 bg-gradient-to-b from-cyan-400/25 to-cyan-600/10 text-cyan-200 shadow-[0_3px_0_rgba(34,211,238,0.35),0_6px_14px_rgba(34,211,238,0.25)] hover:translate-y-[1px] hover:shadow-[0_2px_0_rgba(34,211,238,0.35),0_4px_10px_rgba(34,211,238,0.25)] active:translate-y-[3px] active:shadow-none'
+                : 'cursor-not-allowed border border-line bg-bg/40 text-text-muted opacity-50')
+            }
+          >
+            🧊 VER SPACE 3D
+          </button>
+          {total > 1 && !running && (
+            <button
+              type="button"
+              onClick={onRemove}
+              className="rounded-md border border-line px-2 py-1 text-[11px] text-text-muted transition hover:border-red-400 hover:text-red-300"
+              title="Remover este job"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid gap-3">
+        <label className="block">
+          <span className="label-field">Código do AD / Nome do Space</span>
+          <input
+            type="text"
+            value={job.name}
+            onChange={(e) => onName(e.target.value)}
+            placeholder={`Ex: AD15VN-PRPB06 (job ${index + 1})`}
+            className="input-field"
+            disabled={running}
+          />
+        </label>
 
         <label className="block">
           <span className="label-field">
-            Prompts (cole JSON do Claude ou texto livre numerado)
+            Prompts deste job (JSON do Claude ou texto numerado)
           </span>
           <textarea
-            value={rawPrompts}
-            onChange={(e) => setRawPrompts(e.target.value)}
-            placeholder={`Suporta:
-[ { "imagePrompt": "...", "videoPrompt": "..." }, ... ]
-ou texto livre:
-1. PROMPT_IMG aqui
-   MOTION: slow zoom in
----
-2. Outro prompt`}
-            rows={10}
+            value={job.raw}
+            onChange={(e) => onRaw(e.target.value)}
+            placeholder={`[ { "imagePrompt": "...", "videoPrompt": "..." }, ... ]`}
+            rows={8}
             className="input-field resize-y font-mono text-xs"
-            disabled={processing}
+            disabled={running}
           />
           <div className="mt-1 text-xs text-text-muted">
-            Detectados:{' '}
-            <span className="mono text-lime">{parsedTakes.length}</span> takes
+            Detectados: <span className="mono text-lime">{takesCount}</span> takes
           </div>
         </label>
+      </div>
 
-        <label className="block">
-          <span className="label-field">Motion default (opcional, Kling 2.5)</span>
-          <input
-            type="text"
-            value={globalMotion}
-            onChange={(e) => setGlobalMotion(e.target.value)}
-            placeholder="Ex: slow camera push-in, soft handheld motion"
-            className="input-field"
-            disabled={processing}
-          />
-        </label>
-
-        {/* v3.3.0 — TEMPLATE SPACE TURBO + AUTO BUILDER */}
-        <div className="rounded-[12px] border border-fuchsia-400/40 bg-fuchsia-400/5 p-3">
-          <label className="block">
-            <span className="label-field flex items-center gap-2">
-              <span className="text-fuchsia-300">TURBO MODE · Template Space UUID</span>
-              <span
-                className={
-                  'rounded-full border px-2 py-0.5 text-[10px] font-bold ' +
-                  (templateSpaceId.trim()
-                    ? 'border-fuchsia-400 bg-fuchsia-400/20 text-fuchsia-200'
-                    : 'border-line bg-bg-soft text-text-muted')
-                }
-              >
-                {templateSpaceId.trim() ? 'ON' : 'OFF'}
-              </span>
-            </span>
-            <input
-              type="text"
-              value={templateSpaceId}
-              onChange={(e) => setTemplateSpaceId(e.target.value)}
-              placeholder="Cola UUID, ou clica 'Criar template auto' embaixo (deixa vazio pra modo classico)"
-              className="input-field font-mono text-xs"
-              disabled={processing || buildingTemplate}
-            />
-          </label>
-
-          {/* Auto-builder row */}
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="text-xs text-text-muted">Auto-builder:</span>
-            <input
-              type="number"
-              min={1}
-              max={100}
-              value={templatePairsToCreate}
-              onChange={(e) => setTemplatePairsToCreate(Math.max(1, Math.min(100, Number(e.target.value) || 50)))}
-              className="input-field w-20 text-xs"
-              disabled={processing || buildingTemplate}
-              title="Quantos image gens criar (1-100)"
-            />
-            <span className="text-xs text-text-muted">image gens</span>
-            <button
-              type="button"
-              onClick={handleCreateTemplate}
-              disabled={processing || buildingTemplate || !extStatus.connected}
-              className={
-                'rounded-[8px] border px-3 py-1.5 text-xs font-semibold transition ' +
-                (buildingTemplate
-                  ? 'border-fuchsia-400 bg-fuchsia-400/30 text-fuchsia-100 cursor-wait'
-                  : 'border-fuchsia-400 bg-fuchsia-400/10 text-fuchsia-200 hover:bg-fuchsia-400/20')
-              }
-            >
-              {buildingTemplate ? 'Construindo...' : '🪄 Criar template auto'}
-            </button>
-          </div>
-
-          {templateBuildProgress && (
-            <div className="mt-2 rounded-[6px] border border-fuchsia-400/30 bg-fuchsia-400/5 px-2 py-1 font-mono text-[11px] text-fuchsia-200">
-              {templateBuildProgress}
-            </div>
-          )}
-
-          <div className="mt-2 text-xs text-text-muted">
-            <strong className="text-fuchsia-300">v3.5.0 TEMPLATE-FULL:</strong> Magnific bloqueou clicks programaticos em dropdowns.
-            Agora REQUER que voce monte UMA VEZ um template space MANUAL com 50 pares Image+Video JA configurados.
-            {' '}
-            <strong className="text-lime">SETUP UMA VEZ (~1h):</strong>
-            <br/>1. Cria 1 space "DARKO_TEMPLATE_50_FULL"
-            <br/>2. Adiciona 50 Image Gens (Nano Banana 2 + 9:16 + 1K + Unlimited ON)
-            <br/>3. Em cada um, click no output handle → "Video Generator" → configura Kling 2.5 + 9:16 + 720p + 10s + Unlimited ON
-            <br/>4. Cola o UUID acima ↑
-            <br/>5. Pipelines futuros: 100% automaticos (so duplica template + cola prompts + dispara)
-          </div>
+      {job.error && (
+        <div
+          role="alert"
+          className="mt-3 rounded-[10px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300"
+        >
+          {job.error}
         </div>
+      )}
 
-        {error && (
-          <div
-            key={error}
-            role="alert"
-            className="error-shake rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300"
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        {running ? (
+          <CancelButton onClick={onCancel} label="Cancelar este job" />
+        ) : (
+          <button
+            type="button"
+            onClick={onRun}
+            disabled={!extConnected || takesCount === 0}
+            className="btn-primary"
           >
-            {error}
-          </div>
+            Disparar {takesCount || 0} take{takesCount === 1 ? '' : 's'}
+          </button>
         )}
-
-        <div className="flex flex-wrap gap-3">
-          {processing ? (
-            <CancelButton onClick={handleCancel} label="Cancelar pipeline" />
-          ) : (
-            <button
-              type="button"
-              onClick={handleRun}
-              disabled={!extStatus.connected || parsedTakes.length === 0}
-              className="btn-primary"
-            >
-              Disparar {parsedTakes.length || 0} take{parsedTakes.length === 1 ? '' : 's'}
-            </button>
-          )}
-          {zipReady && (
-            <button type="button" onClick={downloadZip} className="btn-secondary">
-              Baixar {zipReady.name} ({(zipReady.blob.size / 1024 / 1024).toFixed(1)} MB)
-            </button>
-          )}
-        </div>
-
-        {progress && (
-          <div className="rounded-xl border border-line bg-bg-soft/40 p-4">
-            {/* v3.5.40 — BACKGROUND MODE + VIEW button.
-                A geração roda 100% em segundo plano (você NÃO precisa ver as
-                imagens sendo geradas). Clique em VER GERAÇÃO só se quiser
-                acompanhar numa nova aba. Quando terminar, o botão de download
-                do ZIP aparece automaticamente. */}
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                {progress.spaceUrl ? (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      window.open(progress.spaceUrl!, '_blank', 'noopener,noreferrer')
-                    }
-                    className="inline-flex items-center gap-1.5 rounded-[8px] border border-lime/50 bg-lime/10 px-3 py-1.5 text-xs font-semibold text-lime transition hover:bg-lime/20"
-                    title="Abre o Space do Magnific onde a geração está acontecendo, numa nova aba. Opcional — o processo roda em segundo plano de qualquer forma."
-                  >
-                    👁 VER GERAÇÃO (nova aba)
-                  </button>
-                ) : (
-                  <span className="text-xs text-text-muted">
-                    Preparando Space…
-                  </span>
-                )}
-                <span className="mono rounded-full border border-line bg-bg/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-text-muted">
-                  rodando em 2º plano
-                </span>
-              </div>
-              <span className="mono text-lime">
-                {progress.ready}/{progress.total} prontos
-              </span>
-            </div>
-            {progress.message && (
-              <p className="mb-3 text-xs italic text-text-muted">
-                {progress.message}
-              </p>
-            )}
-            <ul className="grid gap-1.5">
-              {progress.takes.map((t) => (
-                <TakeRow key={t.idx} t={t} />
-              ))}
-            </ul>
-          </div>
+        {job.zip && (
+          <button type="button" onClick={onDownload} className="btn-secondary">
+            Baixar {job.zip.name} ({(job.zip.blob.size / 1024 / 1024).toFixed(1)} MB)
+          </button>
         )}
-
-        {parsedTakes.length > 0 && !progress && (
-          <div className="rounded-xl border border-line bg-bg-soft/30 p-3">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
-              Preview dos prompts parseados ({parsedTakes.length})
-            </div>
-            <ul className="grid gap-2 max-h-[260px] overflow-auto">
-              {parsedTakes.slice(0, 30).map((t) => (
-                <li
-                  key={t.idx}
-                  className="rounded-md border border-line bg-black/20 p-2 text-xs"
-                >
-                  <div className="mono text-lime">take{t.idx}</div>
-                  <div className="text-white">{t.imagePrompt}</div>
-                  {t.videoPrompt && (
-                    <div className="mt-1 text-text-muted">motion: {t.videoPrompt}</div>
-                  )}
-                </li>
-              ))}
-              {parsedTakes.length > 30 && (
-                <li className="text-xs text-text-muted">
-                  +{parsedTakes.length - 30} mais...
-                </li>
-              )}
-            </ul>
-          </div>
+        {running && (
+          <span className="mono rounded-full border border-line bg-bg/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-text-muted">
+            rodando em 2º plano
+          </span>
         )}
       </div>
-    </ToolShell>
+
+      {p && (
+        <div className="mt-3 rounded-xl border border-line bg-bg/30 p-3">
+          <div className="mb-2 flex items-center justify-between text-xs">
+            <span className="text-text-muted">
+              {hasSpace ? 'Space ativo (use 🧊 VER SPACE 3D)' : 'Preparando Space…'}
+            </span>
+            <span className="mono text-lime">
+              {p.ready}/{p.total} prontos
+            </span>
+          </div>
+          {p.message && (
+            <p className="mb-2 text-xs italic text-text-muted">{p.message}</p>
+          )}
+          <ul className="grid gap-1.5">
+            {p.takes.map((t) => (
+              <TakeRow key={t.idx} t={t} />
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 

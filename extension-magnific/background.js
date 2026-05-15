@@ -10,7 +10,33 @@
  * captura via DevTools Network e me cola — eu adapto pra match exato.
  */
 
+// v3.5.7: SW lifecycle fix — pendingJobs persisted in storage.session.
+// MV3 SW dies after ~30s idle; in-memory Map is wiped. Storage survives.
 const pendingJobs = new Map();
+const STORAGE_KEY = '__darko_mg_pending_jobs__';
+
+async function persistJob(requestId, data) {
+  try {
+    const all = (await chrome.storage.session.get(STORAGE_KEY))[STORAGE_KEY] || {};
+    all[requestId] = { bridgeTabId: data.bridgeTabId, firstProgressAt: data.firstProgressAt || null };
+    await chrome.storage.session.set({ [STORAGE_KEY]: all });
+  } catch {}
+}
+
+async function unpersistJob(requestId) {
+  try {
+    const all = (await chrome.storage.session.get(STORAGE_KEY))[STORAGE_KEY] || {};
+    delete all[requestId];
+    await chrome.storage.session.set({ [STORAGE_KEY]: all });
+  } catch {}
+}
+
+async function recoverJob(requestId) {
+  try {
+    const all = (await chrome.storage.session.get(STORAGE_KEY))[STORAGE_KEY] || {};
+    return all[requestId] || null;
+  } catch { return null; }
+}
 
 function reportToPage(bridgeTabId, requestId, type, payload) {
   if (!bridgeTabId) return;
@@ -32,14 +58,26 @@ function reportToPage(bridgeTabId, requestId, type, payload) {
 async function findOrCreateMagnificTab() {
   const existing = await chrome.tabs.query({ url: 'https://www.magnific.com/app/*' });
 
-  // Tier 1: active tab (foco do usuario) — content script provavelmente vivo
+  // v3.5.18 CRITICAL: FORCE magnific tab to FOREGROUND. Chrome heavily throttles
+  // background tabs (setTimeout ~1/sec, animations slow). This makes Vue Flow
+  // popup rendering take 30s+ instead of 300ms. By forcing foreground BEFORE
+  // pipeline starts, all UI ops run at normal speed = pipeline completes 10x faster.
+
+  // v3.5.44 (pedido do user): NUNCA roubar foco. O processo roda em SEGUNDO
+  // PLANO no Magnific — o user NÃO deve ver a aba Spaces abrir/focar. Ele só
+  // vê a tela de processamento no DARKO LAB. Se quiser ver o Space, usa o
+  // botão 3D na ferramenta. Trade-off: aba em background é throttled (mais
+  // lento), mas invisível como solicitado. NÃO chamamos tabs.update(active)
+  // nem windows.update(focused) em lugar nenhum.
+
+  // Tier 1: tab já ativa (se por acaso o user estiver nela) — usa, sem mexer
   const active = existing.find((t) => t.active);
   if (active) {
-    console.log('[DARKO BG] Usando active Magnific tab:', active.id);
+    console.log('[DARKO BG] Usando active Magnific tab (sem forçar foco):', active.id);
     return active;
   }
 
-  // Tier 2: testa cada tab via PING; usa o primeiro que responder
+  // Tier 2: testa cada tab via PING; usa o primeiro que responder (NÃO foca)
   for (const t of existing) {
     try {
       const r = await Promise.race([
@@ -47,20 +85,20 @@ async function findOrCreateMagnificTab() {
         new Promise((_, rej) => setTimeout(() => rej(new Error('ping timeout')), 1000)),
       ]);
       if (r?.ok) {
-        console.log('[DARKO BG] Tab Magnific viva (PING ok):', t.id);
+        console.log('[DARKO BG] Tab Magnific viva (PING ok, background):', t.id);
         return t;
       }
     } catch {}
   }
 
-  // Tier 3: pega qualquer tab existente (vamos tentar injetar)
+  // Tier 3: pega qualquer tab existente (NÃO foca)
   if (existing.length > 0) {
-    console.log('[DARKO BG] Usando primeira Magnific tab (nenhuma ativa, sem PING):', existing[0].id);
+    console.log('[DARKO BG] Usando primeira Magnific tab (background):', existing[0].id);
     return existing[0];
   }
 
-  // Tier 4: cria nova tab
-  console.log('[DARKO BG] Criando nova Magnific tab...');
+  // Tier 4: cria nova tab EM BACKGROUND (active:false — não rouba foco)
+  console.log('[DARKO BG] Criando nova Magnific tab em background...');
   const tab = await chrome.tabs.create({ url: 'https://www.magnific.com/app/spaces', active: false });
   await new Promise((r) => setTimeout(r, 4000));
   return tab;
@@ -133,6 +171,82 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'MG_PING') {
     sendResponse({ ok: true });
     return false;
+  }
+
+  // v3.5.7: KEEPALIVE — content script sends every 20s during long polling
+  // to keep SW awake. Critical for waitForNodeVideo (10s polls for up to 15min).
+  if (msg.type === 'MG_KEEPALIVE') {
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  // v3.5.13: PERSISTENT CDP attach — debugger stays attached for entire
+  // pipeline so banner shifts viewport only ONCE. All subsequent clicks
+  // use the SAME viewport so coordinates from getBoundingClientRect match
+  // exactly what Input.dispatchMouseEvent expects. This emulates real
+  // user interactions (isTrusted=true) without flaky coord drift.
+  if (msg.type === 'MG_CDP_ATTACH') {
+    const tabId = sender.tab?.id;
+    if (!tabId) { sendResponse({ ok: false, error: 'no tabId' }); return false; }
+    (async () => {
+      try {
+        await chrome.debugger.attach({ tabId }, '1.3');
+        sendResponse({ ok: true });
+      } catch (e) {
+        if (/already attached/i.test(e?.message || '')) {
+          sendResponse({ ok: true, alreadyAttached: true });
+        } else {
+          sendResponse({ ok: false, error: e?.message || String(e) });
+        }
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === 'MG_CDP_DETACH') {
+    const tabId = sender.tab?.id;
+    if (!tabId) { sendResponse({ ok: false }); return false; }
+    (async () => {
+      try { await chrome.debugger.detach({ tabId }); sendResponse({ ok: true }); }
+      catch (e) { sendResponse({ ok: false, error: e?.message }); }
+    })();
+    return true;
+  }
+
+  // v3.5.13: MG_CDP_FULL_CLICK — emulates full real-mouse sequence:
+  // mouseMoved (hover) → mouseMoved (settle) → mousePressed → mouseReleased.
+  // Vue Flow needs hover state before click registers correctly.
+  if (msg.type === 'MG_CDP_FULL_CLICK') {
+    const tabId = sender.tab?.id;
+    const { x, y } = msg.payload || {};
+    if (!tabId || typeof x !== 'number' || typeof y !== 'number') {
+      sendResponse({ ok: false, error: 'invalid' }); return false;
+    }
+    (async () => {
+      const target = { tabId };
+      try {
+        // Move to position (hover)
+        await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+          type: 'mouseMoved', x, y, button: 'none', buttons: 0, clickCount: 0
+        });
+        // Small settle (real users dwell briefly before clicking)
+        await new Promise(r => setTimeout(r, 50));
+        // Press
+        await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+          type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1
+        });
+        // Brief hold
+        await new Promise(r => setTimeout(r, 30));
+        // Release
+        await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+          type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1
+        });
+        sendResponse({ ok: true });
+      } catch (e) {
+        sendResponse({ ok: false, error: e?.message || String(e) });
+      }
+    })();
+    return true;
   }
 
   // v3.5.1: REAL MOUSE CLICK via chrome.debugger CDP — usado SO pra option click
@@ -208,9 +322,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'MG_TAB_RESULT') {
     const job = pendingJobs.get(msg.requestId);
     if (job) {
-      clearTimeout(job.timeoutId);
+      if (job.timeoutId) clearTimeout(job.timeoutId);
       pendingJobs.delete(msg.requestId);
+      unpersistJob(msg.requestId);
       reportToPage(job.bridgeTabId, msg.requestId, msg.resultType, msg.payload);
+    } else {
+      // v3.5.7: SW restart recovery for RESULT too
+      (async () => {
+        const recovered = await recoverJob(msg.requestId);
+        if (recovered && recovered.bridgeTabId) {
+          unpersistJob(msg.requestId);
+          reportToPage(recovered.bridgeTabId, msg.requestId, msg.resultType, msg.payload);
+        }
+      })();
     }
     return false;
   }
@@ -221,8 +345,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (!job.firstProgressAt) {
         job.firstProgressAt = Date.now();
         if (job.heartbeatId) { clearTimeout(job.heartbeatId); job.heartbeatId = null; }
+        persistJob(msg.requestId, job);
       }
+      // v3.5.44 (pedido do user): REMOVIDO o re-focus periódico. A aba Magnific
+      // NÃO é trazida pro foco durante o pipeline — roda 100% em segundo plano.
+      // O user só acompanha pela tela do DARKO LAB; se quiser ver o Space usa
+      // o botão 3D. (Trade-off: background throttling deixa mais lento, mas é
+      // o comportamento solicitado — invisível.)
       reportToPage(job.bridgeTabId, msg.requestId, msg.progressType, msg.payload);
+    } else {
+      // v3.5.7: SW restart edge case — pendingJobs Map is empty but storage has it.
+      // Recover bridgeTabId from storage and forward progress.
+      (async () => {
+        const recovered = await recoverJob(msg.requestId);
+        if (recovered && recovered.bridgeTabId) {
+          pendingJobs.set(msg.requestId, { bridgeTabId: recovered.bridgeTabId, firstProgressAt: recovered.firstProgressAt || Date.now() });
+          reportToPage(recovered.bridgeTabId, msg.requestId, msg.progressType, msg.payload);
+        }
+      })();
     }
     return false;
   }
@@ -261,6 +401,8 @@ async function handleForward(msg, bridgeTabId) {
       }
     }, timeoutMs);
     pendingJobs.set(requestId, { bridgeTabId, timeoutId });
+    // v3.5.7: persist in storage.session so SW restart can recover
+    persistJob(requestId, { bridgeTabId });
 
     // v3.3.2: aguarda heartbeat de progress dentro de SETUP_HEARTBEAT_MS — se
     // nao chegar nenhum progress nesse tempo, ABORTA com erro claro. Isso evita
