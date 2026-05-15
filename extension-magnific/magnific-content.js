@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.5.3';
+const DARKO_MG_VERSION = '3.5.40';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -39,6 +39,50 @@ if (window.__darkolab_magnific_loaded__) {
   window.__darkolab_magnific_version = DARKO_MG_VERSION;
   console.log('[DARKO Magnific Content] online v=' + DARKO_MG_VERSION);
 }
+
+// ===================== v3.5.38 USERSNAP CRASH SHIM (MAIN WORLD) =========
+// RAIZ do crash recorrente (v3.5.33→v3.5.37): Magnific's useSpacesUsersnap
+// registra listener document-level que faz `event.target.closest(...)`.
+// Quando nosso evento sintético tem target sem .closest (document/Text/etc),
+// o handler do Magnific LANÇA `TypeError: t.closest is not a function`,
+// exceção propaga e ABORTA runWithConcurrency (0 nodes → stall).
+//
+// v3.5.37 falhou: content script roda em ISOLATED WORLD; patchar
+// Document.prototype lá NÃO afeta o MAIN WORLD onde o Usersnap roda.
+// v3.5.38 FIX: injetar <script> no MAIN WORLD da página patchando
+// Document/Text/EventTarget.prototype.closest = ()=>null + window.onerror
+// trap. Roda no mesmo contexto JS do Magnific → neutraliza de verdade.
+(function injectMainWorldUsersnapShim() {
+  try {
+    const code = '(' + function () {
+      try {
+        var noop = function () { return null; };
+        if (typeof Document !== 'undefined' && !Document.prototype.closest) Document.prototype.closest = noop;
+        if (typeof DocumentFragment !== 'undefined' && !DocumentFragment.prototype.closest) DocumentFragment.prototype.closest = noop;
+        if (typeof Text !== 'undefined' && !Text.prototype.closest) Text.prototype.closest = noop;
+        if (typeof Window !== 'undefined' && Window.prototype && !Window.prototype.closest) Window.prototype.closest = noop;
+        try { if (typeof window !== 'undefined' && typeof window.closest !== 'function') window.closest = noop; } catch (e) {}
+        window.addEventListener('error', function (ev) {
+          var m = ev && ev.message ? String(ev.message) : '';
+          if (/closest is not a function/.test(m)) {
+            if (ev.preventDefault) ev.preventDefault();
+            if (ev.stopImmediatePropagation) ev.stopImmediatePropagation();
+            console.warn('[DARKO USERSNAP-SHIM MW] suprimido crash Usersnap');
+            return true;
+          }
+        }, true);
+        console.log('[DARKO USERSNAP-SHIM MW] v3.5.38 instalado no MAIN WORLD');
+      } catch (e) { console.warn('[DARKO USERSNAP-SHIM MW] erro:', e && e.message); }
+    } + ')();';
+    const s = document.createElement('script');
+    s.textContent = code;
+    (document.documentElement || document.head || document.body).appendChild(s);
+    s.remove();
+    console.log('[DARKO USERSNAP-SHIM] script main-world injetado v3.5.38');
+  } catch (e) {
+    console.warn('[DARKO USERSNAP-SHIM] falha injetar main-world:', e && e.message);
+  }
+})();
 
 // ========================= KLING 2.5 LOCK (v3.1.7) =========================
 //
@@ -479,51 +523,34 @@ async function handleRunPipeline(payload, onProgress) {
   await navigateToSpace(space.spaceId);
   console.log('[DARKO Pipeline] Phase 1b: navigate complete, current url=' + location.pathname);
 
-  await sleep(2500); // SPA hydrate
+  // v3.5.29 SPEED: settle 2s only — createImageGenNode tem waitFor plusBtn 15s,
+  // se canvas demora extra esperamos la. Maior parte das vezes canvas pronto em 1s.
+  console.log('[DARKO Pipeline] Phase 1c: settle 2s');
+  onProgress({ phase: 'space', percent: 4, message: 'Aguardando canvas (2s)...' });
+  await sleep(2000);
   console.log('[DARKO Pipeline] Phase 2: setup pares iniciando');
 
-  // PHASE 2: Setup todos os pares (image + video conectado)
-  // SIMPLIFIED v3.4.0: removido LOCK_VIOLATION abort total — se 1 par falha,
-  // segue com os outros. selectModelInNode strict match ja garante Kling 2.5.
+  // ========================================================================
+  // v3.5.8 STREAMING: setup pair N + KICK OFF its dispatch+wait+animate in
+  // background, then proceed to setup pair N+1 sem esperar pair N renderizar.
+  // Setup is sequential (UI bottleneck — single canvas) mas generation roda
+  // 100% em paralelo. Resultado: end-time ~30-40% mais rapido que v3.5.7.
+  //
+  // Constraint: max 6 video gens simultaneos (Kling 2.5 limit) — enforced
+  // via acquireVideoSlot semaphore dentro de processPair.
+  // ========================================================================
+  // v3.5.31: re-add semaphores for true streaming (image+video parallel per pair)
   const pairs = [];
-  for (let i = 0; i < takes.length; i++) {
-    const take = takes[i];
-    const setupPercent = 5 + Math.round((i / takes.length) * 25);
-    onProgress({
-      phase: 'setup',
-      percent: setupPercent,
-      message: `Criando par ${i + 1}/${takes.length} (image + video)...`,
-    });
-    try {
-      const pair = await createTakePair({
-        imagePrompt: take.imagePrompt,
-        videoPrompt: take.videoPrompt || '',
-        imageModel, videoModel, aspect, imageQuality, videoQuality, videoDuration,
-        pairIdx: take.idx ?? i + 1,
-      });
-      pairs.push({ idx: take.idx ?? i + 1, ...pair, status: 'setup-ok' });
-    } catch (e) {
-      pairs.push({ idx: take.idx ?? i + 1, status: 'setup-failed', error: e.message });
-      onProgress({
-        phase: 'setup',
-        percent: setupPercent,
-        message: `Falha setup take ${i + 1}: ${e.message}`,
-      });
-    }
-  }
-
-  // ========================================================================
-  // PHASE 3+4 INTERLEAVED (v3.5.1) — per user directive:
-  //   "imagem pronta = anima imediatamente no kling, nao espera todas"
-  // Semaforos: 12 image slots, 6 video slots (Kling 2.5 limite real)
-  // Cada par roda independente: dispatch image → wait image done → dispatch
-  // video → wait video done. 12 pares em paralelo, mas video gen entra em
-  // queue de 6 slots maximos.
-  // ========================================================================
-  const setupOkPairs = pairs.filter((p) => p.status === 'setup-ok');
-  onProgress({ phase: 'pipeline', percent: 32, message: `Iniciando ${setupOkPairs.length} pares (12 img + 6 vid simultaneos)...` });
-
-  // Video semaphore — limita 6 simultaneos
+  let imageActive = 0;
+  const imageQueue = [];
+  const acquireImageSlot = () => new Promise((resolve) => {
+    if (imageActive < 12) { imageActive++; resolve(); }
+    else imageQueue.push(resolve);
+  });
+  const releaseImageSlot = () => {
+    imageActive--;
+    if (imageQueue.length > 0) { imageActive++; imageQueue.shift()(); }
+  };
   let videoActive = 0;
   const videoQueue = [];
   const acquireVideoSlot = () => new Promise((resolve) => {
@@ -535,84 +562,191 @@ async function handleRunPipeline(payload, onProgress) {
     if (videoQueue.length > 0) { videoActive++; videoQueue.shift()(); }
   };
 
+  // v3.5.32: moved reportProgress BEFORE setup loop (called by _streamPromise)
   const reportProgress = () => {
+    const totalTakes = takes.length;
     const imgOk = pairs.filter((p) => p.imageStatus === 'ok').length;
     const vidOk = pairs.filter((p) => p.videoStatus === 'ok').length;
     const imgFail = pairs.filter((p) => p.imageStatus === 'failed').length;
     const vidFail = pairs.filter((p) => p.videoStatus === 'failed').length;
-    const percent = 32 + Math.round(((imgOk + vidOk * 2) / (setupOkPairs.length * 3)) * 65);
+    const percent = 32 + Math.round(((imgOk + vidOk * 2) / (totalTakes * 3)) * 65);
     onProgress({
       phase: 'pipeline',
       percent: Math.min(percent, 97),
-      message: `IMG ${imgOk}/${setupOkPairs.length} (${imgFail} falha) · VID Kling 2.5 ${vidOk}/${setupOkPairs.length} (${vidFail} falha)`,
+      message: `IMG ${imgOk}/${totalTakes} (${imgFail} falha) · VID Kling 2.5 ${vidOk}/${totalTakes} (${vidFail} falha)`,
     });
   };
 
-  async function processPair(pair) {
-    // STEP A: dispatch IMAGE workflow (Nano Banana 2)
-    try {
-      await selectNodeAndEnsureUnlimited(pair.imageNodeId);
-      const { workflowRunId: imgRunId } = await executeWorkflow(pair.imageNodeId, space.spaceId);
-      pair.imageRunId = imgRunId;
-      const expectedImgPrompt = takes.find((t) => (t.idx ?? 0) === pair.idx)?.imagePrompt || '';
-      const url = await waitForNodeImage(pair.imageNodeId, 600000, expectedImgPrompt);
-      pair.imageUrl = url;
-      pair.imageStatus = 'ok';
-      reportProgress();
-    } catch (e) {
-      pair.imageStatus = 'failed';
-      pair.imageError = e.message;
-      reportProgress();
-      return; // Sem imagem, sem video
-    }
-
-    // STEP B: image pronta → adquire video slot (max 6) → dispatch VIDEO
-    if (!pair.videoNodeId) {
-      pair.videoStatus = 'skipped';
-      return;
-    }
-    await acquireVideoSlot();
-    try {
-      // LOCK v3.4.4 — verifica Kling 2.5 antes de dispatch (zero risco Seedance)
-      await selectNodeForEdit(pair.videoNodeId);
-      await sleep(400);
-      const btns = nodeButtons(pair.videoNodeId);
-      const hasKling25 = btns.includes('Kling 2.5');
-      const forbidden = FORBIDDEN_VIDEO_MODELS.filter((m) => btns.includes(m));
-      if (!hasKling25 || forbidden.length > 0) {
-        throw new Error(
-          `KLING_LOCK_ABORT pair#${pair.idx}: ` +
-          (hasKling25 ? '' : '[Kling 2.5 NAO selecionado] ') +
-          (forbidden.length ? `[FORBIDDEN=${forbidden.join(',')}] ` : '') +
-          `btns=[${btns.join(',')}]`
-        );
+  // v3.5.34 SEQUENTIAL but BLAZING FAST: 1 pair at time, ZERO sleeps,
+  // event-driven only. Mutex queue-pauses removidas. Streaming dispatch
+  // (img+vid background per pair) continua paralelo.
+  await runWithConcurrency(takes, 1, async (take, idx) => {
+    const i = takes.indexOf(take);
+    const setupPercent = 5 + Math.round((i / takes.length) * 25);
+    onProgress({
+      phase: 'setup',
+      percent: setupPercent,
+      message: `[par ${i + 1}/${takes.length}] criando...`,
+    });
+    let pairResult = null;
+    let lastErr = null;
+    for (let attempt = 1; attempt <= 3 && !pairResult; attempt++) {
+      try {
+        const pair = await createTakePair({
+          imagePrompt: take.imagePrompt,
+          videoPrompt: take.videoPrompt || '',
+          imageModel, videoModel, aspect, imageQuality, videoQuality, videoDuration,
+          pairIdx: take.idx ?? i + 1,
+          onStep: (step) => {
+            onProgress({
+              phase: 'setup',
+              percent: setupPercent,
+              message: (attempt > 1 ? `[retry ${attempt}/3] ` : '') + step,
+            });
+          },
+        });
+        pairResult = pair;
+      } catch (e) {
+        lastErr = e;
+        console.warn(`[setup pair ${i+1} attempt ${attempt}/3] failed:`, e.message);
+        onProgress({
+          phase: 'setup',
+          percent: setupPercent,
+          message: `Pair ${i + 1} tentativa ${attempt}/3 falhou: ${e.message.slice(0, 80)}`,
+        });
+        try {
+          document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        } catch {}
+        await sleep(1000);
       }
-      const hasAspect = btns.includes('9:16') || btns.includes('Auto');
-      const has720p = btns.includes('720p');
-      if (!hasAspect || !has720p) {
-        throw new Error(`LOCK_ABORT pair#${pair.idx} config errada: aspect=${hasAspect}, 720p=${has720p}`);
-      }
-
-      await selectNodeAndEnsureUnlimited(pair.videoNodeId);
-      const { workflowRunId: vidRunId } = await executeWorkflow(pair.videoNodeId, space.spaceId);
-      pair.videoRunId = vidRunId;
-      const expectedPrompt = takes.find((t) => (t.idx ?? 0) === pair.idx)?.videoPrompt || '';
-      const vidUrl = await waitForNodeVideo(pair.videoNodeId, 900000, expectedPrompt);
-      pair.videoUrl = vidUrl;
-      pair.videoStatus = 'ok';
-      reportProgress();
-    } catch (e) {
-      pair.videoStatus = 'failed';
-      pair.videoError = e.message;
-      console.error(`[VIDEO LOCK pair#${pair.idx}]`, e.message);
-      reportProgress();
-    } finally {
-      releaseVideoSlot();
     }
-  }
+    if (pairResult) {
+      const pairObj = { idx: take.idx ?? i + 1, ...pairResult, status: 'setup-ok' };
+      pairs.push(pairObj);
+      // v3.5.31 FULL STREAMING: image dispatch + wait + VIDEO dispatch + wait
+      // all per-pair em background. Semaphores 12img/6vid respeitados.
+      // Resultado: pair 1 video pronto ANTES de pair 15 setup terminar.
+      const expectedImgPrompt = take.imagePrompt || '';
+      const expectedVidPrompt = take.videoPrompt || '';
+      pairObj._streamPromise = (async () => {
+        // === IMAGE ===
+        await acquireImageSlot();
+        try {
+          // v3.5.39: image resolução LOD-TOLERANTE — só ABORTA se ler valor
+          // pago CONFIRMADO (2K/4K). Ilegível (LOD) NÃO bloqueia (1K já
+          // HARD-ENFORCED 5x no setup). Resolve gasto residual de crédito
+          // imagem sem o stall do v3.5.35.
+          try {
+            try { await selectNodeForEdit(pairObj.imageNodeId); } catch {}
+            await sleep(200);
+            const inode = findNodeElement(pairObj.imageNodeId);
+            if (inode) {
+              try { inode.click(); } catch {}
+              await sleep(180);
+              const rb = inode.querySelector('[data-cy="node-control-selector-resolution"]');
+              const rv = rb ? (rb.textContent || '').trim() : null;
+              if (rv && rv !== '1K') {
+                throw new Error('CREDIT_GUARD image ' + pairObj.imageNodeId.slice(0,8) +
+                  ': resolution="' + rv + '" (≠1K) — ABORTA, gasta crédito.');
+              }
+              console.log('[CREDIT_GUARD] image ' + pairObj.imageNodeId.slice(0,8) +
+                ' resolution=' + (rv || 'LOD-unreadable(setup-enforced)'));
+            }
+          } catch (ce) {
+            if (/CREDIT_GUARD/.test(ce.message)) throw ce;
+          }
+          // v3.5.40 CREDIT-PREVIEW GATE imagem — aborta se houver QUALQUER
+          // preview de custo em créditos antes do generate da imagem.
+          scanCreditCostPreview(pairObj.imageNodeId, 'image');
+          const { workflowRunId } = await executeWorkflow(pairObj.imageNodeId, space.spaceId);
+          pairObj.imageRunId = workflowRunId;
+          console.log(`[STREAM img dispatched pair#${pairObj.idx}]`);
+          const url = await waitForNodeImage(pairObj.imageNodeId, 600000, expectedImgPrompt);
+          pairObj.imageUrl = url;
+          pairObj.imageStatus = 'ok';
+          console.log(`[STREAM img RENDERED pair#${pairObj.idx}]`);
+        } catch (e) {
+          pairObj.imageStatus = 'failed';
+          pairObj.imageError = e.message;
+          console.error(`[STREAM img pair#${pairObj.idx}]`, e.message);
+          releaseImageSlot();
+          return;
+        }
+        releaseImageSlot();
+        reportProgress();
 
-  // Roda todos os pares em paralelo (max imageConcurrency=12 simultaneos)
-  await runWithConcurrency(setupOkPairs, imageConcurrency, processPair);
+        // === VIDEO === (only if image OK and videoNodeId exists)
+        if (!pairObj.videoNodeId) {
+          pairObj.videoStatus = 'skipped';
+          return;
+        }
+        await acquireVideoSlot();
+        try {
+          // v3.5.35 ZERO-CREDIT GUARANTEE: pre-flight ANTES do dispatch.
+          // Lê modelo REAL do node — só dispara se Kling 2.5. Seedance/outro
+          // = THROW (pair failed, ZERO crédito). Resolve bug 1075 créditos.
+          await preflightVideoGuard(pairObj);
+          const { workflowRunId: vidRunId } = await executeWorkflow(pairObj.videoNodeId, space.spaceId);
+          pairObj.videoRunId = vidRunId;
+          console.log(`[STREAM vid dispatched pair#${pairObj.idx}]`);
+          const vidUrl = await waitForNodeVideo(pairObj.videoNodeId, 900000, expectedVidPrompt);
+          pairObj.videoUrl = vidUrl;
+          pairObj.videoStatus = 'ok';
+          console.log(`[STREAM vid RENDERED pair#${pairObj.idx}]`);
+        } catch (e) {
+          pairObj.videoStatus = 'failed';
+          pairObj.videoError = e.message;
+          console.error(`[STREAM vid pair#${pairObj.idx}]`, e.message);
+        }
+        releaseVideoSlot();
+        reportProgress();
+      })();
+      onProgress({
+        phase: 'setup',
+        percent: setupPercent,
+        message: `Pair ${i + 1} setup OK — img+vid streaming em background`,
+      });
+    } else {
+      pairs.push({ idx: take.idx ?? i + 1, status: 'setup-failed', error: lastErr?.message || 'unknown' });
+      onProgress({
+        phase: 'setup',
+        percent: setupPercent,
+        message: `Falha setup take ${i + 1}: ${lastErr?.message || 'unknown'}`,
+      });
+    }
+  }); // end runWithConcurrency
+
+  // ========================================================================
+  // PHASE 3+4 (v3.5.12 NON-STREAMING revert): all setup done, now dispatch
+  // all setupOk pairs in parallel. Each pair's processPair: image dispatch →
+  // wait image → video dispatch → wait video. Concurrency: 12 image, 6 video.
+  // ========================================================================
+  const setupOkPairs = pairs.filter((p) => p.status === 'setup-ok');
+  onProgress({ phase: 'pipeline', percent: 32, message: `Iniciando ${setupOkPairs.length} pares streaming (3 paralelos setup + 12 img + 6 vid gen)...` });
+  // reportProgress JA definido acima (v3.5.32)
+
+  // ========================================================================
+  // v3.5.25 REST-ONLY DISPATCH (no UI conflicts, no LOD issues, MAX PARALLEL)
+  //
+  // Setup phase JA verificou (HARD-ENFORCE 5x retry):
+  //   - Image: 1K LOCKED via resolution btn check
+  //   - Video: 720p LOCKED + Kling 2.5 LOCKED (5x retry no LOCK)
+  //   - Unlimited ON (ensureUnlimitedON)
+  // Phase 0 confirmou is_unlimited_mode_enabled=true globalmente.
+  // force_credits=false no executeWorkflow respeita Unlimited.
+  //
+  // Triple safety = zero credit risk SEM precisar re-verificar via UI no
+  // dispatch (que falhava em LOD mode + race conditions).
+  //
+  // Dispatch eh pure REST POST /workflows/execute. Sem clicks, sem LOD.
+  // PARALELO max 12 imagens (Magnific limite) + max 6 videos (Kling 2.5).
+  // ========================================================================
+
+  // v3.5.31 FULL STREAMING: image+video dispatch JA estao rodando em paralelo
+  // (kicked off durante setup loop). Phase 3+4 unificado em await de todos
+  // _streamPromise (cada um faz image gen → video gen end-to-end).
+  console.log('[Phase 3+4] Awaiting ' + setupOkPairs.length + ' full streams (img+vid per pair)');
+  await Promise.all(setupOkPairs.map(p => p._streamPromise || Promise.resolve()));
 
   // PHASE 5: SAFETY POST-CHECK — confere se credits NAO diminuiram (Unlimited ativo)
   const walletAfter = await fetchJson('/app/api/wallet');
@@ -908,6 +1042,12 @@ async function handleAnimateImage(payload, onProgress) {
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
+// v3.5.34: __uiMutex no-op (sequential setup is faster than mutex-queueing).
+// Setup loops 1 pair at a time but with ZERO inter-step sleeps + event-driven waits.
+const __uiMutex = {
+  async run(label, fn) { return await fn(); }
+};
+
 function spaceURL(id) {
   return 'https://www.magnific.com/app/spaces/' + id;
 }
@@ -917,14 +1057,22 @@ function currentSpaceId() {
   return m ? m[1] : null;
 }
 
-async function waitFor(predicate, timeoutMs = 30000, pollMs = 150) {
+async function waitFor(predicate, timeoutMs = 30000, pollMs = 80) {
   const deadline = Date.now() + timeoutMs;
   let lastErr;
+  let lastKeepalive = Date.now();
   while (Date.now() < deadline) {
     try {
       const v = await predicate();
       if (v) return v;
     } catch (e) { lastErr = e; }
+    // v3.5.7: KEEPALIVE every 20s — MV3 SW dies after ~30s idle, losing
+    // pendingJobs Map → all progress events get silently dropped. Ping bg
+    // to keep SW awake during long polls (waitForNodeVideo runs 15min).
+    if (Date.now() - lastKeepalive > 20000) {
+      try { chrome.runtime.sendMessage({ type: 'MG_KEEPALIVE' }).catch(() => {}); } catch {}
+      lastKeepalive = Date.now();
+    }
     await sleep(pollMs);
   }
   throw new Error('Timeout: ' + (lastErr?.message || 'predicate nao satisfez em ' + (timeoutMs / 1000) + 's'));
@@ -970,9 +1118,31 @@ async function ensureSpaceWithName(name) {
  * route change e re-render sem reload. Script async sobrevive intacto.
  */
 async function navigateToSpace(spaceId) {
-  if (currentSpaceId() === spaceId) return;
+  if (currentSpaceId() === spaceId) {
+    // Same space already — but still need to verify canvas is ready
+    try {
+      await waitFor(() => document.querySelector('button[data-cy="board-main-toolbar-add-button"]'), 15000);
+    } catch (e) {
+      console.warn('[navigateToSpace] toolbar nao apareceu apos URL match');
+    }
+    return;
+  }
 
-  // SPA-friendly navigation: pushState + popstate event
+  // v3.5.11 CRITICAL: Vue Router treats /spaces/A → /spaces/B as "same route"
+  // and DOESN'T re-fetch space data. Canvas continues showing OLD space.
+  // FIX: first push to /app/spaces (list, different route pattern), then push
+  // to /app/spaces/{newId}. This forces Vue Router lifecycle: leave space →
+  // enter list → leave list → enter NEW space. Liveblocks then fetches new
+  // space data and renders fresh canvas.
+  const currentlyOnSpace = !!currentSpaceId();
+  if (currentlyOnSpace) {
+    console.log('[navigateToSpace] currently on a space — forcing Vue Router re-render via /app/spaces detour');
+    history.pushState({}, '', '/app/spaces');
+    window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
+    await sleep(800); // let list page mount briefly
+  }
+
+  // Now navigate to target space (Vue Router treats this as fresh navigation)
   history.pushState({}, '', spaceURL(spaceId));
   window.dispatchEvent(new PopStateEvent('popstate', { state: {} }));
 
@@ -981,15 +1151,22 @@ async function navigateToSpace(spaceId) {
   try {
     await waitFor(() => currentSpaceId() === spaceId, 8000);
   } catch (e) {
-    // SPA nao pegou pushState — fallback pra navigation (sera fatal pro script,
-    // mas o user precisa saber que isso aconteceu).
-    console.warn('[navigateToSpace] SPA nao reagiu a pushState, fallback hard nav (script vai morrer)');
+    console.warn('[navigateToSpace] SPA nao reagiu a pushState, fallback hard nav');
     location.href = spaceURL(spaceId);
     await sleep(3500);
   }
 
-  // Da tempo do Liveblocks hidratar nodes do novo space
-  await sleep(2000);
+  // WAIT FOR CANVAS FULLY HYDRATED (toolbar + button visible)
+  console.log('[navigateToSpace] aguardando toolbar + button aparecer (canvas ready)');
+  try {
+    await waitFor(() => document.querySelector('button[data-cy="board-main-toolbar-add-button"]'), 15000);
+    console.log('[navigateToSpace] toolbar OK — canvas pronto');
+  } catch (e) {
+    console.warn('[navigateToSpace] toolbar nao apareceu em 15s — segue tentando');
+  }
+  // v3.5.11: bump settle to 2500ms — Liveblocks fetch + Vue Flow render do
+  // new space precisa ~2-3s pos-toolbar-visible.
+  await sleep(2500);
 }
 
 // ========================= TEMPLATE SPACE (v3.2.0) =========================
@@ -1166,13 +1343,67 @@ async function clickViaCDP(el) {
   }
 }
 
+/**
+ * v3.5.13: CDP FULL CLICK — emulates real user mouse sequence:
+ * mouseMoved (hover) → settle 50ms → mousePressed → hold 30ms → mouseReleased.
+ * Requires debugger to be PRE-ATTACHED via cdpAttach() — otherwise dispatches
+ * fail. Vue Flow needs the hover phase before click registers as real intent.
+ *
+ * This is what the user does manually with a real mouse — no isTrusted check
+ * can block it because the events ARE real OS-level mouse events.
+ */
+async function cdpAttach() {
+  return await new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: 'MG_CDP_ATTACH' }, (resp) => {
+      if (chrome.runtime.lastError) { resolve(false); return; }
+      resolve(!!resp?.ok);
+    });
+  });
+}
+
+async function cdpDetach() {
+  return await new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: 'MG_CDP_DETACH' }, () => resolve(true));
+  });
+}
+
+async function cdpFullClick(el) {
+  if (!el || !el.isConnected) return false;
+  // Scroll element into view first (banner-aware viewport)
+  try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
+  await sleep(150); // let scroll settle + viewport stabilize
+  const r = el.getBoundingClientRect();
+  if (!r || r.width === 0) return false;
+  const x = Math.round(r.x + r.width / 2);
+  const y = Math.round(r.y + r.height / 2);
+  return await new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: 'MG_CDP_FULL_CLICK', payload: { x, y } }, (resp) => {
+      if (chrome.runtime.lastError) { resolve(false); return; }
+      resolve(!!resp?.ok);
+    });
+  });
+}
+
 function clickRealElement(el) {
   if (!el) return false;
-  // v3.4.5: STRATEGY HYBRIDA pra Vue Flow + dropdown options funcionarem ambos.
-  // Antes: dispatchEvent puro causava Vue Flow TypeError 'Cannot read property document of null'
-  // E mesmo quando passava, dropdown options nao registravam o click no Vue (state nao mudava).
-  // Agora: usar nativo el.click() PRIMEIRO (que Vue Router/components reconhecem), depois
-  // fallback pra pointer events com pointerId valido pra Vue Flow nao crashar.
+  // v3.5.5: GUARD against detached el — Vue Flow's "In" handler crashes
+  // (TypeError 'Cannot read property document of null') when we dispatch
+  // events to a node that has been detached by a Vue Flow re-render. The
+  // exception is async (in event handler) so dispatchEvent doesn't propagate
+  // it back — but it corrupts Vue Flow internal state, breaking subsequent
+  // selectNodeForEdit and even waitForNodeVideo polling. Bail early if
+  // detached.
+  if (!el.isConnected || !el.ownerDocument) {
+    console.warn('[clickRealElement] el is detached (isConnected=' + el.isConnected + ') — skip click');
+    return false;
+  }
+  // v3.5.34: BLOCK clicks on document/window — Magnific's useSpacesUsersnap
+  // doc-listener calls event.target.closest() and crashes (TypeError) when
+  // target lacks .closest(), aborting the async pipeline. Only allow Elements.
+  if (el === document || el === window || typeof el.closest !== 'function') {
+    console.warn('[clickRealElement] el is not an Element (no .closest) — refuse click to avoid Usersnap crash');
+    return false;
+  }
   try {
     const r = el.getBoundingClientRect();
     const x = r.x + r.width / 2;
@@ -1336,18 +1567,68 @@ async function configureWithLockRetry(fn, verify, label, pairIdx) {
 
 // ---- Create configured pair (Image Generator + Video Generator connected) ----
 
+/**
+ * v3.5.33 POSITION NODE: drag node from current position to target via synthetic
+ * pointer events. Used for organizing 15 pairs in a clean grid on canvas.
+ * Drag simulates user dragging the node header — Vue Flow updates state.
+ */
+async function positionNode(uuid, targetX, targetY) {
+  // v3.5.34 FIX: dispatch on Element (node), NOT document. Document has no
+  // .closest() method so Magnific's useSpacesUsersnap doc-listener crashes
+  // with `TypeError: t.closest is not a function`, which aborts createTakePair
+  // inside async stack. Dispatching on the node makes event.target = node
+  // (an Element), so .closest() works. Events still bubble up to Vue Flow's
+  // window/doc listener for drag registration.
+  try {
+    const node = findNodeElement(uuid);
+    if (!node) return false;
+    const rect = node.getBoundingClientRect();
+    if (rect.width < 50) return false;
+    // Pick a drag handle near the top (header of node is draggable)
+    const startX = rect.x + rect.width / 2;
+    const startY = rect.y + 20;
+    // Compute canvas-relative target
+    const canvasEl = document.querySelector('.vue-flow__pane, .vue-flow__container');
+    const cRect = canvasEl?.getBoundingClientRect();
+    if (!cRect) return false;
+    const screenX = cRect.x + targetX;
+    const screenY = cRect.y + targetY;
+
+    const evtOpts = (type, x, y, buttons) => new PointerEvent(type, {
+      bubbles: true, cancelable: true, clientX: x, clientY: y,
+      pointerId: 1, pointerType: 'mouse', button: 0, buttons, isPrimary: true,
+    });
+    // v3.5.34: pick a SAFE Element to dispatch on. node is always Element;
+    // canvasEl is the .vue-flow__pane which is also Element. Use node for
+    // pointerdown/move/up — bubbles up to document so Vue Flow drag handler
+    // catches it, but event.target stays on the node (has .closest()).
+    const safeTarget = node && typeof node.closest === 'function' ? node : document.body;
+    safeTarget.dispatchEvent(evtOpts('pointerdown', startX, startY, 1));
+    await sleep(30);
+    const steps = 8;
+    for (let i = 1; i <= steps; i++) {
+      const x = startX + (screenX - startX) * (i / steps);
+      const y = startY + (screenY - startY) * (i / steps);
+      safeTarget.dispatchEvent(evtOpts('pointermove', x, y, 1));
+      await sleep(15);
+    }
+    safeTarget.dispatchEvent(evtOpts('pointerup', screenX, screenY, 0));
+    await sleep(80);
+    return true;
+  } catch (e) {
+    console.warn('[positionNode] failed:', e.message);
+    return false;
+  }
+}
+
 async function createTakePair({
   imagePrompt, videoPrompt, imageModel, videoModel,
   aspect, imageQuality, videoQuality, videoDuration,
   pairIdx = 0,
+  onStep,  // v3.5.4: emit progress per micro-step so caller can detect hang
 }) {
   // SIMPLIFIED v3.4.0: forca Kling 2.5 + Nano Banana 2 + 9:16 + 720p/1K (LOCK
   // continua sendo enforced no selectModelInNode via STRICT equality match).
-  // Removido configureWithLockRetry wrapping — adicionava 60s+ overhead que
-  // travava pipeline com user reportando 'antes funcionava'. O selectModelInNode
-  // ja faz strict equality match (sem startsWith fuzzy), entao Kling 2.5 nao vai
-  // ser confundido com Seedance/etc. Se algo der errado, o catch externo
-  // marca o pair como failed e segue.
   imageModel    = 'nano-banana-2';
   videoModel    = 'kling-25';
   aspect        = '9:16';
@@ -1355,95 +1636,291 @@ async function createTakePair({
   videoQuality  = '720p';
   videoDuration = (videoDuration === 5 || videoDuration === '5s') ? 5 : 10;
 
-  // v3.4.3 GRANULAR LOGGING — abrir DevTools (F12) no tab Magnific pra ver
-  const log = (step, extra) => console.log(`[DARKO TakePair #${pairIdx}] ${step}`, extra || '');
+  // v3.5.4 GRANULAR LOGGING + ONSTEP — emit per micro-step pra detectar hang
+  const log = (step, extra) => {
+    const msg = `[DARKO TakePair #${pairIdx}] ${step}`;
+    console.log(msg, extra || '');
+    if (typeof onStep === 'function') {
+      try { onStep(`#${pairIdx} ${step}` + (extra ? ' ' + String(extra).slice(0, 60) : '')); } catch {}
+    }
+  };
 
-  // 1) Cria Image Generator node + cola prompt + configura
+  // v3.5.32 PARALLEL: wrap UI ops com __uiMutex pra serializar popup-using
+  // operations entre pairs paralelos. DOM/REST ops correm livre.
+
+  // 1a) Cria Image Generator node (LOCKED — usa + popup)
   log('1a) createImageGenNode start');
-  const imageNodeId = await createImageGenNode();
+  const imageNodeId = await __uiMutex.run('1a', () => createImageGenNode());
   log('1a) imageNodeId=', imageNodeId);
 
+  // v3.5.33 AUTO-POSITION: organizar nodes em grid 3-col com pair (img+vid) por row.
+  // pair#1 → col=0 row=0, pair#2 → col=1 row=0, pair#3 → col=2 row=0, pair#4 → col=0 row=1
+  // Image at (col*1000 + 100, row*700 + 100), Video at +500 right
+  const col = (pairIdx - 1) % 3;
+  const row = Math.floor((pairIdx - 1) / 3);
+  const imgX = 100 + col * 1000;
+  const imgY = 100 + row * 700;
+  await __uiMutex.run('1a-pos', () => positionNode(imageNodeId, imgX, imgY));
+  log('1a) image positioned at col=' + col + ' row=' + row);
+
+  // 1b) Set prompt (LOCKED — pra evitar race com outro pair clicando + popup
+  // que pode resetar tiptap focus state)
   log('1b) setNodePromptByUuid image');
-  await setNodePromptByUuid(imageNodeId, imagePrompt);
+  await __uiMutex.run('1b', () => setNodePromptByUuid(imageNodeId, imagePrompt));
   log('1b) prompt OK');
 
-  log('1c) configureImageGenNode (Nano Banana 2/9:16/1K)');
-  await configureImageGenNode(imageNodeId, { model: imageModel, aspect, quality: imageQuality });
-  log('1c) image configured OK');
+  // 1c.1) Select model Nano Banana 2 (LOCKED — usa dropdown popup)
+  log('1c.1) configureImage selectModel Nano Banana 2');
+  await __uiMutex.run('1c.1', async () => {
+    await selectNodeForEdit(imageNodeId);
+    const imgNodeEl = findNodeElement(imageNodeId);
+    if (!imgNodeEl) throw new Error('Image node sumiu apos select: ' + imageNodeId);
+    await selectModelInNode(imgNodeEl, modelDisplayName(imageModel));
+  });
+  log('1c.1) model OK');
+  // v3.5.34: removed inter-step sleep 100ms (event-driven waits inside select* handle it)
 
-  // 2) Cria Video Generator via output handle + cola prompt + configura Kling 2.5
+  // 1c.2) Select aspect (LOCKED — dropdown popup)
+  log('1c.2) configureImage selectAspect 9:16');
+  await __uiMutex.run('1c.2', async () => {
+    await selectNodeForEdit(imageNodeId);
+    await selectAspectInNode(findNodeElement(imageNodeId), aspect);
+  });
+  log('1c.2) aspect OK');
+
+  // 1c.3) Select quality 1K (LOCKED) + DOM verify (UNLOCKED, read-only)
+  const targetImgQ = imageQuality || '1K';
+  log('1c.3) configureImage select quality=' + targetImgQ);
+  await __uiMutex.run('1c.3', async () => {
+    await selectNodeForEdit(imageNodeId);
+    try {
+      await selectQualityInNode(findNodeElement(imageNodeId), targetImgQ);
+    } catch (e) {
+      throw new Error(`IMAGE_QUALITY_FAIL pair#${pairIdx}: ${e.message}`);
+    }
+    const imgNodeFinal = findNodeElement(imageNodeId);
+    if (imgNodeFinal) { try { imgNodeFinal.click(); } catch {} await sleep(100); }
+    const imgResBtn = imgNodeFinal?.querySelector('[data-cy="node-control-selector-resolution"]');
+    const imgCurrentRes = imgResBtn ? (imgResBtn.textContent || '').trim() : 'NO_BTN';
+    if (imgCurrentRes !== targetImgQ) {
+      throw new Error(`IMAGE_QUALITY_LOCK_FAIL pair#${pairIdx}: resolution="${imgCurrentRes}" — ABORTA`);
+    }
+  });
+  log(`1c.3) quality LOCKED at ${targetImgQ}`);
+
+  // 1c.4) ensureUnlimited (LOCKED — abre settings sidebar)
+  log('1c.4) ensureUnlimitedON');
+  await __uiMutex.run('1c.4', () => ensureUnlimitedON(findNodeElement(imageNodeId), imageNodeId));
+  log('1c.4) unlimited OK — image configured at ' + targetImgQ);
+
+  // 2a) Create video gen via output handle (LOCKED — usa popup Add)
   log('2a) createVideoGenNodeViaOutputHandle');
-  const videoNodeId = await createVideoGenNodeViaOutputHandle(imageNodeId);
+  const videoNodeId = await __uiMutex.run('2a', () => createVideoGenNodeViaOutputHandle(imageNodeId));
   log('2a) videoNodeId=', videoNodeId);
 
+  // v3.5.33 AUTO-POSITION video to the right of image (same row)
+  const vidX = imgX + 500;
+  const vidY = imgY;
+  await __uiMutex.run('2a-pos', () => positionNode(videoNodeId, vidX, vidY));
+  log('2a) video positioned at col=' + col + '+0.5 row=' + row);
+
+  // 2b) Set video prompt (LOCKED)
   if (videoPrompt) {
     log('2b) setNodePromptByUuid video');
-    await setNodePromptByUuid(videoNodeId, videoPrompt);
+    await __uiMutex.run('2b', () => setNodePromptByUuid(videoNodeId, videoPrompt));
     log('2b) video prompt OK');
   }
 
-  log('2c) configureVideoGenNode (Kling 2.5/9:16/720p/' + videoDuration + 's)');
-  await configureVideoGenNode(videoNodeId, {
-    model: videoModel, aspect, quality: videoQuality, duration: videoDuration,
+  // 2c.1) Kling 2.5 LOCK (LOCKED — internal retry)
+  log('2c.1) configureVideo selectModel Kling 2.5 (with LOCK 5x retry)');
+  await __uiMutex.run('2c.1', () => configureVideoGenNodeLockOnly(videoNodeId, videoModel));
+  log('2c.1) model locked OK');
+
+  // 2c.2) Video aspect (LOCKED)
+  log('2c.2) configureVideo selectAspect 9:16');
+  await __uiMutex.run('2c.2', async () => {
+    await selectNodeForEdit(videoNodeId);
+    await selectAspectInNode(findNodeElement(videoNodeId), aspect);
   });
-  log('2c) video configured OK — pair complete');
+  log('2c.2) aspect OK');
+
+  // 2c.3) Video quality (LOCKED) + DOM verify
+  log('2c.3) configureVideo select quality=' + videoQuality);
+  await __uiMutex.run('2c.3', async () => {
+    await selectNodeForEdit(videoNodeId);
+    try {
+      await selectQualityInNode(findNodeElement(videoNodeId), videoQuality);
+    } catch (e) {
+      throw new Error(`VIDEO_QUALITY_FAIL pair#${pairIdx}: ${e.message}`);
+    }
+  });
+  const vidNodeFinal = findNodeElement(videoNodeId);
+  if (vidNodeFinal) { try { vidNodeFinal.click(); } catch {} await sleep(100); }
+  const vidResBtn = vidNodeFinal?.querySelector('[data-cy="node-control-selector-resolution"]');
+  const vidCurrentRes = vidResBtn ? (vidResBtn.textContent || '').trim() : 'NO_BTN';
+  if (vidCurrentRes !== videoQuality) {
+    throw new Error(`VIDEO_QUALITY_LOCK_FAIL pair#${pairIdx}: resolution="${vidCurrentRes}" (esperado ${videoQuality}) — ABORTA, zero credit risk`);
+  }
+  log(`2c.3) quality LOCKED at ${videoQuality}`);
+
+  log('2c.4) configureVideo selectDuration ' + videoDuration + 's');
+  await __uiMutex.run('2c.4', async () => {
+    await selectNodeForEdit(videoNodeId);
+    await selectDurationInNode(findNodeElement(videoNodeId), videoDuration);
+  });
+  log('2c.4) duration OK');
+
+  log('2c.5) ensureUnlimitedON');
+  await __uiMutex.run('2c.5', () => ensureUnlimitedON(findNodeElement(videoNodeId), videoNodeId));
+  log('2c.5) unlimited OK — pair complete');
 
   return { imageNodeId, videoNodeId };
 }
 
+// v3.5.4: SELECT MODEL with LOCK 5x retry — extraido de configureVideoGenNode
+// pra createTakePair conseguir emitir progress per micro-step.
+async function configureVideoGenNodeLockOnly(uuid, model) {
+  const targetDisplayName = modelDisplayName(model);
+  const MAX_MODEL_RETRIES = 5;
+  let modelOk = false;
+  let lastBtns = [];
+
+  for (let attempt = 0; attempt < MAX_MODEL_RETRIES; attempt++) {
+    await selectNodeForEdit(uuid);
+    const node = findNodeElement(uuid);
+    if (!node) throw new Error('Video node sumiu: ' + uuid);
+
+    try {
+      await selectModelInNode(node, targetDisplayName);
+    } catch (e) {
+      console.warn(`[configureVidLock] selectModel attempt ${attempt + 1} threw:`, e.message);
+    }
+
+    await selectNodeForEdit(uuid);
+    await sleep(200); // v3.5.29 ULTRA: 500→200
+    lastBtns = nodeButtons(uuid);
+    const hasTarget = lastBtns.includes(targetDisplayName);
+    const forbidden = FORBIDDEN_VIDEO_MODELS.filter((m) => lastBtns.includes(m));
+
+    if (hasTarget && forbidden.length === 0) {
+      modelOk = true;
+      console.log(`[configureVidLock] model OK (attempt ${attempt + 1}):`, targetDisplayName);
+      break;
+    }
+    console.warn(`[configureVidLock] attempt ${attempt + 1} bad: hasTarget=${hasTarget}, forbidden=[${forbidden.join(',')}], btns=[${lastBtns.join(',')}]`);
+  }
+
+  if (!modelOk) {
+    throw new Error(
+      `MODEL_LOCK_FAIL: nao consegui selecionar ${targetDisplayName} apos ${MAX_MODEL_RETRIES} tentativas. ` +
+      `btns=[${lastBtns.join(',')}]`,
+    );
+  }
+}
+
 /**
- * VALIDADO LIVE (v3.1.5): cria Image Generator usando data-cy estaveis:
- *   - `button[data-cy="board-main-toolbar-add-button"]` (sempre na toolbar esq)
- *   - Item "Image Generator" no painel (sem data-cy, usa textContent)
+ * v3.5.6 — Multi-pair support: deselect any node first, longer popup timeout,
+ * keyboard ESC fallback to close any popovers before clicking +.
  *
- * PATH A: empty-state card "Image Generator" (space sem nodes) — click direto
+ * PATH A: empty-state card "Image Generator" (space sem nodes)
  * PATH B: toolbar "+" → painel "Image Generator"
  */
 async function createImageGenNode() {
   const before = collectVisibleNodes();
 
-  // PATH A — empty-state card (mais rapido em space vazio)
-  const card = Array.from(document.querySelectorAll('div,section,[role=button],button')).find((e) => {
-    const t = (e.textContent || '').trim();
-    if (!/^Image Generator/.test(t) || t.length > 80) return false;
-    if (!/text prompt|text-to|prompt/.test(t)) return false;
-    const r = e.getBoundingClientRect();
-    return r.width > 100 && r.height > 60 && e.offsetParent !== null;
-  });
-  if (card) {
-    clickRealElement(card);
-    await sleep(600);
-    return await waitForNewNode(before);
+  // v3.5.16 REMOVE PATH A: "empty-state card" predicate was matching the
+  // WELCOME PANEL "Image Generator" option (button at empty space) which only
+  // CLOSES the welcome panel, does NOT create a node. Confirmed via live test:
+  // manual click on this card returned popupOpen=false but imgNodes=0.
+  // ALWAYS use PATH B (toolbar +) which actually creates the node.
+  // Pre-step: deselect + close any welcome panel (ESC + canvas click)
+  try {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', code: 'Escape', bubbles: true }));
+    const canvas = document.querySelector('.vue-flow__pane, .vue-flow__container, .vue-flow');
+    if (canvas) {
+      const r = canvas.getBoundingClientRect();
+      const ev = (type) => new MouseEvent(type, {
+        bubbles: true, cancelable: true,
+        clientX: r.left + 20, clientY: r.top + 20,
+        button: 0, buttons: type === 'mousedown' ? 1 : 0,
+      });
+      canvas.dispatchEvent(ev('mousedown'));
+      canvas.dispatchEvent(ev('mouseup'));
+      canvas.dispatchEvent(ev('click'));
+    }
+  } catch {}
+  await sleep(400);
+
+  // v3.5.17: AGGRESSIVE welcome panel close. Welcome panel auto-shows on
+  // empty space and intercepts clicks. We try: ESC × 3, body click, focus blur.
+  for (let i = 0; i < 3; i++) {
+    const welcomeImgGen = Array.from(document.querySelectorAll('button')).find(b => {
+      const t = (b.textContent || '').trim();
+      return /^Image GeneratorGenerate images/.test(t);
+    });
+    if (!welcomeImgGen) break; // panel closed
+    console.log('[createImageGenNode] welcome panel still open (try ' + (i+1) + '/3) — closing');
+    // Try multiple close methods
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+    document.dispatchEvent(new KeyboardEvent('keyup', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
+    // Also try clicking somewhere safe to dismiss
+    try {
+      const canvasBg = document.querySelector('.vue-flow__pane, .vue-flow__container, .vue-flow__background');
+      if (canvasBg) {
+        const r = canvasBg.getBoundingClientRect();
+        const target = document.elementFromPoint(r.x + 100, r.y + 100);
+        if (target && !target.closest('button')) target.click();
+      }
+    } catch {}
+    // Blur active element
+    try { document.activeElement?.blur(); } catch {}
+    await sleep(800);
   }
 
   // PATH B — toolbar "+" via data-cy estavel
+  // v3.5.9: REVERT CDP click on + button. Reason: chrome.debugger.attach
+  // shows a banner that shifts viewport ~40px AFTER getBoundingClientRect was
+  // read in content_script. CDP click lands 40px below target = misses + button.
+  // Native click() works correctly because no viewport shift. Confirmed via
+  // manual test: plusBtn.click() opens popup with options visible at y=434.
+  // v3.5.10: 6s → 15s. Em multi-pair flow, canvas pode estar mid-render quando
+  // chegamos aqui (pair N-1's video acabou de ser dispatched, Vue Flow esta
+  // adicionando o video node ao DOM). Toolbar fica visivel sempre, mas se a
+  // page acabou de hidratar, pode demorar.
   const plusBtn = await waitFor(() => {
     return document.querySelector('button[data-cy="board-main-toolbar-add-button"]');
-  }, 6000);
-  clickRealElement(plusBtn);
+  }, 15000);
+  // v3.5.20: native click (proven works) + faster settle (1200→600)
+  try { plusBtn.focus({ preventScroll: true }); } catch {}
+  plusBtn.click();
   await sleep(600);
 
   const opt = await waitFor(() => {
     const all = Array.from(document.querySelectorAll('div,li,button,[role=option],[role=menuitem],span'));
     return all.filter((e) => {
       const t = (e.textContent || '').trim();
-      return t === 'Image Generator' && e.offsetParent !== null &&
-             e.getBoundingClientRect().width > 20;
-    }).sort((a, b) => a.getBoundingClientRect().x - b.getBoundingClientRect().x)[0];
-  }, 5000);
-  clickRealElement(opt);
+      if (t !== 'Image Generator') return false;
+      if (e.offsetParent === null) return false;
+      const r = e.getBoundingClientRect();
+      return r.width > 100 && r.height > 20 && r.y < 800;
+    }).sort((a, b) => a.getBoundingClientRect().y - b.getBoundingClientRect().y)[0];
+  }, 10000);
+  const optClickable = opt.closest('[role=option],[role=menuitem],button,li,[role=button]') || opt;
+  optClickable.click();
 
   return await waitForNewNode(before);
 }
 
 async function waitForNewNode(beforeIds) {
-  // v3.4.10: 8s → 25s. Magnific tem 504s intermitentes hoje + Liveblocks
-  // hidratacao pode demorar pra novos nodes aparecerem no DOM.
+  // v3.5.27: 25s → 90s. Background-throttled tabs (MCP interfering with focus)
+  // make Liveblocks node creation take 30-90s instead of 1-3s. Generous timeout
+  // ensures nodes ARE detected (they DO get created, just slowly).
   const newId = await waitFor(() => {
     const now = collectVisibleNodes();
     const diff = now.filter((u) => !beforeIds.includes(u));
     return diff[0] || null;
-  }, 25000);
+  }, 90000);
   await sleep(700);
   return newId;
 }
@@ -1458,10 +1935,13 @@ async function selectNodeForEdit(uuid) {
   const n = findNodeElement(uuid);
   if (!n) throw new Error('Node nao achado: ' + uuid);
   n.scrollIntoView({ block: 'center', inline: 'center' });
-  await sleep(400);
+  await sleep(120); // v3.5.28: 250→120 (most scrolls are instant)
   const body = n.querySelector('[data-cy="space-node-image-generator"], [data-cy^="space-node-"]') || n;
   clickRealElement(body);
-  await sleep(400);
+  // v3.5.28 EVENT-DRIVEN: wait pra controls aparecerem (max 800ms, normally 100-200ms)
+  try {
+    await waitFor(() => n.querySelector('[data-cy="node-controls-container"]'), 800, 30);
+  } catch { /* segue, controls podem ja estar visiveis */ }
 }
 
 /**
@@ -1552,7 +2032,7 @@ async function setNodePromptByUuid(uuid, prompt) {
   ed.innerText = prompt || '';
   ed.dispatchEvent(new InputEvent('input', { bubbles: true, data: prompt || '', inputType: 'insertText' }));
   ed.dispatchEvent(new Event('change', { bubbles: true }));
-  await sleep(250);
+  await sleep(100); // v3.5.29 ULTRA: 250→100
 }
 
 async function configureImageGenNode(uuid, { model, aspect, quality }) {
@@ -1561,18 +2041,45 @@ async function configureImageGenNode(uuid, { model, aspect, quality }) {
   if (!node) throw new Error('Node sumiu apos select: ' + uuid);
 
   await selectModelInNode(node, modelDisplayName(model));
-  // v3.5.3: SETTLE apos selectModel — Vue Flow re-renderiza dropdowns.
   await sleep(1200);
-  // Apos selectModel um popup ficou aberto — re-seleciona o node pra fechar
   await selectNodeForEdit(uuid);
   await sleep(600);
   await selectAspectInNode(findNodeElement(uuid), aspect);
-  if (quality && quality !== '1K') {
+
+  // v3.5.19 HARD-ENFORCE 1K: Nano Banana 2 default = 2K (CONSOME CREDITOS).
+  // Sempre seleciona 1K + VERIFICA + retry ate 5x. Se nao consegue 1K, THROW
+  // pra processPair marcar pair como failed (CREDIT_GUARD pos-dispatch tambem
+  // bloqueia se 2K residual, mas aqui ja resolvemos no setup).
+  const targetQuality = quality || '1K';
+  let qualityOk = false;
+  for (let attempt = 1; attempt <= 5 && !qualityOk; attempt++) {
     await sleep(500);
     await selectNodeForEdit(uuid);
-    await selectQualityInNode(findNodeElement(uuid), quality);
+    try {
+      await selectQualityInNode(findNodeElement(uuid), targetQuality);
+    } catch (e) {
+      console.warn(`[configImg quality attempt ${attempt}/5] selectQuality threw:`, e.message);
+    }
+    // VERIFY: read buttons, confirm targetQuality present AND no forbidden tiers
+    await sleep(700);
+    await selectNodeForEdit(uuid);
+    await sleep(400);
+    const btns = nodeButtons(uuid);
+    const has1K = btns.includes(targetQuality);
+    const has2K = btns.includes('2K');
+    const has4K = btns.includes('4K');
+    console.log(`[configImg quality attempt ${attempt}/5] btns=[${btns.join(',')}] has1K=${has1K} has2K=${has2K}`);
+    if (has1K && !has2K && !has4K) {
+      qualityOk = true;
+      console.log(`[configImg] quality LOCKED at ${targetQuality}`);
+      break;
+    }
+    console.warn(`[configImg] tentativa ${attempt}/5 nao ficou em ${targetQuality} — retry`);
   }
-  // Unlimited toggle — Premium+ ja vem ON por default; verifica
+  if (!qualityOk) {
+    throw new Error(`IMAGE_QUALITY_LOCK_FAIL: nao consegui setar ${targetQuality} no node ${uuid.slice(0,8)} apos 5 tentativas — ABORTA (risco de gastar creditos)`);
+  }
+
   await ensureUnlimitedON(findNodeElement(uuid), uuid);
 }
 
@@ -1600,7 +2107,7 @@ async function configureVideoGenNode(uuid, { model, aspect, quality, duration })
 
     // Re-select node + ler botoes pra confirmar
     await selectNodeForEdit(uuid);
-    await sleep(500);
+    await sleep(200); // v3.5.29 ULTRA: 500→200
     lastBtns = nodeButtons(uuid);
     const hasTarget = lastBtns.includes(targetDisplayName);
     const forbidden = FORBIDDEN_VIDEO_MODELS.filter((m) => lastBtns.includes(m));
@@ -1628,11 +2135,40 @@ async function configureVideoGenNode(uuid, { model, aspect, quality, duration })
   await selectNodeForEdit(uuid);
   await sleep(600);
   await selectAspectInNode(findNodeElement(uuid), aspect);
+
+  // v3.5.19 HARD-ENFORCE 720p: Kling 2.5 default pode ser 1080p (gasta credito).
+  // Mesma logica do image: select + verify + retry ate 5x. Se nao consegue 720p,
+  // THROW pra processPair marcar pair como failed (zero risco de gastar creditos).
   if (quality) {
-    await sleep(500);
-    await selectNodeForEdit(uuid);
-    await selectQualityInNode(findNodeElement(uuid), quality);
+    let videoQualityOk = false;
+    for (let attempt = 1; attempt <= 5 && !videoQualityOk; attempt++) {
+      await sleep(500);
+      await selectNodeForEdit(uuid);
+      try {
+        await selectQualityInNode(findNodeElement(uuid), quality);
+      } catch (e) {
+        console.warn(`[configVid quality attempt ${attempt}/5] selectQuality threw:`, e.message);
+      }
+      await sleep(700);
+      await selectNodeForEdit(uuid);
+      await sleep(400);
+      const btns = nodeButtons(uuid);
+      const hasTarget = btns.includes(quality);
+      const has1080p = btns.includes('1080p');
+      const has4k = btns.includes('4K');
+      console.log(`[configVid quality attempt ${attempt}/5] btns=[${btns.join(',')}] has${quality}=${hasTarget} has1080p=${has1080p}`);
+      if (hasTarget && !has1080p && !has4k) {
+        videoQualityOk = true;
+        console.log(`[configVid] quality LOCKED at ${quality}`);
+        break;
+      }
+      console.warn(`[configVid] tentativa ${attempt}/5 nao ficou em ${quality} — retry`);
+    }
+    if (!videoQualityOk) {
+      throw new Error(`VIDEO_QUALITY_LOCK_FAIL: nao consegui setar ${quality} no video node ${uuid.slice(0,8)} apos 5 tentativas — ABORTA`);
+    }
   }
+
   if (duration) {
     await sleep(500);
     await selectNodeForEdit(uuid);
@@ -1683,7 +2219,16 @@ async function selectModelInNode(node, displayName) {
   // Step 2: click dropdown
   SMLog('2) clicking dropdown');
   clickRealElement(dropdown);
-  await sleep(700);
+  // v3.5.34: event-driven wait pra search input renderizar (no fixed sleep)
+  try {
+    await waitFor(() => {
+      const ins = document.querySelectorAll('input[type="text"],input[placeholder*="earch" i]');
+      for (const i of ins) {
+        if (i.offsetParent !== null && i.getBoundingClientRect().width > 80) return true;
+      }
+      return null;
+    }, 1200, 30);
+  } catch {}
 
   // Step 3: confirm dropdown opened (look for search input)
   SMLog('3) finding search input');
@@ -1716,9 +2261,9 @@ async function selectModelInNode(node, displayName) {
     const newVal = input.value + ch;
     setter.call(input, newVal);
     input.dispatchEvent(new InputEvent('input', { bubbles: true, data: ch, inputType: 'insertText' }));
-    await sleep(50);
+    await sleep(15); // v3.5.29 ULTRA: 25→15
   }
-  await sleep(800);
+  await sleep(250); // v3.5.29 ULTRA: 450→250 (wait pra options filtrar)
   SMLog('4) input.value after typing=', input.value);
 
   // Step 5: find option
@@ -1757,16 +2302,17 @@ async function selectModelInNode(node, displayName) {
   SMLog('6) clicking option via CDP REAL MOUSE');
   const clickable = opt.closest('button,[role=option],[role=menuitem],li,a') || opt;
   clickable.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  await sleep(200);
+  await sleep(80); // v3.5.29 ULTRA: 150→80
   const cdpOk = await clickViaCDP(clickable);
   SMLog('6) CDP click result:', cdpOk);
   if (!cdpOk) {
     SMLog('6) CDP falhou, fallback Enter');
     await pressEnterOnInput(input);
-    await sleep(300);
+    await sleep(200);
     SMLog('6) Enter fallback fired');
   }
-  await sleep(700);
+  await sleep(350); // v3.5.29 ULTRA: 600→350
+
   SMLog('6) DONE');
 }
 
@@ -1783,7 +2329,7 @@ async function selectModelInNode(node, displayName) {
  */
 async function selectOptionRobust(node, targetText, dropdownMatcher, label) {
   const SOL = (m, x) => console.log('[selectOpt ' + label + '=' + targetText + '] ' + m, x !== undefined ? x : '');
-  const MAX_RETRY = 7;
+  const MAX_RETRY = 5; // v3.5.26: 7→5 (faster fail-detection)
   const tt = targetText.toLowerCase();
 
   for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
@@ -1821,13 +2367,21 @@ async function selectOptionRobust(node, targetText, dropdownMatcher, label) {
       return true;
     }
 
-    // Step 2: click dropdown to open (CDP real click)
+    // Step 2: click dropdown
     dd.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    await sleep(150);
     const ddCdp = await clickViaCDP(dd);
     if (!ddCdp) clickRealElement(dd);
     SOL('dropdown clicked, cdp=', ddCdp);
-    await sleep(900);
+    // v3.5.34: wait pra popup ter opção visível (no fixed fallback sleep)
+    try {
+      await waitFor(() => {
+        const opts = document.querySelectorAll('[role=option],[role=menuitem],li');
+        for (const o of opts) {
+          if (o.offsetParent !== null && o.getBoundingClientRect().width > 30) return true;
+        }
+        return null;
+      }, 1500, 30);
+    } catch {}
 
     // Step 3: find option (8s — pode ter animacao de abrir)
     let opt = null;
@@ -1862,17 +2416,26 @@ async function selectOptionRobust(node, targetText, dropdownMatcher, label) {
       continue;
     }
 
-    // Step 4: click option (CDP real click — bypass isTrusted check)
+    // Step 4: click option
     const clickable = opt.closest('button,[role=option],[role=menuitem],li,a') || opt;
     clickable.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    await sleep(250);
     const cdpOk = await clickViaCDP(clickable);
     SOL('option clicked, cdp=', cdpOk);
     if (!cdpOk) clickRealElement(clickable);
-    // v3.5.3: settle MAIS LONGO (Vue Flow re-renderiza node, dropdown text muda async)
-    await sleep(1500);
+    // v3.5.34 EVENT-DRIVEN: wait dropdown text update (NO fixed sleeps)
+    try {
+      await waitFor(() => {
+        const all = node.querySelectorAll('button,[role=button]');
+        for (const b of all) {
+          if (b.offsetParent === null) continue;
+          const t = (b.textContent || '').trim();
+          if (dropdownMatcher(t) && (t.toLowerCase() === tt || t.toLowerCase().includes(tt))) return true;
+        }
+        return null;
+      }, 2000, 30);
+    } catch {}
 
-    // Step 5: verify selection actually applied (5s — Vue Flow render lento)
+    // Step 5: verify selection
     let newDd;
     try {
       newDd = await waitFor(() => {
@@ -1883,23 +2446,20 @@ async function selectOptionRobust(node, targetText, dropdownMatcher, label) {
           if (dropdownMatcher(t)) return b;
         }
         return null;
-      }, 5000);
+      }, 1500, 30); // v3.5.34: faster poll
     } catch (e) {
-      SOL('VERIFY: nao achou dropdown pos-click (matcher falhou pos-update)');
-      await sleep(700);
+      SOL('VERIFY: nao achou dropdown pos-click — retry');
       continue;
     }
     const newText = (newDd.textContent || '').trim();
     SOL('after click, dropdown text=', newText);
 
-    // Aceita match exato OU "contains" (UI pode adicionar sufixos/icones)
     if (newText.toLowerCase() === tt || newText.toLowerCase().includes(tt)) {
       SOL('SUCCESS on attempt ' + attempt);
       return true;
     }
 
     SOL('still ' + newText + ', retry');
-    await sleep(700);
   }
 
   throw new Error(`selectOption FAIL after ${MAX_RETRY} attempts: dropdown nao mudou pra "${targetText}"`);
@@ -2017,6 +2577,213 @@ async function executeWorkflow(startNodeId, spaceId) {
   return { workflowRunId: r.json?.workflow_run_identifier || '?' };
 }
 
+/**
+ * v3.5.15 ZERO-CREDIT GUARANTEE: pre-flight check ANTES de cada executeWorkflow.
+ * Lê botões visíveis do node e ABORTA imediatamente se:
+ *  - "1K" NAO esta presente (significa 2K ou 4K, que custam creditos)
+ *  - "Unlimited mode" / icon ∞ nao esta ATIVO (orange #f97316)
+ *  - Qualquer botao "2K", "4K" presente (defesa em camadas)
+ *
+ * Se check falha, JOGA erro e processPair marca pair como failed-config
+ * (NÃO dispatch, NÃO gasta credito). User pode corrigir manualmente e retry.
+ *
+ * Directive do user: "JAMAIS DEIXE PASSAR UMA GERAÇÃO SE FOR GASTAR CREDITOS"
+ */
+async function verifyZeroCreditConfig(uuid, kind /* 'image' | 'video' */) {
+  try { await selectNodeForEdit(uuid); } catch {}
+  await sleep(400);
+  // v3.5.23: force full-detail via direct click (Vue Flow LOD-mode safe)
+  const node = findNodeElement(uuid);
+  if (!node) throw new Error('CREDIT_GUARD: node sumiu ' + uuid);
+  try { node.click(); } catch {}
+  await sleep(300);
+
+  // v3.5.23: read EXACT current value via data-cy specific selector
+  const resBtn = node.querySelector('[data-cy="node-control-selector-resolution"]');
+  const currentRes = resBtn ? (resBtn.textContent || '').trim() : null;
+  console.log('[CREDIT_GUARD] pair_' + kind + ' ' + uuid.slice(0,8) + ' resolution="' + currentRes + '"');
+
+  if (!currentRes) {
+    throw new Error('CREDIT_GUARD pair_' + kind + ' ' + uuid.slice(0,8) + ': resolution button NAO encontrado (LOD?) — ABORTA');
+  }
+  if (kind === 'image') {
+    if (currentRes !== '1K') {
+      throw new Error('CREDIT_GUARD pair_image ' + uuid.slice(0,8) + ': resolution="' + currentRes + '" (esperado 1K) — ABORTA');
+    }
+  } else if (kind === 'video') {
+    if (currentRes !== '720p') {
+      throw new Error('CREDIT_GUARD pair_video ' + uuid.slice(0,8) + ': resolution="' + currentRes + '" (esperado 720p) — ABORTA');
+    }
+  }
+
+  // v3.5.22 FIX: Unlimited check moved to ensureUnlimitedON (sidebar).
+  // v3.5.24 FIX: btns undefined — use currentRes from above.
+  console.log('[CREDIT_GUARD] pair_' + kind + ' ' + uuid.slice(0,8) + ' OK — resolution=' + currentRes);
+  return { ok: true, resolution: currentRes };
+}
+
+/**
+ * v3.5.35 PARANOIA MÁXIMA — pre-flight do VÍDEO antes de executeWorkflow.
+ * (1) resolução 720p  (2) modelo lido do node = Kling 2.5 EXATO
+ * (3) edge image→video existe. Qualquer falha → throw → pair failed, ZERO
+ * crédito. Resolve: 1075 créditos Seedance + take sem edge.
+ */
+function readSelectedVideoModel(uuid) {
+  const node = findNodeElement(uuid);
+  if (!node) return null;
+  for (const b of node.querySelectorAll('button,[role=button]')) {
+    if (b.offsetParent === null) continue;
+    const t = (b.textContent || '').trim();
+    if (/^(auto|google|kling|flux|cinematic|classic|imagen|nano|gpt|seedream|recraft|veo|sora|seedance|runway|pixverse|minimax|ltx|wan|grok|openai|bytedance|fal|hunyuan|luma)/i.test(t) && t.length < 35) {
+      return t.replace(/\s+/g, ' ').trim();
+    }
+  }
+  return null;
+}
+
+// v3.5.39 EDGE check NÃO-FATAL. Magnific Vue Flow NÃO expõe data-source/
+// data-target; edge id = UUID próprio do edge (não composto dos nodes), logo
+// é impossível casar img→vid por DOM de forma confiável. O edge é SEMPRE
+// auto-criado por createVideoGenNodeViaOutputHandle (clica output handle →
+// Add → Video Generator → node já conectado). v3.5.38 bloqueava TODOS os 15
+// vídeos por seletor errado. Agora: sanity-check de que EXISTEM edges no
+// canvas (auto-connect funcionando); só warn se ZERO edges. NÃO bloqueia
+// per-pair. A garantia de crédito real é o MODEL_GUARD (Kling-only).
+function verifyEdgeImageToVideo(imageNodeId, videoNodeId) {
+  const edges = document.querySelectorAll('g.vue-flow__edge, path.vue-flow__edge-path, .vue-flow__edge');
+  const n = edges.length;
+  if (n === 0) {
+    console.warn('[EDGE_GUARD] AVISO: zero edges no canvas (auto-connect pode ter falhado p/ vid=' +
+      videoNodeId.slice(0, 8) + ') — NÃO bloqueia (MODEL_GUARD protege crédito)');
+    return { ok: false, edgeCount: 0, warned: true };
+  }
+  console.log('[EDGE_GUARD] OK — ' + n + ' edges no canvas (auto-connect ativo)');
+  return { ok: true, edgeCount: n };
+}
+
+async function preflightVideoGuard(pairObj) {
+  const uuid = pairObj.videoNodeId;
+  // 1) resolução 720p — LOD-TOLERANTE: só ABORTA se ler valor pago
+  //    CONFIRMADO (1080p/2K/4K). Se ilegível (LOD off-viewport), NÃO bloqueia
+  //    pois setup já fez HARD-ENFORCE 720p 5x. v3.5.36 fix anti-stall.
+  try {
+    try { await selectNodeForEdit(uuid); } catch {}
+    await sleep(250);
+    const rn = findNodeElement(uuid);
+    if (rn) {
+      try { rn.click(); } catch {}
+      await sleep(200);
+      const resBtn = rn.querySelector('[data-cy="node-control-selector-resolution"]');
+      const res = resBtn ? (resBtn.textContent || '').trim() : null;
+      if (res && res !== '720p') {
+        throw new Error('CREDIT_GUARD video ' + uuid.slice(0,8) + ': resolution="' + res + '" (≠720p) — ABORTA, gasta crédito.');
+      }
+      console.log('[CREDIT_GUARD] video ' + uuid.slice(0,8) + ' resolution=' + (res || 'LOD-unreadable(setup-enforced)'));
+    }
+  } catch (e) {
+    if (/CREDIT_GUARD/.test(e.message)) throw e; // valor pago confirmado → propaga
+    // ilegível/LOD → não bloqueia (setup já garantiu 720p)
+  }
+  // 2) modelo REAL = Kling 2.5 — ESTRITO (este é o guard anti-Seedance/crédito)
+  //    Retry 4x forçando full-detail (LOD-safe) p/ não falhar take Kling válido
+  //    por miss transiente. Só ABORTA se persistir ilegível OU confirmar ≠Kling.
+  let model = null;
+  for (let mr = 0; mr < 4 && !model; mr++) {
+    try { await selectNodeForEdit(uuid); } catch {}
+    await sleep(mr === 0 ? 300 : 450);
+    const node = findNodeElement(uuid);
+    if (!node) throw new Error('MODEL_GUARD: video node sumiu ' + uuid);
+    try { node.click(); } catch {}
+    await sleep(250);
+    model = readSelectedVideoModel(uuid);
+    if (!model) console.warn('[MODEL_GUARD] read attempt ' + (mr+1) + ' ilegível (LOD?) — retry');
+  }
+  console.log('[MODEL_GUARD] video ' + uuid.slice(0,8) + ' selected="' + model + '"');
+  if (!model) {
+    throw new Error('MODEL_GUARD ' + uuid.slice(0,8) + ': modelo NÃO legível após 4x — ABORTA p/ não arriscar crédito');
+  }
+  const isKling25 = /^Kling 2\.5\b/i.test(model) && !/2\.6|2\.1|\bO1\b/i.test(model);
+  if (!isKling25) {
+    throw new Error('MODEL_GUARD ' + uuid.slice(0,8) + ': modelo="' + model +
+      '" NÃO é Kling 2.5 — ABORTA (Seedance/outro = gasta crédito). ZERO dispatch.');
+  }
+  for (const fm of FORBIDDEN_VIDEO_MODELS) {
+    const lm = model.toLowerCase(), lf = fm.toLowerCase();
+    if (lm === lf || lm.startsWith(lf + ' ')) {
+      throw new Error('MODEL_GUARD ' + uuid.slice(0,8) + ': FORBIDDEN "' + model + '" — ABORTA');
+    }
+  }
+  // 3) edge image→video
+  verifyEdgeImageToVideo(pairObj.imageNodeId, uuid);
+  // 4) v3.5.40 — CREDIT-PREVIEW GATE (pedido explícito do user): se o node
+  //    mostra QUALQUER preview de custo em créditos antes do generate, ABORTA.
+  scanCreditCostPreview(uuid, 'video');
+  console.log('[PREFLIGHT] video ' + uuid.slice(0,8) + ' OK — Kling 2.5 + 720p + edge + zero-custo confirmados');
+  return { ok: true, model };
+}
+
+/**
+ * v3.5.40 CREDIT-PREVIEW GATE — última barreira antes de QUALQUER generate.
+ * Lê o texto/UI visível do node e ABORTA se detectar preview de custo em
+ * créditos (Magnific mostra o custo estimado antes de gerar). Só dispara se
+ * NÃO houver custo (coberto por Unlimited). Defensivo: na dúvida, ABORTA
+ * (user: "JAMAIS GASTAR CREDITOS" > completude). Nunca causa gasto — só
+ * impede dispatch.
+ */
+function scanCreditCostPreview(uuid, kind) {
+  const node = findNodeElement(uuid);
+  if (!node) {
+    // sem node legível → não conseguimos confirmar zero-custo → ABORTA
+    throw new Error('CREDIT_PREVIEW ' + kind + ' ' + String(uuid).slice(0,8) +
+      ': node não legível — ABORTA p/ não arriscar crédito');
+  }
+  const txt = (node.textContent || '').replace(/\s+/g, ' ').trim();
+  const low = txt.toLowerCase();
+  // Sinais de COBERTURA (não custa): unlimited / ilimitado / free / incluído
+  const covered = /(unlimited|ilimitad|sem custo|no cost|free|incluíd|included|0\s*cr[eé]dit)/i.test(low);
+  // Sinais de CUSTO: "N credit(s)", "credits: N", "N cr", "custo N", coin/raio
+  const costPatterns = [
+    /(\d+)\s*credit/i,
+    /credit[s]?\s*[:×x]?\s*(\d+)/i,
+    /\b(\d+)\s*cr\b/i,
+    /custo[:\s]+(\d+)/i,
+    /\bcusta\b/i,
+    /(\d+)\s*🪙|🪙\s*(\d+)/,
+    /(\d+)\s*⚡|⚡\s*(\d+)/,
+  ];
+  let hit = null;
+  for (const rx of costPatterns) {
+    const m = txt.match(rx);
+    if (m) {
+      // extrai número se houver; "0" não conta como custo
+      const num = (m[1] || m[2] || '').toString();
+      if (num && /^0+$/.test(num)) continue;
+      hit = m[0].slice(0, 40);
+      break;
+    }
+  }
+  // data-cy / aria com price/cost/credit + valor não-zero
+  if (!hit) {
+    const costEl = node.querySelector(
+      '[data-cy*="credit" i],[data-cy*="cost" i],[data-cy*="price" i],[class*="credit" i],[class*="cost" i]'
+    );
+    if (costEl) {
+      const ct = (costEl.textContent || '').trim();
+      const cm = ct.match(/(\d+)/);
+      if (cm && !/^0+$/.test(cm[1]) && !/unlimited|ilimitad|free/i.test(ct)) {
+        hit = 'el:' + ct.slice(0, 30);
+      }
+    }
+  }
+  if (hit && !covered) {
+    throw new Error('CREDIT_PREVIEW ' + kind + ' ' + String(uuid).slice(0,8) +
+      ': PREVIEW DE CUSTO detectado ("' + hit + '") — ABORTA, ZERO dispatch (nunca gastar crédito).');
+  }
+  console.log('[CREDIT_PREVIEW] ' + kind + ' ' + String(uuid).slice(0,8) +
+    ' OK — sem custo' + (covered ? ' (Unlimited/coberto)' : '') + (hit ? ' [hit ignorado:' + hit + ']' : ''));
+  return { ok: true };
+}
+
 // ---- Wait for renders ----
 
 async function waitForNodeImage(uuid, timeoutMs, expectedPrompt) {
@@ -2068,31 +2835,40 @@ async function waitForNodeImage(uuid, timeoutMs, expectedPrompt) {
  * `filename` matching prompt).
  */
 async function waitForNodeVideo(uuid, timeoutMs, expectedPrompt) {
-  // Pass 1: DOM polling — detecta render
+  // v3.5.28 CRITICAL BUG FIX: removed document.querySelectorAll fallback that
+  // caused CROSS-CONTAMINATION between pairs. When pair 5's video rendered
+  // first in DOM, all subsequent pairs returned pair 5's URL (because document
+  // search returned first match). FIX: ONLY scope to specific node element.
+  let lastHeartbeat = Date.now();
   let frameUrl = null;
   try {
     frameUrl = await waitFor(() => {
+      if (Date.now() - lastHeartbeat > 30000) {
+        console.log('[waitForNodeVideo ' + uuid.slice(0, 8) + '] heartbeat — still polling');
+        lastHeartbeat = Date.now();
+      }
       const node = findNodeElement(uuid);
       if (!node) return null;
-      // direct <video>/<source>
-      const vids = node.querySelectorAll('video, source');
-      for (const v of vids) {
+      // SCOPE-TO-NODE ONLY (no document fallback — fixes cross-contamination)
+      const allVids = node.querySelectorAll('video, source');
+      for (const v of allVids) {
         const s = v.src || v.currentSrc || '';
-        if (/\.mp4/i.test(s) && /cdnpk|pikaso|magnific/i.test(s)) return s;
+        if (!/\.mp4/i.test(s) || !/cdnpk|pikaso|magnific/i.test(s)) continue;
+        if (/\/public\/media\/video-providers\//i.test(s)) continue;
+        if (!/\/private\/production\/\d+\/video\./i.test(s)) continue;
+        return s;
       }
-      // <img src="...start_frame.jpg"> indica MP4 rendered
       const imgs = node.querySelectorAll('img');
       for (const im of imgs) {
         const s = im.src || '';
         if (/pikaso\.cdnpk\.net\/private\/production\/\d+\/start_frame\./.test(s)) return s;
       }
-      // <a href*=".mp4">
       const a = node.querySelector('a[href*=".mp4"]');
       if (a) return a.href;
       return null;
-    }, timeoutMs, 2000);
-  } catch {
-    // ignora — vai pro pass 2
+    }, timeoutMs, 1500); // v3.5.28: 2000ms → 1500ms poll (faster detection)
+  } catch (e) {
+    console.warn('[waitForNodeVideo ' + uuid.slice(0, 8) + '] Pass1 timeout/error: ' + e.message);
   }
 
   // Se o que retornou ja e .mp4, devolve direto

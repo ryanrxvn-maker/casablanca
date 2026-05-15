@@ -475,21 +475,33 @@ ou texto livre:
 
         {progress && (
           <div className="rounded-xl border border-line bg-bg-soft/40 p-4">
-            <div className="mb-3 flex items-center justify-between text-xs">
-              <span className="text-text-muted">
+            {/* v3.5.40 — BACKGROUND MODE + VIEW button.
+                A geração roda 100% em segundo plano (você NÃO precisa ver as
+                imagens sendo geradas). Clique em VER GERAÇÃO só se quiser
+                acompanhar numa nova aba. Quando terminar, o botão de download
+                do ZIP aparece automaticamente. */}
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
                 {progress.spaceUrl ? (
-                  <a
-                    href={progress.spaceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-lime underline"
+                  <button
+                    type="button"
+                    onClick={() =>
+                      window.open(progress.spaceUrl!, '_blank', 'noopener,noreferrer')
+                    }
+                    className="inline-flex items-center gap-1.5 rounded-[8px] border border-lime/50 bg-lime/10 px-3 py-1.5 text-xs font-semibold text-lime transition hover:bg-lime/20"
+                    title="Abre o Space do Magnific onde a geração está acontecendo, numa nova aba. Opcional — o processo roda em segundo plano de qualquer forma."
                   >
-                    Abrir Space no Magnific
-                  </a>
+                    👁 VER GERAÇÃO (nova aba)
+                  </button>
                 ) : (
-                  <span>Sem Space ainda</span>
+                  <span className="text-xs text-text-muted">
+                    Preparando Space…
+                  </span>
                 )}
-              </span>
+                <span className="mono rounded-full border border-line bg-bg/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-text-muted">
+                  rodando em 2º plano
+                </span>
+              </div>
               <span className="mono text-lime">
                 {progress.ready}/{progress.total} prontos
               </span>
