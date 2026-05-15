@@ -355,12 +355,51 @@ export async function runMagnificPipeline(
 
 // ============== PARSER DE PROMPTS (mantido do v1) ==============
 
+/**
+ * v3.5.45 — extrai JSON de forma robusta antes do parse estrito. Resolve o
+ * bug "3 takes vira 14": LLMs/cópias trazem cercas markdown (```json), aspas
+ * curvas, texto antes/depois, vírgula final — JSON.parse estrito falha e cai
+ * no modo texto que super-conta. Aqui sanitizamos e extraímos o array/obj.
+ */
+function __extractJson(raw: string): any | null {
+  let s = raw.trim();
+  // 1) remove cercas markdown ```json ... ``` (ou ``` ... ```)
+  s = s.replace(/^```[a-zA-Z]*\s*/m, '').replace(/```\s*$/m, '').trim();
+  // 2) normaliza aspas curvas/tipográficas → retas
+  s = s
+    .replace(/[“”„‟″‶]/g, '"')
+    .replace(/[‘’‚‛′‵]/g, "'");
+  // 3) tenta direto
+  const tryParse = (txt: string): any | null => {
+    try { return JSON.parse(txt); } catch { return null; }
+  };
+  let j = tryParse(s);
+  if (j != null) return j;
+  // 4) extrai o maior bloco [...] ou {...} (ignora prosa antes/depois)
+  const firstArr = s.indexOf('[');
+  const lastArr = s.lastIndexOf(']');
+  const firstObj = s.indexOf('{');
+  const lastObj = s.lastIndexOf('}');
+  const candidates: string[] = [];
+  if (firstArr !== -1 && lastArr > firstArr) candidates.push(s.slice(firstArr, lastArr + 1));
+  if (firstObj !== -1 && lastObj > firstObj) candidates.push(s.slice(firstObj, lastObj + 1));
+  for (const c of candidates) {
+    j = tryParse(c);
+    if (j != null) return j;
+    // 5) remove vírgulas finais antes de ] ou }
+    const noTrailing = c.replace(/,\s*([\]}])/g, '$1');
+    j = tryParse(noTrailing);
+    if (j != null) return j;
+  }
+  return null;
+}
+
 export function parseMagnificPrompts(raw: string): MagnificTakeInput[] {
   const trimmed = raw.trim();
   if (!trimmed) return [];
 
-  try {
-    const j = JSON.parse(trimmed);
+  {
+    const j = __extractJson(trimmed);
     let arr: any[] | null = null;
     if (Array.isArray(j)) arr = j;
     else if (Array.isArray(j?.prompts)) arr = j.prompts;
@@ -384,9 +423,9 @@ export function parseMagnificPrompts(raw: string): MagnificTakeInput[] {
       });
       return out;
     }
-  } catch {}
+  }
 
-  // Texto livre
+  // Texto livre — só chega aqui se NÃO há JSON válido detectável
   let candidate = trimmed.split(/\n\s*(?:---+|===+|\*\*\*+)\s*\n|\n{2,}/g)
     .map((b) => b.trim())
     .filter(Boolean);
