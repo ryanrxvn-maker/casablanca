@@ -88,6 +88,10 @@ type RunnerResult = {
   zipName?: string;
   successCount: number;
   failedCount: number;
+  /** v3.5.42: true só quando TODOS os takes geraram (ZIP só sai completo) */
+  complete?: boolean;
+  /** idxs que ainda faltam quando não está completo */
+  missingIdxs?: number[];
 };
 
 export async function runMagnificPipeline(
@@ -203,38 +207,123 @@ export async function runMagnificPipeline(
   // Download dos MP4s + ZIP
   const filesForZip: Array<{ name: string; data: Blob }> = [];
   const manifest: Array<any> = [];
+  const zippedIdx = new Set<number>();
 
-  for (let i = 0; i < state.length; i++) {
-    const s = state[i];
-    if (s.status !== 'video-done') continue;
-    if (signal?.aborted) break;
-    state[i] = { idx: s.idx, status: 'downloading', videoUrl: s.videoUrl };
-    emit();
-    try {
-      const { base64, size } = await downloadMagnificAsset(s.videoUrl);
-      const blob = base64ToBlob(base64, 'video/mp4');
-      filesForZip.push({ name: `parte${s.idx}.mp4`, data: blob });
-      manifest.push({
-        idx: s.idx,
-        imagePrompt: takes[i].imagePrompt,
-        videoPrompt: takes[i].videoPrompt || '',
-        imageUrl: s.imageUrl,
-        videoUrl: s.videoUrl,
-        bytes: size,
-      });
-      state[i] = { idx: s.idx, status: 'ready', videoUrl: s.videoUrl, mp4Size: size };
+  // Helper: baixa todos os takes 'video-done' que ainda não entraram no ZIP.
+  // Reusado após o disparo inicial E após cada rodada de retry.
+  const downloadDoneTakes = async () => {
+    for (let i = 0; i < state.length; i++) {
+      const s = state[i];
+      if (s.status !== 'video-done') continue;
+      if (zippedIdx.has(s.idx)) continue;
+      if (signal?.aborted) break;
+      state[i] = { idx: s.idx, status: 'downloading', videoUrl: s.videoUrl };
       emit();
-    } catch (e) {
-      state[i] = { idx: s.idx, status: 'failed', error: 'download: ' + (e as Error).message };
-      emit();
+      try {
+        const { base64, size } = await downloadMagnificAsset(s.videoUrl);
+        const blob = base64ToBlob(base64, 'video/mp4');
+        filesForZip.push({ name: `parte${s.idx}.mp4`, data: blob });
+        zippedIdx.add(s.idx);
+        manifest.push({
+          idx: s.idx,
+          imagePrompt: takes[i].imagePrompt,
+          videoPrompt: takes[i].videoPrompt || '',
+          imageUrl: s.imageUrl,
+          videoUrl: s.videoUrl,
+          bytes: size,
+        });
+        state[i] = { idx: s.idx, status: 'ready', videoUrl: s.videoUrl, mp4Size: size };
+        emit();
+      } catch (e) {
+        state[i] = { idx: s.idx, status: 'failed', error: 'download: ' + (e as Error).message };
+        emit();
+      }
     }
+  };
+
+  await downloadDoneTakes();
+
+  // v3.5.43 (pedido do user): AUTO-RETRY silencioso dos takes que faltaram,
+  // REUSANDO o mesmo space, ANTES do ZIP. Sem mostrar erro — só garante que
+  // TODOS os takes disparados vão estar no ZIP. Loop até completar ou esgotar
+  // tentativas. Ex: 5 disparados, 4 ok + 1 falhou → re-gera só o 1 que faltou.
+  const MAX_RETRY_ROUNDS = 4;
+  for (let round = 1; round <= MAX_RETRY_ROUNDS; round++) {
+    if (signal?.aborted) break;
+    const missing = state.filter((s) => s.status !== 'ready');
+    if (missing.length === 0) break; // todos prontos → segue pro ZIP
+
+    emit({
+      phase: 'retry',
+      percent: 95,
+      message: `Recuperando ${missing.length} take(s) faltante(s) — tentativa ${round}/${MAX_RETRY_ROUNDS} (mesmo space)...`,
+    });
+
+    const missingTakes = missing
+      .map((s) => takes.find((t) => t.idx === s.idx))
+      .filter((t): t is MagnificTakeInput => !!t);
+    if (!missingTakes.length) break;
+
+    let retryRes: PipelineRunResult | null = null;
+    try {
+      retryRes = await runMagnificPipelineExt(
+        {
+          spaceName,
+          spaceId, // CRÍTICO: reusa o MESMO space (não cria outro)
+          takes: missingTakes.map((t) => ({
+            idx: t.idx,
+            imagePrompt: t.imagePrompt,
+            videoPrompt: t.videoPrompt || '',
+          })),
+          imageModel,
+          videoModel,
+          imageConcurrency,
+          videoConcurrency,
+          aspect,
+          imageQuality,
+          videoQuality,
+          videoDuration,
+        },
+        (stage, percent, message) => {
+          emit({ phase: 'retry:' + stage, percent, message });
+        },
+      );
+    } catch {
+      continue; // tentativa falhou — próxima rodada
+    }
+
+    // aplica resultados do retry no state
+    for (const r of retryRes?.results || []) {
+      const i = state.findIndex((s) => s.idx === r.idx);
+      if (i < 0) continue;
+      if (r.videoUrl) {
+        state[i] = { idx: r.idx, status: 'video-done', imageUrl: r.imageUrl || '', videoUrl: r.videoUrl };
+      } else if (r.imageUrl && state[i].status !== 'ready') {
+        state[i] = { idx: r.idx, status: 'image-done', imageUrl: r.imageUrl };
+      }
+    }
+    await downloadDoneTakes();
   }
 
   const successCount = state.filter((s) => s.status === 'ready').length;
   const failedCount = state.filter((s) => s.status === 'failed').length;
+  const missingIdxs = state.filter((s) => s.status !== 'ready').map((s) => s.idx);
+  const complete = successCount === takes.length;
 
-  if (filesForZip.length === 0) {
-    return { ok: false, spaceId, spaceUrl, takes: state, successCount, failedCount };
+  // ZIP só sai quando TODOS os takes estão prontos (após auto-retry). Se ainda
+  // assim faltar após todas as tentativas, retorna sem zipBlob (sem download
+  // parcial) — caso extremo; o normal é completar no retry.
+  if (!complete) {
+    return {
+      ok: false,
+      complete: false,
+      missingIdxs,
+      spaceId,
+      spaceUrl,
+      takes: state,
+      successCount,
+      failedCount,
+    };
   }
 
   emit({ phase: 'zipping', percent: 98, message: 'Empacotando ZIP...' });
@@ -249,9 +338,11 @@ export async function runMagnificPipeline(
   const safeName = spaceName.replace(/[^a-z0-9._-]+/gi, '_');
   const zipName = `${safeName}_brolls.zip`;
 
-  emit({ phase: 'done', percent: 100, message: 'Pipeline finalizada.' });
+  emit({ phase: 'done', percent: 100, message: `Pipeline finalizada — ${successCount}/${takes.length} takes prontos.` });
   return {
     ok: true,
+    complete: true,
+    missingIdxs: [],
     spaceId,
     spaceUrl,
     takes: state,
