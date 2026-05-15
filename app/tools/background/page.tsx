@@ -20,6 +20,51 @@ import { ToolShell } from '@/components/ToolShell';
 
 const BATCH_STATE_KEY = 'darkolab:clickup-pilot:batches';
 const CANCEL_KEY = 'darkolab:clickup-pilot:cancel';
+const MAGNIFIC_QUEUE_KEY = 'darkolab:clickup-pilot:magnific-queue';
+
+type MagnificJob = {
+  taskId: string;
+  adName: string;
+  takeCount: number;
+  status: 'queued' | 'running' | 'done' | 'failed';
+  gateOnHeyGen: boolean;
+  percent?: number;
+  message?: string;
+  enqueuedAt: number;
+  zipKey?: string;
+  zipName?: string;
+};
+
+function readMagnificQueue(): Record<string, MagnificJob> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(MAGNIFIC_QUEUE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+async function downloadMagnificZipBg(job: MagnificJob) {
+  if (!job.zipKey) return;
+  try {
+    const { loadZip } = await import('@/lib/zip-store');
+    const rec = await loadZip(job.zipKey);
+    if (!rec) {
+      alert('ZIP Magnific nao encontrado no armazenamento local.');
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = rec.blobUrl;
+    a.download = rec.filename || job.zipName || `${job.adName}_brolls.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => { try { URL.revokeObjectURL(rec.blobUrl); } catch {} }, 60000);
+  } catch (e) {
+    alert('Falha baixando ZIP Magnific: ' + ((e as Error)?.message || 'erro'));
+  }
+}
 
 type BatchTaskState = {
   taskId: string;
@@ -105,19 +150,23 @@ function percentForPhase(b: BatchTaskState): number {
 export default function BackgroundTasksPage() {
   const [batches, setBatches] = useState<Record<string, BatchTaskState>>({});
   const [cancelMap, setCancelMap] = useState<Record<string, number>>({});
+  const [magnific, setMagnific] = useState<Record<string, MagnificJob>>({});
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
     setBatches(readBatches());
     setCancelMap(readCancelMap());
+    setMagnific(readMagnificQueue());
     const onStorage = (e: StorageEvent) => {
       if (e.key === BATCH_STATE_KEY) setBatches(readBatches());
       if (e.key === CANCEL_KEY) setCancelMap(readCancelMap());
+      if (e.key === MAGNIFIC_QUEUE_KEY) setMagnific(readMagnificQueue());
     };
     window.addEventListener('storage', onStorage);
     // Tambem refazer leitura periodica pra abas mesma origem nao disparam storage
     const id = setInterval(() => {
       setBatches(readBatches());
+      setMagnific(readMagnificQueue());
       setTick((t) => t + 1);
     }, 1500);
     return () => {
@@ -377,6 +426,65 @@ export default function BackgroundTasksPage() {
             })}
           </div>
         )}
+
+        {/* Fila Magnific B-Rolls — serial 1/vez */}
+        {Object.keys(magnific).length > 0 ? (
+          <div className="rounded-[14px] border border-lime/40 bg-lime/5 p-4">
+            <div className="mono mb-3 text-[11px] uppercase tracking-widest text-lime">
+              🍌 Fila Magnific B-Rolls ({Object.keys(magnific).length}) · serial 1 por vez
+            </div>
+            <div className="grid gap-3">
+              {Object.values(magnific).sort((a, b) => b.enqueuedAt - a.enqueuedAt).map((j) => {
+                const stLabel = ({
+                  queued: j.gateOnHeyGen ? 'Aguardando HeyGen da task' : 'Na fila',
+                  running: 'Gerando B-rolls',
+                  done: 'Concluido',
+                  failed: 'Falhou',
+                })[j.status];
+                const stColor = j.status === 'done' ? 'text-lime border-lime/40 bg-lime/10'
+                  : j.status === 'failed' ? 'text-red-300 border-red-500/40 bg-red-500/10'
+                  : j.status === 'running' ? 'text-cyan-200 border-cyan-500/40 bg-cyan-500/10'
+                  : 'text-text-muted border-line-strong bg-bg-soft/40';
+                const pct = j.status === 'done' ? 100 : j.status === 'failed' ? 0 : (j.percent || (j.status === 'running' ? 5 : 0));
+                return (
+                  <div key={j.taskId} className="rounded-[12px] border border-line-strong bg-bg-soft/30 p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="mono rounded-md border border-lime/40 bg-lime/10 px-2 py-0.5 text-[10px] uppercase tracking-widest text-lime">
+                        {j.adName}
+                      </span>
+                      <span className={`mono rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-widest ${stColor}`}>
+                        {stLabel}
+                      </span>
+                      <span className="mono text-[10px] uppercase tracking-widest text-text-muted">
+                        {j.takeCount} take{j.takeCount === 1 ? '' : 's'}
+                      </span>
+                      {j.status === 'done' && j.zipKey ? (
+                        <button
+                          type="button"
+                          onClick={() => downloadMagnificZipBg(j)}
+                          className="mono ml-auto rounded border border-lime/40 bg-lime/10 px-2 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/20"
+                        >
+                          ↓ takes ({j.zipName})
+                        </button>
+                      ) : null}
+                    </div>
+                    {j.message ? <div className="mt-1 text-[11px] text-text-muted">{j.message}</div> : null}
+                    {j.status !== 'failed' ? (
+                      <div className="mt-2 h-1 rounded bg-bg/60 overflow-hidden">
+                        <div className={`h-full transition-all ${j.status === 'done' ? 'bg-lime' : 'bg-cyan-400'}`} style={{ width: `${pct}%` }} />
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="mono mt-3 text-[10px] text-text-muted leading-relaxed">
+              Magnific roda 1 job por vez (fila serial). MORE: cada job espera o HeyGen
+              daquela task concluir antes de iniciar. O processor vive na aba do ClickUp
+              Pilot — feche-a e a fila pausa; reabra e ela retoma do ponto.
+            </div>
+          </div>
+        ) : null}
 
         <div className="rounded-[14px] border border-dashed border-line-strong bg-bg-soft/10 p-3">
           <div className="mono text-[10px] uppercase tracking-widest text-text-muted">

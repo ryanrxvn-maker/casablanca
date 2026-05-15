@@ -51,6 +51,15 @@ import { Toggle3D } from '@/components/Toggle3D';
 import { ToggleRound3D, WirelessIcon } from '@/components/ToggleRound3D';
 import { getPilotTeam, setPilotTeam, getPilotEditor, setPilotEditor } from '@/lib/clickup-pilot-config';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
+import { runMagnificPipeline, parseMagnificPrompts } from '@/lib/magnific-pipeline';
+import {
+  saveMagnificQueue,
+  restoreMagnificQueue,
+  pickNextMagnificJob,
+  loadMagnificJsonMap,
+  saveMagnificJsonMap,
+  type MagnificQueue,
+} from '@/lib/magnific-queue-runner';
 
 /**
  * ClickUp Pilot — cerebro de automacao
@@ -234,6 +243,45 @@ export default function ClickUpPilotPage() {
   /** More Magnific: alem do HeyGen normal, gera B-Rolls extras Magnific pra complementar.
    *  Adiciona pasta /broll/ no ZIP final com takes Kling 2.5. */
   const [moreMagnificMode, setMoreMagnificMode] = useToolState<boolean>('clickup-pilot:moreMagnific', false);
+
+  /** JSON de B-rolls colado por task (caixa "+" inline). Persistido em
+   *  localStorage (sobrevive reload), separado por taskId. */
+  const [taskMagnificJson, setTaskMagnificJsonState] = useState<Record<string, string>>({});
+  /** Quais tasks estao com a caixa "+" aberta (UI efemera, nao persiste). */
+  const [magnificEditorOpen, setMagnificEditorOpen] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    setTaskMagnificJsonState(loadMagnificJsonMap());
+  }, []);
+  const setTaskMagnificJson = (taskId: string, json: string) => {
+    setTaskMagnificJsonState((prev) => {
+      const next = { ...prev, [taskId]: json };
+      saveMagnificJsonMap(next);
+      return next;
+    });
+  };
+
+  /** Fila SERIAL de jobs Magnific (espelha o padrao dos batches HeyGen).
+   *  1 ativo por vez sempre. Persiste reload via localStorage. */
+  const [magnificQueue, setMagnificQueueState] = useState<MagnificQueue>({});
+  const magnificProcessingRef = useRef(false);
+  const [magnificTick, setMagnificTick] = useState(0);
+  const magnificCancelRef = useRef<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setMagnificQueueState(restoreMagnificQueue());
+  }, []);
+  useEffect(() => {
+    saveMagnificQueue(magnificQueue);
+  }, [magnificQueue]);
+
+  /** Patch atomico de 1 job na fila (sempre via setState pra persistir). */
+  const patchMagnificJob = (taskId: string, patch: Partial<MagnificQueue[string]>) => {
+    setMagnificQueueState((prev) => {
+      const cur = prev[taskId];
+      if (!cur) return prev;
+      return { ...prev, [taskId]: { ...cur, ...patch } };
+    });
+  };
 
   useEffect(() => {
     const t = getClickUpToken();
@@ -1503,9 +1551,103 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     }
   }
 
-  /** Inicia batch: filtra tasks selecionadas que estao 'ready' + roda em
-   *  paralelo (max 2 simultaneas pra nao saturar HeyGen) */
+  /** Enfileira o job Magnific de UMA task (fila serial, persistida).
+   *  gated=true (MORE): so roda depois do HeyGen daquela task concluir.
+   *  gated=false (ONLY): elegivel imediatamente. Retorna false se a task
+   *  nao tem JSON colado ou o JSON nao tem nenhum take valido. */
+  function enqueueMagnificForTask(taskId: string, gated: boolean): boolean {
+    const a = taskAnalyses[taskId];
+    if (!a || a.vaBriefing) return false; // VA nunca vai pra Magnific
+    const raw = (taskMagnificJson[taskId] || '').trim();
+    if (!raw) return false;
+    const takes = parseMagnificPrompts(raw);
+    if (takes.length === 0) return false;
+    const adName = (a.baseAdId || a.taskName).replace(/[^a-z0-9_-]/gi, '_');
+    magnificCancelRef.current[taskId] = false;
+    setMagnificQueueState((prev) => ({
+      ...prev,
+      [taskId]: {
+        taskId,
+        adName,
+        takesJson: raw,
+        takeCount: takes.length,
+        status: 'queued',
+        gateOnHeyGen: gated,
+        message: gated
+          ? `Aguardando HeyGen da task concluir (${takes.length} takes na fila)...`
+          : `Na fila Magnific (${takes.length} takes)...`,
+        enqueuedAt: Date.now(),
+      },
+    }));
+    setMagnificTick((t) => t + 1);
+    return true;
+  }
+
+  /** Inicia batch. Comportamento depende dos toggles:
+   *  - Nenhum: HeyGen Auto paralelo (max 2) — fluxo classico INALTERADO.
+   *  - MORE: HeyGen Auto paralelo COMO HOJE + enfileira Magnific gated
+   *    por task (so dispara apos o HeyGen daquela task concluir).
+   *  - ONLY: pula HeyGen, so enfileira Magnific (fila serial). */
   async function startBatch() {
+    if (onlyMagnificMode) {
+      // ONLY: pula HeyGen totalmente. So Magnific serial pras tasks normais
+      // (ready|partial, nao-VA) que tem JSON colado. B-rolls nao precisam
+      // de avatar, entao 'partial' tambem vale.
+      const cands = Array.from(selectedTaskIds).filter((id) => {
+        const a = taskAnalyses[id];
+        return a && !a.vaBriefing && (a.status === 'ready' || a.status === 'partial');
+      });
+      const withJson = cands.filter((id) => (taskMagnificJson[id] || '').trim());
+      const missing = cands.filter((id) => !(taskMagnificJson[id] || '').trim());
+      if (withJson.length === 0) {
+        setError('Cole o JSON de B-rolls nas tasks (botao "+") antes de iniciar o Only Magnific.');
+        return;
+      }
+      setError(
+        missing.length > 0
+          ? `${missing.length} task(s) sem JSON foram puladas. Cole o JSON no botao "+" delas.`
+          : null,
+      );
+      for (const id of withJson) enqueueMagnificForTask(id, false);
+      return;
+    }
+
+    if (moreMagnificMode) {
+      // MORE: HeyGen Auto roda pra TODAS as tasks ready (igual ao fluxo
+      // classico). Magnific gated SO pras tasks ready com JSON — o gate
+      // destrava quando o HeyGen DAQUELA task conclui, entao so faz sentido
+      // pra tasks que de fato vao rodar HeyGen (ready). Task 'partial' com
+      // JSON: nao roda HeyGen, entao seria job preso — pulada (use Only).
+      const ready = Array.from(selectedTaskIds).filter((id) => taskAnalyses[id]?.status === 'ready');
+      const withJson = ready.filter(
+        (id) => !taskAnalyses[id]?.vaBriefing && (taskMagnificJson[id] || '').trim(),
+      );
+      for (const id of withJson) enqueueMagnificForTask(id, true);
+      if (ready.length === 0) {
+        setError('Nenhuma task ready selecionada. Confira que avatares + voz estao OK.');
+        return;
+      }
+      setError(
+        withJson.length === 0
+          ? 'Nenhuma task ready com JSON de B-rolls — rodando so HeyGen. Cole o JSON no botao "+" pra gerar B-rolls.'
+          : null,
+      );
+      const queue = [...ready];
+      const PARALLEL = 2;
+      const workers: Promise<void>[] = [];
+      for (let i = 0; i < PARALLEL; i++) {
+        workers.push((async () => {
+          while (queue.length > 0) {
+            const taskId = queue.shift()!;
+            await runTaskInBackground(taskId);
+          }
+        })());
+      }
+      await Promise.all(workers);
+      return;
+    }
+
+    // === Fluxo classico (nenhum toggle) — INALTERADO ===
     const ready = Array.from(selectedTaskIds).filter((id) => taskAnalyses[id]?.status === 'ready');
     if (ready.length === 0) {
       setError('Nenhuma task ready selecionada. Confira que avatares + voz estao OK.');
@@ -1527,8 +1669,152 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     await Promise.all(workers);
   }
 
+  /** Ungate: quando o HeyGen Auto de uma task (MORE) conclui, libera o job
+   *  Magnific gated daquela task pro processor serial. */
+  useEffect(() => {
+    const toUngate = Object.entries(magnificQueue).filter(
+      ([taskId, job]) =>
+        job.gateOnHeyGen && job.status === 'queued' && batchStates[taskId]?.phase === 'done',
+    );
+    if (toUngate.length === 0) return;
+    // Functional update — nao clobbar patches concorrentes do processor.
+    setMagnificQueueState((prev) => {
+      const next = { ...prev };
+      for (const [taskId] of toUngate) {
+        const cur = next[taskId];
+        if (!cur || !cur.gateOnHeyGen || cur.status !== 'queued') continue;
+        next[taskId] = {
+          ...cur,
+          gateOnHeyGen: false,
+          message: `HeyGen concluido — na fila Magnific (${cur.takeCount} takes)...`,
+        };
+      }
+      return next;
+    });
+    setMagnificTick((t) => t + 1);
+  }, [batchStates, magnificQueue]);
+
+  /** Processor SERIAL: 1 job Magnific por vez SEMPRE. ref-guard impede
+   *  concorrencia; pickNextMagnificJob ignora gated + ja-rodando. Ao
+   *  terminar 1, incrementa tick pra pegar o proximo. */
+  useEffect(() => {
+    if (magnificProcessingRef.current) return;
+    const job = pickNextMagnificJob(magnificQueue);
+    if (!job) return;
+    magnificProcessingRef.current = true;
+    const taskId = job.taskId;
+    (async () => {
+      patchMagnificJob(taskId, {
+        status: 'running',
+        startedAt: Date.now(),
+        message: 'Disparando pipeline Magnific...',
+        percent: 0,
+      });
+      try {
+        const takes = parseMagnificPrompts(job.takesJson);
+        if (takes.length === 0) {
+          patchMagnificJob(taskId, {
+            status: 'failed',
+            message: 'JSON sem takes validos.',
+            finishedAt: Date.now(),
+          });
+          return;
+        }
+        const res = await runMagnificPipeline(
+          { spaceName: job.adName, takes },
+          {
+            signal: undefined,
+            onProgress: (p) => {
+              if (magnificCancelRef.current[taskId]) return;
+              patchMagnificJob(taskId, {
+                phase: p.phase,
+                percent: p.percent,
+                message: p.message
+                  ? `${p.message} (${p.ready}/${p.total})`
+                  : `${p.ready}/${p.total} takes`,
+                totalCount: p.total,
+                successCount: p.ready,
+              });
+            },
+          },
+        );
+        if (res.ok && res.complete && res.zipBlob) {
+          const zipKey = `magnific:${taskId}:takes`;
+          const zipName = res.zipName || `${job.adName}_brolls.zip`;
+          try {
+            const { saveZip } = await import('@/lib/zip-store');
+            await saveZip(zipKey, res.zipBlob, zipName);
+          } catch (e) {
+            console.warn('[magnific-queue] falha salvando ZIP em IndexedDB:', e);
+          }
+          patchMagnificJob(taskId, {
+            status: 'done',
+            zipKey,
+            zipName,
+            successCount: res.successCount,
+            totalCount: res.takes.length,
+            percent: 100,
+            message: `Pronto: ${res.successCount}/${res.takes.length} takes · ${zipName}`,
+            finishedAt: Date.now(),
+          });
+        } else {
+          patchMagnificJob(taskId, {
+            status: 'failed',
+            message: `Magnific incompleto: ${res.successCount}/${res.takes.length} takes${
+              res.missingIdxs?.length ? ` (faltou ${res.missingIdxs.join(', ')})` : ''
+            }`,
+            finishedAt: Date.now(),
+          });
+        }
+      } catch (e) {
+        patchMagnificJob(taskId, {
+          status: 'failed',
+          message: (e as Error)?.message || 'erro no pipeline Magnific',
+          finishedAt: Date.now(),
+        });
+      } finally {
+        magnificProcessingRef.current = false;
+        setMagnificTick((t) => t + 1);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [magnificQueue, magnificTick]);
+
   function cancelTaskBatch(taskId: string) {
     batchCancelRef.current[taskId] = true;
+  }
+
+  /** Baixa o ZIP de takes Magnific do IndexedDB (Blob URL nao sobrevive
+   *  reload — sempre reconstruimos on-demand do zip-store). */
+  async function downloadMagnificZip(taskId: string) {
+    const job = magnificQueue[taskId];
+    if (!job?.zipKey) return;
+    try {
+      const { loadZip } = await import('@/lib/zip-store');
+      const rec = await loadZip(job.zipKey);
+      if (!rec) {
+        setError('ZIP Magnific nao encontrado no armazenamento local.');
+        return;
+      }
+      const a = document.createElement('a');
+      a.href = rec.blobUrl;
+      a.download = rec.filename || job.zipName || `${job.adName}_brolls.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => { try { URL.revokeObjectURL(rec.blobUrl); } catch {} }, 60000);
+    } catch (e) {
+      setError('Falha baixando ZIP Magnific: ' + ((e as Error)?.message || 'erro'));
+    }
+  }
+
+  function removeMagnificJob(taskId: string) {
+    magnificCancelRef.current[taskId] = true;
+    setMagnificQueueState((prev) => {
+      const { [taskId]: _, ...rest } = prev;
+      return rest;
+    });
+    setMagnificTick((t) => t + 1);
   }
 
   function downloadZip(taskId: string) {
@@ -1773,30 +2059,43 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     router.push('/tools/heygen-auto?from=clickup-pilot');
   }
 
-  /** Dispatch p/ Auto B-Rolls (Magnific). Empacota handoff com taskName +
-   *  copy bruta — /tools/auto-broll abre e o user cola/auto-gera os prompts. */
+  /** Dispara Magnific Auto-B-Rolls DESTA task — invisivel, igual ao HeyGen
+   *  Auto (roda via extensao/bridge, nao abre ferramenta nem navega). Usa o
+   *  JSON colado na caixa "+" da task. ONLY: enfileira ungated (roda direto).
+   *  MORE: dispara o HeyGen Auto dessa task em background + enfileira o
+   *  Magnific gated (so roda apos o HeyGen dela concluir). Fila Magnific e
+   *  serial — 1 por vez sempre. */
   function dispatchTaskToMagnific(taskId: string) {
     const a = taskAnalyses[taskId];
-    if (!a) return;
-    const plan = buildPlan(a);
-    if (!plan) {
-      setError('Sem plano valido pra dispatch Magnific.');
+    if (!a || a.vaBriefing) return;
+    if (!(taskMagnificJson[taskId] || '').trim()) {
+      setMagnificEditorOpen((p) => ({ ...p, [taskId]: true }));
+      setError('Cole o JSON de B-rolls dessa task na caixa abaixo (botao "+") antes de disparar.');
       return;
     }
-    // Junta toda a copy do plano pra servir de fonte de prompts (user pode
-    // gerar os prompts no Claude do proprio LLM dele e colar)
-    const fullCopy = plan.parts.map((p: any) => p.text).join('\n\n');
-    const handoff = {
-      source: 'clickup-pilot',
-      adName: plan.adName,
-      copy: fullCopy,
-      partLabels: plan.parts.map((p: any) => p.label),
-      mode: onlyMagnificMode ? 'only-magnific' : 'more-magnific',
-    };
-    sessionStorage.setItem('darkolab:auto-broll:handoff', JSON.stringify(handoff));
-    const siblings = getSiblingTaskIds(taskId);
-    for (const sid of siblings) markDispatched(sid);
-    router.push('/tools/auto-broll?from=clickup-pilot');
+    if (onlyMagnificMode) {
+      if (!enqueueMagnificForTask(taskId, false)) {
+        setError('JSON de B-rolls invalido — nenhum take detectado.');
+        return;
+      }
+      setError(null);
+      for (const sid of getSiblingTaskIds(taskId)) markDispatched(sid);
+      return;
+    }
+    // MORE: HeyGen Auto desta task em background + Magnific gated. O gate
+    // so destrava quando o HeyGen DESTA task concluir — entao a task precisa
+    // estar 'ready' (sem avatar pendente). 'partial' geraria job preso.
+    if (a.status !== 'ready') {
+      setError('MORE Magnific precisa da task ready (resolva o avatar pendente) ou use Only Magnific.');
+      return;
+    }
+    if (!enqueueMagnificForTask(taskId, true)) {
+      setError('JSON de B-rolls invalido — nenhum take detectado.');
+      return;
+    }
+    setError(null);
+    for (const sid of getSiblingTaskIds(taskId)) markDispatched(sid);
+    void runTaskInBackground(taskId);
   }
 
   async function autoFetchDoc(url: string) {
@@ -2831,6 +3130,97 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                     </div>
                   ) : null}
 
+                  {/* Painel fila Magnific — serial, 1 por vez (espelha batches HeyGen) */}
+                  {Object.keys(magnificQueue).length > 0 ? (
+                    <div className="mt-4 rounded-[12px] border border-lime/40 bg-lime/5 p-3">
+                      <div className="mono mb-2 flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-lime">
+                        <span>🍌 Fila Magnific B-Rolls ({Object.keys(magnificQueue).length}) · serial 1/vez</span>
+                        {Object.values(magnificQueue).some((j) => j.status === 'done' || j.status === 'failed') ? (
+                          <button
+                            type="button"
+                            onClick={() => setMagnificQueueState((prev) => {
+                              const next: MagnificQueue = {};
+                              for (const [k, v] of Object.entries(prev)) {
+                                if (v.status !== 'done' && v.status !== 'failed') next[k] = v;
+                              }
+                              return next;
+                            })}
+                            className="rounded border border-line-strong px-2 py-0.5 text-text-muted hover:border-red-500/60 hover:text-red-300"
+                          >
+                            limpar concluidos/falhas
+                          </button>
+                        ) : null}
+                      </div>
+                      <ul className="grid gap-2">
+                        {Object.values(magnificQueue).sort((a, b) => b.enqueuedAt - a.enqueuedAt).map((j) => {
+                          const stLabel = ({
+                            queued: j.gateOnHeyGen ? '⏳ aguardando HeyGen' : '⏳ na fila',
+                            running: '⚙ gerando B-rolls',
+                            done: '✅ pronto',
+                            failed: '✗ falhou',
+                          })[j.status];
+                          const stColor = j.status === 'done' ? 'text-lime border-lime/40 bg-lime/10'
+                            : j.status === 'failed' ? 'text-red-300 border-red-500/40 bg-red-500/10'
+                            : j.status === 'running' ? 'text-cyan-200 border-cyan-500/40 bg-cyan-500/10'
+                            : 'text-text-muted border-line-strong bg-bg-soft/40';
+                          const pct = j.status === 'done' ? 100 : j.status === 'failed' ? 0 : (j.percent || (j.status === 'running' ? 5 : 0));
+                          return (
+                            <li key={j.taskId} className={`rounded-[10px] border ${stColor} p-2`}>
+                              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                                <span className="mono">
+                                  <strong className="text-white">{j.adName}</strong>
+                                  <span className="ml-2">{stLabel}</span>
+                                  <span className="ml-2 text-text-muted">· {j.takeCount} take{j.takeCount === 1 ? '' : 's'}</span>
+                                </span>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {j.status === 'done' && j.zipKey ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => downloadMagnificZip(j.taskId)}
+                                      className="mono rounded border border-lime bg-lime/20 px-2 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30"
+                                      title="Baixa o ZIP de takes B-roll dessa task"
+                                    >
+                                      ⬇ takes
+                                    </button>
+                                  ) : null}
+                                  {j.status === 'failed' ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => { patchMagnificJob(j.taskId, { status: 'queued', message: 'Re-enfileirado manualmente.', finishedAt: undefined }); setMagnificTick((t) => t + 1); }}
+                                      className="mono rounded border border-cyan-500/60 bg-cyan-500/15 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25"
+                                      title="Volta o job pra fila (re-roda do zero — space novo)"
+                                    >
+                                      🔄 Retomar
+                                    </button>
+                                  ) : null}
+                                  <button
+                                    type="button"
+                                    onClick={() => removeMagnificJob(j.taskId)}
+                                    className="mono rounded border border-line-strong px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
+                                    title="Remove esse job da fila"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              </div>
+                              {j.status !== 'failed' ? (
+                                <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-bg-soft/60">
+                                  <div
+                                    className={`h-full ${j.status === 'done' ? 'bg-lime' : 'bg-cyan-400'} transition-all duration-300`}
+                                    style={{ width: `${Math.min(100, Math.max(2, pct))}%` }}
+                                  />
+                                </div>
+                              ) : null}
+                              {j.message ? (
+                                <div className="mono mt-0.5 text-[10px] text-text-muted">{j.message}</div>
+                              ) : null}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ) : null}
+
                   {/* Preview previsibilidade — antes de iniciar */}
                   {bulkMode && Object.keys(taskAnalyses).length > 0 ? (
                     <div className="mt-4">
@@ -2926,12 +3316,26 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   </span>
                                 ) : (a.status === 'ready' || a.status === 'partial') ? (
                                   <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                                    {(onlyMagnificMode || moreMagnificMode) ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setMagnificEditorOpen((p) => ({ ...p, [a.taskId]: !p[a.taskId] }))}
+                                        className={`mono rounded border px-2 py-1 text-[10px] uppercase tracking-widest ${
+                                          (taskMagnificJson[a.taskId] || '').trim()
+                                            ? 'border-lime/60 bg-lime/15 text-lime hover:bg-lime/25'
+                                            : 'border-cyan-500/50 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20'
+                                        }`}
+                                        title="Cola aqui o JSON de B-rolls dessa task (caixa inline — nao troca de tela)"
+                                      >
+                                        {(taskMagnificJson[a.taskId] || '').trim() ? '＋ JSON ✓' : '＋ JSON'}
+                                      </button>
+                                    ) : null}
                                     {onlyMagnificMode ? (
                                       <button
                                         type="button"
                                         onClick={() => dispatchTaskToMagnific(a.taskId)}
                                         className="mono rounded border border-lime bg-lime/20 px-3 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30"
-                                        title="Pula HeyGen — abre Auto B-Rolls (Nano Banana + Kling 2.5)"
+                                        title="Pula HeyGen — enfileira B-Rolls Magnific dessa task (invisivel, fila serial). Cole o JSON no botao + antes."
                                       >
                                         🍌 Magnific only
                                       </button>
@@ -2951,7 +3355,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                             type="button"
                                             onClick={() => dispatchTaskToMagnific(a.taskId)}
                                             className="mono rounded border border-cyan-500/60 bg-cyan-500/15 px-3 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25"
-                                            title="Gera B-Rolls Magnific extras (Nano Banana + Kling 2.5)"
+                                            title="Dispara HeyGen Auto dessa task + enfileira B-Rolls Magnific (so roda apos o HeyGen dela concluir). Cole o JSON no botao + antes."
                                           >
                                             ➕ B-Rolls
                                           </button>
@@ -2961,6 +3365,44 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   </div>
                                 ) : null}
                               </div>
+                              {/* CAIXA INLINE de JSON Magnific por task normal (sem trocar de tela) */}
+                              {!a.vaBriefing && (onlyMagnificMode || moreMagnificMode) && magnificEditorOpen[a.taskId] ? (
+                                <div className="mt-2 rounded-[10px] border border-lime/40 bg-lime/5 p-3">
+                                  <div className="mono mb-1.5 flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-lime">
+                                    <span>JSON de B-rolls dessa task ({onlyMagnificMode ? 'Only Magnific' : 'More Magnific'})</span>
+                                    {(() => {
+                                      const raw = (taskMagnificJson[a.taskId] || '').trim();
+                                      const n = raw ? parseMagnificPrompts(raw).length : 0;
+                                      return raw ? (
+                                        <span className={n > 0 ? 'text-lime' : 'text-red-300'}>
+                                          {n > 0 ? `${n} take${n === 1 ? '' : 's'} detectado${n === 1 ? '' : 's'}` : 'JSON invalido'}
+                                        </span>
+                                      ) : (
+                                        <span className="text-text-muted">vazio</span>
+                                      );
+                                    })()}
+                                  </div>
+                                  <textarea
+                                    value={taskMagnificJson[a.taskId] || ''}
+                                    onChange={(e) => setTaskMagnificJson(a.taskId, e.target.value)}
+                                    rows={6}
+                                    placeholder='Cole aqui o JSON de B-rolls (ex: [{ "imagePrompt": "...", "videoPrompt": "..." }, ...])'
+                                    className="input-field resize-y font-mono text-[11px]"
+                                  />
+                                  <div className="mono mt-1.5 flex flex-wrap items-center gap-2 text-[9px] uppercase tracking-widest text-text-muted">
+                                    <span>Fica salvo nessa task (sobrevive reload). O Magnific roda invisivel via extensao, fila serial 1 por vez.</span>
+                                    {taskMagnificJson[a.taskId] ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setTaskMagnificJson(a.taskId, '')}
+                                        className="rounded border border-line-strong px-2 py-0.5 text-text-muted hover:border-red-500/60 hover:text-red-300"
+                                      >
+                                        limpar
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              ) : null}
                               {/* RENDER VARIACAO DE AVATAR — pipeline diferente */}
                               {a.vaBriefing ? (
                                 <div className="mt-1 grid gap-2">
