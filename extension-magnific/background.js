@@ -63,21 +63,28 @@ async function findOrCreateMagnificTab() {
   // popup rendering take 30s+ instead of 300ms. By forcing foreground BEFORE
   // pipeline starts, all UI ops run at normal speed = pipeline completes 10x faster.
 
-  // v3.5.44 (pedido do user): NUNCA roubar foco. O processo roda em SEGUNDO
-  // PLANO no Magnific — o user NÃO deve ver a aba Spaces abrir/focar. Ele só
-  // vê a tela de processamento no DARKO LAB. Se quiser ver o Space, usa o
-  // botão 3D na ferramenta. Trade-off: aba em background é throttled (mais
-  // lento), mas invisível como solicitado. NÃO chamamos tabs.update(active)
-  // nem windows.update(focused) em lugar nenhum.
+  // v3.5.46 — REVERTIDO pro comportamento que FUNCIONA (v3.5.41: creditDelta=0,
+  // 13/15 takes). Tentar rodar 100% invisível (v3.5.44) quebrou: Chrome
+  // throttla aba oculta a ponto do handshake/criação de Space nunca completar
+  // (trava em "Preparando Space"). Pra FUNCIONAR de forma confiável a aba
+  // Magnific precisa estar ativa/visível durante a run. É um limite do Chrome
+  // pra SPA pesado, não dá pra contornar mantendo invisível + confiável.
 
-  // Tier 1: tab já ativa (se por acaso o user estiver nela) — usa, sem mexer
+  // v3.5.47 — FIX FOCO: a aba Magnific fica ATIVA na PRÓPRIA janela
+  // (chrome.tabs.update active:true → não é throttled, pipeline funciona),
+  // mas NUNCA chamamos chrome.windows.update(focused:true) — ERA ISSO que
+  // roubava o foco do user e jogava a tela dele pro Spaces toda hora.
+  // Resultado: aba aberta gerando normalmente, mas o user trabalha no resto
+  // do PC/navegador sem ter a tela sequestrada.
+
+  // Tier 1: active tab — usa, sem mexer em foco de janela
   const active = existing.find((t) => t.active);
   if (active) {
-    console.log('[DARKO BG] Usando active Magnific tab (sem forçar foco):', active.id);
+    console.log('[DARKO BG] Usando active Magnific tab:', active.id);
     return active;
   }
 
-  // Tier 2: testa cada tab via PING; usa o primeiro que responder (NÃO foca)
+  // Tier 2: PING; usa o primeiro vivo. Ativa a aba NA janela dela (sem focar janela)
   for (const t of existing) {
     try {
       const r = await Promise.race([
@@ -85,21 +92,45 @@ async function findOrCreateMagnificTab() {
         new Promise((_, rej) => setTimeout(() => rej(new Error('ping timeout')), 1000)),
       ]);
       if (r?.ok) {
-        console.log('[DARKO BG] Tab Magnific viva (PING ok, background):', t.id);
+        console.log('[DARKO BG] Tab Magnific viva (PING ok):', t.id);
+        try { await chrome.tabs.update(t.id, { active: true }); } catch {}
         return t;
       }
     } catch {}
   }
 
-  // Tier 3: pega qualquer tab existente (NÃO foca)
+  // Tier 3: qualquer tab existente — ativa na janela dela (sem focar janela)
   if (existing.length > 0) {
-    console.log('[DARKO BG] Usando primeira Magnific tab (background):', existing[0].id);
+    console.log('[DARKO BG] Usando primeira Magnific tab:', existing[0].id);
+    try { await chrome.tabs.update(existing[0].id, { active: true }); } catch {}
     return existing[0];
   }
 
-  // Tier 4: cria nova tab EM BACKGROUND (active:false — não rouba foco)
-  console.log('[DARKO BG] Criando nova Magnific tab em background...');
-  const tab = await chrome.tabs.create({ url: 'https://www.magnific.com/app/spaces', active: false });
+  // Tier 4: cria nova JANELA SEPARADA NÃO-FOCADA. focused:false → não rouba
+  // o foco do user; state:normal → janela visível (NÃO minimizada) =
+  // visibilityState 'visible' = NÃO throttled = pipeline funciona. A aba é a
+  // ativa da própria janela. User pode ignorar/mover essa janela e trabalhar
+  // normalmente no resto.
+  console.log('[DARKO BG] Criando janela Magnific separada (não-focada)...');
+  try {
+    const win = await chrome.windows.create({
+      url: 'https://www.magnific.com/app/spaces',
+      focused: false,
+      state: 'normal',
+      width: 1200,
+      height: 850,
+      top: 60,
+      left: 60,
+    });
+    const tab = win && win.tabs && win.tabs[0];
+    if (tab) {
+      await new Promise((r) => setTimeout(r, 5000));
+      return tab;
+    }
+  } catch (e) {
+    console.warn('[DARKO BG] windows.create falhou, fallback tabs.create active:true:', e && e.message);
+  }
+  const tab = await chrome.tabs.create({ url: 'https://www.magnific.com/app/spaces', active: true });
   await new Promise((r) => setTimeout(r, 4000));
   return tab;
 }
@@ -347,11 +378,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (job.heartbeatId) { clearTimeout(job.heartbeatId); job.heartbeatId = null; }
         persistJob(msg.requestId, job);
       }
-      // v3.5.44 (pedido do user): REMOVIDO o re-focus periódico. A aba Magnific
-      // NÃO é trazida pro foco durante o pipeline — roda 100% em segundo plano.
-      // O user só acompanha pela tela do DARKO LAB; se quiser ver o Space usa
-      // o botão 3D. (Trade-off: background throttling deixa mais lento, mas é
-      // o comportamento solicitado — invisível.)
+      // v3.5.47 — mantém a aba ATIVA na PRÓPRIA janela a cada ~10s
+      // (chrome.tabs.update active:true → evita throttle, pipeline progride),
+      // mas NUNCA chrome.windows.update(focused:true). Era o focused:true que
+      // roubava o foco do user e jogava a tela pro Spaces toda hora. Agora a
+      // aba gera normalmente e o user trabalha no resto sem ser interrompido.
+      const senderTabId = sender.tab?.id;
+      if (senderTabId) {
+        const now = Date.now();
+        if (!job.lastFocusAt || (now - job.lastFocusAt > 10000)) {
+          job.lastFocusAt = now;
+          chrome.tabs.update(senderTabId, { active: true }).catch(() => {});
+          // SEM windows.update(focused) — não sequestra a tela do user
+        }
+      }
       reportToPage(job.bridgeTabId, msg.requestId, msg.progressType, msg.payload);
     } else {
       // v3.5.7: SW restart edge case — pendingJobs Map is empty but storage has it.

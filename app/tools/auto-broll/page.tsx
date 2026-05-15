@@ -200,10 +200,16 @@ export default function AutoBrollPage() {
     setJobs((prev) => (prev.length <= 1 ? prev : prev.filter((j) => j.id !== id)));
   }
 
-  function runAll() {
-    jobs.forEach((j) => {
-      if (j.status !== 'running' && parseJob(j.raw).length > 0) runJob(j);
-    });
+  // v3.5.47 (pedido do user): SERIALIZADO — 1 JSON por vez. JSON 1 termina
+  // 100% (ZIP liberado) → AÍ dispara JSON 2, e assim por diante. Roda 2
+  // simultâneos causava contenção nos popups do Vue Flow (EDGE_CREATE_FAIL).
+  async function runAll() {
+    for (const j of jobs) {
+      if (j.status === 'running') continue;
+      if (parseJob(j.raw).length === 0) continue;
+      // await: só passa pro próximo job quando ESTE terminar (done/error)
+      await runJob(j);
+    }
   }
 
   const anyRunning = jobs.some((j) => j.status === 'running');

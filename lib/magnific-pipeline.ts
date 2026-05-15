@@ -394,9 +394,58 @@ function __extractJson(raw: string): any | null {
   return null;
 }
 
+/**
+ * v3.5.46 — recuperação OBJETO-A-OBJETO. Quando o array está truncado/
+ * malformado (ex: usuário colou incompleto, faltou fechar ] ), varre o texto
+ * achando cada bloco { ... } de topo via balanço de chaves e parseia
+ * individualmente (tolerando vírgula final e ignorando um objeto final
+ * incompleto). Garante que "3 objetos colados = 3 takes", nunca 14.
+ */
+function __extractObjects(raw: string): any[] {
+  let s = raw.trim();
+  s = s.replace(/^```[a-zA-Z]*\s*/m, '').replace(/```\s*$/m, '');
+  s = s.replace(/[“”„‟″‶]/g, '"').replace(/[‘’‚‛′‵]/g, "'");
+  const objs: any[] = [];
+  let depth = 0;
+  let start = -1;
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === '\\') esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === '{') {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        const chunk = s.slice(start, i + 1);
+        try {
+          objs.push(JSON.parse(chunk));
+        } catch {
+          try { objs.push(JSON.parse(chunk.replace(/,\s*}/g, '}'))); } catch {}
+        }
+        start = -1;
+      }
+    }
+  }
+  return objs;
+}
+
 export function parseMagnificPrompts(raw: string): MagnificTakeInput[] {
   const trimmed = raw.trim();
   if (!trimmed) return [];
+
+  // Detecta intenção de JSON: começa com [ ou { OU contém "imagePrompt".
+  // Se parece JSON, NUNCA caímos no modo texto (que super-conta linhas).
+  const looksJson =
+    /^[\[{]/.test(trimmed) || /"image[_]?[Pp]rompt"|"video[_]?[Pp]rompt"/.test(trimmed);
 
   {
     const j = __extractJson(trimmed);
@@ -405,12 +454,21 @@ export function parseMagnificPrompts(raw: string): MagnificTakeInput[] {
     else if (Array.isArray(j?.prompts)) arr = j.prompts;
     else if (Array.isArray(j?.takes)) arr = j.takes;
     else if (Array.isArray(j?.nano_banana_prompts)) arr = j.nano_banana_prompts;
+    else if (j && typeof j === 'object') arr = [j]; // 1 objeto solto = 1 take
+
+    // Recuperação objeto-a-objeto se o array falhou mas parece JSON
+    // (array truncado/malformado). Garante contagem correta de takes.
+    if ((!arr || arr.length === 0) && looksJson) {
+      const recovered = __extractObjects(trimmed);
+      if (recovered.length > 0) arr = recovered;
+    }
+
     if (arr) {
       const out: MagnificTakeInput[] = [];
       arr.forEach((item: any, i: number) => {
         if (typeof item === 'string') {
           const s = item.trim();
-          if (s) out.push({ idx: i + 1, imagePrompt: s, videoPrompt: '' });
+          if (s) out.push({ idx: out.length + 1, imagePrompt: s, videoPrompt: '' });
           return;
         }
         const imagePrompt = String(
@@ -419,13 +477,18 @@ export function parseMagnificPrompts(raw: string): MagnificTakeInput[] {
         const videoPrompt = String(
           item.videoPrompt || item.video_prompt || item.kling_prompt || item.motion || item.video || '',
         ).trim();
-        if (imagePrompt) out.push({ idx: i + 1, imagePrompt, videoPrompt });
+        // Regra do user: take = par image+video. Conta só objetos com imagePrompt.
+        if (imagePrompt) out.push({ idx: out.length + 1, imagePrompt, videoPrompt });
       });
       return out;
     }
+
+    // Parece JSON mas não conseguimos extrair nada → retorna vazio (NÃO
+    // cai no modo texto que contaria linhas e daria número errado).
+    if (looksJson) return [];
   }
 
-  // Texto livre — só chega aqui se NÃO há JSON válido detectável
+  // Texto livre — só chega aqui se NÃO parece JSON de jeito nenhum
   let candidate = trimmed.split(/\n\s*(?:---+|===+|\*\*\*+)\s*\n|\n{2,}/g)
     .map((b) => b.trim())
     .filter(Boolean);
