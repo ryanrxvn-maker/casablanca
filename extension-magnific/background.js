@@ -15,6 +15,40 @@
 const pendingJobs = new Map();
 const STORAGE_KEY = '__darko_mg_pending_jobs__';
 
+// v3.5.48 ANTI-THROTTLE DEFINITIVO: uma aba com chrome.debugger anexado NÃO é
+// throttled pelo Chrome mesmo em background/não-focada (o renderer fica ativo
+// pro debug). Mantemos o debugger anexado durante TODO o pipeline → a janela
+// separada não-focada roda em VELOCIDADE TOTAL sem roubar o foco do user.
+// Resolve a tensão "funciona" vs "não rouba foco" de uma vez.
+const pipelineDebuggerTabs = new Set();
+
+async function attachPipelineDebugger(tabId) {
+  if (!tabId) return;
+  try {
+    await chrome.debugger.attach({ tabId }, '1.3');
+  } catch (e) {
+    if (!/already attached/i.test(e?.message || '')) {
+      console.warn('[DARKO BG] attachPipelineDebugger falhou:', e?.message);
+      return;
+    }
+  }
+  pipelineDebuggerTabs.add(tabId);
+  // Mantém o renderer "acordado": page lifecycle active (anti background-freeze)
+  try {
+    await chrome.debugger.sendCommand({ tabId }, 'Page.enable');
+    await chrome.debugger.sendCommand({ tabId }, 'Emulation.setFocusEmulationEnabled', { enabled: true });
+  } catch {}
+  console.log('[DARKO BG] debugger anexado p/ pipeline (anti-throttle) tab=', tabId);
+}
+
+async function detachPipelineDebugger(tabId) {
+  if (!tabId || !pipelineDebuggerTabs.has(tabId)) return;
+  pipelineDebuggerTabs.delete(tabId);
+  try { await chrome.debugger.sendCommand({ tabId }, 'Emulation.setFocusEmulationEnabled', { enabled: false }); } catch {}
+  try { await chrome.debugger.detach({ tabId }); } catch {}
+  console.log('[DARKO BG] debugger desanexado (fim pipeline) tab=', tabId);
+}
+
 async function persistJob(requestId, data) {
   try {
     const all = (await chrome.storage.session.get(STORAGE_KEY))[STORAGE_KEY] || {};
@@ -238,6 +272,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const tabId = sender.tab?.id;
     if (!tabId) { sendResponse({ ok: false }); return false; }
     (async () => {
+      // v3.5.48: NÃO desanexa se o debugger é do pipeline (anti-throttle).
+      // Só o fim do pipeline (MG_TAB_RESULT/timeout) pode desanexar.
+      if (pipelineDebuggerTabs.has(tabId)) { sendResponse({ ok: true, keptForPipeline: true }); return; }
       try { await chrome.debugger.detach({ tabId }); sendResponse({ ok: true }); }
       catch (e) { sendResponse({ ok: false, error: e?.message }); }
     })();
@@ -314,7 +351,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       } catch (e) {
         sendResponse({ ok: false, error: e?.message || String(e) });
       } finally {
-        if (attached) {
+        // v3.5.48: NÃO desanexa se é o debugger do pipeline (anti-throttle).
+        // Desanexar entre cliques re-throttlaria a aba e travaria tudo.
+        if (attached && !pipelineDebuggerTabs.has(tabId)) {
           try { await chrome.debugger.detach(target); } catch {}
         }
       }
@@ -354,8 +393,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const job = pendingJobs.get(msg.requestId);
     if (job) {
       if (job.timeoutId) clearTimeout(job.timeoutId);
+      if (job.heartbeatId) clearTimeout(job.heartbeatId);
       pendingJobs.delete(msg.requestId);
       unpersistJob(msg.requestId);
+      // v3.5.48: fim do pipeline → desanexa o debugger anti-throttle
+      if (job.magnificTabId) detachPipelineDebugger(job.magnificTabId);
       reportToPage(job.bridgeTabId, msg.requestId, msg.resultType, msg.payload);
     } else {
       // v3.5.7: SW restart recovery for RESULT too
@@ -420,6 +462,12 @@ async function handleForward(msg, bridgeTabId) {
     await waitForTabComplete(tab.id);
     await ensureContentLoaded(tab.id);
 
+    // v3.5.48: pipelines longos → anexa debugger p/ a aba NUNCA ser throttled
+    // mesmo em janela separada não-focada (renderer ativo + focus emulado).
+    if (msg.type === 'MG_RUN_PIPELINE' || msg.type === 'MG_RUN_PIPELINE_TEMPLATE' || msg.type === 'MG_CREATE_TEMPLATE_SPACE') {
+      await attachPipelineDebugger(tab.id);
+    }
+
     // Timeout maximo por tipo
     const timeouts = {
       MG_GENERATE_IMAGE: 240000,
@@ -434,26 +482,30 @@ async function handleForward(msg, bridgeTabId) {
     const timeoutId = setTimeout(() => {
       if (pendingJobs.has(requestId)) {
         pendingJobs.delete(requestId);
+        detachPipelineDebugger(tab.id);
         reportToPage(bridgeTabId, requestId, msg.type + '_RESULT', {
           ok: false,
           error: `Timeout ${timeoutMs / 1000}s no ${msg.type}.`,
         });
       }
     }, timeoutMs);
-    pendingJobs.set(requestId, { bridgeTabId, timeoutId });
+    pendingJobs.set(requestId, { bridgeTabId, timeoutId, magnificTabId: tab.id });
     // v3.5.7: persist in storage.session so SW restart can recover
     persistJob(requestId, { bridgeTabId });
 
     // v3.3.2: aguarda heartbeat de progress dentro de SETUP_HEARTBEAT_MS — se
     // nao chegar nenhum progress nesse tempo, ABORTA com erro claro. Isso evita
     // o stall de 4h se o content script for messageado mas nao processar.
-    const SETUP_HEARTBEAT_MS = 60000; // 60s pra ver ALGUM progress de Phase 0/1
+    // v3.5.48: 60s→180s. Com debugger anexado a aba não throttla, mas a 1ª
+    // carga do SPA pesado pode levar >60s. 180s evita falso-timeout no setup.
+    const SETUP_HEARTBEAT_MS = 180000;
     const heartbeatId = setTimeout(() => {
       if (pendingJobs.has(requestId)) {
         const job = pendingJobs.get(requestId);
         if (!job.firstProgressAt) {
           clearTimeout(job.timeoutId);
           pendingJobs.delete(requestId);
+          detachPipelineDebugger(tab.id);
           reportToPage(bridgeTabId, requestId, msg.type + '_RESULT', {
             ok: false,
             error:
