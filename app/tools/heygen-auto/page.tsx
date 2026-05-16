@@ -19,7 +19,6 @@ import {
 import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
 import { MotorConfigPicker } from '@/components/MotorConfigPicker';
 import { defaultMotorConfig, resolveMotors, estimateSecondsFromText, estimateSecondsFromAudio, type MotorConfig } from '@/lib/motor-config';
-import { AvatarFirstSlot } from '@/components/AvatarFirstSlot';
 import {
   heygenApiFetch,
   REQUIRED_EXT_VERSION,
@@ -890,35 +889,6 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                   ? parts.map((text) => estimateSecondsFromText(text))
                   : audioPartsSeconds
                 }
-              />
-            </section>
-
-            {/* Avatar First — pra quando avatar nao existe na biblioteca */}
-            <section className="border-t border-line pt-6">
-              <h2 className="label-field !mb-3">Avatar First (opcional)</h2>
-              <AvatarFirstSlot
-                slotKey="hgauto-main"
-                briefingUsername={adName || 'avatar'}
-                enabled={avatarFirstEnabled}
-                setEnabled={setAvatarFirstEnabled}
-                onComplete={(r) => {
-                  // Auto-seleciona o avatar criado
-                  setSelectedAvatar({
-                    id: r.avatarId,
-                    name: r.avatarName,
-                    thumb: null,
-                    videoPreview: null,
-                    type: 'photo',
-                    version: 'III',
-                    voiceId: r.voiceId,
-                    voiceName: r.voiceName,
-                  } as any);
-                  // Reseta voice override pra usar a clonada
-                  if (selectedVoice == null) {
-                    setSelectedVoice({ id: r.voiceId, name: r.voiceName } as any);
-                  }
-                }}
-                disabled={processing}
               />
             </section>
 

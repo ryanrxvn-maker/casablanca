@@ -93,19 +93,11 @@ export function Toggle3D({
         </span>
       ) : null}
 
-      {/* Label + hint */}
+      {/* Label — sem ON/OFF nem hint (estado visual ja indica) */}
       <span className="flex min-w-0 flex-1 flex-col leading-tight">
         <span className={'mono text-[11px] font-bold uppercase tracking-widest transition-colors ' + (on ? colorClasses.text : 'text-text-muted')}>
           {label}
-          <span className={'ml-1.5 ' + (on ? 'text-white' : 'text-text-muted')}>
-            {on ? 'ON' : 'OFF'}
-          </span>
         </span>
-        {hint ? (
-          <span className="mono mt-0.5 text-[9px] uppercase tracking-widest text-text-muted">
-            {hint}
-          </span>
-        ) : null}
       </span>
 
       {/* Switch 3D — pill com thumb deslizante e bevel */}

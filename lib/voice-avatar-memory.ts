@@ -107,3 +107,65 @@ export function forgetVoiceName(voiceName: string): void {
 export function memoryCount(): number {
   return Object.keys(loadAll()).length;
 }
+
+/* ============================================================
+ * Memoria AVATAR → VOZ (direcao inversa, pedido do user).
+ *
+ * Quando o user escolhe uma voz pra um avatar especifico, lembramos
+ * avatarId → {voiceId, voiceName}. Na proxima vez que esse MESMO avatar
+ * for selecionado (qualquer task), a voz volta automatica. Pode trocar
+ * normalmente — ao trocar, a memoria atualiza.
+ * ============================================================ */
+
+const AV_KEY = 'darkolab:avatar-voice-memory';
+
+export type AvatarVoiceMapping = {
+  avatarId: string;
+  voiceId: string;
+  voiceName: string;
+  lastUsed: number;
+};
+
+function loadAvAll(): Record<string, AvatarVoiceMapping> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(AV_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveAvAll(map: Record<string, AvatarVoiceMapping>): void {
+  if (typeof window === 'undefined') return;
+  const entries = Object.entries(map);
+  if (entries.length > MAX_ENTRIES) {
+    entries.sort(([, a], [, b]) => b.lastUsed - a.lastUsed);
+    localStorage.setItem(AV_KEY, JSON.stringify(Object.fromEntries(entries.slice(0, MAX_ENTRIES))));
+  } else {
+    localStorage.setItem(AV_KEY, JSON.stringify(map));
+  }
+}
+
+/** Lembra a voz escolhida pra esse avatar. */
+export function rememberAvatarVoice(avatarId: string, voiceId: string, voiceName: string): void {
+  if (!avatarId || !voiceId) return;
+  const all = loadAvAll();
+  all[avatarId] = { avatarId, voiceId, voiceName: voiceName || '', lastUsed: Date.now() };
+  saveAvAll(all);
+}
+
+/** Recupera a voz lembrada pra esse avatar (ou null). */
+export function recallAvatarVoice(avatarId: string): AvatarVoiceMapping | null {
+  if (!avatarId) return null;
+  return loadAvAll()[avatarId] || null;
+}
+
+/** Esquece a voz desse avatar. */
+export function forgetAvatarVoice(avatarId: string): void {
+  const all = loadAvAll();
+  if (all[avatarId]) {
+    delete all[avatarId];
+    saveAvAll(all);
+  }
+}

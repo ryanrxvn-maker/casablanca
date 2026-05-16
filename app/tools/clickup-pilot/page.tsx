@@ -45,7 +45,7 @@ import { CompactVoiceSelector } from '@/components/CompactVoiceSelector';
 import { MotorConfigPicker, MotorSlotPicker } from '@/components/MotorConfigPicker';
 import { defaultMotorConfig, resolveMotors, estimateSecondsFromText, type MotorConfig, type Motor } from '@/lib/motor-config';
 import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
-import { recallByVoiceName, rememberPairing, normalizeVoiceName } from '@/lib/voice-avatar-memory';
+import { recallByVoiceName, rememberPairing, normalizeVoiceName, recallAvatarVoice, rememberAvatarVoice } from '@/lib/voice-avatar-memory';
 import { Toggle3D } from '@/components/Toggle3D';
 import { ToggleRound3D, WirelessIcon } from '@/components/ToggleRound3D';
 import { getPilotTeam, setPilotTeam, getPilotEditor, setPilotEditor } from '@/lib/clickup-pilot-config';
@@ -747,6 +747,25 @@ export default function ClickUpPilotPage() {
         }
       }
     }
+    // 3. Match por TOKENS (resolve nomes com acento/espaco/ponto tipo
+    //    "@Dr. Marco Túlio.mp4"): quebra o username em palavras (sem
+    //    acento), exige que todos os tokens >=3 chars apareçam no texto
+    //    normalizado do link. "dr marco tulio" casa com link cujo texto
+    //    normalizado contem "marco" e "tulio".
+    const tokens = username
+      .replace(/^@/, '')
+      .replace(/\.(mp4|mov)$/i, '')
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((tk) => tk.length >= 3);
+    if (tokens.length > 0) {
+      for (const link of driveLinks) {
+        const t = normalizeForMatch(link.text);
+        if (tokens.every((tk) => t.includes(tk))) return link.fileId;
+      }
+    }
     return null;
   }
 
@@ -979,6 +998,9 @@ export default function ClickUpPilotPage() {
             const voiceFromLib = voiceByNorm.get(normalizeVoiceName(av.username)) || null;
             if (m && m.score >= 30) {
               const candFull = avatarCandidates.find(c => c.id === m.id);
+              // MEMORIA AVATAR→VOZ: se ja escolhi voz pra esse avatar antes,
+              // ela volta automatica (prioridade sobre voz por nome).
+              const avMem = recallAvatarVoice(m.id);
               roleSlots.push({
                 role: av.role,
                 username: av.username,
@@ -987,8 +1009,9 @@ export default function ClickUpPilotPage() {
                 avatarName: m.name,
                 avatarThumb: candFull?.thumb || null,
                 avatarVoiceId: candFull?.voiceId || null,
-                // Se avatar nao tem voz default mas existe voz "@x" na lib, usa como override
-                voiceOverride: !candFull?.voiceId && voiceFromLib ? voiceFromLib : null,
+                voiceOverride: avMem
+                  ? { id: avMem.voiceId, name: avMem.voiceName }
+                  : (!candFull?.voiceId && voiceFromLib ? voiceFromLib : null),
                 matchedBy: m.matchedBy || 'fuzzy',
               });
               continue;
@@ -999,6 +1022,7 @@ export default function ClickUpPilotPage() {
               // Confirma que avatar ainda existe na biblioteca
               const candFull = avatarCandidates.find(c => c.id === recalled.avatarId);
               if (candFull) {
+                const avMem = recallAvatarVoice(recalled.avatarId);
                 roleSlots.push({
                   role: av.role,
                   username: av.username,
@@ -1007,7 +1031,7 @@ export default function ClickUpPilotPage() {
                   avatarName: recalled.avatarName,
                   avatarThumb: candFull.thumb || null,
                   avatarVoiceId: recalled.voiceId,
-                  voiceOverride: null,
+                  voiceOverride: avMem ? { id: avMem.voiceId, name: avMem.voiceName } : null,
                   matchedBy: 'memory',
                 });
                 continue;
@@ -2254,7 +2278,22 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     setTaskAnalyses((prev) => {
       const a = prev[taskId];
       if (!a?.roleSlots) return prev;
+      const prevSlot = a.roleSlots[roleIdx];
       const newSlots = a.roleSlots.map((s, i) => i === roleIdx ? { ...s, ...patch } : s);
+      // MEMORIA AVATAR → VOZ: se o user trocou o AVATAR (e nao mexeu na voz
+      // no mesmo patch) e ja existe voz lembrada pra esse avatar, ja traz
+      // a voz de volta automaticamente (pode trocar depois normalmente).
+      const avatarChanged =
+        'avatarId' in patch && patch.avatarId && patch.avatarId !== prevSlot?.avatarId;
+      if (avatarChanged && !('voiceOverride' in patch)) {
+        const mem = recallAvatarVoice(patch.avatarId!);
+        if (mem) {
+          newSlots[roleIdx] = {
+            ...newSlots[roleIdx],
+            voiceOverride: { id: mem.voiceId, name: mem.voiceName },
+          };
+        }
+      }
       const allHaveAvatar = newSlots.every((s) => s.avatarId);
       const updated = newSlots[roleIdx];
       // Salva memoria: voz usada (override OU padrao do avatar) → avatarId
@@ -2267,6 +2306,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           avatarId: updated.avatarId,
           avatarName: updated.avatarName,
         });
+      }
+      // Memoria direta avatar → voz escolhida (override). Atualiza sempre
+      // que houver avatar + voz override definidos.
+      if (updated.avatarId && updated.voiceOverride?.id) {
+        rememberAvatarVoice(updated.avatarId, updated.voiceOverride.id, updated.voiceOverride.name || '');
       }
       return { ...prev, [taskId]: { ...a, roleSlots: newSlots, status: allHaveAvatar ? 'ready' : 'partial' } };
     });
@@ -2354,13 +2398,6 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     if (!plan || plan.parts.some((p: any) => !p.avatarId)) {
       setError(`Tem avatar sem selecionar. Click no slot e escolhe.`);
       return;
-    }
-    // Se ja foi disparada antes, confirma
-    if (a.dispatchedAt) {
-      const when = new Date(a.dispatchedAt).toLocaleString('pt-BR');
-      if (!confirm(`Esta task foi disparada antes em ${when}.\n\nVai disparar de novo? (vai criar mais ${plan.parts.length} videos no HeyGen)`)) {
-        return;
-      }
     }
     const handoff = {
       adName: plan.adName,
@@ -3737,7 +3774,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                         className="mono rounded border border-lime bg-lime/20 px-3 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30"
                                         title="Only Magnific: enfileira so os B-Rolls dessa task (sem HeyGen). Fila serial 1/vez automatica. Cole o JSON antes."
                                       >
-                                        🍌 {a.dispatchedAt ? 'Disparar de novo' : 'Disparar'}
+                                        🍌 Disparar
                                       </button>
                                     ) : (
                                       <button
@@ -3745,13 +3782,9 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                         onClick={() => moreMagnificMode ? dispatchTaskToMagnific(a.taskId) : dispatchTaskToHeyGen(a.taskId)}
                                         disabled={a.status === 'partial'}
                                         className="mono rounded border border-lime bg-lime/20 px-3 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30 disabled:opacity-40"
-                                        title={a.status === 'partial'
-                                          ? 'Tem avatar pendente — escolhe um abaixo'
-                                          : moreMagnificMode
-                                            ? 'More Magnific: dispara HeyGen dessa task + enfileira B-Rolls (so apos o HeyGen dela). Serial automatico. Cole o JSON antes.'
-                                            : (a.dispatchedAt ? 'Ja disparada antes — vai pedir confirmacao' : 'Abre HeyGen Auto Dynamic com tudo pre-preenchido')}
+                                        title={a.status === 'partial' ? 'Tem avatar pendente — escolhe um abaixo' : 'Disparar'}
                                       >
-                                        ▶ {a.dispatchedAt ? 'Disparar de novo' : 'Disparar'}
+                                        ▶ Disparar
                                       </button>
                                     )}
                                   </div>
@@ -4013,11 +4046,6 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                 <div className="mt-1 grid gap-1 text-text-muted">
                                   <div className="mono text-[10px] flex flex-wrap items-center gap-2">
                                     <span>{a.totalParts} takes ({a.hookCount} hook{(a.hookCount ?? 0) === 1 ? '' : 's'} + {a.bodyPartsCount} body split{(a.bodyPartsCount ?? 0) === 1 ? '' : 's'}){onlyMagnificMode ? ' — só copy (B-Rolls)' : ' — Avatar III'}</span>
-                                    {a.dispatchedAt ? (
-                                      <span className="rounded-full border border-fuchsia-500/40 bg-fuchsia-500/10 px-2 py-0.5 text-fuchsia-300">
-                                        ⚠ ja disparada {new Date(a.dispatchedAt).toLocaleDateString('pt-BR')}
-                                      </span>
-                                    ) : null}
                                   </div>
                                   {/* Only Magnific: nao gera lipsync — avatares ignorados,
                                    *  so a copy do doc importa. RoleSlots escondidos. */}
