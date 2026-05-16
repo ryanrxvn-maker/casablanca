@@ -1028,7 +1028,9 @@ export default function ClickUpPilotPage() {
             for (const sid of siblings) {
               next[sid] = {
                 ...prev[sid],
-                status: allHaveAvatar ? 'ready' : 'partial',
+                // Only Magnific nao gera lipsync — avatares sao irrelevantes,
+                // basta a copy do doc. Marca ready mesmo sem avatar.
+                status: onlyMagnificMode || allHaveAvatar ? 'ready' : 'partial',
                 baseAdId,
                 hookCount: briefing.hooks.length,
                 bodyPartsCount: bodyParts.length,
@@ -2096,6 +2098,37 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     setError(null);
     for (const sid of getSiblingTaskIds(taskId)) markDispatched(sid);
     void runTaskInBackground(taskId);
+  }
+
+  /** Copia SO o body da copy dessa task pro clipboard (sem hooks). Body =
+   *  partTemplates com label BODY/PARTE (ou bodyText da VA). Util pro user
+   *  gerar os prompts de B-roll a partir so do corpo do roteiro. */
+  const [copiedBodyTask, setCopiedBodyTask] = useState<string | null>(null);
+  async function copyTaskBody(taskId: string) {
+    const a = taskAnalyses[taskId];
+    if (!a) return;
+    let body = '';
+    if (a.vaBriefing?.bodyText) {
+      body = a.vaBriefing.bodyText.trim();
+    } else {
+      const bodyParts = (a.partTemplates || [])
+        .filter((p) => /^(BODY|PARTE)\b/i.test(p.label.trim()))
+        .map((p) => p.text.trim())
+        .filter(Boolean);
+      body = bodyParts.join('\n\n');
+    }
+    if (!body) {
+      setError('Essa task nao tem body identificado na copy (so hooks?).');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(body);
+      setError(null);
+      setCopiedBodyTask(taskId);
+      setTimeout(() => setCopiedBodyTask((cur) => (cur === taskId ? null : cur)), 1800);
+    } catch {
+      setError('Nao consegui copiar pro clipboard (permissao do browser).');
+    }
   }
 
   async function autoFetchDoc(url: string) {
@@ -3317,50 +3350,55 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                 ) : (a.status === 'ready' || a.status === 'partial') ? (
                                   <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                                     {(onlyMagnificMode || moreMagnificMode) ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => setMagnificEditorOpen((p) => ({ ...p, [a.taskId]: !p[a.taskId] }))}
-                                        className={`mono rounded border px-2 py-1 text-[10px] uppercase tracking-widest ${
-                                          (taskMagnificJson[a.taskId] || '').trim()
-                                            ? 'border-lime/60 bg-lime/15 text-lime hover:bg-lime/25'
-                                            : 'border-cyan-500/50 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20'
-                                        }`}
-                                        title="Cola aqui o JSON de B-rolls dessa task (caixa inline — nao troca de tela)"
-                                      >
-                                        {(taskMagnificJson[a.taskId] || '').trim() ? '＋ JSON ✓' : '＋ JSON'}
-                                      </button>
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => copyTaskBody(a.taskId)}
+                                          className="mono rounded border border-fuchsia-500/50 bg-fuchsia-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20"
+                                          title="Copia SO o body da copy (sem hooks) — pra gerar os prompts de B-roll"
+                                        >
+                                          {copiedBodyTask === a.taskId ? '✓ copiado' : '⧉ Body'}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setMagnificEditorOpen((p) => ({ ...p, [a.taskId]: !p[a.taskId] }))}
+                                          className={`mono rounded border px-2 py-1 text-[10px] uppercase tracking-widest ${
+                                            (taskMagnificJson[a.taskId] || '').trim()
+                                              ? 'border-lime/60 bg-lime/15 text-lime hover:bg-lime/25'
+                                              : 'border-cyan-500/50 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20'
+                                          }`}
+                                          title="Cola aqui o JSON de B-rolls dessa task (caixa inline — nao troca de tela)"
+                                        >
+                                          {(taskMagnificJson[a.taskId] || '').trim() ? '＋ JSON ✓' : '＋ JSON'}
+                                        </button>
+                                      </>
                                     ) : null}
+                                    {/* Disparo unico inteligente — respeita o toggle. A regra
+                                     *  de 1 Magnific por vez e AUTOMATICA (fila serial), nao
+                                     *  depende de botao. */}
                                     {onlyMagnificMode ? (
                                       <button
                                         type="button"
                                         onClick={() => dispatchTaskToMagnific(a.taskId)}
                                         className="mono rounded border border-lime bg-lime/20 px-3 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30"
-                                        title="Pula HeyGen — enfileira B-Rolls Magnific dessa task (invisivel, fila serial). Cole o JSON no botao + antes."
+                                        title="Only Magnific: enfileira so os B-Rolls dessa task (sem HeyGen). Fila serial 1/vez automatica. Cole o JSON antes."
                                       >
-                                        🍌 Magnific only
+                                        🍌 {a.dispatchedAt ? 'Disparar de novo' : 'Disparar'}
                                       </button>
                                     ) : (
-                                      <>
-                                        <button
-                                          type="button"
-                                          onClick={() => dispatchTaskToHeyGen(a.taskId)}
-                                          disabled={a.status === 'partial'}
-                                          className="mono rounded border border-lime bg-lime/20 px-3 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30 disabled:opacity-40"
-                                          title={a.status === 'partial' ? 'Tem avatar pendente — escolhe um abaixo' : (a.dispatchedAt ? 'Ja disparada antes — vai pedir confirmacao' : 'Abre HeyGen Auto Dynamic com tudo pre-preenchido')}
-                                        >
-                                          ▶ {a.dispatchedAt ? 'Disparar de novo' : 'Disparar'}
-                                        </button>
-                                        {moreMagnificMode ? (
-                                          <button
-                                            type="button"
-                                            onClick={() => dispatchTaskToMagnific(a.taskId)}
-                                            className="mono rounded border border-cyan-500/60 bg-cyan-500/15 px-3 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25"
-                                            title="Dispara HeyGen Auto dessa task + enfileira B-Rolls Magnific (so roda apos o HeyGen dela concluir). Cole o JSON no botao + antes."
-                                          >
-                                            ➕ B-Rolls
-                                          </button>
-                                        ) : null}
-                                      </>
+                                      <button
+                                        type="button"
+                                        onClick={() => moreMagnificMode ? dispatchTaskToMagnific(a.taskId) : dispatchTaskToHeyGen(a.taskId)}
+                                        disabled={a.status === 'partial'}
+                                        className="mono rounded border border-lime bg-lime/20 px-3 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30 disabled:opacity-40"
+                                        title={a.status === 'partial'
+                                          ? 'Tem avatar pendente — escolhe um abaixo'
+                                          : moreMagnificMode
+                                            ? 'More Magnific: dispara HeyGen dessa task + enfileira B-Rolls (so apos o HeyGen dela). Serial automatico. Cole o JSON antes.'
+                                            : (a.dispatchedAt ? 'Ja disparada antes — vai pedir confirmacao' : 'Abre HeyGen Auto Dynamic com tudo pre-preenchido')}
+                                      >
+                                        ▶ {a.dispatchedAt ? 'Disparar de novo' : 'Disparar'}
+                                      </button>
                                     )}
                                   </div>
                                 ) : null}
@@ -3620,14 +3658,20 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                               ) : a.status === 'ready' || a.status === 'partial' ? (
                                 <div className="mt-1 grid gap-1 text-text-muted">
                                   <div className="mono text-[10px] flex flex-wrap items-center gap-2">
-                                    <span>{a.totalParts} takes ({a.hookCount} hook{(a.hookCount ?? 0) === 1 ? '' : 's'} + {a.bodyPartsCount} body split{(a.bodyPartsCount ?? 0) === 1 ? '' : 's'}) — Avatar III</span>
+                                    <span>{a.totalParts} takes ({a.hookCount} hook{(a.hookCount ?? 0) === 1 ? '' : 's'} + {a.bodyPartsCount} body split{(a.bodyPartsCount ?? 0) === 1 ? '' : 's'}){onlyMagnificMode ? ' — só copy (B-Rolls)' : ' — Avatar III'}</span>
                                     {a.dispatchedAt ? (
                                       <span className="rounded-full border border-fuchsia-500/40 bg-fuchsia-500/10 px-2 py-0.5 text-fuchsia-300">
                                         ⚠ ja disparada {new Date(a.dispatchedAt).toLocaleDateString('pt-BR')}
                                       </span>
                                     ) : null}
                                   </div>
-                                  {/* RoleSlots — UM por avatar do briefing, mesmo se sem match */}
+                                  {/* Only Magnific: nao gera lipsync — avatares ignorados,
+                                   *  so a copy do doc importa. RoleSlots escondidos. */}
+                                  {onlyMagnificMode ? (
+                                    <div className="mt-1.5 rounded-[10px] border border-lime/30 bg-lime/5 px-3 py-2 mono text-[10px] uppercase tracking-widest text-lime">
+                                      🍌 Only Magnific — avatares ignorados, so a copy do doc e usada (sem HeyGen)
+                                    </div>
+                                  ) : (
                                   <div className="mt-1.5 grid gap-2">
                                     <div className="mono text-[9px] uppercase tracking-widest text-text-muted">
                                       Avatares ({a.roleSlots.length}) — selecione cada um e a voz
@@ -3863,6 +3907,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       + adicionar avatar manualmente
                                     </button>
                                   </div>
+                                  )}
                                 </div>
                               ) : null}
                               {a.status === 'error' ? (
