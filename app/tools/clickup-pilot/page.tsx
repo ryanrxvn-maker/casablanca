@@ -219,17 +219,32 @@ type TaskAnalysis = {
 };
 
 /**
- * Extrai SO o body falado (roteiro) — corta tudo que vem depois do corpo:
- * seção de variações de hook ("Guia N", "AD03/AD07/..."), referências de
- * B-roll ("Tela dividida", "Take logo..."), e qualquer link (Drive/TikTok).
- * O parser concatena esse lixo no body cru; aqui limpamos pro botao "Body".
+ * Extrai SO o body falado (roteiro) do doc DARKO.
+ *
+ * Estrutura do doc (ver print): headers de variação ("AD15G2VN - PRPB06 -
+ * ..."), hooks destacados, depois um marcador "BODY", o roteiro, e por fim
+ * "Guia N" / "Tela dividida" / "Take logo..." / links de Drive/TikTok.
+ *
+ * Estrategia certeira: (1) se houver marcador "BODY", começa logo APOS ele
+ * (descarta tudo antes — headers + hooks); (2) corta na primeira ocorrencia
+ * de qualquer marcador de fim (Guia/ADdd/Tela dividida/Take/URL), inclusive
+ * colado no fim da ultima frase ("...pra ver. Guia 4"); (3) limpa linhas
+ * residuais de URL/ref.
  */
 function extractSpokenBody(raw: string): string {
   let s = (raw || '').replace(/\r/g, '');
-  // Marcadores que indicam FIM do body falado e inicio de guia/referencias.
-  // Corta na ocorrencia mais cedo de qualquer um deles.
-  // Tokens fim-de-body — podem vir colados no fim da ultima frase
-  // ("...pra ver. Guia 4"), entao NAO exigimos inicio de linha.
+  // (1) Ancora no inicio: tudo APOS o ultimo marcador "BODY" isolado
+  //     (linha "BODY" ou "BODY:"). Body falado nunca tem essa linha.
+  const bodyMarkerRe = /(?:^|\n)[ \t]*BODY[ \t]*:?[ \t]*(?:\n|$)/gi;
+  let bm: RegExpExecArray | null;
+  let lastBodyEnd = -1;
+  while ((bm = bodyMarkerRe.exec(s)) !== null) {
+    lastBodyEnd = bm.index + bm[0].length;
+  }
+  if (lastBodyEnd >= 0) s = s.slice(lastBodyEnd);
+  // (2) Marcadores que indicam FIM do body falado e inicio de guia/refs.
+  //     Corta na ocorrencia mais cedo de qualquer um deles. Podem vir
+  //     colados no fim da ultima frase, entao NAO exigimos inicio de linha.
   const markers: RegExp[] = [
     /\bGuia\s*\d/i,
     /\bAD\s?\d{2,}\b/,
