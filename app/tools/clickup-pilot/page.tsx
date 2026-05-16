@@ -66,6 +66,11 @@ import {
   pruneStaleJobCommands,
   type JobCommand,
 } from '@/lib/job-commands';
+import {
+  getHeyGenSlowMode,
+  setHeyGenSlowMode,
+  heygenDispatchParams,
+} from '@/lib/heygen-slow-mode';
 
 /**
  * ClickUp Pilot — cerebro de automacao
@@ -303,6 +308,15 @@ export default function ClickUpPilotPage() {
   /** More Magnific: alem do HeyGen normal, gera B-Rolls extras Magnific pra complementar.
    *  Adiciona pasta /broll/ no ZIP final com takes Kling 2.5. */
   const [moreMagnificMode, setMoreMagnificMode] = useToolState<boolean>('clickup-pilot:moreMagnific', false);
+
+  /** SLOW MODE (so HeyGen) — espaca o disparo p/ continuar gerando sob o
+   *  limite. Persistido em localStorage (compartilhado com heygen-auto). */
+  const [heygenSlowMode, setHeygenSlowModeState] = useState(false);
+  useEffect(() => { setHeygenSlowModeState(getHeyGenSlowMode()); }, []);
+  const toggleHeygenSlowMode = (v: boolean) => {
+    setHeyGenSlowMode(v);
+    setHeygenSlowModeState(v);
+  };
 
   /** JSON de B-rolls colado por task (caixa "+" inline). Persistido em
    *  localStorage (sobrevive reload), separado por taskId. */
@@ -1280,8 +1294,10 @@ export default function ClickUpPilotPage() {
         voiceId: p.voiceId,
         motor: motorsPerPart[i], // <-- override per job
       }));
+      const slowParams = heygenDispatchParams(heygenSlowMode);
       const results = await runHeyGenJobs(jobs, {
-        parallel: 3,
+        parallel: slowParams.parallel,
+        dispatchDelayMs: slowParams.dispatchDelayMs,
         mode: 'copy',
         avatarId: plan.parts[0]?.avatarId || '',
         voiceId: undefined,
@@ -1704,7 +1720,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           : null,
       );
       const queue = [...ready];
-      const PARALLEL = 2;
+      const PARALLEL = heygenSlowMode ? 1 : 2;
       const workers: Promise<void>[] = [];
       for (let i = 0; i < PARALLEL; i++) {
         workers.push((async () => {
@@ -1727,7 +1743,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     setError(null);
     // Dispara em paralelo (max 2 — cada uma usa 3 workers internos)
     const queue = [...ready];
-    const PARALLEL = 2;
+    const PARALLEL = heygenSlowMode ? 1 : 2;
     const workers: Promise<void>[] = [];
     for (let i = 0; i < PARALLEL; i++) {
       workers.push((async () => {
@@ -3074,6 +3090,14 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                     hint="HeyGen + B-Rolls extras Magnific"
                     variant="cyan"
                     icon={<span className="text-base">➕</span>}
+                  />
+                  <Toggle3D
+                    on={heygenSlowMode}
+                    onChange={toggleHeygenSlowMode}
+                    label="Slow Mode"
+                    hint="≈50% mais lento no HeyGen — fura o limite diario (so HeyGen)"
+                    variant="cyan"
+                    icon={<span className="text-base">🐢</span>}
                   />
                 </div>
 

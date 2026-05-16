@@ -337,6 +337,11 @@ export default function AutoBrollPage() {
               onRaw={(v) => patchJob(job.id, { raw: v })}
               onRun={() => runJob(job)}
               onCancel={() => cancelJob(job.id)}
+              onDebug={() => {
+                if (!confirm(`DEBUG: reiniciar "${job.name || 'job ' + (idx + 1)}" do ZERO?\n\nAborta o atual e recria num space novo.`)) return;
+                abortRefs.current[job.id]?.abort();
+                setTimeout(() => runJob(job), 300);
+              }}
               onRemove={() => removeJob(job.id)}
               onDownload={() => downloadZip(job)}
               onOpenSpace={() => openSpace3D(job)}
@@ -379,6 +384,7 @@ function JobCard({
   onRaw,
   onRun,
   onCancel,
+  onDebug,
   onRemove,
   onDownload,
   onOpenSpace,
@@ -392,6 +398,7 @@ function JobCard({
   onRaw: (v: string) => void;
   onRun: () => void;
   onCancel: () => void;
+  onDebug: () => void;
   onRemove: () => void;
   onDownload: () => void;
   onOpenSpace: () => void;
@@ -492,6 +499,15 @@ function JobCard({
             Disparar {takesCount || 0} take{takesCount === 1 ? '' : 's'}
           </button>
         )}
+        <button
+          type="button"
+          onClick={onDebug}
+          disabled={!extConnected || takesCount === 0}
+          className="mono rounded-md border border-fuchsia-500/50 bg-fuchsia-500/10 px-3 py-1.5 text-[11px] uppercase tracking-widest text-fuchsia-200 transition hover:bg-fuchsia-500/20 disabled:opacity-40"
+          title="DEBUG (reserva p/ bugs/loop): aborta o atual e recria do ZERO num space novo"
+        >
+          🐞 Debug
+        </button>
         {job.zip && (
           <button type="button" onClick={onDownload} className="btn-secondary">
             Baixar {job.zip.name} ({(job.zip.blob.size / 1024 / 1024).toFixed(1)} MB)

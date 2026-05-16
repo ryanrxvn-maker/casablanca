@@ -7,6 +7,7 @@ import { CancelButton } from '@/components/CancelButton';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { Toggle3D } from '@/components/Toggle3D';
+import { getHeyGenSlowMode, setHeyGenSlowMode, heygenDispatchParams } from '@/lib/heygen-slow-mode';
 import { extractAudio, muxAudioIntoVideo } from '@/lib/ffmpeg-worker';
 import { camuflar } from '@/lib/camuflagem';
 import {
@@ -68,6 +69,10 @@ export default function HeyGenAutoPage() {
     connected: false,
   });
   const [extLoading, setExtLoading] = useState(true);
+  /** SLOW MODE (so HeyGen) — compartilhado com o ClickUp Pilot. */
+  const [slowMode, setSlowModeState] = useState(false);
+  useEffect(() => { setSlowModeState(getHeyGenSlowMode()); }, []);
+  const toggleSlowMode = (v: boolean) => { setHeyGenSlowMode(v); setSlowModeState(v); };
 
   const [adName, setAdName] = useToolState<string>('hgauto:adName', '');
   const [motor, setMotor] = useToolState<Motor>('hgauto:motor', 'IV');
@@ -667,8 +672,10 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
       const jobsWithMotor = jobs.map((j, i) => ({ ...j, motor: motorsPerPart[i] }));
 
       const collected: PartResult[] = [];
+      const slowP = heygenDispatchParams(slowMode);
       const finalResults = await runHeyGenJobs(jobsWithMotor, {
-        parallel: 3,
+        parallel: slowP.parallel,
+        dispatchDelayMs: slowP.dispatchDelayMs,
         mode,
         avatarId: selectedAvatar.id,
         voiceId:
@@ -705,6 +712,16 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
               mesmo sem ter vindo do ClickUp Pilot */}
           <div className="mb-5">
             <JobControlPanel scopes={['heygen']} />
+          </div>
+          <div className="mb-5 sm:max-w-xs">
+            <Toggle3D
+              on={slowMode}
+              onChange={toggleSlowMode}
+              label="Slow Mode"
+              hint="≈50% mais lento — fura o limite diario do HeyGen"
+              variant="cyan"
+              icon={<span className="text-base">🐢</span>}
+            />
           </div>
           {/* Status da extensao */}
           {!extLoading ? (

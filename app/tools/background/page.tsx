@@ -152,6 +152,8 @@ export default function BackgroundTasksPage() {
   const [cancelMap, setCancelMap] = useState<Record<string, number>>({});
   const [magnific, setMagnific] = useState<Record<string, MagnificJob>>({});
   const [tick, setTick] = useState(0);
+  /** Filtro de tipo: tudo | so lipsync (HeyGen) | so b-rolls (Magnific) */
+  const [typeFilter, setTypeFilter] = useState<'all' | 'lip' | 'broll'>('all');
 
   useEffect(() => {
     setBatches(readBatches());
@@ -273,7 +275,31 @@ export default function BackgroundTasksPage() {
           </div>
         </div>
 
-        {sorted.length === 0 ? (
+        {/* Filtro de tipo — separa lipsync (HeyGen) de b-rolls (Magnific) */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="mono text-[10px] uppercase tracking-widest text-text-muted">Mostrar:</span>
+          {([
+            { k: 'all', label: 'Tudo' },
+            { k: 'lip', label: '🎙 Lipsync (HeyGen)' },
+            { k: 'broll', label: '🍌 B-Rolls (Magnific)' },
+          ] as const).map((opt) => (
+            <button
+              key={opt.k}
+              type="button"
+              onClick={() => setTypeFilter(opt.k)}
+              className={
+                'mono rounded-md border px-3 py-1.5 text-[10px] uppercase tracking-widest transition ' +
+                (typeFilter === opt.k
+                  ? 'border-lime bg-lime/15 text-lime'
+                  : 'border-line-strong text-text-muted hover:border-lime/50 hover:text-lime')
+              }
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {typeFilter === 'broll' ? null : sorted.length === 0 ? (
           <div className="rounded-[14px] border border-dashed border-line-strong bg-bg-soft/20 p-12 text-center">
             <div className="mono text-[11px] uppercase tracking-widest text-text-muted">
               Nenhuma batch task em andamento
@@ -428,7 +454,7 @@ export default function BackgroundTasksPage() {
         )}
 
         {/* Fila Magnific B-Rolls — serial 1/vez */}
-        {Object.keys(magnific).length > 0 ? (
+        {typeFilter !== 'lip' && Object.keys(magnific).length > 0 ? (
           <div className="rounded-[14px] border border-lime/40 bg-lime/5 p-4">
             <div className="mono mb-3 text-[11px] uppercase tracking-widest text-lime">
               🍌 Fila Magnific B-Rolls ({Object.keys(magnific).length}) · serial 1 por vez
