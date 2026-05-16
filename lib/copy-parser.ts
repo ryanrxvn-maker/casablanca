@@ -575,6 +575,79 @@ export type ParsedDarkoBriefing = {
  * Retorna estrutura pronta pra dispatch: hooks como takes individuais + body
  * como bloco unico (ClickUp Pilot vai split em parts via splitCopyIntoParts).
  */
+/**
+ * SANITIZADOR AUTORITATIVO da fala (hook/body) — fonte unica de verdade.
+ *
+ * O briefing DARKO mistura, depois do roteiro falado, blocos que NAO sao
+ * fala: nomenclatura do proximo AD ("AD15G2VN - PRPB06 - ..."), "Tela
+ * dividida" + dezenas de links do Drive/TikTok, "Take logo de inicio",
+ * "Guia N", "Link do avatar:", "Instruções para edição:". Antes isso
+ * vazava pro body e era LIDO pelo avatar (links recitados). Aqui cortamos
+ * tudo isso de forma deterministica.
+ *
+ * Estrategia:
+ *  1) Se houver marcador "BODY" isolado, comeca DEPOIS do ultimo.
+ *  2) Corta na 1a ocorrencia de qualquer marcador de fim-de-fala
+ *     (nomenclatura ADxGx, Guia N, Tela dividida, Take logo/de inicio,
+ *     URL, Link do avatar:, Instruções para edição:), inclusive colado
+ *     no fim da ultima frase ("...pra ver. Guia 4").
+ *  3) Remove linhas residuais: URLs, "Tela dividida", "Link do avatar:",
+ *     "Instruções...", linhas SO de role (Mulher:/Homem:/Doutor:/etc),
+ *     mention solo (@x.mp4) e marcadores [a-z].
+ *  4) Normaliza espacos.
+ */
+export function sanitizeSpokenCopy(raw: string): string {
+  let s = (raw || '').replace(/\r/g, '');
+
+  // (1) ancora no ultimo "BODY" isolado (linha "BODY" ou "BODY:")
+  const bodyMarkerRe = /(?:^|\n)[ \t]*BODY[ \t]*:?[ \t]*(?:\n|$)/gi;
+  let bm: RegExpExecArray | null;
+  let lastBodyEnd = -1;
+  while ((bm = bodyMarkerRe.exec(s)) !== null) lastBodyEnd = bm.index + bm[0].length;
+  if (lastBodyEnd >= 0) s = s.slice(lastBodyEnd);
+
+  // (2) corta no 1o marcador de fim-de-fala (pode vir colado no texto)
+  const endMarkers: RegExp[] = [
+    /\bAD\d{1,5}[A-Z0-9]*\s*-\s*[A-Z]{2,}\d*/, // nomenclatura ("AD15G2VN - PRPB06")
+    /\bGuia\s*\d/i,
+    /Tela\s*dividida/i,
+    /Take\s+(?:logo|de\s+in[íi]cio)/i,
+    /https?:\/\//i,
+    /\bwww\.[a-z0-9-]+\./i,
+    /drive\.google\.com/i,
+    /tiktok\.com/i,
+    /Link\s+do\s+avatar\s*:/i,
+    /Instru[cç][õo]es\s+para\s+edi[cç][aã]o\s*:/i,
+  ];
+  let cut = s.length;
+  for (const re of endMarkers) {
+    const m = s.match(re);
+    if (m && m.index !== undefined && m.index < cut) cut = m.index;
+  }
+  s = s.slice(0, cut);
+
+  // (3) limpa linhas residuais que nao sao fala
+  s = s
+    .split('\n')
+    .filter((l) => {
+      const t = l.trim();
+      if (!t) return true; // preserva paragrafos
+      if (/(https?:\/\/|\bwww\.[a-z0-9-]+\.|drive\.google\.com|tiktok\.com)/i.test(t)) return false;
+      if (/Tela\s*dividida/i.test(t)) return false;
+      if (/^(Link\s+do\s+avatar|Instru[cç][õo]es)\s*[:\-]/i.test(t)) return false;
+      // linha SO role (Mulher:/Homem:/Doutor:/Depoimento:/Entrevistador:/etc)
+      if (/^[A-Za-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ]+){0,2}\s*:\s*$/.test(t)) return false;
+      // mention solo (@x.mp4)
+      if (/^@[\w._-]+(?:\.(?:mp4|mov))?\s*$/i.test(t)) return false;
+      return true;
+    })
+    .join('\n')
+    .replace(/\s*\[[a-z]{1,3}\]/gi, ''); // marcadores [a]/[abc]
+
+  // (4) normaliza
+  return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 export function parseDarkoBriefing(fullDocText: string, baseAdId: string): ParsedDarkoBriefing | null {
   const baseSection = findAdSection(fullDocText, baseAdId);
   if (!baseSection) return null;
@@ -597,18 +670,24 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string): Parse
     // Hook num = sourceG (G1 → HOOK 1, G2 → HOOK 2, etc). Garante alinhamento
     // 1:1 com a nomenclatura do briefing — NUNCA infla a contagem de hooks.
     if (parsed.hook) {
-      hooks.push({
-        label: `HOOK ${sib.gNum}`,
-        text: parsed.hook.text,
-        sourceG: sib.gNum,
-        role: parsed.hook.role,
-      });
+      const hookText = sanitizeSpokenCopy(parsed.hook.text);
+      if (hookText) {
+        hooks.push({
+          label: `HOOK ${sib.gNum}`,
+          text: hookText,
+          sourceG: sib.gNum,
+          role: parsed.hook.role,
+        });
+      }
     }
     // Body geralmente esta no ultimo sibling. Sobrescreve pra pegar o ultimo
     // (caso mais de um sibling tenha body — improvavel mas seguro).
     if (parsed.body) {
-      body = parsed.body.text;
-      bodyRole = parsed.body.role;
+      const bodyText = sanitizeSpokenCopy(parsed.body.text);
+      if (bodyText) {
+        body = bodyText;
+        bodyRole = parsed.body.role;
+      }
     }
   }
   return {

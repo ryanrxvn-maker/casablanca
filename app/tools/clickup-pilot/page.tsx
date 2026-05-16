@@ -22,6 +22,7 @@ import {
   matchAvatar,
   isVATask,
   parseVABriefing,
+  sanitizeSpokenCopy,
   extractAvaNumsFromTaskName,
   type ParsedAdSection,
   type ParsedDarkoBriefing,
@@ -230,55 +231,13 @@ type TaskAnalysis = {
 };
 
 /**
- * Extrai SO o body falado (roteiro) do doc DARKO.
- *
- * Estrutura do doc (ver print): headers de variação ("AD15G2VN - PRPB06 -
- * ..."), hooks destacados, depois um marcador "BODY", o roteiro, e por fim
- * "Guia N" / "Tela dividida" / "Take logo..." / links de Drive/TikTok.
- *
- * Estrategia certeira: (1) se houver marcador "BODY", começa logo APOS ele
- * (descarta tudo antes — headers + hooks); (2) corta na primeira ocorrencia
- * de qualquer marcador de fim (Guia/ADdd/Tela dividida/Take/URL), inclusive
- * colado no fim da ultima frase ("...pra ver. Guia 4"); (3) limpa linhas
- * residuais de URL/ref.
+ * Extrai SO o body falado — delega pro sanitizador AUTORITATIVO do parser
+ * (lib/copy-parser:sanitizeSpokenCopy), MESMA logica usada no disparo.
+ * Fonte unica de verdade: o que o botao "copiar body" mostra e exatamente
+ * o que e enviado pro HeyGen.
  */
 function extractSpokenBody(raw: string): string {
-  let s = (raw || '').replace(/\r/g, '');
-  // (1) Ancora no inicio: tudo APOS o ultimo marcador "BODY" isolado
-  //     (linha "BODY" ou "BODY:"). Body falado nunca tem essa linha.
-  const bodyMarkerRe = /(?:^|\n)[ \t]*BODY[ \t]*:?[ \t]*(?:\n|$)/gi;
-  let bm: RegExpExecArray | null;
-  let lastBodyEnd = -1;
-  while ((bm = bodyMarkerRe.exec(s)) !== null) {
-    lastBodyEnd = bm.index + bm[0].length;
-  }
-  if (lastBodyEnd >= 0) s = s.slice(lastBodyEnd);
-  // (2) Marcadores que indicam FIM do body falado e inicio de guia/refs.
-  //     Corta na ocorrencia mais cedo de qualquer um deles. Podem vir
-  //     colados no fim da ultima frase, entao NAO exigimos inicio de linha.
-  const markers: RegExp[] = [
-    /\bGuia\s*\d/i,
-    /\bAD\s?\d{2,}\b/,
-    /Tela\s*dividida/i,
-    /Take\s+(?:logo|de\s+in[íi]cio)/i,
-    /https?:\/\//i,
-    /www\.[a-z0-9-]+\./i,
-    /drive\.google\.com/i,
-    /tiktok\.com/i,
-  ];
-  let cut = s.length;
-  for (const re of markers) {
-    const m = s.match(re);
-    if (m && m.index !== undefined && m.index < cut) cut = m.index;
-  }
-  s = s.slice(0, cut);
-  // Defensivo: remove qualquer linha residual que ainda tenha URL/ref.
-  s = s
-    .split('\n')
-    .filter((l) => !/(https?:\/\/|www\.[a-z0-9-]+\.|drive\.google\.com|tiktok\.com|Tela\s*dividida)/i.test(l))
-    .join('\n');
-  // Normaliza linhas em branco multiplas e espacos nas bordas.
-  return s.replace(/\n{3,}/g, '\n\n').trim();
+  return sanitizeSpokenCopy(raw);
 }
 
 export default function ClickUpPilotPage() {
