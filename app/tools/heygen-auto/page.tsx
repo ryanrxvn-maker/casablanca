@@ -8,6 +8,7 @@ import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { Toggle3D } from '@/components/Toggle3D';
 import { getHeyGenSlowMode, setHeyGenSlowMode, heygenDispatchParams } from '@/lib/heygen-slow-mode';
+import { upsertSharedBatch } from '@/lib/heygen-batch-store';
 import { extractAudio, muxAudioIntoVideo } from '@/lib/ffmpeg-worker';
 import { camuflar } from '@/lib/camuflagem';
 import {
@@ -181,6 +182,9 @@ export default function HeyGenAutoPage() {
   const [stage, setStage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const cancelRef = useRef<boolean>(false);
+  /** Id estavel desse run no store compartilhado de batches (espelho
+   *  pro lipsync-history/background/painel + Retomar via motor). */
+  const runBatchIdRef = useRef<string | null>(null);
 
   // Auto-download (polling + ZIP)
   const [downloading, setDownloading] = useState(false);
@@ -355,6 +359,8 @@ export default function HeyGenAutoPage() {
     downloadCancelRef.current = false;
     setDownloadStatuses({});
     setDownloadStage(`Aguardando renderizacao no HeyGen (${ready.length} partes)...`);
+    const bId = runBatchIdRef.current;
+    if (bId) upsertSharedBatch(bId, { phase: 'downloading', message: 'Renderizando + baixando no HeyGen...' });
 
     try {
       const ids = ready.map((r) => r.videoId!) ;
@@ -402,6 +408,13 @@ export default function HeyGenAutoPage() {
       setDownloadStage('Zipando takes...');
       const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
       const filename = `${safeName}_takes.zip`;
+      if (bId) {
+        try {
+          const { saveZip } = await import('@/lib/zip-store');
+          await saveZip(`batch:${bId}:takes`, blob, filename);
+          upsertSharedBatch(bId, { zipFilename: filename });
+        } catch (e) { console.warn('[heygen-auto] save takes IDB:', e); }
+      }
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -457,6 +470,13 @@ Items finais:
 ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'ERRO ('+it.errors.assemble+')' : 'OK'} | decupagem=${it.errors?.decupagem ? 'ERRO ('+it.errors.decupagem+')' : (it.decupado ? 'OK ('+(it.decupado.size/(1024*1024)).toFixed(1)+'MB)' : '?')}`).join('\n')}`);
           const blobMont = await zipMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
           pipeMontadoName = `${safeName}_montado_decupado.zip`;
+          if (bId) {
+            try {
+              const { saveZip } = await import('@/lib/zip-store');
+              await saveZip(`batch:${bId}:montado`, blobMont, pipeMontadoName);
+              upsertSharedBatch(bId, { montadoZipName: pipeMontadoName });
+            } catch (e) { console.warn('[heygen-auto] save montado IDB:', e); }
+          }
           pipeMontadoUrl = URL.createObjectURL(blobMont);
           // Auto-download
           const am = document.createElement('a');
@@ -506,6 +526,13 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
           }
           const blobCamu = await zipCamu.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
           const filenameCamu = `${safeName}_camuflado.zip`;
+          if (bId) {
+            try {
+              const { saveZip } = await import('@/lib/zip-store');
+              await saveZip(`batch:${bId}:camo`, blobCamu, filenameCamu);
+              upsertSharedBatch(bId, { camufladoZipName: filenameCamu });
+            } catch (e) { console.warn('[heygen-auto] save camo IDB:', e); }
+          }
           const urlCamu = URL.createObjectURL(blobCamu);
           const a2 = document.createElement('a');
           a2.href = urlCamu;
@@ -522,11 +549,16 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
         setDownloadStage(`✓ ZIP baixado: ${filename} (${(blob.size / (1024 * 1024)).toFixed(1)}MB)`);
       }
       setTimeout(() => setDownloadStage(null), 8000);
+      if (bId) upsertSharedBatch(bId, { phase: 'done', message: 'Pronto — ZIPs no disco (veja lipsync-history)', finishedAt: Date.now() });
     } catch (e) {
       setError(`Falha no download: ${(e as Error)?.message || e}`);
       setDownloadStage(null);
+      if (bId) upsertSharedBatch(bId, { phase: 'failed', message: `Falha no download: ${(e as Error)?.message || e}`, finishedAt: Date.now() });
     } finally {
       setDownloading(false);
+      if (bId && downloadCancelRef.current) {
+        upsertSharedBatch(bId, { phase: 'failed', message: 'Cancelado pelo user (download).', finishedAt: Date.now() });
+      }
       downloadCancelRef.current = false;
     }
   }
@@ -662,6 +694,28 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     setResults([]);
     setProcessing(true);
 
+    // Espelho no store compartilhado (lipsync-history/background/painel)
+    const batchId = `heygenauto:${safeName}:${Date.now()}`;
+    runBatchIdRef.current = batchId;
+    const mirrorParts = (collected: PartResult[]) =>
+      jobs.map((j, i) => {
+        const rr = collected.find((c) => c.index === i + 1);
+        return {
+          label: j.label,
+          videoId: rr?.videoId ?? null,
+          error: rr?.error ?? null,
+          renamedTo: `${j.label}.mp4`,
+        };
+      });
+    upsertSharedBatch(batchId, {
+      taskName: safeName,
+      baseAdId: safeName,
+      phase: 'dispatching',
+      parts: mirrorParts([]),
+      startedAt: Date.now(),
+      message: 'Disparando partes no HeyGen (heygen-auto)...',
+    });
+
     try {
       // Motor por job: usa motorConfig se ativo, senao cai pro motor global legacy
       const motorsPerPart = resolveMotors(motorConfig, jobs.length, {
@@ -689,13 +743,29 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
         onResult: (r) => {
           collected.push(r);
           setResults([...collected].sort((a, b) => a.index - b.index));
+          upsertSharedBatch(batchId, { parts: mirrorParts(collected) });
         },
       });
       setResults([...finalResults].sort((a, b) => a.index - b.index));
       setStage(null);
+      const okCount = finalResults.filter((r) => r.videoId).length;
+      upsertSharedBatch(batchId, {
+        phase: okCount > 0 ? 'rendering' : 'failed',
+        parts: mirrorParts(finalResults),
+        message:
+          okCount > 0
+            ? `${okCount}/${finalResults.length} disparados — clique "Baixar tudo" pra renderizar/baixar, ou Retomar depois.`
+            : 'Todos os disparos falharam (cota/limite HeyGen?). Use Retomar/Slow Mode.',
+        ...(okCount > 0 ? {} : { finishedAt: Date.now() }),
+      });
     } catch (e) {
       setError((e as Error).message ?? 'Falha desconhecida.');
       setStage(null);
+      upsertSharedBatch(batchId, {
+        phase: 'failed',
+        message: (e as Error).message ?? 'Falha desconhecida.',
+        finishedAt: Date.now(),
+      });
     } finally {
       setProcessing(false);
       cancelRef.current = false;
