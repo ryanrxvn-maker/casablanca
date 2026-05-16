@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
+import { JobControlPanel } from '@/components/JobControlPanel';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { CancelButton } from '@/components/CancelButton';
 import {
@@ -220,6 +221,9 @@ export default function AutoBrollPage() {
       description="Cole 1+ listas JSON (cada lista = 1 nicho = 1 job independente, com seu próprio Space). Roda 100% em segundo plano. Nano Banana 1K + Kling 2.5 720p — zero crédito."
     >
       <div className="grid gap-5">
+        {/* Controle da fila Magnific (Retomar/Pausar/Debug) — funciona
+            mesmo sem ter vindo do ClickUp Pilot */}
+        <JobControlPanel scopes={['magnific']} />
         {/* Extension status */}
         {extStatus.connected ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-3 text-sm">

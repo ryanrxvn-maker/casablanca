@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { ToolShell } from '@/components/ToolShell';
 import { loadZip, listZipKeys, deleteZip as deleteZipFromStore } from '@/lib/zip-store';
+import { sendJobCommand, navigateToEngine } from '@/lib/job-commands';
 
 /**
  * DARKO LAB Lipsync History — todos os lipsyncs feitos pela aplicacao,
@@ -497,6 +498,34 @@ export default function LipsyncHistoryPage() {
                       >
                         {isExpanded ? '▲ Menos' : '▼ Detalhes'}
                       </button>
+                      {e.kind === 'batch' ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => { sendJobCommand('heygen', (e.raw as BatchTaskState).taskId, 'retomar'); navigateToEngine(); }}
+                            className="mono rounded-md border border-cyan-500/60 bg-cyan-500/15 px-3 py-1.5 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25"
+                            title="Retomar no motor (abre o ClickUp Pilot e re-checa/baixa ou re-roda do zero)"
+                          >
+                            🔄 Retomar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => sendJobCommand('heygen', (e.raw as BatchTaskState).taskId, 'pausar')}
+                            className="mono rounded-md border border-yellow-500/50 bg-yellow-500/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-yellow-200 hover:bg-yellow-500/20"
+                            title="Pausar — sinaliza a aba que estiver rodando esse job"
+                          >
+                            ⏸ Pausar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { if (confirm(`DEBUG: reiniciar "${e.taskName}" do ZERO? Re-dispara tudo no HeyGen.`)) { sendJobCommand('heygen', (e.raw as BatchTaskState).taskId, 'debug'); navigateToEngine(); } }}
+                            className="mono rounded-md border border-fuchsia-500/50 bg-fuchsia-500/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20"
+                            title="DEBUG (reserva p/ bugs): reinicia a geracao de LIPS do zero no motor"
+                          >
+                            🐞 Debug
+                          </button>
+                        </>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => removeEntry(e)}

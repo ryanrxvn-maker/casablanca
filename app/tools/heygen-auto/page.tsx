@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
+import { JobControlPanel } from '@/components/JobControlPanel';
 import { CancelButton } from '@/components/CancelButton';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { useToolState } from '@/components/ToolsStateProvider';
@@ -700,6 +701,11 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
         title="HeyGen Auto Avatar"
         description="Automacao do HeyGen via extensao Chrome — gera o avatar parte por parte usando sua propria conta HeyGen (sem custo de API). Voce manda copy ou audios, recebe ZIP organizado por parte na ordem certa."
       >
+          {/* Controle de jobs HeyGen (Retomar/Pausar/Debug) — funciona
+              mesmo sem ter vindo do ClickUp Pilot */}
+          <div className="mb-5">
+            <JobControlPanel scopes={['heygen']} />
+          </div>
           {/* Status da extensao */}
           {!extLoading ? (
             extStatus.connected ? (

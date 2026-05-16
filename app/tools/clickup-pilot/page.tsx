@@ -60,6 +60,12 @@ import {
   saveMagnificJsonMap,
   type MagnificQueue,
 } from '@/lib/magnific-queue-runner';
+import {
+  readJobCommands,
+  clearJobCommand,
+  pruneStaleJobCommands,
+  type JobCommand,
+} from '@/lib/job-commands';
 
 /**
  * ClickUp Pilot — cerebro de automacao
@@ -1943,8 +1949,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   /** DEBUG (HeyGen lipsync) — reserva pra casos de bug: reinicia o processo
    *  de gerar os lips DESSA task do ZERO (re-dispatch completo). Aborta o
    *  run atual e recomeca limpo. */
-  function debugTaskBatch(taskId: string) {
-    if (!confirm('DEBUG: reiniciar a geracao de LIPS dessa task do zero?\n\nVai re-disparar TODAS as partes no HeyGen (cria videos novos).')) return;
+  function debugTaskBatch(taskId: string, skipConfirm = false) {
+    if (!skipConfirm && !confirm('DEBUG: reiniciar a geracao de LIPS dessa task do zero?\n\nVai re-disparar TODAS as partes no HeyGen (cria videos novos).')) return;
     batchCancelRef.current[taskId] = true;
     // Pequeno delay deixa o run atual (se houver) abortar antes do restart.
     setTimeout(() => { void runTaskInBackground(taskId); }, 300);
@@ -2038,10 +2044,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  image). Aborta o run atual e RE-ENFILEIRA do zero; ao rodar de novo
    *  o runMagnificPipeline cria um SPACE NOVO (nunca reusa existingSpaceId
    *  aqui), saindo do estado bugado. */
-  function debugMagnificJob(taskId: string) {
+  function debugMagnificJob(taskId: string, skipConfirm = false) {
     const job = magnificQueue[taskId];
     if (!job) return;
-    if (!confirm('DEBUG: reiniciar a geracao de takes dessa task do ZERO?\n\nAborta o processo atual e cria um SPACE NOVO no Magnific (sai de loop/bug).')) return;
+    if (!skipConfirm && !confirm('DEBUG: reiniciar a geracao de takes dessa task do ZERO?\n\nAborta o processo atual e cria um SPACE NOVO no Magnific (sai de loop/bug).')) return;
     stopActiveMagnificIfCurrent(taskId, 'debug');
     // Re-enfileira limpo. O processor pega quando nenhum outro estiver
     // rodando; runMagnificPipeline cria space novo automaticamente.
@@ -2061,6 +2067,52 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       setMagnificTick((t) => t + 1);
     }, 300);
   }
+
+  /** Handler dos comandos vindos de outras telas (lipsync-history,
+   *  heygen-auto, auto-broll) via command-bus. Ref atualizada a cada
+   *  render pra sempre fechar sobre o estado/funcoes ATUAIS (sem stale
+   *  closure no setInterval). */
+  const jobCmdHandlerRef = useRef<(c: JobCommand) => void>(() => {});
+  jobCmdHandlerRef.current = (c: JobCommand) => {
+    try {
+      if (c.scope === 'heygen') {
+        if (c.action === 'retomar') retomarTaskBatch(c.taskId);
+        else if (c.action === 'pausar') pausarTaskBatch(c.taskId);
+        else if (c.action === 'debug') debugTaskBatch(c.taskId, true);
+      } else {
+        if (c.action === 'retomar') resumeMagnificJob(c.taskId);
+        else if (c.action === 'pausar') pauseMagnificJob(c.taskId);
+        else if (c.action === 'debug') debugMagnificJob(c.taskId, true);
+      }
+    } catch (e) {
+      console.error('[job-commands] falha executando', c, e);
+    }
+  };
+
+  /** Consumidor do command-bus: o motor real (este componente) executa
+   *  Retomar/Pausar/Debug pedidos de qualquer tela. Mount + poll 1.5s +
+   *  storage event (cross-aba imediato). */
+  useEffect(() => {
+    const consume = () => {
+      const cmds = readJobCommands();
+      if (cmds.length === 0) return;
+      for (const c of cmds) {
+        jobCmdHandlerRef.current(c);
+        clearJobCommand(c.id);
+      }
+    };
+    pruneStaleJobCommands();
+    consume();
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'darkolab:clickup-pilot:commands') consume();
+    };
+    window.addEventListener('storage', onStorage);
+    const id = setInterval(consume, 1500);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      clearInterval(id);
+    };
+  }, []);
 
   function downloadZip(taskId: string) {
     const s = batchStates[taskId];
