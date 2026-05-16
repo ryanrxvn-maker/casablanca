@@ -48,26 +48,65 @@ export async function GET(req: Request) {
           preview_audio?: string;
           support_pause?: boolean;
           emotion_support?: boolean;
+          /** flags possiveis em vozes clonadas/custom (HeyGen varia o shape) */
+          is_custom?: boolean;
+          is_clone?: boolean;
+          voice_type?: string;
         }>;
       };
     } | null;
 
     const all = json?.data?.voices ?? [];
-    const filtered = all.filter((v) => {
-      const matchesLang = lang === 'all' || (v.language ?? '').toLowerCase().includes(lang) || (v.language ?? '').toLowerCase().includes('portu');
-      const matchesQ = !q || (v.name ?? '').toLowerCase().includes(q);
-      return matchesLang && matchesQ;
-    });
+    const norm = (x?: string) => (x ?? '').toLowerCase();
+    // Idioma NUNCA exclui — vozes clonadas/custom costumam vir como
+    // "English"/"Multilingual" e eram descartadas pelo filtro pt antigo,
+    // sumindo do DARKO LAB. Agora `lang` so afeta a ORDENACAO (preferencia)
+    // no modo browse (sem busca). Toda voz da conta HeyGen aparece.
+    const isClone = (v: (typeof all)[number]) =>
+      v.is_custom === true ||
+      v.is_clone === true ||
+      /clone|custom/i.test(v.voice_type ?? '');
+    const isPreferredLang = (v: (typeof all)[number]) => {
+      const l = norm(v.language);
+      return (
+        lang === 'all' ||
+        l.includes(lang) ||
+        l.includes('portu') ||
+        l.includes('multi')
+      );
+    };
+
+    // Busca: so por nome/id. SEM filtro de idioma.
+    let matched = all.filter(
+      (v) => !q || norm(v.name).includes(q) || norm(v.voice_id).includes(q),
+    );
+
+    // Modo browse (sem busca): mantem TODAS, mas sobe clonadas + idioma
+    // preferido pro topo pra ficar facil de achar.
+    if (!q) {
+      matched = [...matched].sort((a, b) => {
+        const ra = (isClone(a) ? 0 : 1) + (isPreferredLang(a) ? 0 : 2);
+        const rb = (isClone(b) ? 0 : 1) + (isPreferredLang(b) ? 0 : 2);
+        if (ra !== rb) return ra - rb;
+        return norm(a.name).localeCompare(norm(b.name));
+      });
+    }
+
+    // Cap alto — nenhuma conta HeyGen real chega perto disso. Garante que
+    // NENHUMA voz (incluindo clonadas) seja cortada silenciosamente.
+    const CAP = 1000;
 
     return NextResponse.json({
-      voices: filtered.slice(0, 100).map((v) => ({
+      voices: matched.slice(0, CAP).map((v) => ({
         id: v.voice_id,
         name: v.name,
         gender: v.gender ?? null,
         language: v.language ?? null,
         previewAudio: v.preview_audio ?? null,
+        isClone: isClone(v),
       })),
       total: all.length,
+      returned: Math.min(matched.length, CAP),
     });
   } catch (e) {
     console.error('[heygen voices]', e);
