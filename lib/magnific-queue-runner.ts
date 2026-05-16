@@ -22,6 +22,7 @@
 export type MagnificJobStatus =
   | 'queued'        // elegivel (ou aguardando gate) — ainda nao iniciou
   | 'running'       // pipeline Magnific rodando AGORA (so 1 por vez)
+  | 'paused'        // pausado pelo user — NAO elegivel ate Retomar
   | 'done'          // ZIP de takes pronto
   | 'failed';       // falhou apos tentativas
 

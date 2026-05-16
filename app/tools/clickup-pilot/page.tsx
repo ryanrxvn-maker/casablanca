@@ -320,6 +320,14 @@ export default function ClickUpPilotPage() {
   const magnificProcessingRef = useRef(false);
   const [magnificTick, setMagnificTick] = useState(0);
   const magnificCancelRef = useRef<Record<string, boolean>>({});
+  /** AbortController do job Magnific rodando agora (pra Pausar/Debug
+   *  interromperem o pipeline em vez de so esperar). */
+  const magnificAbortRef = useRef<AbortController | null>(null);
+  /** taskId do job Magnific ativo + quando comecou (watchdog anti-loop). */
+  const magnificActiveRef = useRef<{ taskId: string; startedAt: number } | null>(null);
+  /** Intencao de parada por job: distingue Pausar x Debug x Watchdog do
+   *  fim normal — pro processor nao sobrescrever o status errado. */
+  const magnificStopIntentRef = useRef<Record<string, 'paused' | 'debug' | 'watchdog' | null>>({});
 
   useEffect(() => {
     setMagnificQueueState(restoreMagnificQueue());
@@ -1760,6 +1768,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     if (!job) return;
     magnificProcessingRef.current = true;
     const taskId = job.taskId;
+    const ac = new AbortController();
+    magnificAbortRef.current = ac;
+    magnificActiveRef.current = { taskId, startedAt: Date.now() };
+    magnificStopIntentRef.current[taskId] = null;
+    magnificCancelRef.current[taskId] = false;
     (async () => {
       patchMagnificJob(taskId, {
         status: 'running',
@@ -1767,6 +1780,22 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         message: 'Disparando pipeline Magnific...',
         percent: 0,
       });
+      // Resolve o status final respeitando intencao do user (pausar/debug)
+      // ou watchdog — nunca sobrescreve com 'failed'/'done' indevido.
+      const settle = (
+        normal: () => void,
+      ) => {
+        const intent = magnificStopIntentRef.current[taskId];
+        if (intent === 'paused') {
+          patchMagnificJob(taskId, { status: 'paused', message: '⏸ Pausado pelo user — clique Retomar', finishedAt: Date.now() });
+        } else if (intent === 'debug') {
+          // Debug handler ja re-enfileira (status 'queued') — nao mexe aqui.
+        } else if (intent === 'watchdog') {
+          patchMagnificJob(taskId, { status: 'failed', message: '⚠ Travou (loop infinito?) — clique 🐞 Debug pra recriar o space', finishedAt: Date.now() });
+        } else {
+          normal();
+        }
+      };
       try {
         const takes = parseMagnificPrompts(job.takesJson);
         if (takes.length === 0) {
@@ -1780,7 +1809,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         const res = await runMagnificPipeline(
           { spaceName: job.adName, takes },
           {
-            signal: undefined,
+            signal: ac.signal,
             onProgress: (p) => {
               if (magnificCancelRef.current[taskId]) return;
               patchMagnificJob(taskId, {
@@ -1795,50 +1824,130 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             },
           },
         );
-        if (res.ok && res.complete && res.zipBlob) {
-          const zipKey = `magnific:${taskId}:takes`;
-          const zipName = res.zipName || `${job.adName}_brolls.zip`;
-          try {
-            const { saveZip } = await import('@/lib/zip-store');
-            await saveZip(zipKey, res.zipBlob, zipName);
-          } catch (e) {
-            console.warn('[magnific-queue] falha salvando ZIP em IndexedDB:', e);
+        settle(() => {
+          if (res.ok && res.complete && res.zipBlob) {
+            const zipKey = `magnific:${taskId}:takes`;
+            const zipName = res.zipName || `${job.adName}_brolls.zip`;
+            void (async () => {
+              try {
+                const { saveZip } = await import('@/lib/zip-store');
+                await saveZip(zipKey, res.zipBlob!, zipName);
+              } catch (e) {
+                console.warn('[magnific-queue] falha salvando ZIP em IndexedDB:', e);
+              }
+            })();
+            patchMagnificJob(taskId, {
+              status: 'done',
+              zipKey,
+              zipName,
+              successCount: res.successCount,
+              totalCount: res.takes.length,
+              percent: 100,
+              message: `Pronto: ${res.successCount}/${res.takes.length} takes · ${zipName}`,
+              finishedAt: Date.now(),
+            });
+          } else {
+            patchMagnificJob(taskId, {
+              status: 'failed',
+              message: `Magnific incompleto: ${res.successCount}/${res.takes.length} takes${
+                res.missingIdxs?.length ? ` (faltou ${res.missingIdxs.join(', ')})` : ''
+              }`,
+              finishedAt: Date.now(),
+            });
           }
-          patchMagnificJob(taskId, {
-            status: 'done',
-            zipKey,
-            zipName,
-            successCount: res.successCount,
-            totalCount: res.takes.length,
-            percent: 100,
-            message: `Pronto: ${res.successCount}/${res.takes.length} takes · ${zipName}`,
-            finishedAt: Date.now(),
-          });
-        } else {
+        });
+      } catch (e) {
+        settle(() => {
           patchMagnificJob(taskId, {
             status: 'failed',
-            message: `Magnific incompleto: ${res.successCount}/${res.takes.length} takes${
-              res.missingIdxs?.length ? ` (faltou ${res.missingIdxs.join(', ')})` : ''
-            }`,
+            message: (e as Error)?.message || 'erro no pipeline Magnific',
             finishedAt: Date.now(),
           });
-        }
-      } catch (e) {
-        patchMagnificJob(taskId, {
-          status: 'failed',
-          message: (e as Error)?.message || 'erro no pipeline Magnific',
-          finishedAt: Date.now(),
         });
       } finally {
-        magnificProcessingRef.current = false;
-        setMagnificTick((t) => t + 1);
+        // So libera o guard se AINDA somos o job ativo (watchdog pode ter
+        // ja liberado + iniciado outro — nao podemos roubar o guard dele).
+        if (magnificActiveRef.current?.taskId === taskId) {
+          magnificActiveRef.current = null;
+          magnificAbortRef.current = null;
+          magnificProcessingRef.current = false;
+          setMagnificTick((t) => t + 1);
+        }
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [magnificQueue, magnificTick]);
 
+  /** Watchdog anti-loop-infinito do Magnific. Se o job ativo passar do
+   *  tempo maximo (provavel loop no generate-image da extension, como
+   *  relatado), aborta, marca 'failed' com dica de Debug e LIBERA a fila
+   *  pro proximo job — mesmo que a promise do pipeline tenha travado e
+   *  nunca resolva (nao dependemos dela). */
+  useEffect(() => {
+    const WATCHDOG_MS = 18 * 60 * 1000; // 18min — folga p/ job legit grande
+    const id = setInterval(() => {
+      const act = magnificActiveRef.current;
+      if (!act) return;
+      if (Date.now() - act.startedAt < WATCHDOG_MS) return;
+      const taskId = act.taskId;
+      if (magnificStopIntentRef.current[taskId]) return; // ja tratado
+      console.warn('[magnific-watchdog] job travado, liberando fila:', taskId);
+      magnificStopIntentRef.current[taskId] = 'watchdog';
+      magnificCancelRef.current[taskId] = true;
+      try { magnificAbortRef.current?.abort(); } catch {}
+      patchMagnificJob(taskId, {
+        status: 'failed',
+        message: '⚠ Travou (loop infinito?) — clique 🐞 Debug pra recriar o space',
+        finishedAt: Date.now(),
+      });
+      // Libera o guard SEM esperar a promise (pode nunca resolver).
+      magnificActiveRef.current = null;
+      magnificAbortRef.current = null;
+      magnificProcessingRef.current = false;
+      setMagnificTick((t) => t + 1);
+    }, 15000);
+    return () => clearInterval(id);
+  }, []);
+
   function cancelTaskBatch(taskId: string) {
     batchCancelRef.current[taskId] = true;
+  }
+
+  /** RETOMAR (HeyGen lipsync) — funciona INDEPENDENTE da situacao:
+   *  - tem videoIds disparados → re-checa status no HeyGen + re-baixa (rapido)
+   *  - 0 disparados (ex: bloqueio/quota, erro antes do dispatch) → re-roda do
+   *    zero (TTS+upload+submit+poll+zip). Garante botao util sempre. */
+  function retomarTaskBatch(taskId: string) {
+    const s = batchStates[taskId];
+    if (!s) return;
+    batchCancelRef.current[taskId] = false;
+    if (s.parts.some((p) => p.videoId)) {
+      void resumeTaskBatch(taskId);
+    } else {
+      void runTaskInBackground(taskId);
+    }
+  }
+
+  /** PAUSAR (HeyGen lipsync) — aborta o processamento atual dessa task.
+   *  O run em andamento detecta o cancel e encerra; depois o botao RETOMAR
+   *  re-checa/baixa o que ja renderizou ou re-roda do zero. */
+  function pausarTaskBatch(taskId: string) {
+    batchCancelRef.current[taskId] = true;
+    setBatchStates((prev) => {
+      const cur = prev[taskId];
+      if (!cur || cur.phase === 'done' || cur.phase === 'failed') return prev;
+      return { ...prev, [taskId]: { ...cur, message: '⏸ Pausado pelo user — clique Retomar' } };
+    });
+  }
+
+  /** DEBUG (HeyGen lipsync) — reserva pra casos de bug: reinicia o processo
+   *  de gerar os lips DESSA task do ZERO (re-dispatch completo). Aborta o
+   *  run atual e recomeca limpo. */
+  function debugTaskBatch(taskId: string) {
+    if (!confirm('DEBUG: reiniciar a geracao de LIPS dessa task do zero?\n\nVai re-disparar TODAS as partes no HeyGen (cria videos novos).')) return;
+    batchCancelRef.current[taskId] = true;
+    // Pequeno delay deixa o run atual (se houver) abortar antes do restart.
+    setTimeout(() => { void runTaskInBackground(taskId); }, 300);
   }
 
   /** Baixa o ZIP de takes Magnific do IndexedDB (Blob URL nao sobrevive
@@ -1867,11 +1976,90 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
 
   function removeMagnificJob(taskId: string) {
     magnificCancelRef.current[taskId] = true;
+    if (magnificActiveRef.current?.taskId === taskId) {
+      magnificStopIntentRef.current[taskId] = 'paused';
+      try { magnificAbortRef.current?.abort(); } catch {}
+      magnificActiveRef.current = null;
+      magnificAbortRef.current = null;
+      magnificProcessingRef.current = false;
+    }
     setMagnificQueueState((prev) => {
       const { [taskId]: _, ...rest } = prev;
       return rest;
     });
     setMagnificTick((t) => t + 1);
+  }
+
+  /** Helper: se `taskId` for o job Magnific ativo, aborta e LIBERA a fila
+   *  (intent define como o processor vai assentar o status). */
+  function stopActiveMagnificIfCurrent(taskId: string, intent: 'paused' | 'debug') {
+    magnificStopIntentRef.current[taskId] = intent;
+    magnificCancelRef.current[taskId] = true;
+    if (magnificActiveRef.current?.taskId === taskId) {
+      try { magnificAbortRef.current?.abort(); } catch {}
+      magnificActiveRef.current = null;
+      magnificAbortRef.current = null;
+      magnificProcessingRef.current = false;
+    }
+  }
+
+  /** PAUSAR (Magnific) — para o job (rodando ou na fila). Outro job so
+   *  inicia se este estiver pausado/finalizado (regra serial mantida). */
+  function pauseMagnificJob(taskId: string) {
+    const job = magnificQueue[taskId];
+    if (!job || job.status === 'done') return;
+    stopActiveMagnificIfCurrent(taskId, 'paused');
+    patchMagnificJob(taskId, {
+      status: 'paused',
+      message: '⏸ Pausado pelo user — clique Retomar',
+      finishedAt: Date.now(),
+    });
+    setMagnificTick((t) => t + 1);
+  }
+
+  /** RETOMAR (Magnific) — volta o job pra fila. So roda quando nenhum
+   *  outro estiver rodando (pickNextMagnificJob garante serial 1/vez). */
+  function resumeMagnificJob(taskId: string) {
+    const job = magnificQueue[taskId];
+    if (!job || job.status === 'running' || job.status === 'done') return;
+    magnificStopIntentRef.current[taskId] = null;
+    magnificCancelRef.current[taskId] = false;
+    patchMagnificJob(taskId, {
+      status: 'queued',
+      gateOnHeyGen: false,
+      message: `Na fila Magnific (${job.takeCount} takes) — aguardando vez...`,
+      finishedAt: undefined,
+      percent: 0,
+    });
+    setMagnificTick((t) => t + 1);
+  }
+
+  /** DEBUG (Magnific) — reserva p/ bugs (ex: loop infinito no generate
+   *  image). Aborta o run atual e RE-ENFILEIRA do zero; ao rodar de novo
+   *  o runMagnificPipeline cria um SPACE NOVO (nunca reusa existingSpaceId
+   *  aqui), saindo do estado bugado. */
+  function debugMagnificJob(taskId: string) {
+    const job = magnificQueue[taskId];
+    if (!job) return;
+    if (!confirm('DEBUG: reiniciar a geracao de takes dessa task do ZERO?\n\nAborta o processo atual e cria um SPACE NOVO no Magnific (sai de loop/bug).')) return;
+    stopActiveMagnificIfCurrent(taskId, 'debug');
+    // Re-enfileira limpo. O processor pega quando nenhum outro estiver
+    // rodando; runMagnificPipeline cria space novo automaticamente.
+    setTimeout(() => {
+      magnificStopIntentRef.current[taskId] = null;
+      magnificCancelRef.current[taskId] = false;
+      patchMagnificJob(taskId, {
+        status: 'queued',
+        gateOnHeyGen: false,
+        message: '🐞 Debug — recriando do zero (space novo)...',
+        zipKey: undefined,
+        zipName: undefined,
+        percent: 0,
+        successCount: undefined,
+        finishedAt: undefined,
+      });
+      setMagnificTick((t) => t + 1);
+    }, 300);
   }
 
   function downloadZip(taskId: string) {
@@ -2181,6 +2369,65 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       setError(null);
       setCopiedBodyTask(taskId);
       setTimeout(() => setCopiedBodyTask((cur) => (cur === taskId ? null : cur)), 1800);
+    } catch {
+      setError('Nao consegui copiar pro clipboard (permissao do browser).');
+    }
+  }
+
+  /** Identificador curto da task pro bloco de body (ex:
+   *  "AD13VN - PRPB06 - G1" -> "AD13VN-PRPB06"). Remove sufixo G final. */
+  function taskBodyId(a: TaskAnalysis): string {
+    let n = (a.taskName || a.baseAdId || a.taskId).trim();
+    n = n.replace(/\s*[-–—]\s*G\d+\s*$/i, '');
+    n = n.replace(/\s*[-–—]\s*/g, '-').replace(/\s+/g, ' ').trim();
+    return n || a.baseAdId || a.taskId;
+  }
+
+  /** Copia o body de TODAS as tasks selecionadas, identificado, num bloco
+   *  so. NUNCA inclui Variacao de Avatar (a.vaBriefing). Dedup siblings
+   *  G1/G2 (mesmo id apos remover sufixo G). Formato:
+   *    AD33VN-PRPB05
+   *    <body>
+   *
+   *    AD34VN-PRPB05
+   *    <body>
+   */
+  const [copiedAllBodies, setCopiedAllBodies] = useState(false);
+  async function copyAllSelectedBodies() {
+    const seen = new Set<string>();
+    const blocks: string[] = [];
+    let skippedVA = 0;
+    for (const id of selectedTaskIds) {
+      const a = taskAnalyses[id];
+      if (!a) continue;
+      if (a.vaBriefing) { skippedVA++; continue; } // VA nunca entra
+      const ident = taskBodyId(a);
+      if (seen.has(ident)) continue; // dedup G1/G2 (mesmo conteudo)
+      const src =
+        a.bodyRaw ||
+        (a.partTemplates || [])
+          .filter((p) => /^(BODY|PARTE)\b/i.test(p.label.trim()))
+          .map((p) => p.text.trim())
+          .filter(Boolean)
+          .join('\n\n');
+      const body = extractSpokenBody(src);
+      if (!body) continue;
+      seen.add(ident);
+      blocks.push(`${ident}\n${body}`);
+    }
+    if (blocks.length === 0) {
+      setError(
+        skippedVA > 0
+          ? 'Nenhuma task normal selecionada com body (so VA, que nao copia).'
+          : 'Nenhuma task selecionada com body identificado.',
+      );
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(blocks.join('\n\n'));
+      setError(null);
+      setCopiedAllBodies(true);
+      setTimeout(() => setCopiedAllBodies(false), 2000);
     } catch {
       setError('Nao consegui copiar pro clipboard (permissao do browser).');
     }
@@ -3139,53 +3386,61 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       ⬇ camuflados
                                     </a>
                                   ) : null}
-                                  {b.phase === 'done' && !b.zipBlobUrl && b.parts.some(p => p.videoId) ? (
-                                    // Estado restaurado de localStorage — blob nao sobrevive reload, oferece re-baixar
-                                    <button
-                                      type="button"
-                                      onClick={() => resumeTaskBatch(b.taskId)}
-                                      className="mono rounded border border-cyan-500/60 bg-cyan-500/15 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25"
-                                      title="ZIP foi perdido no reload — re-baixa videos do HeyGen"
-                                    >
-                                      🔄 Re-baixar zip
-                                    </button>
-                                  ) : null}
-                                  {b.phase === 'failed' && b.parts.some(p => p.videoId) ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => resumeTaskBatch(b.taskId)}
-                                      className="mono rounded border border-cyan-500/60 bg-cyan-500/15 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25"
-                                      title="Re-checa status no HeyGen (videos podem estar prontos) + baixa"
-                                    >
-                                      🔄 Retomar
-                                    </button>
-                                  ) : null}
-                                  {b.phase === 'done' || b.phase === 'failed' ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        for (const url of [b.zipBlobUrl, b.montadoZipUrl, b.camufladoZipUrl]) {
-                                          if (url) { try { URL.revokeObjectURL(url); } catch {} }
-                                        }
-                                        setBatchStates((prev) => {
-                                          const { [b.taskId]: _, ...rest } = prev;
-                                          return rest;
-                                        });
-                                      }}
-                                      className="mono rounded border border-line-strong px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
-                                      title="Remove esta entrada do painel"
-                                    >
-                                      ✕
-                                    </button>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={() => cancelTaskBatch(b.taskId)}
-                                      className="mono rounded border border-line-strong px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
-                                    >
-                                      cancelar
-                                    </button>
-                                  )}
+                                  {/* RETOMAR / PAUSAR / DEBUG — sempre presentes,
+                                   *  funcionam independente da situacao da task */}
+                                  {(() => {
+                                    const running = ['dispatching', 'rendering', 'downloading', 'post'].includes(b.phase);
+                                    return (
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => retomarTaskBatch(b.taskId)}
+                                          disabled={running}
+                                          className="mono rounded border border-cyan-500/60 bg-cyan-500/15 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-40"
+                                          title={b.parts.some(p => p.videoId)
+                                            ? 'Re-checa status no HeyGen (videos podem estar prontos) + re-baixa'
+                                            : 'Re-roda a task do zero (TTS+upload+submit+poll+zip) — util quando 0 foram disparados'}
+                                        >
+                                          🔄 Retomar
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => pausarTaskBatch(b.taskId)}
+                                          disabled={!running}
+                                          className="mono rounded border border-yellow-500/50 bg-yellow-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-yellow-200 hover:bg-yellow-500/20 disabled:opacity-40"
+                                          title="Aborta o processamento atual dessa task. Depois use Retomar."
+                                        >
+                                          ⏸ Pausar
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => debugTaskBatch(b.taskId)}
+                                          className="mono rounded border border-fuchsia-500/50 bg-fuchsia-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20"
+                                          title="DEBUG (reserva p/ bugs): reinicia a geracao de LIPS dessa task do ZERO"
+                                        >
+                                          🐞 Debug
+                                        </button>
+                                        {!running ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              for (const url of [b.zipBlobUrl, b.montadoZipUrl, b.camufladoZipUrl]) {
+                                                if (url) { try { URL.revokeObjectURL(url); } catch {} }
+                                              }
+                                              setBatchStates((prev) => {
+                                                const { [b.taskId]: _, ...rest } = prev;
+                                                return rest;
+                                              });
+                                            }}
+                                            className="mono rounded border border-line-strong px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
+                                            title="Remove esta entrada do painel"
+                                          >
+                                            ✕
+                                          </button>
+                                        ) : null}
+                                      </>
+                                    );
+                                  })()}
                                 </div>
                               </div>
                               <div className="mono mt-1 text-[10px] text-text-muted">
@@ -3244,14 +3499,17 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                           const stLabel = ({
                             queued: j.gateOnHeyGen ? '⏳ aguardando HeyGen' : '⏳ na fila',
                             running: '⚙ gerando B-rolls',
+                            paused: '⏸ pausado',
                             done: '✅ pronto',
                             failed: '✗ falhou',
-                          })[j.status];
+                          } as Record<typeof j.status, string>)[j.status];
                           const stColor = j.status === 'done' ? 'text-lime border-lime/40 bg-lime/10'
                             : j.status === 'failed' ? 'text-red-300 border-red-500/40 bg-red-500/10'
                             : j.status === 'running' ? 'text-cyan-200 border-cyan-500/40 bg-cyan-500/10'
+                            : j.status === 'paused' ? 'text-yellow-200 border-yellow-500/40 bg-yellow-500/10'
                             : 'text-text-muted border-line-strong bg-bg-soft/40';
                           const pct = j.status === 'done' ? 100 : j.status === 'failed' ? 0 : (j.percent || (j.status === 'running' ? 5 : 0));
+                          const jobRunning = j.status === 'running';
                           return (
                             <li key={j.taskId} className={`rounded-[10px] border ${stColor} p-2`}>
                               <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
@@ -3271,16 +3529,35 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       ⬇ takes
                                     </button>
                                   ) : null}
-                                  {j.status === 'failed' ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => { patchMagnificJob(j.taskId, { status: 'queued', message: 'Re-enfileirado manualmente.', finishedAt: undefined }); setMagnificTick((t) => t + 1); }}
-                                      className="mono rounded border border-cyan-500/60 bg-cyan-500/15 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25"
-                                      title="Volta o job pra fila (re-roda do zero — space novo)"
-                                    >
-                                      🔄 Retomar
-                                    </button>
-                                  ) : null}
+                                  {/* PAUSAR / RETOMAR / DEBUG — serial garantido:
+                                   *  outro job so inicia se este estiver pausado/
+                                   *  finalizado (pickNextMagnificJob ignora running). */}
+                                  <button
+                                    type="button"
+                                    onClick={() => pauseMagnificJob(j.taskId)}
+                                    disabled={j.status === 'paused' || j.status === 'done'}
+                                    className="mono rounded border border-yellow-500/50 bg-yellow-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-yellow-200 hover:bg-yellow-500/20 disabled:opacity-40"
+                                    title="Para o job (rodando ou na fila). Libera a vez pra outro."
+                                  >
+                                    ⏸ Pausar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => resumeMagnificJob(j.taskId)}
+                                    disabled={jobRunning || j.status === 'done'}
+                                    className="mono rounded border border-cyan-500/60 bg-cyan-500/15 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-40"
+                                    title="Volta o job pra fila — roda quando nenhum outro estiver rodando (serial 1/vez)"
+                                  >
+                                    🔄 Retomar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => debugMagnificJob(j.taskId)}
+                                    className="mono rounded border border-fuchsia-500/50 bg-fuchsia-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20"
+                                    title="DEBUG (reserva p/ bugs/loop): aborta e recria do ZERO num space novo"
+                                  >
+                                    🐞 Debug
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => removeMagnificJob(j.taskId)}
@@ -3993,15 +4270,25 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                 <span className="text-yellow-300">⚠ {partialIds.length} pendente{partialIds.length === 1 ? '' : 's'} (resolva acima pra incluir)</span>
                               ) : null}
                             </span>
-                            <button
-                              type="button"
-                              onClick={startBatch}
-                              disabled={readyIds.length === 0}
-                              className="btn-primary disabled:opacity-40"
-                              title={readyIds.length === 0 ? 'Nenhuma task ready ainda' : 'Roda em background: TTS + upload + submit + poll + zip'}
-                            >
-                              ▶ Iniciar {readyIds.length} task{readyIds.length === 1 ? '' : 's'} em background
-                            </button>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={copyAllSelectedBodies}
+                                className="mono rounded border border-fuchsia-500/50 bg-fuchsia-500/10 px-3 py-2 text-[11px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20"
+                                title="Copia o body de TODAS as tasks selecionadas, identificado por AD. Nunca inclui Variacao de Avatar."
+                              >
+                                {copiedAllBodies ? '✓ bodies copiados' : '⧉ Copiar todos os bodies'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={startBatch}
+                                disabled={readyIds.length === 0}
+                                className="btn-primary disabled:opacity-40"
+                                title={readyIds.length === 0 ? 'Nenhuma task ready ainda' : 'Roda em background: TTS + upload + submit + poll + zip'}
+                              >
+                                ▶ Iniciar {readyIds.length} task{readyIds.length === 1 ? '' : 's'} em background
+                              </button>
+                            </div>
                           </div>
                         );
                       })()}
