@@ -204,6 +204,8 @@ type TaskAnalysis = {
   roleSlots: RoleSlot[];
   /** Body splits + hooks que viram partes (sem avatar — populado a partir de roleSlots) */
   partTemplates: Array<{ label: string; text: string; matchByRole: string | null }>;
+  /** Body cru do parser (antes do split) — fonte pro botao "copiar body" */
+  bodyRaw?: string;
   error?: string;
   /** Quando disparou pra HeyGen (timestamp) — null se ainda nao */
   dispatchedAt?: number | null;
@@ -215,6 +217,43 @@ type TaskAnalysis = {
    *  alternativa em vez do fluxo normal. */
   vaBriefing?: ParsedVABriefing;
 };
+
+/**
+ * Extrai SO o body falado (roteiro) — corta tudo que vem depois do corpo:
+ * seção de variações de hook ("Guia N", "AD03/AD07/..."), referências de
+ * B-roll ("Tela dividida", "Take logo..."), e qualquer link (Drive/TikTok).
+ * O parser concatena esse lixo no body cru; aqui limpamos pro botao "Body".
+ */
+function extractSpokenBody(raw: string): string {
+  let s = (raw || '').replace(/\r/g, '');
+  // Marcadores que indicam FIM do body falado e inicio de guia/referencias.
+  // Corta na ocorrencia mais cedo de qualquer um deles.
+  // Tokens fim-de-body — podem vir colados no fim da ultima frase
+  // ("...pra ver. Guia 4"), entao NAO exigimos inicio de linha.
+  const markers: RegExp[] = [
+    /\bGuia\s*\d/i,
+    /\bAD\s?\d{2,}\b/,
+    /Tela\s*dividida/i,
+    /Take\s+(?:logo|de\s+in[íi]cio)/i,
+    /https?:\/\//i,
+    /www\.[a-z0-9-]+\./i,
+    /drive\.google\.com/i,
+    /tiktok\.com/i,
+  ];
+  let cut = s.length;
+  for (const re of markers) {
+    const m = s.match(re);
+    if (m && m.index !== undefined && m.index < cut) cut = m.index;
+  }
+  s = s.slice(0, cut);
+  // Defensivo: remove qualquer linha residual que ainda tenha URL/ref.
+  s = s
+    .split('\n')
+    .filter((l) => !/(https?:\/\/|www\.[a-z0-9-]+\.|drive\.google\.com|tiktok\.com|Tela\s*dividida)/i.test(l))
+    .join('\n');
+  // Normaliza linhas em branco multiplas e espacos nas bordas.
+  return s.replace(/\n{3,}/g, '\n\n').trim();
+}
 
 export default function ClickUpPilotPage() {
   const router = useRouter();
@@ -1037,6 +1076,7 @@ export default function ClickUpPilotPage() {
                 totalParts: partTemplates.length,
                 roleSlots,
                 partTemplates,
+                bodyRaw: briefing.body || undefined,
                 dispatchedAt: getDispatchedAt(sid),
                 // Marca siblings como "compartilhada com primary"
                 sharedWithPrimaryId: sid === task.id ? undefined : task.id,
@@ -2100,23 +2140,23 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     void runTaskInBackground(taskId);
   }
 
-  /** Copia SO o body da copy dessa task pro clipboard (sem hooks). Body =
-   *  partTemplates com label BODY/PARTE (ou bodyText da VA). Util pro user
-   *  gerar os prompts de B-roll a partir so do corpo do roteiro. */
+  /** Copia SO o body falado dessa task pro clipboard — sem hooks, sem a
+   *  seção de variações (Guia/AD0x), sem "Tela dividida"/"Take logo" e sem
+   *  links. Fonte: bodyRaw do parser (ou bodyText da VA), passado pelo
+   *  extractSpokenBody. Util pro user gerar os prompts de B-roll. */
   const [copiedBodyTask, setCopiedBodyTask] = useState<string | null>(null);
   async function copyTaskBody(taskId: string) {
     const a = taskAnalyses[taskId];
     if (!a) return;
-    let body = '';
-    if (a.vaBriefing?.bodyText) {
-      body = a.vaBriefing.bodyText.trim();
-    } else {
-      const bodyParts = (a.partTemplates || [])
+    const src =
+      a.vaBriefing?.bodyText ||
+      a.bodyRaw ||
+      (a.partTemplates || [])
         .filter((p) => /^(BODY|PARTE)\b/i.test(p.label.trim()))
         .map((p) => p.text.trim())
-        .filter(Boolean);
-      body = bodyParts.join('\n\n');
-    }
+        .filter(Boolean)
+        .join('\n\n');
+    const body = extractSpokenBody(src);
     if (!body) {
       setError('Essa task nao tem body identificado na copy (so hooks?).');
       return;
