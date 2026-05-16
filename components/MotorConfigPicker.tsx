@@ -31,20 +31,11 @@ export function MotorConfigPicker({
    *  Caller eh responsavel por estimar via estimateSecondsFromText. */
   takeSeconds?: number[];
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true); // minimizado por padrao
   // Duracao: usa array per-take quando disponivel (calculado da copy/audio),
   // senao DEFAULT_TAKE_SECONDS uniforme
-  const hasRealDurations = !!takeSeconds && takeSeconds.length === takeCount && takeSeconds.some(s => s > 0);
-  const totalSeconds = hasRealDurations ? takeSeconds!.reduce((a, b) => a + b, 0) : takeCount * DEFAULT_TAKE_SECONDS;
-  const averageTakeSeconds = takeCount > 0 ? Math.round(totalSeconds / takeCount) : DEFAULT_TAKE_SECONDS;
-  const cost = estimateCost(config, takeCount, hasRealDurations ? { slotIds, takeSeconds } : { slotIds, averageTakeSeconds });
-  const { credits, loading: loadingCredits, refresh: refreshCredits } = useHeyGenCredits(true);
-
-  const planCreditAvail = credits?.plan_credit?.amount ?? null;
-  const planCreditTotal = credits?.plan_credit?.total ?? null;
-  const unlimitedAvail = credits?.unlimited_regular?.amount ?? null;
-  const unlimitedTotal = credits?.unlimited_regular?.total ?? null;
-  const exceedsBudget = planCreditAvail != null && cost.total > planCreditAvail;
+  // Previa de creditos / saldo HeyGen REMOVIDOS a pedido — picker so
+  // escolhe o motor. Sem fetch de saldo, sem calculo de custo.
 
   return (
     <div className="rounded-[12px] border border-cyan-500/30 bg-cyan-500/5 p-3">
@@ -58,26 +49,12 @@ export function MotorConfigPicker({
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {/* Preview creditos */}
-          <span
-            className={
-              'mono rounded-full px-2 py-0.5 text-[10px] uppercase tracking-widest ' +
-              (cost.total === 0
-                ? 'border border-lime/40 bg-lime/10 text-lime'
-                : cost.total < 5
-                ? 'border border-yellow-500/40 bg-yellow-500/10 text-yellow-200'
-                : 'border border-red-500/40 bg-red-500/10 text-red-300')
-            }
-            title={`HeyGen oficial: 1 min Avatar V/IV = 20 créditos · III free. Total previa: ${cost.total}c`}
-          >
-            {cost.total === 0 ? '✓ Free' : `${cost.total} créd`}
-          </span>
           <button
             type="button"
             onClick={() => setCollapsed((c) => !c)}
             className="mono rounded border border-line-strong px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted hover:border-cyan-500/60 hover:text-cyan-300"
           >
-            {collapsed ? '▶' : '▼'} {collapsed ? 'Mostrar' : 'Esconder'}
+            {collapsed ? '▶ Escolher motor' : '▼ Esconder'}
           </button>
         </div>
       </div>
@@ -221,119 +198,6 @@ export function MotorConfigPicker({
             </div>
           ) : null}
 
-          {/* Duracao automatica — calculada da copy (ou audio real) */}
-          <div className="flex items-center gap-2 rounded border border-line/40 bg-bg/40 px-3 py-2">
-            <span className="mono shrink-0 text-[10px] uppercase tracking-widest text-text-muted">
-              {hasRealDurations ? 'Duracao real (lida da copy):' : 'Duracao estimada (sem copy ainda):'}
-            </span>
-            <span className="ml-auto mono text-[11px] font-bold text-cyan-300">
-              {totalSeconds.toFixed(0)}s total · {averageTakeSeconds}s media
-            </span>
-            {hasRealDurations ? (
-              <span className="mono rounded border border-lime/40 bg-lime/10 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-lime">
-                ✓ auto
-              </span>
-            ) : (
-              <span className="mono rounded border border-yellow-500/40 bg-yellow-500/10 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-yellow-200">
-                ⚠ default
-              </span>
-            )}
-          </div>
-
-          {/* Resumo creditos — HeyGen cobra por MINUTO de video */}
-          <div className="rounded border border-line/40 bg-bg/40 px-3 py-2 text-[11px]">
-            <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">
-              Previa de custo ({takeCount} takes × {averageTakeSeconds}s = {(takeCount * averageTakeSeconds / 60).toFixed(1)} min)
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <span className="mono text-lime">
-                III: {cost.byMotor.III} {cost.byMotor.III === 1 ? 'take' : 'takes'} ({cost.minutesByMotor.III.toFixed(1)}min · free)
-              </span>
-              <span className="mono text-yellow-200">
-                IV: {cost.byMotor.IV} {cost.byMotor.IV === 1 ? 'take' : 'takes'} ({cost.minutesByMotor.IV.toFixed(1)}min · {Math.ceil(cost.minutesByMotor.IV * CREDIT_COST_PER_MIN.IV)}c)
-              </span>
-              <span className="mono text-fuchsia-200">
-                V: {cost.byMotor.V} {cost.byMotor.V === 1 ? 'take' : 'takes'} ({cost.minutesByMotor.V.toFixed(1)}min · {Math.ceil(cost.minutesByMotor.V * CREDIT_COST_PER_MIN.V)}c)
-              </span>
-              <span className="ml-auto mono font-bold text-cyan-300">
-                ≈ {cost.total} créditos
-              </span>
-            </div>
-            <div className="mt-1 text-[9px] text-text-muted">
-              HeyGen oficial: Avatar V/IV = <strong>20 créditos por minuto</strong>. Avatar III = free (consome priority slot).
-            </div>
-          </div>
-
-          {/* Saldo REAL HeyGen */}
-          <div className={
-            'rounded border px-3 py-2 text-[11px] ' +
-            (loadingCredits
-              ? 'border-line/40 bg-bg/40'
-              : exceedsBudget
-              ? 'border-red-500/60 bg-red-500/10'
-              : credits?.ok
-              ? 'border-lime/40 bg-lime/5'
-              : 'border-yellow-500/40 bg-yellow-500/5')
-          }>
-            <div className="flex items-center justify-between gap-2 mb-1">
-              <span className="mono text-[9px] uppercase tracking-widest text-text-muted">
-                // SALDO HEYGEN {credits?.plan_name ? `(${credits.plan_name})` : ''}
-              </span>
-              <button
-                type="button"
-                onClick={() => refreshCredits(true)}
-                disabled={loadingCredits}
-                className="mono rounded border border-line-strong px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted hover:border-cyan-500/60 hover:text-cyan-300 disabled:opacity-40"
-              >
-                {loadingCredits ? '⟳ atualizando...' : '⟳ refresh'}
-              </button>
-            </div>
-            {loadingCredits ? (
-              <div className="text-text-muted">Carregando saldo da conta HeyGen...</div>
-            ) : !credits?.ok ? (
-              <div className="text-yellow-200">
-                ⚠ Nao consegui ler o saldo HeyGen. {credits?.error ? `Erro: ${credits.error}.` : ''} Confirma que tem a aba app.heygen.com aberta + extension v4.9+ reloaded.
-              </div>
-            ) : (
-              <div className="space-y-1">
-                {/* Plan credit (Avatar IV/V) */}
-                {planCreditAvail != null && planCreditTotal != null ? (
-                  <div className="flex items-center justify-between">
-                    <span className="mono text-text-muted">Créditos pagos (Avatar IV/V):</span>
-                    <span className={'mono font-bold ' + (exceedsBudget ? 'text-red-300' : 'text-lime')}>
-                      {planCreditAvail} / {planCreditTotal}
-                    </span>
-                  </div>
-                ) : null}
-                {/* Unlimited regular (Avatar III priority) */}
-                {unlimitedAvail != null && unlimitedTotal != null ? (
-                  <div className="flex items-center justify-between">
-                    <span className="mono text-text-muted">Priority videos III (rápidos):</span>
-                    <span className={'mono ' + (unlimitedAvail === 0 ? 'text-yellow-200' : 'text-lime')}>
-                      {unlimitedAvail} / {unlimitedTotal}
-                    </span>
-                  </div>
-                ) : null}
-                {/* Days left */}
-                {credits.left_days != null ? (
-                  <div className="flex items-center justify-between">
-                    <span className="mono text-text-muted">Renovacao em:</span>
-                    <span className="mono text-text-muted">{credits.left_days} dias</span>
-                  </div>
-                ) : null}
-                {/* Warning excedeu */}
-                {exceedsBudget ? (
-                  <div className="mt-2 rounded border border-red-500/60 bg-red-500/15 p-2 text-red-200">
-                    <div className="mono font-bold uppercase tracking-widest text-[10px]">⚠ EXCEDE SALDO</div>
-                    <div className="mt-1 text-[10px]">
-                      Previa: <strong>{cost.total} créditos</strong> · Disponível: <strong>{planCreditAvail}</strong> · Faltam <strong>{cost.total - planCreditAvail}</strong> créditos.
-                      Reduza % de IV/V ou aguarde renovação.
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            )}
-          </div>
         </div>
       ) : null}
     </div>
