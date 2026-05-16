@@ -38,10 +38,6 @@ export type RunnerOptions = {
   isCancelled: () => boolean;
   onProgress: (msg: string) => void;
   onResult: (result: RunnerResult) => void;
-  /** SLOW MODE: atraso (ms) antes de cada job ser disparado, por worker.
-   *  Espaca os requests pro HeyGen liberar a cota sob rate/daily limit.
-   *  0/undefined = comportamento normal (inalterado). */
-  dispatchDelayMs?: number;
 };
 
 function motorToEngine(m: 'III' | 'IV' | 'V'): EngineKey {
@@ -68,14 +64,6 @@ export async function runHeyGenJobs(
       if (idx < 0) return;
       const job = jobs[idx];
       const label = job.label;
-      // SLOW MODE: espaca o disparo (sem mudar nada quando delay=0).
-      if (opts.dispatchDelayMs && opts.dispatchDelayMs > 0) {
-        const t0 = Date.now();
-        while (Date.now() - t0 < opts.dispatchDelayMs) {
-          if (opts.isCancelled()) return;
-          await new Promise((r) => setTimeout(r, 500));
-        }
-      }
       try {
         opts.onProgress(`Disparando ${label} (${idx + 1}/${jobs.length})...`);
         // Per-job override (modo dinamico) > opts global > undefined (lookup auto)

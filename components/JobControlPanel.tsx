@@ -58,6 +58,7 @@ export function JobControlPanel({
 }) {
   const [batches, setBatches] = useState<Record<string, BatchState>>({});
   const [magnific, setMagnific] = useState<Record<string, MagnificJob>>({});
+  const [open, setOpen] = useState(false); // minimizado por padrao
 
   useEffect(() => {
     const refresh = () => {
@@ -138,10 +139,24 @@ export function JobControlPanel({
   const empty =
     (!showHeygen || batchList.length === 0) && (!showMag || magList.length === 0);
 
+  const total =
+    (showHeygen ? batchList.length : 0) + (showMag ? magList.length : 0);
+
   return (
     <div className="rounded-[14px] border border-line-strong bg-bg-soft/30 p-3">
-      <div className="mono mb-2 flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-text-muted">
-        <span>Controle de jobs — Retomar / Pausar / Debug</span>
+      <div className="mono flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-text-muted">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="flex items-center gap-2 text-text-muted hover:text-lime"
+          title={open ? 'Minimizar' : 'Expandir lista de jobs'}
+        >
+          <span>{open ? '▾' : '▸'}</span>
+          <span>Controle de jobs — Retomar / Pausar / Debug</span>
+          <span className="rounded-full border border-line-strong bg-bg/40 px-2 py-0.5 text-text-muted">
+            {total}
+          </span>
+        </button>
         <a
           href="/tools/clickup-pilot"
           className="rounded border border-line-strong px-2 py-0.5 text-text-muted hover:border-lime hover:text-lime"
@@ -150,7 +165,7 @@ export function JobControlPanel({
         </a>
       </div>
 
-      {empty ? (
+      {!open ? null : empty ? (
         <div className="rounded-[10px] border border-dashed border-line-strong bg-bg/20 px-3 py-4 text-center text-[11px] text-text-muted">
           Nenhum job persistido ainda. Quando voce disparar lipsyncs/B-rolls,
           eles aparecem aqui e podem ser controlados de qualquer tela.
@@ -224,11 +239,13 @@ export function JobControlPanel({
         </div>
       )}
 
-      <div className="mono mt-2 text-[9px] text-text-muted leading-relaxed">
-        Retomar/Debug abrem o ClickUp Pilot (o motor) e executam no worker real —
-        funciona mesmo sem ter vindo de la. Pausar sinaliza a aba que estiver
-        rodando o job. A fila Magnific roda 1 por vez sempre.
-      </div>
+      {open ? (
+        <div className="mono mt-2 text-[9px] text-text-muted leading-relaxed">
+          Retomar/Debug abrem o ClickUp Pilot (o motor) e executam no worker real —
+          funciona mesmo sem ter vindo de la. Pausar sinaliza a aba que estiver
+          rodando o job. A fila Magnific roda 1 por vez sempre.
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -42,10 +42,8 @@ import {
 } from '@/lib/heygen-library-cache';
 import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
 import { CompactVoiceSelector } from '@/components/CompactVoiceSelector';
-import { VoiceCloneTrigger } from '@/components/VoiceCloneTrigger';
 import { MotorConfigPicker, MotorSlotPicker } from '@/components/MotorConfigPicker';
 import { defaultMotorConfig, resolveMotors, estimateSecondsFromText, type MotorConfig, type Motor } from '@/lib/motor-config';
-import { AvatarFirstSlot } from '@/components/AvatarFirstSlot';
 import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
 import { recallByVoiceName, rememberPairing, normalizeVoiceName } from '@/lib/voice-avatar-memory';
 import { Toggle3D } from '@/components/Toggle3D';
@@ -67,11 +65,6 @@ import {
   pruneStaleJobCommands,
   type JobCommand,
 } from '@/lib/job-commands';
-import {
-  getHeyGenSlowMode,
-  setHeyGenSlowMode,
-  heygenDispatchParams,
-} from '@/lib/heygen-slow-mode';
 
 /**
  * ClickUp Pilot — cerebro de automacao
@@ -150,6 +143,23 @@ function loadPersistedBatchStates(): Record<string, unknown> {
   }
 }
 
+/** Le o `replan` persistido de uma task direto do localStorage —
+ *  fonte autoritativa pra re-disparar mesmo apos reload/navegacao
+ *  (quando taskAnalyses esta vazio e o estado React ainda nao
+ *  reidratou). */
+function loadPersistedReplan(taskId: string): {
+  taskName: string;
+  baseAdId: string;
+  parts: Array<{ label: string; text: string; avatarId: string | null; voiceId: string | null }>;
+} | null {
+  try {
+    const all = loadPersistedBatchStates() as Record<string, { replan?: any }>;
+    return all?.[taskId]?.replan ?? null;
+  } catch {
+    return null;
+  }
+}
+
 type DispatchPlan = {
   adName: string;
   parts: Array<{
@@ -183,6 +193,15 @@ type BatchTaskState = {
   /** ZIP 3 — versoes montadas + camuflagem (gerado se modo camuflagem ON) */
   camufladoZipUrl?: string;
   camufladoZipName?: string;
+  /** Plano serializavel pra RE-DISPARAR sem depender de taskAnalyses
+   *  (que NAO sobrevive reload/navegacao). Sem isto, Retomar/Debug de
+   *  uma task que falhou com 0 videoIds (ex: cota HeyGen) nao fazia
+   *  nada. Persistido junto do batch. */
+  replan?: {
+    taskName: string;
+    baseAdId: string;
+    parts: Array<{ label: string; text: string; avatarId: string | null; voiceId: string | null }>;
+  };
 };
 
 type RoleSlot = {
@@ -268,14 +287,6 @@ export default function ClickUpPilotPage() {
    *  Adiciona pasta /broll/ no ZIP final com takes Kling 2.5. */
   const [moreMagnificMode, setMoreMagnificMode] = useToolState<boolean>('clickup-pilot:moreMagnific', false);
 
-  /** SLOW MODE (so HeyGen) — espaca o disparo p/ continuar gerando sob o
-   *  limite. Persistido em localStorage (compartilhado com heygen-auto). */
-  const [heygenSlowMode, setHeygenSlowModeState] = useState(false);
-  useEffect(() => { setHeygenSlowModeState(getHeyGenSlowMode()); }, []);
-  const toggleHeygenSlowMode = (v: boolean) => {
-    setHeyGenSlowMode(v);
-    setHeygenSlowModeState(v);
-  };
 
   /** JSON de B-rolls colado por task (caixa "+" inline). Persistido em
    *  localStorage (sobrevive reload), separado por taskId. */
@@ -1101,16 +1112,6 @@ export default function ClickUpPilotPage() {
     }
     const workers = Array.from({ length: PARALLEL }, () => worker());
     await Promise.all(workers);
-    // IA Search MODE: roda visual match auto pra todo slot pendente que tem briefingFileId
-    if (iaSearchMode && hasAnthropic !== false) {
-      setAnalyzing(false);
-      // Coleta tasks que sobraram com pendentes
-      const targetIds = targets.map((t) => t.id);
-      for (const taskId of targetIds) {
-        await runVisualMatchAllPendingForTask(taskId);
-      }
-      return;
-    }
     setAnalyzing(false);
   }
 
@@ -1213,11 +1214,59 @@ export default function ClickUpPilotPage() {
    *  4. Salva blob URL no state pra download manual depois */
   async function runTaskInBackground(taskId: string) {
     const a = taskAnalyses[taskId];
-    if (!a) return;
-    const plan = buildPlan(a);
+    // Resolve o plano: 1o de taskAnalyses (sessao com a task analisada);
+    // senao do `replan` persistido (sobrevive reload/navegacao) — e isso
+    // que faz Retomar/Debug funcionarem em task que falhou com 0 videoIds.
+    let plan = a ? buildPlan(a) : null;
+    let rTaskName: string;
+    let rBaseAdId: string;
+    let replan: BatchTaskState['replan'];
+    if (a && plan) {
+      rTaskName = a.taskName;
+      rBaseAdId = a.baseAdId || a.taskName;
+      replan = {
+        taskName: rTaskName,
+        baseAdId: rBaseAdId,
+        parts: plan.parts.map((p: any) => ({
+          label: p.label,
+          text: p.text,
+          avatarId: p.avatarId ?? null,
+          voiceId: p.voiceId ?? null,
+        })),
+      };
+    } else {
+      const saved = batchStates[taskId]?.replan || loadPersistedReplan(taskId);
+      if (!saved || !saved.parts?.length) {
+        setBatchStates((prev) => ({
+          ...prev,
+          [taskId]: {
+            ...(prev[taskId] || { taskId, taskName: taskId, baseAdId: taskId, parts: [], startedAt: Date.now() }),
+            phase: 'failed',
+            message: 'Sem plano salvo pra re-disparar. Abra essa task no ClickUp Pilot e analise de novo.',
+            finishedAt: Date.now(),
+          } as BatchTaskState,
+        }));
+        return;
+      }
+      rTaskName = saved.taskName;
+      rBaseAdId = saved.baseAdId;
+      replan = saved;
+      plan = {
+        adName: rBaseAdId.replace(/[^a-z0-9_-]/gi, '_'),
+        parts: saved.parts.map((p) => ({
+          label: p.label,
+          text: p.text,
+          avatarId: p.avatarId,
+          avatarName: null,
+          avatarThumb: null,
+          voiceId: p.voiceId,
+        })),
+        unmatchedAvatars: [],
+      } as any;
+    }
     if (!plan) return;
     const partsLen = plan.parts.length;
-    const adNameClean = (a.baseAdId || a.taskName).replace(/[^A-Z0-9]/gi, '_');
+    const adNameClean = (rBaseAdId).replace(/[^A-Z0-9]/gi, '_');
 
     // Re-run da mesma task: revoga blob URLs antigos pra nao vazar memoria
     for (const url of [batchStates[taskId]?.zipBlobUrl, batchStates[taskId]?.montadoZipUrl, batchStates[taskId]?.camufladoZipUrl]) {
@@ -1229,11 +1278,12 @@ export default function ClickUpPilotPage() {
     setBatchStates((prev) => ({
       ...prev,
       [taskId]: {
-        taskId, taskName: a.taskName, baseAdId: a.baseAdId || a.taskName,
+        taskId, taskName: rTaskName, baseAdId: rBaseAdId,
         phase: 'dispatching',
-        parts: plan.parts.map((p: any) => ({ label: p.label, videoId: null, renamedTo: labelToFilename(p.label) })),
+        parts: plan!.parts.map((p: any) => ({ label: p.label, videoId: null, renamedTo: labelToFilename(p.label) })),
         startedAt: Date.now(),
         message: 'TTS + upload + submit por parte...',
+        replan,
       },
     }));
 
@@ -1253,12 +1303,10 @@ export default function ClickUpPilotPage() {
         voiceId: p.voiceId,
         motor: motorsPerPart[i], // <-- override per job
       }));
-      const slowParams = heygenDispatchParams(heygenSlowMode);
       const results = await runHeyGenJobs(jobs, {
-        parallel: slowParams.parallel,
-        dispatchDelayMs: slowParams.dispatchDelayMs,
+        parallel: 3,
         mode: 'copy',
-        avatarId: plan.parts[0]?.avatarId || '',
+        avatarId: plan!.parts[0]?.avatarId || '',
         voiceId: undefined,
         motor: motorCfg.kind === 'global' ? motorCfg.motor : 'III', // fallback global; per-job vence
         adNameSafe: adNameClean,
@@ -1377,7 +1425,7 @@ export default function ClickUpPilotPage() {
       let pipeRes: Awaited<ReturnType<typeof runPostPipeline>>;
       try {
         pipeRes = await runPostPipeline({
-          baseAdId: a.baseAdId || a.taskName,
+          baseAdId: rBaseAdId,
           parts: partBlobs,
           decupagem: true,
           camuflagem: camuflagemMode,
@@ -1679,7 +1727,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           : null,
       );
       const queue = [...ready];
-      const PARALLEL = heygenSlowMode ? 1 : 2;
+      const PARALLEL = 2;
       const workers: Promise<void>[] = [];
       for (let i = 0; i < PARALLEL; i++) {
         workers.push((async () => {
@@ -1702,7 +1750,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     setError(null);
     // Dispara em paralelo (max 2 — cada uma usa 3 workers internos)
     const queue = [...ready];
-    const PARALLEL = heygenSlowMode ? 1 : 2;
+    const PARALLEL = 2;
     const workers: Promise<void>[] = [];
     for (let i = 0; i < PARALLEL; i++) {
       workers.push((async () => {
@@ -1899,10 +1947,18 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  - 0 disparados (ex: bloqueio/quota, erro antes do dispatch) → re-roda do
    *    zero (TTS+upload+submit+poll+zip). Garante botao util sempre. */
   function retomarTaskBatch(taskId: string) {
+    // s pode estar ausente no estado React logo apos navegar pro motor
+    // (restore ainda nao reidratou) — caimos no localStorage autoritativo.
     const s = batchStates[taskId];
-    if (!s) return;
+    const persisted = !s ? (loadPersistedBatchStates() as Record<string, BatchTaskState>)[taskId] : null;
+    const eff = s || persisted;
+    if (!eff) {
+      // Sem estado nenhum: ultima tentativa via replan persistido.
+      if (loadPersistedReplan(taskId)) { void runTaskInBackground(taskId); }
+      return;
+    }
     batchCancelRef.current[taskId] = false;
-    if (s.parts.some((p) => p.videoId)) {
+    if (eff.parts?.some((p) => p.videoId)) {
       void resumeTaskBatch(taskId);
     } else {
       void runTaskInBackground(taskId);
@@ -3019,14 +3075,6 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
               <section>
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <Toggle3D
-                    on={iaSearchMode}
-                    onChange={setIaSearchMode}
-                    label="IA Search"
-                    hint={hasAnthropic === false ? 'Falta chave Anthropic' : 'Vision pra avatares pendentes'}
-                    variant="cyan"
-                    icon={<span className="text-base">🤖</span>}
-                  />
-                  <Toggle3D
                     on={camuflagemMode}
                     onChange={setCamuflagemMode}
                     label="Camuflagem"
@@ -3049,14 +3097,6 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                     hint="HeyGen + B-Rolls extras Magnific"
                     variant="cyan"
                     icon={<span className="text-base">➕</span>}
-                  />
-                  <Toggle3D
-                    on={heygenSlowMode}
-                    onChange={toggleHeygenSlowMode}
-                    label="Slow Mode"
-                    hint="≈50% mais lento no HeyGen — fura o limite diario (so HeyGen)"
-                    variant="cyan"
-                    icon={<span className="text-base">🐢</span>}
                   />
                 </div>
 
@@ -3330,39 +3370,6 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                       >
                         {analyzing ? 'Analisando...' : `🔍 Analisar (${selectedTaskIds.size})`}
                       </button>
-                      {(() => {
-                        // Total slots pendentes (sem avatar) com briefingFileId nas tasks selecionadas
-                        const pendingSlots = Array.from(selectedTaskIds).reduce((sum, id) => {
-                          const a = taskAnalyses[id];
-                          return sum + (a?.roleSlots?.filter(s => !s.avatarId && s.briefingFileId).length || 0);
-                        }, 0);
-                        if (pendingSlots === 0) return null;
-                        if (hasAnthropic === false) {
-                          return (
-                            <a
-                              href="/configuracoes/api"
-                              className="mono rounded-md border border-yellow-500/40 bg-yellow-500/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-yellow-200 hover:bg-yellow-500/20"
-                              title="IA Search precisa de chave Anthropic"
-                            >
-                              🔧 Configurar Anthropic pra IA Search ({pendingSlots} pendentes)
-                            </a>
-                          );
-                        }
-                        return (
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              for (const id of Array.from(selectedTaskIds)) {
-                                await runVisualMatchAllPendingForTask(id);
-                              }
-                            }}
-                            className="mono rounded-md border border-cyan-500/40 bg-cyan-500/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/20"
-                            title="Claude vision identifica avatares pendentes comparando thumbs do briefing com biblioteca HeyGen"
-                          >
-                            🤖 IA Search ({pendingSlots} pendentes)
-                          </button>
-                        );
-                      })()}
                     </div>
                   ) : null}
 
@@ -3687,26 +3694,6 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
 
                               <div className="mt-1 flex items-center justify-between gap-2">
                                 <span></span>
-                                {a.status === 'partial' && a.roleSlots?.some(s => !s.avatarId && s.briefingFileId) ? (
-                                  hasAnthropic === false ? (
-                                    <a
-                                      href="/configuracoes/api"
-                                      className="mono shrink-0 rounded border border-yellow-500/40 bg-yellow-500/10 px-3 py-1 text-[10px] uppercase tracking-widest text-yellow-200 hover:bg-yellow-500/20"
-                                      title="IA Search precisa de chave Anthropic"
-                                    >
-                                      🔧 Configurar Anthropic
-                                    </a>
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      onClick={() => runVisualMatchAllPendingForTask(a.taskId)}
-                                      className="mono shrink-0 rounded border border-cyan-500/40 bg-cyan-500/10 px-3 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/20"
-                                      title="Roda Claude vision em todos os avatares pendentes desta task pra tentar achar match visual"
-                                    >
-                                      🤖 IA Search pendentes ({a.roleSlots.filter(s => !s.avatarId && s.briefingFileId).length})
-                                    </button>
-                                  )
-                                ) : null}
                                 {a.vaBriefing ? (
                                   <span
                                     className="mono shrink-0 rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200"
@@ -4112,7 +4099,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                                 );
                                               })()
                                             ) : (
-                                              <span className="text-red-300">· PENDENTE — escolha o avatar abaixo OU click 🤖 IA SEARCH</span>
+                                              <span className="text-red-300">· PENDENTE — escolha o avatar abaixo</span>
                                             )}
                                             <button
                                               type="button"
@@ -4159,41 +4146,10 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                                     sem link drive
                                                   </span>
                                                 )}
-                                                {hasAnthropic !== false && slot.briefingFileId ? (
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => runVisualMatchForSlot(a.taskId, sIdx)}
-                                                    disabled={isVisualSearching}
-                                                    className="mono rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/20 disabled:opacity-50"
-                                                    title="Claude vision compara essa thumb com toda biblioteca HeyGen e escolhe o melhor match visual"
-                                                  >
-                                                    {isVisualSearching ? '🔍 buscando...' : '🤖 IA SEARCH'}
-                                                  </button>
-                                                ) : null}
                                               </div>
                                             </div>
                                           </div>
                                           <div className="mt-2 grid gap-2">
-                                            {/* Avatar First — toggle pra criar avatar via upload (Photo to Video) */}
-                                            <AvatarFirstSlot
-                                              slotKey={`${a.taskId}:${sIdx}`}
-                                              briefingUsername={slot.username}
-                                              enabled={isAvatarFirstEnabled(a.taskId, sIdx)}
-                                              setEnabled={(v) => setAvatarFirstFor(a.taskId, sIdx, v)}
-                                              onComplete={(r) => {
-                                                // Avatar criado — auto-seleciona no slot
-                                                updateRoleSlot(a.taskId, sIdx, {
-                                                  avatarId: r.avatarId,
-                                                  avatarName: r.avatarName,
-                                                  avatarThumb: null, // sera populado quando library reload
-                                                  avatarVoiceId: r.voiceId,
-                                                  voiceOverride: { id: r.voiceId, name: r.voiceName },
-                                                  matchedBy: 'avatar_first',
-                                                });
-                                                // Recarrega biblioteca pra avatar aparecer no picker
-                                                reloadLibrary().catch(() => {});
-                                              }}
-                                            />
                                             <div className="grid gap-0.5">
                                               <div className="mono text-[9px] uppercase tracking-widest text-text-muted">avatar HeyGen escolhido</div>
                                               <div className="max-w-[400px]">
@@ -4219,45 +4175,13 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                                     · {effectiveVoiceLabel}
                                                   </span>
                                                   {noVoice && !slot.voiceOverride ? (
-                                                    <span className="text-red-300">⚠ avatar sem voz padrao — escolha uma voz custom OU clone uma nova</span>
+                                                    <span className="text-red-300">⚠ avatar sem voz padrao — escolha uma voz custom</span>
                                                   ) : null}
                                                 </div>
                                                 <CompactVoiceSelector
                                                   selected={slot.voiceOverride}
                                                   setSelected={(v) => updateRoleSlot(a.taskId, sIdx, { voiceOverride: v })}
                                                 />
-                                                {/* Clone voice — aparece se cloning em andamento OU se botao foi clicado.
-                                                 *  File picker programatico: clica no botao → abre file input invisivel. */}
-                                                {(() => {
-                                                  const cloneKey = `${a.taskId}:${sIdx}`;
-                                                  const cloning = cloningVoice[cloneKey];
-                                                  if (cloning) {
-                                                    return (
-                                                      <div className="mt-1 rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-1.5">
-                                                        <div className="mono text-[9px] uppercase tracking-widest text-cyan-200">
-                                                          🎤 Clonando voz · {cloning.stage} · {Math.round(cloning.percent)}%
-                                                        </div>
-                                                        {cloning.message ? (
-                                                          <div className="text-[10px] text-text-muted mt-0.5">{cloning.message}</div>
-                                                        ) : null}
-                                                        <div className="mt-1 h-1 rounded bg-bg/60 overflow-hidden">
-                                                          <div className="h-full bg-cyan-400 transition-all" style={{ width: `${cloning.percent}%` }} />
-                                                        </div>
-                                                      </div>
-                                                    );
-                                                  }
-                                                  return (
-                                                    <VoiceCloneTrigger
-                                                      onSubmit={(picked) => handleCloneVoiceForSlot(a.taskId, sIdx, picked.file, {
-                                                        model: picked.model,
-                                                        language: picked.language,
-                                                        trimToSeconds: picked.trimToSeconds,
-                                                        removeBackgroundNoise: picked.removeBackgroundNoise,
-                                                        removeBackgroundMusic: picked.removeBackgroundMusic,
-                                                      })}
-                                                    />
-                                                  );
-                                                })()}
                                               </div>
                                             ) : null}
                                           </div>
