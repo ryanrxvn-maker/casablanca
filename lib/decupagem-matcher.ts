@@ -374,11 +374,12 @@ export function textSimilarity(a: string, b: string): number {
 /**
  * Dedup GLOBAL de takes repetidas.
  *
- * Regra dura: se o expert fala a MESMA frase 10x, so 1 sobrevive.
- * Compara cada cut (ordem da copy) contra TODOS os ja aceitos:
- *   - similaridade textual >= 0.6  → mesma fala repetida
- *   - mesma frase da copy + sim >= 0.4 → repeticao da mesma linha
- *   - overlap temporal real → pegou o mesmo pedaco de video 2x
+ * Regra dura: se o expert fala a MESMA frase 10x, so 1 sobrevive — MAS
+ * duas linhas DISTINTAS da copy (mesmo que parecidas) NUNCA somem.
+ *
+ * Dois cortes sao a mesma take repetida sse:
+ *   - overlap temporal real (mesmo pedaco de video); OU
+ *   - mesma frase da copy (normalizada) E transcript sim >= 0.5.
  * Mantem APENAS o de maior score (substitui in-place pra preservar
  * a posicao na ordem da copy).
  */
@@ -397,7 +398,13 @@ export function dedupCutsGlobal(cuts: Cut[]): Cut[] {
       const timeOverlap =
         !(cur.endMs <= k.startMs || cur.startMs >= k.endMs);
 
-      if (sim >= 0.6 || (samePhrase && sim >= 0.4) || timeOverlap) {
+      // So funde se for LITERALMENTE o mesmo pedaco de video, ou se a
+      // copy repete a propria linha e o expert refez. NUNCA funde duas
+      // linhas DISTINTAS da copy so por serem textualmente parecidas
+      // ("ganhar rapido" vs "ganhar facil" sobrevivem as duas).
+      const isDuplicate = timeOverlap || (samePhrase && sim >= 0.5);
+
+      if (isDuplicate) {
         dupIdx = i;
         break;
       }

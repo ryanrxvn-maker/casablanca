@@ -289,6 +289,240 @@ console.log('\n[S7] copy repete a propria linha → nao duplica video');
     `retornou ${cuts.length}`);
 }
 
+// ===================================================================== //
+// CENARIOS HORRIVEIS — robustez extrema
+// ===================================================================== //
+
+// S8: gagueira / repeticao de silaba no meio das palavras
+console.log('\n[S8] gagueira e palavras quebradas');
+{
+  const copy = 'Isso não é um treino qualquer.';
+  const cuts = matchCopyWindowed(
+    copy,
+    transcript('is is isso nao nao e um trei treino qualquer'),
+  );
+  check('S8 acha o corte mesmo com gagueira', cuts.length === 1,
+    `retornou ${cuts.length}`);
+  if (cuts.length === 1) {
+    const t = normalize(cuts[0].transcriptText);
+    check('S8 conteudo correto', t.includes('treino') && t.includes('qualquer'),
+      t);
+  }
+}
+
+// S9: a MELHOR take esta no MEIO (nao a ultima) — tiebreak nao pode
+// deixar a ultima (pior) ganhar
+console.log('\n[S9] melhor take no meio, ultima e pior');
+{
+  const copy = 'Você precisa agir imediatamente sem hesitar nenhum segundo.';
+  const cuts = matchCopyWindowed(
+    copy,
+    transcript(
+      'voce tipo precisa agir entao imediatamente sem hesitar', // 1a ruim
+      'voce precisa agir imediatamente sem hesitar nenhum segundo', // 2a otima
+      'voce precisa tipo agir imediatamente sabe sem hesitar nenhum', // 3a ruim
+    ),
+  );
+  check('S9 retorna 1 corte', cuts.length === 1, `retornou ${cuts.length}`);
+  if (cuts.length === 1) {
+    const t = normalize(cuts[0].transcriptText);
+    check(
+      'S9 escolheu a take limpa do MEIO (sem filler, tem "segundo")',
+      !t.includes('tipo') && !t.includes('sabe') && t.includes('segundo'),
+      t,
+    );
+  }
+}
+
+// S10: duas linhas DISTINTAS da copy mas quase identicas (so muda 1
+// palavra-chave). NENHUMA pode ser fundida/perdida.
+console.log('\n[S10] linhas distintas quase identicas nao podem fundir');
+{
+  const copy =
+    'Com isso você vai ganhar dinheiro rápido.\n' +
+    'Com isso você vai ganhar dinheiro fácil.';
+  const cuts = matchCopyWindowed(
+    copy,
+    transcript(
+      'com isso voce vai ganhar dinheiro rapido',
+      'com isso voce vai ganhar dinheiro facil',
+    ),
+  );
+  check('S10 mantem AS DUAS linhas (2 cortes)', cuts.length === 2,
+    `retornou ${cuts.length}`);
+  if (cuts.length === 2) {
+    const tt = texts(cuts);
+    const temRapido = tt.some((t) => t.includes('rapido'));
+    const temFacil = tt.some((t) => t.includes('facil'));
+    check('S10 tem a linha "rapido" E a "facil"', temRapido && temFacil,
+      JSON.stringify(tt));
+  }
+}
+
+// S11: muito lixo / falsos comecos espalhados antes da take boa
+console.log('\n[S11] enxurrada de falsos comecos');
+{
+  const copy = 'O método funciona em qualquer pessoa comprovadamente.';
+  const cuts = matchCopyWindowed(
+    copy,
+    transcript(
+      'o metodo',
+      'o metodo funciona em',
+      'o metodo funciona em qualquer',
+      'peraí',
+      'o metodo funciona em qualquer pessoa',
+      'o metodo funciona em qualquer pessoa comprovadamente',
+    ),
+  );
+  check('S11 1 corte e' + ' completo', cuts.length === 1,
+    `retornou ${cuts.length}`);
+  if (cuts.length === 1) {
+    const t = normalize(cuts[0].transcriptText);
+    check('S11 pegou a take inteira (tem "comprovadamente")',
+      t.includes('comprovadamente') && t.includes('pessoa'), t);
+  }
+}
+
+// S12: transcript so com lixo, nada casa → [] sem crashar
+console.log('\n[S12] nada casa → vazio sem crashar');
+{
+  let crashed = false;
+  let cuts: Cut[] = [];
+  try {
+    cuts = matchCopyWindowed(
+      'Frase totalmente ausente do video aqui agora.',
+      transcript('bom dia pessoal tudo certo por ai com voces hoje'),
+    );
+  } catch {
+    crashed = true;
+  }
+  check('S12 nao crashou', !crashed);
+  check('S12 retornou poucos/zero cortes ruins', cuts.length <= 1,
+    `retornou ${cuts.length}`);
+}
+
+// S13: copy vazia / so pontuacao / espaco → [] sem crashar
+console.log('\n[S13] copy degenerada');
+{
+  let crashed = false;
+  let r1: Cut[] = [], r2: Cut[] = [], r3: Cut[] = [];
+  try {
+    r1 = matchCopyWindowed('', transcript('qualquer coisa aqui falada'));
+    r2 = matchCopyWindowed('   \n  ', transcript('qualquer coisa aqui'));
+    r3 = matchCopyWindowed('... !!! ?', transcript('qualquer coisa aqui'));
+  } catch {
+    crashed = true;
+  }
+  check('S13 nao crashou', !crashed);
+  check('S13 copy vazia → []', r1.length === 0 && r2.length === 0 &&
+    r3.length === 0,
+    `${r1.length}/${r2.length}/${r3.length}`);
+}
+
+// S14: transcript de 1 palavra / vazio → [] sem crashar
+console.log('\n[S14] transcript minusculo');
+{
+  let crashed = false;
+  let r1: Cut[] = [], r2: Cut[] = [];
+  try {
+    r1 = matchCopyWindowed('Uma frase normal aqui.', []);
+    r2 = matchCopyWindowed('Uma frase normal aqui.', transcript('oi'));
+  } catch {
+    crashed = true;
+  }
+  check('S14 nao crashou', !crashed);
+  check('S14 transcript vazio/1-palavra → []',
+    r1.length === 0 && r2.length === 0, `${r1.length}/${r2.length}`);
+}
+
+// S15: 30 repeticoes da mesma linha repetida 2x na copy → 1 corte
+console.log('\n[S15] 30 takes da mesma frase');
+{
+  const copy = 'Essa oferta acaba à meia-noite de hoje.\n' +
+    'Essa oferta acaba à meia-noite de hoje.';
+  const takes = Array.from(
+    { length: 30 },
+    () => 'essa oferta acaba a meia noite de hoje',
+  );
+  const cuts = matchCopyWindowed(copy, transcript(...takes));
+  check('S15 30 takes → 1 corte', cuts.length === 1,
+    `retornou ${cuts.length}`);
+}
+
+// S16: copy 6 frases, retakes ruins de TODAS espalhados, gravado em
+// ordem com muito ruido — stress real de VSL
+console.log('\n[S16] VSL longa com retakes de todas as frases');
+{
+  const copy =
+    'O problema é que ninguém te contou a verdade.\n' +
+    'Na realidade existe um caminho muito mais simples.\n' +
+    'Eu descobri isso depois de anos de tentativa.\n' +
+    'E agora eu vou compartilhar tudo com você.\n' +
+    'Basta seguir os três passos que eu vou mostrar.\n' +
+    'Clique no botão abaixo antes que acabe o tempo.';
+
+  const cuts = matchCopyWindowed(
+    copy,
+    transcript(
+      'deixa eu respirar aqui um segundo',
+      'o problema e que ninguem aaa te contou', // retake ruim 1
+      'o problema e que ninguem te contou a verdade', // boa 1
+      'na realidade existe um tipo caminho mais', // retake ruim 2
+      'na realidade existe um caminho muito mais simples', // boa 2
+      'eu descobri isso depois de anos de tentativa', // boa 3
+      'errei desculpa de novo',
+      'e agora eu vou sabe compartilhar tudo', // retake ruim 4
+      'e agora eu vou compartilhar tudo com voce', // boa 4
+      'basta seguir os tres passos que eu vou mostrar', // boa 5
+      'clique no botao',
+      'clique no botao abaixo antes que acabe o tempo', // boa 6
+    ),
+  );
+
+  check('S16 retorna 6 cortes', cuts.length === 6, `retornou ${cuts.length}`);
+  check('S16 cronologico', isSortedByStart(cuts));
+  if (cuts.length === 6) {
+    const tt = texts(cuts);
+    check('S16 #1', tt[0].includes('verdade'), tt[0]);
+    check('S16 #2', tt[1].includes('simples'), tt[1]);
+    check('S16 #3', tt[2].includes('tentativa'), tt[2]);
+    check('S16 #4', tt[3].includes('voce') && tt[3].includes('compartilhar'),
+      tt[3]);
+    check('S16 #5', tt[4].includes('passos'), tt[4]);
+    check('S16 #6', tt[5].includes('botao') && tt[5].includes('tempo'),
+      tt[5]);
+    check('S16 sem filler nos cortes finais',
+      !tt.some((t) => t.includes(' aaa ') || t.includes('tipo') ||
+        t.includes('sabe')),
+      JSON.stringify(tt));
+    check('S16 sem duplicatas', new Set(tt).size === 6, JSON.stringify(tt));
+  }
+}
+
+// S17: ordem invertida (copy A→B, expert falou B→A) — nao crasha, nao
+// duplica. Comportamento aceitavel: prioriza cronologia.
+console.log('\n[S17] copy fora da ordem falada');
+{
+  let crashed = false;
+  let cuts: Cut[] = [];
+  try {
+    cuts = matchCopyWindowed(
+      'A frase que vem primeiro na copy.\n' +
+        'A frase que vem depois na copy.',
+      transcript(
+        'a frase que vem depois na copy',
+        'a frase que vem primeiro na copy',
+      ),
+    );
+  } catch {
+    crashed = true;
+  }
+  check('S17 nao crashou', !crashed);
+  check('S17 cronologico e sem duplicata', isSortedByStart(cuts) &&
+    new Set(texts(cuts)).size === cuts.length,
+    JSON.stringify(texts(cuts)));
+}
+
 // --------------------------------------------------------------------- //
 
 console.log(
