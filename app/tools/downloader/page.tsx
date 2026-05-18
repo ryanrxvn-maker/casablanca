@@ -30,6 +30,16 @@ const QUALITIES: { value: Quality; label: string }[] = [
   { value: 'best', label: 'Máxima' },
 ];
 
+const ADULT_SITES = [
+  'pornhub.com',
+  'xvideos.com',
+  'xhamster.com',
+  'redtube.com',
+  'youporn.com',
+  'xvideosputaria.com',
+  'buceteiro.com',
+];
+
 function detectSource(url: string): string {
   const u = url.toLowerCase();
   if (u.includes('tiktok')) return 'TikTok';
@@ -214,6 +224,18 @@ export default function DownloaderPage() {
               {urls.length} link{urls.length > 1 ? 's' : ''} detectado
               {urls.length > 1 ? 's' : ''}
             </p>
+          )}
+          {isAdmin && adult && (
+            <div className="mt-3 rounded-lg border border-red-900/50 bg-red-950/20 px-3 py-2">
+              <p className="mono text-[10px] uppercase tracking-widest text-red-400">
+                Modo +18 ativo — sites suportados (Full HD, otimizado)
+              </p>
+              <div className="mono mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-red-300/80">
+                {ADULT_SITES.map((s) => (
+                  <span key={s}>{s}</span>
+                ))}
+              </div>
+            </div>
           )}
         </div>
 

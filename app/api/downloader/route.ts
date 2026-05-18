@@ -119,42 +119,179 @@ function safeName(title: string, ext: string): string {
   return `${base}.${ext}`;
 }
 
-// --- deteccao de binarios, memoizada no modulo (1x por processo) ---
-let ytDlpPromise: Promise<{ cmd: string; pre: string[] } | null> | null = null;
-let aria2Promise: Promise<boolean> | null = null;
+// ---------------------------------------------------------------------------
+// Deteccao de binarios — ROBUSTA no Windows.
+//
+// child_process.spawn no Windows NAO resolve PATHEXT sem shell:true:
+// spawn('yt-dlp') / spawn('python') FALHAM porque os arquivos reais sao
+// `yt-dlp.exe` / `python.exe`. Solucao: resolver o CAMINHO ABSOLUTO via
+// `where`/`which` e dar spawn no .exe absoluto (sem shell -> seguro com
+// URLs que tem `&`). Falha NAO e cacheada (permite retry/auto-heal).
+// ---------------------------------------------------------------------------
+
+type Tool = { cmd: string; pre: string[] };
+
+let ytDlpResolved: Tool | null = null;
+let ytDlpInflight: Promise<Tool | null> | null = null;
+let ffmpegResolved: string | null = null;
+let aria2Resolved: string | null | undefined = undefined; // undefined=nao checado
+
+async function fileExists(p: string): Promise<boolean> {
+  try {
+    return (await stat(p)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** Caminho absoluto do executavel via `where`(win)/`which`(posix).
+ *  `name` e SEMPRE um literal nosso (sem metachar) -> shell:true seguro. */
+function whichAbs(name: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const finder = process.platform === 'win32' ? 'where' : 'which';
+    const p = spawn(finder, [name], { windowsHide: true, shell: true });
+    let out = '';
+    p.stdout.on('data', (d) => (out += d.toString()));
+    p.on('error', () => resolve(null));
+    p.on('close', (code) => {
+      if (code !== 0) return resolve(null);
+      const first = out
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter(Boolean)[0];
+      resolve(first || null);
+    });
+  });
+}
 
 function probe(cmd: string, args: string[]): Promise<boolean> {
   return new Promise((resolve) => {
+    // cmd aqui ja e caminho absoluto -> sem shell, seguro
     const p = spawn(cmd, args, { windowsHide: true });
     p.on('error', () => resolve(false));
     p.on('close', (code) => resolve(code === 0));
   });
 }
 
-function resolveYtDlp() {
-  if (!ytDlpPromise) {
-    ytDlpPromise = (async () => {
-      const cands: { cmd: string; pre: string[] }[] = [
-        { cmd: 'yt-dlp', pre: [] },
-        { cmd: 'yt-dlp.exe', pre: [] },
-        { cmd: 'python', pre: ['-m', 'yt_dlp'] },
-        { cmd: 'python3', pre: ['-m', 'yt_dlp'] },
-        // Windows Python launcher (py) — comum quando python nao esta no PATH
-        { cmd: 'py', pre: ['-3', '-m', 'yt_dlp'] },
-        { cmd: 'py', pre: ['-m', 'yt_dlp'] },
-      ];
-      for (const c of cands) {
-        if (await probe(c.cmd, [...c.pre, '--version'])) return c;
+/** Diretorios Python comuns no Windows (instalacao por-usuario). */
+async function winPythonDirs(): Promise<string[]> {
+  if (process.platform !== 'win32') return [];
+  const roots = [
+    process.env.LOCALAPPDATA &&
+      path.join(process.env.LOCALAPPDATA, 'Programs', 'Python'),
+    process.env.ProgramFiles && path.join(process.env.ProgramFiles, ''),
+    'C:\\',
+  ].filter(Boolean) as string[];
+  const dirs: string[] = [];
+  for (const root of roots) {
+    try {
+      for (const e of await readdir(root)) {
+        if (/^Python3\d+$/i.test(e)) dirs.push(path.join(root, e));
       }
-      return null;
-    })();
+    } catch {
+      /* root inexistente */
+    }
   }
-  return ytDlpPromise;
+  return dirs;
 }
 
-function hasAria2() {
-  if (!aria2Promise) aria2Promise = probe('aria2c', ['--version']);
-  return aria2Promise;
+async function resolveYtDlp(): Promise<Tool | null> {
+  if (ytDlpResolved) return ytDlpResolved;
+  if (ytDlpInflight) return ytDlpInflight;
+
+  ytDlpInflight = (async (): Promise<Tool | null> => {
+    const tryTool = async (t: Tool): Promise<Tool | null> =>
+      t.cmd && (await probe(t.cmd, [...t.pre, '--version'])) ? t : null;
+
+    // 1) override explicito por env
+    const envYt = process.env.YTDLP_PATH;
+    const envPy = process.env.PYTHON_PATH;
+    const candidates: Tool[] = [];
+    if (envYt) candidates.push({ cmd: envYt, pre: [] });
+    if (envPy) candidates.push({ cmd: envPy, pre: ['-m', 'yt_dlp'] });
+
+    // 2) PATH resolvido pra absoluto
+    const ytAbs =
+      (await whichAbs('yt-dlp')) || (await whichAbs('yt-dlp.exe'));
+    if (ytAbs) candidates.push({ cmd: ytAbs, pre: [] });
+    const pyAbs =
+      (await whichAbs('python')) || (await whichAbs('python3'));
+    if (pyAbs) candidates.push({ cmd: pyAbs, pre: ['-m', 'yt_dlp'] });
+    const pyLauncher = await whichAbs('py');
+    if (pyLauncher)
+      candidates.push({ cmd: pyLauncher, pre: ['-3', '-m', 'yt_dlp'] });
+
+    // 3) locais comuns do Windows
+    for (const d of await winPythonDirs()) {
+      const ytExe = path.join(d, 'Scripts', 'yt-dlp.exe');
+      if (await fileExists(ytExe)) candidates.push({ cmd: ytExe, pre: [] });
+      const pyExe = path.join(d, 'python.exe');
+      if (await fileExists(pyExe))
+        candidates.push({ cmd: pyExe, pre: ['-m', 'yt_dlp'] });
+    }
+
+    for (const c of candidates) {
+      const ok = await tryTool(c);
+      if (ok) {
+        ytDlpResolved = ok;
+        return ok;
+      }
+    }
+
+    // 4) AUTO-HEAL: achou python mas sem modulo yt_dlp -> instala e tenta
+    const anyPy =
+      pyAbs ||
+      envPy ||
+      (await (async () => {
+        for (const d of await winPythonDirs()) {
+          const pe = path.join(d, 'python.exe');
+          if (await fileExists(pe)) return pe;
+        }
+        return null;
+      })());
+    if (anyPy) {
+      await new Promise<void>((res) => {
+        const p = spawn(
+          anyPy,
+          ['-m', 'pip', 'install', '--upgrade', '--quiet', 'yt-dlp'],
+          { windowsHide: true },
+        );
+        p.on('error', () => res());
+        p.on('close', () => res());
+      });
+      const healed = await tryTool({ cmd: anyPy, pre: ['-m', 'yt_dlp'] });
+      if (healed) {
+        ytDlpResolved = healed;
+        return healed;
+      }
+    }
+
+    return null; // NAO cacheia falha -> proxima request tenta de novo
+  })();
+
+  try {
+    return await ytDlpInflight;
+  } finally {
+    ytDlpInflight = null;
+  }
+}
+
+async function resolveFfmpeg(): Promise<string> {
+  if (ffmpegResolved) return ffmpegResolved;
+  const env = process.env.FFMPEG_PATH;
+  const found =
+    (env && (await fileExists(env)) ? env : null) ||
+    (await whichAbs('ffmpeg')) ||
+    (await whichAbs('ffmpeg.exe'));
+  ffmpegResolved = found || 'ffmpeg';
+  return ffmpegResolved;
+}
+
+async function aria2Path(): Promise<string | null> {
+  if (aria2Resolved !== undefined) return aria2Resolved;
+  aria2Resolved =
+    (await whichAbs('aria2c')) || (await whichAbs('aria2c.exe'));
+  return aria2Resolved;
 }
 
 function run(
@@ -244,7 +381,7 @@ async function fetchTikTok(
     mode === 'audio-wav'
       ? ['-y', '-i', srcPath, '-vn', outPath]
       : ['-y', '-i', srcPath, '-vn', '-b:a', '192k', outPath];
-  const { code } = await run('ffmpeg', ffArgs, workDir);
+  const { code } = await run(await resolveFfmpeg(), ffArgs, workDir);
   if (code !== 0) return { error: 'ffmpeg falhou na extracao de audio' };
   return { file: outPath, name: safeName(title, ext) };
 }
@@ -273,10 +410,11 @@ async function ytDlpArgs(
     // alguns tubes bloqueiam UA nao-browser
     base.push('--user-agent', UA, '--extractor-retries', '3');
   }
-  if (await hasAria2()) {
+  const aria2 = await aria2Path();
+  if (aria2) {
     base.push(
       '--downloader',
-      'aria2c',
+      aria2,
       '--downloader-args',
       'aria2c:-x16 -s16 -k1M -j16',
     );
@@ -305,14 +443,21 @@ async function fetchYtDlp(
   quality: Quality,
   provider: Provider,
   workDir: string,
+  referer?: string,
 ): Promise<Built> {
   const tool = await resolveYtDlp();
   if (!tool)
     return {
       error:
-        'yt-dlp nao encontrado no servidor. Instale com: pip install yt-dlp (e tenha ffmpeg no PATH).',
+        'yt-dlp indisponivel e auto-instalacao falhou. Garanta Python no PATH (ou defina PYTHON_PATH/YTDLP_PATH) e ffmpeg no PATH.',
     };
-  const args = [...tool.pre, ...(await ytDlpArgs(mode, quality, provider)), url];
+  const refArgs = referer ? ['--add-header', `Referer:${referer}`] : [];
+  const args = [
+    ...tool.pre,
+    ...(await ytDlpArgs(mode, quality, provider)),
+    ...refArgs,
+    url,
+  ];
   const { code, stderr } = await run(tool.cmd, args, workDir);
   if (code !== 0) {
     const clean = stderr
@@ -342,6 +487,131 @@ async function fetchYtDlp(
   if (files.length === 0) return { error: 'nenhum arquivo gerado' };
   files.sort((a, b) => b.size - a.size);
   return { file: files[0].full, name: files[0].n };
+}
+
+const TUBE_RE =
+  /(pornhub|xvideos|xhamster|redtube|youporn|spankbang|eporner|tube8)\.[a-z.]+/i;
+
+// URLs de bibliotecas de player / placeholders — NUNCA sao o video real.
+const JUNK_MEDIA_RE =
+  /(plyr\.io|jwplayer|jsdelivr|cdnjs|googletagmanager|gstatic|doubleclick|\/blank\.mp4|blank\.mp4|sample\.mp4|placeholder|\/ads?\/)/i;
+
+function isRealMedia(u: string): boolean {
+  return /^https?:\/\//i.test(u) && !JUNK_MEDIA_RE.test(u);
+}
+
+/**
+ * Crack de embed pra blogs/mirrors +18 (xvideosputaria, buceteiro, …)
+ * que nao tem extractor proprio: faz scrape da pagina e acha a midia
+ * real — iframe pra tube conhecido, player HLS (vazounudes), ou
+ * .m3u8/.mp4/og:video direto. Mesmo principio dos sites de download.
+ */
+async function resolveAdultEmbed(
+  pageUrl: string,
+): Promise<{ target: string; referer: string } | null> {
+  let html: string;
+  let origin: string;
+  try {
+    const u = new URL(pageUrl);
+    origin = u.origin;
+    const r = await fetch(pageUrl, {
+      headers: { 'user-agent': UA, referer: origin + '/' },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!r.ok) return null;
+    html = await r.text();
+  } catch {
+    return null;
+  }
+
+  const iframes = [
+    ...html.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi),
+  ].map((m) => m[1].replace(/&amp;/g, '&'));
+
+  // 1) iframe apontando pra um tube conhecido -> yt-dlp nativo resolve
+  for (const src of iframes) {
+    if (TUBE_RE.test(src)) {
+      return { target: src.startsWith('//') ? 'https:' + src : src, referer: origin + '/' };
+    }
+  }
+
+  // 2) player HLS embarcado (ex.: vazounudes video-player-d.php?id=UUID)
+  for (const src of iframes) {
+    const abs = src.startsWith('//')
+      ? 'https:' + src
+      : src.startsWith('http')
+        ? src
+        : origin + (src.startsWith('/') ? '' : '/') + src;
+    try {
+      const fr = await fetch(abs, {
+        headers: { 'user-agent': UA, referer: origin + '/' },
+        signal: AbortSignal.timeout(20_000),
+      });
+      if (!fr.ok) continue;
+      const fh = await fr.text();
+      const refOrigin = new URL(abs).origin + '/';
+      const m3u8 = [...fh.matchAll(/https?:\/\/[^"'\s]+\.m3u8[^"'\s]*/gi)]
+        .map((m) => m[0])
+        .find(isRealMedia);
+      if (m3u8) return { target: m3u8, referer: refOrigin };
+      const mp4 = [...fh.matchAll(/https?:\/\/[^"'\s]+\.mp4[^"'\s]*/gi)]
+        .map((m) => m[0])
+        .find(isRealMedia);
+      if (mp4) return { target: mp4, referer: refOrigin };
+    } catch {
+      /* tenta proximo */
+    }
+  }
+
+  // 3) midia direta na propria pagina (ignorando lixo de player)
+  const og = html.match(
+    /<meta[^>]+property=["']og:video(?::url)?["'][^>]+content=["'](https?:[^"']+)["']/i,
+  );
+  const direct =
+    [...html.matchAll(/https?:\/\/[^"'\s]+\.m3u8[^"'\s]*/gi)]
+      .map((m) => m[0])
+      .find(isRealMedia) ||
+    (og && isRealMedia(og[1]) ? og[1] : null) ||
+    [...html.matchAll(/https?:\/\/[^"'\s]+\.mp4[^"'\s]*/gi)]
+      .map((m) => m[0])
+      .find(isRealMedia);
+  if (direct) return { target: direct, referer: origin + '/' };
+
+  return null;
+}
+
+/**
+ * Pipeline +18: tenta extractor nativo do yt-dlp (pornhub, xvideos,
+ * xhamster, redtube, youporn) e, se o site for um mirror/blog sem
+ * extractor, cai no crack de embed -> yt-dlp na midia real.
+ */
+async function fetchAdult(
+  url: string,
+  mode: Mode,
+  quality: Quality,
+  workDir: string,
+): Promise<Built> {
+  const native = await fetchYtDlp(url, mode, quality, 'adult', workDir);
+  if (!('error' in native)) return native;
+
+  const emb = await resolveAdultEmbed(url);
+  if (emb) {
+    const viaEmbed = await fetchYtDlp(
+      emb.target,
+      mode,
+      quality,
+      'adult',
+      workDir,
+      emb.referer,
+    );
+    if (!('error' in viaEmbed)) return viaEmbed;
+    return {
+      error: `nao foi possivel resolver a midia (site pode exigir login/assinatura ou carregar via JS). [${viaEmbed.error}]`,
+    };
+  }
+  return {
+    error: `nao foi possivel resolver a midia deste link (sem video extraivel — pode exigir login/assinatura ou ser pagina sem video). [${native.error}]`,
+  };
 }
 
 export async function POST(req: NextRequest) {
@@ -412,6 +682,8 @@ export async function POST(req: NextRequest) {
             ? { error: `TikTok: ${built.error}. Fallback yt-dlp: ${fb.error}` }
             : fb;
       }
+    } else if (provider === 'adult') {
+      built = await fetchAdult(url, mode, quality, workDir);
     } else {
       built = await fetchYtDlp(url, mode, quality, provider, workDir);
     }
