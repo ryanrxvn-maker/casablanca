@@ -61,6 +61,17 @@ export function IconCompressor(p: IconProps) {
   );
 }
 
+/** Downloader — play (video) com seta de download pra baixo */
+export function IconDownloader(p: IconProps) {
+  return (
+    <svg {...baseProps(p)}>
+      <rect x="3" y="3" width="18" height="13" rx="2" />
+      <path d="M10 7.5l4 2.5-4 2.5z" />
+      <path d="M12 16v5M9 18l3 3 3-3" />
+    </svg>
+  );
+}
+
 /** Audio Split — waveform dividido por linhas verticais */
 export function IconAudioSplit(p: IconProps) {
   return (

@@ -13,6 +13,7 @@ import {
   IconCopySRT,
   IconDecupageCopy,
   IconDecupagem,
+  IconDownloader,
   IconHeyGenAuto,
   IconNormalizador,
   IconRemoverElementos,
@@ -34,6 +35,11 @@ export const BASE_SUITE: RailItem[] = [
     href: '/tools/camuflagem',
     label: 'Camuflagem',
     icon: <IconCamuflagem />,
+  },
+  {
+    href: '/tools/downloader',
+    label: 'Downloader',
+    icon: <IconDownloader />,
   },
   {
     href: '/tools/compressor',
