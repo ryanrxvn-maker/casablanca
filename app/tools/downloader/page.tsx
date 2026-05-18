@@ -259,10 +259,12 @@ export default function DownloaderPage() {
         )}
 
         <p className="mono text-[10px] leading-relaxed text-text-muted">
-          Requer <span className="text-white">yt-dlp</span> e{' '}
-          <span className="text-white">ffmpeg</span> no servidor. Links
-          privados (Instagram/TikTok fechados) exigem login e não são
-          suportados. Use apenas para conteúdo que você tem direito de baixar.
+          <span className="text-white">TikTok</span> baixa{' '}
+          <span className="text-lime">sem marca d&apos;água em HD</span>{' '}
+          (mesmo esquema do savett), com fallback automático.{' '}
+          <span className="text-white">YouTube/Instagram</span> via yt-dlp +
+          ffmpeg. Links privados exigem login e não são suportados. Use
+          apenas para conteúdo que você tem direito de baixar.
         </p>
       </div>
     </ToolShell>
