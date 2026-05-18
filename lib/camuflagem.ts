@@ -181,30 +181,24 @@ function rmsEnvelope(data: Float32Array, sampleRate: number): Float32Array {
   return env;
 }
 
-/** Reamostra um envelope para `n` pontos por interpolação linear. */
-function resampleTo(env: Float32Array, n: number): Float32Array {
-  if (env.length === n) return env;
-  const out = new Float32Array(n);
-  if (env.length === 0) return out;
-  for (let i = 0; i < n; i++) {
-    const pos = (i * (env.length - 1)) / Math.max(1, n - 1);
-    const lo = Math.floor(pos);
-    const hi = Math.min(env.length - 1, lo + 1);
-    const t = pos - lo;
-    out[i] = env[lo] * (1 - t) + env[hi] * t;
-  }
-  return out;
-}
-
-/** Coeficiente de correlação de Pearson, em valor absoluto (0..1). */
-function corr(a: Float32Array, b: Float32Array): number {
-  const n = Math.min(a.length, b.length);
-  if (n < 4) return 0;
+/**
+ * Pearson |r| entre a[aStart..aStart+n] e b[bStart..bStart+n].
+ * Os dois envelopes estão a 100 fps (frames de 10ms), então o índice de
+ * frame É o tempo real — comparamos a MESMA posição temporal, sem esticar.
+ */
+function pearson(
+  a: Float32Array,
+  aStart: number,
+  b: Float32Array,
+  bStart: number,
+  n: number,
+): number {
+  if (n < 8) return 0;
   let ma = 0;
   let mb = 0;
   for (let i = 0; i < n; i++) {
-    ma += a[i];
-    mb += b[i];
+    ma += a[aStart + i];
+    mb += b[bStart + i];
   }
   ma /= n;
   mb /= n;
@@ -212,14 +206,36 @@ function corr(a: Float32Array, b: Float32Array): number {
   let da = 0;
   let db = 0;
   for (let i = 0; i < n; i++) {
-    const xa = a[i] - ma;
-    const xb = b[i] - mb;
+    const xa = a[aStart + i] - ma;
+    const xb = b[bStart + i] - mb;
     num += xa * xb;
     da += xa * xa;
     db += xb * xb;
   }
   if (da === 0 || db === 0) return 0;
   return Math.abs(num / Math.sqrt(da * db));
+}
+
+/**
+ * Melhor correlação alinhando `ref` contra `sig` com uma pequena busca de
+ * lag (codec/mux podem introduzir alguns ms de atraso). Compara só onde
+ * AMBOS têm conteúdo no mesmo tempo — nada de reamostrar/esticar.
+ */
+function bestCorr(
+  sig: Float32Array,
+  ref: Float32Array,
+  maxLag: number,
+): number {
+  let best = 0;
+  for (let lag = -maxLag; lag <= maxLag; lag++) {
+    const s0 = Math.max(0, lag);
+    const r0 = Math.max(0, -lag);
+    const n = Math.min(sig.length - s0, ref.length - r0);
+    if (n < 8) continue;
+    const c = pearson(sig, s0, ref, r0, n);
+    if (c > best) best = c;
+  }
+  return best;
 }
 
 /**
@@ -278,22 +294,30 @@ export async function verifyCamouflage(args: {
   const whiteEnv = rmsEnvelope(toMono(whiteBuf), whiteBuf.sampleRate);
   const blackEnv = rmsEnvelope(toMono(blackBuf), blackBuf.sampleRate);
 
-  // O WHITE pode ser mais curto que o BLACK; comparamos só o trecho em que
-  // o WHITE existe (lá é onde o cancelamento importa de verdade).
-  const n = Math.min(sumEnv.length, Math.max(whiteEnv.length, blackEnv.length));
-  const s = resampleTo(sumEnv, n);
-  const w = resampleTo(whiteEnv, n);
-  const b = resampleTo(blackEnv, n);
+  // O WHITE quase sempre é mais curto que o BLACK. No mono-sum, FORA da
+  // região do WHITE só sobra silêncio (o BLACK cancela exato). Então só
+  // faz sentido medir DENTRO da janela onde o WHITE existe — e comparando
+  // o MESMO instante de tempo (envelopes a 100 fps), não esticando. Era
+  // exatamente isso que dava falso negativo: comparava sum longo+silêncio
+  // contra WHITE curto reamostrado, e a correlação desabava pra ~0.
+  const win = Math.min(sumEnv.length, whiteEnv.length);
+  if (win < 8) {
+    // WHITE curtíssimo: nada confiável a medir — não reprova à toa.
+    return { verdict: 'ok', whiteScore: 1, blackScore: 0 };
+  }
+  const sumWin = sumEnv.subarray(0, win);
+  const whiteWin = whiteEnv.subarray(0, win);
+  const blackWin = blackEnv.subarray(0, Math.min(win, blackEnv.length));
 
-  const whiteScore = corr(s, w);
-  const blackScore = corr(s, b);
+  // ±0.5s de tolerância de lag (atraso de encoder/mux).
+  const maxLag = 50;
+  const whiteScore = bestCorr(sumWin, whiteWin, maxLag);
+  const blackScore = bestCorr(sumWin, blackWin, maxLag);
 
-  // Camuflou se a soma mono se parece claramente mais com o WHITE do que
-  // com o BLACK e o vazamento de BLACK é baixo.
+  // Camuflou se a soma mono acompanha claramente o WHITE e não o BLACK.
+  // Quando segura, sumWin É ~white escalado → correlação alta com WHITE.
   const verdict: VerifyVerdict =
-    whiteScore >= 0.45 && whiteScore > blackScore + 0.12 && blackScore < 0.6
-      ? 'ok'
-      : 'fail';
+    whiteScore >= 0.4 && whiteScore > blackScore + 0.1 ? 'ok' : 'fail';
 
   return { verdict, whiteScore, blackScore };
 }
