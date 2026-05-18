@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
+import { createClient } from '@/lib/supabase/client';
 
 type Mode = 'video' | 'audio-mp3' | 'audio-wav';
 type Quality = '1080' | '720' | '480' | 'best';
@@ -58,6 +59,32 @@ export default function DownloaderPage() {
   );
   const [jobs, setJobs] = useState<Job[]>([]);
   const [running, setRunning] = useState(false);
+  // Modo +18 — visivel/utilizavel SO por admin. O gate real e no
+  // servidor (requireAdmin); aqui e so UI.
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adult, setAdult] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const supabase = createClient();
+        const { data: u } = await supabase.auth.getUser();
+        if (!u?.user) return;
+        const { data } = await supabase
+          .from('profiles')
+          .select('is_admin')
+          .eq('id', u.user.id)
+          .maybeSingle();
+        if (alive) setIsAdmin(!!data?.is_admin);
+      } catch {
+        /* sem sessao = nao admin */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const urls = raw
     .split(/[\n\s]+/)
@@ -72,7 +99,7 @@ export default function DownloaderPage() {
       const res = await fetch('/api/downloader', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ url, mode, quality }),
+        body: JSON.stringify({ url, mode, quality, adult: isAdmin && adult }),
       });
 
       if (!res.ok) {
@@ -147,9 +174,30 @@ export default function DownloaderPage() {
     >
       <div className="flex flex-col gap-6">
         <div>
-          <label className="label-field" htmlFor="urls">
-            Links (um por linha)
-          </label>
+          <div className="flex items-center justify-between">
+            <label className="label-field !mb-0" htmlFor="urls">
+              Links (um por linha)
+            </label>
+            {isAdmin && (
+              <button
+                type="button"
+                aria-label="Modo +18"
+                title={
+                  adult
+                    ? 'Modo +18 ativado (Full HD, otimizado)'
+                    : 'Ativar modo +18 (admin)'
+                }
+                onClick={() => setAdult((v) => !v)}
+                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[8px] font-black leading-none tracking-tight transition-all duration-200 active:scale-90 ${
+                  adult
+                    ? 'border-red-500 bg-red-600 text-white shadow-[0_0_10px_rgba(220,38,38,0.6)]'
+                    : 'border-red-900/60 bg-transparent text-red-700/70 hover:border-red-600 hover:text-red-500'
+                }`}
+              >
+                +18
+              </button>
+            )}
+          </div>
           <textarea
             id="urls"
             rows={4}

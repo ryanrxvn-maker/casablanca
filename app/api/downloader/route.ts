@@ -10,6 +10,7 @@ import {
 } from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { requireAdmin } from '@/app/api/admin/_helpers';
 
 /**
  * POST /api/downloader
@@ -41,7 +42,25 @@ export const dynamic = 'force-dynamic';
 
 type Mode = 'video' | 'audio-mp3' | 'audio-wav';
 type Quality = '1080' | '720' | '480' | 'best';
-type Provider = 'tiktok' | 'pinterest' | 'generic';
+type Provider = 'tiktok' | 'pinterest' | 'generic' | 'adult';
+
+/**
+ * Bases de dominio do modo +18 (admin-only). yt-dlp tem extractor
+ * nativo pra pornhub/xhamster/redtube/youporn/xvideos; subdominios de
+ * pais casam no extractor; mirrors caem no extractor generico.
+ */
+const ADULT_BASES = [
+  'pornhub.com',
+  'xhamster.com',
+  'xhamster.desi',
+  'xhamster2.com',
+  'redtube.com',
+  'redtube.com.br',
+  'youporn.com',
+  'xvideos.com',
+  'xvideosputaria.com',
+  'buceteiro.com',
+];
 
 const URL_RE = /^https?:\/\/[^\s]+$/i;
 
@@ -67,6 +86,11 @@ const UA =
 /** Dominio liberado + a que provider ele pertence. */
 function classify(host: string): Provider | null {
   const h = host.replace(/^www\./, '').toLowerCase();
+  if (
+    ADULT_BASES.some((b) => h === b || h.endsWith('.' + b))
+  ) {
+    return 'adult';
+  }
   if (h === 'tiktok.com' || h.endsWith('.tiktok.com')) return 'tiktok';
   if (h === 'pin.it' || /(^|\.)pinterest\.[a-z.]+$/.test(h)) return 'pinterest';
   if (
@@ -112,11 +136,12 @@ function resolveYtDlp() {
     ytDlpPromise = (async () => {
       const cands: { cmd: string; pre: string[] }[] = [
         { cmd: 'yt-dlp', pre: [] },
-        {
-          cmd: process.platform === 'win32' ? 'python' : 'python3',
-          pre: ['-m', 'yt_dlp'],
-        },
+        { cmd: 'yt-dlp.exe', pre: [] },
         { cmd: 'python', pre: ['-m', 'yt_dlp'] },
+        { cmd: 'python3', pre: ['-m', 'yt_dlp'] },
+        // Windows Python launcher (py) — comum quando python nao esta no PATH
+        { cmd: 'py', pre: ['-3', '-m', 'yt_dlp'] },
+        { cmd: 'py', pre: ['-m', 'yt_dlp'] },
       ];
       for (const c of cands) {
         if (await probe(c.cmd, [...c.pre, '--version'])) return c;
@@ -244,6 +269,10 @@ async function ytDlpArgs(
     '-o',
     '%(title).80B-%(id)s.%(ext)s',
   ];
+  if (provider === 'adult') {
+    // alguns tubes bloqueiam UA nao-browser
+    base.push('--user-agent', UA, '--extractor-retries', '3');
+  }
   if (await hasAria2()) {
     base.push(
       '--downloader',
@@ -322,10 +351,12 @@ export async function POST(req: NextRequest) {
       url?: string;
       mode?: Mode;
       quality?: Quality;
+      adult?: boolean;
     };
     const url = (body.url ?? '').trim();
     const mode: Mode = body.mode ?? 'video';
     const quality: Quality = body.quality ?? '1080';
+    const adult = body.adult === true;
 
     if (!url || !URL_RE.test(url))
       return NextResponse.json({ error: 'URL invalida.' }, { status: 400 });
@@ -344,6 +375,22 @@ export async function POST(req: NextRequest) {
         },
         { status: 400 },
       );
+
+    // Modo +18: SO admin autenticado, e so com a flag explicita ligada.
+    // Gate real no servidor — usuario normal nao acessa nem forjando body.
+    if (provider === 'adult') {
+      if (!adult)
+        return NextResponse.json(
+          { error: 'Conteudo +18: ative o modo +18 no Downloader.' },
+          { status: 400 },
+        );
+      const guard = await requireAdmin();
+      if (!guard.ok)
+        return NextResponse.json(
+          { error: 'Modo +18 restrito a administradores.' },
+          { status: 403 },
+        );
+    }
     if (!['video', 'audio-mp3', 'audio-wav'].includes(mode))
       return NextResponse.json({ error: 'Modo invalido.' }, { status: 400 });
 
