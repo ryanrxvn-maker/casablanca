@@ -14,21 +14,25 @@ import path from 'path';
 /**
  * POST /api/downloader
  *
- * Baixa video/audio do YouTube, Instagram (Reels/posts) e TikTok.
+ * Baixa video/audio/imagem do YouTube, Instagram, TikTok e Pinterest.
  *
- * - TikTok: usa o MESMO esquema do savett.cc — API resolvedora
- *   (tikwm) que devolve a stream SEM marca d'agua em HD + o audio,
- *   sem precisar de login. Se o resolver falhar, cai pro yt-dlp.
- * - YouTube/Instagram: yt-dlp + ffmpeg (merge bestvideo+bestaudio).
+ * - TikTok   : esquema savett.cc — resolver tikwm (sem marca d'agua HD,
+ *              sem login). Video em modo "video" e STREAMADO direto
+ *              (sem tocar disco) pra latencia minima.
+ * - Pinterest: esquema klickpin — extrai a midia direta do pin via
+ *              yt-dlp (video mp4 ou imagem), sem login.
+ * - YouTube/Instagram: yt-dlp + ffmpeg.
  *
- * Body JSON:
- *   { url: string, mode: 'video'|'audio-mp3'|'audio-wav', quality?: '1080'|'720'|'480'|'best' }
+ * Otimizacoes de velocidade (todos os providers):
+ *   - resolucao de yt-dlp/aria2c memoizada no modulo (zero spawn extra
+ *     por request depois do 1o);
+ *   - download paralelo: `-N 8` fragmentos + aria2c (se instalado);
+ *   - sem reescrever mtime; TikTok video sem buffer em disco.
  *
- * Resposta: o arquivo binario (attachment) ou JSON de erro.
+ * Body: { url, mode:'video'|'audio-mp3'|'audio-wav', quality?:'1080'|'720'|'480'|'best' }
  *
- * NOTA: roda em runtime Node e depende dos binarios `yt-dlp` (ou
- * `python -m yt_dlp`) e `ffmpeg` no PATH. Funciona em ambiente local /
- * self-hosted (nao em serverless puro da Vercel).
+ * NOTA: runtime Node, depende de `yt-dlp` (ou `python -m yt_dlp`) e
+ * `ffmpeg` no PATH. Local / self-hosted (nao serverless puro Vercel).
  */
 
 export const runtime = 'nodejs';
@@ -37,18 +41,9 @@ export const dynamic = 'force-dynamic';
 
 type Mode = 'video' | 'audio-mp3' | 'audio-wav';
 type Quality = '1080' | '720' | '480' | 'best';
+type Provider = 'tiktok' | 'pinterest' | 'generic';
 
 const URL_RE = /^https?:\/\/[^\s]+$/i;
-const ALLOWED_HOSTS = [
-  'youtube.com',
-  'youtu.be',
-  'm.youtube.com',
-  'instagram.com',
-  'instagr.am',
-  'tiktok.com',
-  'vm.tiktok.com',
-  'vt.tiktok.com',
-];
 
 const CONTENT_TYPES: Record<string, string> = {
   '.mp4': 'video/mp4',
@@ -58,11 +53,34 @@ const CONTENT_TYPES: Record<string, string> = {
   '.mp3': 'audio/mpeg',
   '.wav': 'audio/wav',
   '.m4a': 'audio/mp4',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
 };
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+
+/** Dominio liberado + a que provider ele pertence. */
+function classify(host: string): Provider | null {
+  const h = host.replace(/^www\./, '').toLowerCase();
+  if (h === 'tiktok.com' || h.endsWith('.tiktok.com')) return 'tiktok';
+  if (h === 'pin.it' || /(^|\.)pinterest\.[a-z.]+$/.test(h)) return 'pinterest';
+  if (
+    h === 'youtube.com' ||
+    h.endsWith('.youtube.com') ||
+    h === 'youtu.be' ||
+    h === 'instagram.com' ||
+    h.endsWith('.instagram.com') ||
+    h === 'instagr.am'
+  ) {
+    return 'generic';
+  }
+  return null;
+}
 
 /** Nome de arquivo seguro (ASCII, sem espaco/aspas), com extensao. */
 function safeName(title: string, ext: string): string {
@@ -77,25 +95,41 @@ function safeName(title: string, ext: string): string {
   return `${base}.${ext}`;
 }
 
-/** Resolve qual comando usar: `yt-dlp` standalone ou `python -m yt_dlp`. */
-async function resolveYtDlp(): Promise<{ cmd: string; pre: string[] } | null> {
-  const candidates: { cmd: string; pre: string[] }[] = [
-    { cmd: 'yt-dlp', pre: [] },
-    {
-      cmd: process.platform === 'win32' ? 'python' : 'python3',
-      pre: ['-m', 'yt_dlp'],
-    },
-    { cmd: 'python', pre: ['-m', 'yt_dlp'] },
-  ];
-  for (const c of candidates) {
-    const ok = await new Promise<boolean>((resolve) => {
-      const p = spawn(c.cmd, [...c.pre, '--version'], { windowsHide: true });
-      p.on('error', () => resolve(false));
-      p.on('close', (code) => resolve(code === 0));
-    });
-    if (ok) return c;
+// --- deteccao de binarios, memoizada no modulo (1x por processo) ---
+let ytDlpPromise: Promise<{ cmd: string; pre: string[] } | null> | null = null;
+let aria2Promise: Promise<boolean> | null = null;
+
+function probe(cmd: string, args: string[]): Promise<boolean> {
+  return new Promise((resolve) => {
+    const p = spawn(cmd, args, { windowsHide: true });
+    p.on('error', () => resolve(false));
+    p.on('close', (code) => resolve(code === 0));
+  });
+}
+
+function resolveYtDlp() {
+  if (!ytDlpPromise) {
+    ytDlpPromise = (async () => {
+      const cands: { cmd: string; pre: string[] }[] = [
+        { cmd: 'yt-dlp', pre: [] },
+        {
+          cmd: process.platform === 'win32' ? 'python' : 'python3',
+          pre: ['-m', 'yt_dlp'],
+        },
+        { cmd: 'python', pre: ['-m', 'yt_dlp'] },
+      ];
+      for (const c of cands) {
+        if (await probe(c.cmd, [...c.pre, '--version'])) return c;
+      }
+      return null;
+    })();
   }
-  return null;
+  return ytDlpPromise;
+}
+
+function hasAria2() {
+  if (!aria2Promise) aria2Promise = probe('aria2c', ['--version']);
+  return aria2Promise;
 }
 
 function run(
@@ -115,30 +149,32 @@ function run(
   });
 }
 
-type Built = { file: string; name: string };
+type Built =
+  | { stream: ReadableStream; name: string; contentType: string }
+  | { file: string; name: string }
+  | { error: string };
 
 /**
- * Esquema savett.cc para TikTok: resolver tikwm -> URL sem marca
- * d'agua (hdplay) -> baixa os bytes. Audio sai via ffmpeg do proprio
- * video (garante que casa com a stream baixada).
+ * TikTok no esquema savett: resolver tikwm -> hdplay (sem marca
+ * d'agua). Modo video = STREAM direto do CDN (zero disco). Audio =
+ * baixa + ffmpeg.
  */
 async function fetchTikTok(
   url: string,
   mode: Mode,
   workDir: string,
-): Promise<Built | { error: string }> {
+): Promise<Built> {
   const api = `https://www.tikwm.com/api/?hd=1&url=${encodeURIComponent(url)}`;
   let data: Record<string, unknown>;
   try {
     const r = await fetch(api, {
       headers: { 'user-agent': UA, accept: 'application/json' },
-      signal: AbortSignal.timeout(25_000),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!r.ok) return { error: `resolver HTTP ${r.status}` };
     const j = (await r.json()) as { code?: number; msg?: string; data?: any };
-    if (j.code !== 0 || !j.data) {
+    if (j.code !== 0 || !j.data)
       return { error: j.msg || 'resolver sem dados (privado/removido?)' };
-    }
     data = j.data;
   } catch (e) {
     return { error: e instanceof Error ? e.message : 'resolver falhou' };
@@ -149,28 +185,34 @@ async function fetchTikTok(
     (data.play as string) ||
     (data.wmplay as string);
   if (!videoUrl) return { error: 'sem stream de video' };
-
   const title = (data.title as string) || (data.id as string) || 'tiktok';
-  let buf: Buffer;
+
+  let vr: Response;
   try {
-    const vr = await fetch(videoUrl, {
+    vr = await fetch(videoUrl, {
       headers: { 'user-agent': UA, referer: 'https://www.tikwm.com/' },
       signal: AbortSignal.timeout(120_000),
     });
-    if (!vr.ok) return { error: `download da midia HTTP ${vr.status}` };
-    buf = Buffer.from(await vr.arrayBuffer());
   } catch (e) {
     return { error: e instanceof Error ? e.message : 'download falhou' };
   }
-  if (buf.length < 1024) return { error: 'midia vazia' };
+  if (!vr.ok || !vr.body)
+    return { error: `download da midia HTTP ${vr.status}` };
 
-  const srcPath = path.join(workDir, 'tt-src.mp4');
-  await writeFile(srcPath, buf);
-
+  // modo video: streama o CDN direto pro cliente (sem buffer/disco)
   if (mode === 'video') {
-    return { file: srcPath, name: safeName(title, 'mp4') };
+    return {
+      stream: vr.body,
+      name: safeName(title, 'mp4'),
+      contentType: 'video/mp4',
+    };
   }
 
+  // audio: precisa do arquivo em disco pro ffmpeg
+  const buf = Buffer.from(await vr.arrayBuffer());
+  if (buf.length < 1024) return { error: 'midia vazia' };
+  const srcPath = path.join(workDir, 'tt-src.mp4');
+  await writeFile(srcPath, buf);
   const ext = mode === 'audio-wav' ? 'wav' : 'mp3';
   const outPath = path.join(workDir, `tt-out.${ext}`);
   const ffArgs =
@@ -182,12 +224,19 @@ async function fetchTikTok(
   return { file: outPath, name: safeName(title, ext) };
 }
 
-function ytDlpArgs(mode: Mode, quality: Quality): string[] {
+async function ytDlpArgs(
+  mode: Mode,
+  quality: Quality,
+  provider: Provider,
+): Promise<string[]> {
   const base = [
     '--no-playlist',
     '--no-warnings',
     '--restrict-filenames',
     '--no-progress',
+    '--no-mtime',
+    '-N',
+    '8',
     '--retries',
     '3',
     '--socket-timeout',
@@ -195,14 +244,29 @@ function ytDlpArgs(mode: Mode, quality: Quality): string[] {
     '-o',
     '%(title).80B-%(id)s.%(ext)s',
   ];
-  if (mode === 'audio-mp3') {
-    return [...base, '-x', '--audio-format', 'mp3', '--audio-quality', '0'];
+  if (await hasAria2()) {
+    base.push(
+      '--downloader',
+      'aria2c',
+      '--downloader-args',
+      'aria2c:-x16 -s16 -k1M -j16',
+    );
   }
-  if (mode === 'audio-wav') {
+
+  if (mode === 'audio-mp3')
+    return [...base, '-x', '--audio-format', 'mp3', '--audio-quality', '0'];
+  if (mode === 'audio-wav')
     return [...base, '-x', '--audio-format', 'wav'];
+
+  // VIDEO. Pinterest pode ser imagem -> nao forcar merge/format estrito.
+  if (provider === 'pinterest') {
+    return [...base, '-f', 'b/bv*+ba/best', '--merge-output-format', 'mp4'];
   }
   const v = [...base, '--merge-output-format', 'mp4', '-f', 'bv*+ba/b'];
-  v.push('-S', quality !== 'best' ? `res:${quality},ext:mp4:m4a` : 'ext:mp4:m4a');
+  v.push(
+    '-S',
+    quality !== 'best' ? `res:${quality},ext:mp4:m4a` : 'ext:mp4:m4a',
+  );
   return v;
 }
 
@@ -210,16 +274,16 @@ async function fetchYtDlp(
   url: string,
   mode: Mode,
   quality: Quality,
+  provider: Provider,
   workDir: string,
-): Promise<Built | { error: string }> {
+): Promise<Built> {
   const tool = await resolveYtDlp();
-  if (!tool) {
+  if (!tool)
     return {
       error:
         'yt-dlp nao encontrado no servidor. Instale com: pip install yt-dlp (e tenha ffmpeg no PATH).',
     };
-  }
-  const args = [...tool.pre, ...ytDlpArgs(mode, quality), url];
+  const args = [...tool.pre, ...(await ytDlpArgs(mode, quality, provider)), url];
   const { code, stderr } = await run(tool.cmd, args, workDir);
   if (code !== 0) {
     const clean = stderr
@@ -231,7 +295,7 @@ async function fetchYtDlp(
     return {
       error:
         clean ||
-        'Verifique se o link e publico (Instagram/TikTok privados exigem login).',
+        'Verifique se o link e publico (conteudo privado exige login).',
     };
   }
   const names = await readdir(workDir);
@@ -263,71 +327,77 @@ export async function POST(req: NextRequest) {
     const mode: Mode = body.mode ?? 'video';
     const quality: Quality = body.quality ?? '1080';
 
-    if (!url || !URL_RE.test(url)) {
+    if (!url || !URL_RE.test(url))
       return NextResponse.json({ error: 'URL invalida.' }, { status: 400 });
-    }
     let host: string;
     try {
-      host = new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+      host = new URL(url).hostname;
     } catch {
       return NextResponse.json({ error: 'URL invalida.' }, { status: 400 });
     }
-    if (!ALLOWED_HOSTS.some((h) => host === h || host.endsWith('.' + h))) {
+    const provider = classify(host);
+    if (!provider)
       return NextResponse.json(
         {
           error:
-            'Dominio nao suportado. Use links do YouTube, Instagram ou TikTok.',
+            'Dominio nao suportado. Use YouTube, Instagram, TikTok ou Pinterest.',
         },
         { status: 400 },
       );
-    }
-    if (!['video', 'audio-mp3', 'audio-wav'].includes(mode)) {
+    if (!['video', 'audio-mp3', 'audio-wav'].includes(mode))
       return NextResponse.json({ error: 'Modo invalido.' }, { status: 400 });
-    }
 
     workDir = await mkdtemp(path.join(os.tmpdir(), 'darkolab-dl-'));
 
-    const isTikTok =
-      host === 'tiktok.com' || host.endsWith('.tiktok.com');
-
-    let built: Built | { error: string };
-    if (isTikTok) {
-      // 1) esquema savett (sem marca d'agua, HD, sem login)
+    let built: Built;
+    if (provider === 'tiktok') {
       built = await fetchTikTok(url, mode, workDir);
-      // 2) fallback yt-dlp se o resolver falhar
       if ('error' in built) {
-        const fb = await fetchYtDlp(url, mode, quality, workDir);
-        if (!('error' in fb)) built = fb;
-        else
-          built = {
-            error: `TikTok: ${built.error}. Fallback yt-dlp: ${fb.error}`,
-          };
+        const fb = await fetchYtDlp(
+          url,
+          mode,
+          quality,
+          'generic',
+          workDir,
+        );
+        built =
+          'error' in fb
+            ? { error: `TikTok: ${built.error}. Fallback yt-dlp: ${fb.error}` }
+            : fb;
       }
     } else {
-      built = await fetchYtDlp(url, mode, quality, workDir);
+      built = await fetchYtDlp(url, mode, quality, provider, workDir);
     }
 
-    if ('error' in built) {
+    if ('error' in built)
       return NextResponse.json(
         { error: 'Falha no download. ' + built.error },
         { status: 502 },
       );
+
+    // Resposta STREAMADA (TikTok video) — latencia minima, sem disco.
+    if ('stream' in built) {
+      return new NextResponse(built.stream, {
+        status: 200,
+        headers: {
+          'content-type': built.contentType,
+          'content-disposition': `attachment; filename="${built.name.replace(/"/g, '')}"`,
+          'cache-control': 'no-store',
+        },
+      });
     }
 
     const ext = path.extname(built.name).toLowerCase();
     const data = await readFile(built.file);
-    const headers = new Headers();
-    headers.set(
-      'content-type',
-      CONTENT_TYPES[ext] ?? 'application/octet-stream',
-    );
-    headers.set(
-      'content-disposition',
-      `attachment; filename="${built.name.replace(/"/g, '')}"`,
-    );
-    headers.set('content-length', String(data.length));
-    headers.set('cache-control', 'no-store');
-    return new NextResponse(new Uint8Array(data), { status: 200, headers });
+    return new NextResponse(new Uint8Array(data), {
+      status: 200,
+      headers: {
+        'content-type': CONTENT_TYPES[ext] ?? 'application/octet-stream',
+        'content-disposition': `attachment; filename="${built.name.replace(/"/g, '')}"`,
+        'content-length': String(data.length),
+        'cache-control': 'no-store',
+      },
+    });
   } catch (e) {
     console.error('[downloader]', e);
     return NextResponse.json(
@@ -338,8 +408,6 @@ export async function POST(req: NextRequest) {
       { status: 500 },
     );
   } finally {
-    if (workDir) {
-      rm(workDir, { recursive: true, force: true }).catch(() => {});
-    }
+    if (workDir) rm(workDir, { recursive: true, force: true }).catch(() => {});
   }
 }

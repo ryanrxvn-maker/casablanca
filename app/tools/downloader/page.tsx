@@ -32,6 +32,7 @@ const QUALITIES: { value: Quality; label: string }[] = [
 function detectSource(url: string): string {
   const u = url.toLowerCase();
   if (u.includes('tiktok')) return 'TikTok';
+  if (u.includes('pinterest') || u.includes('pin.it')) return 'Pinterest';
   if (u.includes('instagr')) return 'Instagram';
   if (u.includes('youtu')) return 'YouTube';
   return '—';
@@ -122,18 +123,27 @@ export default function DownloaderPage() {
     }));
     setJobs(initial);
     setRunning(true);
-    for (let i = 0; i < urls.length; i++) {
-      // sequencial: evita saturar banda/CPU do servidor
-      // eslint-disable-next-line no-await-in-loop
-      await processOne(urls[i], i);
+    // Pool concorrente: ate 3 downloads em paralelo (lote rapido sem
+    // saturar banda/CPU do servidor).
+    const CONCURRENCY = 3;
+    let next = 0;
+    async function worker() {
+      while (next < urls.length) {
+        const i = next++;
+        // eslint-disable-next-line no-await-in-loop
+        await processOne(urls[i], i);
+      }
     }
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, urls.length) }, worker),
+    );
     setRunning(false);
   }
 
   return (
     <ToolShell
       title="Downloader"
-      description="Baixe vídeos ou áudio do YouTube, Instagram (Reels/posts) e TikTok. Usa yt-dlp + ffmpeg no servidor — cole um ou vários links (um por linha)."
+      description="Baixe vídeos, áudio ou imagens do YouTube, Instagram, TikTok e Pinterest. Downloads paralelos e rápidos — cole um ou vários links (um por linha)."
     >
       <div className="flex flex-col gap-6">
         <div>
@@ -144,7 +154,7 @@ export default function DownloaderPage() {
             id="urls"
             rows={4}
             placeholder={
-              'https://youtube.com/watch?v=...\nhttps://instagram.com/reel/...\nhttps://tiktok.com/@user/video/...'
+              'https://youtube.com/watch?v=...\nhttps://tiktok.com/@user/video/...\nhttps://pinterest.com/pin/...\nhttps://instagram.com/reel/...'
             }
             className="input-field font-mono text-xs"
             value={raw}
@@ -259,12 +269,15 @@ export default function DownloaderPage() {
         )}
 
         <p className="mono text-[10px] leading-relaxed text-text-muted">
-          <span className="text-white">TikTok</span> baixa{' '}
+          <span className="text-white">TikTok</span>{' '}
           <span className="text-lime">sem marca d&apos;água em HD</span>{' '}
-          (mesmo esquema do savett), com fallback automático.{' '}
-          <span className="text-white">YouTube/Instagram</span> via yt-dlp +
-          ffmpeg. Links privados exigem login e não são suportados. Use
-          apenas para conteúdo que você tem direito de baixar.
+          (esquema savett) ·{' '}
+          <span className="text-white">Pinterest</span> mídia direta
+          (esquema klickpin) ·{' '}
+          <span className="text-white">YouTube/Instagram</span> yt-dlp.
+          Downloads paralelos (3x) e acelerados (multi-conexão). Links
+          privados exigem login. Use apenas para conteúdo que você tem
+          direito de baixar.
         </p>
       </div>
     </ToolShell>
