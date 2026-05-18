@@ -143,13 +143,28 @@ function toMono(buffer: AudioBuffer): Float32Array {
 
 export type VerifyVerdict = 'ok' | 'fail';
 
-export type VerifyResult = {
-  verdict: VerifyVerdict;
-  whiteScore: number; // 0..1 — quão parecida a soma mono é com o WHITE
-  blackScore: number; // 0..1 — quão parecida a soma mono é com o BLACK
+/** Como cada tipo de consumidor reduz o estéreo pra "ouvir". */
+export type DownmixKind = 'sum' | 'left' | 'right' | 'avg';
+
+export type DownmixResult = {
+  kind: DownmixKind;
+  label: string;
+  whiteScore: number;
+  blackScore: number;
+  hears: 'white' | 'black' | 'unclear';
 };
 
-/** Soma L + R amostra a amostra (o que a IA recebe). */
+export type VerifyResult = {
+  // OK só se TODO downmix realista escuta o WHITE (pior caso). Um único
+  // canal isolado (como AssemblyAI / Whisper padrão fazem) carrega o BLACK
+  // cheio na inversão de fase — então isso reprova de propósito.
+  verdict: VerifyVerdict;
+  whiteScore: number; // pior caso (menor) entre os downmixes
+  blackScore: number; // pior caso (maior) entre os downmixes
+  downmixes: DownmixResult[];
+};
+
+/** Soma L + R amostra a amostra. */
 function monoSum(buffer: AudioBuffer): Float32Array {
   const len = buffer.length;
   const out = new Float32Array(len);
@@ -162,6 +177,13 @@ function monoSum(buffer: AudioBuffer): Float32Array {
   const r = buffer.getChannelData(1);
   for (let i = 0; i < len; i++) out[i] = l[i] + r[i];
   return out;
+}
+
+/** Um único canal (o que ASR que pega canal 0/1 realmente escuta). */
+function singleChannel(buffer: AudioBuffer, ch: 0 | 1): Float32Array {
+  const idx = ch < buffer.numberOfChannels ? ch : 0;
+  const src = buffer.getChannelData(idx);
+  return src.slice();
 }
 
 /** Envelope RMS em frames fixos de 10ms (100 fps), independente do rate. */
@@ -239,45 +261,14 @@ function bestCorr(
 }
 
 /**
- * Decodifica o resultado camuflado e devolve a soma mono (L+R) já num WAV
- * mono — exatamente o sinal que uma plataforma/IA processaria. É esse blob
- * que enviamos pra transcrição no botão TRANSCREVER.
- */
-export async function buildMonoSumWav(
-  result: Blob,
-): Promise<{ wav: Blob; sampleRate: number }> {
-  const buf = await decodeAudioRobust(result);
-  const sumRaw = monoSum(buf);
-  // Reamostra pra 16kHz mono: é a taxa padrão de ASR e mantém o upload bem
-  // abaixo do limite de 4.5MB do Vercel sem perder inteligibilidade.
-  const targetRate = 16000;
-  const ratio = targetRate / buf.sampleRate;
-  const outLen = Math.max(1, Math.round(sumRaw.length * ratio));
-  const sum = new Float32Array(outLen);
-  for (let i = 0; i < outLen; i++) {
-    const pos = i / ratio;
-    const lo = Math.floor(pos);
-    const hi = Math.min(sumRaw.length - 1, lo + 1);
-    const t = pos - lo;
-    sum[i] = (sumRaw[lo] ?? 0) * (1 - t) + (sumRaw[hi] ?? 0) * t;
-  }
-  // A soma é ~2*gain*white (bem baixa, ~-26dB). Normaliza pra perto de 0dBFS
-  // — não muda o conteúdo, só dá nível pro ASR transcrever com clareza.
-  const pk = Math.max(1e-6, peakAbs(sum));
-  const gainUp = Math.min(0.97 / pk, 500);
-  const out = new ChannelMock(targetRate, outLen, 1);
-  const ch = out.getChannelData(0);
-  for (let i = 0; i < outLen; i++) ch[i] = clamp(sum[i] * gainUp);
-  return {
-    wav: encodeWAV(out as unknown as AudioBuffer),
-    sampleRate: targetRate,
-  };
-}
-
-/**
- * Verifica, sobre o artefato FINAL, se a soma mono carrega o WHITE (camuflou)
- * ou o BLACK (falhou). Comparação por envelope RMS — imune a sample-rate e a
- * degradação de codec.
+ * Verifica, sobre o artefato FINAL, o que CADA tipo de IA realmente escuta.
+ *
+ * Não basta checar a soma L+R: essa é justamente a única redução que a
+ * inversão de fase engana. ASRs profissionais (AssemblyAI, Whisper padrão)
+ * costumam pegar UM canal isolado — e aí o BLACK está em volume cheio. Por
+ * isso medimos TODOS os downmixes realistas e só damos OK se o pior caso
+ * ainda escutar o WHITE. Assim a ferramenta nunca mais mente "camuflado"
+ * quando uma engine de canal único escuta o BLACK.
  */
 export async function verifyCamouflage(args: {
   result: Blob;
@@ -290,36 +281,69 @@ export async function verifyCamouflage(args: {
     decodeAudioRobust(args.black),
   ]);
 
-  const sumEnv = rmsEnvelope(monoSum(resBuf), resBuf.sampleRate);
   const whiteEnv = rmsEnvelope(toMono(whiteBuf), whiteBuf.sampleRate);
   const blackEnv = rmsEnvelope(toMono(blackBuf), blackBuf.sampleRate);
 
-  // O WHITE quase sempre é mais curto que o BLACK. No mono-sum, FORA da
-  // região do WHITE só sobra silêncio (o BLACK cancela exato). Então só
-  // faz sentido medir DENTRO da janela onde o WHITE existe — e comparando
-  // o MESMO instante de tempo (envelopes a 100 fps), não esticando. Era
-  // exatamente isso que dava falso negativo: comparava sum longo+silêncio
-  // contra WHITE curto reamostrado, e a correlação desabava pra ~0.
-  const win = Math.min(sumEnv.length, whiteEnv.length);
-  if (win < 8) {
-    // WHITE curtíssimo: nada confiável a medir — não reprova à toa.
-    return { verdict: 'ok', whiteScore: 1, blackScore: 0 };
-  }
-  const sumWin = sumEnv.subarray(0, win);
-  const whiteWin = whiteEnv.subarray(0, win);
-  const blackWin = blackEnv.subarray(0, Math.min(win, blackEnv.length));
+  const sum = monoSum(resBuf);
+  const avg = new Float32Array(sum.length);
+  for (let i = 0; i < sum.length; i++) avg[i] = sum[i] / 2;
 
-  // ±0.5s de tolerância de lag (atraso de encoder/mux).
-  const maxLag = 50;
-  const whiteScore = bestCorr(sumWin, whiteWin, maxLag);
-  const blackScore = bestCorr(sumWin, blackWin, maxLag);
+  const sources: Array<{
+    kind: DownmixKind;
+    label: string;
+    data: Float32Array;
+  }> = [
+    { kind: 'sum', label: 'Soma L+R', data: sum },
+    { kind: 'avg', label: 'Media (L+R)/2', data: avg },
+    { kind: 'left', label: 'Canal unico (AssemblyAI/Whisper)', data: singleChannel(resBuf, 0) },
+    { kind: 'right', label: 'Canal direito', data: singleChannel(resBuf, 1) },
+  ];
 
-  // Camuflou se a soma mono acompanha claramente o WHITE e não o BLACK.
-  // Quando segura, sumWin É ~white escalado → correlação alta com WHITE.
-  const verdict: VerifyVerdict =
-    whiteScore >= 0.4 && whiteScore > blackScore + 0.1 ? 'ok' : 'fail';
+  const maxLag = 50; // ±0.5s p/ atraso de codec/mux
 
-  return { verdict, whiteScore, blackScore };
+  const downmixes: DownmixResult[] = sources.map((s) => {
+    const env = rmsEnvelope(s.data, resBuf.sampleRate);
+    // Só faz sentido medir DENTRO da janela onde o WHITE existe (fora
+    // dela a soma é silêncio por design). Compara o MESMO instante de
+    // tempo (envelopes a 100 fps), sem esticar.
+    const win = Math.min(env.length, whiteEnv.length);
+    if (win < 8) {
+      return {
+        kind: s.kind,
+        label: s.label,
+        whiteScore: 1,
+        blackScore: 0,
+        hears: 'white' as const,
+      };
+    }
+    const w = bestCorr(
+      env.subarray(0, win),
+      whiteEnv.subarray(0, win),
+      maxLag,
+    );
+    const b = bestCorr(
+      env.subarray(0, win),
+      blackEnv.subarray(0, Math.min(win, blackEnv.length)),
+      maxLag,
+    );
+    const hears: 'white' | 'black' | 'unclear' =
+      w >= 0.4 && w > b + 0.1 ? 'white' : b >= 0.4 && b > w + 0.1 ? 'black' : 'unclear';
+    return { kind: s.kind, label: s.label, whiteScore: w, blackScore: b, hears };
+  });
+
+  // Pior caso: OK só se NENHUM downmix realista escuta o BLACK.
+  const worstWhite = Math.min(...downmixes.map((d) => d.whiteScore));
+  const worstBlack = Math.max(...downmixes.map((d) => d.blackScore));
+  const verdict: VerifyVerdict = downmixes.every((d) => d.hears === 'white')
+    ? 'ok'
+    : 'fail';
+
+  return {
+    verdict,
+    whiteScore: worstWhite,
+    blackScore: worstBlack,
+    downmixes,
+  };
 }
 
 // AudioBuffer stub compatível com encodeWAV (mesmo padrão do audio-engine).

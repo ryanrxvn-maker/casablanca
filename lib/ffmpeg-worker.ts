@@ -641,6 +641,47 @@ export async function extractAudioForTranscription(
   }
 }
 
+/**
+ * Igual à de cima, mas mantém os DOIS canais (estéreo) intactos — sem
+ * `-ac 1`, que faria a média (L+R)/2 e, num arquivo de camuflagem por
+ * inversão de fase, "limparia" o BLACK artificialmente. Para o botão
+ * TRANSCREVER reproduzir fielmente o que um ASR faz com o arquivo REAL
+ * (ele costuma pegar UM canal, onde o BLACK está cheio), precisamos do
+ * estéreo preservado. Opus 48k estéreo é minúsculo (~720KB p/ 2min).
+ */
+export async function extractStereoAudioForTranscription(
+  file: Blob,
+  opts: RunOptions = {},
+): Promise<Blob> {
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const { fetchFile } = await import('@ffmpeg/util');
+
+  const inputName = 'in.' + guessExt(file, 'mp4');
+  const outputName = 'out.opus';
+  const progressHandler = wireProgress(ff, opts.onProgress);
+
+  try {
+    opts.onStage?.('Extraindo audio estereo (fiel ao arquivo real)...');
+    await ff.writeFile(inputName, await fetchFile(file));
+    await ff.exec([
+      '-i', inputName,
+      '-vn',
+      '-c:a', 'libopus',
+      '-b:a', '48k',
+      '-ac', '2',
+      '-ar', '16000',
+      '-application', 'audio',
+      outputName,
+    ]);
+    const data = await ff.readFile(outputName);
+    return toBlob(data, 'audio/ogg');
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    await safeDelete(ff, inputName);
+    await safeDelete(ff, outputName);
+  }
+}
+
 // ---------- Take Splitter (separa cenas/takes de um video) --------------
 //
 // Detecta cortes de cena via filtro `select='gt(scene,N)'` do FFmpeg

@@ -8,14 +8,15 @@ import { useToolState } from '@/components/ToolsStateProvider';
 import {
   camuflar,
   verifyCamouflage,
-  buildMonoSumWav,
   type VerifyVerdict,
+  type DownmixResult,
 } from '@/lib/camuflagem';
 import { downloadBlob } from '@/lib/audio-engine';
 import { buildZip } from '@/lib/zip-builder';
 import {
   cancelFFmpeg,
   extractAudioAs,
+  extractStereoAudioForTranscription,
   isCancellationError,
   muxAudioIntoVideo,
 } from '@/lib/ffmpeg-worker';
@@ -36,6 +37,7 @@ type Pair = {
   guard?: 'checking' | VerifyVerdict;
   whiteScore?: number;
   blackScore?: number;
+  downmixes?: DownmixResult[];
   // Transcrição (prova manual)
   transcribing?: boolean;
   transcript?: string;
@@ -110,82 +112,60 @@ export default function CamuflagemPage() {
           );
         }
 
-        // LOOP DE GARANTIA (vale pra WAV, MP3 e MP4):
-        //  1. camufla com reforço atual
-        //  2. codifica no formato pedido (MP3/MP4 com settings robustos)
-        //  3. decodifica o ARQUIVO REAL, refaz o downmix mono (L+R) que a IA
-        //     recebe e mede se sobrou o WHITE
-        //  4. se a IA ainda escuta o BLACK (codec lossy comeu a camada),
-        //     dobra o reforço do WHITE e tenta de novo — até passar.
-        // Nunca entregamos um arquivo que a verificação reprova.
-        const ladder = [1, 2, 4, 8, 16];
-        let out: Blob | null = null;
-        let lastV: Awaited<ReturnType<typeof verifyCamouflage>> | null = null;
+        // Camufla -> codifica no formato pedido (MP3/MP4 com settings
+        // robustos pra inversão de fase sobreviver ao codec lossy).
+        updatePair(pair.id, { stage: 'Camuflando audio...' });
+        const wav = await camuflar({
+          black: pair.black!,
+          white: pair.white!,
+          volumePercent: volume,
+        });
 
-        for (let attempt = 0; attempt < ladder.length; attempt++) {
-          const boost = ladder[attempt];
-          const tag = attempt === 0 ? '' : ` (reforco ${attempt})`;
-
-          updatePair(pair.id, { stage: `Camuflando audio${tag}...` });
-          const wav = await camuflar({
-            black: pair.black!,
-            white: pair.white!,
-            volumePercent: volume,
-            gainBoost: boost,
-          });
-
-          let candidate: Blob;
-          if (format === 'wav') {
-            candidate = wav;
-          } else if (format === 'mp3') {
-            updatePair(pair.id, {
-              stage: `Convertendo para MP3 320k${tag}...`,
-            });
-            candidate = await extractAudioAs(
-              wav,
-              'mp3',
-              { onStage: (s) => updatePair(pair.id, { stage: s }) },
-              true,
-            );
-          } else {
-            updatePair(pair.id, {
-              stage: `Muxando no video (AAC 320k)${tag}...`,
-            });
-            candidate = await muxAudioIntoVideo(
-              pair.black!,
-              wav,
-              { onStage: (s) => updatePair(pair.id, { stage: s }) },
-              true,
-            );
-          }
-
-          updatePair(pair.id, {
-            stage: `Verificando o que a IA escuta no ${format.toUpperCase()} real${tag}...`,
-            guard: 'checking',
-          });
-          const v = await verifyCamouflage({
-            result: candidate,
-            white: pair.white!,
-            black: pair.black!,
-          });
-          lastV = v;
-          out = candidate;
-
-          if (v.verdict === 'ok') break;
-          // WAV é exato por construção: se reprovar, reforçar não muda nada
-          // (problema seria no áudio de origem) — para e reporta honestamente.
-          if (format === 'wav') break;
+        let out: Blob;
+        if (format === 'wav') {
+          out = wav;
+        } else if (format === 'mp3') {
+          updatePair(pair.id, { stage: 'Convertendo para MP3 320k...' });
+          out = await extractAudioAs(
+            wav,
+            'mp3',
+            { onStage: (s) => updatePair(pair.id, { stage: s }) },
+            true,
+          );
+        } else {
+          updatePair(pair.id, { stage: 'Muxando no video (AAC 320k)...' });
+          out = await muxAudioIntoVideo(
+            pair.black!,
+            wav,
+            { onStage: (s) => updatePair(pair.id, { stage: s }) },
+            true,
+          );
         }
 
-        const url = URL.createObjectURL(out!);
+        // GARANTIA HONESTA: decodifica o ARQUIVO REAL e mede o que CADA
+        // tipo de IA escuta — soma L+R, média E canal isolado (que é como
+        // AssemblyAI/Whisper padrão fazem). Só fica verde se o PIOR caso
+        // ainda escutar o WHITE. Nunca mais "camuflado" mentiroso.
+        updatePair(pair.id, {
+          stage: `Verificando o que cada IA escuta no ${format.toUpperCase()} real...`,
+          guard: 'checking',
+        });
+        const v = await verifyCamouflage({
+          result: out,
+          white: pair.white!,
+          black: pair.black!,
+        });
+
+        const url = URL.createObjectURL(out);
         updatePair(pair.id, {
           status: 'done',
-          resultBlob: out!,
+          resultBlob: out,
           resultUrl: url,
           stage: undefined,
-          guard: lastV?.verdict ?? 'fail',
-          whiteScore: lastV?.whiteScore,
-          blackScore: lastV?.blackScore,
+          guard: v.verdict,
+          whiteScore: v.whiteScore,
+          blackScore: v.blackScore,
+          downmixes: v.downmixes,
         });
       } catch (e) {
         console.error(e);
@@ -207,9 +187,9 @@ export default function CamuflagemPage() {
     setProcessingAll(false);
   }
 
-  // TRANSCREVER: pega o resultado, refaz o downmix mono (L+R) idêntico ao
-  // que a IA processaria e transcreve. O texto que voltar é literalmente
-  // "o que a IA escuta" — tem que ser o roteiro do WHITE.
+  // TRANSCREVER: manda o ARQUIVO REAL (estéreo preservado) pro AssemblyAI —
+  // exatamente o que você faria subindo o arquivo lá. Sem refazer soma
+  // nenhuma: o que voltar é a verdade crua do que esse ASR escuta.
   async function transcribeOne(pair: Pair) {
     if (!pair.resultBlob || pair.transcribing) return;
     updatePair(pair.id, {
@@ -218,9 +198,9 @@ export default function CamuflagemPage() {
       transcriptErr: undefined,
     });
     try {
-      const { wav } = await buildMonoSumWav(pair.resultBlob);
+      const audio = await extractStereoAudioForTranscription(pair.resultBlob);
       const fd = new FormData();
-      fd.append('audio', wav, 'mono-sum.wav');
+      fd.append('audio', audio, 'real.ogg');
       fd.append('languageCode', 'pt');
       const res = await fetch('/api/camuflagem/transcribe', {
         method: 'POST',
@@ -273,7 +253,7 @@ export default function CamuflagemPage() {
   return (
     <ToolShell
       title="Camuflagem"
-      description="Inversao de fase estereo: IA escuta o WHITE, publico escuta o BLACK. Cada arquivo gerado e verificado NO FORMATO REAL (WAV, MP3 ou MP4) e a camuflagem e reforcada automaticamente ate a IA comprovadamente escutar o WHITE — garantido em qualquer formato."
+      description="Inversao de fase estereo: funciona contra IA que SOMA L+R (TikTok/Meta-like). Cada arquivo e checado no formato real mostrando o que CADA tipo de IA escuta — inclusive engines de canal unico (AssemblyAI/Whisper), que escutam o BLACK. Sem promessa falsa: o selo so fica verde se o pior caso escutar o WHITE."
     >
       <div className="flex flex-col gap-6">
         <MissingKeyBanner services={['assemblyai']} />
@@ -426,34 +406,75 @@ export default function CamuflagemPage() {
                     <AudioPlayer src={pair.resultUrl} label="Resultado camuflado" />
                   )}
 
-                  {/* GARANTIA automatica: o que a IA realmente escuta */}
+                  {/* GARANTIA HONESTA: o que CADA tipo de IA escuta */}
                   {pair.guard === 'checking' ? (
                     <div className="flex items-center gap-2 rounded-[10px] border border-line bg-bg-soft/40 px-3 py-2 text-xs text-text-muted">
                       <span className="h-3 w-3 animate-spin rounded-full border-2 border-lime border-t-transparent" />
-                      Verificando o que a IA escuta...
+                      Verificando o que cada IA escuta no arquivo real...
                     </div>
-                  ) : pair.guard === 'ok' ? (
-                    <div className="rounded-[10px] border border-lime/50 bg-lime/10 px-3 py-2 text-xs text-lime shadow-[0_0_22px_-8px_rgba(200,255,0,0.6)]">
-                      <strong>CAMUFLAGEM GARANTIDA</strong> — a IA escuta o{' '}
-                      <strong>WHITE</strong>, o BLACK cancela no mono.
-                      <span className="ml-2 mono text-[10px] text-text-muted">
-                        white {(pair.whiteScore ?? 0).toFixed(2)} · black{' '}
-                        {(pair.blackScore ?? 0).toFixed(2)}
-                      </span>
-                    </div>
-                  ) : pair.guard === 'fail' ? (
+                  ) : pair.guard === 'ok' || pair.guard === 'fail' ? (
                     <div
-                      role="alert"
-                      className="error-shake rounded-[10px] border border-red-500/50 bg-red-500/10 px-3 py-2 text-xs text-red-300 shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)]"
+                      role={pair.guard === 'fail' ? 'alert' : undefined}
+                      className={
+                        'rounded-[10px] border px-3 py-2 text-xs ' +
+                        (pair.guard === 'ok'
+                          ? 'border-lime/50 bg-lime/10 text-lime shadow-[0_0_22px_-8px_rgba(200,255,0,0.6)]'
+                          : 'error-shake border-red-500/50 bg-red-500/10 text-red-300 shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)]')
+                      }
                     >
-                      <strong>FALHOU — a IA escuta o BLACK</strong> mesmo apos
-                      reforcar a camuflagem ao maximo. Provavel causa no audio
-                      de origem (WHITE quase mudo, ou BLACK/WHITE trocados).
-                      Cheque os arquivos e o botao de transcrever.
-                      <span className="ml-2 mono text-[10px] text-red-400/80">
-                        white {(pair.whiteScore ?? 0).toFixed(2)} · black{' '}
-                        {(pair.blackScore ?? 0).toFixed(2)}
-                      </span>
+                      <div className="mb-1.5 font-semibold">
+                        {pair.guard === 'ok' ? (
+                          <>CAMUFLAGEM GARANTIDA — todo tipo de IA escuta o WHITE</>
+                        ) : (
+                          <>
+                            NAO CAMUFLADO PRA TODA IA — alguma engine escuta o
+                            BLACK
+                          </>
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        {(pair.downmixes ?? []).map((d) => (
+                          <div
+                            key={d.kind}
+                            className="flex items-center justify-between gap-2"
+                          >
+                            <span className="text-text-muted">{d.label}</span>
+                            <span className="flex items-center gap-2">
+                              <span className="mono text-[10px] text-text-muted">
+                                w {d.whiteScore.toFixed(2)} · b{' '}
+                                {d.blackScore.toFixed(2)}
+                              </span>
+                              <span
+                                className={
+                                  'rounded px-1.5 py-0.5 text-[10px] font-semibold ' +
+                                  (d.hears === 'white'
+                                    ? 'bg-lime/20 text-lime'
+                                    : d.hears === 'black'
+                                      ? 'bg-red-500/25 text-red-300'
+                                      : 'bg-yellow-500/20 text-yellow-300')
+                                }
+                              >
+                                {d.hears === 'white'
+                                  ? 'WHITE'
+                                  : d.hears === 'black'
+                                    ? 'BLACK'
+                                    : '???'}
+                              </span>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      {pair.guard === 'fail' ? (
+                        <div className="mt-2 border-t border-red-500/30 pt-2 text-[11px] text-red-300/90">
+                          A inversao de fase so engana quem SOMA L+R. Engines
+                          que pegam um canal isolado (AssemblyAI, Whisper
+                          padrao) escutam o BLACK em volume cheio — e isso{' '}
+                          <strong>nao tem como ser corrigido</strong> sem o
+                          publico tambem ouvir o WHITE. Use TikTok/Meta-like
+                          (somam L+R) OU aceite que pra ASR de canal unico essa
+                          tecnica nao camufla. Confirme no botao TRANSCREVER.
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
 
@@ -463,7 +484,7 @@ export default function CamuflagemPage() {
                       onClick={() => transcribeOne(pair)}
                       disabled={pair.transcribing}
                       aria-label="Transcrever (ouvir como a IA)"
-                      title="Transcrever — ouve o downmix mono (L+R) e mostra o que a IA realmente escuta"
+                      title="Transcrever — manda o arquivo REAL pro AssemblyAI e mostra o texto cru que esse ASR escuta"
                       className="group relative flex h-9 w-9 items-center justify-center rounded-xl border-2 border-line bg-bg-soft/80 text-text-muted backdrop-blur-md transition-all duration-300 ease-[cubic-bezier(.4,1.4,.6,1)] hover:scale-[1.06] hover:border-lime hover:text-lime active:scale-[0.92] active:duration-75 disabled:cursor-not-allowed disabled:opacity-50"
                       style={{
                         boxShadow:
@@ -510,7 +531,7 @@ export default function CamuflagemPage() {
                   {pair.transcript ? (
                     <div className="rounded-[8px] border border-lime/30 bg-bg-soft/50 px-3 py-2">
                       <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-text-muted">
-                        O que a IA escuta (downmix mono L+R)
+                        O que o AssemblyAI escuta no arquivo REAL
                       </div>
                       <p className="whitespace-pre-wrap text-xs leading-relaxed text-white">
                         {pair.transcript}
