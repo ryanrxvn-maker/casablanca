@@ -261,6 +261,55 @@ function bestCorr(
 }
 
 /**
+ * Reproduz FIELMENTE o que TikTok/Kwai/YouTube alimentam no ASR deles:
+ * decodifica o ARQUIVO REAL já codificado e reduz pra mono pela MÉDIA dos
+ * canais (L+R)/2 — exatamente o downmix que o YouTube Content ID faz
+ * (comprovado) e que plataformas de escala usam. Se o codec lossy tiver
+ * vazado o BLACK, ele aparece aqui (não é auto-ilusão: parte do arquivo
+ * final real, não de uma soma reconstruída do estéreo ideal). 16kHz mono
+ * mantém o upload minúsculo.
+ *
+ * IMPORTANTE: isto é uma reprodução fiel do pipeline mono dessas
+ * plataformas — NÃO é um grampo do servidor delas. Certeza absoluta só a
+ * legenda automática da própria plataforma no vídeo publicado dá.
+ */
+export async function buildPlatformMonoWav(
+  result: Blob,
+): Promise<{ wav: Blob }> {
+  const buf = await decodeAudioRobust(result);
+  const n = buf.numberOfChannels;
+  const len = buf.length;
+  const mono = new Float32Array(len);
+  if (n === 1) {
+    mono.set(buf.getChannelData(0));
+  } else {
+    const l = buf.getChannelData(0);
+    const r = buf.getChannelData(1);
+    for (let i = 0; i < len; i++) mono[i] = (l[i] + r[i]) / 2;
+  }
+
+  const targetRate = 16000;
+  const ratio = targetRate / buf.sampleRate;
+  const outLen = Math.max(1, Math.round(len * ratio));
+  const ds = new Float32Array(outLen);
+  for (let i = 0; i < outLen; i++) {
+    const pos = i / ratio;
+    const lo = Math.floor(pos);
+    const hi = Math.min(len - 1, lo + 1);
+    const t = pos - lo;
+    ds[i] = (mono[lo] ?? 0) * (1 - t) + (mono[hi] ?? 0) * t;
+  }
+  // O mono-média é ~gain*white (bem baixo). Normaliza pra ~0dBFS — não
+  // muda o conteúdo, só dá nível pro ASR transcrever com clareza.
+  const pk = Math.max(1e-6, peakAbs(ds));
+  const gainUp = Math.min(0.97 / pk, 500);
+  const out = new ChannelMock(targetRate, outLen, 1);
+  const ch = out.getChannelData(0);
+  for (let i = 0; i < outLen; i++) ch[i] = clamp(ds[i] * gainUp);
+  return { wav: encodeWAV(out as unknown as AudioBuffer) };
+}
+
+/**
  * Verifica, sobre o artefato FINAL, o que CADA tipo de IA realmente escuta.
  *
  * Não basta checar a soma L+R: essa é justamente a única redução que a

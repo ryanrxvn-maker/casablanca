@@ -8,6 +8,7 @@ import { useToolState } from '@/components/ToolsStateProvider';
 import {
   camuflar,
   verifyCamouflage,
+  buildPlatformMonoWav,
   type VerifyVerdict,
   type DownmixResult,
 } from '@/lib/camuflagem';
@@ -217,9 +218,11 @@ export default function CamuflagemPage() {
     setProcessingAll(false);
   }
 
-  // TRANSCREVER: manda o ARQUIVO REAL (estéreo preservado) pro AssemblyAI —
-  // exatamente o que você faria subindo o arquivo lá. Sem refazer soma
-  // nenhuma: o que voltar é a verdade crua do que esse ASR escuta.
+  // TRANSCREVER: reproduz o pipeline da IA-alvo escolhida sobre o ARQUIVO
+  // REAL já codificado e transcreve via AssemblyAI:
+  //  - platforms: mono-média (L+R)/2 — exatamente o que TikTok/Kwai/YouTube
+  //    alimentam no ASR deles (YouTube Content ID faz a média, comprovado).
+  //  - single/universal: estéreo cru — o ASR pega 1 canal (pior caso).
   async function transcribeOne(pair: Pair) {
     if (!pair.resultBlob || pair.transcribing) return;
     updatePair(pair.id, {
@@ -228,9 +231,18 @@ export default function CamuflagemPage() {
       transcriptErr: undefined,
     });
     try {
-      const audio = await extractStereoAudioForTranscription(pair.resultBlob);
+      let audio: Blob;
+      let fname: string;
+      if (target === 'platforms') {
+        const { wav } = await buildPlatformMonoWav(pair.resultBlob);
+        audio = wav;
+        fname = 'platform-mono.wav';
+      } else {
+        audio = await extractStereoAudioForTranscription(pair.resultBlob);
+        fname = 'real-stereo.ogg';
+      }
       const fd = new FormData();
-      fd.append('audio', audio, 'real.ogg');
+      fd.append('audio', audio, fname);
       fd.append('languageCode', 'pt');
       const res = await fetch('/api/camuflagem/transcribe', {
         method: 'POST',
@@ -641,14 +653,29 @@ export default function CamuflagemPage() {
                   {pair.transcript ? (
                     <div className="rounded-[8px] border border-lime/30 bg-bg-soft/50 px-3 py-2">
                       <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-text-muted">
-                        O que o AssemblyAI escuta no arquivo REAL
+                        {target === 'platforms'
+                          ? 'O que TikTok/Kwai/YouTube escutariam (mono-media L+R do arquivo real)'
+                          : 'O que um ASR de canal unico escuta (estereo cru do arquivo real)'}
                       </div>
                       <p className="whitespace-pre-wrap text-xs leading-relaxed text-white">
                         {pair.transcript}
                       </p>
                       <p className="mt-2 text-[10px] text-text-muted">
                         Esse texto tem que ser o roteiro do <strong>WHITE</strong>.
-                        Se aparecer o roteiro do BLACK, a camuflagem nao segurou.
+                        {target === 'platforms' ? (
+                          <>
+                            {' '}
+                            Reproducao fiel do pipeline mono dessas plataformas
+                            — mas a certeza ABSOLUTA so vem da legenda
+                            automatica da propria plataforma no video publicado.
+                          </>
+                        ) : (
+                          <>
+                            {' '}
+                            Se aparecer o roteiro do BLACK, a camuflagem nao
+                            segurou pra esse tipo de IA.
+                          </>
+                        )}
                       </p>
                     </div>
                   ) : null}
