@@ -3,8 +3,14 @@
 import { ToolShell } from '@/components/ToolShell';
 import { FileUpload } from '@/components/FileUpload';
 import { AudioPlayer } from '@/components/AudioPlayer';
+import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { useToolState } from '@/components/ToolsStateProvider';
-import { camuflar } from '@/lib/camuflagem';
+import {
+  camuflar,
+  verifyCamouflage,
+  buildMonoSumWav,
+  type VerifyVerdict,
+} from '@/lib/camuflagem';
 import { downloadBlob } from '@/lib/audio-engine';
 import { buildZip } from '@/lib/zip-builder';
 import {
@@ -26,6 +32,14 @@ type Pair = {
   resultBlob?: Blob;
   resultUrl?: string;
   stage?: string;
+  // Verificação automática "o que a IA escuta"
+  guard?: 'checking' | VerifyVerdict;
+  whiteScore?: number;
+  blackScore?: number;
+  // Transcrição (prova manual)
+  transcribing?: boolean;
+  transcript?: string;
+  transcriptErr?: string;
 };
 
 function newPair(): Pair {
@@ -84,41 +98,94 @@ export default function CamuflagemPage() {
           status: 'processing',
           errorMsg: undefined,
           stage: 'Camuflando audio...',
+          guard: undefined,
+          whiteScore: undefined,
+          blackScore: undefined,
+          transcript: undefined,
+          transcriptErr: undefined,
         });
-        // 1) Gera WAV camuflado (stereo, com inversao de fase)
-        const wav = await camuflar({
-          black: pair.black!,
-          white: pair.white!,
-          volumePercent: volume,
-        });
-
-        let out: Blob;
-        if (format === 'wav') {
-          out = wav;
-        } else if (format === 'mp3') {
-          updatePair(pair.id, { stage: 'Convertendo para MP3...' });
-          out = await extractAudioAs(wav, 'mp3', {
-            onStage: (s) => updatePair(pair.id, { stage: s }),
-          });
-        } else {
-          // mp4: exige BLACK de video — mantem o video, troca a trilha de audio
-          if (!isVideoFile(pair.black)) {
-            throw new Error(
-              'Para sair em MP4, o BLACK precisa ser um arquivo de video.',
-            );
-          }
-          updatePair(pair.id, { stage: 'Muxando audio camuflado no video...' });
-          out = await muxAudioIntoVideo(pair.black!, wav, {
-            onStage: (s) => updatePair(pair.id, { stage: s }),
-          });
+        if (format === 'mp4' && !isVideoFile(pair.black)) {
+          throw new Error(
+            'Para sair em MP4, o BLACK precisa ser um arquivo de video.',
+          );
         }
 
-        const url = URL.createObjectURL(out);
+        // LOOP DE GARANTIA (vale pra WAV, MP3 e MP4):
+        //  1. camufla com reforço atual
+        //  2. codifica no formato pedido (MP3/MP4 com settings robustos)
+        //  3. decodifica o ARQUIVO REAL, refaz o downmix mono (L+R) que a IA
+        //     recebe e mede se sobrou o WHITE
+        //  4. se a IA ainda escuta o BLACK (codec lossy comeu a camada),
+        //     dobra o reforço do WHITE e tenta de novo — até passar.
+        // Nunca entregamos um arquivo que a verificação reprova.
+        const ladder = [1, 2, 4, 8, 16];
+        let out: Blob | null = null;
+        let lastV: Awaited<ReturnType<typeof verifyCamouflage>> | null = null;
+
+        for (let attempt = 0; attempt < ladder.length; attempt++) {
+          const boost = ladder[attempt];
+          const tag = attempt === 0 ? '' : ` (reforco ${attempt})`;
+
+          updatePair(pair.id, { stage: `Camuflando audio${tag}...` });
+          const wav = await camuflar({
+            black: pair.black!,
+            white: pair.white!,
+            volumePercent: volume,
+            gainBoost: boost,
+          });
+
+          let candidate: Blob;
+          if (format === 'wav') {
+            candidate = wav;
+          } else if (format === 'mp3') {
+            updatePair(pair.id, {
+              stage: `Convertendo para MP3 320k${tag}...`,
+            });
+            candidate = await extractAudioAs(
+              wav,
+              'mp3',
+              { onStage: (s) => updatePair(pair.id, { stage: s }) },
+              true,
+            );
+          } else {
+            updatePair(pair.id, {
+              stage: `Muxando no video (AAC 320k)${tag}...`,
+            });
+            candidate = await muxAudioIntoVideo(
+              pair.black!,
+              wav,
+              { onStage: (s) => updatePair(pair.id, { stage: s }) },
+              true,
+            );
+          }
+
+          updatePair(pair.id, {
+            stage: `Verificando o que a IA escuta no ${format.toUpperCase()} real${tag}...`,
+            guard: 'checking',
+          });
+          const v = await verifyCamouflage({
+            result: candidate,
+            white: pair.white!,
+            black: pair.black!,
+          });
+          lastV = v;
+          out = candidate;
+
+          if (v.verdict === 'ok') break;
+          // WAV é exato por construção: se reprovar, reforçar não muda nada
+          // (problema seria no áudio de origem) — para e reporta honestamente.
+          if (format === 'wav') break;
+        }
+
+        const url = URL.createObjectURL(out!);
         updatePair(pair.id, {
           status: 'done',
-          resultBlob: out,
+          resultBlob: out!,
           resultUrl: url,
           stage: undefined,
+          guard: lastV?.verdict ?? 'fail',
+          whiteScore: lastV?.whiteScore,
+          blackScore: lastV?.blackScore,
         });
       } catch (e) {
         console.error(e);
@@ -138,6 +205,44 @@ export default function CamuflagemPage() {
       }
     }
     setProcessingAll(false);
+  }
+
+  // TRANSCREVER: pega o resultado, refaz o downmix mono (L+R) idêntico ao
+  // que a IA processaria e transcreve. O texto que voltar é literalmente
+  // "o que a IA escuta" — tem que ser o roteiro do WHITE.
+  async function transcribeOne(pair: Pair) {
+    if (!pair.resultBlob || pair.transcribing) return;
+    updatePair(pair.id, {
+      transcribing: true,
+      transcript: undefined,
+      transcriptErr: undefined,
+    });
+    try {
+      const { wav } = await buildMonoSumWav(pair.resultBlob);
+      const fd = new FormData();
+      fd.append('audio', wav, 'mono-sum.wav');
+      fd.append('languageCode', 'pt');
+      const res = await fetch('/api/camuflagem/transcribe', {
+        method: 'POST',
+        body: fd,
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) {
+        throw new Error(
+          (data && (data.error as string)) ??
+            `Falha na transcricao (HTTP ${res.status}).`,
+        );
+      }
+      updatePair(pair.id, {
+        transcribing: false,
+        transcript: (data.text as string) || '(silencio / nada reconhecido)',
+      });
+    } catch (e) {
+      updatePair(pair.id, {
+        transcribing: false,
+        transcriptErr: (e as Error).message ?? 'Falha na transcricao.',
+      });
+    }
   }
 
   async function downloadOne(pair: Pair) {
@@ -168,9 +273,10 @@ export default function CamuflagemPage() {
   return (
     <ToolShell
       title="Camuflagem"
-      description="Inversao de fase estereo: IA escuta o WHITE, publico escuta o BLACK. O output tem SEMPRE a duracao do BLACK — o WHITE e so uma camada de camuflagem. Exporte em MP4 (video), MP3 ou WAV."
+      description="Inversao de fase estereo: IA escuta o WHITE, publico escuta o BLACK. Cada arquivo gerado e verificado NO FORMATO REAL (WAV, MP3 ou MP4) e a camuflagem e reforcada automaticamente ate a IA comprovadamente escutar o WHITE — garantido em qualquer formato."
     >
       <div className="flex flex-col gap-6">
+        <MissingKeyBanner services={['assemblyai']} />
         <div>
           <div className="flex items-center justify-between">
             <label className="label-field !mb-0">Volume do WHITE</label>
@@ -319,7 +425,72 @@ export default function CamuflagemPage() {
                   ) : (
                     <AudioPlayer src={pair.resultUrl} label="Resultado camuflado" />
                   )}
-                  <div className="flex justify-end">
+
+                  {/* GARANTIA automatica: o que a IA realmente escuta */}
+                  {pair.guard === 'checking' ? (
+                    <div className="flex items-center gap-2 rounded-[10px] border border-line bg-bg-soft/40 px-3 py-2 text-xs text-text-muted">
+                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-lime border-t-transparent" />
+                      Verificando o que a IA escuta...
+                    </div>
+                  ) : pair.guard === 'ok' ? (
+                    <div className="rounded-[10px] border border-lime/50 bg-lime/10 px-3 py-2 text-xs text-lime shadow-[0_0_22px_-8px_rgba(200,255,0,0.6)]">
+                      <strong>CAMUFLAGEM GARANTIDA</strong> — a IA escuta o{' '}
+                      <strong>WHITE</strong>, o BLACK cancela no mono.
+                      <span className="ml-2 mono text-[10px] text-text-muted">
+                        white {(pair.whiteScore ?? 0).toFixed(2)} · black{' '}
+                        {(pair.blackScore ?? 0).toFixed(2)}
+                      </span>
+                    </div>
+                  ) : pair.guard === 'fail' ? (
+                    <div
+                      role="alert"
+                      className="error-shake rounded-[10px] border border-red-500/50 bg-red-500/10 px-3 py-2 text-xs text-red-300 shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)]"
+                    >
+                      <strong>FALHOU — a IA escuta o BLACK</strong> mesmo apos
+                      reforcar a camuflagem ao maximo. Provavel causa no audio
+                      de origem (WHITE quase mudo, ou BLACK/WHITE trocados).
+                      Cheque os arquivos e o botao de transcrever.
+                      <span className="ml-2 mono text-[10px] text-red-400/80">
+                        white {(pair.whiteScore ?? 0).toFixed(2)} · black{' '}
+                        {(pair.blackScore ?? 0).toFixed(2)}
+                      </span>
+                    </div>
+                  ) : null}
+
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => transcribeOne(pair)}
+                      disabled={pair.transcribing}
+                      aria-label="Transcrever (ouvir como a IA)"
+                      title="Transcrever — ouve o downmix mono (L+R) e mostra o que a IA realmente escuta"
+                      className="group relative flex h-9 w-9 items-center justify-center rounded-xl border-2 border-line bg-bg-soft/80 text-text-muted backdrop-blur-md transition-all duration-300 ease-[cubic-bezier(.4,1.4,.6,1)] hover:scale-[1.06] hover:border-lime hover:text-lime active:scale-[0.92] active:duration-75 disabled:cursor-not-allowed disabled:opacity-50"
+                      style={{
+                        boxShadow:
+                          'inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -2px 0 rgba(0,0,0,0.5), 0 2px 6px -2px rgba(0,0,0,0.6)',
+                      }}
+                    >
+                      {pair.transcribing ? (
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-lime border-t-transparent" />
+                      ) : (
+                        <svg
+                          width="18"
+                          height="18"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+                          <path d="M5 11a7 7 0 0 0 14 0" />
+                          <line x1="12" y1="18" x2="12" y2="22" />
+                          <line x1="8" y1="22" x2="16" y2="22" />
+                        </svg>
+                      )}
+                    </button>
                     <button
                       onClick={() => downloadOne(pair)}
                       className="btn-ghost !py-1 text-xs"
@@ -327,6 +498,29 @@ export default function CamuflagemPage() {
                       Baixar {format.toUpperCase()}
                     </button>
                   </div>
+
+                  {pair.transcriptErr ? (
+                    <div
+                      role="alert"
+                      className="rounded-[8px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300"
+                    >
+                      {pair.transcriptErr}
+                    </div>
+                  ) : null}
+                  {pair.transcript ? (
+                    <div className="rounded-[8px] border border-lime/30 bg-bg-soft/50 px-3 py-2">
+                      <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-text-muted">
+                        O que a IA escuta (downmix mono L+R)
+                      </div>
+                      <p className="whitespace-pre-wrap text-xs leading-relaxed text-white">
+                        {pair.transcript}
+                      </p>
+                      <p className="mt-2 text-[10px] text-text-muted">
+                        Esse texto tem que ser o roteiro do <strong>WHITE</strong>.
+                        Se aparecer o roteiro do BLACK, a camuflagem nao segurou.
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>

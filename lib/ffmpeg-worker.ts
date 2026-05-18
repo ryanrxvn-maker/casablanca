@@ -222,6 +222,10 @@ export async function extractAudioAs(
   file: Blob,
   format: 'wav' | 'mp3',
   opts: RunOptions = {},
+  // Modo camuflagem: MP3 com estéreo INDEPENDENTE (sem joint/M-S, que
+  // destrói a camada quieta do WHITE) e bitrate máximo, pra o cancelamento
+  // de fase sobreviver ao codec lossy.
+  robust = false,
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
   const { fetchFile } = await import('@ffmpeg/util');
@@ -236,6 +240,13 @@ export async function extractAudioAs(
     const args = ['-i', inputName, '-vn'];
     if (format === 'wav') {
       args.push('-c:a', 'pcm_s16le', '-ar', '44100');
+    } else if (robust) {
+      args.push(
+        '-c:a', 'libmp3lame',
+        '-b:a', '320k',
+        '-joint_stereo', '0',
+        '-ar', '44100',
+      );
     } else {
       args.push('-c:a', 'libmp3lame', '-q:a', '2');
     }
@@ -458,6 +469,9 @@ export async function muxAudioIntoVideo(
   video: Blob,
   audio: Blob,
   opts: RunOptions = {},
+  // Modo camuflagem: AAC no bitrate máximo pra o piso de ruído do codec
+  // ficar bem abaixo do WHITE e o cancelamento de fase sobreviver.
+  robust = false,
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
   const { fetchFile } = await import('@ffmpeg/util');
@@ -481,7 +495,8 @@ export async function muxAudioIntoVideo(
       '-map', '1:a:0',
       '-c:v', 'copy',
       '-c:a', 'aac',
-      '-b:a', '192k',
+      '-b:a', robust ? '320k' : '192k',
+      ...(robust ? ['-ar', '44100', '-cutoff', '20000'] : []),
       '-shortest',
       '-movflags', '+faststart',
       outputName,
