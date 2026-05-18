@@ -253,7 +253,15 @@ async function resolveYtDlp(): Promise<Tool | null> {
       await new Promise<void>((res) => {
         const p = spawn(
           anyPy,
-          ['-m', 'pip', 'install', '--upgrade', '--quiet', 'yt-dlp'],
+          [
+            '-m',
+            'pip',
+            'install',
+            '--upgrade',
+            '--quiet',
+            'yt-dlp[default,curl-cffi]',
+            'curl_cffi',
+          ],
           { windowsHide: true },
         );
         p.on('error', () => res());
@@ -407,8 +415,17 @@ async function ytDlpArgs(
     '%(title).80B-%(id)s.%(ext)s',
   ];
   if (provider === 'adult') {
-    // alguns tubes bloqueiam UA nao-browser
-    base.push('--user-agent', UA, '--extractor-retries', '3');
+    // --impersonate: finge TLS de Chrome real (curl_cffi) -> derruba o
+    // bloqueio 410/Cloudflare do pornhub/xvideos/xhamster/redtube/youporn
+    // e o extractor nativo pega a midia certa (sem ads).
+    base.push(
+      '--impersonate',
+      'chrome',
+      '--user-agent',
+      UA,
+      '--extractor-retries',
+      '3',
+    );
   }
   const aria2 = await aria2Path();
   if (aria2) {
@@ -581,19 +598,55 @@ async function resolveAdultEmbed(
 }
 
 /**
- * Pipeline +18: tenta extractor nativo do yt-dlp (pornhub, xvideos,
- * xhamster, redtube, youporn) e, se o site for um mirror/blog sem
- * extractor, cai no crack de embed -> yt-dlp na midia real.
+ * Pipeline +18, em 3 camadas (rapido -> robusto):
+ *  1. yt-dlp --impersonate chrome  → pornhub/xvideos/xhamster/redtube/
+ *     youporn (extractor nativo, TLS de browser real fura o bloqueio).
+ *  2. crack de embed estatico      → mirrors tipo xvideosputaria
+ *     (iframe/player HLS) — leve.
+ *  3. headless (Chromium real)     → buceteiro/playernc e qualquer
+ *     site JS/anti-bot: o player toca e capturamos a stream real.
  */
+/** Normaliza subdominio de pais (pt./br./de.…) pra www. — necessario
+ *  pra yt-dlp casar o extractor nativo (ex.: br.youporn.com -> generico
+ *  e quebra; www.youporn.com -> extractor YouPorn). */
+function normalizeAdultUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    const h = u.hostname.toLowerCase();
+    for (const base of [
+      'pornhub.com',
+      'youporn.com',
+      'redtube.com',
+      'xvideos.com',
+    ]) {
+      if (h === base || h.endsWith('.' + base)) {
+        u.hostname = 'www.' + base;
+        return u.toString();
+      }
+    }
+    return raw;
+  } catch {
+    return raw;
+  }
+}
+
 async function fetchAdult(
   url: string,
   mode: Mode,
   quality: Quality,
   workDir: string,
 ): Promise<Built> {
-  const native = await fetchYtDlp(url, mode, quality, 'adult', workDir);
+  // 1) extractor nativo com impersonate (subdominio normalizado)
+  const native = await fetchYtDlp(
+    normalizeAdultUrl(url),
+    mode,
+    quality,
+    'adult',
+    workDir,
+  );
   if (!('error' in native)) return native;
 
+  // 2) crack de embed estatico
   const emb = await resolveAdultEmbed(url);
   if (emb) {
     const viaEmbed = await fetchYtDlp(
@@ -605,12 +658,59 @@ async function fetchAdult(
       emb.referer,
     );
     if (!('error' in viaEmbed)) return viaEmbed;
-    return {
-      error: `nao foi possivel resolver a midia (site pode exigir login/assinatura ou carregar via JS). [${viaEmbed.error}]`,
-    };
   }
+
+  // 3) headless — passa Cloudflare/age-gate/fingerprint e captura a
+  //    stream que o player de fato baixa
+  try {
+    const { grabMedia } = await import('@/lib/headless-grab');
+    const grab = await grabMedia(url);
+    if (grab && 'm3u8' in grab) {
+      const viaHls = await fetchYtDlp(
+        grab.m3u8,
+        mode,
+        quality,
+        'adult',
+        workDir,
+        grab.referer,
+      );
+      if (!('error' in viaHls)) return viaHls;
+    } else if (grab && 'buffer' in grab) {
+      if (mode === 'video') {
+        const name = safeName(
+          new URL(url).pathname.split('/').filter(Boolean).pop() || 'video',
+          grab.ext,
+        );
+        const fp = path.join(workDir, name);
+        await writeFile(fp, grab.buffer);
+        return { file: fp, name };
+      }
+      // audio: salva o video e extrai com ffmpeg
+      const src = path.join(workDir, 'hl-src.mp4');
+      await writeFile(src, grab.buffer);
+      const ext = mode === 'audio-wav' ? 'wav' : 'mp3';
+      const outP = path.join(workDir, `hl-out.${ext}`);
+      const ff =
+        mode === 'audio-wav'
+          ? ['-y', '-i', src, '-vn', outP]
+          : ['-y', '-i', src, '-vn', '-b:a', '192k', outP];
+      const { code } = await run(await resolveFfmpeg(), ff, workDir);
+      if (code === 0)
+        return {
+          file: outP,
+          name: safeName(
+            new URL(url).pathname.split('/').filter(Boolean).pop() ||
+              'audio',
+            ext,
+          ),
+        };
+    }
+  } catch {
+    /* headless indisponivel (playwright ausente) — cai no erro abaixo */
+  }
+
   return {
-    error: `nao foi possivel resolver a midia deste link (sem video extraivel — pode exigir login/assinatura ou ser pagina sem video). [${native.error}]`,
+    error: `nao foi possivel resolver a midia (site pode exigir login/assinatura, ou o Chromium do headless nao esta instalado: npx playwright install chromium). [${native.error}]`,
   };
 }
 
