@@ -24,6 +24,32 @@ import { CancelButton } from '@/components/CancelButton';
 
 type OutFormat = 'mp4' | 'mp3' | 'wav';
 
+// Alvo da camuflagem. Define QUAL downmix decide o veredito:
+//  - platforms: TikTok/Kwai/YouTube reduzem pra mono SOMANDO/mediando os
+//    canais (YouTube Content ID faz a média — comprovado). A inversão de
+//    fase engana esses. Julga por soma L+R + média.
+//  - single: ASR de canal único (AssemblyAI, Whisper padrão). Pega 1 canal,
+//    onde o BLACK está cheio. A técnica NÃO camufla. Julga pelos canais.
+//  - universal: pior caso — só passa se TODO downmix escutar o WHITE.
+type Target = 'platforms' | 'single' | 'universal';
+
+const TARGET_KINDS: Record<Target, Array<'sum' | 'avg' | 'left' | 'right'>> = {
+  platforms: ['sum', 'avg'],
+  single: ['left', 'right'],
+  universal: ['sum', 'avg', 'left', 'right'],
+};
+
+function effectiveVerdict(
+  downmixes: DownmixResult[] | undefined,
+  target: Target,
+): 'ok' | 'fail' | null {
+  if (!downmixes || downmixes.length === 0) return null;
+  const kinds = TARGET_KINDS[target];
+  const relevant = downmixes.filter((d) => kinds.includes(d.kind));
+  if (relevant.length === 0) return null;
+  return relevant.every((d) => d.hears === 'white') ? 'ok' : 'fail';
+}
+
 type Pair = {
   id: string;
   black: File | null;
@@ -65,6 +91,10 @@ export default function CamuflagemPage() {
   const [format, setFormat] = useToolState<OutFormat>(
     'camuflagem:format',
     'wav',
+  );
+  const [target, setTarget] = useToolState<Target>(
+    'camuflagem:target',
+    'platforms',
   );
   const [processingAll, setProcessingAll] = useToolState<boolean>(
     'camuflagem:processingAll',
@@ -253,7 +283,7 @@ export default function CamuflagemPage() {
   return (
     <ToolShell
       title="Camuflagem"
-      description="Inversao de fase estereo: funciona contra IA que SOMA L+R (TikTok/Meta-like). Cada arquivo e checado no formato real mostrando o que CADA tipo de IA escuta — inclusive engines de canal unico (AssemblyAI/Whisper), que escutam o BLACK. Sem promessa falsa: o selo so fica verde se o pior caso escutar o WHITE."
+      description="Inversao de fase estereo. Escolha a IA-alvo: TikTok/Kwai/YouTube somam/mediam L+R (YouTube Content ID comprovado) e escutam o WHITE; ASR de canal unico (AssemblyAI/Whisper) escuta o BLACK e nao tem como camuflar. Cada arquivo e medido no formato REAL e o selo so fica verde se a IA-alvo escolhida escutar o WHITE — sem promessa falsa."
     >
       <div className="flex flex-col gap-6">
         <MissingKeyBanner services={['assemblyai']} />
@@ -315,6 +345,57 @@ export default function CamuflagemPage() {
               versao camuflada.
             </p>
           ) : null}
+        </div>
+
+        <div>
+          <label className="label-field">IA-alvo (define o veredito)</label>
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                ['platforms', 'TikTok / Kwai / YouTube'],
+                ['single', 'ASR canal unico (AssemblyAI/Whisper)'],
+                ['universal', 'Universal (pior caso)'],
+              ] as const
+            ).map(([t, lbl]) => {
+              const active = target === t;
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTarget(t)}
+                  disabled={processingAll}
+                  className={
+                    'rounded-[12px] px-4 py-2 text-sm transition-all duration-200 active:scale-[0.97] disabled:opacity-40 ' +
+                    (active
+                      ? 'bg-lime font-semibold text-black shadow-[0_0_18px_-4px_rgba(200,255,0,0.6)]'
+                      : 'border border-line-strong text-text-muted hover:border-lime hover:text-white')
+                  }
+                >
+                  {lbl}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-2 text-xs text-text-muted">
+            {target === 'platforms' ? (
+              <>
+                TikTok/Kwai/YouTube reduzem o audio pra mono SOMANDO os canais
+                (o Content ID do YouTube faz a media — comprovado). A inversao
+                de fase engana esses: eles escutam o WHITE.
+              </>
+            ) : target === 'single' ? (
+              <>
+                Engines que pegam UM canal isolado escutam o BLACK em volume
+                cheio. A inversao de fase NAO camufla contra elas — e nao tem
+                como, sem o publico tambem ouvir o WHITE.
+              </>
+            ) : (
+              <>
+                So fica verde se TODO tipo de IA (somadora E de canal unico)
+                escutar o WHITE. A inversao de fase nunca passa aqui.
+              </>
+            )}
+          </p>
         </div>
 
         <div className="flex flex-col gap-4">
@@ -413,69 +494,98 @@ export default function CamuflagemPage() {
                       Verificando o que cada IA escuta no arquivo real...
                     </div>
                   ) : pair.guard === 'ok' || pair.guard === 'fail' ? (
-                    <div
-                      role={pair.guard === 'fail' ? 'alert' : undefined}
-                      className={
-                        'rounded-[10px] border px-3 py-2 text-xs ' +
-                        (pair.guard === 'ok'
-                          ? 'border-lime/50 bg-lime/10 text-lime shadow-[0_0_22px_-8px_rgba(200,255,0,0.6)]'
-                          : 'error-shake border-red-500/50 bg-red-500/10 text-red-300 shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)]')
-                      }
-                    >
-                      <div className="mb-1.5 font-semibold">
-                        {pair.guard === 'ok' ? (
-                          <>CAMUFLAGEM GARANTIDA — todo tipo de IA escuta o WHITE</>
-                        ) : (
-                          <>
-                            NAO CAMUFLADO PRA TODA IA — alguma engine escuta o
-                            BLACK
-                          </>
-                        )}
-                      </div>
-                      <div className="flex flex-col gap-1">
-                        {(pair.downmixes ?? []).map((d) => (
-                          <div
-                            key={d.kind}
-                            className="flex items-center justify-between gap-2"
-                          >
-                            <span className="text-text-muted">{d.label}</span>
-                            <span className="flex items-center gap-2">
-                              <span className="mono text-[10px] text-text-muted">
-                                w {d.whiteScore.toFixed(2)} · b{' '}
-                                {d.blackScore.toFixed(2)}
-                              </span>
-                              <span
-                                className={
-                                  'rounded px-1.5 py-0.5 text-[10px] font-semibold ' +
-                                  (d.hears === 'white'
-                                    ? 'bg-lime/20 text-lime'
-                                    : d.hears === 'black'
-                                      ? 'bg-red-500/25 text-red-300'
-                                      : 'bg-yellow-500/20 text-yellow-300')
-                                }
-                              >
-                                {d.hears === 'white'
-                                  ? 'WHITE'
-                                  : d.hears === 'black'
-                                    ? 'BLACK'
-                                    : '???'}
-                              </span>
-                            </span>
+                    (() => {
+                      const ev = effectiveVerdict(pair.downmixes, target);
+                      const ok = ev === 'ok';
+                      const relevant = TARGET_KINDS[target];
+                      const targetLabel =
+                        target === 'platforms'
+                          ? 'TikTok / Kwai / YouTube'
+                          : target === 'single'
+                            ? 'ASR de canal unico'
+                            : 'qualquer IA';
+                      return (
+                        <div
+                          role={ok ? undefined : 'alert'}
+                          className={
+                            'rounded-[10px] border px-3 py-2 text-xs ' +
+                            (ok
+                              ? 'border-lime/50 bg-lime/10 text-lime shadow-[0_0_22px_-8px_rgba(200,255,0,0.6)]'
+                              : 'error-shake border-red-500/50 bg-red-500/10 text-red-300 shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)]')
+                          }
+                        >
+                          <div className="mb-1.5 font-semibold">
+                            {ok ? (
+                              <>
+                                CAMUFLADO PRA {targetLabel.toUpperCase()} — essa
+                                IA escuta o WHITE
+                              </>
+                            ) : (
+                              <>
+                                NAO CAMUFLADO PRA {targetLabel.toUpperCase()} —
+                                essa IA escuta o BLACK
+                              </>
+                            )}
                           </div>
-                        ))}
-                      </div>
-                      {pair.guard === 'fail' ? (
-                        <div className="mt-2 border-t border-red-500/30 pt-2 text-[11px] text-red-300/90">
-                          A inversao de fase so engana quem SOMA L+R. Engines
-                          que pegam um canal isolado (AssemblyAI, Whisper
-                          padrao) escutam o BLACK em volume cheio — e isso{' '}
-                          <strong>nao tem como ser corrigido</strong> sem o
-                          publico tambem ouvir o WHITE. Use TikTok/Meta-like
-                          (somam L+R) OU aceite que pra ASR de canal unico essa
-                          tecnica nao camufla. Confirme no botao TRANSCREVER.
+                          <div className="flex flex-col gap-1">
+                            {(pair.downmixes ?? []).map((d) => {
+                              const used = relevant.includes(d.kind);
+                              return (
+                                <div
+                                  key={d.kind}
+                                  className={
+                                    'flex items-center justify-between gap-2 ' +
+                                    (used ? '' : 'opacity-40')
+                                  }
+                                >
+                                  <span className="text-text-muted">
+                                    {used ? '▸ ' : ''}
+                                    {d.label}
+                                  </span>
+                                  <span className="flex items-center gap-2">
+                                    <span className="mono text-[10px] text-text-muted">
+                                      w {d.whiteScore.toFixed(2)} · b{' '}
+                                      {d.blackScore.toFixed(2)}
+                                    </span>
+                                    <span
+                                      className={
+                                        'rounded px-1.5 py-0.5 text-[10px] font-semibold ' +
+                                        (d.hears === 'white'
+                                          ? 'bg-lime/20 text-lime'
+                                          : d.hears === 'black'
+                                            ? 'bg-red-500/25 text-red-300'
+                                            : 'bg-yellow-500/20 text-yellow-300')
+                                      }
+                                    >
+                                      {d.hears === 'white'
+                                        ? 'WHITE'
+                                        : d.hears === 'black'
+                                          ? 'BLACK'
+                                          : '???'}
+                                    </span>
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {ok && target === 'platforms' ? (
+                            <div className="mt-2 border-t border-lime/30 pt-2 text-[11px] text-lime/80">
+                              YouTube Content ID faz a media dos canais
+                              (comprovado); TikTok/Kwai sao da mesma familia. A
+                              prova final e empirica: suba 1 video teste e veja
+                              a legenda automatica / se a moderacao pega o WHITE.
+                            </div>
+                          ) : !ok ? (
+                            <div className="mt-2 border-t border-red-500/30 pt-2 text-[11px] text-red-300/90">
+                              A inversao de fase so engana quem SOMA/media L+R.
+                              Engine de canal unico escuta o BLACK cheio — sem
+                              correcao possivel sem o publico ouvir o WHITE.
+                              Confirme no botao TRANSCREVER.
+                            </div>
+                          ) : null}
                         </div>
-                      ) : null}
-                    </div>
+                      );
+                    })()
                   ) : null}
 
                   <div className="flex items-center justify-end gap-2">
