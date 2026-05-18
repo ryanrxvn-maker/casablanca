@@ -479,8 +479,13 @@ function findTopWindows(
     }
   }
 
-  // Ordena por score desc + dedup-overlap
-  candidates.sort((a, b) => b.score - a.score);
+  // Ordena por score desc. Tiebreak: quando dois takes empatam (diff < 2%),
+  // prefere o MAIS TARDIO no video — expert refaz a frase ate acertar, a
+  // ultima take quase sempre e' a boa (a primeira costuma ter hesitacao).
+  candidates.sort((a, b) => {
+    if (Math.abs(a.score - b.score) < 0.02) return b.startMs - a.startMs;
+    return b.score - a.score;
+  });
 
   // Remove candidatos que se sobrepoe MUITO com outros melhores (>50%
   // overlap) — fica so os mais distintos
@@ -651,12 +656,11 @@ function matchCopyWindowed(copy: string, words: Word[]): Cut[] {
     });
   }
 
-  // Pos-processamento: dedup cuts com overlap textual alto.
-  // Causa do bug anterior: speaker repetia mesma frase 2x consecutivas,
-  // matcher pegava 1 take pra frase i e a OUTRA take pra frase i+1
-  // (porque o transcript continha conteudo da frase i misturado).
-  // Aqui detectamos e removemos a duplicada.
-  const dedupedCuts = dedupOverlappingCuts(rawCuts);
+  // Pos-processamento: dedup GLOBAL. Se o expert fala a mesma frase 10x,
+  // so 1 take pode sobreviver. Compara cada cut contra TODOS os ja aceitos
+  // (nao so o anterior) por similaridade textual, igualdade da frase da
+  // copy e overlap temporal. Mantem sempre o de maior score.
+  const dedupedCuts = dedupCutsGlobal(rawCuts);
 
   // Tambem garante NO TIME OVERLAP — se cut[i].endMs > cut[i+1].startMs,
   // ajusta pra eliminar overlap (corta ponto medio).
@@ -666,35 +670,62 @@ function matchCopyWindowed(copy: string, words: Word[]): Cut[] {
 }
 
 /**
- * Remove cuts consecutivos que tem mais de 60% de overlap textual.
- * Mantem o de maior score.
+ * Similaridade textual entre dois trechos (stems, set overlap simetrico
+ * normalizado pelo menor — pega "frase X" dentro de "frase X mais coisa").
  */
-function dedupOverlappingCuts(cuts: Cut[]): Cut[] {
+function textSimilarity(a: string, b: string): number {
+  const sa = new Set(tokenize(a).map(stem));
+  const sb = new Set(tokenize(b).map(stem));
+  if (sa.size === 0 || sb.size === 0) return 0;
+  let intersect = 0;
+  for (const t of sa) if (sb.has(t)) intersect++;
+  return intersect / Math.min(sa.size, sb.size);
+}
+
+/**
+ * Dedup GLOBAL de takes repetidas.
+ *
+ * Regra dura pedida: se o expert fala a MESMA frase 10x, so 1 sobrevive.
+ *
+ * Pra cada cut (em ordem da copy) compara contra TODOS os ja aceitos:
+ *   - similaridade textual >= 0.6  → mesma fala repetida
+ *   - mesma frase da copy + sim >= 0.4 → repeticao da mesma linha
+ *   - overlap temporal real → pegou o mesmo pedaco de video 2x
+ * Em qualquer caso mantem APENAS o de maior score (substitui in-place pra
+ * preservar a posicao na ordem da copy).
+ */
+function dedupCutsGlobal(cuts: Cut[]): Cut[] {
   if (cuts.length <= 1) return cuts;
 
-  const result: Cut[] = [cuts[0]];
-  for (let i = 1; i < cuts.length; i++) {
-    const cur = cuts[i];
-    const prev = result[result.length - 1];
+  const kept: Cut[] = [];
+  for (const cur of cuts) {
+    const curPhrase = normalize(cur.copyPhrase);
+    let dupIdx = -1;
 
-    const curTokens = new Set(tokenize(cur.transcriptText).map(stem));
-    const prevTokens = new Set(tokenize(prev.transcriptText).map(stem));
-    let intersect = 0;
-    for (const t of curTokens) if (prevTokens.has(t)) intersect++;
-    const minSize = Math.min(curTokens.size, prevTokens.size);
-    const overlap = minSize > 0 ? intersect / minSize : 0;
+    for (let i = 0; i < kept.length; i++) {
+      const k = kept[i];
+      const sim = textSimilarity(cur.transcriptText, k.transcriptText);
+      const samePhrase = curPhrase === normalize(k.copyPhrase);
+      const timeOverlap =
+        !(cur.endMs <= k.startMs || cur.startMs >= k.endMs);
 
-    if (overlap >= 0.6) {
-      // Sao redundantes — mantem o de maior score
-      if (cur.score > prev.score) {
-        result[result.length - 1] = cur;
+      if (sim >= 0.6 || (samePhrase && sim >= 0.4) || timeOverlap) {
+        dupIdx = i;
+        break;
       }
-      // senao descarta cur
+    }
+
+    if (dupIdx >= 0) {
+      if (cur.score > kept[dupIdx].score) kept[dupIdx] = cur;
+      // senao descarta — duplicada de qualidade inferior
     } else {
-      result.push(cur);
+      kept.push(cur);
     }
   }
-  return result;
+
+  // Mantem ordem cronologica (= ordem da copy apos o DP) pra concat correto.
+  kept.sort((a, b) => a.startMs - b.startMs);
+  return kept;
 }
 
 /**

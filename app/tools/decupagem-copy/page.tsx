@@ -40,6 +40,9 @@ import { formatBytes, formatTime } from '@/lib/utils';
 
 const MAX_FILE_BYTES = 800 * 1024 * 1024;
 const MAX_DURATION_SEC = 40 * 60;
+// Corte de silencio FIXO em 0.10s — pausas >= 100ms entre falas somem.
+// Valor calibrado: corta tempo morto/respiracao sem comer palavra.
+const SILENCE_TOLERANCE = 0.1;
 
 type Cut = {
   startMs: number;
@@ -80,10 +83,6 @@ export default function DecupagemCopyPage() {
   const [removeSilence, setRemoveSilence] = useToolState<boolean>(
     'decupcopy:removeSilence',
     true,
-  );
-  const [silenceTolerance, setSilenceTolerance] = useToolState<number>(
-    'decupcopy:silenceTolerance',
-    0.5,
   );
   const abortRef = useRef<AbortController | null>(null);
 
@@ -221,13 +220,13 @@ export default function DecupagemCopyPage() {
       });
 
       // Step 4: Silence removal GLOBAL no MP4 final (depois do concat).
-      // Remove pausas longas naturais entre frases sem dividir cuts.
-      // Tolerancia (silenceTolerance) define o que e' "longo demais".
+      // Remove pausas naturais entre frases sem dividir cuts.
+      // Limiar FIXO em SILENCE_TOLERANCE (0.10s).
       if (removeSilence) {
         setStage('Removendo silencios globais do video final...');
         setProgress(0.9);
         try {
-          out = await removeAvatarSilences(out, silenceTolerance, {
+          out = await removeAvatarSilences(out, SILENCE_TOLERANCE, {
             onStage: (s) => setStage(s),
             onProgress: (p: FFProgress) =>
               setProgress(0.9 + p.ratio * 0.1),
@@ -376,40 +375,13 @@ export default function DecupagemCopyPage() {
                 Remover silencios entre as falas
               </div>
               <div className="mt-0.5 text-[11px] text-text-muted">
-                Depois de alinhar a copy, decupa cada trecho tirando
-                pausas longas — igual a ferramenta Decupagem.
+                Depois de alinhar a copy, corta toda pausa{' '}
+                <span className="mono text-lime">≥ 0.10s</span> entre as
+                falas — valor fixo calibrado pra tirar tempo morto sem
+                comer palavra.
               </div>
             </div>
           </label>
-          {removeSilence ? (
-            <div className="mt-4 border-t border-line pt-3">
-              <div className="flex items-center justify-between">
-                <label className="label-field !mb-0">
-                  Tolerancia de silencio
-                </label>
-                <span className="mono text-xs text-lime">
-                  {silenceTolerance.toFixed(2)}s
-                </span>
-              </div>
-              <input
-                type="range"
-                min={0.05}
-                max={1}
-                step={0.05}
-                value={silenceTolerance}
-                onChange={(e) =>
-                  setSilenceTolerance(parseFloat(e.target.value))
-                }
-                className="mt-3"
-                disabled={processing}
-              />
-              <p className="mt-2 text-[11px] text-text-muted">
-                Margem mantida em cada borda do silencio detectado.
-                Valores baixos cortam mais agressivo, altos preservam mais
-                respiracao.
-              </p>
-            </div>
-          ) : null}
         </div>
 
         {file && duration !== null && duration > 0 ? (
