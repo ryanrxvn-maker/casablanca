@@ -54,17 +54,20 @@ export type TokenState = {
   genToday: number;
 };
 
-let TOKENS: string[] | null = null;
-let STATE: TokenState[] = [];
+// Estado POR TOKEN (cooldown/uso/genToday) — chave = string do token.
+// NUNCA cacheamos a LISTA de tokens: relemos o env a cada chamada (é
+// barato) porque uma instância serverless pode ter esquentado ANTES do
+// HF_TOKENS chegar no runtime. Cachear vazio quebrava o /generate
+// enquanto o /status (instância nova) via os tokens. Bug real corrigido.
+const STATES = new Map<string, TokenState>();
 
-function load(): void {
-  if (TOKENS) return;
+function envTokens(): string[] {
   const raw =
     process.env.HF_TOKENS ||
     process.env.HF_TOKEN ||
     process.env.HUGGINGFACE_TOKEN ||
     '';
-  const list = Array.from(
+  return Array.from(
     new Set(
       raw
         .split(/[,\s]+/)
@@ -72,17 +75,6 @@ function load(): void {
         .filter((t) => /^hf_[A-Za-z0-9]{8,}$/.test(t)),
     ),
   ).slice(0, MAX_TOKENS);
-
-  TOKENS = list;
-  STATE = list.map((t, i) => ({
-    i,
-    mask: `hf_…${t.slice(-4)}`,
-    cooldownUntil: 0,
-    lastUsed: 0,
-    fails: 0,
-    ok: 0,
-    genToday: 0,
-  }));
 }
 
 /** Virou o dia UTC? Zera contadores/cooldown (a quota do HF reseta diária). */
@@ -90,15 +82,46 @@ function rollover(): void {
   const d = dayKey();
   if (d === CUR_DAY) return;
   CUR_DAY = d;
-  for (const s of STATE) {
+  for (const s of STATES.values()) {
     s.genToday = 0;
     s.cooldownUntil = 0;
   }
 }
 
+/**
+ * Relê o env, preserva o estado por token e devolve a lista atual
+ * (tokens[i] casa com states[i]). Sem cache da lista = sem stale.
+ */
+function resolve(): { tokens: string[]; states: TokenState[] } {
+  rollover();
+  const tokens = envTokens();
+  const states = tokens.map((t, i) => {
+    let s = STATES.get(t);
+    if (!s) {
+      s = {
+        i,
+        mask: `hf_…${t.slice(-4)}`,
+        cooldownUntil: 0,
+        lastUsed: 0,
+        fails: 0,
+        ok: 0,
+        genToday: 0,
+      };
+      STATES.set(t, s);
+    }
+    s.i = i;
+    return s;
+  });
+  // Limpa estado de tokens que sairam do env (evita crescer sem limite).
+  if (STATES.size > tokens.length) {
+    const keep = new Set(tokens);
+    for (const k of [...STATES.keys()]) if (!keep.has(k)) STATES.delete(k);
+  }
+  return { tokens, states };
+}
+
 export function poolSize(): number {
-  load();
-  return TOKENS!.length;
+  return resolve().tokens.length;
 }
 
 /** "Try again in 23:25:04" / "in 142s" -> segundos. Fallback 1h. */
@@ -119,18 +142,17 @@ export function parseRetrySeconds(msg: string): number {
 export function nextToken():
   | { token: string; state: TokenState }
   | { token: null; soonestMs: number } {
-  load();
-  rollover();
-  if (TOKENS!.length === 0) return { token: null, soonestMs: 0 };
+  const { tokens, states } = resolve();
+  if (tokens.length === 0) return { token: null, soonestMs: 0 };
   const now = Date.now();
 
-  const free = STATE.filter((s) => s.cooldownUntil <= now);
+  const free = states.filter((s) => s.cooldownUntil <= now);
   if (free.length > 0) {
     free.sort((a, b) => a.lastUsed - b.lastUsed || a.i - b.i);
     const st = free[0];
-    return { token: TOKENS![st.i], state: st };
+    return { token: tokens[st.i], state: st };
   }
-  const soonest = STATE.reduce(
+  const soonest = states.reduce(
     (m, s) => Math.min(m, s.cooldownUntil),
     Number.MAX_SAFE_INTEGER,
   );
@@ -182,12 +204,11 @@ export function poolStatus(): {
     fails: number;
   }>;
 } {
-  load();
-  rollover();
+  const { states } = resolve();
   const now = Date.now();
   const perDay = gensPerAccountDay();
 
-  const accounts = STATE.map((s) => {
+  const accounts = states.map((s) => {
     const left = Math.max(0, Math.ceil((s.cooldownUntil - now) / 1000));
     const cooling = left > 0;
     // Estimativa honesta: conta em cooldown rende 0 até liberar; senão,
@@ -205,10 +226,10 @@ export function poolStatus(): {
   });
 
   return {
-    total: STATE.length,
+    total: states.length,
     available: accounts.filter((a) => a.state === 'livre').length,
     perAccountDay: perDay,
-    usedToday: STATE.reduce((n, s) => n + s.genToday, 0),
+    usedToday: states.reduce((n, s) => n + s.genToday, 0),
     estRemainingToday: accounts.reduce((n, a) => n + a.genLeft, 0),
     dayUTC: CUR_DAY,
     accounts,
