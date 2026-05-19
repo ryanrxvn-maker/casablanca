@@ -8,12 +8,7 @@ import {
   extractFrameAt,
   probeVideoMetadata,
 } from '@/lib/ffmpeg-worker';
-import {
-  LTX_DURATIONS,
-  LTX_MODES,
-  LTX_RESOLUTIONS,
-  LTX_STEPS,
-} from '@/lib/ltx-video';
+import { LTX_DURATIONS, LTX_RESOLUTIONS } from '@/lib/ltx-video';
 
 /**
  * LTX-Video 2.3 — geração de vídeo (com áudio) via Hugging Face ZeroGPU.
@@ -50,7 +45,6 @@ export default function LtxVideoPage() {
   const [prompt, setPrompt] = useToolState<string>('ltx:prompt', '');
   const [resId, setResId] = useToolState<string>('ltx:res', LTX_RESOLUTIONS[0].id);
   const [durId, setDurId] = useToolState<string>('ltx:dur', '6s');
-  const [stepsId, setStepsId] = useToolState<string>('ltx:steps', '50');
 
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState('');
@@ -116,7 +110,6 @@ export default function LtxVideoPage() {
 
     const res = LTX_RESOLUTIONS.find((r) => r.id === resId) ?? LTX_RESOLUTIONS[0];
     const dur = LTX_DURATIONS.find((d) => d.id === durId) ?? LTX_DURATIONS[0];
-    const steps = LTX_STEPS.find((s) => s.id === stepsId) ?? LTX_STEPS[0];
 
     setBusy(true);
     setError(null);
@@ -129,7 +122,9 @@ export default function LtxVideoPage() {
         duration: String(dur.seconds),
         width: String(res.width),
         height: String(res.height),
-        enhance: steps.enhance ? '1' : '0',
+        // enhance_prompt fixo em OFF: é o caminho COMPROVADO (gerou MP4
+        // real) e o mais rápido — não estoura o teto de 75s da GPU.
+        enhance: '0',
       };
 
       const parts: Blob[] = [];
@@ -188,7 +183,7 @@ export default function LtxVideoPage() {
         id: 'g_' + Math.random().toString(36).slice(2, 9),
         url,
         prompt: txt,
-        meta: `${res.label} · ${dur.label} · ${steps.label}`,
+        meta: `${res.label} · ${dur.label}`,
       };
       setResult(item);
       setGallery((g) => [item, ...g].slice(0, 8));
@@ -244,17 +239,7 @@ export default function LtxVideoPage() {
           />
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div>
-            <label className="label-field">Modo</label>
-            <select className="input-field" value="fast" disabled>
-              {LTX_MODES.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
             <label className="label-field">Duração</label>
             <select
@@ -281,21 +266,6 @@ export default function LtxVideoPage() {
               {LTX_RESOLUTIONS.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="label-field">Steps</label>
-            <select
-              className="input-field"
-              value={stepsId}
-              disabled={busy}
-              onChange={(e) => setStepsId(e.target.value)}
-            >
-              {LTX_STEPS.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.label}
                 </option>
               ))}
             </select>
