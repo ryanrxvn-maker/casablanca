@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.12.0';
+const DARKO_EXT_VERSION = '4.12.1';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -2611,7 +2611,27 @@ async function enterStudioForAvatar(avatarId, avatarName, groupName) {
   }
   // editor pesado (canvas) — folga extra pra cena 1 + avatar bound montarem
   await sleep(3500);
+  // GUARDA: modal "Plans that fit your scale" e upsell que bloqueia a
+  // UI. Aborta em vez de tentar (clicar "Switch" pode cobrar plano).
+  studioAbortIfPaywall('editor pronto');
   studioLog('editor Studio pronto (entrada via URL direta)');
+}
+
+/** Se o HeyGen abriu o paywall "Plans that fit your scale" — aborta com
+ *  mensagem clara em vez de tentar bypass (auto-click "Switch" pode
+ *  incorrer custo). User precisa fechar manualmente uma vez e re-rodar. */
+function studioAbortIfPaywall(where) {
+  const dlg = [...document.querySelectorAll('[role="dialog"]')].find((d) =>
+    d.offsetParent !== null && /Plans that fit your scale/i.test(d.textContent || ''));
+  if (!dlg) return;
+  studioDumpDiag('plans-paywall:' + where);
+  throw new Error(
+    'PAYWALL: HeyGen abriu o modal "Plans that fit your scale" e bloqueou ' +
+    'a UI (' + where + '). FECHA esse modal MANUALMENTE na aba app.heygen.com ' +
+    '(X ou clica fora) e re-dispara o VA. Se aparecer toda vez, sua conta ' +
+    'pode nao ter o plano que destrava Voice Mirroring nesse avatar — ' +
+    'confere em app.heygen.com/account/plans.'
+  );
 }
 
 /** Acha o controle "Motion Engine" do painel direito do Studio
@@ -3033,6 +3053,7 @@ async function runStudioJob(requestId, payload) {
       // upload do audio da parte na cena ativa
       reportProgress(requestId, `${sceneLabel}: upload ${part.filename}...`, Math.round((i / total) * 70) + 4);
       await studioUploadAudioToActiveScene(part.audioBase64, part.filename, sceneLabel);
+      studioAbortIfPaywall(`${sceneLabel} pos-upload`);
 
       // AVATAR III obrigatorio — protege creditos pagos (NUNCA IV/V).
       reportProgress(requestId, `${sceneLabel}: garantindo Avatar III...`, Math.round((i / total) * 70) + 6);

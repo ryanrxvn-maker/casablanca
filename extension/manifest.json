@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "DARKO LAB — HeyGen Auto",
-  "version": "4.12.0",
+  "version": "4.12.1",
   "description": "DARKO LAB HeyGen — Avatar First + saldo creditos + VA pipeline (Studio cena-por-cena Mirror voice via CDP) + voice clone.",
   "icons": {
     "16": "icons/icon-16.png",
