@@ -1,0 +1,13 @@
+DarkoLab Downloader — Motor (Windows)
+=====================================
+1) Clique direito em "Instalar.ps1" > Executar com PowerShell.
+   (Baixa Node + yt-dlp + ffmpeg + Chromium ~250 MB UMA VEZ,
+    configura auto-start e mostra/copia o CODIGO de pareamento.)
+2) Instale a extensao "DarkoLab Downloader" no navegador
+   (chrome://extensions > modo dev > Carregar sem compactacao).
+3) Abra a extensao > cole o CODIGO > Parear.
+4) Pronto: em qualquer video (YouTube/Insta/TikTok/Pinterest/+18)
+   aparece o botao "Baixar". Roda no seu PC, sem servidor.
+
+Desinstalar: clique direito em "Desinstalar.ps1" > Executar com PowerShell.
+Precisa de internet so na 1a instalacao. Requer Windows 64-bit.

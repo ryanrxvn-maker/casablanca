@@ -38,8 +38,10 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# downloader engine — artefatos de build (binarios pesados, gerados por package.mjs)
-/engine/pkg/
+# downloader engine — artefatos de build
+# engine/pkg/ agora e LEVE (server.cjs + scripts, ~40KB) -> vai pro git
+# (a rota /api/downloader-engine zipa esses arquivos). Os pesados
+# (Node/yt-dlp/ffmpeg/Chromium) sao baixados pelo Instalar.ps1 no PC.
 /engine/pkg.zip
 /engine/dist/
 

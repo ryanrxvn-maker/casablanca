@@ -245,18 +245,12 @@ export default function DownloaderPage() {
               </li>
             </ol>
             <p className="mono mt-2 text-[10px] text-text-muted">
-              Requer Windows. O motor roda no PC do usuário (não precisa do
-              seu PC ligado nem de servidor). +18 já vem habilitado.
-            </p>
-            <p className="mono mt-1 text-[10px] text-text-muted">
-              Obs.: o Motor tem ~380&nbsp;MB. Na Vercel o botão só funciona
-              depois de publicá-lo uma vez (
-              <code className="mono text-white">
-                node engine/publish-release.mjs
-              </code>{' '}
-              → define a env{' '}
-              <code className="mono text-white">DOWNLOADER_ENGINE_URL</code>).
-              Rodando o DARKO local, já baixa direto.
+              Requer Windows 64-bit. O motor roda no PC do usuário (não
+              precisa do seu PC ligado nem de servidor). +18 já vem
+              habilitado. O download do Motor é leve (~16&nbsp;KB); na 1ª
+              instalação o <code className="mono text-white">Instalar.ps1</code>{' '}
+              baixa Node + yt-dlp + ffmpeg + Chromium (~250&nbsp;MB, uma
+              vez, ~1–2&nbsp;min) automaticamente.
             </p>
           </details>
         </div>
