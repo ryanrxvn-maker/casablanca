@@ -125,6 +125,26 @@ async function main() {
       );
     }
 
+    // AUTO-PAIR: entrega o token APENAS pra extensao (Origin de
+    // extensao) ou requisicao sem Origin (service worker). Site comum
+    // tem Origin https -> bloqueado. Acaba o pareamento manual e o 401.
+    if (req.method === 'GET' && url.pathname === '/pair') {
+      if (origin && !isExtensionOrigin(origin)) {
+        res.writeHead(403, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'origem nao permitida' }));
+      }
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end(
+        JSON.stringify({
+          app: 'darkolab-downloader-engine',
+          token: cfg.token,
+          port: cfg.port,
+          allowAdult: cfg.allowAdult,
+          version: VERSION,
+        }),
+      );
+    }
+
     function tokenOk(tok: string): boolean {
       try {
         return (

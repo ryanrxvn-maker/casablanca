@@ -10,18 +10,25 @@ function getCfg() {
   );
 }
 
-async function findEnginePort(preferred) {
+// Descobre a porta E pareia automaticamente (pega o token do motor
+// vivo). Acaba o pareamento manual e o 401 por token desatualizado.
+async function discoverEngine(preferred) {
   const tries = [preferred, 47923, 47924, 47925, 47926, 47927, 47928].filter(
     (v, i, a) => v && a.indexOf(v) === i,
   );
   for (const p of tries) {
     try {
-      const h = await fetch(`http://127.0.0.1:${p}/health`, {
-        method: 'GET',
-      });
-      if (h.ok) {
-        const j = await h.json();
-        if (j && j.app === 'darkolab-downloader-engine') return p;
+      const h = await fetch(`http://127.0.0.1:${p}/health`);
+      if (!h.ok) continue;
+      const j = await h.json();
+      if (!j || j.app !== 'darkolab-downloader-engine') continue;
+      // auto-pair: pega o token REAL desse motor
+      const pr = await fetch(`http://127.0.0.1:${p}/pair`);
+      if (!pr.ok) continue;
+      const pj = await pr.json();
+      if (pj && pj.token) {
+        chrome.storage.local.set({ token: pj.token, port: p });
+        return { port: p, token: pj.token, allowAdult: pj.allowAdult === true };
       }
     } catch {
       /* tenta proxima */
@@ -31,18 +38,16 @@ async function findEnginePort(preferred) {
 }
 
 async function startDownload({ url, mode, quality, adult }) {
-  const { token, port } = await getCfg();
-  if (!token) {
-    return { ok: false, error: 'Extensão não pareada. Abra a extensão e pareie com o motor.' };
+  const eng = await discoverEngine((await getCfg()).port || 47923);
+  if (!eng) {
+    return {
+      ok: false,
+      error: 'Motor local não está rodando. Abra o DarkoLab Downloader.',
+    };
   }
-  const p = await findEnginePort(port || 47923);
-  if (!p) {
-    return { ok: false, error: 'Motor local não está rodando. Abra o DarkoLab Downloader.' };
-  }
-  if (p !== port) chrome.storage.local.set({ port: p });
-
+  const p = eng.port;
   const params = {
-    t: token,
+    t: eng.token,
     url,
     mode: mode || 'video',
     quality: quality || '1080',
@@ -100,8 +105,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg && msg.type === 'darko-ping-engine') {
     (async () => {
       const { port } = await getCfg();
-      const live = await findEnginePort(port || 47923);
-      sendResponse({ connected: !!live, port: live || port || 47923 });
+      const eng = await discoverEngine(port || 47923);
+      sendResponse({
+        connected: !!eng,
+        port: eng ? eng.port : port || 47923,
+      });
     })();
     return true;
   }

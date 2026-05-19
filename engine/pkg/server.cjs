@@ -815,6 +815,22 @@ async function main() {
         })
       );
     }
+    if (req.method === "GET" && url.pathname === "/pair") {
+      if (origin && !isExtensionOrigin(origin)) {
+        res.writeHead(403, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "origem nao permitida" }));
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(
+        JSON.stringify({
+          app: "darkolab-downloader-engine",
+          token: cfg.token,
+          port: cfg.port,
+          allowAdult: cfg.allowAdult,
+          version: VERSION
+        })
+      );
+    }
     function tokenOk(tok) {
       try {
         return tok.length === cfg.token.length && import_crypto.default.timingSafeEqual(Buffer.from(tok), Buffer.from(cfg.token));

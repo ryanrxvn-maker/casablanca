@@ -38,9 +38,19 @@ async function checkEngine() {
       if (!res.ok) continue;
       const j = await res.json();
       if (j && j.app === 'darkolab-downloader-engine') {
-        if (p !== state.port) {
-          state.port = p;
-          await storageSet({ port: p });
+        state.port = p;
+        // AUTO-PAIR: pega o token real do motor (sem o usuario colar)
+        try {
+          const pr = await fetch(`http://127.0.0.1:${p}/pair`);
+          if (pr.ok) {
+            const pj = await pr.json();
+            if (pj && pj.token) {
+              state.token = pj.token;
+              await storageSet({ token: pj.token, port: p });
+            }
+          }
+        } catch {
+          /* fallback: pareamento manual */
         }
         return j;
       }
