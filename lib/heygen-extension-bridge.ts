@@ -753,22 +753,47 @@ export async function downloadDriveFileViaExtension(fileId: string): Promise<{
   if (typeof window === 'undefined') return { ok: false, error: 'sem window' };
   return new Promise((resolve) => {
     const requestId = `dl_drive_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    // Acumulador de chunks (extension v4.12.3+: arquivos > ~48MB chegam
+    // em chunks de 24MB base64 chars cada — chrome.tabs.sendMessage tem
+    // limite 64MiB por mensagem).
+    const chunks: string[] = [];
+    const finish = (ok: boolean, base64: string | null, error?: string) => {
+      window.removeEventListener('message', handler);
+      if (!ok) { resolve({ ok: false, error: error || 'download falhou' }); return; }
+      try {
+        const binary = atob(base64 || '');
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        resolve({ ok: true, bytes, size: bytes.length });
+      } catch (e) {
+        resolve({ ok: false, error: 'decode base64: ' + (e as Error)?.message });
+      }
+    };
     const handler = (ev: MessageEvent) => {
       if (ev.data?.source !== 'darkolab-ext') return;
       if (ev.data?.requestId !== requestId) return;
+      if (ev.data?.type === 'HG_DRIVE_DOWNLOAD_CHUNK') {
+        const idx = Number(ev.data.chunkIdx);
+        const piece = String(ev.data.piece || '');
+        chunks[idx] = piece;
+        return; // espera proximos chunks + RESULT final
+      }
       if (ev.data?.type === 'HG_DRIVE_DOWNLOAD_RESULT') {
-        window.removeEventListener('message', handler);
-        if (!ev.data.ok) {
-          resolve({ ok: false, error: String(ev.data.error || 'download falhou') });
-          return;
-        }
-        try {
-          const binary = atob(String(ev.data.base64 || ''));
-          const bytes = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-          resolve({ ok: true, bytes, size: bytes.length });
-        } catch (e) {
-          resolve({ ok: false, error: 'decode base64: ' + (e as Error)?.message });
+        if (!ev.data.ok) { finish(false, null, String(ev.data.error || 'download falhou')); return; }
+        // Modo chunked: ev.data.chunks=N -> assembla. Modo legacy: ev.data.base64 inteiro.
+        if (typeof ev.data.chunks === 'number' && ev.data.chunks > 0) {
+          // Verifica que todos os chunks chegaram
+          let missing = -1;
+          for (let i = 0; i < ev.data.chunks; i++) {
+            if (chunks[i] === undefined) { missing = i; break; }
+          }
+          if (missing >= 0) {
+            finish(false, null, `chunk ${missing}/${ev.data.chunks} faltou (chrome.tabs.sendMessage perdeu mensagem)`);
+            return;
+          }
+          finish(true, chunks.join(''));
+        } else {
+          finish(true, String(ev.data.base64 || ''));
         }
       }
     };

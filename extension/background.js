@@ -733,11 +733,36 @@ async function handleDownloadDrive(requestId, fileId, bridgeTabId) {
       binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)));
     }
     const base64 = btoa(binary);
-    reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_RESULT', {
-      ok: true,
-      base64,
-      size: bytes.length,
-    });
+    // chrome.tabs.sendMessage tem limite ~64MiB por mensagem; base64 incha
+    // 33%, entao um MP4 de ~48MB ja estoura. SOLUCAO: chunked transfer com
+    // chunks de 24MB base64 chars (= ~18MB raw bytes — folga grande).
+    const CHUNK_SIZE = 24 * 1024 * 1024;
+    if (base64.length <= CHUNK_SIZE) {
+      // legado: single message pra files pequenos
+      reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_RESULT', {
+        ok: true,
+        base64,
+        size: bytes.length,
+      });
+    } else {
+      const total = Math.ceil(base64.length / CHUNK_SIZE);
+      console.log(`[DARKO LAB BG] Drive download chunked: ${total} chunks de ${CHUNK_SIZE} chars`);
+      for (let i = 0; i < total; i++) {
+        const piece = base64.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+        reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_CHUNK', {
+          chunkIdx: i,
+          total,
+          piece,
+        });
+        // pequeno yield pro service worker nao engasgar
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_RESULT', {
+        ok: true,
+        chunks: total,
+        size: bytes.length,
+      });
+    }
   } catch (e) {
     reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_RESULT', {
       ok: false,
