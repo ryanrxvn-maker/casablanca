@@ -30,7 +30,7 @@ async function findEnginePort(preferred) {
   return null;
 }
 
-async function startDownload({ url, mode, quality }) {
+async function startDownload({ url, mode, quality, adult }) {
   const { token, port } = await getCfg();
   if (!token) {
     return { ok: false, error: 'Extensão não pareada. Abra a extensão e pareie com o motor.' };
@@ -41,12 +41,14 @@ async function startDownload({ url, mode, quality }) {
   }
   if (p !== port) chrome.storage.local.set({ port: p });
 
-  const qs = new URLSearchParams({
+  const params = {
     t: token,
     url,
     mode: mode || 'video',
     quality: quality || '1080',
-  }).toString();
+  };
+  if (adult === true) params.adult = '1';
+  const qs = new URLSearchParams(params).toString();
   const dlUrl = `http://127.0.0.1:${p}/get?${qs}`;
 
   return new Promise((resolve) => {

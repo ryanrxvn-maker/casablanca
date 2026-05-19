@@ -29,8 +29,22 @@
     {
       "matches": [
         "*://*.youtube.com/*",
+        "*://youtu.be/*",
         "*://*.tiktok.com/*",
-        "*://*.instagram.com/*"
+        "*://*.instagram.com/*",
+        "*://*.pinterest.com/*",
+        "*://*.pinterest.com.br/*",
+        "*://pin.it/*",
+        "*://*.pornhub.com/*",
+        "*://*.xvideos.com/*",
+        "*://*.xhamster.com/*",
+        "*://*.xhamster.desi/*",
+        "*://*.xhamster2.com/*",
+        "*://*.redtube.com/*",
+        "*://*.redtube.com.br/*",
+        "*://*.youporn.com/*",
+        "*://*.xvideosputaria.com/*",
+        "*://*.buceteiro.com/*"
       ],
       "js": ["content.js"],
       "css": ["content.css"],

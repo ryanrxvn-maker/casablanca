@@ -42,11 +42,12 @@ async function loadConfig(): Promise<Config> {
   try {
     const c = JSON.parse(await readFile(file, 'utf8')) as Partial<Config>;
     if (c.token && c.port) {
-      return {
-        token: c.token,
-        port: c.port,
-        allowAdult: c.allowAdult === true,
-      };
+      // env DARKO_ALLOW_ADULT (se definida) sobrescreve a config —
+      // assim o launcher controla o +18 a cada start.
+      const envA = process.env.DARKO_ALLOW_ADULT;
+      const allowAdult =
+        envA === '1' ? true : envA === '0' ? false : c.allowAdult === true;
+      return { token: c.token, port: c.port, allowAdult };
     }
   } catch {
     /* sem config -> cria */

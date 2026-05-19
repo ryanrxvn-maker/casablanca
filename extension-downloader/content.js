@@ -7,27 +7,76 @@
   window.__darkoDlInjected = true;
 
   const host = location.hostname;
+  const ADULT_BASES = [
+    'pornhub.com',
+    'xvideos.com',
+    'xhamster.com',
+    'xhamster.desi',
+    'xhamster2.com',
+    'redtube.com',
+    'redtube.com.br',
+    'youporn.com',
+    'xvideosputaria.com',
+    'buceteiro.com',
+  ];
+  const isHost = (b) => host === b || host.endsWith('.' + b);
+  const isAdultHost = ADULT_BASES.some(isHost);
 
-  // Retorna a URL do vídeo atual, ou null se a página não for de vídeo.
-  function videoUrl() {
+  // Página "de conteúdo" genérica (blogs/mirrors): qualquer rota com
+  // slug que não seja home/listagem óbvia.
+  function looksLikePost(p) {
+    if (p === '/' || p.length < 2) return false;
+    if (
+      /^\/(category|categories|tag|tags|page|search|login|signup|register|assine|sobre|contato|terms|privacy|dmca|2257|c|s|amp)\b/i.test(
+        p,
+      )
+    )
+      return false;
+    return /[a-z0-9]/i.test(p.replace(/\//g, ''));
+  }
+
+  // Retorna { url, adult } se a página for de vídeo, ou null.
+  function videoTarget() {
     const u = new URL(location.href);
     const p = u.pathname;
+
     if (/(^|\.)youtube\.com$/.test(host) || host === 'youtu.be') {
-      if (host === 'youtu.be' && p.length > 1) return location.href;
-      if (p === '/watch' && u.searchParams.get('v')) return location.href;
-      if (/^\/shorts\/[\w-]+/.test(p)) return location.href;
-      if (/^\/live\/[\w-]+/.test(p)) return location.href;
+      if (host === 'youtu.be' && p.length > 1) return { url: location.href, adult: false };
+      if (p === '/watch' && u.searchParams.get('v')) return { url: location.href, adult: false };
+      if (/^\/(shorts|live)\/[\w-]+/.test(p)) return { url: location.href, adult: false };
       return null;
     }
     if (/(^|\.)tiktok\.com$/.test(host)) {
-      if (/\/video\/\d+/.test(p)) return location.href;
-      if (/\/photo\/\d+/.test(p)) return location.href;
-      if (/^\/@[\w.-]+\/video\/\d+/.test(p)) return location.href;
+      if (/\/(video|photo)\/\d+/.test(p)) return { url: location.href, adult: false };
       return null;
     }
     if (/(^|\.)instagram\.com$/.test(host)) {
-      if (/^\/(reel|reels|p|tv)\/[\w-]+/.test(p)) return location.href;
+      if (/^\/(reel|reels|p|tv)\/[\w-]+/.test(p)) return { url: location.href, adult: false };
       return null;
+    }
+    if (/(^|\.)pinterest\.[a-z.]+$/.test(host) || host === 'pin.it') {
+      if (host === 'pin.it' && p.length > 1) return { url: location.href, adult: false };
+      if (/^\/pin\/[\w-]+/.test(p)) return { url: location.href, adult: false };
+      return null;
+    }
+    if (isAdultHost) {
+      // tubes com padrão claro de página de vídeo
+      if (isHost('pornhub.com') && !/view_video\.php|\/embed\//.test(u.href)) return null;
+      if (isHost('xvideos.com') && !/\/video[.\d]/.test(p) && !/\/prof-video-click/.test(p)) return null;
+      if (isHost('xhamster.com') || isHost('xhamster.desi') || isHost('xhamster2.com')) {
+        if (!/^\/videos\//.test(p)) return null;
+      }
+      if (isHost('redtube.com') || isHost('redtube.com.br')) {
+        if (!/^\/\d{3,}/.test(p)) return null;
+      }
+      if (isHost('youporn.com') && !/^\/watch\/\d+/.test(p)) return null;
+      // mirrors BR (xvideosputaria/buceteiro): qualquer post
+      if (
+        (isHost('xvideosputaria.com') || isHost('buceteiro.com')) &&
+        !looksLikePost(p)
+      )
+        return null;
+      return { url: location.href, adult: true };
     }
     return null;
   }
@@ -88,13 +137,13 @@
   }
 
   function onClick() {
-    const url = videoUrl();
-    if (!url) {
+    const t = videoTarget();
+    if (!t) {
       toast('Abra um vídeo para baixar.', 'err');
       return;
     }
     setBtn('loading');
-    toast('Enviando pro motor…', '');
+    toast(t.adult ? 'Enviando pro motor (+18)…' : 'Enviando pro motor…', '');
     let done = false;
     const timeout = setTimeout(() => {
       if (done) return;
@@ -103,7 +152,13 @@
       toast('Download iniciado. Veja a barra de downloads.', 'ok');
     }, 4000);
     chrome.runtime.sendMessage(
-      { type: 'darko-download', url, mode: 'video', quality: '1080' },
+      {
+        type: 'darko-download',
+        url: t.url,
+        mode: 'video',
+        quality: '1080',
+        adult: t.adult === true,
+      },
       (resp) => {
         if (done) return;
         done = true;
@@ -125,7 +180,7 @@
   }
 
   function refresh() {
-    const isVideo = !!videoUrl();
+    const isVideo = !!videoTarget();
     if (isVideo) {
       ensureButton().style.display = 'flex';
     } else if (btn) {
