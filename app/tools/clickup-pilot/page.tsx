@@ -916,37 +916,48 @@ export default function ClickUpPilotPage() {
                   .replace(/\.(mp4|mov)$/i, '')
                   .trim();
                 const target = normName(vaBriefing.linkAdFilename);
+                // Extrai AD ID prefix: "AD02G1VN-PRPB05" do filename
+                // (mais unico que filename inteiro — basta isso pra achar)
+                const adIdMatch = target.match(/^(ad\d+[a-z0-9]*-[a-z]+\d+)/i);
+                const adIdPrefix = adIdMatch ? adIdMatch[1].toLowerCase() : null;
+                // Match super flexivel: confere nome OU AD ID prefix
+                const fuzzyMatch = (candidateName: string) => {
+                  const fn = normName(candidateName);
+                  if (!fn) return false;
+                  if (fn === target || fn.includes(target) || target.includes(fn)) return true;
+                  if (adIdPrefix && fn.includes(adIdPrefix)) return true;
+                  return false;
+                };
+                console.log(`[clickup-pilot] VA AD detection: target="${target}" adIdPrefix="${adIdPrefix}" driveLinks=${docR.driveLinks.length}`);
 
                 // 1) Match direto nos driveLinks do doc (link em qualquer parte do doc)
                 {
-                  const direct = docR.driveLinks.find((d: any) => {
-                    const t = normName(d.text || '');
-                    return t === target || t.includes(target) || target.includes(t);
-                  });
+                  const direct = docR.driveLinks.find((d: any) => fuzzyMatch(d.text));
                   if (direct) {
                     vaBriefing.linkAdFileId = direct.fileId;
-                    console.log(`[clickup-pilot] VA: direct match in driveLinks → ${direct.fileId}`);
+                    console.log(`[clickup-pilot] VA: direct match in driveLinks "${direct.text}" → ${direct.fileId}`);
+                  } else {
+                    console.log(`[clickup-pilot] VA: nenhum driveLink direto bateu. Lista:`, docR.driveLinks.map((d:any)=>d.text).slice(0,12));
                   }
                 }
 
-                // 2) Fallback: lista pasta CRIATIVOS + match por nome normalizado
+                // 2) Fallback: lista pasta CRIATIVOS + match por nome flexivel
                 if (!vaBriefing.linkAdFileId) {
-                  const criativosFolder = docR.driveLinks.find((d: any) => /criativos/i.test(d.text || ''));
+                  const criativosFolder = docR.driveLinks.find((d: any) =>
+                    /criativos|criativo|videos|drive criativos/i.test(d.text || '')) ||
+                    docR.driveLinks.find((d: any) => (d as any).isFolder);
                   if (criativosFolder) {
-                    console.log(`[clickup-pilot] VA: auto-resolving Drive ID via folder ${criativosFolder.fileId} for ${vaBriefing.linkAdFilename}`);
+                    console.log(`[clickup-pilot] VA: tentando pasta "${criativosFolder.text}" (${criativosFolder.fileId})`);
                     try {
                       const { listDriveFolderViaExtension } = await import('@/lib/heygen-extension-bridge');
                       const folderRes = await listDriveFolderViaExtension(criativosFolder.fileId);
                       if (folderRes.ok) {
-                        const match = folderRes.files.find((f) => {
-                          const fn = normName(f.name);
-                          return fn === target || fn.includes(target) || target.includes(fn);
-                        });
+                        const match = folderRes.files.find((f) => fuzzyMatch(f.name));
                         if (match) {
                           vaBriefing.linkAdFileId = match.fileId;
-                          console.log(`[clickup-pilot] VA: matched ${match.name} → ${match.fileId}`);
+                          console.log(`[clickup-pilot] VA: matched in folder "${match.name}" → ${match.fileId}`);
                         } else {
-                          console.warn(`[clickup-pilot] VA: '${target}' nao achou na pasta (${folderRes.files.length} files): ${folderRes.files.slice(0, 5).map(f => f.name).join(', ')}`);
+                          console.warn(`[clickup-pilot] VA: target nao achou na pasta (${folderRes.files.length} files):`, folderRes.files.slice(0, 8).map(f => f.name));
                         }
                       } else {
                         console.warn(`[clickup-pilot] VA: list folder falhou: ${folderRes.error}`);
@@ -957,8 +968,7 @@ export default function ClickUpPilotPage() {
                   }
                 }
 
-                // 3) Ultimo recurso: lista TODAS as pastas Drive referenciadas
-                // no doc e procura o filename em cada uma
+                // 3) Ultimo recurso: lista TODAS as pastas Drive do doc
                 if (!vaBriefing.linkAdFileId) {
                   try {
                     const { listDriveFolderViaExtension } = await import('@/lib/heygen-extension-bridge');
@@ -967,19 +977,24 @@ export default function ClickUpPilotPage() {
                     for (const fl of folderLinks) {
                       const folderRes = await listDriveFolderViaExtension(fl.fileId);
                       if (!folderRes.ok || !folderRes.files?.length) continue;
-                      const match = folderRes.files.find((f) => {
-                        const fn = normName(f.name);
-                        return fn === target || fn.includes(target) || target.includes(fn);
-                      });
+                      const match = folderRes.files.find((f) => fuzzyMatch(f.name));
                       if (match) {
                         vaBriefing.linkAdFileId = match.fileId;
-                        console.log(`[clickup-pilot] VA: matched via fallback folder ${fl.fileId}: ${match.name} → ${match.fileId}`);
+                        console.log(`[clickup-pilot] VA: matched via folder "${fl.text}": ${match.name} → ${match.fileId}`);
                         break;
                       }
                     }
                   } catch (e) {
                     console.warn(`[clickup-pilot] VA: fallback folder scan threw:`, e);
                   }
+                }
+
+                // 4) Persiste candidatos pra UI mostrar (one-click pick)
+                if (!vaBriefing.linkAdFileId) {
+                  (vaBriefing as any).candidateLinks = (docR.driveLinks || [])
+                    .filter((d: any) => d.fileId && d.fileId.length > 15)
+                    .map((d: any) => ({ text: d.text, fileId: d.fileId, isFolder: d.isFolder }));
+                  console.log(`[clickup-pilot] VA: candidates expostos na UI:`, ((vaBriefing as any).candidateLinks || []).length);
                 }
               }
               const siblings = siblingMap.get(task.id) || [task.id];
@@ -4006,15 +4021,50 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       </div>
                                     );
                                   })}
-                                  {/* Input Drive URL (so se parser nao detectou) */}
+                                  {/* AD original nao detectado: lista candidatos (1-click) + input manual */}
                                   {!a.vaBriefing.linkAdFileId ? (
                                     <div className="rounded-[10px] border border-yellow-500/40 bg-yellow-500/5 p-3">
-                                      <div className="mono mb-1 text-[9px] uppercase tracking-widest text-yellow-200">
-                                        Drive URL do AD original (parser nao achou auto)
+                                      <div className="mono mb-2 text-[10px] uppercase tracking-widest text-yellow-200">
+                                        ⚠ AD original — parser não achou Drive ID auto
+                                      </div>
+                                      {(a.vaBriefing as any).candidateLinks && (a.vaBriefing as any).candidateLinks.length > 0 ? (
+                                        <div className="mb-2">
+                                          <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">
+                                            Links detectados no doc — clica no AD correto:
+                                          </div>
+                                          <div className="flex flex-col gap-1">
+                                            {(a.vaBriefing as any).candidateLinks.map((c: any, ci: number) => (
+                                              <button
+                                                key={ci}
+                                                type="button"
+                                                onClick={() => {
+                                                  setVaAdUrl((prev) => ({ ...prev, [a.taskId]: `https://drive.google.com/file/d/${c.fileId}/view` }));
+                                                  // Tambem grava no briefing pra UI atualizar
+                                                  setTaskAnalyses((prev) => {
+                                                    const next = { ...prev };
+                                                    if (next[a.taskId]?.vaBriefing) {
+                                                      next[a.taskId] = { ...next[a.taskId], vaBriefing: { ...next[a.taskId].vaBriefing!, linkAdFileId: c.fileId } } as any;
+                                                    }
+                                                    return next;
+                                                  });
+                                                }}
+                                                className="mono text-left rounded border border-line-strong bg-bg/40 px-2 py-1 text-[10px] hover:border-lime hover:bg-lime/10 flex items-center gap-2"
+                                                title={c.fileId}
+                                              >
+                                                <span className={c.isFolder ? 'text-yellow-300' : 'text-cyan-200'}>{c.isFolder ? '📁' : '📄'}</span>
+                                                <span className="truncate">{c.text || '(sem texto)'}</span>
+                                                <span className="ml-auto text-text-muted">usar como AD →</span>
+                                              </button>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      ) : null}
+                                      <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">
+                                        Ou cola a URL do Drive:
                                       </div>
                                       <input
                                         type="text"
-                                        placeholder="Cole a URL do video Drive (ex https://drive.google.com/file/d/XXX/view)"
+                                        placeholder="https://drive.google.com/file/d/XXX/view"
                                         value={vaAdUrl[a.taskId] || ''}
                                         onChange={(e) => setVaAdUrl((prev) => ({ ...prev, [a.taskId]: e.target.value }))}
                                         className="input-field font-mono text-xs"
