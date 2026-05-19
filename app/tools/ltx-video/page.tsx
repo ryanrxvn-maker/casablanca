@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
 import {
@@ -33,10 +33,14 @@ type GalleryItem = {
 type GenResp = {
   videoUrl?: string;
   seed?: number | null;
-  tokenIndex?: number;
   error?: string;
   kind?: string;
-  tokenTotal?: number;
+  retrySec?: number | null;
+};
+
+type PoolStatus = {
+  total: number;
+  available: number;
 };
 
 export default function LtxVideoPage() {
@@ -50,15 +54,27 @@ export default function LtxVideoPage() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<GalleryItem | null>(null);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
+  const [pool, setPool] = useState<PoolStatus | null>(null);
+
+  const refreshPool = useCallback(async () => {
+    try {
+      const r = await fetch('/api/ltx-video/status');
+      if (r.ok) setPool((await r.json()) as PoolStatus);
+    } catch {
+      /* silencioso */
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshPool();
+  }, [refreshPool]);
 
   async function callGenerate(
     fields: Record<string, string>,
     image: Blob | null,
-    startToken: number,
-  ): Promise<{ blob: Blob; tokenIndex: number }> {
+  ): Promise<Blob> {
     const fd = new FormData();
     Object.entries(fields).forEach(([k, v]) => fd.append(k, v));
-    fd.append('startToken', String(startToken));
     if (image) fd.append('image', image, 'frame.jpg');
 
     const resp = await fetch('/api/ltx-video/generate', {
@@ -68,18 +84,18 @@ export default function LtxVideoPage() {
     const j = (await resp.json()) as GenResp;
 
     if (!resp.ok || !j.videoUrl) {
-      if (j.kind === 'config' || j.tokenTotal === 0) {
+      if (j.kind === 'config') {
         throw new Error(
           'Nenhum token Hugging Face configurado no servidor. ' +
-            'Crie tokens grátis em huggingface.co/settings/tokens e ponha ' +
-            'em HF_TOKENS (vários, de contas diferentes = mais quota).',
+            'Configure HF_TOKENS (até 10 contas, separadas por vírgula).',
         );
       }
       if (j.kind === 'quota') {
+        const min = j.retrySec ? Math.ceil(j.retrySec / 60) : null;
         throw new Error(
-          'Quota ZeroGPU esgotada em TODOS os tokens. ' +
-            (j.error || '') +
-            ' — adicione mais tokens (contas HF diferentes) ou use conta PRO.',
+          (j.error || 'Quota ZeroGPU esgotada em todas as contas.') +
+            (min ? ` Tenta de novo em ~${min} min.` : '') +
+            ' Adicione mais contas no HF_TOKENS pra zerar a espera.',
         );
       }
       throw new Error(j.error || 'Falha na geração.');
@@ -88,7 +104,7 @@ export default function LtxVideoPage() {
     setPhase('Baixando vídeo...');
     const vr = await fetch(j.videoUrl);
     if (!vr.ok) throw new Error('Não consegui baixar o vídeo gerado.');
-    return { blob: await vr.blob(), tokenIndex: j.tokenIndex ?? startToken };
+    return await vr.blob();
   }
 
   async function handleGenerate() {
@@ -114,7 +130,6 @@ export default function LtxVideoPage() {
       };
 
       const parts: Blob[] = [];
-      let tok = 0;
 
       for (let c = 0; c < dur.chunks; c++) {
         const label =
@@ -135,8 +150,7 @@ export default function LtxVideoPage() {
         }
 
         setPhase(`${label} — gerando na H200 (pode levar ~1-2 min)...`);
-        const { blob, tokenIndex } = await callGenerate(fields, image, tok);
-        tok = tokenIndex; // próximo chunk começa no token que funcionou
+        const blob = await callGenerate(fields, image);
         parts.push(blob);
       }
 
@@ -159,6 +173,7 @@ export default function LtxVideoPage() {
       setPhase('');
     } finally {
       setBusy(false);
+      refreshPool();
     }
   }
 
@@ -168,6 +183,22 @@ export default function LtxVideoPage() {
       description="Vídeo + áudio sincronizados. H200 80GB via Hugging Face ZeroGPU — geração unlimited com rotação de tokens, sem gastar crédito."
     >
       <div className="flex flex-col gap-6">
+        {pool ? (
+          <div className="flex items-center gap-2 text-[11px] uppercase tracking-widest">
+            <span
+              className={
+                'inline-block h-2 w-2 rounded-full ' +
+                (pool.available > 0
+                  ? 'bg-lime shadow-[0_0_10px_var(--lime)]'
+                  : 'bg-red-500')
+              }
+            />
+            <span className="text-text-muted">
+              Pool HF: {pool.available}/{pool.total} contas com quota
+              {pool.total === 0 ? ' — configure HF_TOKENS' : ''}
+            </span>
+          </div>
+        ) : null}
         <div>
           <label className="label-field">Prompt</label>
           <textarea

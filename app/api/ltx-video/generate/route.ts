@@ -3,13 +3,10 @@ import { ltxGenerate } from '@/lib/ltx-client-server';
 
 /**
  * POST /api/ltx-video/generate  (multipart/form-data)
- *
- * Campos: prompt, duration, width, height, enhance ("1"/"0"),
- *         seed? , startToken? (índice inicial do pool p/ rotação),
+ * Campos: prompt, duration, width, height, enhance ("1"/"0"), seed?,
  *         image? (arquivo — último frame, p/ continuação i2v)
  *
- * Faz a geração inteira (connect + predict) numa request só. ZeroGPU H200
- * é rápido; rotação de token é automática dentro do ltxGenerate.
+ * Rotação de até 10 contas HF é automática dentro do ltxGenerate.
  */
 
 export const runtime = 'nodejs';
@@ -35,7 +32,6 @@ export async function POST(req: Request) {
   const seedRaw = form.get('seed');
   const seed =
     seedRaw != null && String(seedRaw) !== '' ? Number(seedRaw) : undefined;
-  const startToken = Number(form.get('startToken') ?? 0) || 0;
 
   let imageBytes: Uint8Array | null = null;
   const img = form.get('image');
@@ -43,26 +39,24 @@ export async function POST(req: Request) {
     imageBytes = new Uint8Array(await img.arrayBuffer());
   }
 
-  const r = await ltxGenerate(
-    { prompt, duration, width, height, enhancePrompt: enhance, seed, imageBytes },
-    startToken,
-  );
+  const r = await ltxGenerate({
+    prompt,
+    duration,
+    width,
+    height,
+    enhancePrompt: enhance,
+    seed,
+    imageBytes,
+  });
 
   if (!r.ok) {
-    const status = r.kind === 'quota' ? 429 : r.kind === 'config' ? 400 : 502;
+    const status =
+      r.kind === 'quota' ? 429 : r.kind === 'config' ? 400 : 502;
     return NextResponse.json(
-      {
-        error: r.error,
-        kind: r.kind,
-        tokenTotal: r.tokenTotal,
-      },
+      { error: r.error, kind: r.kind, retrySec: r.retrySec ?? null },
       { status },
     );
   }
 
-  return NextResponse.json({
-    videoUrl: r.videoUrl,
-    seed: r.seed,
-    tokenIndex: r.tokenIndex,
-  });
+  return NextResponse.json({ videoUrl: r.videoUrl, seed: r.seed });
 }
