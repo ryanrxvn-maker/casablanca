@@ -183,6 +183,74 @@ export default function DownloaderPage() {
       description="Baixe vídeos, áudio ou imagens do YouTube, Instagram, TikTok e Pinterest. Downloads paralelos e rápidos — cole um ou vários links (um por linha)."
     >
       <div className="flex flex-col gap-6">
+        {/* Extensão + Motor: clica → baixa, no PC do usuário, sem servidor */}
+        <div className="rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-4">
+          <div className="flex items-center gap-2">
+            <span className="text-lime">⬇</span>
+            <strong className="text-sm text-lime">
+              Extensão + Motor (clica e baixa em qualquer site, no seu PC)
+            </strong>
+          </div>
+          <p className="mono mt-1 text-[11px] text-text-muted">
+            Instala uma vez. Aí aparece um botão <b>Baixar</b> direto nos
+            vídeos do YouTube, Instagram, TikTok, Pinterest (e +18) — sem
+            copiar link, sem depender de servidor.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <a
+              href="/api/downloader-engine/download"
+              className="btn-primary !py-2 text-xs"
+              download
+            >
+              1. Baixar o Motor (Windows)
+            </a>
+            <a
+              href="/api/downloader-extension/download"
+              className="btn-secondary !py-2 text-xs"
+              download
+            >
+              2. Baixar a Extensão
+            </a>
+          </div>
+          <details className="mt-3">
+            <summary className="cursor-pointer text-[11px] text-lime/80 hover:text-lime">
+              Como instalar (passo a passo)
+            </summary>
+            <ol className="mono mt-2 list-decimal space-y-1 pl-5 text-[11px] text-text-muted">
+              <li>
+                Baixa o <b>Motor</b> (botão 1), extrai o .zip numa pasta.
+              </li>
+              <li>
+                Dentro da pasta, clique direito em{' '}
+                <code className="mono text-white">Instalar.ps1</code> →{' '}
+                <i>Executar com PowerShell</i>. Ele instala, inicia junto
+                com o Windows e <b>copia o código de pareamento</b>.
+              </li>
+              <li>
+                Baixa a <b>Extensão</b> (botão 2), extrai numa pasta.
+              </li>
+              <li>
+                Abre <code className="mono text-white">chrome://extensions</code>
+                , liga o <i>Modo de desenvolvedor</i>, clica{' '}
+                <i>Carregar sem compactação</i> e seleciona a pasta da
+                extensão.
+              </li>
+              <li>
+                Clica no ícone da extensão → cola o <b>código</b> (já está
+                copiado) → <i>Parear</i>.
+              </li>
+              <li>
+                Pronto. Abre um vídeo em qualquer site suportado e clica no
+                botão <b>⬇ Baixar</b> que aparece na página.
+              </li>
+            </ol>
+            <p className="mono mt-2 text-[10px] text-text-muted">
+              Requer Windows. O motor roda no PC do usuário (não precisa do
+              seu PC ligado nem de servidor). +18 já vem habilitado.
+            </p>
+          </details>
+        </div>
+
         <div>
           <div className="flex items-center justify-between">
             <label className="label-field !mb-0" htmlFor="urls">

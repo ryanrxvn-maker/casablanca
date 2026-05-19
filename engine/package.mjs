@@ -193,7 +193,21 @@ async function main() {
   );
   writeFileSync(path.join(pkg, 'LEIA-ME.txt'), LEIAME.trim() + '\r\n');
 
-  log('pronto -> ' + pkg);
+  // 8) zip distribuivel (servido por /api/downloader-engine/download)
+  log('compactando engine/pkg.zip (pode demorar)...');
+  const zipOut = path.join(here, 'pkg.zip');
+  rmSync(zipOut, { force: true });
+  execFileSync(
+    'powershell',
+    [
+      '-NoProfile',
+      '-Command',
+      `Compress-Archive -Path '${pkg}\\*' -DestinationPath '${zipOut}' -Force`,
+    ],
+    { stdio: 'inherit' },
+  );
+
+  log('pronto -> ' + pkg + '  (+ engine/pkg.zip)');
 }
 
 const INSTALAR_PS1 = `

@@ -40,6 +40,7 @@ next-env.d.ts
 
 # downloader engine — artefatos de build (binarios pesados, gerados por package.mjs)
 /engine/pkg/
+/engine/pkg.zip
 /engine/dist/
 
 # scripts de teste descartaveis
