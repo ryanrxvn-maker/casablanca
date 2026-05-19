@@ -75,7 +75,6 @@ export default function DownloaderPage() {
     version?: string;
     engine?: boolean;
   }>({ connected: false });
-  const [reping, setReping] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -88,7 +87,6 @@ export default function DownloaderPage() {
         version: d.version,
         engine: d.engine === true,
       });
-      setReping(false);
     }
     window.addEventListener('message', onMsg);
     const ping = () =>
@@ -107,11 +105,6 @@ export default function DownloaderPage() {
     };
   }, []);
 
-  function testarMotor() {
-    setReping(true);
-    window.postMessage({ source: 'darko-dl', type: 'DL_TEST' }, '*');
-    setTimeout(() => setReping(false), 4000);
-  }
   const [jobs, setJobs] = useState<Job[]>([]);
   const [running, setRunning] = useState(false);
   // Modo +18 — visivel/utilizavel SO por admin. O gate real e no
@@ -250,14 +243,6 @@ export default function DownloaderPage() {
                 {ext.engine ? '✓ motor online' : '✗ motor offline'}
               </span>
             </div>
-            <button
-              type="button"
-              onClick={testarMotor}
-              disabled={reping}
-              className="rounded-md border border-line-strong bg-bg-soft px-3 py-1 text-[11px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime disabled:opacity-50"
-            >
-              {reping ? 'Testando...' : 'Testar motor'}
-            </button>
           </div>
         ) : (
         <div className="rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-4">
