@@ -335,7 +335,89 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     return false;
   }
+
+  // ===== CDP: cliques confiaveis (isTrusted=true) via Chrome DevTools =====
+  // Necessario pra alguns botoes do create-v4 (Add audio, linha biblioteca,
+  // pilula Use avatar voice) que so respondem a eventos confiaveis.
+  if (msg.type === 'HG_CDP_CLICK') {
+    const tabId = sender.tab?.id;
+    if (!tabId) { sendResponse({ ok: false, error: 'no tabId' }); return false; }
+    cdpTrustedClick(tabId, msg.x, msg.y)
+      .then(() => sendResponse({ ok: true }))
+      .catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+    return true;
+  }
+  if (msg.type === 'HG_CDP_DETACH') {
+    cdpDetach().finally(() => sendResponse({ ok: true }));
+    return true;
+  }
 });
+
+// ============================ CDP HELPERS ============================
+let cdpTab = null;
+let cdpAttachInflight = null;
+
+async function cdpAttach(tabId) {
+  if (cdpTab === tabId) return;
+  // detach previous if different
+  if (cdpTab !== null) {
+    try { await new Promise((r) => chrome.debugger.detach({ tabId: cdpTab }, () => r())); } catch {}
+    cdpTab = null;
+  }
+  if (cdpAttachInflight) await cdpAttachInflight;
+  cdpAttachInflight = new Promise((resolve, reject) => {
+    chrome.debugger.attach({ tabId }, '1.3', () => {
+      if (chrome.runtime.lastError) {
+        const m = chrome.runtime.lastError.message || '';
+        // se ja anexado (mesma sessao), ok
+        if (/already attached/i.test(m)) { cdpTab = tabId; resolve(); }
+        else reject(new Error(m));
+      } else {
+        cdpTab = tabId;
+        resolve();
+      }
+    });
+  });
+  try { await cdpAttachInflight; }
+  finally { cdpAttachInflight = null; }
+  console.log('[DARKO LAB BG CDP] attached to tab', tabId);
+}
+
+function cdpSend(tabId, method, params) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.sendCommand({ tabId }, method, params || {}, (res) => {
+      if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+      else resolve(res);
+    });
+  });
+}
+
+async function cdpTrustedClick(tabId, x, y) {
+  await cdpAttach(tabId);
+  // hover first (some sites depend on hover for visibility/enable)
+  await cdpSend(tabId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+  await new Promise((r) => setTimeout(r, 40));
+  await cdpSend(tabId, 'Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1, buttons: 1 });
+  await new Promise((r) => setTimeout(r, 50));
+  await cdpSend(tabId, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1, buttons: 0 });
+}
+
+async function cdpDetach() {
+  if (cdpTab === null) return;
+  const t = cdpTab; cdpTab = null;
+  await new Promise((r) => chrome.debugger.detach({ tabId: t }, () => r()));
+  console.log('[DARKO LAB BG CDP] detached from tab', t);
+}
+
+// Auto-detach se o debugger for desanexado pelo user/Chrome
+try {
+  chrome.debugger.onDetach.addListener((source, reason) => {
+    if (source.tabId === cdpTab) {
+      console.log('[DARKO LAB BG CDP] auto-detached, reason=', reason);
+      cdpTab = null;
+    }
+  });
+} catch {}
 
 async function handleTestSession(requestId, bridgeTabId) {
   const tab = await findOrCreateHeyGenTab();

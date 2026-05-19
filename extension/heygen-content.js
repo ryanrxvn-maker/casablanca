@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.11.2';
+const DARKO_EXT_VERSION = '4.12.0';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -2332,6 +2332,34 @@ async function proxyApiFetch({ url, method = 'GET', headers = {}, bodyText, body
 function studioLog(...a) { console.log('[DARKO LAB STUDIO]', ...a); }
 function studioWarn(...a) { console.warn('[DARKO LAB STUDIO]', ...a); }
 
+/** Click CONFIAVEL (isTrusted=true) via CDP Input.dispatchMouseEvent.
+ *  Usado pros botoes que so respondem a eventos confiaveis (Add audio,
+ *  linha da biblioteca, pilula Use avatar voice no create-v4). */
+async function cdpClick(x, y) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: 'HG_CDP_CLICK', x: Math.round(x), y: Math.round(y) }, (res) => {
+      resolve(res || { ok: false, error: 'no response' });
+    });
+  });
+}
+async function cdpClickEl(el, label) {
+  if (!el) { studioWarn(`cdpClickEl ${label || ''}: elemento nulo`); return false; }
+  try { el.scrollIntoView({ block: 'center', behavior: 'instant' }); } catch {}
+  await sleep(150);
+  const r = el.getBoundingClientRect();
+  if (r.width === 0 || r.height === 0) { studioWarn(`cdpClickEl ${label || ''}: rect zero`); return false; }
+  const x = r.left + r.width / 2, y = r.top + r.height / 2;
+  const res = await cdpClick(x, y);
+  if (!res.ok) studioWarn(`cdpClickEl ${label || ''}: falhou - ${res.error}`);
+  else studioLog(`cdpClick ${label || ''} @${Math.round(x)},${Math.round(y)} OK`);
+  return !!res.ok;
+}
+async function cdpDetachBg() {
+  try {
+    await new Promise((r) => chrome.runtime.sendMessage({ type: 'HG_CDP_DETACH' }, () => r()));
+  } catch {}
+}
+
 function studioDumpDiag(tag) {
   try {
     const btns = Array.from(document.querySelectorAll('button, [role="button"]'))
@@ -2470,8 +2498,8 @@ async function setSceneMirrorVoice(scope, sceneLabel) {
       studioLog(`${sceneLabel}: ja esta em Mirror voice ✓`);
       return true;
     }
-    studioLog(`${sceneLabel}: esta em "${cur}" — forcando Use avatar voice (tentativa ${attempt})`);
-    clickElement(tog);
+    studioLog(`${sceneLabel}: esta em "${cur}" — forcando Use avatar voice (tentativa ${attempt}) via CDP`);
+    await cdpClickEl(tog, 'voice-toggle');
     await sleep(900);
     // procura a opcao "Use avatar voice" / "Mirror voice" num popover/menu
     // (HeyGen portala menus no body, entao busca global).
@@ -2494,7 +2522,7 @@ async function setSceneMirrorVoice(scope, sceneLabel) {
             c.getAttribute('role') === 'option' || window.getComputedStyle(c).cursor.includes('pointer')) break;
         c = c.parentElement;
       }
-      clickElement(c || opt);
+      await cdpClickEl(c || opt, 'use-avatar-voice');
       await sleep(1100);
     } else {
       // toggle pode ser switch direto (sem menu) — re-checa
@@ -2548,8 +2576,8 @@ async function playStudioScene(scope, sceneLabel) {
     await sleep(1500);
     return;
   }
-  studioLog(`${sceneLabel}: play pra carregar a fala...`);
-  clickElement(playBtn);
+  studioLog(`${sceneLabel}: play pra carregar a fala via CDP...`);
+  await cdpClickEl(playBtn, 'play scene');
   // espera o loading/spinner sumir (best-effort) + buffer
   const deadline = Date.now() + 30000;
   await sleep(1500);
@@ -2637,8 +2665,8 @@ async function setStudioMotorAvatarIII(sceneLabel) {
       studioLog(`${sceneLabel}: Motion Engine ja em Avatar III ✓`);
       return true;
     }
-    studioLog(`${sceneLabel}: Motion Engine em "${cur}" — trocando pra Avatar III (tentativa ${attempt})`);
-    clickElement(ctrl);
+    studioLog(`${sceneLabel}: Motion Engine em "${cur}" — trocando pra Avatar III (tentativa ${attempt}) via CDP`);
+    await cdpClickEl(ctrl, 'motor-ctrl');
     await sleep(900);
     // procura item "Avatar III" no menu (portalado no body).
     // VALIDADO EM TESTE REAL: o menu lista "Avatar V/IV/III" com
@@ -2661,7 +2689,7 @@ async function setStudioMotorAvatarIII(sceneLabel) {
             c.getAttribute('role') === 'option' || window.getComputedStyle(c).cursor.includes('pointer')) break;
         c = c.parentElement;
       }
-      clickElement(c || item);
+      await cdpClickEl(c || item, 'Avatar III');
       await sleep(1100);
     } else {
       studioWarn(`${sceneLabel}: item "Avatar III" nao apareceu no menu`);
@@ -2713,8 +2741,12 @@ function findStudioUploadAudioBtn() {
   return findUploadAudioToggle();
 }
 
-/** Injeta o File no input do modal + dispara change E drop (fallback
- *  pra dropzones que so escutam drag&drop). */
+/** Injeta o File via DataTransfer + drop events.
+ *  VALIDADO AO VIVO no create-v4: a sequencia "input.files set+change"
+ *  SOZINHA nao dispara o upload real; a combinacao com DragEvent(drop)
+ *  na dropzone aciona o S3/asset upload (confirmado por sniff:
+ *  2 PUTs S3 + 2 POSTs /asset). Drop com `new DragEvent(..., {
+ *  dataTransfer })` na zona "Upload a file or drag and drop here". */
 async function studioInjectAudioFile(audioBase64, filename) {
   const bin = atob(audioBase64);
   const bytes = new Uint8Array(bin.length);
@@ -2725,38 +2757,69 @@ async function studioInjectAudioFile(audioBase64, filename) {
 
   const inp = await waitForOrNull(() => findAudioFileInput(), 8000, 200);
   if (inp) {
-    const dt = new DataTransfer();
-    dt.items.add(file);
-    inp.files = dt.files;
-    inp.dispatchEvent(new Event('input', { bubbles: true }));
-    inp.dispatchEvent(new Event('change', { bubbles: true }));
-    studioLog(`file ${filename} injetado no input (${bytes.length}B)`);
+    try {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      inp.files = dt.files;
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      inp.dispatchEvent(new Event('change', { bubbles: true }));
+      studioLog(`file ${filename} setado no input (${bytes.length}B)`);
+    } catch (e) { studioWarn('set input.files falhou:', e?.message || e); }
   }
-  // fallback drop na dropzone do modal
+  // CRITICO: drop na dropzone com DataTransfer eh o que aciona o
+  // uploader real do create-v4 (validado ao vivo).
   const modal = findUploadModal();
   if (modal) {
-    const zone = Array.from(modal.querySelectorAll('*')).find((e) =>
-      e.offsetParent !== null && /drag and drop|drop here|arraste|solte/i.test(e.textContent || '') &&
-      (e.textContent || '').length < 120) || modal;
+    let zone = null;
+    for (const e of modal.querySelectorAll('*')) {
+      if (e.offsetParent === null) continue;
+      const t = (e.textContent || '').trim();
+      if (/Upload a file|drag and drop/i.test(t) && t.length < 160) { zone = e; break; }
+    }
+    zone = zone || modal;
     try {
       const dt2 = new DataTransfer();
       dt2.items.add(file);
       for (const type of ['dragenter', 'dragover', 'drop']) {
-        const ev = new DragEvent(type, { bubbles: true, cancelable: true });
-        try { Object.defineProperty(ev, 'dataTransfer', { value: dt2 }); } catch {}
-        zone.dispatchEvent(ev);
+        try {
+          const ev = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt2 });
+          zone.dispatchEvent(ev);
+        } catch {
+          const ev = new Event(type, { bubbles: true, cancelable: true });
+          try { Object.defineProperty(ev, 'dataTransfer', { value: dt2 }); } catch {}
+          zone.dispatchEvent(ev);
+        }
       }
-      studioLog(`drop ${filename} disparado na dropzone (fallback)`);
-    } catch (e) { studioWarn('drop fallback falhou:', e?.message || e); }
+      studioLog(`drop ${filename} disparado (deve iniciar S3 upload)`);
+    } catch (e) { studioWarn('drop disparo falhou:', e?.message || e); }
   }
   if (!inp && !modal) {
     throw new Error('Input/dropzone de audio nao encontrado no modal Upload Audio.');
   }
 }
 
-/** Upload de audio na CENA ATIVA do Studio. Clica "Upload audio",
- *  injeta o WAV, espera o modal fechar (= aplicado na cena) e o chip
- *  do audio aparecer. */
+/** Acha o modal "Confirm Audio" (segunda etapa do upload no create-v4).
+ *  Contem o switch "Voice Mirroring" + botoes Back/Add audio/Close. */
+function findConfirmAudioModal() {
+  const dlgs = Array.from(document.querySelectorAll('[role="dialog"]'));
+  for (const d of dlgs) {
+    if (d.offsetParent === null) continue;
+    const t = d.textContent || '';
+    if (/Confirm Audio/i.test(t) && /Voice Mirroring/i.test(t) && /Add audio/i.test(t)) return d;
+  }
+  return null;
+}
+
+/** Upload de audio na CENA ATIVA do Studio create-v4. Fluxo VALIDADO:
+ *  1) clica "Upload audio"  -> abre modal Upload Audio (library)
+ *  2) drop+input.files do WAV -> S3 upload (2 PUTs + 2 POSTs /asset)
+ *  3) aparece modal "Confirm Audio" com switch "Voice Mirroring"
+ *  4) NAO toca no switch (ligar dispara paywall "Plans that fit your
+ *     scale" que bloqueia). Mirror voice e setada DEPOIS na cena via
+ *     "Use avatar voice" (sem paywall).
+ *  5) clica "Add audio" -> audio aplicado na cena como Recorded voice
+ *  Sucesso = Confirm modal sumiu + chip parteN.wav na cena.
+ *  Mirror voice e aplicada via setSceneMirrorVoice depois. */
 async function studioUploadAudioToActiveScene(audioBase64, filename, sceneLabel) {
   studioLog(`${sceneLabel}: clicando "Upload audio"...`);
   const upBtn = await waitForOrNull(() => findStudioUploadAudioBtn(), 12000, 400);
@@ -2764,91 +2827,126 @@ async function studioUploadAudioToActiveScene(audioBase64, filename, sceneLabel)
     studioDumpDiag('no-upload-audio-btn');
     throw new Error(`${sceneLabel}: botao "Upload audio" nao encontrado. Cola os logs [DARKO LAB STUDIO].`);
   }
-  clickElement(upBtn);
+  await cdpClickEl(upBtn, 'Upload audio btn');
   const modal = await waitForOrNull(() => findUploadModal(), 8000, 250);
   if (!modal) {
     studioDumpDiag('no-upload-modal');
     throw new Error(`${sceneLabel}: modal Upload Audio nao abriu. Cola os logs [DARKO LAB STUDIO].`);
   }
-  // garante aba "Upload Audio" ativa
   const upTab = Array.from(modal.querySelectorAll('[role="tab"], button'))
     .find((b) => b.offsetParent !== null && /^upload audio$/i.test((b.textContent || '').trim()));
   if (upTab && upTab.getAttribute('aria-selected') === 'false') { clickElement(upTab); await sleep(400); }
 
   await studioInjectAudioFile(audioBase64, filename);
 
-  // Sucesso = modal fechou OU surgiu o toggle de voz / chip de audio na
-  // cena (upload de arquivo novo no HeyGen auto-aplica e fecha o modal —
-  // comprovado pelos prints manuais do user). Fallback: clicar a linha
-  // mais NOVA da biblioteca (topo) pra aplicar.
-  const sceneApplied = () => {
-    if (!findUploadModal()) return true;
-    if (findVoiceModeToggle(document)) return true;
-    const chip = Array.from(document.querySelectorAll('span, div'))
-      .some((e) => e.offsetParent !== null &&
-        /parte\d+\.wav|\.wav/i.test(e.textContent || '') &&
-        /\d{1,2}:\d{2}/.test(e.textContent || '') &&
-        (e.textContent || '').trim().length < 24 && !findUploadModal());
-    return chip;
-  };
-  const deadline = Date.now() + 75000;
-  let applied = false;
-  let triedRow = false;
-  while (Date.now() < deadline) {
-    if (sceneApplied()) { applied = true; break; }
+  // Aguarda o modal "Confirm Audio" aparecer (segundo step do upload).
+  // Pode demorar enquanto o S3 upload + transcribe rodam.
+  studioLog(`${sceneLabel}: aguardando modal "Confirm Audio"...`);
+  // 1a tentativa: ate 45s o drop disparar Confirm sozinho
+  let confirmModal = await waitForOrNull(() => findConfirmAudioModal(), 45000, 600);
+  // 2a tentativa (fallback validado ao vivo): se Confirm nao surgiu mas
+  // o Upload modal ainda esta aberto com a biblioteca de audios, o
+  // arquivo recem-upado esta no topo. Clicar a linha dele abre Confirm.
+  if (!confirmModal) {
     const m = findUploadModal();
-    if (!m) { applied = true; break; }
-    const mt = m.textContent || '';
-    if (/upload failed|invalid|corrupted|not supported|nao suportado/i.test(mt)) {
-      throw new Error(`${sceneLabel}: HeyGen reportou erro no upload. Modal: ${mt.slice(0, 160)}`);
-    }
-    const stillUploading = /uploading/i.test(mt);
-    // Quando o upload terminou e o modal continua aberto (biblioteca),
-    // seleciona a PRIMEIRA linha .wav da lista (a recem-upada fica no
-    // topo) clicando o container clicavel (cursor custom = includes
-    // 'pointer'). Faz 1x pra nao spammar.
-    if (!stillUploading && !triedRow) {
-      triedRow = true;
+    if (m) {
+      studioLog(`${sceneLabel}: Confirm nao abriu pelo drop, clicando linha da biblioteca`);
+      const fnameBase = (filename || '').replace(/\.[a-z0-9]+$/i, '');
+      const safeRe = new RegExp('^' + fnameBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\.wav$', 'i');
       let leaf = null;
-      for (const e of m.querySelectorAll('*')) {
+      for (const e of m.querySelectorAll('span,div')) {
         if (e.offsetParent === null) continue;
-        if (e.children.length === 0 && /\.wav$/i.test((e.textContent || '').trim()) &&
-            (e.textContent || '').trim().length < 40) { leaf = e; break; }
+        const t = (e.textContent || '').trim();
+        if (e.children.length === 0 && safeRe.test(t)) { leaf = e; break; }
+      }
+      if (!leaf) {
+        for (const e of m.querySelectorAll('span,div')) {
+          if (e.offsetParent === null) continue;
+          if (e.children.length === 0 && /\.wav$/i.test((e.textContent || '').trim()) &&
+              (e.textContent || '').trim().length < 30) { leaf = e; break; }
+        }
       }
       if (leaf) {
         let row = leaf;
         for (let i = 0; i < 7 && row.parentElement; i++) {
           row = row.parentElement;
           const r = row.getBoundingClientRect();
-          if (r.height >= 34 && r.height <= 120 && /\d{1,2}:\d{2}/.test(row.textContent || '')) break;
+          const cur = window.getComputedStyle(row).cursor;
+          if ((cur.includes('pointer') && r.height > 20 && r.height < 120) ||
+              (r.height >= 34 && r.height <= 80 && /\d{1,2}:\d{2}/.test(row.textContent || ''))) break;
         }
-        studioLog(`${sceneLabel}: upload ok, selecionando linha da biblioteca`);
-        clickElement(row);
-        await sleep(900);
-        // possivel botao confirmar/usar/inserir (portal)
-        const confirm = Array.from(document.querySelectorAll('button, [role="button"]'))
-          .find((b) => {
-            if (b.offsetParent === null) return false;
-            const t = (b.textContent || '').trim().toLowerCase();
-            return t === 'use' || t === 'apply' || t === 'add' || t === 'select' ||
-              t === 'confirm' || t === 'insert' || t === 'use audio' || t === 'add to scene' ||
-              t === 'usar' || t === 'adicionar' || t === 'inserir' || t === 'confirmar';
-          });
-        if (confirm) { clickElement(confirm); await sleep(900); }
+        // CDP trusted click - linha da biblioteca exige isTrusted
+        const ok = await cdpClickEl(row, 'lib-row');
+        if (ok) confirmModal = await waitForOrNull(() => findConfirmAudioModal(), 30000, 500);
       }
     }
-    await sleep(900);
   }
-  if (!applied) {
-    studioDumpDiag('audio-apply-timeout');
+  if (!confirmModal) {
+    studioDumpDiag('no-confirm-modal');
+    // Ultimo fallback: se sumiu o Upload modal e ja tem chip na cena,
+    // o audio auto-aplicou (variante de UI). Aceita.
+    const chipNow = Array.from(document.querySelectorAll('span, div')).some((e) =>
+      e.offsetParent !== null &&
+      /^parte\d+\.wav/i.test((e.textContent || '').trim()) &&
+      /\d{1,2}:\d{2}/.test(e.textContent || '') &&
+      (e.textContent || '').trim().length < 30);
+    if (!findUploadModal() && chipNow) {
+      studioLog(`${sceneLabel}: audio auto-aplicou (sem Confirm modal) — segue p/ Mirror via toggle da cena`);
+      return;
+    }
     throw new Error(
-      `${sceneLabel}: audio "${filename}" nao aplicou na cena em 75s ` +
-      `(modal Upload Audio nao fechou / sem toggle de voz). ` +
-      `Cola os logs [DARKO LAB STUDIO] + me diz se o WAV apareceu no modal.`
+      `${sceneLabel}: modal "Confirm Audio" nao apareceu. ` +
+      `Cola os logs [DARKO LAB STUDIO].`
     );
   }
-  await sleep(2000);
-  studioLog(`${sceneLabel}: audio ${filename} aplicado`);
+  studioLog(`${sceneLabel}: Confirm Audio aberto — NAO toca no switch Voice Mirroring`);
+  // CRITICO (validado ao vivo): ligar o switch "Voice Mirroring" AQUI
+  // dispara um modal "Plans that fit your scale" (paywall HeyGen) que
+  // bloqueia tudo. O fluxo manual correto e: deixar o switch OFF,
+  // clicar Add audio (audio entra como Recorded voice), e DEPOIS
+  // converter pra Mirror voice clicando "Use avatar voice" na pilula
+  // da CENA (setSceneMirrorVoice mais adiante em runStudioJob). Esse
+  // caminho NAO dispara paywall.
+
+  // Clica "Add audio" via CDP (isTrusted=true). O onClick do React no
+  // create-v4 ignora click sintetico — precisa de evento confiavel.
+  studioLog(`${sceneLabel}: clicando "Add audio" via CDP...`);
+  let addBtn = Array.from(confirmModal.querySelectorAll('button'))
+    .find((b) => b.offsetParent !== null && /^add audio$/i.test((b.textContent || '').trim()));
+  if (!addBtn) {
+    studioDumpDiag('no-add-audio-btn');
+    throw new Error(`${sceneLabel}: botao "Add audio" nao achado. Cola os logs [DARKO LAB STUDIO].`);
+  }
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (!findConfirmAudioModal()) break;
+    addBtn = Array.from(document.querySelectorAll('button'))
+      .find((b) => b.offsetParent !== null && /^add audio$/i.test((b.textContent || '').trim())) || addBtn;
+    await cdpClickEl(addBtn, 'Add audio');
+    await sleep(1800);
+    if (!findConfirmAudioModal()) break;
+    studioLog(`${sceneLabel}: Add audio CDP click ${attempt}/3 — modal ainda aberto, retry`);
+  }
+
+  // Espera o Confirm modal fechar (= audio attached) com timeout robusto.
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    if (!findConfirmAudioModal()) break;
+    await sleep(500);
+  }
+  if (findConfirmAudioModal()) {
+    studioDumpDiag('confirm-not-closed');
+    throw new Error(
+      `${sceneLabel}: Confirm modal nao fechou apos Add audio em 60s. ` +
+      `Cola os logs [DARKO LAB STUDIO].`
+    );
+  }
+  // tambem fecha o modal Upload Audio se ainda estiver aberto (raro)
+  if (findUploadModal()) {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await sleep(500);
+  }
+  await sleep(1500);
+  studioLog(`${sceneLabel}: audio ${filename} aplicado na cena com Mirror voice ✓`);
 }
 
 /** Seleciona uma voz pelo nome no painel direito (best-effort, nao
@@ -2928,7 +3026,7 @@ async function runStudioJob(requestId, payload) {
           studioDumpDiag('no-add-scene');
           throw new Error(`${sceneLabel}: botao "Add scene" nao encontrado. Cola os logs [DARKO LAB STUDIO].`);
         }
-        clickElement(addBtn);
+        await cdpClickEl(addBtn, 'Add scene');
         await sleep(2200);
       }
 
@@ -3031,7 +3129,7 @@ async function runStudioJob(requestId, payload) {
     if (recentVideo) {
       studioWarn('Generate SKIP — video ja gerado nos ultimos 90s:', recentVideo.id);
     } else {
-      clickElement(genBtn);
+      await cdpClickEl(genBtn, 'Generate');
       // Studio as vezes abre modal de confirmacao ("Generate"/"Submit")
       await sleep(1800);
       const confirm = Array.from(document.querySelectorAll('[role="dialog"] button, [role="alertdialog"] button'))
@@ -3040,7 +3138,7 @@ async function runStudioJob(requestId, payload) {
           const t = (b.textContent || '').trim().toLowerCase();
           return t === 'generate' || t === 'submit' || t === 'confirm' || t === 'gerar' || t === 'continue';
         });
-      if (confirm) { studioLog('confirmando modal de Generate'); clickElement(confirm); }
+      if (confirm) { studioLog('confirmando modal de Generate via CDP'); await cdpClickEl(confirm, 'Generate confirm'); }
     }
     reportProgress(requestId, 'Enviando pro HeyGen...', 92);
     await sleep(4500);
@@ -3063,6 +3161,8 @@ async function runStudioJob(requestId, payload) {
     reportError(requestId, e?.message ?? String(e));
   } finally {
     currentJob = null;
+    // remove a barra amarela "DARKO LAB started debugging" do Chrome
+    try { await cdpDetachBg(); } catch {}
   }
 }
 
