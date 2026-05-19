@@ -35,6 +35,30 @@ export type LtxGenResult =
       retrySec?: number;
     };
 
+/**
+ * O @gradio/client rejeita com OBJETO (ex: {type:'status',stage:'error',
+ * title:'ZeroGPU quota exceeded', message:'You have exceeded...'}), não
+ * com Error. String(obj) virava "[object Object]" e quebrava o classify.
+ * Aqui extraímos o texto real (title + message) pra classificar certo.
+ */
+function errText(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === 'string') return e;
+  if (e && typeof e === 'object') {
+    const o = e as Record<string, unknown>;
+    const parts = [o.title, o.message, o.error, o.detail]
+      .filter((x) => typeof x === 'string' && x)
+      .join(' — ');
+    if (parts) return parts;
+    try {
+      return JSON.stringify(o).slice(0, 400);
+    } catch {
+      return '[erro não serializável]';
+    }
+  }
+  return String(e);
+}
+
 function classify(msg: string): 'quota' | 'runtime' | 'config' | 'network' {
   const m = msg.toLowerCase();
   if (m.includes('quota') || m.includes('exceeded') || m.includes('rate limit'))
@@ -106,7 +130,7 @@ export async function ltxGenerate(input: LtxGenInput): Promise<LtxGenResult> {
     try {
       app = await Client.connect(LTX_SPACE, { token: token as `hf_${string}` });
     } catch (e) {
-      lastErr = e instanceof Error ? e.message : String(e);
+      lastErr = errText(e);
       lastKind = classify(lastErr);
       if (lastKind === 'quota') markQuota(state, parseRetrySeconds(lastErr));
       else markRuntime(state);
@@ -145,7 +169,7 @@ export async function ltxGenerate(input: LtxGenInput): Promise<LtxGenResult> {
       markOk(state);
       return { ok: true, videoUrl: url, seed: seedVal };
     } catch (e) {
-      lastErr = e instanceof Error ? e.message : String(e);
+      lastErr = errText(e);
       lastKind = classify(lastErr);
       if (lastKind === 'quota') markQuota(state, parseRetrySeconds(lastErr));
       else markRuntime(state);
