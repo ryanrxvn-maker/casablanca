@@ -9,6 +9,8 @@ export type RailItem = {
   href: string;
   label: string;
   icon: ReactNode;
+  /** só aparece/abre pra conta admin */
+  adminOnly?: boolean;
 };
 
 /**

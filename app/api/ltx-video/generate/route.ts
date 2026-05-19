@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { requireAdmin } from '@/app/api/admin/_helpers';
 import { ltxGenerate } from '@/lib/ltx-client-server';
 
 /**
@@ -13,6 +14,9 @@ export const runtime = 'nodejs';
 export const maxDuration = 300;
 
 export async function POST(req: Request) {
+  const guard = await requireAdmin();
+  if (!guard.ok) return guard.response;
+
   let form: FormData;
   try {
     form = await req.formData();

@@ -41,6 +41,9 @@ type GenResp = {
 type PoolStatus = {
   total: number;
   available: number;
+  perAccountDay: number;
+  usedToday: number;
+  estRemainingToday: number;
 };
 
 export default function LtxVideoPage() {
@@ -184,18 +187,27 @@ export default function LtxVideoPage() {
     >
       <div className="flex flex-col gap-6">
         {pool ? (
-          <div className="flex items-center gap-2 text-[11px] uppercase tracking-widest">
-            <span
-              className={
-                'inline-block h-2 w-2 rounded-full ' +
-                (pool.available > 0
-                  ? 'bg-lime shadow-[0_0_10px_var(--lime)]'
-                  : 'bg-red-500')
-              }
-            />
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-[12px] border border-line bg-bg-soft px-4 py-3 text-[11px] uppercase tracking-widest">
+            <span className="flex items-center gap-2">
+              <span
+                className={
+                  'inline-block h-2 w-2 rounded-full ' +
+                  (pool.estRemainingToday > 0
+                    ? 'bg-lime shadow-[0_0_10px_var(--lime)]'
+                    : 'bg-red-500')
+                }
+              />
+              <span className="text-white">
+                ≈ {pool.estRemainingToday} gerações restantes hoje
+              </span>
+            </span>
             <span className="text-text-muted">
-              Pool HF: {pool.available}/{pool.total} contas com quota
-              {pool.total === 0 ? ' — configure HF_TOKENS' : ''}
+              {pool.available}/{pool.total} contas com quota
+            </span>
+            <span className="text-text-dim normal-case tracking-normal">
+              {pool.total === 0
+                ? 'configure HF_TOKENS'
+                : `${pool.usedToday} usadas · ~${pool.perAccountDay}/conta/dia · capacidade ~${pool.total * pool.perAccountDay}/dia`}
             </span>
           </div>
         ) : null}

@@ -21,7 +21,23 @@
  * "garantido pra sempre" — é decisão informada do dono das contas.
  */
 
-const MAX_TOKENS = 10;
+const MAX_TOKENS = 30;
+
+/**
+ * Gerações estimadas por CONTA por dia. Free ZeroGPU ≈ ~5 min/dia e a
+ * Space reserva 75s por chamada -> ~4. Conta PRO ≈ ~25 min -> ~20.
+ * Override por env se o pool for de contas PRO: LTX_GENS_PER_ACCOUNT=20
+ */
+function gensPerAccountDay(): number {
+  const n = Number(process.env.LTX_GENS_PER_ACCOUNT);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 4;
+}
+
+/** Chave de dia UTC pra zerar contadores na virada. */
+function dayKey(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+let CUR_DAY = dayKey();
 
 export type TokenState = {
   /** índice estável (ordem do env) */
@@ -34,6 +50,8 @@ export type TokenState = {
   lastUsed: number;
   fails: number;
   ok: number;
+  /** gerações OK hoje (zera na virada de dia UTC) */
+  genToday: number;
 };
 
 let TOKENS: string[] | null = null;
@@ -63,7 +81,19 @@ function load(): void {
     lastUsed: 0,
     fails: 0,
     ok: 0,
+    genToday: 0,
   }));
+}
+
+/** Virou o dia UTC? Zera contadores/cooldown (a quota do HF reseta diária). */
+function rollover(): void {
+  const d = dayKey();
+  if (d === CUR_DAY) return;
+  CUR_DAY = d;
+  for (const s of STATE) {
+    s.genToday = 0;
+    s.cooldownUntil = 0;
+  }
 }
 
 export function poolSize(): number {
@@ -90,6 +120,7 @@ export function nextToken():
   | { token: string; state: TokenState }
   | { token: null; soonestMs: number } {
   load();
+  rollover();
   if (TOKENS!.length === 0) return { token: null, soonestMs: 0 };
   const now = Date.now();
 
@@ -124,6 +155,7 @@ export function markRuntime(st: TokenState): void {
 
 export function markOk(st: TokenState): void {
   st.ok++;
+  st.genToday++;
   st.cooldownUntil = 0;
 }
 
@@ -136,29 +168,49 @@ export function jitter(): Promise<void> {
 export function poolStatus(): {
   total: number;
   available: number;
+  perAccountDay: number;
+  usedToday: number;
+  estRemainingToday: number;
+  dayUTC: string;
   accounts: Array<{
     mask: string;
     state: 'livre' | 'cooldown';
     secondsLeft: number;
+    genToday: number;
+    genLeft: number;
     ok: number;
     fails: number;
   }>;
 } {
   load();
+  rollover();
   const now = Date.now();
+  const perDay = gensPerAccountDay();
+
   const accounts = STATE.map((s) => {
     const left = Math.max(0, Math.ceil((s.cooldownUntil - now) / 1000));
+    const cooling = left > 0;
+    // Estimativa honesta: conta em cooldown rende 0 até liberar; senão,
+    // o que sobra da cota diária estimada.
+    const genLeft = cooling ? 0 : Math.max(0, perDay - s.genToday);
     return {
       mask: s.mask,
-      state: (left > 0 ? 'cooldown' : 'livre') as 'livre' | 'cooldown',
+      state: (cooling ? 'cooldown' : 'livre') as 'livre' | 'cooldown',
       secondsLeft: left,
+      genToday: s.genToday,
+      genLeft,
       ok: s.ok,
       fails: s.fails,
     };
   });
+
   return {
     total: STATE.length,
     available: accounts.filter((a) => a.state === 'livre').length,
+    perAccountDay: perDay,
+    usedToday: STATE.reduce((n, s) => n + s.genToday, 0),
+    estRemainingToday: accounts.reduce((n, a) => n + a.genLeft, 0),
+    dayUTC: CUR_DAY,
     accounts,
   };
 }

@@ -1,6 +1,8 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
 import { SuiteSwitcher, type Suite } from './SuiteSwitcher';
 import { ToolRail, type RailItem } from './ToolRail';
 import {
@@ -109,6 +111,7 @@ export const AI_SUITE: RailItem[] = [
     href: '/tools/ltx-video',
     label: 'LTX-Video 2.3',
     icon: <IconLtxVideo />,
+    adminOnly: true,
   },
   // ClickUp Pilot fica no botao especial 3D do top-bar (ClickUpPilotButton).
   // Nao duplicar aqui no rail pra evitar dois botoes pra mesma coisa.
@@ -121,6 +124,33 @@ export const AI_SUITE: RailItem[] = [
  */
 export function ToolsNav() {
   const pathname = usePathname();
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const supabase = createClient();
+        const { data: u } = await supabase.auth.getUser();
+        const uid = u.user?.id;
+        if (!uid) return;
+        const { data } = await supabase
+          .from('profiles')
+          .select('is_admin')
+          .eq('id', uid)
+          .maybeSingle();
+        if (!cancelled) setIsAdmin(!!data?.is_admin);
+      } catch {
+        /* silencioso — sem admin = sem itens admin */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const visible = (list: RailItem[]) =>
+    list.filter((it) => !it.adminOnly || isAdmin);
 
   const isAi = AI_SUITE.some(
     (it) => pathname === it.href || pathname.startsWith(it.href + '/'),
@@ -131,7 +161,12 @@ export function ToolsNav() {
   // active=null quando pathname nao pertence a nenhum suite — ex: ClickUp Pilot
   // (ferramenta especial acessada pelo top-bar, fora de Base/AI)
   const active: Suite | null = isAi ? 'ai' : isBase ? 'base' : null;
-  const items = active === 'ai' ? AI_SUITE : active === 'base' ? BASE_SUITE : null;
+  const items =
+    active === 'ai'
+      ? visible(AI_SUITE)
+      : active === 'base'
+        ? visible(BASE_SUITE)
+        : null;
 
   return (
     <>
