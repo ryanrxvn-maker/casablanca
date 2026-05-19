@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "DARKO LAB — Magnific Auto",
-  "version": "3.5.55",
-  "description": "DARKO LAB Magnific Auto v3.5.55 — ANTI-TRAVA: pipeline com teto de 30min no bg + abort-all (mata orfao/loop, recarrega aba) = nunca roda 2 ao mesmo tempo nem trava a noite toda. v3.5.44 base — EDGE-GUARANTEED + BACKGROUND. (1) createVideoGenNodeViaOutputHandle verifica edge por contagem; se video nasceu solto, deleta órfão e refaz até 3x — NUNCA gera video sem linha da imagem. (2) Removido TODO roubo de foco (findOrCreateMagnificTab + re-focus periódico): Magnific roda 100% em background, aba nunca é trazida pro foco. Mantém v3.5.41 (3 settles Kling) + CREDIT-PREVIEW GATE + MODEL_GUARD + USERSNAP SHIM + force_credits:false. Zero-crédito intacto.",
+  "version": "3.5.56",
+  "description": "DARKO LAB Magnific Auto v3.5.56 — OVERLAY-KILLER: remove modais 'Help us improve'/feedback Usersnap/early-preview/cookies que cobriam o canvas e faziam os cliques errarem (EDGE_CREATE_FAIL). + v3.5.55 ANTI-TRAVA (teto 30min no bg, abort-all mata orfao/loop, nunca 2 ao mesmo tempo, fila nunca congela). v3.5.44 base — EDGE-GUARANTEED + BACKGROUND. (1) createVideoGenNodeViaOutputHandle verifica edge por contagem; se video nasceu solto, deleta órfão e refaz até 3x — NUNCA gera video sem linha da imagem. (2) Removido TODO roubo de foco (findOrCreateMagnificTab + re-focus periódico): Magnific roda 100% em background, aba nunca é trazida pro foco. Mantém v3.5.41 (3 settles Kling) + CREDIT-PREVIEW GATE + MODEL_GUARD + USERSNAP SHIM + force_credits:false. Zero-crédito intacto.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
@@ -50,6 +50,16 @@
       ],
       "run_at": "document_start",
       "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://www.magnific.com/*",
+        "https://magnific.com/*"
+      ],
+      "js": [
+        "overlay-killer.js"
+      ],
+      "run_at": "document_start"
     },
     {
       "matches": [

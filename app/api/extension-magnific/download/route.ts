@@ -23,6 +23,8 @@ const FILES = [
   'manifest.json',
   'background.js',
   'bridge.js',
+  'usersnap-shim.js',
+  'overlay-killer.js',
   'magnific-content.js',
   'README.md',
 ];
