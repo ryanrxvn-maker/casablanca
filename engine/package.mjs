@@ -63,6 +63,34 @@ async function main() {
     path.join(pkg, 'Instalar.ps1'),
     INSTALAR_PS1.replace(/__NODE_VER__/g, NODE_VER).trim() + '\r\n',
   );
+  // Entrada DUPLO-CLIQUE: o usuario so abre este. Chama o .ps1 com
+  // ExecutionPolicy Bypass (sem precisar de admin, instala na conta).
+  writeFileSync(
+    path.join(pkg, 'INSTALAR.cmd'),
+    [
+      '@echo off',
+      'title DarkoLab Downloader - Instalador',
+      'echo.',
+      'echo  Instalando o DarkoLab Downloader...',
+      'echo  (baixa as dependencias na 1a vez, ~1-2 min)',
+      'echo.',
+      'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Instalar.ps1"',
+      'echo.',
+      'echo  Pode fechar esta janela.',
+      'pause >nul',
+      '',
+    ].join('\r\n'),
+  );
+  writeFileSync(
+    path.join(pkg, 'DESINSTALAR.cmd'),
+    [
+      '@echo off',
+      'title DarkoLab Downloader - Desinstalar',
+      'powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Desinstalar.ps1"',
+      'pause >nul',
+      '',
+    ].join('\r\n'),
+  );
   writeFileSync(path.join(pkg, 'Desinstalar.ps1'), DESINSTALAR_PS1.trim() + '\r\n');
   writeFileSync(path.join(pkg, 'LEIA-ME.txt'), LEIAME.trim() + '\r\n');
 
@@ -217,16 +245,18 @@ Write-Host 'Motor removido. (config/token em LOCALAPPDATA\\DarkoDownloader prese
 const LEIAME = `
 DarkoLab Downloader — Motor (Windows)
 =====================================
-1) Clique direito em "Instalar.ps1" > Executar com PowerShell.
+1) DE DUPLO-CLIQUE em "INSTALAR.cmd".
    (Baixa Node + yt-dlp + ffmpeg + Chromium ~250 MB UMA VEZ,
-    configura auto-start e mostra/copia o CODIGO de pareamento.)
+    configura auto-start e mostra/copia o CODIGO de pareamento.
+    Se o Windows avisar, clique "Mais informacoes" > "Executar
+    assim mesmo".)
 2) Instale a extensao "DarkoLab Downloader" no navegador
    (chrome://extensions > modo dev > Carregar sem compactacao).
 3) Abra a extensao > cole o CODIGO > Parear.
 4) Pronto: em qualquer video (YouTube/Insta/TikTok/Pinterest/+18)
    aparece o botao "Baixar". Roda no seu PC, sem servidor.
 
-Desinstalar: clique direito em "Desinstalar.ps1" > Executar com PowerShell.
+Desinstalar: duplo-clique em "DESINSTALAR.cmd".
 Precisa de internet so na 1a instalacao. Requer Windows 64-bit.
 `;
 

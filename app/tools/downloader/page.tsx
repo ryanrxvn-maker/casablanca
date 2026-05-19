@@ -221,10 +221,11 @@ export default function DownloaderPage() {
                 Baixa o <b>Motor</b> (botão 1), extrai o .zip numa pasta.
               </li>
               <li>
-                Dentro da pasta, clique direito em{' '}
-                <code className="mono text-white">Instalar.ps1</code> →{' '}
-                <i>Executar com PowerShell</i>. Ele instala, inicia junto
-                com o Windows e <b>copia o código de pareamento</b>.
+                Dentro da pasta, dê <b>duplo-clique</b> em{' '}
+                <code className="mono text-white">INSTALAR.cmd</code> (se o
+                Windows avisar, &quot;Mais informações&quot; → &quot;Executar
+                assim mesmo&quot;). Ele baixa tudo, instala, inicia junto com
+                o Windows e <b>copia o código de pareamento</b>.
               </li>
               <li>
                 Baixa a <b>Extensão</b> (botão 2), extrai numa pasta.
@@ -247,10 +248,11 @@ export default function DownloaderPage() {
             <p className="mono mt-2 text-[10px] text-text-muted">
               Requer Windows 64-bit. O motor roda no PC do usuário (não
               precisa do seu PC ligado nem de servidor). +18 já vem
-              habilitado. O download do Motor é leve (~16&nbsp;KB); na 1ª
-              instalação o <code className="mono text-white">Instalar.ps1</code>{' '}
-              baixa Node + yt-dlp + ffmpeg + Chromium (~250&nbsp;MB, uma
-              vez, ~1–2&nbsp;min) automaticamente.
+              habilitado. O download do Motor é leve (~16&nbsp;KB); o
+              duplo-clique em{' '}
+              <code className="mono text-white">INSTALAR.cmd</code> baixa Node
+              + yt-dlp + ffmpeg + Chromium (~250&nbsp;MB, uma vez,
+              ~1–2&nbsp;min) automaticamente.
             </p>
           </details>
         </div>
