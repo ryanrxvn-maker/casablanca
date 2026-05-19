@@ -46,7 +46,7 @@ type PoolStatus = {
 export default function LtxVideoPage() {
   const [prompt, setPrompt] = useToolState<string>('ltx:prompt', '');
   const [resId, setResId] = useToolState<string>('ltx:res', LTX_RESOLUTIONS[0].id);
-  const [durId, setDurId] = useToolState<string>('ltx:dur', '12s');
+  const [durId, setDurId] = useToolState<string>('ltx:dur', '6s');
   const [stepsId, setStepsId] = useToolState<string>('ltx:steps', '50');
 
   const [busy, setBusy] = useState(false);

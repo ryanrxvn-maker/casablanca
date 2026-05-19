@@ -67,12 +67,18 @@ export type ResolutionOption = {
   height: number;
 };
 
-// Múltiplos de 32. Default da Space é 1536×1024 (3:2).
+// IMPORTANTE: a Space SÓ aceita estes presets exatos (RESOLUTIONS no
+// app.py). Qualquer outro WxH faz o pipeline lançar exceção e voltar
+// vídeo nulo. Pares são (width × height).
+//   high: 16:9=(1536,1024) 9:16=(1024,1536) 1:1=(1024,1024)
+//   low : 16:9=(768,512)   9:16=(512,768)   1:1=(768,768)
 export const LTX_RESOLUTIONS: ResolutionOption[] = [
-  { id: '1280x720', label: '1280×720 (16:9)', width: 1280, height: 736 },
-  { id: '1536x1024', label: '1536×1024 (3:2 — máx)', width: 1536, height: 1024 },
-  { id: '720x1280', label: '720×1280 (9:16 vertical)', width: 736, height: 1280 },
-  { id: '1024x1024', label: '1024×1024 (1:1)', width: 1024, height: 1024 },
+  { id: '768x512', label: '768×512 (16:9 rápido)', width: 768, height: 512 },
+  { id: '1536x1024', label: '1536×1024 (16:9 HD)', width: 1536, height: 1024 },
+  { id: '512x768', label: '512×768 (9:16 rápido)', width: 512, height: 768 },
+  { id: '1024x1536', label: '1024×1536 (9:16 vertical HD)', width: 1024, height: 1536 },
+  { id: '768x768', label: '768×768 (1:1 rápido)', width: 768, height: 768 },
+  { id: '1024x1024', label: '1024×1024 (1:1 HD)', width: 1024, height: 1024 },
 ];
 
 export type DurationOption = {
