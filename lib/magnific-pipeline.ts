@@ -114,6 +114,12 @@ export async function runMagnificPipeline(
   } = cfg;
   const { onProgress, signal } = cb;
 
+  // Teto de tempo AGREGADO do job inteiro. O retry-rounds NAO pode
+  // re-rodar o pipeline 4x por horas — passou do budget, segue pro ZIP
+  // com o que tiver pronto (job SEMPRE termina em tempo limitado).
+  const jobStart = Date.now();
+  const JOB_BUDGET_MS = 50 * 60 * 1000; // 50min teto duro do job
+
   const state: TakeState[] = takes.map((t) => ({ idx: t.idx, status: 'idle' as const }));
   let spaceId = existingSpaceId;
   let spaceUrl: string | undefined;
@@ -250,6 +256,15 @@ export async function runMagnificPipeline(
   const MAX_RETRY_ROUNDS = 4;
   for (let round = 1; round <= MAX_RETRY_ROUNDS; round++) {
     if (signal?.aborted) break;
+    // budget agregado: nunca re-roda o pipeline por horas
+    if (Date.now() - jobStart > JOB_BUDGET_MS) {
+      emit({
+        phase: 'retry',
+        percent: 95,
+        message: 'Tempo do job esgotado — finalizando com o que ficou pronto.',
+      });
+      break;
+    }
     const missing = state.filter((s) => s.status !== 'ready');
     if (missing.length === 0) break; // todos prontos → segue pro ZIP
 

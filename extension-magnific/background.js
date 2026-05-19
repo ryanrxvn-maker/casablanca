@@ -382,6 +382,46 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
+  // v3.5.55: ABORT_ALL — mata QUALQUER pipeline em andamento e recarrega
+  // a aba Magnific (destroi loop/orfao no content-script). Usado pelo
+  // watchdog/anti-concorrencia: garante que nunca rode 2 pipelines na
+  // mesma aba ao mesmo tempo (causa do ">1 ao mesmo tempo" + cascata).
+  if (msg.type === 'MG_ABORT_ALL') {
+    sendResponse({ ok: true });
+    (async () => {
+      try {
+        for (const [rid, job] of Array.from(pendingJobs.entries())) {
+          try { if (job.timeoutId) clearTimeout(job.timeoutId); } catch {}
+          try { if (job.heartbeatId) clearTimeout(job.heartbeatId); } catch {}
+          try {
+            if (job.bridgeTabId) {
+              reportToPage(job.bridgeTabId, rid, 'MG_RUN_PIPELINE_RESULT', {
+                ok: false,
+                error: 'Pipeline abortado (anti-concorrencia/watchdog).',
+              });
+            }
+          } catch {}
+          try { unpersistJob(rid); } catch {}
+        }
+        pendingJobs.clear();
+        const tabs = await chrome.tabs.query({
+          url: 'https://www.magnific.com/app/*',
+        });
+        for (const t of tabs) {
+          try {
+            detachPipelineDebugger(t.id);
+          } catch {}
+          try {
+            await chrome.tabs.reload(t.id, { bypassCache: false });
+          } catch {}
+        }
+      } catch (e) {
+        console.warn('[BG] MG_ABORT_ALL falhou:', e);
+      }
+    })();
+    return false;
+  }
+
   // Forward generic — todos handlers passam pelo content-script
   const FORWARD = [
     'MG_TEST_SESSION', 'MG_GET_PLAN', 'MG_CREATE_SPACE',
@@ -482,8 +522,8 @@ async function handleForward(msg, bridgeTabId) {
       MG_GENERATE_IMAGE: 240000,
       MG_ANIMATE_IMAGE: 720000,
       MG_DOWNLOAD_ASSET: 120000,
-      MG_RUN_PIPELINE: 14400000,
-      MG_RUN_PIPELINE_TEMPLATE: 14400000,
+      MG_RUN_PIPELINE: 1800000,
+      MG_RUN_PIPELINE_TEMPLATE: 1800000,
       MG_CREATE_TEMPLATE_SPACE: 1800000,
     };
     const timeoutMs = timeouts[msg.type] || 60000;

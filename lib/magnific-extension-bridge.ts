@@ -203,7 +203,14 @@ export function generateMagnificImage(
       { source: PAGE_SRC, type: 'MG_GENERATE_IMAGE', requestId, payload },
       '*',
     );
-    // sem timeout — bg ja tem 3min
+    // backstop: se o RESULT nunca chegar (SW morto etc.), rejeita em
+    // tempo limitado — NUNCA fica pendente pra sempre travando a fila.
+    setTimeout(() => {
+      if (pending.has(requestId)) {
+        pending.delete(requestId);
+        reject(new Error('Timeout 6min no generate-image (sem resposta da extensao).'));
+      }
+    }, 360000);
   });
 }
 
@@ -241,7 +248,12 @@ export function animateMagnificImage(
       { source: PAGE_SRC, type: 'MG_ANIMATE_IMAGE', requestId, payload },
       '*',
     );
-    // bg timeout 10min
+    setTimeout(() => {
+      if (pending.has(requestId)) {
+        pending.delete(requestId);
+        reject(new Error('Timeout 15min no animate-image (sem resposta da extensao).'));
+      }
+    }, 900000);
   });
 }
 
@@ -335,7 +347,16 @@ export function runMagnificPipelineExt(
       { source: PAGE_SRC, type: 'MG_RUN_PIPELINE', requestId, payload },
       '*',
     );
-    // sem timeout — bg cuida (pipeline pode demorar muito com 30+ takes)
+    // backstop absoluto: o bg corta em 30min e manda RESULT(ok:false);
+    // este timeout (35min) so dispara se o RESULT NUNCA chegar (SW
+    // morto). Garante que runMagnificPipeline sempre resolve -> a fila
+    // do ClickUp Pilot NUNCA congela a noite toda.
+    setTimeout(() => {
+      if (pending.has(requestId)) {
+        pending.delete(requestId);
+        reject(new Error('Timeout 35min no pipeline (sem resposta da extensao).'));
+      }
+    }, 2_100_000);
   });
 }
 
@@ -390,7 +411,12 @@ export function createMagnificTemplate(
       { source: PAGE_SRC, type: 'MG_CREATE_TEMPLATE_SPACE', requestId, payload },
       '*',
     );
-    // sem timeout — extensao tem 30min, pode demorar
+    setTimeout(() => {
+      if (pending.has(requestId)) {
+        pending.delete(requestId);
+        reject(new Error('Timeout 35min no create-template (sem resposta da extensao).'));
+      }
+    }, 2_100_000);
   });
 }
 
@@ -451,8 +477,29 @@ export function runMagnificPipelineTemplateExt(
       { source: PAGE_SRC, type: 'MG_RUN_PIPELINE_TEMPLATE', requestId, payload },
       '*',
     );
-    // sem timeout
+    setTimeout(() => {
+      if (pending.has(requestId)) {
+        pending.delete(requestId);
+        reject(new Error('Timeout 35min no pipeline-template (sem resposta da extensao).'));
+      }
+    }, 2_100_000);
   });
+}
+
+/**
+ * Aborta QUALQUER pipeline Magnific em andamento na extensao e recarrega
+ * a aba Magnific (mata loop/orfao no content-script). Fire-and-forget —
+ * usado pelo watchdog/anti-concorrencia antes de disparar o proximo job,
+ * pra garantir que NUNCA rode 2 pipelines na mesma aba ao mesmo tempo.
+ */
+export function abortAllMagnific(): void {
+  if (typeof window === 'undefined') return;
+  installListener();
+  try {
+    window.postMessage({ source: PAGE_SRC, type: 'MG_ABORT_ALL' }, '*');
+  } catch {
+    /* noop */
+  }
 }
 
 /** Util: converte base64 -> Blob (no browser). */

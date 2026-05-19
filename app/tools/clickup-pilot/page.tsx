@@ -51,6 +51,7 @@ import { ToggleRound3D, WirelessIcon } from '@/components/ToggleRound3D';
 import { getPilotTeam, setPilotTeam, getPilotEditor, setPilotEditor } from '@/lib/clickup-pilot-config';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
 import { runMagnificPipeline, parseMagnificPrompts } from '@/lib/magnific-pipeline';
+import { abortAllMagnific } from '@/lib/magnific-extension-bridge';
 import {
   saveMagnificQueue,
   restoreMagnificQueue,
@@ -1948,6 +1949,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       magnificStopIntentRef.current[taskId] = 'watchdog';
       magnificCancelRef.current[taskId] = true;
       try { magnificAbortRef.current?.abort(); } catch {}
+      // CRÍTICO: mata o pipeline ÓRFÃO na extensão e recarrega a aba
+      // Magnific. Sem isso o job zumbi continua vivo e o PRÓXIMO job
+      // dispara na MESMA aba = ">1 ao mesmo tempo" + cascata. Agora o
+      // próximo sempre roda numa aba limpa.
+      try { abortAllMagnific(); } catch {}
       patchMagnificJob(taskId, {
         status: 'failed',
         message: '⚠ Travou (loop infinito?) — clique 🐞 Debug pra recriar o space',

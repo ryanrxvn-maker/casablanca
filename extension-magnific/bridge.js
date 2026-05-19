@@ -52,6 +52,15 @@
       });
       return;
     }
+    if (data.type === 'MG_ABORT_ALL') {
+      // v3.5.55: fire-and-forget — bg mata pipelines e recarrega a aba
+      try {
+        chrome.runtime.sendMessage({ type: 'MG_ABORT_ALL' }, () => {
+          void chrome.runtime.lastError;
+        });
+      } catch {}
+      return;
+    }
     if (data.type === 'MG_TEST_SESSION') return route('MG_TEST_SESSION');
     if (data.type === 'MG_GET_PLAN') return route('MG_GET_PLAN');
     if (data.type === 'MG_CREATE_SPACE') return route('MG_CREATE_SPACE', { payload: data.payload });
