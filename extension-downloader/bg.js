@@ -60,20 +60,34 @@ async function startDownload({ url, mode, quality, adult }) {
         });
         return;
       }
-      // acompanha pra reportar erro do servidor (ex.: 502/baixa vazia)
+      let settled = false;
+      const finish = (r) => {
+        if (settled) return;
+        settled = true;
+        chrome.downloads.onChanged.removeListener(onChanged);
+        clearTimeout(cap);
+        resolve(r);
+      };
+      // espera o RESULTADO REAL (sem "ok" otimista): so resolve quando
+      // completar de verdade ou der erro do servidor (401/502/etc).
       const onChanged = (delta) => {
         if (delta.id !== id) return;
         if (delta.state && delta.state.current === 'complete') {
-          chrome.downloads.onChanged.removeListener(onChanged);
-          resolve({ ok: true });
+          finish({ ok: true });
         } else if (delta.error && delta.error.current) {
-          chrome.downloads.onChanged.removeListener(onChanged);
-          resolve({ ok: false, error: 'servidor: ' + delta.error.current });
+          const e = String(delta.error.current);
+          const friendly = /FORBIDDEN|SERVER_FAILED|BLOCKED|FAILED/i.test(e)
+            ? 'Falha no motor (código pode ter mudado — re-pareie pelo CODIGO.cmd) ou link inválido.'
+            : 'servidor: ' + e;
+          finish({ ok: false, error: friendly });
         }
       };
       chrome.downloads.onChanged.addListener(onChanged);
-      // resposta otimista após 1.2s se nada falhou ainda
-      setTimeout(() => resolve({ ok: true }), 1200);
+      // teto de seguranca: nunca prende a UI pra sempre
+      const cap = setTimeout(
+        () => finish({ ok: false, error: 'tempo esgotado — tente de novo.' }),
+        300000,
+      );
     });
   });
 }

@@ -168,6 +168,14 @@ async function downloadOne(url, el) {
         adult: state.adult,
       }),
     });
+    if (res.status === 401) {
+      // o motor gerou um novo código — força re-pareamento
+      await storageSet({ token: '' });
+      state.token = '';
+      throw new Error(
+        'Código mudou. Abra o CODIGO.cmd e cole o novo código (re-parear).',
+      );
+    }
     if (!res.ok) {
       let msg = 'HTTP ' + res.status;
       try {
@@ -220,6 +228,7 @@ $('go').addEventListener('click', async () => {
   );
   $('go').disabled = false;
   $('go').textContent = 'Baixar';
+  if (!state.token) await refresh(); // 401 limpou o token -> tela de parear
 });
 
 refresh();

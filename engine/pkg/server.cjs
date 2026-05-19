@@ -360,16 +360,30 @@ async function aria2Path() {
   aria2Resolved = await whichAbs("aria2c") || await whichAbs("aria2c.exe");
   return aria2Resolved;
 }
-function run(cmd, args, cwd) {
+function run(cmd, args, cwd, timeoutMs) {
   return new Promise((resolve) => {
     const p = (0, import_child_process.spawn)(cmd, args, { cwd, windowsHide: true });
     let stderr = "";
+    let done = false;
+    const finish = (code, extra = "") => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      resolve({ code, stderr: stderr + extra });
+    };
+    const timer = timeoutMs ? setTimeout(() => {
+      try {
+        p.kill("SIGKILL");
+      } catch {
+      }
+      finish(-1, "\n[timeout: processo morto]");
+    }, timeoutMs) : null;
     p.stderr.on("data", (d) => {
       stderr += d.toString();
       if (stderr.length > 64e3) stderr = stderr.slice(-64e3);
     });
-    p.on("error", (e) => resolve({ code: -1, stderr: String(e) }));
-    p.on("close", (code) => resolve({ code: code ?? -1, stderr }));
+    p.on("error", (e) => finish(-1, String(e)));
+    p.on("close", (code) => finish(code ?? -1));
   });
 }
 async function fetchTikTok(url, mode, workDir) {
@@ -480,7 +494,7 @@ async function fetchYtDlp(url, mode, quality, provider, workDir, referer) {
     ...refArgs,
     url
   ];
-  const { code, stderr } = await run(tool.cmd, args, workDir);
+  const { code, stderr } = await run(tool.cmd, args, workDir, 15e5);
   if (code !== 0) {
     const clean = stderr.split("\n").filter((l) => /error|unsupported|unavailable|private|login/i.test(l)).slice(-3).join(" ").trim();
     return {
@@ -596,7 +610,10 @@ async function fetchAdult(url, mode, quality, workDir) {
   }
   try {
     const { grabMedia: grabMedia2 } = await Promise.resolve().then(() => (init_headless_grab(), headless_grab_exports));
-    const grab = await grabMedia2(url);
+    const grab = await Promise.race([
+      grabMedia2(url),
+      new Promise((r) => setTimeout(() => r(null), 7e4))
+    ]);
     if (grab && "m3u8" in grab) {
       const viaHls = await fetchYtDlp(
         grab.m3u8,
@@ -909,6 +926,8 @@ async function main() {
     res.end(JSON.stringify({ error: "not found" }));
   });
   function announce() {
+    persistConfig(cfg).catch(() => {
+    });
     console.log(
       JSON.stringify({
         event: "listening",

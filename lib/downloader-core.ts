@@ -249,16 +249,34 @@ function run(
   cmd: string,
   args: string[],
   cwd: string,
+  timeoutMs?: number,
 ): Promise<{ code: number; stderr: string }> {
   return new Promise((resolve) => {
     const p = spawn(cmd, args, { cwd, windowsHide: true });
     let stderr = '';
+    let done = false;
+    const finish = (code: number, extra = '') => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      resolve({ code, stderr: stderr + extra });
+    };
+    const timer = timeoutMs
+      ? setTimeout(() => {
+          try {
+            p.kill('SIGKILL');
+          } catch {
+            /* ignore */
+          }
+          finish(-1, '\n[timeout: processo morto]');
+        }, timeoutMs)
+      : null;
     p.stderr.on('data', (d) => {
       stderr += d.toString();
       if (stderr.length > 64_000) stderr = stderr.slice(-64_000);
     });
-    p.on('error', (e) => resolve({ code: -1, stderr: String(e) }));
-    p.on('close', (code) => resolve({ code: code ?? -1, stderr }));
+    p.on('error', (e) => finish(-1, String(e)));
+    p.on('close', (code) => finish(code ?? -1));
   });
 }
 
@@ -402,7 +420,9 @@ async function fetchYtDlp(
     ...refArgs,
     url,
   ];
-  const { code, stderr } = await run(tool.cmd, args, workDir);
+  // teto generoso: video grande conclui (ex.: 30+min), mas processo
+  // realmente travado morre. --socket-timeout ja corta stalls de rede.
+  const { code, stderr } = await run(tool.cmd, args, workDir, 1_500_000);
   if (code !== 0) {
     const clean = stderr
       .split('\n')
@@ -560,7 +580,11 @@ async function fetchAdult(
 
   try {
     const { grabMedia } = await import('./headless-grab');
-    const grab = await grabMedia(url);
+    // headless com teto duro de 70s — nunca trava infinito
+    const grab = await Promise.race([
+      grabMedia(url),
+      new Promise<null>((r) => setTimeout(() => r(null), 70_000)),
+    ]);
     if (grab && 'm3u8' in grab) {
       const viaHls = await fetchYtDlp(
         grab.m3u8,

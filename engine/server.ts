@@ -254,6 +254,9 @@ async function main() {
   });
 
   function announce() {
+    // SEMPRE grava a config com o token/porta REAIS desta instancia —
+    // garante que config.json (CODIGO.cmd / extensao) nunca dessincroniza.
+    persistConfig(cfg).catch(() => {});
     console.log(
       JSON.stringify({
         event: 'listening',
