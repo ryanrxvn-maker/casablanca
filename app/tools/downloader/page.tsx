@@ -67,6 +67,10 @@ export default function DownloaderPage() {
     'downloader:quality',
     '1080',
   );
+  const [installHidden, setInstallHidden] = useToolState<boolean>(
+    'downloader:installHidden',
+    false,
+  );
   const [jobs, setJobs] = useState<Job[]>([]);
   const [running, setRunning] = useState(false);
   // Modo +18 — visivel/utilizavel SO por admin. O gate real e no
@@ -183,13 +187,32 @@ export default function DownloaderPage() {
       description="Baixe vídeos, áudio ou imagens do YouTube, Instagram, TikTok e Pinterest. Downloads paralelos e rápidos — cole um ou vários links (um por linha)."
     >
       <div className="flex flex-col gap-6">
-        {/* Extensão + Motor: clica → baixa, no PC do usuário, sem servidor */}
+        {/* Extensão + Motor: clica → baixa, no PC do usuário, sem servidor.
+            Dispensável: some quando o usuário já instalou. */}
+        {installHidden ? (
+          <button
+            type="button"
+            onClick={() => setInstallHidden(false)}
+            className="mono self-start text-[10px] text-text-muted underline-offset-2 hover:text-lime hover:underline"
+          >
+            Extensão + Motor (instalar / ver passo a passo)
+          </button>
+        ) : (
         <div className="rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-4">
           <div className="flex items-center gap-2">
             <span className="text-lime">⬇</span>
-            <strong className="text-sm text-lime">
+            <strong className="flex-1 text-sm text-lime">
               Extensão + Motor (clica e baixa em qualquer site, no seu PC)
             </strong>
+            <button
+              type="button"
+              aria-label="Ocultar"
+              title="Já instalei — ocultar este aviso"
+              onClick={() => setInstallHidden(true)}
+              className="shrink-0 rounded-full px-2 py-0.5 text-xs text-text-muted transition-colors hover:bg-lime/10 hover:text-lime"
+            >
+              ✕
+            </button>
           </div>
           <p className="mono mt-1 text-[11px] text-text-muted">
             Instala uma vez. Aí aparece um botão <b>Baixar</b> direto nos
@@ -260,6 +283,7 @@ export default function DownloaderPage() {
             </p>
           </details>
         </div>
+        )}
 
         <div>
           <div className="flex items-center justify-between">
