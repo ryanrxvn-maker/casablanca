@@ -82,9 +82,9 @@ export async function POST(req: Request) {
         error: r.error,
         kind: r.kind,
         retrySec: r.retrySec ?? null,
-        // diagnóstico só quando o servidor diz que não tem token —
-        // mostra QUAL build está rodando e se o env chegou nesta função
-        detail: r.kind === 'config' ? envDiag() : undefined,
+        // diagnóstico em TODO erro (build/env/token) — nunca mais esconder
+        // a verdade atrás de mensagem genérica.
+        detail: envDiag(),
       },
       { status },
     );

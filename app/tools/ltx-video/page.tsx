@@ -90,14 +90,23 @@ export default function LtxVideoPage() {
         );
       }
       if (j.kind === 'quota') {
-        const min = j.retrySec ? Math.ceil(j.retrySec / 60) : null;
+        const s = j.retrySec ?? 0;
+        const when =
+          s > 0
+            ? s < 90
+              ? ` Tenta de novo em ~${s}s.`
+              : ` Tenta de novo em ~${Math.ceil(s / 60)} min.`
+            : '';
         throw new Error(
-          (j.error || 'Quota ZeroGPU esgotada em todas as contas.') +
-            (min ? ` Tenta de novo em ~${min} min.` : '') +
-            ' Adicione mais contas no HF_TOKENS pra zerar a espera.',
+          (j.error || 'Quota ZeroGPU esgotada.') +
+            when +
+            ' (Conta free zera na virada do dia; PRO/+contas = sem espera.)',
         );
       }
-      throw new Error(j.error || 'Falha na geração.');
+      throw new Error(
+        (j.error || 'Falha na geração.') +
+          (j.detail ? ` [${j.detail}]` : ''),
+      );
     }
 
     setPhase('Baixando vídeo...');

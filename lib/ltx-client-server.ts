@@ -42,7 +42,11 @@ function classify(msg: string): 'quota' | 'runtime' | 'config' | 'network' {
   if (m.includes('runtimeerror') || m.includes('worker error')) return 'runtime';
   if (m.includes('fetch') || m.includes('network') || m.includes('timeout'))
     return 'network';
-  return 'config';
+  // Default NUNCA é 'config' — 'config' significa SÓ "nenhum token no
+  // servidor" (setado explicitamente no ltxGenerate quando poolSize=0).
+  // Erro desconhecido vindo da Space/cliente = runtime (mostra o texto
+  // real pro usuário em vez de mentir "configure HF_TOKENS").
+  return 'runtime';
 }
 
 function pickVideoUrl(data: unknown): string | null {
