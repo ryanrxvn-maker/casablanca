@@ -15,6 +15,7 @@ import {
   IconDecupagem,
   IconDownloader,
   IconHeyGenAuto,
+  IconLtxVideo,
   IconNormalizador,
   IconRemoverElementos,
   IconTakeSplitter,
@@ -103,6 +104,11 @@ export const AI_SUITE: RailItem[] = [
     href: '/tools/heygen-auto',
     label: 'HeyGen Auto',
     icon: <IconHeyGenAuto />,
+  },
+  {
+    href: '/tools/ltx-video',
+    label: 'LTX-Video 2.3',
+    icon: <IconLtxVideo />,
   },
   // ClickUp Pilot fica no botao especial 3D do top-bar (ClickUpPilotButton).
   // Nao duplicar aqui no rail pra evitar dois botoes pra mesma coisa.

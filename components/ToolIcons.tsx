@@ -280,6 +280,18 @@ export function IconHeyGenAuto(p: IconProps) {
   );
 }
 
+/** LTX-Video — claquete/play (geração de vídeo IA) */
+export function IconLtxVideo(p: IconProps) {
+  return (
+    <svg {...baseProps(p)}>
+      <rect x="3" y="6" width="18" height="13" rx="2" />
+      <path d="M3 9h18" />
+      <path d="M7 6l-1.5 3M12 6l-1.5 3M17 6l-1.5 3" opacity="0.6" />
+      <path d="M11 12.5l3 1.8-3 1.8z" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 /** Wrench utilitario (pra decorar Base Suite) */
 export function IconWrench(p: IconProps) {
   return (
