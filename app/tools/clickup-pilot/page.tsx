@@ -2878,6 +2878,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           const choice = vaAvatarChoice[`${taskId}:${avaCode}`];
           const res = await generateAvatarStudio({
             avatarId,
+            groupId: choice?.groupId ?? null,
             avatarName,
             groupName: choice?.groupName ?? undefined,
             voiceName: voiceName ?? null,

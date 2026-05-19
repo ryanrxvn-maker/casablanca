@@ -810,13 +810,32 @@ async function handleStudioGenerate(requestId, payload, bridgeTabId) {
   const tab = await findOrCreateHeyGenTab();
   activeJobs.set(requestId, { tabId: tab.id, payload, bridgeTabId });
 
-  reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', { stage: 'Abrindo HeyGen (My Avatars)...' });
-  // Navega fresh pra My Avatars — o content script abre o editor Studio
-  // "Build scene-by-scene" do avatar exato a partir dai.
-  console.log('[DARKO LAB BG] navegando pra /avatar pra entrar no Studio');
-  await chrome.tabs.update(tab.id, { url: 'https://app.heygen.com/avatar' });
-  await waitForTabComplete(tab.id, 30000);
-  await new Promise((r) => setTimeout(r, 3500));
+  // Entrada DETERMINISTICA no editor Studio cena-por-cena: URL direta
+  // descoberta via teste real — equivale a My Avatars > look > "Use in
+  // video" > "Build scene-by-scene", sem caça a menu/DOM.
+  const lookId = payload && payload.avatarId;
+  const groupId = payload && payload.groupId;
+  let studioUrl;
+  if (groupId && lookId) {
+    studioUrl = 'https://app.heygen.com/create-v4/draft?avatarGroup=' +
+      encodeURIComponent(groupId) + '&defaultLookId=' + encodeURIComponent(lookId) +
+      '&fromCreateButton=true';
+  } else if (lookId) {
+    // sem groupId: ainda tenta com defaultLookId (HeyGen costuma resolver o grupo)
+    studioUrl = 'https://app.heygen.com/create-v4/draft?defaultLookId=' +
+      encodeURIComponent(lookId) + '&fromCreateButton=true';
+  } else {
+    activeJobs.delete(requestId);
+    reportToPage(bridgeTabId, requestId, 'HG_ERROR', {
+      error: 'VA Studio: payload sem avatarId/groupId — nao da pra abrir o editor.',
+    });
+    return;
+  }
+  reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', { stage: 'Abrindo editor Studio do avatar...' });
+  console.log('[DARKO LAB BG] navegando direto pro editor Studio create-v4');
+  await chrome.tabs.update(tab.id, { url: studioUrl });
+  await waitForTabComplete(tab.id, 40000);
+  await new Promise((r) => setTimeout(r, 5000));
   await waitForTabReady(tab.id);
 
   reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', { stage: 'Comandando Studio na aba HeyGen...' });

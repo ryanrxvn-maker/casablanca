@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.11.0';
+const DARKO_EXT_VERSION = '4.11.2';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -2431,21 +2431,26 @@ function getSceneScriptBlocks() {
 function findVoiceModeToggle(scope) {
   const root = scope || document;
   const cand = Array.from(root.querySelectorAll('button, [role="button"], div[tabindex], span'));
+  let best = null, bestN = Infinity;
   for (const el of cand) {
     if (el.offsetParent === null) continue;
     const t = (el.textContent || '').trim().toLowerCase();
-    if (t === 'recorded voice' || t === 'mirror voice') {
-      // pega o elemento clicavel mais proximo
-      let c = el;
-      for (let i = 0; i < 4 && c && c !== document.body; i++) {
-        if (c.tagName === 'BUTTON' || c.getAttribute('role') === 'button' ||
-            window.getComputedStyle(c).cursor === 'pointer') return c;
-        c = c.parentElement;
-      }
-      return el;
-    }
+    if (!t || t.length > 30) continue;
+    const isToggle = t === 'recorded voice' || t === 'mirror voice' ||
+      ((t.includes('recorded voice') || t.includes('mirror voice')) && t.length < 24);
+    if (!isToggle) continue;
+    // menor elemento (label puro) — evita pegar container grande
+    const n = el.querySelectorAll('*').length;
+    if (n < bestN) { bestN = n; best = el; }
   }
-  return null;
+  if (!best) return null;
+  let c = best;
+  for (let i = 0; i < 4 && c && c !== document.body; i++) {
+    if (c.tagName === 'BUTTON' || c.getAttribute('role') === 'button' ||
+        window.getComputedStyle(c).cursor.includes('pointer')) return c;
+    c = c.parentElement;
+  }
+  return best;
 }
 
 /** Garante que UMA cena (scope) esta em "Mirror voice".
@@ -2470,20 +2475,23 @@ async function setSceneMirrorVoice(scope, sceneLabel) {
     await sleep(900);
     // procura a opcao "Use avatar voice" / "Mirror voice" num popover/menu
     // (HeyGen portala menus no body, entao busca global).
-    let opt = null;
-    const opts = Array.from(document.querySelectorAll('[role="menuitem"], [role="option"], button, li, div[tabindex], span'));
+    let opt = null, optN = Infinity;
+    const PHRASES = ['use avatar voice', 'mirror voice', 'avatar voice', 'usar voz do avatar', 'voz do avatar'];
+    const opts = Array.from(document.querySelectorAll('[role="menuitem"], [role="option"], button, li, div[tabindex], div, span, p'));
     for (const o of opts) {
       if (o.offsetParent === null) continue;
       const t = (o.textContent || '').trim().toLowerCase();
       if (!t || t.length > 40) continue;
-      if (t === 'use avatar voice' || t === 'mirror voice' || t === 'avatar voice' ||
-          t === 'usar voz do avatar' || t === 'voz do avatar') { opt = o; break; }
+      const hit = PHRASES.some((p) => t === p || t.startsWith(p));
+      if (!hit) continue;
+      const n = o.querySelectorAll('*').length; // menor elemento = label puro
+      if (n < optN) { optN = n; opt = o; }
     }
     if (opt) {
       let c = opt;
       for (let i = 0; i < 4 && c && c !== document.body; i++) {
         if (c.tagName === 'BUTTON' || c.getAttribute('role') === 'menuitem' ||
-            c.getAttribute('role') === 'option' || window.getComputedStyle(c).cursor === 'pointer') break;
+            c.getAttribute('role') === 'option' || window.getComputedStyle(c).cursor.includes('pointer')) break;
         c = c.parentElement;
       }
       clickElement(c || opt);
@@ -2558,101 +2566,24 @@ async function playStudioScene(scope, sceneLabel) {
   await sleep(1500);
 }
 
-/** Abre o editor Studio "Build scene-by-scene" do avatar EXATO.
- *  Match por avatarId na img do card (avatar ja vem bound na Scene 1).
- *  Se nao identificar com seguranca o avatar certo, ABORTA (nunca
- *  arriscar avatar errado em VA). */
+/** Aguarda o editor Studio cena-por-cena montar. O background ja navegou
+ *  DIRETO pra URL do editor (app.heygen.com/create-v4/draft?avatarGroup
+ *  =<g>&defaultLookId=<look>&fromCreateButton=true) — o avatar ja vem
+ *  bound na Scene 1, sem caça a menu/DOM. So esperamos a UI ficar pronta
+ *  (painel Script + Add scene/Generate). Validado em teste real. */
 async function enterStudioForAvatar(avatarId, avatarName, groupName) {
-  if (isInStudioEditor()) {
-    studioLog('ja dentro do editor Studio — pulando entrada');
-    return;
-  }
   await dismissAnnouncementModals();
-  // 1. acha o card do avatar pelo id na img
-  const card = await waitForOrNull(() => {
-    for (const img of document.querySelectorAll('img')) {
-      if (img.offsetParent === null || !img.src) continue;
-      if (!img.src.includes(avatarId)) continue;
-      let p = img;
-      for (let i = 0; i < 8 && p && p !== document.body; i++) {
-        const r = p.getBoundingClientRect();
-        if (r.width > 120 && r.height > 120 && r.width < 520) return p;
-        p = p.parentElement;
-      }
-      return img.parentElement;
-    }
-    return null;
-  }, 20000, 600);
-
-  if (!card) {
-    studioDumpDiag('enter-no-card');
-    throw new Error(
-      `Avatar ${avatarName || avatarId} nao encontrado na grade My Avatars (match por id na img). ` +
-      `Abre app.heygen.com/avatar, confirma que o avatar existe na conta, e cola os logs [DARKO LAB STUDIO].`
-    );
-  }
-  studioLog('card do avatar localizado, revelando menu "..."');
-  // 2. hover pra revelar a barra de acoes do card
-  for (const evt of ['pointerover', 'mouseover', 'mouseenter', 'pointermove']) {
-    try { card.dispatchEvent(new MouseEvent(evt, { bubbles: true })); } catch {}
-  }
-  await sleep(900);
-  // 3. acha o botao "..." (more) dentro do card
-  let moreBtn = null;
-  for (const b of card.querySelectorAll('button, [role="button"]')) {
-    if (b.offsetParent === null) continue;
-    const al = (b.getAttribute('aria-label') || '').toLowerCase();
-    const t = (b.textContent || '').trim();
-    const svg = b.querySelector('svg');
-    const svgHtml = svg ? svg.innerHTML.toLowerCase() : '';
-    if (al.includes('more') || al.includes('option') || al.includes('menu') ||
-        t === '...' || t === '⋯' || t === '⋮' ||
-        svgHtml.includes('circle') /* tres bolinhas */) { moreBtn = b; break; }
-  }
-  if (!moreBtn) {
-    // fallback: primeiro botao do card que nao seja claramente outra coisa
-    moreBtn = Array.from(card.querySelectorAll('button, [role="button"]'))
-      .find((b) => b.offsetParent !== null) || null;
-  }
-  if (!moreBtn) {
-    studioDumpDiag('enter-no-more');
-    throw new Error('Botao "..." do card do avatar nao encontrado. Cola os logs [DARKO LAB STUDIO].');
-  }
-  clickElement(moreBtn);
-  await sleep(1100);
-  // 4. no menu, clica "Build scene-by-scene"
-  let buildItem = null;
-  for (const o of document.querySelectorAll('[role="menuitem"], [role="option"], button, li, div[tabindex], span, a')) {
-    if (o.offsetParent === null) continue;
-    const t = (o.textContent || '').trim().toLowerCase();
-    if (!t || t.length > 48) continue;
-    if (t === 'build scene-by-scene' || t.includes('scene-by-scene') ||
-        t.includes('scene by scene') || t.includes('cena por cena') ||
-        t.includes('cena-por-cena')) { buildItem = o; break; }
-  }
-  if (!buildItem) {
-    studioDumpDiag('enter-no-build');
-    throw new Error(
-      'Opcao "Build scene-by-scene" nao apareceu no menu do avatar. ' +
-      'Cola os logs [DARKO LAB STUDIO] + screenshot do menu.'
-    );
-  }
-  let c = buildItem;
-  for (let i = 0; i < 4 && c && c !== document.body; i++) {
-    if (c.tagName === 'BUTTON' || c.tagName === 'A' || c.getAttribute('role') === 'menuitem' ||
-        window.getComputedStyle(c).cursor === 'pointer') break;
-    c = c.parentElement;
-  }
-  studioLog('clicando "Build scene-by-scene"');
-  clickElement(c || buildItem);
-  // 5. espera o editor montar
-  const ok = await waitForOrNull(() => isInStudioEditor(), 30000, 700);
+  const ok = await waitForOrNull(() => isInStudioEditor(), 45000, 800);
   if (!ok) {
     studioDumpDiag('enter-editor-timeout');
-    throw new Error('Editor Studio nao montou em 30s apos "Build scene-by-scene". Cola os logs [DARKO LAB STUDIO].');
+    throw new Error(
+      'Editor Studio (create-v4) nao montou em 45s. Confere se o avatar/grupo ' +
+      'existe na conta HeyGen. Cola os logs [DARKO LAB STUDIO].'
+    );
   }
-  await sleep(2500);
-  studioLog('editor Studio pronto');
+  // editor pesado (canvas) — folga extra pra cena 1 + avatar bound montarem
+  await sleep(3500);
+  studioLog('editor Studio pronto (entrada via URL direta)');
 }
 
 /** Acha o controle "Motion Engine" do painel direito do Studio
@@ -2670,7 +2601,7 @@ function findStudioMotorControl() {
     const r = el.getBoundingClientRect();
     if (r.width < 40 || r.height < 16 || r.width > 420) continue;
     const style = window.getComputedStyle(el);
-    const clickable = style.cursor === 'pointer' || el.tagName === 'BUTTON' ||
+    const clickable = style.cursor.includes('pointer') || el.tagName === 'BUTTON' ||
       el.getAttribute('role') === 'button' || (el.className || '').includes('cursor-pointer');
     // bonus se houver "Motion Engine" por perto (ancestral ate 5 niveis)
     let nearLabel = false;
@@ -2709,22 +2640,25 @@ async function setStudioMotorAvatarIII(sceneLabel) {
     studioLog(`${sceneLabel}: Motion Engine em "${cur}" — trocando pra Avatar III (tentativa ${attempt})`);
     clickElement(ctrl);
     await sleep(900);
-    // procura item "Avatar III" no menu (portalado no body)
-    let item = null;
-    for (const o of document.querySelectorAll('[role="menuitem"], [role="option"], li, button, div[tabindex], span')) {
+    // procura item "Avatar III" no menu (portalado no body).
+    // VALIDADO EM TESTE REAL: o menu lista "Avatar V/IV/III" com
+    // descricao concatenada ("Avatar IIIPremium..."). Pega o MENOR
+    // elemento cujo texto COMECA com "Avatar III" (o label puro tem
+    // children=0 e texto exatamente "Avatar III"). "Avatar IV/V" nao
+    // dao falso-positivo (nao comecam com "Avatar III").
+    let item = null, bestN = Infinity;
+    for (const o of document.querySelectorAll('[role="menuitem"], [role="option"], li, button, div[tabindex], div, span, p')) {
       if (o.offsetParent === null) continue;
       const t = (o.textContent || '').trim();
-      if (!/^Avatar III\b/.test(t)) continue;
-      if (t.length > 80) continue;
-      const next = t.charAt('Avatar III'.length);
-      if (next && /[0-9A-Za-z]/.test(next)) continue; // evita "Avatar IIIx"
-      item = o; break;
+      if (!t.startsWith('Avatar III')) continue;
+      const n = o.querySelectorAll('*').length;
+      if (n < bestN) { bestN = n; item = o; }
     }
     if (item) {
       let c = item;
       for (let i = 0; i < 4 && c && c !== document.body; i++) {
         if (c.tagName === 'BUTTON' || c.getAttribute('role') === 'menuitem' ||
-            c.getAttribute('role') === 'option' || window.getComputedStyle(c).cursor === 'pointer') break;
+            c.getAttribute('role') === 'option' || window.getComputedStyle(c).cursor.includes('pointer')) break;
         c = c.parentElement;
       }
       clickElement(c || item);
@@ -2760,18 +2694,160 @@ function studioHasPaidEngineVisible() {
   return null;
 }
 
-/** Upload de audio na CENA ATIVA do Studio (reusa o modal Upload
- *  Audio). Retorna quando o upload completa. */
-async function studioUploadAudioToActiveScene(audioBase64, filename, sceneLabel) {
-  studioLog(`${sceneLabel}: abrindo Upload Audio...`);
-  const opened = await switchToAudioMode();
-  if (!opened) {
-    studioDumpDiag('upload-no-modal');
-    throw new Error(`${sceneLabel}: nao consegui abrir o modal Upload Audio. Cola os logs [DARKO LAB STUDIO].`);
+/** Botao "Upload audio" do Studio (VALIDADO EM TESTE REAL: texto
+ *  exatamente "Upload audio", <button> no topo do painel Script). */
+function findStudioUploadAudioBtn() {
+  const cands = Array.from(document.querySelectorAll('button, [role="button"], div[tabindex]'));
+  // 1) match exato "Upload audio"
+  for (const e of cands) {
+    if (e.offsetParent === null) continue;
+    if (/^upload audio$/i.test((e.textContent || '').trim())) return e;
   }
-  await uploadAudioToScriptArea(audioBase64, filename);
-  await waitForAudioUploadComplete(120000);
-  await sleep(1200);
+  // 2) contem "Upload audio" e e curto (evita pegar texto de modal)
+  for (const e of cands) {
+    if (e.offsetParent === null) continue;
+    const t = (e.textContent || '').trim();
+    if (/upload audio/i.test(t) && t.length < 24) return e;
+  }
+  // 3) legado Quick Create ("Upload")
+  return findUploadAudioToggle();
+}
+
+/** Injeta o File no input do modal + dispara change E drop (fallback
+ *  pra dropzones que so escutam drag&drop). */
+async function studioInjectAudioFile(audioBase64, filename) {
+  const bin = atob(audioBase64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const ext = (filename || '').toLowerCase().match(/\.(\w+)$/)?.[1] || 'wav';
+  const mime = ext === 'mp3' ? 'audio/mpeg' : ext === 'm4a' ? 'audio/mp4' : 'audio/wav';
+  const file = new File([bytes], filename || 'audio.wav', { type: mime });
+
+  const inp = await waitForOrNull(() => findAudioFileInput(), 8000, 200);
+  if (inp) {
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    inp.files = dt.files;
+    inp.dispatchEvent(new Event('input', { bubbles: true }));
+    inp.dispatchEvent(new Event('change', { bubbles: true }));
+    studioLog(`file ${filename} injetado no input (${bytes.length}B)`);
+  }
+  // fallback drop na dropzone do modal
+  const modal = findUploadModal();
+  if (modal) {
+    const zone = Array.from(modal.querySelectorAll('*')).find((e) =>
+      e.offsetParent !== null && /drag and drop|drop here|arraste|solte/i.test(e.textContent || '') &&
+      (e.textContent || '').length < 120) || modal;
+    try {
+      const dt2 = new DataTransfer();
+      dt2.items.add(file);
+      for (const type of ['dragenter', 'dragover', 'drop']) {
+        const ev = new DragEvent(type, { bubbles: true, cancelable: true });
+        try { Object.defineProperty(ev, 'dataTransfer', { value: dt2 }); } catch {}
+        zone.dispatchEvent(ev);
+      }
+      studioLog(`drop ${filename} disparado na dropzone (fallback)`);
+    } catch (e) { studioWarn('drop fallback falhou:', e?.message || e); }
+  }
+  if (!inp && !modal) {
+    throw new Error('Input/dropzone de audio nao encontrado no modal Upload Audio.');
+  }
+}
+
+/** Upload de audio na CENA ATIVA do Studio. Clica "Upload audio",
+ *  injeta o WAV, espera o modal fechar (= aplicado na cena) e o chip
+ *  do audio aparecer. */
+async function studioUploadAudioToActiveScene(audioBase64, filename, sceneLabel) {
+  studioLog(`${sceneLabel}: clicando "Upload audio"...`);
+  const upBtn = await waitForOrNull(() => findStudioUploadAudioBtn(), 12000, 400);
+  if (!upBtn) {
+    studioDumpDiag('no-upload-audio-btn');
+    throw new Error(`${sceneLabel}: botao "Upload audio" nao encontrado. Cola os logs [DARKO LAB STUDIO].`);
+  }
+  clickElement(upBtn);
+  const modal = await waitForOrNull(() => findUploadModal(), 8000, 250);
+  if (!modal) {
+    studioDumpDiag('no-upload-modal');
+    throw new Error(`${sceneLabel}: modal Upload Audio nao abriu. Cola os logs [DARKO LAB STUDIO].`);
+  }
+  // garante aba "Upload Audio" ativa
+  const upTab = Array.from(modal.querySelectorAll('[role="tab"], button'))
+    .find((b) => b.offsetParent !== null && /^upload audio$/i.test((b.textContent || '').trim()));
+  if (upTab && upTab.getAttribute('aria-selected') === 'false') { clickElement(upTab); await sleep(400); }
+
+  await studioInjectAudioFile(audioBase64, filename);
+
+  // Sucesso = modal fechou OU surgiu o toggle de voz / chip de audio na
+  // cena (upload de arquivo novo no HeyGen auto-aplica e fecha o modal —
+  // comprovado pelos prints manuais do user). Fallback: clicar a linha
+  // mais NOVA da biblioteca (topo) pra aplicar.
+  const sceneApplied = () => {
+    if (!findUploadModal()) return true;
+    if (findVoiceModeToggle(document)) return true;
+    const chip = Array.from(document.querySelectorAll('span, div'))
+      .some((e) => e.offsetParent !== null &&
+        /parte\d+\.wav|\.wav/i.test(e.textContent || '') &&
+        /\d{1,2}:\d{2}/.test(e.textContent || '') &&
+        (e.textContent || '').trim().length < 24 && !findUploadModal());
+    return chip;
+  };
+  const deadline = Date.now() + 75000;
+  let applied = false;
+  let triedRow = false;
+  while (Date.now() < deadline) {
+    if (sceneApplied()) { applied = true; break; }
+    const m = findUploadModal();
+    if (!m) { applied = true; break; }
+    const mt = m.textContent || '';
+    if (/upload failed|invalid|corrupted|not supported|nao suportado/i.test(mt)) {
+      throw new Error(`${sceneLabel}: HeyGen reportou erro no upload. Modal: ${mt.slice(0, 160)}`);
+    }
+    const stillUploading = /uploading/i.test(mt);
+    // Quando o upload terminou e o modal continua aberto (biblioteca),
+    // seleciona a PRIMEIRA linha .wav da lista (a recem-upada fica no
+    // topo) clicando o container clicavel (cursor custom = includes
+    // 'pointer'). Faz 1x pra nao spammar.
+    if (!stillUploading && !triedRow) {
+      triedRow = true;
+      let leaf = null;
+      for (const e of m.querySelectorAll('*')) {
+        if (e.offsetParent === null) continue;
+        if (e.children.length === 0 && /\.wav$/i.test((e.textContent || '').trim()) &&
+            (e.textContent || '').trim().length < 40) { leaf = e; break; }
+      }
+      if (leaf) {
+        let row = leaf;
+        for (let i = 0; i < 7 && row.parentElement; i++) {
+          row = row.parentElement;
+          const r = row.getBoundingClientRect();
+          if (r.height >= 34 && r.height <= 120 && /\d{1,2}:\d{2}/.test(row.textContent || '')) break;
+        }
+        studioLog(`${sceneLabel}: upload ok, selecionando linha da biblioteca`);
+        clickElement(row);
+        await sleep(900);
+        // possivel botao confirmar/usar/inserir (portal)
+        const confirm = Array.from(document.querySelectorAll('button, [role="button"]'))
+          .find((b) => {
+            if (b.offsetParent === null) return false;
+            const t = (b.textContent || '').trim().toLowerCase();
+            return t === 'use' || t === 'apply' || t === 'add' || t === 'select' ||
+              t === 'confirm' || t === 'insert' || t === 'use audio' || t === 'add to scene' ||
+              t === 'usar' || t === 'adicionar' || t === 'inserir' || t === 'confirmar';
+          });
+        if (confirm) { clickElement(confirm); await sleep(900); }
+      }
+    }
+    await sleep(900);
+  }
+  if (!applied) {
+    studioDumpDiag('audio-apply-timeout');
+    throw new Error(
+      `${sceneLabel}: audio "${filename}" nao aplicou na cena em 75s ` +
+      `(modal Upload Audio nao fechou / sem toggle de voz). ` +
+      `Cola os logs [DARKO LAB STUDIO] + me diz se o WAV apareceu no modal.`
+    );
+  }
+  await sleep(2000);
   studioLog(`${sceneLabel}: audio ${filename} aplicado`);
 }
 

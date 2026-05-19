@@ -154,7 +154,10 @@ export type StudioPart = {
 };
 
 export type GenerateAvatarStudioPayload = {
+  /** look id (defaultLookId no editor create-v4) */
   avatarId: string;
+  /** avatar group id — usado pra montar a URL direta do editor Studio */
+  groupId?: string | null;
   avatarName?: string;
   groupName?: string;
   /** Voz opcional. Mirror voice ja usa a voz do avatar — isso so
@@ -188,6 +191,7 @@ export function generateAvatarStudio(
     pending.set(requestId, { resolve, reject, onProgress });
     const wirePayload = {
       avatarId: payload.avatarId,
+      groupId: payload.groupId ?? null,
       avatarName: payload.avatarName ?? null,
       groupName: payload.groupName ?? null,
       voiceName: payload.voiceName ?? null,
