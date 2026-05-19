@@ -15,14 +15,16 @@
       <!-- Pareamento (so aparece se nao pareado) -->
       <section id="pairBox" class="card hidden">
         <p class="muted">
-          Cole o <b>código de pareamento</b> que o instalador do motor
-          mostrou:
+          Cole só o <b>código de pareamento</b> (o instalador mostrou e
+          copiou; perdeu? abra <b>CODIGO.cmd</b> ou o atalho no Menu
+          Iniciar):
         </p>
         <input id="pairToken" type="password" placeholder="código de pareamento" />
         <div class="row">
-          <input id="pairPort" type="number" placeholder="porta (47923)" />
+          <input id="pairPort" type="number" placeholder="porta (automática)" />
           <button id="pairBtn" class="primary">Parear</button>
         </div>
+        <p class="muted small">A porta é detectada sozinha — não precisa mexer.</p>
         <p id="pairMsg" class="muted small"></p>
       </section>
 

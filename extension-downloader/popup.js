@@ -65,7 +65,17 @@ async function refresh() {
   $('engineDot').className = 'dot ' + (health ? 'on' : 'off');
 
   if (!health) return show('noEngine');
-  if (!state.token) return show('pairBox');
+  if (!state.token) {
+    // motor achado: porta ja detectada -> pre-preenche (usuario nao
+    // precisa digitar, so cola o codigo)
+    const pp = $('pairPort');
+    if (pp) {
+      pp.value = state.port;
+      pp.readOnly = true;
+      pp.title = 'Detectada automaticamente';
+    }
+    return show('pairBox');
+  }
 
   show('appBox');
   // +18 só aparece se o motor permitir
@@ -80,7 +90,7 @@ async function refresh() {
 // ---- pareamento ----
 $('pairBtn').addEventListener('click', async () => {
   const tok = $('pairToken').value.trim();
-  const port = parseInt($('pairPort').value, 10) || 47923;
+  const port = parseInt($('pairPort').value, 10) || state.port || 47923;
   if (tok.length < 16) {
     $('pairMsg').textContent = 'Código muito curto.';
     return;

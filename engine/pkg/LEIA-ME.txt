@@ -11,5 +11,9 @@ DarkoLab Downloader — Motor (Windows)
 4) Pronto: em qualquer video (YouTube/Insta/TikTok/Pinterest/+18)
    aparece o botao "Baixar". Roda no seu PC, sem servidor.
 
+Perdeu o codigo? Duplo-clique em "CODIGO.cmd" (ou no atalho do Menu
+Iniciar "DarkoLab Downloader - Codigo"). A porta e detectada
+automaticamente pela extensao (deixe 47923 se perguntar).
+
 Desinstalar: duplo-clique em "DESINSTALAR.cmd".
 Precisa de internet so na 1a instalacao. Requer Windows 64-bit.

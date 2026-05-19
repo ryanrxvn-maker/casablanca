@@ -237,8 +237,12 @@ export default function DownloaderPage() {
                 extensão.
               </li>
               <li>
-                Clica no ícone da extensão → cola o <b>código</b> (já está
-                copiado) → <i>Parear</i>.
+                Clica no ícone da extensão → cola só o <b>código</b> (já
+                está copiado) → <i>Parear</i> (a porta é automática).
+                Perdeu o código? Duplo-clique em{' '}
+                <code className="mono text-white">CODIGO.cmd</code> ou abra o
+                atalho <i>&quot;DarkoLab Downloader - Codigo&quot;</i> no Menu
+                Iniciar.
               </li>
               <li>
                 Pronto. Abre um vídeo em qualquer site suportado e clica no

@@ -29,6 +29,8 @@ try {
   Copy-Item (Join-Path $src 'server.cjs') $dst -Force
   Copy-Item (Join-Path $src 'DarkoDownloader.cmd') $dst -Force
   Copy-Item (Join-Path $src 'Desinstalar.ps1') $dst -Force
+  Copy-Item (Join-Path $src 'Codigo.ps1') $dst -Force -ErrorAction SilentlyContinue
+  Copy-Item (Join-Path $src 'CODIGO.cmd') $dst -Force -ErrorAction SilentlyContinue
   Copy-Item (Join-Path $src 'LEIA-ME.txt') $dst -Force -ErrorAction SilentlyContinue
   $tmp = Join-Path $env:TEMP ('darko-dl-' + [Guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Force -Path $tmp | Out-Null
@@ -83,6 +85,16 @@ try {
   $lnk.Arguments = '"' + $vbs + '"'
   $lnk.WorkingDirectory = $dst
   $lnk.Save()
+
+  # atalho no Menu Iniciar pra rever o codigo quando quiser
+  try {
+    $progs = [Environment]::GetFolderPath('Programs')
+    $lc = $wsh.CreateShortcut((Join-Path $progs 'DarkoLab Downloader - Codigo.lnk'))
+    $lc.TargetPath = 'powershell.exe'
+    $lc.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + (Join-Path $dst 'Codigo.ps1') + '"'
+    $lc.WorkingDirectory = $dst
+    $lc.Save()
+  } catch {}
 
   St 97 'Iniciando o motor...'
   Remove-Item (Join-Path $dst 'engine.log') -ErrorAction SilentlyContinue
