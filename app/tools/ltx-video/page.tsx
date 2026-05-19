@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
 import {
@@ -16,11 +16,11 @@ import {
 } from '@/lib/ltx-video';
 
 /**
- * LTX-Video 2.3 — geração de vídeo unlimited via Hugging Face ZeroGPU.
+ * LTX-Video 2.3 — geração de vídeo (com áudio) via Hugging Face ZeroGPU.
  *
- * Roda 100% server-side proxy pra Space pública (Lightricks distilled, H200).
- * "12s (2 chunks)" = gera chunk t2v + continua com image-to-video a partir
- * do último frame e concatena (ffmpeg.wasm, sem re-encode).
+ * Proxy server-side autenticado pra Space Lightricks/LTX-2-3 (H200).
+ * "12s (2 chunks)" = gera 6s, extrai o último frame, continua com
+ * image-to-video e concatena (ffmpeg.wasm, sem re-encode).
  */
 
 type GalleryItem = {
@@ -30,21 +30,14 @@ type GalleryItem = {
   meta: string;
 };
 
-type StartResp = {
-  eventId: string;
-  fn: string;
-  tokenIndex: number;
-  tokenTotal: number;
+type GenResp = {
+  videoUrl?: string;
+  seed?: number | null;
+  tokenIndex?: number;
   error?: string;
-  retryable?: boolean;
+  kind?: string;
+  tokenTotal?: number;
 };
-
-type PollResp =
-  | { status: 'done'; videoUrl: string; seed: number | null }
-  | { status: 'error'; error: string; retryable: boolean }
-  | { status: 'pending' };
-
-const MAX_POLLS = 14; // ~10 min/chunk de teto
 
 export default function LtxVideoPage() {
   const [prompt, setPrompt] = useToolState<string>('ltx:prompt', '');
@@ -58,68 +51,44 @@ export default function LtxVideoPage() {
   const [result, setResult] = useState<GalleryItem | null>(null);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
 
-  const tokenIdxRef = useRef(0);
+  async function callGenerate(
+    fields: Record<string, string>,
+    image: Blob | null,
+    startToken: number,
+  ): Promise<{ blob: Blob; tokenIndex: number }> {
+    const fd = new FormData();
+    Object.entries(fields).forEach(([k, v]) => fd.append(k, v));
+    fd.append('startToken', String(startToken));
+    if (image) fd.append('image', image, 'frame.jpg');
 
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const resp = await fetch('/api/ltx-video/generate', {
+      method: 'POST',
+      body: fd,
+    });
+    const j = (await resp.json()) as GenResp;
 
-  /** Roda 1 chunk (start + poll com rotação de token) e devolve o Blob. */
-  async function runChunk(
-    body: Record<string, unknown>,
-    label: string,
-  ): Promise<Blob> {
-    const tokenTries = 6;
-    for (let attempt = 0; attempt < tokenTries; attempt++) {
-      setPhase(`${label} — enviando pra fila...`);
-      const sResp = await fetch('/api/ltx-video/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...body, tokenIndex: tokenIdxRef.current }),
-      });
-      const s = (await sResp.json()) as StartResp;
-      if (s.tokenTotal === 0) {
+    if (!resp.ok || !j.videoUrl) {
+      if (j.kind === 'config' || j.tokenTotal === 0) {
         throw new Error(
-          'Nenhum token Hugging Face configurado. O ZeroGPU exige auth: ' +
-            'crie tokens grátis em huggingface.co/settings/tokens e ponha ' +
-            'em HF_TOKENS (separados por vírgula) no ambiente. Vários tokens = unlimited.',
+          'Nenhum token Hugging Face configurado no servidor. ' +
+            'Crie tokens grátis em huggingface.co/settings/tokens e ponha ' +
+            'em HF_TOKENS (vários, de contas diferentes = mais quota).',
         );
       }
-      if (!sResp.ok || !s.eventId) {
-        if (s.retryable) {
-          tokenIdxRef.current++;
-          await sleep(1200);
-          continue;
-        }
-        throw new Error(s.error || 'Falha ao enfileirar.');
-      }
-
-      for (let i = 0; i < MAX_POLLS; i++) {
-        setPhase(`${label} — gerando na H200 (ZeroGPU)...`);
-        const pResp = await fetch(
-          `/api/ltx-video/result?fn=${encodeURIComponent(s.fn)}` +
-            `&eventId=${encodeURIComponent(s.eventId)}` +
-            `&tokenIndex=${tokenIdxRef.current}`,
+      if (j.kind === 'quota') {
+        throw new Error(
+          'Quota ZeroGPU esgotada em TODOS os tokens. ' +
+            (j.error || '') +
+            ' — adicione mais tokens (contas HF diferentes) ou use conta PRO.',
         );
-        const p = (await pResp.json()) as PollResp;
-        if (p.status === 'done') {
-          setPhase(`${label} — baixando vídeo...`);
-          const vr = await fetch(p.videoUrl);
-          if (!vr.ok) throw new Error('Não consegui baixar o vídeo gerado.');
-          return await vr.blob();
-        }
-        if (p.status === 'error') {
-          if (p.retryable) {
-            tokenIdxRef.current++;
-            await sleep(1200);
-            break; // sai do poll, tenta novo token (novo start)
-          }
-          throw new Error(p.error || 'Erro na geração.');
-        }
-        // pending -> continua
       }
+      throw new Error(j.error || 'Falha na geração.');
     }
-    throw new Error(
-      'Quota ZeroGPU esgotada em todos os tokens. Tente de novo em alguns minutos ou configure HF_TOKENS.',
-    );
+
+    setPhase('Baixando vídeo...');
+    const vr = await fetch(j.videoUrl);
+    if (!vr.ok) throw new Error('Não consegui baixar o vídeo gerado.');
+    return { blob: await vr.blob(), tokenIndex: j.tokenIndex ?? startToken };
   }
 
   async function handleGenerate() {
@@ -133,66 +102,45 @@ export default function LtxVideoPage() {
     setBusy(true);
     setError(null);
     setResult(null);
-    setPhase('Iniciando...');
+    setPhase('Conectando na H200 (ZeroGPU)...');
 
     try {
-      const baseBody = {
+      const baseFields = {
         prompt: txt,
-        width: res.width,
-        height: res.height,
-        duration: dur.seconds,
-        improveTexture: steps.improveTexture,
+        duration: String(dur.seconds),
+        width: String(res.width),
+        height: String(res.height),
+        enhance: steps.enhance ? '1' : '0',
       };
 
       const parts: Blob[] = [];
+      let tok = 0;
+
       for (let c = 0; c < dur.chunks; c++) {
         const label =
           dur.chunks > 1 ? `Chunk ${c + 1}/${dur.chunks}` : 'Gerando';
+        let image: Blob | null = null;
+        let fields = baseFields;
 
-        if (c === 0) {
-          const blob = await runChunk(
-            { ...baseBody, mode: 'text-to-video' },
-            label,
-          );
-          parts.push(blob);
-        } else {
-          // Continuação: último frame do chunk anterior -> i2v
+        if (c > 0) {
           setPhase(`${label} — preparando continuação...`);
           const prev = parts[parts.length - 1];
           const meta = await probeVideoMetadata(prev);
-          const at = meta ? Math.max(0, meta.durationSec - 0.1) : 3;
-          const frame = await extractFrameAt(prev, at, {
-            maxWidth: res.width,
-          });
-
-          const fd = new FormData();
-          fd.append('file', frame, 'frame.jpg');
-          fd.append('tokenIndex', String(tokenIdxRef.current));
-          const up = await fetch('/api/ltx-video/upload', {
-            method: 'POST',
-            body: fd,
-          });
-          const upJson = (await up.json()) as { path?: string; error?: string };
-          if (!up.ok || !upJson.path) {
-            throw new Error(upJson.error || 'Falha ao subir frame da continuação.');
-          }
-
-          const blob = await runChunk(
-            {
-              ...baseBody,
-              mode: 'image-to-video',
-              imageFilepath: upJson.path,
-              prompt: `${txt}. Continue the motion smoothly, seamless continuation.`,
-            },
-            label,
-          );
-          parts.push(blob);
+          const at = meta ? Math.max(0, meta.durationSec - 0.08) : 3;
+          image = await extractFrameAt(prev, at, { maxWidth: res.width });
+          fields = {
+            ...baseFields,
+            prompt: `${txt}. Seamless continuation of the previous shot, same scene, smooth continuous motion.`,
+          };
         }
+
+        setPhase(`${label} — gerando na H200 (pode levar ~1-2 min)...`);
+        const { blob, tokenIndex } = await callGenerate(fields, image, tok);
+        tok = tokenIndex; // próximo chunk começa no token que funcionou
+        parts.push(blob);
       }
 
-      setPhase(
-        parts.length > 1 ? 'Juntando os chunks...' : 'Finalizando...',
-      );
+      setPhase(parts.length > 1 ? 'Juntando os chunks...' : 'Finalizando...');
       const finalBlob =
         parts.length > 1 ? await concatVideosFast(parts) : parts[0];
 
@@ -217,7 +165,7 @@ export default function LtxVideoPage() {
   return (
     <ToolShell
       title="LTX-Video 2.3"
-      description="12 segundos. Qualidade máxima. H200 80GB via Hugging Face ZeroGPU — geração unlimited, sem gastar crédito."
+      description="Vídeo + áudio sincronizados. H200 80GB via Hugging Face ZeroGPU — geração unlimited com rotação de tokens, sem gastar crédito."
     >
       <div className="flex flex-col gap-6">
         <div>
@@ -234,12 +182,7 @@ export default function LtxVideoPage() {
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div>
             <label className="label-field">Modo</label>
-            <select
-              className="input-field"
-              value="fast"
-              disabled={busy}
-              onChange={() => {}}
-            >
+            <select className="input-field" value="fast" disabled>
               {LTX_MODES.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.label}
@@ -356,7 +299,6 @@ export default function LtxVideoPage() {
                     src={g.url}
                     controls
                     loop
-                    muted
                     className="aspect-video w-full bg-black"
                   />
                   <div className="px-3 py-2">

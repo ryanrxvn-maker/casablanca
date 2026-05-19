@@ -6,6 +6,12 @@ const nextConfig = {
   // Remove o "X-Powered-By: Next.js" header.
   poweredByHeader: false,
 
+  // @gradio/client é ESM com deps (ws/etc) que não devem ser empacotadas
+  // pelo bundler do server — roda como módulo Node externo.
+  experimental: {
+    serverComponentsExternalPackages: ['@gradio/client'],
+  },
+
   async headers() {
     return [
       {

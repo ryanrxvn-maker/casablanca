@@ -1,76 +1,61 @@
 /**
- * LTX-Video 2.3 — integração com a Space gratuita do Hugging Face (ZeroGPU).
+ * LTX-Video 2.3 — integração com a Space oficial do Hugging Face (ZeroGPU).
  *
- * "Unlimited" = nós fazemos PROXY server-side pra Space pública
- * `Lightricks/ltx-video-distilled` (Gradio 5, ZeroGPU H200). A quota do
- * ZeroGPU é por conta/IP; pra não esbarrar nela rotacionamos um pool de
- * tokens HF (env `HF_TOKENS`, separados por vírgula). Sem token, cai no
- * modo anônimo (ainda funciona, só com quota menor por IP do servidor).
+ * Space: `Lightricks/LTX-2-3` ("LTX 2.3 Distilled", H200/ZeroGPU, vídeo+áudio).
+ * Endpoint: `/generate_video` — 8 inputs (confirmado via view_api):
+ *   0 input_image    FileData|null  (opcional; usado p/ continuação i2v)
+ *   1 prompt         str
+ *   2 duration       float  (1..10s, passo 0.1)
+ *   3 enhance_prompt bool
+ *   4 seed           float
+ *   5 randomize_seed bool
+ *   6 height         int
+ *   7 width          int
+ * Retorno: [ videoFilepath, seed ]
  *
- * Esse arquivo é compartilhado client/server — só constantes e tipos puros,
- * sem dependência de Node nem de browser.
+ * "Unlimited": chamada anônima/raw-REST NÃO funciona no ZeroGPU — só via
+ * @gradio/client autenticado com token HF (handshake de quota). Cada CONTA
+ * HF tem quota diária própria de GPU; cada chamada reserva ~150s de H200.
+ * Rotacionamos um pool de tokens (`HF_TOKENS`) — idealmente de contas
+ * diferentes — e pulamos pro próximo quando um estoura a quota.
+ *
+ * Arquivo compartilhado client/server: só constantes/tipos puros.
  */
 
-export const LTX_SPACE_HOST = 'lightricks-ltx-video-distilled.hf.space';
-export const LTX_API_PREFIX = '/gradio_api';
+export const LTX_SPACE = 'Lightricks/LTX-2-3';
+export const LTX_FN = '/generate_video';
 
-/** Endpoints nomeados da Space (confirmados via /gradio_api/info). */
-export const LTX_FN = {
-  t2v: 'text_to_video',
-  i2v: 'image_to_video',
-} as const;
-
-export type LtxMode = 'text-to-video' | 'image-to-video';
-
-/**
- * Ordem EXATA dos 13 inputs do fn `text_to_video` / `image_to_video`:
- *  0 prompt              string
- *  1 negative_prompt     string
- *  2 input_image_filepath  string | FileData | null
- *  3 input_video_filepath  string | null
- *  4 height_ui           number  (256..1280, passo 32)
- *  5 width_ui            number  (256..1280, passo 32)
- *  6 mode                string  ("text-to-video" | "image-to-video")
- *  7 duration_ui         number  (0.3..8.5, passo 0.1)  -> segundos
- *  8 ui_frames_to_use    number  (9, p/ t2v fixo)
- *  9 seed_ui             integer
- * 10 randomize_seed      boolean
- * 11 ui_guidance_scale   number
- * 12 improve_texture_flag boolean
- */
-export function buildLtxData(opts: {
-  prompt: string;
-  negativePrompt?: string;
-  imageFilepath?: unknown | null;
-  width: number;
-  height: number;
-  mode: LtxMode;
-  duration: number;
-  seed?: number;
-  guidanceScale?: number;
-  improveTexture?: boolean;
-}): unknown[] {
-  return [
-    opts.prompt,
-    opts.negativePrompt ??
-      'worst quality, inconsistent motion, blurry, jittery, distorted',
-    opts.imageFilepath ?? null,
-    null,
-    clampStep(opts.height, 256, 1280, 32),
-    clampStep(opts.width, 256, 1280, 32),
-    opts.mode,
-    Math.min(8.5, Math.max(0.3, Number(opts.duration.toFixed(1)))),
-    9,
-    typeof opts.seed === 'number' ? opts.seed : 42,
-    typeof opts.seed === 'number' ? false : true,
-    opts.guidanceScale ?? 1,
-    opts.improveTexture ?? true,
-  ];
-}
-
-function clampStep(v: number, min: number, max: number, step: number): number {
+export function clampStep(
+  v: number,
+  min: number,
+  max: number,
+  step: number,
+): number {
   const c = Math.min(max, Math.max(min, v));
   return Math.round(c / step) * step;
+}
+
+/** Monta os 8 inputs na ordem exata do endpoint. */
+export function buildLtxData(opts: {
+  prompt: string;
+  duration: number;
+  width: number;
+  height: number;
+  inputImage?: unknown | null;
+  enhancePrompt?: boolean;
+  seed?: number;
+}): unknown[] {
+  const hasSeed = typeof opts.seed === 'number';
+  return [
+    opts.inputImage ?? null,
+    opts.prompt,
+    clampStep(opts.duration, 1, 10, 0.1),
+    opts.enhancePrompt ?? false,
+    hasSeed ? (opts.seed as number) : 10,
+    !hasSeed,
+    clampStep(opts.height, 256, 1536, 32),
+    clampStep(opts.width, 256, 1536, 32),
+  ];
 }
 
 /* ---------- Opções do painel (espelham a imagem de referência) ---------- */
@@ -82,42 +67,38 @@ export type ResolutionOption = {
   height: number;
 };
 
-// Todos múltiplos de 32 (exigência do slider da Space).
+// Múltiplos de 32. Default da Space é 1536×1024 (3:2).
 export const LTX_RESOLUTIONS: ResolutionOption[] = [
-  { id: '1024x576', label: '1024×576 (16:9)', width: 1024, height: 576 },
-  { id: '768x448', label: '768×448 (16:9 rápido)', width: 768, height: 448 },
-  { id: '576x1024', label: '576×1024 (9:16 vertical)', width: 576, height: 1024 },
-  { id: '768x768', label: '768×768 (1:1)', width: 768, height: 768 },
+  { id: '1280x720', label: '1280×720 (16:9)', width: 1280, height: 736 },
+  { id: '1536x1024', label: '1536×1024 (3:2 — máx)', width: 1536, height: 1024 },
+  { id: '720x1280', label: '720×1280 (9:16 vertical)', width: 736, height: 1280 },
+  { id: '1024x1024', label: '1024×1024 (1:1)', width: 1024, height: 1024 },
 ];
 
 export type DurationOption = {
   id: string;
   label: string;
-  /** segundos por chunk enviados pra Space */
+  /** segundos por chunk enviados pra Space (máx 10) */
   seconds: number;
-  /** quantos chunks gerados e concatenados (continuação i2v) */
+  /** quantos chunks gerados+concatenados (continuação i2v) */
   chunks: number;
 };
 
 export const LTX_DURATIONS: DurationOption[] = [
   { id: '4s', label: '4s (1 chunk)', seconds: 4, chunks: 1 },
   { id: '6s', label: '6s (1 chunk)', seconds: 6, chunks: 1 },
-  { id: '8s', label: '8s (1 chunk)', seconds: 8, chunks: 1 },
+  { id: '10s', label: '10s (1 chunk)', seconds: 10, chunks: 1 },
   { id: '12s', label: '12s (2 chunks)', seconds: 6, chunks: 2 },
 ];
 
-export type StepsOption = {
-  id: string;
-  label: string;
-  improveTexture: boolean;
-};
+export type StepsOption = { id: string; label: string; enhance: boolean };
 
-// A Space distilled não recebe "steps" cru — o que muda a qualidade é o
-// passo de refino (improve_texture). Mantemos o rótulo "STEPS" pra bater
-// com o painel de referência, mas mapeia pro que a Space realmente aceita.
+// A Space 2.3 distilled não recebe "steps" cru. Mantemos o rótulo "STEPS"
+// pra bater com o painel; mapeia pro enhance_prompt (melhora aderência/
+// detalhe do prompt, custo de qualidade "máxima").
 export const LTX_STEPS: StepsOption[] = [
-  { id: '50', label: '50 (máxima)', improveTexture: true },
-  { id: '30', label: '30 (rápida)', improveTexture: false },
+  { id: '50', label: '50 (máxima)', enhance: true },
+  { id: '30', label: '30 (rápida)', enhance: false },
 ];
 
 export const LTX_MODES = [{ id: 'fast', label: 'Fast (HF · grátis)' }] as const;
