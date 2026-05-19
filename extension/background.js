@@ -59,6 +59,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'HG_STUDIO_GENERATE') {
+    // VA de avatar — fluxo HeyGen Studio cena-por-cena (Mirror voice).
+    const requestId = msg.requestId;
+    handleStudioGenerate(requestId, msg.payload, sender.tab?.id).catch((err) => {
+      reportToPage(sender.tab?.id, requestId, 'HG_ERROR', {
+        error: err?.message ?? String(err),
+      });
+    });
+    sendResponse({ accepted: true });
+    return true;
+  }
+
   if (msg.type === 'HG_TEST_SESSION') {
     const requestId = msg.requestId;
     handleTestSession(requestId, sender.tab?.id).catch((err) => {
@@ -783,6 +795,42 @@ async function handleGenerate(requestId, payload, bridgeTabId) {
         'Aba HeyGen nao respondeu - recarregue a aba e tente de novo. (' +
         (e?.message ?? '') +
         ')',
+    });
+  }
+}
+
+/**
+ * VA de avatar: navega pra My Avatars e comanda runStudioJob (Studio
+ * cena-por-cena com Mirror voice). Mesmo padrao do handleGenerate, mas
+ * roteia pro HG_RUN_STUDIO_JOB. Registra em activeJobs pra os HG_TAB_*
+ * (progress/result/error) serem relayados pra page.
+ */
+async function handleStudioGenerate(requestId, payload, bridgeTabId) {
+  console.log('[DARKO LAB BG] handleStudioGenerate START reqId=', requestId);
+  const tab = await findOrCreateHeyGenTab();
+  activeJobs.set(requestId, { tabId: tab.id, payload, bridgeTabId });
+
+  reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', { stage: 'Abrindo HeyGen (My Avatars)...' });
+  // Navega fresh pra My Avatars — o content script abre o editor Studio
+  // "Build scene-by-scene" do avatar exato a partir dai.
+  console.log('[DARKO LAB BG] navegando pra /avatar pra entrar no Studio');
+  await chrome.tabs.update(tab.id, { url: 'https://app.heygen.com/avatar' });
+  await waitForTabComplete(tab.id, 30000);
+  await new Promise((r) => setTimeout(r, 3500));
+  await waitForTabReady(tab.id);
+
+  reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', { stage: 'Comandando Studio na aba HeyGen...' });
+  try {
+    await chrome.tabs.sendMessage(tab.id, {
+      type: 'HG_RUN_STUDIO_JOB',
+      requestId,
+      payload,
+    });
+    console.log('[DARKO LAB BG] HG_RUN_STUDIO_JOB despachado pra tab', tab.id);
+  } catch (e) {
+    activeJobs.delete(requestId);
+    reportToPage(bridgeTabId, requestId, 'HG_ERROR', {
+      error: 'Aba HeyGen nao respondeu - recarregue a aba e tente de novo. (' + (e?.message ?? '') + ')',
     });
   }
 }

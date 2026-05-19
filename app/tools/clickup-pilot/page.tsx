@@ -2786,6 +2786,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   /** VA: SMART MODE per task — detecta face no AD original e troca apenas
    *  segmentos com avatar visivel (b-rolls intactos). Key: taskId → boolean */
   const [vaSmartMode, setVaSmartMode] = useState<Record<string, boolean>>({});
+  /** VA (Studio): voz custom por avatar. Key: `${taskId}:${avaCode}` →
+   *  {id,name} ou null = usar a voz do proprio avatar (Mirror voice). */
+  const [vaVoiceChoice, setVaVoiceChoice] = useState<Record<string, { id: string; name: string } | null>>({});
 
   /** Extrai Drive file ID de uma URL Drive (varios formatos suportados) */
   function extractDriveFileId(input: string): string | null {
@@ -2858,9 +2861,57 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         baseAdId: va.baseAdId.replace(/\s+/g, ''),
         adVideoBytes: dl.bytes,
         avatares,
-        smartMode: !!vaSmartMode[taskId],
+        smartMode: false, // VA de avatar = Studio cena-por-cena (full swap); smart mode nao se aplica
+        studioVoiceByAva: Object.fromEntries(
+          va.avatares.map((av) => [av.avaCode, vaVoiceChoice[`${taskId}:${av.avaCode}`]?.name ?? null]),
+        ),
         onProgress: (p) => {
           setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: p.stage, percent: p.percent, message: p.message } }));
+        },
+        // === VA DE AVATAR: HeyGen Studio cena-por-cena (Mirror voice) ===
+        // 1 parte do split = 1 cena. Forca "Use avatar voice" em TODAS,
+        // play pra carregar a fala, Generate 1x. HeyGen concatena as
+        // cenas no video final (timing exato do original, sem decupagem).
+        dispatchAvatarStudio: async ({ avatarId, avatarName, avaCode, voiceName, segments }) => {
+          const { generateAvatarStudio } = await import('@/lib/heygen-extension-bridge');
+          const { pollVideosUntilReady, downloadVideoBytes } = await import('@/lib/heygen-api-direct');
+          const choice = vaAvatarChoice[`${taskId}:${avaCode}`];
+          const res = await generateAvatarStudio({
+            avatarId,
+            avatarName,
+            groupName: choice?.groupName ?? undefined,
+            voiceName: voiceName ?? null,
+            jobLabel: avaCode,
+            parts: segments.map((s) => ({
+              audioBytes: s.audioBytes,
+              filename: s.filename,
+              label: `${avaCode}_${s.label}`,
+            })),
+          }, (stage: string) => {
+            console.log(`[VA Studio ${avaCode}] ${stage}`);
+          });
+          // res = videoUrl OU 'QUEUED:<id>' OU 'QUEUED' (dispatch-only)
+          let videoUrl = '';
+          let videoId = '';
+          if (typeof res === 'string' && res.startsWith('QUEUED:')) videoId = res.slice(7);
+          else if (res === 'QUEUED') videoId = '';
+          else videoUrl = String(res || '');
+          if (!videoUrl) {
+            if (!videoId) {
+              throw new Error(`${avaCode}: Studio nao retornou video_id (HeyGen pode nao ter aceitado o Generate). Confere a aba app.heygen.com.`);
+            }
+            const statuses = await pollVideosUntilReady([videoId], {
+              intervalMs: 8000,
+              timeoutMs: 40 * 60 * 1000,
+            });
+            const st = statuses[videoId];
+            if (!st || st.status !== 'completed' || !st.videoUrl) {
+              throw new Error(`${avaCode}: video Studio nao renderizou (status=${st?.status}): ${st?.error || 'sem detalhes'}`);
+            }
+            videoUrl = st.videoUrl;
+          }
+          const bytes = await downloadVideoBytes(videoUrl);
+          return new Blob([bytes as BlobPart], { type: 'video/mp4' });
         },
         dispatchAudioTake: async ({ avatarId, audioBytes, audioFilename, label }) => {
           // MESMO fluxo do /tools/heygen-auto (modo audio):
@@ -3842,7 +3893,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       📹 Variação de Avatar · {a.vaBriefing.baseAdId}
                                     </div>
                                     <div className="text-[11px] text-text-muted">
-                                      Pipeline diferente: lipsync usa a voz do AD original (sem TTS).
+                                      Pipeline VA: HeyGen Studio cena-por-cena · 1 parte do split = 1 cena · Use avatar voice (Mirror voice) em todas · timing exato do AD original.
                                       Gera <strong className="text-cyan-300">{a.vaBriefing.avatares.length} vídeo{a.vaBriefing.avatares.length === 1 ? '' : 's'} final{a.vaBriefing.avatares.length === 1 ? '' : 'is'}</strong>
                                       {a.vaBriefing.depoimentoText ? ' + 1 depoimento' : ''}.
                                     </div>
@@ -3904,6 +3955,15 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                             setSelected={(newAv) => setVaAvatarChoice((prev) => ({ ...prev, [choiceKey]: newAv }))}
                                             disabled={!!vaPipelineState[a.taskId] && vaPipelineState[a.taskId].stage !== 'error' && vaPipelineState[a.taskId].stage !== 'done'}
                                             label={`Avatar HeyGen pra ${av.avaCode}`}
+                                          />
+                                        </div>
+                                        <div className="mt-1.5 max-w-[400px]">
+                                          <div className="mono mb-1 text-[8px] uppercase tracking-widest text-text-muted">
+                                            Voz de {av.avaCode} (Mirror voice) — padrão = voz do avatar
+                                          </div>
+                                          <CompactVoiceSelector
+                                            selected={vaVoiceChoice[choiceKey] || null}
+                                            setSelected={(v) => setVaVoiceChoice((prev) => ({ ...prev, [choiceKey]: v }))}
                                           />
                                         </div>
                                       </div>

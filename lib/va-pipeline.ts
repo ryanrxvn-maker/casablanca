@@ -56,6 +56,24 @@ export type VAPipelineInput = {
     audioFilename: string;
     label: string;
   }) => Promise<Blob>;
+  /** VA DE AVATAR — modo HeyGen Studio cena-por-cena (Mirror voice).
+   *  Quando presente, SUBSTITUI o dispatchAudioTake+mount: pra cada
+   *  avatar dispara UMA sessao Studio com TODAS as partes (1 parte =
+   *  1 cena). O HeyGen concatena as cenas no video final na ordem, com
+   *  o timing exato do audio original (sem decupagem do nosso lado).
+   *  Incompativel com smartMode (Studio gera o video cheio por avatar).
+   *  Caller injeta — pipeline nao depende do bridge direto. */
+  dispatchAvatarStudio?: (params: {
+    avatarId: string;
+    avatarName: string;
+    avaCode: string;
+    voiceName?: string | null;
+    segments: Array<{ audioBytes: Uint8Array; filename: string; label: string }>;
+  }) => Promise<Blob>;
+  /** Voz custom por avatar (opcional) — so usado no modo Studio.
+   *  Key: avaCode → voiceName. Mirror voice ja usa a voz do avatar; isso
+   *  so sobrescreve se o user escolheu voz custom. */
+  studioVoiceByAva?: Record<string, string | null>;
   /** Cancelado? */
   isCancelled?: () => boolean;
   /** Voice isolation antes do split (CRITICO pra lipsync nao ficar
@@ -276,6 +294,48 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
   const silences = detectSilences(audioBuffer);
   const boundaries = planAudioSplitBoundaries(audioBuffer.duration, silences, targetSec, minSec, maxSec);
   progress({ stage: 'split_audio', message: `Split planejado: ${boundaries.length} segmentos`, percent: 20 });
+
+  // ============== MODO STUDIO (VA DE AVATAR) ==============
+  // 1 parte = 1 cena. Pra cada avatar, dispara UMA sessao Studio com
+  // TODAS as partes; o HeyGen concatena as cenas (timing exato do
+  // audio original, sem decupagem). Substitui dispatch+mount.
+  if (input.dispatchAvatarStudio) {
+    const studioSegments = boundaries.map((b, i) => ({
+      audioBytes: sliceAudioBufferToWAV(audioBuffer, b.start, b.end),
+      filename: `parte${i + 1}.wav`,
+      label: `parte${i + 1}`,
+    }));
+    const studioItems: VAPipelineResult['items'] = [];
+    for (let ai = 0; ai < input.avatares.length; ai++) {
+      if (input.isCancelled?.()) break;
+      const av = input.avatares[ai];
+      const filename = `${input.baseAdId}-${av.avaCode}.mp4`;
+      progress({
+        stage: 'dispatch',
+        message: `Studio ${ai + 1}/${input.avatares.length} (${av.avaCode}) — ${studioSegments.length} cenas, Mirror voice...`,
+        percent: 20 + Math.round((ai / input.avatares.length) * 70),
+        avatarIdx: ai,
+      });
+      try {
+        const blob = await input.dispatchAvatarStudio({
+          avatarId: av.avatarId,
+          avatarName: av.avatarName,
+          avaCode: av.avaCode,
+          voiceName: input.studioVoiceByAva?.[av.avaCode] ?? null,
+          segments: studioSegments,
+        });
+        studioItems.push({ avaCode: av.avaCode, filename, blob });
+      } catch (e) {
+        studioItems.push({ avaCode: av.avaCode, filename, blob: null, error: (e as Error)?.message || 'falha Studio' });
+      }
+    }
+    progress({ stage: 'done', message: 'Pipeline VA (Studio) concluido', percent: 100 });
+    return {
+      items: studioItems,
+      audioSegmentCount: studioSegments.length,
+      summary: `${studioItems.filter((i) => i.blob).length}/${studioItems.length} avatares OK · Studio cena-por-cena (Mirror voice) · ${studioSegments.length} cenas/avatar`,
+    };
+  }
 
   // 3. SMART MODE: face detection nos segmentos do video original
   const smartMode = input.smartMode === true;
