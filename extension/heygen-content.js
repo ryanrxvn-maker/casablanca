@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.12.1';
+const DARKO_EXT_VERSION = '4.12.2';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -3067,10 +3067,17 @@ async function runStudioJob(requestId, payload) {
         );
       }
 
-      // FORCA Mirror voice (Use avatar voice) — requisito duro do VA
-      reportProgress(requestId, `${sceneLabel}: ativando "Use avatar voice" (Mirror voice)...`, Math.round((i / total) * 70) + 8);
+      // 1) Seleciona a voz ANTES de Mirror voice — Mirror usa a voz
+      //    que estiver bound na cena nesse momento.
       const blocks = getSceneScriptBlocks();
       const scope = blocks[blocks.length - 1] || document; // cena recem-criada = ultima
+      if (voiceName) {
+        reportProgress(requestId, `${sceneLabel}: setando voz "${voiceName}"...`, Math.round((i / total) * 70) + 7);
+        await studioTrySelectVoice(voiceName, sceneLabel);
+      }
+
+      // 2) FORCA Mirror voice (Use avatar voice) — requisito duro do VA
+      reportProgress(requestId, `${sceneLabel}: ativando "Use avatar voice" (Mirror voice)...`, Math.round((i / total) * 70) + 8);
       const mirrored = await setSceneMirrorVoice(scope, sceneLabel);
       if (!mirrored) {
         studioDumpDiag('mirror-fail');
@@ -3080,9 +3087,6 @@ async function runStudioJob(requestId, payload) {
           `Cola os logs [DARKO LAB STUDIO].`
         );
       }
-
-      // voz opcional (Mirror voice ja usa a voz do avatar)
-      await studioTrySelectVoice(voiceName, sceneLabel);
 
       // play pra carregar a fala antes do Generate
       reportProgress(requestId, `${sceneLabel}: carregando a fala (play)...`, Math.round((i / total) * 70) + 12);

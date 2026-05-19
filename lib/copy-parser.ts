@@ -836,16 +836,29 @@ export function parseVABriefing(
   const baseMatch = header.match(/^(.+?)\s*[-–—]\s*varia[cç][aã]o/i);
   const baseAdId = baseMatch ? baseMatch[1].trim() : baseAdIdOrTaskName;
 
-  // 3. Link do AD: linha "Link do ad: <filename>" ou similar
+  // 3. Link do AD: linha "Link do ad: <filename>" ou similar.
+  // Aceita filenames com acentos/cedilha (ex: AÇAFRÃO.mp4) — regex
+  // permissivo (todos chars exceto espaço/<>"|) terminando em .mp4/.mov.
   let linkAdFilename: string | null = null;
   let linkAdFileId: string | null = null;
   for (let i = vaHeaderIdx; i < Math.min(vaHeaderIdx + 15, lines.length); i++) {
     const t = lines[i].trim();
-    const m = t.match(/^link\s+do\s+ad\s*[:\-]\s*[^a-zA-Z0-9]*([a-zA-Z0-9_.\-]+\.(?:mp4|mov))/i);
+    // 1) Tenta extrair filename completo (inclui acentos)
+    const m = t.match(/^link\s+do\s+ad\s*[:\-]\s*[^\S\n]*([^\s<>"|]+?\.(?:mp4|mov))\b/i);
     if (m) {
       linkAdFilename = m[1];
-      // Tenta achar fileId nos driveLinks pelo texto
-      const dl = driveLinks.find((d) => d.text.includes(linkAdFilename!) || d.text === linkAdFilename);
+      // Match nos driveLinks por:
+      //   a) text === filename
+      //   b) text inclui filename
+      //   c) filename ASCII-normalizado match com text ASCII-normalizado
+      const norm = (s: string) => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+      const targetNorm = norm(linkAdFilename!);
+      const dl = driveLinks.find((d) =>
+        d.text === linkAdFilename ||
+        d.text.includes(linkAdFilename!) ||
+        norm(d.text).includes(targetNorm) ||
+        targetNorm.includes(norm(d.text))
+      );
       if (dl) linkAdFileId = dl.fileId;
       break;
     }
