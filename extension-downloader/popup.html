@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <div class="brand">DARKO<span>LAB</span> · Downloader</div>
+      <div id="engineDot" class="dot off" title="motor"></div>
+    </header>
+
+    <main>
+      <!-- Pareamento (so aparece se nao pareado) -->
+      <section id="pairBox" class="card hidden">
+        <p class="muted">
+          Cole o <b>código de pareamento</b> que o instalador do motor
+          mostrou:
+        </p>
+        <input id="pairToken" type="password" placeholder="código de pareamento" />
+        <div class="row">
+          <input id="pairPort" type="number" placeholder="porta (47923)" />
+          <button id="pairBtn" class="primary">Parear</button>
+        </div>
+        <p id="pairMsg" class="muted small"></p>
+      </section>
+
+      <!-- App -->
+      <section id="appBox" class="hidden">
+        <label class="lbl">Links (um por linha)</label>
+        <textarea
+          id="urls"
+          rows="4"
+          placeholder="https://youtube.com/watch?v=...
+https://tiktok.com/@user/video/...
+https://instagram.com/reel/..."
+        ></textarea>
+
+        <div class="grid">
+          <div>
+            <label class="lbl">Formato</label>
+            <div id="modes" class="chips">
+              <button data-v="video" class="chip on">Vídeo (MP4)</button>
+              <button data-v="audio-mp3" class="chip">Áudio (MP3)</button>
+              <button data-v="audio-wav" class="chip">Áudio (WAV)</button>
+            </div>
+          </div>
+          <div>
+            <label class="lbl">Qualidade</label>
+            <div id="quals" class="chips">
+              <button data-v="1080" class="chip on">1080p</button>
+              <button data-v="720" class="chip">720p</button>
+              <button data-v="480" class="chip">480p</button>
+              <button data-v="best" class="chip">Máxima</button>
+            </div>
+          </div>
+        </div>
+
+        <button id="adultBtn" class="adult hidden" title="Modo +18">+18</button>
+        <div id="adultList" class="adultlist hidden"></div>
+
+        <button id="go" class="primary big">Baixar</button>
+        <div id="jobs" class="jobs"></div>
+      </section>
+
+      <section id="noEngine" class="card hidden">
+        <p class="muted">
+          ⚠️ Motor local não encontrado. Instale o
+          <b>DarkoLab Downloader (motor)</b> e abra-o. Depois clique em
+          <a id="retry" href="#">tentar de novo</a>.
+        </p>
+      </section>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

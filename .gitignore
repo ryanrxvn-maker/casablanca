@@ -37,3 +37,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# downloader engine — artefatos de build (binarios pesados, gerados por package.mjs)
+/engine/pkg/
+/engine/dist/
+
+# scripts de teste descartaveis
+/scripts/_*.mjs
