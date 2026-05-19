@@ -175,8 +175,10 @@ async function main() {
       'set "YTDLP_PATH=%HERE%bin\\yt-dlp.exe"',
       'set "FFMPEG_PATH=%HERE%bin\\ffmpeg.exe"',
       'set "PLAYWRIGHT_BROWSERS_PATH=%HERE%ms-playwright"',
-      'set "DARKO_ALLOW_ADULT=%DARKO_ALLOW_ADULT%"',
-      '"%HERE%node.exe" "%HERE%server.cjs"',
+      'if not defined DARKO_ALLOW_ADULT set "DARKO_ALLOW_ADULT=%DARKO_ALLOW_ADULT%"',
+      'echo [%DATE% %TIME%] start >> "%HERE%engine.log"',
+      '"%HERE%node.exe" "%HERE%server.cjs" >> "%HERE%engine.log" 2>&1',
+      'echo [%DATE% %TIME%] exit %ERRORLEVEL% >> "%HERE%engine.log"',
       '',
     ].join('\r\n'),
   );
@@ -209,7 +211,8 @@ $startup = [Environment]::GetFolderPath('Startup')
 $vbs = Join-Path $dst 'run-hidden.vbs'
 @'
 Set s = CreateObject("WScript.Shell")
-s.Run """" & CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName) & "\DarkoDownloader.cmd""", 0, False
+d = CreateObject("Scripting.FileSystemObject").GetParentFolderName(WScript.ScriptFullName)
+s.Run "cmd /c """ & d & "\\DarkoDownloader.cmd""", 0, False
 '@ | Set-Content -Encoding ASCII $vbs
 $ws = New-Object -ComObject WScript.Shell
 $lnk = $ws.CreateShortcut((Join-Path $startup 'DarkoLab Downloader.lnk'))

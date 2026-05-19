@@ -27,13 +27,28 @@ async function storageSet(v) {
 }
 
 async function checkEngine() {
-  try {
-    const res = await fetch(`${engineBase()}/health`, { method: 'GET' });
-    if (!res.ok) throw new Error('health ' + res.status);
-    return await res.json();
-  } catch {
-    return null;
+  const tries = [state.port, 47923, 47924, 47925, 47926, 47927, 47928].filter(
+    (v, i, a) => v && a.indexOf(v) === i,
+  );
+  for (const p of tries) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${p}/health`, {
+        method: 'GET',
+      });
+      if (!res.ok) continue;
+      const j = await res.json();
+      if (j && j.app === 'darkolab-downloader-engine') {
+        if (p !== state.port) {
+          state.port = p;
+          await storageSet({ port: p });
+        }
+        return j;
+      }
+    } catch {
+      /* tenta proxima porta */
+    }
   }
+  return null;
 }
 
 function show(boxId) {

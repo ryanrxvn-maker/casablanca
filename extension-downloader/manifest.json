@@ -20,9 +20,21 @@
     "128": "icons/icon-128.png"
   },
   "background": { "service_worker": "bg.js" },
-  "permissions": ["downloads", "storage"],
+  "permissions": ["downloads", "storage", "notifications"],
   "host_permissions": [
     "http://127.0.0.1/*",
     "http://localhost/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.youtube.com/*",
+        "*://*.tiktok.com/*",
+        "*://*.instagram.com/*"
+      ],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
   ]
 }

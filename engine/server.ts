@@ -60,6 +60,12 @@ async function loadConfig(): Promise<Config> {
   return cfg;
 }
 
+async function persistConfig(cfg: Config): Promise<void> {
+  const file = path.join(configDir(), 'config.json');
+  await mkdir(configDir(), { recursive: true });
+  await writeFile(file, JSON.stringify(cfg, null, 2));
+}
+
 function isExtensionOrigin(origin: string | undefined): boolean {
   return (
     !!origin &&
@@ -118,33 +124,24 @@ async function main() {
       );
     }
 
-    if (req.method === 'POST' && url.pathname === '/download') {
-      // origem precisa ser extensao
-      if (!isExtensionOrigin(origin)) {
-        res.writeHead(403, { 'content-type': 'application/json' });
-        return res.end(JSON.stringify({ error: 'Origem nao permitida.' }));
-      }
-      // token
-      const auth = req.headers.authorization || '';
-      const tok = auth.replace(/^Bearer\s+/i, '');
-      if (
-        tok.length !== cfg.token.length ||
-        !crypto.timingSafeEqual(Buffer.from(tok), Buffer.from(cfg.token))
-      ) {
-        res.writeHead(401, { 'content-type': 'application/json' });
-        return res.end(JSON.stringify({ error: 'Token invalido. Pareie a extensao.' }));
-      }
-
-      let body: { url?: string; mode?: Mode; quality?: Quality; adult?: boolean };
+    function tokenOk(tok: string): boolean {
       try {
-        body = JSON.parse((await readBody(req)) || '{}');
+        return (
+          tok.length === cfg.token.length &&
+          crypto.timingSafeEqual(Buffer.from(tok), Buffer.from(cfg.token))
+        );
       } catch {
-        res.writeHead(400, { 'content-type': 'application/json' });
-        return res.end(JSON.stringify({ error: 'JSON invalido.' }));
+        return false;
       }
+    }
 
-      const adult = body.adult === true;
-      if (adult && !cfg.allowAdult) {
+    async function serve(params: {
+      url: string;
+      mode?: Mode;
+      quality?: Quality;
+      adult: boolean;
+    }) {
+      if (params.adult && !cfg.allowAdult) {
         res.writeHead(403, { 'content-type': 'application/json' });
         return res.end(
           JSON.stringify({
@@ -153,30 +150,19 @@ async function main() {
           }),
         );
       }
-
-      const result = await processDownload({
-        url: body.url || '',
-        mode: body.mode,
-        quality: body.quality,
-        adult,
-      });
-
+      const result = await processDownload(params);
       if (!result.ok) {
         res.writeHead(result.status, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ error: result.error }));
       }
-
       const cd = `attachment; filename="${result.name.replace(/"/g, '')}"`;
-
       if (result.kind === 'remote') {
         try {
           const up = await fetch(result.url, { headers: result.headers });
           if (!up.ok || !up.body) {
             await result.dispose();
             res.writeHead(502, { 'content-type': 'application/json' });
-            return res.end(
-              JSON.stringify({ error: `CDN HTTP ${up.status}` }),
-            );
+            return res.end(JSON.stringify({ error: `CDN HTTP ${up.status}` }));
           }
           res.writeHead(200, {
             'content-type': result.contentType,
@@ -201,8 +187,6 @@ async function main() {
         }
         return;
       }
-
-      // arquivo em disco
       res.writeHead(200, {
         'content-type': result.contentType,
         'content-disposition': cd,
@@ -219,15 +203,56 @@ async function main() {
         result.dispose();
       });
       stream.pipe(res);
-      return;
+    }
+
+    // POST /download — usado pelo popup (fetch + blob).
+    if (req.method === 'POST' && url.pathname === '/download') {
+      if (!isExtensionOrigin(origin)) {
+        res.writeHead(403, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Origem nao permitida.' }));
+      }
+      const tok = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+      if (!tokenOk(tok)) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(
+          JSON.stringify({ error: 'Token invalido. Pareie a extensao.' }),
+        );
+      }
+      let b: { url?: string; mode?: Mode; quality?: Quality; adult?: boolean };
+      try {
+        b = JSON.parse((await readBody(req)) || '{}');
+      } catch {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'JSON invalido.' }));
+      }
+      return serve({
+        url: b.url || '',
+        mode: b.mode,
+        quality: b.quality,
+        adult: b.adult === true,
+      });
+    }
+
+    // GET /get — usado pelo botao na pagina (chrome.downloads, sem blob
+    // no service worker). Token vai na query (localhost + segredo alto).
+    if (req.method === 'GET' && url.pathname === '/get') {
+      if (!tokenOk(url.searchParams.get('t') || '')) {
+        res.writeHead(401, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'Token invalido.' }));
+      }
+      return serve({
+        url: url.searchParams.get('url') || '',
+        mode: (url.searchParams.get('mode') as Mode) || 'video',
+        quality: (url.searchParams.get('quality') as Quality) || '1080',
+        adult: url.searchParams.get('adult') === '1',
+      });
     }
 
     res.writeHead(404, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ error: 'not found' }));
   });
 
-  server.listen(cfg.port, '127.0.0.1', () => {
-    // stdout serve pro instalador exibir o token de pareamento
+  function announce() {
     console.log(
       JSON.stringify({
         event: 'listening',
@@ -243,12 +268,48 @@ async function main() {
     console.log(
       `[DarkoLab Downloader] CODIGO DE PAREAMENTO (cole na extensao):\n  ${cfg.token}\n`,
     );
-  });
+  }
 
-  server.on('error', (e) => {
-    console.error('[DarkoLab Downloader] erro do servidor:', e);
-    process.exit(1);
-  });
+  // Tenta escutar; se a porta estiver ocupada, verifica se ja somos nos
+  // (outra instancia do motor) -> sai quieto; senao tenta as proximas
+  // portas e persiste a escolhida na config (auto-start resiliente).
+  async function tryListen(port: number, attempt: number): Promise<void> {
+    server.removeAllListeners('error');
+    server.once('error', async (e: NodeJS.ErrnoException) => {
+      if (e.code === 'EADDRINUSE') {
+        // ja existe um motor nosso nessa porta?
+        try {
+          const r = await fetch(`http://127.0.0.1:${port}/health`, {
+            signal: AbortSignal.timeout(2500),
+          });
+          const j: any = await r.json().catch(() => ({}));
+          if (j && j.app === 'darkolab-downloader-engine') {
+            console.log(
+              `[DarkoLab Downloader] ja ha um motor em ${port} — ok, saindo.`,
+            );
+            process.exit(0);
+          }
+        } catch {
+          /* porta ocupada por outra coisa */
+        }
+        if (attempt < 8) {
+          const next = port + 1;
+          cfg.port = next;
+          try {
+            await persistConfig(cfg);
+          } catch {
+            /* segue */
+          }
+          return tryListen(next, attempt + 1);
+        }
+      }
+      console.error('[DarkoLab Downloader] erro do servidor:', e);
+      process.exit(1);
+    });
+    server.listen(port, '127.0.0.1', announce);
+  }
+
+  await tryListen(cfg.port, 0);
 }
 
 main();

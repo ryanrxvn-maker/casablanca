@@ -1,0 +1,44 @@
+#darko-dl-btn {
+  position: fixed;
+  right: 18px;
+  bottom: 84px;
+  z-index: 2147483647;
+  display: none;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 999px;
+  background: #c8ff00;
+  color: #0b0d0c;
+  font: 700 13px/1 -apple-system, "Segoe UI", Roboto, sans-serif;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(0, 0, 0, 0.2);
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+#darko-dl-btn:hover { transform: translateY(-2px); filter: brightness(1.05); }
+#darko-dl-btn:active { transform: scale(0.96); }
+#darko-dl-btn:disabled { cursor: progress; opacity: 0.85; }
+#darko-dl-btn .d-ic { font-size: 15px; line-height: 1; }
+#darko-dl-btn[data-state="ok"] { background: #5ade5a; }
+#darko-dl-btn[data-state="err"] { background: #ff6b6b; color: #fff; }
+
+#darko-dl-toast {
+  position: fixed;
+  right: 18px;
+  bottom: 138px;
+  z-index: 2147483647;
+  max-width: 320px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #14181a;
+  color: #e8eae9;
+  font: 500 12px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+  border: 1px solid #2a2f2b;
+}
+#darko-dl-toast.ok { border-color: #5ade5a; }
+#darko-dl-toast.err { border-color: #ff6b6b; }
