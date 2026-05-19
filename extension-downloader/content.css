@@ -59,7 +59,7 @@
 }
 /* estados (sem texto/ícone extra — só o orbe reage) */
 #darko-dl-btn[data-state="loading"] .d-orb {
-  animation: darko-rot 1s linear infinite;
+  animation: darko-pulse 0.85s ease-in-out infinite;
 }
 #darko-dl-btn[data-state="ok"] .d-orb {
   filter: brightness(1.18) saturate(1.15);
@@ -68,9 +68,15 @@
 #darko-dl-btn[data-state="err"] .d-orb {
   filter: hue-rotate(-110deg) saturate(1.5) brightness(1.05);
 }
-@keyframes darko-rot {
-  to {
-    transform: rotate(360deg);
+@keyframes darko-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+  50% {
+    transform: scale(1.075);
+    filter: brightness(1.06);
   }
 }
 @keyframes darko-pop {

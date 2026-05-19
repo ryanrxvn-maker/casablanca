@@ -154,7 +154,7 @@
       return;
     }
     setBtn('loading');
-    toast(t.adult ? 'Enviando pro motor (+18)…' : 'Enviando pro motor…', '');
+    toast('Enviando…', '');
     let done = false;
     const timeout = setTimeout(() => {
       if (done) return;
