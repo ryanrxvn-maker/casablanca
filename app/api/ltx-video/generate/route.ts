@@ -1,6 +1,26 @@
 import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/app/api/admin/_helpers';
 import { ltxGenerate } from '@/lib/ltx-client-server';
+import { poolSize } from '@/lib/ltx-token-pool';
+
+/** Diagnóstico SEM segredo: o que ESTA função enxerga do ambiente. */
+function envDiag(): string {
+  const sha = (process.env.VERCEL_GIT_COMMIT_SHA || 'local').slice(0, 7);
+  const venv = process.env.VERCEL_ENV || 'n/a';
+  const raw =
+    process.env.HF_TOKENS ??
+    process.env.HF_TOKEN ??
+    process.env.HUGGINGFACE_TOKEN ??
+    null;
+  const which = ['HF_TOKENS', 'HF_TOKEN', 'HUGGINGFACE_TOKEN'].filter(
+    (k) => typeof process.env[k] === 'string' && process.env[k] !== '',
+  );
+  return (
+    `build=${sha} env=${venv} ` +
+    `HF=${raw === null ? 'AUSENTE' : `presente(len=${raw.length})`} ` +
+    `vars=[${which.join(',') || 'nenhuma'}] parsed=${poolSize()}`
+  );
+}
 
 /**
  * POST /api/ltx-video/generate  (multipart/form-data)
@@ -11,7 +31,8 @@ import { ltxGenerate } from '@/lib/ltx-client-server';
  */
 
 export const runtime = 'nodejs';
-export const maxDuration = 300;
+// Hobby = teto 60s. 1 geração curta cabe folgado (~10-40s na H200).
+export const maxDuration = 60;
 
 export async function POST(req: Request) {
   const guard = await requireAdmin();
@@ -57,7 +78,14 @@ export async function POST(req: Request) {
     const status =
       r.kind === 'quota' ? 429 : r.kind === 'config' ? 400 : 502;
     return NextResponse.json(
-      { error: r.error, kind: r.kind, retrySec: r.retrySec ?? null },
+      {
+        error: r.error,
+        kind: r.kind,
+        retrySec: r.retrySec ?? null,
+        // diagnóstico só quando o servidor diz que não tem token —
+        // mostra QUAL build está rodando e se o env chegou nesta função
+        detail: r.kind === 'config' ? envDiag() : undefined,
+      },
       { status },
     );
   }

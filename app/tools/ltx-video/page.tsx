@@ -31,6 +31,7 @@ type GenResp = {
   error?: string;
   kind?: string;
   retrySec?: number | null;
+  detail?: string;
 };
 
 type PoolStatus = {
@@ -83,8 +84,9 @@ export default function LtxVideoPage() {
     if (!resp.ok || !j.videoUrl) {
       if (j.kind === 'config') {
         throw new Error(
-          'Nenhum token Hugging Face configurado no servidor. ' +
-            'Configure HF_TOKENS (até 10 contas, separadas por vírgula).',
+          'Nenhum token HF visível NESTA função do servidor. ' +
+            'Configure HF_TOKENS no Vercel (escopo Project) e Redeploy. ' +
+            (j.detail ? `[diagnóstico: ${j.detail}]` : ''),
         );
       }
       if (j.kind === 'quota') {
