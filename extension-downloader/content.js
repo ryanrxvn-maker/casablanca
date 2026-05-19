@@ -83,13 +83,12 @@
 
   let btn, toastEl;
 
-  const ICONS = {
-    idle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M5 20h14"/></svg>',
-    loading:
-      '<svg class="d-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 3a9 9 0 1 0 9 9" opacity="0.95"/></svg>',
-    ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg>',
-    err: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v7"/><circle cx="12" cy="17.5" r="0.6" fill="currentColor"/><path d="M12 3l9 16H3z"/></svg>',
-  };
+  let orbUrl = '';
+  try {
+    orbUrl = chrome.runtime.getURL('icons/btn-orb.png');
+  } catch {
+    /* contexto invalido */
+  }
 
   function ensureButton() {
     if (btn) return btn;
@@ -99,8 +98,15 @@
     btn.setAttribute('aria-label', 'Baixar');
     btn.title = 'Baixar';
     btn.dataset.state = 'idle';
-    btn.innerHTML =
-      '<span class="d-ic">' + ICONS.idle + '</span><span class="d-ring"></span>';
+    const img = document.createElement('img');
+    img.className = 'd-orb';
+    img.alt = '';
+    img.draggable = false;
+    img.src = orbUrl;
+    const ring = document.createElement('span');
+    ring.className = 'd-ring';
+    btn.appendChild(ring);
+    btn.appendChild(img);
     btn.addEventListener('click', onClick);
     document.documentElement.appendChild(btn);
     return btn;
@@ -124,23 +130,18 @@
   function setBtn(state) {
     if (!btn) return;
     btn.dataset.state = state;
-    const ic = btn.querySelector('.d-ic');
     if (state === 'loading') {
-      ic.innerHTML = ICONS.loading;
       btn.title = 'Baixando…';
       btn.disabled = true;
     } else if (state === 'ok') {
-      ic.innerHTML = ICONS.ok;
       btn.title = 'Pronto!';
       btn.disabled = false;
       setTimeout(() => setBtn('idle'), 2600);
     } else if (state === 'err') {
-      ic.innerHTML = ICONS.err;
       btn.title = 'Erro';
       btn.disabled = false;
       setTimeout(() => setBtn('idle'), 3000);
     } else {
-      ic.innerHTML = ICONS.idle;
       btn.title = 'Baixar';
       btn.disabled = false;
     }

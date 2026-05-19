@@ -24,7 +24,13 @@ const FILES = [
   'popup.css',
   'popup.js',
 ];
-const ICONS = ['icon-16.png', 'icon-32.png', 'icon-48.png', 'icon-128.png'];
+const ICONS = [
+  'icon-16.png',
+  'icon-32.png',
+  'icon-48.png',
+  'icon-128.png',
+  'btn-orb.png',
+];
 
 export async function GET() {
   try {
