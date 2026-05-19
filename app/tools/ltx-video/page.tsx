@@ -137,29 +137,51 @@ export default function LtxVideoPage() {
       for (let c = 0; c < dur.chunks; c++) {
         const label =
           dur.chunks > 1 ? `Chunk ${c + 1}/${dur.chunks}` : 'Gerando';
-        let image: Blob | null = null;
-        let fields = baseFields;
 
-        if (c > 0) {
+        if (c === 0) {
+          // Chunk 1 = text-to-video puro (caminho COMPROVADO). Se falhar
+          // aqui, não há vídeo nenhum — erro real pro usuário.
+          setPhase(`${label} — gerando na H200 (pode levar ~1-2 min)...`);
+          parts.push(await callGenerate(baseFields, null));
+          continue;
+        }
+
+        // Continuação (i2v). Blindado: se falhar, NÃO perde o vídeo —
+        // entrega o que já gerou (degrada com elegância).
+        try {
           setPhase(`${label} — preparando continuação...`);
           const prev = parts[parts.length - 1];
           const meta = await probeVideoMetadata(prev);
           const at = meta ? Math.max(0, meta.durationSec - 0.08) : 3;
-          image = await extractFrameAt(prev, at, { maxWidth: res.width });
-          fields = {
-            ...baseFields,
-            prompt: `${txt}. Seamless continuation of the previous shot, same scene, smooth continuous motion.`,
-          };
+          const image = await extractFrameAt(prev, at, { maxWidth: res.width });
+          setPhase(`${label} — gerando na H200 (pode levar ~1-2 min)...`);
+          parts.push(
+            await callGenerate(
+              {
+                ...baseFields,
+                prompt: `${txt}. Seamless continuation of the previous shot, same scene, smooth continuous motion.`,
+              },
+              image,
+            ),
+          );
+        } catch (contErr) {
+          console.warn('[ltx] continuação falhou, usando o que já tem:', contErr);
+          setPhase('Continuação falhou — finalizando com o que gerou...');
+          break;
         }
-
-        setPhase(`${label} — gerando na H200 (pode levar ~1-2 min)...`);
-        const blob = await callGenerate(fields, image);
-        parts.push(blob);
       }
 
+      if (parts.length === 0) throw new Error('Nenhum chunk gerado.');
+
       setPhase(parts.length > 1 ? 'Juntando os chunks...' : 'Finalizando...');
-      const finalBlob =
-        parts.length > 1 ? await concatVideosFast(parts) : parts[0];
+      let finalBlob: Blob;
+      try {
+        finalBlob =
+          parts.length > 1 ? await concatVideosFast(parts) : parts[0];
+      } catch (concatErr) {
+        console.warn('[ltx] concat falhou, entregando o 1º chunk:', concatErr);
+        finalBlob = parts[0];
+      }
 
       const url = URL.createObjectURL(finalBlob);
       const item: GalleryItem = {
