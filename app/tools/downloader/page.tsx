@@ -67,10 +67,51 @@ export default function DownloaderPage() {
     'downloader:quality',
     '1080',
   );
-  const [installHidden, setInstallHidden] = useToolState<boolean>(
-    'downloader:installHidden',
-    false,
-  );
+  // Detecção automática da extensão (igual Magnific/HeyGen): se a
+  // extensão estiver instalada ela responde DL_PONG -> mostramos a
+  // pílula verde no lugar das instruções.
+  const [ext, setExt] = useState<{
+    connected: boolean;
+    version?: string;
+    engine?: boolean;
+  }>({ connected: false });
+  const [reping, setReping] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    function onMsg(e: MessageEvent) {
+      const d = e.data;
+      if (!d || d.source !== 'darko-dl-ext' || d.type !== 'DL_PONG') return;
+      if (!alive) return;
+      setExt({
+        connected: true,
+        version: d.version,
+        engine: d.engine === true,
+      });
+      setReping(false);
+    }
+    window.addEventListener('message', onMsg);
+    const ping = () =>
+      window.postMessage({ source: 'darko-dl', type: 'DL_PING' }, '*');
+    ping();
+    // re-tenta: a bridge pode anexar logo após o load
+    const t1 = setTimeout(ping, 600);
+    const t2 = setTimeout(ping, 1800);
+    const t3 = setTimeout(ping, 3500);
+    return () => {
+      alive = false;
+      window.removeEventListener('message', onMsg);
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
+  }, []);
+
+  function testarMotor() {
+    setReping(true);
+    window.postMessage({ source: 'darko-dl', type: 'DL_TEST' }, '*');
+    setTimeout(() => setReping(false), 4000);
+  }
   const [jobs, setJobs] = useState<Job[]>([]);
   const [running, setRunning] = useState(false);
   // Modo +18 — visivel/utilizavel SO por admin. O gate real e no
@@ -187,16 +228,37 @@ export default function DownloaderPage() {
       description="Baixe vídeos, áudio ou imagens do YouTube, Instagram, TikTok e Pinterest. Downloads paralelos e rápidos — cole um ou vários links (um por linha)."
     >
       <div className="flex flex-col gap-6">
-        {/* Extensão + Motor: clica → baixa, no PC do usuário, sem servidor.
-            Dispensável: some quando o usuário já instalou. */}
-        {installHidden ? (
-          <button
-            type="button"
-            onClick={() => setInstallHidden(false)}
-            className="mono self-start text-[10px] text-text-muted underline-offset-2 hover:text-lime hover:underline"
-          >
-            Extensão + Motor (instalar / ver passo a passo)
-          </button>
+        {/* Extensão detectada -> pílula verde (igual Magnific/HeyGen).
+            Não detectada -> instruções de instalação. */}
+        {ext.connected ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-3 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2 w-2 shrink-0">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
+              </span>
+              <span className="text-lime">
+                Extensão DARKO LAB Downloader v{ext.version}
+              </span>
+              <span
+                className={`mono ml-2 rounded-full px-2 py-0.5 text-[10px] uppercase ${
+                  ext.engine
+                    ? 'bg-lime/15 text-lime'
+                    : 'bg-red-500/15 text-red-300'
+                }`}
+              >
+                {ext.engine ? '✓ motor online' : '✗ motor offline'}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={testarMotor}
+              disabled={reping}
+              className="rounded-md border border-line-strong bg-bg-soft px-3 py-1 text-[11px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime disabled:opacity-50"
+            >
+              {reping ? 'Testando...' : 'Testar motor'}
+            </button>
+          </div>
         ) : (
         <div className="rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-4">
           <div className="flex items-center gap-2">
@@ -204,15 +266,6 @@ export default function DownloaderPage() {
             <strong className="flex-1 text-sm text-lime">
               Extensão + Motor (clica e baixa em qualquer site, no seu PC)
             </strong>
-            <button
-              type="button"
-              aria-label="Ocultar"
-              title="Já instalei — ocultar este aviso"
-              onClick={() => setInstallHidden(true)}
-              className="shrink-0 rounded-full px-2 py-0.5 text-xs text-text-muted transition-colors hover:bg-lime/10 hover:text-lime"
-            >
-              ✕
-            </button>
           </div>
           <p className="mono mt-1 text-[11px] text-text-muted">
             Instala uma vez. Aí aparece um botão <b>Baixar</b> direto nos

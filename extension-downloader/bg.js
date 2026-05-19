@@ -83,4 +83,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     startDownload(msg).then(sendResponse);
     return true; // resposta assíncrona
   }
+  if (msg && msg.type === 'darko-ping-engine') {
+    (async () => {
+      const { port } = await getCfg();
+      const live = await findEnginePort(port || 47923);
+      sendResponse({ connected: !!live, port: live || port || 47923 });
+    })();
+    return true;
+  }
 });

@@ -17,6 +17,7 @@ export const maxDuration = 30;
 const FILES = [
   'manifest.json',
   'bg.js',
+  'bridge.js',
   'content.js',
   'content.css',
   'popup.html',

@@ -23,9 +23,19 @@
   "permissions": ["downloads", "storage", "notifications"],
   "host_permissions": [
     "http://127.0.0.1/*",
-    "http://localhost/*"
+    "http://localhost/*",
+    "https://*.vercel.app/*"
   ],
   "content_scripts": [
+    {
+      "matches": [
+        "https://*.vercel.app/*",
+        "http://localhost/*",
+        "http://localhost:*/*"
+      ],
+      "js": ["bridge.js"],
+      "run_at": "document_start"
+    },
     {
       "matches": [
         "*://*.youtube.com/*",
