@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.10.0';
+const DARKO_EXT_VERSION = '4.12.2';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -84,6 +84,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg && msg.type === 'HG_RUN_JOB') {
     runJob(msg.requestId, msg.payload).catch((err) => {
+      reportError(msg.requestId, err?.message ?? String(err));
+    });
+    return false;
+  }
+  if (msg && msg.type === 'HG_RUN_STUDIO_JOB') {
+    // VA de avatar: fluxo HeyGen Studio cena-por-cena com Mirror voice.
+    // NAO usar pra task normal — esse path e exclusivo de Variacao de Avatar.
+    runStudioJob(msg.requestId, msg.payload).catch((err) => {
       reportError(msg.requestId, err?.message ?? String(err));
     });
     return false;
@@ -2298,6 +2306,889 @@ async function proxyApiFetch({ url, method = 'GET', headers = {}, bodyText, body
     }
   }
   return { status: r.status, ok: r.ok, body: data, _uploadedBytes: uploadedBytes };
+}
+
+
+/* ================================================================== *
+ *  HEYGEN STUDIO — VA DE AVATAR (cena-por-cena, Mirror voice)         *
+ * ------------------------------------------------------------------ *
+ *  Fluxo EXCLUSIVO de Variacao de Avatar. NAO usar pra task normal.   *
+ *  background.js navega pra /avatar (My Avatars). Aqui a gente:       *
+ *   1. Abre o editor Studio "Build scene-by-scene" do avatar exato    *
+ *      (match por avatarId na img do card — avatar ja vem bound na    *
+ *      Scene 1, entao NUNCA arriscamos avatar errado).                *
+ *   2. Pra cada parte de audio: cria cena (Add scene a partir da 2a), *
+ *      upa parteN.wav, forca "Use avatar voice" => Mirror voice,      *
+ *      (opcional) seta a voz, da PLAY pra carregar a fala.            *
+ *   3. Verifica que TODAS as cenas estao em Mirror voice (aborta se   *
+ *      qualquer uma ficou Recorded — requisito duro do VA).           *
+ *   4. Clica Generate 1x. Captura video_id via interceptor.           *
+ *   5. Retorna QUEUED:<id> (dispatch-only). A page faz poll+download. *
+ *                                                                    *
+ *  HeyGen ja concatena as cenas no video final na ordem — o timing    *
+ *  do audio original e preservado (1 parte = 1 cena, sem decupagem).  *
+ * ================================================================== */
+
+function studioLog(...a) { console.log('[DARKO LAB STUDIO]', ...a); }
+function studioWarn(...a) { console.warn('[DARKO LAB STUDIO]', ...a); }
+
+/** Click CONFIAVEL (isTrusted=true) via CDP Input.dispatchMouseEvent.
+ *  Usado pros botoes que so respondem a eventos confiaveis (Add audio,
+ *  linha da biblioteca, pilula Use avatar voice no create-v4). */
+async function cdpClick(x, y) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: 'HG_CDP_CLICK', x: Math.round(x), y: Math.round(y) }, (res) => {
+      resolve(res || { ok: false, error: 'no response' });
+    });
+  });
+}
+async function cdpClickEl(el, label) {
+  if (!el) { studioWarn(`cdpClickEl ${label || ''}: elemento nulo`); return false; }
+  try { el.scrollIntoView({ block: 'center', behavior: 'instant' }); } catch {}
+  await sleep(150);
+  const r = el.getBoundingClientRect();
+  if (r.width === 0 || r.height === 0) { studioWarn(`cdpClickEl ${label || ''}: rect zero`); return false; }
+  const x = r.left + r.width / 2, y = r.top + r.height / 2;
+  const res = await cdpClick(x, y);
+  if (!res.ok) studioWarn(`cdpClickEl ${label || ''}: falhou - ${res.error}`);
+  else studioLog(`cdpClick ${label || ''} @${Math.round(x)},${Math.round(y)} OK`);
+  return !!res.ok;
+}
+async function cdpDetachBg() {
+  try {
+    await new Promise((r) => chrome.runtime.sendMessage({ type: 'HG_CDP_DETACH' }, () => r()));
+  } catch {}
+}
+
+function studioDumpDiag(tag) {
+  try {
+    const btns = Array.from(document.querySelectorAll('button, [role="button"]'))
+      .filter((b) => b.offsetParent !== null)
+      .slice(0, 40)
+      .map((b) => ((b.textContent || '').trim() || b.getAttribute('aria-label') || '').slice(0, 32))
+      .filter(Boolean);
+    studioWarn(`diag[${tag}] url=${location.href}`);
+    studioWarn(`diag[${tag}] botoes visiveis:`, btns);
+  } catch {}
+}
+
+/** True se ja estamos dentro do editor Studio (painel Script + cenas). */
+function isInStudioEditor() {
+  const txt = (document.body.textContent || '');
+  const hasScript = /(^|\s)Script(\s|$)/.test(txt) || !!document.querySelector('[class*="scene" i], [data-testid*="scene" i]');
+  const hasAddScene = !!findAddSceneButton();
+  const hasGen = !!findStudioGenerateButton();
+  return (hasScript && (hasAddScene || hasGen));
+}
+
+/** Botao "Add scene" / "Adicionar cena" no rodape do painel Script. */
+function findAddSceneButton() {
+  const all = Array.from(document.querySelectorAll('button, [role="button"], div[tabindex]'));
+  for (const el of all) {
+    if (el.offsetParent === null || el.disabled) continue;
+    const t = (el.textContent || '').trim().toLowerCase();
+    if (!t || t.length > 40) continue;
+    if (
+      t === 'add scene' || t === 'adicionar cena' ||
+      t === '+ add scene' || t.includes('add scene') || t.includes('adicionar cena')
+    ) return el;
+  }
+  return null;
+}
+
+/** Botao Generate do Studio: topo-direita, texto "Generate" (NAO
+ *  "Render Scene", NAO o play ▶). Pill largo (>=70px). */
+function findStudioGenerateButton() {
+  const W = window.innerWidth;
+  const cands = [];
+  for (const b of document.querySelectorAll('button, [role="button"]')) {
+    if (b.disabled || b.offsetParent === null) continue;
+    const r = b.getBoundingClientRect();
+    if (r.width < 60 || r.height < 22 || r.height > 90) continue;
+    const t = (b.textContent || '').trim().toLowerCase();
+    const al = (b.getAttribute('aria-label') || '').toLowerCase();
+    const dt = (b.getAttribute('data-testid') || '').toLowerCase();
+    if (t.includes('render scene') || t.includes('renderizar cena')) continue;
+    let score = 0;
+    if (t === 'generate' || t === 'gerar') score += 100;
+    else if (t.startsWith('generate') || t.startsWith('gerar')) score += 70;
+    if (al.includes('generate') || dt.includes('generate')) score += 60;
+    if (r.top < window.innerHeight * 0.25) score += 30;     // topo
+    score += Math.round(((r.right) / W) * 20);              // mais a direita
+    if (score > 0) cands.push({ b, score });
+  }
+  if (!cands.length) return null;
+  cands.sort((x, y) => y.score - x.score);
+  return cands[0].b;
+}
+
+/** Lista os blocos de cena no painel Script (esquerda). Heuristica:
+ *  blocos que contem um chip de audio (parteN.wav / mm:ss) e/ou o
+ *  toggle de voz (Recorded voice / Mirror voice). */
+function getSceneScriptBlocks() {
+  const blocks = [];
+  const seen = new Set();
+  const toggles = Array.from(document.querySelectorAll('button, [role="button"], span, div'))
+    .filter((el) => {
+      if (el.offsetParent === null) return false;
+      const t = (el.textContent || '').trim().toLowerCase();
+      return t === 'recorded voice' || t === 'mirror voice' || t === 'use avatar voice';
+    });
+  for (const tog of toggles) {
+    // sobe ate um container "cena" razoavel (tem o chip de audio OU numero)
+    let p = tog;
+    for (let i = 0; i < 8 && p && p !== document.body; i++) {
+      p = p.parentElement;
+      if (!p) break;
+      const txt = (p.textContent || '');
+      if (/\.wav|\.mp3|\d{1,2}:\d{2}/.test(txt)) {
+        const r = p.getBoundingClientRect();
+        if (r.height > 40 && r.height < 600) break;
+      }
+    }
+    const container = p || tog.parentElement || tog;
+    const key = container;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    blocks.push(container);
+  }
+  return blocks;
+}
+
+/** Acha o toggle de modo de voz dentro de um escopo (ou doc todo). */
+function findVoiceModeToggle(scope) {
+  const root = scope || document;
+  const cand = Array.from(root.querySelectorAll('button, [role="button"], div[tabindex], span'));
+  let best = null, bestN = Infinity;
+  for (const el of cand) {
+    if (el.offsetParent === null) continue;
+    const t = (el.textContent || '').trim().toLowerCase();
+    if (!t || t.length > 30) continue;
+    const isToggle = t === 'recorded voice' || t === 'mirror voice' ||
+      ((t.includes('recorded voice') || t.includes('mirror voice')) && t.length < 24);
+    if (!isToggle) continue;
+    // menor elemento (label puro) — evita pegar container grande
+    const n = el.querySelectorAll('*').length;
+    if (n < bestN) { bestN = n; best = el; }
+  }
+  if (!best) return null;
+  let c = best;
+  for (let i = 0; i < 4 && c && c !== document.body; i++) {
+    if (c.tagName === 'BUTTON' || c.getAttribute('role') === 'button' ||
+        window.getComputedStyle(c).cursor.includes('pointer')) return c;
+    c = c.parentElement;
+  }
+  return best;
+}
+
+/** Garante que UMA cena (scope) esta em "Mirror voice".
+ *  Se estiver "Recorded voice": clica o toggle e seleciona a opcao
+ *  "Use avatar voice" (popover pode estar portalado fora do scope).
+ *  Retorna true se confirmou Mirror voice. */
+async function setSceneMirrorVoice(scope, sceneLabel) {
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    const tog = findVoiceModeToggle(scope) || findVoiceModeToggle(document);
+    if (!tog) {
+      studioWarn(`${sceneLabel}: toggle de voz nao encontrado (tentativa ${attempt})`);
+      await sleep(700);
+      continue;
+    }
+    const cur = (tog.textContent || '').trim().toLowerCase();
+    if (cur.includes('mirror voice')) {
+      studioLog(`${sceneLabel}: ja esta em Mirror voice ✓`);
+      return true;
+    }
+    studioLog(`${sceneLabel}: esta em "${cur}" — forcando Use avatar voice (tentativa ${attempt}) via CDP`);
+    await cdpClickEl(tog, 'voice-toggle');
+    await sleep(900);
+    // procura a opcao "Use avatar voice" / "Mirror voice" num popover/menu
+    // (HeyGen portala menus no body, entao busca global).
+    let opt = null, optN = Infinity;
+    const PHRASES = ['use avatar voice', 'mirror voice', 'avatar voice', 'usar voz do avatar', 'voz do avatar'];
+    const opts = Array.from(document.querySelectorAll('[role="menuitem"], [role="option"], button, li, div[tabindex], div, span, p'));
+    for (const o of opts) {
+      if (o.offsetParent === null) continue;
+      const t = (o.textContent || '').trim().toLowerCase();
+      if (!t || t.length > 40) continue;
+      const hit = PHRASES.some((p) => t === p || t.startsWith(p));
+      if (!hit) continue;
+      const n = o.querySelectorAll('*').length; // menor elemento = label puro
+      if (n < optN) { optN = n; opt = o; }
+    }
+    if (opt) {
+      let c = opt;
+      for (let i = 0; i < 4 && c && c !== document.body; i++) {
+        if (c.tagName === 'BUTTON' || c.getAttribute('role') === 'menuitem' ||
+            c.getAttribute('role') === 'option' || window.getComputedStyle(c).cursor.includes('pointer')) break;
+        c = c.parentElement;
+      }
+      await cdpClickEl(c || opt, 'use-avatar-voice');
+      await sleep(1100);
+    } else {
+      // toggle pode ser switch direto (sem menu) — re-checa
+      studioLog(`${sceneLabel}: sem menu visivel, assumindo toggle direto`);
+      await sleep(600);
+    }
+    // re-verifica
+    const tog2 = findVoiceModeToggle(scope) || findVoiceModeToggle(document);
+    const cur2 = tog2 ? (tog2.textContent || '').trim().toLowerCase() : '';
+    if (cur2.includes('mirror voice')) {
+      studioLog(`${sceneLabel}: confirmado Mirror voice ✓`);
+      return true;
+    }
+    // fecha eventual popover aberto antes de retentar
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await sleep(500);
+  }
+  return false;
+}
+
+/** Da play na cena ativa pra HeyGen "carregar a fala" do avatar antes
+ *  do Generate. Best-effort: clica o ▶ do scope e espera o loading
+ *  sumir. */
+async function playStudioScene(scope, sceneLabel) {
+  const root = scope || document;
+  let playBtn = null;
+  for (const b of root.querySelectorAll('button, [role="button"]')) {
+    if (b.offsetParent === null) continue;
+    const al = (b.getAttribute('aria-label') || '').toLowerCase();
+    const t = (b.textContent || '').trim().toLowerCase();
+    const svg = b.querySelector('svg');
+    const svgHtml = svg ? svg.innerHTML.toLowerCase() : '';
+    const looksPlay =
+      al.includes('play') || al.includes('preview') || t === 'play' ||
+      svgHtml.includes('polygon') || svgHtml.includes('m8 5v14') || svgHtml.includes('play');
+    if (looksPlay) {
+      const r = b.getBoundingClientRect();
+      if (r.width > 10 && r.width < 80 && r.height > 10 && r.height < 80) { playBtn = b; break; }
+    }
+  }
+  if (!playBtn) {
+    // fallback: barra de transporte do preview central
+    playBtn = Array.from(document.querySelectorAll('button, [role="button"]')).find((b) => {
+      if (b.offsetParent === null) return false;
+      const al = (b.getAttribute('aria-label') || '').toLowerCase();
+      return al === 'play' || al.includes('play scene') || al.includes('preview');
+    }) || null;
+  }
+  if (!playBtn) {
+    studioWarn(`${sceneLabel}: botao play nao achado — seguindo (HeyGen pode carregar no Generate)`);
+    await sleep(1500);
+    return;
+  }
+  studioLog(`${sceneLabel}: play pra carregar a fala via CDP...`);
+  await cdpClickEl(playBtn, 'play scene');
+  // espera o loading/spinner sumir (best-effort) + buffer
+  const deadline = Date.now() + 30000;
+  await sleep(1500);
+  while (Date.now() < deadline) {
+    const loading = Array.from(document.querySelectorAll('*')).some((el) => {
+      if (el.offsetParent === null) return false;
+      const t = (el.textContent || '').trim().toLowerCase();
+      return t === 'loading...' || t === 'loading' || t === 'generating audio' || t === 'carregando...';
+    });
+    const spinner = document.querySelector('[class*="spinner" i]:not([style*="display: none"]), [role="progressbar"]');
+    if (!loading && !spinner) break;
+    await sleep(800);
+  }
+  await sleep(1500);
+}
+
+/** Aguarda o editor Studio cena-por-cena montar. O background ja navegou
+ *  DIRETO pra URL do editor (app.heygen.com/create-v4/draft?avatarGroup
+ *  =<g>&defaultLookId=<look>&fromCreateButton=true) — o avatar ja vem
+ *  bound na Scene 1, sem caça a menu/DOM. So esperamos a UI ficar pronta
+ *  (painel Script + Add scene/Generate). Validado em teste real. */
+async function enterStudioForAvatar(avatarId, avatarName, groupName) {
+  await dismissAnnouncementModals();
+  const ok = await waitForOrNull(() => isInStudioEditor(), 45000, 800);
+  if (!ok) {
+    studioDumpDiag('enter-editor-timeout');
+    throw new Error(
+      'Editor Studio (create-v4) nao montou em 45s. Confere se o avatar/grupo ' +
+      'existe na conta HeyGen. Cola os logs [DARKO LAB STUDIO].'
+    );
+  }
+  // editor pesado (canvas) — folga extra pra cena 1 + avatar bound montarem
+  await sleep(3500);
+  // GUARDA: modal "Plans that fit your scale" e upsell que bloqueia a
+  // UI. Aborta em vez de tentar (clicar "Switch" pode cobrar plano).
+  studioAbortIfPaywall('editor pronto');
+  studioLog('editor Studio pronto (entrada via URL direta)');
+}
+
+/** Se o HeyGen abriu o paywall "Plans that fit your scale" — aborta com
+ *  mensagem clara em vez de tentar bypass (auto-click "Switch" pode
+ *  incorrer custo). User precisa fechar manualmente uma vez e re-rodar. */
+function studioAbortIfPaywall(where) {
+  const dlg = [...document.querySelectorAll('[role="dialog"]')].find((d) =>
+    d.offsetParent !== null && /Plans that fit your scale/i.test(d.textContent || ''));
+  if (!dlg) return;
+  studioDumpDiag('plans-paywall:' + where);
+  throw new Error(
+    'PAYWALL: HeyGen abriu o modal "Plans that fit your scale" e bloqueou ' +
+    'a UI (' + where + '). FECHA esse modal MANUALMENTE na aba app.heygen.com ' +
+    '(X ou clica fora) e re-dispara o VA. Se aparecer toda vez, sua conta ' +
+    'pode nao ter o plano que destrava Voice Mirroring nesse avatar — ' +
+    'confere em app.heygen.com/account/plans.'
+  );
+}
+
+/** Acha o controle "Motion Engine" do painel direito do Studio
+ *  (botao/dropdown que mostra "Avatar III/IV/V"). Sem restricao de
+ *  posicao vertical (painel direito varia). Prefere o que estiver
+ *  perto de um rotulo "Motion Engine". */
+function findStudioMotorControl() {
+  const cands = [];
+  for (const el of document.querySelectorAll('button, [role="button"], div[tabindex], div, span, a')) {
+    if (el.offsetParent === null || el.disabled) continue;
+    const t = (el.textContent || '').trim();
+    if (!/^Avatar (III|IV|V)\b/.test(t)) continue;
+    if (t.length > 60) continue;
+    if (el.querySelectorAll('*').length > 6) continue;
+    const r = el.getBoundingClientRect();
+    if (r.width < 40 || r.height < 16 || r.width > 420) continue;
+    const style = window.getComputedStyle(el);
+    const clickable = style.cursor.includes('pointer') || el.tagName === 'BUTTON' ||
+      el.getAttribute('role') === 'button' || (el.className || '').includes('cursor-pointer');
+    // bonus se houver "Motion Engine" por perto (ancestral ate 5 niveis)
+    let nearLabel = false;
+    let p = el;
+    for (let i = 0; i < 6 && p && p !== document.body; i++) {
+      p = p.parentElement;
+      if (p && /motion engine|motor/i.test(p.textContent || '') && (p.textContent || '').length < 400) { nearLabel = true; break; }
+    }
+    cands.push({ el, clickable, nearLabel, right: r.right });
+  }
+  if (!cands.length) return null;
+  cands.sort((a, b) =>
+    (a.nearLabel !== b.nearLabel ? (a.nearLabel ? -1 : 1)
+      : a.clickable !== b.clickable ? (a.clickable ? -1 : 1)
+      : b.right - a.right));
+  return cands[0].el;
+}
+
+/** Garante Avatar III na cena ativa (NUNCA IV/V — protege creditos
+ *  pagos). Se nao confirmar III, retorna false → runStudioJob ABORTA
+ *  antes do Generate. */
+async function setStudioMotorAvatarIII(sceneLabel) {
+  const target = 'Avatar III';
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const ctrl = findStudioMotorControl();
+    if (!ctrl) {
+      studioWarn(`${sceneLabel}: controle Motion Engine nao achado (tentativa ${attempt})`);
+      await sleep(800);
+      continue;
+    }
+    const cur = (ctrl.textContent || '').trim();
+    if (/^Avatar III\b/.test(cur)) {
+      studioLog(`${sceneLabel}: Motion Engine ja em Avatar III ✓`);
+      return true;
+    }
+    studioLog(`${sceneLabel}: Motion Engine em "${cur}" — trocando pra Avatar III (tentativa ${attempt}) via CDP`);
+    await cdpClickEl(ctrl, 'motor-ctrl');
+    await sleep(900);
+    // procura item "Avatar III" no menu (portalado no body).
+    // VALIDADO EM TESTE REAL: o menu lista "Avatar V/IV/III" com
+    // descricao concatenada ("Avatar IIIPremium..."). Pega o MENOR
+    // elemento cujo texto COMECA com "Avatar III" (o label puro tem
+    // children=0 e texto exatamente "Avatar III"). "Avatar IV/V" nao
+    // dao falso-positivo (nao comecam com "Avatar III").
+    let item = null, bestN = Infinity;
+    for (const o of document.querySelectorAll('[role="menuitem"], [role="option"], li, button, div[tabindex], div, span, p')) {
+      if (o.offsetParent === null) continue;
+      const t = (o.textContent || '').trim();
+      if (!t.startsWith('Avatar III')) continue;
+      const n = o.querySelectorAll('*').length;
+      if (n < bestN) { bestN = n; item = o; }
+    }
+    if (item) {
+      let c = item;
+      for (let i = 0; i < 4 && c && c !== document.body; i++) {
+        if (c.tagName === 'BUTTON' || c.getAttribute('role') === 'menuitem' ||
+            c.getAttribute('role') === 'option' || window.getComputedStyle(c).cursor.includes('pointer')) break;
+        c = c.parentElement;
+      }
+      await cdpClickEl(c || item, 'Avatar III');
+      await sleep(1100);
+    } else {
+      studioWarn(`${sceneLabel}: item "Avatar III" nao apareceu no menu`);
+    }
+    const after = findStudioMotorControl();
+    if (after && /^Avatar III\b/.test((after.textContent || '').trim())) {
+      studioLog(`${sceneLabel}: confirmado Avatar III ✓`);
+      return true;
+    }
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await sleep(500);
+  }
+  return false;
+}
+
+/** Varre a UI inteira: se QUALQUER coisa visivel mostrar "Avatar IV"
+ *  ou "Avatar V", aborta (nao pode gerar pago em VA). */
+function studioHasPaidEngineVisible() {
+  for (const el of document.querySelectorAll('button, [role="button"], div, span, a')) {
+    if (el.offsetParent === null) continue;
+    const t = (el.textContent || '').trim();
+    if (t.length > 60) continue;
+    if (/^Avatar (IV|V)\b/.test(t)) {
+      // ignora se for so um item de menu aberto (nao o estado atual)
+      const role = el.getAttribute('role');
+      if (role === 'menuitem' || role === 'option') continue;
+      return t;
+    }
+  }
+  return null;
+}
+
+/** Botao "Upload audio" do Studio (VALIDADO EM TESTE REAL: texto
+ *  exatamente "Upload audio", <button> no topo do painel Script). */
+function findStudioUploadAudioBtn() {
+  const cands = Array.from(document.querySelectorAll('button, [role="button"], div[tabindex]'));
+  // 1) match exato "Upload audio"
+  for (const e of cands) {
+    if (e.offsetParent === null) continue;
+    if (/^upload audio$/i.test((e.textContent || '').trim())) return e;
+  }
+  // 2) contem "Upload audio" e e curto (evita pegar texto de modal)
+  for (const e of cands) {
+    if (e.offsetParent === null) continue;
+    const t = (e.textContent || '').trim();
+    if (/upload audio/i.test(t) && t.length < 24) return e;
+  }
+  // 3) legado Quick Create ("Upload")
+  return findUploadAudioToggle();
+}
+
+/** Injeta o File via DataTransfer + drop events.
+ *  VALIDADO AO VIVO no create-v4: a sequencia "input.files set+change"
+ *  SOZINHA nao dispara o upload real; a combinacao com DragEvent(drop)
+ *  na dropzone aciona o S3/asset upload (confirmado por sniff:
+ *  2 PUTs S3 + 2 POSTs /asset). Drop com `new DragEvent(..., {
+ *  dataTransfer })` na zona "Upload a file or drag and drop here". */
+async function studioInjectAudioFile(audioBase64, filename) {
+  const bin = atob(audioBase64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const ext = (filename || '').toLowerCase().match(/\.(\w+)$/)?.[1] || 'wav';
+  const mime = ext === 'mp3' ? 'audio/mpeg' : ext === 'm4a' ? 'audio/mp4' : 'audio/wav';
+  const file = new File([bytes], filename || 'audio.wav', { type: mime });
+
+  const inp = await waitForOrNull(() => findAudioFileInput(), 8000, 200);
+  if (inp) {
+    try {
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      inp.files = dt.files;
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      inp.dispatchEvent(new Event('change', { bubbles: true }));
+      studioLog(`file ${filename} setado no input (${bytes.length}B)`);
+    } catch (e) { studioWarn('set input.files falhou:', e?.message || e); }
+  }
+  // CRITICO: drop na dropzone com DataTransfer eh o que aciona o
+  // uploader real do create-v4 (validado ao vivo).
+  const modal = findUploadModal();
+  if (modal) {
+    let zone = null;
+    for (const e of modal.querySelectorAll('*')) {
+      if (e.offsetParent === null) continue;
+      const t = (e.textContent || '').trim();
+      if (/Upload a file|drag and drop/i.test(t) && t.length < 160) { zone = e; break; }
+    }
+    zone = zone || modal;
+    try {
+      const dt2 = new DataTransfer();
+      dt2.items.add(file);
+      for (const type of ['dragenter', 'dragover', 'drop']) {
+        try {
+          const ev = new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt2 });
+          zone.dispatchEvent(ev);
+        } catch {
+          const ev = new Event(type, { bubbles: true, cancelable: true });
+          try { Object.defineProperty(ev, 'dataTransfer', { value: dt2 }); } catch {}
+          zone.dispatchEvent(ev);
+        }
+      }
+      studioLog(`drop ${filename} disparado (deve iniciar S3 upload)`);
+    } catch (e) { studioWarn('drop disparo falhou:', e?.message || e); }
+  }
+  if (!inp && !modal) {
+    throw new Error('Input/dropzone de audio nao encontrado no modal Upload Audio.');
+  }
+}
+
+/** Acha o modal "Confirm Audio" (segunda etapa do upload no create-v4).
+ *  Contem o switch "Voice Mirroring" + botoes Back/Add audio/Close. */
+function findConfirmAudioModal() {
+  const dlgs = Array.from(document.querySelectorAll('[role="dialog"]'));
+  for (const d of dlgs) {
+    if (d.offsetParent === null) continue;
+    const t = d.textContent || '';
+    if (/Confirm Audio/i.test(t) && /Voice Mirroring/i.test(t) && /Add audio/i.test(t)) return d;
+  }
+  return null;
+}
+
+/** Upload de audio na CENA ATIVA do Studio create-v4. Fluxo VALIDADO:
+ *  1) clica "Upload audio"  -> abre modal Upload Audio (library)
+ *  2) drop+input.files do WAV -> S3 upload (2 PUTs + 2 POSTs /asset)
+ *  3) aparece modal "Confirm Audio" com switch "Voice Mirroring"
+ *  4) NAO toca no switch (ligar dispara paywall "Plans that fit your
+ *     scale" que bloqueia). Mirror voice e setada DEPOIS na cena via
+ *     "Use avatar voice" (sem paywall).
+ *  5) clica "Add audio" -> audio aplicado na cena como Recorded voice
+ *  Sucesso = Confirm modal sumiu + chip parteN.wav na cena.
+ *  Mirror voice e aplicada via setSceneMirrorVoice depois. */
+async function studioUploadAudioToActiveScene(audioBase64, filename, sceneLabel) {
+  studioLog(`${sceneLabel}: clicando "Upload audio"...`);
+  const upBtn = await waitForOrNull(() => findStudioUploadAudioBtn(), 12000, 400);
+  if (!upBtn) {
+    studioDumpDiag('no-upload-audio-btn');
+    throw new Error(`${sceneLabel}: botao "Upload audio" nao encontrado. Cola os logs [DARKO LAB STUDIO].`);
+  }
+  await cdpClickEl(upBtn, 'Upload audio btn');
+  const modal = await waitForOrNull(() => findUploadModal(), 8000, 250);
+  if (!modal) {
+    studioDumpDiag('no-upload-modal');
+    throw new Error(`${sceneLabel}: modal Upload Audio nao abriu. Cola os logs [DARKO LAB STUDIO].`);
+  }
+  const upTab = Array.from(modal.querySelectorAll('[role="tab"], button'))
+    .find((b) => b.offsetParent !== null && /^upload audio$/i.test((b.textContent || '').trim()));
+  if (upTab && upTab.getAttribute('aria-selected') === 'false') { clickElement(upTab); await sleep(400); }
+
+  await studioInjectAudioFile(audioBase64, filename);
+
+  // Aguarda o modal "Confirm Audio" aparecer (segundo step do upload).
+  // Pode demorar enquanto o S3 upload + transcribe rodam.
+  studioLog(`${sceneLabel}: aguardando modal "Confirm Audio"...`);
+  // 1a tentativa: ate 45s o drop disparar Confirm sozinho
+  let confirmModal = await waitForOrNull(() => findConfirmAudioModal(), 45000, 600);
+  // 2a tentativa (fallback validado ao vivo): se Confirm nao surgiu mas
+  // o Upload modal ainda esta aberto com a biblioteca de audios, o
+  // arquivo recem-upado esta no topo. Clicar a linha dele abre Confirm.
+  if (!confirmModal) {
+    const m = findUploadModal();
+    if (m) {
+      studioLog(`${sceneLabel}: Confirm nao abriu pelo drop, clicando linha da biblioteca`);
+      const fnameBase = (filename || '').replace(/\.[a-z0-9]+$/i, '');
+      const safeRe = new RegExp('^' + fnameBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\.wav$', 'i');
+      let leaf = null;
+      for (const e of m.querySelectorAll('span,div')) {
+        if (e.offsetParent === null) continue;
+        const t = (e.textContent || '').trim();
+        if (e.children.length === 0 && safeRe.test(t)) { leaf = e; break; }
+      }
+      if (!leaf) {
+        for (const e of m.querySelectorAll('span,div')) {
+          if (e.offsetParent === null) continue;
+          if (e.children.length === 0 && /\.wav$/i.test((e.textContent || '').trim()) &&
+              (e.textContent || '').trim().length < 30) { leaf = e; break; }
+        }
+      }
+      if (leaf) {
+        let row = leaf;
+        for (let i = 0; i < 7 && row.parentElement; i++) {
+          row = row.parentElement;
+          const r = row.getBoundingClientRect();
+          const cur = window.getComputedStyle(row).cursor;
+          if ((cur.includes('pointer') && r.height > 20 && r.height < 120) ||
+              (r.height >= 34 && r.height <= 80 && /\d{1,2}:\d{2}/.test(row.textContent || ''))) break;
+        }
+        // CDP trusted click - linha da biblioteca exige isTrusted
+        const ok = await cdpClickEl(row, 'lib-row');
+        if (ok) confirmModal = await waitForOrNull(() => findConfirmAudioModal(), 30000, 500);
+      }
+    }
+  }
+  if (!confirmModal) {
+    studioDumpDiag('no-confirm-modal');
+    // Ultimo fallback: se sumiu o Upload modal e ja tem chip na cena,
+    // o audio auto-aplicou (variante de UI). Aceita.
+    const chipNow = Array.from(document.querySelectorAll('span, div')).some((e) =>
+      e.offsetParent !== null &&
+      /^parte\d+\.wav/i.test((e.textContent || '').trim()) &&
+      /\d{1,2}:\d{2}/.test(e.textContent || '') &&
+      (e.textContent || '').trim().length < 30);
+    if (!findUploadModal() && chipNow) {
+      studioLog(`${sceneLabel}: audio auto-aplicou (sem Confirm modal) — segue p/ Mirror via toggle da cena`);
+      return;
+    }
+    throw new Error(
+      `${sceneLabel}: modal "Confirm Audio" nao apareceu. ` +
+      `Cola os logs [DARKO LAB STUDIO].`
+    );
+  }
+  studioLog(`${sceneLabel}: Confirm Audio aberto — NAO toca no switch Voice Mirroring`);
+  // CRITICO (validado ao vivo): ligar o switch "Voice Mirroring" AQUI
+  // dispara um modal "Plans that fit your scale" (paywall HeyGen) que
+  // bloqueia tudo. O fluxo manual correto e: deixar o switch OFF,
+  // clicar Add audio (audio entra como Recorded voice), e DEPOIS
+  // converter pra Mirror voice clicando "Use avatar voice" na pilula
+  // da CENA (setSceneMirrorVoice mais adiante em runStudioJob). Esse
+  // caminho NAO dispara paywall.
+
+  // Clica "Add audio" via CDP (isTrusted=true). O onClick do React no
+  // create-v4 ignora click sintetico — precisa de evento confiavel.
+  studioLog(`${sceneLabel}: clicando "Add audio" via CDP...`);
+  let addBtn = Array.from(confirmModal.querySelectorAll('button'))
+    .find((b) => b.offsetParent !== null && /^add audio$/i.test((b.textContent || '').trim()));
+  if (!addBtn) {
+    studioDumpDiag('no-add-audio-btn');
+    throw new Error(`${sceneLabel}: botao "Add audio" nao achado. Cola os logs [DARKO LAB STUDIO].`);
+  }
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (!findConfirmAudioModal()) break;
+    addBtn = Array.from(document.querySelectorAll('button'))
+      .find((b) => b.offsetParent !== null && /^add audio$/i.test((b.textContent || '').trim())) || addBtn;
+    await cdpClickEl(addBtn, 'Add audio');
+    await sleep(1800);
+    if (!findConfirmAudioModal()) break;
+    studioLog(`${sceneLabel}: Add audio CDP click ${attempt}/3 — modal ainda aberto, retry`);
+  }
+
+  // Espera o Confirm modal fechar (= audio attached) com timeout robusto.
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    if (!findConfirmAudioModal()) break;
+    await sleep(500);
+  }
+  if (findConfirmAudioModal()) {
+    studioDumpDiag('confirm-not-closed');
+    throw new Error(
+      `${sceneLabel}: Confirm modal nao fechou apos Add audio em 60s. ` +
+      `Cola os logs [DARKO LAB STUDIO].`
+    );
+  }
+  // tambem fecha o modal Upload Audio se ainda estiver aberto (raro)
+  if (findUploadModal()) {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await sleep(500);
+  }
+  await sleep(1500);
+  studioLog(`${sceneLabel}: audio ${filename} aplicado na cena com Mirror voice ✓`);
+}
+
+/** Seleciona uma voz pelo nome no painel direito (best-effort, nao
+ *  fatal — Mirror voice ja usa a voz do avatar por padrao). */
+async function studioTrySelectVoice(voiceName, sceneLabel) {
+  if (!voiceName) return;
+  try {
+    // abre o seletor de Voice (painel direito) — botao/area com a voz atual
+    const voiceBtns = Array.from(document.querySelectorAll('button, [role="button"], div[tabindex]'))
+      .filter((b) => b.offsetParent !== null);
+    let voiceOpener = null;
+    for (const b of voiceBtns) {
+      const t = (b.textContent || '').trim().toLowerCase();
+      if (t === 'voice' || t.startsWith('voice ') || t.includes('select voice') || t.includes('change voice')) {
+        voiceOpener = b; break;
+      }
+    }
+    if (!voiceOpener) { studioLog(`${sceneLabel}: opener de Voice nao achado — mantendo voz do avatar`); return; }
+    clickElement(voiceOpener);
+    await sleep(1200);
+    // busca input de pesquisa de voz
+    const search = Array.from(document.querySelectorAll('input[type="text"], input:not([type])'))
+      .find((i) => i.offsetParent !== null &&
+        /voice|voz|search|buscar/i.test((i.getAttribute('placeholder') || '')));
+    if (search) {
+      search.focus();
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(search, voiceName);
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+      await sleep(1600);
+    }
+    // clica o primeiro resultado que casa com o nome
+    const target = voiceName.toLowerCase();
+    let picked = null;
+    for (const o of document.querySelectorAll('[role="option"], [role="menuitem"], li, button, div[tabindex]')) {
+      if (o.offsetParent === null) continue;
+      const t = (o.textContent || '').trim().toLowerCase();
+      if (!t || t.length > 60) continue;
+      if (t === target || t.startsWith(target) || t.includes(target)) { picked = o; break; }
+    }
+    if (picked) { clickElement(picked); await sleep(1000); studioLog(`${sceneLabel}: voz "${voiceName}" selecionada`); }
+    else studioLog(`${sceneLabel}: voz "${voiceName}" nao achada — mantendo voz do avatar`);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await sleep(500);
+  } catch (e) {
+    studioWarn(`${sceneLabel}: select voice falhou (nao fatal):`, e?.message || e);
+  }
+}
+
+/**
+ * VA de avatar: monta o projeto Studio cena-por-cena e dispara Generate.
+ * payload = { avatarId, avatarName, groupName, voiceName, parts:[{audioBase64,filename,label}], jobLabel }
+ */
+async function runStudioJob(requestId, payload) {
+  if (currentJob) {
+    reportError(requestId, 'Outra geracao em andamento — aguarde finalizar.');
+    return;
+  }
+  currentJob = requestId;
+  try {
+    const { avatarId, avatarName, groupName, voiceName, parts, jobLabel } = payload || {};
+    if (!avatarId) throw new Error('payload invalido: avatarId obrigatorio.');
+    if (!Array.isArray(parts) || parts.length === 0) throw new Error('payload invalido: parts vazio.');
+
+    reportProgress(requestId, `VA Studio: abrindo editor de ${avatarName || avatarId}...`);
+    await enterStudioForAvatar(avatarId, avatarName, groupName);
+
+    const total = parts.length;
+    for (let i = 0; i < total; i++) {
+      const part = parts[i];
+      const sceneLabel = `${jobLabel || 'VA'} cena ${i + 1}/${total}`;
+      reportProgress(requestId, `${sceneLabel}: criando cena...`, Math.round((i / total) * 70));
+
+      if (i > 0) {
+        const addBtn = await waitForOrNull(() => findAddSceneButton(), 12000, 400);
+        if (!addBtn) {
+          studioDumpDiag('no-add-scene');
+          throw new Error(`${sceneLabel}: botao "Add scene" nao encontrado. Cola os logs [DARKO LAB STUDIO].`);
+        }
+        await cdpClickEl(addBtn, 'Add scene');
+        await sleep(2200);
+      }
+
+      // upload do audio da parte na cena ativa
+      reportProgress(requestId, `${sceneLabel}: upload ${part.filename}...`, Math.round((i / total) * 70) + 4);
+      await studioUploadAudioToActiveScene(part.audioBase64, part.filename, sceneLabel);
+      studioAbortIfPaywall(`${sceneLabel} pos-upload`);
+
+      // AVATAR III obrigatorio — protege creditos pagos (NUNCA IV/V).
+      reportProgress(requestId, `${sceneLabel}: garantindo Avatar III...`, Math.round((i / total) * 70) + 6);
+      const motorOk = await setStudioMotorAvatarIII(sceneLabel);
+      if (!motorOk) {
+        studioDumpDiag('motor-iii-fail');
+        throw new Error(
+          `${sceneLabel}: NAO consegui confirmar Avatar III no Motion Engine. ` +
+          `Abortei ANTES do Generate pra nao consumir credito pago (IV/V). ` +
+          `Cola os logs [DARKO LAB STUDIO].`
+        );
+      }
+
+      // 1) Seleciona a voz ANTES de Mirror voice — Mirror usa a voz
+      //    que estiver bound na cena nesse momento.
+      const blocks = getSceneScriptBlocks();
+      const scope = blocks[blocks.length - 1] || document; // cena recem-criada = ultima
+      if (voiceName) {
+        reportProgress(requestId, `${sceneLabel}: setando voz "${voiceName}"...`, Math.round((i / total) * 70) + 7);
+        await studioTrySelectVoice(voiceName, sceneLabel);
+      }
+
+      // 2) FORCA Mirror voice (Use avatar voice) — requisito duro do VA
+      reportProgress(requestId, `${sceneLabel}: ativando "Use avatar voice" (Mirror voice)...`, Math.round((i / total) * 70) + 8);
+      const mirrored = await setSceneMirrorVoice(scope, sceneLabel);
+      if (!mirrored) {
+        studioDumpDiag('mirror-fail');
+        throw new Error(
+          `${sceneLabel}: NAO consegui forcar "Mirror voice" (ficou em Recorded voice). ` +
+          `VA exige Mirror voice em TODAS as cenas — abortei pra nao gerar errado. ` +
+          `Cola os logs [DARKO LAB STUDIO].`
+        );
+      }
+
+      // play pra carregar a fala antes do Generate
+      reportProgress(requestId, `${sceneLabel}: carregando a fala (play)...`, Math.round((i / total) * 70) + 12);
+      await playStudioScene(scope, sceneLabel);
+    }
+
+    // verificacao final: TODAS as cenas em Mirror voice
+    reportProgress(requestId, 'Verificando Mirror voice em todas as cenas...', 78);
+    {
+      const toggles = Array.from(document.querySelectorAll('button, [role="button"], span, div'))
+        .filter((el) => {
+          if (el.offsetParent === null) return false;
+          const t = (el.textContent || '').trim().toLowerCase();
+          return t === 'recorded voice' || t === 'mirror voice';
+        });
+      const recorded = toggles.filter((el) => (el.textContent || '').trim().toLowerCase() === 'recorded voice');
+      const mirror = toggles.filter((el) => (el.textContent || '').trim().toLowerCase() === 'mirror voice');
+      studioLog(`verificacao: mirror=${mirror.length} recorded=${recorded.length} (esperado mirror=${total})`);
+      if (recorded.length > 0) {
+        // ultima tentativa de consertar as que sobraram
+        for (const rEl of recorded) {
+          let p = rEl;
+          for (let k = 0; k < 8 && p && p !== document.body; k++) p = p.parentElement;
+          await setSceneMirrorVoice(p || document, 'fix-final');
+        }
+        const stillRec = Array.from(document.querySelectorAll('button, [role="button"], span, div'))
+          .filter((el) => el.offsetParent !== null &&
+            (el.textContent || '').trim().toLowerCase() === 'recorded voice');
+        if (stillRec.length > 0) {
+          studioDumpDiag('mirror-verify-fail');
+          throw new Error(
+            `${stillRec.length} cena(s) ainda em "Recorded voice" apos retry. ` +
+            `VA exige Mirror voice em todas — abortei. Cola os logs [DARKO LAB STUDIO].`
+          );
+        }
+      }
+    }
+
+    // GUARDA FINAL DE CREDITO: se qualquer cena/painel mostrar Avatar
+    // IV ou V, ABORTA antes do Generate (VA so pode gerar em III).
+    reportProgress(requestId, 'Verificacao final: Avatar III em tudo...', 82);
+    {
+      const paid = studioHasPaidEngineVisible();
+      if (paid) {
+        studioDumpDiag('paid-engine-visible');
+        throw new Error(
+          `Detectei "${paid}" na UI antes do Generate. VA exige Avatar III ` +
+          `(sem custo). Abortei pra NAO consumir credito pago. ` +
+          `Cola os logs [DARKO LAB STUDIO].`
+        );
+      }
+      studioLog('verificacao final OK — nenhum Avatar IV/V visivel');
+    }
+
+    // Generate (1x) com guarda anti-duplicacao
+    reportProgress(requestId, 'Clicando Generate...', 85);
+    const genBtn = await waitForOrNull(() => findStudioGenerateButton(), 12000, 400);
+    if (!genBtn) {
+      studioDumpDiag('no-generate');
+      throw new Error('Botao Generate do Studio nao encontrado. Cola os logs [DARKO LAB STUDIO].');
+    }
+    const clickStartTs = Date.now();
+    const ANTI_DUP_MS = 90000;
+    const recentVideo = interceptedVideoIds.filter((v) => Date.now() - v.ts < ANTI_DUP_MS).pop();
+    if (recentVideo) {
+      studioWarn('Generate SKIP — video ja gerado nos ultimos 90s:', recentVideo.id);
+    } else {
+      await cdpClickEl(genBtn, 'Generate');
+      // Studio as vezes abre modal de confirmacao ("Generate"/"Submit")
+      await sleep(1800);
+      const confirm = Array.from(document.querySelectorAll('[role="dialog"] button, [role="alertdialog"] button'))
+        .find((b) => {
+          if (b.offsetParent === null) return false;
+          const t = (b.textContent || '').trim().toLowerCase();
+          return t === 'generate' || t === 'submit' || t === 'confirm' || t === 'gerar' || t === 'continue';
+        });
+      if (confirm) { studioLog('confirmando modal de Generate via CDP'); await cdpClickEl(confirm, 'Generate confirm'); }
+    }
+    reportProgress(requestId, 'Enviando pro HeyGen...', 92);
+    await sleep(4500);
+
+    let myVideoId = null;
+    for (const item of interceptedVideoIds) {
+      if (item.ts >= clickStartTs - 5000) { myVideoId = item.id; break; }
+    }
+    if (!myVideoId) {
+      const newest = await findNewestVideoFromAccount(180000);
+      if (newest && newest.id) myVideoId = newest.id;
+    }
+    if (myVideoId) studioLog('dispatch OK, video_id =', myVideoId);
+    else studioWarn('dispatch OK mas sem video_id capturado (page vai cair no fallback newest).');
+
+    reportProgress(requestId, 'Projeto VA enviado pro HeyGen!', 100);
+    reportResult(requestId, myVideoId ? `QUEUED:${myVideoId}` : 'QUEUED');
+  } catch (e) {
+    console.error('[DARKO LAB STUDIO] runStudioJob FAIL:', e);
+    reportError(requestId, e?.message ?? String(e));
+  } finally {
+    currentJob = null;
+    // remove a barra amarela "DARKO LAB started debugging" do Chrome
+    try { await cdpDetachBg(); } catch {}
+  }
 }
 
 

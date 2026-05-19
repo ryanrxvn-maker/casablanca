@@ -41,6 +41,23 @@
       return;
     }
 
+    if (data.type === 'HG_STUDIO_GENERATE') {
+      const requestId = data.requestId;
+      chrome.runtime.sendMessage(
+        { type: 'HG_STUDIO_GENERATE', requestId, payload: data.payload },
+        () => {
+          if (chrome.runtime.lastError) {
+            sendToPage({
+              type: 'HG_ERROR',
+              requestId,
+              error: chrome.runtime.lastError.message ?? 'Background nao respondeu.',
+            });
+          }
+        },
+      );
+      return;
+    }
+
     if (data.type === 'HG_CANCEL') {
       chrome.runtime.sendMessage({ type: 'HG_CANCEL', requestId: data.requestId });
       return;

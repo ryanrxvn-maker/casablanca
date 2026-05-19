@@ -907,44 +907,78 @@ export default function ClickUpPilotPage() {
               // procura pasta CRIATIVOS (link no topo do doc) + lista files +
               // match por nome. Critico pra pipeline VA funcionar.
               if (!vaBriefing.linkAdFileId && vaBriefing.linkAdFilename && docR.driveLinks?.length) {
-                // Procura pasta com texto 'CRIATIVOS' ou 'criativos'
-                const criativosFolder = docR.driveLinks.find((d: any) => /criativos/i.test(d.text || ''));
-                if (criativosFolder) {
-                  console.log(`[clickup-pilot] VA: auto-resolving Drive ID via folder ${criativosFolder.fileId} for ${vaBriefing.linkAdFilename}`);
-                  try {
-                    const { listDriveFolderViaExtension } = await import('@/lib/heygen-extension-bridge');
-                    const folderRes = await listDriveFolderViaExtension(criativosFolder.fileId);
-                    if (folderRes.ok) {
-                      const target = vaBriefing.linkAdFilename.toLowerCase().replace(/\.(mp4|mov)$/i, '');
-                      // Match exato OU contains
-                      const match = folderRes.files.find((f) => {
-                        const fn = f.name.toLowerCase().replace(/\.(mp4|mov)$/i, '');
-                        return fn === target || fn.includes(target) || target.includes(fn);
-                      });
-                      if (match) {
-                        vaBriefing.linkAdFileId = match.fileId;
-                        console.log(`[clickup-pilot] VA: matched ${match.name} → ${match.fileId}`);
-                      } else {
-                        console.warn(`[clickup-pilot] VA: '${target}' nao achou na pasta (${folderRes.files.length} files): ${folderRes.files.slice(0, 5).map(f => f.name).join(', ')}`);
-                      }
-                    } else {
-                      console.warn(`[clickup-pilot] VA: list folder falhou: ${folderRes.error}`);
-                    }
-                  } catch (e) {
-                    console.warn(`[clickup-pilot] VA: auto-resolve threw:`, e);
-                  }
-                }
-                // Tambem tenta achar diretamente nos driveLinks (caso o link
-                // esteja em outro lugar do doc, nao como pasta)
-                if (!vaBriefing.linkAdFileId) {
-                  const target = vaBriefing.linkAdFilename.toLowerCase().replace(/\.(mp4|mov)$/i, '');
+                // Normaliza removendo acentos/cedilha/case + extensao
+                // (pra match robusto entre filename do doc e nome no Drive)
+                const normName = (s: string) => (s || '')
+                  .normalize('NFD')
+                  .replace(/[̀-ͯ]/g, '')
+                  .toLowerCase()
+                  .replace(/\.(mp4|mov)$/i, '')
+                  .trim();
+                const target = normName(vaBriefing.linkAdFilename);
+
+                // 1) Match direto nos driveLinks do doc (link em qualquer parte do doc)
+                {
                   const direct = docR.driveLinks.find((d: any) => {
-                    const t = (d.text || '').toLowerCase();
-                    return t.includes(target) || (target.length > 5 && t.includes(target.slice(0, -2)));
+                    const t = normName(d.text || '');
+                    return t === target || t.includes(target) || target.includes(t);
                   });
                   if (direct) {
                     vaBriefing.linkAdFileId = direct.fileId;
                     console.log(`[clickup-pilot] VA: direct match in driveLinks → ${direct.fileId}`);
+                  }
+                }
+
+                // 2) Fallback: lista pasta CRIATIVOS + match por nome normalizado
+                if (!vaBriefing.linkAdFileId) {
+                  const criativosFolder = docR.driveLinks.find((d: any) => /criativos/i.test(d.text || ''));
+                  if (criativosFolder) {
+                    console.log(`[clickup-pilot] VA: auto-resolving Drive ID via folder ${criativosFolder.fileId} for ${vaBriefing.linkAdFilename}`);
+                    try {
+                      const { listDriveFolderViaExtension } = await import('@/lib/heygen-extension-bridge');
+                      const folderRes = await listDriveFolderViaExtension(criativosFolder.fileId);
+                      if (folderRes.ok) {
+                        const match = folderRes.files.find((f) => {
+                          const fn = normName(f.name);
+                          return fn === target || fn.includes(target) || target.includes(fn);
+                        });
+                        if (match) {
+                          vaBriefing.linkAdFileId = match.fileId;
+                          console.log(`[clickup-pilot] VA: matched ${match.name} → ${match.fileId}`);
+                        } else {
+                          console.warn(`[clickup-pilot] VA: '${target}' nao achou na pasta (${folderRes.files.length} files): ${folderRes.files.slice(0, 5).map(f => f.name).join(', ')}`);
+                        }
+                      } else {
+                        console.warn(`[clickup-pilot] VA: list folder falhou: ${folderRes.error}`);
+                      }
+                    } catch (e) {
+                      console.warn(`[clickup-pilot] VA: auto-resolve threw:`, e);
+                    }
+                  }
+                }
+
+                // 3) Ultimo recurso: lista TODAS as pastas Drive referenciadas
+                // no doc e procura o filename em cada uma
+                if (!vaBriefing.linkAdFileId) {
+                  try {
+                    const { listDriveFolderViaExtension } = await import('@/lib/heygen-extension-bridge');
+                    const folderLinks = (docR.driveLinks || []).filter((d: any) =>
+                      d.fileId && d.fileId.length > 15);
+                    for (const fl of folderLinks) {
+                      const folderRes = await listDriveFolderViaExtension(fl.fileId);
+                      if (!folderRes.ok || !folderRes.files?.length) continue;
+                      const match = folderRes.files.find((f) => {
+                        const fn = normName(f.name);
+                        return fn === target || fn.includes(target) || target.includes(fn);
+                      });
+                      if (match) {
+                        vaBriefing.linkAdFileId = match.fileId;
+                        console.log(`[clickup-pilot] VA: matched via fallback folder ${fl.fileId}: ${match.name} → ${match.fileId}`);
+                        break;
+                      }
+                    }
+                  } catch (e) {
+                    console.warn(`[clickup-pilot] VA: fallback folder scan threw:`, e);
                   }
                 }
               }
@@ -2785,7 +2819,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   const [vaPipelineState, setVaPipelineState] = useState<Record<string, { stage: string; percent: number; message: string; zipUrl?: string; zipName?: string; error?: string }>>({});
   /** VA: SMART MODE per task — detecta face no AD original e troca apenas
    *  segmentos com avatar visivel (b-rolls intactos). Key: taskId → boolean */
-  const [vaSmartMode, setVaSmartMode] = useState<Record<string, boolean>>({});
+  /** VA (Studio): voz custom por avatar. Key: `${taskId}:${avaCode}` →
+   *  {id,name} ou null = usar a voz do proprio avatar (Mirror voice). */
+  const [vaVoiceChoice, setVaVoiceChoice] = useState<Record<string, { id: string; name: string } | null>>({});
 
   /** Extrai Drive file ID de uma URL Drive (varios formatos suportados) */
   function extractDriveFileId(input: string): string | null {
@@ -2858,9 +2894,58 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         baseAdId: va.baseAdId.replace(/\s+/g, ''),
         adVideoBytes: dl.bytes,
         avatares,
-        smartMode: !!vaSmartMode[taskId],
+        smartMode: false, // VA de avatar = Studio cena-por-cena (full swap); smart mode nao se aplica
+        studioVoiceByAva: Object.fromEntries(
+          va.avatares.map((av) => [av.avaCode, vaVoiceChoice[`${taskId}:${av.avaCode}`]?.name ?? null]),
+        ),
         onProgress: (p) => {
           setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: p.stage, percent: p.percent, message: p.message } }));
+        },
+        // === VA DE AVATAR: HeyGen Studio cena-por-cena (Mirror voice) ===
+        // 1 parte do split = 1 cena. Forca "Use avatar voice" em TODAS,
+        // play pra carregar a fala, Generate 1x. HeyGen concatena as
+        // cenas no video final (timing exato do original, sem decupagem).
+        dispatchAvatarStudio: async ({ avatarId, avatarName, avaCode, voiceName, segments }) => {
+          const { generateAvatarStudio } = await import('@/lib/heygen-extension-bridge');
+          const { pollVideosUntilReady, downloadVideoBytes } = await import('@/lib/heygen-api-direct');
+          const choice = vaAvatarChoice[`${taskId}:${avaCode}`];
+          const res = await generateAvatarStudio({
+            avatarId,
+            groupId: choice?.groupId ?? null,
+            avatarName,
+            groupName: choice?.groupName ?? undefined,
+            voiceName: voiceName ?? null,
+            jobLabel: avaCode,
+            parts: segments.map((s) => ({
+              audioBytes: s.audioBytes,
+              filename: s.filename,
+              label: `${avaCode}_${s.label}`,
+            })),
+          }, (stage: string) => {
+            console.log(`[VA Studio ${avaCode}] ${stage}`);
+          });
+          // res = videoUrl OU 'QUEUED:<id>' OU 'QUEUED' (dispatch-only)
+          let videoUrl = '';
+          let videoId = '';
+          if (typeof res === 'string' && res.startsWith('QUEUED:')) videoId = res.slice(7);
+          else if (res === 'QUEUED') videoId = '';
+          else videoUrl = String(res || '');
+          if (!videoUrl) {
+            if (!videoId) {
+              throw new Error(`${avaCode}: Studio nao retornou video_id (HeyGen pode nao ter aceitado o Generate). Confere a aba app.heygen.com.`);
+            }
+            const statuses = await pollVideosUntilReady([videoId], {
+              intervalMs: 8000,
+              timeoutMs: 40 * 60 * 1000,
+            });
+            const st = statuses[videoId];
+            if (!st || st.status !== 'completed' || !st.videoUrl) {
+              throw new Error(`${avaCode}: video Studio nao renderizou (status=${st?.status}): ${st?.error || 'sem detalhes'}`);
+            }
+            videoUrl = st.videoUrl;
+          }
+          const bytes = await downloadVideoBytes(videoUrl);
+          return new Blob([bytes as BlobPart], { type: 'video/mp4' });
         },
         dispatchAudioTake: async ({ avatarId, audioBytes, audioFilename, label }) => {
           // MESMO fluxo do /tools/heygen-auto (modo audio):
@@ -3842,7 +3927,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       📹 Variação de Avatar · {a.vaBriefing.baseAdId}
                                     </div>
                                     <div className="text-[11px] text-text-muted">
-                                      Pipeline diferente: lipsync usa a voz do AD original (sem TTS).
+                                      Pipeline VA: HeyGen Studio cena-por-cena · 1 parte do split = 1 cena · cada avatar fala com a voz que você escolher (Mirror voice / Use avatar voice) · timing 1:1 do AD original (sem decupagem).
                                       Gera <strong className="text-cyan-300">{a.vaBriefing.avatares.length} vídeo{a.vaBriefing.avatares.length === 1 ? '' : 's'} final{a.vaBriefing.avatares.length === 1 ? '' : 'is'}</strong>
                                       {a.vaBriefing.depoimentoText ? ' + 1 depoimento' : ''}.
                                     </div>
@@ -3906,6 +3991,18 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                             label={`Avatar HeyGen pra ${av.avaCode}`}
                                           />
                                         </div>
+                                        <div className="mt-2 max-w-[400px]">
+                                          <div className="mono mb-1 text-[10px] uppercase tracking-widest text-cyan-200">
+                                            🎤 Voz pra {av.avaCode} → Mirror voice / Use avatar voice
+                                          </div>
+                                          <CompactVoiceSelector
+                                            selected={vaVoiceChoice[choiceKey] || null}
+                                            setSelected={(v) => setVaVoiceChoice((prev) => ({ ...prev, [choiceKey]: v }))}
+                                          />
+                                          <div className="mono mt-1 text-[9px] uppercase tracking-widest text-text-muted">
+                                            HeyGen Studio aplica essa voz como Mirror voice no avatar. Padrão = voz do próprio avatar.
+                                          </div>
+                                        </div>
                                       </div>
                                     );
                                   })}
@@ -3930,41 +4027,12 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       ) : null}
                                     </div>
                                   ) : null}
-                                  {/* SMART MODE TOGGLE — sempre visivel (antes/durante/depois do pipeline)
-                                      pra user poder ligar e re-rodar */}
-                                  <div className={
-                                    'flex items-center gap-3 rounded-[10px] border p-3 transition-all ' +
-                                    (vaSmartMode[a.taskId]
-                                      ? 'border-lime/60 bg-lime/10'
-                                      : 'border-line bg-bg-soft/30')
-                                  }>
-                                    <ToggleRound3D
-                                      on={!!vaSmartMode[a.taskId]}
-                                      onChange={(v) => setVaSmartMode((prev) => ({ ...prev, [a.taskId]: v }))}
-                                      icon={<WirelessIcon className="h-5 w-5" />}
-                                      title={vaSmartMode[a.taskId] ? 'Smart Mode ON · detecta face + troca so onde tem avatar' : 'Ativar Smart Mode (detecta face + troca avatar so onde aparece, b-rolls intactos)'}
-                                      variant="lime"
-                                      size="md"
-                                    />
-                                    <div className="flex-1">
-                                      <div className={'mono text-[11px] font-bold uppercase tracking-widest ' + (vaSmartMode[a.taskId] ? 'text-lime' : 'text-text-muted')}>
-                                        Smart Mode · {vaSmartMode[a.taskId] ? 'ON' : 'OFF'}
-                                      </div>
-                                      <div className="mono mt-0.5 text-[9px] uppercase tracking-widest text-text-muted">
-                                        {vaSmartMode[a.taskId]
-                                          ? 'Detecta face no AD original e troca SO onde tem avatar (b-rolls intactos)'
-                                          : 'Ative pra troca cirurgica: avatar so onde aparece, b-rolls preservados'}
-                                      </div>
-                                    </div>
-                                  </div>
-
                                   {/* Pipeline state OU botao iniciar/re-run */}
                                   {vaPipelineState[a.taskId] && vaPipelineState[a.taskId].stage !== 'done' && !vaPipelineState[a.taskId].error ? (
                                     // EM ANDAMENTO — so progress, sem botao
                                     <div className="rounded-[10px] border border-cyan-500/40 bg-cyan-500/5 p-3">
                                       <div className="mono text-[9px] uppercase tracking-widest text-cyan-200 flex items-center gap-2">
                                         <span>📹 Pipeline VA · {vaPipelineState[a.taskId].stage} · {Math.round(vaPipelineState[a.taskId].percent)}%</span>
-                                        {vaSmartMode[a.taskId] ? <span className="rounded bg-lime/20 px-1.5 py-0.5 text-lime">SMART</span> : null}
                                       </div>
                                       <div className="text-[11px] text-text-muted mt-1">{vaPipelineState[a.taskId].message}</div>
                                       <div className="mt-1 h-1 rounded bg-bg/60 overflow-hidden">
@@ -4008,15 +4076,10 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                           });
                                           runVAPipelineForTask(a.taskId);
                                         }}
-                                        className={
-                                          'mono w-full rounded-[10px] border py-2 px-3 text-[11px] uppercase tracking-widest transition ' +
-                                          (vaSmartMode[a.taskId]
-                                            ? 'border-lime bg-lime/20 text-lime hover:bg-lime/30'
-                                            : 'border-cyan-500 bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30')
-                                        }
+                                        className="mono w-full rounded-[10px] border border-cyan-500 bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30 py-2 px-3 text-[11px] uppercase tracking-widest transition"
                                       >
                                         {vaPipelineState[a.taskId]?.zipUrl ? '🔁 Re-rodar Pipeline VA' : '▶ Iniciar Pipeline VA'}
-                                        {' '}({a.vaBriefing.avatares.length} avatares){vaSmartMode[a.taskId] ? ' · SMART' : ''}
+                                        {' '}({a.vaBriefing.avatares.length} avatares)
                                       </button>
                                     </>
                                   )}

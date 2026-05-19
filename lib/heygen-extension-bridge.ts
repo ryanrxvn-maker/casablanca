@@ -133,6 +133,82 @@ export function generateAvatarPart(
   });
 }
 
+/* ===================== VA DE AVATAR — STUDIO ===================== *
+ * Dispara o fluxo HeyGen Studio cena-por-cena (Mirror voice) pra UM
+ * avatar. Cada parte do split de audio vira 1 cena; a extensao forca
+ * "Use avatar voice" (Mirror voice) em todas, da play pra carregar a
+ * fala, e clica Generate 1x. Resolve com a string de resultado
+ * (videoUrl ou "QUEUED:<videoId>" / "QUEUED") — a page faz poll +
+ * download. SEM TIMEOUT no lado da page (extension/HeyGen decidem).
+ *
+ * EXCLUSIVO de Variacao de Avatar — task normal NAO usa esse path.
+ */
+
+export type StudioPart = {
+  /** Bytes do WAV da parte (parte1, parte2, ...) */
+  audioBytes: Uint8Array;
+  /** Nome do arquivo (ex 'parte1.wav') */
+  filename: string;
+  /** Label de progresso (ex 'AVA05_parte1') */
+  label: string;
+};
+
+export type GenerateAvatarStudioPayload = {
+  /** look id (defaultLookId no editor create-v4) */
+  avatarId: string;
+  /** avatar group id — usado pra montar a URL direta do editor Studio */
+  groupId?: string | null;
+  avatarName?: string;
+  groupName?: string;
+  /** Voz opcional. Mirror voice ja usa a voz do avatar — isso so
+   *  sobrescreve se o user escolheu uma voz custom pro avatar. */
+  voiceName?: string | null;
+  parts: StudioPart[];
+  /** Label do job (ex 'AVA05') pra logs/progresso. */
+  jobLabel?: string;
+};
+
+function u8ToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)));
+  }
+  return btoa(binary);
+}
+
+export function generateAvatarStudio(
+  payload: GenerateAvatarStudioPayload,
+  onProgress?: (stage: string, percent?: number) => void,
+): Promise<string> {
+  installListener();
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') {
+      reject(new Error('Sem window — bridge so funciona client-side.'));
+      return;
+    }
+    const requestId = `hgst_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    pending.set(requestId, { resolve, reject, onProgress });
+    const wirePayload = {
+      avatarId: payload.avatarId,
+      groupId: payload.groupId ?? null,
+      avatarName: payload.avatarName ?? null,
+      groupName: payload.groupName ?? null,
+      voiceName: payload.voiceName ?? null,
+      jobLabel: payload.jobLabel ?? 'VA',
+      parts: payload.parts.map((p) => ({
+        audioBase64: u8ToBase64(p.audioBytes),
+        filename: p.filename,
+        label: p.label,
+      })),
+    };
+    window.postMessage(
+      { source: 'darkolab', type: 'HG_STUDIO_GENERATE', requestId, payload: wirePayload },
+      '*',
+    );
+  });
+}
+
 /**
  * Pede pra extensao listar os avatares EXATAMENTE como aparecem na
  * biblioteca da conta HeyGen do user (espelho 1:1, sem stock publico).

@@ -59,6 +59,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'HG_STUDIO_GENERATE') {
+    // VA de avatar — fluxo HeyGen Studio cena-por-cena (Mirror voice).
+    const requestId = msg.requestId;
+    handleStudioGenerate(requestId, msg.payload, sender.tab?.id).catch((err) => {
+      reportToPage(sender.tab?.id, requestId, 'HG_ERROR', {
+        error: err?.message ?? String(err),
+      });
+    });
+    sendResponse({ accepted: true });
+    return true;
+  }
+
   if (msg.type === 'HG_TEST_SESSION') {
     const requestId = msg.requestId;
     handleTestSession(requestId, sender.tab?.id).catch((err) => {
@@ -323,7 +335,89 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     return false;
   }
+
+  // ===== CDP: cliques confiaveis (isTrusted=true) via Chrome DevTools =====
+  // Necessario pra alguns botoes do create-v4 (Add audio, linha biblioteca,
+  // pilula Use avatar voice) que so respondem a eventos confiaveis.
+  if (msg.type === 'HG_CDP_CLICK') {
+    const tabId = sender.tab?.id;
+    if (!tabId) { sendResponse({ ok: false, error: 'no tabId' }); return false; }
+    cdpTrustedClick(tabId, msg.x, msg.y)
+      .then(() => sendResponse({ ok: true }))
+      .catch((e) => sendResponse({ ok: false, error: e?.message || String(e) }));
+    return true;
+  }
+  if (msg.type === 'HG_CDP_DETACH') {
+    cdpDetach().finally(() => sendResponse({ ok: true }));
+    return true;
+  }
 });
+
+// ============================ CDP HELPERS ============================
+let cdpTab = null;
+let cdpAttachInflight = null;
+
+async function cdpAttach(tabId) {
+  if (cdpTab === tabId) return;
+  // detach previous if different
+  if (cdpTab !== null) {
+    try { await new Promise((r) => chrome.debugger.detach({ tabId: cdpTab }, () => r())); } catch {}
+    cdpTab = null;
+  }
+  if (cdpAttachInflight) await cdpAttachInflight;
+  cdpAttachInflight = new Promise((resolve, reject) => {
+    chrome.debugger.attach({ tabId }, '1.3', () => {
+      if (chrome.runtime.lastError) {
+        const m = chrome.runtime.lastError.message || '';
+        // se ja anexado (mesma sessao), ok
+        if (/already attached/i.test(m)) { cdpTab = tabId; resolve(); }
+        else reject(new Error(m));
+      } else {
+        cdpTab = tabId;
+        resolve();
+      }
+    });
+  });
+  try { await cdpAttachInflight; }
+  finally { cdpAttachInflight = null; }
+  console.log('[DARKO LAB BG CDP] attached to tab', tabId);
+}
+
+function cdpSend(tabId, method, params) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.sendCommand({ tabId }, method, params || {}, (res) => {
+      if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+      else resolve(res);
+    });
+  });
+}
+
+async function cdpTrustedClick(tabId, x, y) {
+  await cdpAttach(tabId);
+  // hover first (some sites depend on hover for visibility/enable)
+  await cdpSend(tabId, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+  await new Promise((r) => setTimeout(r, 40));
+  await cdpSend(tabId, 'Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1, buttons: 1 });
+  await new Promise((r) => setTimeout(r, 50));
+  await cdpSend(tabId, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1, buttons: 0 });
+}
+
+async function cdpDetach() {
+  if (cdpTab === null) return;
+  const t = cdpTab; cdpTab = null;
+  await new Promise((r) => chrome.debugger.detach({ tabId: t }, () => r()));
+  console.log('[DARKO LAB BG CDP] detached from tab', t);
+}
+
+// Auto-detach se o debugger for desanexado pelo user/Chrome
+try {
+  chrome.debugger.onDetach.addListener((source, reason) => {
+    if (source.tabId === cdpTab) {
+      console.log('[DARKO LAB BG CDP] auto-detached, reason=', reason);
+      cdpTab = null;
+    }
+  });
+} catch {}
 
 async function handleTestSession(requestId, bridgeTabId) {
   const tab = await findOrCreateHeyGenTab();
@@ -783,6 +877,61 @@ async function handleGenerate(requestId, payload, bridgeTabId) {
         'Aba HeyGen nao respondeu - recarregue a aba e tente de novo. (' +
         (e?.message ?? '') +
         ')',
+    });
+  }
+}
+
+/**
+ * VA de avatar: navega pra My Avatars e comanda runStudioJob (Studio
+ * cena-por-cena com Mirror voice). Mesmo padrao do handleGenerate, mas
+ * roteia pro HG_RUN_STUDIO_JOB. Registra em activeJobs pra os HG_TAB_*
+ * (progress/result/error) serem relayados pra page.
+ */
+async function handleStudioGenerate(requestId, payload, bridgeTabId) {
+  console.log('[DARKO LAB BG] handleStudioGenerate START reqId=', requestId);
+  const tab = await findOrCreateHeyGenTab();
+  activeJobs.set(requestId, { tabId: tab.id, payload, bridgeTabId });
+
+  // Entrada DETERMINISTICA no editor Studio cena-por-cena: URL direta
+  // descoberta via teste real — equivale a My Avatars > look > "Use in
+  // video" > "Build scene-by-scene", sem caça a menu/DOM.
+  const lookId = payload && payload.avatarId;
+  const groupId = payload && payload.groupId;
+  let studioUrl;
+  if (groupId && lookId) {
+    studioUrl = 'https://app.heygen.com/create-v4/draft?avatarGroup=' +
+      encodeURIComponent(groupId) + '&defaultLookId=' + encodeURIComponent(lookId) +
+      '&fromCreateButton=true';
+  } else if (lookId) {
+    // sem groupId: ainda tenta com defaultLookId (HeyGen costuma resolver o grupo)
+    studioUrl = 'https://app.heygen.com/create-v4/draft?defaultLookId=' +
+      encodeURIComponent(lookId) + '&fromCreateButton=true';
+  } else {
+    activeJobs.delete(requestId);
+    reportToPage(bridgeTabId, requestId, 'HG_ERROR', {
+      error: 'VA Studio: payload sem avatarId/groupId — nao da pra abrir o editor.',
+    });
+    return;
+  }
+  reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', { stage: 'Abrindo editor Studio do avatar...' });
+  console.log('[DARKO LAB BG] navegando direto pro editor Studio create-v4');
+  await chrome.tabs.update(tab.id, { url: studioUrl });
+  await waitForTabComplete(tab.id, 40000);
+  await new Promise((r) => setTimeout(r, 5000));
+  await waitForTabReady(tab.id);
+
+  reportToPage(bridgeTabId, requestId, 'HG_PROGRESS', { stage: 'Comandando Studio na aba HeyGen...' });
+  try {
+    await chrome.tabs.sendMessage(tab.id, {
+      type: 'HG_RUN_STUDIO_JOB',
+      requestId,
+      payload,
+    });
+    console.log('[DARKO LAB BG] HG_RUN_STUDIO_JOB despachado pra tab', tab.id);
+  } catch (e) {
+    activeJobs.delete(requestId);
+    reportToPage(bridgeTabId, requestId, 'HG_ERROR', {
+      error: 'Aba HeyGen nao respondeu - recarregue a aba e tente de novo. (' + (e?.message ?? '') + ')',
     });
   }
 }
