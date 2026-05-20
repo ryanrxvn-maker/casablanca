@@ -435,10 +435,14 @@ export type CreateVideoParams = {
   orientation?: 'portrait' | 'landscape' | 'square';
   resolution?: '720p' | '1080p';
   motionPrompt?: string;
+  /** VA de avatar: ativa "Voice Mirroring" — avatar fala com a propria
+   *  voz mas com timing/conteudo espelhando o audio uploaded. HeyGen
+   *  aceita varias nomenclaturas; mandamos todas pra robustez. */
+  voiceMirroring?: boolean;
 };
 
 export async function createVideo(params: CreateVideoParams): Promise<{ video_id: string; avatar_id: string }> {
-  const { title, avatarId, engine, audio, orientation = 'portrait', resolution, motionPrompt } = params;
+  const { title, avatarId, engine, audio, orientation = 'portrait', resolution, motionPrompt, voiceMirroring } = params;
   const eng = ENGINES[engine];
   if (!eng) throw new Error(`Motor desconhecido: ${engine}`);
 
@@ -448,24 +452,40 @@ export async function createVideo(params: CreateVideoParams): Promise<{ video_id
     settings.prompt = motionPrompt;
   }
 
-  const body = {
+  const audio_data: Record<string, any> = {
+    audio_type: 'uploaded',
+    audio_url: audio.audio_url,
+    duration: audio.duration,
+    words: audio.words,
+    text: audio.text || '',
+  };
+  // Voice Mirroring: avatar fala com SUA propria voz espelhando o audio
+  // uploaded (timing/cadencia). HeyGen UI mostra checkbox "Voice
+  // Mirroring" no Quick Create. Mandamos as variantes mais provaveis de
+  // param name (server ignora as que nao conhece).
+  if (voiceMirroring) {
+    audio_data.voice_mirroring = true;
+    audio_data.enable_voice_mirroring = true;
+    audio_data.mirror_voice = true;
+  }
+
+  const body: Record<string, any> = {
     video_title: title || 'Avatar Video',
     video_orientation: orientation,
     resolution: resolution || eng.default_resolution,
     avatar_id: avatarId,
     source_type: eng.source_type,
     fit: 'cover',
-    audio_data: {
-      audio_type: 'uploaded',
-      audio_url: audio.audio_url,
-      duration: audio.duration,
-      words: audio.words,
-      text: audio.text || '',
-    },
+    audio_data,
     avatar_settings: settings,
     enable_caption: false,
     create_new_avatar: false,
   };
+  if (voiceMirroring) {
+    // Tambem no body root, caso HeyGen leia de la
+    body.voice_mirroring = true;
+    body.enable_voice_mirroring = true;
+  }
   const r = await jsonCall('POST', '/v2/avatar/shortcut/submit', body);
   if (!r.ok) {
     throw new Error(r.body?.message || `Falha ao criar video (status ${r.status})`);
@@ -720,6 +740,10 @@ export type ProcessJobInput = {
   orientation?: 'portrait' | 'landscape' | 'square';
   resolution?: '720p' | '1080p';
   motionPrompt?: string;
+  /** VA de avatar: ativa Voice Mirroring (avatar fala com a propria voz
+   *  espelhando o audio uploaded). Equivalente ao checkbox "Voice
+   *  Mirroring" no Quick Create do HeyGen. */
+  voiceMirroring?: boolean;
 };
 
 export async function processJob(
@@ -733,7 +757,7 @@ export async function processJob(
       onStep: (step, info) => onProgress?.(`upload-${step}`, info),
     });
 
-    onProgress?.('submitting', { duration: audio.duration });
+    onProgress?.('submitting', { duration: audio.duration, voiceMirroring: !!job.voiceMirroring });
     const created = await createVideo({
       title: job.title,
       avatarId: job.avatarId,
@@ -742,6 +766,7 @@ export async function processJob(
       orientation: job.orientation,
       resolution: job.resolution,
       motionPrompt: job.motionPrompt,
+      voiceMirroring: job.voiceMirroring,
     });
 
     if (job.title && job.title !== 'Avatar Video') {
