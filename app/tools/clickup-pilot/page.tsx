@@ -24,6 +24,7 @@ import {
   parseVABriefing,
   sanitizeSpokenCopy,
   extractAvaNumsFromTaskName,
+  findAdSection,
   type ParsedAdSection,
   type ParsedDarkoBriefing,
   type ParsedVABriefing,
@@ -865,9 +866,19 @@ export default function ClickUpPilotPage() {
           // 2.5 VARIACAO DE AVATAR: detector + parser dedicado
           // Tasks 'VA - ...' OU docs com 'Variação de avatar' tem pipeline
           // diferente (lipsync por audio do AD original, N avatares).
-          // Roda parser VA primeiro — se detectado, marca como ready e pula
-          // o fluxo normal de hooks/body/avatares.
-          if (isVATask(task.name) || /varia[cç][aã]o\s+de\s+avatar/i.test(docR.text || '')) {
+          // CRITICAL: o check do doc tem que ser ESCOPADO na secao do AD em
+          // questao — antes checava docR.text inteiro, e docs com multiplos
+          // ADs (alguns VA, outros nao) marcavam o AD errado como VA falso.
+          // Ex: AD05VN-VRWA01 nao e VA, mas o doc tinha AD09 (VA) que vazava
+          // o trigger pro AD05.
+          const baseAdIdMatch = task.name.match(/^(AD\d+[A-Z]+)\b/i);
+          const baseAdIdForVaCheck = baseAdIdMatch ? baseAdIdMatch[1].toUpperCase() : null;
+          const sectionForVaCheck = baseAdIdForVaCheck
+            ? (findAdSection(docR.text, baseAdIdForVaCheck) || '')
+            : '';
+          // So conta como VA se: task name e VA, OU a secao DESSE ad
+          // especifico tem o marker. Doc-wide check foi removido.
+          if (isVATask(task.name) || /varia[cç][aã]o\s+de\s+avatar/i.test(sectionForVaCheck)) {
             // Extrai quais AVAs estao indicados na NOMENCLATURA da task
             // (ex 'VA - AD03G1VN - ... - AVA05 e 06 - Silas' → [5, 6]).
             // Se task indicar AVAs especificas, parser SO retorna esses

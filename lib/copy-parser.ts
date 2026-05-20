@@ -98,6 +98,13 @@ const NON_AVATAR_PREFIXES = [
   /^observa[cç][aã]o\b/i,                 // "Observação:"
   /^nota\b/i,                             // "Nota:"
   /^obs\b/i,                              // "OBS:"
+  /^link\s+do\s+avatar\b/i,               // "Link do avatar:" → parseGlobalAvatarLinks
+  /^avatar\s+do\s+video\b/i,              // "Avatar do video:"
+  /^avatar\s+global\b/i,                  // "Avatar global:"
+  /^avatar\s+padr[aã]o\b/i,               // "Avatar padrão:"
+  /^link\s+avatar\b/i,                    // "Link avatar:"
+  /^link\s+do\s+ad\b/i,                   // "Link do ad:" (VA briefing)
+  /^depoimento\b/i,                       // "Depoimento com avatar:"
 ];
 
 /** Heuristica: o que parece role label valido pra avatar?
@@ -330,54 +337,79 @@ export function parseAdSection(fullDocText: string, adIdOrPrefix: string): Parse
  *    Linha N+1: "omédicodoshomens.mp4"  ← filename pode ser um <a> link
  */
 export function parseGlobalAvatarLink(section: string): { role: string; username: string } | null {
+  const all = parseGlobalAvatarLinks(section);
+  return all.length > 0 ? all[0] : null;
+}
+
+/**
+ * Versao MULTI-AVATAR de parseGlobalAvatarLink. Retorna TODOS os avatares
+ * mencionados na linha "Link do avatar:".
+ *
+ * Suporta separadores: "+", ",", " e ", " / ", " | ".
+ *
+ * Ex doc AD05VN-VRWA01:
+ *   "Link do avatar: monetzamoraa.mp4 + feliperocha3.mp4"
+ *   → [{role:'Avatar 1', username:'monetzamoraa'},
+ *      {role:'Avatar 2', username:'feliperocha3'}]
+ *
+ *  Quando body tem labels de speaker ("Mulher", "Doutor"), splitBySpeaker
+ *  no body decide quem fala o que. Os roles aqui ficam como "Avatar N"
+ *  generico — o user pode renomear pelo UI se quiser, ou o splitter
+ *  associa pela ordem dos labels no body.
+ */
+export function parseGlobalAvatarLinks(section: string): Array<{ role: string; username: string }> {
   const lines = section.split(/\r?\n/);
 
-  // Regex pra filename de avatar: @opcional + chars (incluindo acentos + espacos)
-  // Aceita: @user.mp4 / user.mp4 / Dr. Marco Túlio.mp4 / @username (sem ext)
-  const filenameRe = /^[^@a-zA-ZÀ-ÿ0-9]*@?([a-zA-ZÀ-ÿ][a-zA-ZÀ-ÿ0-9._\s-]+?)(?:\.(?:mp4|mov))(?:\s|$)/i;
-  const filenameWithAtRe = /^[^@a-zA-ZÀ-ÿ0-9]*@([a-zA-ZÀ-ÿ0-9_][a-zA-ZÀ-ÿ0-9._-]+?)(?:\.(?:mp4|mov))?(?:\s|$)/i;
+  // Filename de avatar: @opcional + chars (incluindo acentos + espacos)
+  // Aceita: @user.mp4 / user.mp4 / Dr. Marco Túlio.mp4
+  const filenameTokenRe = /@?([a-zA-ZÀ-ÿ0-9_][a-zA-ZÀ-ÿ0-9._\s-]*?)\.(?:mp4|mov)\b/gi;
 
   // Pattern de header: "Link do avatar:" (varia: "Avatar do video:", etc)
   const headerRe = /^(?:link\s+do\s+avatar|avatar\s+do\s+video|avatar\s+global|avatar\s+padr[aã]o|link\s+avatar)\s*[:\-]?\s*(.*)$/i;
+
+  const collect = (text: string, out: Array<{ role: string; username: string }>): void => {
+    // Extrai TODOS os "<name>.mp4" da string (suporta "+", ",", " e ", etc.)
+    filenameTokenRe.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = filenameTokenRe.exec(text)) !== null) {
+      const u = m[1].trim();
+      if (u.length >= 3 && !/^(http|https|www|drive|google)$/i.test(u)) {
+        const role = out.length === 0 ? 'Avatar' : `Avatar ${out.length + 1}`;
+        // Dedup por username
+        if (!out.some((a) => a.username.toLowerCase() === u.toLowerCase())) {
+          out.push({ role, username: u });
+        }
+      }
+    }
+  };
 
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim();
     if (!t) continue;
     const mh = t.match(headerRe);
     if (!mh) continue;
-    // Header detectado. Procura o filename:
-    //  a) Mesmo line, apos o ':' (mais comum)
-    //  b) Proxima(s) linha(s) — caso tabela/multi-line do Google Docs
+    const out: Array<{ role: string; username: string }> = [];
+    // Mesma linha (apos ":")
     const restOfLine = mh[1].trim();
-    if (restOfLine) {
-      const m = restOfLine.match(filenameRe) || restOfLine.match(filenameWithAtRe);
-      if (m && m[1]) {
-        const u = m[1].trim();
-        if (u.length >= 3 && !/^(http|https|www|drive|google)$/i.test(u)) {
-          return { role: 'Avatar', username: u };
-        }
-      }
-    }
-    // Procura nas proximas 3 linhas
+    if (restOfLine) collect(restOfLine, out);
+    // Proximas 3 linhas — caso tabela/multi-line
     for (let j = i + 1; j <= Math.min(i + 3, lines.length - 1); j++) {
       const next = lines[j].trim();
       if (!next) continue;
-      // Pula linhas de "Instruções:", "Atenção:", etc
       if (/^(instru[cç][oõ]es|aten[cç][aã]o|observa[cç][aã]o|caixinha)/i.test(next)) break;
-      // Pula linhas de URL (drive.google.com link de referencia, nao do avatar)
       if (/^https?:\/\//.test(next)) continue;
-      const m = next.match(filenameRe) || next.match(filenameWithAtRe);
-      if (m && m[1]) {
-        const u = m[1].trim();
-        if (u.length >= 3 && !/^(http|https|www|drive|google)$/i.test(u)) {
-          return { role: 'Avatar', username: u };
-        }
-      }
-      // Se a linha N+1 nao for filename nem vazia, para
-      break;
+      const sizeBefore = out.length;
+      collect(next, out);
+      if (out.length === sizeBefore) break; // linha sem filename — para
+    }
+    if (out.length > 0) {
+      // Se 1 unico avatar, mantem role 'Avatar' (compat com parseGlobalAvatarLink).
+      // Se >= 2, ja vem como 'Avatar 1', 'Avatar 2', ...
+      if (out.length === 1) return out;
+      return out.map((a, idx) => ({ role: `Avatar ${idx + 1}`, username: a.username }));
     }
   }
-  return null;
+  return [];
 }
 
 /* ============= Convencao G[N] = Hook[N] (DARKO LAB briefings) ============= */
@@ -899,10 +931,18 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string): Parse
   let avatars = parseAvatars(baseSection);
   // Fallback: alguns ADs usam 'Link do avatar: <file>' em vez de 'Avatar:'
   // — vira avatar GLOBAL da copy (todos hooks + body desse avatar).
+  // Suporta MULTIPLOS avatares na mesma linha separados por +/,/e:
+  //   "Link do avatar: monetzamoraa.mp4 + feliperocha3.mp4"
+  //   → 2 slots (Avatar 1, Avatar 2). Body com labels Mulher/Doutor
+  //   vira 2 segmentos no splitBySpeaker — user atribui avatar por slot.
   if (avatars.length === 0) {
-    const global = parseGlobalAvatarLink(baseSection);
-    if (global) {
-      avatars = [{ role: global.role, username: global.username, raw: `Link do avatar: ${global.username}.mp4` }];
+    const globals = parseGlobalAvatarLinks(baseSection);
+    if (globals.length > 0) {
+      avatars = globals.map((g) => ({
+        role: g.role,
+        username: g.username,
+        raw: `Link do avatar: ${g.username}.mp4`,
+      }));
     }
   }
   // Coleta roles do briefing pra ajudar o sanitizador a detectar labels
@@ -949,6 +989,38 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string): Parse
       }
     }
   }
+
+  // RENAME AUTOMATICO: quando avatares vieram de "Link do avatar: a.mp4 + b.mp4"
+  // (roles genericos "Avatar", "Avatar 2"...) E o body/hooks tem speaker labels
+  // explicitos (ex "Mulher", "Doutor"), casa POR ORDEM DE APARICAO.
+  //
+  // Ex AD05VN: avatars=[Avatar 1: monetzamoraa, Avatar 2: feliperocha3]
+  //   body: [Mulher: ..., Doutor: ...]
+  //   → rename: [Mulher: monetzamoraa, Doutor: feliperocha3]
+  //
+  // Isso faz o slotsByRole no dispatch achar "mulher" → @monetzamoraa
+  // direto. Sem isso, dispatch caia em firstSlot (sempre o 1o avatar)
+  // pra tudo.
+  const avatarsAreGeneric = avatars.length > 0 && avatars.every((a) => /^avatar(?:\s+\d+)?$/i.test(a.role.trim()));
+  if (avatarsAreGeneric) {
+    // Coleta roles unicos detectados em ordem (hooks primeiro, dps body)
+    const detected: string[] = [];
+    const seen = new Set<string>();
+    const pushRole = (r: string | null) => {
+      if (!r) return;
+      const key = r.toLowerCase().trim();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      detected.push(r);
+    };
+    for (const h of hooks) pushRole(h.role);
+    for (const s of bodySegments) pushRole(s.role);
+    // Renomeia pelos labels detectados (ate o limite de avatars disponiveis)
+    if (detected.length > 0) {
+      avatars = avatars.map((a, i) => detected[i] ? { ...a, role: detected[i] } : a);
+    }
+  }
+
   return {
     baseAdId,
     avatars,
