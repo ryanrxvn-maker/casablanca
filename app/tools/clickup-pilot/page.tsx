@@ -2909,66 +2909,19 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         baseAdId: va.baseAdId.replace(/\s+/g, ''),
         adVideoBytes: dl.bytes,
         avatares,
-        smartMode: false, // VA de avatar = Studio cena-por-cena (full swap); smart mode nao se aplica
-        studioVoiceByAva: Object.fromEntries(
-          va.avatares.map((av) => [av.avaCode, vaVoiceChoice[`${taskId}:${av.avaCode}`]?.name ?? null]),
-        ),
+        smartMode: false, // VA = full swap, smart mode nao se aplica
         onProgress: (p) => {
           setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: p.stage, percent: p.percent, message: p.message } }));
         },
-        // === VA DE AVATAR: HeyGen Studio cena-por-cena (Mirror voice) ===
-        // 1 parte do split = 1 cena. Forca "Use avatar voice" em TODAS,
-        // play pra carregar a fala, Generate 1x. HeyGen concatena as
-        // cenas no video final (timing exato do original, sem decupagem).
-        dispatchAvatarStudio: async ({ avatarId, avatarName, avaCode, voiceName, segments }) => {
-          const { generateAvatarStudio } = await import('@/lib/heygen-extension-bridge');
-          const { pollVideosUntilReady, downloadVideoBytes } = await import('@/lib/heygen-api-direct');
-          const choice = vaAvatarChoice[`${taskId}:${avaCode}`];
-          const res = await generateAvatarStudio({
-            avatarId,
-            groupId: choice?.groupId ?? null,
-            avatarName,
-            groupName: choice?.groupName ?? undefined,
-            voiceName: voiceName ?? null,
-            jobLabel: avaCode,
-            parts: segments.map((s) => ({
-              audioBytes: s.audioBytes,
-              filename: s.filename,
-              label: `${avaCode}_${s.label}`,
-            })),
-          }, (stage: string) => {
-            console.log(`[VA Studio ${avaCode}] ${stage}`);
-          });
-          // res = videoUrl OU 'QUEUED:<id>' OU 'QUEUED' (dispatch-only)
-          let videoUrl = '';
-          let videoId = '';
-          if (typeof res === 'string' && res.startsWith('QUEUED:')) videoId = res.slice(7);
-          else if (res === 'QUEUED') videoId = '';
-          else videoUrl = String(res || '');
-          if (!videoUrl) {
-            if (!videoId) {
-              throw new Error(`${avaCode}: Studio nao retornou video_id (HeyGen pode nao ter aceitado o Generate). Confere a aba app.heygen.com.`);
-            }
-            const statuses = await pollVideosUntilReady([videoId], {
-              intervalMs: 8000,
-              timeoutMs: 40 * 60 * 1000,
-            });
-            const st = statuses[videoId];
-            if (!st || st.status !== 'completed' || !st.videoUrl) {
-              throw new Error(`${avaCode}: video Studio nao renderizou (status=${st?.status}): ${st?.error || 'sem detalhes'}`);
-            }
-            videoUrl = st.videoUrl;
-          }
-          const bytes = await downloadVideoBytes(videoUrl);
-          return new Blob([bytes as BlobPart], { type: 'video/mp4' });
-        },
+        // === VA DE AVATAR: API processJob (Quick Create) + Voice Mirroring ===
+        // Mesmo fluxo de task normal (que JA FUNCIONA), com 2 diferencas:
+        //   1. voiceMirroring: true → avatar fala com a propria voz
+        //      (equivalente ao checkbox "Voice Mirroring" do Quick Create)
+        //   2. Output mantem timing exato do audio original — NUNCA
+        //      decupa. Concat na ordem = video final 1:1 com o AD.
+        // Studio cena-por-cena foi abandonado: dispara paywall e
+        // requer Pro plan pra esses avatares custom.
         dispatchAudioTake: async ({ avatarId, audioBytes, audioFilename, label }) => {
-          // MESMO fluxo do /tools/heygen-auto (modo audio):
-          // 1. processJob: faz upload do audio direto via HeyGen API (sem UI)
-          //    + cria video → retorna videoId imediato
-          // 2. pollVideosUntilReady: aguarda HeyGen renderizar
-          // 3. downloadVideoBytes: baixa o MP4 final
-          // Nada de UI automation — tudo via API direta com cookies sessao.
           const { processJob } = await import('@/lib/heygen-api-direct');
           const file = new File([audioBytes as BlobPart], audioFilename || `${label}.wav`, { type: 'audio/wav' });
           const job = await processJob({
@@ -2977,6 +2930,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             title: `${va.baseAdId.replace(/\s+/g, '')}_${label}`,
             engine: 'iii',
             orientation: 'portrait',
+            voiceMirroring: true, // ← KEY: VA usa Voice Mirroring sempre
           }, {
             onProgress: (stage: string) => {
               console.log(`[VA dispatch ${label}] ${stage}`);
