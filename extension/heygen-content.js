@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.12.3';
+const DARKO_EXT_VERSION = '4.12.8';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -2612,26 +2612,105 @@ async function enterStudioForAvatar(avatarId, avatarName, groupName) {
   // editor pesado (canvas) — folga extra pra cena 1 + avatar bound montarem
   await sleep(3500);
   // GUARDA: modal "Plans that fit your scale" e upsell que bloqueia a
-  // UI. Aborta em vez de tentar (clicar "Switch" pode cobrar plano).
-  studioAbortIfPaywall('editor pronto');
-  studioLog('editor Studio pronto (entrada via URL direta)');
+  // UI. DISMISS via JS (display:none no backdrop+modal) sem clicar nada
+  // do modal (botao Switch poderia cobrar plano).
+  studioDismissPaywallIfShown('editor pronto');
+  // Espera ate o botao Upload audio ficar REALMENTE clicavel (sem
+  // overlays cobrindo). HeyGen tem loading overlay com z=999999 bg
+  // solid que bloqueia tudo ate o canvas montar de verdade.
+  studioLog('aguardando overlays clearem (Upload audio btn no topo)...');
+  let lastTopText = '';
+  const clickableOk = await waitForOrNull(() => {
+    studioDismissPaywallIfShown('overlay-wait');
+    const btn = findStudioUploadAudioBtn();
+    if (!btn) return false;
+    const r = btn.getBoundingClientRect();
+    if (r.width === 0) return false;
+    const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    if (!at) return false;
+    // Aceita btn, descendente do btn, OU ancestral (elementFromPoint
+    // pode retornar o container — clique propaga via bubble normal).
+    if (at === btn) return true;
+    if (btn.contains(at)) return true;
+    if (at.contains && at.contains(btn)) return true;
+    const t = at.tagName + ' z=' + (window.getComputedStyle(at).zIndex || '?');
+    if (t !== lastTopText) { lastTopText = t; studioLog('overlay topo no Upload audio: ' + t); }
+    return false;
+  }, 60000, 1000);
+  if (!clickableOk) {
+    studioWarn('Upload audio btn nao ficou clicavel em 60s — seguindo mesmo assim');
+  }
+  await sleep(800);
+  studioLog('editor Studio 100% pronto');
 }
 
-/** Se o HeyGen abriu o paywall "Plans that fit your scale" — aborta com
- *  mensagem clara em vez de tentar bypass (auto-click "Switch" pode
- *  incorrer custo). User precisa fechar manualmente uma vez e re-rodar. */
-function studioAbortIfPaywall(where) {
-  const dlg = [...document.querySelectorAll('[role="dialog"]')].find((d) =>
+/** Se HeyGen abriu o paywall "Plans that fit your scale" — REMOVE
+ *  backdrop + modal via JS (display:none). NAO clica em nada do
+ *  modal (botao "Switch" poderia cobrar plano). VALIDADO: o backdrop
+ *  e um DIV fixed z>=100 com bg semi-transparente cobrindo viewport.
+ *  Removendo o backdrop libera os cliques no editor por tras. */
+function studioDismissPaywallIfShown(where) {
+  const plans = [...document.querySelectorAll('[role="dialog"]')].find((d) =>
     d.offsetParent !== null && /Plans that fit your scale/i.test(d.textContent || ''));
-  if (!dlg) return;
-  studioDumpDiag('plans-paywall:' + where);
-  throw new Error(
-    'PAYWALL: HeyGen abriu o modal "Plans that fit your scale" e bloqueou ' +
-    'a UI (' + where + '). FECHA esse modal MANUALMENTE na aba app.heygen.com ' +
-    '(X ou clica fora) e re-dispara o VA. Se aparecer toda vez, sua conta ' +
-    'pode nao ter o plano que destrava Voice Mirroring nesse avatar — ' +
-    'confere em app.heygen.com/account/plans.'
-  );
+  let dismissed = 0;
+  if (plans) {
+    plans.style.display = 'none';
+    dismissed++;
+    studioLog(`paywall (${where}): "Plans that fit your scale" escondido`);
+  }
+  // Remove overlays bloqueando viewport. 2 tipos:
+  //  A) backdrop semi-transparente (rgba(...,0.x), z>=100, fixed) — paywall
+  //  B) overlay de transicao do HeyGen (z=999999, bg solid, contem video
+  //     "animations/disappear_v1.webm" tw-hidden — fica STUCK em sessoes
+  //     onde o paywall apareceu antes)
+  for (const d of document.querySelectorAll('div')) {
+    if (d.style.display === 'none') continue;
+    const cs = window.getComputedStyle(d);
+    if (cs.position !== 'fixed') continue;
+    const z = parseInt(cs.zIndex) || 0;
+    if (z < 100) continue;
+    const r = d.getBoundingClientRect();
+    if (r.width < window.innerWidth * 0.7 || r.height < window.innerHeight * 0.7) continue;
+    const bg = cs.backgroundColor;
+    const isSemiTrans = /rgba?\([^)]*,\s*0?\.[0-9]+\)/.test(bg);
+    // HeyGen overlay sticky: z=999999 com video animations
+    const hasAnimVideo = !!d.querySelector('video[src*="animations"]');
+    const isStuckHeygenOverlay = z >= 999999 && hasAnimVideo;
+    if (!isSemiTrans && !isStuckHeygenOverlay) continue;
+    // Backdrop puro / overlay nao tem muitos botoes; dialog legit tem
+    const btnsInside = d.querySelectorAll('button').length;
+    if (btnsInside > 10) continue;
+    d.style.display = 'none';
+    dismissed++;
+  }
+  // Corrige ancestrais com opacity:0 dos botoes criticos do editor
+  // (paywall interrompe a animacao de fade-in, deixa panel invisivel).
+  const criticalBtns = [...document.querySelectorAll('button')].filter((b) => {
+    if (b.offsetParent === null) return false;
+    const t = (b.textContent || '').trim().toLowerCase();
+    return t === 'upload audio' || t === 'generate' || t === 'add scene';
+  });
+  for (const btn of criticalBtns) {
+    let p = btn;
+    for (let i = 0; i < 10 && p && p !== document.body; i++) {
+      const cs = window.getComputedStyle(p);
+      if (cs.opacity === '0') {
+        p.style.setProperty('opacity', '1', 'important');
+        p.style.transition = 'none';
+        dismissed++;
+        studioLog(`paywall (${where}): forcei opacity:1 em ancestral de "${(btn.textContent||'').trim()}"`);
+        break;
+      }
+      p = p.parentElement;
+    }
+  }
+  if (dismissed > 0) studioLog(`paywall (${where}): ${dismissed} ajuste(s)`);
+  return dismissed > 0;
+}
+
+/** Legado: agora dismiss em vez de abort. */
+function studioAbortIfPaywall(where) {
+  studioDismissPaywallIfShown(where);
 }
 
 /** Acha o controle "Motion Engine" do painel direito do Studio
@@ -3040,6 +3119,9 @@ async function runStudioJob(requestId, payload) {
       const sceneLabel = `${jobLabel || 'VA'} cena ${i + 1}/${total}`;
       reportProgress(requestId, `${sceneLabel}: criando cena...`, Math.round((i / total) * 70));
 
+      // Limpa paywall se reabrir entre cenas
+      studioDismissPaywallIfShown(`${sceneLabel} start`);
+
       if (i > 0) {
         const addBtn = await waitForOrNull(() => findAddSceneButton(), 12000, 400);
         if (!addBtn) {
@@ -3048,12 +3130,13 @@ async function runStudioJob(requestId, payload) {
         }
         await cdpClickEl(addBtn, 'Add scene');
         await sleep(2200);
+        studioDismissPaywallIfShown(`${sceneLabel} apos add-scene`);
       }
 
       // upload do audio da parte na cena ativa
       reportProgress(requestId, `${sceneLabel}: upload ${part.filename}...`, Math.round((i / total) * 70) + 4);
       await studioUploadAudioToActiveScene(part.audioBase64, part.filename, sceneLabel);
-      studioAbortIfPaywall(`${sceneLabel} pos-upload`);
+      studioDismissPaywallIfShown(`${sceneLabel} pos-upload`);
 
       // AVATAR III obrigatorio — protege creditos pagos (NUNCA IV/V).
       reportProgress(requestId, `${sceneLabel}: garantindo Avatar III...`, Math.round((i / total) * 70) + 6);
@@ -3124,6 +3207,9 @@ async function runStudioJob(requestId, payload) {
         }
       }
     }
+
+    // Dismiss paywall se reabriu antes do Generate final
+    studioDismissPaywallIfShown('pre-Generate');
 
     // GUARDA FINAL DE CREDITO: se qualquer cena/painel mostrar Avatar
     // IV ou V, ABORTA antes do Generate (VA so pode gerar em III).
