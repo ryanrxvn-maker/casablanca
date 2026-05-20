@@ -57,6 +57,18 @@ export default function LtxVideoPage() {
   // Imagem opcional p/ image-to-video. Quando setada, vira o 1º frame
   // (modo "anime esta imagem"); o prompt vira a descrição do MOVIMENTO.
   const [image, setImage] = useState<File | null>(null);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+
+  // Mantém um object URL pro preview da imagem anexada (revoga ao trocar).
+  useEffect(() => {
+    if (!image) {
+      setImagePreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(image);
+    setImagePreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [image]);
 
   const refreshPool = useCallback(async () => {
     try {
@@ -159,28 +171,42 @@ export default function LtxVideoPage() {
           continue;
         }
 
-        // Continuação (i2v). Blindado: se falhar, NÃO perde o vídeo —
-        // entrega o que já gerou (degrada com elegância).
-        try {
-          setPhase(`${label} — preparando continuação...`);
-          const prev = parts[parts.length - 1];
-          const meta = await probeVideoMetadata(prev);
-          const at = meta ? Math.max(0, meta.durationSec - 0.08) : 3;
-          const image = await extractFrameAt(prev, at, { maxWidth: res.width });
-          setPhase(`${label} — gerando na H200 (pode levar ~1-2 min)...`);
-          parts.push(
-            await callGenerate(
-              {
-                ...baseFields,
-                prompt: `${txt}. Seamless continuation of the previous shot, same scene, smooth continuous motion.`,
-              },
-              image,
-            ),
+        // Continuação (i2v). Se você pediu 12s, EU ENTREGO 12s ou erro
+        // claro — sem entregar 6s mascarando que a continuação falhou.
+        // 1 retry rápido cobre blip transitório da Space; falha real
+        // surface mensagem honesta pro user.
+        setPhase(`${label} — preparando continuação...`);
+        const prev = parts[parts.length - 1];
+        const meta = await probeVideoMetadata(prev);
+        const at = meta ? Math.max(0, meta.durationSec - 0.08) : 3;
+        const contImage = await extractFrameAt(prev, at, { maxWidth: res.width });
+        const contFields = {
+          ...baseFields,
+          prompt: `${txt}. Seamless continuation of the previous shot, same scene, smooth continuous motion.`,
+        };
+
+        let chunk2Err: unknown = null;
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            setPhase(
+              `${label} — gerando na H200${attempt > 1 ? ' (tentativa 2)' : ''}...`,
+            );
+            parts.push(await callGenerate(contFields, contImage));
+            chunk2Err = null;
+            break;
+          } catch (e) {
+            chunk2Err = e;
+            if (attempt < 2) await new Promise((r) => setTimeout(r, 2500));
+          }
+        }
+        if (chunk2Err) {
+          const msg = chunk2Err instanceof Error ? chunk2Err.message : String(chunk2Err);
+          throw new Error(
+            `Você pediu ${dur.label}, mas o Chunk ${c + 1}/${dur.chunks} ` +
+              `falhou (mesmo após retry). Razão: ${msg}\n` +
+              `Geramos só os primeiros ${c * dur.seconds}s — não entreguei o vídeo ` +
+              `parcial pra não te enganar. Tente de novo agora ou quando houver mais quota.`,
           );
-        } catch (contErr) {
-          console.warn('[ltx] continuação falhou, usando o que já tem:', contErr);
-          setPhase('Continuação falhou — finalizando com o que gerou...');
-          break;
         }
       }
 
@@ -271,6 +297,34 @@ export default function LtxVideoPage() {
             onChange={(f) => setImage(f)}
             hint="Anexe uma imagem pra ela virar o 1º frame do vídeo (image-to-video). Sem imagem = gera só pelo prompt."
           />
+          {imagePreviewUrl && image ? (
+            <div className="mt-3 flex items-center gap-3 rounded-[12px] border border-line bg-bg-soft p-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={imagePreviewUrl}
+                alt="Pré-visualização da imagem que será animada"
+                className="h-28 w-auto rounded-[8px] border border-line object-contain bg-black"
+              />
+              <div className="min-w-0 flex-1 text-xs">
+                <p className="truncate text-white">{image.name}</p>
+                <p className="mt-1 text-text-muted">
+                  {Math.max(1, Math.round(image.size / 1024))} KB
+                </p>
+                <p className="mt-1 text-text-dim">
+                  Será o 1º frame · descreva o movimento no prompt acima
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={busy}
+                onClick={() => setImage(null)}
+                aria-label="Remover imagem"
+              >
+                Remover
+              </button>
+            </div>
+          ) : null}
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
