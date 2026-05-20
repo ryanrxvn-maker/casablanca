@@ -58,6 +58,23 @@
       'GET'
     ).toUpperCase();
     const isInteresting = method === 'POST' && URL_RE.test(url);
+    // Log REQUEST BODY de /submit (Quick Create / VA) pra reverse-eng
+    // de param names tipo voice_mirroring. Logado no console + window.
+    if (isInteresting && /shortcut|submit|generate|create/.test(url) && init && init.body) {
+      try {
+        const b = init.body;
+        let bodyStr = '';
+        if (typeof b === 'string') bodyStr = b;
+        else if (b instanceof FormData) {
+          const o = {}; b.forEach((v, k) => { o[k] = String(v).slice(0, 200); });
+          bodyStr = JSON.stringify(o);
+        }
+        if (bodyStr) {
+          console.log('[DARKO LAB inject] REQ BODY', url.slice(0, 80), bodyStr.slice(0, 2000));
+          window.__darkolab_lastReqBody = { url, body: bodyStr.slice(0, 5000), ts: Date.now() };
+        }
+      } catch (e) {}
+    }
     const p = origFetch.apply(this, arguments);
     if (isInteresting) {
       p.then(async (res) => {
