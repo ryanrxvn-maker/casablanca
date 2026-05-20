@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { FileUpload } from '@/components/FileUpload';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
 import {
@@ -53,6 +54,9 @@ export default function LtxVideoPage() {
   const [result, setResult] = useState<GalleryItem | null>(null);
   const [gallery, setGallery] = useState<GalleryItem[]>([]);
   const [pool, setPool] = useState<PoolStatus | null>(null);
+  // Imagem opcional p/ image-to-video. Quando setada, vira o 1º frame
+  // (modo "anime esta imagem"); o prompt vira a descrição do MOVIMENTO.
+  const [image, setImage] = useState<File | null>(null);
 
   const refreshPool = useCallback(async () => {
     try {
@@ -145,10 +149,13 @@ export default function LtxVideoPage() {
           dur.chunks > 1 ? `Chunk ${c + 1}/${dur.chunks}` : 'Gerando';
 
         if (c === 0) {
-          // Chunk 1 = text-to-video puro (caminho COMPROVADO). Se falhar
-          // aqui, não há vídeo nenhum — erro real pro usuário.
-          setPhase(`${label} — gerando na H200 (pode levar ~1-2 min)...`);
-          parts.push(await callGenerate(baseFields, null));
+          // Chunk 1: t2v puro OU i2v se o user anexou uma imagem
+          // (LTX-2.3 aceita imagem como 1º frame nativamente). Se falhar
+          // aqui, não há vídeo — erro real pro usuário.
+          setPhase(
+            `${label} — gerando na H200 (pode levar ~1-2 min)${image ? ' [animando imagem]' : ''}...`,
+          );
+          parts.push(await callGenerate(baseFields, image));
           continue;
         }
 
@@ -243,10 +250,26 @@ export default function LtxVideoPage() {
           <label className="label-field">Prompt</label>
           <textarea
             className="input-field min-h-[96px] resize-y"
-            placeholder="A close-up of a young woman in a Tokyo neon alley at night, cinematic, slow dolly forward, soft rain, film grain"
+            placeholder={
+              image
+                ? 'Descreva o MOVIMENTO (ex: "slow zoom in, soft wind moving the hair, cinematic")'
+                : 'A close-up of a young woman in a Tokyo neon alley at night, cinematic, slow dolly forward, soft rain, film grain'
+            }
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             disabled={busy}
+          />
+        </div>
+
+        <div>
+          <label className="label-field">
+            Imagem inicial (opcional — anima a foto)
+          </label>
+          <FileUpload
+            accept="image/png,image/jpeg,image/webp"
+            value={image}
+            onChange={(f) => setImage(f)}
+            hint="Anexe uma imagem pra ela virar o 1º frame do vídeo (image-to-video). Sem imagem = gera só pelo prompt."
           />
         </div>
 
