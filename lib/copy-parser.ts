@@ -654,28 +654,6 @@ export function sanitizeSpokenCopy(raw: string, knownRoles: string[] = []): stri
   while ((bm = bodyMarkerRe.exec(s)) !== null) lastBodyEnd = bm.index + bm[0].length;
   if (lastBodyEnd >= 0) s = s.slice(lastBodyEnd);
 
-  // (2) corta no 1o marcador de fim-de-fala (pode vir colado no texto).
-  // OBS: "Caixinha de perguntas:" NAO entra aqui porque pode aparecer NO MEIO
-  // do body (antes do "Avatar fala:" twin). Cortamos linha-a-linha na fase (3).
-  const endMarkers: RegExp[] = [
-    /\bAD\d{1,5}[A-Z0-9]*\s*-\s*[A-Z]{2,}\d*/, // nomenclatura ("AD15G2VN - PRPB06")
-    /\bGuia\s*\d/i,
-    /Tela\s*dividida/i,
-    /Take\s+(?:logo|de\s+in[íi]cio)/i,
-    /https?:\/\//i,
-    /\bwww\.[a-z0-9-]+\./i,
-    /drive\.google\.com/i,
-    /tiktok\.com/i,
-    /Link\s+do\s+avatar\s*:/i,
-    /Instru[cç][õo]es\s+para\s+edi[cç][aã]o\s*:/i,
-  ];
-  let cut = s.length;
-  for (const re of endMarkers) {
-    const m = s.match(re);
-    if (m && m.index !== undefined && m.index < cut) cut = m.index;
-  }
-  s = s.slice(0, cut);
-
   // Set lowercased dos roles conhecidos pra detectar label solto ("Doutor"
   // sozinho na linha). Tambem inclui um conjunto core mesmo se knownRoles
   // vazio — cobre briefings sem avatares mapeados.
@@ -736,6 +714,12 @@ export function sanitizeSpokenCopy(raw: string, knownRoles: string[] = []): stri
       if (/^@[\w._\-À-ÿ]+(?:\.(?:mp4|mov))?\s*$/i.test(t)) return null;
       // filename solto sem @ (ex "thethaetresmyarena.mp4" ou "kiko.urso3.mp4")
       if (/^[\w._\-À-ÿ]+\.(?:mp4|mov)\s*$/i.test(t)) return null;
+      // METADATA MULTI-LABEL: linha que tem ":" + (.mp4|.mov|nomenclatura ADxxx).
+      // Cobre o caso "Doutor: radyrahbanmd.mp4 - Voz do Doutor: AD600VN[T]-VFPB02-AVA01.mp4"
+      // — multiplos labels + filenames combinados em UMA linha. NUNCA e fala.
+      // Tambem cobre "Voz: AD600VN...mp4", "Referência: ARQUIVO.mp4". Speech real
+      // nunca contem ".mp4" nem "AD<num>-" nomenclatura.
+      if (/:/.test(t) && /(\.(?:mp4|mov)\b|\bAD\d{1,5}[A-Z0-9]*\s*[-_]\s*[A-Z]{2,})/i.test(t)) return null;
       // linha de role/speaker label — cobre TODAS variacoes:
       //   "Role:" / "Role: @file.mp4" / "Role: file.mp4" /
       //   "Role (extras):" / "Role (extras): @file.mp4" /
@@ -767,7 +751,31 @@ export function sanitizeSpokenCopy(raw: string, knownRoles: string[] = []): stri
     .join('\n')
     .replace(/\s*\[[a-z]{1,3}\]/gi, ''); // marcadores [a]/[abc]
 
-  // (4) normaliza
+  // (4) AGORA corta no 1o marcador de fim-de-fala — depois do filtro de
+  // metadata. Isso evita que a nomenclatura "AD600VN[T]-VFPB02" que vive
+  // DENTRO de linha de metadata corte fala legitima que vem DEPOIS daquela
+  // linha (bug real: hook "Tem algo bloqueando..." era descartado porque
+  // o cut acontecia mid-line na linha "Doutor: x.mp4 - Voz: AD600VN...").
+  const endMarkers: RegExp[] = [
+    /\bAD\d{1,5}[A-Z0-9]*\s*-\s*[A-Z]{2,}\d*/, // nomenclatura ("AD15G2VN - PRPB06")
+    /\bGuia\s*\d/i,
+    /Tela\s*dividida/i,
+    /Take\s+(?:logo|de\s+in[íi]cio)/i,
+    /https?:\/\//i,
+    /\bwww\.[a-z0-9-]+\./i,
+    /drive\.google\.com/i,
+    /tiktok\.com/i,
+    /Link\s+do\s+avatar\s*:/i,
+    /Instru[cç][õo]es\s+para\s+edi[cç][aã]o\s*:/i,
+  ];
+  let cut = s.length;
+  for (const re of endMarkers) {
+    const m = s.match(re);
+    if (m && m.index !== undefined && m.index < cut) cut = m.index;
+  }
+  s = s.slice(0, cut);
+
+  // (5) normaliza
   return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
