@@ -443,13 +443,21 @@ const KNOWN_ROLES_RE = /^(Mulher|Homem|Doutor[a]?|Voz|Narrador[a]?|Avatar|Locuto
  */
 function detectRoleFromLine(line: string): string | null {
   const t = line.trim();
-  // "Palavra:" / "Palavra Palavra:" / "Palavra Palavra Palavra:" — opcionalmente seguido de mention/texto
-  const m = t.match(/^([A-Za-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ]+){0,2})\s*:/);
+  // Captura "Palavra" inicial (head do role — o nome principal). Apos isso
+  // pode vir QUALQUER coisa antes do ":" enquanto for label de briefing:
+  //   parens "(Homem depoimento)", trace " - Ator pornô", palavras extras.
+  // Tudo ate o ":" e ignorado; so o head e retornado como role name.
+  //
+  // Patterns suportados:
+  //   "Doutor:"
+  //   "Leandro (Homem depoimento):"
+  //   "Homem - Ator pornô:"
+  //   "Mulher (Esposa de Leandro):"
+  //   "Voz do Homem:"
+  //   "Avatar 1:"
+  const m = t.match(/^([A-Za-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ]+)?)(?:[\s\-–—()][A-Za-zÀ-ÿ0-9 \-\(\)]{0,60})?\s*:/);
   if (!m) return null;
   const role = m[1].trim();
-  // Filtro: roles validos sao palavras curtas (< 30 chars). Frases comuns tipo
-  // "Hoje:" sao improvaveis num briefing, mas se vier "Eu disse: blah" rejeita
-  // por seguranca (mais de 3 palavras antes do : ja excluido pelo regex).
   if (role.length > 30) return null;
   return role;
 }
@@ -457,13 +465,34 @@ function detectRoleFromLine(line: string): string | null {
 /** Linha que e SO um role label (ex "Mulher:") ou role + mention (ex "Mulher: @x.mp4")
  *  ou so um mention solo (ex "@manualdohomemsolo1.mp4"). Descartar inteira. */
 function isPureRoleOrMentionLine(line: string): boolean {
-  const t = line.trim();
-  // "Mulher:" / "Voz do Homem:" — 1-3 palavras + ":"
-  if (/^[A-Za-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ]+){0,2}\s*:\s*$/.test(t)) return true;
-  // "Mulher: @x.mp4" / "Voz do Homem: @x.mp4" — role + mention
-  if (/^[A-Za-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ]+){0,2}\s*:\s*[^@\w]*@[\w._-]+(\.(mp4|mov))?\s*$/i.test(t)) return true;
-  // "@x.mp4" — so mention
-  if (/^@[\w._-]+(\.(mp4|mov))?\s*$/i.test(t)) return true;
+  // Normaliza trailing markers (" p", ".p", "[a]") que o copywriter coloca
+  // como controle de paragrafo — nao sao texto da fala nem do label.
+  const cleaned = (line || '')
+    .replace(/\s*\[[a-z]{1,3}\]\s*$/i, '')
+    .replace(/\s+[a-z]{1,2}\.?\s*$/i, '')
+    .replace(/\.[a-z]{1,2}\s*$/i, '');
+  const t = cleaned.trim();
+  // Bloqueia frases reais — se tem virgula ANTES do primeiro ":" e provavel
+  // fala ("Doutor, voce sabe que..." nao deve ser tratado como label).
+  const colon = t.indexOf(':');
+  if (colon > 0 && t.slice(0, colon).includes(',')) return false;
+
+  // Pattern unico flexivel:
+  //   <Role-head: 1-3 palavras alpha>
+  //   <opcional: extras com parens / trace / palavras adicionais>
+  //   ":"
+  //   <opcional: mention @x.mp4 OU filename.mp4>
+  //
+  // Cobre: "Mulher:", "Voz do Homem:", "Leandro (Homem depoimento):",
+  //        "Homem - Ator pornô:", "Mulher (Esposa de Leandro): @x.mp4",
+  //        "Doutor: thethaetresmyarena.mp4"
+  if (/^[A-Za-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ]+){0,2}(?:[\s\-–—()][A-Za-zÀ-ÿ0-9 \-\(\)]{0,60})?\s*:\s*(?:[^@\w]*@?[\w._\-À-ÿ]+(?:\.(?:mp4|mov))?)?\s*$/i.test(t)) {
+    // Garante que o "head" (antes de qualquer separador) e curto
+    const head = t.split(/[\s\-–—():]/)[0];
+    if (head.length >= 2 && head.length <= 30) return true;
+  }
+  // "@x.mp4" — so mention solo
+  if (/^@[\w._\-À-ÿ]+(?:\.(?:mp4|mov))?\s*$/i.test(t)) return true;
   return false;
 }
 
@@ -558,10 +587,15 @@ export type ParsedDarkoBriefing = {
    *  role = quem fala (extraido da linha "Mulher:"/"Homem:"/etc do briefing).
    *  Pode ser null se nao havia indicacao explicita. Usado pra mapear avatar. */
   hooks: Array<{ label: string; text: string; sourceG: number; role: string | null }>;
-  /** Body (do sibling que tiver — geralmente o ultimo G) */
+  /** Body CONCATENADO (todos os segmentos juntos) — pra UI display + bodyRaw.
+   *  Pra dispatch, use bodySegments. */
   body: string | null;
-  /** Quem fala o body (extraido da linha apos "Body" marker — geralmente "Homem"). */
+  /** Quem fala o body (role do PRIMEIRO segmento — compat). */
   bodyRole: string | null;
+  /** Body segmentado por SPEAKER. Cada item = um trecho falado por um role
+   *  diferente. Usado pelo dispatch pra criar partTemplates por avatar.
+   *  Quando body tem 1 unico speaker, bodySegments tem 1 item. */
+  bodySegments: Array<{ role: string | null; text: string }>;
   /** G siblings encontrados (debug) */
   gSiblings: Array<{ gNum: number; heading: string }>;
 };
@@ -578,12 +612,15 @@ export type ParsedDarkoBriefing = {
 /**
  * SANITIZADOR AUTORITATIVO da fala (hook/body) — fonte unica de verdade.
  *
- * O briefing DARKO mistura, depois do roteiro falado, blocos que NAO sao
- * fala: nomenclatura do proximo AD ("AD15G2VN - PRPB06 - ..."), "Tela
- * dividida" + dezenas de links do Drive/TikTok, "Take logo de inicio",
- * "Guia N", "Link do avatar:", "Instruções para edição:". Antes isso
- * vazava pro body e era LIDO pelo avatar (links recitados). Aqui cortamos
- * tudo isso de forma deterministica.
+ * O briefing DARKO mistura, depois e DENTRO do roteiro falado, blocos que NAO
+ * sao fala: nomenclatura do proximo AD ("AD15G2VN - PRPB06 - ..."), "Tela
+ * dividida" + dezenas de links do Drive/TikTok, "Take logo de inicio", "Guia
+ * N", "Link do avatar:", "Instruções para edição:", "Caixinha de perguntas:
+ * ...", "Avatar fala: ...", "Doutor" (red, label de speaker), "Voz: ...",
+ * "Referência: ...", "Atenção na Voz: ...", "Mulher (Esposa de X): @file.mp4"
+ * (mention de speaker com filename inline). Antes isso vazava pra TTS e era
+ * lido pelo avatar (filenames recitados, labels duplicados). Aqui cortamos
+ * tudo de forma deterministica.
  *
  * Estrategia:
  *  1) Se houver marcador "BODY" isolado, comeca DEPOIS do ultimo.
@@ -591,12 +628,23 @@ export type ParsedDarkoBriefing = {
  *     (nomenclatura ADxGx, Guia N, Tela dividida, Take logo/de inicio,
  *     URL, Link do avatar:, Instruções para edição:), inclusive colado
  *     no fim da ultima frase ("...pra ver. Guia 4").
- *  3) Remove linhas residuais: URLs, "Tela dividida", "Link do avatar:",
- *     "Instruções...", linhas SO de role (Mulher:/Homem:/Doutor:/etc),
- *     mention solo (@x.mp4) e marcadores [a-z].
- *  4) Normaliza espacos.
+ *  3) Limpa linhas residuais: URLs, "Tela dividida", linhas de metadata
+ *     ("Voz:", "Referência:", "Atenção:", "Observação:", "Nota:",
+ *     "Instruções:"), label de speaker com OU sem mention/filename
+ *     ("Mulher:", "Leandro (Homem depoimento): @kiko.urso3.mp4",
+ *     "Doutor: tarena.mp4"), label de UI ("Caixinha de perguntas: ...",
+ *     entire line — texto duplica "Avatar fala:" depois), mention solo
+ *     (@x.mp4) e marcadores [a-z].
+ *  4) Strip "Avatar fala:" prefix (essa LINHA contem a fala real).
+ *  5) Strip role-only words (Doutor / Mulher / Leandro / etc) na sua linha.
+ *  6) Normaliza espacos.
+ *
+ * @param raw      texto bruto
+ * @param knownRoles  roles do briefing pra ajudar a identificar labels
+ *                    soltos ("Doutor" sozinho na linha indica speaker, mas
+ *                    sem essa lista nao da pra distinguir de fala normal).
  */
-export function sanitizeSpokenCopy(raw: string): string {
+export function sanitizeSpokenCopy(raw: string, knownRoles: string[] = []): string {
   let s = (raw || '').replace(/\r/g, '');
 
   // (1) ancora no ultimo "BODY" isolado (linha "BODY" ou "BODY:")
@@ -606,7 +654,9 @@ export function sanitizeSpokenCopy(raw: string): string {
   while ((bm = bodyMarkerRe.exec(s)) !== null) lastBodyEnd = bm.index + bm[0].length;
   if (lastBodyEnd >= 0) s = s.slice(lastBodyEnd);
 
-  // (2) corta no 1o marcador de fim-de-fala (pode vir colado no texto)
+  // (2) corta no 1o marcador de fim-de-fala (pode vir colado no texto).
+  // OBS: "Caixinha de perguntas:" NAO entra aqui porque pode aparecer NO MEIO
+  // do body (antes do "Avatar fala:" twin). Cortamos linha-a-linha na fase (3).
   const endMarkers: RegExp[] = [
     /\bAD\d{1,5}[A-Z0-9]*\s*-\s*[A-Z]{2,}\d*/, // nomenclatura ("AD15G2VN - PRPB06")
     /\bGuia\s*\d/i,
@@ -626,26 +676,213 @@ export function sanitizeSpokenCopy(raw: string): string {
   }
   s = s.slice(0, cut);
 
+  // Set lowercased dos roles conhecidos pra detectar label solto ("Doutor"
+  // sozinho na linha). Tambem inclui um conjunto core mesmo se knownRoles
+  // vazio — cobre briefings sem avatares mapeados.
+  const knownRoleSet = new Set<string>([
+    'doutor', 'doutora', 'dr', 'dra',
+    'mulher', 'homem',
+    'narrador', 'narradora', 'locutor', 'locutora',
+    'avatar', 'voz',
+    'esposa', 'marido',
+    'depoimento', 'entrevistador', 'entrevistadora',
+    ...knownRoles.map((r) => r.toLowerCase().trim()),
+    // Tambem o "core" da role (1a palavra) — ex "Leandro (Homem depoimento)"
+    // → tambem matcha "leandro" sozinho.
+    ...knownRoles.map((r) => r.toLowerCase().trim().split(/[\s(]/)[0]),
+  ].filter(Boolean));
+
+  // Padrao role label generico: 1-4 palavras letras+acentos, opcional
+  // " (extras quaisquer)", terminando OU ":" + filename OU ":" sozinho
+  // OU nada (label solto). Usado pra filtrar linhas residuais.
+  //
+  //   "Mulher:"
+  //   "Mulher (Esposa de Leandro):"
+  //   "Mulher (Esposa de Leandro): @anapaulalima1.mp4"
+  //   "Leandro (Homem depoimento): @kiko.urso3.mp4"
+  //   "Doutor: thethaetresmyarena.mp4"
+  //   "Voz do Homem:"
+  //   "Doutor"  ← label solto (red)
+  const roleLineRe = /^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9 \-]{0,40}?)(?:\s*\([^)]{0,80}\))?\s*(?::\s*(?:[^@a-zA-ZÀ-ÿ0-9]*@?[\w._\-À-ÿ]+(?:\.(?:mp4|mov))?)?)?\s*$/i;
+
   // (3) limpa linhas residuais que nao sao fala
   s = s
     .split('\n')
-    .filter((l) => {
-      const t = l.trim();
-      if (!t) return true; // preserva paragrafos
-      if (/(https?:\/\/|\bwww\.[a-z0-9-]+\.|drive\.google\.com|tiktok\.com)/i.test(t)) return false;
-      if (/Tela\s*dividida/i.test(t)) return false;
-      if (/^(Link\s+do\s+avatar|Instru[cç][õo]es)\s*[:\-]/i.test(t)) return false;
-      // linha SO role (Mulher:/Homem:/Doutor:/Depoimento:/Entrevistador:/etc)
-      if (/^[A-Za-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ]+){0,2}\s*:\s*$/.test(t)) return false;
+    .map((l) => {
+      // Normaliza trailing markers (" p", ".p", "[a]") pro teste, mas mantem
+      // o `l` original pra preservar formatacao quando a linha for de fala real.
+      const cleaned = l
+        .replace(/\s*\[[a-z]{1,3}\]\s*$/i, '')
+        .replace(/\s+[a-z]{1,2}\.?\s*$/i, '')
+        .replace(/\.[a-z]{1,2}\s*$/i, '');
+      const t = cleaned.trim();
+      if (!t) return l; // preserva paragrafos
+      // URLs / referencias
+      if (/(https?:\/\/|\bwww\.[a-z0-9-]+\.|drive\.google\.com|tiktok\.com)/i.test(t)) return null;
+      // Markers
+      if (/Tela\s*dividida/i.test(t)) return null;
+      if (/^(Link\s+do\s+avatar|Instru[cç][õo]es)\s*[:\-]/i.test(t)) return null;
+      // Metadata prefixes — entire line out
+      if (/^(Voz(?:\s+(?:do|da|de|off|over)\s+\w+)?|Refer[eê]ncia|Aten[cç][aã]o(?:\s+\w+)?|Observa[cç][aã]o|Obs|Nota)\s*[:\-]/i.test(t)) return null;
+      // "Caixinha de perguntas: ..." (entire line — texto duplica em "Avatar fala:")
+      if (/^Caixinha\s+de\s+perguntas\s*[:\-]/i.test(t)) return null;
+      // "Avatar fala: <texto>" — STRIP PREFIX, mantem texto
+      const af = t.match(/^Avatar\s+fala\s*[:\-]\s*(.*)$/i);
+      if (af) {
+        const after = af[1].trim();
+        return after ? l.replace(/^(\s*)Avatar\s+fala\s*[:\-]\s*/i, '$1') : null;
+      }
       // mention solo (@x.mp4)
-      if (/^@[\w._-]+(?:\.(?:mp4|mov))?\s*$/i.test(t)) return false;
-      return true;
+      if (/^@[\w._\-À-ÿ]+(?:\.(?:mp4|mov))?\s*$/i.test(t)) return null;
+      // filename solto sem @ (ex "thethaetresmyarena.mp4" ou "kiko.urso3.mp4")
+      if (/^[\w._\-À-ÿ]+\.(?:mp4|mov)\s*$/i.test(t)) return null;
+      // linha de role/speaker label — cobre TODAS variacoes:
+      //   "Role:" / "Role: @file.mp4" / "Role: file.mp4" /
+      //   "Role (extras):" / "Role (extras): @file.mp4" /
+      //   "Role - extras:" / "Role - extras: @file.mp4"
+      // CRITERIO: parte antes do ":" tem que parecer label (head curto, ate
+      // 3 palavras antes de qualquer separador). Bloqueia fala ("Eu disse: oi"
+      // tem head "Eu" e funcionaria, mas "Eu" raramente sera primeira linha).
+      // Reject linhas que tem virgula ANTES do ":" — sinal de fala.
+      const colonIdx = t.indexOf(':');
+      const beforeColon = colonIdx > 0 ? t.slice(0, colonIdx) : '';
+      const hasCommaBeforeColon = beforeColon.includes(',');
+      if (!hasCommaBeforeColon && /^[A-Za-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ]+){0,2}(?:[\s\-–—()][A-Za-zÀ-ÿ0-9 \-\(\)]{0,60})?\s*:\s*(?:[^@\w]*@?[\w._\-À-ÿ]+(?:\.(?:mp4|mov))?)?\s*$/i.test(t)) {
+        // head = primeira palavra antes de qualquer separador
+        const head = t.split(/[\s\-–—():]/)[0];
+        if (head.length >= 2 && head.length <= 30) {
+          return null;
+        }
+      }
+      // role-label solto sem ":" — ex "Doutor" sozinho (red). Tem que matchar
+      // role conhecido pra evitar false-positive em fala normal.
+      // Aceita tambem "Homem - Ator pornô" (com trace).
+      if (/^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9 \-\(\)]{0,40}$/.test(t)) {
+        const head = t.split(/[\s\-–—():]/)[0].toLowerCase();
+        if (knownRoleSet.has(head)) return null;
+      }
+      return l;
     })
+    .filter((l): l is string => l !== null)
     .join('\n')
     .replace(/\s*\[[a-z]{1,3}\]/gi, ''); // marcadores [a]/[abc]
 
   // (4) normaliza
   return s.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * Detecta se uma linha e um "speaker label" — indica QUEM fala a partir dali.
+ * Retorna o role normalizado (ex "Mulher", "Doutor", "Leandro") ou null.
+ *
+ * Aceita formatos:
+ *   "Mulher:"                              → "Mulher"
+ *   "Mulher: @x.mp4"                       → "Mulher"
+ *   "Mulher (Esposa de Leandro): @x.mp4"   → "Mulher"
+ *   "Leandro (Homem depoimento): @x.mp4"   → "Leandro"
+ *   "Doutor"                               → "Doutor" (so se em knownRoles)
+ *   "Voz do Homem:"                        → "Voz do Homem"
+ *
+ * REJEITA frases normais ("Eu disse: oi", "Doutor, voce sabe...").
+ */
+export function detectSpeakerLabelLine(line: string, knownRoles: string[] = []): string | null {
+  // Tira marcadores [a]/[abc] e trailing curto (" p", " p.", " .p") que
+  // alguns copywriters deixam no fim das linhas como controle de paragrafo.
+  // Sem isso, "Mulher: @x.mp4 p" nao matcha como speaker label e a fala
+  // dela vaza pro segmento anterior — bug real reportado pelo user.
+  const cleaned = (line || '')
+    .replace(/\s*\[[a-z]{1,3}\]\s*$/i, '')          // " [a]" / " [ab]"
+    .replace(/\s+[a-z]{1,2}\.?\s*$/i, '')           // " p" / " pa" / " p."
+    .replace(/\.[a-z]{1,2}\s*$/i, '');               // ".p" / ".pa"
+  const t = cleaned.trim();
+  if (!t) return null;
+  // Reject linhas que tem virgula ANTES do ":" — provavelmente fala
+  // (ex "Doutor, voce sabe...:").
+  const colonIdx = t.indexOf(':');
+  if (colonIdx > 0 && t.slice(0, colonIdx).includes(',')) return null;
+
+  // Padrao: "Role-head[ extras: parens/trace/palavras][: opcional filename]"
+  // Captura SO o head (primeira palavra ou 2-3 palavras alpha).
+  // Aceita: "Doutor:", "Voz do Homem:", "Leandro (Homem depoimento):",
+  //         "Homem - Ator pornô:", "Mulher (Esposa de Leandro): @x.mp4"
+  const m = t.match(/^([A-Za-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ]+){0,2})(?:[\s\-–—()][A-Za-zÀ-ÿ0-9 \-\(\)]{0,60})?\s*(?::\s*(?:[^@a-zA-ZÀ-ÿ0-9]*@?[\w._\-À-ÿ]+(?:\.(?:mp4|mov))?)?)?\s*$/);
+  if (!m) return null;
+  const head = m[1].trim();
+  if (!head) return null;
+  const wordCount = head.split(/\s+/).length;
+  if (wordCount > 3 || head.length > 40) return null;
+
+  // Reject linhas que NAO terminam com ":", ".mp4" ou parens/trace — i.e.
+  // palavras soltas sem indicador de label. Aceita SO se o head matcha
+  // role conhecido.
+  const hasColon = t.includes(':');
+  const hasFilename = /\.(?:mp4|mov)\b/i.test(t);
+  const hasParens = /\(/.test(t);
+  const hasTrace = /\s[\-–—]\s/.test(t);
+
+  if (!hasColon && !hasFilename && !hasParens && !hasTrace) {
+    // Label solto — precisa matchar role conhecido
+    const knownSet = new Set<string>([
+      'doutor', 'doutora', 'dr', 'dra',
+      'mulher', 'homem',
+      'narrador', 'narradora', 'locutor', 'locutora',
+      'avatar', 'voz',
+      ...knownRoles.map((r) => r.toLowerCase().trim()),
+      ...knownRoles.map((r) => r.toLowerCase().trim().split(/[\s(\-]/)[0]),
+    ].filter(Boolean));
+    if (!knownSet.has(head.toLowerCase())) return null;
+  }
+
+  return head;
+}
+
+/**
+ * Segmenta um bloco de texto (body ou hook) em partes por SPEAKER.
+ *
+ * Cada vez que aparece um "speaker label" (linha "Role:" / "Role (extras):
+ * @file.mp4" / "Role" solo), inicia uma nova sub-secao com aquele role.
+ * Texto antes do primeiro speaker label vai pra primeira secao (com role
+ * = firstRole se conhecido, senao null).
+ *
+ * Linhas que SAO speaker labels NAO entram na fala — sao descartadas.
+ * Linhas "Avatar fala: X" tem o prefixo removido (X entra na fala).
+ *
+ * Saida: array de {role, text} — text ja sem labels mas SEM ainda passar
+ * por sanitizeSpokenCopy (caller deve sanitizar cada segmento).
+ */
+export function splitBySpeaker(
+  raw: string,
+  knownRoles: string[] = [],
+  firstRole: string | null = null,
+): Array<{ role: string | null; text: string }> {
+  const lines = (raw || '').replace(/\r/g, '').split('\n');
+  const segments: Array<{ role: string | null; lines: string[] }> = [
+    { role: firstRole, lines: [] },
+  ];
+  for (const ln of lines) {
+    const t = ln.trim();
+    if (!t) {
+      segments[segments.length - 1].lines.push(ln);
+      continue;
+    }
+    const role = detectSpeakerLabelLine(t, knownRoles);
+    if (role) {
+      // Inicia novo segmento. Se segment atual nao tem conteudo util,
+      // sobrescreve o role dele (provavel caso da PRIMEIRA linha ser label).
+      const cur = segments[segments.length - 1];
+      const curHasText = cur.lines.some((l) => l.trim().length > 0);
+      if (!curHasText) {
+        cur.role = role;
+      } else {
+        segments.push({ role, lines: [] });
+      }
+      continue;
+    }
+    segments[segments.length - 1].lines.push(ln);
+  }
+  return segments
+    .map((s) => ({ role: s.role, text: s.lines.join('\n').trim() }))
+    .filter((s) => s.text.length > 0);
 }
 
 export function parseDarkoBriefing(fullDocText: string, baseAdId: string): ParsedDarkoBriefing | null {
@@ -660,17 +897,26 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string): Parse
       avatars = [{ role: global.role, username: global.username, raw: `Link do avatar: ${global.username}.mp4` }];
     }
   }
+  // Coleta roles do briefing pra ajudar o sanitizador a detectar labels
+  // soltos ("Doutor", "Mulher" em vermelho — sem ":" nem filename).
+  const knownRoles: string[] = [];
+  for (const a of avatars) {
+    if (a.role) knownRoles.push(a.role);
+  }
   const siblings = findGSiblings(fullDocText, baseAdId);
   const hooks: ParsedDarkoBriefing['hooks'] = [];
   let body: string | null = null;
   let bodyRole: string | null = null;
+  let bodySegments: Array<{ role: string | null; text: string }> = [];
   for (const sib of siblings) {
     const parsed = parseGSibling(sib.section);
     // CADA SIBLING = EXATAMENTE 1 HOOK (mesmo que tenha multiplos paragrafos).
     // Hook num = sourceG (G1 → HOOK 1, G2 → HOOK 2, etc). Garante alinhamento
     // 1:1 com a nomenclatura do briefing — NUNCA infla a contagem de hooks.
     if (parsed.hook) {
-      const hookText = sanitizeSpokenCopy(parsed.hook.text);
+      // Hook costuma ter 1 speaker, mas o "Role (extras): @file.mp4" header
+      // pode vir embutido — sanitize com knownRoles tira o resto.
+      const hookText = sanitizeSpokenCopy(parsed.hook.text, knownRoles);
       if (hookText) {
         hooks.push({
           label: `HOOK ${sib.gNum}`,
@@ -683,10 +929,15 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string): Parse
     // Body geralmente esta no ultimo sibling. Sobrescreve pra pegar o ultimo
     // (caso mais de um sibling tenha body — improvavel mas seguro).
     if (parsed.body) {
-      const bodyText = sanitizeSpokenCopy(parsed.body.text);
-      if (bodyText) {
-        body = bodyText;
-        bodyRole = parsed.body.role;
+      // Segmenta body POR SPEAKER antes de sanitizar — speaker labels viram
+      // boundaries de segmento, nao sao lidos como fala.
+      const segs = splitBySpeaker(parsed.body.text, knownRoles, parsed.body.role)
+        .map((s) => ({ role: s.role, text: sanitizeSpokenCopy(s.text, knownRoles) }))
+        .filter((s) => s.text.length > 0);
+      if (segs.length > 0) {
+        bodySegments = segs;
+        body = segs.map((s) => s.text).join('\n\n');
+        bodyRole = segs[0].role;
       }
     }
   }
@@ -696,6 +947,7 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string): Parse
     hooks,
     body,
     bodyRole,
+    bodySegments,
     gSiblings: siblings.map(s => ({ gNum: s.gNum, heading: s.heading })),
   };
 }

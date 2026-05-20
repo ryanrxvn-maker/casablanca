@@ -1139,12 +1139,37 @@ export default function ClickUpPilotPage() {
           for (const h of briefing.hooks) {
             partTemplates.push({ label: h.label, text: h.text, matchByRole: pickRoleForText(h.text, h.label, h.role) });
           }
-          const bodyParts = briefing.body ? splitCopyIntoParts(briefing.body, { targetSec: 20, minSec: 10, maxSec: 35 }) : [];
-          bodyParts.forEach((bp, i) => {
-            const label = bodyParts.length === 1 ? 'BODY' : `BODY ${i + 1}`;
-            // Todas as parts do body herdam o mesmo bodyRole (split nao muda speaker)
-            partTemplates.push({ label, text: bp, matchByRole: pickRoleForText(bp, label, briefing.bodyRole) });
-          });
+          // Body segmentado por SPEAKER (cada role vira sub-bloco). Dentro
+          // de cada segmento, split por tempo (~20s) preservando o role.
+          // CRITICAL: split nao MUDA speaker — cada part herda o role do
+          // segmento de origem, NUNCA cruza com texto de outro speaker.
+          const segs = briefing.bodySegments && briefing.bodySegments.length > 0
+            ? briefing.bodySegments
+            : (briefing.body ? [{ role: briefing.bodyRole, text: briefing.body }] : []);
+          let bodyIdx = 0;
+          const totalSegs = segs.length;
+          for (let si = 0; si < segs.length; si++) {
+            const seg = segs[si];
+            const segParts = splitCopyIntoParts(seg.text, { targetSec: 20, minSec: 10, maxSec: 35 });
+            for (let pi = 0; pi < segParts.length; pi++) {
+              bodyIdx++;
+              // Label: BODY (1 part total), BODY N (multi parts mesmo speaker),
+              // BODY S.P (multi speakers — S=segment idx, P=part idx)
+              const label = (totalSegs === 1 && segParts.length === 1)
+                ? 'BODY'
+                : (totalSegs === 1)
+                  ? `BODY ${pi + 1}`
+                  : (segParts.length === 1)
+                    ? `BODY ${si + 1}`
+                    : `BODY ${si + 1}.${pi + 1}`;
+              partTemplates.push({
+                label,
+                text: segParts[pi],
+                matchByRole: pickRoleForText(segParts[pi], label, seg.role),
+              });
+            }
+          }
+          const bodyPartsCount = bodyIdx;
           const allHaveAvatar = roleSlots.every((s) => s.avatarId);
           // Propaga o mesmo resultado pra TODAS siblings G1/G2 do grupo
           // (compartilham o doc — ja analisamos uma vez).
@@ -1159,7 +1184,7 @@ export default function ClickUpPilotPage() {
                 status: onlyMagnificMode || allHaveAvatar ? 'ready' : 'partial',
                 baseAdId,
                 hookCount: briefing.hooks.length,
-                bodyPartsCount: bodyParts.length,
+                bodyPartsCount,
                 totalParts: partTemplates.length,
                 roleSlots,
                 partTemplates,
@@ -1370,6 +1395,26 @@ export default function ClickUpPilotPage() {
         seed: taskId,
       });
       console.log(`[clickup-pilot] motor config (${motorCfg.kind}): ${motorsPerPart.join(', ')}`);
+      // LOG CRITICO: avatar mapping por task. Permite o user verificar em
+      // DevTools que cada AD pegou o avatar certo. Se 2 ADs distintos
+      // estiverem usando o MESMO avatarId pro mesmo role, e bug — abrir
+      // issue ou re-analisar. Esse log salvou ja o caso AD144/AD145 onde
+      // o user reclamou de avatar trocado.
+      console.log(
+        `[clickup-pilot] DISPATCH task=${taskId} ad=${rBaseAdId} name=${rTaskName}\n` +
+        plan.parts.map((p: any, i: number) =>
+          `  part ${i + 1} [${p.label}] avatar=${p.avatarId} (${p.avatarName || '?'}) voice=${p.voiceId || 'default'} text="${(p.text || '').slice(0, 60).replace(/\n/g, ' ')}..."`
+        ).join('\n')
+      );
+      // Sanity check: se algum part vai SEM avatar, aborta antes de torrar
+      // chamadas TTS em vao.
+      const missingAv = plan.parts.findIndex((p: any) => !p.avatarId);
+      if (missingAv >= 0) {
+        const errMsg = `Part ${missingAv + 1} (${plan.parts[missingAv].label}) sem avatarId. NUNCA dispara sem avatar — refaz a analise.`;
+        console.error(`[clickup-pilot] ${errMsg}`);
+        setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: errMsg, finishedAt: Date.now() } }));
+        return;
+      }
       const jobs = plan.parts.map((p: any, i: number) => ({
         label: p.label,
         copy: p.text,
@@ -1537,8 +1582,16 @@ export default function ClickUpPilotPage() {
       {
         const zipMont = new JSZip();
         for (const item of assembled) {
-          if (item.decupado) {
+          // PRIORIDADE: normalized (decupado+volume EQ) > decupado > rawAssembled.
+          // normalizado e o produto final ideal — voz equalizada e silencios
+          // cortados. decupado e fallback se normalize falhou.
+          if (item.normalized) {
+            zipMont.file(item.filename, item.normalized);
+          } else if (item.decupado) {
             zipMont.file(item.filename, item.decupado);
+            if (item.errors?.normalizacao) {
+              zipMont.file(`${item.filename.replace('.mp4', '')}_NORMALIZACAO_ERRO.txt`, item.errors.normalizacao);
+            }
           } else if (item.rawAssembled && item.rawAssembled.size > 0 && !item.errors?.assemble) {
             // Decupagem falhou mas tem montagem — entrega o montado raw + nota
             const baseName = item.filename.replace('.mp4', '_sem_decupagem.mp4');
@@ -1546,7 +1599,7 @@ export default function ClickUpPilotPage() {
             zipMont.file(`${item.filename.replace('.mp4', '')}_DECUPAGEM_ERRO.txt`, item.errors?.decupagem || 'erro desconhecido');
           } else {
             zipMont.file(`${item.filename.replace('.mp4', '')}_ERRO.txt`,
-              `Assemble: ${item.errors?.assemble || 'OK'}\nDecupagem: ${item.errors?.decupagem || 'OK'}`);
+              `Assemble: ${item.errors?.assemble || 'OK'}\nDecupagem: ${item.errors?.decupagem || 'OK'}\nNormalizacao: ${item.errors?.normalizacao || 'OK'}`);
           }
         }
         zipMont.file('_DIAGNOSTICO.txt',
@@ -1603,7 +1656,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         } catch (e) { console.warn('[batch] save camo IDB:', e); }
       }
 
-      const totalSize = takesBlob.size + (montadoUrl ? assembled.reduce((n, it) => n + (it.decupado?.size || it.rawAssembled?.size || 0), 0) : 0);
+      const totalSize = takesBlob.size + (montadoUrl ? assembled.reduce((n, it) => n + (it.normalized?.size || it.decupado?.size || it.rawAssembled?.size || 0), 0) : 0);
       setBatchStates((prev) => ({
         ...prev,
         [taskId]: {
@@ -2536,6 +2589,24 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     });
   }
 
+  /** Edita o texto de uma part especifica (preview/correcao manual antes
+   *  do dispatch). User abre o preview por avatar, ve EXATAMENTE o que vai
+   *  pro HeyGen, e se tiver leak (indicativo de cor vermelha que escapou
+   *  do parser), edita direto aqui. Mutacao explicita — substitui o texto
+   *  e mantem label + matchByRole. */
+  function updatePartTemplateText(taskId: string, partIdx: number, newText: string) {
+    setTaskAnalyses((prev) => {
+      const a = prev[taskId];
+      if (!a?.partTemplates) return prev;
+      const newParts = a.partTemplates.map((p, i) => i === partIdx ? { ...p, text: newText } : p);
+      return { ...prev, [taskId]: { ...a, partTemplates: newParts } };
+    });
+  }
+
+  /** Map { "taskId:roleIdx" → boolean } pra controlar qual slot esta com
+   *  preview aberto. UI efemera, nao persiste. */
+  const [previewOpen, setPreviewOpen] = useState<Record<string, boolean>>({});
+
   /** Remove um slot manual/auto-detectado */
   function removeRoleSlot(taskId: string, roleIdx: number) {
     setTaskAnalyses((prev) => {
@@ -2885,19 +2956,32 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           avatarName: av?.name || null,
         });
       }
-      if (briefing.body) {
-        // Split do body em parts ~20s no Avatar III (todas herdam bodyRole)
-        const bodyParts = splitCopyIntoParts(briefing.body, { targetSec: 20, minSec: 10, maxSec: 35 });
-        bodyParts.forEach((bp, i) => {
-          const label = bodyParts.length === 1 ? 'BODY' : `BODY ${i + 1}`;
-          const av = pickAvatarForText(bp, label, briefing.bodyRole);
+      // Body: itera POR SPEAKER (bodySegments). Cada segmento mantem seu role
+      // — split por tempo NUNCA cruza speaker. Quando body tem 1 unico
+      // speaker, bodySegments tem 1 entry.
+      const bodySegs = briefing.bodySegments && briefing.bodySegments.length > 0
+        ? briefing.bodySegments
+        : (briefing.body ? [{ role: briefing.bodyRole, text: briefing.body }] : []);
+      const totalSegs = bodySegs.length;
+      for (let si = 0; si < bodySegs.length; si++) {
+        const seg = bodySegs[si];
+        const segParts = splitCopyIntoParts(seg.text, { targetSec: 20, minSec: 10, maxSec: 35 });
+        for (let pi = 0; pi < segParts.length; pi++) {
+          const label = (totalSegs === 1 && segParts.length === 1)
+            ? 'BODY'
+            : (totalSegs === 1)
+              ? `BODY ${pi + 1}`
+              : (segParts.length === 1)
+                ? `BODY ${si + 1}`
+                : `BODY ${si + 1}.${pi + 1}`;
+          const av = pickAvatarForText(segParts[pi], label, seg.role);
           planParts.push({
             label,
-            text: bp,
+            text: segParts[pi],
             avatarId: av?.id || null,
             avatarName: av?.name || null,
           });
-        });
+        }
       }
       return { adName, parts: planParts, unmatchedAvatars };
     }
@@ -4335,15 +4419,79 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                             ) : (
                                               <span className="text-red-300">· PENDENTE — escolha o avatar abaixo</span>
                                             )}
+                                            {/* BOTAO 3D: preview da copy que vai pro HeyGen deste avatar.
+                                              * Icone-only — abre/fecha painel com textarea editavel das parts
+                                              * onde matchByRole === slot.role.toLowerCase(). Permite confirmar
+                                              * o que cada avatar vai falar ANTES de disparar. Critico pra pegar
+                                              * leaks de indicativo (texto vermelho) que escapou do parser. */}
+                                            <button
+                                              type="button"
+                                              onClick={() => setPreviewOpen((prev) => ({ ...prev, [`${a.taskId}:${sIdx}`]: !prev[`${a.taskId}:${sIdx}`] }))}
+                                              className="ml-auto rounded-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-200 hover:bg-cyan-500/25 shadow-[0_2px_0_rgba(0,0,0,0.4),0_0_8px_rgba(34,211,238,0.3)] active:translate-y-[1px] active:shadow-[0_1px_0_rgba(0,0,0,0.4)]"
+                                              title="Preview do texto que esse avatar vai falar no HeyGen (editavel — corrige se tiver leak de indicativo)"
+                                            >
+                                              👁
+                                            </button>
                                             <button
                                               type="button"
                                               onClick={() => removeRoleSlot(a.taskId, sIdx)}
-                                              className="ml-auto rounded-full px-1.5 py-0.5 text-text-muted hover:bg-red-500/10 hover:text-red-300"
+                                              className="rounded-full px-1.5 py-0.5 text-text-muted hover:bg-red-500/10 hover:text-red-300"
                                               title="Remover este slot"
                                             >
                                               ×
                                             </button>
                                           </div>
+                                          {/* PAINEL DE PREVIEW POR AVATAR — editavel.
+                                            * Mostra TODAS as parts (HOOK/BODY) que matcham por role do slot.
+                                            * Cada part tem um textarea independente — user pode ajustar
+                                            * o texto exato que vai pro HeyGen antes de disparar.
+                                            * Diff visual: texto identico ao que sera enviado, 1:1. */}
+                                          {previewOpen[`${a.taskId}:${sIdx}`] ? (
+                                            <div className="mt-2 rounded-[10px] border border-cyan-500/40 bg-cyan-500/5 p-3">
+                                              <div className="mono mb-2 text-[9px] uppercase tracking-widest text-cyan-200">
+                                                preview do texto pro HeyGen ({slot.role}) — editavel
+                                              </div>
+                                              {(() => {
+                                                const matched = (a.partTemplates || [])
+                                                  .map((pt, idx) => ({ pt, idx }))
+                                                  .filter(({ pt }) => pt.matchByRole === slot.role.toLowerCase());
+                                                if (matched.length === 0) {
+                                                  return (
+                                                    <div className="rounded-[8px] border border-yellow-500/40 bg-yellow-500/5 p-2 text-[11px] text-yellow-200">
+                                                      ⚠ Nenhuma parte foi atribuida a este avatar.
+                                                      Ou o parser nao detectou speaker corretamente, ou outro avatar pegou tudo.
+                                                    </div>
+                                                  );
+                                                }
+                                                return (
+                                                  <div className="grid gap-2">
+                                                    {matched.map(({ pt, idx }) => (
+                                                      <div key={idx} className="rounded-[8px] border border-line bg-bg/60 p-2">
+                                                        <div className="mono mb-1 flex items-center justify-between text-[9px] uppercase tracking-widest text-cyan-300">
+                                                          <span>{pt.label}</span>
+                                                          <span className="text-text-muted">
+                                                            {pt.text.length} chars · {pt.text.split(/\s+/).filter(Boolean).length} palavras
+                                                          </span>
+                                                        </div>
+                                                        <textarea
+                                                          value={pt.text}
+                                                          onChange={(e) => updatePartTemplateText(a.taskId, idx, e.target.value)}
+                                                          className="mono w-full resize-y rounded border border-line-strong bg-bg/40 px-2 py-1.5 text-[12px] text-text focus:border-cyan-500/60 focus:outline-none"
+                                                          rows={Math.max(3, Math.min(12, pt.text.split('\n').length + 1))}
+                                                          spellCheck={false}
+                                                          placeholder="(vazio — esse part nao vai gerar nada)"
+                                                        />
+                                                      </div>
+                                                    ))}
+                                                  </div>
+                                                );
+                                              })()}
+                                              <div className="mono mt-2 text-[9px] uppercase tracking-widest text-text-muted">
+                                                ↑ se ver indicativo vermelho/filename/marker aqui dentro, edita pra remover.
+                                                este e o texto EXATO que vai pro avatar.
+                                              </div>
+                                            </div>
+                                          ) : null}
                                           {/* Preview avatar SEMPRE visivel (thumb se Drive ID detectado, placeholder caso contrario) */}
                                           <div className="mt-2 flex items-center gap-3 rounded-[8px] border border-blue-500/30 bg-blue-500/5 p-2">
                                             {briefingThumbUrl ? (
