@@ -57,6 +57,64 @@
 #darko-dl-btn:disabled {
   cursor: progress;
 }
+/* Anel de progresso REAL em volta do orbe — aparece enquanto baixa,
+   some quando o arquivo entra na barra de downloads do navegador. */
+#darko-dl-btn .d-prog {
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  --p: 0;
+  background: conic-gradient(
+    rgba(200, 255, 0, 0.95) calc(var(--p) * 1%),
+    rgba(200, 255, 0, 0.12) 0
+  );
+  -webkit-mask: radial-gradient(
+    circle,
+    transparent 60%,
+    #000 62%,
+    #000 100%
+  );
+  mask: radial-gradient(circle, transparent 60%, #000 62%, #000 100%);
+  transition: opacity 0.18s ease;
+}
+#darko-dl-btn[data-prog="on"] .d-prog {
+  opacity: 1;
+}
+#darko-dl-btn[data-prog="indet"] .d-prog {
+  opacity: 1;
+  background: conic-gradient(
+    rgba(200, 255, 0, 0.95) 0 25%,
+    rgba(200, 255, 0, 0.05) 0 100%
+  );
+  animation: darko-prog-spin 1s linear infinite;
+}
+@keyframes darko-prog-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+#darko-dl-btn .d-pct {
+  position: absolute;
+  left: 50%;
+  bottom: -14px;
+  transform: translateX(-50%);
+  font: 700 10px/1 ui-monospace, "Segoe UI", monospace;
+  color: #c8ff00;
+  background: rgba(11, 13, 12, 0.86);
+  border-radius: 6px;
+  padding: 2px 5px;
+  pointer-events: none;
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+#darko-dl-btn[data-prog="on"] .d-pct {
+  opacity: 1;
+}
+
 /* estados (sem texto/ícone extra — só o orbe reage) */
 #darko-dl-btn[data-state="loading"] .d-orb {
   animation: darko-pulse 0.85s ease-in-out infinite;

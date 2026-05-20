@@ -163,28 +163,48 @@ function addJob(url) {
   return el;
 }
 
+async function reauthFromEngine() {
+  // pega o token vivo do motor via /pair (acaba 401 sem o usuario mexer)
+  try {
+    const pr = await fetch(`${engineBase()}/pair`);
+    if (pr.ok) {
+      const pj = await pr.json();
+      if (pj && pj.token) {
+        state.token = pj.token;
+        await storageSet({ token: pj.token, port: state.port });
+        return true;
+      }
+    }
+  } catch {
+    /* offline */
+  }
+  return false;
+}
+
+async function postDownload(url) {
+  return fetch(`${engineBase()}/download`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${state.token}`,
+    },
+    body: JSON.stringify({
+      url,
+      mode: state.mode,
+      quality: state.quality,
+      adult: state.adult,
+    }),
+  });
+}
+
 async function downloadOne(url, el) {
   try {
-    const res = await fetch(`${engineBase()}/download`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${state.token}`,
-      },
-      body: JSON.stringify({
-        url,
-        mode: state.mode,
-        quality: state.quality,
-        adult: state.adult,
-      }),
-    });
+    let res = await postDownload(url);
     if (res.status === 401) {
-      // o motor gerou um novo código — força re-pareamento
-      await storageSet({ token: '' });
-      state.token = '';
-      throw new Error(
-        'Código mudou. Abra o CODIGO.cmd e cole o novo código (re-parear).',
-      );
+      // motor regerou token? Tenta re-pair automatico (transparente)
+      if (await reauthFromEngine()) {
+        res = await postDownload(url);
+      }
     }
     if (!res.ok) {
       let msg = 'HTTP ' + res.status;
@@ -238,7 +258,16 @@ $('go').addEventListener('click', async () => {
   );
   $('go').disabled = false;
   $('go').textContent = 'Baixar';
-  if (!state.token) await refresh(); // 401 limpou o token -> tela de parear
+  // (token nao e mais limpo em 401 — reauthFromEngine refaz sozinho)
 });
 
 refresh();
+// Pos-restart do PC: o motor pode demorar uns segundos pra subir.
+// Reconecta sozinho enquanto o popup esta aberto — sem precisar clicar
+// "tentar de novo" nem colar codigo. Auto-pair via /pair faz o resto.
+setInterval(() => {
+  const noEng = document.getElementById('noEngine');
+  if (noEng && !noEng.classList.contains('hidden')) {
+    refresh();
+  }
+}, 2500);

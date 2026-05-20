@@ -185,10 +185,15 @@ async function main() {
             res.writeHead(502, { 'content-type': 'application/json' });
             return res.end(JSON.stringify({ error: `CDN HTTP ${up.status}` }));
           }
-          res.writeHead(200, {
+          // forward content-length se o CDN mandou — permite o Chrome
+          // calcular % de progresso pro botao na pagina.
+          const upLen = up.headers.get('content-length');
+          const baseHeaders: Record<string, string> = {
             'content-type': result.contentType,
             'content-disposition': cd,
-          });
+          };
+          if (upLen) baseHeaders['content-length'] = upLen;
+          res.writeHead(200, baseHeaders);
           const reader = up.body.getReader();
           for (;;) {
             const { done, value } = await reader.read();
@@ -208,10 +213,21 @@ async function main() {
         }
         return;
       }
-      res.writeHead(200, {
+      // file path: stat pra mandar content-length -> Chrome mostra %
+      // real no botao da pagina (e na barra de downloads).
+      let totalBytes = 0;
+      try {
+        totalBytes = (await (await import('fs/promises')).stat(result.filePath))
+          .size;
+      } catch {
+        /* fallback sem length */
+      }
+      const fhdrs: Record<string, string> = {
         'content-type': result.contentType,
         'content-disposition': cd,
-      });
+      };
+      if (totalBytes > 0) fhdrs['content-length'] = String(totalBytes);
+      res.writeHead(200, fhdrs);
       const stream = createReadStream(result.filePath);
       stream.on('error', () => {
         try {

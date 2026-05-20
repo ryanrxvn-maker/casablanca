@@ -37,15 +37,24 @@ async function discoverEngine(preferred) {
   return null;
 }
 
-async function startDownload({ url, mode, quality, adult }) {
+function sendProgress(tabId, payload) {
+  if (!tabId) return;
+  try {
+    chrome.tabs.sendMessage(tabId, { type: 'darko-dl-progress', ...payload });
+  } catch {
+    /* aba pode ter fechado */
+  }
+}
+
+async function tryDownloadOnce({ url, mode, quality, adult, tabId }) {
   const eng = await discoverEngine((await getCfg()).port || 47923);
   if (!eng) {
     return {
       ok: false,
+      authFail: false,
       error: 'Motor local não está rodando. Abra o DarkoLab Downloader.',
     };
   }
-  const p = eng.port;
   const params = {
     t: eng.token,
     url,
@@ -54,13 +63,14 @@ async function startDownload({ url, mode, quality, adult }) {
   };
   if (adult === true) params.adult = '1';
   const qs = new URLSearchParams(params).toString();
-  const dlUrl = `http://127.0.0.1:${p}/get?${qs}`;
+  const dlUrl = `http://127.0.0.1:${eng.port}/get?${qs}`;
 
   return new Promise((resolve) => {
     chrome.downloads.download({ url: dlUrl, saveAs: false }, (id) => {
       if (chrome.runtime.lastError || id === undefined) {
         resolve({
           ok: false,
+          authFail: false,
           error: chrome.runtime.lastError?.message || 'falha ao iniciar',
         });
         return;
@@ -70,36 +80,97 @@ async function startDownload({ url, mode, quality, adult }) {
         if (settled) return;
         settled = true;
         chrome.downloads.onChanged.removeListener(onChanged);
+        clearInterval(poller);
         clearTimeout(cap);
         resolve(r);
       };
-      // espera o RESULTADO REAL (sem "ok" otimista): so resolve quando
-      // completar de verdade ou der erro do servidor (401/502/etc).
+      // PROGRESSO REAL: polling de chrome.downloads.search → manda %
+      // pro content script (botao mostra carregando ate subir na barra).
+      const poller = setInterval(() => {
+        try {
+          chrome.downloads.search({ id }, (items) => {
+            const it = items && items[0];
+            if (!it) return;
+            const total = Number(it.totalBytes) || 0;
+            const recv = Number(it.bytesReceived) || 0;
+            const pct = total > 0 ? Math.min(99, Math.floor((recv / total) * 100)) : -1;
+            sendProgress(tabId, { id, state: it.state, pct, recv, total });
+            if (it.state === 'complete') {
+              sendProgress(tabId, { id, state: 'complete', pct: 100 });
+              finish({ ok: true });
+            } else if (it.state === 'interrupted') {
+              const err = it.error || 'FAILED';
+              sendProgress(tabId, { id, state: 'interrupted', pct, error: err });
+              finish({
+                ok: false,
+                authFail: /FORBIDDEN|SERVER_UNAUTHORIZED|SERVER_BAD_CONTENT/i.test(
+                  err,
+                ),
+                error: err,
+              });
+            }
+          });
+        } catch {
+          /* SW pode estar suspendendo — proxima tick ok */
+        }
+      }, 600);
+      // event-driven backup
       const onChanged = (delta) => {
         if (delta.id !== id) return;
         if (delta.state && delta.state.current === 'complete') {
+          sendProgress(tabId, { id, state: 'complete', pct: 100 });
           finish({ ok: true });
         } else if (delta.error && delta.error.current) {
           const e = String(delta.error.current);
-          const friendly = /FORBIDDEN|SERVER_FAILED|BLOCKED|FAILED/i.test(e)
-            ? 'Falha no motor (código pode ter mudado — re-pareie pelo CODIGO.cmd) ou link inválido.'
-            : 'servidor: ' + e;
-          finish({ ok: false, error: friendly });
+          sendProgress(tabId, { id, state: 'interrupted', error: e });
+          finish({
+            ok: false,
+            authFail: /FORBIDDEN|SERVER_UNAUTHORIZED|SERVER_BAD_CONTENT/i.test(
+              e,
+            ),
+            error: e,
+          });
         }
       };
       chrome.downloads.onChanged.addListener(onChanged);
-      // teto de seguranca: nunca prende a UI pra sempre
       const cap = setTimeout(
-        () => finish({ ok: false, error: 'tempo esgotado — tente de novo.' }),
-        300000,
+        () =>
+          finish({
+            ok: false,
+            authFail: false,
+            error: 'tempo esgotado — tente de novo.',
+          }),
+        600000,
       );
     });
   });
 }
 
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+async function startDownload({ url, mode, quality, adult, tabId }) {
+  // Tentativa 1
+  let r = await tryDownloadOnce({ url, mode, quality, adult, tabId });
+  // Se 401/auth (token defasado), faz re-pair forçado e tenta de novo
+  // — usuario nao precisa fazer nada manualmente.
+  if (!r.ok && r.authFail) {
+    try {
+      await chrome.storage.local.set({ token: '' });
+    } catch {}
+    r = await tryDownloadOnce({ url, mode, quality, adult, tabId });
+  }
+  if (r.ok) return { ok: true };
+  return {
+    ok: false,
+    error:
+      r.error === 'SERVER_UNAUTHORIZED'
+        ? 'Sem autorizacao — abra o Downloader uma vez e tente de novo.'
+        : 'Falha: ' + r.error,
+  };
+}
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'darko-download') {
-    startDownload(msg).then(sendResponse);
+    const tabId = sender && sender.tab && sender.tab.id;
+    startDownload({ ...msg, tabId }).then(sendResponse);
     return true; // resposta assíncrona
   }
   if (msg && msg.type === 'darko-ping-engine') {

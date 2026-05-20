@@ -105,11 +105,60 @@
     img.src = orbUrl;
     const ring = document.createElement('span');
     ring.className = 'd-ring';
+    const prog = document.createElement('span');
+    prog.className = 'd-prog';
+    prog.style.setProperty('--p', '0');
+    const pct = document.createElement('span');
+    pct.className = 'd-pct';
     btn.appendChild(ring);
     btn.appendChild(img);
+    btn.appendChild(prog);
+    btn.appendChild(pct);
     btn.addEventListener('click', onClick);
     document.documentElement.appendChild(btn);
     return btn;
+  }
+
+  function setProgress(p) {
+    if (!btn) return;
+    const prog = btn.querySelector('.d-prog');
+    const lbl = btn.querySelector('.d-pct');
+    if (!prog || !lbl) return;
+    if (p < 0) {
+      // tamanho desconhecido — anel indeterminado, sem %
+      btn.dataset.prog = 'indet';
+      lbl.textContent = '';
+      prog.style.setProperty('--p', '0');
+      return;
+    }
+    btn.dataset.prog = 'on';
+    prog.style.setProperty('--p', String(p));
+    lbl.textContent = p >= 100 ? '' : p + '%';
+  }
+  function clearProgress() {
+    if (!btn) return;
+    btn.dataset.prog = '';
+    const lbl = btn.querySelector('.d-pct');
+    if (lbl) lbl.textContent = '';
+  }
+
+  // Recebe progresso REAL do background (chrome.downloads): anel + %
+  // mostram que o download disparou e quanto falta ate subir na barra.
+  try {
+    chrome.runtime.onMessage.addListener((m) => {
+      if (!m || m.type !== 'darko-dl-progress') return;
+      const pct = typeof m.pct === 'number' ? m.pct : -1;
+      if (m.state === 'complete') {
+        setProgress(100);
+        setTimeout(clearProgress, 1200);
+      } else if (m.state === 'interrupted') {
+        clearProgress();
+      } else {
+        setProgress(pct);
+      }
+    });
+  } catch {
+    /* contexto invalido */
   }
 
   function toast(msg, kind) {
@@ -154,6 +203,7 @@
       return;
     }
     setBtn('loading');
+    setProgress(-1); // anel indeterminado ate chegar % real
     toast('Enviando…', '');
     let done = false;
     const timeout = setTimeout(() => {

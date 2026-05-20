@@ -861,10 +861,13 @@ async function main() {
             res.writeHead(502, { "content-type": "application/json" });
             return res.end(JSON.stringify({ error: `CDN HTTP ${up.status}` }));
           }
-          res.writeHead(200, {
+          const upLen = up.headers.get("content-length");
+          const baseHeaders = {
             "content-type": result.contentType,
             "content-disposition": cd
-          });
+          };
+          if (upLen) baseHeaders["content-length"] = upLen;
+          res.writeHead(200, baseHeaders);
           const reader = up.body.getReader();
           for (; ; ) {
             const { done, value } = await reader.read();
@@ -884,10 +887,17 @@ async function main() {
         }
         return;
       }
-      res.writeHead(200, {
+      let totalBytes = 0;
+      try {
+        totalBytes = (await (await import("fs/promises")).stat(result.filePath)).size;
+      } catch {
+      }
+      const fhdrs = {
         "content-type": result.contentType,
         "content-disposition": cd
-      });
+      };
+      if (totalBytes > 0) fhdrs["content-length"] = String(totalBytes);
+      res.writeHead(200, fhdrs);
       const stream = (0, import_fs.createReadStream)(result.filePath);
       stream.on("error", () => {
         try {
