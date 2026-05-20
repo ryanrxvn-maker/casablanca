@@ -83,25 +83,89 @@ export default function LtxVideoPage() {
     refreshPool();
   }, [refreshPool]);
 
+  /**
+   * Redimensiona/comprime a imagem no cliente antes de subir.
+   *  - Vercel Hobby tem teto de ~4.5 MB de body por função.
+   *  - LTX-2.3 só usa até 1536px no maior lado (presets) — não vale a
+   *    pena mandar mais do que isso.
+   * Resultado: JPEG q≈0.88, longest side ≤ 1536. Cabe em <1 MB sem perder
+   * qualidade perceptível pro modelo.
+   */
+  async function compressImageIfNeeded(blob: Blob): Promise<Blob> {
+    if (!blob.type.startsWith('image/')) return blob;
+    const url = URL.createObjectURL(blob);
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = reject;
+        el.src = url;
+      });
+      const MAX = 1536;
+      const longest = Math.max(img.naturalWidth, img.naturalHeight);
+      const scale = longest > MAX ? MAX / longest : 1;
+      // Se já é pequena (<1.5 MB) e dentro do limite, manda direto.
+      if (scale === 1 && blob.size < 1_500_000) return blob;
+      const w = Math.round(img.naturalWidth * scale);
+      const h = Math.round(img.naturalHeight * scale);
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      const ctx = c.getContext('2d');
+      if (!ctx) return blob;
+      ctx.drawImage(img, 0, 0, w, h);
+      const out = await new Promise<Blob | null>((res) =>
+        c.toBlob(res, 'image/jpeg', 0.88),
+      );
+      return out && out.size > 0 ? out : blob;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
   async function callGenerate(
     fields: Record<string, string>,
     image: Blob | null,
   ): Promise<Blob> {
     const fd = new FormData();
     Object.entries(fields).forEach(([k, v]) => fd.append(k, v));
-    if (image) fd.append('image', image, 'frame.jpg');
+    if (image) {
+      const compact = await compressImageIfNeeded(image);
+      fd.append('image', compact, 'frame.jpg');
+    }
 
     const resp = await fetch('/api/ltx-video/generate', {
       method: 'POST',
       body: fd,
     });
-    const j = (await resp.json()) as GenResp;
+
+    // Resposta pode vir como texto cru em erros de infra (413, 504, etc).
+    // Lemos como texto e tentamos JSON; senão, jogamos um erro humano com
+    // o status real, em vez do críptico "Unexpected token 'R'".
+    const raw = await resp.text();
+    let j: GenResp;
+    try {
+      j = JSON.parse(raw) as GenResp;
+    } catch {
+      const head = raw.replace(/\s+/g, ' ').slice(0, 200);
+      const is413 = resp.status === 413 || /entity too large/i.test(raw);
+      throw new Error(
+        is413
+          ? `Imagem grande demais pro servidor (HTTP ${resp.status}). ` +
+              `Tentamos comprimir mas ainda passou do limite — anexe uma ` +
+              `imagem menor (<4 MB) ou em menor resolução.`
+          : `Servidor respondeu fora do padrão (HTTP ${resp.status}): ${head}`,
+      );
+    }
 
     if (!resp.ok || !j.videoUrl) {
       if (j.kind === 'config') {
         throw new Error(
-          'Nenhum token HF visível NESTA função do servidor. ' +
-            'Configure HF_TOKENS no Vercel (escopo Project) e Redeploy. ' +
+          '❌ FALTA DE TOKEN HF. Nenhum token Hugging Face configurado no ' +
+            'servidor. Pra gerar vídeo o HF_TOKENS precisa ter ≥1 token ' +
+            'válido. Vercel → casablanca → Settings → Environment ' +
+            'Variables → HF_TOKENS = hf_xxx (vírgula separa várias contas). ' +
+            'Token grátis em huggingface.co/settings/tokens. ' +
             (j.detail ? `[diagnóstico: ${j.detail}]` : ''),
         );
       }
@@ -114,9 +178,12 @@ export default function LtxVideoPage() {
               : ` Tenta de novo em ~${Math.ceil(s / 60)} min.`
             : '';
         throw new Error(
-          (j.error || 'Quota ZeroGPU esgotada.') +
+          '⏳ QUOTA DE TOKEN ESGOTADA. ' +
+            (j.error || 'Todas as contas HF do pool sem quota ZeroGPU.') +
             when +
-            ' (Conta free zera na virada do dia; PRO/+contas = sem espera.)',
+            ' Conta free zera diariamente; pra zerar a espera adicione ' +
+            'mais tokens de contas DIFERENTES no HF_TOKENS (vírgula), ou ' +
+            'use 1 conta PRO (US$9/mês = ~20 vídeos/dia estáveis).',
         );
       }
       throw new Error(
