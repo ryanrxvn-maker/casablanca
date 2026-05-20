@@ -1663,9 +1663,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         },
       });
 
-      setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'downloading', message: `Baixando + zipando ${validIds.length} videos...` } }));
+      setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'downloading', message: `Baixando ${validIds.length} videos...` } }));
       const JSZip = (await import('jszip')).default;
       const zip = new JSZip();
+      // Coleta blobs em memoria pra rodar o pipeline pos-producao (igual
+      // runTaskBatch faz). Sem isso, retomar so entrega o ZIP de takes e
+      // o user perde montado/decupado/camuflado.
+      const partBlobs: Array<{ label: string; blob: Blob | null }> =
+        state.parts.map((p) => ({ label: p.label, blob: null }));
       let downloaded = 0;
       const downloadOne = async (idx: number) => {
         if (batchCancelRef.current[taskId]) return;
@@ -1682,6 +1687,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         try {
           const bytes = await downloadVideoBytes(status.videoUrl);
           zip.file(part.renamedTo, bytes);
+          partBlobs[idx] = { label: part.label, blob: new Blob([bytes as BlobPart], { type: 'video/mp4' }) };
           downloaded++;
           setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], message: `Baixando: ${downloaded}/${validIds.length}` } }));
         } catch (e) {
@@ -1700,18 +1706,145 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       }
       await Promise.all(dlWorkers);
 
-      const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
-      const filename = `${adNameClean}.zip`;
-      const url = URL.createObjectURL(blob);
+      // ZIP 1 — takes individuais
+      const takesBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+      const takesFilename = `${adNameClean}_takes.zip`;
+      const takesUrl = URL.createObjectURL(takesBlob);
+      try {
+        const { saveZip } = await import('@/lib/zip-store');
+        await saveZip(`batch:${taskId}:takes`, takesBlob, takesFilename);
+      } catch (e) {
+        console.warn('[batch resume] falha salvando ZIP takes em IndexedDB:', e);
+      }
+
+      // === PIPELINE pos-producao (concat + decupagem [+ camuflagem]) ===
+      setBatchStates((prev) => ({
+        ...prev,
+        [taskId]: {
+          ...prev[taskId],
+          phase: 'post',
+          message: 'Montando + decupando' + (camuflagemMode ? ' + camuflando...' : '...'),
+          zipBlobUrl: takesUrl,
+          zipFilename: takesFilename,
+        },
+      }));
+
+      let pipeRes: Awaited<ReturnType<typeof runPostPipeline>>;
+      try {
+        pipeRes = await runPostPipeline({
+          baseAdId: state.baseAdId,
+          parts: partBlobs,
+          decupagem: true,
+          camuflagem: camuflagemMode,
+          whiteAudio: camuflagemMode ? camuflagemWhite : null,
+          camuflagemVolume,
+          onProgress: (p) => {
+            setBatchStates((prev) => ({
+              ...prev,
+              [taskId]: { ...prev[taskId], message: `${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}` },
+            }));
+          },
+        });
+      } catch (e) {
+        console.error('[clickup-pilot resume] pipeline threw:', e);
+        setBatchStates((prev) => ({
+          ...prev,
+          [taskId]: {
+            ...prev[taskId],
+            phase: 'done',
+            message: `Takes OK · pipeline FATAL: ${(e as Error)?.message || 'erro desconhecido'} (ver console F12)`,
+            finishedAt: Date.now(),
+          },
+        }));
+        return;
+      }
+      const assembled = pipeRes.items;
+
+      // ZIP 2 — versoes montadas + decupadas (sempre cria, mesmo com 0
+      // assembled — entrega _DIAGNOSTICO.txt explicando o motivo)
+      let montadoUrl: string | undefined;
+      let montadoName: string | undefined;
+      {
+        const zipMont = new JSZip();
+        for (const item of assembled) {
+          if (item.decupado) {
+            zipMont.file(item.filename, item.decupado);
+          } else if (item.rawAssembled && item.rawAssembled.size > 0 && !item.errors?.assemble) {
+            const baseName = item.filename.replace('.mp4', '_sem_decupagem.mp4');
+            zipMont.file(baseName, item.rawAssembled);
+            zipMont.file(`${item.filename.replace('.mp4', '')}_DECUPAGEM_ERRO.txt`, item.errors?.decupagem || 'erro desconhecido');
+          } else {
+            zipMont.file(`${item.filename.replace('.mp4', '')}_ERRO.txt`,
+              `Assemble: ${item.errors?.assemble || 'OK'}\nDecupagem: ${item.errors?.decupagem || 'OK'}`);
+          }
+        }
+        zipMont.file('_DIAGNOSTICO.txt',
+`Pipeline pos-producao - relatorio (RETOMAR)
+============================================
+${pipeRes.diagnostics.summary}
+
+Total de partes recebidas: ${pipeRes.diagnostics.totalParts}
+Hooks identificados (label HOOK ou GANCHO): ${pipeRes.diagnostics.hooksFound}
+Bodies identificados (label BODY ou PARTE): ${pipeRes.diagnostics.bodiesFound}
+Labels nao reconhecidas: ${pipeRes.diagnostics.unrecognizedLabels.join(', ') || 'nenhuma'}
+
+Items finais: ${assembled.length}
+${assembled.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'ERRO ('+it.errors.assemble+')' : 'OK'} | decupagem=${it.errors?.decupagem ? 'ERRO ('+it.errors.decupagem+')' : (it.decupado ? 'OK ('+(it.decupado.size/(1024*1024)).toFixed(1)+'MB)' : '?')}${camuflagemMode ? ' | camuflagem=' + (it.errors?.camuflagem ? 'ERRO ('+it.errors.camuflagem+')' : (it.camuflado ? 'OK' : '?')) : ''}`).join('\n')}
+
+Se a pasta estiver vazia ou so com _DIAGNOSTICO.txt, ABRA O CONSOLE DO BROWSER (F12)
+pra ver os erros detalhados [clickup-pilot-pipeline].`);
+        const blob2 = await zipMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+        montadoName = `${adNameClean}_montado_decupado.zip`;
+        montadoUrl = URL.createObjectURL(blob2);
+        try {
+          const { saveZip } = await import('@/lib/zip-store');
+          await saveZip(`batch:${taskId}:montado`, blob2, montadoName);
+        } catch (e) { console.warn('[batch resume] save montado IDB:', e); }
+      }
+
+      // ZIP 3 — versoes camufladas (so se modo ON)
+      let camuUrl: string | undefined;
+      let camuName: string | undefined;
+      if (camuflagemMode) {
+        const zipCamu = new JSZip();
+        for (const item of assembled) {
+          if (item.camuflado) {
+            zipCamu.file(item.filename.replace('.mp4', '_camuflado.mp4'), item.camuflado);
+          } else {
+            zipCamu.file(`${item.filename.replace('.mp4', '')}_CAMUFLAGEM_ERRO.txt`, item.errors?.camuflagem || item.errors?.assemble || 'falha sem detalhes');
+          }
+        }
+        zipCamu.file('_DIAGNOSTICO.txt',
+`Camuflagem - relatorio (RETOMAR)
+=================================
+${pipeRes.diagnostics.summary}
+WHITE audio: ${camuflagemWhite?.name || '(NAO SELECIONADO — adicione na ferramenta)'}
+Volume: ${camuflagemVolume}%
+
+${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOSTICO.txt do zip de montados pra detalhes)' : assembled.map(it => `- ${it.filename}: ${it.camuflado ? 'OK' : 'ERRO ('+(it.errors?.camuflagem || 'sem detalhes')+')'}`).join('\n')}`);
+        const blob3 = await zipCamu.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+        camuName = `${adNameClean}_camuflado.zip`;
+        camuUrl = URL.createObjectURL(blob3);
+        try {
+          const { saveZip } = await import('@/lib/zip-store');
+          await saveZip(`batch:${taskId}:camo`, blob3, camuName);
+        } catch (e) { console.warn('[batch resume] save camo IDB:', e); }
+      }
+
+      const totalSize = takesBlob.size + (montadoUrl ? assembled.reduce((n, it) => n + (it.decupado?.size || it.rawAssembled?.size || 0), 0) : 0);
       setBatchStates((prev) => ({
         ...prev,
         [taskId]: {
           ...prev[taskId],
           phase: 'done',
-          message: `Pronto: ${downloaded}/${validIds.length} videos · ${(blob.size / (1024 * 1024)).toFixed(1)}MB`,
+          message: `Pronto: ${downloaded} takes · ${pipeRes.diagnostics.summary} · ${(totalSize / (1024 * 1024)).toFixed(1)}MB`,
           finishedAt: Date.now(),
-          zipBlobUrl: url,
-          zipFilename: filename,
+          zipBlobUrl: takesUrl,
+          zipFilename: takesFilename,
+          montadoZipUrl: montadoUrl,
+          montadoZipName: montadoName,
+          camufladoZipUrl: camuUrl,
+          camufladoZipName: camuName,
         },
       }));
     } catch (e) {
