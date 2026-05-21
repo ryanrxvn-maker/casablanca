@@ -948,6 +948,157 @@ async function main() {
         adult: url.searchParams.get("adult") === "1"
       });
     }
+    if (req.method === "POST" && url.pathname === "/audio-batch") {
+      let videoId2 = function(u) {
+        let m = u.match(/\/video\/(\d{6,})/);
+        if (m) return "tt" + m[1];
+        m = u.match(/[?&]v=([\w-]{8,})/);
+        if (m) return "yt" + m[1];
+        m = u.match(/youtu\.be\/([\w-]{8,})/);
+        if (m) return "yt" + m[1];
+        m = u.match(/\/shorts\/([\w-]{8,})/);
+        if (m) return "yts" + m[1];
+        return "h" + import_crypto.default.createHash("sha1").update(u).digest("hex").slice(0, 12);
+      }, emit2 = function(obj) {
+        try {
+          res.write(JSON.stringify(obj) + "\n");
+        } catch {
+        }
+      };
+      var videoId = videoId2, emit = emit2;
+      if (!isExtensionOrigin(origin)) {
+        res.writeHead(403, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "Origem nao permitida." }));
+      }
+      const tok = (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+      if (!tokenOk(tok)) {
+        res.writeHead(401, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "Token invalido." }));
+      }
+      let body;
+      try {
+        body = JSON.parse(await readBody(req) || "{}");
+      } catch {
+        res.writeHead(400, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "JSON invalido." }));
+      }
+      const niche = String(body.niche || "").toLowerCase().replace(/[^a-z0-9_-]+/g, "").slice(0, 32);
+      const urls = Array.isArray(body.urls) ? body.urls.filter((u) => typeof u === "string") : [];
+      if (!niche || urls.length === 0) {
+        res.writeHead(400, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "Faltou niche/urls." }));
+      }
+      res.writeHead(200, {
+        "content-type": "application/x-ndjson; charset=utf-8",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff"
+      });
+      const dir = import_path2.default.join(configDir(), "audios", niche);
+      await (0, import_promises2.mkdir)(dir, { recursive: true });
+      const { stat: fsStat, copyFile, readdir: fsReaddir } = await import("fs/promises");
+      const existing = /* @__PURE__ */ new Set();
+      try {
+        for (const n of await fsReaddir(dir)) {
+          const m = n.match(/-(.+?)\.mp3$/i);
+          if (m) existing.add(m[1]);
+        }
+      } catch {
+      }
+      emit2({ type: "start", niche, total: urls.length });
+      let done = 0;
+      let saved = 0;
+      let skipped = 0;
+      let failed = 0;
+      const CONC = 3;
+      let next = 0;
+      const worker = async () => {
+        while (next < urls.length) {
+          const i = next++;
+          const u = urls[i].trim();
+          const vid = videoId2(u) || "h" + import_crypto.default.createHash("sha1").update(u).digest("hex").slice(0, 12);
+          const outName = `${niche}-${vid}.mp3`;
+          const outPath = import_path2.default.join(dir, outName);
+          if (existing.has(vid)) {
+            skipped++;
+            done++;
+            emit2({ type: "item", url: u, vid, name: outName, status: "skipped", i: done, total: urls.length });
+            continue;
+          }
+          try {
+            const r = await processDownload({ url: u, mode: "audio-mp3" });
+            if (!r.ok) {
+              failed++;
+              done++;
+              emit2({ type: "item", url: u, vid, status: "error", error: r.error, i: done, total: urls.length });
+              continue;
+            }
+            if (r.kind === "file") {
+              try {
+                await copyFile(r.filePath, outPath);
+                const sz = (await fsStat(outPath)).size;
+                existing.add(vid);
+                saved++;
+                done++;
+                emit2({ type: "item", url: u, vid, name: outName, status: "ok", size: sz, i: done, total: urls.length });
+              } catch (e) {
+                failed++;
+                done++;
+                emit2({ type: "item", url: u, vid, status: "error", error: e instanceof Error ? e.message : String(e), i: done, total: urls.length });
+              } finally {
+                await r.dispose().catch(() => {
+                });
+              }
+            } else {
+              await r.dispose().catch(() => {
+              });
+              failed++;
+              done++;
+              emit2({ type: "item", url: u, vid, status: "error", error: "modo remoto inesperado em audio-mp3", i: done, total: urls.length });
+            }
+          } catch (e) {
+            failed++;
+            done++;
+            emit2({ type: "item", url: u, vid, status: "error", error: e instanceof Error ? e.message : String(e), i: done, total: urls.length });
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(CONC, urls.length) }, worker));
+      emit2({ type: "done", niche, saved, skipped, failed, total: urls.length, dir });
+      return res.end();
+    }
+    if (req.method === "GET" && url.pathname === "/audios-list") {
+      if (!tokenOk(url.searchParams.get("t") || "")) {
+        res.writeHead(401, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "Token invalido." }));
+      }
+      const base = import_path2.default.join(configDir(), "audios");
+      const { readdir: fsReaddir, stat: fsStat } = await import("fs/promises");
+      const out = {};
+      try {
+        for (const niche of await fsReaddir(base)) {
+          const ndir = import_path2.default.join(base, niche);
+          let s;
+          try {
+            s = await fsStat(ndir);
+          } catch {
+            continue;
+          }
+          if (!s.isDirectory()) continue;
+          out[niche] = [];
+          for (const f of await fsReaddir(ndir)) {
+            if (!/\.mp3$/i.test(f)) continue;
+            try {
+              const st = await fsStat(import_path2.default.join(ndir, f));
+              out[niche].push({ name: f, size: st.size, mtime: st.mtimeMs });
+            } catch {
+            }
+          }
+        }
+      } catch {
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ ok: true, niches: out }));
+    }
     res.writeHead(404, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "not found" }));
   });
