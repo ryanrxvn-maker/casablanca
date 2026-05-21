@@ -187,71 +187,11 @@ async function startDownload({ url, mode, quality, adult, tabId }) {
   };
 }
 
-// === Bulk audio: chama /audio-batch do motor, streama NDJSON e
-// retransmite progresso pro content script que pediu (TikTok coletor).
-async function bulkAudio({ niche, urls, tabId }) {
-  const eng = await discoverEngine((await getCfg()).port || 47923);
-  if (!eng) return { ok: false, error: 'Motor não está rodando.' };
-  try {
-    const res = await fetch(`http://127.0.0.1:${eng.port}/audio-batch`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${eng.token}`,
-      },
-      body: JSON.stringify({ niche, urls }),
-    });
-    if (!res.ok || !res.body) {
-      let msg = `HTTP ${res.status}`;
-      try {
-        msg = (await res.json()).error || msg;
-      } catch {}
-      return { ok: false, error: msg };
-    }
-    const reader = res.body.getReader();
-    const dec = new TextDecoder();
-    let buf = '';
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let nl;
-      while ((nl = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (!line) continue;
-        try {
-          const ev = JSON.parse(line);
-          if (tabId) {
-            chrome.tabs
-              .sendMessage(tabId, {
-                type: 'darko-bulk-progress',
-                kind: ev.type,
-                ...ev,
-              })
-              .catch(() => {});
-          }
-        } catch {
-          /* linha invalida — pula */
-        }
-      }
-    }
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: (e && e.message) || 'fetch failed' };
-  }
-}
-
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'darko-download') {
     const tabId = sender && sender.tab && sender.tab.id;
     startDownload({ ...msg, tabId }).then(sendResponse);
     return true; // resposta assíncrona
-  }
-  if (msg && msg.type === 'darko-bulk-audio') {
-    const tabId = sender && sender.tab && sender.tab.id;
-    bulkAudio({ niche: msg.niche, urls: msg.urls, tabId }).then(sendResponse);
-    return true;
   }
   if (msg && msg.type === 'darko-ping-engine') {
     (async () => {

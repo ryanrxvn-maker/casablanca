@@ -20,7 +20,6 @@ const FILES = [
   'bridge.js',
   'content.js',
   'content.css',
-  'tiktok-collector.js',
   'popup.html',
   'popup.css',
   'popup.js',
