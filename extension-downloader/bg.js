@@ -2,7 +2,27 @@
 // download pelo motor local via chrome.downloads (endpoint GET /get,
 // token na query — sem precisar de blob no service worker).
 
-chrome.runtime.onInstalled.addListener(() => {});
+// Pre-warm: assim que o Chrome inicia / a extensao instala, busca o
+// token vivo do motor e guarda. Acaba o cenario "reiniciei o PC e
+// pediu pra colar codigo de novo" — quando voce abrir o popup ele ja
+// esta pareado. Tenta varias vezes pq o motor pode demorar uns segs
+// pra subir junto com o Windows.
+function prewarmToken() {
+  let tries = 0;
+  const tick = () => {
+    tries++;
+    discoverEngine(47923)
+      .then((eng) => {
+        if (!eng && tries < 30) setTimeout(tick, 2000); // ~1min de tentativas
+      })
+      .catch(() => {
+        if (tries < 30) setTimeout(tick, 2000);
+      });
+  };
+  tick();
+}
+chrome.runtime.onInstalled.addListener(() => prewarmToken());
+chrome.runtime.onStartup.addListener(() => prewarmToken());
 
 function getCfg() {
   return new Promise((r) =>

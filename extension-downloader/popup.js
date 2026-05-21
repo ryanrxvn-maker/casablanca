@@ -76,15 +76,11 @@ async function refresh() {
 
   if (!health) return show('noEngine');
   if (!state.token) {
-    // motor achado: porta ja detectada -> pre-preenche (usuario nao
-    // precisa digitar, so cola o codigo)
-    const pp = $('pairPort');
-    if (pp) {
-      pp.value = state.port;
-      pp.readOnly = true;
-      pp.title = 'Detectada automaticamente';
-    }
-    return show('pairBox');
+    // Motor achado mas /pair falhou momentaneamente — NUNCA mostra a
+    // tela de colar codigo manual (usuario nao precisa fazer isso).
+    // O setInterval no fim do arquivo refaz refresh() a cada 2.5s ate
+    // o /pair funcionar e o token aparecer sozinho.
+    return show('noEngine');
   }
 
   show('appBox');
