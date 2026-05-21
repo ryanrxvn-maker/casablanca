@@ -167,11 +167,17 @@ export default function AceleradorPage() {
     }
   }
 
+  function suffixTag(s: number) {
+    // 1.50 -> "1.5x" ; 0.85 -> "0.85x" ; 2.00 -> "2x"
+    const str = s.toFixed(2).replace(/\.?0+$/, '');
+    return str + 'x';
+  }
+
   async function downloadOne(job: Job) {
     if (!job.resultBlob) return;
     await downloadBlob(
       job.resultBlob,
-      baseName(job.file.name) + '_' + speed.toFixed(1) + 'x.' + format,
+      baseName(job.file.name) + '_' + suffixTag(speed) + '.' + format,
     );
   }
 
@@ -182,11 +188,11 @@ export default function AceleradorPage() {
     try {
       const zip = await buildZip(
         done.map((j) => ({
-          name: baseName(j.file.name) + '_' + speed.toFixed(1) + 'x.' + format,
+          name: baseName(j.file.name) + '_' + suffixTag(speed) + '.' + format,
           data: j.resultBlob!,
         })),
       );
-      await downloadBlob(zip, 'acelerador_' + speed.toFixed(1) + 'x.zip');
+      await downloadBlob(zip, 'mixer_' + suffixTag(speed) + '.zip');
     } finally {
       setZipping(false);
     }
@@ -198,10 +204,15 @@ export default function AceleradorPage() {
     { id: 'wav', label: 'WAV (audio)', disabled: false },
   ];
 
+  const speedMode: 'slow' | 'same' | 'fast' =
+    speed < 0.99 ? 'slow' : speed > 1.01 ? 'fast' : 'same';
+  const actionLabel =
+    speedMode === 'slow' ? 'Desacelerar' : speedMode === 'fast' ? 'Acelerar' : 'Processar';
+
   return (
     <ToolShell
-      title="Acelerador"
-      description="Acelera audio/video sem mudar o tom. Processa ate 20 arquivos com escolha de formato de saida."
+      title="Mixer de Velocidade"
+      description="Acelera ou desacelera audio/video sem mudar o tom (sem efeito robotico). Processa ate 20 arquivos com escolha de formato de saida."
     >
       <div className="flex flex-col gap-6">
         <div>
@@ -219,18 +230,62 @@ export default function AceleradorPage() {
         <div>
           <div className="flex items-center justify-between">
             <label className="label-field !mb-0">Velocidade</label>
-            <span className="mono text-xs text-lime">{speed.toFixed(1)}x</span>
+            <span
+              className={
+                'mono text-xs ' +
+                (speedMode === 'slow'
+                  ? 'text-cyan-300'
+                  : speedMode === 'fast'
+                    ? 'text-lime'
+                    : 'text-text-muted')
+              }
+            >
+              {speed.toFixed(2)}x
+              <span className="ml-2 uppercase tracking-widest opacity-60">
+                {speedMode === 'slow'
+                  ? 'desacelerando'
+                  : speedMode === 'fast'
+                    ? 'acelerando'
+                    : 'original'}
+              </span>
+            </span>
           </div>
           <input
             type="range"
-            min={1.1}
+            min={0.5}
             max={3.0}
-            step={0.1}
+            step={0.05}
             value={speed}
             onChange={(e) => setSpeed(parseFloat(e.target.value))}
             className="mt-3"
             disabled={processing}
           />
+          <div className="mono mt-1 flex justify-between text-[10px] uppercase tracking-widest text-text-muted">
+            <span>0.5x</span>
+            <span>1.0x</span>
+            <span>3.0x</span>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {[0.75, 0.85, 1.0, 1.25, 1.5, 2.0].map((preset) => {
+              const active = Math.abs(speed - preset) < 0.001;
+              return (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setSpeed(preset)}
+                  disabled={processing}
+                  className={
+                    'mono rounded-[8px] px-2 py-1 text-[11px] transition-all duration-150 disabled:opacity-40 ' +
+                    (active
+                      ? 'bg-lime/90 font-semibold text-black'
+                      : 'border border-line-strong text-text-muted hover:border-lime hover:text-white')
+                  }
+                >
+                  {preset.toFixed(2)}x
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         <div>
@@ -272,9 +327,14 @@ export default function AceleradorPage() {
             <button
               onClick={processAll}
               className="btn-primary"
-              disabled={files.length === 0}
+              disabled={files.length === 0 || speedMode === 'same'}
+              title={
+                speedMode === 'same'
+                  ? 'Mova o slider para acelerar ou desacelerar'
+                  : undefined
+              }
             >
-              {`Acelerar ${files.length || ''}`.trim()}
+              {`${actionLabel} ${files.length || ''}`.trim()}
             </button>
           )}
           <button
