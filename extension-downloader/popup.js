@@ -160,19 +160,27 @@ function addJob(url) {
 }
 
 async function reauthFromEngine() {
-  // pega o token vivo do motor via /pair (acaba 401 sem o usuario mexer)
-  try {
-    const pr = await fetch(`${engineBase()}/pair`);
-    if (pr.ok) {
+  // Pega o token vivo do motor via /pair. Varre a faixa de portas:
+  // se um motor ANTIGO sem /pair estiver na porta padrao, esta sonda
+  // continua e pega o motor novo onde quer que esteja. Acaba o 401
+  // por motor desatualizado/dessincronizado, sem o usuario mexer.
+  const tries = [state.port, 47923, 47924, 47925, 47926, 47927, 47928].filter(
+    (v, i, a) => v && a.indexOf(v) === i,
+  );
+  for (const p of tries) {
+    try {
+      const pr = await fetch(`http://127.0.0.1:${p}/pair`);
+      if (!pr.ok) continue;
       const pj = await pr.json();
       if (pj && pj.token) {
         state.token = pj.token;
-        await storageSet({ token: pj.token, port: state.port });
+        state.port = p;
+        await storageSet({ token: pj.token, port: p });
         return true;
       }
+    } catch {
+      /* tenta proxima */
     }
-  } catch {
-    /* offline */
   }
   return false;
 }
