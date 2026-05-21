@@ -19,7 +19,7 @@
  */
 
 import { decodeAudioRobust, detectSilences } from './audio-engine';
-import { concatAvatarParts, concatVideosFast, cutVideoSegments, muxAudioIntoVideo, extractAudio, normalizeVolume } from './ffmpeg-worker';
+import { concatAvatarParts, concatVideosFast, cutVideoSegments, muxAudioIntoVideo, extractAudio } from './ffmpeg-worker';
 import { camuflar } from './camuflagem';
 
 export type AssembledPart = {
@@ -29,19 +29,14 @@ export type AssembledPart = {
   rawAssembled: Blob;
   /** Blob apos decupagem */
   decupado?: Blob;
-  /** Blob apos normalizacao de volume (loudnorm EBU R128 + acompressor +
-   *  alimiter). Aplicado em CIMA do decupado pra equalizar voz de partes
-   *  e avatares diferentes — voz baixa sobe, voz alta baixa, tudo no
-   *  mesmo nivel percebido (-16 LUFS, padrao web/YouTube). */
-  normalized?: Blob;
-  /** Blob apos normalizacao + camuflagem audio */
+  /** Blob apos decupagem + camuflagem audio */
   camuflado?: Blob;
   /** Erros por estagio */
-  errors?: { assemble?: string; decupagem?: string; normalizacao?: string; camuflagem?: string };
+  errors?: { assemble?: string; decupagem?: string; camuflagem?: string };
 };
 
 export type PipelineProgress = {
-  stage: 'assembling' | 'decupando' | 'normalizando' | 'camuflando' | 'done';
+  stage: 'assembling' | 'decupando' | 'camuflando' | 'done';
   currentFilename?: string;
   doneCount: number;
   totalCount: number;
@@ -255,32 +250,6 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     }
   }
 
-  // === Stage 2.5: NORMALIZACAO DE VOLUME (loudnorm EBU R128 + compressor) ===
-  // Aplicada sobre o decupado pra equalizar voz quando partes/avatares vem
-  // com volumes diferentes do HeyGen. Preset 'padrao' = 2 estagios de
-  // acompressor + alimiter + loudnorm a -16 LUFS (padrao web/YouTube).
-  // Resultado: voz baixa SOBE, voz alta BAIXA, video todo no mesmo nivel.
-  // Fallback: se normalize falhar, mantem o decupado (item.normalized fica
-  // null e o zip usa decupado como antes — nao quebra o resultado).
-  for (let g = 0; g < out.length; g++) {
-    const item = out[g];
-    const source = item.decupado || item.rawAssembled;
-    if (!source || source.size === 0 || item.errors?.assemble) continue;
-    onProgress?.({ stage: 'normalizando', currentFilename: item.filename, doneCount: g, totalCount: total });
-    try {
-      const tNorm = Date.now();
-      item.normalized = await normalizeVolume(source, {
-        intensity: 'padrao',
-        output: 'mp4',
-      });
-      console.log(`[clickup-pilot-pipeline] normalize ${item.filename}: OK ${(item.normalized.size/(1024*1024)).toFixed(1)}MB em ${((Date.now()-tNorm)/1000).toFixed(1)}s`);
-    } catch (e) {
-      console.error(`[clickup-pilot-pipeline] normalize ${item.filename}: FAIL`, e);
-      item.errors = { ...item.errors, normalizacao: (e as Error)?.message || 'falha normalizacao' };
-      // Continua sem normalize — zip vai usar decupado/rawAssembled como antes
-    }
-  }
-
   // === Stage 3: CAMUFLAGEM ===
   if (camuflagem) {
     if (!whiteAudio) {
@@ -308,10 +277,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
 
       for (let g = 0; g < out.length; g++) {
         const item = out[g];
-        // PRIORIDADE: normalized (volume equalizado) > decupado > rawAssembled.
-        // Camuflagem em cima do video JA normalizado mantem o nivel constante
-        // no resultado final.
-        const source = item.normalized || item.decupado || item.rawAssembled;
+        const source = item.decupado || item.rawAssembled;
         if (!source || item.errors?.assemble) continue;
         onProgress?.({ stage: 'camuflando', currentFilename: item.filename, doneCount: g, totalCount: total });
         try {
@@ -332,9 +298,8 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
 
   onProgress?.({ stage: 'done', doneCount: total, totalCount: total });
   const decupCount = out.filter(i=>i.decupado).length;
-  const normCount = out.filter(i=>i.normalized).length;
   const camuCount = out.filter(i=>i.camuflado).length;
-  const summary = `${out.length} montagens · ${decupCount} decupados · ${normCount} normalizados${camuflagem ? ` · ${camuCount} camuflados` : ''}`;
+  const summary = `${out.length} montagens · ${decupCount} decupados${camuflagem ? ` · ${camuCount} camuflados` : ''}`;
   console.log('[clickup-pilot-pipeline] DONE', summary);
   return { items: out, diagnostics: { totalParts: parts.length, hooksFound: hooks.length, bodiesFound: bodies.length, unrecognizedLabels: unrecognized, summary } };
 }

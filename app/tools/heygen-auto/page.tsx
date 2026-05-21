@@ -440,22 +440,14 @@ export default function HeyGenAutoPage() {
           // Monta ZIP com decupados (ou raw assembled se decupagem falhou)
           const zipMont = new JSZip();
           for (const item of pipeRes.items) {
-            // PRIORIDADE: normalized (volume EQ pos-decupagem) > decupado > raw.
-            // Garante que o video final no zip tem volume uniforme entre partes
-            // e avatares — voz baixa sobe, voz alta baixa.
-            if (item.normalized) {
-              zipMont.file(item.filename, item.normalized);
-            } else if (item.decupado) {
+            if (item.decupado) {
               zipMont.file(item.filename, item.decupado);
-              if (item.errors?.normalizacao) {
-                zipMont.file(`${item.filename.replace('.mp4', '')}_NORMALIZACAO_ERRO.txt`, item.errors.normalizacao);
-              }
             } else if (item.rawAssembled && item.rawAssembled.size > 0 && !item.errors?.assemble) {
               zipMont.file(item.filename.replace('.mp4', '_sem_decupagem.mp4'), item.rawAssembled);
               zipMont.file(`${item.filename.replace('.mp4', '')}_DECUPAGEM_ERRO.txt`, item.errors?.decupagem || 'erro desconhecido');
             } else {
               zipMont.file(`${item.filename.replace('.mp4', '')}_ERRO.txt`,
-                `Assemble: ${item.errors?.assemble || 'OK'}\nDecupagem: ${item.errors?.decupagem || 'OK'}\nNormalizacao: ${item.errors?.normalizacao || 'OK'}`);
+                `Assemble: ${item.errors?.assemble || 'OK'}\nDecupagem: ${item.errors?.decupagem || 'OK'}`);
             }
           }
           zipMont.file('_DIAGNOSTICO.txt',

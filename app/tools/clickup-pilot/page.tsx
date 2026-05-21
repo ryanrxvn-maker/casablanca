@@ -1593,16 +1593,8 @@ export default function ClickUpPilotPage() {
       {
         const zipMont = new JSZip();
         for (const item of assembled) {
-          // PRIORIDADE: normalized (decupado+volume EQ) > decupado > rawAssembled.
-          // normalizado e o produto final ideal — voz equalizada e silencios
-          // cortados. decupado e fallback se normalize falhou.
-          if (item.normalized) {
-            zipMont.file(item.filename, item.normalized);
-          } else if (item.decupado) {
+          if (item.decupado) {
             zipMont.file(item.filename, item.decupado);
-            if (item.errors?.normalizacao) {
-              zipMont.file(`${item.filename.replace('.mp4', '')}_NORMALIZACAO_ERRO.txt`, item.errors.normalizacao);
-            }
           } else if (item.rawAssembled && item.rawAssembled.size > 0 && !item.errors?.assemble) {
             // Decupagem falhou mas tem montagem — entrega o montado raw + nota
             const baseName = item.filename.replace('.mp4', '_sem_decupagem.mp4');
@@ -1610,7 +1602,7 @@ export default function ClickUpPilotPage() {
             zipMont.file(`${item.filename.replace('.mp4', '')}_DECUPAGEM_ERRO.txt`, item.errors?.decupagem || 'erro desconhecido');
           } else {
             zipMont.file(`${item.filename.replace('.mp4', '')}_ERRO.txt`,
-              `Assemble: ${item.errors?.assemble || 'OK'}\nDecupagem: ${item.errors?.decupagem || 'OK'}\nNormalizacao: ${item.errors?.normalizacao || 'OK'}`);
+              `Assemble: ${item.errors?.assemble || 'OK'}\nDecupagem: ${item.errors?.decupagem || 'OK'}`);
           }
         }
         zipMont.file('_DIAGNOSTICO.txt',
@@ -1667,7 +1659,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         } catch (e) { console.warn('[batch] save camo IDB:', e); }
       }
 
-      const totalSize = takesBlob.size + (montadoUrl ? assembled.reduce((n, it) => n + (it.normalized?.size || it.decupado?.size || it.rawAssembled?.size || 0), 0) : 0);
+      const totalSize = takesBlob.size + (montadoUrl ? assembled.reduce((n, it) => n + (it.decupado?.size || it.rawAssembled?.size || 0), 0) : 0);
       setBatchStates((prev) => ({
         ...prev,
         [taskId]: {
