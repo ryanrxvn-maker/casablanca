@@ -1,0 +1,260 @@
+/* TikTok URL Collector — bookmarklet standalone
+ *
+ * NÃO tem nada a ver com o DARKO LAB. Pura JS de navegador:
+ * 1. Você arrasta esse código como favorito (install.html ajuda).
+ * 2. No TikTok (busca, perfil, hashtag, feed), clica no favorito.
+ * 3. Aparece um painel no canto. Escolhe o nicho, dá scroll, clica
+ *    "Capturar visíveis". Repete em quantas páginas/buscas quiser.
+ * 4. "Exportar TXT" baixa um .txt por nicho com as URLs limpas, uma
+ *    por linha. Depois você usa onde quiser (yt-dlp, qualquer coisa).
+ *
+ * Dados ficam em localStorage da própria tiktok.com -> persiste entre
+ * páginas e sessões; pra zerar use "Limpar".
+ */
+(function () {
+  var ID = 'tt-url-col-panel';
+  var existing = document.getElementById(ID);
+  if (existing) {
+    existing.style.display = existing.style.display === 'none' ? 'block' : 'none';
+    return;
+  }
+
+  var LS_BUCK = 'tt_url_col_buckets';
+  var LS_NICHE = 'tt_url_col_niche';
+  var DEFAULT_NICHES = ['memoria', 'ed'];
+  var LABELS = { memoria: 'Memória', ed: 'E.D' };
+
+  function load() {
+    try {
+      return JSON.parse(localStorage.getItem(LS_BUCK) || '{}') || {};
+    } catch (e) {
+      return {};
+    }
+  }
+  function save() {
+    try {
+      localStorage.setItem(LS_BUCK, JSON.stringify(buckets));
+      localStorage.setItem(LS_NICHE, niche);
+    } catch (e) {}
+  }
+  var buckets = load();
+  var niche = localStorage.getItem(LS_NICHE) || 'memoria';
+  if (!buckets[niche]) buckets[niche] = {};
+
+  function vid(u) {
+    var m = (u || '').match(/\/video\/(\d{6,})/);
+    return m ? m[1] : null;
+  }
+  function scan() {
+    var out = [];
+    var seen = {};
+    document.querySelectorAll('a[href*="/video/"]').forEach(function (a) {
+      var h = a.href.split('?')[0].split('#')[0];
+      var id = vid(h);
+      if (id && !seen[id]) {
+        seen[id] = 1;
+        out.push({ url: h, id: id });
+      }
+    });
+    return out;
+  }
+  function nicheList() {
+    var keys = Object.keys(buckets);
+    DEFAULT_NICHES.forEach(function (k) {
+      if (keys.indexOf(k) < 0) keys.push(k);
+    });
+    return keys;
+  }
+  function fmtCount(k) {
+    return (LABELS[k] || k) + ': ' + Object.keys(buckets[k] || {}).length;
+  }
+
+  // ============== UI ==============
+  var css =
+    '#' + ID + '{position:fixed;top:14px;right:14px;z-index:2147483647;' +
+    'width:300px;background:#0b0d0c;color:#e8eae9;border:1px solid #2a2f2b;' +
+    'border-radius:10px;font:13px/1.35 -apple-system,Segoe UI,Roboto,sans-serif;' +
+    'box-shadow:0 8px 28px rgba(0,0,0,.55);user-select:none;overflow:hidden}' +
+    '#' + ID + ' header{display:flex;align-items:center;justify-content:space-between;' +
+    'padding:9px 10px;border-bottom:1px solid #1d211e;cursor:move;' +
+    'background:linear-gradient(180deg,#161a16,#0b0d0c)}' +
+    '#' + ID + ' header b{font-weight:700;letter-spacing:.5px;font-size:12px;color:#c8ff00}' +
+    '#' + ID + ' header span{color:#8a8f8b;font-size:11px;margin-left:6px}' +
+    '#' + ID + ' header button{background:none;border:0;color:#8a8f8b;font:600 16px/1 monospace;cursor:pointer;padding:0 6px}' +
+    '#' + ID + ' .b{padding:10px;display:flex;flex-direction:column;gap:8px}' +
+    '#' + ID + ' label{display:flex;align-items:center;gap:6px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#8a8f8b}' +
+    '#' + ID + ' select,#' + ID + ' input{flex:1;background:#121512;border:1px solid #2a2f2b;color:#e8eae9;padding:6px 7px;border-radius:6px;font-size:12px}' +
+    '#' + ID + ' .a{background:#c8ff00;color:#0b0d0c;border:0;border-radius:7px;padding:8px;font-weight:700;cursor:pointer;font-size:12px}' +
+    '#' + ID + ' .a:disabled{opacity:.5;cursor:not-allowed}' +
+    '#' + ID + ' .g{background:#121512;color:#e8eae9;border:1px solid #2a2f2b;border-radius:7px;padding:6px;font-size:11px;cursor:pointer}' +
+    '#' + ID + ' .row{display:flex;gap:6px}' +
+    '#' + ID + ' .row>*{flex:1}' +
+    '#' + ID + ' .cnt{font:11px ui-monospace,monospace;color:#c8ff00;background:#10130f;padding:6px 8px;border-radius:6px;border:1px solid #1d2818;display:flex;flex-wrap:wrap;gap:8px}' +
+    '#' + ID + ' .log{max-height:80px;overflow-y:auto;font:10px/1.5 ui-monospace,monospace;color:#8a8f8b;background:#0a0c0a;border:1px solid #1d211e;border-radius:6px;padding:6px}' +
+    '#' + ID + ' .log .ok{color:#c8ff00}#' + ID + ' .log .er{color:#ff7676}';
+
+  var style = document.createElement('style');
+  style.textContent = css;
+  document.head.appendChild(style);
+
+  var p = document.createElement('div');
+  p.id = ID;
+  p.innerHTML =
+    '<header><div><b>TT URL</b><span class="dv">visíveis: 0</span></div>' +
+    '<div><button class="mn" title="esconder">_</button></div></header>' +
+    '<div class="b">' +
+    '<label>Nicho<select class="ns"></select></label>' +
+    '<div class="row"><input class="nw" placeholder="novo nicho..." /><button class="g ad">+ add</button></div>' +
+    '<button class="a cap">Capturar visíveis (<span class="vc">0</span>)</button>' +
+    '<div class="cnt cn"></div>' +
+    '<div class="row"><button class="g cp">Copiar URLs do nicho</button><button class="g ex">Exportar TXT</button></div>' +
+    '<div class="row"><button class="g cl">Limpar nicho</button><button class="g ca">Limpar TUDO</button></div>' +
+    '<div class="log lg"></div></div>';
+  document.body.appendChild(p);
+
+  var q = function (s) { return p.querySelector(s); };
+  var ns = q('.ns');
+
+  function fillNiches() {
+    ns.innerHTML = '';
+    nicheList().forEach(function (k) {
+      var o = document.createElement('option');
+      o.value = k;
+      o.textContent = LABELS[k] || k;
+      if (k === niche) o.selected = true;
+      ns.appendChild(o);
+    });
+  }
+  function updateCounts() {
+    var cn = q('.cn');
+    cn.innerHTML = '';
+    nicheList().forEach(function (k) {
+      var sp = document.createElement('span');
+      sp.textContent = fmtCount(k);
+      cn.appendChild(sp);
+    });
+  }
+  function updateVisible() {
+    var list = scan();
+    var bm = buckets[niche] || {};
+    var novos = list.filter(function (x) { return !bm[x.id]; });
+    q('.vc').textContent = novos.length;
+    q('.dv').textContent = 'visíveis: ' + list.length;
+    return novos;
+  }
+  function log(t, cls) {
+    var el = q('.lg');
+    var d = document.createElement('div');
+    if (cls) d.className = cls;
+    d.textContent = t;
+    el.appendChild(d);
+    el.scrollTop = el.scrollHeight;
+    while (el.children.length > 100) el.removeChild(el.firstChild);
+  }
+
+  ns.addEventListener('change', function () {
+    niche = ns.value;
+    if (!buckets[niche]) buckets[niche] = {};
+    save();
+    updateCounts();
+    updateVisible();
+  });
+  q('.ad').addEventListener('click', function () {
+    var n = q('.nw').value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '').slice(0, 24);
+    if (!n) return;
+    if (!buckets[n]) buckets[n] = {};
+    niche = n;
+    save();
+    fillNiches();
+    updateCounts();
+    updateVisible();
+    q('.nw').value = '';
+    log('+ nicho "' + n + '"', 'ok');
+  });
+  q('.mn').addEventListener('click', function () {
+    p.querySelector('.b').style.display =
+      p.querySelector('.b').style.display === 'none' ? '' : 'none';
+  });
+  q('.cap').addEventListener('click', function () {
+    var novos = updateVisible();
+    if (!novos.length) { log('nada novo visível.'); return; }
+    novos.forEach(function (x) { buckets[niche][x.id] = x.url; });
+    save();
+    updateCounts();
+    updateVisible();
+    log('+' + novos.length + ' em "' + niche + '"', 'ok');
+  });
+  q('.cp').addEventListener('click', function () {
+    var arr = Object.values(buckets[niche] || {});
+    if (!arr.length) { log('vazio.'); return; }
+    var txt = arr.join('\n');
+    navigator.clipboard.writeText(txt).then(function () {
+      log('copiado ' + arr.length + ' URLs (' + niche + ')', 'ok');
+    }, function () {
+      var ta = document.createElement('textarea');
+      ta.value = txt;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+      log('copiado (fallback) ' + arr.length + ' URLs', 'ok');
+    });
+  });
+  q('.ex').addEventListener('click', function () {
+    var keys = nicheList().filter(function (k) {
+      return Object.keys(buckets[k] || {}).length;
+    });
+    if (!keys.length) { log('nada pra exportar.'); return; }
+    keys.forEach(function (k) {
+      var txt = Object.values(buckets[k] || {}).join('\n');
+      var blob = new Blob([txt], { type: 'text/plain' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = k + '.txt';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 30000);
+    });
+    log('exportado ' + keys.length + ' arquivo(s) .txt', 'ok');
+  });
+  q('.cl').addEventListener('click', function () {
+    if (!confirm('Limpar URLs coletadas de "' + niche + '"?')) return;
+    buckets[niche] = {};
+    save();
+    updateCounts();
+    updateVisible();
+    log('nicho "' + niche + '" limpo.');
+  });
+  q('.ca').addEventListener('click', function () {
+    if (!confirm('Limpar TODOS os nichos?')) return;
+    buckets = {};
+    DEFAULT_NICHES.forEach(function (k) { buckets[k] = {}; });
+    save();
+    fillNiches();
+    updateCounts();
+    updateVisible();
+    log('tudo limpo.');
+  });
+
+  // arrastar
+  var drag = null;
+  p.querySelector('header').addEventListener('mousedown', function (e) {
+    if (e.target.tagName === 'BUTTON') return;
+    var r = p.getBoundingClientRect();
+    drag = { x: e.clientX - r.left, y: e.clientY - r.top };
+  });
+  window.addEventListener('mousemove', function (e) {
+    if (!drag) return;
+    p.style.right = 'auto';
+    p.style.left = e.clientX - drag.x + 'px';
+    p.style.top = e.clientY - drag.y + 'px';
+  });
+  window.addEventListener('mouseup', function () { drag = null; });
+
+  fillNiches();
+  updateCounts();
+  updateVisible();
+  setInterval(updateVisible, 1500);
+  log('pronto. escolha o nicho e capture conforme rola.');
+})();
