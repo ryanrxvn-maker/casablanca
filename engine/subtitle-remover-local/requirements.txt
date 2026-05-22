@@ -20,7 +20,7 @@ python-multipart==0.0.20
 # Imagem / video
 opencv-python==4.10.0.84
 numpy==1.26.4
-Pillow==10.4.0
+Pillow==9.5.0
 
 # OCR (deteccao de hard-sub) — PaddleOCR roda em CPU sem dor de cabeca.
 # paddlepaddle 2.6.2 = ultima wheel da serie 2.6 publicada pra Python 3.11.

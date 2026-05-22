@@ -20,8 +20,29 @@ $workSrc = @'
 param($src,$dst,$pyVer,$status)
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
+# pip imprime warnings com prefixo "ERROR:" no stderr (resolver
+# warnings, etc) que NAO sao erros fatais — eles tem exit code 0.
+# Em PS 7+ ($PSNativeCommandUseErrorActionPreference=true), isso
+# vira exception. Desligamos pra usar exit code como verdade.
+try { $PSNativeCommandUseErrorActionPreference = $false } catch {}
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
 function St($p,$m){ Set-Content -LiteralPath $status -Value ("$p|$m") -Encoding UTF8 }
+
+# Invocador robusto pra pip — confia no exit code, ignora stderr.
+function Invoke-Pip {
+  param([string]$py, [string[]]$Args)
+  $oldEAP = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  $logOut = Join-Path $env:TEMP 'darko-pip.out'
+  $logErr = Join-Path $env:TEMP 'darko-pip.err'
+  $allArgs = @('-m','pip','install','--no-warn-script-location','--disable-pip-version-check') + $Args
+  $proc = Start-Process -FilePath $py -ArgumentList $allArgs -Wait -PassThru -NoNewWindow -RedirectStandardOutput $logOut -RedirectStandardError $logErr
+  $ErrorActionPreference = $oldEAP
+  if ($proc.ExitCode -ne 0) {
+    $tail = (Get-Content $logErr -ErrorAction SilentlyContinue | Select-Object -Last 8) -join ' | '
+    throw ("pip install falhou (exit " + $proc.ExitCode + "): " + $tail)
+  }
+}
 try {
   St 3 'Preparando...'
   # Mata server.py anterior, se houver
@@ -67,18 +88,22 @@ try {
     St 20 'Instalando o pip...'
     $gp = Join-Path $tmp 'get-pip.py'
     Invoke-WebRequest -UseBasicParsing -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile $gp
-    & $py $gp --no-warn-script-location 2>&1 | Out-Null
+    $oldEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    $proc = Start-Process -FilePath $py -ArgumentList @($gp,'--no-warn-script-location') -Wait -PassThru -NoNewWindow
+    $ErrorActionPreference = $oldEAP
+    if ($proc.ExitCode -ne 0) { throw ("get-pip falhou (exit " + $proc.ExitCode + ")") }
   }
 
   # ---- 3) deps Python (FastAPI + opencv + paddleocr + LaMa) ----
   $marker = Join-Path $dst 'python\Lib\site-packages\simple_lama_inpainting'
   if (-not (Test-Path $marker)) {
     St 30 'Baixando o framework web...'
-    & $py -m pip install --no-warn-script-location --disable-pip-version-check fastapi==0.115.6 "uvicorn[standard]==0.32.1" python-multipart==0.0.20 opencv-python==4.10.0.84 numpy==1.26.4 Pillow==10.4.0 2>&1 | Out-Null
+    # Pillow fixo em 9.5.x: simple-lama-inpainting 0.1.2 exige pillow<10.
+    Invoke-Pip $py @('fastapi==0.115.6','uvicorn[standard]==0.32.1','python-multipart==0.0.20','opencv-python==4.10.0.84','numpy==1.26.4','Pillow==9.5.0')
     St 45 'Instalando IA de deteccao (PaddleOCR)...'
-    & $py -m pip install --no-warn-script-location --disable-pip-version-check paddlepaddle==2.6.2 paddleocr==2.8.1 2>&1 | Out-Null
+    Invoke-Pip $py @('paddlepaddle==2.6.2','paddleocr==2.8.1')
     St 65 'Instalando IA de inpainting (LaMa neural - parte maior)...'
-    & $py -m pip install --no-warn-script-location --disable-pip-version-check torch==2.4.1 simple-lama-inpainting==0.1.2 2>&1 | Out-Null
+    Invoke-Pip $py @('torch==2.4.1','simple-lama-inpainting==0.1.2')
   }
 
   # ---- 4) ffmpeg.exe ----
