@@ -48,7 +48,7 @@ import { defaultMotorConfig, resolveMotors, estimateSecondsFromText, type MotorC
 import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
 import { recallByVoiceName, rememberPairing, normalizeVoiceName, recallAvatarVoice, rememberAvatarVoice } from '@/lib/voice-avatar-memory';
 import { Toggle3D } from '@/components/Toggle3D';
-import { ToggleRound3D, WirelessIcon } from '@/components/ToggleRound3D';
+import { ToggleRound3D, WirelessIcon, ScissorsIcon } from '@/components/ToggleRound3D';
 import { getPilotTeam, setPilotTeam, getPilotEditor, setPilotEditor } from '@/lib/clickup-pilot-config';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
 import { runMagnificPipeline, parseMagnificPrompts } from '@/lib/magnific-pipeline';
@@ -490,6 +490,23 @@ export default function ClickUpPilotPage() {
   const isAvatarFirstEnabled = (taskId: string, sIdx: number) => !!avatarFirstEnabled[`${taskId}:${sIdx}`];
   const setAvatarFirstFor = (taskId: string, sIdx: number, enabled: boolean) => {
     setAvatarFirstEnabled((prev) => ({ ...prev, [`${taskId}:${sIdx}`]: enabled }));
+  };
+
+  // Decupagem — toggle por task. Default OFF: AD vem montado SEM cortar
+  // silencios. ON = roda stage 2 do pipeline (detectSilences + cutVideoSegments).
+  // Persiste em localStorage pra escolha sobreviver reload.
+  const DECUPAGEM_KEY = 'darkolab:clickup-pilot:decupagem';
+  const [decupagemEnabled, setDecupagemEnabled] = useState<Record<string, boolean>>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(localStorage.getItem(DECUPAGEM_KEY) || '{}'); } catch { return {}; }
+  });
+  const isDecupagemEnabled = (taskId: string) => !!decupagemEnabled[taskId];
+  const setDecupagemFor = (taskId: string, enabled: boolean) => {
+    setDecupagemEnabled((prev) => {
+      const next = { ...prev, [taskId]: enabled };
+      try { localStorage.setItem(DECUPAGEM_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
   };
   const [analyzing, setAnalyzing] = useState(false);
 
@@ -1557,7 +1574,7 @@ export default function ClickUpPilotPage() {
         pipeRes = await runPostPipeline({
           baseAdId: rBaseAdId,
           parts: partBlobs,
-          decupagem: true,
+          decupagem: isDecupagemEnabled(taskId),
           camuflagem: camuflagemMode,
           whiteAudio: camuflagemMode ? camuflagemWhite : null,
           camuflagemVolume,
@@ -1621,7 +1638,7 @@ ${assembled.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'ERRO 
 Se a pasta estiver vazia ou so com _DIAGNOSTICO.txt, ABRA O CONSOLE DO BROWSER (F12)
 pra ver os erros detalhados [clickup-pilot-pipeline].`);
         const blob2 = await zipMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
-        montadoName = `${adNameClean}_montado_decupado.zip`;
+        montadoName = `${adNameClean}_${isDecupagemEnabled(taskId) ? 'montado_decupado' : 'montado'}.zip`;
         montadoUrl = URL.createObjectURL(blob2);
         try {
           const { saveZip } = await import('@/lib/zip-store');
@@ -1790,7 +1807,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         pipeRes = await runPostPipeline({
           baseAdId: state.baseAdId,
           parts: partBlobs,
-          decupagem: true,
+          decupagem: isDecupagemEnabled(taskId),
           camuflagem: camuflagemMode,
           whiteAudio: camuflagemMode ? camuflagemWhite : null,
           camuflagemVolume,
@@ -1850,7 +1867,7 @@ ${assembled.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'ERRO 
 Se a pasta estiver vazia ou so com _DIAGNOSTICO.txt, ABRA O CONSOLE DO BROWSER (F12)
 pra ver os erros detalhados [clickup-pilot-pipeline].`);
         const blob2 = await zipMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
-        montadoName = `${adNameClean}_montado_decupado.zip`;
+        montadoName = `${adNameClean}_${isDecupagemEnabled(taskId) ? 'montado_decupado' : 'montado'}.zip`;
         montadoUrl = URL.createObjectURL(blob2);
         try {
           const { saveZip } = await import('@/lib/zip-store');
@@ -3590,6 +3607,16 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                               className="h-4 w-4 shrink-0 cursor-pointer accent-fuchsia-400"
                             />
                           ) : null}
+                          <ToggleRound3D
+                            on={isDecupagemEnabled(t.id)}
+                            onChange={(v) => setDecupagemFor(t.id, v)}
+                            size="sm"
+                            variant="lime"
+                            title={isDecupagemEnabled(t.id)
+                              ? 'Decupagem ON — vai cortar silencios desse AD'
+                              : 'Decupagem OFF — AD vem montado, sem cortes'}
+                            icon={<ScissorsIcon className="h-3.5 w-3.5" />}
+                          />
                           <button
                             type="button"
                             onClick={() => bulkMode ? toggleTaskSelected(t.id) : openTask(t)}

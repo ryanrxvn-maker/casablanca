@@ -110,7 +110,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   // keepSilenceSec=0.12: margem mantida nas bordas das fala. Era 0.05 (muito
   // agressivo, video ficava entrecortado). 0.12 da pausa natural entre takes
   // sem soar robotico — feedback do user em 12/05/2026.
-  const { baseAdId, parts, camuflagem, whiteAudio, camuflagemVolume = 30, keepSilenceSec = 0.12, onProgress } = input;
+  const { baseAdId, parts, decupagem, camuflagem, whiteAudio, camuflagemVolume = 30, keepSilenceSec = 0.12, onProgress } = input;
   const { hooks, bodies } = classifyParts(parts);
   const out: AssembledPart[] = [];
   const unrecognized = parts.filter((p, i) => !hooks.includes(i) && !bodies.includes(i)).map((p) => p.label);
@@ -199,7 +199,11 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   }
 
   // === Stage 2: DECUPAGEM (com retry de assemble se fast produziu lixo) ===
-  for (let g = 0; g < out.length; g++) {
+  // Quando `decupagem: false`, pula stage inteiro — user pediu ad montado
+  // sem cortes de silencio. Toggle por task no ClickUp Pilot.
+  if (!decupagem) {
+    console.log('[clickup-pilot-pipeline] decupagem desligada pelo toggle — pulando stage 2');
+  } else for (let g = 0; g < out.length; g++) {
     const item = out[g] as AssembledPart & { _usedFastPath?: boolean };
     if (!item.rawAssembled || item.errors?.assemble) continue;
     onProgress?.({ stage: 'decupando', currentFilename: item.filename, doneCount: g, totalCount: total });
