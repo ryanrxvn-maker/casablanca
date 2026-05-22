@@ -69,14 +69,38 @@ function Invoke-Py {
   Invoke-Cmd $Py $PyArgs $Label
 }
 try {
-  St 3 'Preparando...'
+  St 2 'Verificando instalacao atual...'
   # Mata server.py anterior, se houver
-  Get-CimInstance Win32_Process -Filter "Name='python.exe'" | Where-Object { $_.CommandLine -match 'server\.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+  Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -and $_.CommandLine -match 'DarkoSubtitleRemoverApp.*server\.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+
+  # Detecta o que ja existe
+  $hasPython = Test-Path (Join-Path $dst 'python\python.exe')
+  $hasPip = Test-Path (Join-Path $dst 'python\Lib\site-packages\pip')
+  $hasDeps = Test-Path (Join-Path $dst 'python\Lib\site-packages\simple_lama_inpainting')
+  $hasFFmpeg = (Test-Path (Join-Path $dst 'bin\ffmpeg.exe')) -and ((Get-Item (Join-Path $dst 'bin\ffmpeg.exe') -ErrorAction SilentlyContinue).Length -gt 10MB)
+  $fullyInstalled = $hasPython -and $hasPip -and $hasDeps -and $hasFFmpeg
+
+  if ($fullyInstalled) {
+    St 5 'Ja instalado. Atualizando codigo do motor...'
+  } else {
+    $partial = $hasPython -or $hasPip -or $hasDeps -or $hasFFmpeg
+    if ($partial) {
+      $faltam = @()
+      if (-not $hasPython) { $faltam += 'Python' }
+      if (-not $hasPip) { $faltam += 'pip' }
+      if (-not $hasDeps) { $faltam += 'IA+deps' }
+      if (-not $hasFFmpeg) { $faltam += 'ffmpeg' }
+      St 3 ('Instalacao parcial. Continuando: ' + ($faltam -join ', '))
+    } else {
+      St 3 'Preparando instalacao do zero...'
+    }
+  }
 
   New-Item -ItemType Directory -Force -Path $dst | Out-Null
   New-Item -ItemType Directory -Force -Path (Join-Path $dst 'bin') | Out-Null
 
-  # Copia os arquivos estaticos do pacote pro destino
+  # Copia os arquivos estaticos do pacote pro destino (sempre — pode
+  # ter atualizado server.py/pipeline.py mesmo se motor ja instalado)
   Copy-Item (Join-Path $src 'server.py') $dst -Force
   Copy-Item (Join-Path $src 'pipeline.py') $dst -Force
   Copy-Item (Join-Path $src 'DarkoSubtitleRemover.cmd') $dst -Force
@@ -87,6 +111,13 @@ try {
 
   $tmp = Join-Path $env:TEMP ('darko-subrm-' + [Guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+
+  # ---- Deteccao de GPU NVIDIA pra escolher torch CUDA ----
+  $hasNvidia = $false
+  try {
+    $nv = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'NVIDIA' -and $_.Name -notmatch 'NVS' }
+    if ($nv) { $hasNvidia = $true }
+  } catch {}
 
   # ---- 1) Python 3.11 embeddable ----
   $py = Join-Path $dst 'python\python.exe'
@@ -105,6 +136,8 @@ try {
       if (-not ($c -match '^import site\s*$')) { $c += 'import site' }
       Set-Content -LiteralPath $pth.FullName -Value $c -Encoding ASCII
     }
+  } else {
+    St 15 'Python ja instalado (pulando).'
   }
 
   # ---- 2) pip via get-pip.py (com redirect pra nao travar buffer) ----
@@ -114,6 +147,8 @@ try {
     $gp = Join-Path $tmp 'get-pip.py'
     Invoke-WebRequest -UseBasicParsing -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile $gp
     Invoke-Py $py @($gp,'--no-warn-script-location') 'getpip'
+  } else {
+    St 22 'pip ja instalado (pulando).'
   }
 
   # ---- 3) deps Python - UMA CHAMADA pip pra acelerar resolver ----
@@ -123,16 +158,28 @@ try {
   # --no-cache-dir evita IO desnecessario no Local AppData.
   $marker = Join-Path $dst 'python\Lib\site-packages\simple_lama_inpainting'
   if (-not (Test-Path $marker)) {
-    St 25 'Baixando IA e dependencias (parte maior, ~500 MB, 4-7 min)...'
-    # UMA chamada pip = pip baixa em paralelo numa sessao HTTP unica.
-    # Pillow fixo em 9.5.x: simple-lama-inpainting 0.1.2 exige pillow<10.
-    Invoke-Pip $py @(
-      'fastapi==0.115.6', 'uvicorn[standard]==0.32.1', 'python-multipart==0.0.20',
-      'opencv-python==4.10.0.84', 'numpy==1.26.4', 'Pillow==9.5.0',
-      'paddlepaddle==2.6.2', 'paddleocr==2.8.1',
-      'torch==2.4.1', 'simple-lama-inpainting==0.1.2'
-    )
+    if ($hasNvidia) {
+      St 25 'GPU NVIDIA detectada! Baixando IA + CUDA (~2 GB, 7-10 min, 10x mais rapido depois)...'
+      # torch CUDA 12.1 — ~10-25x mais rapido em GPU vs CPU
+      Invoke-Pip $py @(
+        'fastapi==0.115.6', 'uvicorn[standard]==0.32.1', 'python-multipart==0.0.20',
+        'opencv-python==4.10.0.84', 'numpy==1.26.4', 'Pillow==9.5.0',
+        'paddlepaddle==2.6.2', 'paddleocr==2.8.1',
+        '--extra-index-url', 'https://download.pytorch.org/whl/cu121',
+        'torch==2.4.1', 'simple-lama-inpainting==0.1.2'
+      )
+    } else {
+      St 25 'Sem GPU NVIDIA. Baixando IA modo CPU (~500 MB, 4-7 min)...'
+      Invoke-Pip $py @(
+        'fastapi==0.115.6', 'uvicorn[standard]==0.32.1', 'python-multipart==0.0.20',
+        'opencv-python==4.10.0.84', 'numpy==1.26.4', 'Pillow==9.5.0',
+        'paddlepaddle==2.6.2', 'paddleocr==2.8.1',
+        'torch==2.4.1', 'simple-lama-inpainting==0.1.2'
+      )
+    }
     St 75 'Componentes instalados.'
+  } else {
+    St 78 'IA + dependencias ja instaladas (pulando download).'
   }
 
   # ---- 4) ffmpeg.exe ----
@@ -144,6 +191,8 @@ try {
     Expand-Archive -LiteralPath $fz -DestinationPath (Join-Path $tmp 'ff') -Force
     $fe = Get-ChildItem -Recurse -Path (Join-Path $tmp 'ff') -Filter ffmpeg.exe | Select-Object -First 1
     Copy-Item $fe.FullName $ff -Force
+  } else {
+    St 88 'ffmpeg ja instalado (pulando).'
   }
   Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 
