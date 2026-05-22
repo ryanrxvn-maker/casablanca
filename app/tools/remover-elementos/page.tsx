@@ -13,26 +13,34 @@ import { createClient } from '@/lib/supabase/client';
 /**
  * Remover Legenda — Smart Mode (motor LOCAL, 100% offline, sem custo).
  *
- * O processamento NAO usa API paga (Claude Haiku) nem o servidor do Vercel.
- * Em vez disso, fala direto com o sidecar Python rodando em 127.0.0.1:8765
- * (engine/subtitle-remover-local). Pipeline:
- *   PaddleOCR (deteccao hard-sub) -> mascara persistente -> OpenCV Telea
- *   inpaint frame-a-frame -> remux com audio original (ffmpeg libx264 + aac).
+ * Espelha o padrao do Downloader:
+ *   1) Usuario clica "Baixar o Motor" -> baixa o zip (engine/subtitle-remover-pkg)
+ *   2) Extrai e da duplo-clique em INSTALAR.cmd -> instalador GUI Darko
+ *      baixa Python 3.11 + paddleocr + opencv + ffmpeg (~400 MB, 1a vez),
+ *      configura auto-start e mostra/copia o CODIGO de pareamento.
+ *   3) Usuario cola o codigo aqui na UI e parea uma vez.
+ *   4) Apos pareado, esta pagina detecta o motor via /health, mostra
+ *      pilula verde, e envia uploads direto pra 127.0.0.1:8765 com
+ *      Authorization: Bearer <token>.
  *
- * Acesso: apenas conta admin (gated no rail e validado server-side em
- * /api/remover-elementos/detect, embora o fluxo principal nem passe la).
- *
- * Pre-requisito: o admin precisa rodar `start.bat` no engine local pra
- * subir o server. A UI mostra status do server e bloqueia upload se off.
+ * Acesso: apenas conta admin (gated no rail, na UI e no endpoint
+ * /api/subtitle-remover-engine/download).
  */
 
-const LOCAL_BASE = 'http://127.0.0.1:8765';
+const PORT_CANDIDATES = [8765, 8766, 8767, 8768, 8769];
+const TOKEN_KEY = 'darko:sub-remover:token';
+const PORT_KEY = 'darko:sub-remover:port';
 const MAX_BATCH = 5;
 const MAX_FILE_BYTES = 500 * 1024 * 1024; // 500 MB
 
 type ServerStatus =
   | { state: 'checking' }
-  | { state: 'online'; ready: boolean; deps: Record<string, boolean> }
+  | {
+      state: 'online';
+      ready: boolean;
+      deps: Record<string, boolean>;
+      port: number;
+    }
   | { state: 'offline'; reason: string };
 
 type JobState =
@@ -44,11 +52,11 @@ type JobState =
   | 'cancelled';
 
 type Job = {
-  id: string;            // id local (estavel pra UI)
+  id: string;
   remoteId: string | null;
   file: File;
   state: JobState;
-  progress: number;      // 0..1
+  progress: number;
   stage: string;
   resultBlob: Blob | null;
   resultUrl: string | null;
@@ -112,39 +120,88 @@ export default function RemoverElementosPage() {
     };
   }, []);
 
+  // ---------- Token persistente + porta ----------
+  const [token, setToken] = useState<string>('');
+  const [port, setPort] = useState<number>(8765);
+  const [pairingInput, setPairingInput] = useState<string>('');
+  const [pairingErr, setPairingErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const t = localStorage.getItem(TOKEN_KEY);
+      if (t) setToken(t);
+      const p = localStorage.getItem(PORT_KEY);
+      if (p) setPort(parseInt(p, 10) || 8765);
+    } catch {
+      /* localStorage indisponivel */
+    }
+  }, []);
+
+  function saveToken(newTok: string, newPort: number) {
+    setToken(newTok);
+    setPort(newPort);
+    try {
+      localStorage.setItem(TOKEN_KEY, newTok);
+      localStorage.setItem(PORT_KEY, String(newPort));
+    } catch {
+      /* noop */
+    }
+  }
+
+  function unpair() {
+    setToken('');
+    try {
+      localStorage.removeItem(TOKEN_KEY);
+    } catch {
+      /* noop */
+    }
+  }
+
   // ---------- Server status ----------
   const [server, setServer] = useState<ServerStatus>({ state: 'checking' });
 
+  const baseUrl = `http://127.0.0.1:${port}`;
+
   const checkServer = useCallback(async () => {
     setServer({ state: 'checking' });
-    try {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 3000);
-      const res = await fetch(LOCAL_BASE + '/health', {
-        signal: ctrl.signal,
-        cache: 'no-store',
-      });
-      clearTimeout(t);
-      if (!res.ok) {
-        setServer({ state: 'offline', reason: 'HTTP ' + res.status });
+    // varre o range de portas pra detectar onde o motor esta ouvindo
+    for (const p of [port, ...PORT_CANDIDATES.filter((x) => x !== port)]) {
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 1500);
+        const res = await fetch(`http://127.0.0.1:${p}/health`, {
+          signal: ctrl.signal,
+          cache: 'no-store',
+        });
+        clearTimeout(t);
+        if (!res.ok) continue;
+        const json = (await res.json()) as {
+          ok: boolean;
+          ready: boolean;
+          deps: Record<string, boolean>;
+          port: number;
+          service: string;
+        };
+        if (json.service !== 'darko-subtitle-remover') continue;
+        if (p !== port) {
+          setPort(p);
+          try {
+            localStorage.setItem(PORT_KEY, String(p));
+          } catch {}
+        }
+        setServer({
+          state: 'online',
+          ready: json.ready,
+          deps: json.deps,
+          port: p,
+        });
         return;
+      } catch {
+        /* tenta proxima porta */
       }
-      const json = (await res.json()) as {
-        ok: boolean;
-        ready: boolean;
-        deps: Record<string, boolean>;
-      };
-      setServer({ state: 'online', ready: json.ready, deps: json.deps });
-    } catch (e) {
-      setServer({
-        state: 'offline',
-        reason:
-          e instanceof Error && e.name === 'AbortError'
-            ? 'timeout'
-            : 'sem resposta',
-      });
     }
-  }, []);
+    setServer({ state: 'offline', reason: 'motor nao detectado' });
+  }, [port]);
 
   useEffect(() => {
     if (adminCheck !== 'allowed') return;
@@ -152,6 +209,35 @@ export default function RemoverElementosPage() {
     const id = setInterval(checkServer, 15_000);
     return () => clearInterval(id);
   }, [adminCheck, checkServer]);
+
+  async function handlePair() {
+    setPairingErr(null);
+    const tok = pairingInput.trim().toLowerCase();
+    if (!/^[0-9a-f]{16,64}$/.test(tok)) {
+      setPairingErr('Codigo invalido. Deve ser uma sequencia hex de 32 caracteres.');
+      return;
+    }
+    if (server.state !== 'online') {
+      setPairingErr('Motor offline. Clique em "recheck" depois de instalar.');
+      return;
+    }
+    // valida o token com uma chamada autenticada (delete num job que nao existe — deve dar 404)
+    try {
+      const res = await fetch(`http://127.0.0.1:${server.port}/jobs/__probe__`, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + tok },
+      });
+      if (res.status === 401) {
+        setPairingErr('Codigo errado — motor recusou o pareamento.');
+        return;
+      }
+      // 200 ou 404 = token aceito
+      saveToken(tok, server.port);
+      setPairingInput('');
+    } catch (e) {
+      setPairingErr('Falha ao validar: ' + (e as Error).message);
+    }
+  }
 
   // ---------- Tool state ----------
   const [files, setFiles] = useToolState<File[]>('remover:files', []);
@@ -166,9 +252,6 @@ export default function RemoverElementosPage() {
   );
   const [zipping, setZipping] = useToolState<boolean>('remover:zipping', false);
   const [error, setError] = useToolState<string | null>('remover:error', null);
-
-  const activeRef = useRef(false);
-  activeRef.current = processing;
 
   function updateJob(id: string, patch: Partial<Job>) {
     setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)));
@@ -198,25 +281,29 @@ export default function RemoverElementosPage() {
     updateJob(job.id, {
       state: 'uploading',
       progress: 0,
-      stage: 'Enviando vídeo pro motor local...',
+      stage: 'Enviando video pro motor local...',
       abortCtrl: abort,
     });
 
-    // 1) cria o job no server local
     const form = new FormData();
     form.append('file', job.file);
     form.append('mode', mode);
 
     let remoteId: string;
     try {
-      const res = await fetch(LOCAL_BASE + '/jobs', {
+      const res = await fetch(baseUrl + '/jobs', {
         method: 'POST',
         body: form,
+        headers: { Authorization: 'Bearer ' + token },
         signal: abort.signal,
       });
       if (!res.ok) {
         const t = await res.text().catch(() => '');
-        throw new Error('Falha ao iniciar job: ' + (t || res.status));
+        throw new Error(
+          res.status === 401
+            ? 'Token rejeitado pelo motor. Despareia e cola o codigo de novo.'
+            : 'Falha ao iniciar job: ' + (t || res.status),
+        );
       }
       const json = (await res.json()) as { job_id: string };
       remoteId = json.job_id;
@@ -224,7 +311,7 @@ export default function RemoverElementosPage() {
       if ((e as Error).name === 'AbortError') {
         updateJob(job.id, {
           state: 'cancelled',
-          error: 'Cancelado pelo usuário.',
+          error: 'Cancelado pelo usuario.',
         });
         return;
       }
@@ -242,24 +329,28 @@ export default function RemoverElementosPage() {
       progress: 0.05,
     });
 
-    // 2) polling
     let done = false;
     while (!done) {
       if (abort.signal.aborted) {
         try {
-          await fetch(LOCAL_BASE + '/jobs/' + remoteId, { method: 'DELETE' });
+          await fetch(baseUrl + '/jobs/' + remoteId, {
+            method: 'DELETE',
+            headers: { Authorization: 'Bearer ' + token },
+          });
         } catch {
           /* noop */
         }
         updateJob(job.id, {
           state: 'cancelled',
-          error: 'Cancelado pelo usuário.',
+          error: 'Cancelado pelo usuario.',
         });
         return;
       }
 
       try {
-        const res = await fetch(LOCAL_BASE + '/jobs/' + remoteId);
+        const res = await fetch(baseUrl + '/jobs/' + remoteId, {
+          headers: { Authorization: 'Bearer ' + token },
+        });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const json = (await res.json()) as {
           state: string;
@@ -285,18 +376,18 @@ export default function RemoverElementosPage() {
       } catch (e) {
         updateJob(job.id, {
           state: 'error',
-          error: 'Conexão com o motor local caiu: ' + (e as Error).message,
+          error: 'Conexao com o motor caiu: ' + (e as Error).message,
         });
         return;
       }
-      // Polling rate 800ms — suficiente pra UI suave
       await new Promise((r) => setTimeout(r, 800));
     }
 
-    // 3) baixa o resultado
-    updateJob(job.id, { stage: 'Baixando vídeo limpo...', progress: 0.97 });
+    updateJob(job.id, { stage: 'Baixando video limpo...', progress: 0.97 });
     try {
-      const res = await fetch(LOCAL_BASE + '/jobs/' + remoteId + '/result');
+      const res = await fetch(baseUrl + '/jobs/' + remoteId + '/result', {
+        headers: { Authorization: 'Bearer ' + token },
+      });
       if (!res.ok) {
         const t = await res.text().catch(() => '');
         throw new Error('Falha ao baixar resultado: ' + (t || res.status));
@@ -324,9 +415,13 @@ export default function RemoverElementosPage() {
       setError(validation[0]);
       return;
     }
+    if (!token) {
+      setError('Pareie o motor primeiro (cole o codigo de instalacao).');
+      return;
+    }
     if (server.state !== 'online' || !server.ready) {
       setError(
-        'Motor local offline. Inicie o sidecar (engine/subtitle-remover-local/start.bat) e tente de novo.',
+        'Motor local offline. Abra o INSTALAR.cmd ou inicie pelo atalho do menu.',
       );
       return;
     }
@@ -388,7 +483,7 @@ export default function RemoverElementosPage() {
     return (
       <ToolShell
         title="Acesso restrito"
-        description="Esta ferramenta está disponível apenas para a conta admin."
+        description="Esta ferramenta esta disponivel apenas para a conta admin."
       >
         <div className="rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
           Acesso negado.
@@ -400,108 +495,163 @@ export default function RemoverElementosPage() {
   const doneJobs = jobs.filter((j) => j.state === 'done');
   const hasResults = doneJobs.length > 0;
 
-  const serverBadge = (() => {
-    if (server.state === 'checking') {
-      return (
-        <span className="mono inline-flex items-center gap-2 rounded-full border border-line bg-bg px-3 py-1 text-[10px] uppercase tracking-widest text-text-muted">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-text-muted" />
-          Detectando motor local...
-        </span>
-      );
-    }
-    if (server.state === 'offline') {
-      return (
-        <span className="mono inline-flex items-center gap-2 rounded-full border border-red-500/40 bg-red-500/10 px-3 py-1 text-[10px] uppercase tracking-widest text-red-300">
-          <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
-          Motor offline ({server.reason})
-        </span>
-      );
-    }
-    const deps = server.deps;
-    const allOk = server.ready;
-    return (
-      <span
-        className={
-          'mono inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] uppercase tracking-widest ' +
-          (allOk
-            ? 'border-lime/50 bg-lime/10 text-lime'
-            : 'border-yellow-500/40 bg-yellow-500/10 text-yellow-300')
-        }
-      >
-        <span
-          className={
-            'h-1.5 w-1.5 rounded-full ' +
-            (allOk ? 'bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]' : 'bg-yellow-400')
-          }
-        />
-        Motor local {allOk ? 'pronto' : 'parcial'} · OCR{' '}
-        {deps.paddleocr ? '✓' : '✗'} · FF {deps.ffmpeg ? '✓' : '✗'}
-        {deps.lama ? ' · LaMa ✓' : ''}
-      </span>
-    );
-  })();
+  const motorOnline =
+    server.state === 'online' && server.ready && Boolean(token);
 
   return (
     <ToolShell
-      title="Remover Legenda & Marca d'Água"
-      description="Smart Mode local: PaddleOCR detecta legendas hard-coded e o motor de inpainting limpa o vídeo frame-a-frame. 100% offline, sem custo de API. Apenas admin."
+      title="Remover Legenda & Marca d'Agua"
+      description="Smart Mode local: PaddleOCR detecta legendas hardcoded e o motor de inpainting limpa o video frame-a-frame. 100% offline, sem custo de API. Apenas admin."
     >
       <div className="flex flex-col gap-6">
-        {/* Status do motor local */}
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-line bg-bg-soft/40 px-4 py-3">
-          <div className="flex flex-col gap-1">
-            <span className="text-[11px] uppercase tracking-widest text-text-muted">
-              motor de processamento
-            </span>
-            <span className="text-sm text-white">
-              {LOCAL_BASE.replace('http://', '')}
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            {serverBadge}
+        {/* === BANNER UNICO (motor + pareamento) — mesmo design do downloader === */}
+        {motorOnline ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-3 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="relative flex h-2 w-2 shrink-0">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
+              </span>
+              <span className="text-lime">
+                Motor DarkoLab Subtitle Remover
+              </span>
+              <span className="mono ml-2 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
+                pareado · porta {server.state === 'online' ? server.port : port}
+              </span>
+              {server.state === 'online' && server.deps.lama ? (
+                <span className="mono ml-1 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
+                  LaMa ✓
+                </span>
+              ) : null}
+            </div>
             <button
               type="button"
               className="btn-ghost !py-1 !px-2 text-[10px] uppercase tracking-widest"
-              onClick={checkServer}
-              disabled={server.state === 'checking'}
+              onClick={unpair}
+              title="Esquecer codigo pareado (nao desinstala)"
             >
-              recheck
+              despairar
             </button>
           </div>
-        </div>
-
-        {server.state === 'offline' ? (
-          <div className="rounded-[12px] border border-yellow-500/40 bg-yellow-500/10 px-4 py-3 text-xs text-yellow-100">
-            <div className="mono mb-2 text-[10px] uppercase tracking-widest text-yellow-300">
-              Como iniciar o motor local
+        ) : (
+          <div className="rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-4">
+            <div className="flex items-center gap-2">
+              <span className="text-lime">⬇</span>
+              <strong className="flex-1 text-sm text-lime">
+                Motor de Remocao de Legenda (roda no seu PC, sem custo)
+              </strong>
             </div>
-            <ol className="ml-4 list-decimal space-y-1 text-text">
-              <li>
-                Abra <code className="mono text-lime">engine/subtitle-remover-local/start.bat</code>
-              </li>
-              <li>
-                (Primeira vez) Rode:&nbsp;
-                <code className="mono text-lime">python -m venv .venv</code>,&nbsp;
-                <code className="mono text-lime">.venv\Scripts\activate</code>,&nbsp;
-                <code className="mono text-lime">pip install -r requirements.txt</code>
-              </li>
-              <li>
-                Deixe a janela aberta enquanto usar a ferramenta. Esta página
-                detecta automaticamente.
-              </li>
-            </ol>
+            <p className="mono mt-1 text-[11px] text-text-muted">
+              Instala uma vez. A IA detecta a legenda hardcoded e limpa
+              frame-a-frame com PaddleOCR + OpenCV inpainting. Nada sai do
+              seu PC, sem token de API, sem limite.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <a
+                href="/api/subtitle-remover-engine/download"
+                className="btn-primary !py-2 text-xs"
+                download
+              >
+                1. Baixar o Motor (Windows)
+              </a>
+              <button
+                type="button"
+                className="btn-secondary !py-2 text-xs"
+                onClick={checkServer}
+                disabled={server.state === 'checking'}
+              >
+                {server.state === 'checking'
+                  ? 'Detectando...'
+                  : '2. Recheck motor'}
+              </button>
+            </div>
+
+            {/* Estado: motor instalado mas sem token salvo => formulario de pareamento */}
+            {server.state === 'online' && !token ? (
+              <div className="mt-4 rounded-[10px] border border-lime/30 bg-bg/40 px-3 py-3">
+                <div className="mono mb-2 text-[10px] uppercase tracking-widest text-lime">
+                  Motor detectado · porta {server.port}. Cole o codigo:
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    type="text"
+                    placeholder="32 caracteres hex (ja foi copiado pelo instalador)"
+                    className="input-field flex-1 font-mono text-xs"
+                    value={pairingInput}
+                    onChange={(e) => setPairingInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handlePair();
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn-primary !py-1.5 text-xs"
+                    onClick={handlePair}
+                  >
+                    Parear
+                  </button>
+                </div>
+                {pairingErr ? (
+                  <div className="mt-2 text-[11px] text-red-300">{pairingErr}</div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <details className="mt-3">
+              <summary className="cursor-pointer text-[11px] text-lime/80 hover:text-lime">
+                Como instalar (passo a passo)
+              </summary>
+              <ol className="mono mt-2 list-decimal space-y-1 pl-5 text-[11px] text-text-muted">
+                <li>
+                  Baixa o <b>Motor</b> (botao 1), extrai o .zip numa pasta.
+                </li>
+                <li>
+                  Dentro da pasta, da <b>duplo-clique</b> em{' '}
+                  <code className="mono text-white">INSTALAR.cmd</code>
+                  &nbsp;(se o Windows avisar, &quot;Mais informacoes&quot; →
+                  &quot;Executar assim mesmo&quot;). Ele baixa tudo (Python +
+                  IA + ffmpeg, ~400 MB, 1a vez), instala, inicia junto com o
+                  Windows e <b>copia o codigo de pareamento</b>.
+                </li>
+                <li>
+                  Volta aqui — esta caixa vai mostrar &quot;Motor detectado&quot;,
+                  cole o codigo (ja esta copiado) e clique <i>Parear</i>.
+                </li>
+                <li>
+                  Pronto. Sobe video em &quot;Videos&quot; e aplica Smart Mode.
+                  Perdeu o codigo? Duplo-clique em{' '}
+                  <code className="mono text-white">CODIGO.cmd</code> ou abre
+                  o atalho{' '}
+                  <i>&quot;DarkoLab Subtitle Remover - Codigo&quot;</i> no Menu
+                  Iniciar.
+                </li>
+              </ol>
+              <p className="mono mt-2 text-[10px] text-text-muted">
+                Requer Windows 64-bit. O motor roda 100% no PC do usuario.
+                Download leve (~50 KB); o duplo-clique em{' '}
+                <code className="mono text-white">INSTALAR.cmd</code> baixa
+                Python + paddleocr + opencv + ffmpeg (~400 MB, uma vez,
+                ~3-5 min) automaticamente.
+              </p>
+            </details>
+
+            {server.state === 'offline' ? (
+              <p className="mono mt-3 text-[10px] uppercase tracking-widest text-text-muted">
+                status: motor offline ({server.reason})
+              </p>
+            ) : null}
           </div>
-        ) : null}
+        )}
 
         {/* Upload */}
         <div>
-          <label className="label-field">Vídeos (até {MAX_BATCH})</label>
+          <label className="label-field">Videos (ate {MAX_BATCH})</label>
           <BatchFileUpload
             accept="video/mp4,video/webm,video/quicktime,video/x-matroska"
             value={files}
             onChange={setFilesSafe}
             max={MAX_BATCH}
-            hint="MP4, MOV, WEBM, MKV — até 500MB cada"
+            hint="MP4, MOV, WEBM, MKV — ate 500MB cada"
             disabled={processing}
           />
           {validation.length > 0 ? (
@@ -520,16 +670,20 @@ export default function RemoverElementosPage() {
             {[
               {
                 id: 'telea' as const,
-                label: 'Rápido (Telea)',
-                desc: 'OpenCV Telea — CPU, ~1x realtime. Ótimo pra fundos uniformes.',
+                label: 'Rapido (Telea)',
+                desc: 'OpenCV Telea — CPU, ~1x realtime. Otimo pra fundos uniformes.',
                 badge: 'CPU',
               },
               {
                 id: 'lama' as const,
                 label: 'Qualidade (LaMa)',
                 desc: 'Modelo neural single-frame — mais lento, melhor em fundos complexos.',
-                badge: server.state === 'online' && server.deps.lama ? 'AI' : 'AI ✗',
-                disabled: server.state === 'online' && !server.deps.lama,
+                badge:
+                  server.state === 'online' && server.deps.lama
+                    ? 'AI'
+                    : 'AI ✗',
+                disabled:
+                  server.state === 'online' && !server.deps.lama,
               },
             ].map((opt) => {
               const active = mode === opt.id;
@@ -570,13 +724,13 @@ export default function RemoverElementosPage() {
             })}
           </div>
           <p className="mt-2 text-[11px] text-text-muted">
-            Smart Mode automático: o motor amostra 16 frames, detecta onde a
-            legenda aparece de forma persistente (≥40% das amostras), unifica
-            tudo em uma máscara dilatada e aplica o inpainting na região.
+            Smart Mode automatico: o motor amostra 16 frames, detecta onde
+            a legenda aparece de forma persistente (≥40% das amostras),
+            unifica tudo em uma mascara dilatada e aplica o inpainting.
           </p>
         </div>
 
-        {/* Ações */}
+        {/* Acoes */}
         <div className="flex flex-wrap gap-3">
           {processing ? (
             <CancelButton onClick={cancelAll} label="Cancelar processamento" />
@@ -587,8 +741,7 @@ export default function RemoverElementosPage() {
               disabled={
                 files.length === 0 ||
                 validation.length > 0 ||
-                server.state !== 'online' ||
-                (server.state === 'online' && !server.ready)
+                !motorOnline
               }
             >
               {`Remover legenda ${files.length || ''}`.trim()}
