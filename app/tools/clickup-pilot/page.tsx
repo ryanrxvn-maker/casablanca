@@ -4047,6 +4047,21 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   </span>
                                 ) : (a.status === 'ready' || a.status === 'partial') ? (
                                   <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                                    {/* Decupagem toggle (pos-analise) — mesmo state global da pre-analise.
+                                     *  Permite ligar/desligar a decupagem mesmo apos a task ja ter sido
+                                     *  analisada, sem voltar pra lista de tasks. */}
+                                    {!onlyMagnificMode ? (
+                                      <ToggleRound3D
+                                        on={isDecupagemEnabled(a.taskId)}
+                                        onChange={(v) => setDecupagemFor(a.taskId, v)}
+                                        size="sm"
+                                        variant="lime"
+                                        title={isDecupagemEnabled(a.taskId)
+                                          ? 'Decupagem ON — vai cortar silencios desse AD'
+                                          : 'Decupagem OFF — AD vem montado, sem cortes'}
+                                        icon={<ScissorsIcon className="h-3.5 w-3.5" />}
+                                      />
+                                    ) : null}
                                     {(onlyMagnificMode || moreMagnificMode) ? (
                                       <>
                                         <button
