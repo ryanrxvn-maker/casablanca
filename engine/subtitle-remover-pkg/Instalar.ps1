@@ -70,19 +70,21 @@ try {
     & $py $gp --no-warn-script-location 2>&1 | Out-Null
   }
 
-  # ---- 3) deps Python (FastAPI + opencv + paddleocr) ----
-  $marker = Join-Path $dst 'python\Lib\site-packages\paddleocr'
+  # ---- 3) deps Python (FastAPI + opencv + paddleocr + LaMa) ----
+  $marker = Join-Path $dst 'python\Lib\site-packages\simple_lama_inpainting'
   if (-not (Test-Path $marker)) {
-    St 30 'Baixando o motor de IA (parte maior)...'
+    St 30 'Baixando o framework web...'
     & $py -m pip install --no-warn-script-location --disable-pip-version-check fastapi==0.115.6 "uvicorn[standard]==0.32.1" python-multipart==0.0.20 opencv-python==4.10.0.84 numpy==1.26.4 Pillow==10.4.0 2>&1 | Out-Null
-    St 50 'Instalando PaddleOCR (IA de deteccao)...'
+    St 45 'Instalando IA de deteccao (PaddleOCR)...'
     & $py -m pip install --no-warn-script-location --disable-pip-version-check paddlepaddle==2.6.2 paddleocr==2.8.1 2>&1 | Out-Null
+    St 65 'Instalando IA de inpainting (LaMa neural - parte maior)...'
+    & $py -m pip install --no-warn-script-location --disable-pip-version-check torch==2.4.1 simple-lama-inpainting==0.1.2 2>&1 | Out-Null
   }
 
   # ---- 4) ffmpeg.exe ----
   $ff = Join-Path $dst 'bin\ffmpeg.exe'
   if (-not (Test-Path $ff) -or (Get-Item $ff).Length -lt 10MB) {
-    St 80 'Baixando o conversor de midia...'
+    St 85 'Baixando o conversor de midia...'
     $fz = Join-Path $tmp 'ff.zip'
     Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip' -OutFile $fz
     Expand-Archive -LiteralPath $fz -DestinationPath (Join-Path $tmp 'ff') -Force
@@ -117,28 +119,19 @@ try {
   Remove-Item (Join-Path $dst 'engine.log') -ErrorAction SilentlyContinue
   Start-Process wscript.exe -ArgumentList ('"' + $vbs + '"') -WindowStyle Hidden
 
-  $tok = $null
+  # Zero-config: nao precisa capturar token nenhum, so confirmar que
+  # o motor subiu (linha JSON "event":"ready" no engine.log).
+  $ready = $false
   for ($i=0; $i -lt 80; $i++) {
     Start-Sleep -Milliseconds 800
     $log = Get-Content (Join-Path $dst 'engine.log') -Raw -ErrorAction SilentlyContinue
-    if ($log -and $log -match '"event"\s*:\s*"ready".*?"token"\s*:\s*"([0-9a-f]+)"') {
-      $tok = $Matches[1]; break
-    }
-  }
-  # fallback: le do config.json se o motor ja persistiu
-  if (-not $tok) {
-    $cfg = Join-Path $env:LOCALAPPDATA 'DarkoSubtitleRemover\config.json'
-    if (Test-Path $cfg) {
-      try {
-        $c = Get-Content $cfg -Raw | ConvertFrom-Json
-        if ($c.token) { $tok = "$($c.token)" }
-      } catch {}
+    if ($log -and $log -match '"event"\s*:\s*"ready"') {
+      $ready = $true; break
     }
   }
 
-  if ($tok) {
-    try { Set-Clipboard -Value $tok } catch {}
-    Set-Content -LiteralPath $status -Value ("DONE|$tok") -Encoding UTF8
+  if ($ready) {
+    Set-Content -LiteralPath $status -Value 'DONE|' -Encoding UTF8
   } else {
     Set-Content -LiteralPath $status -Value ("ERR|O motor nao confirmou o start. Log: " + (Join-Path $dst 'engine.log')) -Encoding UTF8
   }
@@ -192,36 +185,19 @@ try {
   $fill.BackColor=$LIME; $track.Controls.Add($fill)
 
   $hint=New-Object Windows.Forms.Label
-  $hint.Text='Baixando o necessario na 1a vez (~400 MB). Pode levar 3-5 min.'
+  $hint.Text='Baixando o necessario na 1a vez (~600 MB). Pode levar 5-8 min.'
   $hint.ForeColor=$MUT; $hint.Font=New-Object Drawing.Font('Segoe UI',8)
   $hint.AutoSize=$false; $hint.Size=New-Object Drawing.Size(452,20)
   $hint.Location=New-Object Drawing.Point(34,182); $f.Controls.Add($hint)
 
-  $code=New-Object Windows.Forms.TextBox
-  $code.ReadOnly=$true; $code.BorderStyle='FixedSingle'
-  $code.BackColor=$CARD; $code.ForeColor=$LIME; $code.TextAlign='Center'
-  $code.Font=New-Object Drawing.Font('Consolas',11,[Drawing.FontStyle]::Bold)
-  $code.Size=New-Object Drawing.Size(452,28); $code.Location=New-Object Drawing.Point(34,150)
-  $code.Visible=$false; $f.Controls.Add($code)
-
-  $btnCopy=New-Object Windows.Forms.Button
-  $btnCopy.Text='Copiar codigo'; $btnCopy.FlatStyle='Flat'
-  $btnCopy.BackColor=$LIME; $btnCopy.ForeColor=$BG
-  $btnCopy.FlatAppearance.BorderSize=0
-  $btnCopy.Font=New-Object Drawing.Font('Segoe UI',9,[Drawing.FontStyle]::Bold)
-  $btnCopy.Size=New-Object Drawing.Size(150,34); $btnCopy.Location=New-Object Drawing.Point(34,200)
-  $btnCopy.Visible=$false; $f.Controls.Add($btnCopy)
-
   $btnClose=New-Object Windows.Forms.Button
   $btnClose.Text='Fechar'; $btnClose.FlatStyle='Flat'
-  $btnClose.BackColor=$CARD; $btnClose.ForeColor=$TXT
-  $btnClose.FlatAppearance.BorderColor=$MUT
-  $btnClose.Font=New-Object Drawing.Font('Segoe UI',9)
-  $btnClose.Size=New-Object Drawing.Size(110,34); $btnClose.Location=New-Object Drawing.Point(376,200)
+  $btnClose.BackColor=$LIME; $btnClose.ForeColor=$BG
+  $btnClose.FlatAppearance.BorderSize=0
+  $btnClose.Font=New-Object Drawing.Font('Segoe UI',9,[Drawing.FontStyle]::Bold)
+  $btnClose.Size=New-Object Drawing.Size(452,34); $btnClose.Location=New-Object Drawing.Point(34,200)
   $btnClose.Visible=$false; $f.Controls.Add($btnClose)
 
-  $script:tok=$null
-  $btnCopy.Add_Click({ if ($script:tok) { [Windows.Forms.Clipboard]::SetText($script:tok); $btnCopy.Text='Copiado!' } })
   $btnClose.Add_Click({ $f.Close() })
 
   # arrastar a janela (sem borda)
@@ -242,13 +218,10 @@ try {
     $k=$line.Split('|',2)
     if ($k[0] -eq 'DONE') {
       $tmr.Stop()
-      $script:tok=$k[1]
       $fill.Width=$track.Width
-      $st.Text='Instalado e rodando!'
-      $hint.Text='Cole este codigo no DarkoLab (ja copiado):'
-      $code.Text=$k[1]; $code.Visible=$true
-      $btnCopy.Visible=$true; $btnClose.Visible=$true
-      try { [Windows.Forms.Clipboard]::SetText($k[1]) } catch {}
+      $st.Text='Pronto pra usar!'
+      $hint.Text='Abra o DarkoLab no navegador. A ferramenta ja conectou sozinha — sem precisar de codigo.'
+      $btnClose.Visible=$true
     } elseif ($k[0] -eq 'ERR') {
       $tmr.Stop()
       $st.Text='Falhou'
@@ -275,10 +248,10 @@ try {
   Write-Host 'Instalando DarkoLab Subtitle Remover (sem interface)...'
   Wait-Job $job | Out-Null
   $line=(Get-Content -LiteralPath $status -Raw -ErrorAction SilentlyContinue)
-  if ($line -match '^DONE\|([0-9a-f]+)') {
+  if ($line -match '^DONE') {
     Write-Host ''
-    Write-Host ('CODIGO DE PAREAMENTO: ' + $Matches[1])
-    Write-Host '(cole no DarkoLab)'
+    Write-Host 'INSTALADO. O motor ja esta rodando.'
+    Write-Host 'Abra o DarkoLab > Remover Legenda. A pagina conecta sozinha.'
   } else {
     Write-Host ('Falhou: ' + $line)
   }

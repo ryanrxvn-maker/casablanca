@@ -5,20 +5,24 @@ Roda em http://127.0.0.1:8765 (apenas localhost). O front-end do DarkoLab
 fala diretamente com este server, sem passar pela API do Next.js — assim
 nao temos limite de 4.5MB do Vercel e nada sobe pra nuvem.
 
-Seguranca / pareamento (mesmo padrao do downloader-engine):
+Seguranca / pareamento — ZERO-CONFIG (sem codigo de pareamento):
   - bind so em 127.0.0.1 (nao acessivel da rede local)
-  - token aleatorio gerado no 1o start, salvo em
-    %LOCALAPPDATA%\\DarkoSubtitleRemover\\config.json
-  - /process, /jobs, /jobs/{id}, /jobs/{id}/result exigem
-        Authorization: Bearer <token>
-        (ou header X-Darko-Token: <token> como fallback)
-  - /health e PUBLICO (sem token) — so retorna status/porta/versao
-  - CORS aberto pra darkolab.com, *.vercel.app e localhost
-  - Origin precisa ser de uma origem confiavel; bloqueia chamadas de
-    sites arbitrarios mesmo que conheçam o token.
-
-Loga no stdout uma linha JSON com {"event":"ready","token":..,"port":..}
-pra o instalador GUI capturar e mostrar/copiar pro usuario.
+  - guard de Origin: TODA request (exceto /health) precisa vir com
+    header Origin de uma whitelist hardcoded (darkolab.com,
+    *.vercel.app, localhost, 127.0.0.1). Origin eh setado pelo
+    browser e NAO pode ser forjado por JavaScript em outro site
+    (a spec do fetch / XHR garante isso). Logo, basta o motor
+    estar rodando — quando o usuario abre o DarkoLab, o browser
+    automaticamente manda Origin: https://darkolab.com (ou
+    localhost em dev), e o motor aceita.
+  - /health e PUBLICO (sem guard) — qualquer site pode pingar
+    pra detectar se o motor esta rodando, mas isso nao expoe
+    nenhum dado nem permite processar videos.
+  - Token (legado): ainda eh gerado e persistido em
+    %LOCALAPPDATA%\\DarkoSubtitleRemover\\config.json, mas a UI
+    nao usa mais. Pode ser usado por scripts manuais via
+    Authorization: Bearer <token>, que tambem libera o acesso
+    (bypass do Origin guard) — util pra automacoes locais.
 
 Use 'start.bat' pra iniciar; ou:
     .venv\\Scripts\\activate
@@ -146,10 +150,34 @@ def _extract_token(authorization: Optional[str], x_darko_token: Optional[str]) -
     return x_darko_token
 
 
-def _auth_or_401(authorization: Optional[str], x_darko_token: Optional[str]):
+def _origin_ok(origin: Optional[str]) -> bool:
+    """Valida que Origin vem de uma origem confiavel."""
+    if not origin:
+        return False
+    return _origin_re.match(origin) is not None
+
+
+def _auth_or_403(
+    request_origin: Optional[str],
+    authorization: Optional[str],
+    x_darko_token: Optional[str],
+):
+    """
+    Autorizacao zero-config:
+      - se Origin esta na whitelist -> OK (browser nao deixa origin ser
+        forjado em fetch/XHR, entao isso eh seguro contra sites maliciosos)
+      - OU se Bearer token bate -> OK (fallback pra scripts locais)
+      - Caso contrario -> 403
+    """
+    if _origin_ok(request_origin):
+        return
     tok = _extract_token(authorization, x_darko_token)
-    if tok != TOKEN:
-        raise HTTPException(status_code=401, detail="invalid or missing token")
+    if tok and tok == TOKEN:
+        return
+    raise HTTPException(
+        status_code=403,
+        detail="origin not allowed (browser must come from darkolab.com or localhost)",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -203,28 +231,29 @@ JOBS_LOCK = threading.Lock()
 
 @app.get("/health")
 async def health():
-    """Publico — nao vaza o token, so status + porta."""
+    """Publico — status/porta/deps. Nao vaza token nem dado sensivel."""
     rt = check_runtime()
     return {
         "ok": True,
         "service": "darko-subtitle-remover",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "port": PORT,
         "ready": rt["ready"],
         "deps": rt["deps"],
-        "auth_required": True,  # sempre exige token na nova versao
+        "auth_mode": "origin",  # gate por Origin whitelist (zero-config)
     }
 
 
 @app.post("/process")
 async def process(
     file: UploadFile = File(...),
-    mode: str = Form("telea"),
+    mode: str = Form("lama"),
+    origin: Optional[str] = Header(default=None),
     authorization: Optional[str] = Header(default=None),
     x_darko_token: Optional[str] = Header(default=None),
 ):
     """Sincrono: processa e devolve direto o MP4. Pra videos curtos."""
-    _auth_or_401(authorization, x_darko_token)
+    _auth_or_403(origin, authorization, x_darko_token)
     if mode not in ("telea", "lama"):
         raise HTTPException(status_code=400, detail="mode must be telea|lama")
 
@@ -243,7 +272,7 @@ async def process(
 
     try:
         stats = await asyncio.to_thread(
-            process_video, in_path, out_path, mode, 16, 0.4, None,
+            process_video, in_path, out_path, mode, 20, 0.30, None,
         )
     except Exception as e:
         shutil.rmtree(job_dir, ignore_errors=True)
@@ -270,12 +299,13 @@ async def process(
 @app.post("/jobs")
 async def create_job(
     file: UploadFile = File(...),
-    mode: str = Form("telea"),
+    mode: str = Form("lama"),
+    origin: Optional[str] = Header(default=None),
     authorization: Optional[str] = Header(default=None),
     x_darko_token: Optional[str] = Header(default=None),
 ):
     """Assincrono: cria o job, retorna id; cliente faz polling em /jobs/{id}."""
-    _auth_or_401(authorization, x_darko_token)
+    _auth_or_403(origin, authorization, x_darko_token)
     if mode not in ("telea", "lama"):
         raise HTTPException(status_code=400, detail="mode must be telea|lama")
 
@@ -304,7 +334,7 @@ async def create_job(
                 with job.lock:
                     job.progress = float(max(0.0, min(1.0, p)))
                     job.stage = msg
-            stats = process_video(in_path, out_path, mode, 16, 0.4, on_prog)
+            stats = process_video(in_path, out_path, mode, 20, 0.30, on_prog)
             with job.lock:
                 job.state = "done"
                 job.progress = 1.0
@@ -324,10 +354,11 @@ async def create_job(
 @app.get("/jobs/{jid}")
 async def get_job(
     jid: str,
+    origin: Optional[str] = Header(default=None),
     authorization: Optional[str] = Header(default=None),
     x_darko_token: Optional[str] = Header(default=None),
 ):
-    _auth_or_401(authorization, x_darko_token)
+    _auth_or_403(origin, authorization, x_darko_token)
     with JOBS_LOCK:
         job = JOBS.get(jid)
     if not job:
@@ -348,10 +379,11 @@ async def get_job(
 @app.get("/jobs/{jid}/result")
 async def get_job_result(
     jid: str,
+    origin: Optional[str] = Header(default=None),
     authorization: Optional[str] = Header(default=None),
     x_darko_token: Optional[str] = Header(default=None),
 ):
-    _auth_or_401(authorization, x_darko_token)
+    _auth_or_403(origin, authorization, x_darko_token)
     with JOBS_LOCK:
         job = JOBS.get(jid)
     if not job:
@@ -383,10 +415,11 @@ async def get_job_result(
 @app.delete("/jobs/{jid}")
 async def delete_job(
     jid: str,
+    origin: Optional[str] = Header(default=None),
     authorization: Optional[str] = Header(default=None),
     x_darko_token: Optional[str] = Header(default=None),
 ):
-    _auth_or_401(authorization, x_darko_token)
+    _auth_or_403(origin, authorization, x_darko_token)
     with JOBS_LOCK:
         job = JOBS.pop(jid, None)
     if job:
@@ -399,13 +432,14 @@ async def delete_job(
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # Linha JSON pro instalador GUI capturar:
+    # Linha JSON pro instalador GUI capturar — zero-config: nao mostra
+    # token, o instalador so confirma que o server subiu OK.
     print(json.dumps({
         "event": "ready",
         "service": "darko-subtitle-remover",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "port": PORT,
-        "token": TOKEN,
+        "auth_mode": "origin",
     }), flush=True)
     print(f"[darko] Subtitle Remover Local @ http://{HOST}:{PORT}", flush=True)
     rt = check_runtime()

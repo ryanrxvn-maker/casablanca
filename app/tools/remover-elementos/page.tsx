@@ -13,23 +13,25 @@ import { createClient } from '@/lib/supabase/client';
 /**
  * Remover Legenda — Smart Mode (motor LOCAL, 100% offline, sem custo).
  *
- * Espelha o padrao do Downloader:
- *   1) Usuario clica "Baixar o Motor" -> baixa o zip (engine/subtitle-remover-pkg)
- *   2) Extrai e da duplo-clique em INSTALAR.cmd -> instalador GUI Darko
- *      baixa Python 3.11 + paddleocr + opencv + ffmpeg (~400 MB, 1a vez),
- *      configura auto-start e mostra/copia o CODIGO de pareamento.
- *   3) Usuario cola o codigo aqui na UI e parea uma vez.
- *   4) Apos pareado, esta pagina detecta o motor via /health, mostra
- *      pilula verde, e envia uploads direto pra 127.0.0.1:8765 com
- *      Authorization: Bearer <token>.
+ * Fluxo ZERO-CONFIG (sem pareamento manual):
+ *   1) Usuario clica "Baixar o Motor" -> baixa o zip (~50 KB).
+ *   2) Da duplo-clique em INSTALAR.cmd -> instalador GUI Darko baixa
+ *      Python 3.11 + paddleocr + opencv + lama + ffmpeg (~600 MB, 1a vez)
+ *      e ja inicia o motor + configura auto-start.
+ *   3) Pronto. Esta pagina detecta o motor via /health, fica verde e
+ *      ja pode processar. Sem codigo, sem cola, sem nada manual.
  *
- * Acesso: apenas conta admin (gated no rail, na UI e no endpoint
- * /api/subtitle-remover-engine/download).
+ * Seguranca: o motor (127.0.0.1:8765) so aceita requests com header
+ * Origin de uma whitelist (darkolab.com, *.vercel.app, localhost). O
+ * browser SEMPRE seta Origin em cross-origin fetch e NAO pode ser
+ * forjado por JS de outro site (spec do fetch garante). Logo, basta
+ * a pagina estar carregada do darkolab.com pra autorizar — qualquer
+ * outro site fica bloqueado pelo guard.
+ *
+ * Acesso UI: apenas conta admin (gated no rail e na pagina).
  */
 
 const PORT_CANDIDATES = [8765, 8766, 8767, 8768, 8769];
-const TOKEN_KEY = 'darko:sub-remover:token';
-const PORT_KEY = 'darko:sub-remover:port';
 const MAX_BATCH = 5;
 const MAX_FILE_BYTES = 500 * 1024 * 1024; // 500 MB
 
@@ -130,45 +132,9 @@ export default function RemoverElementosPage() {
     };
   }, []);
 
-  // ---------- Token persistente + porta ----------
-  const [token, setToken] = useState<string>('');
-  const [port, setPort] = useState<number>(8765);
-  const [pairingInput, setPairingInput] = useState<string>('');
-  const [pairingErr, setPairingErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    try {
-      const t = localStorage.getItem(TOKEN_KEY);
-      if (t) setToken(t);
-      const p = localStorage.getItem(PORT_KEY);
-      if (p) setPort(parseInt(p, 10) || 8765);
-    } catch {
-      /* localStorage indisponivel */
-    }
-  }, []);
-
-  function saveToken(newTok: string, newPort: number) {
-    setToken(newTok);
-    setPort(newPort);
-    try {
-      localStorage.setItem(TOKEN_KEY, newTok);
-      localStorage.setItem(PORT_KEY, String(newPort));
-    } catch {
-      /* noop */
-    }
-  }
-
-  function unpair() {
-    setToken('');
-    try {
-      localStorage.removeItem(TOKEN_KEY);
-    } catch {
-      /* noop */
-    }
-  }
-
-  // ---------- Server status ----------
+  // ---------- Server status (zero-config: sem token) ----------
   const [server, setServer] = useState<ServerStatus>({ state: 'checking' });
+  const [port, setPort] = useState<number>(8765);
 
   const baseUrl = `http://127.0.0.1:${port}`;
 
@@ -195,9 +161,6 @@ export default function RemoverElementosPage() {
         if (json.service !== 'darko-subtitle-remover') continue;
         if (p !== port) {
           setPort(p);
-          try {
-            localStorage.setItem(PORT_KEY, String(p));
-          } catch {}
         }
         setServer({
           state: 'online',
@@ -219,35 +182,6 @@ export default function RemoverElementosPage() {
     const id = setInterval(checkServer, 15_000);
     return () => clearInterval(id);
   }, [adminCheck, checkServer]);
-
-  async function handlePair() {
-    setPairingErr(null);
-    const tok = pairingInput.trim().toLowerCase();
-    if (!/^[0-9a-f]{16,64}$/.test(tok)) {
-      setPairingErr('Codigo invalido. Deve ser uma sequencia hex de 32 caracteres.');
-      return;
-    }
-    if (server.state !== 'online') {
-      setPairingErr('Motor offline. Clique em "recheck" depois de instalar.');
-      return;
-    }
-    // valida o token com uma chamada autenticada (delete num job que nao existe — deve dar 404)
-    try {
-      const res = await fetch(`http://127.0.0.1:${server.port}/jobs/__probe__`, {
-        method: 'DELETE',
-        headers: { Authorization: 'Bearer ' + tok },
-      });
-      if (res.status === 401) {
-        setPairingErr('Codigo errado — motor recusou o pareamento.');
-        return;
-      }
-      // 200 ou 404 = token aceito
-      saveToken(tok, server.port);
-      setPairingInput('');
-    } catch (e) {
-      setPairingErr('Falha ao validar: ' + (e as Error).message);
-    }
-  }
 
   // ---------- Tool state ----------
   // Smart Mode = LaMa neural inpainting (mesma qualidade do vmake.ai).
@@ -303,14 +237,13 @@ export default function RemoverElementosPage() {
       const res = await fetch(baseUrl + '/jobs', {
         method: 'POST',
         body: form,
-        headers: { Authorization: 'Bearer ' + token },
         signal: abort.signal,
       });
       if (!res.ok) {
         const t = await res.text().catch(() => '');
         throw new Error(
-          res.status === 401
-            ? 'Token rejeitado pelo motor. Despareia e cola o codigo de novo.'
+          res.status === 403
+            ? 'Motor recusou a origem desta pagina (Origin guard). Verifique se voce esta acessando o DarkoLab em uma URL valida.'
             : 'Falha ao iniciar job: ' + (t || res.status),
         );
       }
@@ -344,8 +277,7 @@ export default function RemoverElementosPage() {
         try {
           await fetch(baseUrl + '/jobs/' + remoteId, {
             method: 'DELETE',
-            headers: { Authorization: 'Bearer ' + token },
-          });
+              });
         } catch {
           /* noop */
         }
@@ -358,8 +290,7 @@ export default function RemoverElementosPage() {
 
       try {
         const res = await fetch(baseUrl + '/jobs/' + remoteId, {
-          headers: { Authorization: 'Bearer ' + token },
-        });
+          });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const json = (await res.json()) as {
           state: string;
@@ -395,7 +326,6 @@ export default function RemoverElementosPage() {
     updateJob(job.id, { stage: 'Baixando video limpo...', progress: 0.97 });
     try {
       const res = await fetch(baseUrl + '/jobs/' + remoteId + '/result', {
-        headers: { Authorization: 'Bearer ' + token },
       });
       if (!res.ok) {
         const t = await res.text().catch(() => '');
@@ -422,10 +352,6 @@ export default function RemoverElementosPage() {
     if (files.length === 0 || processing) return;
     if (validation.length > 0) {
       setError(validation[0]);
-      return;
-    }
-    if (!token) {
-      setError('Pareie o motor primeiro (cole o codigo de instalacao).');
       return;
     }
     if (server.state !== 'online' || !server.ready) {
@@ -504,8 +430,7 @@ export default function RemoverElementosPage() {
   const doneJobs = jobs.filter((j) => j.state === 'done');
   const hasResults = doneJobs.length > 0;
 
-  const motorOnline =
-    server.state === 'online' && server.ready && Boolean(token);
+  const motorOnline = server.state === 'online' && server.ready;
 
   return (
     <ToolShell
@@ -513,7 +438,7 @@ export default function RemoverElementosPage() {
       description="Smart Mode local: PaddleOCR detecta legendas hardcoded e o motor de inpainting limpa o video frame-a-frame. 100% offline, sem custo de API. Apenas admin."
     >
       <div className="flex flex-col gap-6">
-        {/* === BANNER UNICO (motor + pareamento) — mesmo design do downloader === */}
+        {/* === BANNER UNICO — zero-config (sem pareamento manual) === */}
         {motorOnline ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-3 text-sm">
             <div className="flex items-center gap-2">
@@ -525,7 +450,7 @@ export default function RemoverElementosPage() {
                 Motor DarkoLab Subtitle Remover
               </span>
               <span className="mono ml-2 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
-                pareado · porta {server.state === 'online' ? server.port : port}
+                online · porta {server.state === 'online' ? server.port : port}
               </span>
               {server.state === 'online' && server.deps.lama ? (
                 <span className="mono ml-1 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
@@ -537,14 +462,6 @@ export default function RemoverElementosPage() {
                 </span>
               )}
             </div>
-            <button
-              type="button"
-              className="btn-ghost !py-1 !px-2 text-[10px] uppercase tracking-widest"
-              onClick={unpair}
-              title="Esquecer codigo pareado (nao desinstala)"
-            >
-              despairar
-            </button>
           </div>
         ) : (
           <div className="rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-4">
@@ -556,8 +473,9 @@ export default function RemoverElementosPage() {
             </div>
             <p className="mono mt-1 text-[11px] text-text-muted">
               Instala uma vez. A IA detecta a legenda hardcoded e limpa
-              frame-a-frame com PaddleOCR + OpenCV inpainting. Nada sai do
-              seu PC, sem token de API, sem limite.
+              frame-a-frame com PaddleOCR + LaMa neural inpainting. Nada
+              sai do seu PC, sem token de API, sem limite. Zero-config:
+              instalou, ja funciona.
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <a
@@ -579,37 +497,6 @@ export default function RemoverElementosPage() {
               </button>
             </div>
 
-            {/* Estado: motor instalado mas sem token salvo => formulario de pareamento */}
-            {server.state === 'online' && !token ? (
-              <div className="mt-4 rounded-[10px] border border-lime/30 bg-bg/40 px-3 py-3">
-                <div className="mono mb-2 text-[10px] uppercase tracking-widest text-lime">
-                  Motor detectado · porta {server.port}. Cole o codigo:
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <input
-                    type="text"
-                    placeholder="32 caracteres hex (ja foi copiado pelo instalador)"
-                    className="input-field flex-1 font-mono text-xs"
-                    value={pairingInput}
-                    onChange={(e) => setPairingInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handlePair();
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="btn-primary !py-1.5 text-xs"
-                    onClick={handlePair}
-                  >
-                    Parear
-                  </button>
-                </div>
-                {pairingErr ? (
-                  <div className="mt-2 text-[11px] text-red-300">{pairingErr}</div>
-                ) : null}
-              </div>
-            ) : null}
-
             <details className="mt-3">
               <summary className="cursor-pointer text-[11px] text-lime/80 hover:text-lime">
                 Como instalar (passo a passo)
@@ -623,28 +510,20 @@ export default function RemoverElementosPage() {
                   <code className="mono text-white">INSTALAR.cmd</code>
                   &nbsp;(se o Windows avisar, &quot;Mais informacoes&quot; →
                   &quot;Executar assim mesmo&quot;). Ele baixa tudo (Python +
-                  IA + ffmpeg, ~400 MB, 1a vez), instala, inicia junto com o
-                  Windows e <b>copia o codigo de pareamento</b>.
+                  IA + ffmpeg, ~600 MB, 1a vez), instala, inicia o motor e
+                  configura auto-start junto com o Windows.
                 </li>
                 <li>
-                  Volta aqui — esta caixa vai mostrar &quot;Motor detectado&quot;,
-                  cole o codigo (ja esta copiado) e clique <i>Parear</i>.
-                </li>
-                <li>
-                  Pronto. Sobe video em &quot;Videos&quot; e aplica Smart Mode.
-                  Perdeu o codigo? Duplo-clique em{' '}
-                  <code className="mono text-white">CODIGO.cmd</code> ou abre
-                  o atalho{' '}
-                  <i>&quot;DarkoLab Subtitle Remover - Codigo&quot;</i> no Menu
-                  Iniciar.
+                  Volta aqui. <b>Pronto</b> — a caixa fica verde
+                  automaticamente, sem precisar colar codigo nenhum.
                 </li>
               </ol>
               <p className="mono mt-2 text-[10px] text-text-muted">
                 Requer Windows 64-bit. O motor roda 100% no PC do usuario.
                 Download leve (~50 KB); o duplo-clique em{' '}
                 <code className="mono text-white">INSTALAR.cmd</code> baixa
-                Python + paddleocr + opencv + ffmpeg (~400 MB, uma vez,
-                ~3-5 min) automaticamente.
+                Python + paddleocr + opencv + LaMa + ffmpeg (~600 MB, uma
+                vez, ~5-8 min) automaticamente.
               </p>
             </details>
 

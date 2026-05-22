@@ -1,20 +1,15 @@
-# Mostra o codigo de pareamento (e a porta) numa janela DARKO.
+# Mostra status do motor e a porta numa janela DARKO.
+# Versao 1.2 — zero-config, sem codigo de pareamento. Esta tela
+# agora so existe pra diagnostico (ver se o motor ta rodando).
 $ErrorActionPreference = 'SilentlyContinue'
 try {
   Add-Type -Name W -Namespace Win -MemberDefinition '[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int c);'
   [Win.W]::ShowWindow([Win.W]::GetConsoleWindow(),0) | Out-Null
 } catch {}
 
-$cfgPath = Join-Path $env:LOCALAPPDATA 'DarkoSubtitleRemover\config.json'
-$tok=''; $port=8765
-if (Test-Path $cfgPath) {
-  try {
-    $c = Get-Content $cfgPath -Raw | ConvertFrom-Json
-    $tok = "$($c.token)"; $port = $c.port
-  } catch {}
-}
-# descobre a porta viva (pode ter migrado de 8765)
-foreach ($p in @($port,8765,8766,8767,8768,8769)) {
+# descobre porta viva
+$port = $null
+foreach ($p in @(8765,8766,8767,8768,8769)) {
   try {
     $r = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$p/health" -TimeoutSec 2
     if ($r.Content -match 'darko-subtitle-remover') { $port=$p; break }
@@ -28,11 +23,12 @@ $CARD=[Drawing.Color]::FromArgb(20,24,22)
 $LIME=[Drawing.Color]::FromArgb(200,255,0)
 $TXT=[Drawing.Color]::FromArgb(232,234,233)
 $MUT=[Drawing.Color]::FromArgb(138,143,139)
+$ERR=[Drawing.Color]::FromArgb(255,107,107)
 
 $f=New-Object Windows.Forms.Form
 $f.FormBorderStyle='None'; $f.StartPosition='CenterScreen'
 $f.Size=New-Object Drawing.Size(500,260); $f.BackColor=$BG; $f.TopMost=$true
-$f.Text='DarkoLab Subtitle Remover - Codigo'
+$f.Text='DarkoLab Subtitle Remover - Status'
 
 $accent=New-Object Windows.Forms.Panel
 $accent.Size=New-Object Drawing.Size(500,4); $accent.Location=New-Object Drawing.Point(0,0)
@@ -48,44 +44,36 @@ $lbl.ForeColor=$MUT; $lbl.Font=New-Object Drawing.Font('Segoe UI',9)
 $lbl.AutoSize=$false; $lbl.Size=New-Object Drawing.Size(440,20)
 $lbl.Location=New-Object Drawing.Point(32,62); $f.Controls.Add($lbl)
 
-$box=New-Object Windows.Forms.TextBox
-$box.ReadOnly=$true; $box.BorderStyle='FixedSingle'
-$box.BackColor=$CARD; $box.ForeColor=$LIME; $box.TextAlign='Center'
-$box.Font=New-Object Drawing.Font('Consolas',11,[Drawing.FontStyle]::Bold)
-$box.Size=New-Object Drawing.Size(436,30); $box.Location=New-Object Drawing.Point(32,92)
-$f.Controls.Add($box)
+$big=New-Object Windows.Forms.Label
+$big.ForeColor=$LIME; $big.Font=New-Object Drawing.Font('Segoe UI',16,[Drawing.FontStyle]::Bold)
+$big.AutoSize=$false; $big.Size=New-Object Drawing.Size(440,36)
+$big.Location=New-Object Drawing.Point(32,90); $big.TextAlign='MiddleCenter'
+$f.Controls.Add($big)
 
 $pl=New-Object Windows.Forms.Label
 $pl.ForeColor=$TXT; $pl.Font=New-Object Drawing.Font('Segoe UI',9)
-$pl.AutoSize=$true; $pl.Location=New-Object Drawing.Point(32,132); $f.Controls.Add($pl)
-
-$btnC=New-Object Windows.Forms.Button
-$btnC.Text='Copiar codigo'; $btnC.FlatStyle='Flat'
-$btnC.BackColor=$LIME; $btnC.ForeColor=$BG
-$btnC.FlatAppearance.BorderSize=0
-$btnC.Font=New-Object Drawing.Font('Segoe UI',9,[Drawing.FontStyle]::Bold)
-$btnC.Size=New-Object Drawing.Size(150,34); $btnC.Location=New-Object Drawing.Point(32,170)
-$f.Controls.Add($btnC)
+$pl.AutoSize=$false; $pl.Size=New-Object Drawing.Size(440,40)
+$pl.Location=New-Object Drawing.Point(32,135); $pl.TextAlign='MiddleCenter'
+$f.Controls.Add($pl)
 
 $btnX=New-Object Windows.Forms.Button
 $btnX.Text='Fechar'; $btnX.FlatStyle='Flat'
-$btnX.BackColor=$CARD; $btnX.ForeColor=$TXT
-$btnX.FlatAppearance.BorderColor=$MUT
-$btnX.Font=New-Object Drawing.Font('Segoe UI',9)
-$btnX.Size=New-Object Drawing.Size(110,34); $btnX.Location=New-Object Drawing.Point(358,170)
+$btnX.BackColor=$LIME; $btnX.ForeColor=$BG
+$btnX.FlatAppearance.BorderSize=0
+$btnX.Font=New-Object Drawing.Font('Segoe UI',9,[Drawing.FontStyle]::Bold)
+$btnX.Size=New-Object Drawing.Size(440,34); $btnX.Location=New-Object Drawing.Point(32,190)
 $f.Controls.Add($btnX)
 
-if ($tok) {
-  $lbl.Text='Codigo de pareamento (cole no DarkoLab):'
-  $box.Text=$tok
-  $pl.Text=("Porta: " + $port + "   (DarkoLab detecta sozinho - deixe 8765)")
-  try { [Windows.Forms.Clipboard]::SetText($tok) } catch {}
-  $btnC.Add_Click({ try { [Windows.Forms.Clipboard]::SetText($tok); $btnC.Text='Copiado!' } catch {} })
+if ($port) {
+  $lbl.Text='Status do motor'
+  $big.Text='ONLINE'
+  $big.ForeColor=$LIME
+  $pl.Text="Porta: $port`nAbra o DarkoLab > Remover Legenda. Conecta sozinho."
 } else {
-  $lbl.Text='Motor ainda nao instalado/iniciado.'
-  $box.Text='--- rode o INSTALAR.cmd primeiro ---'
-  $pl.Text=''
-  $btnC.Enabled=$false
+  $lbl.Text='Status do motor'
+  $big.Text='OFFLINE'
+  $big.ForeColor=$ERR
+  $pl.Text='O motor nao esta rodando. Reabra pelo atalho do Menu Iniciar.'
 }
 $btnX.Add_Click({ $f.Close() })
 
