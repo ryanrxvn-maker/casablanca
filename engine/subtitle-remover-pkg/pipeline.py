@@ -67,12 +67,29 @@ def _get_ocr():
 
 
 def _get_lama():
-    """Carrega LaMa sob demanda. Falha graciosamente se torch nao instalado."""
+    """
+    Carrega LaMa sob demanda no melhor device disponivel.
+      - CUDA: SimpleLama(device=cuda) — GPU NVIDIA, 10-50x faster.
+      - CPU:  SimpleLama() — fallback. Otimizado com torch threads
+              + half-res inpaint + frame caching.
+
+    DirectML (AMD/Intel iGPU): testado e NAO funciona com simple-lama
+    (TorchScript model nao suporta .to(dml_device); LaMa.onnx via
+    onnxruntime-directml falha em ops MatMul especificos do modelo).
+    Pra acelerar em Vega/iGPU teria que converter LaMa pra um modelo
+    DML-compativel (semanas de trabalho). Pra Vega, CPU otimizado +
+    cache eh o caminho pratico.
+    """
     global _lama_engine
     if _lama_engine is None:
         try:
             from simple_lama_inpainting import SimpleLama
-            _lama_engine = SimpleLama()
+            import torch
+            dev_name = _detect_torch_device()
+            if dev_name == "cuda":
+                _lama_engine = SimpleLama(device=torch.device("cuda"))
+            else:
+                _lama_engine = SimpleLama(device=torch.device("cpu"))
         except Exception as e:
             raise RuntimeError(
                 f"LaMa indisponivel: {e}. Use mode='telea' ou instale "
@@ -295,10 +312,11 @@ def _setup_perf():
 
 
 # Limite maximo da dimensao maior do crop antes de mandar pra LaMa.
-# 512 = sweet spot entre velocidade e qualidade. LaMa em 512 e ~4x mais
-# rapido que em 1080 e o resultado upsamplado fica imperceptivelmente
-# diferente em regiao de legenda (que tem detalhes finos baixos).
-_LAMA_MAX_DIM = 512
+# Adaptive: 384 em CPU (1.7x mais rapido), 512 em GPU (qualidade
+# levemente superior). Em legenda no rodape (detalhes finos baixos),
+# 384 fica visualmente identico a 512.
+def _lama_max_dim() -> int:
+    return 512 if _detect_torch_device() == "cuda" else 384
 
 
 def _inpaint_lama(frame: np.ndarray, mask: np.ndarray, bbox: Optional[Tuple[int,int,int,int]] = None) -> np.ndarray:
@@ -319,8 +337,9 @@ def _inpaint_lama(frame: np.ndarray, mask: np.ndarray, bbox: Optional[Tuple[int,
 
         # downscale pra acelerar (LaMa em 512 e ~4x mais rapido que em 1080)
         scale = 1.0
-        if max(ch, cw) > _LAMA_MAX_DIM:
-            scale = _LAMA_MAX_DIM / float(max(ch, cw))
+        max_dim = _lama_max_dim()
+        if max(ch, cw) > max_dim:
+            scale = max_dim / float(max(ch, cw))
             new_w = max(8, int(round(cw * scale)))
             new_h = max(8, int(round(ch * scale)))
             crop_frame_s = cv2.resize(crop_frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
@@ -447,8 +466,9 @@ def process_video(
         cache_hits = 0
         # threshold em [0..255] da diferenca absoluta media; pequeno o
         # suficiente pra nao deixar artefato visivel, grande o suficiente
-        # pra captar continuidade temporal.
-        CROP_DIFF_THRESHOLD = 3.5
+        # pra captar continuidade temporal. 5.0 = mais agressivo (mais
+        # cache hits sem artefato perceptivel em videos VSL/TikTok tipicos).
+        CROP_DIFF_THRESHOLD = 5.0
 
         cap = cv2.VideoCapture(in_path)
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
@@ -563,7 +583,13 @@ def process_video(
 # ---------------------------------------------------------------------------
 
 def _detect_torch_device() -> str:
-    """Retorna 'cuda' se PyTorch + GPU disponivel, senao 'cpu'."""
+    """
+    Retorna o device disponivel:
+      'cuda' -> GPU NVIDIA (10-50x faster vs CPU)
+      'cpu'  -> fallback. Otimizado com threads + half-res + cache.
+    DirectML nao eh usado: simple-lama (TorchScript) nao suporta DML,
+    e LaMa.onnx via onnxruntime-directml falha em ops especificos.
+    """
     if not _TORCH_AVAILABLE:
         return "cpu"
     try:
