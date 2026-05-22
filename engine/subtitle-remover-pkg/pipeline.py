@@ -27,6 +27,18 @@ import math
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
 
+# IMPORTANTE: torch DEVE ser importado ANTES de paddlepaddle no Windows.
+# Os dois embarcam runtimes nativos conflitantes (MKL/OpenMP/shm.dll) e
+# se o paddle carregar primeiro, o torch falha com WinError 127 ao
+# tentar carregar shm.dll. Importar torch primeiro corrige.
+# Tolerante a falha: se torch nao estiver instalado, o modo Telea ainda
+# funciona (mas Smart Mode = LaMa exige torch).
+try:
+    import torch  # noqa: F401
+    _TORCH_AVAILABLE = True
+except Exception:
+    _TORCH_AVAILABLE = False
+
 import cv2
 import numpy as np
 
@@ -176,8 +188,8 @@ def _persistent_mask(
     frames: List[Tuple[int, np.ndarray]],
     W: int,
     H: int,
-    min_persistence: float = 0.4,
-    bottom_bias: float = 1.4,
+    min_persistence: float = 0.30,
+    bottom_bias: float = 1.6,
 ) -> Optional[np.ndarray]:
     """
     Heatmap de onde texto aparece em N frames amostrados → mascara binaria
@@ -186,6 +198,11 @@ def _persistent_mask(
     bottom_bias > 1 favorece deteccoes na metade inferior (legendas).
     Tudo na metade superior tem que ser MAIS consistente pra entrar (evita
     falso positivo em titulos / placas naturais).
+
+    Calibrado pra ser AGRESSIVO: persistencia minima de 30% pra pegar
+    legendas que mudam de palavra ao longo do video (cada palavra so
+    aparece num subset dos frames). Dilation maior cobre o glow/outline
+    + sombra residual.
     """
     if not frames:
         return None
@@ -211,9 +228,10 @@ def _persistent_mask(
     if mask.max() == 0:
         return None
 
-    # dilata generosamente pra cobrir glow / outline ao redor das letras
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 9))
-    mask = cv2.dilate(mask, kernel, iterations=2)
+    # Dilation MAIS agressiva — cobre glow/outline/sombra residual.
+    # Kernel maior + iteracoes a mais.
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 15))
+    mask = cv2.dilate(mask, kernel, iterations=3)
 
     # CC filter: descarta componentes muito pequenas (<0.05% da area)
     n_cc, labels, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
@@ -221,7 +239,24 @@ def _persistent_mask(
     cleaned = np.zeros_like(mask)
     for i in range(1, n_cc):
         if stats[i, cv2.CC_STAT_AREA] >= min_area:
-            cleaned[labels == i] = 255
+            # Se a CC eh do tipo "faixa de legenda" (largura >> altura, no
+            # rodape), unifica em uma faixa retangular pra cobrir bordas
+            # que o OCR pode ter perdido entre palavras.
+            x = stats[i, cv2.CC_STAT_LEFT]
+            y = stats[i, cv2.CC_STAT_TOP]
+            w = stats[i, cv2.CC_STAT_WIDTH]
+            h = stats[i, cv2.CC_STAT_HEIGHT]
+            if y > H * 0.55 and w > W * 0.2 and h < H * 0.25:
+                # legenda no rodape: estende horizontalmente um pouco
+                pad_x = int(W * 0.02)
+                pad_y = int(H * 0.005)
+                x0 = max(0, x - pad_x)
+                y0 = max(0, y - pad_y)
+                x1 = min(W, x + w + pad_x)
+                y1 = min(H, y + h + pad_y)
+                cleaned[y0:y1, x0:x1] = 255
+            else:
+                cleaned[labels == i] = 255
 
     return cleaned if cleaned.max() > 0 else None
 
@@ -230,15 +265,60 @@ def _inpaint_telea(frame: np.ndarray, mask: np.ndarray) -> np.ndarray:
     return cv2.inpaint(frame, mask, 3, cv2.INPAINT_TELEA)
 
 
-def _inpaint_lama(frame: np.ndarray, mask: np.ndarray) -> np.ndarray:
-    """LaMa rounding-safe: resize pra multiplos de 8 e volta."""
+def _mask_bbox_with_padding(mask: np.ndarray, pad: int = 64) -> Optional[Tuple[int, int, int, int]]:
+    """Pega bbox da mascara + padding pra dar contexto ao modelo neural."""
+    ys, xs = np.where(mask > 0)
+    if len(ys) == 0:
+        return None
+    H, W = mask.shape[:2]
+    y0 = max(0, int(ys.min()) - pad)
+    y1 = min(H, int(ys.max()) + pad + 1)
+    x0 = max(0, int(xs.min()) - pad)
+    x1 = min(W, int(xs.max()) + pad + 1)
+    return (y0, y1, x0, x1)
+
+
+def _inpaint_lama(frame: np.ndarray, mask: np.ndarray, bbox: Optional[Tuple[int,int,int,int]] = None) -> np.ndarray:
+    """
+    LaMa neural inpaint. Pra acelerar drasticamente em videos onde a
+    legenda fica numa regiao pequena (e.g. rodape), processa SO o crop
+    com padding pra dar contexto, e depois cola de volta no frame.
+
+    Em 1080p com legenda no rodape, processar so o crop reduz o tempo
+    em ~5x sem perda de qualidade — LaMa precisa de contexto local, nao
+    do frame inteiro.
+    """
     from PIL import Image
     lama = _get_lama()
+
+    if bbox is not None:
+        y0, y1, x0, x1 = bbox
+        crop_frame = frame[y0:y1, x0:x1]
+        crop_mask = mask[y0:y1, x0:x1]
+        ch, cw = crop_frame.shape[:2]
+        img_rgb = cv2.cvtColor(crop_frame, cv2.COLOR_BGR2RGB)
+        pil_img = Image.fromarray(img_rgb)
+        pil_mask = Image.fromarray(crop_mask)
+        out = lama(pil_img, pil_mask)
+        out_np = np.array(out)
+        # simple-lama padda internamente pra multiplo de 8; recorta o
+        # output de volta pro tamanho original do crop.
+        if out_np.shape[:2] != (ch, cw):
+            out_np = out_np[:ch, :cw]
+        out_bgr = cv2.cvtColor(out_np, cv2.COLOR_RGB2BGR)
+        # cola de volta SO na regiao mascarada (nao sobrescreve fora dela)
+        result = frame.copy()
+        result[y0:y1, x0:x1] = out_bgr
+        return result
+
+    h, w = frame.shape[:2]
     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     pil_img = Image.fromarray(img_rgb)
     pil_mask = Image.fromarray(mask)
     out = lama(pil_img, pil_mask)
     out_np = np.array(out)
+    if out_np.shape[:2] != (h, w):
+        out_np = out_np[:h, :w]
     return cv2.cvtColor(out_np, cv2.COLOR_RGB2BGR)
 
 
@@ -252,9 +332,9 @@ ProgressCb = Callable[[float, str], None]
 def process_video(
     in_path: str,
     out_path: str,
-    mode: str = "telea",        # 'telea' | 'lama'
-    sample_count: int = 16,
-    min_persistence: float = 0.4,
+    mode: str = "lama",          # 'lama' (default Smart) | 'telea' (fallback)
+    sample_count: int = 20,
+    min_persistence: float = 0.30,
     on_progress: Optional[ProgressCb] = None,
 ) -> dict:
     """
@@ -297,7 +377,11 @@ def process_video(
             "assume regiao consistente)."
         )
 
-    emit(0.18, "Stable subtitle mask built. Starting inpaint pass...")
+    # bbox da mascara pra acelerar LaMa (processa so a regiao + padding)
+    bbox = _mask_bbox_with_padding(mask, pad=64) if mode == "lama" else None
+
+    device = _detect_torch_device()
+    emit(0.18, f"Mask ready. Starting {mode.upper()} inpaint pass ({device})...")
 
     # ---- Inpaint pass ----------------------------------------------------
     tmp_dir = tempfile.mkdtemp(prefix="darko_subrm_")
@@ -319,14 +403,14 @@ def process_video(
                 if not ok or frame is None:
                     break
                 if mode == "lama":
-                    clean = _inpaint_lama(frame, mask)
+                    clean = _inpaint_lama(frame, mask, bbox=bbox)
                 else:
                     clean = _inpaint_telea(frame, mask)
                 out_writer.write(clean)
                 idx += 1
                 if total and (idx % max(1, total // 50) == 0):
                     p = 0.18 + 0.72 * (idx / max(1, total))
-                    emit(p, f"Inpainting frame {idx}/{total}")
+                    emit(p, f"Inpainting frame {idx}/{total} [{device}]")
         finally:
             cap.release()
             out_writer.release()
@@ -392,6 +476,19 @@ def process_video(
 # Self-check
 # ---------------------------------------------------------------------------
 
+def _detect_torch_device() -> str:
+    """Retorna 'cuda' se PyTorch + GPU disponivel, senao 'cpu'."""
+    if not _TORCH_AVAILABLE:
+        return "cpu"
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return "cuda"
+    except Exception:
+        pass
+    return "cpu"
+
+
 def check_runtime() -> dict:
     """Health-check usado pelo /health do server."""
     deps = {
@@ -400,15 +497,18 @@ def check_runtime() -> dict:
         "paddleocr": False,
         "lama": False,
         "ffmpeg": False,
+        "device": "cpu",
     }
-    try:
-        import paddleocr  # noqa: F401
-        deps["paddleocr"] = True
-    except Exception:
-        pass
+    # ORDEM CRITICA no Windows: lama (torch) ANTES de paddleocr — invertendo
+    # da pau de DLL (WinError 127).
     try:
         from simple_lama_inpainting import SimpleLama  # noqa: F401
         deps["lama"] = True
+    except Exception:
+        pass
+    try:
+        import paddleocr  # noqa: F401
+        deps["paddleocr"] = True
     except Exception:
         pass
     try:
@@ -418,4 +518,9 @@ def check_runtime() -> dict:
         deps["ffmpeg"] = r.returncode == 0
     except Exception:
         pass
-    return {"deps": deps, "ready": all([deps["opencv"], deps["paddleocr"], deps["ffmpeg"]])}
+    deps["device"] = _detect_torch_device()
+    # ready = todas as deps essenciais OK. LaMa eh nucleo agora (Smart Mode).
+    return {
+        "deps": deps,
+        "ready": all([deps["opencv"], deps["paddleocr"], deps["ffmpeg"], deps["lama"]]),
+    }

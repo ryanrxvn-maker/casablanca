@@ -33,12 +33,22 @@ const PORT_KEY = 'darko:sub-remover:port';
 const MAX_BATCH = 5;
 const MAX_FILE_BYTES = 500 * 1024 * 1024; // 500 MB
 
+type ServerDeps = {
+  opencv: boolean;
+  numpy: boolean;
+  paddleocr: boolean;
+  lama: boolean;
+  ffmpeg: boolean;
+  /** 'cuda' se torch detectou GPU, senao 'cpu'. */
+  device: 'cuda' | 'cpu';
+};
+
 type ServerStatus =
   | { state: 'checking' }
   | {
       state: 'online';
       ready: boolean;
-      deps: Record<string, boolean>;
+      deps: ServerDeps;
       port: number;
     }
   | { state: 'offline'; reason: string };
@@ -178,7 +188,7 @@ export default function RemoverElementosPage() {
         const json = (await res.json()) as {
           ok: boolean;
           ready: boolean;
-          deps: Record<string, boolean>;
+          deps: ServerDeps;
           port: number;
           service: string;
         };
@@ -240,11 +250,10 @@ export default function RemoverElementosPage() {
   }
 
   // ---------- Tool state ----------
+  // Smart Mode = LaMa neural inpainting (mesma qualidade do vmake.ai).
+  // Telea (OpenCV) so vai como fallback automatico se LaMa falhar.
+  const mode: 'lama' = 'lama';
   const [files, setFiles] = useToolState<File[]>('remover:files', []);
-  const [mode, setMode] = useToolState<'telea' | 'lama'>(
-    'remover:mode',
-    'telea',
-  );
   const [jobs, setJobs] = useToolState<Job[]>('remover:jobs', []);
   const [processing, setProcessing] = useToolState<boolean>(
     'remover:processing',
@@ -520,9 +529,13 @@ export default function RemoverElementosPage() {
               </span>
               {server.state === 'online' && server.deps.lama ? (
                 <span className="mono ml-1 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
-                  LaMa ✓
+                  LaMa ✓ {server.deps.device === 'cuda' ? 'GPU' : 'CPU'}
                 </span>
-              ) : null}
+              ) : (
+                <span className="mono ml-1 rounded-full bg-yellow-500/15 px-2 py-0.5 text-[10px] uppercase text-yellow-300">
+                  LaMa ✗ atualize o motor
+                </span>
+              )}
             </div>
             <button
               type="button"
@@ -663,70 +676,40 @@ export default function RemoverElementosPage() {
           ) : null}
         </div>
 
-        {/* Modo de inpaint */}
-        <div>
-          <label className="label-field">Qualidade do inpainting</label>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {[
-              {
-                id: 'telea' as const,
-                label: 'Rapido (Telea)',
-                desc: 'OpenCV Telea — CPU, ~1x realtime. Otimo pra fundos uniformes.',
-                badge: 'CPU',
-              },
-              {
-                id: 'lama' as const,
-                label: 'Qualidade (LaMa)',
-                desc: 'Modelo neural single-frame — mais lento, melhor em fundos complexos.',
-                badge:
-                  server.state === 'online' && server.deps.lama
-                    ? 'AI'
-                    : 'AI ✗',
-                disabled:
-                  server.state === 'online' && !server.deps.lama,
-              },
-            ].map((opt) => {
-              const active = mode === opt.id;
-              const dis = (opt as { disabled?: boolean }).disabled;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => !dis && setMode(opt.id)}
-                  disabled={processing || dis}
+        {/* Smart Mode info — sem seletor, motor decide tudo */}
+        <div className="rounded-[12px] border border-lime/30 bg-lime/5 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold uppercase tracking-widest text-lime">
+                Smart Mode (LaMa neural)
+              </span>
+              <span className="mono shrink-0 rounded-full border border-lime/60 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-lime">
+                AI
+              </span>
+              {server.state === 'online' ? (
+                <span
                   className={
-                    'relative flex flex-col items-start gap-1 rounded-[12px] border px-3 py-3 text-left transition-all duration-200 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40 ' +
-                    (active
-                      ? 'border-lime bg-lime/10 text-lime shadow-[0_0_18px_-4px_rgba(200,255,0,0.5)]'
-                      : 'border-line bg-bg text-text-muted hover:border-lime/50 hover:text-white')
+                    'mono shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-widest ' +
+                    (server.deps.device === 'cuda'
+                      ? 'border-lime/60 text-lime'
+                      : 'border-line text-text-muted')
                   }
                 >
-                  <div className="flex w-full items-center justify-between gap-1">
-                    <span className="text-sm font-semibold uppercase tracking-widest">
-                      {opt.label}
-                    </span>
-                    <span
-                      className={
-                        'mono shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] uppercase tracking-widest ' +
-                        (active
-                          ? 'border-lime/60 text-lime'
-                          : 'border-line text-text-dim')
-                      }
-                    >
-                      {opt.badge}
-                    </span>
-                  </div>
-                  <span className="text-[11px] leading-snug text-text-muted">
-                    {opt.desc}
-                  </span>
-                </button>
-              );
-            })}
+                  {server.deps.device === 'cuda' ? 'GPU CUDA' : 'CPU'}
+                </span>
+              ) : null}
+            </div>
           </div>
-          <p className="mt-2 text-[11px] text-text-muted">
-            Smart Mode automatico: o motor amostra 16 frames, detecta onde
-            a legenda aparece de forma persistente (≥40% das amostras),
-            unifica tudo em uma mascara dilatada e aplica o inpainting.
+          <p className="mt-2 text-[11px] leading-snug text-text-muted">
+            Mesmo motor neural que o vmake.ai usa. PaddleOCR amostra 20
+            frames, detecta onde a legenda persiste, e o LaMa reconstrói
+            o fundo frame-a-frame. Sem blur, sem mancha.
+            {server.state === 'online' && server.deps.device === 'cpu' ? (
+              <span className="ml-1 text-yellow-300">
+                Sem GPU: ~2-3s/frame em 1080p. Pra acelerar, instale uma
+                NVIDIA com CUDA.
+              </span>
+            ) : null}
           </p>
         </div>
 
