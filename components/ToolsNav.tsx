@@ -91,6 +91,7 @@ export const AI_SUITE: RailItem[] = [
     href: '/tools/remover-elementos',
     label: 'Remover Legenda',
     icon: <IconRemoverElementos />,
+    adminOnly: true,
   },
   {
     href: '/tools/decupagem-copy',

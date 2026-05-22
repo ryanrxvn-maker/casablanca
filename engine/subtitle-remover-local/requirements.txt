@@ -1,0 +1,33 @@
+# Subtitle Remover Local — runtime puro Python, 100% offline, sem custo.
+# Stack equivalente ao motor do vmake.ai (PaddleOCR detection + inpainting).
+#
+# Instalacao (uma vez):
+#   cd engine/subtitle-remover-local
+#   python -m venv .venv
+#   .venv\Scripts\activate           (Windows)
+#   pip install -r requirements.txt
+#
+# Inicializacao (sempre que for usar a ferramenta no DarkoLab):
+#   start.bat                       (Windows; chama python server.py)
+#
+# Pesos do PaddleOCR baixam automaticamente no primeiro uso (~10MB).
+# LaMa (opcional, qualidade superior) baixa ~200MB no primeiro --mode lama.
+
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.20
+
+# Imagem / video
+opencv-python==4.10.0.84
+numpy==1.26.4
+Pillow==10.4.0
+
+# OCR (deteccao de hard-sub) — PaddleOCR roda em CPU sem dor de cabeca.
+# paddlepaddle 2.6.2 = ultima wheel da serie 2.6 publicada pra Python 3.11.
+paddlepaddle==2.6.2
+paddleocr==2.8.1
+
+# Inpainting de alta qualidade (modo lama, opcional) — pesa ~200MB
+# Comente as duas linhas abaixo se voce so quer o modo rapido (telea).
+torch==2.4.1
+simple-lama-inpainting==0.1.2

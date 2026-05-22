@@ -1,0 +1,14 @@
+# Virtual environment (pesados — paddlepaddle + opencv etc)
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Caches do PaddleOCR / matplotlib / etc
+.paddleocr/
+.cache/
+
+# Outputs temporarios de teste
+test_*.mp4
+*.tmp.mp4

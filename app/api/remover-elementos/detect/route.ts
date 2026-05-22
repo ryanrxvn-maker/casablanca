@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getUserKey } from '@/lib/user-keys';
+import { requireAdmin } from '@/app/api/admin/_helpers';
 
 /**
  * POST /api/remover-elementos/detect
+ *
+ * DEPRECATED — mantido apenas pra compat. A nova UI usa o backend local
+ * Python (engine/subtitle-remover-local) que faz tudo offline e sem custo.
  *
  * Recebe um frame JPEG (base64) e retorna bounding boxes das regioes
  * de legenda / watermark detectadas via Claude 3.5 Haiku Vision.
@@ -75,6 +79,11 @@ type AnthropicResponse = {
 
 export async function POST(req: Request) {
   try {
+    // Ferramenta de remocao de legenda eh admin-only desde a migracao
+    // pro motor local. Caller nao-admin nao tem acesso.
+    const guard = await requireAdmin();
+    if (!guard.ok) return guard.response;
+
     const keyResult = await getUserKey('anthropic');
     if ('response' in keyResult) return keyResult.response;
     const apiKey = keyResult.key;
