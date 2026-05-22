@@ -103,11 +103,17 @@ try {
   # ter atualizado server.py/pipeline.py mesmo se motor ja instalado)
   Copy-Item (Join-Path $src 'server.py') $dst -Force
   Copy-Item (Join-Path $src 'pipeline.py') $dst -Force
+  Copy-Item (Join-Path $src 'sttn_engine.py') $dst -Force -ErrorAction SilentlyContinue
   Copy-Item (Join-Path $src 'DarkoSubtitleRemover.cmd') $dst -Force
   Copy-Item (Join-Path $src 'Desinstalar.ps1') $dst -Force
   Copy-Item (Join-Path $src 'Codigo.ps1') $dst -Force -ErrorAction SilentlyContinue
   Copy-Item (Join-Path $src 'CODIGO.cmd') $dst -Force -ErrorAction SilentlyContinue
   Copy-Item (Join-Path $src 'LEIA-ME.txt') $dst -Force -ErrorAction SilentlyContinue
+  # STTN module + modelo treinado (~66 MB, qualidade Vmake)
+  if (Test-Path (Join-Path $src 'sttn')) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $dst 'sttn') | Out-Null
+    Copy-Item (Join-Path $src 'sttn\*') (Join-Path $dst 'sttn') -Recurse -Force -ErrorAction SilentlyContinue
+  }
 
   $tmp = Join-Path $env:TEMP ('darko-subrm-' + [Guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Force -Path $tmp | Out-Null

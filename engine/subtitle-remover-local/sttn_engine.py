@@ -1,0 +1,213 @@
+"""
+STTN (Spatial-Temporal Transformer Network) engine pra remocao temporal
+de legenda em video. Eh o motor "Smart" do vmake.ai por baixo dos panos.
+
+Diferenca vs LaMa single-frame:
+  - LaMa olha 1 frame de cada vez. Sem contexto temporal => fica borrado
+    em regioes com textura humana (pele, cabelo).
+  - STTN olha 15 frames vizinhos. Usa pixels disponíveis em frames sem
+    legenda pra reconstruir o frame atual. Textura real, sem borrao.
+
+Modelo: arquitetura InpaintGenerator (auto_sttn.InpaintGenerator).
+Peso treinado: ~80MB, vem do release oficial do video-subtitle-remover.
+
+Codigo de arquitetura: adaptado de YaoFANGUK/video-subtitle-remover
+(Apache 2.0).
+"""
+from __future__ import annotations
+
+import os
+import sys
+import cv2
+import numpy as np
+import torch
+from torchvision import transforms
+from typing import List, Optional
+
+# Garante que o pacote sttn local seja importavel
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+from sttn.auto_sttn import InpaintGenerator
+from sttn.sttn_utils import Stack, ToTorchFormatTensor
+
+
+# Resolution do modelo (treinado em 640x120 - faixa de legenda no rodape)
+STTN_MODEL_WIDTH = 640
+STTN_MODEL_HEIGHT = 120
+
+# Quantos frames vizinhos olhar pra cada frame target (default 5 = janela de 11)
+DEFAULT_NEIGHBOR_STRIDE = 5
+# Quantos frames de referencia globais amostrar
+DEFAULT_REFERENCE_LENGTH = 10
+
+
+_to_tensors = transforms.Compose([
+    Stack(),
+    ToTorchFormatTensor(),
+])
+
+
+class STTNInpaint:
+    """
+    Wrapper de inferencia do STTN, pronto pra ser plugado num pipeline
+    de video. Processa um chunk de frames de uma vez (memoria intensiva).
+    """
+
+    def __init__(
+        self,
+        model_path: str,
+        device: Optional[torch.device] = None,
+        neighbor_stride: int = DEFAULT_NEIGHBOR_STRIDE,
+        reference_length: int = DEFAULT_REFERENCE_LENGTH,
+    ):
+        if device is None:
+            if torch.cuda.is_available():
+                device = torch.device("cuda")
+            else:
+                device = torch.device("cpu")
+        self.device = device
+        self.neighbor_stride = neighbor_stride
+        self.ref_length = reference_length
+
+        # Cria a arquitetura e carrega os pesos
+        self.model = InpaintGenerator().to(device)
+        ckpt = torch.load(model_path, map_location="cpu")
+        # checkpoint do video-subtitle-remover usa key 'netG'
+        if isinstance(ckpt, dict) and "netG" in ckpt:
+            self.model.load_state_dict(ckpt["netG"])
+        else:
+            self.model.load_state_dict(ckpt)
+        self.model.eval()
+
+    def _get_ref_index(self, neighbor_ids: List[int], length: int) -> List[int]:
+        """Amostra frames de referencia globais (1 a cada `ref_length`),
+        excluindo os que ja sao vizinhos."""
+        return [i for i in range(0, length, self.ref_length) if i not in neighbor_ids]
+
+    def __call__(
+        self,
+        frames: List[np.ndarray],
+        mask: np.ndarray,
+    ) -> List[np.ndarray]:
+        """
+        Args:
+            frames: lista de N frames BGR uint8 (H, W, 3).
+            mask: uint8 (H, W) ou (H, W, 1). Pixels >0 sao a regiao a
+                  inpaintar.
+        Returns:
+            Lista de N frames BGR uint8 com a regiao da mascara reconstruida.
+        """
+        if not frames:
+            return []
+
+        H_ori, W_ori = frames[0].shape[:2]
+        # Garante mask binaria (0/1), 2D
+        if mask.ndim == 3:
+            mask = mask[:, :, 0]
+        _, mask_bin = cv2.threshold(mask, 127, 1, cv2.THRESH_BINARY)
+        mask_3d = mask_bin[:, :, None]  # (H, W, 1)
+
+        # Determina a faixa vertical a processar (rodape onde mask >0)
+        ys = np.where(mask_bin > 0)[0]
+        if len(ys) == 0:
+            return [f.copy() for f in frames]
+        y_min, y_max = int(ys.min()), int(ys.max())
+        # Expande a faixa pra altura proporcional do modelo (640x120 = 16:3)
+        strip_h_target = max(60, int(W_ori * 3 / 16))
+        strip_h_actual = y_max - y_min + 1
+        if strip_h_actual < strip_h_target:
+            extra = strip_h_target - strip_h_actual
+            y_min = max(0, y_min - extra // 2)
+            y_max = min(H_ori, y_max + extra - extra // 2)
+
+        # Crop vertical da regiao da legenda em todos os frames
+        strips = [f[y_min:y_max + 1, :, :] for f in frames]
+        strip_mask = mask_3d[y_min:y_max + 1, :, :]
+
+        # Resize de cada strip pro tamanho do modelo
+        scaled = [
+            cv2.resize(s, (STTN_MODEL_WIDTH, STTN_MODEL_HEIGHT))
+            for s in strips
+        ]
+
+        # Inference temporal
+        comp_frames = self._inpaint_chunk(scaled)
+
+        # Resize de volta pra resolucao original do strip, e cola no frame
+        # IMPORTANTE: usa strip.shape direto (nao recalcula y_max-y_min) pra
+        # garantir consistencia se o strip foi indexado por slicing.
+        h_strip = strips[0].shape[0]
+        result = []
+        for i, frame in enumerate(frames):
+            out = frame.copy()
+            comp_resized = cv2.resize(comp_frames[i], (W_ori, h_strip))
+            # comp vem em RGB; converte pra BGR
+            comp_bgr = cv2.cvtColor(comp_resized.astype(np.uint8), cv2.COLOR_RGB2BGR)
+            # Garante shape alinhado
+            orig_strip = frame[y_min:y_min + h_strip, :, :]
+            strip_mask_3 = strip_mask[:h_strip, :, :].astype(np.float32)
+            blended = (
+                strip_mask_3 * comp_bgr.astype(np.float32)
+                + (1.0 - strip_mask_3) * orig_strip.astype(np.float32)
+            ).astype(np.uint8)
+            out[y_min:y_min + h_strip, :, :] = blended
+            result.append(out)
+        return result
+
+    @torch.inference_mode()
+    def _inpaint_chunk(self, scaled_frames: List[np.ndarray]) -> List[np.ndarray]:
+        """Inference temporal do STTN num chunk de frames ja escalados
+        pra (STTN_MODEL_HEIGHT, STTN_MODEL_WIDTH)."""
+        frame_length = len(scaled_frames)
+        # Tensor (1, T, 3, H, W) normalizado [-1, 1]
+        feats = _to_tensors(scaled_frames).unsqueeze(0) * 2 - 1
+        feats = feats.view(frame_length, 3, STTN_MODEL_HEIGHT, STTN_MODEL_WIDTH)
+        feats = feats.to(self.device)
+
+        # Encoder: extrai features (uma vez pra todos os frames)
+        feats_enc = self.model.encoder(feats)
+        _, c, fh, fw = feats_enc.size()
+        feats_enc = feats_enc.view(1, frame_length, c, fh, fw)
+
+        comp = [None] * frame_length
+
+        for f in range(0, frame_length, self.neighbor_stride):
+            # Vizinhos do frame target
+            neighbor_ids = list(range(
+                max(0, f - self.neighbor_stride),
+                min(frame_length, f + self.neighbor_stride + 1)
+            ))
+            ref_ids = self._get_ref_index(neighbor_ids, frame_length)
+
+            # Inference com transformer temporal
+            pred_feat = self.model.infer(feats_enc[0, neighbor_ids + ref_ids, :, :, :])
+            pred_img = torch.tanh(self.model.decoder(pred_feat[:len(neighbor_ids), :, :, :]))
+            pred_img = (pred_img + 1) / 2
+            # (N, 3, H, W) -> (N, H, W, 3) numpy [0, 255]
+            pred_np = pred_img.cpu().permute(0, 2, 3, 1).numpy() * 255
+
+            for i, idx in enumerate(neighbor_ids):
+                img = pred_np[i].astype(np.uint8)
+                if comp[idx] is None:
+                    comp[idx] = img
+                else:
+                    # Mistura com inference anterior (suaviza transicoes)
+                    comp[idx] = (comp[idx].astype(np.float32) * 0.5
+                                 + img.astype(np.float32) * 0.5).astype(np.uint8)
+
+        return comp
+
+
+def find_sttn_model() -> Optional[str]:
+    """Procura o checkpoint do STTN nos lugares conhecidos."""
+    candidates = [
+        os.path.join(_HERE, "sttn", "infer_model.pth"),
+        os.path.join(_HERE, "models", "sttn-auto", "infer_model.pth"),
+        os.path.join(os.path.expanduser("~"), ".cache", "darko", "sttn", "infer_model.pth"),
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            return p
+    return None

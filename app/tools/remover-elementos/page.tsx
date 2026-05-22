@@ -184,9 +184,9 @@ export default function RemoverElementosPage() {
   }, [adminCheck, checkServer]);
 
   // ---------- Tool state ----------
-  // Smart Mode = LaMa neural inpainting (mesma qualidade do vmake.ai).
-  // Telea (OpenCV) so vai como fallback automatico se LaMa falhar.
-  const mode: 'lama' = 'lama';
+  // Smart Mode = auto: motor escolhe STTN (temporal, qualidade Vmake) se
+  // o modelo .pth estiver presente, senao cai pra LaMa single-frame.
+  const mode: 'auto' = 'auto';
   const [files, setFiles] = useToolState<File[]>('remover:files', []);
   const [jobs, setJobs] = useToolState<Job[]>('remover:jobs', []);
   const [processing, setProcessing] = useToolState<boolean>(

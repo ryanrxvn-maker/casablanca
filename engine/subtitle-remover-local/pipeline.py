@@ -49,6 +49,24 @@ import numpy as np
 
 _ocr_engine = None  # PaddleOCR
 _lama_engine = None  # SimpleLama
+_sttn_engine = None  # STTNInpaint
+
+
+def _get_sttn():
+    """Carrega STTN sob demanda. Retorna None se modelo nao baixado."""
+    global _sttn_engine
+    if _sttn_engine is None:
+        try:
+            from sttn_engine import STTNInpaint, find_sttn_model
+            model_path = find_sttn_model()
+            if not model_path:
+                return None
+            import torch
+            dev = torch.device("cuda" if _TORCH_AVAILABLE and torch.cuda.is_available() else "cpu")
+            _sttn_engine = STTNInpaint(model_path=model_path, device=dev)
+        except Exception:
+            return None
+    return _sttn_engine
 
 
 def _get_ocr():
@@ -443,10 +461,50 @@ def _inpaint_lama(
 ProgressCb = Callable[[float, str], None]
 
 
+def _remux(silent_video: str, original_with_audio: str, out_path: str) -> None:
+    """Junta video silencioso + audio do original num MP4 H.264."""
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", silent_video,
+        "-i", original_with_audio,
+        "-map", "0:v:0",
+        "-map", "1:a:0?",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "20",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-movflags", "+faststart",
+        "-shortest",
+        out_path,
+    ]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0:
+        # fallback: copy audio sem reencode
+        cmd_copy = [
+            "ffmpeg", "-y",
+            "-i", silent_video,
+            "-i", original_with_audio,
+            "-map", "0:v:0",
+            "-map", "1:a:0?",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "20",
+            "-c:a", "copy",
+            "-movflags", "+faststart",
+            out_path,
+        ]
+        res2 = subprocess.run(cmd_copy, capture_output=True, text=True)
+        if res2.returncode != 0:
+            raise RuntimeError(
+                "ffmpeg falhou: " + (res2.stderr[-400:] if res2.stderr else "(sem stderr)")
+            )
+
+
 def process_video(
     in_path: str,
     out_path: str,
-    mode: str = "lama",          # 'lama' (default Smart) | 'telea' (fallback)
+    mode: str = "auto",          # 'auto' = STTN se disponivel senao LaMa | 'lama' | 'telea'
     sample_count: int = 20,
     min_persistence: float = 0.30,
     on_progress: Optional[ProgressCb] = None,
@@ -469,6 +527,17 @@ def process_video(
     W, H, fps = info["width"], info["height"], info["fps"]
     if W <= 0 or H <= 0:
         raise RuntimeError("Video sem dimensoes legiveis.")
+
+    # ---- Modo auto: usa STTN se modelo disponivel (qualidade Vmake) ----
+    # STTN olha multiplos frames simultaneamente, reconstruindo textura
+    # real (pele, cabelo, fundo). Vs LaMa single-frame que fica borrado.
+    sttn = None
+    if mode == "auto":
+        sttn = _get_sttn()
+        if sttn is not None:
+            mode = "sttn"
+        else:
+            mode = "lama"
 
     emit(0.04, "Sampling frames for text detection...")
     cap = cv2.VideoCapture(in_path)
@@ -542,6 +611,53 @@ def process_video(
         if not out_writer.isOpened():
             raise RuntimeError("OpenCV VideoWriter falhou ao abrir.")
 
+        # ============================================================
+        # STTN: processa em CHUNKS de N frames temporais.
+        # Qualidade significativamente superior ao LaMa pq usa contexto
+        # entre frames pra reconstruir textura (pele, cabelo, fundo).
+        # ============================================================
+        if mode == "sttn" and sttn is not None:
+            CHUNK_SIZE = 50  # frames por chunk (memoria-limitado em CPU)
+            cap = cv2.VideoCapture(in_path)
+            total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+            idx = 0
+            try:
+                while True:
+                    # Le um chunk de frames
+                    chunk_frames = []
+                    for _ in range(CHUNK_SIZE):
+                        ok, frame = cap.read()
+                        if not ok or frame is None:
+                            break
+                        chunk_frames.append(frame)
+                    if not chunk_frames:
+                        break
+
+                    emit(
+                        0.18 + 0.72 * (idx / max(1, total)),
+                        f"STTN inpaint chunk {idx}-{idx+len(chunk_frames)}/{total}",
+                    )
+                    # STTN processa o chunk inteiro temporalmente
+                    cleaned = sttn(chunk_frames, mask)
+                    for f in cleaned:
+                        out_writer.write(f)
+                    idx += len(chunk_frames)
+                    if len(chunk_frames) < CHUNK_SIZE:
+                        break
+            finally:
+                cap.release()
+                out_writer.release()
+
+            emit(0.92, "Muxing original audio + clean video...")
+            # Pula direto pro remux
+            _remux(silent_video, in_path, out_path)
+            emit(1.0, "Done.")
+            return {
+                "width": W, "height": H, "fps": fps,
+                "frames_processed": idx, "mode": "sttn",
+                "mask_area_ratio": float(mask.sum() / 255) / float(W * H),
+            }
+
         # Frame caching: se o crop da mascara nao muda muito entre 2 frames
         # consecutivos (cena estatica + legenda na mesma posicao), reusa
         # o ultimo inpaint. Em videos VSL/TikTok com camera parada, isso
@@ -550,12 +666,12 @@ def process_video(
         prev_crop_signature = None
         last_inpaint = None
         cache_hits = 0
-        # threshold em [0..255] da diferenca absoluta media; pequeno o
-        # suficiente pra nao deixar artefato visivel, grande o suficiente
-        # pra captar continuidade temporal. 7.0 = bem agressivo (~99%
-        # cache hits em videos com camera estatica) sem artefato visivel
-        # — feathering esconde transicao de cache vs novo inpaint.
-        CROP_DIFF_THRESHOLD = 7.0
+        # CACHE DESATIVADO POR DEFAULT (threshold 0.5 ~= so frames
+        # PERFEITAMENTE identicos reusam). Cache causa "fantasma piscante"
+        # em videos onde a pessoa atras da legenda se mexe minimamente —
+        # o inpaint anterior continha contexto que ja nao bate. Em vez de
+        # cache espacial, o STTN/temporal-median garante consistencia.
+        CROP_DIFF_THRESHOLD = 0.5
 
         cap = cv2.VideoCapture(in_path)
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0

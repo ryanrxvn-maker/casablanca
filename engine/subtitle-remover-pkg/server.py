@@ -247,15 +247,15 @@ async def health():
 @app.post("/process")
 async def process(
     file: UploadFile = File(...),
-    mode: str = Form("lama"),
+    mode: str = Form("auto"),
     origin: Optional[str] = Header(default=None),
     authorization: Optional[str] = Header(default=None),
     x_darko_token: Optional[str] = Header(default=None),
 ):
     """Sincrono: processa e devolve direto o MP4. Pra videos curtos."""
     _auth_or_403(origin, authorization, x_darko_token)
-    if mode not in ("telea", "lama"):
-        raise HTTPException(status_code=400, detail="mode must be telea|lama")
+    if mode not in ("auto", "sttn", "lama", "telea"):
+        raise HTTPException(status_code=400, detail="mode must be auto|sttn|lama|telea")
 
     jid = uuid.uuid4().hex[:12]
     job_dir = os.path.join(JOBS_DIR, jid)
@@ -299,15 +299,15 @@ async def process(
 @app.post("/jobs")
 async def create_job(
     file: UploadFile = File(...),
-    mode: str = Form("lama"),
+    mode: str = Form("auto"),
     origin: Optional[str] = Header(default=None),
     authorization: Optional[str] = Header(default=None),
     x_darko_token: Optional[str] = Header(default=None),
 ):
     """Assincrono: cria o job, retorna id; cliente faz polling em /jobs/{id}."""
     _auth_or_403(origin, authorization, x_darko_token)
-    if mode not in ("telea", "lama"):
-        raise HTTPException(status_code=400, detail="mode must be telea|lama")
+    if mode not in ("auto", "sttn", "lama", "telea"):
+        raise HTTPException(status_code=400, detail="mode must be auto|sttn|lama|telea")
 
     jid = uuid.uuid4().hex[:12]
     job_dir = os.path.join(JOBS_DIR, jid)
