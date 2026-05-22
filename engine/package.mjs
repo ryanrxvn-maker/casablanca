@@ -1,21 +1,28 @@
 /**
- * Monta engine/pkg/ — pacote LEVE (uns KB). NADA de binario aqui:
- *   pkg/
- *     server.cjs            (bundle do motor)
- *     DarkoDownloader.cmd   (launcher)
- *     Instalar.ps1          (baixa Node+yt-dlp+ffmpeg+Chromium NO PC
- *                            do usuario, configura auto-start, mostra
- *                            o codigo de pareamento)
- *     Desinstalar.ps1 / LEIA-ME.txt
- *   pkg.zip                 (zip pequeno -> cabe na Vercel e no git)
+ * Monta engine/pkg/ e empacota tudo num UNICO instalador:
+ *   pkg/                       (KB de scripts + bundle do motor)
+ *   pkg.zip                    (zip do pkg/)
+ *   DarkoDownloaderSetup.exe   (stub C# nativo: clica -> instala)
+ *                              <- distribuir SO ISSO pro usuario.
+ *
+ * Sem ZIP pro usuario final, sem codigo manual de pareamento.
+ * Icone do exe = icone da extensao DarkoLab Downloader.
  *
  * Rode:  node engine/build.mjs && node engine/package.mjs
  */
 import { build } from 'esbuild';
 import { execFileSync } from 'child_process';
-import { cpSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import { pngToIco, pngFiles } from './installer/png-to-ico.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const pkg = path.join(here, 'pkg');
@@ -86,18 +93,6 @@ async function main() {
     ].join('\r\n'),
   );
   writeFileSync(path.join(pkg, 'Desinstalar.ps1'), DESINSTALAR_PS1.trim() + '\r\n');
-  // Visualizador do codigo de pareamento (abre quando quiser)
-  writeFileSync(path.join(pkg, 'Codigo.ps1'), CODIGO_PS1.trim() + '\r\n');
-  writeFileSync(
-    path.join(pkg, 'CODIGO.cmd'),
-    [
-      '@echo off',
-      'rem mostra o codigo de pareamento numa janela DARKO',
-      'start "" powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0Codigo.ps1"',
-      'exit',
-      '',
-    ].join('\r\n'),
-  );
   writeFileSync(path.join(pkg, 'LEIA-ME.txt'), LEIAME.trim() + '\r\n');
 
   log('zip...');
@@ -112,7 +107,58 @@ async function main() {
     ],
     { stdio: 'inherit' },
   );
-  log('pronto -> engine/pkg + engine/pkg.zip (leve)');
+
+  log('gerando icone (ico) a partir dos PNGs da extensao...');
+  // Os PNGs da extensao (mesma marca DARKO) viram icon.ico do .exe.
+  const extIcons = path.join(here, '..', 'extension-downloader', 'icons');
+  const iconSet = pngFiles({
+    16: path.join(extIcons, 'icon-16.png'),
+    32: path.join(extIcons, 'icon-32.png'),
+    48: path.join(extIcons, 'icon-48.png'),
+    128: path.join(extIcons, 'icon-128.png'),
+  });
+  const icoBuf = pngToIco(iconSet);
+  const icoPath = path.join(here, 'installer', 'icon.ico');
+  writeFileSync(icoPath, icoBuf);
+
+  log('compilando DarkoDownloaderSetup.exe (csc.exe)...');
+  const csc =
+    'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe';
+  if (!existsSync(csc)) {
+    throw new Error(
+      'csc.exe nao encontrado (.NET Framework 4 ausente). Esperado em: ' + csc,
+    );
+  }
+  const exeOut = path.join(here, 'DarkoDownloaderSetup.exe');
+  rmSync(exeOut, { force: true });
+  // /resource:zip,DarkoLab.pkg.zip -> nome lido pelo Setup.cs
+  // System.IO.Compression.FileSystem.dll precisa do .NET 4.5+; csc v4
+  // aceita referenciar essa DLL (no GAC). System.Windows.Forms pro
+  // MessageBox de erro.
+  execFileSync(
+    csc,
+    [
+      '/nologo',
+      '/target:winexe',
+      '/optimize+',
+      '/platform:anycpu',
+      `/win32icon:${icoPath}`,
+      `/resource:${zipOut},DarkoLab.pkg.zip`,
+      '/reference:System.dll',
+      '/reference:System.IO.Compression.dll',
+      '/reference:System.IO.Compression.FileSystem.dll',
+      '/reference:System.Windows.Forms.dll',
+      '/reference:System.Drawing.dll',
+      `/out:${exeOut}`,
+      path.join(here, 'installer', 'Setup.cs'),
+    ],
+    { stdio: 'inherit' },
+  );
+
+  log('pronto:');
+  log('  -> ' + exeOut + '  (distribuir SO ISSO pro usuario)');
+  log('  -> ' + zipOut + '  (zip cru, opcional)');
+  log('  -> ' + pkg + '\\   (pasta crua, opcional)');
 }
 
 const INSTALAR_PS1 = `
@@ -147,8 +193,6 @@ try {
   Copy-Item (Join-Path $src 'server.cjs') $dst -Force
   Copy-Item (Join-Path $src 'DarkoDownloader.cmd') $dst -Force
   Copy-Item (Join-Path $src 'Desinstalar.ps1') $dst -Force
-  Copy-Item (Join-Path $src 'Codigo.ps1') $dst -Force -ErrorAction SilentlyContinue
-  Copy-Item (Join-Path $src 'CODIGO.cmd') $dst -Force -ErrorAction SilentlyContinue
   Copy-Item (Join-Path $src 'LEIA-ME.txt') $dst -Force -ErrorAction SilentlyContinue
   $tmp = Join-Path $env:TEMP ('darko-dl-' + [Guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Force -Path $tmp | Out-Null
@@ -204,30 +248,33 @@ try {
   $lnk.WorkingDirectory = $dst
   $lnk.Save()
 
-  # atalho no Menu Iniciar pra rever o codigo quando quiser
-  try {
-    $progs = [Environment]::GetFolderPath('Programs')
-    $lc = $wsh.CreateShortcut((Join-Path $progs 'DarkoLab Downloader - Codigo.lnk'))
-    $lc.TargetPath = 'powershell.exe'
-    $lc.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + (Join-Path $dst 'Codigo.ps1') + '"'
-    $lc.WorkingDirectory = $dst
-    $lc.Save()
-  } catch {}
+  # (sem atalho de "Codigo" no Menu Iniciar — auto-pair via /pair acabou
+  # com a necessidade de o usuario ver/colar o token).
 
   St 97 'Iniciando o motor...'
   Remove-Item (Join-Path $dst 'engine.log') -ErrorAction SilentlyContinue
   Start-Process wscript.exe -ArgumentList ('"' + $vbs + '"') -WindowStyle Hidden
-  $tok = $null
+  # Espera o motor subir (ate 40s). Nao mostra mais o token pro usuario:
+  # a extensao pega via /pair sozinha. Sucesso = /health respondendo.
+  $alive = $false
   for ($i=0; $i -lt 50; $i++) {
     Start-Sleep -Milliseconds 800
-    $log = Get-Content (Join-Path $dst 'engine.log') -Raw -ErrorAction SilentlyContinue
-    if ($log -match '"token":"([0-9a-f]+)"') { $tok = $Matches[1]; break }
+    try {
+      $r = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:47923/health' -TimeoutSec 2
+      if ($r.Content -match 'darkolab-downloader-engine') { $alive=$true; break }
+    } catch {}
+    foreach ($p in 47924,47925,47926,47927,47928) {
+      try {
+        $r = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$p/health" -TimeoutSec 1
+        if ($r.Content -match 'darkolab-downloader-engine') { $alive=$true; break }
+      } catch {}
+    }
+    if ($alive) { break }
   }
-  if ($tok) {
-    try { Set-Clipboard -Value $tok } catch {}
-    Set-Content -LiteralPath $status -Value ("DONE|$tok") -Encoding UTF8
+  if ($alive) {
+    Set-Content -LiteralPath $status -Value 'DONE|ok' -Encoding UTF8
   } else {
-    Set-Content -LiteralPath $status -Value ("ERR|O motor nao confirmou o start. Log: " + (Join-Path $dst 'engine.log')) -Encoding UTF8
+    Set-Content -LiteralPath $status -Value ("ERR|O motor nao subiu. Log: " + (Join-Path $dst 'engine.log')) -Encoding UTF8
   }
 } catch {
   Set-Content -LiteralPath $status -Value ("ERR|" + $_.Exception.Message) -Encoding UTF8
@@ -329,13 +376,10 @@ try {
     $k=$line.Split('|',2)
     if ($k[0] -eq 'DONE') {
       $tmr.Stop()
-      $script:tok=$k[1]
       $fill.Width=$track.Width
-      $st.Text='Instalado e rodando!'
-      $hint.Text='Cole este codigo na extensao do navegador (ja copiado):'
-      $code.Text=$k[1]; $code.Visible=$true
-      $btnCopy.Visible=$true; $btnClose.Visible=$true
-      try { [Windows.Forms.Clipboard]::SetText($k[1]) } catch {}
+      $st.Text='Instalado e vinculado!'
+      $hint.Text='Pronto. A extensao DarkoLab Downloader ja esta conectada — sem codigos, sem pareamento. Roda toda vez que voce ligar o PC.'
+      $btnClose.Visible=$true
     } elseif ($k[0] -eq 'ERR') {
       $tmr.Stop()
       $st.Text='Falhou'
@@ -362,10 +406,10 @@ try {
   Write-Host 'Instalando DarkoLab Downloader (sem interface)...'
   Wait-Job $job | Out-Null
   $line=(Get-Content -LiteralPath $status -Raw -ErrorAction SilentlyContinue)
-  if ($line -match '^DONE\\|([0-9a-f]+)') {
+  if ($line -match '^DONE\\|') {
     Write-Host ''
-    Write-Host ('CODIGO DE PAREAMENTO: ' + $Matches[1])
-    Write-Host '(cole na extensao)'
+    Write-Host 'DarkoLab Downloader instalado e vinculado a extensao.'
+    Write-Host '(roda automaticamente toda vez que o Windows liga)'
   } else {
     Write-Host ('Falhou: ' + $line)
   }
@@ -387,126 +431,21 @@ Write-Host 'Motor removido. (config/token em LOCALAPPDATA\\DarkoDownloader prese
 const LEIAME = `
 DarkoLab Downloader — Motor (Windows)
 =====================================
-1) DE DUPLO-CLIQUE em "INSTALAR.cmd".
-   (Baixa Node + yt-dlp + ffmpeg + Chromium ~250 MB UMA VEZ,
-    configura auto-start e mostra/copia o CODIGO de pareamento.
-    Se o Windows avisar, clique "Mais informacoes" > "Executar
-    assim mesmo".)
+1) DUPLO-CLIQUE em "DarkoDownloaderSetup.exe".
+   Baixa o necessario (Node + yt-dlp + ffmpeg + Chromium, ~250 MB)
+   UMA UNICA VEZ, configura auto-start no Windows e ja vincula a
+   extensao DarkoLab Downloader sozinho — sem codigo, sem pareamento.
+   Se o Windows avisar (SmartScreen), clique "Mais informacoes" >
+   "Executar assim mesmo".
+
 2) Instale a extensao "DarkoLab Downloader" no navegador
    (chrome://extensions > modo dev > Carregar sem compactacao).
-3) Abra a extensao > cole o CODIGO > Parear.
-4) Pronto: em qualquer video (YouTube/Insta/TikTok/Pinterest/+18)
-   aparece o botao "Baixar". Roda no seu PC, sem servidor.
 
-Perdeu o codigo? Duplo-clique em "CODIGO.cmd" (ou no atalho do Menu
-Iniciar "DarkoLab Downloader - Codigo"). A porta e detectada
-automaticamente pela extensao (deixe 47923 se perguntar).
+3) Pronto: em qualquer video (YouTube/Insta/TikTok/Pinterest/+18)
+   aparece o botao "Baixar". Roda 100% no seu PC, sem servidor.
 
-Desinstalar: duplo-clique em "DESINSTALAR.cmd".
+Desinstalar: rode "DESINSTALAR.cmd" dentro de %LOCALAPPDATA%\\DarkoDownloaderApp.
 Precisa de internet so na 1a instalacao. Requer Windows 64-bit.
-`;
-
-const CODIGO_PS1 = `
-# Mostra o codigo de pareamento (e a porta) numa janela DARKO.
-$ErrorActionPreference = 'SilentlyContinue'
-try {
-  Add-Type -Name W -Namespace Win -MemberDefinition '[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int c);'
-  [Win.W]::ShowWindow([Win.W]::GetConsoleWindow(),0) | Out-Null
-} catch {}
-
-$cfgPath = Join-Path $env:LOCALAPPDATA 'DarkoDownloader\\config.json'
-$tok=''; $port=47923
-if (Test-Path $cfgPath) {
-  try {
-    $c = Get-Content $cfgPath -Raw | ConvertFrom-Json
-    $tok = "$($c.token)"; $port = $c.port
-  } catch {}
-}
-# descobre a porta viva (pode ter migrado de 47923)
-foreach ($p in @($port,47923,47924,47925,47926,47927,47928)) {
-  try {
-    $r = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$p/health" -TimeoutSec 2
-    if ($r.Content -match 'darkolab-downloader-engine') { $port=$p; break }
-  } catch {}
-}
-
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-$BG=[Drawing.Color]::FromArgb(11,13,12)
-$CARD=[Drawing.Color]::FromArgb(20,24,22)
-$LIME=[Drawing.Color]::FromArgb(200,255,0)
-$TXT=[Drawing.Color]::FromArgb(232,234,233)
-$MUT=[Drawing.Color]::FromArgb(138,143,139)
-
-$f=New-Object Windows.Forms.Form
-$f.FormBorderStyle='None'; $f.StartPosition='CenterScreen'
-$f.Size=New-Object Drawing.Size(500,260); $f.BackColor=$BG; $f.TopMost=$true
-$f.Text='DarkoLab Downloader - Codigo'
-
-$accent=New-Object Windows.Forms.Panel
-$accent.Size=New-Object Drawing.Size(500,4); $accent.Location=New-Object Drawing.Point(0,0)
-$accent.BackColor=$LIME; $f.Controls.Add($accent)
-
-$brand=New-Object Windows.Forms.Label
-$brand.Text='DARKO LAB'; $brand.ForeColor=$LIME
-$brand.Font=New-Object Drawing.Font('Segoe UI',14,[Drawing.FontStyle]::Bold)
-$brand.AutoSize=$true; $brand.Location=New-Object Drawing.Point(30,28); $f.Controls.Add($brand)
-
-$lbl=New-Object Windows.Forms.Label
-$lbl.ForeColor=$MUT; $lbl.Font=New-Object Drawing.Font('Segoe UI',9)
-$lbl.AutoSize=$false; $lbl.Size=New-Object Drawing.Size(440,20)
-$lbl.Location=New-Object Drawing.Point(32,62); $f.Controls.Add($lbl)
-
-$box=New-Object Windows.Forms.TextBox
-$box.ReadOnly=$true; $box.BorderStyle='FixedSingle'
-$box.BackColor=$CARD; $box.ForeColor=$LIME; $box.TextAlign='Center'
-$box.Font=New-Object Drawing.Font('Consolas',11,[Drawing.FontStyle]::Bold)
-$box.Size=New-Object Drawing.Size(436,30); $box.Location=New-Object Drawing.Point(32,92)
-$f.Controls.Add($box)
-
-$pl=New-Object Windows.Forms.Label
-$pl.ForeColor=$TXT; $pl.Font=New-Object Drawing.Font('Segoe UI',9)
-$pl.AutoSize=$true; $pl.Location=New-Object Drawing.Point(32,132); $f.Controls.Add($pl)
-
-$btnC=New-Object Windows.Forms.Button
-$btnC.Text='Copiar codigo'; $btnC.FlatStyle='Flat'
-$btnC.BackColor=$LIME; $btnC.ForeColor=$BG
-$btnC.FlatAppearance.BorderSize=0
-$btnC.Font=New-Object Drawing.Font('Segoe UI',9,[Drawing.FontStyle]::Bold)
-$btnC.Size=New-Object Drawing.Size(150,34); $btnC.Location=New-Object Drawing.Point(32,170)
-$f.Controls.Add($btnC)
-
-$btnX=New-Object Windows.Forms.Button
-$btnX.Text='Fechar'; $btnX.FlatStyle='Flat'
-$btnX.BackColor=$CARD; $btnX.ForeColor=$TXT
-$btnX.FlatAppearance.BorderColor=$MUT
-$btnX.Font=New-Object Drawing.Font('Segoe UI',9)
-$btnX.Size=New-Object Drawing.Size(110,34); $btnX.Location=New-Object Drawing.Point(358,170)
-$f.Controls.Add($btnX)
-
-if ($tok) {
-  $lbl.Text='Codigo de pareamento (cole na extensao):'
-  $box.Text=$tok
-  $pl.Text=("Porta: " + $port + "   (a extensao detecta sozinha - deixe 47923)")
-  try { [Windows.Forms.Clipboard]::SetText($tok) } catch {}
-  $btnC.Add_Click({ try { [Windows.Forms.Clipboard]::SetText($tok); $btnC.Text='Copiado!' } catch {} })
-} else {
-  $lbl.Text='Motor ainda nao instalado/iniciado.'
-  $box.Text='--- rode o INSTALAR.cmd primeiro ---'
-  $pl.Text=''
-  $btnC.Enabled=$false
-}
-$btnX.Add_Click({ $f.Close() })
-
-# arrastar
-$script:drag=$false; $script:dx=0; $script:dy=0
-$dn={ $script:drag=$true; $script:dx=[Windows.Forms.Cursor]::Position.X-$f.Left; $script:dy=[Windows.Forms.Cursor]::Position.Y-$f.Top }
-$mv={ if($script:drag){ $f.Left=[Windows.Forms.Cursor]::Position.X-$script:dx; $f.Top=[Windows.Forms.Cursor]::Position.Y-$script:dy } }
-$f.Add_MouseDown($dn); $f.Add_MouseMove($mv); $f.Add_MouseUp({ $script:drag=$false })
-$brand.Add_MouseDown($dn); $brand.Add_MouseMove($mv)
-
-[Windows.Forms.Application]::EnableVisualStyles()
-[void]$f.ShowDialog()
 `;
 
 main().catch((e) => {

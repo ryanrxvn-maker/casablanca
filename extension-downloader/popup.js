@@ -26,43 +26,38 @@ async function storageSet(v) {
   return new Promise((r) => chrome.storage.local.set(v, r));
 }
 
-async function checkEngine() {
+// AUTO-PAIR DEFINITIVO: a cada chamada, varre as portas conhecidas, acha
+// o motor vivo e PEGA o token atual via /pair. Nunca usa token cacheado
+// stale. Acaba o cenario "atualizei o motor e a extensao ficou com token
+// velho -> 401 Token invalido". Devolve true se conseguiu pareamento.
+async function refreshPair() {
   const tries = [state.port, 47923, 47924, 47925, 47926, 47927, 47928].filter(
     (v, i, a) => v && a.indexOf(v) === i,
   );
   for (const p of tries) {
     try {
-      const res = await fetch(`http://127.0.0.1:${p}/health`, {
-        method: 'GET',
-      });
-      if (!res.ok) continue;
-      const j = await res.json();
-      if (j && j.app === 'darkolab-downloader-engine') {
+      const h = await fetch(`http://127.0.0.1:${p}/health`);
+      if (!h.ok) continue;
+      const j = await h.json();
+      if (!j || j.app !== 'darkolab-downloader-engine') continue;
+      const pr = await fetch(`http://127.0.0.1:${p}/pair`);
+      if (!pr.ok) continue;
+      const pj = await pr.json();
+      if (pj && pj.token) {
+        state.token = pj.token;
         state.port = p;
-        // AUTO-PAIR: pega o token real do motor (sem o usuario colar)
-        try {
-          const pr = await fetch(`http://127.0.0.1:${p}/pair`);
-          if (pr.ok) {
-            const pj = await pr.json();
-            if (pj && pj.token) {
-              state.token = pj.token;
-              await storageSet({ token: pj.token, port: p });
-            }
-          }
-        } catch {
-          /* fallback: pareamento manual */
-        }
-        return j;
+        await storageSet({ token: pj.token, port: p });
+        return { allowAdult: pj.allowAdult === true };
       }
     } catch {
-      /* tenta proxima porta */
+      /* tenta proxima */
     }
   }
   return null;
 }
 
 function show(boxId) {
-  for (const id of ['pairBox', 'appBox', 'noEngine'])
+  for (const id of ['appBox', 'noEngine'])
     $(id).classList.toggle('hidden', id !== boxId);
 }
 
@@ -71,47 +66,19 @@ async function refresh() {
   state.token = cfg.token || '';
   state.port = cfg.port || 47923;
 
-  const health = await checkEngine();
-  $('engineDot').className = 'dot ' + (health ? 'on' : 'off');
+  const eng = await refreshPair();
+  $('engineDot').className = 'dot ' + (eng ? 'on' : 'off');
 
-  if (!health) return show('noEngine');
-  if (!state.token) {
-    // Motor achado mas /pair falhou momentaneamente — NUNCA mostra a
-    // tela de colar codigo manual (usuario nao precisa fazer isso).
-    // O setInterval no fim do arquivo refaz refresh() a cada 2.5s ate
-    // o /pair funcionar e o token aparecer sozinho.
-    return show('noEngine');
-  }
+  if (!eng) return show('noEngine');
 
   show('appBox');
-  // +18 só aparece se o motor permitir
-  if (health.allowAdult) {
+  if (eng.allowAdult) {
     $('adultBtn').classList.remove('hidden');
   } else {
     $('adultBtn').classList.add('hidden');
     state.adult = false;
   }
 }
-
-// ---- pareamento ----
-$('pairBtn').addEventListener('click', async () => {
-  const tok = $('pairToken').value.trim();
-  const port = parseInt($('pairPort').value, 10) || state.port || 47923;
-  if (tok.length < 16) {
-    $('pairMsg').textContent = 'Código muito curto.';
-    return;
-  }
-  await storageSet({ token: tok, port });
-  state.token = tok;
-  state.port = port;
-  // valida fazendo um /health (token nao e exigido la, mas confirma porta)
-  const h = await checkEngine();
-  if (!h) {
-    $('pairMsg').textContent = 'Motor não respondeu nessa porta.';
-    return;
-  }
-  await refresh();
-});
 
 $('retry').addEventListener('click', (e) => {
   e.preventDefault();
@@ -159,32 +126,6 @@ function addJob(url) {
   return el;
 }
 
-async function reauthFromEngine() {
-  // Pega o token vivo do motor via /pair. Varre a faixa de portas:
-  // se um motor ANTIGO sem /pair estiver na porta padrao, esta sonda
-  // continua e pega o motor novo onde quer que esteja. Acaba o 401
-  // por motor desatualizado/dessincronizado, sem o usuario mexer.
-  const tries = [state.port, 47923, 47924, 47925, 47926, 47927, 47928].filter(
-    (v, i, a) => v && a.indexOf(v) === i,
-  );
-  for (const p of tries) {
-    try {
-      const pr = await fetch(`http://127.0.0.1:${p}/pair`);
-      if (!pr.ok) continue;
-      const pj = await pr.json();
-      if (pj && pj.token) {
-        state.token = pj.token;
-        state.port = p;
-        await storageSet({ token: pj.token, port: p });
-        return true;
-      }
-    } catch {
-      /* tenta proxima */
-    }
-  }
-  return false;
-}
-
 async function postDownload(url) {
   return fetch(`${engineBase()}/download`, {
     method: 'POST',
@@ -203,10 +144,12 @@ async function postDownload(url) {
 
 async function downloadOne(url, el) {
   try {
+    // pega token vivo antes (sempre fresh — invalida storage stale)
+    if (!state.token) await refreshPair();
     let res = await postDownload(url);
     if (res.status === 401) {
-      // motor regerou token? Tenta re-pair automatico (transparente)
-      if (await reauthFromEngine()) {
+      // motor regerou token? re-pair forcado e tenta de novo
+      if (await refreshPair()) {
         res = await postDownload(url);
       }
     }
@@ -246,6 +189,8 @@ $('go').addEventListener('click', async () => {
     .map((s) => s.trim())
     .filter((s) => /^https?:\/\//i.test(s));
   if (!urls.length) return;
+  // garante token vivo antes de disparar batch
+  await refreshPair();
   $('jobs').innerHTML = '';
   $('go').disabled = true;
   $('go').textContent = 'Baixando…';
@@ -262,13 +207,11 @@ $('go').addEventListener('click', async () => {
   );
   $('go').disabled = false;
   $('go').textContent = 'Baixar';
-  // (token nao e mais limpo em 401 — reauthFromEngine refaz sozinho)
 });
 
 refresh();
-// Pos-restart do PC: o motor pode demorar uns segundos pra subir.
-// Reconecta sozinho enquanto o popup esta aberto — sem precisar clicar
-// "tentar de novo" nem colar codigo. Auto-pair via /pair faz o resto.
+// Pos-restart do PC: motor pode demorar uns segs pra subir. Reconecta
+// sozinho enquanto o popup esta aberto.
 setInterval(() => {
   const noEng = document.getElementById('noEngine');
   if (noEng && !noEng.classList.contains('hidden')) {

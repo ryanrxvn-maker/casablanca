@@ -1,19 +1,17 @@
 DarkoLab Downloader — Motor (Windows)
 =====================================
-1) DE DUPLO-CLIQUE em "INSTALAR.cmd".
-   (Baixa Node + yt-dlp + ffmpeg + Chromium ~250 MB UMA VEZ,
-    configura auto-start e mostra/copia o CODIGO de pareamento.
-    Se o Windows avisar, clique "Mais informacoes" > "Executar
-    assim mesmo".)
+1) DUPLO-CLIQUE em "DarkoDownloaderSetup.exe".
+   Baixa o necessario (Node + yt-dlp + ffmpeg + Chromium, ~250 MB)
+   UMA UNICA VEZ, configura auto-start no Windows e ja vincula a
+   extensao DarkoLab Downloader sozinho — sem codigo, sem pareamento.
+   Se o Windows avisar (SmartScreen), clique "Mais informacoes" >
+   "Executar assim mesmo".
+
 2) Instale a extensao "DarkoLab Downloader" no navegador
    (chrome://extensions > modo dev > Carregar sem compactacao).
-3) Abra a extensao > cole o CODIGO > Parear.
-4) Pronto: em qualquer video (YouTube/Insta/TikTok/Pinterest/+18)
-   aparece o botao "Baixar". Roda no seu PC, sem servidor.
 
-Perdeu o codigo? Duplo-clique em "CODIGO.cmd" (ou no atalho do Menu
-Iniciar "DarkoLab Downloader - Codigo"). A porta e detectada
-automaticamente pela extensao (deixe 47923 se perguntar).
+3) Pronto: em qualquer video (YouTube/Insta/TikTok/Pinterest/+18)
+   aparece o botao "Baixar". Roda 100% no seu PC, sem servidor.
 
-Desinstalar: duplo-clique em "DESINSTALAR.cmd".
+Desinstalar: rode "DESINSTALAR.cmd" dentro de %LOCALAPPDATA%\DarkoDownloaderApp.
 Precisa de internet so na 1a instalacao. Requer Windows 64-bit.

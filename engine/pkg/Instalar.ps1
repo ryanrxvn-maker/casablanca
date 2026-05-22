@@ -29,8 +29,6 @@ try {
   Copy-Item (Join-Path $src 'server.cjs') $dst -Force
   Copy-Item (Join-Path $src 'DarkoDownloader.cmd') $dst -Force
   Copy-Item (Join-Path $src 'Desinstalar.ps1') $dst -Force
-  Copy-Item (Join-Path $src 'Codigo.ps1') $dst -Force -ErrorAction SilentlyContinue
-  Copy-Item (Join-Path $src 'CODIGO.cmd') $dst -Force -ErrorAction SilentlyContinue
   Copy-Item (Join-Path $src 'LEIA-ME.txt') $dst -Force -ErrorAction SilentlyContinue
   $tmp = Join-Path $env:TEMP ('darko-dl-' + [Guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Force -Path $tmp | Out-Null
@@ -86,30 +84,33 @@ try {
   $lnk.WorkingDirectory = $dst
   $lnk.Save()
 
-  # atalho no Menu Iniciar pra rever o codigo quando quiser
-  try {
-    $progs = [Environment]::GetFolderPath('Programs')
-    $lc = $wsh.CreateShortcut((Join-Path $progs 'DarkoLab Downloader - Codigo.lnk'))
-    $lc.TargetPath = 'powershell.exe'
-    $lc.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + (Join-Path $dst 'Codigo.ps1') + '"'
-    $lc.WorkingDirectory = $dst
-    $lc.Save()
-  } catch {}
+  # (sem atalho de "Codigo" no Menu Iniciar — auto-pair via /pair acabou
+  # com a necessidade de o usuario ver/colar o token).
 
   St 97 'Iniciando o motor...'
   Remove-Item (Join-Path $dst 'engine.log') -ErrorAction SilentlyContinue
   Start-Process wscript.exe -ArgumentList ('"' + $vbs + '"') -WindowStyle Hidden
-  $tok = $null
+  # Espera o motor subir (ate 40s). Nao mostra mais o token pro usuario:
+  # a extensao pega via /pair sozinha. Sucesso = /health respondendo.
+  $alive = $false
   for ($i=0; $i -lt 50; $i++) {
     Start-Sleep -Milliseconds 800
-    $log = Get-Content (Join-Path $dst 'engine.log') -Raw -ErrorAction SilentlyContinue
-    if ($log -match '"token":"([0-9a-f]+)"') { $tok = $Matches[1]; break }
+    try {
+      $r = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:47923/health' -TimeoutSec 2
+      if ($r.Content -match 'darkolab-downloader-engine') { $alive=$true; break }
+    } catch {}
+    foreach ($p in 47924,47925,47926,47927,47928) {
+      try {
+        $r = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$p/health" -TimeoutSec 1
+        if ($r.Content -match 'darkolab-downloader-engine') { $alive=$true; break }
+      } catch {}
+    }
+    if ($alive) { break }
   }
-  if ($tok) {
-    try { Set-Clipboard -Value $tok } catch {}
-    Set-Content -LiteralPath $status -Value ("DONE|$tok") -Encoding UTF8
+  if ($alive) {
+    Set-Content -LiteralPath $status -Value 'DONE|ok' -Encoding UTF8
   } else {
-    Set-Content -LiteralPath $status -Value ("ERR|O motor nao confirmou o start. Log: " + (Join-Path $dst 'engine.log')) -Encoding UTF8
+    Set-Content -LiteralPath $status -Value ("ERR|O motor nao subiu. Log: " + (Join-Path $dst 'engine.log')) -Encoding UTF8
   }
 } catch {
   Set-Content -LiteralPath $status -Value ("ERR|" + $_.Exception.Message) -Encoding UTF8
@@ -211,13 +212,10 @@ try {
     $k=$line.Split('|',2)
     if ($k[0] -eq 'DONE') {
       $tmr.Stop()
-      $script:tok=$k[1]
       $fill.Width=$track.Width
-      $st.Text='Instalado e rodando!'
-      $hint.Text='Cole este codigo na extensao do navegador (ja copiado):'
-      $code.Text=$k[1]; $code.Visible=$true
-      $btnCopy.Visible=$true; $btnClose.Visible=$true
-      try { [Windows.Forms.Clipboard]::SetText($k[1]) } catch {}
+      $st.Text='Instalado e vinculado!'
+      $hint.Text='Pronto. A extensao DarkoLab Downloader ja esta conectada — sem codigos, sem pareamento. Roda toda vez que voce ligar o PC.'
+      $btnClose.Visible=$true
     } elseif ($k[0] -eq 'ERR') {
       $tmr.Stop()
       $st.Text='Falhou'
@@ -244,10 +242,10 @@ try {
   Write-Host 'Instalando DarkoLab Downloader (sem interface)...'
   Wait-Job $job | Out-Null
   $line=(Get-Content -LiteralPath $status -Raw -ErrorAction SilentlyContinue)
-  if ($line -match '^DONE\|([0-9a-f]+)') {
+  if ($line -match '^DONE\|') {
     Write-Host ''
-    Write-Host ('CODIGO DE PAREAMENTO: ' + $Matches[1])
-    Write-Host '(cole na extensao)'
+    Write-Host 'DarkoLab Downloader instalado e vinculado a extensao.'
+    Write-Host '(roda automaticamente toda vez que o Windows liga)'
   } else {
     Write-Host ('Falhou: ' + $line)
   }

@@ -12,22 +12,6 @@
     </header>
 
     <main>
-      <!-- Pareamento (so aparece se nao pareado) -->
-      <section id="pairBox" class="card hidden">
-        <p class="muted">
-          Cole só o <b>código de pareamento</b> (o instalador mostrou e
-          copiou; perdeu? abra <b>CODIGO.cmd</b> ou o atalho no Menu
-          Iniciar):
-        </p>
-        <input id="pairToken" type="password" placeholder="código de pareamento" />
-        <div class="row">
-          <input id="pairPort" type="number" placeholder="porta (automática)" />
-          <button id="pairBtn" class="primary">Parear</button>
-        </div>
-        <p class="muted small">A porta é detectada sozinha — não precisa mexer.</p>
-        <p id="pairMsg" class="muted small"></p>
-      </section>
-
       <!-- App -->
       <section id="appBox" class="hidden">
         <label class="lbl">Links (um por linha)</label>
@@ -69,9 +53,10 @@ https://instagram.com/reel/..."
       <section id="noEngine" class="card hidden">
         <p class="muted">
           <span class="d-dot-pulse"></span>
-          <b>Esperando o motor…</b> conecta sozinho assim que o
-          DarkoLab Downloader sobe (auto-start no Windows). Se nunca
-          subir, abra o <b>DarkoDownloader.cmd</b> ou
+          <b>Conectando ao motor…</b> o DarkoLab Downloader sobe junto
+          com o Windows e a extensão se conecta sozinha — sem código,
+          sem pareamento manual. Se nunca subir, abra
+          <b>DarkoDownloader.cmd</b> ou
           <a id="retry" href="#">tente de novo</a>.
         </p>
       </section>

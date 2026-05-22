@@ -1,12 +1,11 @@
 // Service worker: recebe pedido do botao na pagina e dispara o
 // download pelo motor local via chrome.downloads (endpoint GET /get,
 // token na query — sem precisar de blob no service worker).
+//
+// Auto-pareamento DEFINITIVO: a extensao NUNCA pede codigo. A cada
+// operacao, varre as portas conhecidas, acha o motor vivo e pega o
+// token atual via /pair. Storage local serve so de cache rapido.
 
-// Pre-warm: assim que o Chrome inicia / a extensao instala, busca o
-// token vivo do motor e guarda. Acaba o cenario "reiniciei o PC e
-// pediu pra colar codigo de novo" — quando voce abrir o popup ele ja
-// esta pareado. Tenta varias vezes pq o motor pode demorar uns segs
-// pra subir junto com o Windows.
 function prewarmToken() {
   let tries = 0;
   const tick = () => {
@@ -67,6 +66,8 @@ function sendProgress(tabId, payload) {
 }
 
 async function tryDownloadOnce({ url, mode, quality, adult, tabId }) {
+  // SEMPRE refaz pair antes do download. Custo: 1 GET extra (<5ms localhost),
+  // mas elimina de vez o 401 por token stale.
   const eng = await discoverEngine((await getCfg()).port || 47923);
   if (!eng) {
     return {
@@ -169,8 +170,9 @@ async function tryDownloadOnce({ url, mode, quality, adult, tabId }) {
 async function startDownload({ url, mode, quality, adult, tabId }) {
   // Tentativa 1
   let r = await tryDownloadOnce({ url, mode, quality, adult, tabId });
-  // Se 401/auth (token defasado), faz re-pair forçado e tenta de novo
-  // — usuario nao precisa fazer nada manualmente.
+  // Se 401/auth (token defasado), re-pair forcado e tenta de novo —
+  // usuario nao precisa fazer nada manualmente. NUNCA mostra dialogo
+  // de codigo.
   if (!r.ok && r.authFail) {
     try {
       await chrome.storage.local.set({ token: '' });
@@ -182,7 +184,7 @@ async function startDownload({ url, mode, quality, adult, tabId }) {
     ok: false,
     error:
       r.error === 'SERVER_UNAUTHORIZED'
-        ? 'Sem autorizacao — abra o Downloader uma vez e tente de novo.'
+        ? 'Motor reiniciando — tente novamente em alguns segundos.'
         : 'Falha: ' + r.error,
   };
 }
