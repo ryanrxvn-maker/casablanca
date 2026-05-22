@@ -1,0 +1,5 @@
+;!@Install@!UTF-8!
+Title="DarkoLab Subtitle Remover"
+BeginPrompt="Instalar o motor do DarkoLab Subtitle Remover?\n\nVai baixar Python + IA + ffmpeg (~600 MB, 1a vez, ~10-12 min)."
+RunProgram="INSTALAR.cmd"
+;!@InstallEnd@!

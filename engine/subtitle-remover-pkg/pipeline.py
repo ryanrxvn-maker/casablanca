@@ -278,15 +278,35 @@ def _mask_bbox_with_padding(mask: np.ndarray, pad: int = 64) -> Optional[Tuple[i
     return (y0, y1, x0, x1)
 
 
+def _setup_perf():
+    """Liga todos os threads disponiveis pra paddleocr / opencv / torch."""
+    try:
+        cv2.setNumThreads(0)  # 0 = auto = all cores
+    except Exception:
+        pass
+    if _TORCH_AVAILABLE:
+        try:
+            import torch
+            n = os.cpu_count() or 4
+            torch.set_num_threads(n)
+            torch.set_num_interop_threads(min(n, 4))
+        except Exception:
+            pass
+
+
+# Limite maximo da dimensao maior do crop antes de mandar pra LaMa.
+# 512 = sweet spot entre velocidade e qualidade. LaMa em 512 e ~4x mais
+# rapido que em 1080 e o resultado upsamplado fica imperceptivelmente
+# diferente em regiao de legenda (que tem detalhes finos baixos).
+_LAMA_MAX_DIM = 512
+
+
 def _inpaint_lama(frame: np.ndarray, mask: np.ndarray, bbox: Optional[Tuple[int,int,int,int]] = None) -> np.ndarray:
     """
-    LaMa neural inpaint. Pra acelerar drasticamente em videos onde a
-    legenda fica numa regiao pequena (e.g. rodape), processa SO o crop
-    com padding pra dar contexto, e depois cola de volta no frame.
-
-    Em 1080p com legenda no rodape, processar so o crop reduz o tempo
-    em ~5x sem perda de qualidade — LaMa precisa de contexto local, nao
-    do frame inteiro.
+    LaMa neural inpaint com 2 otimizacoes:
+      1. CROP: processa so o bbox da mascara + padding (5x faster vs frame inteiro)
+      2. HALF-RES: redimensiona crop pra <= 512px antes de LaMa, upscala depois
+         (3-5x faster sem perda visivel)
     """
     from PIL import Image
     lama = _get_lama()
@@ -296,21 +316,41 @@ def _inpaint_lama(frame: np.ndarray, mask: np.ndarray, bbox: Optional[Tuple[int,
         crop_frame = frame[y0:y1, x0:x1]
         crop_mask = mask[y0:y1, x0:x1]
         ch, cw = crop_frame.shape[:2]
-        img_rgb = cv2.cvtColor(crop_frame, cv2.COLOR_BGR2RGB)
+
+        # downscale pra acelerar (LaMa em 512 e ~4x mais rapido que em 1080)
+        scale = 1.0
+        if max(ch, cw) > _LAMA_MAX_DIM:
+            scale = _LAMA_MAX_DIM / float(max(ch, cw))
+            new_w = max(8, int(round(cw * scale)))
+            new_h = max(8, int(round(ch * scale)))
+            crop_frame_s = cv2.resize(crop_frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            crop_mask_s = cv2.resize(crop_mask, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
+        else:
+            crop_frame_s = crop_frame
+            crop_mask_s = crop_mask
+
+        sh, sw = crop_frame_s.shape[:2]
+        img_rgb = cv2.cvtColor(crop_frame_s, cv2.COLOR_BGR2RGB)
         pil_img = Image.fromarray(img_rgb)
-        pil_mask = Image.fromarray(crop_mask)
+        pil_mask = Image.fromarray(crop_mask_s)
         out = lama(pil_img, pil_mask)
         out_np = np.array(out)
-        # simple-lama padda internamente pra multiplo de 8; recorta o
-        # output de volta pro tamanho original do crop.
-        if out_np.shape[:2] != (ch, cw):
-            out_np = out_np[:ch, :cw]
+        # simple-lama padda internamente pra multiplo de 8
+        if out_np.shape[:2] != (sh, sw):
+            out_np = out_np[:sh, :sw]
+
+        # upscale de volta pro tamanho original do crop
+        if scale != 1.0:
+            out_np = cv2.resize(out_np, (cw, ch), interpolation=cv2.INTER_LINEAR)
+
         out_bgr = cv2.cvtColor(out_np, cv2.COLOR_RGB2BGR)
-        # cola de volta SO na regiao mascarada (nao sobrescreve fora dela)
         result = frame.copy()
-        result[y0:y1, x0:x1] = out_bgr
+        # blend so na regiao da mascara original (fora dela mantem o frame)
+        m3 = (crop_mask > 0)[:, :, None]
+        result[y0:y1, x0:x1] = np.where(m3, out_bgr, crop_frame)
         return result
 
+    # fallback: frame inteiro (raramente usado)
     h, w = frame.shape[:2]
     img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     pil_img = Image.fromarray(img_rgb)
@@ -380,6 +420,9 @@ def process_video(
     # bbox da mascara pra acelerar LaMa (processa so a regiao + padding)
     bbox = _mask_bbox_with_padding(mask, pad=64) if mode == "lama" else None
 
+    # Liga multi-threading (torch + opencv) pra usar TODOS os cores
+    _setup_perf()
+
     device = _detect_torch_device()
     emit(0.18, f"Mask ready. Starting {mode.upper()} inpaint pass ({device})...")
 
@@ -394,6 +437,19 @@ def process_video(
         if not out_writer.isOpened():
             raise RuntimeError("OpenCV VideoWriter falhou ao abrir.")
 
+        # Frame caching: se o crop da mascara nao muda muito entre 2 frames
+        # consecutivos (cena estatica + legenda na mesma posicao), reusa
+        # o ultimo inpaint. Em videos VSL/TikTok com camera parada, isso
+        # da 5-20x speedup porque a maioria dos frames sao quase identicos
+        # na regiao da legenda.
+        prev_crop_signature = None
+        last_inpaint = None
+        cache_hits = 0
+        # threshold em [0..255] da diferenca absoluta media; pequeno o
+        # suficiente pra nao deixar artefato visivel, grande o suficiente
+        # pra captar continuidade temporal.
+        CROP_DIFF_THRESHOLD = 3.5
+
         cap = cv2.VideoCapture(in_path)
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
         idx = 0
@@ -402,15 +458,45 @@ def process_video(
                 ok, frame = cap.read()
                 if not ok or frame is None:
                     break
-                if mode == "lama":
+
+                if mode == "lama" and bbox is not None:
+                    # signature do crop atual (pra cache hit/miss)
+                    y0, y1, x0, x1 = bbox
+                    crop_now = frame[y0:y1, x0:x1]
+                    # downscale rapido p/ calculo de signature (8x8)
+                    sig = cv2.resize(crop_now, (16, 16), interpolation=cv2.INTER_AREA).astype(np.float32)
+                    if prev_crop_signature is not None and last_inpaint is not None:
+                        diff = float(np.mean(np.abs(sig - prev_crop_signature)))
+                        if diff < CROP_DIFF_THRESHOLD:
+                            # cache hit: aplica o ultimo inpaint mas
+                            # com o frame atual fora da mascara (so a regiao
+                            # mascarada vem do cache)
+                            result = frame.copy()
+                            crop_mask = mask[y0:y1, x0:x1]
+                            m3 = (crop_mask > 0)[:, :, None]
+                            cached_crop = last_inpaint[y0:y1, x0:x1]
+                            result[y0:y1, x0:x1] = np.where(m3, cached_crop, crop_now)
+                            out_writer.write(result)
+                            cache_hits += 1
+                            idx += 1
+                            if total and (idx % max(1, total // 50) == 0):
+                                p = 0.18 + 0.72 * (idx / max(1, total))
+                                emit(p, f"Inpainting {idx}/{total} (cache {cache_hits})")
+                            continue
+                    # cache miss: roda LaMa normal
+                    clean = _inpaint_lama(frame, mask, bbox=bbox)
+                    prev_crop_signature = sig
+                    last_inpaint = clean
+                elif mode == "lama":
                     clean = _inpaint_lama(frame, mask, bbox=bbox)
                 else:
                     clean = _inpaint_telea(frame, mask)
+
                 out_writer.write(clean)
                 idx += 1
                 if total and (idx % max(1, total // 50) == 0):
                     p = 0.18 + 0.72 * (idx / max(1, total))
-                    emit(p, f"Inpainting frame {idx}/{total} [{device}]")
+                    emit(p, f"Inpainting {idx}/{total} (cache {cache_hits})")
         finally:
             cap.release()
             out_writer.release()

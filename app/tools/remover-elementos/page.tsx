@@ -479,11 +479,11 @@ export default function RemoverElementosPage() {
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <a
-                href="/api/subtitle-remover-engine/download"
+                href="/api/subtitle-remover-engine/installer"
                 className="btn-primary !py-2 text-xs"
                 download
               >
-                1. Baixar o Motor (Windows)
+                1. Baixar Instalador (.exe)
               </a>
               <button
                 type="button"
@@ -503,15 +503,15 @@ export default function RemoverElementosPage() {
               </summary>
               <ol className="mono mt-2 list-decimal space-y-1 pl-5 text-[11px] text-text-muted">
                 <li>
-                  Baixa o <b>Motor</b> (botao 1), extrai o .zip numa pasta.
+                  Baixa o <b>Instalador</b> (botao 1) — eh um <code className="mono text-white">.exe</code> de ~230 KB.
                 </li>
                 <li>
-                  Dentro da pasta, da <b>duplo-clique</b> em{' '}
-                  <code className="mono text-white">INSTALAR.cmd</code>
-                  &nbsp;(se o Windows avisar, &quot;Mais informacoes&quot; →
-                  &quot;Executar assim mesmo&quot;). Ele baixa tudo (Python +
-                  IA + ffmpeg, ~600 MB, 1a vez), instala, inicia o motor e
-                  configura auto-start junto com o Windows.
+                  Da <b>duplo-clique</b> no{' '}
+                  <code className="mono text-white">.exe</code> baixado (se
+                  o Windows avisar, &quot;Mais informacoes&quot; → &quot;Executar
+                  assim mesmo&quot;). Ele se extrai automaticamente, baixa tudo
+                  (Python + IA + ffmpeg, ~500 MB, 1a vez), instala, inicia
+                  o motor e configura auto-start junto com o Windows.
                 </li>
                 <li>
                   Volta aqui. <b>Pronto</b> — a caixa fica verde
@@ -520,10 +520,9 @@ export default function RemoverElementosPage() {
               </ol>
               <p className="mono mt-2 text-[10px] text-text-muted">
                 Requer Windows 64-bit. O motor roda 100% no PC do usuario.
-                Download leve (~50 KB); o duplo-clique em{' '}
-                <code className="mono text-white">INSTALAR.cmd</code> baixa
-                Python + paddleocr + opencv + LaMa + ffmpeg (~600 MB, uma
-                vez, ~5-8 min) automaticamente.
+                Instalador leve (~230 KB); ao executar baixa Python +
+                paddleocr + opencv + LaMa + ffmpeg (~500 MB, uma vez,
+                ~10-12 min) automaticamente.
               </p>
             </details>
 
