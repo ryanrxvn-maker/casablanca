@@ -1,4 +1,4 @@
-# DarkoLab Subtitle Remover - instalador com TELA (design DARKO).
+﻿# DarkoLab Subtitle Remover - instalador com TELA (design DARKO).
 # Espelha o instalador do Downloader. O trabalho pesado roda num Job de
 # background; a janela WinForms so mostra "Instalando...", barra de progresso
 # e, no fim, o codigo de pareamento.
@@ -21,27 +21,52 @@ param($src,$dst,$pyVer,$status)
 $ErrorActionPreference='Stop'
 $ProgressPreference='SilentlyContinue'
 # pip imprime warnings com prefixo "ERROR:" no stderr (resolver
-# warnings, etc) que NAO sao erros fatais — eles tem exit code 0.
+# warnings, etc) que NAO sao erros fatais - eles tem exit code 0.
 # Em PS 7+ ($PSNativeCommandUseErrorActionPreference=true), isso
 # vira exception. Desligamos pra usar exit code como verdade.
 try { $PSNativeCommandUseErrorActionPreference = $false } catch {}
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
 function St($p,$m){ Set-Content -LiteralPath $status -Value ("$p|$m") -Encoding UTF8 }
 
-# Invocador robusto pra pip — confia no exit code, ignora stderr.
-function Invoke-Pip {
-  param([string]$py, [string[]]$Args)
-  $oldEAP = $ErrorActionPreference
-  $ErrorActionPreference = 'Continue'
-  $logOut = Join-Path $env:TEMP 'darko-pip.out'
-  $logErr = Join-Path $env:TEMP 'darko-pip.err'
-  $allArgs = @('-m','pip','install','--no-warn-script-location','--disable-pip-version-check') + $Args
-  $proc = Start-Process -FilePath $py -ArgumentList $allArgs -Wait -PassThru -NoNewWindow -RedirectStandardOutput $logOut -RedirectStandardError $logErr
-  $ErrorActionPreference = $oldEAP
+# Helper: escapa um argumento pra linha de comando do cmd.
+function Q { param([string]$s) '"' + ($s -replace '"', '""') + '"' }
+
+# Roda comando via arquivo .bat temporario que faz redirect OS-level.
+# Sem buffer de PowerShell, sem deadlock, sem problema de aspas
+# (cmd /c "..." come a primeira aspa, .bat nao tem esse bug).
+# Start-Process -NoNewWindow -RedirectStandardOutput trava em deadlock
+# quando o stdout enche enquanto o parent esta em WaitForExit (bug
+# conhecido do .NET Framework no Windows).
+function Invoke-Cmd {
+  param([string]$Exe, [string[]]$ExeArgs, [string]$Label='cmd')
+  $logOut = Join-Path $env:TEMP ('darko-' + $Label + '.out')
+  $logErr = Join-Path $env:TEMP ('darko-' + $Label + '.err')
+  $batPath = Join-Path $env:TEMP ('darko-' + $Label + '.bat')
+  # monta linha do comando, com escape de aspas em paths
+  $line = (Q $Exe)
+  foreach ($a in $ExeArgs) { $line += ' ' + (Q $a) }
+  $line += ' > ' + (Q $logOut) + ' 2> ' + (Q $logErr)
+  $bat = '@echo off' + [Environment]::NewLine + $line + [Environment]::NewLine + 'exit /b %ERRORLEVEL%'
+  Set-Content -LiteralPath $batPath -Value $bat -Encoding ASCII
+  $proc = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/c', $batPath) -Wait -PassThru -WindowStyle Hidden
+  Remove-Item $batPath -Force -ErrorAction SilentlyContinue
   if ($proc.ExitCode -ne 0) {
     $tail = (Get-Content $logErr -ErrorAction SilentlyContinue | Select-Object -Last 8) -join ' | '
-    throw ("pip install falhou (exit " + $proc.ExitCode + "): " + $tail)
+    throw ($Label + ' falhou (exit ' + $proc.ExitCode + '): ' + $tail)
   }
+}
+
+function Invoke-Pip {
+  param([string]$Py, [string[]]$Pkgs)
+  $allArgs = @('-m','pip','install',
+               '--no-warn-script-location','--disable-pip-version-check',
+               '--prefer-binary','--no-cache-dir') + $Pkgs
+  Invoke-Cmd $Py $allArgs 'pip'
+}
+
+function Invoke-Py {
+  param([string]$Py, [string[]]$PyArgs, [string]$Label='python')
+  Invoke-Cmd $Py $PyArgs $Label
 }
 try {
   St 3 'Preparando...'
@@ -82,34 +107,38 @@ try {
     }
   }
 
-  # ---- 2) pip via get-pip.py ----
-  $pipMarker = Join-Path $dst 'python\Scripts\pip.exe'
+  # ---- 2) pip via get-pip.py (com redirect pra nao travar buffer) ----
+  $pipMarker = Join-Path $dst 'python\Lib\site-packages\pip'
   if (-not (Test-Path $pipMarker)) {
-    St 20 'Instalando o pip...'
+    St 18 'Instalando o pip...'
     $gp = Join-Path $tmp 'get-pip.py'
     Invoke-WebRequest -UseBasicParsing -Uri 'https://bootstrap.pypa.io/get-pip.py' -OutFile $gp
-    $oldEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
-    $proc = Start-Process -FilePath $py -ArgumentList @($gp,'--no-warn-script-location') -Wait -PassThru -NoNewWindow
-    $ErrorActionPreference = $oldEAP
-    if ($proc.ExitCode -ne 0) { throw ("get-pip falhou (exit " + $proc.ExitCode + ")") }
+    Invoke-Py $py @($gp,'--no-warn-script-location') 'getpip'
   }
 
-  # ---- 3) deps Python (FastAPI + opencv + paddleocr + LaMa) ----
+  # ---- 3) deps Python - UMA CHAMADA pip pra acelerar resolver ----
+  # Pip baixa todos os wheels em paralelo numa mesma sessao HTTP e
+  # resolve dependencias uma so vez (vs 3 chamadas sequenciais).
+  # --prefer-binary forca wheels (sem compilacao de source code).
+  # --no-cache-dir evita IO desnecessario no Local AppData.
   $marker = Join-Path $dst 'python\Lib\site-packages\simple_lama_inpainting'
   if (-not (Test-Path $marker)) {
-    St 30 'Baixando o framework web...'
+    St 25 'Baixando IA e dependencias (parte maior, ~500 MB, 4-7 min)...'
+    # UMA chamada pip = pip baixa em paralelo numa sessao HTTP unica.
     # Pillow fixo em 9.5.x: simple-lama-inpainting 0.1.2 exige pillow<10.
-    Invoke-Pip $py @('fastapi==0.115.6','uvicorn[standard]==0.32.1','python-multipart==0.0.20','opencv-python==4.10.0.84','numpy==1.26.4','Pillow==9.5.0')
-    St 45 'Instalando IA de deteccao (PaddleOCR)...'
-    Invoke-Pip $py @('paddlepaddle==2.6.2','paddleocr==2.8.1')
-    St 65 'Instalando IA de inpainting (LaMa neural - parte maior)...'
-    Invoke-Pip $py @('torch==2.4.1','simple-lama-inpainting==0.1.2')
+    Invoke-Pip $py @(
+      'fastapi==0.115.6', 'uvicorn[standard]==0.32.1', 'python-multipart==0.0.20',
+      'opencv-python==4.10.0.84', 'numpy==1.26.4', 'Pillow==9.5.0',
+      'paddlepaddle==2.6.2', 'paddleocr==2.8.1',
+      'torch==2.4.1', 'simple-lama-inpainting==0.1.2'
+    )
+    St 75 'Componentes instalados.'
   }
 
   # ---- 4) ffmpeg.exe ----
   $ff = Join-Path $dst 'bin\ffmpeg.exe'
   if (-not (Test-Path $ff) -or (Get-Item $ff).Length -lt 10MB) {
-    St 85 'Baixando o conversor de midia...'
+    St 80 'Baixando o conversor de midia...'
     $fz = Join-Path $tmp 'ff.zip'
     Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip' -OutFile $fz
     Expand-Archive -LiteralPath $fz -DestinationPath (Join-Path $tmp 'ff') -Force
@@ -233,9 +262,13 @@ try {
   $f.Add_MouseDown($down); $f.Add_MouseMove($move); $f.Add_MouseUp($up)
   $brand.Add_MouseDown($down); $brand.Add_MouseMove($move); $brand.Add_MouseUp($up)
 
+  # Path do log do pip pra heartbeat enquanto baixa as deps gigantes
+  $script:pipLogPath = Join-Path $env:TEMP 'darko-pip.out'
+  $script:pipPhaseStart = $null  # quando o status virou "25"
+
   $script:spin=0
   $tmr=New-Object Windows.Forms.Timer
-  $tmr.Interval=160
+  $tmr.Interval=400
   $tmr.Add_Tick({
     $line=$null
     try { $line=(Get-Content -LiteralPath $status -Raw -ErrorAction Stop).Trim() } catch {}
@@ -245,7 +278,7 @@ try {
       $tmr.Stop()
       $fill.Width=$track.Width
       $st.Text='Pronto pra usar!'
-      $hint.Text='Abra o DarkoLab no navegador. A ferramenta ja conectou sozinha — sem precisar de codigo.'
+      $hint.Text='Abra o DarkoLab no navegador. A ferramenta ja conectou sozinha - sem precisar de codigo.'
       $btnClose.Visible=$true
     } elseif ($k[0] -eq 'ERR') {
       $tmr.Stop()
@@ -255,6 +288,32 @@ try {
       $btnClose.Visible=$true
     } else {
       $p=0; [int]::TryParse($k[0],[ref]$p) | Out-Null
+      # Fase pesada do pip: o worker fica em 25 enquanto pip baixa
+      # ~500MB. A UI vai animando 25->70 ao longo de 6 min + lendo o
+      # log do pip pra mostrar pacote sendo baixado em tempo real.
+      if ($p -eq 25) {
+        if (-not $script:pipPhaseStart) { $script:pipPhaseStart = Get-Date }
+        $elapsed = ((Get-Date) - $script:pipPhaseStart).TotalSeconds
+        # 6 min = 360s linear de 25 a 70
+        $p = [int](25 + [Math]::Min(45, $elapsed / 8.0))
+        # tenta ler o log do pip pra mensagem dinamica
+        $pkg = ''
+        try {
+          if (Test-Path $script:pipLogPath) {
+            $tail = Get-Content $script:pipLogPath -Tail 5 -ErrorAction Stop
+            $found = $tail | Where-Object { $_ -match '^(Downloading|Collecting|Installing\s+collected)' } | Select-Object -Last 1
+            if ($found) {
+              if ($found -match '^Downloading\s+(\S+?)-') { $pkg = 'Baixando ' + $Matches[1] + '...' }
+              elseif ($found -match '^Downloading\s+(\S+)') { $pkg = 'Baixando ' + $Matches[1].Split('/')[-1] + '...' }
+              elseif ($found -match '^Collecting\s+(\S+)') { $pkg = 'Coletando ' + $Matches[1] + '...' }
+              elseif ($found -match '^Installing\s+collected') { $pkg = 'Instalando wheels baixados...' }
+            }
+          }
+        } catch {}
+        if ($pkg) { $k = @('', $pkg) } else { $k = @('', $k[1]) }
+      } else {
+        $script:pipPhaseStart = $null
+      }
       $tw=[int]($track.Width * ([Math]::Max(2,[Math]::Min(100,$p)) / 100.0))
       if ($fill.Width -lt $tw) { $fill.Width=$tw }
       $dots='.' * (1 + ($script:spin % 3))
