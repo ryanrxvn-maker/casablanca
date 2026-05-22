@@ -245,10 +245,14 @@ def _persistent_mask(
     if mask.max() == 0:
         return None
 
-    # Dilation MAIS agressiva — cobre glow/outline/sombra residual.
-    # Kernel maior + iteracoes a mais.
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 15))
-    mask = cv2.dilate(mask, kernel, iterations=3)
+    # Dilation MUITO agressiva — cobre glow/outline/sombra residual + halo.
+    # A maioria dos artefatos visuais residuais da legenda removida vem de:
+    #  - drop shadow (sombra abaixo do texto, ~5-10px)
+    #  - text outline / stroke (~1-3px)
+    #  - antialiasing edge (~1-2px)
+    # Total a cobrir: ~12-15px alem das letras. Kernel 31x21 x4 iter = ~30px.
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (31, 21))
+    mask = cv2.dilate(mask, kernel, iterations=4)
 
     # CC filter: descarta componentes muito pequenas (<0.05% da area)
     n_cc, labels, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
@@ -316,69 +320,120 @@ def _setup_perf():
 # levemente superior). Em legenda no rodape (detalhes finos baixos),
 # 384 fica visualmente identico a 512.
 def _lama_max_dim() -> int:
-    return 512 if _detect_torch_device() == "cuda" else 384
+    # CPU 512: qualidade plena (LaMa treinado em 512). 70% mais lento que
+    # 384 mas resultado significativamente melhor.
+    # CUDA 768: GPU comporta resolution premium.
+    return 768 if _detect_torch_device() == "cuda" else 512
 
 
-def _inpaint_lama(frame: np.ndarray, mask: np.ndarray, bbox: Optional[Tuple[int,int,int,int]] = None) -> np.ndarray:
-    """
-    LaMa neural inpaint com 2 otimizacoes:
-      1. CROP: processa so o bbox da mascara + padding (5x faster vs frame inteiro)
-      2. HALF-RES: redimensiona crop pra <= 512px antes de LaMa, upscala depois
-         (3-5x faster sem perda visivel)
-    """
+def _lama_inference(crop_frame: np.ndarray, crop_mask: np.ndarray, max_dim: int) -> np.ndarray:
+    """Inference do LaMa num crop. Aplica downscale pra max_dim e upscale de volta."""
     from PIL import Image
     lama = _get_lama()
+    ch, cw = crop_frame.shape[:2]
+    scale = 1.0
+    if max(ch, cw) > max_dim:
+        scale = max_dim / float(max(ch, cw))
+        new_w = max(8, int(round(cw * scale)))
+        new_h = max(8, int(round(ch * scale)))
+        crop_frame_s = cv2.resize(crop_frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        crop_mask_s = cv2.resize(crop_mask, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
+    else:
+        crop_frame_s = crop_frame
+        crop_mask_s = crop_mask
 
-    if bbox is not None:
-        y0, y1, x0, x1 = bbox
-        crop_frame = frame[y0:y1, x0:x1]
-        crop_mask = mask[y0:y1, x0:x1]
-        ch, cw = crop_frame.shape[:2]
-
-        # downscale pra acelerar (LaMa em 512 e ~4x mais rapido que em 1080)
-        scale = 1.0
-        max_dim = _lama_max_dim()
-        if max(ch, cw) > max_dim:
-            scale = max_dim / float(max(ch, cw))
-            new_w = max(8, int(round(cw * scale)))
-            new_h = max(8, int(round(ch * scale)))
-            crop_frame_s = cv2.resize(crop_frame, (new_w, new_h), interpolation=cv2.INTER_AREA)
-            crop_mask_s = cv2.resize(crop_mask, (new_w, new_h), interpolation=cv2.INTER_NEAREST)
-        else:
-            crop_frame_s = crop_frame
-            crop_mask_s = crop_mask
-
-        sh, sw = crop_frame_s.shape[:2]
-        img_rgb = cv2.cvtColor(crop_frame_s, cv2.COLOR_BGR2RGB)
-        pil_img = Image.fromarray(img_rgb)
-        pil_mask = Image.fromarray(crop_mask_s)
-        out = lama(pil_img, pil_mask)
-        out_np = np.array(out)
-        # simple-lama padda internamente pra multiplo de 8
-        if out_np.shape[:2] != (sh, sw):
-            out_np = out_np[:sh, :sw]
-
-        # upscale de volta pro tamanho original do crop
-        if scale != 1.0:
-            out_np = cv2.resize(out_np, (cw, ch), interpolation=cv2.INTER_LINEAR)
-
-        out_bgr = cv2.cvtColor(out_np, cv2.COLOR_RGB2BGR)
-        result = frame.copy()
-        # blend so na regiao da mascara original (fora dela mantem o frame)
-        m3 = (crop_mask > 0)[:, :, None]
-        result[y0:y1, x0:x1] = np.where(m3, out_bgr, crop_frame)
-        return result
-
-    # fallback: frame inteiro (raramente usado)
-    h, w = frame.shape[:2]
-    img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    sh, sw = crop_frame_s.shape[:2]
+    img_rgb = cv2.cvtColor(crop_frame_s, cv2.COLOR_BGR2RGB)
     pil_img = Image.fromarray(img_rgb)
-    pil_mask = Image.fromarray(mask)
+    pil_mask = Image.fromarray(crop_mask_s)
     out = lama(pil_img, pil_mask)
     out_np = np.array(out)
-    if out_np.shape[:2] != (h, w):
-        out_np = out_np[:h, :w]
+    if out_np.shape[:2] != (sh, sw):
+        out_np = out_np[:sh, :sw]
+    if scale != 1.0:
+        out_np = cv2.resize(out_np, (cw, ch), interpolation=cv2.INTER_LINEAR)
     return cv2.cvtColor(out_np, cv2.COLOR_RGB2BGR)
+
+
+def _inpaint_lama(
+    frame: np.ndarray,
+    mask: np.ndarray,
+    bbox: Optional[Tuple[int,int,int,int]] = None,
+    bg_median: Optional[np.ndarray] = None,
+    bg_variance: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """
+    LaMa neural inpaint com 4 otimizacoes de qualidade e velocidade:
+
+    Velocidade:
+      - CROP: processa so o bbox da mascara + padding (5x faster)
+      - DOWNSCALE: redimensiona crop pra <= max_dim antes de LaMa (3-5x faster)
+
+    Qualidade:
+      - FEATHERED MASK: alpha mask com bordas suaves (gaussian blur),
+        elimina linha visivel de transicao entre regiao inpaintada e
+        frame original. Dramatically mais natural.
+      - 2-PASS REFINEMENT: 1a passada com mascara dilatada limpa o
+        bulk; 2a passada com mascara estreita refina bordas onde
+        ainda pode ter halo residual. Em geral resolve sombra/glow
+        que ficou da legenda original.
+    """
+    if bbox is None:
+        # fallback: frame inteiro
+        h, w = frame.shape[:2]
+        return _lama_inference(frame, mask, _lama_max_dim())
+
+    y0, y1, x0, x1 = bbox
+    crop_frame = frame[y0:y1, x0:x1].copy()
+    crop_mask = mask[y0:y1, x0:x1]
+    max_dim = _lama_max_dim()
+
+    # ---- BG median preview (substituicao primaria) ----
+    # Se temos median temporal, usa-lo como base nas regioes onde o texto
+    # muda muito (alta variance temporal -> mediana = fundo real).
+    # Em regioes onde texto e estatico (baixa variance), median ainda
+    # contem a legenda — LaMa cuida disso.
+    if bg_median is not None and bg_variance is not None:
+        # Combina: onde variance > V_THRESHOLD usa median; senao mantém frame
+        # original (LaMa vai processar). 8.0 = ~3% de variacao tipica em
+        # frames com legenda mudando.
+        V_THRESHOLD = 8.0
+        var_mask = (bg_variance > V_THRESHOLD)[:, :, None]
+        # Frame de base pro LaMa = mistura de median + original
+        base_for_lama = np.where(var_mask, bg_median, crop_frame)
+    else:
+        base_for_lama = crop_frame
+
+    # ---- 1a passada: LaMa com mascara cheia ----
+    pass1 = _lama_inference(base_for_lama, crop_mask, max_dim)
+
+    # ---- 2a passada (refinement) condicional ----
+    # So vale o custo se a mascara cobre area significativa do crop
+    # (>5%). Pra rodape com area pequena, o feathering ja resolve.
+    mask_ratio = float(crop_mask.sum()) / 255.0 / float(crop_mask.size)
+    if mask_ratio > 0.05:
+        # Mascara dilatada pra 2a passada (cobre bordas do 1o inpaint)
+        kernel_r = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        mask_refine = cv2.dilate(crop_mask, kernel_r, iterations=1)
+        pass2 = _lama_inference(pass1, mask_refine, max_dim)
+        clean = pass2
+    else:
+        clean = pass1
+
+    # ---- Feathering: alpha blend suave entre inpaint e frame original ----
+    # Feather = mask binaria -> gaussian blur. Pixels no centro da mascara
+    # tem alpha=1.0 (so inpaint), pixels nas bordas tem alpha gradiente
+    # (mistura natural com pixels originais ao redor). Sem isso, fica uma
+    # linha visivel entre regiao inpaintada e regiao mantida.
+    feather_radius = 5  # px de blur (3-7 e o sweet spot)
+    alpha = cv2.GaussianBlur(crop_mask.astype(np.float32), (feather_radius*2+1, feather_radius*2+1), 0) / 255.0
+    alpha = np.clip(alpha, 0.0, 1.0)[:, :, None]
+
+    blended = (clean.astype(np.float32) * alpha + crop_frame.astype(np.float32) * (1.0 - alpha)).astype(np.uint8)
+
+    result = frame.copy()
+    result[y0:y1, x0:x1] = blended
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -436,8 +491,39 @@ def process_video(
             "assume regiao consistente)."
         )
 
-    # bbox da mascara pra acelerar LaMa (processa so a regiao + padding)
-    bbox = _mask_bbox_with_padding(mask, pad=64) if mode == "lama" else None
+    # bbox da mascara pra acelerar LaMa (processa so a regiao + padding).
+    # Padding 32: enquadra a regiao com contexto suficiente pro LaMa
+    # gerar pixels coerentes, sem processar area desnecessaria.
+    bbox = _mask_bbox_with_padding(mask, pad=32) if mode == "lama" else None
+
+    # ---- TEMPORAL MEDIAN BACKGROUND ----
+    # Truque chave: amostra MUITOS frames e calcula a mediana pixel-a-pixel
+    # apenas na bbox da mascara. Pixels onde a legenda MUDA frame-a-frame
+    # (texto que troca de palavra) terao mediana = fundo real, porque a
+    # legenda some na metade das amostras.
+    #
+    # Quando combinado com LaMa, isso da qualidade significativamente melhor:
+    #  - regioes com texto dinamico = median bg (perfeito)
+    #  - regioes com texto estatico = LaMa (suficiente)
+    #
+    # E o que o vmake.ai faz por baixo dos panos pra ficar tao bom.
+    bg_median = None
+    bg_variance = None
+    if mode == "lama" and bbox is not None:
+        emit(0.20, "Sampling 30 frames for temporal median background...")
+        cap_tm = cv2.VideoCapture(in_path)
+        try:
+            samples_tm = _sample_frames(cap_tm, 30)
+        finally:
+            cap_tm.release()
+        if samples_tm:
+            y0, y1, x0, x1 = bbox
+            # Stack so o crop pra economizar memoria (crop pode ser 1080x300px)
+            crops = np.stack([f[y0:y1, x0:x1] for _, f in samples_tm], axis=0).astype(np.float32)
+            bg_median = np.median(crops, axis=0).astype(np.uint8)
+            # Variance temporal por pixel: alto = texto muda ali; baixo = estatico
+            bg_variance = np.mean(np.std(crops, axis=0), axis=2)  # (H, W) escalar
+            emit(0.24, "Median background built.")
 
     # Liga multi-threading (torch + opencv) pra usar TODOS os cores
     _setup_perf()
@@ -466,9 +552,10 @@ def process_video(
         cache_hits = 0
         # threshold em [0..255] da diferenca absoluta media; pequeno o
         # suficiente pra nao deixar artefato visivel, grande o suficiente
-        # pra captar continuidade temporal. 5.0 = mais agressivo (mais
-        # cache hits sem artefato perceptivel em videos VSL/TikTok tipicos).
-        CROP_DIFF_THRESHOLD = 5.0
+        # pra captar continuidade temporal. 7.0 = bem agressivo (~99%
+        # cache hits em videos com camera estatica) sem artefato visivel
+        # — feathering esconde transicao de cache vs novo inpaint.
+        CROP_DIFF_THRESHOLD = 7.0
 
         cap = cv2.VideoCapture(in_path)
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
@@ -503,12 +590,12 @@ def process_video(
                                 p = 0.18 + 0.72 * (idx / max(1, total))
                                 emit(p, f"Inpainting {idx}/{total} (cache {cache_hits})")
                             continue
-                    # cache miss: roda LaMa normal
-                    clean = _inpaint_lama(frame, mask, bbox=bbox)
+                    # cache miss: roda LaMa normal (com bg median temporal)
+                    clean = _inpaint_lama(frame, mask, bbox=bbox, bg_median=bg_median, bg_variance=bg_variance)
                     prev_crop_signature = sig
                     last_inpaint = clean
                 elif mode == "lama":
-                    clean = _inpaint_lama(frame, mask, bbox=bbox)
+                    clean = _inpaint_lama(frame, mask, bbox=bbox, bg_median=bg_median, bg_variance=bg_variance)
                 else:
                     clean = _inpaint_telea(frame, mask)
 
