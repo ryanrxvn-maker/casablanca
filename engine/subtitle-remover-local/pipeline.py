@@ -617,13 +617,15 @@ def process_video(
         # entre frames pra reconstruir textura (pele, cabelo, fundo).
         # ============================================================
         if mode == "sttn" and sttn is not None:
-            CHUNK_SIZE = 50  # frames por chunk (memoria-limitado em CPU)
+            # Chunks menores = feedback de progresso mais frequente.
+            # 25 frames eh sweet spot pra CPU (memoria OK + janela temporal
+            # suficiente pra STTN ter contexto temporal de qualidade).
+            CHUNK_SIZE = 25
             cap = cv2.VideoCapture(in_path)
             total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
             idx = 0
             try:
                 while True:
-                    # Le um chunk de frames
                     chunk_frames = []
                     for _ in range(CHUNK_SIZE):
                         ok, frame = cap.read()
@@ -633,12 +635,29 @@ def process_video(
                     if not chunk_frames:
                         break
 
+                    chunk_start = idx
+                    chunk_end = idx + len(chunk_frames)
                     emit(
-                        0.18 + 0.72 * (idx / max(1, total)),
-                        f"STTN inpaint chunk {idx}-{idx+len(chunk_frames)}/{total}",
+                        0.18 + 0.72 * (chunk_start / max(1, total)),
+                        f"STTN inpaint {chunk_start}-{chunk_end}/{total}",
                     )
-                    # STTN processa o chunk inteiro temporalmente
-                    cleaned = sttn(chunk_frames, mask)
+
+                    # Callback intra-chunk: emite progresso DENTRO do chunk
+                    # a cada window neighbor processada. Faz a barra
+                    # avancar suavemente em vez de pular de chunk em chunk.
+                    _last_pct = [-1]
+                    def _inner_progress(win, total_wins):
+                        done_in_chunk = min(len(chunk_frames),
+                                            int(win * len(chunk_frames) / max(1, total_wins)))
+                        global_done = chunk_start + done_in_chunk
+                        p = 0.18 + 0.72 * (global_done / max(1, total))
+                        # Throttle: so emite se mudou pelo menos 1%
+                        pct_now = int(p * 100)
+                        if pct_now != _last_pct[0]:
+                            _last_pct[0] = pct_now
+                            emit(p, f"STTN inpaint {global_done}/{total}")
+
+                    cleaned = sttn(chunk_frames, mask, on_progress=_inner_progress)
                     for f in cleaned:
                         out_writer.write(f)
                     idx += len(chunk_frames)
