@@ -22,7 +22,6 @@ import {
 } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import { pngToIco, pngFiles } from './installer/png-to-ico.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const pkg = path.join(here, 'pkg');
@@ -108,20 +107,6 @@ async function main() {
     { stdio: 'inherit' },
   );
 
-  log('gerando icone (ico) a partir dos PNGs da extensao...');
-  // Os PNGs da extensao (mesma marca DARKO) viram icon.ico do .exe.
-  const extIcons = path.join(here, '..', 'extension-downloader', 'icons');
-  const iconSet = pngFiles({
-    16: path.join(extIcons, 'icon-16.png'),
-    32: path.join(extIcons, 'icon-32.png'),
-    48: path.join(extIcons, 'icon-48.png'),
-    128: path.join(extIcons, 'icon-128.png'),
-  });
-  const icoBuf = pngToIco(iconSet);
-  const icoPath = path.join(here, 'installer', 'icon.ico');
-  writeFileSync(icoPath, icoBuf);
-
-  log('compilando DarkoDownloaderSetup.exe (csc.exe)...');
   const csc =
     'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe';
   if (!existsSync(csc)) {
@@ -129,6 +114,41 @@ async function main() {
       'csc.exe nao encontrado (.NET Framework 4 ausente). Esperado em: ' + csc,
     );
   }
+
+  log('compilando MakeIco.exe (utilitario PNG->ICO classico)...');
+  // ICO classico (BMP DIB) — Explorer/csc leem 100%. PNG-embedded ICO
+  // pode falhar em alguns parsers e e o motivo do icone aparecer
+  // branco/azul generico em alguns Windows.
+  const makeIcoExe = path.join(here, 'installer', 'MakeIco.exe');
+  execFileSync(
+    csc,
+    [
+      '/nologo',
+      '/target:exe',
+      '/platform:anycpu',
+      '/reference:System.Drawing.dll',
+      `/out:${makeIcoExe}`,
+      path.join(here, 'installer', 'MakeIco.cs'),
+    ],
+    { stdio: 'inherit' },
+  );
+
+  log('gerando icon.ico a partir dos PNGs da extensao (coelho DARKO)...');
+  const extIcons = path.join(here, '..', 'extension-downloader', 'icons');
+  const icoPath = path.join(here, 'installer', 'icon.ico');
+  execFileSync(
+    makeIcoExe,
+    [
+      icoPath,
+      path.join(extIcons, 'icon-16.png'),
+      path.join(extIcons, 'icon-32.png'),
+      path.join(extIcons, 'icon-48.png'),
+      path.join(extIcons, 'icon-128.png'),
+    ],
+    { stdio: 'inherit' },
+  );
+
+  log('compilando DarkoDownloaderSetup.exe (csc.exe)...');
   const exeOut = path.join(here, 'DarkoDownloaderSetup.exe');
   rmSync(exeOut, { force: true });
   // /resource:zip,DarkoLab.pkg.zip -> nome lido pelo Setup.cs

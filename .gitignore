@@ -1,49 +1,40 @@
-# dependencies
-/node_modules
-/.pnp
-.pnp.js
 
+# (Node/yt-dlp/ffmpeg/Chromium) sao baixados pelo Instalar.ps1 no PC.
+# (a rota /api/downloader-engine zipa esses arquivos). Os pesados
 # claude code session artifacts
+# debug
+# dependencies
+# downloader engine — artefatos de build
+# engine/pkg/ agora e LEVE (server.cjs + scripts, ~40KB) -> vai pro git
+# local env files
+# misc
+# next.js
+# production
+# scripts de teste descartaveis
+# testing
+# typescript
+# vercel
+*.pem
+*.tsbuildinfo
+.DS_Store
+.env
+.env*.local
+.pnp.js
+.vercel
 /.claude/scheduled_tasks.lock
 /.claude/worktrees/
-
-# testing
-/coverage
-/.test-tmp/
-
-# next.js
 /.next/
-/out/
-
-# production
+/.pnp
+/.test-tmp/
 /build
-
-# misc
-.DS_Store
-*.pem
-
-# debug
+/coverage
+/engine/dist/
+/engine/pkg.zip
+/node_modules
+/out/
+/scripts/_*.mjs
+engine/installer/MakeIco.exe
+next-env.d.ts
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-
-# local env files
-.env*.local
-.env
-
-# vercel
-.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
-# downloader engine — artefatos de build
-# engine/pkg/ agora e LEVE (server.cjs + scripts, ~40KB) -> vai pro git
-# (a rota /api/downloader-engine zipa esses arquivos). Os pesados
-# (Node/yt-dlp/ffmpeg/Chromium) sao baixados pelo Instalar.ps1 no PC.
-/engine/pkg.zip
-/engine/dist/
-
-# scripts de teste descartaveis
-/scripts/_*.mjs
