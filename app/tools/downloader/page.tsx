@@ -232,7 +232,7 @@ export default function DownloaderPage() {
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
               </span>
               <span className="text-lime">
-                Extensão DARKO LAB Downloader v{ext.version}
+                Extensão Auto Edit · Downloader v{ext.version}
               </span>
               <span
                 className={`mono ml-2 rounded-full px-2 py-0.5 text-[10px] uppercase ${
@@ -283,11 +283,11 @@ export default function DownloaderPage() {
                 Clica em <b>1. Instalar o Motor</b> e dá <b>duplo-clique</b>{' '}
                 no{' '}
                 <code className="mono text-white">
-                  DarkoDownloaderSetup.exe
+                  AutoEditDownloaderSetup.exe
                 </code>{' '}
-                (ícone DARKO). Se o Windows avisar (SmartScreen),
+                (ícone do coelho neon). Se o Windows avisar (SmartScreen),
                 &quot;Mais informações&quot; → &quot;Executar assim
-                mesmo&quot;. A UI DARKO mostra o progresso e finaliza com{' '}
+                mesmo&quot;. A janela mostra o progresso e finaliza com{' '}
                 <b>&quot;Instalado e vinculado!&quot;</b>.
               </li>
               <li>
@@ -321,25 +321,23 @@ export default function DownloaderPage() {
             <label className="label-field !mb-0" htmlFor="urls">
               Links (um por linha)
             </label>
-            {isAdmin && (
-              <button
-                type="button"
-                aria-label="Modo +18"
-                title={
-                  adult
-                    ? 'Modo +18 ativado (Full HD, otimizado)'
-                    : 'Ativar modo +18 (admin)'
-                }
-                onClick={() => setAdult((v) => !v)}
-                className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[8px] font-black leading-none tracking-tight transition-all duration-200 active:scale-90 ${
-                  adult
-                    ? 'border-red-500 bg-red-600 text-white shadow-[0_0_10px_rgba(220,38,38,0.6)]'
-                    : 'border-red-900/60 bg-transparent text-red-700/70 hover:border-red-600 hover:text-red-500'
-                }`}
-              >
-                +18
-              </button>
-            )}
+            <button
+              type="button"
+              aria-label="Modo +18"
+              title={
+                adult
+                  ? 'Modo +18 ativado'
+                  : 'Ativar modo +18'
+              }
+              onClick={() => setAdult((v) => !v)}
+              className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[8px] font-black leading-none tracking-tight transition-all duration-200 active:scale-90 ${
+                adult
+                  ? 'border-rose-500 bg-rose-600 text-white shadow-[0_0_10px_rgba(244,63,94,0.6)]'
+                  : 'border-rose-900/60 bg-transparent text-rose-700/70 hover:border-rose-500 hover:text-rose-400'
+              }`}
+            >
+              +18
+            </button>
           </div>
           <textarea
             id="urls"
@@ -358,12 +356,12 @@ export default function DownloaderPage() {
               {urls.length > 1 ? 's' : ''}
             </p>
           )}
-          {isAdmin && adult && (
-            <div className="mt-3 rounded-lg border border-red-900/50 bg-red-950/20 px-3 py-2">
-              <p className="mono text-[10px] uppercase tracking-widest text-red-400">
-                Modo +18 ativo — sites suportados (Full HD, otimizado)
+          {adult && (
+            <div className="mt-3 rounded-lg border border-rose-900/50 bg-rose-950/20 px-3 py-2">
+              <p className="mono text-[10px] uppercase tracking-widest text-rose-400">
+                Modo +18 ativo — sites suportados
               </p>
-              <div className="mono mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-red-300/80">
+              <div className="mono mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-rose-300/80">
                 {ADULT_SITES.map((s) => (
                   <span key={s}>{s}</span>
                 ))}

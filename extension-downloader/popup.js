@@ -68,16 +68,14 @@ async function refresh() {
 
   const eng = await refreshPair();
   $('engineDot').className = 'dot ' + (eng ? 'on' : 'off');
+  const lbl = $('engineLabel');
+  if (lbl) lbl.textContent = eng ? 'Online' : 'Conectando';
 
   if (!eng) return show('noEngine');
 
   show('appBox');
-  if (eng.allowAdult) {
-    $('adultBtn').classList.remove('hidden');
-  } else {
-    $('adultBtn').classList.add('hidden');
-    state.adult = false;
-  }
+  // +18 liberado pra todos
+  $('adultBtn').classList.remove('hidden');
 }
 
 $('retry').addEventListener('click', (e) => {
@@ -183,17 +181,23 @@ async function downloadOne(url, el) {
   }
 }
 
+function setDownloadLabel(text) {
+  // O botão tem estrutura HTML; só troca o texto do <span> interno.
+  const btn = $('go');
+  const labelSpan = btn.querySelector('.download-btn-content span:last-child');
+  if (labelSpan) labelSpan.textContent = text;
+}
+
 $('go').addEventListener('click', async () => {
   const urls = $('urls')
     .value.split(/[\n\s]+/)
     .map((s) => s.trim())
     .filter((s) => /^https?:\/\//i.test(s));
   if (!urls.length) return;
-  // garante token vivo antes de disparar batch
   await refreshPair();
   $('jobs').innerHTML = '';
   $('go').disabled = true;
-  $('go').textContent = 'Baixando…';
+  setDownloadLabel('Baixando…');
   const els = urls.map(addJob);
   let next = 0;
   const worker = async () => {
@@ -206,7 +210,7 @@ $('go').addEventListener('click', async () => {
     Array.from({ length: Math.min(3, urls.length) }, worker),
   );
   $('go').disabled = false;
-  $('go').textContent = 'Baixar';
+  setDownloadLabel('Baixar');
 });
 
 refresh();

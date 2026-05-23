@@ -513,12 +513,18 @@ body > * {
     border-top: none;
   }
 
-  /* Title profissional — Bricolage Grotesque, peso forte, leve negative tracking */
+  /* Title profissional — Bricolage Grotesque, peso forte, leve negative tracking.
+   * hyphens:none + overflow-wrap:normal evita quebrar palavras como "automático"
+   * no meio (problema visual). */
   .section-title {
     @apply text-3xl font-extrabold tracking-tight md:text-4xl;
     font-family: var(--font-tech), var(--font-display), system-ui;
     letter-spacing: -0.02em;
     line-height: 1.05;
+    hyphens: none;
+    -webkit-hyphens: none;
+    overflow-wrap: normal;
+    word-break: normal;
   }
 
   .hero-title {
@@ -526,6 +532,17 @@ body > * {
     font-family: var(--font-tech), var(--font-display), system-ui;
     letter-spacing: -0.03em;
     line-height: 1;
+    hyphens: none;
+    -webkit-hyphens: none;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+
+  .display-subtle {
+    hyphens: none;
+    -webkit-hyphens: none;
+    overflow-wrap: normal;
+    word-break: normal;
   }
 
   .display-subtle {

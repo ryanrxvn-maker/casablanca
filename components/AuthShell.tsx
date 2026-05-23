@@ -62,7 +62,7 @@ export function AuthShell({
               <SmokeText text="Vai dormir." className="block" />
             </h1>
             <p className="mt-5 max-w-[440px] text-[15px] leading-relaxed text-text-muted">
-              <SmokeText text="O estúdio fica acordado, editando por você." />
+              O estúdio fica acordado, editando por você.
             </p>
 
             <div className="mt-12 hidden lg:block">
@@ -105,9 +105,7 @@ export function AuthShell({
                   {title}
                 </h2>
                 {subtitle && (
-                  <p className="mt-2 text-[14.5px] text-text-muted">
-                    <SmokeText text={subtitle} />
-                  </p>
+                  <p className="mt-2 text-[14.5px] text-text-muted">{subtitle}</p>
                 )}
                 <div className="mt-6">{children}</div>
               </div>

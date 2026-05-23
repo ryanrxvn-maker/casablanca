@@ -9,6 +9,7 @@ import {
 import { MouseGlow } from '@/components/MouseGlow';
 import { RippleRoot } from '@/components/RippleRoot';
 import { FloatingOrbs } from '@/components/FloatingOrbs';
+import { WhatsAppFab } from '@/components/WhatsAppFab';
 import './globals.css';
 
 /**
@@ -76,6 +77,7 @@ export default function RootLayout({
         <MouseGlow />
         <RippleRoot />
         {children}
+        <WhatsAppFab />
       </body>
     </html>
   );

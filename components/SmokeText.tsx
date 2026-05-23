@@ -1,105 +1,108 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 /**
- * SmokeText — texto que vira fumaça no hover.
+ * SmokeText v3 — esfumaçado SUTIL que acompanha o mouse.
  *
- * Cada letra é um <span> independente. No hover, as letras se dissolvem
- * em sequência (stagger por índice) — translateY + scale + blur + opacity.
- * Quando o mouse sai, a sequência inverte.
+ * Em vez de "explodir" as letras na entrada do hover, agora calcula a
+ * distância de cada letra até o cursor e aplica um blur progressivo
+ * (mais perto do cursor = mais fumaça). A animação é leve, sem grandes
+ * deslocamentos. Quando o mouse sai, todas as letras voltam a 0 suave.
  *
- * Usado em:
- *  • Brand (wordmark da topbar/sidebar)
- *  • Landing (títulos, parágrafos, listas)
- *  • Login (subtítulos)
+ * Use APENAS em headlines grandes (h1/h2). Não usar em parágrafos,
+ * listas ou textos pequenos — fica visualmente carregado.
  */
 export function SmokeText({
   text,
   className = '',
-  /** Quando true, o texto é cor-no-gradient (default true) */
-  gradient = false,
 }: {
   text: string;
   className?: string;
-  gradient?: boolean;
 }) {
-  const [hover, setHover] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement | null>(null);
+  const lettersRef = useRef<Array<HTMLSpanElement | null>>([]);
+  const [active, setActive] = useState(false);
+
   const letters = Array.from(text);
+
+  // Recalcula intensidade por letra baseado na posição do mouse.
+  // Cada letra ganha --d (distância 0..1) que vira blur via CSS.
+  const onMove = (e: React.MouseEvent<HTMLSpanElement>) => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const wrapRect = wrap.getBoundingClientRect();
+    const mx = e.clientX;
+    const my = e.clientY;
+    const maxDist = Math.max(wrapRect.width * 0.4, 120);
+
+    for (const el of lettersRef.current) {
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const dx = cx - mx;
+      const dy = cy - my;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      // 0 = bem perto do mouse (fumaça forte), 1 = longe (normal)
+      const t = Math.min(1, dist / maxDist);
+      const intensity = 1 - t; // 0..1, alto = perto
+      el.style.setProperty('--d', String(intensity.toFixed(3)));
+    }
+  };
+
+  const onLeave = () => {
+    setActive(false);
+    for (const el of lettersRef.current) {
+      if (!el) continue;
+      el.style.setProperty('--d', '0');
+    }
+  };
 
   return (
     <span
+      ref={wrapRef}
       className={'smoke-text inline-block ' + className}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      data-state={hover ? 'gone' : 'idle'}
-      data-gradient={gradient ? 'on' : 'off'}
+      onMouseEnter={() => setActive(true)}
+      onMouseMove={onMove}
+      onMouseLeave={onLeave}
+      data-active={active ? 'on' : 'off'}
       aria-label={text}
     >
-      {letters.map((ch, i) => {
-        const isSpace = ch === ' ';
-        return (
-          <span
-            key={i}
-            className="smoke-letter inline-block"
-            aria-hidden
-            style={{
-              transitionDelay: hover ? `${i * 22}ms` : `${(letters.length - 1 - i) * 18}ms`,
-            }}
-          >
-            {isSpace ? ' ' : ch}
-          </span>
-        );
-      })}
+      {letters.map((ch, i) => (
+        <span
+          key={i}
+          ref={(el) => {
+            lettersRef.current[i] = el;
+          }}
+          className="smoke-letter inline-block"
+          aria-hidden
+        >
+          {ch === ' ' ? ' ' : ch}
+        </span>
+      ))}
 
       <style jsx>{`
         .smoke-text {
           position: relative;
           cursor: pointer;
         }
-        .smoke-text[data-gradient='on'] {
-          background: linear-gradient(135deg, #f5e8ff 0%, #c084fc 100%);
-          -webkit-background-clip: text;
-          background-clip: text;
-          -webkit-text-fill-color: transparent;
-        }
         .smoke-letter {
           display: inline-block;
-          will-change: transform, filter, opacity;
+          will-change: filter, transform, opacity;
+          --d: 0;
           transition:
-            transform 520ms cubic-bezier(0.22, 1, 0.36, 1),
-            filter 520ms cubic-bezier(0.22, 1, 0.36, 1),
-            opacity 520ms cubic-bezier(0.22, 1, 0.36, 1);
+            filter 350ms cubic-bezier(0.22, 1, 0.36, 1),
+            transform 350ms cubic-bezier(0.22, 1, 0.36, 1),
+            opacity 350ms cubic-bezier(0.22, 1, 0.36, 1);
         }
-        .smoke-text[data-state='gone'] .smoke-letter {
-          opacity: 0;
-          filter: blur(14px);
-          transform: translateY(-22px) translateX(var(--sx, 0px)) scale(1.35) rotate(var(--sr, 0deg));
-        }
-        .smoke-text .smoke-letter:nth-child(odd) {
-          --sx: -6px;
-          --sr: -8deg;
-        }
-        .smoke-text .smoke-letter:nth-child(even) {
-          --sx: 7px;
-          --sr: 9deg;
-        }
-        .smoke-text .smoke-letter:nth-child(3n) {
-          --sx: -3px;
-          --sr: 14deg;
-        }
-        .smoke-text .smoke-letter:nth-child(4n + 1) {
-          --sx: 9px;
-          --sr: -12deg;
-        }
-        .smoke-text .smoke-letter:nth-child(5n) {
-          --sx: -8px;
-          --sr: 6deg;
-        }
-        .smoke-text[data-state='idle'] .smoke-letter {
-          opacity: 1;
-          filter: blur(0);
-          transform: translateY(0) translateX(0) scale(1) rotate(0);
+        /* Quando há um valor --d > 0, a letra "fumacha" proporcionalmente.
+         * Blur máx 5px, lift máx -4px, opacity mín 0.55 — bem mais sutil
+         * que a versão anterior (era blur 14px, scale 1.35). */
+        .smoke-text[data-active='on'] .smoke-letter {
+          filter: blur(calc(var(--d) * 5px));
+          transform: translateY(calc(var(--d) * -4px)) scale(calc(1 + var(--d) * 0.08));
+          opacity: calc(1 - var(--d) * 0.45);
         }
       `}</style>
     </span>

@@ -109,15 +109,13 @@ function HeroSection() {
             </span>
           </h1>
 
-          <div
+          <p
             className="mt-6 max-w-[540px] text-[16px] leading-relaxed text-text-muted fade-in-up"
             style={{ animationDelay: '500ms' }}
           >
-            <SmokeText text="Ligue a automação, fache o notebook e vá viver." className="block" />
-            <span className="mt-1 block">
-              <SmokeText text="Acorde com B-roll, lipsync e legenda prontos." />
-            </span>
-          </div>
+            Ligue a automação, feche o notebook e vá viver.<br />
+            Acorde com B-roll e lipsync prontos.
+          </p>
 
           <div
             className="mt-8 flex flex-wrap items-center gap-3 fade-in-up"
@@ -135,9 +133,9 @@ function HeroSection() {
           <div className="mt-8 flex items-center gap-4 fade-in-up" style={{ animationDelay: '720ms' }}>
             <AvatarStack />
             <p className="text-[12.5px] leading-tight text-text-muted">
-              <SmokeText text="Estúdios automatizados" className="font-semibold text-white" />
+              <span className="font-semibold text-white">Estúdios automatizados</span>
               <br />
-              <SmokeText text="entregando 20× mais com a mesma equipe." />
+              entregando 20× mais com a mesma equipe.
             </p>
           </div>
         </div>
@@ -248,7 +246,7 @@ function AvatarStack() {
 function StatsRow() {
   const stats = [
     { value: '20×', label: 'mais rápido que editar à mão' },
-    { value: '–95%', label: 'do tempo no trabalho repetitivo' },
+    { value: '90%', label: 'do trabalho repetitivo no automático' },
     { value: '24/7', label: 'rodando enquanto você dorme' },
     { value: '1×', label: 'clique pra disparar o dia inteiro' },
   ];
@@ -270,7 +268,7 @@ function StatsRow() {
               {s.value}
             </div>
             <p className="mt-2 text-[12px] leading-snug text-text-muted">
-              <SmokeText text={s.label} />
+              {s.label}
             </p>
           </div>
         ))}
@@ -359,10 +357,9 @@ function PilotShowcase() {
           </h2>
 
           <p className="max-w-[560px] text-[15px] leading-relaxed text-white/80">
-            <SmokeText text="O Pilot lê os briefings no ClickUp e dispara os avatares por conta própria." className="block" />
-            <span className="block mt-2">
-              <SmokeText text="Você acorda no outro dia com tudo pronto pra revisar." />
-            </span>
+            O Pilot lê os briefings no ClickUp e dispara os avatares por conta própria.
+            <br />
+            Você acorda no outro dia com tudo pronto pra revisar.
           </p>
 
           <Link
@@ -525,10 +522,10 @@ function CapabilityCard({
           className="text-[18px] font-bold tracking-tight text-white"
           style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.01em' }}
         >
-          <SmokeText text={title} />
+          {title}
         </h3>
         <p className="mt-2 text-[14px] leading-relaxed text-text-muted">
-          <SmokeText text={desc} />
+          {desc}
         </p>
       </div>
     </div>
@@ -555,16 +552,15 @@ function ShowcaseSection() {
             </span>
           </h2>
           <p className="mt-5 max-w-[480px] text-[15px] leading-relaxed text-text-muted">
-            <SmokeText text="A fila roda em segundo plano enquanto você faz outra coisa." className="block" />
-            <span className="mt-2 block">
-              <SmokeText text="Você só volta pra revisar." />
-            </span>
+            A fila roda em segundo plano enquanto você faz outra coisa.
+            <br />
+            Você só volta pra revisar.
           </p>
           <ul className="mt-7 space-y-3">
             {[
               'Tudo roda no seu computador. Sem servidor remoto.',
               'Os arquivos nunca saem da sua máquina.',
-              'Você usa suas próprias chaves de IA, no seu ritmo.',
+              'Você usa suas próprias chaves de IA, em ambiente seguro.',
               'Sem assinatura escondida. Sem letra miúda.',
             ].map((line, i) => (
               <li
@@ -573,9 +569,7 @@ function ShowcaseSection() {
                 style={{ animationDelay: `${i * 80}ms` }}
               >
                 <CheckMark />
-                <span className="text-[14.5px] text-white">
-                  <SmokeText text={line} />
-                </span>
+                <span className="text-[14.5px] text-white">{line}</span>
               </li>
             ))}
           </ul>
@@ -706,7 +700,7 @@ function FinalCTA() {
             <SmokeText text="Pronto pra automatizar?" />
           </h2>
           <p className="mx-auto mt-4 max-w-[540px] text-[15.5px] leading-relaxed text-white/75">
-            <SmokeText text="Cria a conta, liga a fila e vai viver. Resto é robô." />
+            Cria a conta, liga a fila e vai viver. Resto é robô.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Link href="/login" className="btn-primary group text-base">

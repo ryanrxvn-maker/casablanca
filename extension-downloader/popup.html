@@ -3,18 +3,34 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="popup.css" />
   </head>
   <body>
-    <header>
-      <div class="brand">DARKO<span>LAB</span> · Downloader</div>
-      <div id="engineDot" class="dot off" title="motor"></div>
+    <!-- Atmosfera de fundo -->
+    <div class="bg-mesh" aria-hidden="true"></div>
+    <div class="bg-grid" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <div class="brand">
+        <img src="icons/icon-32.png" alt="" class="brand-logo" />
+        <span class="brand-text">
+          <span class="brand-name">Auto Edit</span>
+          <span class="brand-sub">Downloader</span>
+        </span>
+      </div>
+      <div class="status">
+        <span id="engineDot" class="dot off" title="Motor"></span>
+        <span id="engineLabel">Conectando</span>
+      </div>
     </header>
 
     <main>
-      <!-- App -->
       <section id="appBox" class="hidden">
-        <label class="lbl">Links (um por linha)</label>
+        <label class="lbl">Links · um por linha</label>
         <textarea
           id="urls"
           rows="4"
@@ -27,9 +43,9 @@ https://instagram.com/reel/..."
           <div>
             <label class="lbl">Formato</label>
             <div id="modes" class="chips">
-              <button data-v="video" class="chip on">Vídeo (MP4)</button>
-              <button data-v="audio-mp3" class="chip">Áudio (MP3)</button>
-              <button data-v="audio-wav" class="chip">Áudio (WAV)</button>
+              <button data-v="video" class="chip on">Vídeo</button>
+              <button data-v="audio-mp3" class="chip">MP3</button>
+              <button data-v="audio-wav" class="chip">WAV</button>
             </div>
           </div>
           <div>
@@ -38,25 +54,46 @@ https://instagram.com/reel/..."
               <button data-v="1080" class="chip on">1080p</button>
               <button data-v="720" class="chip">720p</button>
               <button data-v="480" class="chip">480p</button>
-              <button data-v="best" class="chip">Máxima</button>
+              <button data-v="best" class="chip">Máx</button>
             </div>
           </div>
         </div>
 
-        <button id="adultBtn" class="adult hidden" title="Modo +18">+18</button>
+        <div class="adult-row">
+          <button id="adultBtn" class="adult" title="Modo +18">+18</button>
+          <span class="adult-hint" id="adultHint">Pra conteúdo adulto</span>
+        </div>
         <div id="adultList" class="adultlist hidden"></div>
 
-        <button id="go" class="primary big">Baixar</button>
+        <!-- Botão de download com loop de fumaça -->
+        <button id="go" class="download-btn">
+          <span class="download-btn-glow" aria-hidden="true"></span>
+          <span class="download-btn-smoke" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+            <span></span>
+          </span>
+          <span class="download-btn-content">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3v12" />
+              <path d="M7 10l5 5 5-5" />
+              <path d="M5 21h14" />
+            </svg>
+            <span>Baixar</span>
+          </span>
+        </button>
+
         <div id="jobs" class="jobs"></div>
       </section>
 
       <section id="noEngine" class="card hidden">
         <p class="muted">
           <span class="d-dot-pulse"></span>
-          <b>Conectando ao motor…</b> o DarkoLab Downloader sobe junto
-          com o Windows e a extensão se conecta sozinha — sem código,
-          sem pareamento manual. Se nunca subir, abra
-          <b>DarkoDownloader.cmd</b> ou
+          <b>Conectando ao motor…</b><br />
+          O Auto Edit Downloader sobe junto com o Windows e a extensão
+          se conecta sozinha — sem pareamento manual. Se não subir,
+          abra <b>AutoEditDownloader.cmd</b> ou
           <a id="retry" href="#">tente de novo</a>.
         </p>
       </section>
