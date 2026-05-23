@@ -51,6 +51,7 @@ import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
 import { recallByVoiceName, rememberPairing, normalizeVoiceName, recallAvatarVoice, rememberAvatarVoice } from '@/lib/voice-avatar-memory';
 import { Toggle3D } from '@/components/Toggle3D';
 import { ToggleRound3D, WirelessIcon, ScissorsIcon } from '@/components/ToggleRound3D';
+import { IconClickUpPilot } from '@/components/ToolIcons';
 import { getPilotTeam, setPilotTeam, getPilotEditor, setPilotEditor } from '@/lib/clickup-pilot-config';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
 import { runMagnificPipeline, parseMagnificPrompts } from '@/lib/magnific-pipeline';
@@ -535,10 +536,12 @@ export default function ClickUpPilotPage() {
   const [statusFilter, setStatusFilterRaw] = useState(DEFAULT_EDIT_STATUSES.join(','));
 
   // Filtros de data + prioridade (client-side, aplicados depois de listTasks)
-  type DateFilter = 'all' | 'today' | 'overdue' | 'next7' | 'next30';
+  type DateFilter = 'all' | 'today' | 'yesterday' | 'overdue' | 'next7' | 'next30' | 'specific';
   type PriorityFilter = 'all' | 'urgent' | 'high';
   const [dateFilter, setDateFilter] = useState<DateFilter>('all');
   const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('all');
+  // Data específica (YYYY-MM-DD) — usada quando dateFilter === 'specific'
+  const [specificDate, setSpecificDate] = useState<string>('');
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const stored = localStorage.getItem(STATUS_FILTER_KEY);
@@ -3447,40 +3450,126 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
     <>
       <ToolShell
         title="ClickUp Pilot"
-        eyebrow="AUTOMAÇÃO"
-        description="Conecta no seu ClickUp, lê as tarefas e gera os avatares automaticamente."
-        hue="rgba(200,255,0,0.4)"
+        eyebrow="AUTOMAÇÃO · ORQUESTRADOR"
+        description="O cérebro do estúdio. Conecta no ClickUp, lê cada task e dispara avatares, B-rolls, decupagem e camuflagem — tudo em fila, sem você abrir uma aba sequer."
+        hue="rgba(200,255,0,0.45)"
+        icon={<IconClickUpPilot size={56} />}
       >
-          {/* Setup status — todo o config (token + workspace + editor + status filter)
-           *  fica em /configuracoes/clickup-pilot. Aqui so mostramos um chip status. */}
+          {/* Command Center — chip de status + métricas ao vivo */}
           {(() => {
             const setupOK = hasToken && selectedTeam && selectedEditor;
-            if (setupOK) {
-              return (
-                <div className="mb-5 flex items-center justify-between rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-2 text-xs">
-                  <span className="text-lime">
-                    ✓ Setup OK
-                    <span className="ml-2 text-text-muted">
-                      · {currentTeam?.name || '?'} · {editors.find(u => String(u.id) === selectedEditor)?.username || authUser?.username || '?'}
-                    </span>
-                  </span>
-                  <a
-                    href="/configuracoes/clickup-pilot"
-                    className="rounded-md border border-line-strong px-2 py-0.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
-                  >
-                    Configurar
-                  </a>
-                </div>
-              );
-            }
+            const editorName = editors.find(u => String(u.id) === selectedEditor)?.username || authUser?.username || '?';
             return (
-              <div className="mb-5 flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-fuchsia-500/40 bg-fuchsia-500/5 px-4 py-3 text-xs">
-                <span className="text-fuchsia-200">
-                  ⚙ Configure ClickUp Pilot pra comecar — {!hasToken ? 'falta token' : 'falta workspace/editor'}
-                </span>
-                <a href="/configuracoes/clickup-pilot" className="btn-primary !py-1 !px-3 !text-xs">
-                  Ir pras configuracoes →
-                </a>
+              <div
+                className="cp-command-center mb-5 relative overflow-hidden rounded-[18px] border p-4 md:p-5"
+                style={{
+                  borderColor: setupOK ? 'rgba(200,255,0,0.35)' : 'rgba(232,121,249,0.35)',
+                  background:
+                    'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, #15151a, #0c0c10)',
+                }}
+              >
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full opacity-50 blur-3xl"
+                  style={{
+                    background: setupOK ? 'rgba(200,255,0,0.45)' : 'rgba(232,121,249,0.45)',
+                  }}
+                />
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 opacity-[0.04]"
+                  style={{
+                    backgroundImage:
+                      'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)',
+                    backgroundSize: '30px 30px',
+                  }}
+                />
+                <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={
+                        'relative flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] border ' +
+                        (setupOK ? 'border-lime/60 bg-lime/10' : 'border-fuchsia-500/60 bg-fuchsia-500/10')
+                      }
+                      style={{
+                        boxShadow: setupOK
+                          ? '0 0 22px -6px rgba(200,255,0,0.55), inset 0 1px 0 rgba(255,255,255,0.1)'
+                          : '0 0 22px -6px rgba(232,121,249,0.55), inset 0 1px 0 rgba(255,255,255,0.1)',
+                      }}
+                    >
+                      <span className="relative flex h-2.5 w-2.5">
+                        <span
+                          className={
+                            'absolute inline-flex h-full w-full animate-ping rounded-full opacity-60 ' +
+                            (setupOK ? 'bg-lime' : 'bg-fuchsia-400')
+                          }
+                        />
+                        <span
+                          className={
+                            'relative inline-flex h-2.5 w-2.5 rounded-full ' +
+                            (setupOK ? 'bg-lime' : 'bg-fuchsia-400')
+                          }
+                          style={{
+                            boxShadow: setupOK
+                              ? '0 0 10px rgba(200,255,0,0.9)'
+                              : '0 0 10px rgba(232,121,249,0.9)',
+                          }}
+                        />
+                      </span>
+                    </div>
+                    <div className="min-w-0">
+                      <div
+                        className="text-[10.5px] font-bold uppercase tracking-[0.22em] text-text-muted"
+                        style={{ fontFamily: 'var(--font-tech)' }}
+                      >
+                        {setupOK ? 'Pilot Online' : 'Pilot Offline'}
+                      </div>
+                      <div
+                        className="mt-0.5 truncate text-[16px] font-bold tracking-tight text-white"
+                        style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.015em' }}
+                      >
+                        {setupOK ? (currentTeam?.name || '—') : 'Configure pra começar'}
+                      </div>
+                      <div className="mt-0.5 text-[11.5px] text-text-muted">
+                        {setupOK ? (
+                          <>
+                            Editor:{' '}
+                            <span className="mono text-white">{editorName}</span>
+                            {tasks.length > 0 ? (
+                              <>
+                                {' · '}
+                                <span className="mono text-lime">{tasks.length}</span> tasks
+                                {bulkMode && selectedTaskIds.size > 0 ? (
+                                  <>
+                                    {' · '}
+                                    <span className="mono text-fuchsia-300">{selectedTaskIds.size}</span> sel
+                                  </>
+                                ) : null}
+                              </>
+                            ) : null}
+                          </>
+                        ) : (
+                          <>{!hasToken ? 'Cole o token ClickUp pra autenticar' : 'Falta workspace ou editor'}</>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <a
+                      href="/configuracoes/clickup-pilot"
+                      className={
+                        'group inline-flex items-center gap-2 rounded-[12px] border px-3.5 py-2 text-[11px] font-bold uppercase tracking-[0.16em] transition-all ' +
+                        (setupOK
+                          ? 'border-line-strong text-text-muted hover:border-lime hover:text-lime'
+                          : 'border-fuchsia-500/65 bg-fuchsia-500/15 text-fuchsia-100 hover:bg-fuchsia-500/25')
+                      }
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      {setupOK ? 'Configurar' : 'Configurar agora'}
+                      <span className="transition-transform group-hover:translate-x-1">→</span>
+                    </a>
+                  </div>
+                </div>
               </div>
             );
           })()}
@@ -3511,8 +3600,28 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
           {hasToken && selectedTeam && selectedEditor ? (
             <div className="grid gap-6">
               {/* Modos + Carregar tasks (UI principal enxuta) */}
-              <section>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <section
+                className="cp-modes-bar relative overflow-hidden rounded-[18px] border border-line/60 p-4 md:p-5"
+                style={{
+                  background:
+                    'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, #15151a, #0c0c10)',
+                }}
+              >
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full opacity-35 blur-3xl"
+                  style={{ background: 'rgba(167,139,250,0.45)' }}
+                />
+                <div className="relative mb-3 flex items-center gap-2">
+                  <span
+                    className="text-[10.5px] font-bold uppercase tracking-[0.22em] text-violet"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    Modos de geração
+                  </span>
+                  <span className="h-px flex-1 bg-gradient-to-r from-violet/30 via-line to-transparent" />
+                </div>
+                <div className="relative grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <Toggle3D
                     on={camuflagemMode}
                     onChange={setCamuflagemMode}
@@ -3570,17 +3679,48 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                   </div>
                 ) : null}
 
-                <div className="mt-4 flex flex-wrap items-center gap-2">
+                <div className="mt-5 flex flex-wrap items-center gap-3">
                   <button
                     type="button"
                     onClick={loadTasks}
                     disabled={loadingTasks}
-                    className="btn-primary"
+                    className="cp-load-cta group relative overflow-hidden rounded-[14px] border border-lime/60 px-5 py-3 text-[13px] font-bold uppercase tracking-[0.16em] text-black transition-all disabled:opacity-70"
+                    style={{
+                      fontFamily: 'var(--font-tech)',
+                      background:
+                        'linear-gradient(135deg, #c8ff00 0%, #a3e635 100%)',
+                      boxShadow:
+                        '0 0 28px -6px rgba(200,255,0,0.55), inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.2)',
+                    }}
                   >
-                    {loadingTasks ? 'Carregando...' : 'Carregar tasks'}
+                    <span className="relative z-10 flex items-center gap-2">
+                      {loadingTasks ? (
+                        <>
+                          <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-black/60 border-t-transparent" />
+                          Carregando…
+                        </>
+                      ) : (
+                        <>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 12a9 9 0 1 1-9-9" />
+                            <path d="M21 3v6h-6" />
+                          </svg>
+                          Carregar tasks
+                          <span className="transition-transform group-hover:translate-x-1">→</span>
+                        </>
+                      )}
+                    </span>
+                    <span
+                      aria-hidden
+                      className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/45 to-transparent transition-transform duration-700 group-hover:translate-x-full"
+                    />
                   </button>
-                  <a href="/configuracoes/clickup-pilot" className="mono text-[10px] uppercase tracking-widest text-text-muted hover:text-lime">
-                    Configurar workspace, editor e filtros →
+                  <a
+                    href="/configuracoes/clickup-pilot"
+                    className="mono inline-flex items-center gap-2 rounded-full border border-line-strong px-3.5 py-1.5 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime"
+                  >
+                    Configurar workspace, editor e filtros
+                    <span>→</span>
                   </a>
                 </div>
               </section>
@@ -3588,10 +3728,36 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
               {/* Lista de tasks */}
               {tasks.length > 0 ? (
                 <section>
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <h2 className="label-field !mb-0">Tasks ({tasks.length})</h2>
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <h2
+                        className="text-[20px] font-extrabold tracking-tight text-white"
+                        style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.015em' }}
+                      >
+                        Tasks
+                      </h2>
+                      <span
+                        className="mono rounded-full border border-lime/45 bg-lime/10 px-2.5 py-0.5 text-[11px] font-bold text-lime"
+                        style={{ boxShadow: '0 0 12px -4px rgba(200,255,0,0.45)' }}
+                      >
+                        {tasks.length}
+                      </span>
+                      {bulkMode && selectedTaskIds.size > 0 ? (
+                        <span className="mono rounded-full border border-fuchsia-500/45 bg-fuchsia-500/10 px-2.5 py-0.5 text-[11px] font-bold text-fuchsia-200">
+                          {selectedTaskIds.size} sel
+                        </span>
+                      ) : null}
+                    </div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <label className="mono flex cursor-pointer items-center gap-1.5 text-[10px] uppercase tracking-widest text-text-muted">
+                      <label
+                        className={
+                          'group flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.16em] transition-all ' +
+                          (bulkMode
+                            ? 'border-fuchsia-500/65 bg-fuchsia-500/15 text-fuchsia-100'
+                            : 'border-line-strong text-text-muted hover:border-fuchsia-500/45 hover:text-fuchsia-200')
+                        }
+                        style={{ fontFamily: 'var(--font-tech)' }}
+                      >
                         <input
                           type="checkbox"
                           checked={bulkMode}
@@ -3605,7 +3771,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                           <button
                             type="button"
                             onClick={selectAllTasks}
-                            className="mono rounded-md border border-line-strong px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
+                            className="mono rounded-full border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime"
                           >
                             Selecionar todas
                           </button>
@@ -3613,7 +3779,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                             type="button"
                             onClick={clearSelected}
                             disabled={selectedTaskIds.size === 0}
-                            className="mono rounded-md border border-line-strong px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300 disabled:opacity-40"
+                            className="mono rounded-full border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-red-500/60 hover:text-red-300 disabled:opacity-40"
                           >
                             Limpar
                           </button>
@@ -3621,53 +3787,181 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                       ) : null}
                     </div>
                   </div>
-                  {/* Filtros de data + prioridade */}
-                  <div className="mb-3 grid gap-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="mono text-[9px] uppercase tracking-widest text-text-muted">Período:</span>
-                      {([
-                        { id: 'all' as const, label: 'Todos' },
-                        { id: 'today' as const, label: 'Hoje' },
-                        { id: 'overdue' as const, label: '⚠ Atrasadas' },
-                        { id: 'next7' as const, label: 'Próx 7d' },
-                        { id: 'next30' as const, label: 'Próx 30d' },
-                      ]).map((f) => (
-                        <button
-                          key={f.id}
-                          type="button"
-                          onClick={() => setDateFilter(f.id)}
-                          className={
-                            'mono rounded-md px-2 py-1 text-[10px] uppercase tracking-widest transition ' +
-                            (dateFilter === f.id
-                              ? 'border border-lime bg-lime/20 text-lime'
-                              : 'border border-line-strong text-text-muted hover:border-lime hover:text-white')
-                          }
+                  {/* Filtros premium — Período + Prioridade + Data específica */}
+                  <div
+                    className="cp-filters-bar mb-4 relative overflow-hidden rounded-[16px] border border-line/60 p-4"
+                    style={{
+                      background:
+                        'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, #15151a, #0c0c10)',
+                    }}
+                  >
+                    <div
+                      aria-hidden
+                      className="pointer-events-none absolute -left-12 -top-12 h-40 w-40 rounded-full opacity-40 blur-3xl"
+                      style={{ background: 'rgba(200,255,0,0.35)' }}
+                    />
+                    <div className="relative">
+                      <div className="mb-3 flex items-center gap-2">
+                        <span
+                          className="text-[10.5px] font-bold uppercase tracking-[0.22em] text-lime"
+                          style={{ fontFamily: 'var(--font-tech)' }}
                         >
-                          {f.label}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="mono text-[9px] uppercase tracking-widest text-text-muted">Prioridade:</span>
-                      {([
-                        { id: 'all' as const, label: 'Todas' },
-                        { id: 'urgent' as const, label: '🔴 Urgent' },
-                        { id: 'high' as const, label: '🟠 High' },
-                      ]).map((f) => (
-                        <button
-                          key={f.id}
-                          type="button"
-                          onClick={() => setPriorityFilter(f.id)}
-                          className={
-                            'mono rounded-md px-2 py-1 text-[10px] uppercase tracking-widest transition ' +
-                            (priorityFilter === f.id
-                              ? 'border border-fuchsia-500 bg-fuchsia-500/20 text-fuchsia-200'
-                              : 'border border-line-strong text-text-muted hover:border-fuchsia-500 hover:text-white')
-                          }
+                          Período
+                        </span>
+                        <span className="h-px flex-1 bg-gradient-to-r from-lime/30 via-line to-transparent" />
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {([
+                          { id: 'all' as const, label: 'Todos', sub: 'sem filtro' },
+                          { id: 'today' as const, label: 'Hoje', sub: 'due = hoje' },
+                          { id: 'yesterday' as const, label: 'Ontem', sub: 'due = ontem' },
+                          { id: 'overdue' as const, label: 'Atrasadas', sub: '⚠ passado' },
+                          { id: 'next7' as const, label: 'Próx 7d', sub: '+ 1 semana' },
+                          { id: 'next30' as const, label: 'Próx 30d', sub: '+ 1 mês' },
+                          { id: 'specific' as const, label: 'Data específica', sub: 'YYYY-MM-DD' },
+                        ]).map((f) => {
+                          const active = dateFilter === f.id;
+                          return (
+                            <button
+                              key={f.id}
+                              type="button"
+                              onClick={() => setDateFilter(f.id)}
+                              className={
+                                'group relative overflow-hidden rounded-[12px] border px-3 py-2 text-left transition-all duration-200 ' +
+                                (active
+                                  ? 'border-lime/65 bg-lime/12'
+                                  : 'border-line-strong bg-bg/40 hover:border-lime/45 hover:-translate-y-[1px]')
+                              }
+                              style={
+                                active
+                                  ? { boxShadow: '0 0 22px -6px rgba(200,255,0,0.55)' }
+                                  : undefined
+                              }
+                            >
+                              <div
+                                className="text-[11.5px] font-bold tracking-tight text-white"
+                                style={{ fontFamily: 'var(--font-tech)' }}
+                              >
+                                {f.label}
+                              </div>
+                              <div className="mono mt-0.5 text-[9px] uppercase tracking-widest text-text-muted">
+                                {f.sub}
+                              </div>
+                              {active ? (
+                                <span
+                                  aria-hidden
+                                  className="absolute right-2 top-2 inline-block h-1.5 w-1.5 rounded-full bg-lime"
+                                  style={{ boxShadow: '0 0 8px rgba(200,255,0,0.9)' }}
+                                />
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Date picker — aparece só se 'specific' selecionado */}
+                      {dateFilter === 'specific' ? (
+                        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-[12px] border border-lime/40 bg-lime/5 px-3 py-2.5">
+                          <span
+                            className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-lime"
+                            style={{ fontFamily: 'var(--font-tech)' }}
+                          >
+                            Escolher data
+                          </span>
+                          <input
+                            type="date"
+                            value={specificDate}
+                            onChange={(e) => setSpecificDate(e.target.value)}
+                            className="rounded-[8px] border border-lime/40 bg-black/40 px-3 py-1.5 text-[12px] text-white mono outline-none focus:border-lime/70"
+                            style={{ colorScheme: 'dark' }}
+                          />
+                          {specificDate ? (
+                            <button
+                              type="button"
+                              onClick={() => setSpecificDate('')}
+                              className="mono rounded-full border border-line-strong px-2.5 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
+                            >
+                              ✕ limpar
+                            </button>
+                          ) : (
+                            <span className="mono text-[10px] uppercase tracking-widest text-text-muted">
+                              ↑ escolha pra filtrar
+                            </span>
+                          )}
+                          <div className="ml-auto flex flex-wrap gap-1.5">
+                            {(() => {
+                              const fmt = (d: Date) => d.toISOString().slice(0, 10);
+                              const today = new Date();
+                              const presets = [-2, -3, -7, -14].map((delta) => {
+                                const d = new Date(today);
+                                d.setDate(today.getDate() + delta);
+                                return { date: fmt(d), label: `${Math.abs(delta)}d atrás` };
+                              });
+                              return presets.map((p) => (
+                                <button
+                                  key={p.date}
+                                  type="button"
+                                  onClick={() => setSpecificDate(p.date)}
+                                  className={
+                                    'mono rounded-full border px-2.5 py-0.5 text-[10px] uppercase tracking-widest transition ' +
+                                    (specificDate === p.date
+                                      ? 'border-lime bg-lime/15 text-lime'
+                                      : 'border-line-strong text-text-muted hover:border-lime hover:text-lime')
+                                  }
+                                >
+                                  {p.label}
+                                </button>
+                              ));
+                            })()}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <div className="mt-4 mb-3 flex items-center gap-2">
+                        <span
+                          className="text-[10.5px] font-bold uppercase tracking-[0.22em] text-fuchsia-300"
+                          style={{ fontFamily: 'var(--font-tech)' }}
                         >
-                          {f.label}
-                        </button>
-                      ))}
+                          Prioridade
+                        </span>
+                        <span className="h-px flex-1 bg-gradient-to-r from-fuchsia-500/30 via-line to-transparent" />
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {([
+                          { id: 'all' as const, label: 'Todas', dot: 'rgba(148,163,184,0.7)' },
+                          { id: 'urgent' as const, label: 'Urgent', dot: '#ef4444' },
+                          { id: 'high' as const, label: 'High', dot: '#f97316' },
+                        ]).map((f) => {
+                          const active = priorityFilter === f.id;
+                          return (
+                            <button
+                              key={f.id}
+                              type="button"
+                              onClick={() => setPriorityFilter(f.id)}
+                              className={
+                                'group flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.14em] transition-all ' +
+                                (active
+                                  ? 'border-fuchsia-500/65 bg-fuchsia-500/15 text-fuchsia-100'
+                                  : 'border-line-strong text-text-muted hover:border-fuchsia-500/45 hover:text-white')
+                              }
+                              style={
+                                active
+                                  ? { boxShadow: '0 0 18px -6px rgba(236,72,153,0.55)', fontFamily: 'var(--font-tech)' }
+                                  : { fontFamily: 'var(--font-tech)' }
+                              }
+                            >
+                              <span
+                                className="inline-block h-2 w-2 rounded-full"
+                                style={{
+                                  background: f.dot,
+                                  boxShadow: active ? `0 0 8px ${f.dot}` : undefined,
+                                }}
+                              />
+                              {f.label}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                   <ul className="grid gap-2">
@@ -3683,14 +3977,25 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                           const today = new Date();
                           today.setHours(0, 0, 0, 0);
                           const tomorrow = today.getTime() + DAY;
+                          const yesterday = today.getTime() - DAY;
                           if (dateFilter === 'today') {
                             if (due < today.getTime() || due >= tomorrow) return false;
+                          } else if (dateFilter === 'yesterday') {
+                            if (due < yesterday || due >= today.getTime()) return false;
                           } else if (dateFilter === 'overdue') {
                             if (due >= today.getTime()) return false;
                           } else if (dateFilter === 'next7') {
                             if (due < now || due > now + 7 * DAY) return false;
                           } else if (dateFilter === 'next30') {
                             if (due < now || due > now + 30 * DAY) return false;
+                          } else if (dateFilter === 'specific') {
+                            // Sem data escolhida: não filtra (mostra tudo até user escolher)
+                            if (!specificDate) return true;
+                            const parsed = new Date(specificDate + 'T00:00:00');
+                            if (isNaN(parsed.getTime())) return true;
+                            const start = parsed.getTime();
+                            const end = start + DAY;
+                            if (due < start || due >= end) return false;
                           }
                         }
                         return true;
