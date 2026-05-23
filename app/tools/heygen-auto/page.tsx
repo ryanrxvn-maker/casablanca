@@ -117,9 +117,11 @@ export default function HeyGenAutoPage() {
    *  Cada hook vira 1 take. Body e splitado em ~20s pra cada take.
    *  Output final: 3 ZIPs igual clickup-pilot (takes individuais, montados
    *  HOOK[N]+BODY decupados, camuflados opcional). */
-  type StructuredInput = { text: string; audios: File[] };
+  // Hook: 1 áudio por hook (cada hook que você adicionar vira 1 take final).
+  // Body: pode ter múltiplos áudios (parte1, parte2, parte3…) ordenados.
+  type StructuredInput = { text: string; audio: File | null };
   const [structuredHooks, setStructuredHooks] = useState<StructuredInput[]>([
-    { text: '', audios: [] },
+    { text: '', audio: null },
   ]);
   const [structuredBody, setStructuredBody] = useState<{
     enabled: boolean;
@@ -646,7 +648,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
       if (forcedParts && forcedParts.length > 0 && forcedParts[idx]) {
         return forcedParts[idx].label;
       }
-      const hookCount = structuredHooks.filter((h) => mode === 'copy' ? h.text.trim() : h.audios.length > 0).length;
+      const hookCount = structuredHooks.filter((h) => mode === 'copy' ? h.text.trim() : !!h.audio).length;
       if (idx < hookCount) return `HOOK ${idx + 1}`;
       const bodyIdx = idx - hookCount;
       const totalParts = parts.length;
@@ -682,46 +684,36 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
         };
       });
     } else {
-      // Modo audio: hooks[].audios[] + body.audios[]
-      // Cada audio (já ordenado por nome) vira UM job HeyGen.
-      // Hooks com múltiplas partes ficam labelados "HOOK N · parte M"
-      // pro pipeline post-prod entender que são partes do mesmo hook.
-      const hooksWithAudios = structuredHooks
-        .map((h, i) => ({ idx: i, files: h.audios }))
-        .filter((x) => x.files.length > 0);
+      // Modo audio: cada hook = 1 audio; body = múltiplos audios em ordem
+      const hookFiles = structuredHooks
+        .map((h) => h.audio)
+        .filter((f): f is File => !!f);
       const bodyFiles = structuredBody.enabled ? structuredBody.audios : [];
-      const totalAudios = hooksWithAudios.reduce((acc, h) => acc + h.files.length, 0) + bodyFiles.length;
-      if (totalAudios === 0) {
-        setError('Faça upload de pelo menos 1 áudio de hook OU body.');
+      if (hookFiles.length === 0 && bodyFiles.length === 0) {
+        setError('Faça upload de pelo menos 1 áudio (hook ou body).');
         return;
       }
 
       jobs = [];
-      hooksWithAudios.forEach((hook, hookIdx) => {
-        const hookNumber = hookIdx + 1;
-        hook.files.forEach((file, partIdx) => {
-          const label =
-            hook.files.length === 1
-              ? `HOOK ${hookNumber}`
-              : `HOOK ${hookNumber} · parte ${partIdx + 1}`;
-          jobs.push({
-            label,
-            audio: file,
-            avatarId: dynamicMode ? selectedAvatar?.id : undefined,
-          });
+      // Hooks: 1 audio = 1 take "HOOK N" (igual ao comportamento original)
+      hookFiles.forEach((file, i) => {
+        jobs.push({
+          label: `HOOK ${i + 1}`,
+          audio: file,
+          avatarId: dynamicMode ? selectedAvatar?.id : undefined,
         });
       });
-      if (bodyFiles.length > 0) {
-        bodyFiles.forEach((file, partIdx) => {
-          const label =
-            bodyFiles.length === 1 ? 'BODY' : `BODY · parte ${partIdx + 1}`;
-          jobs.push({
-            label,
-            audio: file,
-            avatarId: dynamicMode ? selectedAvatar?.id : undefined,
-          });
+      // Body: múltiplos audios em ordem; cada um vira "BODY · parte N"
+      // (ou só "BODY" se for 1)
+      bodyFiles.forEach((file, partIdx) => {
+        const label =
+          bodyFiles.length === 1 ? 'BODY' : `BODY · parte ${partIdx + 1}`;
+        jobs.push({
+          label,
+          audio: file,
+          avatarId: dynamicMode ? selectedAvatar?.id : undefined,
         });
-      }
+      });
     }
 
     cancelRef.current = false;
@@ -1045,131 +1037,21 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                           <input
                             type="file"
                             accept="audio/*"
-                            multiple
                             onChange={(e) => {
-                              const added = Array.from(e.target.files ?? []);
-                              if (added.length === 0) return;
+                              const f = e.target.files?.[0] || null;
                               setStructuredHooks((prev) =>
                                 prev.map((p, i) =>
-                                  i === hi
-                                    ? {
-                                        ...p,
-                                        audios: sortAudiosByPartName([
-                                          ...p.audios,
-                                          ...added,
-                                        ]),
-                                      }
-                                    : p,
+                                  i === hi ? { ...p, audio: f } : p,
                                 ),
                               );
-                              // Limpa o input pra permitir re-upload do mesmo arquivo
-                              e.target.value = '';
                             }}
                             className="input-field file:mr-3 file:rounded-md file:border-0 file:bg-lime file:px-3 file:py-1 file:text-xs file:font-semibold file:text-black"
                             disabled={processing}
                           />
-                          {h.audios.length > 0 ? (
-                            <div className="grid gap-1.5 rounded-[10px] border border-line bg-bg/40 p-2">
-                              <div className="mono text-[10px] uppercase tracking-widest text-text-muted">
-                                {h.audios.length} áudio
-                                {h.audios.length === 1 ? '' : 's'} · ordem de
-                                execução
-                              </div>
-                              {h.audios.map((file, ai) => (
-                                <div
-                                  key={ai + '-' + file.name}
-                                  className="flex items-center gap-2 rounded-md border border-line-strong bg-bg/60 px-2 py-1.5 text-[11px]"
-                                >
-                                  <span className="mono w-6 shrink-0 text-center text-lime">
-                                    {ai + 1}
-                                  </span>
-                                  <span className="flex-1 truncate text-text">
-                                    {file.name}
-                                  </span>
-                                  <span className="mono shrink-0 text-text-muted">
-                                    {(file.size / (1024 * 1024)).toFixed(2)}MB
-                                  </span>
-                                  <div className="flex shrink-0 gap-0.5">
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setStructuredHooks((prev) =>
-                                          prev.map((p, i) => {
-                                            if (i !== hi) return p;
-                                            if (ai === 0) return p;
-                                            const next = [...p.audios];
-                                            [next[ai - 1], next[ai]] = [
-                                              next[ai],
-                                              next[ai - 1],
-                                            ];
-                                            return { ...p, audios: next };
-                                          }),
-                                        )
-                                      }
-                                      disabled={ai === 0 || processing}
-                                      className="rounded p-0.5 text-text-muted transition hover:bg-bg hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
-                                      title="Mover pra cima"
-                                    >
-                                      ▲
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setStructuredHooks((prev) =>
-                                          prev.map((p, i) => {
-                                            if (i !== hi) return p;
-                                            if (ai === p.audios.length - 1)
-                                              return p;
-                                            const next = [...p.audios];
-                                            [next[ai], next[ai + 1]] = [
-                                              next[ai + 1],
-                                              next[ai],
-                                            ];
-                                            return { ...p, audios: next };
-                                          }),
-                                        )
-                                      }
-                                      disabled={
-                                        ai === h.audios.length - 1 || processing
-                                      }
-                                      className="rounded p-0.5 text-text-muted transition hover:bg-bg hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
-                                      title="Mover pra baixo"
-                                    >
-                                      ▼
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setStructuredHooks((prev) =>
-                                          prev.map((p, i) =>
-                                            i === hi
-                                              ? {
-                                                  ...p,
-                                                  audios: p.audios.filter(
-                                                    (_, k) => k !== ai,
-                                                  ),
-                                                }
-                                              : p,
-                                          ),
-                                        )
-                                      }
-                                      disabled={processing}
-                                      className="rounded p-0.5 text-text-muted transition hover:bg-red-500/15 hover:text-red-300"
-                                      title="Remover"
-                                    >
-                                      ×
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                              {h.audios.length > 1 ? (
-                                <div className="mono mt-0.5 text-[10px] text-text-muted">
-                                  💡 Dica: nomeie como{' '}
-                                  <span className="text-lime">parte1.mp3</span>,{' '}
-                                  <span className="text-lime">parte2.mp3</span>{' '}
-                                  pra ordenação automática.
-                                </div>
-                              ) : null}
+                          {h.audio ? (
+                            <div className="text-[11px] text-text-muted">
+                              📎 {h.audio.name} (
+                              {(h.audio.size / (1024 * 1024)).toFixed(2)}MB)
                             </div>
                           ) : null}
                         </div>
@@ -1179,7 +1061,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                   {structuredHooks.length < 10 ? (
                     <button
                       type="button"
-                      onClick={() => setStructuredHooks((prev) => [...prev, { text: '', audios: [] }])}
+                      onClick={() => setStructuredHooks((prev) => [...prev, { text: '', audio: null }])}
                       disabled={processing}
                       className="mono rounded-[10px] border border-dashed border-line-strong bg-bg/30 py-2 px-3 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime/40 hover:bg-lime/5 hover:text-lime transition disabled:opacity-50"
                     >

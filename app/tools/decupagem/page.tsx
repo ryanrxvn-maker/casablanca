@@ -1,8 +1,17 @@
 'use client';
 
-import { ToolShell } from '@/components/ToolShell';
-import { FileUpload } from '@/components/FileUpload';
 import { AudioPlayer } from '@/components/AudioPlayer';
+import {
+  ToolHero,
+  ToolStep,
+  ToolDropzone,
+  ToolChoice,
+  ToolSlider,
+  ToolAction,
+  ToolResultCard,
+  ToolMetric,
+} from '@/components/tool-kit';
+import { IconDecupagem } from '@/components/ToolIcons';
 import { useToolState } from '@/components/ToolsStateProvider';
 import {
   decodeAudioRobust,
@@ -235,154 +244,134 @@ export default function DecupagemPage() {
       ? Math.max(0, Math.round((1 - result.newDur / result.originalDur) * 100))
       : 0;
 
+  const audioOptions = [
+    { value: 'mp3' as const, label: 'MP3', sub: 'menor' },
+    { value: 'wav' as const, label: 'WAV', sub: 'qualidade máx' },
+  ];
+
   return (
-    <ToolShell
-      title="Decupagem"
-      eyebrow="VÍDEO / ÁUDIO"
-      description="Corta os silêncios. Envia áudio, recebe áudio. Envia vídeo, recebe vídeo (ou só o áudio)."
-    >
-      <div className="flex flex-col gap-6">
-        <div>
-          <label className="label-field">Arquivo</label>
-          <FileUpload
+    <div className="mx-auto w-full max-w-[920px] px-5 md:px-8">
+      <ToolHero
+        title="Decupagem"
+        eyebrow="VÍDEO / ÁUDIO"
+        subtitle="Corta os silêncios. Envia áudio, recebe áudio. Envia vídeo, recebe vídeo."
+        hue="rgba(163,230,53,0.4)"
+        icon={<IconDecupagem size={56} />}
+      />
+
+      <div className="mt-6 grid gap-5">
+        {/* PASSO 1 — UPLOAD */}
+        <ToolStep
+          n={1}
+          title="Solta o arquivo"
+          hint="MP3, WAV, MP4, WEBM ou MOV"
+          hue="rgba(163,230,53,0.4)"
+        >
+          <ToolDropzone
             accept="audio/*,video/mp4,video/webm,video/quicktime"
-            value={file}
-            onChange={(f) => {
+            file={file}
+            onFile={(f) => {
               reset();
               setFile(f);
             }}
-            hint="MP3, WAV, MP4, WEBM ou MOV"
+            hint="Até 2 GB. Arraste pra cá ou clique pra escolher."
+            hue="rgba(163,230,53,0.5)"
+            disabled={processing}
           />
-        </div>
+        </ToolStep>
 
+        {/* PASSO 2 — SAÍDA (só pra vídeo) */}
         {fileIsVideo ? (
-          <div>
-            <label className="label-field">Saída</label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => !isFree && setOutputKind('video')}
-                disabled={isFree}
-                title={isFree ? 'Disponível só pra contas Beta' : undefined}
-                className={
-                  'flex-1 rounded-[12px] border px-4 py-3 text-sm transition-all duration-200 active:scale-[0.97] flex items-center justify-center gap-2 ' +
-                  (isFree
-                    ? 'cursor-not-allowed border-line bg-bg/40 text-text-dim'
-                    : outputKind === 'video' && !isFree
-                      ? 'border-lime bg-lime/10 text-lime'
-                      : 'border-line bg-bg text-text-muted hover:border-lime/50')
-                }
-              >
-                {isFree ? (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="4" y="11" width="16" height="10" rx="2" />
-                    <path d="M8 11V7a4 4 0 018 0v4" />
-                  </svg>
-                ) : null}
-                Vídeo (MP4)
-              </button>
-              <button
-                type="button"
-                onClick={() => setOutputKind('audio')}
-                className={
-                  'flex-1 rounded-[12px] border px-4 py-3 text-sm transition-all duration-200 active:scale-[0.97] ' +
-                  (effectiveKind === 'audio'
-                    ? 'border-lime bg-lime/10 text-lime'
-                    : 'border-line bg-bg text-text-muted hover:border-lime/50')
-                }
-              >
-                Apenas áudio
-              </button>
-            </div>
+          <ToolStep
+            n={2}
+            title="Como você quer receber?"
+            hint={isFree ? 'A conta grátis exporta só áudio' : 'Escolhe o formato de saída'}
+            hue="rgba(167,139,250,0.4)"
+          >
+            <ToolChoice
+              value={effectiveKind}
+              onChange={(v) => {
+                if (v === 'video' && isFree) return;
+                setOutputKind(v);
+              }}
+              options={[
+                { value: 'video' as const, label: 'Vídeo', sub: 'mp4' },
+                { value: 'audio' as const, label: 'Áudio', sub: 'só som' },
+              ]}
+              disabled={processing}
+            />
             {isFree ? (
               <p className="mt-2 text-[11.5px] text-violet">
-                A conta grátis só processa áudio. Pra exportar vídeo, fale com o time.
+                🔒 Vídeo bloqueado no plano grátis.
               </p>
             ) : null}
-          </div>
+          </ToolStep>
         ) : null}
 
+        {/* PASSO 3 — FORMATO DE ÁUDIO (se for saída áudio) */}
         {effectiveKind === 'audio' ? (
-          <div>
-            <label className="label-field">Formato do audio</label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setAudioFormat('mp3')}
-                className={
-                  'flex-1 rounded-[12px] border px-4 py-3 text-sm transition-all duration-200 active:scale-[0.97] ' +
-                  (audioFormat === 'mp3'
-                    ? 'border-lime bg-lime/10 text-lime'
-                    : 'border-line bg-bg text-text-muted hover:border-lime/50')
-                }
-              >
-                MP3 (menor)
-              </button>
-              <button
-                type="button"
-                onClick={() => setAudioFormat('wav')}
-                className={
-                  'flex-1 rounded-[12px] border px-4 py-3 text-sm transition-all duration-200 active:scale-[0.97] ' +
-                  (audioFormat === 'wav'
-                    ? 'border-lime bg-lime/10 text-lime'
-                    : 'border-line bg-bg text-text-muted hover:border-lime/50')
-                }
-              >
-                WAV (maxima qualidade)
-              </button>
-            </div>
-          </div>
+          <ToolStep
+            n={fileIsVideo ? 3 : 2}
+            title="Formato do áudio"
+            hue="rgba(34,211,238,0.4)"
+          >
+            <ToolChoice
+              value={audioFormat}
+              onChange={setAudioFormat}
+              options={audioOptions}
+              disabled={processing}
+            />
+          </ToolStep>
         ) : null}
 
-        <div>
-          <div className="flex items-center justify-between">
-            <label className="label-field !mb-0">Tolerancia de silencio</label>
-            <span className="mono text-xs text-lime">
-              {keepSilence.toFixed(2)}s
-            </span>
-          </div>
-          <input
-            type="range"
+        {/* PASSO 4 — TOLERÂNCIA */}
+        <ToolStep
+          n={effectiveKind === 'audio' ? (fileIsVideo ? 4 : 3) : 3}
+          title="Quanto de silêncio manter?"
+          hint="Pouco = corte agressivo. Muito = fala respira"
+          hue="rgba(244,114,182,0.4)"
+        >
+          <ToolSlider
+            label="Tolerância de silêncio"
             min={0.01}
             max={0.5}
             step={0.01}
             value={keepSilence}
-            onChange={(e) => setKeepSilence(parseFloat(e.target.value))}
-            className="mt-3"
+            onChange={setKeepSilence}
+            display={(v) => `${v.toFixed(2)}s`}
+            disabled={processing}
           />
-        </div>
+        </ToolStep>
 
-        <div className="flex flex-wrap gap-3">
+        {/* AÇÃO */}
+        <div className="flex flex-wrap items-center gap-3">
           {processing ? (
-            <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
+            <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar" />
           ) : (
-            <button
-              onClick={process}
-              className="btn-primary"
-              disabled={!file}
-            >
-              Decupar
-            </button>
+            <ToolAction onClick={process} disabled={!file} variant="lime">
+              Decupar agora
+            </ToolAction>
           )}
           <button
             onClick={() => {
               reset();
               setFile(null);
             }}
-            className="btn-secondary"
+            className="btn-ghost"
             disabled={processing}
           >
             Limpar
           </button>
         </div>
 
+        {/* STATUS */}
         {status ? (
           <div
             className={
-              'rounded-[12px] border px-4 py-3 text-xs ' +
+              'rounded-[14px] border px-4 py-3 text-xs ' +
               (processing
-                ? 'scan-line border-lime/40 bg-bg-soft/40 text-lime'
-                : 'border-line bg-bg text-text-muted')
+                ? 'scan-line border-lime/40 bg-lime/5 text-lime'
+                : 'border-line bg-bg-soft/40 text-text-muted')
             }
           >
             <div className="flex items-center gap-2">
@@ -392,7 +381,12 @@ export default function DecupagemPage() {
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
                 </span>
               ) : null}
-              <span className="mono uppercase tracking-widest">{status}</span>
+              <span
+                className="mono uppercase tracking-widest"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                {status}
+              </span>
             </div>
             {progress !== null ? (
               <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-line">
@@ -405,53 +399,55 @@ export default function DecupagemPage() {
           </div>
         ) : null}
 
+        {/* ERRO */}
         {error ? (
           <div
             key={error}
             role="alert"
-            className="error-shake rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300 shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)]"
+            className="error-shake rounded-[14px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300"
           >
             {error}
           </div>
         ) : null}
 
+        {/* RESULTADO */}
         {result ? (
-          <div className="fade-in-up mt-2 border-t border-line pt-6">
-            <div className="mb-4 grid gap-3 sm:grid-cols-3">
-              <div>
-                <div className="label-field">Duracao original</div>
-                <div className="mono text-sm">{formatTime(result.originalDur)}</div>
-              </div>
-              <div>
-                <div className="label-field">Apos decupagem</div>
-                <div className="mono text-sm text-lime">
-                  {formatTime(result.newDur)}
-                </div>
-              </div>
-              <div>
-                <div className="label-field">Reducao</div>
-                <div className="mono text-sm text-lime">{reducedPct}%</div>
-              </div>
+          <ToolResultCard
+            title="Decupagem concluída"
+            meta={`${reducedPct}% menor`}
+          >
+            <div className="mb-4 grid gap-2.5 sm:grid-cols-3">
+              <ToolMetric
+                value={formatTime(result.originalDur)}
+                label="Original"
+              />
+              <ToolMetric
+                value={formatTime(result.newDur)}
+                label="Após decupagem"
+                accent="lime"
+              />
+              <ToolMetric value={`–${reducedPct}%`} label="Redução" accent="lime" />
             </div>
             {result.kind === 'video' ? (
               <video
                 src={result.url}
                 controls
-                className="w-full rounded-[12px] border border-lime/30 bg-bg shadow-[0_0_28px_-12px_rgba(200,255,0,0.4)]"
+                className="w-full rounded-[14px] border border-lime/30 bg-bg shadow-[0_0_28px_-12px_rgba(200,255,0,0.4)]"
               />
             ) : (
               <AudioPlayer src={result.url} label="Preview" />
             )}
-            <div className="mt-3 flex justify-end">
-              <button onClick={download} className="btn-primary !py-2 text-xs">
+            <div className="mt-4 flex justify-end">
+              <button onClick={download} className="btn-lime !py-2.5 text-xs">
+                Baixar{' '}
                 {result.kind === 'video'
-                  ? 'Baixar MP4'
-                  : 'Baixar ' + result.format.toUpperCase()}
+                  ? 'MP4'
+                  : result.format.toUpperCase()}
               </button>
             </div>
-          </div>
+          </ToolResultCard>
         ) : null}
       </div>
-    </ToolShell>
+    </div>
   );
 }

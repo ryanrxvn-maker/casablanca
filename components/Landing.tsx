@@ -72,7 +72,7 @@ function LandingHeader() {
       <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between px-5 md:px-8">
         <Brand href="/" />
         <div className="flex items-center gap-2">
-          <Link href="/planos" className="btn-ghost">
+          <Link href="/planos" className="btn-silver">
             Planos
           </Link>
           <Link href="/login" className="btn-ghost">
@@ -492,11 +492,11 @@ function PilotMockup() {
         {/* Lista de tasks fake */}
         <div className="space-y-2 px-4 py-4">
           {[
-            { name: 'Lipsync · cena 04', state: 'done' },
-            { name: 'Lipsync · cena 05', state: 'done' },
-            { name: 'Lipsync · cena 06', state: 'running' },
-            { name: 'Lipsync · cena 07', state: 'queued' },
-            { name: 'Lipsync · cena 08', state: 'queued' },
+            { name: 'Lipsync · ADS04', state: 'done' },
+            { name: 'Lipsync · ADS05', state: 'done' },
+            { name: 'Lipsync · ADS06', state: 'running' },
+            { name: 'Lipsync · ADS07', state: 'queued' },
+            { name: 'Lipsync · ADS08', state: 'queued' },
           ].map((t, i) => (
             <div
               key={i}
@@ -561,7 +561,7 @@ function PilotMockup() {
           className="text-[9px] font-bold uppercase tracking-[0.2em] text-lime"
           style={{ fontFamily: 'var(--font-tech)' }}
         >
-          ÚLTIMO MERGE
+          ÚLTIMO DISPARO
         </div>
         <div
           className="mt-0.5 text-[11px] text-white/85"
@@ -1145,6 +1145,10 @@ function FinalCTA() {
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Link href="/login" className="btn-primary group text-base">
               <span>Começar grátis</span>
+              <span className="transition-transform duration-300 group-hover:translate-x-1">→</span>
+            </Link>
+            <Link href="/planos" className="btn-silver group text-base">
+              <span>Ver planos</span>
               <span className="transition-transform duration-300 group-hover:translate-x-1">→</span>
             </Link>
           </div>
