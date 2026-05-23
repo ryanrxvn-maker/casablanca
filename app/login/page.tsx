@@ -5,32 +5,127 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { AuthShell } from '@/components/AuthShell';
 import { createClient } from '@/lib/supabase/client';
 
+type DiagnoseResp = {
+  reason:
+    | 'not_found'
+    | 'unconfirmed'
+    | 'banned'
+    | 'revoked'
+    | 'must_change_password'
+    | 'wrong_password'
+    | 'unknown';
+  message: string;
+  canResend: boolean;
+};
+
+type LoginError = {
+  message: string;
+  reason?: DiagnoseResp['reason'];
+  canResend?: boolean;
+  ctaHref?: string;
+  ctaLabel?: string;
+};
+
 function LoginInner() {
   const router = useRouter();
   const params = useSearchParams();
   const betaClosed = params.get('beta') === 'closed';
+  const justConfirmed = params.get('confirmed') === '1';
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<LoginError | null>(null);
+  const [resending, setResending] = useState(false);
+  const [resentMsg, setResentMsg] = useState<string | null>(null);
+
+  async function diagnose(emailToCheck: string): Promise<DiagnoseResp | null> {
+    try {
+      const res = await fetch('/api/auth/diagnose', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: emailToCheck }),
+      });
+      if (!res.ok) return null;
+      return (await res.json()) as DiagnoseResp;
+    } catch {
+      return null;
+    }
+  }
 
   async function handleEmailLogin(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setResentMsg(null);
+
+    const cleanEmail = email.trim().toLowerCase();
     const supabase = createClient();
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
+
+    const { error: signInErr } = await supabase.auth.signInWithPassword({
+      email: cleanEmail,
       password,
     });
-    setLoading(false);
-    if (error) {
-      setError(error.message);
+
+    if (!signInErr) {
+      setLoading(false);
+      router.replace('/tools');
+      router.refresh();
       return;
     }
-    router.replace('/tools');
-    router.refresh();
+
+    // ── Erro genérico do Supabase — chama nosso diagnóstico server-side
+    const diag = await diagnose(cleanEmail);
+
+    if (diag) {
+      // Monta erro com CTA específico por motivo
+      let cta: { href?: string; label?: string } = {};
+      if (diag.reason === 'must_change_password') {
+        cta = { href: '/trocar-senha', label: 'Ir trocar senha' };
+      } else if (diag.reason === 'not_found') {
+        cta = { href: '/register', label: 'Criar conta' };
+      } else if (diag.reason === 'banned' || diag.reason === 'revoked') {
+        cta = {
+          href: 'https://wa.me/5531991262437',
+          label: 'Falar no WhatsApp',
+        };
+      }
+      setError({
+        message: diag.message,
+        reason: diag.reason,
+        canResend: diag.canResend,
+        ctaHref: cta.href,
+        ctaLabel: cta.label,
+      });
+      setLoading(false);
+      return;
+    }
+
+    // Fallback: usa msg crua do Supabase
+    setError({ message: signInErr.message || 'Não consegui entrar agora.' });
+    setLoading(false);
+  }
+
+  async function handleResend() {
+    setResending(true);
+    setResentMsg(null);
+    try {
+      const res = await fetch('/api/auth/resend-confirm', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+      });
+      const json = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !json.ok) {
+        setResentMsg(json.error || 'Falha ao reenviar.');
+        return;
+      }
+      setResentMsg(
+        'Email reenviado. Confira a caixa de entrada (e o spam).',
+      );
+    } finally {
+      setResending(false);
+    }
   }
 
   return (
@@ -57,6 +152,15 @@ function LoginInner() {
             <span>
               Os cadastros estão fechados no momento. Entre em contato pra solicitar acesso.
             </span>
+          </div>
+        ) : null}
+
+        {justConfirmed ? (
+          <div
+            role="status"
+            className="fade-in-up rounded-[12px] border border-lime/40 bg-lime/10 px-3 py-2 text-xs text-lime"
+          >
+            ✓ Email confirmado. Agora entre com sua senha.
           </div>
         ) : null}
 
@@ -89,15 +193,69 @@ function LoginInner() {
           />
         </div>
 
-        {error && (
+        {error ? (
           <div
-            key={error}
+            key={error.message}
             role="alert"
-            className="error-shake rounded-[12px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300 shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)]"
+            className={
+              'error-shake rounded-[12px] border px-3.5 py-3 text-xs shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)] ' +
+              (error.reason === 'unconfirmed'
+                ? 'border-yellow-500/40 bg-yellow-500/10 text-yellow-200'
+                : 'border-red-500/40 bg-red-500/10 text-red-300')
+            }
           >
-            {error}
+            <div className="mb-1 flex items-center gap-2">
+              <span
+                className="text-[10px] font-bold uppercase tracking-[0.18em]"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                {reasonLabel(error.reason)}
+              </span>
+            </div>
+            <div className="leading-relaxed">{error.message}</div>
+
+            {/* Ações contextuais */}
+            <div className="mt-2.5 flex flex-wrap gap-2">
+              {error.canResend ? (
+                <button
+                  type="button"
+                  onClick={handleResend}
+                  disabled={resending || !email.trim()}
+                  className="rounded-full border border-yellow-500/60 bg-yellow-500/15 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-yellow-100 transition hover:bg-yellow-500/25 disabled:opacity-50"
+                  style={{ fontFamily: 'var(--font-tech)' }}
+                >
+                  {resending ? 'Reenviando…' : '↻ Reenviar email de confirmação'}
+                </button>
+              ) : null}
+              {error.ctaHref && error.ctaLabel ? (
+                <a
+                  href={error.ctaHref}
+                  className="rounded-full border border-violet/60 bg-violet/15 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-violet-100 transition hover:bg-violet/25"
+                  style={{ fontFamily: 'var(--font-tech)' }}
+                >
+                  {error.ctaLabel} →
+                </a>
+              ) : null}
+              {error.reason === 'wrong_password' ? (
+                <span
+                  className="text-[10.5px] uppercase tracking-widest text-text-muted/70"
+                  style={{ fontFamily: 'var(--font-tech)' }}
+                >
+                  · Esqueceu? Fale com a gente no WhatsApp pra resetar
+                </span>
+              ) : null}
+            </div>
           </div>
-        )}
+        ) : null}
+
+        {resentMsg ? (
+          <div
+            role="status"
+            className="fade-in-up rounded-[12px] border border-lime/40 bg-lime/10 px-3 py-2 text-xs leading-relaxed text-lime"
+          >
+            {resentMsg}
+          </div>
+        ) : null}
 
         <button type="submit" className="btn-primary" disabled={loading}>
           {loading ? <span className="loading-dots">Entrando</span> : 'Entrar'}
@@ -105,6 +263,25 @@ function LoginInner() {
       </form>
     </AuthShell>
   );
+}
+
+function reasonLabel(reason?: DiagnoseResp['reason']): string {
+  switch (reason) {
+    case 'not_found':
+      return 'Email não cadastrado';
+    case 'unconfirmed':
+      return 'Email não confirmado';
+    case 'banned':
+      return 'Conta bloqueada';
+    case 'revoked':
+      return 'Acesso revogado';
+    case 'must_change_password':
+      return 'Trocar senha provisória';
+    case 'wrong_password':
+      return 'Senha incorreta';
+    default:
+      return 'Não consegui entrar';
+  }
 }
 
 export default function LoginPage() {

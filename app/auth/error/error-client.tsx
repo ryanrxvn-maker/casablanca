@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
 
 /**
  * Decodifica códigos de erro em mensagens humanas.
@@ -48,19 +47,15 @@ export default function AuthErrorClient() {
     }
     setSending(true);
     try {
-      const supabase = createClient();
-      const { error: rErr } = await supabase.auth.resend({
-        type: 'signup',
-        email: email.trim(),
-        options: {
-          emailRedirectTo:
-            typeof window !== 'undefined'
-              ? `${window.location.origin}/auth/callback`
-              : undefined,
-        },
+      // Server-side route — usa NEXT_PUBLIC_SITE_URL canônico
+      const res = await fetch('/api/auth/resend-confirm', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase() }),
       });
-      if (rErr) {
-        setError(rErr.message);
+      const json = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !json.ok) {
+        setError(json.error || 'Falha ao reenviar.');
         return;
       }
       setInfo('Email reenviado. Verifique sua caixa (e o spam).');
