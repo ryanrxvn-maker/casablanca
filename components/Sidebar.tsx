@@ -61,14 +61,34 @@ export function Sidebar() {
       const { data: userData } = await supabase.auth.getUser();
       const uid = userData.user?.id;
       if (!uid) return;
-      const { data } = await supabase
+      // Tenta select com tier; se a coluna não existir, cai pro select básico.
+      type RowShape = {
+        name?: string | null;
+        avatar_url?: string | null;
+        is_admin?: boolean | null;
+        tier?: string | null;
+      };
+      let row: RowShape | null = null;
+      const full = await supabase
         .from('profiles')
         .select('name, avatar_url, is_admin, tier')
         .eq('id', uid)
         .maybeSingle();
+      if (full.error) {
+        const basic = await supabase
+          .from('profiles')
+          .select('name, avatar_url, is_admin')
+          .eq('id', uid)
+          .maybeSingle();
+        row = (basic.data ?? null) as unknown as RowShape | null;
+      } else {
+        row = (full.data ?? null) as unknown as RowShape | null;
+      }
+      const data = row;
       if (!cancelled) {
         const rawTier = (data?.tier ?? '') as string;
         let resolvedTier: 'free' | 'basic' | 'pro' | 'admin' = 'free';
+        // PRIORIDADE: is_admin sempre ganha
         if (data?.is_admin) resolvedTier = 'admin';
         else if (rawTier === 'pro' || rawTier === 'beta') resolvedTier = 'pro';
         else if (rawTier === 'basic') resolvedTier = 'basic';
@@ -542,7 +562,7 @@ function tierBorderOf(t: AvatarTier): string {
         : 'rgba(139,139,150,0.35)';
 }
 function tierLabelOf(t: AvatarTier): string {
-  return t === 'admin' ? 'ADM' : t === 'pro' ? 'PRO' : t === 'basic' ? 'BSC' : 'FRE';
+  return t === 'admin' ? 'ADMIN' : t === 'pro' ? 'PRO' : t === 'basic' ? 'BASIC' : 'FREE';
 }
 
 function TierAvatar({

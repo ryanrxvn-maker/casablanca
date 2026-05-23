@@ -64,26 +64,45 @@ export function useTier(): Tier | null {
           if (!cancelled) setTier('free');
           return;
         }
-        const { data } = await supabase
+        // Tenta select com tier; se coluna faltar, cai pro básico (compat
+        // com schema antes da migration 015/016).
+        type RowShape = {
+          tier?: string | null;
+          is_admin?: boolean | null;
+          is_active?: boolean | null;
+        };
+        let data: RowShape | null = null;
+        const full = await supabase
           .from('profiles')
           .select('tier, is_admin, is_active')
           .eq('id', uid)
           .maybeSingle();
+        if (full.error) {
+          const basic = await supabase
+            .from('profiles')
+            .select('is_admin, is_active')
+            .eq('id', uid)
+            .maybeSingle();
+          data = (basic.data ?? null) as unknown as RowShape | null;
+        } else {
+          data = (full.data ?? null) as unknown as RowShape | null;
+        }
         if (cancelled) return;
         const raw = (data?.tier ?? '').toString();
         let resolved: Tier;
+        // PRIORIDADE: is_admin sempre ganha — mesmo se tier for outro
         if (data?.is_admin) {
           resolved = 'admin';
         } else if (raw === 'pro' || raw === 'beta') {
-          // 'beta' = legado, agora vira 'pro'
           resolved = 'pro';
         } else if (raw === 'basic') {
           resolved = 'basic';
         } else if (raw === 'free') {
           resolved = 'free';
         } else {
-          // Sem tier explícito mas ativo? fallback pra free
-          resolved = data?.is_active ? 'free' : 'free';
+          // Sem coluna tier: usuário com is_active=true e sem tier era beta
+          // (legado fechado). Vira pro pra preservar acesso.
+          resolved = data?.is_active ? 'pro' : 'free';
         }
         setTier(resolved);
       } catch {

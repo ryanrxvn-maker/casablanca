@@ -41,6 +41,8 @@ import {
   reloadLibrary,
   subscribeLibrary,
 } from '@/lib/heygen-library-cache';
+import { useTier, tierCanAutomate } from '@/lib/use-tier';
+import Link from 'next/link';
 import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
 import { CompactVoiceSelector } from '@/components/CompactVoiceSelector';
 import { MotorConfigPicker, MotorSlotPicker } from '@/components/MotorConfigPicker';
@@ -274,8 +276,76 @@ function extractSpokenBody(raw: string): string {
   return sanitizeSpokenCopy(raw);
 }
 
+/**
+ * Tela de bloqueio mostrada pra contas free/basic que tentam acessar
+ * o ClickUp Pilot via URL direta. Server-side já redireciona no
+ * middleware; isso é o último escudo + UX educativa.
+ */
+function ClickUpPilotLocked({ tier }: { tier: 'free' | 'basic' | 'pro' | 'admin' }) {
+  return (
+    <div className="mx-auto w-full max-w-[760px] px-5 py-12 md:px-8">
+      <ToolShell
+        title="Disponível só no Pro"
+        eyebrow="CLICKUP PILOT · BLOQUEADO"
+        description="A automação do Pilot é um recurso premium. Faça upgrade pra liberar e começar a entregar 5× mais."
+      >
+        <div className="flex flex-col items-center gap-6 py-6 text-center">
+          <span
+            className="flex h-20 w-20 items-center justify-center rounded-full border border-violet/40 bg-violet/10"
+            style={{ boxShadow: '0 0 32px -6px rgba(167,139,250,0.6)' }}
+          >
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#c084fc" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="4" y="11" width="16" height="10" rx="2" />
+              <path d="M8 11V7a4 4 0 018 0v4" />
+            </svg>
+          </span>
+          <div>
+            <h3
+              className="text-[24px] font-extrabold tracking-tight text-white md:text-[28px]"
+              style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
+            >
+              Sua conta é <span className="text-violet">{tier.toUpperCase()}</span>.
+            </h3>
+            <p className="mt-2 max-w-[480px] text-[14.5px] leading-relaxed text-text-muted">
+              O ClickUp Pilot dispara automação em massa no HeyGen — disponível
+              só no plano <span className="font-bold text-white">Pro</span>.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <Link
+              href="/planos"
+              className="inline-flex items-center gap-2 rounded-full px-6 py-3 text-[13.5px] font-bold text-black"
+              style={{
+                background: 'linear-gradient(135deg, #c8ff00 0%, #a3e635 100%)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.5), 0 14px 36px -8px rgba(200,255,0,0.55)',
+              }}
+            >
+              Ver planos
+              <span>→</span>
+            </Link>
+            <Link
+              href="/pilot"
+              className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-black/40 px-6 py-3 text-[13.5px] font-bold text-white transition hover:-translate-y-[1px] hover:border-white/40"
+            >
+              Conhecer o Pilot
+            </Link>
+          </div>
+        </div>
+      </ToolShell>
+    </div>
+  );
+}
+
 export default function ClickUpPilotPage() {
   const router = useRouter();
+  const tier = useTier();
+
+  // ─── BLOQUEIO: só Pro/Admin podem usar ───
+  // Free e Basic veem tela de upgrade. Middleware também bloqueia o
+  // acesso direto via URL — esse é o último escudo client-side.
+  if (tier && !tierCanAutomate(tier)) {
+    return <ClickUpPilotLocked tier={tier} />;
+  }
 
   /* ========== Token ========== */
   const [tokenInput, setTokenInput] = useState('');
