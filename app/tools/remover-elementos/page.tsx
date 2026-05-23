@@ -9,6 +9,7 @@ import { downloadBlob } from '@/lib/audio-engine';
 import { buildZip } from '@/lib/zip-builder';
 import { formatBytes } from '@/lib/utils';
 import { createClient } from '@/lib/supabase/client';
+import { IconRemoverElementos } from '@/components/ToolIcons';
 
 /**
  * Remover Legenda — Smart Mode (motor LOCAL, 100% offline, sem custo).
@@ -440,6 +441,7 @@ export default function RemoverElementosPage() {
       eyebrow="VÍDEO COM IA"
       description="Remove legenda e marca d’água sem deixar borrão. A IA reconstrói o fundo."
       hue="rgba(244,114,182,0.45)"
+      icon={<IconRemoverElementos size={56} />}
     >
       <div className="flex flex-col gap-6">
         {/* === BANNER UNICO — zero-config (sem pareamento manual) === */}

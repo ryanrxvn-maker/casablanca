@@ -20,6 +20,10 @@ import {
 import { CancelButton } from '@/components/CancelButton';
 import { useRef } from 'react';
 import { formatBytes, formatTime } from '@/lib/utils';
+import { ToolStep, ToolAction, ToolMetric } from '@/components/tool-kit';
+import { IconDecupageCopy } from '@/components/ToolIcons';
+
+const HUE = 'rgba(232,121,249,0.45)';
 
 /**
  * Decupagem com Copy — re-edita um video bruto pra seguir a ordem de uma
@@ -274,13 +278,13 @@ export default function DecupagemCopyPage() {
       title="Smart Decup"
       eyebrow="VÍDEO COM IA"
       description="Decupa o vídeo seguindo a sua copy. A IA escolhe a melhor take de cada frase e monta tudo na ordem certa."
-      hue="rgba(232,121,249,0.45)"
+      hue={HUE}
+      icon={<IconDecupageCopy size={56} />}
     >
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-5">
         <MissingKeyBanner services={['groq']} />
 
-        <div>
-          <label className="label-field">Vídeo bruto</label>
+        <ToolStep n={1} title="Vídeo bruto" hint="MP4, MOV, WEBM, MKV — até 800MB e 40min" hue={HUE}>
           <FileUpload
             accept="video/mp4,video/webm,video/quicktime,video/x-matroska"
             value={file}
@@ -291,66 +295,46 @@ export default function DecupagemCopyPage() {
             hint="MP4, MOV, WEBM, MKV — ate 800MB e 40min"
           />
           {file ? (
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-muted">
-              <span>
-                {file.name} —{' '}
-                <span
-                  className={
-                    'mono ' +
-                    (file.size > MAX_FILE_BYTES ? 'text-red-300' : 'text-lime')
-                  }
-                >
-                  {formatBytes(file.size)}
-                </span>
-              </span>
+            <div className="mt-3 grid grid-cols-2 gap-2.5 md:grid-cols-3">
+              <ToolMetric value={formatBytes(file.size)} label="Tamanho" />
               {duration !== null ? (
-                <span>
-                  ·{' '}
-                  <span
-                    className={
-                      'mono ' +
-                      (duration > MAX_DURATION_SEC
-                        ? 'text-red-300'
-                        : 'text-lime')
-                    }
-                  >
-                    {formatTime(duration)}
-                  </span>
-                </span>
+                <ToolMetric value={formatTime(duration)} label="Duração" accent="lime" />
+              ) : null}
+              {file && duration !== null && duration > 0 ? (
+                <div className="hidden md:block">
+                  <CostHint estimate={estimateDecupagemCopy(duration)} />
+                </div>
               ) : null}
             </div>
           ) : null}
           {validation ? (
-            <div className="mt-2 rounded-[8px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+            <div className="mt-3 rounded-[10px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
               {validation}
             </div>
           ) : null}
-        </div>
+        </ToolStep>
 
-        <div>
-          <label className="label-field" htmlFor="copy">
-            Copy / Script (na ordem desejada)
-          </label>
+        <ToolStep n={2} title="Copy / Script" hint="Cole na ordem desejada — frase por frase" hue={HUE}>
           <textarea
             id="copy"
             value={copyText}
             onChange={(e) => setCopyText(e.target.value)}
             placeholder="Cole aqui a copy completa, frase por frase. Quebre por linha ou pontuacao (.!?). A IA vai pegar cada frase e procurar a melhor take dela no video bruto."
-            rows={10}
+            rows={9}
             className="input-field resize-y font-mono text-sm"
             disabled={processing}
           />
-          <div className="mt-1 flex items-center justify-between text-xs text-text-muted">
+          <div className="mt-2 flex items-center justify-between text-xs text-text-muted">
             <span>
-              <span className="mono text-lime">
+              <span className="mono text-violet">
                 {copyText.trim().length}
               </span>{' '}
               caracteres ·{' '}
-              <span className="mono text-lime">
+              <span className="mono text-violet">
                 {copyText.split(/[.!?\n]+/).filter((p) => p.trim().length > 2)
                   .length}
               </span>{' '}
-              frase(s) detectada(s)
+              frase(s)
             </span>
             <button
               type="button"
@@ -358,63 +342,58 @@ export default function DecupagemCopyPage() {
               className="btn-ghost !py-0.5 !px-2 text-[11px]"
               disabled={processing || !copyText}
             >
-              Limpar
+              Limpar copy
             </button>
           </div>
-        </div>
+        </ToolStep>
 
-        <div className="rounded-[12px] border border-line bg-bg p-4">
+        <ToolStep n={3} title="Silêncios" hint="Decide se corta as pausas entre as falas" hue={HUE}>
           <label className="flex items-start gap-3 text-sm">
             <input
               type="checkbox"
               checked={removeSilence}
               onChange={(e) => setRemoveSilence(e.target.checked)}
-              className="mt-0.5 h-4 w-4 accent-lime"
+              className="mt-0.5 h-4 w-4 accent-violet"
               disabled={processing}
             />
             <div className="flex-1">
-              <div className="text-white">
-                Remover silencios entre as falas
+              <div className="text-white font-semibold">
+                Remover silêncios entre as falas
               </div>
-              <div className="mt-0.5 text-[11px] text-text-muted">
+              <div className="mt-0.5 text-[11px] leading-relaxed text-text-muted">
                 Depois de alinhar a copy, corta toda pausa{' '}
-                <span className="mono text-lime">≥ 0.10s</span> entre as
-                falas — valor fixo calibrado pra tirar tempo morto sem
-                comer palavra.
+                <span className="mono text-violet">≥ 0.10s</span> — calibrado pra tirar tempo morto sem comer palavra.
               </div>
             </div>
           </label>
-        </div>
+        </ToolStep>
 
-        {file && duration !== null && duration > 0 ? (
-          <CostHint estimate={estimateDecupagemCopy(duration)} />
-        ) : null}
-
-        <div className="flex flex-wrap gap-3">
-          {processing ? (
-            <CancelButton onClick={handleCancel} label="Cancelar processamento" />
-          ) : (
+        <ToolStep n={4} title={processing ? 'Decupando…' : 'Decupar pela copy'} hue={HUE}>
+          <div className="flex flex-wrap gap-3">
+            {processing ? (
+              <CancelButton onClick={handleCancel} label="Cancelar processamento" />
+            ) : (
+              <ToolAction
+                onClick={process}
+                disabled={!file || !!validation || !copyText.trim()}
+              >
+                Decupar pela Copy
+              </ToolAction>
+            )}
             <button
-              onClick={process}
-              className="btn-primary"
-              disabled={!file || !!validation || !copyText.trim()}
+              onClick={() => {
+                reset();
+                setFile(null);
+                setDuration(null);
+                setCopyText('');
+              }}
+              className="btn-secondary"
+              disabled={processing}
             >
-              Decupar pela Copy
+              Limpar tudo
             </button>
-          )}
-          <button
-            onClick={() => {
-              reset();
-              setFile(null);
-              setDuration(null);
-              setCopyText('');
-            }}
-            className="btn-secondary"
-            disabled={processing}
-          >
-            Limpar tudo
-          </button>
-        </div>
+          </div>
+        </ToolStep>
 
         {error ? (
           <div

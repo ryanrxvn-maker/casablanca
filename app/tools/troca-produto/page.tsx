@@ -8,6 +8,10 @@ import { estimateTrocaProduto } from '@/lib/cost-estimator';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { getFFmpeg } from '@/lib/ffmpeg-worker';
 import { fetchFile } from '@ffmpeg/util';
+import { ToolStep, ToolAction } from '@/components/tool-kit';
+import { IconTrocaProduto } from '@/components/ToolIcons';
+
+const HUE = 'rgba(244,114,182,0.45)';
 
 /**
  * Troca de Produto — substitui mencoes de um produto antigo pelo novo
@@ -298,44 +302,50 @@ export default function TrocaProdutoPage() {
       title="Troca de produto"
       eyebrow="ÁUDIO COM IA"
       description="Substitui o produto do áudio. A voz original continua igual."
-      hue="rgba(244,114,182,0.45)"
+      hue={HUE}
+      icon={<IconTrocaProduto size={56} />}
     >
       <div className="grid gap-5">
         <MissingKeyBanner services={['assemblyai', 'elevenlabs']} />
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="block">
-            <span className="label-field">
-              Produto antigo (como aparece na fala)
-            </span>
-            <input
-              type="text"
-              value={oldProduct}
-              onChange={(e) => setOldProduct(e.target.value)}
-              placeholder="Ex: Glicodin"
-              className="input-field"
-              disabled={busy}
-            />
-          </label>
-          <label className="block">
-            <span className="label-field">
-              Produto novo
-            </span>
-            <input
-              type="text"
-              value={newProduct}
-              onChange={(e) => setNewProduct(e.target.value)}
-              placeholder="Ex: Glicopril"
-              className="input-field"
-              disabled={busy}
-            />
-          </label>
-        </div>
+        <ToolStep n={1} title="Produtos" hint="Como o antigo aparece na fala + nome do novo" hue={HUE}>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="block">
+              <span
+                className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                Produto antigo
+              </span>
+              <input
+                type="text"
+                value={oldProduct}
+                onChange={(e) => setOldProduct(e.target.value)}
+                placeholder="Ex: Glicodin"
+                className="input-field mt-2"
+                disabled={busy}
+              />
+            </label>
+            <label className="block">
+              <span
+                className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                Produto novo
+              </span>
+              <input
+                type="text"
+                value={newProduct}
+                onChange={(e) => setNewProduct(e.target.value)}
+                placeholder="Ex: Glicopril"
+                className="input-field mt-2"
+                disabled={busy}
+              />
+            </label>
+          </div>
+        </ToolStep>
 
-        <label className="block">
-          <span className="label-field">
-            Áudio da VSL
-          </span>
+        <ToolStep n={2} title="Áudio da VSL" hint={`Até ${MAX_UPLOAD_BYTES / 1024 / 1024}MB · use Compressor se passar`} hue={HUE}>
           <input
             type="file"
             accept="audio/*,video/*"
@@ -344,17 +354,17 @@ export default function TrocaProdutoPage() {
               setFile(f);
               reset();
             }}
-            className="input-field file:mr-3 file:rounded-md file:border-0 file:bg-lime file:px-3 file:py-1 file:text-xs file:font-semibold file:text-black"
+            className="input-field file:mr-3 file:rounded-md file:border-0 file:bg-violet file:px-3 file:py-1 file:text-xs file:font-semibold file:text-white"
             disabled={busy}
           />
           {file && (
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-text-muted">
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-muted">
               <span>
                 {file.name} —{' '}
                 <span
                   className={
                     'mono ' +
-                    (file.size > MAX_UPLOAD_BYTES ? 'text-red-300' : 'text-lime')
+                    (file.size > MAX_UPLOAD_BYTES ? 'text-red-300' : 'text-violet')
                   }
                 >
                   {(file.size / 1024 / 1024).toFixed(2)} MB
@@ -362,18 +372,12 @@ export default function TrocaProdutoPage() {
               </span>
               {file.size > MAX_UPLOAD_BYTES ? (
                 <span className="text-red-300">
-                  · acima do limite ({MAX_UPLOAD_BYTES / 1024 / 1024}MB).
-                  Comprima primeiro com a Compressor.
+                  · acima do limite. Comprima primeiro.
                 </span>
               ) : null}
             </div>
           )}
-          <p className="mt-2 text-[11px] text-text-muted">
-            Limite de upload: {MAX_UPLOAD_BYTES / 1024 / 1024}MB. Para arquivos
-            maiores, use a ferramenta{' '}
-            <span className="text-lime">Compressor</span> antes de enviar.
-          </p>
-        </label>
+        </ToolStep>
 
         {error && (
           <div
@@ -417,38 +421,38 @@ export default function TrocaProdutoPage() {
           </div>
         )}
 
-        <div className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={runTranscribe}
-            disabled={busy || !file || !oldProduct.trim()}
-            className="btn-secondary"
-          >
-            1. Transcrever + localizar
-          </button>
-          <button
-            type="button"
-            onClick={runReplace}
-            disabled={
-              busy ||
-              !transcript ||
-              selectedMatches.length === 0 ||
-              !newProduct.trim()
-            }
-            className="btn-primary"
-          >
-            2. Clonar voz e substituir
-          </button>
-          {resultUrl && (
+        <ToolStep n={3} title="Pipeline" hint="Transcreve · localiza · clona voz · substitui" hue={HUE}>
+          <div className="flex flex-wrap gap-3">
             <button
               type="button"
-              onClick={downloadResult}
+              onClick={runTranscribe}
+              disabled={busy || !file || !oldProduct.trim()}
               className="btn-secondary"
             >
-              Baixar áudio final
+              1. Transcrever + localizar
             </button>
-          )}
-        </div>
+            <ToolAction
+              onClick={runReplace}
+              disabled={
+                busy ||
+                !transcript ||
+                selectedMatches.length === 0 ||
+                !newProduct.trim()
+              }
+            >
+              2. Clonar voz e substituir
+            </ToolAction>
+            {resultUrl && (
+              <button
+                type="button"
+                onClick={downloadResult}
+                className="btn-secondary"
+              >
+                Baixar áudio final
+              </button>
+            )}
+          </div>
+        </ToolStep>
 
         {transcript && transcript.matches.length > 0 ? (
           <CostHint
