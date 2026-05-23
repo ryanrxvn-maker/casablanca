@@ -1,7 +1,6 @@
 'use client';
 
 import { Heartbeat } from '@/components/Heartbeat';
-import { MindAdsButton } from '@/components/MindAdsButton';
 import { RouteLoader } from '@/components/RouteLoader';
 import { Sidebar } from '@/components/Sidebar';
 import { SubSidebar, useSubSidebarActive } from '@/components/SubSidebar';
@@ -29,7 +28,6 @@ export default function ToolsLayout({
       <Sidebar />
       <SubSidebar />
       <ContentWrap>{children}</ContentWrap>
-      <MindAdsButton />
       <RouteLoader />
     </ToolsStateProvider>
   );
