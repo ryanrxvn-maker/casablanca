@@ -461,14 +461,22 @@ def _inpaint_lama(
 ProgressCb = Callable[[float, str], None]
 
 
-def _remux(silent_video: str, original_with_audio: str, out_path: str) -> None:
-    """Junta video silencioso + audio do original num MP4 H.264."""
+def _remux(silent_video: str, original_with_audio: str, out_path: str, target_size: Optional[Tuple[int,int]] = None) -> None:
+    """Junta video silencioso + audio do original num MP4 H.264.
+    Se target_size=(W,H), faz upscale do silent_video pra essa resolution."""
+    vf = []
+    if target_size is not None:
+        vf.append(f"scale={target_size[0]}:{target_size[1]}:flags=lanczos")
     cmd = [
         "ffmpeg", "-y",
         "-i", silent_video,
         "-i", original_with_audio,
         "-map", "0:v:0",
         "-map", "1:a:0?",
+    ]
+    if vf:
+        cmd.extend(["-vf", ",".join(vf)])
+    cmd.extend([
         "-c:v", "libx264",
         "-preset", "veryfast",
         "-crf", "20",
@@ -477,7 +485,7 @@ def _remux(silent_video: str, original_with_audio: str, out_path: str) -> None:
         "-movflags", "+faststart",
         "-shortest",
         out_path,
-    ]
+    ])
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0:
         # fallback: copy audio sem reencode
@@ -528,6 +536,34 @@ def process_video(
     if W <= 0 or H <= 0:
         raise RuntimeError("Video sem dimensoes legiveis.")
 
+    # ---- DOWNSCALE pra acelerar: se video maior que 1280px no lado maior,
+    # processa em 1280 e upscale depois. STTN fica ~2x mais rapido em
+    # vertical 720p vs 1080p sem perda visual perceptivel.
+    downscale_processing = False
+    proc_in_path = in_path
+    proc_W, proc_H = W, H
+    MAX_DIM = 1280
+    if max(W, H) > MAX_DIM:
+        scale = MAX_DIM / float(max(W, H))
+        proc_W = int(W * scale) // 2 * 2  # par pra ffmpeg
+        proc_H = int(H * scale) // 2 * 2
+        emit(0.01, f"Downscale {W}x{H} -> {proc_W}x{proc_H} (acelera 2x)...")
+        # Cria copia reescalada do video pro processamento
+        proc_tmp = os.path.join(tempfile.gettempdir(), f"darko_downscale_{os.getpid()}.mp4")
+        ds_cmd = [
+            "ffmpeg", "-y", "-i", in_path,
+            "-vf", f"scale={proc_W}:{proc_H}",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+            "-an", proc_tmp,
+        ]
+        ds_res = subprocess.run(ds_cmd, capture_output=True, text=True)
+        if ds_res.returncode == 0 and os.path.exists(proc_tmp):
+            proc_in_path = proc_tmp
+            downscale_processing = True
+        else:
+            # Fallback: processa em resolution original
+            proc_W, proc_H = W, H
+
     # ---- Modo auto: usa STTN se modelo disponivel (qualidade Vmake) ----
     # STTN olha multiplos frames simultaneamente, reconstruindo textura
     # real (pele, cabelo, fundo). Vs LaMa single-frame que fica borrado.
@@ -540,7 +576,7 @@ def process_video(
             mode = "lama"
 
     emit(0.04, "Sampling frames for text detection...")
-    cap = cv2.VideoCapture(in_path)
+    cap = cv2.VideoCapture(proc_in_path)
     if not cap.isOpened():
         raise RuntimeError("OpenCV nao conseguiu abrir o video.")
     try:
@@ -552,7 +588,7 @@ def process_video(
         raise RuntimeError("Nao foi possivel amostrar frames do video.")
 
     emit(0.08, f"Running OCR on {len(samples)} sample frames...")
-    mask = _persistent_mask(samples, W, H, min_persistence=min_persistence)
+    mask = _persistent_mask(samples, proc_W, proc_H, min_persistence=min_persistence)
     if mask is None:
         raise RuntimeError(
             "Nenhuma legenda persistente detectada. O video pode ja estar "
@@ -578,20 +614,26 @@ def process_video(
     # E o que o vmake.ai faz por baixo dos panos pra ficar tao bom.
     bg_median = None
     bg_variance = None
-    if mode == "lama" and bbox is not None:
+    # Frame-level median (pro STTN). Diferente do bg_median do LaMa que
+    # eh so do crop bbox, o STTN precisa do median do FRAME INTEIRO.
+    bg_median_full = None
+    if mode in ("lama", "sttn") and bbox is not None:
         emit(0.20, "Sampling 30 frames for temporal median background...")
-        cap_tm = cv2.VideoCapture(in_path)
+        cap_tm = cv2.VideoCapture(proc_in_path)
         try:
             samples_tm = _sample_frames(cap_tm, 30)
         finally:
             cap_tm.release()
         if samples_tm:
             y0, y1, x0, x1 = bbox
-            # Stack so o crop pra economizar memoria (crop pode ser 1080x300px)
+            # crop pra LaMa
             crops = np.stack([f[y0:y1, x0:x1] for _, f in samples_tm], axis=0).astype(np.float32)
             bg_median = np.median(crops, axis=0).astype(np.uint8)
-            # Variance temporal por pixel: alto = texto muda ali; baixo = estatico
-            bg_variance = np.mean(np.std(crops, axis=0), axis=2)  # (H, W) escalar
+            bg_variance = np.mean(np.std(crops, axis=0), axis=2)
+            # frame inteiro pra STTN (mediana global)
+            if mode == "sttn":
+                full_stack = np.stack([f for _, f in samples_tm], axis=0).astype(np.float32)
+                bg_median_full = np.median(full_stack, axis=0).astype(np.uint8)
             emit(0.24, "Median background built.")
 
     # Liga multi-threading (torch + opencv) pra usar TODOS os cores
@@ -607,7 +649,7 @@ def process_video(
         # Encoder VP via OpenCV writer (H.264 nem sempre disponivel; usamos mp4v
         # como intermediario, e depois remuxamos com ffmpeg pra h264 + audio).
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        out_writer = cv2.VideoWriter(silent_video, fourcc, fps, (W, H))
+        out_writer = cv2.VideoWriter(silent_video, fourcc, fps, (proc_W, proc_H))
         if not out_writer.isOpened():
             raise RuntimeError("OpenCV VideoWriter falhou ao abrir.")
 
@@ -621,7 +663,7 @@ def process_video(
             # 25 frames eh sweet spot pra CPU (memoria OK + janela temporal
             # suficiente pra STTN ter contexto temporal de qualidade).
             CHUNK_SIZE = 25
-            cap = cv2.VideoCapture(in_path)
+            cap = cv2.VideoCapture(proc_in_path)
             total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
             idx = 0
             try:
@@ -657,7 +699,7 @@ def process_video(
                             _last_pct[0] = pct_now
                             emit(p, f"STTN inpaint {global_done}/{total}")
 
-                    cleaned = sttn(chunk_frames, mask, on_progress=_inner_progress)
+                    cleaned = sttn(chunk_frames, mask, on_progress=_inner_progress, bg_median=bg_median_full)
                     for f in cleaned:
                         out_writer.write(f)
                     idx += len(chunk_frames)
@@ -669,7 +711,11 @@ def process_video(
 
             emit(0.92, "Muxing original audio + clean video...")
             # Pula direto pro remux
-            _remux(silent_video, in_path, out_path)
+            _remux(silent_video, in_path, out_path, target_size=(W, H) if downscale_processing else None)
+            # cleanup do downscale tmp
+            if downscale_processing and proc_in_path != in_path:
+                try: os.remove(proc_in_path)
+                except Exception: pass
             emit(1.0, "Done.")
             return {
                 "width": W, "height": H, "fps": fps,
@@ -692,7 +738,7 @@ def process_video(
         # cache espacial, o STTN/temporal-median garante consistencia.
         CROP_DIFF_THRESHOLD = 0.5
 
-        cap = cv2.VideoCapture(in_path)
+        cap = cv2.VideoCapture(proc_in_path)
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
         idx = 0
         try:
@@ -745,24 +791,15 @@ def process_video(
 
         emit(0.92, "Muxing original audio + clean video...")
 
-        # Remux: pega video do silent_video + audio do original. Se o original
-        # nao tiver audio, fica so video. -shortest evita stall.
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", silent_video,
-            "-i", in_path,
-            "-map", "0:v:0",
-            "-map", "1:a:0?",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "20",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-movflags", "+faststart",
-            "-shortest",
-            out_path,
-        ]
-        res = subprocess.run(cmd, capture_output=True, text=True)
+        # Remux unificado (faz upscale se houve downscale)
+        _remux(silent_video, in_path, out_path, target_size=(W, H) if downscale_processing else None)
+        # cleanup do video temporario do downscale
+        if downscale_processing and proc_in_path != in_path:
+            try: os.remove(proc_in_path)
+            except Exception: pass
+
+        # Pular branch antigo
+        res = type('R', (), {'returncode': 0, 'stderr': ''})()
         if res.returncode != 0:
             # fallback: copy audio sem reencode
             cmd_copy = [

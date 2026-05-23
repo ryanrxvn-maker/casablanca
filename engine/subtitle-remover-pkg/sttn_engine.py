@@ -98,6 +98,7 @@ class STTNInpaint:
         frames: List[np.ndarray],
         mask: np.ndarray,
         on_progress: Optional[callable] = None,
+        bg_median: Optional[np.ndarray] = None,
     ) -> List[np.ndarray]:
         """
         Args:
@@ -130,6 +131,21 @@ class STTNInpaint:
             y_min = max(0, y_min - extra // 2)
             y_max = min(H_ori, y_max + extra - extra // 2)
 
+        # ---- PRE-PASS: substitui regiao da mascara pelo bg median ----
+        # Se temos median temporal computado em todo o video, usa ELE como
+        # input pro STTN no lugar dos pixels da legenda. STTN vai REFINAR
+        # essa versao ja meio-limpa em vez de tentar inventar do zero.
+        # Resultado: significativamente mais natural.
+        if bg_median is not None and bg_median.shape[:2] == (H_ori, W_ori):
+            mask_3ch = np.repeat(mask_3d, 3, axis=2).astype(bool)
+            frames_prepped = []
+            for f in frames:
+                fp = f.copy()
+                # Onde mascara > 0, usa median; senao, usa o frame original
+                fp[mask_3ch] = bg_median[mask_3ch]
+                frames_prepped.append(fp)
+            frames = frames_prepped
+
         # Crop vertical da regiao da legenda em todos os frames
         strips = [f[y_min:y_max + 1, :, :] for f in frames]
         strip_mask = mask_3d[y_min:y_max + 1, :, :]
@@ -143,22 +159,27 @@ class STTNInpaint:
         # Inference temporal (com callback de progresso intra-chunk)
         comp_frames = self._inpaint_chunk(scaled, on_progress=on_progress)
 
-        # Resize de volta pra resolucao original do strip, e cola no frame
-        # IMPORTANTE: usa strip.shape direto (nao recalcula y_max-y_min) pra
-        # garantir consistencia se o strip foi indexado por slicing.
+        # Resize de volta + feathering pra blend INVISIVEL
         h_strip = strips[0].shape[0]
+        # Mascara feathered: gaussian blur 21px na mascara binaria.
+        # Resultado: pixels do centro da legenda usam 100% STTN; pixels
+        # nas bordas tem alpha gradiente (transicao suave invisivel).
+        strip_mask_2d = strip_mask[:h_strip, :, 0].astype(np.float32) * 255
+        feather_radius = 21
+        feathered = cv2.GaussianBlur(
+            strip_mask_2d, (feather_radius * 2 + 1, feather_radius * 2 + 1), 0
+        ) / 255.0
+        feathered = np.clip(feathered, 0.0, 1.0)[:, :, None]
+
         result = []
         for i, frame in enumerate(frames):
             out = frame.copy()
             comp_resized = cv2.resize(comp_frames[i], (W_ori, h_strip))
-            # comp vem em RGB; converte pra BGR
             comp_bgr = cv2.cvtColor(comp_resized.astype(np.uint8), cv2.COLOR_RGB2BGR)
-            # Garante shape alinhado
             orig_strip = frame[y_min:y_min + h_strip, :, :]
-            strip_mask_3 = strip_mask[:h_strip, :, :].astype(np.float32)
             blended = (
-                strip_mask_3 * comp_bgr.astype(np.float32)
-                + (1.0 - strip_mask_3) * orig_strip.astype(np.float32)
+                feathered * comp_bgr.astype(np.float32)
+                + (1.0 - feathered) * orig_strip.astype(np.float32)
             ).astype(np.uint8)
             out[y_min:y_min + h_strip, :, :] = blended
             result.append(out)
