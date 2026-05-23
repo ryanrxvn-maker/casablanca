@@ -23,12 +23,15 @@ type CookieToSet = { name: string; value: string; options: CookieOptions };
 const PUBLIC_AUTH_ROUTES = [
   '/login',
   '/register',
+  '/verify',           // OTP code entry (signup + recovery)
   '/verify-phone',
   '/access-revoked',
+  '/forgot-password',  // esqueci a senha (envia código por email)
+  '/reset-password',   // entra código + nova senha
   '/auth',
   '/trocar-senha',
 ];
-const DISABLED_AUTH_ROUTES = ['/forgot-password', '/verify'];
+const DISABLED_AUTH_ROUTES: string[] = [];
 
 // Rotas que o tier 'free' PODE acessar
 const FREE_ALLOWED_PREFIXES = [

@@ -2,6 +2,7 @@
 
 import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { AuthShell } from '@/components/AuthShell';
 import { createClient } from '@/lib/supabase/client';
 
@@ -84,6 +85,11 @@ function LoginInner() {
         cta = { href: '/trocar-senha', label: 'Ir trocar senha' };
       } else if (diag.reason === 'not_found') {
         cta = { href: '/register', label: 'Criar conta' };
+      } else if (diag.reason === 'wrong_password') {
+        cta = {
+          href: `/forgot-password${cleanEmail ? `?email=${encodeURIComponent(cleanEmail)}` : ''}`,
+          label: 'Redefinir senha por email',
+        };
       } else if (diag.reason === 'banned' || diag.reason === 'revoked') {
         cta = {
           href: 'https://wa.me/5531991262437',
@@ -179,9 +185,18 @@ function LoginInner() {
           />
         </div>
         <div>
-          <label className="label-field" htmlFor="password">
-            Senha
-          </label>
+          <div className="mb-2 flex items-center justify-between">
+            <label className="label-field !mb-0" htmlFor="password">
+              Senha
+            </label>
+            <Link
+              href={`/forgot-password${email ? `?email=${encodeURIComponent(email)}` : ''}`}
+              className="text-[11px] font-semibold text-violet transition hover:text-white"
+              tabIndex={-1}
+            >
+              Esqueci a senha
+            </Link>
+          </div>
           <input
             id="password"
             type="password"
@@ -235,14 +250,6 @@ function LoginInner() {
                 >
                   {error.ctaLabel} →
                 </a>
-              ) : null}
-              {error.reason === 'wrong_password' ? (
-                <span
-                  className="text-[10.5px] uppercase tracking-widest text-text-muted/70"
-                  style={{ fontFamily: 'var(--font-tech)' }}
-                >
-                  · Esqueceu? Fale com a gente no WhatsApp pra resetar
-                </span>
               ) : null}
             </div>
           </div>
