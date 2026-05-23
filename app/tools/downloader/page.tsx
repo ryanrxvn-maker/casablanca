@@ -9,7 +9,7 @@ import { IconDownloader } from '@/components/ToolIcons';
 
 type Mode = 'video' | 'audio-mp3' | 'audio-wav';
 type Quality = '1080' | '720' | '480' | 'best';
-type JobState = 'queued' | 'running' | 'done' | 'error';
+type JobState = 'queued' | 'resolving' | 'downloading' | 'done' | 'error';
 
 type Job = {
   id: string;
@@ -17,6 +17,8 @@ type Job = {
   state: JobState;
   filename: string | null;
   error: string | null;
+  /** Bytes recebidos / total (null = ainda não chegou content-length) */
+  progress: { received: number; total: number | null } | null;
 };
 
 const HUE = 'rgba(96,165,250,0.4)';
@@ -62,6 +64,13 @@ function triggerDownload(blob: Blob, filename: string) {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(objUrl), 10_000);
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+  return (n / 1024 / 1024 / 1024).toFixed(2) + ' GB';
 }
 
 export default function DownloaderPage() {
@@ -138,8 +147,11 @@ export default function DownloaderPage() {
     .filter((s) => /^https?:\/\//i.test(s));
 
   async function processOne(url: string, idx: number) {
+    // Fase 1: 'resolving' — esperando o servidor descobrir/baixar a fonte
     setJobs((prev) =>
-      prev.map((j, i) => (i === idx ? { ...j, state: 'running' } : j)),
+      prev.map((j, i) =>
+        i === idx ? { ...j, state: 'resolving', progress: null } : j,
+      ),
     );
     try {
       const res = await fetch('/api/downloader', {
@@ -162,12 +174,66 @@ export default function DownloaderPage() {
       const cd = res.headers.get('content-disposition') || '';
       const m = cd.match(/filename="?([^"]+)"?/i);
       const filename = m ? m[1] : `download-${Date.now()}`;
-      const blob = await res.blob();
-      triggerDownload(blob, filename);
+      const total = Number(res.headers.get('content-length')) || null;
+
+      // Fase 2: 'downloading' — bytes começando a chegar
+      setJobs((prev) =>
+        prev.map((j, i) =>
+          i === idx
+            ? {
+                ...j,
+                state: 'downloading',
+                progress: { received: 0, total },
+              }
+            : j,
+        ),
+      );
+
+      // Lê a stream em chunks pra mostrar % na UI ANTES do
+      // download nativo do navegador aparecer.
+      if (!res.body) {
+        // Fallback (browsers muito antigos): cai pra blob direto
+        const blob = await res.blob();
+        triggerDownload(blob, filename);
+      } else {
+        const reader = res.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let received = 0;
+        // throttle dos setJobs pra não floodar o React
+        let lastUpdate = 0;
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!value) continue;
+          chunks.push(value);
+          received += value.length;
+          const now = Date.now();
+          if (now - lastUpdate > 100) {
+            lastUpdate = now;
+            const snap = received;
+            setJobs((prev) =>
+              prev.map((j, i) =>
+                i === idx && j.progress
+                  ? {
+                      ...j,
+                      progress: { received: snap, total: j.progress.total },
+                    }
+                  : j,
+              ),
+            );
+          }
+        }
+        const ct = res.headers.get('content-type') || 'application/octet-stream';
+        const blob = new Blob(chunks as BlobPart[], { type: ct });
+        triggerDownload(blob, filename);
+      }
 
       setJobs((prev) =>
         prev.map((j, i) =>
-          i === idx ? { ...j, state: 'done', filename } : j,
+          i === idx
+            ? { ...j, state: 'done', filename, progress: null }
+            : j,
         ),
       );
     } catch (e) {
@@ -178,6 +244,7 @@ export default function DownloaderPage() {
                 ...j,
                 state: 'error',
                 error: e instanceof Error ? e.message : String(e),
+                progress: null,
               }
             : j,
         ),
@@ -193,6 +260,7 @@ export default function DownloaderPage() {
       state: 'queued',
       filename: null,
       error: null,
+      progress: null,
     }));
     setJobs(initial);
     setRunning(true);
@@ -435,41 +503,85 @@ export default function DownloaderPage() {
 
           {jobs.length > 0 && (
             <div className="mt-4 flex flex-col gap-2">
-              {jobs.map((j) => (
-                <div
-                  key={j.id}
-                  className="card-3d card-pad flex items-center justify-between gap-3 !py-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="mono truncate text-xs text-white">
-                      {j.filename || j.url}
-                    </div>
-                    <div className="mono mt-0.5 text-[10px] uppercase tracking-widest text-text-muted">
-                      {detectSource(j.url)}
-                      {j.error ? ` · ${j.error}` : ''}
-                    </div>
-                  </div>
-                  <span
-                    className={`mono shrink-0 rounded-full border px-2.5 py-0.5 text-[10px] uppercase tracking-widest ${
-                      j.state === 'done'
-                        ? 'border-lime text-lime'
-                        : j.state === 'error'
-                          ? 'border-red-500/60 text-red-300'
-                          : j.state === 'running'
-                            ? 'border-violet/60 text-violet'
-                            : 'border-line-strong text-text-muted'
-                    }`}
+              {jobs.map((j) => {
+                const pct =
+                  j.progress && j.progress.total
+                    ? Math.min(100, Math.round((j.progress.received / j.progress.total) * 100))
+                    : null;
+                const isActive = j.state === 'resolving' || j.state === 'downloading';
+                return (
+                  <div
+                    key={j.id}
+                    className="card-3d card-pad flex flex-col gap-2 !py-3"
                   >
-                    {j.state === 'queued'
-                      ? 'fila'
-                      : j.state === 'running'
-                        ? 'baixando'
-                        : j.state === 'done'
-                          ? 'ok'
-                          : 'erro'}
-                  </span>
-                </div>
-              ))}
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="mono truncate text-xs text-white">
+                          {j.filename || j.url}
+                        </div>
+                        <div className="mono mt-0.5 text-[10px] uppercase tracking-widest text-text-muted">
+                          {detectSource(j.url)}
+                          {j.progress && j.state === 'downloading' ? (
+                            <>
+                              {' · '}
+                              <span className="text-violet">
+                                {formatBytes(j.progress.received)}
+                                {j.progress.total
+                                  ? ` / ${formatBytes(j.progress.total)}`
+                                  : ''}
+                              </span>
+                            </>
+                          ) : null}
+                          {j.error ? ` · ${j.error}` : ''}
+                        </div>
+                      </div>
+                      <span
+                        className={`mono shrink-0 rounded-full border px-2.5 py-0.5 text-[10px] uppercase tracking-widest ${
+                          j.state === 'done'
+                            ? 'border-lime text-lime'
+                            : j.state === 'error'
+                              ? 'border-red-500/60 text-red-300'
+                              : j.state === 'downloading'
+                                ? 'border-violet/60 text-violet'
+                                : j.state === 'resolving'
+                                  ? 'border-blue-400/60 text-blue-300'
+                                  : 'border-line-strong text-text-muted'
+                        }`}
+                      >
+                        {j.state === 'queued' && 'fila'}
+                        {j.state === 'resolving' && 'localizando'}
+                        {j.state === 'downloading' &&
+                          (pct !== null ? `${pct}%` : 'baixando…')}
+                        {j.state === 'done' && 'ok'}
+                        {j.state === 'error' && 'erro'}
+                      </span>
+                    </div>
+                    {/* Barra de progresso: visível durante resolving e downloading */}
+                    {isActive ? (
+                      <div className="relative h-1 w-full overflow-hidden rounded-full bg-line/40">
+                        {pct !== null ? (
+                          <div
+                            className="absolute left-0 top-0 h-full bg-gradient-to-r from-violet to-blue-400 transition-all duration-150"
+                            style={{ width: `${pct}%` }}
+                          />
+                        ) : (
+                          // Indeterminado — animação de "scan" enquanto resolve
+                          <div className="cp-indeterminate absolute left-0 top-0 h-full w-1/3 bg-gradient-to-r from-transparent via-violet to-transparent" />
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+              <style jsx>{`
+                @keyframes cp-indeterminate {
+                  0%   { transform: translateX(-100%); }
+                  100% { transform: translateX(400%); }
+                }
+                .cp-indeterminate {
+                  animation: cp-indeterminate 1.2s ease-in-out infinite;
+                }
+              `}</style>
             </div>
           )}
         </ToolStep>

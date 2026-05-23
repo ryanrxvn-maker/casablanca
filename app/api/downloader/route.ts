@@ -3,10 +3,12 @@ import { requireAdmin } from '@/app/api/admin/_helpers';
 import {
   processDownload,
   classify,
-  readFile,
   type Mode,
   type Quality,
 } from '@/lib/downloader-core';
+import { createReadStream } from 'fs';
+import { stat as statFs } from 'fs/promises';
+import { Readable } from 'stream';
 
 /**
  * POST /api/downloader — wrapper fino sobre lib/downloader-core.
@@ -101,19 +103,41 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Arquivo em disco.
+  // Arquivo em disco — STREAMING (não bufferiza em memória).
+  // Vantagem: o cliente começa a receber bytes assim que o yt-dlp
+  // termina a 1ª chunk; antes ele esperava o readFile completo
+  // antes de QUALQUER byte chegar. Agora o browser/extensão recebe
+  // content-length de cara e mostra % real desde o byte 0.
   try {
-    const data = await readFile(result.filePath);
-    return new NextResponse(new Uint8Array(data), {
+    const st = await statFs(result.filePath);
+    const node = createReadStream(result.filePath);
+    // converte Node Readable → Web ReadableStream
+    const webStream = Readable.toWeb(node) as unknown as ReadableStream<Uint8Array>;
+
+    // dispose quando o stream fechar (sucesso) ou der erro
+    node.on('close', () => {
+      void result.dispose();
+    });
+    node.on('error', () => {
+      void result.dispose();
+    });
+
+    return new NextResponse(webStream, {
       status: 200,
       headers: {
         'content-type': result.contentType,
         'content-disposition': cd,
-        'content-length': String(data.length),
+        'content-length': String(st.size),
         'cache-control': 'no-store',
+        // Hint pro browser/proxy não bufferizar
+        'x-accel-buffering': 'no',
       },
     });
-  } finally {
+  } catch (e) {
     await result.dispose();
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : 'Falha lendo o arquivo.' },
+      { status: 500 },
+    );
   }
 }
