@@ -1,42 +1,41 @@
+import { ToolHero } from './tool-kit';
+
 /**
- * ToolShell v2 — shell visual de cada ferramenta.
+ * ToolShell v3 — agora usa o ToolHero do tool-kit por baixo.
  *
- * - Eyebrow de identidade (categoria)
- * - Titulo kinetic com peso editorial
- * - Subtitulo curto, sem termos tecnicos
- * - Card 3D com tech-frame discreto
+ * Todas as ferramentas que usam ToolShell ganham automaticamente o
+ * novo header cinematográfico (com glow, grid sutil, ícone gigante
+ * flutuante). O conteúdo interno (children) continua igual — cada
+ * ferramenta pode ser refinada individualmente pra usar ToolStep/
+ * ToolDropzone/etc do tool-kit, mas até lá já tem visual decente.
  */
 export function ToolShell({
   title,
   description,
   eyebrow,
+  hue,
+  icon,
   children,
 }: {
   title: string;
   description?: string;
   eyebrow?: string;
+  hue?: string;
+  icon?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <div className="animate-fade-in-up">
-      <div className="mb-7">
-        {eyebrow ? (
-          <div
-            className="mb-3 inline-flex items-center gap-2 rounded-full border border-line bg-bg-soft/60 px-3 py-1 text-[10.5px] font-semibold uppercase tracking-[0.20em] text-text-muted"
-            style={{ fontFamily: 'var(--font-tech)' }}
-          >
-            <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-violet" />
-            {eyebrow}
-          </div>
-        ) : null}
-        <h1 className="section-title">{title}</h1>
-        {description && (
-          <p className="mt-2 max-w-2xl text-[14px] leading-relaxed text-text-muted">
-            {description}
-          </p>
-        )}
+    <div className="mx-auto w-full max-w-[1080px] px-5 md:px-8">
+      <ToolHero
+        title={title}
+        eyebrow={eyebrow}
+        subtitle={description}
+        hue={hue}
+        icon={icon}
+      />
+      <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 md:p-7 backdrop-blur-sm">
+        {children}
       </div>
-      <div className="card-3d card-pad tech-frame">{children}</div>
     </div>
   );
 }

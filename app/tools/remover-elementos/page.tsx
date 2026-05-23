@@ -439,6 +439,7 @@ export default function RemoverElementosPage() {
       title="Smart Remover"
       eyebrow="VÍDEO COM IA"
       description="Remove legenda e marca d’água sem deixar borrão. A IA reconstrói o fundo."
+      hue="rgba(244,114,182,0.45)"
     >
       <div className="flex flex-col gap-6">
         {/* === BANNER UNICO — zero-config (sem pareamento manual) === */}

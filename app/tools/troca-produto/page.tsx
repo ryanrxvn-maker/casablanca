@@ -298,6 +298,7 @@ export default function TrocaProdutoPage() {
       title="Troca de produto"
       eyebrow="ÁUDIO COM IA"
       description="Substitui o produto do áudio. A voz original continua igual."
+      hue="rgba(244,114,182,0.45)"
     >
       <div className="grid gap-5">
         <MissingKeyBanner services={['assemblyai', 'elevenlabs']} />

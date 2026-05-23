@@ -1,6 +1,7 @@
 'use client';
 
 import { ToolShell } from '@/components/ToolShell';
+import { IconCamuflagem } from '@/components/ToolIcons';
 import { FileUpload } from '@/components/FileUpload';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
@@ -297,6 +298,8 @@ export default function CamuflagemPage() {
       title="Camuflagem"
       eyebrow="ÁUDIO"
       description="Escolha pra quem você quer enganar. O selo só fica verde se realmente camuflar."
+      hue="rgba(45,212,191,0.4)"
+      icon={<IconCamuflagem size={56} />}
     >
       <div className="flex flex-col gap-6">
         <MissingKeyBanner services={['assemblyai']} />

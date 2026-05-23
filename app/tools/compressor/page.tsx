@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo } from 'react';
-import { ToolShell } from '@/components/ToolShell';
+import { ToolHero, ToolStep } from '@/components/tool-kit';
+import { IconCompressor } from '@/components/ToolIcons';
 import { BatchFileUpload } from '@/components/BatchFileUpload';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { downloadBlob } from '@/lib/audio-engine';
@@ -274,14 +275,16 @@ export default function CompressorPage() {
   }
 
   return (
-    <ToolShell
-      title="Compressor"
-      eyebrow="VÍDEO"
-      description="Reduz o peso dos vídeos sem perder qualidade visível. Até vinte de uma vez."
-    >
-      <div className="flex flex-col gap-6">
-        <div>
-          <label className="label-field">Vídeos (até {MAX_BATCH})</label>
+    <div className="mx-auto w-full max-w-[1080px] px-5 md:px-8">
+      <ToolHero
+        title="Compressor"
+        eyebrow="VÍDEO"
+        subtitle="Reduz o peso dos vídeos sem perder qualidade visível. Até vinte de uma vez."
+        hue="rgba(129,140,248,0.4)"
+        icon={<IconCompressor size={56} />}
+      />
+      <div className="mt-6 flex flex-col gap-5">
+        <ToolStep n={1} title={`Solta os vídeos`} hint={`Até ${MAX_BATCH} arquivos`} hue="rgba(129,140,248,0.4)">
           <BatchFileUpload
             accept="video/mp4,video/webm,video/quicktime"
             value={files}
@@ -290,7 +293,7 @@ export default function CompressorPage() {
             hint="MP4, WEBM ou MOV"
             disabled={processing}
           />
-        </div>
+        </ToolStep>
 
         {files.length > 0 ? (
           <div className="grid gap-3 rounded-[12px] border border-line bg-bg p-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -495,6 +498,6 @@ export default function CompressorPage() {
           </ul>
         ) : null}
       </div>
-    </ToolShell>
+    </div>
   );
 }

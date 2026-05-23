@@ -219,6 +219,7 @@ export default function TakeSplitterPage() {
       title="Separar takes"
       eyebrow="VÍDEO"
       description="Recebe o bruto, devolve cada take separado em um arquivo. Tudo direto no navegador, sem perder qualidade."
+      hue="rgba(134,239,172,0.4)"
     >
       <div className="flex flex-col gap-6">
         <div>

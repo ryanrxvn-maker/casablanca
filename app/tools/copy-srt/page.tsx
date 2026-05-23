@@ -177,6 +177,7 @@ export default function CopySrtPage() {
       title="SRT Generator"
       eyebrow="TEXTO COM IA"
       description="Gera legendas prontas no tempo do seu áudio pra importar no editor. Texto exato da copy."
+      hue="rgba(196,181,253,0.45)"
     >
       <div className="flex flex-col gap-6">
         <MissingKeyBanner services={['groq']} />

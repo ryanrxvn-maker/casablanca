@@ -274,6 +274,7 @@ export default function DecupagemCopyPage() {
       title="Smart Decup"
       eyebrow="VÍDEO COM IA"
       description="Decupa o vídeo seguindo a sua copy. A IA escolhe a melhor take de cada frase e monta tudo na ordem certa."
+      hue="rgba(232,121,249,0.45)"
     >
       <div className="flex flex-col gap-6">
         <MissingKeyBanner services={['groq']} />

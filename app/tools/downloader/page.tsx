@@ -220,6 +220,7 @@ export default function DownloaderPage() {
       title="Downloader"
       eyebrow="WEB"
       description="Baixa vídeos, áudios e imagens do YouTube, Instagram, TikTok e Pinterest. Cola um link ou vários, um por linha."
+      hue="rgba(96,165,250,0.4)"
     >
       <div className="flex flex-col gap-6">
         {/* Extensão detectada -> pílula verde (igual Magnific/HeyGen).

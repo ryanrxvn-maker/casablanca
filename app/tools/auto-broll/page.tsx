@@ -220,6 +220,7 @@ export default function AutoBrollPage() {
       title="Auto B-roll"
       eyebrow="VÍDEO COM IA"
       description="Cola a sua lista, deixa rodando. Os B-rolls saem prontos enquanto você faz outra coisa."
+      hue="rgba(240,171,252,0.45)"
     >
       <div className="grid gap-5">
         {/* Controle da fila Magnific (Retomar/Pausar/Debug) — funciona

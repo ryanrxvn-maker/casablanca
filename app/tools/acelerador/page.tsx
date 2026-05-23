@@ -214,6 +214,7 @@ export default function AceleradorPage() {
       title="Mixer de Velocidade"
       eyebrow="VÍDEO / ÁUDIO"
       description="Acelera ou desacelera o vídeo/áudio sem ficar robótico."
+      hue="rgba(251,191,36,0.4)"
     >
       <div className="flex flex-col gap-6">
         <div>

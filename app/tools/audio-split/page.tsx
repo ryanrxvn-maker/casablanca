@@ -115,6 +115,7 @@ export default function AudioSplitPage() {
       title="Separar áudios"
       eyebrow="ÁUDIO"
       description="Quebra o áudio em pedaços pelas pausas. Sem cortar falas."
+      hue="rgba(34,211,238,0.4)"
     >
       <div className="flex flex-col gap-6">
         <div>

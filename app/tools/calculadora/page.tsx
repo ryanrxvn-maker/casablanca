@@ -33,6 +33,7 @@ export default function CalculadoraPage() {
       title="Calculadora"
       eyebrow="OPERACIONAL"
       description="Quanto cobrar pelo projeto? Coloca os minutos, o valor e a gente fecha a conta."
+      hue="rgba(148,163,184,0.4)"
     >
       <div className="flex flex-col gap-6">
         <div className="grid gap-4 sm:grid-cols-2">

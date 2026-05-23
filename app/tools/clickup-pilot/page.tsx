@@ -3449,6 +3449,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
         title="ClickUp Pilot"
         eyebrow="AUTOMAÇÃO"
         description="Conecta no seu ClickUp, lê as tarefas e gera os avatares automaticamente."
+        hue="rgba(200,255,0,0.4)"
       >
           {/* Setup status — todo o config (token + workspace + editor + status filter)
            *  fica em /configuracoes/clickup-pilot. Aqui so mostramos um chip status. */}

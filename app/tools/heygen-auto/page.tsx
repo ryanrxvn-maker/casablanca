@@ -803,6 +803,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
         title="HeyGen Auto"
         eyebrow="VÍDEO COM IA"
         description="Cola o roteiro ou os áudios, recebe o vídeo do seu avatar falando tudo na ordem certa."
+        hue="rgba(103,232,249,0.45)"
       >
           {/* Controle de jobs HeyGen (Retomar/Pausar/Debug) — funciona
               mesmo sem ter vindo do ClickUp Pilot */}

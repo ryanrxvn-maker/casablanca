@@ -211,6 +211,7 @@ export default function NormalizadorPage() {
       title="Normalizador"
       eyebrow="ÁUDIO"
       description="Iguala o volume dos arquivos. Voz baixa sobe, voz alta desce. Tudo no mesmo nível."
+      hue="rgba(94,234,212,0.4)"
     >
       <div className="flex flex-col gap-6">
         <div>
