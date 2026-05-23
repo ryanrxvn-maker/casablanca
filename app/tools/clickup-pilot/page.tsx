@@ -3377,7 +3377,8 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
     <>
       <ToolShell
         title="ClickUp Pilot"
-        description="Cerebro de automacao: le suas tasks no ClickUp, identifica avatares + copy do briefing, e dispara lipsync no HeyGen Auto Dynamic. Motor III sempre (sem custo de creditos)."
+        eyebrow="AUTOMAÇÃO"
+        description="Conecta no seu ClickUp, lê as tarefas e gera os avatares automaticamente."
       >
           {/* Setup status — todo o config (token + workspace + editor + status filter)
            *  fica em /configuracoes/clickup-pilot. Aqui so mostramos um chip status. */}

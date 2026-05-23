@@ -112,12 +112,13 @@ export default function AudioSplitPage() {
 
   return (
     <ToolShell
-      title="Audio Split"
-      description="Divide seu audio em partes por paragrafos detectando pausas naturais."
+      title="Separar áudios"
+      eyebrow="ÁUDIO"
+      description="Quebra o áudio em pedaços pelas pausas naturais. Útil pra revisar, traduzir ou refazer só um trecho."
     >
       <div className="flex flex-col gap-6">
         <div>
-          <label className="label-field">Arquivo de audio / video</label>
+          <label className="label-field">Arquivo de áudio ou vídeo</label>
           <FileUpload
             accept="audio/*,video/mp4,video/webm,video/ogg"
             value={file}

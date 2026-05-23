@@ -35,11 +35,11 @@ function LoginInner() {
 
   return (
     <AuthShell
-      title="Entrar"
-      subtitle="Acesso por convite."
+      title="Bem-vindo de volta"
+      subtitle="Entre pra continuar de onde parou."
       footer={
         <span className="text-text-muted">
-          Sem conta? Fale com o admin.
+          Ainda não tem conta? Fale com o nosso time.
         </span>
       }
     >
@@ -51,7 +51,7 @@ function LoginInner() {
           >
             <span className="mt-0.5 inline-block h-2 w-2 rounded-full bg-violet shadow-[0_0_8px_rgba(167,139,250,0.9)]" />
             <span>
-              Cadastros pausados. Pra entrar, fale com o admin.
+              Os cadastros estão fechados no momento. Entre em contato pra solicitar acesso.
             </span>
           </div>
         ) : null}

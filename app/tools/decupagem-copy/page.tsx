@@ -271,14 +271,15 @@ export default function DecupagemCopyPage() {
 
   return (
     <ToolShell
-      title="Decupagem por Copy"
-      description="Mande um video bruto de expert + a copy/script. A IA transcreve, alinha cada frase com a melhor take (mais fluente, sem repeticao/stutter) e devolve o video ja decupado na ordem da copy. AssemblyAI + FFmpeg WASM. 1 video por vez ate 800MB/40min."
+      title="Decupagem por roteiro"
+      eyebrow="VÍDEO COM IA"
+      description="Manda o vídeo bruto e o roteiro. A IA escolhe a melhor take de cada frase e monta tudo na ordem certa."
     >
       <div className="flex flex-col gap-6">
         <MissingKeyBanner services={['groq']} />
 
         <div>
-          <label className="label-field">Video bruto</label>
+          <label className="label-field">Vídeo bruto</label>
           <FileUpload
             accept="video/mp4,video/webm,video/quicktime,video/x-matroska"
             value={file}

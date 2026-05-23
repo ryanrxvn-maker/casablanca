@@ -310,8 +310,9 @@ export default function LtxVideoPage() {
 
   return (
     <ToolShell
-      title="LTX-Video 2.3"
-      description="Vídeo + áudio sincronizados. H200 80GB via Hugging Face ZeroGPU — geração unlimited com rotação de tokens, sem gastar crédito."
+      title="Vídeo do zero"
+      eyebrow="VÍDEO COM IA"
+      description="Descreve a cena, recebe o vídeo com áudio já sincronizado."
     >
       <div className="flex flex-col gap-6">
         {pool ? (

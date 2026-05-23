@@ -767,8 +767,9 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
   return (
     <>
       <ToolShell
-        title="HeyGen Auto Avatar"
-        description="Automacao do HeyGen via extensao Chrome — gera o avatar parte por parte usando sua propria conta HeyGen (sem custo de API). Voce manda copy ou audios, recebe ZIP organizado por parte na ordem certa."
+        title="Avatar automático"
+        eyebrow="VÍDEO COM IA"
+        description="Cola o roteiro ou os áudios, recebe o vídeo do seu avatar falando tudo na ordem certa."
       >
           {/* Controle de jobs HeyGen (Retomar/Pausar/Debug) — funciona
               mesmo sem ter vindo do ClickUp Pilot */}

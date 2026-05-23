@@ -295,8 +295,9 @@ export default function TrocaProdutoPage() {
 
   return (
     <ToolShell
-      title="Troca de Produto"
-      description="Substitui o nome de um produto em um áudio mantendo a voz original (ElevenLabs + AssemblyAI + FFmpeg)."
+      title="Troca de produto"
+      eyebrow="ÁUDIO COM IA"
+      description="Troca o nome do produto no áudio sem perder a voz original. A pessoa continua falando como sempre."
     >
       <div className="grid gap-5">
         <MissingKeyBanner services={['assemblyai', 'elevenlabs']} />

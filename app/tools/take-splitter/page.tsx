@@ -216,12 +216,13 @@ export default function TakeSplitterPage() {
 
   return (
     <ToolShell
-      title="Separar Takes"
-      description="Divide um documentario / VSL / video bruto nos cortes de cena automaticamente. Saida: ZIP com cada take nomeado tipo take_001_NICHO.mp4. Lossless (-c copy). Roda 100% no browser, ate 2GB."
+      title="Separar takes"
+      eyebrow="VÍDEO"
+      description="Recebe o bruto, devolve cada take separado em um arquivo. Tudo direto no navegador, sem perder qualidade."
     >
       <div className="flex flex-col gap-6">
         <div>
-          <label className="label-field">Video</label>
+          <label className="label-field">Vídeo</label>
           <FileUpload
             accept="video/mp4,video/webm,video/quicktime,video/x-matroska"
             value={file}

@@ -217,8 +217,9 @@ export default function AutoBrollPage() {
 
   return (
     <ToolShell
-      title="Magnific Auto B-Rolls"
-      description="Cole 1+ listas JSON (cada lista = 1 nicho = 1 job independente, com seu próprio Space). Roda 100% em segundo plano. Nano Banana 1K + Kling 2.5 720p — zero crédito."
+      title="Auto B-roll"
+      eyebrow="VÍDEO COM IA"
+      description="Cola a sua lista, deixa rodando. Os B-rolls saem prontos enquanto você faz outra coisa."
     >
       <div className="grid gap-5">
         {/* Controle da fila Magnific (Retomar/Pausar/Debug) — funciona

@@ -302,8 +302,8 @@ export default function CamuflagemPage() {
         <MissingKeyBanner services={['assemblyai']} />
         <div>
           <div className="flex items-center justify-between">
-            <label className="label-field !mb-0">Volume do WHITE</label>
-            <span className="mono text-xs text-lime">{volume}%</span>
+            <label className="label-field !mb-0">Intensidade da camuflagem</label>
+            <span className="mono text-xs text-violet">{volume}%</span>
           </div>
           <input
             type="range"
@@ -316,15 +316,12 @@ export default function CamuflagemPage() {
             disabled={processingAll}
           />
           <p className="mt-2 text-xs text-text-muted">
-            Ganho aplicado:{' '}
-            <span className="mono text-lime">
-              {((volume / 100) * 0.05).toFixed(4)}
-            </span>
+            Quanto maior, mais difícil de detectar.
           </p>
         </div>
 
         <div>
-          <label className="label-field">Formato de saida</label>
+          <label className="label-field">Formato de saída</label>
           <div className="flex flex-wrap gap-2">
             {(['mp4', 'mp3', 'wav'] as const).map((f) => {
               const disabled = f === 'mp4' && mp4Disabled;

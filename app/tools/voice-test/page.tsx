@@ -99,13 +99,14 @@ export default function VoiceTestPage() {
 
   return (
     <ToolShell
-      title="Voice Isolator — Test"
-      description="Testa o pre-processamento do VA pipeline. Upload audio com voz+musica e ouve antes/depois. Mesma logica usada no lipsync HeyGen."
+      title="Isolar voz"
+      eyebrow="ÁUDIO"
+      description="Tira a música, deixa só a voz. Ideal pra usar com avatar e lipsync."
     >
       <div className="grid gap-5">
         {/* Upload */}
         <div>
-          <label className="label-field block mb-2">Audio (MP3, WAV, M4A, OGG, ou MP4 com audio)</label>
+          <label className="label-field block mb-2">Áudio (MP3, WAV, M4A, OGG ou MP4)</label>
           <input
             type="file"
             accept="audio/*,video/mp4"

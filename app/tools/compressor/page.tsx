@@ -276,11 +276,12 @@ export default function CompressorPage() {
   return (
     <ToolShell
       title="Compressor"
-      description="Comprime ate 20 videos de uma vez com H.264 CRF, mostrando previsao de tamanho final."
+      eyebrow="VÍDEO"
+      description="Reduz o peso dos vídeos sem perder qualidade visível. Até vinte de uma vez."
     >
       <div className="flex flex-col gap-6">
         <div>
-          <label className="label-field">Videos (ate {MAX_BATCH})</label>
+          <label className="label-field">Vídeos (até {MAX_BATCH})</label>
           <BatchFileUpload
             accept="video/mp4,video/webm,video/quicktime"
             value={files}

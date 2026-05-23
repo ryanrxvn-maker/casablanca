@@ -30,8 +30,9 @@ export default function CalculadoraPage() {
 
   return (
     <ToolShell
-      title="Calculadora de minutos"
-      description="Calcule o orcamento do projeto a partir do valor por minuto, da minutagem total e (opcional) um desconto percentual."
+      title="Calculadora"
+      eyebrow="OPERACIONAL"
+      description="Quanto cobrar pelo projeto? Coloca os minutos, o valor e a gente fecha a conta."
     >
       <div className="flex flex-col gap-6">
         <div className="grid gap-4 sm:grid-cols-2">

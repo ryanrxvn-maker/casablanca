@@ -286,8 +286,9 @@ export default function PointsPage() {
 
   return (
     <ToolShell
-      title="Sistema de Pontos"
-      description="Visor tecnológico com seus pontos mensais. Bate metas (60/90/120/150) e desbloqueia bônus + medalhas."
+      title="Seus pontos"
+      eyebrow="CONQUISTAS"
+      description="Cada entrega rende ponto. Cada meta rende medalha. Continue assim."
     >
       {/* === VISOR PRINCIPAL === */}
       <div className="relative rounded-[16px] border border-cyan-500/40 bg-gradient-to-br from-bg-soft/80 to-bg/60 p-6 mb-5 overflow-hidden">

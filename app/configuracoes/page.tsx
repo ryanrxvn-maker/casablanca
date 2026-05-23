@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Header } from '@/components/Header';
 import { createClient } from '@/lib/supabase/client';
 import { ClickUpPilotStatusSection } from '@/components/ClickUpPilotStatusSection';
 
@@ -130,13 +129,10 @@ export default function ConfiguracoesPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen flex-col">
-        <Header />
-        <main className="container-app flex-1 py-10">
-          <div className="rounded-[16px] border border-line bg-bg-soft/60 p-8 text-center text-sm text-text-muted">
-            <span className="loading-dots">Carregando</span>
-          </div>
-        </main>
+      <div className="mx-auto w-full max-w-[1000px] px-5 md:px-8">
+        <div className="rounded-[16px] border border-line bg-bg-soft/60 p-8 text-center text-sm text-text-muted">
+          <span className="loading-dots">Carregando</span>
+        </div>
       </div>
     );
   }
@@ -151,9 +147,8 @@ export default function ConfiguracoesPage() {
   ];
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <Header />
-      <main className="container-app flex-1 py-10">
+    <div className="mx-auto w-full max-w-[1000px] px-5 md:px-8">
+      <main>
         <div className="animate-fade-in-up mb-10">
           <div
             className="mb-3 inline-flex items-center gap-2 rounded-full border border-line bg-bg-soft/60 px-3 py-1 text-[10.5px] font-semibold uppercase tracking-[0.20em] text-text-muted"

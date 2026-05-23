@@ -244,7 +244,7 @@ export default function LipsyncHistoryPage() {
   }, [entries]);
 
   return (
-    <ToolShell title="lipsync history" description="Todos os lipsyncs gerados pelo DARKO LAB — batches + VA">
+    <ToolShell title="Histórico" eyebrow="AVATAR" description="Todo avatar gerado por aqui fica aqui. Pra você revisar quando quiser.">
       <div className="space-y-4">
         {/* Stats */}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">

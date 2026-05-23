@@ -208,12 +208,13 @@ export default function NormalizadorPage() {
 
   return (
     <ToolShell
-      title="Normalizador de Volume"
-      description="Equilibra o volume com compressor estatico (2 estagios). Voz baixa e voz alta saem no mesmo nivel — ate em videos com varias pessoas. Saida MP4 (mantem video), MP3 ou WAV. Batch ate 10 arquivos."
+      title="Normalizador"
+      eyebrow="ÁUDIO"
+      description="Iguala o volume dos arquivos. Voz baixa sobe, voz alta desce. Tudo no mesmo nível."
     >
       <div className="flex flex-col gap-6">
         <div>
-          <label className="label-field">Arquivos (ate {MAX_BATCH})</label>
+          <label className="label-field">Arquivos (até {MAX_BATCH})</label>
           <BatchFileUpload
             accept="audio/*,video/mp4,video/webm,video/quicktime"
             value={files}

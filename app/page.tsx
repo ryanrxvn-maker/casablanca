@@ -1,6 +1,10 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
+import { Landing } from '@/components/Landing';
 
+/**
+ * `/` — quando logado: vai pro hub. Quando não: landing pública.
+ */
 export default async function HomePage() {
   const supabase = createClient();
   const {
@@ -10,5 +14,5 @@ export default async function HomePage() {
   if (user) {
     redirect('/tools');
   }
-  redirect('/login');
+  return <Landing />;
 }

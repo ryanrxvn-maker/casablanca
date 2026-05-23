@@ -211,12 +211,13 @@ export default function AceleradorPage() {
 
   return (
     <ToolShell
-      title="Mixer de Velocidade"
-      description="Acelera ou desacelera audio/video sem mudar o tom (sem efeito robotico). Processa ate 20 arquivos com escolha de formato de saida."
+      title="Acelerador"
+      eyebrow="VÍDEO / ÁUDIO"
+      description="Acelera ou desacelera sem deixar a voz robotizada. Vários arquivos de uma vez."
     >
       <div className="flex flex-col gap-6">
         <div>
-          <label className="label-field">Arquivos (ate {MAX_BATCH})</label>
+          <label className="label-field">Arquivos (até {MAX_BATCH})</label>
           <BatchFileUpload
             accept="audio/*,video/mp4,video/webm,video/quicktime"
             value={files}

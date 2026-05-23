@@ -218,7 +218,8 @@ export default function DownloaderPage() {
   return (
     <ToolShell
       title="Downloader"
-      description="Baixe vídeos, áudio ou imagens do YouTube, Instagram, TikTok e Pinterest. Downloads paralelos e rápidos — cole um ou vários links (um por linha)."
+      eyebrow="WEB"
+      description="Baixa vídeos, áudios e imagens do YouTube, Instagram, TikTok e Pinterest. Cola um link ou vários, um por linha."
     >
       <div className="flex flex-col gap-6">
         {/* Extensão detectada -> pílula verde (igual Magnific/HeyGen).

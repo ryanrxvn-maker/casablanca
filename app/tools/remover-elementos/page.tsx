@@ -436,8 +436,9 @@ export default function RemoverElementosPage() {
 
   return (
     <ToolShell
-      title="Remover Legenda & Marca d'Agua"
-      description="Smart Mode local: PaddleOCR detecta legendas hardcoded e o motor de inpainting limpa o video frame-a-frame. 100% offline, sem custo de API. Apenas admin."
+      title="Remover legenda"
+      eyebrow="VÍDEO COM IA"
+      description="Apaga legenda gravada e marca d'água sem deixar borrão. A IA reconstrói o fundo."
     >
       <div className="flex flex-col gap-6">
         {/* === BANNER UNICO — zero-config (sem pareamento manual) === */}

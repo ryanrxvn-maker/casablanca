@@ -462,8 +462,9 @@ export default function MindAdsPage() {
   return (
     <>
       <ToolShell
-        title="Mind Ads Suite"
-        description="Megazord. Voce manda copy + nicho + avatar HeyGen, a Mind Ads gera o anuncio completo: avatar falando + b-rolls IA + montagem + SRT. Pipeline em 6 etapas (Claude → HeyGen → Replicate Nano Banana Pro → Wan 2.1 → FFmpeg → AssemblyAI). Acesso restrito ao admin."
+        title="Mind Ads"
+        eyebrow="ANÚNCIO COMPLETO"
+        description="Cola o roteiro, o nicho e o avatar. Sai o anúncio inteiro pronto, com avatar, B-roll, montagem e legenda."
       >
           <div className="mb-6 rounded-[12px] border border-yellow-500/40 bg-yellow-500/5 px-4 py-3">
             <div className="flex items-start gap-2">
