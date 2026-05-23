@@ -37,6 +37,7 @@ import {
   type VoiceOption,
   type ClonedVoice,
 } from '@/components/HeyGenVoicePicker';
+import { IconHeyGenAuto } from '@/components/ToolIcons';
 
 /**
  * HeyGen Auto Avatar — automacao do HeyGen sem API.
@@ -804,6 +805,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
         eyebrow="VÍDEO COM IA"
         description="Cola o roteiro ou os áudios, recebe o vídeo do seu avatar falando tudo na ordem certa."
         hue="rgba(103,232,249,0.45)"
+        icon={<IconHeyGenAuto size={56} />}
       >
           {/* Controle de jobs HeyGen (Retomar/Pausar/Debug) — funciona
               mesmo sem ter vindo do ClickUp Pilot */}

@@ -17,6 +17,10 @@ import {
   type PipelineProgress,
   type TakeState,
 } from '@/lib/magnific-pipeline';
+import { ToolStep } from '@/components/tool-kit';
+import { IconAutoBroll } from '@/components/ToolIcons';
+
+const HUE = 'rgba(240,171,252,0.45)';
 
 /**
  * Magnific Auto B-Rolls — MULTI-JOB.
@@ -220,12 +224,14 @@ export default function AutoBrollPage() {
       title="Auto B-roll"
       eyebrow="VÍDEO COM IA"
       description="Cola a sua lista, deixa rodando. Os B-rolls saem prontos enquanto você faz outra coisa."
-      hue="rgba(240,171,252,0.45)"
+      hue={HUE}
+      icon={<IconAutoBroll size={56} />}
     >
       <div className="grid gap-5">
         {/* Controle da fila Magnific (Retomar/Pausar/Debug) — funciona
             mesmo sem ter vindo do ClickUp Pilot */}
         <JobControlPanel scopes={['magnific']} />
+        <ToolStep n={1} title="Extensão Magnific" hint="Conecta à sua conta Premium+ — gera sem gastar crédito" hue={HUE}>
         {/* Extension status */}
         {extStatus.connected ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-3 text-sm">
@@ -297,34 +303,37 @@ export default function AutoBrollPage() {
             </div>
           </div>
         )}
+        </ToolStep>
 
-        {/* Config global (aplica a todos os jobs) */}
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="block">
-            <span className="label-field">Modelo de imagem</span>
-            <select
-              value={imageModel}
-              onChange={(e) => setImageModel(e.target.value as ImageModelChoice)}
-              className="input-field"
-              disabled={anyRunning}
-            >
-              <option value="nano-banana-2">Nano Banana 2 (1K, ilimitado)</option>
-              <option value="nano-banana-pro">Nano Banana Pro (1K, ilimitado)</option>
-            </select>
-          </label>
-          <label className="block">
-            <span className="label-field">Motion default (opcional, Kling 2.5)</span>
-            <input
-              type="text"
-              value={globalMotion}
-              onChange={(e) => setGlobalMotion(e.target.value)}
-              placeholder="Ex: slow camera push-in, soft handheld motion"
-              className="input-field"
-              disabled={anyRunning}
-            />
-          </label>
-        </div>
+        <ToolStep n={2} title="Configuração global" hint="Aplica a todos os jobs deste lote" hue={HUE}>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block">
+              <span className="label-field">Modelo de imagem</span>
+              <select
+                value={imageModel}
+                onChange={(e) => setImageModel(e.target.value as ImageModelChoice)}
+                className="input-field"
+                disabled={anyRunning}
+              >
+                <option value="nano-banana-2">Nano Banana 2 (1K, ilimitado)</option>
+                <option value="nano-banana-pro">Nano Banana Pro (1K, ilimitado)</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className="label-field">Motion default (opcional, Kling 2.5)</span>
+              <input
+                type="text"
+                value={globalMotion}
+                onChange={(e) => setGlobalMotion(e.target.value)}
+                placeholder="Ex: slow camera push-in, soft handheld motion"
+                className="input-field"
+                disabled={anyRunning}
+              />
+            </label>
+          </div>
+        </ToolStep>
 
+        <ToolStep n={3} title="Jobs" hint="Cada lista de prompts dispara em seu próprio Space — rodam em série" hue={HUE}>
         {/* JOBS — cada lista JSON dispara separada, com seu próprio Space */}
         <div className="grid gap-4">
           {jobs.map((job, idx) => (
@@ -351,26 +360,27 @@ export default function AutoBrollPage() {
           ))}
         </div>
 
-        <div className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={addJob}
-            disabled={anyRunning}
-            className="rounded-[8px] border border-line-strong bg-bg-soft px-4 py-2 text-sm font-semibold text-text-muted transition hover:border-lime hover:text-lime disabled:opacity-50"
-          >
-            + Adicionar outro JSON (novo job/space)
-          </button>
-          {jobs.length > 1 && (
+          <div className="mt-4 flex flex-wrap gap-3">
             <button
               type="button"
-              onClick={runAll}
-              disabled={!extStatus.connected || anyRunning}
-              className="btn-primary"
+              onClick={addJob}
+              disabled={anyRunning}
+              className="rounded-[8px] border border-line-strong bg-bg-soft px-4 py-2 text-sm font-semibold text-text-muted transition hover:border-violet hover:text-violet disabled:opacity-50"
             >
-              Disparar TODOS os {jobs.length} jobs
+              + Adicionar outro JSON (novo job/space)
             </button>
-          )}
-        </div>
+            {jobs.length > 1 && (
+              <button
+                type="button"
+                onClick={runAll}
+                disabled={!extStatus.connected || anyRunning}
+                className="btn-primary"
+              >
+                Disparar TODOS os {jobs.length} jobs
+              </button>
+            )}
+          </div>
+        </ToolStep>
       </div>
     </ToolShell>
   );

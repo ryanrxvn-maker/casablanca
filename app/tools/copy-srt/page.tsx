@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef } from 'react';
 import { ToolShell } from '@/components/ToolShell';
-import { FileUpload } from '@/components/FileUpload';
 import { CancelButton } from '@/components/CancelButton';
 import { CostHint } from '@/components/CostHint';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
@@ -17,6 +16,14 @@ import {
   type FFProgress,
 } from '@/lib/ffmpeg-worker';
 import { formatBytes, formatTime } from '@/lib/utils';
+import {
+  ToolStep,
+  ToolDropzone,
+  ToolAction,
+  ToolResultCard,
+  ToolMetric,
+} from '@/components/tool-kit';
+import { IconCopySRT } from '@/components/ToolIcons';
 
 /**
  * Copy → SRT — gera legendas SRT pulando a revisao manual.
@@ -28,6 +35,7 @@ import { formatBytes, formatTime } from '@/lib/utils';
 
 const MAX_FILE_BYTES = 800 * 1024 * 1024;
 const MAX_DURATION_SEC = 60 * 60;
+const HUE = 'rgba(167,139,250,0.45)';
 
 export default function CopySrtPage() {
   const [file, setFile] = useToolState<File | null>('copysrt:file', null);
@@ -172,158 +180,186 @@ export default function CopySrtPage() {
     await downloadBlob(blob, baseName + '.srt');
   }
 
+  const charCount = copyText.trim().length;
+  const lineCount = srt
+    ? srt.split('\n').filter((l) => /^\d+$/.test(l.trim())).length
+    : 0;
+
   return (
     <ToolShell
       title="SRT Generator"
       eyebrow="TEXTO COM IA"
       description="Gera legendas prontas no tempo do seu áudio pra importar no editor. Texto exato da copy."
-      hue="rgba(196,181,253,0.45)"
+      hue={HUE}
+      icon={<IconCopySRT size={56} />}
     >
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-5">
         <MissingKeyBanner services={['groq']} />
 
-        <div>
-          <label className="label-field">Audio ou video</label>
-          <FileUpload
+        <ToolStep n={1} title="Áudio ou vídeo" hint="MP3, WAV, MP4, MOV, WEBM — até 800MB e 60min" hue={HUE}>
+          <ToolDropzone
             accept="audio/*,video/mp4,video/webm,video/quicktime,video/x-matroska"
-            value={file}
-            onChange={(f) => {
+            file={file}
+            onFile={(f) => {
               reset();
               setFile(f);
             }}
-            hint="MP3, WAV, MP4, MOV, WEBM — ate 800MB e 60min"
+            disabled={processing}
+            hue={HUE}
           />
           {file ? (
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-muted">
-              <span>
-                {file.name} —{' '}
-                <span
-                  className={
-                    'mono ' +
-                    (file.size > MAX_FILE_BYTES ? 'text-red-300' : 'text-lime')
-                  }
-                >
-                  {formatBytes(file.size)}
-                </span>
-              </span>
+            <div className="mt-3 grid grid-cols-2 gap-2.5 md:grid-cols-3">
+              <ToolMetric value={formatBytes(file.size)} label="Tamanho" />
               {duration !== null ? (
-                <span>
-                  · <span className="mono text-lime">{formatTime(duration)}</span>
-                </span>
+                <ToolMetric
+                  value={formatTime(duration)}
+                  label="Duração"
+                  accent="lime"
+                />
+              ) : null}
+              {duration !== null && duration > 0 ? (
+                <div className="hidden md:block">
+                  <CostHint estimate={estimateDecupagemCopy(duration)} />
+                </div>
               ) : null}
             </div>
           ) : null}
           {validation ? (
-            <div className="mt-2 rounded-[8px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+            <div className="mt-3 rounded-[10px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
               {validation}
             </div>
           ) : null}
-        </div>
+        </ToolStep>
 
-        <div>
-          <label className="label-field" htmlFor="copy">
-            Texto da copy (sera o conteudo do SRT)
-          </label>
+        <ToolStep
+          n={2}
+          title="Texto da copy"
+          hint="Será o conteúdo exato do SRT — só os tempos vêm do áudio"
+          hue={HUE}
+        >
           <textarea
             id="copy"
             value={copyText}
             onChange={(e) => setCopyText(e.target.value)}
             placeholder="Cole aqui o texto da copy. O SRT vai sair com este texto exato + os tempos extraidos do audio."
-            rows={10}
+            rows={9}
             className="input-field resize-y font-mono text-sm"
             disabled={processing}
           />
-          <div className="mt-1 text-xs text-text-muted">
-            <span className="mono text-lime">{copyText.trim().length}</span>{' '}
-            caracteres
-          </div>
-        </div>
-
-        {file && duration !== null && duration > 0 ? (
-          <CostHint estimate={estimateDecupagemCopy(duration)} />
-        ) : null}
-
-        <div className="flex flex-wrap gap-3">
-          {processing ? (
-            <CancelButton onClick={handleCancel} label="Cancelar" />
-          ) : (
-            <button
-              onClick={process}
-              className="btn-primary"
-              disabled={!file || !!validation || !copyText.trim()}
+          <div className="mt-2 flex items-center justify-between">
+            <span
+              className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+              style={{ fontFamily: 'var(--font-tech)' }}
             >
-              Gerar SRT
+              Caracteres
+            </span>
+            <span
+              className={
+                'mono text-[12.5px] ' +
+                (charCount > 0 ? 'text-violet' : 'text-text-muted')
+              }
+            >
+              {charCount}
+            </span>
+          </div>
+        </ToolStep>
+
+        <ToolStep n={3} title="Gerar SRT" hue={HUE}>
+          <div className="flex flex-wrap gap-3">
+            {processing ? (
+              <CancelButton onClick={handleCancel} label="Cancelar" />
+            ) : (
+              <ToolAction
+                onClick={process}
+                disabled={!file || !!validation || !copyText.trim()}
+              >
+                Gerar SRT
+              </ToolAction>
+            )}
+            <button
+              onClick={() => {
+                reset();
+                setFile(null);
+                setCopyText('');
+              }}
+              className="btn-secondary"
+              disabled={processing}
+            >
+              Limpar
             </button>
-          )}
-          <button
-            onClick={() => {
-              reset();
-              setFile(null);
-              setCopyText('');
-            }}
-            className="btn-secondary"
-            disabled={processing}
-          >
-            Limpar
-          </button>
-        </div>
-
-        {error ? (
-          <div
-            key={error}
-            role="alert"
-            className="error-shake rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300 shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)]"
-          >
-            {error}
           </div>
-        ) : null}
 
-        {stage ? (
-          <div
-            className={
-              'rounded-[12px] border px-4 py-3 text-xs ' +
-              (processing
-                ? 'scan-line border-lime/40 bg-bg-soft/40 text-lime'
-                : 'border-line bg-bg text-text-muted')
-            }
-          >
-            <div className="flex items-center gap-2">
-              {processing ? (
-                <span className="relative flex h-2 w-2 shrink-0">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
-                </span>
-              ) : null}
-              <span className="mono uppercase tracking-widest">{stage}</span>
+          {error ? (
+            <div
+              key={error}
+              role="alert"
+              className="error-shake mt-4 rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300 shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)]"
+            >
+              {error}
             </div>
-            {progress !== null ? (
-              <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-line">
-                <div
-                  className="h-full bg-lime transition-all"
-                  style={{ width: `${Math.round(progress * 100)}%` }}
-                />
+          ) : null}
+
+          {stage ? (
+            <div
+              className={
+                'mt-4 rounded-[12px] border px-4 py-3 text-xs ' +
+                (processing
+                  ? 'scan-line border-violet/40 bg-violet/5 text-violet'
+                  : 'border-line bg-bg text-text-muted')
+              }
+            >
+              <div className="flex items-center gap-2">
+                {processing ? (
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet opacity-60" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-violet shadow-[0_0_8px_rgba(167,139,250,0.9)]" />
+                  </span>
+                ) : null}
+                <span
+                  className="text-[11px] font-bold uppercase tracking-[0.18em]"
+                  style={{ fontFamily: 'var(--font-tech)' }}
+                >
+                  {stage}
+                </span>
               </div>
-            ) : null}
-          </div>
-        ) : null}
+              {progress !== null ? (
+                <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-line">
+                  <div
+                    className="h-full bg-violet transition-all"
+                    style={{ width: `${Math.round(progress * 100)}%` }}
+                  />
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </ToolStep>
 
         {srt ? (
-          <div className="fade-in-up mt-2 border-t border-line pt-6">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-widest text-lime">
-                <span className="relative flex h-2 w-2">
-                  <span className="absolute inline-flex h-full w-full animate-pulse-soft rounded-full bg-lime opacity-60" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_10px_rgba(200,255,0,0.9)]" />
-                </span>
-                SRT pronto
-              </h3>
-              <button onClick={download} className="btn-primary !py-2 text-xs">
-                Baixar .SRT
-              </button>
-            </div>
-            <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap rounded-md border border-lime/30 bg-black/40 p-3 text-xs leading-relaxed text-white">
-              {srt}
-            </pre>
+          <div className="fade-in-up">
+            <ToolResultCard
+              title="SRT gerado"
+              meta={file ? file.name.replace(/\.[^.]+$/, '') + '.srt' : undefined}
+              hue={HUE}
+            >
+              <div className="mb-4 grid grid-cols-2 gap-2.5 md:grid-cols-3">
+                <ToolMetric value={String(lineCount)} label="Legendas" accent="violet" />
+                <ToolMetric
+                  value={formatBytes(new Blob([srt]).size)}
+                  label="Tamanho"
+                  accent="violet"
+                />
+                <ToolMetric value=".SRT" label="Formato" accent="violet" />
+              </div>
+              <pre
+                className="max-h-[360px] overflow-auto whitespace-pre-wrap rounded-[12px] border border-violet/25 bg-black/40 p-4 text-xs leading-relaxed text-white/90"
+                style={{ fontFamily: 'var(--font-mono)' }}
+              >
+                {srt}
+              </pre>
+              <div className="mt-4 flex flex-wrap gap-3">
+                <ToolAction onClick={download}>Baixar .SRT</ToolAction>
+              </div>
+            </ToolResultCard>
           </div>
         ) : null}
       </div>
