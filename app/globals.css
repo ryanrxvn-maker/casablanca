@@ -48,6 +48,16 @@ body {
   font-feature-settings: 'ss01', 'cv11', 'cv02';
 }
 
+/* ─── Regra universal: NUNCA hifenizar ou quebrar palavra no meio ─── */
+* {
+  -webkit-hyphens: none;
+  hyphens: none;
+}
+h1, h2, h3, h4, h5, h6 {
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
 body {
   min-height: 100vh;
   position: relative;

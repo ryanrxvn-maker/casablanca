@@ -3,15 +3,26 @@
 import { useRef, useState } from 'react';
 
 /**
- * SmokeText v3 — esfumaçado SUTIL que acompanha o mouse.
+ * SmokeText v4 — esfumaçado sutil + nunca quebra palavra no meio.
  *
- * Em vez de "explodir" as letras na entrada do hover, agora calcula a
- * distância de cada letra até o cursor e aplica um blur progressivo
- * (mais perto do cursor = mais fumaça). A animação é leve, sem grandes
- * deslocamentos. Quando o mouse sai, todas as letras voltam a 0 suave.
+ * Estrutura crítica:
+ *   <wrapper>
+ *     <word> ← display:inline-block + white-space:nowrap (NÃO quebra)
+ *       <letter/><letter/><letter/>
+ *     </word>
+ *     <space/>
+ *     <word>...</word>
+ *   </wrapper>
  *
- * Use APENAS em headlines grandes (h1/h2). Não usar em parágrafos,
- * listas ou textos pequenos — fica visualmente carregado.
+ * O navegador pode quebrar entre palavras (espaços), mas NUNCA dentro de
+ * uma palavra — porque cada palavra é um inline-block que não quebra.
+ * Isso resolve o bug de "automático" virar "automát-ico".
+ *
+ * A animação: cada letra mede distância pro cursor e ganha blur sutil
+ * proporcional (máx 5px), translateY -4px, scale +0.08. Mouse-out volta
+ * todas as letras a 0 suavemente.
+ *
+ * Use só em headlines grandes.
  */
 export function SmokeText({
   text,
@@ -24,10 +35,23 @@ export function SmokeText({
   const lettersRef = useRef<Array<HTMLSpanElement | null>>([]);
   const [active, setActive] = useState(false);
 
-  const letters = Array.from(text);
+  // Tokeniza por espaço; mantém o espaço como token separado pra preservar
+  // largura natural quando renderizado.
+  const tokens: Array<{ kind: 'word' | 'space'; chars: string[] }> = [];
+  let current: string[] = [];
+  for (const ch of Array.from(text)) {
+    if (ch === ' ') {
+      if (current.length) {
+        tokens.push({ kind: 'word', chars: current });
+        current = [];
+      }
+      tokens.push({ kind: 'space', chars: [' '] });
+    } else {
+      current.push(ch);
+    }
+  }
+  if (current.length) tokens.push({ kind: 'word', chars: current });
 
-  // Recalcula intensidade por letra baseado na posição do mouse.
-  // Cada letra ganha --d (distância 0..1) que vira blur via CSS.
   const onMove = (e: React.MouseEvent<HTMLSpanElement>) => {
     const wrap = wrapRef.current;
     if (!wrap) return;
@@ -44,10 +68,9 @@ export function SmokeText({
       const dx = cx - mx;
       const dy = cy - my;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      // 0 = bem perto do mouse (fumaça forte), 1 = longe (normal)
       const t = Math.min(1, dist / maxDist);
-      const intensity = 1 - t; // 0..1, alto = perto
-      el.style.setProperty('--d', String(intensity.toFixed(3)));
+      const intensity = 1 - t;
+      el.style.setProperty('--d', intensity.toFixed(3));
     }
   };
 
@@ -59,33 +82,58 @@ export function SmokeText({
     }
   };
 
+  // Reset do index das letras pra mapear corretamente entre palavras
+  let letterIdx = 0;
+
   return (
     <span
       ref={wrapRef}
-      className={'smoke-text inline-block ' + className}
+      className={'smoke-text inline ' + className}
       onMouseEnter={() => setActive(true)}
       onMouseMove={onMove}
       onMouseLeave={onLeave}
       data-active={active ? 'on' : 'off'}
       aria-label={text}
     >
-      {letters.map((ch, i) => (
-        <span
-          key={i}
-          ref={(el) => {
-            lettersRef.current[i] = el;
-          }}
-          className="smoke-letter inline-block"
-          aria-hidden
-        >
-          {ch === ' ' ? ' ' : ch}
-        </span>
-      ))}
+      {tokens.map((tok, i) => {
+        if (tok.kind === 'space') {
+          // Espaço como nó de texto puro (permite quebra natural aqui).
+          return <span key={`s-${i}`}> </span>;
+        }
+        // Palavra: inline-block + nowrap → letras animam, mas a palavra
+        // permanece inteira em uma linha.
+        return (
+          <span key={`w-${i}`} className="smoke-word" aria-hidden>
+            {tok.chars.map((ch) => {
+              const idx = letterIdx++;
+              return (
+                <span
+                  key={idx}
+                  ref={(el) => {
+                    lettersRef.current[idx] = el;
+                  }}
+                  className="smoke-letter"
+                >
+                  {ch}
+                </span>
+              );
+            })}
+          </span>
+        );
+      })}
 
       <style jsx>{`
         .smoke-text {
-          position: relative;
           cursor: pointer;
+          /* Garante quebra apenas entre palavras */
+          word-break: normal;
+          overflow-wrap: normal;
+          -webkit-hyphens: none;
+          hyphens: none;
+        }
+        .smoke-word {
+          display: inline-block;
+          white-space: nowrap;
         }
         .smoke-letter {
           display: inline-block;
@@ -96,9 +144,6 @@ export function SmokeText({
             transform 350ms cubic-bezier(0.22, 1, 0.36, 1),
             opacity 350ms cubic-bezier(0.22, 1, 0.36, 1);
         }
-        /* Quando há um valor --d > 0, a letra "fumacha" proporcionalmente.
-         * Blur máx 5px, lift máx -4px, opacity mín 0.55 — bem mais sutil
-         * que a versão anterior (era blur 14px, scale 1.35). */
         .smoke-text[data-active='on'] .smoke-letter {
           filter: blur(calc(var(--d) * 5px));
           transform: translateY(calc(var(--d) * -4px)) scale(calc(1 + var(--d) * 0.08));
