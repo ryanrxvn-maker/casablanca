@@ -8,11 +8,13 @@ import { LipsyncHistoryButton } from './LipsyncHistoryButton';
 import { PointsButton } from './PointsButton';
 
 /**
- * TopBar v3 — barra fina topo direito.
+ * TopBar v4 — barra fina com título contextual + cluster de ações.
  *
- * - Encolhe (h-12) ao rolar pra baixo
- * - Mostra título contextual da rota à esquerda + ações à direita
- * - Sem brand (já está na sidebar)
+ *  ┌─ Título da rota ─────────────────────── [Pontos · Bg · ⏱ · Pilot] ─┐
+ *
+ * Os 4 ícones agora vivem dentro de um cluster (.topbar-cluster) —
+ * pílula com fundo translúcido e divisor entre grupo "do usuário"
+ * (Pontos) e grupo "do trabalho" (Bg/Histórico/Pilot).
  */
 const TITLES: Record<string, string> = {
   '/tools': 'Início',
@@ -33,7 +35,15 @@ const TITLES: Record<string, string> = {
   '/tools/heygen-auto': 'Avatar automático',
   '/tools/ltx-video': 'Vídeo do zero',
   '/tools/points': 'Pontos',
-  '/configuracoes': 'Conta',
+  '/tools/background': 'Tarefas em segundo plano',
+  '/tools/lipsync-history': 'Histórico de avatares',
+  '/tools/clickup-pilot': 'ClickUp Pilot',
+  '/tools/mind-ads': 'Mind Ads',
+  '/tools/voice-test': 'Isolar voz',
+  '/configuracoes': 'Configurações',
+  '/configuracoes/api': 'Chaves de IA',
+  '/configuracoes/clickup-pilot': 'ClickUp Pilot · ajustes',
+  '/admin': 'Painel admin',
 };
 
 export function TopBar() {
@@ -42,49 +52,53 @@ export function TopBar() {
 
   useEffect(() => {
     function onScroll() {
-      setScrolled(window.scrollY > 8);
+      setScrolled(window.scrollY > 6);
     }
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  const title =
-    TITLES[pathname] ??
-    Object.keys(TITLES)
-      .filter((k) => pathname.startsWith(k))
-      .sort((a, b) => b.length - a.length)[0];
-
-  const display = title ? TITLES[title] ?? title : '';
+  // Resolve título: exato primeiro, senão o prefixo mais longo
+  let display: string | undefined = TITLES[pathname];
+  if (!display) {
+    const matches = Object.keys(TITLES)
+      .filter((k) => pathname === k || pathname.startsWith(k + '/'))
+      .sort((a, b) => b.length - a.length);
+    if (matches.length > 0) display = TITLES[matches[0]];
+  }
 
   return (
     <header
       className={
         'sticky top-0 z-30 border-b transition-all duration-300 ' +
         (scrolled
-          ? 'border-line/70 bg-bg/85 backdrop-blur-xl'
-          : 'border-line/30 bg-bg/50 backdrop-blur-md')
+          ? 'border-line/60 bg-bg/85 backdrop-blur-xl'
+          : 'border-line/20 bg-bg/40 backdrop-blur-md')
       }
     >
       <div
         className={
-          'flex items-center justify-between px-5 transition-all duration-300 md:px-8 ' +
+          'flex items-center justify-between gap-4 px-5 transition-all duration-300 md:px-8 ' +
           (scrolled ? 'h-12' : 'h-14')
         }
       >
-        <div className="ml-12 flex items-center gap-3 md:ml-0">
+        {/* Esquerda: título da rota */}
+        <div className="ml-12 flex min-w-0 items-center gap-3 md:ml-0">
           {display ? (
-            <span
-              className="text-[13px] font-semibold tracking-tight text-white"
-              style={{ fontFamily: 'var(--font-tech)' }}
+            <h2
+              className="truncate text-[13.5px] font-bold tracking-tight text-white"
+              style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.01em' }}
             >
               {display}
-            </span>
+            </h2>
           ) : null}
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Direita: cluster de ícones */}
+        <div className="topbar-cluster">
           <PointsButton />
+          <span aria-hidden className="topbar-divider" />
           <BackgroundTasksButton />
           <LipsyncHistoryButton />
           <ClickUpPilotButton />

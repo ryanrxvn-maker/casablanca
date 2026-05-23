@@ -3,11 +3,7 @@ import { RouteLoader } from '@/components/RouteLoader';
 import { Sidebar } from '@/components/Sidebar';
 import { TopBar } from '@/components/TopBar';
 
-/**
- * Layout das configurações — mesma sidebar das ferramentas, sem sub-sidebar
- * (não há sub-categorias aqui).
- */
-export default function ConfiguracoesLayout({
+export default function AdminLayout({
   children,
 }: {
   children: React.ReactNode;

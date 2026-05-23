@@ -1,17 +1,22 @@
+'use client';
+
 import { Heartbeat } from '@/components/Heartbeat';
 import { MindAdsButton } from '@/components/MindAdsButton';
 import { RouteLoader } from '@/components/RouteLoader';
 import { Sidebar } from '@/components/Sidebar';
+import { SubSidebar, useSubSidebarActive } from '@/components/SubSidebar';
 import { TopBar } from '@/components/TopBar';
 import { ToolsStateProvider } from '@/components/ToolsStateProvider';
 
 /**
- * Layout das ferramentas v3 — estilo HeyGen.
+ * Layout das ferramentas v4 — estilo HeyGen com sub-sidebar.
  *
- * - Sidebar lateral fixa (84px) com navegação principal vertical
- * - TopBar fina à direita com search/atalhos e ações secundárias
- * - Conteúdo central com padding adaptado
- * - RouteLoader: splash entre transições
+ * Estrutura:
+ *  ┌──────┬───────────────┬────────────────────────┐
+ *  │  84  │  244 (subnav  │   conteúdo flex        │
+ *  │ side │  só em Base/  │                        │
+ *  │ bar  │  IA)          │                        │
+ *  └──────┴───────────────┴────────────────────────┘
  */
 export default function ToolsLayout({
   children,
@@ -20,16 +25,31 @@ export default function ToolsLayout({
 }) {
   return (
     <ToolsStateProvider>
-      <div className="flex min-h-screen flex-col md:pl-[84px]">
-        <Heartbeat />
-        <Sidebar />
-        <TopBar />
-        <main className="flex-1 pb-16 pt-6 md:pt-8">
-          {children}
-        </main>
-        <MindAdsButton />
-        <RouteLoader />
-      </div>
+      <Heartbeat />
+      <Sidebar />
+      <SubSidebar />
+      <ContentWrap>{children}</ContentWrap>
+      <MindAdsButton />
+      <RouteLoader />
     </ToolsStateProvider>
+  );
+}
+
+/**
+ * Conteúdo principal — ajusta padding-left de acordo com sub-sidebar.
+ * Cliente porque precisa do hook do pathname.
+ */
+function ContentWrap({ children }: { children: React.ReactNode }) {
+  const subActive = useSubSidebarActive();
+  return (
+    <div
+      className={
+        'flex min-h-screen flex-col transition-[padding] duration-300 ' +
+        (subActive ? 'md:pl-[328px]' : 'md:pl-[84px]')
+      }
+    >
+      <TopBar />
+      <main className="flex-1 pb-16 pt-6 md:pt-8">{children}</main>
+    </div>
   );
 }

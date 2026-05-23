@@ -17,16 +17,33 @@ type NavItem = {
   label: string;
   icon: React.ReactNode;
   match?: (path: string) => boolean;
-  adminOnly?: boolean;
+};
+
+type NavSection = {
+  label: string;
+  items: NavItem[];
 };
 
 /**
- * Sidebar v3 — navegação principal lateral estilo HeyGen.
+ * Sidebar v4 — categorias visuais.
  *
- * Substitui o Header horizontal antigo. Sempre fixa, 84px no desktop,
- * fechada em mobile (com botão pra abrir). Cada item: ícone grande
- * dentro de um quadro com glow + label embaixo. Item ativo ganha
- * fundo translúcido + borda violet.
+ * Estrutura:
+ *   ┌─────────────┐
+ *   │   [Logo]    │
+ *   ├─────────────┤
+ *   │  NAVEGAR    │  ← label de categoria
+ *   │  Início     │
+ *   ├─────────────┤
+ *   │ FERRAMENTAS │  ← label de categoria
+ *   │  Base       │
+ *   │  IA         │
+ *   │  Pontos     │
+ *   └─────────────┘
+ *           ↓
+ *      [avatar S]   ← clica aqui pra Conta/Admin/Sair
+ *
+ * Conta e Admin foram removidos da nav principal — só aparecem no
+ * dropdown ao clicar no avatar do rodapé.
  */
 export function Sidebar() {
   const router = useRouter();
@@ -78,49 +95,44 @@ export function Sidebar() {
   const displayName = profile?.name?.trim() || 'Editor';
   const initial = displayName.charAt(0).toUpperCase();
 
-  const navItems: NavItem[] = [
+  const sections: NavSection[] = [
     {
-      href: '/tools',
-      label: 'Início',
-      icon: <IconHome />,
-      match: (p) => p === '/tools',
+      label: 'Navegar',
+      items: [
+        {
+          href: '/tools',
+          label: 'Início',
+          icon: <IconHome />,
+          match: (p) => p === '/tools',
+        },
+      ],
     },
     {
-      href: '/tools/decupagem',
-      label: 'Base',
-      icon: <IconBase />,
-      match: (p) =>
-        BASE_PATHS.some((bp) => p === bp || p.startsWith(bp + '/')),
-    },
-    {
-      href: '/tools/auto-broll',
-      label: 'IA',
-      icon: <IconAi />,
-      match: (p) => AI_PATHS.some((bp) => p === bp || p.startsWith(bp + '/')),
-    },
-    {
-      href: '/tools/points',
-      label: 'Pontos',
-      icon: <IconTrophy />,
-      match: (p) => p.startsWith('/tools/points'),
-    },
-    {
-      href: '/configuracoes',
-      label: 'Conta',
-      icon: <IconGear />,
-      match: (p) => p.startsWith('/configuracoes'),
+      label: 'Ferramentas',
+      items: [
+        {
+          href: '/tools/decupagem',
+          label: 'Base',
+          icon: <IconBase />,
+          match: (p) =>
+            BASE_PATHS.some((bp) => p === bp || p.startsWith(bp + '/')),
+        },
+        {
+          href: '/tools/auto-broll',
+          label: 'IA',
+          icon: <IconAi />,
+          match: (p) =>
+            AI_PATHS.some((bp) => p === bp || p.startsWith(bp + '/')),
+        },
+        {
+          href: '/tools/points',
+          label: 'Pontos',
+          icon: <IconTrophy />,
+          match: (p) => p.startsWith('/tools/points'),
+        },
+      ],
     },
   ];
-
-  if (profile?.is_admin) {
-    navItems.push({
-      href: '/admin',
-      label: 'Admin',
-      icon: <IconAdmin />,
-      match: (p) => p.startsWith('/admin'),
-      adminOnly: true,
-    });
-  }
 
   const isActive = (it: NavItem) =>
     it.match ? it.match(pathname) : pathname === it.href;
@@ -167,60 +179,72 @@ export function Sidebar() {
           </div>
         </Link>
 
-        {/* Navegação principal */}
+        {/* Navegação principal por categorias */}
         <nav className="flex-1 overflow-y-auto py-3">
-          <ul className="flex flex-col gap-1 px-2.5">
-            {navItems.map((it) => {
-              const active = isActive(it);
-              return (
-                <li key={it.href}>
-                  <Link
-                    href={it.href}
-                    onClick={() => setMobileOpen(false)}
-                    className={
-                      'group relative flex flex-col items-center justify-center gap-1 rounded-[14px] py-3 transition-all duration-300 ' +
-                      (active
-                        ? 'bg-violet/12 text-violet'
-                        : 'text-text-muted hover:bg-bg/50 hover:text-white')
-                    }
-                  >
-                    {/* Indicador lateral ativo */}
-                    {active ? (
-                      <span
-                        aria-hidden
-                        className="absolute -left-[10px] top-1/2 h-7 w-[3px] -translate-y-1/2 rounded-r-full"
-                        style={{
-                          background:
-                            'linear-gradient(180deg, #c084fc 0%, #6d4ee8 100%)',
-                          boxShadow:
-                            '0 0 12px rgba(167,139,250,0.85), 0 0 28px rgba(167,139,250,0.3)',
-                        }}
-                      />
-                    ) : null}
-                    <span
-                      className={
-                        'flex h-9 w-9 items-center justify-center rounded-[10px] transition-all duration-300 ' +
-                        (active
-                          ? 'scale-105'
-                          : 'group-hover:scale-105 group-hover:-translate-y-[1px]')
-                      }
-                    >
-                      {it.icon}
-                    </span>
-                    <span
-                      className="text-[10px] font-semibold tracking-[0.04em]"
-                      style={{ fontFamily: 'var(--font-tech)' }}
-                    >
-                      {it.label}
-                    </span>
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
+          {sections.map((section, sIdx) => (
+            <div key={section.label} className={sIdx === 0 ? '' : 'mt-4'}>
+              {/* Label de categoria */}
+              <div
+                className="mb-1.5 px-2.5 text-center text-[8.5px] font-bold uppercase tracking-[0.18em] text-text-dim"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                {section.label}
+              </div>
+              {/* Linha sutil sob a label */}
+              <div className="mx-auto mb-2 h-px w-8 bg-line/80" />
+              <ul className="flex flex-col gap-1 px-2.5">
+                {section.items.map((it) => {
+                  const active = isActive(it);
+                  return (
+                    <li key={it.href}>
+                      <Link
+                        href={it.href}
+                        onClick={() => setMobileOpen(false)}
+                        className={
+                          'group relative flex flex-col items-center justify-center gap-1 rounded-[14px] py-2.5 transition-all duration-300 ' +
+                          (active
+                            ? 'bg-violet/12 text-violet'
+                            : 'text-text-muted hover:bg-bg/50 hover:text-white')
+                        }
+                      >
+                        {active ? (
+                          <span
+                            aria-hidden
+                            className="absolute -left-[10px] top-1/2 h-7 w-[3px] -translate-y-1/2 rounded-r-full"
+                            style={{
+                              background:
+                                'linear-gradient(180deg, #c084fc 0%, #6d4ee8 100%)',
+                              boxShadow:
+                                '0 0 12px rgba(167,139,250,0.85), 0 0 28px rgba(167,139,250,0.3)',
+                            }}
+                          />
+                        ) : null}
+                        <span
+                          className={
+                            'flex h-9 w-9 items-center justify-center rounded-[10px] transition-all duration-300 ' +
+                            (active
+                              ? 'scale-105'
+                              : 'group-hover:scale-105 group-hover:-translate-y-[1px]')
+                          }
+                        >
+                          {it.icon}
+                        </span>
+                        <span
+                          className="text-[10px] font-semibold tracking-[0.04em]"
+                          style={{ fontFamily: 'var(--font-tech)' }}
+                        >
+                          {it.label}
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
         </nav>
 
-        {/* Rodapé — avatar/conta */}
+        {/* Rodapé — avatar/conta (Conta e Admin SÓ vivem aqui) */}
         <div className="relative border-t border-line/60 px-2.5 py-3">
           <button
             type="button"
@@ -228,6 +252,7 @@ export function Sidebar() {
             className="group flex w-full flex-col items-center justify-center gap-1 rounded-[14px] py-2 transition hover:bg-bg/50"
             aria-haspopup="menu"
             aria-expanded={accountOpen}
+            title={displayName}
           >
             {profile?.avatar_url && !avatarBroken ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -236,11 +261,17 @@ export function Sidebar() {
                 alt={displayName}
                 onError={() => setAvatarBroken(true)}
                 referrerPolicy="no-referrer"
-                className="h-10 w-10 rounded-full border-2 border-line object-cover transition-transform group-hover:scale-105"
+                className={
+                  'h-10 w-10 rounded-full border-2 object-cover transition-transform group-hover:scale-105 ' +
+                  (accountOpen ? 'border-violet' : 'border-line')
+                }
               />
             ) : (
               <span
-                className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-line bg-gradient-to-br from-violet/30 to-violet-deep/40 text-sm font-bold text-white transition-transform group-hover:scale-105"
+                className={
+                  'flex h-10 w-10 items-center justify-center rounded-full border-2 bg-gradient-to-br from-violet/30 to-violet-deep/40 text-sm font-bold text-white transition-all group-hover:scale-105 ' +
+                  (accountOpen ? 'border-violet' : 'border-line')
+                }
                 style={{
                   boxShadow:
                     'inset 0 1px 0 rgba(255,255,255,0.12), 0 0 18px -6px rgba(167,139,250,0.6)',
@@ -254,13 +285,13 @@ export function Sidebar() {
           {accountOpen ? (
             <div
               role="menu"
-              className="dropdown-pop absolute bottom-3 left-[80px] z-50 w-60 overflow-hidden rounded-[16px] border border-line bg-bg-soft/95 shadow-2xl backdrop-blur-xl"
+              className="dropdown-pop absolute bottom-3 left-[80px] z-50 w-64 overflow-hidden rounded-[16px] border border-line bg-bg-soft/95 shadow-2xl backdrop-blur-xl"
               style={{
                 boxShadow:
                   '0 1px 0 rgba(255,255,255,0.06) inset, 0 32px 64px -20px rgba(0,0,0,0.95), 0 0 48px -12px rgba(167,139,250,0.28)',
               }}
             >
-              <div className="border-b border-line px-4 py-3">
+              <div className="border-b border-line px-4 py-3.5">
                 <div className="truncate text-sm font-semibold">
                   {displayName}
                 </div>
@@ -275,19 +306,40 @@ export function Sidebar() {
                 <Link
                   href="/configuracoes"
                   onClick={() => setAccountOpen(false)}
-                  className="group flex items-center justify-between px-4 py-2.5 text-text-muted transition hover:bg-bg hover:text-text"
+                  className="group flex items-center gap-3 px-4 py-2.5 text-text-muted transition hover:bg-bg hover:text-text"
                 >
-                  <span>Configurações</span>
+                  <span className="flex h-7 w-7 items-center justify-center rounded-[8px] border border-line bg-bg">
+                    <DotGear />
+                  </span>
+                  <span className="flex-1">Configurações</span>
                   <span className="text-text-dim transition group-hover:translate-x-0.5 group-hover:text-violet">→</span>
                 </Link>
+                {profile?.is_admin ? (
+                  <Link
+                    href="/admin"
+                    onClick={() => setAccountOpen(false)}
+                    className="group flex items-center gap-3 px-4 py-2.5 text-text-muted transition hover:bg-bg hover:text-text"
+                  >
+                    <span className="flex h-7 w-7 items-center justify-center rounded-[8px] border border-lime/30 bg-lime/10">
+                      <DotShield />
+                    </span>
+                    <span className="flex-1">Painel admin</span>
+                    <span className="rounded-full border border-lime/40 bg-lime/10 px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-[0.18em] text-lime" style={{ fontFamily: 'var(--font-tech)' }}>
+                      ADMIN
+                    </span>
+                  </Link>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => {
                     setAccountOpen(false);
                     handleLogout();
                   }}
-                  className="mt-1 border-t border-line px-4 py-2.5 text-left text-red-400 transition hover:bg-red-500/10 hover:text-red-300"
+                  className="mt-1 flex items-center gap-3 border-t border-line px-4 py-2.5 text-left text-red-400 transition hover:bg-red-500/10 hover:text-red-300"
                 >
+                  <span className="flex h-7 w-7 items-center justify-center rounded-[8px] border border-red-500/30 bg-red-500/10">
+                    <DotExit />
+                  </span>
                   Sair
                 </button>
               </nav>
@@ -299,7 +351,7 @@ export function Sidebar() {
   );
 }
 
-/* ─── Paths usados pra detectar "Base" / "IA" no nav ─── */
+/* ─── Paths Base / IA (usados pra match do nav ativo) ─── */
 const BASE_PATHS = [
   '/tools/decupagem',
   '/tools/camuflagem',
@@ -321,7 +373,7 @@ const AI_PATHS = [
   '/tools/ltx-video',
 ];
 
-/* ─── Ícones grandes da sidebar (gradientes coloridos) ─── */
+/* ─── Ícones grandes (gradientes) ─── */
 
 function IconHome() {
   return (
@@ -412,44 +464,31 @@ function IconTrophy() {
   );
 }
 
-function IconGear() {
+/* ─── Mini ícones do dropdown da conta ─── */
+
+function DotGear() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-      <defs>
-        <linearGradient id="sb-gear" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#94a3b8" />
-          <stop offset="100%" stopColor="#cbd5e1" />
-        </linearGradient>
-      </defs>
-      <circle cx="12" cy="12" r="3" stroke="url(#sb-gear)" strokeWidth="1.8" />
-      <path
-        d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.9 2.9l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1A2 2 0 113.1 16.9l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H1a2 2 0 010-4h.1A1.7 1.7 0 002.6 9a1.7 1.7 0 00-.3-1.8l-.1-.1A2 2 0 015.1 4.2l.1.1a1.7 1.7 0 001.8.3H7a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 012.9 2.9l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H23a2 2 0 010 4h-.1a1.7 1.7 0 00-1.5 1z"
-        stroke="url(#sb-gear)"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.9 2.9l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1A2 2 0 113.1 16.9l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H1a2 2 0 010-4h.1A1.7 1.7 0 002.6 9a1.7 1.7 0 00-.3-1.8l-.1-.1A2 2 0 015.1 4.2l.1.1a1.7 1.7 0 001.8.3H7a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 012.9 2.9l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H23a2 2 0 010 4h-.1a1.7 1.7 0 00-1.5 1z" />
     </svg>
   );
 }
 
-function IconAdmin() {
+function DotShield() {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-      <defs>
-        <linearGradient id="sb-ad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#c8ff00" />
-          <stop offset="100%" stopColor="#84cc16" />
-        </linearGradient>
-      </defs>
-      <path
-        d="M12 2l9 4v6c0 5-3.5 9-9 10-5.5-1-9-5-9-10V6l9-4z"
-        stroke="url(#sb-ad)"
-        strokeWidth="1.8"
-        strokeLinejoin="round"
-        fill="rgba(200,255,0,0.06)"
-      />
-      <path d="M9 12l2 2 4-4" stroke="url(#sb-ad)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#c8ff00" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2l9 4v6c0 5-3.5 9-9 10-5.5-1-9-5-9-10V6l9-4z" />
+      <path d="M9 12l2 2 4-4" />
+    </svg>
+  );
+}
+
+function DotExit() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f87171" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+      <path d="M16 17l5-5-5-5M21 12H9" />
     </svg>
   );
 }

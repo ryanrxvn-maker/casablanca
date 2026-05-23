@@ -1,8 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Heartbeat } from '@/components/Heartbeat';
-import { Header } from '@/components/Header';
 import { ToolShell } from '@/components/ToolShell';
 
 /**
@@ -165,13 +163,12 @@ export default function AdminPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <Heartbeat />
-      <Header />
-      <main className="container-app flex-1 py-10">
+    <div className="mx-auto w-full max-w-[1100px] px-5 md:px-8">
+      <main>
         <ToolShell
           title="Painel admin"
-          description="Voce ve seus clientes, status em tempo real, IPs, ferramenta sendo usada. Nao tem acesso a senhas nem chaves de IA deles."
+          eyebrow="ADMIN"
+          description="Veja seus clientes em tempo real: quem está online, IP atual e ferramenta em uso. Sem acesso a senhas ou chaves."
         >
           <div className="flex flex-col gap-8">
             {error ? (

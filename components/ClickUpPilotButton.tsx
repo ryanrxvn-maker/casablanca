@@ -2,13 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { IconClickUpPilot } from './ToolIcons';
 
 const BATCH_STATE_KEY = 'darkolab:clickup-pilot:batches';
 
-/** Le batchStates do localStorage e retorna true se ha pelo menos UMA task
- *  rodando em background (phase != done && != failed). Usado pra acender o
- *  badge "ATIVO" no botao do top-bar. */
 function readActiveBatchCount(): number {
   if (typeof window === 'undefined') return 0;
   try {
@@ -26,12 +22,8 @@ function readActiveBatchCount(): number {
 }
 
 /**
- * Botao especial 3D animado pra ClickUp Pilot — fica no top-bar do lado
- * do dropdown do user (em vez de so na sidebar das ferramentas).
- *
- * O badge "ATIVO" aparece SO quando ha task rodando em background no Pilot
- * (phase pos != done/failed). Acessar a pagina nao acende o badge — ele
- * indica processamento ativo, nao localizacao do user.
+ * ClickUpPilotButton v4 — ícone-only no top-bar.
+ * Acende em lime quando há tarefa ativa.
  */
 export function ClickUpPilotButton() {
   const [activeBatches, setActiveBatches] = useState(0);
@@ -42,10 +34,8 @@ export function ClickUpPilotButton() {
       if (!alive) return;
       setActiveBatches(readActiveBatchCount());
     }
-    // Initial + poll a cada 3s (cheap, localStorage read e instantaneo)
     check();
     const id = setInterval(check, 3000);
-    // Tambem escuta storage event pra atualizar instantaneamente entre tabs
     function onStorage(e: StorageEvent) {
       if (e.key === BATCH_STATE_KEY) check();
     }
@@ -62,74 +52,24 @@ export function ClickUpPilotButton() {
   return (
     <Link
       href="/tools/clickup-pilot"
-      aria-label="Abrir ClickUp Pilot"
-      className={
-        'group relative inline-flex select-none items-center gap-2 rounded-full px-4 py-1.5 transition-all duration-300 ease-[cubic-bezier(.4,1.4,.6,1)] hover:scale-[1.04] active:scale-[0.96] active:duration-75 ' +
-        (active
-          ? 'bg-gradient-to-r from-lime/30 to-cyan-400/20 ring-2 ring-lime'
-          : 'bg-gradient-to-r from-bg-soft/90 to-bg/80 ring-1 ring-line hover:ring-lime/70')
-      }
+      aria-label="ClickUp Pilot"
+      title={active ? `ClickUp Pilot · ${activeBatches} ativo${activeBatches === 1 ? '' : 's'}` : 'ClickUp Pilot'}
+      className="topbar-icon group"
       style={{
-        boxShadow: active
-          ? '0 0 20px -2px rgba(200,255,0,0.6), 0 0 40px -8px rgba(34,211,238,0.4), inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -1px 0 rgba(0,0,0,0.5)'
-          : '0 0 14px -6px rgba(200,255,0,0.3), 0 0 30px -12px rgba(34,211,238,0.2), inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -1px 0 rgba(0,0,0,0.4)',
+        ['--ti-color' as string]: active ? '#c8ff00' : '#9c9ca6',
+        ['--ti-glow' as string]: active ? 'rgba(200,255,0,0.55)' : 'transparent',
       }}
     >
-      {/* Animated radial glow background — pulsa subtil em hover */}
-      <span
-        aria-hidden
-        className="pointer-events-none absolute inset-0 rounded-full opacity-0 transition-opacity duration-500 group-hover:opacity-100"
-        style={{
-          background: 'radial-gradient(circle at 30% 50%, rgba(200,255,0,0.18), transparent 60%), radial-gradient(circle at 70% 50%, rgba(34,211,238,0.15), transparent 65%)',
-        }}
-      />
-
-      {/* Icone com float animation sutil */}
-      <span
-        className={
-          'relative z-10 flex h-6 w-6 shrink-0 items-center justify-center rounded-full transition-all duration-300 ' +
-          (active ? 'text-lime' : 'text-text-muted group-hover:text-lime')
-        }
-        style={{
-          transform: active ? 'translateY(-1px)' : undefined,
-          filter: active ? 'drop-shadow(0 0 4px rgba(200,255,0,0.6))' : undefined,
-        }}
-      >
-        <IconClickUpPilot size={16} strokeWidth={1.8} />
-      </span>
-
-      {/* Label */}
-      <span
-        className={
-          'relative z-10 hidden text-[11px] font-bold uppercase tracking-widest transition-colors md:inline ' +
-          (active ? 'text-lime' : 'text-text-muted group-hover:text-white')
-        }
-      >
-        ClickUp Pilot
-      </span>
-
-      {/* Sticker ATIVO so quando ha batch rodando */}
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="17" height="17">
+        {/* Foguete piloto */}
+        <path d="M4.5 16.5l3 3 1-3 3-3 5-8a4 4 0 014 4l-8 5-3 3-3 1z" />
+        <circle cx="14" cy="10" r="1.5" fill="currentColor" />
+      </svg>
       {active ? (
-        <span
-          className="relative z-10 mono ml-1 rounded-full bg-lime/30 px-1.5 py-0.5 text-[8px] uppercase tracking-widest text-lime"
-          title={`${activeBatches} task${activeBatches === 1 ? '' : 's'} rodando em background`}
-        >
-          {activeBatches > 1 ? `${activeBatches} ATIVOS` : 'ATIVO'}
+        <span className="topbar-icon-badge" style={{ background: '#c8ff00', color: '#0a0a0a' }}>
+          {activeBatches > 9 ? '9+' : activeBatches}
         </span>
       ) : null}
-
-      {/* Sparkle decorativo no canto — sempre presente mas mais brilhante quando ativo */}
-      <span
-        aria-hidden
-        className={
-          'pointer-events-none absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-lime ' +
-          (active ? 'animate-pulse opacity-80' : 'opacity-40')
-        }
-        style={{
-          boxShadow: active ? '0 0 8px rgba(200,255,0,0.8)' : '0 0 4px rgba(200,255,0,0.4)',
-          animationDuration: '2.4s',
-        }}
-      />
     </Link>
   );
 }
