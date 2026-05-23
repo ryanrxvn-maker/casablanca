@@ -699,7 +699,47 @@ def process_video(
                             _last_pct[0] = pct_now
                             emit(p, f"STTN inpaint {global_done}/{total}")
 
-                    cleaned = sttn(chunk_frames, mask, on_progress=_inner_progress, bg_median=bg_median_full)
+                    # ---- FRAME-SKIP STTN: 2x speedup ----
+                    # STTN processa apenas frames PARES; impares sao
+                    # interpolados como media dos vizinhos NA REGIAO da
+                    # mascara. Resto do frame eh do original. Funciona
+                    # bem porque:
+                    #  - cena nao muda dramaticamente em 1 frame (1/30s)
+                    #  - somente a regiao mascarada precisa interpolacao
+                    #  - feathering 21px esconde transicao temporal
+                    keys_idx = list(range(0, len(chunk_frames), 2))
+                    if (len(chunk_frames) - 1) not in keys_idx:
+                        # Garante que o ultimo frame eh key (evita gap no fim)
+                        keys_idx.append(len(chunk_frames) - 1)
+                    key_frames = [chunk_frames[i] for i in keys_idx]
+
+                    # STTN inpaint somente nos key frames
+                    cleaned_keys = sttn(key_frames, mask, on_progress=_inner_progress, bg_median=bg_median_full)
+
+                    # Reconstroi a lista completa interpolando
+                    mask_bool = (mask > 0)
+                    mask_3 = mask_bool[:, :, None]
+                    cleaned = [None] * len(chunk_frames)
+                    for ki, fi in enumerate(keys_idx):
+                        cleaned[fi] = cleaned_keys[ki]
+                    # Interpola frames intermediarios
+                    for fi in range(len(chunk_frames)):
+                        if cleaned[fi] is not None:
+                            continue
+                        # Acha key anterior e posterior
+                        prev_ki = max(k for k in keys_idx if k < fi)
+                        next_ki = min(k for k in keys_idx if k > fi)
+                        alpha = (fi - prev_ki) / float(next_ki - prev_ki)
+                        prev_clean = cleaned[prev_ki]
+                        next_clean = cleaned[next_ki]
+                        # Resultado base = frame original
+                        result = chunk_frames[fi].copy()
+                        # Na regiao da mascara: media ponderada dos keys
+                        blend = (prev_clean.astype(np.float32) * (1 - alpha)
+                                 + next_clean.astype(np.float32) * alpha).astype(np.uint8)
+                        result = np.where(mask_3, blend, result)
+                        cleaned[fi] = result
+
                     for f in cleaned:
                         out_writer.write(f)
                     idx += len(chunk_frames)
