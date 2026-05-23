@@ -219,6 +219,89 @@ def _detect_text_boxes(frame: np.ndarray) -> List[TextBox]:
     return boxes
 
 
+def _detect_subtitle_box(frame: np.ndarray, text_box: TextBox) -> Optional[TextBox]:
+    """
+    Detecta a CAIXA DE FUNDO da legenda ao redor do texto detectado.
+
+    PaddleOCR detecta SO o texto. Mas legendas modernas (TikTok, Reels)
+    quase sempre vem com uma caixa de fundo (branca, preta, com bordas
+    arredondadas). Sem detectar essa caixa, o STTN/LaMa borra a regiao
+    do texto mas deixa a caixa de fundo visivel — fica horrivel.
+
+    Estrategia:
+      1. Expande o bbox do texto em todas as direcoes (50% pra cima/baixo,
+         30% pros lados).
+      2. Detecta pixels "uniformes" (caixa) via edge detection (Canny):
+         caixa tem bordas claras + interior uniforme.
+      3. Acha o maior contorno retangular que contem o texto.
+      4. Retorna bbox dessa caixa.
+
+    Se nao detectar caixa, retorna o text_box original (fallback).
+    """
+    H, W = frame.shape[:2]
+    # Expande regiao de busca
+    pad_y = int(text_box.h * 0.8)
+    pad_x = int(text_box.w * 0.4)
+    sx = max(0, text_box.x - pad_x)
+    sy = max(0, text_box.y - pad_y)
+    ex = min(W, text_box.x + text_box.w + pad_x)
+    ey = min(H, text_box.y + text_box.h + pad_y)
+    if ex - sx < 10 or ey - sy < 10:
+        return text_box
+
+    region = frame[sy:ey, sx:ex]
+    gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+
+    # Canny edge detection — caixa de legenda tem bordas fortes
+    edges = cv2.Canny(gray, 50, 150)
+    # Dilata edges pra fechar gaps
+    edges = cv2.dilate(edges, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=2)
+
+    # Acha contornos
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return text_box
+
+    # Acha o contorno que contem o texto (centro do text_box dentro do bbox)
+    text_cx_local = (text_box.x + text_box.w // 2) - sx
+    text_cy_local = (text_box.y + text_box.h // 2) - sy
+
+    best_box = None
+    best_area = 0
+    for cnt in contours:
+        x, y, w, h = cv2.boundingRect(cnt)
+        # Caixa precisa CONTER o centro do texto
+        if not (x <= text_cx_local <= x + w and y <= text_cy_local <= y + h):
+            continue
+        # Caixa precisa ser maior que o texto (com margem)
+        if w < text_box.w * 1.1 or h < text_box.h * 1.1:
+            continue
+        # Caixa nao deve ser absurdamente grande (>3x texto)
+        if w > text_box.w * 3 or h > text_box.h * 5:
+            continue
+        area = w * h
+        if area > best_area:
+            best_area = area
+            best_box = (x, y, w, h)
+
+    if best_box is None:
+        # Fallback: expande o text_box pra cobrir margem fixa
+        return TextBox(
+            x=max(0, text_box.x - int(text_box.w * 0.1)),
+            y=max(0, text_box.y - int(text_box.h * 0.5)),
+            w=min(W, text_box.w + int(text_box.w * 0.2)),
+            h=min(H, text_box.h + int(text_box.h * 1.0)),
+        )
+
+    bx, by, bw, bh = best_box
+    return TextBox(
+        x=sx + bx,
+        y=sy + by,
+        w=bw,
+        h=bh,
+    )
+
+
 def _persistent_mask(
     frames: List[Tuple[int, np.ndarray]],
     W: int,
@@ -245,8 +328,14 @@ def _persistent_mask(
     n = 0
     for _, fr in frames:
         n += 1
-        boxes = _detect_text_boxes(fr)
-        for b in boxes:
+        text_boxes = _detect_text_boxes(fr)
+        # EXPANDE pra cobrir caixa de fundo da legenda (se houver)
+        expanded_boxes = []
+        for tb in text_boxes:
+            box = _detect_subtitle_box(fr, tb) or tb
+            expanded_boxes.append(box)
+
+        for b in expanded_boxes:
             x0 = max(0, b.x)
             y0 = max(0, b.y)
             x1 = min(W, b.x + b.w)
