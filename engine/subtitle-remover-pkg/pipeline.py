@@ -329,6 +329,136 @@ def _detect_subtitle_box(frame: np.ndarray, text_box: TextBox) -> Optional[TextB
     return TextBox(x=final_x, y=final_y, w=final_w, h=final_h)
 
 
+def _cluster_detections(all_dets: List[Tuple[int, TextBox]], tol: int = 15) -> List[List[Tuple[int, TextBox]]]:
+    """
+    Agrupa bboxes detectados em DIFERENTES frames que estao na MESMA
+    posicao (+/- tol pixels). Cluster = "mesmo elemento visto em varios
+    frames".
+
+    Retorna lista de clusters: [[(frame_idx, box), ...], ...]
+    """
+    clusters: List[List[Tuple[int, TextBox]]] = []
+    for frame_idx, box in all_dets:
+        cx, cy = box.x + box.w / 2, box.y + box.h / 2
+        added = False
+        for cluster in clusters:
+            # Pega o centroide do cluster
+            cxs = [b.x + b.w / 2 for _, b in cluster]
+            cys = [b.y + b.h / 2 for _, b in cluster]
+            mcx = sum(cxs) / len(cxs)
+            mcy = sum(cys) / len(cys)
+            if abs(cx - mcx) < tol and abs(cy - mcy) < tol:
+                cluster.append((frame_idx, box))
+                added = True
+                break
+        if not added:
+            clusters.append([(frame_idx, box)])
+    return clusters
+
+
+def _is_subtitle_or_watermark(
+    cluster: List[Tuple[int, TextBox]],
+    total_frames: int,
+    W: int,
+    H: int,
+    sample_frame: np.ndarray,
+) -> bool:
+    """
+    Classifica um cluster de bboxes detectados:
+      - retorna True se eh provavel LEGENDA ou MARCA D'AGUA (mascarar)
+      - retorna False se eh provavel TEXTO DA CENA (deixar quieto)
+
+    Sinais usados:
+      1. Persistencia >= 50% dos frames (objetos da cena entram/saem;
+         legendas/marcas ficam durante todo o video).
+      2. Posicao ABSOLUTAMENTE estatica (stddev < 5 px) - legendas sao
+         fixadas no pixel; objetos da cena tem micro-movimento com camera.
+      3. Tamanho consistente entre frames (stddev_w, stddev_h < 10).
+      4. Posicao tipica de legenda (rodape/topo central) OU canto (marca d'agua).
+      5. Aspect ratio largo (texto de legenda eh wider, objeto pode ser qualquer).
+      6. Fundo uniforme ao redor (caixa de subtitle vs textura de objeto).
+
+    Score precisa atingir 4 pra mascarar (de 6 possiveis).
+    """
+    if len(cluster) == 0:
+        return False
+
+    # 1. PERSISTENCIA
+    persistence = len(cluster) / max(1, total_frames)
+    if persistence < 0.40:
+        # Pode ser legenda que muda muito (frase por frase) - tolera
+        # mas exige MAIS dos outros sinais
+        required_score = 5
+    else:
+        required_score = 4
+
+    score = 0
+
+    if persistence >= 0.60:
+        score += 2  # super persistente, quase certo legenda/marca
+    elif persistence >= 0.40:
+        score += 1
+
+    # 2. POSICAO ESTATICA (variancia da posicao entre detecoes)
+    cxs = [b.x + b.w / 2 for _, b in cluster]
+    cys = [b.y + b.h / 2 for _, b in cluster]
+    std_x = float(np.std(cxs)) if len(cxs) > 1 else 0.0
+    std_y = float(np.std(cys)) if len(cys) > 1 else 0.0
+    if std_x < 5 and std_y < 5:
+        score += 2  # absolutamente fixo no pixel (legenda)
+    elif std_x < 15 and std_y < 15:
+        score += 1  # quase fixo
+
+    # 3. TAMANHO CONSISTENTE
+    ws = [b.w for _, b in cluster]
+    hs = [b.h for _, b in cluster]
+    if len(ws) > 1:
+        std_w = float(np.std(ws))
+        std_h = float(np.std(hs))
+        if std_w < 8 and std_h < 8:
+            score += 1
+
+    # 4. POSICAO TIPICA (rodape ou topo central, ou canto)
+    mcy = sum(cys) / len(cys)
+    mcx = sum(cxs) / len(cxs)
+    rel_y = mcy / H
+    rel_x = mcx / W
+
+    is_subtitle_pos = (rel_y > 0.65 or rel_y < 0.20) and (0.15 < rel_x < 0.85)
+    is_watermark_pos = (rel_x < 0.20 or rel_x > 0.80) and (rel_y < 0.20 or rel_y > 0.80)
+
+    if is_subtitle_pos or is_watermark_pos:
+        score += 1
+
+    # 5. ASPECT RATIO (legendas sao bem mais largas que altas)
+    avg_w = sum(ws) / len(ws)
+    avg_h = sum(hs) / len(hs)
+    ar = avg_w / max(1, avg_h)
+    if ar > 2.5:
+        score += 1  # texto largo - tipico de legenda
+
+    # 6. UNIFORMIDADE DO FUNDO (caixa de subtitle tem fundo uniforme)
+    last_box = cluster[-1][1]
+    try:
+        # Pega faixa fina ACIMA do texto (geralmente faz parte da caixa)
+        pad_above = 8
+        y0 = max(0, last_box.y - pad_above)
+        y1 = last_box.y
+        x0 = max(0, last_box.x)
+        x1 = min(W, last_box.x + last_box.w)
+        if y1 > y0 and x1 > x0:
+            strip_above = sample_frame[y0:y1, x0:x1]
+            if strip_above.size > 0:
+                std_color = float(np.std(strip_above, axis=(0, 1)).mean())
+                if std_color < 25:
+                    score += 1  # fundo uniforme = caixa de subtitle
+
+    except Exception:
+        pass
+
+    return score >= required_score
+
+
 def _persistent_mask(
     frames: List[Tuple[int, np.ndarray]],
     W: int,
@@ -337,44 +467,68 @@ def _persistent_mask(
     bottom_bias: float = 1.6,
 ) -> Optional[np.ndarray]:
     """
-    Heatmap de onde texto aparece em N frames amostrados → mascara binaria
-    final consolidando regioes com persistencia >= min_persistence.
+    Mascara persistente com classificador inteligente legenda vs cena.
 
-    bottom_bias > 1 favorece deteccoes na metade inferior (legendas).
-    Tudo na metade superior tem que ser MAIS consistente pra entrar (evita
-    falso positivo em titulos / placas naturais).
+    Pipeline:
+      1. Detecta bboxes em todos os N frames de sample
+      2. Clusteriza bboxes que estao na MESMA posicao (mesmo elemento)
+      3. Pra cada cluster, classifica como legenda/marca/cena via
+         _is_subtitle_or_watermark()
+      4. Mascara SO os clusters classificados como legenda/marca
+      5. Expande pra cobrir caixa de fundo via _detect_subtitle_box
 
-    Calibrado pra ser AGRESSIVO: persistencia minima de 30% pra pegar
-    legendas que mudam de palavra ao longo do video (cada palavra so
-    aparece num subset dos frames). Dilation maior cobre o glow/outline
-    + sombra residual.
+    Isso resolve o caso de texto em objeto (caixa de ovos, livro, placa)
+    sendo confundido com legenda. Objetos:
+      - Aparecem em alguns frames (baixa persistencia)
+      - Movem com camera/perspectiva (alta variancia de posicao)
+      - Tem fundo nao-uniforme
     """
     if not frames:
         return None
-    heat = np.zeros((H, W), dtype=np.float32)
-    n = 0
-    for _, fr in frames:
-        n += 1
-        text_boxes = _detect_text_boxes(fr)
-        # EXPANDE pra cobrir caixa de fundo da legenda (se houver)
-        expanded_boxes = []
-        for tb in text_boxes:
-            box = _detect_subtitle_box(fr, tb) or tb
-            expanded_boxes.append(box)
 
-        for b in expanded_boxes:
-            x0 = max(0, b.x)
-            y0 = max(0, b.y)
-            x1 = min(W, b.x + b.w)
-            y1 = min(H, b.y + b.h)
+    # Coleta TODAS as detecoes com indice do frame
+    all_dets: List[Tuple[int, TextBox]] = []
+    for frame_idx, fr in frames:
+        boxes = _detect_text_boxes(fr)
+        for b in boxes:
+            all_dets.append((frame_idx, b))
+
+    if not all_dets:
+        return None
+
+    # Cluster por posicao
+    clusters = _cluster_detections(all_dets, tol=20)
+
+    # Filtra clusters que sao legenda/watermark
+    sample_frame = frames[len(frames) // 2][1]  # frame do meio pra analise de fundo
+    valid_clusters = [
+        c for c in clusters
+        if _is_subtitle_or_watermark(c, len(frames), W, H, sample_frame)
+    ]
+
+    if not valid_clusters:
+        return None
+
+    # Constroi heatmap a partir dos clusters validos (expandindo cada
+    # bbox pra cobrir caixa de fundo)
+    heat = np.zeros((H, W), dtype=np.float32)
+    n = len(frames)
+    for cluster in valid_clusters:
+        for frame_idx, b in cluster:
+            # Acha o frame correspondente pro _detect_subtitle_box
+            fr = next((f for fi, f in frames if fi == frame_idx), sample_frame)
+            box = _detect_subtitle_box(fr, b) or b
+
+            x0 = max(0, box.x)
+            y0 = max(0, box.y)
+            x1 = min(W, box.x + box.w)
+            y1 = min(H, box.y + box.h)
             if x0 >= x1 or y0 >= y1:
                 continue
             weight = bottom_bias if y0 > H * 0.55 else 1.0
             heat[y0:y1, x0:x1] += weight
-    if n == 0:
-        return None
-    heat /= n  # 0..bottom_bias
-    # mascara persistente
+
+    heat /= n
     mask = (heat >= min_persistence).astype(np.uint8) * 255
     if mask.max() == 0:
         return None
