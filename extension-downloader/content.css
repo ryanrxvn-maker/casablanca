@@ -1,5 +1,8 @@
-/* Botão flutuante = orbe 3D DARKO (imagem), fundo transparente.
-   Hover discreto (pouca iluminação), levemente menor. */
+/* ───────────────────────────────────────────────────────────────
+   Botão de download Auto Edit — pílula neon violet com 3D
+   Aparece sobreposto em vídeos do YouTube, TikTok, Instagram, etc.
+─────────────────────────────────────────────────────────────── */
+
 #darko-dl-btn {
   position: fixed;
   right: 22px;
@@ -8,67 +11,116 @@
   display: none;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
+  width: 56px;
+  height: 56px;
   padding: 0;
   border: 0;
   border-radius: 50%;
-  background: transparent;
+  background: linear-gradient(
+    135deg,
+    rgba(167, 139, 250, 0.95) 0%,
+    rgba(109, 78, 232, 1) 100%
+  );
   cursor: pointer;
   -webkit-appearance: none;
   appearance: none;
-  filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.45));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+    0 12px 28px -6px rgba(109, 78, 232, 0.55),
+    0 0 0 1px rgba(167, 139, 250, 0.3),
+    0 6px 14px rgba(0, 0, 0, 0.45);
   transition:
-    transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1),
-    filter 0.22s ease;
+    transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.35s ease,
+    background-position 0.4s ease;
+  transform-style: preserve-3d;
+  perspective: 600px;
 }
-#darko-dl-btn .d-orb {
+
+/* Halo (glow ambient pulsante atrás do botão) */
+#darko-dl-btn .d-halo {
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(192, 132, 252, 0.55),
+    transparent 70%
+  );
+  filter: blur(12px);
+  pointer-events: none;
+  opacity: 0.6;
+  z-index: -1;
+  animation: dl-halo-breathe 2.6s ease-in-out infinite;
+}
+
+/* Anel "idle" — pulsa lentamente, dá vida ao botão sem download */
+#darko-dl-btn .d-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  pointer-events: none;
+  border: 1.5px solid rgba(192, 132, 252, 0.55);
+  opacity: 0.7;
+  animation: dl-ring-pulse 2.2s ease-in-out infinite;
+}
+
+/* Núcleo com o SVG do ícone */
+#darko-dl-btn .d-core {
+  position: relative;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.55));
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+#darko-dl-btn .d-core svg {
   width: 100%;
   height: 100%;
   display: block;
-  border-radius: 50%;
-  user-select: none;
-  -webkit-user-drag: none;
-  transition: filter 0.22s ease;
 }
-/* glow bem sutil, só no hover */
-#darko-dl-btn .d-ring {
-  position: absolute;
-  inset: -1px;
-  border-radius: 50%;
-  pointer-events: none;
-  opacity: 0;
-  box-shadow: 0 0 7px 1px rgba(70, 230, 140, 0.22);
-  transition: opacity 0.25s ease;
-}
+
+/* Hover: lift + tilt 3D + brilho */
 #darko-dl-btn:hover {
-  transform: translateY(-1px) scale(1.03);
-  filter: drop-shadow(0 7px 13px rgba(0, 0, 0, 0.46));
+  transform: translateY(-4px) scale(1.08) rotateX(8deg) rotateY(-6deg);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.18),
+    0 22px 44px -6px rgba(109, 78, 232, 0.75),
+    0 0 0 1px rgba(167, 139, 250, 0.5),
+    0 8px 18px rgba(0, 0, 0, 0.5);
 }
-#darko-dl-btn:hover .d-orb {
-  filter: brightness(1.025);
+#darko-dl-btn:hover .d-core {
+  transform: translateY(-1px) scale(1.1);
 }
-#darko-dl-btn:hover .d-ring {
+#darko-dl-btn:hover .d-halo {
   opacity: 1;
+  animation-duration: 1.4s;
 }
+
 #darko-dl-btn:active {
-  transform: translateY(0) scale(0.96);
+  transform: translateY(-1px) scale(0.96);
 }
+
 #darko-dl-btn:disabled {
   cursor: progress;
 }
-/* Anel de progresso REAL em volta do orbe — aparece enquanto baixa,
-   some quando o arquivo entra na barra de downloads do navegador. */
+
+/* Anel de progresso REAL — aparece durante download */
 #darko-dl-btn .d-prog {
   position: absolute;
-  inset: -4px;
+  inset: -5px;
   border-radius: 50%;
   pointer-events: none;
   opacity: 0;
   --p: 0;
   background: conic-gradient(
-    rgba(200, 255, 0, 0.95) calc(var(--p) * 1%),
-    rgba(200, 255, 0, 0.12) 0
+    rgba(192, 132, 252, 1) calc(var(--p) * 1%),
+    rgba(192, 132, 252, 0.15) 0
   );
   -webkit-mask: radial-gradient(
     circle,
@@ -77,104 +129,135 @@
     #000 100%
   );
   mask: radial-gradient(circle, transparent 60%, #000 62%, #000 100%);
-  transition: opacity 0.18s ease;
+  transition: opacity 0.2s ease;
+  filter: drop-shadow(0 0 8px rgba(192, 132, 252, 0.7));
 }
-#darko-dl-btn[data-prog="on"] .d-prog {
+#darko-dl-btn[data-prog='on'] .d-prog {
   opacity: 1;
 }
-#darko-dl-btn[data-prog="indet"] .d-prog {
+#darko-dl-btn[data-prog='indet'] .d-prog {
   opacity: 1;
   background: conic-gradient(
-    rgba(200, 255, 0, 0.95) 0 25%,
-    rgba(200, 255, 0, 0.05) 0 100%
+    rgba(192, 132, 252, 1) 0 25%,
+    rgba(192, 132, 252, 0.05) 0 100%
   );
-  animation: darko-prog-spin 1s linear infinite;
+  animation: dl-prog-spin 1s linear infinite;
 }
-@keyframes darko-prog-spin {
-  to {
-    transform: rotate(360deg);
-  }
+@keyframes dl-prog-spin {
+  to { transform: rotate(360deg); }
 }
+
+/* Label de percentual embaixo */
 #darko-dl-btn .d-pct {
   position: absolute;
   left: 50%;
-  bottom: -14px;
+  bottom: -16px;
   transform: translateX(-50%);
-  font: 700 10px/1 ui-monospace, "Segoe UI", monospace;
-  color: #c8ff00;
-  background: rgba(11, 13, 12, 0.86);
-  border-radius: 6px;
-  padding: 2px 5px;
+  font: 700 10px/1 ui-monospace, 'Segoe UI', monospace;
+  color: #c084fc;
+  background: rgba(7, 7, 8, 0.92);
+  border: 1px solid rgba(167, 139, 250, 0.4);
+  border-radius: 7px;
+  padding: 2px 6px;
   pointer-events: none;
   white-space: nowrap;
-  letter-spacing: 0.2px;
+  letter-spacing: 0.04em;
   opacity: 0;
-  transition: opacity 0.18s ease;
+  transition: opacity 0.2s ease;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.55);
 }
-#darko-dl-btn[data-prog="on"] .d-pct {
+#darko-dl-btn[data-prog='on'] .d-pct {
   opacity: 1;
 }
 
-/* estados (sem texto/ícone extra — só o orbe reage) */
-#darko-dl-btn[data-state="loading"] .d-orb {
-  animation: darko-pulse 0.85s ease-in-out infinite;
+/* Estados — animação no núcleo */
+#darko-dl-btn[data-state='loading'] .d-core {
+  animation: dl-pulse 0.9s ease-in-out infinite;
 }
-#darko-dl-btn[data-state="ok"] .d-orb {
-  filter: brightness(1.18) saturate(1.15);
-  animation: darko-pop 0.45s ease;
+#darko-dl-btn[data-state='ok'] {
+  background: linear-gradient(135deg, #a3e635 0%, #65a30d 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 16px 32px -6px rgba(132, 204, 22, 0.65),
+    0 0 0 1px rgba(163, 230, 53, 0.5);
 }
-#darko-dl-btn[data-state="err"] .d-orb {
-  filter: hue-rotate(-110deg) saturate(1.5) brightness(1.05);
+#darko-dl-btn[data-state='ok'] .d-core {
+  animation: dl-pop 0.5s ease;
 }
-@keyframes darko-pulse {
-  0%,
-  100% {
+#darko-dl-btn[data-state='err'] {
+  background: linear-gradient(135deg, #f87171 0%, #b91c1c 100%);
+}
+
+@keyframes dl-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); }
+}
+@keyframes dl-pop {
+  0% { transform: scale(0.7); }
+  60% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+@keyframes dl-halo-breathe {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.12); }
+}
+@keyframes dl-ring-pulse {
+  0%, 100% {
     transform: scale(1);
-    filter: brightness(1);
+    opacity: 0.7;
+    border-color: rgba(192, 132, 252, 0.55);
   }
   50% {
-    transform: scale(1.075);
-    filter: brightness(1.06);
+    transform: scale(1.08);
+    opacity: 1;
+    border-color: rgba(232, 213, 255, 0.85);
   }
 }
-@keyframes darko-pop {
-  0% {
-    transform: scale(0.86);
-  }
-  60% {
-    transform: scale(1.1);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
+
 @media (prefers-reduced-motion: reduce) {
-  #darko-dl-btn[data-state="loading"] .d-orb,
-  #darko-dl-btn[data-state="ok"] .d-orb {
+  #darko-dl-btn .d-halo,
+  #darko-dl-btn .d-ring,
+  #darko-dl-btn[data-state='loading'] .d-core,
+  #darko-dl-btn[data-state='ok'] .d-core {
     animation: none;
   }
 }
 
+/* Toast — feedback de baixou / erro */
 #darko-dl-toast {
   position: fixed;
   right: 18px;
-  bottom: 152px;
+  bottom: 168px;
   z-index: 2147483647;
   max-width: 320px;
-  padding: 10px 14px;
-  border-radius: 10px;
-  background: #14181a;
-  color: #e8eae9;
-  font: 500 12px/1.4 -apple-system, "Segoe UI", Roboto, sans-serif;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  padding: 11px 15px;
+  border-radius: 12px;
+  background: rgba(14, 14, 16, 0.95);
+  color: #fff;
+  font: 600 12px/1.5 -apple-system, 'Segoe UI', Roboto, sans-serif;
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
   opacity: 0;
-  transition: opacity 0.25s ease;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  transform: translateY(8px);
   pointer-events: none;
-  border: 1px solid #2a2f2b;
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  backdrop-filter: blur(12px);
+}
+#darko-dl-toast.show {
+  opacity: 1;
+  transform: translateY(0);
 }
 #darko-dl-toast.ok {
-  border-color: #5ade5a;
+  border-color: rgba(163, 230, 53, 0.5);
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.6),
+    0 0 24px -8px rgba(163, 230, 53, 0.55);
 }
 #darko-dl-toast.err {
-  border-color: #ff6b6b;
+  border-color: rgba(248, 113, 113, 0.55);
+  box-shadow:
+    0 12px 28px rgba(0, 0, 0, 0.6),
+    0 0 24px -8px rgba(248, 113, 113, 0.55);
 }

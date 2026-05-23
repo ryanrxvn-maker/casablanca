@@ -139,6 +139,74 @@ export default function AdminPage() {
     }
   }
 
+  const [tierBusy, setTierBusy] = useState<string | null>(null);
+  const [tierToast, setTierToast] = useState<{ kind: 'ok' | 'err'; msg: string } | null>(null);
+
+  async function changeTier(userId: string, newTier: 'free' | 'basic' | 'pro') {
+    setTierBusy(userId);
+    setTierToast(null);
+    try {
+      const res = await fetch('/api/admin/set-tier', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId, tier: newTier }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        setTierToast({
+          kind: 'err',
+          msg: json.error || json.detail || 'Falha ao trocar plano.',
+        });
+        return;
+      }
+      setTierToast({
+        kind: 'ok',
+        msg: `Plano atualizado pra ${newTier.toUpperCase()}.`,
+      });
+      await load();
+    } catch (e) {
+      setTierToast({
+        kind: 'err',
+        msg: (e as Error).message || 'Erro inesperado.',
+      });
+    } finally {
+      setTierBusy(null);
+      setTimeout(() => setTierToast(null), 3500);
+    }
+  }
+
+  const [resetModal, setResetModal] = useState<{ email: string; password: string } | null>(null);
+
+  async function resetPassword(userId: string, email: string) {
+    if (!window.confirm(`Gerar nova senha provisória pra ${email}?\n\nO usuário será forçado a trocar no próximo login.`)) {
+      return;
+    }
+    try {
+      const res = await fetch('/api/admin/reset-password', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        setTierToast({
+          kind: 'err',
+          msg: json.error || 'Falha ao gerar senha.',
+        });
+        setTimeout(() => setTierToast(null), 3500);
+        return;
+      }
+      setResetModal({ email, password: json.password });
+      await load();
+    } catch (e) {
+      setTierToast({
+        kind: 'err',
+        msg: (e as Error).message || 'Erro inesperado.',
+      });
+      setTimeout(() => setTierToast(null), 3500);
+    }
+  }
+
   async function toggleAction(userId: string, action: string) {
     if (action === 'delete') {
       if (
@@ -409,20 +477,12 @@ export default function AdminPage() {
                               value={
                                 (u.tier === 'beta' ? 'pro' : u.tier) ?? 'free'
                               }
-                              onChange={async (e) => {
-                                const newTier = e.target.value;
-                                await fetch('/api/admin/set-tier', {
-                                  method: 'POST',
-                                  headers: { 'content-type': 'application/json' },
-                                  body: JSON.stringify({
-                                    userId: u.id,
-                                    tier: newTier,
-                                  }),
-                                });
-                                // Recarrega lista
-                                window.location.reload();
+                              onChange={(e) => {
+                                const v = e.target.value as 'free' | 'basic' | 'pro';
+                                changeTier(u.id, v);
                               }}
-                              className="rounded-[10px] border border-line-strong bg-bg-soft px-2 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-white"
+                              disabled={tierBusy === u.id}
+                              className="rounded-[10px] border border-line-strong bg-bg-soft px-2 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-white disabled:opacity-50"
                               style={{ fontFamily: 'var(--font-tech)' }}
                               title="Mudar plano"
                             >
@@ -430,6 +490,15 @@ export default function AdminPage() {
                               <option value="basic">BASIC</option>
                               <option value="pro">PRO</option>
                             </select>
+                            {/* Botão reset senha (só se must_change_password=true ou sempre) */}
+                            <button
+                              onClick={() => resetPassword(u.id, u.email || '')}
+                              className="rounded-[10px] border border-amber-500/40 px-2 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-amber-300 transition hover:bg-amber-500/10 active:scale-[0.96]"
+                              style={{ fontFamily: 'var(--font-tech)' }}
+                              title="Gerar nova senha provisória"
+                            >
+                              SENHA
+                            </button>
                             {u.is_active ? (
                               <button
                                 onClick={() => toggleAction(u.id, 'deactivate')}
@@ -470,6 +539,91 @@ export default function AdminPage() {
           </div>
         </ToolShell>
       </main>
+
+      {/* Toast — feedback de troca de tier */}
+      {tierToast ? (
+        <div
+          role="status"
+          className={
+            'toast-pop fixed bottom-6 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-full border px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.16em] shadow-2xl backdrop-blur-xl ' +
+            (tierToast.kind === 'ok'
+              ? 'border-violet/50 bg-bg/85 text-violet shadow-[0_0_28px_-8px_rgba(167,139,250,0.6)]'
+              : 'border-red-500/50 bg-bg/85 text-red-300 shadow-[0_0_28px_-8px_rgba(248,113,113,0.6)]')
+          }
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          {tierToast.msg}
+        </div>
+      ) : null}
+
+      {/* Modal — senha provisória gerada */}
+      {resetModal ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+          onClick={() => setResetModal(null)}
+        >
+          <div
+            className="dropdown-pop relative w-full max-w-md overflow-hidden rounded-[20px] border border-amber-500/45 bg-bg-soft p-6"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              boxShadow:
+                '0 32px 64px -20px rgba(0,0,0,0.95), 0 0 60px -12px rgba(251,191,36,0.4), inset 0 1px 0 rgba(255,255,255,0.06)',
+            }}
+          >
+            <div
+              className="mb-2 inline-flex items-center gap-2 rounded-full border border-amber-500/45 bg-amber-500/10 px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.2em] text-amber-300"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-amber-400" />
+              SENHA PROVISÓRIA
+            </div>
+            <h3
+              className="mt-1 text-[20px] font-extrabold tracking-tight text-white"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              Nova senha gerada
+            </h3>
+            <p className="mt-1 text-[12.5px] text-text-muted">
+              Pra <span className="font-medium text-white">{resetModal.email}</span>
+            </p>
+
+            <div className="mt-4 rounded-[14px] border border-line-strong bg-bg p-4">
+              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted" style={{ fontFamily: 'var(--font-tech)' }}>
+                Senha
+              </div>
+              <div
+                className="mt-1 select-all text-center text-[24px] font-bold tracking-[0.06em] text-amber-300"
+                style={{ fontFamily: 'var(--font-mono)' }}
+              >
+                {resetModal.password}
+              </div>
+            </div>
+
+            <p className="mt-3 text-[12px] leading-relaxed text-text-muted">
+              O usuário será forçado a trocar a senha no próximo login. Copie agora — depois que fechar, essa senha não pode ser recuperada.
+            </p>
+
+            <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(resetModal.password);
+                  setTierToast({ kind: 'ok', msg: 'Senha copiada.' });
+                  setTimeout(() => setTierToast(null), 2500);
+                }}
+                className="rounded-full border border-amber-500/45 bg-amber-500/10 px-5 py-2 text-[12.5px] font-bold text-amber-300 transition hover:bg-amber-500/20"
+              >
+                Copiar senha
+              </button>
+              <button
+                onClick={() => setResetModal(null)}
+                className="rounded-full border border-line-strong bg-bg-soft px-5 py-2 text-[12.5px] font-bold text-white transition hover:bg-bg"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

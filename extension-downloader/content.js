@@ -83,12 +83,24 @@
 
   let btn, toastEl;
 
-  let orbUrl = '';
-  try {
-    orbUrl = chrome.runtime.getURL('icons/btn-orb.png');
-  } catch {
-    /* contexto invalido */
-  }
+  // SVG do ícone de download (seta pra baixo) — gradient violet
+  const DOWNLOAD_SVG = `
+    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="dl-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#e9d5ff"/>
+          <stop offset="50%" stop-color="#c084fc"/>
+          <stop offset="100%" stop-color="#a78bfa"/>
+        </linearGradient>
+        <filter id="dl-glow">
+          <feGaussianBlur stdDeviation="1.2"/>
+        </filter>
+      </defs>
+      <path d="M12 3v13" stroke="url(#dl-grad)" stroke-width="2.4" stroke-linecap="round"/>
+      <path d="M6 12l6 6 6-6" stroke="url(#dl-grad)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M4 21h16" stroke="url(#dl-grad)" stroke-width="2.4" stroke-linecap="round"/>
+    </svg>
+  `;
 
   function ensureButton() {
     if (btn) return btn;
@@ -96,22 +108,34 @@
     btn.id = 'darko-dl-btn';
     btn.type = 'button';
     btn.setAttribute('aria-label', 'Baixar');
-    btn.title = 'Baixar';
+    btn.title = 'Baixar com Auto Edit';
     btn.dataset.state = 'idle';
-    const img = document.createElement('img');
-    img.className = 'd-orb';
-    img.alt = '';
-    img.draggable = false;
-    img.src = orbUrl;
+
+    // Halo de fundo (glow pulsante)
+    const halo = document.createElement('span');
+    halo.className = 'd-halo';
+
+    // Anel rotativo (idle)
     const ring = document.createElement('span');
     ring.className = 'd-ring';
+
+    // Núcleo do botão (com ícone SVG dentro)
+    const core = document.createElement('span');
+    core.className = 'd-core';
+    core.innerHTML = DOWNLOAD_SVG;
+
+    // Anel de progresso (download em andamento)
     const prog = document.createElement('span');
     prog.className = 'd-prog';
     prog.style.setProperty('--p', '0');
+
+    // Label percentual
     const pct = document.createElement('span');
     pct.className = 'd-pct';
+
+    btn.appendChild(halo);
     btn.appendChild(ring);
-    btn.appendChild(img);
+    btn.appendChild(core);
     btn.appendChild(prog);
     btn.appendChild(pct);
     btn.addEventListener('click', onClick);

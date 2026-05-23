@@ -28,16 +28,31 @@ export async function POST(req: Request) {
     }
 
     const svc = serviceClient();
-    const { error } = await svc
+    // Tenta UPDATE direto na coluna tier
+    const { data, error } = await svc
       .from('profiles')
       .update({ tier })
-      .eq('id', userId);
+      .eq('id', userId)
+      .select('id, tier');
 
     if (error) {
+      // Coluna tier não existe? Mensagem explícita.
+      const msg = (error.message || '').toLowerCase();
+      if (msg.includes('column') && msg.includes('tier')) {
+        return jsonError(
+          'Coluna tier não existe ainda. Rode a migration 016_tier_expand.sql no Supabase SQL Editor.',
+          500,
+          error.message,
+        );
+      }
       return jsonError('Falha ao atualizar tier.', 500, error.message);
     }
 
-    return NextResponse.json({ ok: true });
+    if (!data || data.length === 0) {
+      return jsonError('Usuário não encontrado.', 404);
+    }
+
+    return NextResponse.json({ ok: true, tier: data[0].tier });
   } catch (e) {
     return jsonError(
       'Erro inesperado.',
