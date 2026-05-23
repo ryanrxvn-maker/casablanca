@@ -239,9 +239,9 @@ def _detect_subtitle_box(frame: np.ndarray, text_box: TextBox) -> Optional[TextB
     Se nao detectar caixa, retorna o text_box original (fallback).
     """
     H, W = frame.shape[:2]
-    # Expande regiao de busca
-    pad_y = int(text_box.h * 0.8)
-    pad_x = int(text_box.w * 0.4)
+    # Expande regiao de busca MAIS AGRESSIVO
+    pad_y = int(text_box.h * 1.2)
+    pad_x = int(text_box.w * 0.5)
     sx = max(0, text_box.x - pad_x)
     sy = max(0, text_box.y - pad_y)
     ex = min(W, text_box.x + text_box.w + pad_x)
@@ -250,34 +250,59 @@ def _detect_subtitle_box(frame: np.ndarray, text_box: TextBox) -> Optional[TextB
         return text_box
 
     region = frame[sy:ey, sx:ex]
-    gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+    rh, rw = region.shape[:2]
+    tx_l = text_box.x - sx
+    ty_l = text_box.y - sy
+    tcx = tx_l + text_box.w // 2
+    tcy = ty_l + text_box.h // 2
 
-    # Canny edge detection — caixa de legenda tem bordas fortes
-    edges = cv2.Canny(gray, 50, 150)
-    # Dilata edges pra fechar gaps
+    # 1) COR: HSV threshold pra branco/preto uniforme
+    hsv = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
+    sat = hsv[:, :, 1]
+    val = hsv[:, :, 2]
+    color_mask = (((sat < 50) & (val > 200)) | ((sat < 50) & (val < 60))).astype(np.uint8) * 255
+
+    # 2) EDGE: Canny
+    gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 30, 100)
     edges = cv2.dilate(edges, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)), iterations=2)
 
-    # Acha contornos
-    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return text_box
+    # 3) FLOOD-FILL a partir de 4 pontos ao redor do texto (acha cor de caixa)
+    flood_mask_accum = np.zeros((rh, rw), dtype=np.uint8)
+    flood_seeds = [
+        (tcx, max(2, ty_l - 5)),
+        (tcx, min(rh - 2, ty_l + text_box.h + 5)),
+        (max(2, tx_l - 5), tcy),
+        (min(rw - 2, tx_l + text_box.w + 5), tcy),
+    ]
+    for sx_, sy_ in flood_seeds:
+        if 0 <= sx_ < rw and 0 <= sy_ < rh:
+            try:
+                seed_mask = np.zeros((rh + 2, rw + 2), dtype=np.uint8)
+                cv2.floodFill(
+                    region.copy(), seed_mask, (sx_, sy_), 255,
+                    loDiff=(15, 15, 15), upDiff=(15, 15, 15),
+                    flags=cv2.FLOODFILL_MASK_ONLY | (255 << 8) | 4,
+                )
+                flood_mask_accum = np.maximum(flood_mask_accum, seed_mask[1:-1, 1:-1])
+            except Exception:
+                pass
 
-    # Acha o contorno que contem o texto (centro do text_box dentro do bbox)
-    text_cx_local = (text_box.x + text_box.w // 2) - sx
-    text_cy_local = (text_box.y + text_box.h // 2) - sy
+    # Combina + fecha gaps
+    combined = np.maximum(np.maximum(color_mask, edges), flood_mask_accum)
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 9))
+    combined = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel_close, iterations=2)
 
+    contours, _ = cv2.findContours(combined, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     best_box = None
     best_area = 0
     for cnt in contours:
         x, y, w, h = cv2.boundingRect(cnt)
-        # Caixa precisa CONTER o centro do texto
-        if not (x <= text_cx_local <= x + w and y <= text_cy_local <= y + h):
+        if not (x <= tcx <= x + w and y <= tcy <= y + h):
             continue
-        # Caixa precisa ser maior que o texto (com margem)
-        if w < text_box.w * 1.1 or h < text_box.h * 1.1:
+        if w < text_box.w * 1.05 or h < text_box.h * 1.05:
             continue
-        # Caixa nao deve ser absurdamente grande (>3x texto)
-        if w > text_box.w * 3 or h > text_box.h * 5:
+        if w > text_box.w * 3.5 or h > text_box.h * 6:
             continue
         area = w * h
         if area > best_area:
@@ -285,21 +310,23 @@ def _detect_subtitle_box(frame: np.ndarray, text_box: TextBox) -> Optional[TextB
             best_box = (x, y, w, h)
 
     if best_box is None:
-        # Fallback: expande o text_box pra cobrir margem fixa
+        # Fallback agressivo
         return TextBox(
-            x=max(0, text_box.x - int(text_box.w * 0.1)),
-            y=max(0, text_box.y - int(text_box.h * 0.5)),
-            w=min(W, text_box.w + int(text_box.w * 0.2)),
-            h=min(H, text_box.h + int(text_box.h * 1.0)),
+            x=max(0, text_box.x - int(text_box.w * 0.2)),
+            y=max(0, text_box.y - int(text_box.h * 0.8)),
+            w=min(W, text_box.w + int(text_box.w * 0.4)),
+            h=min(H, text_box.h + int(text_box.h * 1.6)),
         )
 
     bx, by, bw, bh = best_box
-    return TextBox(
-        x=sx + bx,
-        y=sy + by,
-        w=bw,
-        h=bh,
-    )
+    # Margem extra +10% pra cada lado
+    extra_x = int(bw * 0.1)
+    extra_y = int(bh * 0.1)
+    final_x = max(0, sx + bx - extra_x)
+    final_y = max(0, sy + by - extra_y)
+    final_w = min(W - final_x, bw + extra_x * 2)
+    final_h = min(H - final_y, bh + extra_y * 2)
+    return TextBox(x=final_x, y=final_y, w=final_w, h=final_h)
 
 
 def _persistent_mask(
