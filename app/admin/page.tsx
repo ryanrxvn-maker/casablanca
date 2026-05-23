@@ -403,7 +403,33 @@ export default function AdminPage() {
                               ) : null}
                             </div>
                           </div>
-                          <div className="flex flex-wrap gap-1.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {/* Dropdown de tier */}
+                            <select
+                              value={
+                                (u.tier === 'beta' ? 'pro' : u.tier) ?? 'free'
+                              }
+                              onChange={async (e) => {
+                                const newTier = e.target.value;
+                                await fetch('/api/admin/set-tier', {
+                                  method: 'POST',
+                                  headers: { 'content-type': 'application/json' },
+                                  body: JSON.stringify({
+                                    userId: u.id,
+                                    tier: newTier,
+                                  }),
+                                });
+                                // Recarrega lista
+                                window.location.reload();
+                              }}
+                              className="rounded-[10px] border border-line-strong bg-bg-soft px-2 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-white"
+                              style={{ fontFamily: 'var(--font-tech)' }}
+                              title="Mudar plano"
+                            >
+                              <option value="free">FREE</option>
+                              <option value="basic">BASIC</option>
+                              <option value="pro">PRO</option>
+                            </select>
                             {u.is_active ? (
                               <button
                                 onClick={() => toggleAction(u.id, 'deactivate')}

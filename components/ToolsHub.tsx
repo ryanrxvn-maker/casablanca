@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { useTier, tierAllowsTool } from '@/lib/use-tier';
+import { useTier, tierAllowsTool, tierCanAutomate } from '@/lib/use-tier';
 import {
   IconAcelerador,
   IconAudioSplit,
@@ -245,7 +245,7 @@ export function ToolsHub() {
       </section>
 
       {/* Banner promocional / destaque (estilo HeyGen) */}
-      <PromoBanner />
+      <PromoBanner tier={tier} isAdmin={isAdmin} />
 
       {/* Bloco DESTAQUES — grandes, com gradiente */}
       <section className="mt-10">
@@ -365,7 +365,15 @@ function SectionTitle({
   );
 }
 
-function PromoBanner() {
+function PromoBanner({
+  tier,
+  isAdmin,
+}: {
+  tier: 'free' | 'basic' | 'pro' | 'admin' | null;
+  isAdmin: boolean;
+}) {
+  // "Iniciar automação" só liberado pra Pro ou admin
+  const canStartAutomation = isAdmin || tierCanAutomate(tier);
   return (
     <div
       className="promo-banner group relative overflow-hidden rounded-[26px] border border-line/60 fade-in-up"
@@ -462,24 +470,55 @@ function PromoBanner() {
           </p>
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
+            {/* Botão 1: Conhecer o Pilot (preto, sempre disponível) */}
             <Link
-              href="/tools/clickup-pilot"
-              className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full px-6 py-3 text-[13.5px] font-bold text-black"
+              href="/pilot"
+              className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full border border-white/20 bg-black/60 px-6 py-3 text-[13.5px] font-bold text-white backdrop-blur-md transition-all duration-300 hover:-translate-y-[1px] hover:border-white/45 hover:bg-black/80"
               style={{
-                background: 'linear-gradient(135deg, #c8ff00 0%, #a3e635 100%)',
                 boxShadow:
-                  'inset 0 1px 0 rgba(255,255,255,0.5), 0 12px 32px -8px rgba(200,255,0,0.55), 0 2px 6px rgba(0,0,0,0.4)',
+                  'inset 0 1px 0 rgba(255,255,255,0.06), 0 12px 28px -10px rgba(0,0,0,0.7)',
               }}
             >
               <span className="relative z-10">Conhecer o Pilot</span>
               <span className="relative z-10 transition-transform duration-300 group-hover/btn:translate-x-1">
                 →
               </span>
-              <span
-                aria-hidden
-                className="absolute inset-0 -translate-x-[120%] bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 group-hover/btn:translate-x-[120%]"
-              />
             </Link>
+
+            {/* Botão 2: Iniciar automação (verde, bloqueado pra free/basic) */}
+            {canStartAutomation ? (
+              <Link
+                href="/tools/clickup-pilot"
+                className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full px-6 py-3 text-[13.5px] font-bold text-black"
+                style={{
+                  background:
+                    'linear-gradient(135deg, #c8ff00 0%, #a3e635 100%)',
+                  boxShadow:
+                    'inset 0 1px 0 rgba(255,255,255,0.5), 0 12px 32px -8px rgba(200,255,0,0.55), 0 2px 6px rgba(0,0,0,0.4)',
+                }}
+              >
+                <span className="relative z-10">Iniciar automação</span>
+                <span className="relative z-10 transition-transform duration-300 group-hover/btn:translate-x-1">
+                  →
+                </span>
+                <span
+                  aria-hidden
+                  className="absolute inset-0 -translate-x-[120%] bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 group-hover/btn:translate-x-[120%]"
+                />
+              </Link>
+            ) : (
+              <Link
+                href="/planos"
+                title="Disponível só no plano Pro"
+                className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full border border-lime/35 bg-lime/5 px-6 py-3 text-[13.5px] font-bold text-lime/70 backdrop-blur-md transition-all duration-300 hover:border-lime/55 hover:text-lime"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="4" y="11" width="16" height="10" rx="2" />
+                  <path d="M8 11V7a4 4 0 018 0v4" />
+                </svg>
+                <span className="relative z-10">Iniciar automação</span>
+              </Link>
+            )}
           </div>
         </div>
       </div>

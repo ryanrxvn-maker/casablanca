@@ -117,7 +117,7 @@ function HeroSection() {
             className="mt-6 max-w-[540px] text-[16px] leading-relaxed text-text-muted fade-in-up"
             style={{ animationDelay: '500ms' }}
           >
-            Ligue a automação, feche o notebook e vá viver.<br />
+            Ligue a automação, feche o notebook e vá dormir.<br />
             Acorde com B-roll e lipsync prontos.
           </p>
 
@@ -595,7 +595,7 @@ function PilotMockup() {
 
 /* ────────────────────── PILOT — COMO FUNCIONA ────────────────────── */
 
-function PilotHowItWorks() {
+export function PilotHowItWorks() {
   const steps = [
     {
       n: '01',
@@ -615,7 +615,7 @@ function PilotHowItWorks() {
       n: '03',
       title: 'Revisa task por task',
       desc:
-        'Preview limpo de cada uma: roteiro, avatar sugerido pelo Pilot baseado na copy e dados extras. Você só confirma o que tá certo.',
+        'Preview limpo de cada uma: roteiro + avatar identificado pelo link na copy. Se o avatar já tá na sua biblioteca do HeyGen, o Pilot usa direto.',
       tint: 'rgba(244,114,182,0.45)',
     },
     {

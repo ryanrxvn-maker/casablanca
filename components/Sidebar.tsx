@@ -10,6 +10,7 @@ type Profile = {
   name: string | null;
   avatar_url: string | null;
   is_admin: boolean;
+  tier: 'free' | 'basic' | 'pro' | 'admin' | null;
 };
 
 type NavItem = {
@@ -62,14 +63,21 @@ export function Sidebar() {
       if (!uid) return;
       const { data } = await supabase
         .from('profiles')
-        .select('name, avatar_url, is_admin')
+        .select('name, avatar_url, is_admin, tier')
         .eq('id', uid)
         .maybeSingle();
       if (!cancelled) {
+        const rawTier = (data?.tier ?? '') as string;
+        let resolvedTier: 'free' | 'basic' | 'pro' | 'admin' = 'free';
+        if (data?.is_admin) resolvedTier = 'admin';
+        else if (rawTier === 'pro' || rawTier === 'beta') resolvedTier = 'pro';
+        else if (rawTier === 'basic') resolvedTier = 'basic';
+        else if (rawTier === 'free') resolvedTier = 'free';
         setProfile({
           name: data?.name ?? null,
           avatar_url: data?.avatar_url ?? null,
           is_admin: !!data?.is_admin,
+          tier: resolvedTier,
         });
         setAvatarBroken(false);
       }
@@ -270,32 +278,27 @@ export function Sidebar() {
             aria-expanded={accountOpen}
             title={displayName}
           >
-            {profile?.avatar_url && !avatarBroken ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={profile.avatar_url}
-                alt={displayName}
-                onError={() => setAvatarBroken(true)}
-                referrerPolicy="no-referrer"
-                className={
-                  'h-10 w-10 rounded-full border-2 object-cover transition-transform group-hover:scale-105 ' +
-                  (accountOpen ? 'border-violet' : 'border-line')
-                }
-              />
-            ) : (
-              <span
-                className={
-                  'flex h-10 w-10 items-center justify-center rounded-full border-2 bg-gradient-to-br from-violet/30 to-violet-deep/40 text-sm font-bold text-white transition-all group-hover:scale-105 ' +
-                  (accountOpen ? 'border-violet' : 'border-line')
-                }
-                style={{
-                  boxShadow:
-                    'inset 0 1px 0 rgba(255,255,255,0.12), 0 0 18px -6px rgba(167,139,250,0.6)',
-                }}
-              >
-                {initial}
-              </span>
-            )}
+            <TierAvatar
+              tier={profile?.tier ?? 'free'}
+              avatarUrl={profile?.avatar_url}
+              avatarBroken={avatarBroken}
+              onAvatarError={() => setAvatarBroken(true)}
+              displayName={displayName}
+              initial={initial}
+              active={accountOpen}
+            />
+            {/* Pill do tier embaixo */}
+            <span
+              className="mt-1 rounded-full px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-[0.18em]"
+              style={{
+                fontFamily: 'var(--font-tech)',
+                color: tierColorOf(profile?.tier ?? 'free'),
+                background: tierBgOf(profile?.tier ?? 'free'),
+                border: `1px solid ${tierBorderOf(profile?.tier ?? 'free')}`,
+              }}
+            >
+              {tierLabelOf(profile?.tier ?? 'free')}
+            </span>
           </button>
 
           {accountOpen ? (
@@ -506,6 +509,201 @@ function IconTrophy() {
 }
 
 /* ─── Mini ícones do dropdown da conta ─── */
+
+/* ─── TierAvatar — moldura do avatar muda conforme tier ─── */
+
+type AvatarTier = 'free' | 'basic' | 'pro' | 'admin';
+
+function tierColorOf(t: AvatarTier): string {
+  return t === 'admin'
+    ? '#c8ff00'
+    : t === 'pro'
+      ? '#c084fc'
+      : t === 'basic'
+        ? '#f472b6'
+        : '#8b8b96';
+}
+function tierBgOf(t: AvatarTier): string {
+  return t === 'admin'
+    ? 'rgba(200,255,0,0.10)'
+    : t === 'pro'
+      ? 'rgba(192,132,252,0.12)'
+      : t === 'basic'
+        ? 'rgba(244,114,182,0.10)'
+        : 'rgba(139,139,150,0.08)';
+}
+function tierBorderOf(t: AvatarTier): string {
+  return t === 'admin'
+    ? 'rgba(200,255,0,0.45)'
+    : t === 'pro'
+      ? 'rgba(192,132,252,0.45)'
+      : t === 'basic'
+        ? 'rgba(244,114,182,0.45)'
+        : 'rgba(139,139,150,0.35)';
+}
+function tierLabelOf(t: AvatarTier): string {
+  return t === 'admin' ? 'ADM' : t === 'pro' ? 'PRO' : t === 'basic' ? 'BSC' : 'FRE';
+}
+
+function TierAvatar({
+  tier,
+  avatarUrl,
+  avatarBroken,
+  onAvatarError,
+  displayName,
+  initial,
+  active,
+}: {
+  tier: AvatarTier;
+  avatarUrl: string | null | undefined;
+  avatarBroken: boolean;
+  onAvatarError: () => void;
+  displayName: string;
+  initial: string;
+  active: boolean;
+}) {
+  const color = tierColorOf(tier);
+  const isPremium = tier === 'pro' || tier === 'admin';
+  const isAdmin = tier === 'admin';
+
+  // Moldura conforme tier:
+  //  free → borda simples cinza
+  //  basic → gradient rosa
+  //  pro → gradient violet com glow + ring extra
+  //  admin → gradient lime + sparkles flutuantes
+  const ringStyle: React.CSSProperties = (() => {
+    if (tier === 'free') {
+      return {
+        background: 'rgba(139,139,150,0.25)',
+      };
+    }
+    if (tier === 'basic') {
+      return {
+        background:
+          'conic-gradient(from 0deg, #f472b6, #ec4899, #f472b6, #f9a8d4, #f472b6)',
+      };
+    }
+    if (tier === 'pro') {
+      return {
+        background:
+          'conic-gradient(from 0deg, #c084fc, #a78bfa, #c084fc, #d8b4fe, #c084fc)',
+        animation: 'tier-ring-spin 6s linear infinite',
+      };
+    }
+    // admin
+    return {
+      background:
+        'conic-gradient(from 0deg, #c8ff00, #a3e635, #c8ff00, #d9f99d, #c8ff00)',
+      animation: 'tier-ring-spin 4s linear infinite',
+    };
+  })();
+
+  return (
+    <div className="tier-avatar relative inline-block">
+      {/* Glow externo (só basic+) */}
+      {isPremium ? (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -inset-1.5 rounded-full opacity-70 blur-md"
+          style={{
+            background: color,
+            animation: 'tier-glow-pulse 2.6s ease-in-out infinite',
+          }}
+        />
+      ) : null}
+
+      {/* Anel conic giratório (basic+, pro, admin) */}
+      <div
+        className="relative h-12 w-12 rounded-full p-[2px]"
+        style={ringStyle}
+      >
+        <div className="relative h-full w-full overflow-hidden rounded-full bg-bg">
+          {avatarUrl && !avatarBroken ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={avatarUrl}
+              alt={displayName}
+              onError={onAvatarError}
+              referrerPolicy="no-referrer"
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div
+              className="flex h-full w-full items-center justify-center bg-gradient-to-br from-violet/20 to-violet-deep/30 text-[15px] font-bold text-white"
+              style={{
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12)',
+              }}
+            >
+              {initial}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Coroa decorativa pra admin */}
+      {isAdmin ? (
+        <span
+          aria-hidden
+          className="absolute -top-1.5 left-1/2 -translate-x-1/2"
+          style={{
+            filter: 'drop-shadow(0 0 6px rgba(200,255,0,0.85))',
+          }}
+        >
+          <svg width="20" height="14" viewBox="0 0 24 16" fill="none">
+            <path
+              d="M2 14L4 4l5 6 3-10 3 10 5-6 2 10z"
+              fill="#c8ff00"
+              stroke="#a3e635"
+              strokeWidth="0.8"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </span>
+      ) : null}
+
+      {/* Sparkle decorativo Pro */}
+      {tier === 'pro' ? (
+        <span
+          aria-hidden
+          className="absolute -right-1 -top-1"
+          style={{
+            animation: 'tier-spark 2.4s ease-in-out infinite',
+          }}
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+            <path d="M5 0l1 4 4 1-4 1-1 4-1-4-4-1 4-1z" fill="#c084fc" />
+          </svg>
+        </span>
+      ) : null}
+
+      {/* Outline de active (hover/open) */}
+      {active ? (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -inset-1 rounded-full"
+          style={{
+            border: `1.5px solid ${color}`,
+            opacity: 0.65,
+          }}
+        />
+      ) : null}
+
+      <style jsx>{`
+        @keyframes tier-ring-spin {
+          to { transform: rotate(360deg); }
+        }
+        @keyframes tier-glow-pulse {
+          0%, 100% { opacity: 0.4; }
+          50% { opacity: 0.85; }
+        }
+        @keyframes tier-spark {
+          0%, 100% { transform: scale(0.7) rotate(0); opacity: 0.6; }
+          50% { transform: scale(1.2) rotate(90deg); opacity: 1; }
+        }
+      `}</style>
+    </div>
+  );
+}
 
 function DotPlans() {
   return (

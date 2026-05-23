@@ -202,10 +202,6 @@ export default function RegisterPage() {
         <button type="submit" className="btn-primary" disabled={loading}>
           {loading ? <span className="loading-dots">Criando</span> : 'Criar conta'}
         </button>
-
-        <p className="mt-2 text-[11.5px] leading-relaxed text-text-muted">
-          A conta grátis libera Decupagem de áudio e Downloader. Pra acessar o resto, fale com o time.
-        </p>
       </form>
     </AuthShell>
   );
