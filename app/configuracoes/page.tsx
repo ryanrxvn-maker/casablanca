@@ -3,15 +3,17 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
-import { ToolShell } from '@/components/ToolShell';
 import { createClient } from '@/lib/supabase/client';
 import { ClickUpPilotStatusSection } from '@/components/ClickUpPilotStatusSection';
 
 /**
- * /configuracoes — Configuracoes de login.
+ * /configuracoes — Conta.
  *
- * Substitui a antiga /perfil. Nao edita nome, foto nem bio — so
- * informacoes da conta: email, senha, sessoes, deletar conta.
+ * Layout reorganizado em duas colunas:
+ *  - Esquerda  → indice sticky (ancoras pra cada secao)
+ *  - Direita   → cards individuais com fade-in-up escalonado
+ *
+ * Copy minima, sem termos tecnicos. Estados de loading usam .loading-dots.
  */
 export default function ConfiguracoesPage() {
   const router = useRouter();
@@ -57,10 +59,7 @@ export default function ConfiguracoesPage() {
         flash('err', error.message);
         return;
       }
-      flash(
-        'ok',
-        'Confirme o novo email pelo link enviado. Ele só entra em vigor depois da confirmação.',
-      );
+      flash('ok', 'Confirme o link no novo email.');
       setNewEmail('');
     } finally {
       setEmailBusy(false);
@@ -70,17 +69,16 @@ export default function ConfiguracoesPage() {
   async function handleChangePassword(e: React.FormEvent) {
     e.preventDefault();
     if (newPassword.length < 6) {
-      flash('err', 'Nova senha precisa ter ao menos 6 caracteres.');
+      flash('err', 'Mínimo 6 caracteres.');
       return;
     }
     if (newPassword !== newPasswordConfirm) {
-      flash('err', 'As senhas novas não coincidem.');
+      flash('err', 'As senhas não coincidem.');
       return;
     }
     setPassBusy(true);
     try {
       const supabase = createClient();
-      // Valida a senha atual reautenticando.
       const { error: signErr } = await supabase.auth.signInWithPassword({
         email,
         password: currentPassword,
@@ -96,7 +94,7 @@ export default function ConfiguracoesPage() {
         flash('err', error.message);
         return;
       }
-      flash('ok', 'Senha alterada com sucesso.');
+      flash('ok', 'Senha alterada.');
       setCurrentPassword('');
       setNewPassword('');
       setNewPasswordConfirm('');
@@ -114,25 +112,16 @@ export default function ConfiguracoesPage() {
 
   async function handleDeleteAccount() {
     const confirmed = window.confirm(
-      'Tem CERTEZA que quer deletar sua conta? Todos os dados vinculados serão perdidos e a ação é irreversível.',
+      'Tem certeza? A ação é irreversível.',
     );
     if (!confirmed) return;
-    const typed = window.prompt(
-      'Digite "DELETAR" (maiúsculas) para confirmar:',
-    );
+    const typed = window.prompt('Digite "DELETAR" pra confirmar:');
     if (typed !== 'DELETAR') return;
     setDeleteBusy(true);
     try {
-      // Nao temos endpoint admin pra deletar a conta de fato sem service role.
-      // Alternativa: sign out + exibir instrucao pra contato de suporte.
-      // Quando um endpoint admin estiver disponivel (ex: /api/account/delete
-      // com service role), trocar pelo fetch correspondente.
       const supabase = createClient();
       await supabase.auth.signOut();
-      flash(
-        'ok',
-        'Sessão encerrada. Para remover a conta do banco entre em contato com o suporte.',
-      );
+      flash('ok', 'Sessão encerrada. Fale com o suporte pra remover do banco.');
       setTimeout(() => router.replace('/login'), 2200);
     } finally {
       setDeleteBusy(false);
@@ -144,51 +133,94 @@ export default function ConfiguracoesPage() {
       <div className="flex min-h-screen flex-col">
         <Header />
         <main className="container-app flex-1 py-10">
-          <div className="rounded-[12px] border border-line bg-bg p-8 text-center text-sm text-text-muted">
-            Carregando...
+          <div className="rounded-[16px] border border-line bg-bg-soft/60 p-8 text-center text-sm text-text-muted">
+            <span className="loading-dots">Carregando</span>
           </div>
         </main>
       </div>
     );
   }
 
+  const sections = [
+    { id: 'apis', label: 'Chaves IA' },
+    { id: 'email', label: 'Email' },
+    { id: 'senha', label: 'Senha' },
+    { id: 'sessao', label: 'Sessão' },
+    { id: 'clickup', label: 'ClickUp' },
+    { id: 'zona-perigo', label: 'Zona de perigo' },
+  ];
+
   return (
     <div className="flex min-h-screen flex-col">
       <Header />
       <main className="container-app flex-1 py-10">
-        <ToolShell
-          title="Configurações"
-          description="Configurações de login da sua conta. Alterações aqui afetam acesso, email e segurança."
-        >
-          <div className="flex flex-col gap-8">
-            <section>
-              <h2 className="label-field !mb-3">Chaves de IA (BYOK)</h2>
+        <div className="animate-fade-in-up mb-10">
+          <div
+            className="mb-3 inline-flex items-center gap-2 rounded-full border border-line bg-bg-soft/60 px-3 py-1 text-[10.5px] font-semibold uppercase tracking-[0.20em] text-text-muted"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-violet" />
+            CONTA
+          </div>
+          <h1 className="section-title">Configurações</h1>
+          <p className="mt-2 text-sm text-text-muted">
+            Email, senha e acesso.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-[200px_1fr]">
+          {/* Sidebar interna sticky */}
+          <aside className="hidden lg:block">
+            <nav
+              className="sticky top-24 flex flex-col gap-1 rounded-[14px] border border-line bg-bg-soft/50 p-3 backdrop-blur-md"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              {sections.map((s) => (
+                <a
+                  key={s.id}
+                  href={`#${s.id}`}
+                  className="flex items-center justify-between rounded-[10px] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted transition hover:bg-bg hover:text-white"
+                >
+                  <span>{s.label}</span>
+                  <span className="text-text-dim transition group-hover:text-violet">·</span>
+                </a>
+              ))}
+            </nav>
+          </aside>
+
+          <div className="flex flex-col gap-5">
+            {/* Chaves IA */}
+            <section id="apis" className="fade-in-up" style={{ animationDelay: '40ms' }}>
               <a
                 href="/configuracoes/api"
-                className="block rounded-[12px] border border-lime/30 bg-lime/5 p-4 transition-all duration-300 hover:-translate-y-[1px] hover:border-lime/60 hover:bg-lime/10"
+                className="card-tool block p-5 md:p-6"
               >
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center justify-between gap-4">
                   <div>
-                    <div className="text-sm font-semibold text-lime">
-                      Configurar API Keys →
+                    <div className="mb-1 flex items-center gap-2">
+                      <span className="pill-lime text-[9px]">BYOK</span>
                     </div>
-                    <div className="mt-0.5 text-[11px] text-text-muted">
-                      Anthropic, AssemblyAI, ElevenLabs. Ferramentas de IA
-                      gastam credito da SUA conta nessas APIs.
+                    <div
+                      className="text-[17px] font-bold tracking-tight text-white"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      Chaves de IA
+                    </div>
+                    <div className="mt-1 text-[13px] text-text-muted">
+                      Conecte suas chaves. O crédito sai da sua conta.
                     </div>
                   </div>
-                  <span className="mono text-[10px] uppercase tracking-widest text-lime">
-                    BYOK
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full border border-line-strong text-text-dim transition group-hover:border-lime group-hover:text-lime">
+                    →
                   </span>
                 </div>
               </a>
             </section>
 
-            {/* ------ Email ------ */}
-            <section>
-              <h2 className="label-field !mb-3">Email da conta</h2>
-              <div className="mb-3 rounded-[12px] border border-line bg-bg px-4 py-3 text-sm text-text-muted">
-                Email atual:{' '}
+            {/* Email */}
+            <SectionCard id="email" label="Email" delay={80}>
+              <div className="mb-3 rounded-[12px] border border-line bg-bg/60 px-4 py-3 text-sm">
+                <span className="text-text-muted">Atual: </span>
                 <span className="font-medium text-white">{email}</span>
               </div>
               <form
@@ -208,18 +240,16 @@ export default function ConfiguracoesPage() {
                   className="btn-primary"
                   disabled={emailBusy || !newEmail.trim()}
                 >
-                  {emailBusy ? 'Enviando...' : 'Trocar email'}
+                  {emailBusy ? <span className="loading-dots">Enviando</span> : 'Trocar'}
                 </button>
               </form>
               <p className="mt-2 text-[11px] text-text-muted">
-                Você receberá um link de confirmação no novo email. A troca só
-                entra em vigor após a confirmação.
+                Você precisa confirmar no novo email.
               </p>
-            </section>
+            </SectionCard>
 
-            {/* ------ Senha ------ */}
-            <section className="border-t border-line pt-6">
-              <h2 className="label-field !mb-3">Alterar senha</h2>
+            {/* Senha */}
+            <SectionCard id="senha" label="Senha" delay={120}>
               <form
                 onSubmit={handleChangePassword}
                 className="flex flex-col gap-3"
@@ -236,7 +266,7 @@ export default function ConfiguracoesPage() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <input
                     type="password"
-                    placeholder="Nova senha (mín. 6)"
+                    placeholder="Nova"
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     className="input-field"
@@ -246,7 +276,7 @@ export default function ConfiguracoesPage() {
                   />
                   <input
                     type="password"
-                    placeholder="Confirmar nova senha"
+                    placeholder="Confirmar"
                     value={newPasswordConfirm}
                     onChange={(e) => setNewPasswordConfirm(e.target.value)}
                     className="input-field"
@@ -266,62 +296,97 @@ export default function ConfiguracoesPage() {
                       !newPasswordConfirm
                     }
                   >
-                    {passBusy ? 'Alterando...' : 'Alterar senha'}
+                    {passBusy ? <span className="loading-dots">Alterando</span> : 'Alterar'}
                   </button>
                 </div>
               </form>
-            </section>
+            </SectionCard>
 
-            {/* ------ Sessao ------ */}
-            <section className="border-t border-line pt-6">
-              <h2 className="label-field !mb-3">Sessão</h2>
+            {/* Sessao */}
+            <SectionCard id="sessao" label="Sessão" delay={160}>
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm text-text-muted">
-                  Encerra esta sessão e volta para a tela de login.
-                </p>
+                <p className="text-sm text-text-muted">Sair desta conta.</p>
                 <button onClick={handleLogout} className="btn-secondary">
                   Sair
                 </button>
               </div>
+            </SectionCard>
+
+            {/* ClickUp Pilot */}
+            <section id="clickup" className="fade-in-up" style={{ animationDelay: '200ms' }}>
+              <ClickUpPilotStatusSection flash={flash} />
             </section>
 
-            {/* ------ ClickUp Pilot — status filter ------ */}
-            <ClickUpPilotStatusSection flash={flash} />
-
-            {/* ------ Zona perigosa ------ */}
-            <section className="border-t border-line pt-6">
-              <h2 className="label-field !mb-3 text-red-400">Zona perigosa</h2>
-              <div className="rounded-[12px] border border-red-500/30 bg-red-500/5 p-4">
-                <p className="mb-3 text-sm text-text-muted">
-                  Deletar a conta encerra todas as sessões ativas e remove
-                  seus dados. A ação é irreversível.
+            {/* Zona perigo */}
+            <section
+              id="zona-perigo"
+              className="fade-in-up"
+              style={{ animationDelay: '240ms' }}
+            >
+              <div className="rounded-[16px] border border-red-500/25 bg-red-500/5 p-5 md:p-6">
+                <div className="mb-2 inline-flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[0.20em] text-red-400" style={{ fontFamily: 'var(--font-tech)' }}>
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-400 shadow-[0_0_8px_rgba(248,113,113,0.7)]" />
+                  ZONA DE PERIGO
+                </div>
+                <p className="text-sm text-text-muted">
+                  Apaga sua conta. Sem volta.
                 </p>
                 <button
                   onClick={handleDeleteAccount}
-                  className="rounded-[12px] border border-red-500/50 px-4 py-2 text-sm font-medium text-red-300 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="mt-4 rounded-[12px] border border-red-500/50 px-4 py-2 text-sm font-medium text-red-300 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
                   disabled={deleteBusy}
                 >
-                  {deleteBusy ? 'Processando...' : 'Deletar conta'}
+                  {deleteBusy ? <span className="loading-dots">Processando</span> : 'Deletar conta'}
                 </button>
               </div>
             </section>
           </div>
-        </ToolShell>
+        </div>
       </main>
 
       {toast ? (
         <div
           role="status"
           className={
-            'toast-pop fixed bottom-6 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-full border px-5 py-2.5 text-xs font-medium uppercase tracking-widest shadow-2xl backdrop-blur-md ' +
+            'toast-pop fixed bottom-6 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-full border px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.16em] shadow-2xl backdrop-blur-xl ' +
             (toast.kind === 'ok'
-              ? 'border-lime/50 bg-bg/80 text-lime shadow-[0_0_28px_-8px_rgba(200,255,0,0.6)]'
-              : 'border-red-500/50 bg-bg/80 text-red-300 shadow-[0_0_28px_-8px_rgba(248,113,113,0.6)]')
+              ? 'border-violet/50 bg-bg/85 text-violet shadow-[0_0_28px_-8px_rgba(167,139,250,0.6)]'
+              : 'border-red-500/50 bg-bg/85 text-red-300 shadow-[0_0_28px_-8px_rgba(248,113,113,0.6)]')
           }
+          style={{ fontFamily: 'var(--font-tech)' }}
         >
           {toast.msg}
         </div>
       ) : null}
     </div>
+  );
+}
+
+function SectionCard({
+  id,
+  label,
+  delay,
+  children,
+}: {
+  id: string;
+  label: string;
+  delay: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      id={id}
+      className="card-tool fade-in-up p-5 md:p-6"
+      style={{ animationDelay: `${delay}ms` }}
+    >
+      <div
+        className="mb-4 inline-flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[0.20em] text-text-muted"
+        style={{ fontFamily: 'var(--font-tech)' }}
+      >
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-violet shadow-[0_0_8px_rgba(167,139,250,0.7)]" />
+        {label}
+      </div>
+      {children}
+    </section>
   );
 }

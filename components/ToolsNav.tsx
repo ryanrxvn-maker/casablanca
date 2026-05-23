@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { SuiteSwitcher, type Suite } from './SuiteSwitcher';
@@ -171,18 +172,29 @@ export function ToolsNav() {
 
   return (
     <>
-      <div className="border-b border-line bg-bg/50 backdrop-blur-sm">
-        <div className="container-app flex items-center justify-between py-4">
-          <span className="hidden text-[11px] uppercase tracking-widest text-text-muted md:inline">
-            {active === 'ai' ? 'AI Suite' : active === 'base' ? 'Base Suite' : ''}
-          </span>
+      <div className="border-b border-line/60 bg-bg/55 backdrop-blur-md">
+        <div className="container-app flex items-center justify-between py-3.5">
+          <Link
+            href="/tools"
+            className="group hidden items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[0.18em] text-text-muted transition hover:text-white md:inline-flex"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            <span className="text-text-dim transition group-hover:text-violet group-hover:-translate-x-0.5 group-hover:inline-block">←</span>
+            <span>Início</span>
+          </Link>
           <SuiteSwitcher
             active={active}
             baseHref={BASE_SUITE[0].href}
             aiHref={AI_SUITE[0].href}
           />
-          <span className="hidden text-[11px] uppercase tracking-widest text-text-muted md:inline">
-            {items ? `${items.length} ${items.length === 1 ? 'ferramenta' : 'ferramentas'}` : ''}
+          <span
+            className="hidden text-[10.5px] font-semibold uppercase tracking-[0.18em] text-text-muted md:inline"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            {items ? (
+              <span className="mono text-violet">{String(items.length).padStart(2, '0')}</span>
+            ) : null}
+            {items ? <span className="ml-2">no catálogo</span> : null}
           </span>
         </div>
       </div>

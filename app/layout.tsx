@@ -1,16 +1,25 @@
 import type { Metadata } from 'next';
 
-import { Space_Grotesk, JetBrains_Mono, Orbitron } from 'next/font/google';
+import {
+  Space_Grotesk,
+  JetBrains_Mono,
+  Bricolage_Grotesque,
+  Instrument_Serif,
+} from 'next/font/google';
 import { MouseGlow } from '@/components/MouseGlow';
 import { RippleRoot } from '@/components/RippleRoot';
 import { FloatingOrbs } from '@/components/FloatingOrbs';
 import './globals.css';
 
 /**
- * Fonts carregadas via next/font (zero FOUC, self-host automatico).
- * - display: Space Grotesk  -> UI geral
- * - mono:    JetBrains Mono -> numeros, timestamps, codigo
- * - tech:    Orbitron       -> tabs, labels maiusculas, estilo hardware UI
+ * Tipografia DARKO LAB v2 — identidade premium, nada generico.
+ *
+ *  display  · Space Grotesk        → UI geral (sem custos cognitivos)
+ *  mono     · JetBrains Mono       → numeros, timestamps, codigo
+ *  tech     · Bricolage Grotesque  → titulos, brand, labels (substitui o Orbitron
+ *                                     com cara de "vibe code"; geometria moderna
+ *                                     com personalidade marcante).
+ *  serif    · Instrument Serif     → acentos editoriais (frases italicas no hero)
  */
 const display = Space_Grotesk({
   subsets: ['latin'],
@@ -26,17 +35,24 @@ const mono = JetBrains_Mono({
   display: 'swap',
 });
 
-const tech = Orbitron({
+const tech = Bricolage_Grotesque({
   subsets: ['latin'],
   variable: '--font-tech',
-  weight: ['500', '700', '900'],
+  weight: ['500', '700', '800'],
+  display: 'swap',
+});
+
+const serif = Instrument_Serif({
+  subsets: ['latin'],
+  variable: '--font-serif',
+  weight: ['400'],
+  style: ['italic', 'normal'],
   display: 'swap',
 });
 
 export const metadata: Metadata = {
-  title: 'DARKO LAB — Ferramentas para editores',
-  description:
-    'DARKO LAB: suite de ferramentas para editores de video e criadores — decupagem, camuflagem, compressao e uma AI Suite com Auto B-Roll e Troca de Produto.',
+  title: 'DARKO LAB',
+  description: 'Suite criativa pra editores.',
   icons: {
     icon: '/favicon.svg',
   },
@@ -50,7 +66,7 @@ export default function RootLayout({
   return (
     <html
       lang="pt-BR"
-      className={`${display.variable} ${mono.variable} ${tech.variable}`}
+      className={`${display.variable} ${mono.variable} ${tech.variable} ${serif.variable}`}
     >
       <body>
         <FloatingOrbs />

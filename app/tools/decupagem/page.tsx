@@ -132,10 +132,10 @@ export default function DecupagemPage() {
     } catch (e) {
       console.error(e);
       if (isCancellationError(e)) {
-        setStatus('Cancelado pelo usuario.');
+        setStatus('Cancelado.');
         setError(null);
       } else {
-        setError((e as Error).message ?? 'Falha ao processar o arquivo.');
+        setError((e as Error).message ?? 'Não foi possível processar.');
         setStatus(null);
       }
     } finally {
@@ -146,20 +146,20 @@ export default function DecupagemPage() {
 
   async function processAudio() {
     if (!file) return;
-    setStatus('Decodificando audio...');
-    const decoded = await decodeAudioRobust(file, (s) => setStatus(s));
-    setStatus('Removendo silencios...');
+    setStatus('Carregando...');
+    const decoded = await decodeAudioRobust(file, () => setStatus('Carregando...'));
+    setStatus('Cortando silêncios...');
     const trimmed = trimSilences(decoded, keepSilence);
 
     let blob: Blob;
     if (audioFormat === 'wav') {
-      setStatus('Codificando WAV...');
+      setStatus('Gerando arquivo...');
       blob = encodeWAV(trimmed);
     } else {
-      setStatus('Codificando MP3 (FFmpeg)...');
+      setStatus('Gerando arquivo...');
       const wav = encodeWAV(trimmed);
       blob = await extractAudioAs(wav, 'mp3', {
-        onStage: (s) => setStatus(s),
+        onStage: () => setStatus('Gerando arquivo...'),
         onProgress: ({ ratio }) => setProgress(ratio),
       });
     }
@@ -177,8 +177,8 @@ export default function DecupagemPage() {
 
   async function processVideo() {
     if (!file) return;
-    setStatus('Analisando audio do video...');
-    const decoded = await decodeAudioRobust(file, (s) => setStatus(s));
+    setStatus('Analisando...');
+    const decoded = await decodeAudioRobust(file, () => setStatus('Analisando...'));
     const silences = detectSilences(decoded);
     const segments = computeSpeechSegments(
       silences,
@@ -188,7 +188,7 @@ export default function DecupagemPage() {
 
     if (segments.length === 0) {
       throw new Error(
-        'Nao foi possivel detectar fala no video. Tente diminuir a tolerancia de silencio.',
+        'Não consegui detectar a fala. Tente diminuir a tolerância de silêncio.',
       );
     }
 
@@ -230,7 +230,8 @@ export default function DecupagemPage() {
   return (
     <ToolShell
       title="Decupagem"
-      description="Remove automaticamente os silencios. Envie audio para receber audio; envie video para receber video (com imagem sincronizada) ou so o audio decupado."
+      eyebrow="VÍDEO / ÁUDIO"
+      description="Corta os silêncios. Envia áudio, recebe áudio. Envia vídeo, recebe vídeo (ou só o áudio)."
     >
       <div className="flex flex-col gap-6">
         <div>

@@ -17,18 +17,18 @@ type Profile = {
 };
 
 /**
- * Header global — usado dentro das areas logadas.
+ * Header v2 — vidro com motion ao scroll.
  *
- * Privacidade:
- * - O email NAO e exibido (vazava info pessoal pra qualquer um olhando a tela).
- * - Sem badge ONLINE.
- * - Conta: apenas Configuracoes + Sair no dropdown.
+ * - Encolhe sutilmente quando o usuario rola pra baixo (depth feel)
+ * - Backdrop blur mais forte + borda mais sutil
+ * - Dropdown da conta com motion 3D refinado
  */
 export function Header() {
   const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [open, setOpen] = useState(false);
   const [avatarBroken, setAvatarBroken] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -56,8 +56,6 @@ export function Header() {
 
     fetchProfile();
 
-    // Escuta evento customizado (mantido por compatibilidade) pra manter
-    // o Header em sync sem refresh quando o nome ou avatar mudarem.
     function onProfileUpdated() {
       fetchProfile();
     }
@@ -78,6 +76,15 @@ export function Header() {
     return () => document.removeEventListener('mousedown', onClick);
   }, [open]);
 
+  useEffect(() => {
+    function onScroll() {
+      setScrolled(window.scrollY > 8);
+    }
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
   async function handleLogout() {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -89,121 +96,150 @@ export function Header() {
   const initial = displayName.charAt(0).toUpperCase();
 
   return (
-    <header className="sticky top-0 z-30 border-b border-line bg-bg/80 backdrop-blur-md">
-      <div className="container-app flex h-16 items-center justify-between">
+    <header
+      className={
+        'sticky top-0 z-30 border-b transition-all duration-300 ' +
+        (scrolled
+          ? 'border-line/80 bg-bg/85 backdrop-blur-xl shadow-[0_8px_24px_-12px_rgba(0,0,0,0.6)]'
+          : 'border-line/50 bg-bg/55 backdrop-blur-md')
+      }
+    >
+      <div
+        className={
+          'container-app flex items-center justify-between transition-all duration-300 ' +
+          (scrolled ? 'h-14' : 'h-16')
+        }
+      >
         <Brand />
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <PointsButton />
           <BackgroundTasksButton />
           <LipsyncHistoryButton />
           <ClickUpPilotButton />
 
-        <div className="relative" ref={menuRef}>
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            className={
-              'group flex items-center gap-3 rounded-full border bg-bg/60 py-1 pl-1 pr-3 text-left transition-all duration-300 hover:bg-bg ' +
-              (open
-                ? 'border-lime/70 shadow-[0_0_22px_-6px_rgba(200,255,0,0.65)]'
-                : 'border-line hover:border-lime/60 hover:shadow-[0_0_18px_-8px_rgba(200,255,0,0.45)]')
-            }
-            aria-haspopup="menu"
-            aria-expanded={open}
-          >
-            {profile?.avatar_url && !avatarBroken ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={profile.avatar_url}
-                alt={displayName}
-                onError={() => setAvatarBroken(true)}
-                referrerPolicy="no-referrer"
-                className="h-8 w-8 rounded-full border border-line object-cover"
-              />
-            ) : (
-              <span className="flex h-8 w-8 items-center justify-center rounded-full border border-line bg-bg-soft text-xs font-bold text-lime">
-                {initial}
-              </span>
-            )}
-            <span className="hidden max-w-[140px] truncate text-sm font-semibold text-text md:inline">
-              {displayName}
-            </span>
-            <svg
+          <div className="relative" ref={menuRef}>
+            <button
+              type="button"
+              onClick={() => setOpen((v) => !v)}
               className={
-                'h-4 w-4 text-text-muted transition-transform duration-200 ' +
-                (open ? 'rotate-180' : '')
+                'group flex items-center gap-2.5 rounded-full border bg-bg/60 py-1 pl-1 pr-3 text-left transition-all duration-300 hover:bg-bg ' +
+                (open
+                  ? 'border-violet/60 shadow-[0_0_22px_-6px_rgba(167,139,250,0.6)]'
+                  : 'border-line-strong hover:border-violet/50 hover:shadow-[0_0_18px_-8px_rgba(167,139,250,0.4)]')
               }
-              viewBox="0 0 20 20"
-              fill="currentColor"
-              aria-hidden
+              aria-haspopup="menu"
+              aria-expanded={open}
             >
-              <path
-                fillRule="evenodd"
-                d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
-                clipRule="evenodd"
-              />
-            </svg>
-          </button>
+              {profile?.avatar_url && !avatarBroken ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={profile.avatar_url}
+                  alt={displayName}
+                  onError={() => setAvatarBroken(true)}
+                  referrerPolicy="no-referrer"
+                  className="h-8 w-8 rounded-full border border-line object-cover"
+                />
+              ) : (
+                <span
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-line bg-gradient-to-br from-bg-soft to-bg text-xs font-bold text-violet"
+                  style={{
+                    boxShadow:
+                      'inset 0 1px 0 rgba(255,255,255,0.06), 0 0 18px -6px rgba(167,139,250,0.5)',
+                  }}
+                >
+                  {initial}
+                </span>
+              )}
+              <span className="hidden max-w-[140px] truncate text-sm font-semibold text-text md:inline">
+                {displayName}
+              </span>
+              <svg
+                className={
+                  'h-4 w-4 text-text-muted transition-transform duration-200 ' +
+                  (open ? 'rotate-180' : '')
+                }
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                aria-hidden
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </button>
 
-          {open ? (
-            <div
-              role="menu"
-              className="dropdown-pop absolute right-0 mt-2 w-60 overflow-hidden rounded-[12px] border border-line bg-bg-soft/95 shadow-2xl backdrop-blur-md"
-            >
-              <div className="border-b border-line px-4 py-3">
-                <div className="truncate text-sm font-semibold">
-                  {displayName}
+            {open ? (
+              <div
+                role="menu"
+                className="dropdown-pop absolute right-0 mt-2 w-64 overflow-hidden rounded-[16px] border border-line bg-bg-soft/95 shadow-2xl backdrop-blur-xl"
+                style={{
+                  boxShadow:
+                    '0 1px 0 rgba(255,255,255,0.06) inset, 0 24px 48px -16px rgba(0,0,0,0.95), 0 0 40px -10px rgba(167,139,250,0.25)',
+                }}
+              >
+                <div className="border-b border-line px-4 py-3.5">
+                  <div className="truncate text-sm font-semibold">
+                    {displayName}
+                  </div>
+                  <div
+                    className="mt-1 text-[10px] uppercase tracking-[0.18em] text-text-muted"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    Conta ativa
+                  </div>
                 </div>
-                <div className="mt-0.5 text-[11px] uppercase tracking-widest text-text-muted">
-                  Conta ativa
-                </div>
-              </div>
-              <nav className="flex flex-col py-1 text-sm">
-                <Link
-                  href="/tools"
-                  onClick={() => setOpen(false)}
-                  className="px-4 py-2 text-text-muted transition hover:bg-bg hover:text-text"
-                  role="menuitem"
-                >
-                  Ferramentas
-                </Link>
-                <Link
-                  href="/configuracoes"
-                  onClick={() => setOpen(false)}
-                  className="px-4 py-2 text-text-muted transition hover:bg-bg hover:text-text"
-                  role="menuitem"
-                >
-                  Configurações
-                </Link>
-                {profile?.is_admin ? (
+                <nav className="flex flex-col py-1.5 text-sm">
                   <Link
-                    href="/admin"
+                    href="/tools"
                     onClick={() => setOpen(false)}
-                    className="flex items-center justify-between px-4 py-2 text-lime transition hover:bg-bg"
+                    className="group flex items-center justify-between px-4 py-2.5 text-text-muted transition hover:bg-bg hover:text-text"
                     role="menuitem"
                   >
-                    Admin
-                    <span className="mono rounded-full border border-lime/60 px-1.5 py-0.5 text-[8px] uppercase tracking-widest">
-                      ADMIN
+                    <span>Ferramentas</span>
+                    <span className="text-text-dim transition group-hover:translate-x-0.5 group-hover:text-violet">
+                      →
                     </span>
                   </Link>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOpen(false);
-                    handleLogout();
-                  }}
-                  className="border-t border-line px-4 py-2 text-left text-red-400 transition hover:bg-red-500/10 hover:text-red-300"
-                  role="menuitem"
-                >
-                  Sair
-                </button>
-              </nav>
-            </div>
-          ) : null}
-        </div>
+                  <Link
+                    href="/configuracoes"
+                    onClick={() => setOpen(false)}
+                    className="group flex items-center justify-between px-4 py-2.5 text-text-muted transition hover:bg-bg hover:text-text"
+                    role="menuitem"
+                  >
+                    <span>Configurações</span>
+                    <span className="text-text-dim transition group-hover:translate-x-0.5 group-hover:text-violet">
+                      →
+                    </span>
+                  </Link>
+                  {profile?.is_admin ? (
+                    <Link
+                      href="/admin"
+                      onClick={() => setOpen(false)}
+                      className="flex items-center justify-between px-4 py-2.5 text-lime transition hover:bg-bg"
+                      role="menuitem"
+                    >
+                      <span>Admin</span>
+                      <span className="pill-lime text-[9px]">ADMIN</span>
+                    </Link>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpen(false);
+                      handleLogout();
+                    }}
+                    className="mt-1 border-t border-line px-4 py-2.5 text-left text-red-400 transition hover:bg-red-500/10 hover:text-red-300"
+                    role="menuitem"
+                  >
+                    Sair
+                  </button>
+                </nav>
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
     </header>

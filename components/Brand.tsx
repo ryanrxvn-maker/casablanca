@@ -2,10 +2,11 @@ import Link from 'next/link';
 import { DarkoLogo } from './DarkoLogo';
 
 /**
- * Brand da aplicacao — DARKO LAB.
+ * Brand DARKO LAB v2.
  *
- * Combina o coelho sombrio do Donnie Darko (olho verde lime brilhando)
- * com o wordmark em caixa alta, letter-spacing hacker.
+ * Wordmark com peso 800 + tracking apertado pra parecer marca de produto
+ * (nao mais "vibe-code"). "DARKO" e' branco com leve glow violet no hover;
+ * "LAB" e' a parte com peso editorial (lime sutil) que cria a dupla camada.
  */
 export function Brand({
   href = '/tools',
@@ -15,20 +16,23 @@ export function Brand({
   size?: 'sm' | 'md' | 'lg';
 }) {
   const sizes = {
-    sm: { text: 'text-sm', logo: 20 },
-    md: { text: 'text-lg', logo: 28 },
-    lg: { text: 'text-2xl', logo: 40 },
+    sm: { text: 'text-[13px]', logo: 22 },
+    md: { text: 'text-[15px]', logo: 30 },
+    lg: { text: 'text-[22px]', logo: 44 },
   };
   const s = sizes[size];
   return (
     <Link
       href={href}
-      className={`brand group flex items-center gap-2 font-display uppercase ${s.text} select-none transition-transform duration-300 hover:scale-[1.04]`}
+      className={`brand group flex items-center gap-2.5 ${s.text} select-none transition-transform duration-300 hover:scale-[1.03]`}
     >
-      <span className="transition-transform duration-500 group-hover:rotate-[-4deg]">
+      <span className="transition-transform duration-500 group-hover:rotate-[-5deg]">
         <DarkoLogo size={s.logo} />
       </span>
-      <span>DARKO LAB</span>
+      <span className="leading-none">
+        <span className="text-white">DARKO</span>
+        <span className="brand-mark ml-1.5">LAB</span>
+      </span>
     </Link>
   );
 }

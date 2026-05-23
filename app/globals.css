@@ -3,20 +3,29 @@
 @tailwind utilities;
 
 /* -----------------------------------------------------------------------
-   DARKO LAB - design system base
-   Dark tech/fintech visual com profundidade 3D, fonte techy nas tabs e
-   interacoes responsivas a mouse (glow follow + ripple click).
+   DARKO LAB — design system v2
+   Dark premium tech. Acento PRIMARIO lime usado com parcimonia, acento
+   SECUNDARIO violet pra estados AI/inteligente. Profundidade 3D real,
+   animacoes fluidas, tipografia com identidade.
 ----------------------------------------------------------------------- */
 
 :root {
   color-scheme: dark;
-  --bg: #0a0a0a;
-  --bg-soft: #111111;
-  --line: #1a1a1a;
-  --line-strong: #222222;
+  --bg: #070708;
+  --bg-soft: #0e0e10;
+  --bg-softer: #15151a;
+  --bg-elev: #1a1a20;
+  --line: #1c1c22;
+  --line-strong: #24242c;
+  --line-glow: #2e2e38;
   --text: #ffffff;
-  --text-muted: #888888;
+  --text-muted: #8b8b96;
+  --text-dim: #4d4d57;
   --lime: #c8ff00;
+  --violet: #a78bfa;
+  --violet-deep: #6d4ee8;
+  --amber: #f5c842;
+  --cyan: #67e8f9;
 
   /* Mouse-tracked spotlight (atualizado por components/MouseGlow.tsx). */
   --mx: 50vw;
@@ -33,9 +42,10 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-display), 'Outfit', system-ui, sans-serif;
+  font-family: var(--font-display), 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'ss01', 'cv11', 'cv02';
 }
 
 body {
@@ -43,14 +53,15 @@ body {
   position: relative;
   background-color: var(--bg);
   background-image:
-    radial-gradient(60% 50% at 50% -10%, rgba(200, 255, 0, 0.08), transparent 70%),
-    radial-gradient(40% 40% at 90% 110%, rgba(200, 255, 0, 0.05), transparent 70%),
-    linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
-  background-size: auto, auto, 48px 48px, 48px 48px;
+    radial-gradient(50% 35% at 12% 0%, rgba(167, 139, 250, 0.08), transparent 70%),
+    radial-gradient(35% 28% at 88% 8%, rgba(103, 232, 249, 0.05), transparent 70%),
+    radial-gradient(60% 45% at 50% 100%, rgba(200, 255, 0, 0.035), transparent 75%),
+    linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: auto, auto, auto, 52px 52px, 52px 52px;
 }
 
-/* Spotlight sutil seguindo o mouse globalmente. */
+/* Spotlight sutil seguindo o mouse — tom violet pra reduzir presenca lime. */
 body::before {
   content: '';
   position: fixed;
@@ -58,64 +69,68 @@ body::before {
   pointer-events: none;
   z-index: 1;
   background: radial-gradient(
-    420px circle at var(--mx) var(--my),
-    rgba(200, 255, 0, 0.08),
+    480px circle at var(--mx) var(--my),
+    rgba(167, 139, 250, 0.07),
     transparent 65%
   );
-  transition: background 0.18s ease-out;
+  transition: background 0.2s ease-out;
 }
 
-/* Grain/noise overlay leve pra adicionar textura premium. */
+/* Grain/noise overlay leve. */
 body::after {
   content: '';
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 1;
-  opacity: 0.035;
+  opacity: 0.03;
   mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.55'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)' opacity='0.55'/></svg>");
 }
 
-/* Conteudo acima do overlay. */
 body > * {
   position: relative;
   z-index: 2;
 }
 
 ::selection {
-  background: var(--lime);
-  color: #000;
+  background: var(--violet);
+  color: #0a0a0c;
 }
 
 /* ----- Reusable primitives ----- */
 @layer components {
   .container-app {
-    @apply mx-auto w-full max-w-[960px] px-5;
+    @apply mx-auto w-full max-w-[1080px] px-5;
+  }
+  .container-wide {
+    @apply mx-auto w-full max-w-[1240px] px-5;
   }
 
   .card {
-    @apply relative rounded-[16px] border border-line bg-bg-soft/80 backdrop-blur-sm shadow-depth-1;
+    @apply relative rounded-[18px] border border-line bg-bg-soft/80 backdrop-blur-md shadow-depth-1;
   }
 
-  /* card 3D com gradiente sutil + glow tracking + conic border on hover */
+  /* Card 3D com brilho cromatico sutil seguindo o mouse + conic borda no hover.
+   * Usa --gx/--gy injetados pelo Tilt3D pra ponto luminoso responsivo. */
   .card-3d {
     @apply card shadow-depth-2;
     background-image:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(0, 0, 0, 0.15)),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(0, 0, 0, 0.18)),
       radial-gradient(
-        500px circle at var(--gx, 50%) var(--gy, 0%),
-        rgba(200, 255, 0, 0.07),
+        520px circle at var(--gx, 50%) var(--gy, 0%),
+        rgba(167, 139, 250, 0.07),
         transparent 60%
       );
     transition:
-      transform 0.35s cubic-bezier(.2,.8,.2,1),
-      box-shadow 0.35s cubic-bezier(.2,.8,.2,1),
-      border-color 0.25s ease;
+      transform 0.4s cubic-bezier(.2,.8,.2,1),
+      box-shadow 0.4s cubic-bezier(.2,.8,.2,1),
+      border-color 0.3s ease;
     transform-style: preserve-3d;
   }
 
-  /* Conic border animada — ativa so no hover, fica por tras do card. */
+  /* Conic border — visivel so no hover, gira devagar. Usa violet+lime pra
+   * efeito iridescente sem dominar a UI com verde puro. */
   .card-3d::after {
     content: '';
     position: absolute;
@@ -125,9 +140,10 @@ body > * {
     background: conic-gradient(
       from var(--angle, 0deg),
       transparent 0%,
-      rgba(200, 255, 0, 0.45) 25%,
-      transparent 50%,
-      rgba(200, 255, 0, 0.25) 75%,
+      rgba(167, 139, 250, 0.55) 22%,
+      rgba(200, 255, 0, 0.35) 40%,
+      transparent 55%,
+      rgba(103, 232, 249, 0.35) 78%,
       transparent 100%
     );
     -webkit-mask:
@@ -137,8 +153,8 @@ body > * {
             mask-composite: exclude;
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.3s ease;
-    animation: card-border-spin 6s linear infinite;
+    transition: opacity 0.35s ease;
+    animation: card-border-spin 8s linear infinite;
   }
 
   .card-3d:hover::after {
@@ -146,28 +162,51 @@ body > * {
   }
 
   .card-3d:hover {
-    border-color: rgba(200, 255, 0, 0.35);
+    border-color: rgba(167, 139, 250, 0.32);
     transform: translateY(-3px);
     box-shadow:
       0 1px 0 rgba(255, 255, 255, 0.08) inset,
-      0 36px 72px -25px rgba(0, 0, 0, 0.95),
-      0 16px 32px rgba(0, 0, 0, 0.55),
-      0 0 50px -8px rgba(200, 255, 0, 0.3);
+      0 44px 88px -28px rgba(0, 0, 0, 0.95),
+      0 18px 36px rgba(0, 0, 0, 0.55),
+      0 0 60px -10px rgba(167, 139, 250, 0.28);
   }
 
   .card-pad {
     @apply p-6 md:p-8;
   }
 
+  /* Card "neon" — variant pra cards de ferramentas/destaque, sem o conic */
+  .card-tool {
+    @apply relative rounded-[18px] border border-line/80 bg-gradient-to-b from-bg-soft/90 to-bg/60 backdrop-blur-md;
+    transition:
+      transform 0.5s cubic-bezier(.2,.8,.2,1),
+      border-color 0.35s ease,
+      box-shadow 0.45s cubic-bezier(.2,.8,.2,1);
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.04) inset,
+      0 12px 28px -16px rgba(0,0,0,0.8);
+  }
+  .card-tool:hover {
+    border-color: rgba(167, 139, 250, 0.4);
+    transform: translateY(-4px) scale(1.01);
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.08) inset,
+      0 26px 56px -22px rgba(0,0,0,0.95),
+      0 0 48px -14px rgba(167, 139, 250, 0.42);
+  }
+
+  /* ---------- Botoes ---------- */
+
+  /* Primary — lime (acao principal, brand) */
   .btn-primary {
-    @apply relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-[12px] bg-lime px-5 py-3 text-sm font-semibold text-black transition-all duration-200 active:translate-y-[1px] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40;
+    @apply relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-[14px] bg-lime px-5 py-3 text-sm font-semibold text-black transition-all duration-200 active:translate-y-[1px] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40;
     box-shadow:
       0 1px 0 rgba(255, 255, 255, 0.5) inset,
       0 -2px 0 rgba(0, 0, 0, 0.18) inset,
-      0 8px 18px -6px rgba(200, 255, 0, 0.45),
+      0 8px 22px -8px rgba(200, 255, 0, 0.5),
       0 2px 4px rgba(0, 0, 0, 0.4);
+    letter-spacing: 0.01em;
   }
-  /* Sheen passando pelo botao no hover */
   .btn-primary::before {
     content: '';
     position: absolute;
@@ -175,83 +214,125 @@ body > * {
     background: linear-gradient(
       120deg,
       transparent 0%,
-      rgba(255, 255, 255, 0.35) 50%,
+      rgba(255, 255, 255, 0.32) 50%,
       transparent 100%
     );
-    transform: translateX(-120%);
-    transition: transform 0.6s cubic-bezier(.2,.8,.2,1);
+    transform: translateX(-130%);
+    transition: transform 0.7s cubic-bezier(.2,.8,.2,1);
     pointer-events: none;
   }
   .btn-primary:hover:not(:disabled) {
-    filter: brightness(1.06);
+    filter: brightness(1.05);
     transform: translateY(-1px);
     box-shadow:
       0 1px 0 rgba(255, 255, 255, 0.6) inset,
       0 -2px 0 rgba(0, 0, 0, 0.18) inset,
-      0 14px 32px -6px rgba(200, 255, 0, 0.65),
+      0 16px 36px -8px rgba(200, 255, 0, 0.65),
       0 2px 6px rgba(0, 0, 0, 0.4);
   }
   .btn-primary:hover:not(:disabled)::before {
-    transform: translateX(120%);
+    transform: translateX(130%);
   }
 
+  /* Secondary — neutro com hover violet (acoes secundarias) */
   .btn-secondary {
-    @apply relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-[12px] border border-line-strong bg-bg-soft/40 px-5 py-3 text-sm font-medium text-text-muted transition-all duration-200 hover:border-lime hover:text-white hover:-translate-y-[1px] active:translate-y-0 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40;
+    @apply relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-[14px] border border-line-strong bg-bg-soft/50 px-5 py-3 text-sm font-medium text-text-muted transition-all duration-200 hover:border-violet/60 hover:text-white hover:-translate-y-[1px] active:translate-y-0 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40;
     box-shadow:
       0 1px 0 rgba(255, 255, 255, 0.04) inset,
       0 4px 12px -6px rgba(0, 0, 0, 0.6);
   }
   .btn-secondary:hover:not(:disabled) {
     box-shadow:
-      0 1px 0 rgba(255, 255, 255, 0.06) inset,
-      0 8px 18px -6px rgba(0, 0, 0, 0.8),
-      0 0 24px -8px rgba(200, 255, 0, 0.25);
+      0 1px 0 rgba(255, 255, 255, 0.07) inset,
+      0 10px 22px -8px rgba(0, 0, 0, 0.85),
+      0 0 28px -10px rgba(167, 139, 250, 0.4);
+  }
+
+  /* Violet — acoes AI / premium */
+  .btn-violet {
+    @apply relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-[14px] px-5 py-3 text-sm font-semibold text-white transition-all duration-200 active:translate-y-[1px] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40;
+    background: linear-gradient(135deg, #8B6FE8 0%, #6D4EE8 100%);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.18) inset,
+      0 -2px 0 rgba(0, 0, 0, 0.2) inset,
+      0 10px 28px -8px rgba(109, 78, 232, 0.5),
+      0 2px 6px rgba(0, 0, 0, 0.4);
+  }
+  .btn-violet:hover:not(:disabled) {
+    filter: brightness(1.08);
+    transform: translateY(-1px);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.22) inset,
+      0 18px 38px -8px rgba(109, 78, 232, 0.7),
+      0 2px 6px rgba(0, 0, 0, 0.4);
   }
 
   .btn-ghost {
     @apply inline-flex items-center justify-center gap-2 rounded-[12px] px-3 py-2 text-sm text-text-muted transition-all duration-200 hover:bg-bg-soft/60 hover:text-white active:scale-[0.96] disabled:cursor-not-allowed disabled:opacity-40;
   }
 
+  /* ---------- Inputs ---------- */
   .input-field {
-    @apply w-full rounded-[12px] border border-line-strong bg-bg/80 px-4 py-3 text-sm text-white outline-none transition placeholder:text-text-dim focus:border-lime focus:bg-bg;
+    @apply w-full rounded-[14px] border border-line-strong bg-bg/70 px-4 py-3 text-sm text-white outline-none transition-all duration-200 placeholder:text-text-dim focus:border-violet focus:bg-bg;
     box-shadow:
       0 1px 0 rgba(255, 255, 255, 0.03) inset,
       0 2px 6px -4px rgba(0, 0, 0, 0.6);
   }
   .input-field:focus {
     box-shadow:
-      0 1px 0 rgba(255, 255, 255, 0.05) inset,
-      0 0 0 3px rgba(200, 255, 0, 0.18);
+      0 1px 0 rgba(255, 255, 255, 0.06) inset,
+      0 0 0 3px rgba(167, 139, 250, 0.18);
   }
 
   .label-field {
-    @apply mb-2 block text-xs font-medium uppercase tracking-widest text-text-muted;
+    @apply mb-2 block text-[11px] font-semibold uppercase tracking-[0.18em] text-text-muted;
     font-family: var(--font-tech), var(--font-display), system-ui;
   }
 
+  /* ---------- Badges ---------- */
   .badge-online {
-    @apply inline-flex items-center gap-2 rounded-full border border-line-strong bg-bg-soft px-3 py-1 text-[11px] font-medium uppercase tracking-widest text-text-muted;
+    @apply inline-flex items-center gap-2 rounded-full border border-line-strong bg-bg-soft/70 px-3 py-1 text-[10.5px] font-semibold uppercase tracking-[0.18em] text-text-muted;
   }
-
   .badge-online::before {
     content: '';
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     border-radius: 9999px;
     background: var(--lime);
-    box-shadow: 0 0 12px var(--lime);
+    box-shadow: 0 0 10px var(--lime);
     @apply animate-pulse-soft;
   }
 
-  /* Tabs com fonte tech (Orbitron) e acabamento 3D */
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-bg-soft/60 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-text-muted;
+  }
+  .pill-violet {
+    @apply pill;
+    color: var(--violet);
+    border-color: rgba(167, 139, 250, 0.35);
+    background: rgba(167, 139, 250, 0.08);
+  }
+  .pill-lime {
+    @apply pill;
+    color: var(--lime);
+    border-color: rgba(200, 255, 0, 0.35);
+    background: rgba(200, 255, 0, 0.06);
+  }
+  .pill-amber {
+    @apply pill;
+    color: var(--amber);
+    border-color: rgba(245, 200, 66, 0.35);
+    background: rgba(245, 200, 66, 0.06);
+  }
+
+  /* ---------- Tabs ---------- */
   .tab-link {
-    @apply relative whitespace-nowrap px-2 py-3 text-[10px] font-medium uppercase tracking-[0.08em] text-text-muted transition hover:text-white sm:px-3 sm:text-[11px] sm:tracking-[0.14em] md:text-[12px] md:tracking-[0.18em];
+    @apply relative whitespace-nowrap px-2 py-3 text-[10px] font-semibold uppercase tracking-[0.10em] text-text-muted transition hover:text-white sm:px-3 sm:text-[11px] sm:tracking-[0.14em] md:text-[12px] md:tracking-[0.16em];
     font-family: var(--font-tech), var(--font-display), system-ui;
   }
 
   .tab-link-active {
     @apply text-white;
-    text-shadow: 0 0 10px rgba(200, 255, 0, 0.35);
   }
 
   .tab-link-active::after {
@@ -261,20 +342,23 @@ body > * {
     right: 0.5rem;
     bottom: -1px;
     height: 2px;
-    background: linear-gradient(90deg, transparent, var(--lime), transparent);
+    background: linear-gradient(90deg, transparent, var(--violet), transparent);
     border-radius: 2px;
-    box-shadow: 0 0 12px rgba(200, 255, 0, 0.6);
+    box-shadow: 0 0 12px rgba(167, 139, 250, 0.6);
   }
 
+  /* ---------- Brand ---------- */
   .brand {
-    font-weight: 900;
-    letter-spacing: 0.25em;
-    color: var(--lime);
+    font-weight: 800;
+    letter-spacing: 0.22em;
+    color: #fff;
     font-family: var(--font-tech), var(--font-display), system-ui;
-    text-shadow: 0 0 14px rgba(200, 255, 0, 0.45);
-    animation: brand-breathe 4s ease-in-out infinite;
+  }
+  .brand .brand-mark {
+    color: var(--lime);
   }
 
+  /* ---------- Shimmer / Sheen ---------- */
   .shimmer {
     position: relative;
     overflow: hidden;
@@ -289,11 +373,11 @@ body > * {
       rgba(255, 255, 255, 0.06) 50%,
       transparent 75%
     );
-    animation: shimmer-pass 2.2s ease-in-out infinite;
+    animation: shimmer-pass 2.4s ease-in-out infinite;
     pointer-events: none;
   }
 
-  /* Scan line sutil atravessando elemento — use em cards "processando" */
+  /* Scan line — usado em cards "processando" */
   .scan-line {
     position: relative;
     overflow: hidden;
@@ -308,14 +392,14 @@ body > * {
     background: linear-gradient(
       90deg,
       transparent 0%,
-      rgba(200, 255, 0, 0.9) 50%,
+      rgba(167, 139, 250, 0.85) 50%,
       transparent 100%
     );
-    animation: scan-move 2.2s linear infinite;
+    animation: scan-move 2.4s linear infinite;
     pointer-events: none;
   }
 
-  /* Frame tech — cantos estilo HUD futurista */
+  /* Tech-frame — cantos discretos em violet (reduzido vs versao antiga) */
   .tech-frame {
     position: relative;
   }
@@ -323,9 +407,9 @@ body > * {
   .tech-frame::after {
     content: '';
     position: absolute;
-    width: 14px;
-    height: 14px;
-    border: 1px solid rgba(200, 255, 0, 0.55);
+    width: 12px;
+    height: 12px;
+    border: 1px solid rgba(167, 139, 250, 0.45);
     pointer-events: none;
   }
   .tech-frame::before {
@@ -341,18 +425,49 @@ body > * {
     border-top: none;
   }
 
+  /* Title profissional — Bricolage Grotesque, peso forte, leve negative tracking */
   .section-title {
-    @apply text-2xl font-extrabold tracking-tight md:text-3xl;
+    @apply text-3xl font-extrabold tracking-tight md:text-4xl;
     font-family: var(--font-tech), var(--font-display), system-ui;
-    letter-spacing: 0.04em;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+  }
+
+  .hero-title {
+    @apply text-4xl font-extrabold tracking-tight md:text-6xl;
+    font-family: var(--font-tech), var(--font-display), system-ui;
+    letter-spacing: -0.03em;
+    line-height: 1;
+  }
+
+  .display-subtle {
+    font-family: var(--font-serif), Georgia, serif;
+    font-style: italic;
+    font-weight: 400;
+    color: var(--text-muted);
   }
 
   .mono {
     font-family: var(--font-mono), 'JetBrains Mono', ui-monospace, monospace;
   }
+
+  /* Kinetic text — palavra que sobe e desbota com leve rotacao X */
+  .kinetic-text > span {
+    display: inline-block;
+    animation: kinetic-in 0.7s cubic-bezier(.2,.8,.2,1) both;
+  }
+
+  /* Loading dots minimalistas — "Carregando.." */
+  .loading-dots::after {
+    content: '';
+    display: inline-block;
+    width: 1em;
+    text-align: left;
+    animation: dots 1.4s infinite steps(4, end);
+  }
 }
 
-/* ----- Tool rail (sidebar esquerda das ferramentas) ----- */
+/* ----- Tool rail (sidebar das ferramentas) ----- */
 .rail-item-in {
   animation: rail-in 0.55s cubic-bezier(.2,.8,.2,1) both;
 }
@@ -360,7 +475,7 @@ body > * {
 @keyframes rail-in {
   0% {
     opacity: 0;
-    transform: translateX(-14px) scale(0.9);
+    transform: translateX(-18px) scale(0.88);
   }
   100% {
     opacity: 1;
@@ -368,7 +483,7 @@ body > * {
   }
 }
 
-/* Suite switcher — glow sutil no thumb ativo */
+/* Suite switcher */
 .suite-switcher {
   position: relative;
   overflow: hidden;
@@ -380,14 +495,14 @@ body > * {
   inset: -30%;
   background: radial-gradient(
     40% 40% at 50% 50%,
-    rgba(200, 255, 0, 0.08),
+    rgba(167, 139, 250, 0.06),
     transparent 70%
   );
   pointer-events: none;
   animation: drift 8s ease-in-out infinite;
 }
 
-/* ----- Click ripple (anexado dinamicamente em components/Ripple.tsx) ----- */
+/* Click ripple */
 .ripple-dot {
   position: absolute;
   left: var(--rx, 50%);
@@ -395,14 +510,14 @@ body > * {
   width: 8px;
   height: 8px;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.5);
   transform: translate(-50%, -50%) scale(0);
   pointer-events: none;
   animation: ripple 0.6s ease-out forwards;
   mix-blend-mode: screen;
 }
 
-/* Range input (slider) styling */
+/* Range slider — agora em violet */
 input[type='range'] {
   -webkit-appearance: none;
   appearance: none;
@@ -419,18 +534,18 @@ input[type='range']::-webkit-slider-thumb {
   width: 16px;
   height: 16px;
   border-radius: 9999px;
-  background: var(--lime);
+  background: var(--violet);
   cursor: pointer;
   box-shadow:
-    0 0 0 4px rgba(200, 255, 0, 0.15),
-    0 0 12px rgba(200, 255, 0, 0.5);
+    0 0 0 4px rgba(167, 139, 250, 0.16),
+    0 0 12px rgba(167, 139, 250, 0.5);
   transition: box-shadow 0.15s ease;
 }
 
 input[type='range']::-webkit-slider-thumb:hover {
   box-shadow:
-    0 0 0 6px rgba(200, 255, 0, 0.25),
-    0 0 18px rgba(200, 255, 0, 0.65);
+    0 0 0 6px rgba(167, 139, 250, 0.25),
+    0 0 18px rgba(167, 139, 250, 0.65);
 }
 
 input[type='range']::-moz-range-thumb {
@@ -438,7 +553,7 @@ input[type='range']::-moz-range-thumb {
   height: 16px;
   border: none;
   border-radius: 9999px;
-  background: var(--lime);
+  background: var(--violet);
   cursor: pointer;
 }
 
@@ -451,65 +566,65 @@ input[type='range']::-moz-range-thumb {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1f1f1f;
+  background: #1f1f25;
   border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #2a2a2a;
+  background: #2a2a32;
 }
 
-/* Floating ambient orbs (background) */
+/* Floating ambient orbs (background) — tons violet/cyan/lime suaves */
 .orb {
   position: absolute;
   border-radius: 9999px;
-  filter: blur(60px);
-  opacity: 0.55;
+  filter: blur(70px);
+  opacity: 0.5;
   mix-blend-mode: screen;
   will-change: transform;
 }
 .orb-a {
-  width: 520px;
-  height: 520px;
-  top: -180px;
-  left: -140px;
-  background: radial-gradient(circle, rgba(200, 255, 0, 0.22), transparent 65%);
-  animation: orb-float-a 22s ease-in-out infinite;
+  width: 560px;
+  height: 560px;
+  top: -200px;
+  left: -160px;
+  background: radial-gradient(circle, rgba(167, 139, 250, 0.28), transparent 65%);
+  animation: orb-float-a 26s ease-in-out infinite;
 }
 .orb-b {
-  width: 380px;
-  height: 380px;
-  bottom: -120px;
-  right: -100px;
-  background: radial-gradient(circle, rgba(130, 180, 255, 0.15), transparent 65%);
-  animation: orb-float-b 28s ease-in-out infinite;
+  width: 420px;
+  height: 420px;
+  bottom: -140px;
+  right: -120px;
+  background: radial-gradient(circle, rgba(103, 232, 249, 0.16), transparent 65%);
+  animation: orb-float-b 32s ease-in-out infinite;
 }
 .orb-c {
-  width: 280px;
-  height: 280px;
-  top: 45%;
+  width: 300px;
+  height: 300px;
+  top: 50%;
   left: 60%;
-  background: radial-gradient(circle, rgba(255, 100, 180, 0.08), transparent 65%);
-  animation: orb-float-c 32s ease-in-out infinite;
+  background: radial-gradient(circle, rgba(200, 255, 0, 0.07), transparent 65%);
+  animation: orb-float-c 36s ease-in-out infinite;
 }
 
-/* Keyframes — animacoes extras que nao moram no tailwind.config */
+/* Keyframes */
 @keyframes orb-float-a {
   0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
-  33% { transform: translate3d(40px, 30px, 0) scale(1.08); }
-  66% { transform: translate3d(-20px, 60px, 0) scale(0.96); }
+  33% { transform: translate3d(48px, 32px, 0) scale(1.08); }
+  66% { transform: translate3d(-22px, 62px, 0) scale(0.96); }
 }
 @keyframes orb-float-b {
   0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
-  40% { transform: translate3d(-60px, -40px, 0) scale(1.05); }
-  80% { transform: translate3d(30px, -20px, 0) scale(0.94); }
+  40% { transform: translate3d(-66px, -44px, 0) scale(1.05); }
+  80% { transform: translate3d(32px, -22px, 0) scale(0.94); }
 }
 @keyframes orb-float-c {
   0%, 100% { transform: translate3d(0, 0, 0); }
-  50% { transform: translate3d(-50px, 30px, 0); }
+  50% { transform: translate3d(-55px, 32px, 0); }
 }
 @keyframes shimmer-pass {
-  0% { transform: translateX(-120%); }
-  100% { transform: translateX(120%); }
+  0% { transform: translateX(-130%); }
+  100% { transform: translateX(130%); }
 }
 @keyframes scan-move {
   0% { transform: translateY(0); opacity: 0; }
@@ -521,50 +636,40 @@ input[type='range']::-moz-range-thumb {
   0% { --angle: 0deg; }
   100% { --angle: 360deg; }
 }
-@keyframes brand-breathe {
-  0%, 100% {
-    text-shadow: 0 0 14px rgba(200, 255, 0, 0.45);
-  }
-  50% {
-    text-shadow:
-      0 0 18px rgba(200, 255, 0, 0.65),
-      0 0 32px rgba(200, 255, 0, 0.25);
-  }
-}
 
-/* Eye-pulse for the DarkoLogo pupil — subtle scaling + opacity pulse */
+/* Logo — pulso suave nos olhos do coelho */
 @keyframes darko-eye-pulse {
   0%, 100% { opacity: 1; transform-box: fill-box; transform-origin: center; transform: scale(1); }
-  50% { opacity: 0.75; transform-box: fill-box; transform-origin: center; transform: scale(0.88); }
+  50% { opacity: 0.78; transform-box: fill-box; transform-origin: center; transform: scale(0.86); }
 }
 .darko-eye-pulse {
-  animation: darko-eye-pulse 3.2s ease-in-out infinite;
+  animation: darko-eye-pulse 3.4s ease-in-out infinite;
   transform-box: fill-box;
   transform-origin: center;
 }
 .darko-eye-pulse.delay {
-  animation-delay: 0.4s;
+  animation-delay: 0.45s;
 }
 
-/* Eye-blink on hover — quick scale-y squash that mimics a blink */
+/* Logo blink on hover */
 @keyframes darko-eye-blink {
   0%, 100% { transform: scaleY(1); }
   50% { transform: scaleY(0.05); }
 }
 .brand:hover .darko-eye-pulse {
-  animation: darko-eye-blink 220ms ease-in-out 1;
+  animation: darko-eye-blink 240ms ease-in-out 1;
   transform-box: fill-box;
   transform-origin: center;
 }
 .brand:hover .darko-eye-pulse.delay {
-  animation-delay: 70ms;
+  animation-delay: 80ms;
 }
 
 /* Toast slide-up + soft bounce */
 @keyframes toast-pop {
   0% {
     opacity: 0;
-    transform: translate(-50%, 20px) scale(0.92);
+    transform: translate(-50%, 22px) scale(0.92);
   }
   60% {
     opacity: 1;
@@ -576,14 +681,14 @@ input[type='range']::-moz-range-thumb {
   }
 }
 .toast-pop {
-  animation: toast-pop 320ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation: toast-pop 360ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 
-/* Dropdown reveal — slight slide + fade + scale anchored top-right */
+/* Dropdown reveal */
 @keyframes dropdown-pop {
   0% {
     opacity: 0;
-    transform: translateY(-6px) scale(0.96);
+    transform: translateY(-8px) scale(0.94);
     transform-origin: top right;
   }
   100% {
@@ -593,11 +698,11 @@ input[type='range']::-moz-range-thumb {
   }
 }
 .dropdown-pop {
-  animation: dropdown-pop 200ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+  animation: dropdown-pop 220ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
   transform-origin: top right;
 }
 
-/* Error shake — used on form error banners when something goes wrong */
+/* Error shake */
 @keyframes error-shake {
   0%, 100% { transform: translateX(0); }
   15% { transform: translateX(-6px); }
@@ -608,26 +713,40 @@ input[type='range']::-moz-range-thumb {
   90% { transform: translateX(1px); }
 }
 .error-shake {
-  animation: error-shake 420ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+  animation: error-shake 440ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
 }
 
-/* Generic enter — fade + slight slide-up — for stagger lists */
+/* Fade-in-up — generico pra stagger */
 @keyframes fade-in-up {
-  0% { opacity: 0; transform: translateY(6px); }
+  0% { opacity: 0; transform: translateY(8px); }
   100% { opacity: 1; transform: translateY(0); }
 }
 .fade-in-up {
-  animation: fade-in-up 280ms cubic-bezier(0.2, 0.9, 0.3, 1) both;
+  animation: fade-in-up 320ms cubic-bezier(0.2, 0.9, 0.3, 1) both;
 }
 
-/* Register the --angle custom property so the keyframe can animate it */
+/* Kinetic-in pra textos editoriais */
+@keyframes kinetic-in {
+  0% { opacity: 0; transform: translateY(22px) rotateX(-30deg); }
+  100% { opacity: 1; transform: translateY(0) rotateX(0); }
+}
+
+/* Loading dots — "Carregando.." sem texto tecnico */
+@keyframes dots {
+  0%, 20% { content: ''; }
+  40% { content: '.'; }
+  60% { content: '..'; }
+  80%, 100% { content: '...'; }
+}
+
+/* Register --angle property pra animacao do conic-gradient */
 @property --angle {
   syntax: '<angle>';
   initial-value: 0deg;
   inherits: false;
 }
 
-/* Reduce motion for users who prefer it */
+/* Reduce motion */
 @media (prefers-reduced-motion: reduce) {
   body::before,
   body::after,

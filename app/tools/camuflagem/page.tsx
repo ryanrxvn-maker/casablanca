@@ -295,7 +295,8 @@ export default function CamuflagemPage() {
   return (
     <ToolShell
       title="Camuflagem"
-      description="Inversao de fase estereo. Escolha a IA-alvo: TikTok/Kwai/YouTube somam/mediam L+R (YouTube Content ID comprovado) e escutam o WHITE; ASR de canal unico (AssemblyAI/Whisper) escuta o BLACK e nao tem como camuflar. Cada arquivo e medido no formato REAL e o selo so fica verde se a IA-alvo escolhida escutar o WHITE — sem promessa falsa."
+      eyebrow="ÁUDIO"
+      description="Escolha pra quem você quer enganar. O selo só fica verde se realmente camuflar."
     >
       <div className="flex flex-col gap-6">
         <MissingKeyBanner services={['assemblyai']} />
@@ -360,13 +361,13 @@ export default function CamuflagemPage() {
         </div>
 
         <div>
-          <label className="label-field">IA-alvo (define o veredito)</label>
+          <label className="label-field">Quem você quer enganar</label>
           <div className="flex flex-wrap gap-2">
             {(
               [
                 ['platforms', 'TikTok / Kwai / YouTube'],
-                ['single', 'ASR canal unico (AssemblyAI/Whisper)'],
-                ['universal', 'Universal (pior caso)'],
+                ['single', 'IAs de transcrição'],
+                ['universal', 'Todos (mais difícil)'],
               ] as const
             ).map(([t, lbl]) => {
               const active = target === t;
@@ -606,7 +607,7 @@ export default function CamuflagemPage() {
                       onClick={() => transcribeOne(pair)}
                       disabled={pair.transcribing}
                       aria-label="Transcrever (ouvir como a IA)"
-                      title="Transcrever — manda o arquivo REAL pro AssemblyAI e mostra o texto cru que esse ASR escuta"
+                      title="Transcrever — escuta o que a IA ouve"
                       className="group relative flex h-9 w-9 items-center justify-center rounded-xl border-2 border-line bg-bg-soft/80 text-text-muted backdrop-blur-md transition-all duration-300 ease-[cubic-bezier(.4,1.4,.6,1)] hover:scale-[1.06] hover:border-lime hover:text-lime active:scale-[0.92] active:duration-75 disabled:cursor-not-allowed disabled:opacity-50"
                       style={{
                         boxShadow:

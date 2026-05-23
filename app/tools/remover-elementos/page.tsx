@@ -449,26 +449,16 @@ export default function RemoverElementosPage() {
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
               </span>
               <span className="text-lime">
-                Motor DarkoLab Subtitle Remover
+                Motor online
               </span>
-              <span className="mono ml-2 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
-                online · porta {server.state === 'online' ? server.port : port}
-              </span>
-              {server.state === 'online' && server.deps.propainter ? (
-                <span className="mono ml-1 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
-                  ProPainter ✓ {server.deps.device === 'cuda' ? 'GPU' : 'CPU'}
-                </span>
-              ) : server.state === 'online' && server.deps.sttn ? (
-                <span className="mono ml-1 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
-                  STTN ✓ {server.deps.device === 'cuda' ? 'GPU' : 'CPU'}
-                </span>
-              ) : server.state === 'online' && server.deps.lama ? (
-                <span className="mono ml-1 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
-                  LaMa ✓ {server.deps.device === 'cuda' ? 'GPU' : 'CPU'}
+              {server.state === 'online' &&
+              (server.deps.propainter || server.deps.sttn || server.deps.lama) ? (
+                <span className="mono ml-2 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
+                  {server.deps.device === 'cuda' ? 'Rápido' : 'Padrão'}
                 </span>
               ) : (
                 <span className="mono ml-1 rounded-full bg-yellow-500/15 px-2 py-0.5 text-[10px] uppercase text-yellow-300">
-                  Motor incompleto · atualize
+                  Atualize o motor
                 </span>
               )}
             </div>
@@ -569,7 +559,7 @@ export default function RemoverElementosPage() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold uppercase tracking-widest text-lime">
-                Smart Mode (LaMa neural)
+                Modo inteligente
               </span>
               <span className="mono shrink-0 rounded-full border border-lime/60 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-lime">
                 AI
@@ -583,19 +573,16 @@ export default function RemoverElementosPage() {
                       : 'border-line text-text-muted')
                   }
                 >
-                  {server.deps.device === 'cuda' ? 'GPU CUDA' : 'CPU'}
+                  {server.deps.device === 'cuda' ? 'Rápido' : 'Padrão'}
                 </span>
               ) : null}
             </div>
           </div>
           <p className="mt-2 text-[11px] leading-snug text-text-muted">
-            Mesmo motor neural que o vmake.ai usa. PaddleOCR amostra 20
-            frames, detecta onde a legenda persiste, e o LaMa reconstrói
-            o fundo frame-a-frame. Sem blur, sem mancha.
+            O motor detecta onde a legenda fica fixa e reconstrói o fundo, sem blur.
             {server.state === 'online' && server.deps.device === 'cpu' ? (
               <span className="ml-1 text-yellow-300">
-                Sem GPU: ~2-3s/frame em 1080p. Pra acelerar, instale uma
-                NVIDIA com CUDA.
+                Sem placa dedicada, pode demorar mais.
               </span>
             ) : null}
           </p>

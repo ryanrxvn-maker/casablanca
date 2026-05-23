@@ -64,13 +64,13 @@ export default function AudioSplitPage() {
     reset();
     setProcessing(true);
     try {
-      setStatus('Decodificando audio...');
-      const decoded = await decodeAudioRobust(file, (s) => setStatus(s));
+      setStatus('Carregando...');
+      const decoded = await decodeAudioRobust(file, () => setStatus('Carregando...'));
 
-      setStatus('Detectando pausas e dividindo...');
+      setStatus('Dividindo...');
       const buffers = splitByParagraphs(decoded);
 
-      setStatus('Gerando ' + buffers.length + ' arquivo(s)...');
+      setStatus('Gerando arquivos...');
       const out: OutputPart[] = buffers.map((buf, i) => {
         const blob = encodeWAV(buf);
         return {

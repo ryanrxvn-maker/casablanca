@@ -135,7 +135,7 @@ export default function TakeSplitterPage() {
     reset();
     setProcessing(true);
     try {
-      setStatus('Carregando FFmpeg...');
+      setStatus('Carregando...');
       const result: Take[] = await splitVideoByScenes(
         file,
         {

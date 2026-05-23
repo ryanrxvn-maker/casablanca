@@ -1,8 +1,15 @@
-import { redirect } from 'next/navigation';
+import { Suspense } from 'react';
+import { ToolsHub } from '@/components/ToolsHub';
 
-// Landing das ferramentas: abre direto no Decupagem (primeira ferramenta
-// do grupo Base Suite). O layout renderiza o seletor Base Suite / AI Suite
-// e o rail vertical de icones por fora desse redirect.
+/**
+ * Landing das ferramentas — Hub central com cards organizados por suite.
+ * Substitui o antigo redirect. Mostra a coleçao toda com cards animados,
+ * pilas de identidade visual e copy minima.
+ */
 export default function ToolsIndex() {
-  redirect('/tools/decupagem');
+  return (
+    <Suspense fallback={null}>
+      <ToolsHub />
+    </Suspense>
+  );
 }

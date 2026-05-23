@@ -36,11 +36,10 @@ function LoginInner() {
   return (
     <AuthShell
       title="Entrar"
-      subtitle="DARKO LAB · acesso restrito"
+      subtitle="Acesso por convite."
       footer={
         <span className="text-text-muted">
-          Beta fechada · acesso por convite. Contato com o admin pra
-          solicitar acesso.
+          Sem conta? Fale com o admin.
         </span>
       }
     >
@@ -48,12 +47,11 @@ function LoginInner() {
         {betaClosed ? (
           <div
             role="status"
-            className="fade-in-up flex items-start gap-2 rounded-[12px] border border-lime/40 bg-lime/10 px-3 py-2 text-xs text-lime"
+            className="fade-in-up flex items-start gap-2 rounded-[12px] border border-violet/40 bg-violet/10 px-3 py-2 text-xs text-violet"
           >
-            <span className="mt-0.5 inline-block h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
+            <span className="mt-0.5 inline-block h-2 w-2 rounded-full bg-violet shadow-[0_0_8px_rgba(167,139,250,0.9)]" />
             <span>
-              Esta versao esta em beta fechada. Cadastros abertos e recuperacao
-              de senha estao desativados — entre em contato com o admin.
+              Cadastros pausados. Pra entrar, fale com o admin.
             </span>
           </div>
         ) : null}
@@ -98,7 +96,7 @@ function LoginInner() {
         )}
 
         <button type="submit" className="btn-primary" disabled={loading}>
-          {loading ? 'Entrando...' : 'Entrar'}
+          {loading ? <span className="loading-dots">Entrando</span> : 'Entrar'}
         </button>
       </form>
     </AuthShell>

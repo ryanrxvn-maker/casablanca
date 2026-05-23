@@ -23,7 +23,7 @@ export default function ToolsLayout({
         <Heartbeat />
         <Header />
         <ToolsNav />
-        <main className="container-app flex-1 py-10 md:pl-[76px]">
+        <main className="container-wide flex-1 py-10 md:pl-[76px]">
           {children}
         </main>
         <MindAdsButton />
