@@ -9,13 +9,13 @@ import {
   IconAutoBroll,
   IconCalculadora,
   IconCamuflagem,
+  IconClickUpPilot,
   IconCompressor,
   IconCopySRT,
   IconDecupageCopy,
   IconDecupagem,
   IconDownloader,
   IconHeyGenAuto,
-  IconLtxVideo,
   IconNormalizador,
   IconRemoverElementos,
   IconTakeSplitter,
@@ -55,7 +55,7 @@ const FEATURED: ToolEntry[] = [
   {
     href: '/tools/troca-produto',
     label: 'Troque o produto sem regravar',
-    description: 'Mantém a cena, troca o que aparece nas mãos.',
+    description: 'Substitui o produto do áudio sem perder a voz original.',
     icon: <IconTrocaProduto size={28} />,
     hue: 'rgba(244, 114, 182, 0.45)',
     badge: 'IA',
@@ -102,7 +102,7 @@ const BASE: ToolEntry[] = [
   {
     href: '/tools/audio-split',
     label: 'Separar áudios',
-    description: 'Divide o áudio em pedaços por pausas.',
+    description: 'Divide o áudio em pedaços pelas pausas. Sem cortar falas.',
     icon: <IconAudioSplit size={26} />,
     hue: 'rgba(34, 211, 238, 0.4)',
   },
@@ -148,15 +148,15 @@ const AI: ToolEntry[] = [
   {
     href: '/tools/troca-produto',
     label: 'Troca de produto',
-    description: 'Substitui o produto na cena.',
+    description: 'Substitui o produto do áudio.',
     icon: <IconTrocaProduto size={26} />,
     hue: 'rgba(244, 114, 182, 0.42)',
     badge: 'IA',
   },
   {
     href: '/tools/remover-elementos',
-    label: 'Remover legenda',
-    description: 'Apaga a legenda gravada sem deixar marca.',
+    label: 'Smart Remover',
+    description: 'Remove legenda e marca d’água sem deixar borrão.',
     icon: <IconRemoverElementos size={26} />,
     hue: 'rgba(244, 114, 182, 0.42)',
     badge: 'IA',
@@ -164,36 +164,27 @@ const AI: ToolEntry[] = [
   },
   {
     href: '/tools/decupagem-copy',
-    label: 'Decupagem por roteiro',
-    description: 'Compara o que foi dito com o roteiro.',
+    label: 'Smart Decup',
+    description: 'Decupa o vídeo seguindo a sua copy.',
     icon: <IconDecupageCopy size={26} />,
     hue: 'rgba(232, 121, 249, 0.42)',
     badge: 'IA',
   },
   {
     href: '/tools/copy-srt',
-    label: 'Roteiro vira legenda',
-    description: 'Transforma seu texto em legenda pronta.',
+    label: 'SRT Generator',
+    description: 'Gera legendas prontas no tempo do seu áudio pra importar no editor.',
     icon: <IconCopySRT size={26} />,
     hue: 'rgba(196, 181, 253, 0.42)',
     badge: 'IA',
   },
   {
     href: '/tools/heygen-auto',
-    label: 'Avatar automático',
-    description: 'Gera vídeo do seu avatar falando o roteiro.',
+    label: 'HeyGen Auto',
+    description: 'Gera o vídeo do seu avatar falando o roteiro.',
     icon: <IconHeyGenAuto size={26} />,
     hue: 'rgba(103, 232, 249, 0.42)',
     badge: 'IA',
-  },
-  {
-    href: '/tools/ltx-video',
-    label: 'Vídeo do zero',
-    description: 'Cria um vídeo curto a partir de uma ideia.',
-    icon: <IconLtxVideo size={26} />,
-    hue: 'rgba(251, 191, 36, 0.42)',
-    badge: 'IA',
-    adminOnly: true,
   },
 ];
 
@@ -366,36 +357,46 @@ function PromoBanner() {
       style={{
         animationDelay: '80ms',
         background:
-          'linear-gradient(120deg, rgba(167,139,250,0.18) 0%, rgba(244,114,182,0.12) 45%, rgba(103,232,249,0.10) 100%), linear-gradient(180deg, #15151a, #0e0e10)',
+          'linear-gradient(120deg, rgba(200,255,0,0.14) 0%, rgba(167,139,250,0.14) 50%, rgba(34,211,238,0.10) 100%), linear-gradient(180deg, #15151a, #0e0e10)',
       }}
     >
-      <div className="absolute inset-0 opacity-50" style={{ background: 'radial-gradient(60% 80% at 0% 50%, rgba(167,139,250,0.3), transparent 60%)' }} />
-      <div className="absolute inset-0 opacity-50" style={{ background: 'radial-gradient(60% 80% at 100% 50%, rgba(244,114,182,0.22), transparent 60%)' }} />
+      <div className="absolute inset-0 opacity-55" style={{ background: 'radial-gradient(55% 85% at 0% 50%, rgba(200,255,0,0.22), transparent 60%)' }} />
+      <div className="absolute inset-0 opacity-55" style={{ background: 'radial-gradient(55% 85% at 100% 50%, rgba(167,139,250,0.28), transparent 60%)' }} />
+
+      {/* Ícone decorativo do piloto à direita, atrás do texto */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-6 top-1/2 -translate-y-1/2 opacity-25 md:opacity-30"
+        style={{ filter: 'drop-shadow(0 0 32px rgba(200,255,0,0.4))' }}
+      >
+        <IconClickUpPilot size={180} strokeWidth={1.2} />
+      </div>
+
       <div className="relative flex flex-col items-start gap-4 px-6 py-7 md:flex-row md:items-center md:justify-between md:px-8">
-        <div>
+        <div className="max-w-[560px]">
           <div
-            className="mb-2 inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/30 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-white"
+            className="mb-2 inline-flex items-center gap-2 rounded-full border border-lime/40 bg-black/40 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-lime"
             style={{ fontFamily: 'var(--font-tech)' }}
           >
-            <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-white" />
-            Novo
+            <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.85)]" />
+            ClickUp Pilot
           </div>
           <h3
             className="text-2xl font-extrabold tracking-tight text-white md:text-[28px]"
             style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
           >
-            Mais agilidade pro seu fluxo.
+            Sua equipe edita no automático.
           </h3>
-          <p className="mt-1 max-w-[520px] text-[13.5px] text-white/70">
-            B-roll automático, troca de produto e avatar — tudo em um lugar.
+          <p className="mt-1 text-[13.5px] text-white/75">
+            Conecta no seu ClickUp, lê os briefings e dispara os avatares sozinho. Você só revisa.
           </p>
         </div>
         <Link
-          href="/tools/auto-broll"
-          className="btn-glass-light inline-flex items-center gap-2"
+          href="/tools/clickup-pilot"
+          className="btn-glass-light inline-flex items-center gap-2 whitespace-nowrap"
         >
           <span>Conhecer</span>
-          <span className="text-base">→</span>
+          <span className="text-base transition-transform duration-300 group-hover:translate-x-0.5">→</span>
         </Link>
       </div>
     </div>

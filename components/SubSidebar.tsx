@@ -16,7 +16,6 @@ import {
   IconDecupagem,
   IconDownloader,
   IconHeyGenAuto,
-  IconLtxVideo,
   IconNormalizador,
   IconRemoverElementos,
   IconTakeSplitter,
@@ -46,11 +45,10 @@ const BASE_ITEMS: Item[] = [
 const AI_ITEMS: Item[] = [
   { href: '/tools/auto-broll', label: 'Auto B-roll', icon: <IconAutoBroll size={20} />, hue: 'rgba(240,171,252,0.45)' },
   { href: '/tools/troca-produto', label: 'Troca de produto', icon: <IconTrocaProduto size={20} />, hue: 'rgba(244,114,182,0.45)' },
-  { href: '/tools/remover-elementos', label: 'Remover legenda', icon: <IconRemoverElementos size={20} />, hue: 'rgba(244,114,182,0.45)', adminOnly: true },
-  { href: '/tools/decupagem-copy', label: 'Decupagem por roteiro', icon: <IconDecupageCopy size={20} />, hue: 'rgba(232,121,249,0.45)' },
-  { href: '/tools/copy-srt', label: 'Roteiro vira legenda', icon: <IconCopySRT size={20} />, hue: 'rgba(196,181,253,0.45)' },
-  { href: '/tools/heygen-auto', label: 'Avatar automático', icon: <IconHeyGenAuto size={20} />, hue: 'rgba(103,232,249,0.45)' },
-  { href: '/tools/ltx-video', label: 'Vídeo do zero', icon: <IconLtxVideo size={20} />, hue: 'rgba(251,191,36,0.45)', adminOnly: true },
+  { href: '/tools/remover-elementos', label: 'Smart Remover', icon: <IconRemoverElementos size={20} />, hue: 'rgba(244,114,182,0.45)', adminOnly: true },
+  { href: '/tools/decupagem-copy', label: 'Smart Decup', icon: <IconDecupageCopy size={20} />, hue: 'rgba(232,121,249,0.45)' },
+  { href: '/tools/copy-srt', label: 'SRT Generator', icon: <IconCopySRT size={20} />, hue: 'rgba(196,181,253,0.45)' },
+  { href: '/tools/heygen-auto', label: 'HeyGen Auto', icon: <IconHeyGenAuto size={20} />, hue: 'rgba(103,232,249,0.45)' },
 ];
 
 const BASE_PATHS = BASE_ITEMS.map((i) => i.href);

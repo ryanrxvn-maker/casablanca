@@ -370,7 +370,6 @@ const AI_PATHS = [
   '/tools/decupagem-copy',
   '/tools/copy-srt',
   '/tools/heygen-auto',
-  '/tools/ltx-video',
 ];
 
 /* ─── Ícones grandes (gradientes) ─── */

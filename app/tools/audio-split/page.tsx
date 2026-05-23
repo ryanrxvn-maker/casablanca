@@ -114,7 +114,7 @@ export default function AudioSplitPage() {
     <ToolShell
       title="Separar áudios"
       eyebrow="ÁUDIO"
-      description="Quebra o áudio em pedaços pelas pausas naturais. Útil pra revisar, traduzir ou refazer só um trecho."
+      description="Quebra o áudio em pedaços pelas pausas. Sem cortar falas."
     >
       <div className="flex flex-col gap-6">
         <div>

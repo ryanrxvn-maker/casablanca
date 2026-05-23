@@ -174,9 +174,9 @@ export default function CopySrtPage() {
 
   return (
     <ToolShell
-      title="Roteiro vira legenda"
+      title="SRT Generator"
       eyebrow="TEXTO COM IA"
-      description="Manda o áudio e o roteiro. A IA pega o tempo certo de cada frase e devolve a legenda pronta pro CapCut."
+      description="Gera legendas prontas no tempo do seu áudio pra importar no editor. Texto exato da copy."
     >
       <div className="flex flex-col gap-6">
         <MissingKeyBanner services={['groq']} />

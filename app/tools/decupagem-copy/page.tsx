@@ -271,9 +271,9 @@ export default function DecupagemCopyPage() {
 
   return (
     <ToolShell
-      title="Decupagem por roteiro"
+      title="Smart Decup"
       eyebrow="VÍDEO COM IA"
-      description="Manda o vídeo bruto e o roteiro. A IA escolhe a melhor take de cada frase e monta tudo na ordem certa."
+      description="Decupa o vídeo seguindo a sua copy. A IA escolhe a melhor take de cada frase e monta tudo na ordem certa."
     >
       <div className="flex flex-col gap-6">
         <MissingKeyBanner services={['groq']} />

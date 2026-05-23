@@ -767,7 +767,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
   return (
     <>
       <ToolShell
-        title="Avatar automático"
+        title="HeyGen Auto"
         eyebrow="VÍDEO COM IA"
         description="Cola o roteiro ou os áudios, recebe o vídeo do seu avatar falando tudo na ordem certa."
       >

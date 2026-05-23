@@ -436,9 +436,9 @@ export default function RemoverElementosPage() {
 
   return (
     <ToolShell
-      title="Remover legenda"
+      title="Smart Remover"
       eyebrow="VÍDEO COM IA"
-      description="Apaga legenda gravada e marca d'água sem deixar borrão. A IA reconstrói o fundo."
+      description="Remove legenda e marca d’água sem deixar borrão. A IA reconstrói o fundo."
     >
       <div className="flex flex-col gap-6">
         {/* === BANNER UNICO — zero-config (sem pareamento manual) === */}

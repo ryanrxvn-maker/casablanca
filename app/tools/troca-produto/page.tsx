@@ -297,7 +297,7 @@ export default function TrocaProdutoPage() {
     <ToolShell
       title="Troca de produto"
       eyebrow="ÁUDIO COM IA"
-      description="Troca o nome do produto no áudio sem perder a voz original. A pessoa continua falando como sempre."
+      description="Substitui o produto do áudio. A voz original continua igual."
     >
       <div className="grid gap-5">
         <MissingKeyBanner services={['assemblyai', 'elevenlabs']} />

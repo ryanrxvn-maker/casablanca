@@ -1,23 +1,20 @@
+'use client';
+
 /**
- * ToolIcons v3 — ícones COLORIDOS com gradientes por categoria.
+ * ToolIcons v4 — ícones COLORIDOS com gradientes por categoria.
  *
- * Mudança visual chave: agora cada ferramenta tem cor própria (gradient
- * stroke + glow). Não é mais monocromático. Visual estilo HeyGen.
- *
- * Cada ícone gera um id único por chamada (Math.random) pra evitar
- * conflito de defs quando o mesmo ícone aparece em vários lugares da
- * mesma página.
+ * Usa React.useId() (React 18+) pra gerar IDs estáveis e únicos em
+ * SSR + CSR, sem hydration mismatch (motivo do Normalizador aparecer
+ * sem ícone na versão anterior).
  */
+
+import { useId } from 'react';
 
 type IconProps = {
   size?: number;
   className?: string;
   strokeWidth?: number;
 };
-
-function rid() {
-  return 'i' + Math.random().toString(36).slice(2, 9);
-}
 
 function baseProps(p: IconProps, fallbackStroke: string) {
   return {
@@ -38,7 +35,8 @@ function baseProps(p: IconProps, fallbackStroke: string) {
 
 /** Decupagem — corte fino, gradient verde/lime */
 export function IconDecupagem(p: IconProps) {
-  const id = rid();
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
   return (
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
@@ -55,7 +53,8 @@ export function IconDecupagem(p: IconProps) {
 
 /** Camuflagem — escudo, gradient verde/teal */
 export function IconCamuflagem(p: IconProps) {
-  const id = rid();
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
   return (
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
@@ -72,7 +71,8 @@ export function IconCamuflagem(p: IconProps) {
 
 /** Compressor — gradient roxo/azul */
 export function IconCompressor(p: IconProps) {
-  const id = rid();
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
   return (
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
@@ -89,7 +89,8 @@ export function IconCompressor(p: IconProps) {
 
 /** Downloader — gradient azul */
 export function IconDownloader(p: IconProps) {
-  const id = rid();
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
   return (
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
@@ -107,7 +108,8 @@ export function IconDownloader(p: IconProps) {
 
 /** Audio Split — gradient ciano */
 export function IconAudioSplit(p: IconProps) {
-  const id = rid();
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
   return (
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
@@ -125,7 +127,8 @@ export function IconAudioSplit(p: IconProps) {
 
 /** Acelerador — gradient laranja/âmbar */
 export function IconAcelerador(p: IconProps) {
-  const id = rid();
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
   return (
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
@@ -140,9 +143,10 @@ export function IconAcelerador(p: IconProps) {
   );
 }
 
-/** Normalizador — gradient azul/teal */
+/** Normalizador — gradient teal */
 export function IconNormalizador(p: IconProps) {
-  const id = rid();
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
   return (
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
@@ -164,7 +168,8 @@ export function IconNormalizador(p: IconProps) {
 
 /** Take Splitter — gradient verde/teal */
 export function IconTakeSplitter(p: IconProps) {
-  const id = rid();
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
   return (
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
@@ -182,9 +187,10 @@ export function IconTakeSplitter(p: IconProps) {
   );
 }
 
-/** Calculadora — gradient cinza/azul (operacional) */
+/** Calculadora — gradient cinza/azul */
 export function IconCalculadora(p: IconProps) {
-  const id = rid();
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
   return (
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
@@ -202,9 +208,10 @@ export function IconCalculadora(p: IconProps) {
 
 /* ------------------------------ IA ------------------------------ */
 
-/** Auto B-Roll — gradient violeta/rosa */
+/** Auto B-roll — gradient violeta/rosa */
 export function IconAutoBroll(p: IconProps) {
-  const id = rid();
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
   return (
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
@@ -223,7 +230,8 @@ export function IconAutoBroll(p: IconProps) {
 
 /** Troca de Produto — gradient rosa */
 export function IconTrocaProduto(p: IconProps) {
-  const id = rid();
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
   return (
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
@@ -241,7 +249,8 @@ export function IconTrocaProduto(p: IconProps) {
 
 /** Copy → SRT — gradient violeta */
 export function IconCopySRT(p: IconProps) {
-  const id = rid();
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
   return (
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
@@ -260,7 +269,8 @@ export function IconCopySRT(p: IconProps) {
 
 /** Decupagem com Copy — gradient violeta/rosa */
 export function IconDecupageCopy(p: IconProps) {
-  const id = rid();
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
   return (
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
@@ -282,7 +292,8 @@ export function IconDecupageCopy(p: IconProps) {
 
 /** Remover Legenda — gradient rosa/violeta */
 export function IconRemoverElementos(p: IconProps) {
-  const id = rid();
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
   return (
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
@@ -302,7 +313,8 @@ export function IconRemoverElementos(p: IconProps) {
 
 /** HeyGen Auto — gradient ciano */
 export function IconHeyGenAuto(p: IconProps) {
-  const id = rid();
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
   return (
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
@@ -320,9 +332,10 @@ export function IconHeyGenAuto(p: IconProps) {
   );
 }
 
-/** LTX-Video — gradient laranja/rosa */
+/** LTX-Video — mantido pro caso de admin querer acessar direto. */
 export function IconLtxVideo(p: IconProps) {
-  const id = rid();
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
   return (
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
@@ -341,9 +354,10 @@ export function IconLtxVideo(p: IconProps) {
 
 /* ------------------------------ Util ------------------------------ */
 
-/** Sparkle utilitário */
+/** Sparkle — usado pra acentos AI */
 export function IconSparkle(p: IconProps) {
-  const id = rid();
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
   return (
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
@@ -359,7 +373,8 @@ export function IconSparkle(p: IconProps) {
 
 /** Wrench (Base) */
 export function IconWrench(p: IconProps) {
-  const id = rid();
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
   return (
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
@@ -375,7 +390,8 @@ export function IconWrench(p: IconProps) {
 
 /** ClickUp Pilot */
 export function IconClickUpPilot(p: IconProps) {
-  const id = rid();
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
   return (
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
