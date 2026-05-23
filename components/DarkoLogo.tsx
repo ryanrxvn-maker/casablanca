@@ -1,12 +1,12 @@
 /**
- * AutoEditLogo (mantém nome legado DarkoLogo pra não quebrar imports).
+ * AutoEditLogo (mantém nome legado DarkoLogo pra compat).
  *
  * Renderiza a logo oficial do Auto Edit — coelho frontal neon roxo —
- * a partir do PNG transparente em /auto-edit-logo@256.png.
+ * a partir do PNG transparente em /auto-edit-logo@*.png.
  *
- * O glow violet característico do neon é adicionado via CSS drop-shadow,
- * permitindo que o efeito acompanhe qualquer tamanho sem perda de
- * qualidade.
+ * Escolhe a melhor resolução de origem conforme o `size` pedido.
+ * Glow violet característico do neon é adicionado via CSS drop-shadow,
+ * permitindo escala sem perda de qualidade.
  */
 export function DarkoLogo({
   size = 28,
@@ -15,7 +15,6 @@ export function DarkoLogo({
   size?: number;
   className?: string;
 }) {
-  // Escolhe a melhor resolução de origem pro tamanho pedido (evita downscale forte)
   const src =
     size <= 32
       ? '/auto-edit-logo@32.png'
@@ -41,7 +40,7 @@ export function DarkoLogo({
       style={{
         width: size,
         height: size,
-        filter: `drop-shadow(0 0 ${Math.max(6, size * 0.18)}px rgba(167, 139, 250, 0.55)) drop-shadow(0 0 ${Math.max(2, size * 0.06)}px rgba(217, 70, 239, 0.45))`,
+        filter: `drop-shadow(0 0 ${Math.max(6, size * 0.18)}px rgba(167, 139, 250, 0.6)) drop-shadow(0 0 ${Math.max(2, size * 0.06)}px rgba(217, 70, 239, 0.45))`,
       }}
     />
   );

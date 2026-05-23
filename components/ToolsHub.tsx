@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { useTier, tierAllowsTool } from '@/lib/use-tier';
 import {
   IconAcelerador,
   IconAudioSplit,
   IconAutoBroll,
-  IconCalculadora,
   IconCamuflagem,
   IconClickUpPilot,
   IconCompressor,
@@ -46,24 +47,24 @@ type ToolEntry = {
 const FEATURED: ToolEntry[] = [
   {
     href: '/tools/auto-broll',
-    label: 'B-roll a partir do seu JSON',
-    description: 'Cola o arquivo JSON, deixa rodando. Os cortes saem prontos enquanto você vive a vida.',
+    label: 'B-roll automático no JSON',
+    description: 'Cola o arquivo JSON, liga a automação e faz outra coisa. Os cortes saem prontos enquanto você dorme.',
     icon: <IconAutoBroll size={28} />,
     hue: 'rgba(240, 171, 252, 0.45)',
     badge: 'IA',
   },
   {
     href: '/tools/troca-produto',
-    label: 'Troque o produto sem regravar',
-    description: 'Substitui o produto do áudio. A voz original continua igual.',
+    label: 'Troca o produto do áudio',
+    description: 'Substitui o produto sem regravar. A voz original continua exatamente igual.',
     icon: <IconTrocaProduto size={28} />,
     hue: 'rgba(244, 114, 182, 0.45)',
     badge: 'IA',
   },
   {
     href: '/tools/heygen-auto',
-    label: 'Avatar que fala pra você',
-    description: 'Cola o roteiro, recebe o vídeo do seu avatar pronto.',
+    label: 'HeyGen Auto',
+    description: 'Dispara todos os lipsyncs do dia com 1 clique. Vá dormir e acorde com tudo pronto.',
     icon: <IconHeyGenAuto size={28} />,
     hue: 'rgba(103, 232, 249, 0.45)',
     badge: 'IA',
@@ -108,8 +109,8 @@ const BASE: ToolEntry[] = [
   },
   {
     href: '/tools/acelerador',
-    label: 'Acelerador',
-    description: 'Acelera o vídeo na velocidade que você quiser.',
+    label: 'Mixer de Velocidade',
+    description: 'Acelera ou desacelera sem ficar robótico.',
     icon: <IconAcelerador size={26} />,
     hue: 'rgba(251, 191, 36, 0.4)',
   },
@@ -126,13 +127,6 @@ const BASE: ToolEntry[] = [
     description: 'Quebra o vídeo em cada take automaticamente.',
     icon: <IconTakeSplitter size={26} />,
     hue: 'rgba(134, 239, 172, 0.4)',
-  },
-  {
-    href: '/tools/calculadora',
-    label: 'Calculadora',
-    description: 'Calcula prazos, entregas e métricas da edição.',
-    icon: <IconCalculadora size={26} />,
-    hue: 'rgba(148, 163, 184, 0.4)',
   },
 ];
 
@@ -189,6 +183,9 @@ const AI: ToolEntry[] = [
 ];
 
 export function ToolsHub() {
+  const tier = useTier();
+  const params = useSearchParams();
+  const lockedFlash = params.get('locked') === '1';
   const [isAdmin, setIsAdmin] = useState(false);
   const [firstName, setFirstName] = useState<string>('');
 
@@ -226,6 +223,9 @@ export function ToolsHub() {
 
   return (
     <div className="mx-auto w-full max-w-[1100px] px-5 md:px-8">
+      {/* Flash de "ferramenta bloqueada" — só pra free que tentou acessar */}
+      {lockedFlash && tier === 'free' ? <LockedFlash /> : null}
+
       {/* Saudação + descrição */}
       <section className="mb-8 animate-fade-in-up">
         <div
@@ -239,7 +239,7 @@ export function ToolsHub() {
           {greeting}{firstName ? `, ${firstName}` : ''}.
           <br />
           <span className="display-subtle text-3xl md:text-5xl">
-            O que vamos editar hoje?
+            O que vamos automatizar hoje?
           </span>
         </h1>
       </section>
@@ -262,7 +262,12 @@ export function ToolsHub() {
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {featured.map((it, i) => (
-            <FeaturedCard key={it.href} entry={it} delay={140 + i * 60} />
+            <FeaturedCard
+              key={it.href}
+              entry={it}
+              delay={140 + i * 60}
+              locked={!tierAllowsTool(tier, it.href)}
+            />
           ))}
         </div>
       </section>
@@ -280,7 +285,12 @@ export function ToolsHub() {
           style={{ animationDelay: '340ms' }}
         >
           {base.map((it, i) => (
-            <ToolCard key={it.href} entry={it} delay={i * 35} />
+            <ToolCard
+              key={it.href}
+              entry={it}
+              delay={i * 35}
+              locked={!tierAllowsTool(tier, it.href)}
+            />
           ))}
         </div>
       </section>
@@ -298,7 +308,12 @@ export function ToolsHub() {
           style={{ animationDelay: '460ms' }}
         >
           {ai.map((it, i) => (
-            <ToolCard key={it.href} entry={it} delay={i * 35} />
+            <ToolCard
+              key={it.href}
+              entry={it}
+              delay={i * 35}
+              locked={!tierAllowsTool(tier, it.href)}
+            />
           ))}
         </div>
       </section>
@@ -460,18 +475,11 @@ function PromoBanner() {
               <span className="relative z-10 transition-transform duration-300 group-hover/btn:translate-x-1">
                 →
               </span>
-              {/* Sheen */}
               <span
                 aria-hidden
                 className="absolute inset-0 -translate-x-[120%] bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 group-hover/btn:translate-x-[120%]"
               />
             </Link>
-            <span
-              className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/55"
-              style={{ fontFamily: 'var(--font-tech)' }}
-            >
-              · Em ~2 min
-            </span>
           </div>
         </div>
       </div>
@@ -516,99 +524,113 @@ function Sparkle({ className, delay = 0 }: { className?: string; delay?: number 
 }
 
 /**
- * FeaturedCard — card 3D rico com:
- *   • Tilt seguindo o mouse (perspective + rotateX/Y, 3D real)
- *   • Spotlight radial que segue o cursor (--gx/--gy)
- *   • Glow ambiente que intensifica no hover
- *   • Ícone com bounce + rotação e profundidade Z
- *   • Conic border animada visível no hover
- *   • Título com leve translate vertical no hover
+ * FeaturedCard — card 3D rico com tilt, spotlight, conic border.
+ * Quando `locked=true`, vira <div> não-clicável + overlay de cadeado.
  */
 function FeaturedCard({
   entry,
   delay,
+  locked = false,
 }: {
   entry: ToolEntry;
   delay: number;
+  locked?: boolean;
 }) {
-  return (
-    <div
-      className="featured-card-wrap fade-in-up"
-      style={{ animationDelay: `${delay}ms`, perspective: '1100px' }}
-    >
-      <Link
-        href={entry.href}
-        onMouseMove={(e) => {
-          const el = e.currentTarget;
-          const rect = el.getBoundingClientRect();
-          const px = (e.clientX - rect.left) / rect.width;
-          const py = (e.clientY - rect.top) / rect.height;
-          el.style.setProperty('--gx', `${(px * 100).toFixed(1)}%`);
-          el.style.setProperty('--gy', `${(py * 100).toFixed(1)}%`);
-          const rotY = (px - 0.5) * 8;
-          const rotX = -(py - 0.5) * 8;
-          el.style.transform = `rotateX(${rotX.toFixed(2)}deg) rotateY(${rotY.toFixed(2)}deg)`;
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.transform = 'rotateX(0) rotateY(0)';
-        }}
-        className="featured-card group relative block overflow-hidden rounded-[20px] border border-line/70 p-5 md:p-6"
+  const handleMouseMove: React.MouseEventHandler<HTMLElement> = (e) => {
+    const el = e.currentTarget;
+    const rect = el.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width;
+    const py = (e.clientY - rect.top) / rect.height;
+    el.style.setProperty('--gx', `${(px * 100).toFixed(1)}%`);
+    el.style.setProperty('--gy', `${(py * 100).toFixed(1)}%`);
+    const rotY = (px - 0.5) * 8;
+    const rotX = -(py - 0.5) * 8;
+    el.style.transform = `rotateX(${rotX.toFixed(2)}deg) rotateY(${rotY.toFixed(2)}deg)`;
+  };
+  const handleMouseLeave: React.MouseEventHandler<HTMLElement> = (e) => {
+    e.currentTarget.style.transform = 'rotateX(0) rotateY(0)';
+  };
+
+  const cardClass =
+    'featured-card group relative block overflow-hidden rounded-[20px] border border-line/70 p-5 md:p-6' +
+    (locked ? ' cursor-not-allowed' : '');
+  const cardStyle: React.CSSProperties = {
+    background:
+      'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.22)), linear-gradient(180deg, #16161c, #0c0c10)',
+    transformStyle: 'preserve-3d',
+    transition:
+      'transform 0.35s cubic-bezier(.2,.8,.2,1), box-shadow 0.5s ease, border-color 0.4s ease',
+    willChange: 'transform',
+  };
+
+  const body = (
+    <>
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100"
         style={{
-          background:
-            'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.22)), linear-gradient(180deg, #16161c, #0c0c10)',
-          transformStyle: 'preserve-3d',
-          transition:
-            'transform 0.35s cubic-bezier(.2,.8,.2,1), box-shadow 0.5s ease, border-color 0.4s ease',
-          willChange: 'transform',
+          background: `radial-gradient(380px circle at var(--gx, 50%) var(--gy, 50%), ${entry.hue}, transparent 55%)`,
         }}
-      >
-        {/* Spotlight seguindo o cursor */}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-14 -top-14 h-44 w-44 rounded-full opacity-70 blur-3xl transition-all duration-500 group-hover:opacity-100"
+        style={{ background: entry.hue }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 rounded-[20px] opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+        style={{
+          padding: '1px',
+          background:
+            'conic-gradient(from var(--angle, 0deg), transparent 0%, ' +
+            entry.hue +
+            ' 22%, transparent 50%, ' +
+            entry.hue +
+            ' 78%, transparent 100%)',
+          WebkitMask:
+            'linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)',
+          WebkitMaskComposite: 'xor',
+          maskComposite: 'exclude',
+          animation: 'card-border-spin 6s linear infinite',
+        }}
+      />
+
+      {locked ? (
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100"
-          style={{
-            background: `radial-gradient(380px circle at var(--gx, 50%) var(--gy, 50%), ${entry.hue}, transparent 55%)`,
-          }}
-        />
+          className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center backdrop-blur-[2px]"
+          style={{ background: 'rgba(7,7,8,0.55)' }}
+        >
+          <span
+            className="flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-black/60 backdrop-blur-md"
+            style={{ boxShadow: '0 0 24px -6px rgba(167,139,250,0.55)' }}
+          >
+            <LockIcon />
+          </span>
+        </div>
+      ) : null}
 
-        {/* Glow ambient — canto superior direito */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -right-14 -top-14 h-44 w-44 rounded-full opacity-70 blur-3xl transition-all duration-500 group-hover:opacity-100"
-          style={{ background: entry.hue }}
-        />
-
-        {/* Conic border animada — só no hover */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 rounded-[20px] opacity-0 transition-opacity duration-500 group-hover:opacity-100"
-          style={{
-            padding: '1px',
-            background:
-              'conic-gradient(from var(--angle, 0deg), transparent 0%, ' +
-              entry.hue +
-              ' 22%, transparent 50%, ' +
-              entry.hue +
-              ' 78%, transparent 100%)',
-            WebkitMask:
-              'linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)',
-            WebkitMaskComposite: 'xor',
-            maskComposite: 'exclude',
-            animation: 'card-border-spin 6s linear infinite',
-          }}
-        />
-
-        <div className="relative">
-          <div className="mb-5 flex items-center justify-between">
-            <span
-              className="flex h-14 w-14 items-center justify-center rounded-[16px] border border-white/10 bg-black/40 backdrop-blur-md transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:scale-110 group-hover:-rotate-[8deg]"
-              style={{
-                boxShadow: `0 0 32px -2px ${entry.hue}, inset 0 1px 0 rgba(255,255,255,0.12)`,
-                transform: 'translateZ(30px)',
-              }}
-            >
-              {entry.icon}
-            </span>
+      <div className={'relative ' + (locked ? 'opacity-50' : '')}>
+        <div className="mb-5 flex items-center justify-between">
+          <span
+            className="flex h-14 w-14 items-center justify-center rounded-[16px] border border-white/10 bg-black/40 backdrop-blur-md transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:scale-110 group-hover:-rotate-[8deg]"
+            style={{
+              boxShadow: `0 0 32px -2px ${entry.hue}, inset 0 1px 0 rgba(255,255,255,0.12)`,
+              transform: 'translateZ(30px)',
+            }}
+          >
+            {entry.icon}
+          </span>
+          <div className="flex items-center gap-1.5">
+            {locked ? (
+              <span
+                className="rounded-full border border-white/15 bg-black/40 px-2.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.20em] text-white/70 backdrop-blur-md"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                BETA
+              </span>
+            ) : null}
             {entry.badge ? (
               <span
                 className="rounded-full border border-violet/35 bg-violet/10 px-2.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.20em] text-violet backdrop-blur-md transition-transform duration-300 group-hover:scale-105"
@@ -618,54 +640,110 @@ function FeaturedCard({
               </span>
             ) : null}
           </div>
-          <h3
-            className="text-[18px] font-bold leading-snug tracking-tight text-white transition-transform duration-300 group-hover:-translate-y-0.5"
-            style={{
-              fontFamily: 'var(--font-tech)',
-              letterSpacing: '-0.015em',
-              transform: 'translateZ(20px)',
-            }}
-          >
-            {entry.label}
-          </h3>
-          <p className="mt-1.5 text-[13.5px] leading-relaxed text-text-muted">
-            {entry.description}
-          </p>
-          <div
-            className="mt-6 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-text-dim transition-all duration-300 group-hover:text-white"
-            style={{ fontFamily: 'var(--font-tech)' }}
-          >
-            <span>Abrir</span>
-            <span
-              className="flex h-6 w-6 items-center justify-center rounded-full border border-white/10 transition-all duration-300 group-hover:translate-x-1 group-hover:scale-110 group-hover:border-white/30"
-              style={{ background: 'rgba(255,255,255,0.02)' }}
-            >
-              →
-            </span>
-          </div>
         </div>
-      </Link>
+        <h3
+          className="text-[18px] font-bold leading-snug tracking-tight text-white transition-transform duration-300 group-hover:-translate-y-0.5"
+          style={{
+            fontFamily: 'var(--font-tech)',
+            letterSpacing: '-0.015em',
+            transform: 'translateZ(20px)',
+          }}
+        >
+          {entry.label}
+        </h3>
+        <p className="mt-1.5 text-[13.5px] leading-relaxed text-text-muted">
+          {entry.description}
+        </p>
+        <div
+          className="mt-6 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-text-dim transition-all duration-300 group-hover:text-white"
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          <span>{locked ? 'Bloqueado' : 'Abrir'}</span>
+          <span
+            className="flex h-6 w-6 items-center justify-center rounded-full border border-white/10 transition-all duration-300 group-hover:translate-x-1 group-hover:scale-110 group-hover:border-white/30"
+            style={{ background: 'rgba(255,255,255,0.02)' }}
+          >
+            →
+          </span>
+        </div>
+      </div>
+    </>
+  );
+
+  return (
+    <div
+      className="featured-card-wrap fade-in-up"
+      style={{ animationDelay: `${delay}ms`, perspective: '1100px' }}
+    >
+      {locked ? (
+        <div
+          className={cardClass}
+          style={cardStyle}
+          aria-disabled
+          title="Disponível só pra contas Beta"
+          onMouseMove={handleMouseMove}
+          onMouseLeave={handleMouseLeave}
+        >
+          {body}
+        </div>
+      ) : (
+        <Link
+          href={entry.href}
+          className={cardClass}
+          style={cardStyle}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={handleMouseLeave}
+        >
+          {body}
+        </Link>
+      )}
     </div>
   );
 }
 
-function ToolCard({ entry, delay }: { entry: ToolEntry; delay: number }) {
-  return (
-    <Link
-      href={entry.href}
-      className="tool-card group relative block overflow-hidden rounded-[16px] border border-line/70 p-4 transition-all duration-300 hover:-translate-y-[2px] hover:border-violet/45 md:p-5"
-      style={{
-        animationDelay: `${delay}ms`,
-        background: 'linear-gradient(180deg, #15151a 0%, #0e0e10 100%)',
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
-      }}
-    >
+function ToolCard({
+  entry,
+  delay,
+  locked = false,
+}: {
+  entry: ToolEntry;
+  delay: number;
+  locked?: boolean;
+}) {
+  const cls =
+    'tool-card group relative block overflow-hidden rounded-[16px] border border-line/70 p-4 transition-all duration-300 md:p-5 ' +
+    (locked
+      ? 'cursor-not-allowed'
+      : 'hover:-translate-y-[2px] hover:border-violet/45');
+  const style: React.CSSProperties = {
+    animationDelay: `${delay}ms`,
+    background: 'linear-gradient(180deg, #15151a 0%, #0e0e10 100%)',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
+  };
+  const body = (
+    <>
       <div
         aria-hidden
         className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full opacity-0 blur-2xl transition-opacity duration-500 group-hover:opacity-80"
         style={{ background: entry.hue }}
       />
-      <div className="relative flex items-start gap-3">
+
+      {locked ? (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center"
+          style={{ background: 'rgba(7,7,8,0.55)' }}
+        >
+          <span
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-black/60 backdrop-blur-md"
+            style={{ boxShadow: '0 0 18px -6px rgba(167,139,250,0.55)' }}
+          >
+            <LockIcon size={14} />
+          </span>
+        </div>
+      ) : null}
+
+      <div className={'relative flex items-start gap-3 ' + (locked ? 'opacity-45' : '')}>
         <span
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[12px] border border-white/6 bg-black/30 transition-transform duration-300 group-hover:scale-110"
           style={{
@@ -696,6 +774,63 @@ function ToolCard({ entry, delay }: { entry: ToolEntry; delay: number }) {
           </p>
         </div>
       </div>
+    </>
+  );
+
+  return locked ? (
+    <div
+      className={cls}
+      style={style}
+      aria-disabled
+      title="Disponível só pra contas Beta"
+    >
+      {body}
+    </div>
+  ) : (
+    <Link href={entry.href} className={cls} style={style}>
+      {body}
     </Link>
+  );
+}
+
+function LockIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#c084fc"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="4" y="11" width="16" height="10" rx="2" />
+      <path d="M8 11V7a4 4 0 018 0v4" />
+    </svg>
+  );
+}
+
+function LockedFlash() {
+  return (
+    <div
+      role="status"
+      className="fade-in-up mb-6 flex items-start gap-3 rounded-[14px] border border-violet/40 bg-violet/10 px-5 py-4"
+    >
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-violet/40 bg-violet/15">
+        <LockIcon size={16} />
+      </span>
+      <div>
+        <div
+          className="text-[12px] font-bold uppercase tracking-[0.18em] text-violet"
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          ferramenta bloqueada
+        </div>
+        <p className="mt-1 text-[13.5px] text-white/85">
+          Sua conta grátis libera só a Decupagem de áudio. Pra acessar o resto, fale com o time.
+        </p>
+      </div>
+    </div>
   );
 }

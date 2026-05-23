@@ -3,21 +3,26 @@
 import { useState } from 'react';
 
 /**
- * SmokeText — wordmark com efeito "vira fumaça" no hover.
+ * SmokeText — texto que vira fumaça no hover.
  *
  * Cada letra é um <span> independente. No hover, as letras se dissolvem
  * em sequência (stagger por índice) — translateY + scale + blur + opacity.
- * Quando o mouse sai, a sequência inverte (letras "remontam" da fumaça).
+ * Quando o mouse sai, a sequência inverte.
  *
- * Detalhe técnico: usamos data-state pra controlar a animação via CSS;
- * isso evita re-render no React e mantém o efeito GPU-only (60fps).
+ * Usado em:
+ *  • Brand (wordmark da topbar/sidebar)
+ *  • Landing (títulos, parágrafos, listas)
+ *  • Login (subtítulos)
  */
 export function SmokeText({
   text,
   className = '',
+  /** Quando true, o texto é cor-no-gradient (default true) */
+  gradient = false,
 }: {
   text: string;
   className?: string;
+  gradient?: boolean;
 }) {
   const [hover, setHover] = useState(false);
   const letters = Array.from(text);
@@ -28,8 +33,8 @@ export function SmokeText({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       data-state={hover ? 'gone' : 'idle'}
+      data-gradient={gradient ? 'on' : 'off'}
       aria-label={text}
-      style={{ fontFamily: 'var(--font-tech)', fontWeight: 800, letterSpacing: '-0.02em' }}
     >
       {letters.map((ch, i) => {
         const isSpace = ch === ' ';
@@ -38,10 +43,8 @@ export function SmokeText({
             key={i}
             className="smoke-letter inline-block"
             aria-hidden
-            // Delay escalonado pra criar onda — entrada da esquerda pra direita
             style={{
-              animationDelay: `${i * 38}ms`,
-              transitionDelay: hover ? `${i * 38}ms` : `${(letters.length - 1 - i) * 28}ms`,
+              transitionDelay: hover ? `${i * 22}ms` : `${(letters.length - 1 - i) * 18}ms`,
             }}
           >
             {isSpace ? ' ' : ch}
@@ -52,8 +55,13 @@ export function SmokeText({
       <style jsx>{`
         .smoke-text {
           position: relative;
-          color: #fff;
           cursor: pointer;
+        }
+        .smoke-text[data-gradient='on'] {
+          background: linear-gradient(135deg, #f5e8ff 0%, #c084fc 100%);
+          -webkit-background-clip: text;
+          background-clip: text;
+          -webkit-text-fill-color: transparent;
         }
         .smoke-letter {
           display: inline-block;
@@ -61,27 +69,13 @@ export function SmokeText({
           transition:
             transform 520ms cubic-bezier(0.22, 1, 0.36, 1),
             filter 520ms cubic-bezier(0.22, 1, 0.36, 1),
-            opacity 520ms cubic-bezier(0.22, 1, 0.36, 1),
-            color 200ms ease;
-          color: #fff;
+            opacity 520ms cubic-bezier(0.22, 1, 0.36, 1);
         }
-        /* "AUTO" recebe a cor neon — a parte da assinatura */
-        .smoke-text :nth-child(1),
-        .smoke-text :nth-child(2),
-        .smoke-text :nth-child(3),
-        .smoke-text :nth-child(4) {
-          background: linear-gradient(135deg, #f5e8ff 0%, #c084fc 100%);
-          -webkit-background-clip: text;
-          background-clip: text;
-          -webkit-text-fill-color: transparent;
-        }
-        /* Estado "fumaça" — letra sobe, gira, espalha, blurra, some */
         .smoke-text[data-state='gone'] .smoke-letter {
           opacity: 0;
           filter: blur(14px);
           transform: translateY(-22px) translateX(var(--sx, 0px)) scale(1.35) rotate(var(--sr, 0deg));
         }
-        /* Variação aleatória entre letras (offsets diferentes via nth) */
         .smoke-text .smoke-letter:nth-child(odd) {
           --sx: -6px;
           --sr: -8deg;
@@ -98,8 +92,10 @@ export function SmokeText({
           --sx: 9px;
           --sr: -12deg;
         }
-
-        /* Estado idle — letra firme, com leve hover-respiro */
+        .smoke-text .smoke-letter:nth-child(5n) {
+          --sx: -8px;
+          --sr: 6deg;
+        }
         .smoke-text[data-state='idle'] .smoke-letter {
           opacity: 1;
           filter: blur(0);

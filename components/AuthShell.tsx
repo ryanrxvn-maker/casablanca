@@ -1,15 +1,13 @@
 import Link from 'next/link';
 import { Brand } from './Brand';
 import { DarkoLogo } from './DarkoLogo';
+import { SmokeText } from './SmokeText';
 
 /**
- * AuthShell v3 — login cinematográfico.
+ * AuthShell v4 — login cinematográfico com SmokeText.
  *
- * Layout em duas colunas no desktop:
- *  - Esquerda: identidade visual (logo gigante + frase)
- *  - Direita: card com form
- *
- * Mobile: stack vertical, brand pequena no topo, card centralizado.
+ * Layout 2 colunas: narrativa à esquerda, card à direita.
+ * Textos da narrativa todos com efeito smoke no hover.
  */
 export function AuthShell({
   title,
@@ -24,7 +22,6 @@ export function AuthShell({
 }) {
   return (
     <main className="relative flex min-h-screen flex-col">
-      {/* Background mesh */}
       <div
         aria-hidden
         className="pointer-events-none fixed inset-0 z-0"
@@ -46,7 +43,6 @@ export function AuthShell({
 
       <section className="relative z-10 flex flex-1 items-center justify-center px-5 py-12 md:py-20">
         <div className="grid w-full max-w-[1100px] grid-cols-1 items-center gap-14 lg:grid-cols-[1.1fr_0.9fr]">
-          {/* COL ESQUERDA — narrativa */}
           <div
             className="order-2 fade-in-up lg:order-1"
             style={{ animationDelay: '120ms' }}
@@ -56,29 +52,25 @@ export function AuthShell({
               style={{ fontFamily: 'var(--font-tech)' }}
             >
               <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-violet shadow-[0_0_8px_rgba(167,139,250,0.85)]" />
-              SUITE CRIATIVA
+              SUITE DE AUTOMAÇÃO
             </div>
             <h1
               className="hero-title"
               style={{ fontSize: 'clamp(2.25rem, 5vw, 3.75rem)', lineHeight: 1.05 }}
             >
-              O estúdio onde o<br />
-              corte fica pronto.
+              <SmokeText text="Liga a fila." className="block" />
+              <SmokeText text="Vai dormir." className="block" />
             </h1>
             <p className="mt-5 max-w-[440px] text-[15px] leading-relaxed text-text-muted">
-              Tudo o que você usa todo dia, em um lugar que respira com você.
+              <SmokeText text="O estúdio fica acordado, editando por você." />
             </p>
 
-            {/* Logo gigante decorativo */}
             <div className="mt-12 hidden lg:block">
               <div className="relative w-fit">
                 <div
                   aria-hidden
                   className="absolute inset-0 -m-8 rounded-full opacity-60 blur-3xl"
-                  style={{
-                    background:
-                      'radial-gradient(circle, rgba(167,139,250,0.4), transparent 65%)',
-                  }}
+                  style={{ background: 'radial-gradient(circle, rgba(167,139,250,0.4), transparent 65%)' }}
                 />
                 <div className="relative animate-float-y">
                   <DarkoLogo size={140} />
@@ -87,7 +79,6 @@ export function AuthShell({
             </div>
           </div>
 
-          {/* COL DIREITA — card */}
           <div
             className="order-1 lg:order-2 animate-fade-in-up"
             style={{ animationDelay: '60ms' }}
@@ -114,7 +105,9 @@ export function AuthShell({
                   {title}
                 </h2>
                 {subtitle && (
-                  <p className="mt-2 text-[14.5px] text-text-muted">{subtitle}</p>
+                  <p className="mt-2 text-[14.5px] text-text-muted">
+                    <SmokeText text={subtitle} />
+                  </p>
                 )}
                 <div className="mt-6">{children}</div>
               </div>

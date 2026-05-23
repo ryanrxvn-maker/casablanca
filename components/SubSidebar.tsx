@@ -8,7 +8,6 @@ import {
   IconAcelerador,
   IconAudioSplit,
   IconAutoBroll,
-  IconCalculadora,
   IconCamuflagem,
   IconCompressor,
   IconCopySRT,
@@ -36,10 +35,9 @@ const BASE_ITEMS: Item[] = [
   { href: '/tools/downloader', label: 'Downloader', icon: <IconDownloader size={20} />, hue: 'rgba(96,165,250,0.4)' },
   { href: '/tools/compressor', label: 'Compressor', icon: <IconCompressor size={20} />, hue: 'rgba(129,140,248,0.4)' },
   { href: '/tools/audio-split', label: 'Separar áudios', icon: <IconAudioSplit size={20} />, hue: 'rgba(34,211,238,0.4)' },
-  { href: '/tools/acelerador', label: 'Acelerador', icon: <IconAcelerador size={20} />, hue: 'rgba(251,191,36,0.4)' },
+  { href: '/tools/acelerador', label: 'Mixer de Velocidade', icon: <IconAcelerador size={20} />, hue: 'rgba(251,191,36,0.4)' },
   { href: '/tools/normalizador', label: 'Normalizador', icon: <IconNormalizador size={20} />, hue: 'rgba(94,234,212,0.4)' },
   { href: '/tools/take-splitter', label: 'Separar takes', icon: <IconTakeSplitter size={20} />, hue: 'rgba(134,239,172,0.4)' },
-  { href: '/tools/calculadora', label: 'Calculadora', icon: <IconCalculadora size={20} />, hue: 'rgba(148,163,184,0.4)' },
 ];
 
 const AI_ITEMS: Item[] = [

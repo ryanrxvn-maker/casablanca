@@ -95,6 +95,24 @@ export function Sidebar() {
   const displayName = profile?.name?.trim() || 'Editor';
   const initial = displayName.charAt(0).toUpperCase();
 
+  const extras: NavItem[] = [];
+  // Pontos é UTIL apenas pra admin
+  if (profile?.is_admin) {
+    extras.push({
+      href: '/tools/points',
+      label: 'Pontos',
+      icon: <IconTrophy />,
+      match: (p) => p.startsWith('/tools/points'),
+    });
+  }
+  // Calculadora é util pra todos (não é mais uma "ferramenta" do catálogo)
+  extras.push({
+    href: '/tools/calculadora',
+    label: 'Calc',
+    icon: <IconCalc />,
+    match: (p) => p.startsWith('/tools/calculadora'),
+  });
+
   const sections: NavSection[] = [
     {
       label: 'Navegar',
@@ -124,13 +142,11 @@ export function Sidebar() {
           match: (p) =>
             AI_PATHS.some((bp) => p === bp || p.startsWith(bp + '/')),
         },
-        {
-          href: '/tools/points',
-          label: 'Pontos',
-          icon: <IconTrophy />,
-          match: (p) => p.startsWith('/tools/points'),
-        },
       ],
+    },
+    {
+      label: 'Atalhos',
+      items: extras,
     },
   ];
 
@@ -361,7 +377,6 @@ const BASE_PATHS = [
   '/tools/acelerador',
   '/tools/normalizador',
   '/tools/take-splitter',
-  '/tools/calculadora',
 ];
 const AI_PATHS = [
   '/tools/auto-broll',
@@ -433,6 +448,22 @@ function IconAi() {
         fill="url(#sb-ai)"
         opacity="0.7"
       />
+    </svg>
+  );
+}
+
+function IconCalc() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <defs>
+        <linearGradient id="sb-calc" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#94a3b8" />
+          <stop offset="100%" stopColor="#64748b" />
+        </linearGradient>
+      </defs>
+      <rect x="4" y="3" width="16" height="18" rx="2.5" stroke="url(#sb-calc)" strokeWidth="1.8" />
+      <path d="M7 7h10" stroke="url(#sb-calc)" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M8 12h.01M12 12h.01M16 12h.01M8 16h.01M12 16h.01M16 16h.01" stroke="url(#sb-calc)" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }

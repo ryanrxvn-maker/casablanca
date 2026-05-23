@@ -19,6 +19,7 @@ import {
 } from '@/lib/ffmpeg-worker';
 import { CancelButton } from '@/components/CancelButton';
 import { formatTime } from '@/lib/utils';
+import { useTier } from '@/lib/use-tier';
 
 type OutputKind = 'video' | 'audio';
 type AudioFmt = 'wav' | 'mp3';
@@ -74,6 +75,8 @@ function computeSpeechSegments(
 }
 
 export default function DecupagemPage() {
+  const tier = useTier();
+  const isFree = tier === 'free';
   const [file, setFile] = useToolState<File | null>('decupagem:file', null);
   const [keepSilence, setKeepSilence] = useToolState<number>(
     'decupagem:keepSilence',
@@ -109,7 +112,12 @@ export default function DecupagemPage() {
   );
 
   const fileIsVideo = file ? isVideoFile(file) : false;
-  const effectiveKind: OutputKind = fileIsVideo ? outputKind : 'audio';
+  // Free é forçado a 'audio' — segurança UI (server também bloqueia).
+  const effectiveKind: OutputKind = isFree
+    ? 'audio'
+    : fileIsVideo
+      ? outputKind
+      : 'audio';
 
   function reset() {
     if (result) URL.revokeObjectURL(result.url);
@@ -249,33 +257,48 @@ export default function DecupagemPage() {
 
         {fileIsVideo ? (
           <div>
-            <label className="label-field">Saida</label>
+            <label className="label-field">Saída</label>
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => setOutputKind('video')}
+                onClick={() => !isFree && setOutputKind('video')}
+                disabled={isFree}
+                title={isFree ? 'Disponível só pra contas Beta' : undefined}
                 className={
-                  'flex-1 rounded-[12px] border px-4 py-3 text-sm transition-all duration-200 active:scale-[0.97] ' +
-                  (outputKind === 'video'
-                    ? 'border-lime bg-lime/10 text-lime'
-                    : 'border-line bg-bg text-text-muted hover:border-lime/50')
+                  'flex-1 rounded-[12px] border px-4 py-3 text-sm transition-all duration-200 active:scale-[0.97] flex items-center justify-center gap-2 ' +
+                  (isFree
+                    ? 'cursor-not-allowed border-line bg-bg/40 text-text-dim'
+                    : outputKind === 'video' && !isFree
+                      ? 'border-lime bg-lime/10 text-lime'
+                      : 'border-line bg-bg text-text-muted hover:border-lime/50')
                 }
               >
-                Video (MP4)
+                {isFree ? (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="4" y="11" width="16" height="10" rx="2" />
+                    <path d="M8 11V7a4 4 0 018 0v4" />
+                  </svg>
+                ) : null}
+                Vídeo (MP4)
               </button>
               <button
                 type="button"
                 onClick={() => setOutputKind('audio')}
                 className={
                   'flex-1 rounded-[12px] border px-4 py-3 text-sm transition-all duration-200 active:scale-[0.97] ' +
-                  (outputKind === 'audio'
+                  (effectiveKind === 'audio'
                     ? 'border-lime bg-lime/10 text-lime'
                     : 'border-line bg-bg text-text-muted hover:border-lime/50')
                 }
               >
-                Apenas audio
+                Apenas áudio
               </button>
             </div>
+            {isFree ? (
+              <p className="mt-2 text-[11.5px] text-violet">
+                A conta grátis só processa áudio. Pra exportar vídeo, fale com o time.
+              </p>
+            ) : null}
           </div>
         ) : null}
 

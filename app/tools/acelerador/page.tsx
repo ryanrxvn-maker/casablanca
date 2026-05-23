@@ -211,9 +211,9 @@ export default function AceleradorPage() {
 
   return (
     <ToolShell
-      title="Acelerador"
+      title="Mixer de Velocidade"
       eyebrow="VÍDEO / ÁUDIO"
-      description="Acelera ou desacelera sem deixar a voz robotizada. Vários arquivos de uma vez."
+      description="Acelera ou desacelera o vídeo/áudio sem ficar robótico."
     >
       <div className="flex flex-col gap-6">
         <div>

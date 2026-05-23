@@ -5,9 +5,8 @@ import { SmokeText } from './SmokeText';
 /**
  * Brand Auto Edit.
  *
- * Combina logo do coelho neon frontal com wordmark "Auto Edit".
- * O wordmark usa o componente SmokeText — ao passar o mouse, o
- * texto se dissolve em fumaça e volta quando o mouse sai.
+ * Logo do coelho neon frontal + wordmark "Auto Edit" com efeito SmokeText
+ * (ao passar o mouse, texto se dissolve em fumaça).
  */
 export function Brand({
   href = '/tools',
@@ -17,16 +16,17 @@ export function Brand({
   size?: 'sm' | 'md' | 'lg';
 }) {
   const sizes = {
-    sm: { text: 'text-[14px]', logo: 26 },
-    md: { text: 'text-[17px]', logo: 34 },
-    lg: { text: 'text-[26px]', logo: 52 },
+    sm: { logo: 26, fontSize: '13px' },
+    md: { logo: 34, fontSize: '17px' },
+    lg: { logo: 52, fontSize: '26px' },
   };
   const s = sizes[size];
   return (
     <Link
       href={href}
-      className={`brand group flex items-center gap-2.5 ${s.text} select-none transition-transform duration-300`}
+      className="brand group flex items-center gap-2.5 select-none transition-transform duration-300"
       aria-label="Auto Edit"
+      style={{ fontSize: s.fontSize }}
     >
       <span
         className="transition-transform duration-500 group-hover:scale-[1.08] group-hover:-rotate-[6deg]"
@@ -34,7 +34,18 @@ export function Brand({
       >
         <DarkoLogo size={s.logo} />
       </span>
-      <SmokeText text="Auto Edit" className="leading-none" />
+      <span
+        className="leading-none"
+        style={{
+          fontFamily: 'var(--font-tech)',
+          fontWeight: 800,
+          letterSpacing: '-0.02em',
+        }}
+      >
+        <span style={{ color: '#fff' }}>
+          <SmokeText text="Auto Edit" />
+        </span>
+      </span>
     </Link>
   );
 }

@@ -23,7 +23,7 @@ const TITLES: Record<string, string> = {
   '/tools/downloader': 'Downloader',
   '/tools/compressor': 'Compressor',
   '/tools/audio-split': 'Separar áudios',
-  '/tools/acelerador': 'Acelerador',
+  '/tools/acelerador': 'Mixer de Velocidade',
   '/tools/normalizador': 'Normalizador',
   '/tools/take-splitter': 'Separar takes',
   '/tools/calculadora': 'Calculadora',

@@ -1,11 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Brand } from './Brand';
 import { DarkoLogo } from './DarkoLogo';
+import { SmokeText } from './SmokeText';
 import {
   IconAutoBroll,
+  IconClickUpPilot,
   IconDecupagem,
   IconHeyGenAuto,
   IconRemoverElementos,
@@ -15,21 +17,12 @@ import {
 /**
  * Landing — página pública em `/`.
  *
- * Estrutura cinematográfica:
- *  1. Top-bar minimalista com brand + CTA entrar
- *  2. Hero massivo com headline animada + visual 3D do coelho gigante
- *  3. Faixa de números (social proof)
- *  4. Grade de capacidades com ícones coloridos + descrições curtas
- *  5. Showcase em duas colunas (texto editorial + visual)
- *  6. CTA final
- *  7. Footer fino
- *
- * Copy em PT-BR perfeito, sem termos técnicos, escrita pra encantar editor.
+ * Copy 100% focada em AUTOMAÇÃO (não na edição em si).
+ * Texto da copy quando passa o mouse vira fumaça (SmokeText).
  */
 export function Landing() {
   return (
     <main className="relative min-h-screen overflow-hidden">
-      {/* Background mesh extra cinematográfico */}
       <div
         aria-hidden
         className="pointer-events-none fixed inset-0 z-0"
@@ -44,6 +37,7 @@ export function Landing() {
       <LandingHeader />
       <HeroSection />
       <StatsRow />
+      <PilotShowcase />
       <CapabilitiesSection />
       <ShowcaseSection />
       <FinalCTA />
@@ -81,7 +75,7 @@ function LandingHeader() {
             Entrar
           </Link>
           <Link href="/login" className="btn-primary">
-            Começar
+            Começar grátis
           </Link>
         </div>
       </div>
@@ -95,58 +89,59 @@ function HeroSection() {
   return (
     <section className="relative px-5 pt-12 md:px-8 md:pt-20">
       <div className="mx-auto grid max-w-[1200px] grid-cols-1 items-center gap-12 lg:grid-cols-[1.1fr_0.9fr]">
-        {/* TEXTO */}
         <div className="relative z-10">
           <div
             className="mb-5 inline-flex items-center gap-2 rounded-full border border-violet/35 bg-violet/10 px-3 py-1 text-[10.5px] font-semibold uppercase tracking-[0.20em] text-violet animate-fade-in"
             style={{ fontFamily: 'var(--font-tech)' }}
           >
             <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-violet shadow-[0_0_10px_rgba(167,139,250,0.9)]" />
-            Suite criativa pra editores
+            Suite de automação criativa
           </div>
 
           <h1 className="hero-title" style={{ fontSize: 'clamp(2.5rem, 6vw, 4.5rem)' }}>
-            <KineticLine text="Edição rápida," delay={0} />
-            <br />
-            <KineticLine text="entrega no prazo." delay={140} />
-            <br />
-            <span className="display-subtle" style={{ fontSize: 'clamp(1.8rem, 4vw, 3rem)', lineHeight: '1.1' }}>
-              <KineticLine text="Pra quem vive do corte." delay={320} color="var(--violet)" />
+            <SmokeText text="Edição no automático." className="block" />
+            <span className="block" style={{ marginTop: '0.2em' }}>
+              <span className="display-subtle" style={{ fontSize: 'clamp(1.8rem, 4vw, 3rem)', lineHeight: '1.1' }}>
+                <span style={{ color: 'var(--violet)' }}>
+                  <SmokeText text="Você dorme, o estúdio entrega." />
+                </span>
+              </span>
             </span>
           </h1>
 
-          <p
-            className="mt-6 max-w-[520px] text-[16px] leading-relaxed text-text-muted fade-in-up"
+          <div
+            className="mt-6 max-w-[540px] text-[16px] leading-relaxed text-text-muted fade-in-up"
             style={{ animationDelay: '500ms' }}
           >
-            B-roll automático, troca de produto, avatar que fala, legenda em segundos.
-            Tudo no mesmo lugar — sem trocar de programa.
-          </p>
+            <SmokeText text="Ligue a automação, fache o notebook e vá viver." className="block" />
+            <span className="mt-1 block">
+              <SmokeText text="Acorde com B-roll, lipsync e legenda prontos." />
+            </span>
+          </div>
 
           <div
             className="mt-8 flex flex-wrap items-center gap-3 fade-in-up"
             style={{ animationDelay: '600ms' }}
           >
             <Link href="/login" className="btn-primary group">
-              <span>Entrar no estúdio</span>
+              <span>Começar agora</span>
               <span className="transition-transform duration-300 group-hover:translate-x-1">→</span>
             </Link>
             <a href="#capacidades" className="btn-secondary">
-              Ver o que faz
+              Ver como funciona
             </a>
           </div>
 
           <div className="mt-8 flex items-center gap-4 fade-in-up" style={{ animationDelay: '720ms' }}>
             <AvatarStack />
             <p className="text-[12.5px] leading-tight text-text-muted">
-              <span className="font-semibold text-white">Editores em produção</span>
+              <SmokeText text="Estúdios automatizados" className="font-semibold text-white" />
               <br />
-              já estão entregando mais com menos.
+              <SmokeText text="entregando 20× mais com a mesma equipe." />
             </p>
           </div>
         </div>
 
-        {/* VISUAL */}
         <HeroVisual />
       </div>
     </section>
@@ -156,49 +151,19 @@ function HeroSection() {
 function HeroVisual() {
   return (
     <div className="hero-visual relative mx-auto flex h-[460px] w-full max-w-[520px] items-center justify-center md:h-[560px]">
-      {/* Orbita externa */}
       <div className="hv-orbit hv-orbit-1 absolute inset-0">
-        <FloatIcon
-          delay={0}
-          className="absolute left-[8%] top-[12%]"
-          hue="rgba(240,171,252,0.45)"
-          icon={<IconAutoBroll size={28} />}
-        />
-        <FloatIcon
-          delay={300}
-          className="absolute right-[6%] top-[20%]"
-          hue="rgba(103,232,249,0.45)"
-          icon={<IconHeyGenAuto size={28} />}
-        />
-        <FloatIcon
-          delay={600}
-          className="absolute left-[5%] bottom-[18%]"
-          hue="rgba(163,230,53,0.4)"
-          icon={<IconDecupagem size={28} />}
-        />
-        <FloatIcon
-          delay={900}
-          className="absolute right-[8%] bottom-[10%]"
-          hue="rgba(244,114,182,0.45)"
-          icon={<IconTrocaProduto size={28} />}
-        />
-        <FloatIcon
-          delay={1200}
-          className="absolute right-[40%] top-[5%]"
-          hue="rgba(167,139,250,0.45)"
-          icon={<IconRemoverElementos size={28} />}
-        />
+        <FloatIcon delay={0} className="absolute left-[8%] top-[12%]" hue="rgba(240,171,252,0.45)" icon={<IconAutoBroll size={28} />} />
+        <FloatIcon delay={300} className="absolute right-[6%] top-[20%]" hue="rgba(103,232,249,0.45)" icon={<IconHeyGenAuto size={28} />} />
+        <FloatIcon delay={600} className="absolute left-[5%] bottom-[18%]" hue="rgba(163,230,53,0.4)" icon={<IconDecupagem size={28} />} />
+        <FloatIcon delay={900} className="absolute right-[8%] bottom-[10%]" hue="rgba(244,114,182,0.45)" icon={<IconTrocaProduto size={28} />} />
+        <FloatIcon delay={1200} className="absolute right-[40%] top-[5%]" hue="rgba(167,139,250,0.45)" icon={<IconRemoverElementos size={28} />} />
       </div>
 
-      {/* Logo central enorme */}
       <div className="hv-mark relative z-10">
         <div
           aria-hidden
           className="absolute inset-0 -m-12 rounded-full opacity-60 blur-3xl"
-          style={{
-            background:
-              'radial-gradient(circle, rgba(167,139,250,0.5), transparent 65%)',
-          }}
+          style={{ background: 'radial-gradient(circle, rgba(167,139,250,0.5), transparent 65%)' }}
         />
         <div className="relative">
           <DarkoLogo size={220} />
@@ -206,16 +171,12 @@ function HeroVisual() {
       </div>
 
       <style jsx>{`
-        .hv-mark {
-          animation: hv-mark-float 6s ease-in-out infinite;
-        }
+        .hv-mark { animation: hv-mark-float 6s ease-in-out infinite; }
         @keyframes hv-mark-float {
           0%, 100% { transform: translateY(0) rotateZ(0); }
           50% { transform: translateY(-12px) rotateZ(-2deg); }
         }
-        .hv-orbit {
-          animation: hv-orbit-spin 30s linear infinite;
-        }
+        .hv-orbit { animation: hv-orbit-spin 30s linear infinite; }
         @keyframes hv-orbit-spin {
           0% { transform: rotate(0deg); }
           100% { transform: rotate(360deg); }
@@ -237,26 +198,16 @@ function FloatIcon({
   className?: string;
 }) {
   return (
-    <div
-      className={'float-icon ' + (className || '')}
-      style={{ animationDelay: `${delay}ms` }}
-    >
+    <div className={'float-icon ' + (className || '')} style={{ animationDelay: `${delay}ms` }}>
       <span
         className="float-icon-inner flex h-14 w-14 items-center justify-center rounded-[16px] border border-white/10 bg-black/40 backdrop-blur-md"
-        style={{
-          boxShadow: `0 0 32px -6px ${hue}, inset 0 1px 0 rgba(255,255,255,0.1)`,
-        }}
+        style={{ boxShadow: `0 0 32px -6px ${hue}, inset 0 1px 0 rgba(255,255,255,0.1)` }}
       >
         {icon}
       </span>
       <style jsx>{`
-        .float-icon {
-          animation: fi-pop 600ms cubic-bezier(0.34, 1.56, 0.64, 1) both,
-            fi-float 5s ease-in-out infinite;
-        }
-        .float-icon-inner {
-          animation: fi-counterspin 30s linear infinite;
-        }
+        .float-icon { animation: fi-pop 600ms cubic-bezier(0.34, 1.56, 0.64, 1) both, fi-float 5s ease-in-out infinite; }
+        .float-icon-inner { animation: fi-counterspin 30s linear infinite; }
         @keyframes fi-pop {
           0% { opacity: 0; transform: scale(0.4); }
           100% { opacity: 1; transform: scale(1); }
@@ -271,46 +222,6 @@ function FloatIcon({
         }
       `}</style>
     </div>
-  );
-}
-
-function KineticLine({
-  text,
-  delay,
-  color,
-}: {
-  text: string;
-  delay: number;
-  color?: string;
-}) {
-  const words = text.split(' ');
-  let acc = delay;
-  return (
-    <span className="inline-block" style={color ? { color } : undefined}>
-      {words.map((w, i) => {
-        const d = acc;
-        acc += 60;
-        return (
-          <span
-            key={`${w}-${i}`}
-            className="inline-block kl-word"
-            style={{ animationDelay: `${d}ms` }}
-          >
-            {w}
-            {i < words.length - 1 ? ' ' : ''}
-            <style jsx>{`
-              .kl-word {
-                animation: kl-in 700ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
-              }
-              @keyframes kl-in {
-                0% { opacity: 0; transform: translateY(22px) rotateX(-30deg); }
-                100% { opacity: 1; transform: translateY(0) rotateX(0); }
-              }
-            `}</style>
-          </span>
-        );
-      })}
-    </span>
   );
 }
 
@@ -336,20 +247,16 @@ function AvatarStack() {
 
 function StatsRow() {
   const stats = [
-    { value: '–80%', label: 'tempo no corte de silêncios' },
-    { value: '< 30s', label: 'pra gerar um B-roll inteiro' },
-    { value: '100%', label: 'no seu computador' },
-    { value: '24/7', label: 'sem fila de espera' },
+    { value: '20×', label: 'mais rápido que editar à mão' },
+    { value: '–95%', label: 'do tempo no trabalho repetitivo' },
+    { value: '24/7', label: 'rodando enquanto você dorme' },
+    { value: '1×', label: 'clique pra disparar o dia inteiro' },
   ];
   return (
     <section className="mx-auto mt-24 max-w-[1200px] px-5 md:px-8">
       <div className="grid grid-cols-2 gap-6 rounded-[20px] border border-line/60 bg-bg-soft/50 px-6 py-7 backdrop-blur-md md:grid-cols-4 md:px-10">
         {stats.map((s, i) => (
-          <div
-            key={i}
-            className="fade-in-up text-center"
-            style={{ animationDelay: `${i * 80}ms` }}
-          >
+          <div key={i} className="fade-in-up text-center" style={{ animationDelay: `${i * 80}ms` }}>
             <div
               className="text-3xl font-extrabold tracking-tight md:text-4xl"
               style={{
@@ -363,12 +270,152 @@ function StatsRow() {
               {s.value}
             </div>
             <p className="mt-2 text-[12px] leading-snug text-text-muted">
-              {s.label}
+              <SmokeText text={s.label} />
             </p>
           </div>
         ))}
       </div>
     </section>
+  );
+}
+
+/* ────────────────────── PILOT SHOWCASE ────────────────────── */
+
+function PilotShowcase() {
+  return (
+    <section className="mx-auto mt-32 max-w-[1200px] px-5 md:px-8">
+      <div
+        className="relative overflow-hidden rounded-[28px] border border-line/70 fade-in-up"
+        style={{
+          background:
+            'linear-gradient(120deg, rgba(200,255,0,0.16) 0%, rgba(167,139,250,0.20) 50%, rgba(34,211,238,0.12) 100%), linear-gradient(180deg, #15151a, #0a0a0c)',
+        }}
+      >
+        {/* Pulsos animados */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background: 'radial-gradient(60% 90% at 0% 50%, rgba(200,255,0,0.28), transparent 60%)',
+            animation: 'promo-pulse-a 6s ease-in-out infinite',
+          }}
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background: 'radial-gradient(60% 90% at 100% 50%, rgba(167,139,250,0.34), transparent 60%)',
+            animation: 'promo-pulse-b 7s ease-in-out infinite',
+          }}
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-[0.06]"
+          style={{
+            backgroundImage: 'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)',
+            backgroundSize: '44px 44px',
+          }}
+        />
+        <SparkleFloat className="absolute top-8 right-[28%]" delay={0} />
+        <SparkleFloat className="absolute top-[60%] right-[18%]" delay={900} />
+        <SparkleFloat className="absolute top-[25%] right-[8%]" delay={1800} />
+
+        <div
+          aria-hidden
+          className="pointer-events-none absolute right-4 top-1/2 hidden -translate-y-1/2 lg:block"
+          style={{
+            filter: 'drop-shadow(0 0 38px rgba(200,255,0,0.42)) drop-shadow(0 0 20px rgba(167,139,250,0.38))',
+            animation: 'promo-icon-float 5.5s ease-in-out infinite',
+          }}
+        >
+          <div className="opacity-35">
+            <IconClickUpPilot size={280} strokeWidth={1.2} />
+          </div>
+        </div>
+
+        <div className="relative flex flex-col items-start gap-6 px-7 py-12 md:px-14 md:py-20">
+          <div
+            className="inline-flex items-center gap-2 rounded-full border border-lime/50 bg-black/50 px-3.5 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.22em] text-lime backdrop-blur-md"
+            style={{
+              fontFamily: 'var(--font-tech)',
+              boxShadow: '0 0 22px -6px rgba(200,255,0,0.55), inset 0 1px 0 rgba(255,255,255,0.08)',
+            }}
+          >
+            <span
+              className="inline-block h-2 w-2 animate-pulse-soft rounded-full bg-lime"
+              style={{ boxShadow: '0 0 10px rgba(200,255,0,0.95)' }}
+            />
+            ClickUp Pilot
+          </div>
+
+          <h2
+            className="max-w-[760px] text-[34px] font-extrabold leading-[1.05] tracking-tight text-white md:text-[56px]"
+            style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.025em' }}
+          >
+            <SmokeText text="Você sai do escritório." className="block" />
+            <span className="block" style={{ background: 'linear-gradient(135deg, #c8ff00 0%, #a78bfa 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+              <SmokeText text="Ele continua editando." />
+            </span>
+          </h2>
+
+          <p className="max-w-[560px] text-[15px] leading-relaxed text-white/80">
+            <SmokeText text="O Pilot lê os briefings no ClickUp e dispara os avatares por conta própria." className="block" />
+            <span className="block mt-2">
+              <SmokeText text="Você acorda no outro dia com tudo pronto pra revisar." />
+            </span>
+          </p>
+
+          <Link
+            href="/login"
+            className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full px-7 py-3.5 text-[14px] font-bold text-black"
+            style={{
+              background: 'linear-gradient(135deg, #c8ff00 0%, #a3e635 100%)',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.5), 0 14px 36px -8px rgba(200,255,0,0.6)',
+            }}
+          >
+            <span className="relative z-10">Ver o Pilot em ação</span>
+            <span className="relative z-10 transition-transform duration-300 group-hover/btn:translate-x-1">→</span>
+            <span aria-hidden className="absolute inset-0 -translate-x-[120%] bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 group-hover/btn:translate-x-[120%]" />
+          </Link>
+        </div>
+
+        <style jsx>{`
+          @keyframes promo-pulse-a {
+            0%, 100% { opacity: 0.55; transform: scale(1); }
+            50% { opacity: 0.9; transform: scale(1.05); }
+          }
+          @keyframes promo-pulse-b {
+            0%, 100% { opacity: 0.55; transform: scale(1.03); }
+            50% { opacity: 0.9; transform: scale(0.97); }
+          }
+          @keyframes promo-icon-float {
+            0%, 100% { transform: translateY(-50%) translateX(0) rotate(0); }
+            50% { transform: translateY(calc(-50% - 8px)) translateX(-4px) rotate(-3deg); }
+          }
+        `}</style>
+      </div>
+    </section>
+  );
+}
+
+function SparkleFloat({ className, delay = 0 }: { className?: string; delay?: number }) {
+  return (
+    <span
+      aria-hidden
+      className={'pointer-events-none ' + (className || '')}
+      style={{ animation: `sparkle-twinkle 2.6s ease-in-out infinite`, animationDelay: `${delay}ms` }}
+    >
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+        <path d="M7 0l1.2 4.8L13 6l-4.8 1.2L7 12l-1.2-4.8L0 6l4.8-1.2L7 0z" fill="#fff" opacity="0.9" />
+      </svg>
+      <style jsx>{`
+        @keyframes sparkle-twinkle {
+          0%, 100% { opacity: 0; transform: scale(0.6) rotate(0); }
+          40% { opacity: 1; transform: scale(1) rotate(90deg); }
+          60% { opacity: 1; transform: scale(1) rotate(120deg); }
+        }
+      `}</style>
+    </span>
   );
 }
 
@@ -379,54 +426,55 @@ function CapabilitiesSection() {
     {
       icon: <IconAutoBroll size={32} />,
       hue: 'rgba(240,171,252,0.55)',
-      title: 'B-roll no ritmo certo',
-      desc: 'A IA escuta o que você fala e monta os cortes no tempo da edição. Você só revisa.',
+      title: 'Disparar B-roll do dia inteiro',
+      desc: 'Cola o JSON, liga a fila, faz outra coisa. Volta com a pasta cheia de cortes.',
     },
     {
       icon: <IconTrocaProduto size={32} />,
       hue: 'rgba(244,114,182,0.5)',
-      title: 'Troca de produto sem regravar',
-      desc: 'Mudou a marca? Troque o produto na cena. A pessoa continua falando como antes.',
+      title: 'Trocar produto sem regravar',
+      desc: 'Mudou a marca? Substitui no áudio em segundos. A voz original continua intacta.',
     },
     {
       icon: <IconHeyGenAuto size={32} />,
       hue: 'rgba(103,232,249,0.5)',
-      title: 'Avatar que fala por você',
-      desc: 'Cola o roteiro, escolhe a voz, recebe o vídeo. Sem câmera, sem set, sem luz.',
+      title: 'Lipsync do dia em 1 clique',
+      desc: 'Dispara todos os avatares de uma vez. Vá dormir e acorde com os vídeos prontos.',
     },
     {
       icon: <IconRemoverElementos size={32} />,
       hue: 'rgba(167,139,250,0.5)',
-      title: 'Apaga legenda sem marca',
-      desc: 'Esqueceu de tirar a legenda gravada? A IA reconstrói o fundo e ninguém percebe.',
+      title: 'Remover legenda em massa',
+      desc: 'Passa o batch, a IA limpa todas. Marca d’água, legenda gravada — tudo no lixo.',
     },
     {
       icon: <IconDecupagem size={32} />,
       hue: 'rgba(163,230,53,0.45)',
-      title: 'Decupagem em um clique',
-      desc: 'Os silêncios somem. O ritmo do vídeo melhora. Você ganha horas todo dia.',
+      title: 'Decupagem instantânea',
+      desc: 'Silêncios somem sozinhos. O que demorava 1 hora vira 30 segundos.',
     },
     {
-      icon: <DonutIcon />,
-      hue: 'rgba(245,200,66,0.5)',
-      title: 'Ganhe pontos editando',
-      desc: 'Cada projeto entregue rende pontos. Pontos viram medalhas. Medalhas viram conquistas.',
+      icon: <IconClickUpPilot size={32} />,
+      hue: 'rgba(200,255,0,0.5)',
+      title: 'Pipeline ClickUp → entrega',
+      desc: 'O Pilot puxa o briefing, identifica o avatar, dispara o lipsync. Sem clique manual.',
     },
   ];
 
   return (
     <section id="capacidades" className="mx-auto mt-32 max-w-[1200px] px-5 md:px-8">
-      <div className="mb-12 max-w-[680px] fade-in-up">
+      <div className="mb-12 max-w-[720px] fade-in-up">
         <div
           className="mb-3 text-[10.5px] font-semibold uppercase tracking-[0.22em] text-text-dim"
           style={{ fontFamily: 'var(--font-tech)' }}
         >
-          O QUE FAZ
+          O QUE AUTOMATIZA
         </div>
         <h2 className="section-title text-[36px] md:text-[48px]" style={{ lineHeight: 1.05 }}>
-          Tudo que você precisa pra fechar um projeto.
-          <br />
-          <span className="display-subtle">Em um só lugar.</span>
+          <SmokeText text="O fluxo todo." className="block" />
+          <span className="display-subtle block">
+            <SmokeText text="Sem você no monitor." />
+          </span>
         </h2>
       </div>
 
@@ -436,20 +484,6 @@ function CapabilitiesSection() {
         ))}
       </div>
     </section>
-  );
-}
-
-function DonutIcon() {
-  return (
-    <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
-      <defs>
-        <linearGradient id="donut-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#fbbf24" />
-          <stop offset="100%" stopColor="#f97316" />
-        </linearGradient>
-      </defs>
-      <path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z" stroke="url(#donut-grad)" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" />
-    </svg>
   );
 }
 
@@ -468,7 +502,7 @@ function CapabilityCard({
 }) {
   return (
     <div
-      className="cap-card group relative overflow-hidden rounded-[20px] border border-line/60 p-6 transition-all duration-500 hover:-translate-y-1 hover:border-violet/40 md:p-7"
+      className="cap-card fade-in-up group relative overflow-hidden rounded-[20px] border border-line/60 p-6 transition-all duration-500 hover:-translate-y-1 hover:border-violet/40 md:p-7"
       style={{
         animationDelay: `${delay}ms`,
         background:
@@ -483,9 +517,7 @@ function CapabilityCard({
       <div className="relative">
         <span
           className="mb-5 inline-flex h-14 w-14 items-center justify-center rounded-[16px] border border-white/10 bg-black/40 backdrop-blur-md transition-transform duration-500 group-hover:scale-110 group-hover:-rotate-6"
-          style={{
-            boxShadow: `0 0 32px -4px ${hue}, inset 0 1px 0 rgba(255,255,255,0.12)`,
-          }}
+          style={{ boxShadow: `0 0 32px -4px ${hue}, inset 0 1px 0 rgba(255,255,255,0.12)` }}
         >
           {icon}
         </span>
@@ -493,18 +525,12 @@ function CapabilityCard({
           className="text-[18px] font-bold tracking-tight text-white"
           style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.01em' }}
         >
-          {title}
+          <SmokeText text={title} />
         </h3>
         <p className="mt-2 text-[14px] leading-relaxed text-text-muted">
-          {desc}
+          <SmokeText text={desc} />
         </p>
       </div>
-      <style jsx>{`
-        .cap-card {
-          animation: fade-in-up 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
-          animation-delay: var(--d, 0ms);
-        }
-      `}</style>
     </div>
   );
 }
@@ -520,21 +546,25 @@ function ShowcaseSection() {
             className="mb-3 text-[10.5px] font-semibold uppercase tracking-[0.22em] text-text-dim"
             style={{ fontFamily: 'var(--font-tech)' }}
           >
-            FEITO PRA ENTREGAR
+            COMO FUNCIONA
           </div>
           <h2 className="section-title text-[34px] md:text-[44px]" style={{ lineHeight: 1.08 }}>
-            Você edita.<br />
-            <span className="display-subtle">A gente cuida do resto.</span>
+            <SmokeText text="Liga a automação." className="block" />
+            <span className="display-subtle block">
+              <SmokeText text="O resto é fila." />
+            </span>
           </h2>
           <p className="mt-5 max-w-[480px] text-[15px] leading-relaxed text-text-muted">
-            Esquece de ficar trocando entre dez programas pra fazer uma coisa simples.
-            Aqui o atalho vem pronto.
+            <SmokeText text="A fila roda em segundo plano enquanto você faz outra coisa." className="block" />
+            <span className="mt-2 block">
+              <SmokeText text="Você só volta pra revisar." />
+            </span>
           </p>
           <ul className="mt-7 space-y-3">
             {[
-              'Tudo funciona direto do navegador.',
-              'Os arquivos ficam no seu computador.',
-              'Você usa as suas chaves de IA, no seu ritmo.',
+              'Tudo roda no seu computador. Sem servidor remoto.',
+              'Os arquivos nunca saem da sua máquina.',
+              'Você usa suas próprias chaves de IA, no seu ritmo.',
               'Sem assinatura escondida. Sem letra miúda.',
             ].map((line, i) => (
               <li
@@ -543,19 +573,20 @@ function ShowcaseSection() {
                 style={{ animationDelay: `${i * 80}ms` }}
               >
                 <CheckMark />
-                <span className="text-[14.5px] text-white">{line}</span>
+                <span className="text-[14.5px] text-white">
+                  <SmokeText text={line} />
+                </span>
               </li>
             ))}
           </ul>
           <div className="mt-8">
             <Link href="/login" className="btn-primary group">
-              <span>Acessar agora</span>
+              <span>Começar agora</span>
               <span className="transition-transform duration-300 group-hover:translate-x-1">→</span>
             </Link>
           </div>
         </div>
 
-        {/* Mock visual estilizado */}
         <ShowcaseVisual />
       </div>
     </section>
@@ -598,7 +629,6 @@ function ShowcaseVisual() {
         }}
       />
 
-      {/* Cards flutuantes simulando UI */}
       <div className="absolute left-6 top-6 w-[58%] rounded-[14px] border border-white/10 bg-black/45 p-4 backdrop-blur-xl float-y-card">
         <div className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-red-400" />
@@ -609,7 +639,7 @@ function ShowcaseVisual() {
         <div className="mt-2 h-1.5 w-32 rounded-full bg-white/15" />
         <div className="mt-1 h-1.5 w-20 rounded-full bg-white/10" />
         <div className="mt-4 grid grid-cols-3 gap-2">
-          {[1,2,3,4,5,6].map((i) => (
+          {[1, 2, 3, 4, 5, 6].map((i) => (
             <div key={i} className="h-10 rounded-md bg-white/5 border border-white/8" />
           ))}
         </div>
@@ -617,20 +647,19 @@ function ShowcaseVisual() {
 
       <div className="absolute bottom-8 right-6 w-[60%] rounded-[14px] border border-white/10 bg-black/55 p-4 backdrop-blur-xl float-y-card-2">
         <div
-          className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-violet"
+          className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-lime"
           style={{ fontFamily: 'var(--font-tech)' }}
         >
-          Carregando
+          Em execução
         </div>
         <div className="mt-3 h-1.5 w-full rounded-full bg-white/8 overflow-hidden">
-          <div className="h-full w-2/3 rounded-full" style={{ background: 'linear-gradient(90deg, #a78bfa, #67e8f9)' }} />
+          <div className="h-full w-2/3 rounded-full" style={{ background: 'linear-gradient(90deg, #c8ff00, #a78bfa)' }} />
         </div>
         <div className="mt-3 text-[12.5px] text-white/80">
-          B-roll sendo montado…
+          Fila do Pilot · 12 de 18 prontos
         </div>
       </div>
 
-      {/* Coelho central */}
       <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-70 mix-blend-screen">
         <DarkoLogo size={180} />
       </div>
@@ -674,14 +703,14 @@ function FinalCTA() {
             className="text-[40px] font-extrabold tracking-tight text-white md:text-[56px]"
             style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.03em', lineHeight: 1.05 }}
           >
-            Pronto pra editar diferente?
+            <SmokeText text="Pronto pra automatizar?" />
           </h2>
-          <p className="mx-auto mt-4 max-w-[520px] text-[15.5px] leading-relaxed text-white/75">
-            Cria a conta, entra, edita. É só isso.
+          <p className="mx-auto mt-4 max-w-[540px] text-[15.5px] leading-relaxed text-white/75">
+            <SmokeText text="Cria a conta, liga a fila e vai viver. Resto é robô." />
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Link href="/login" className="btn-primary group text-base">
-              <span>Entrar no estúdio</span>
+              <span>Começar grátis</span>
               <span className="transition-transform duration-300 group-hover:translate-x-1">→</span>
             </Link>
           </div>
@@ -707,7 +736,7 @@ function LandingFooter() {
           </span>
         </div>
         <p className="text-[12.5px] text-text-muted">
-          Feito por quem edita. © {new Date().getFullYear()}
+          Auto Edit · © {new Date().getFullYear()}
         </p>
       </div>
     </footer>

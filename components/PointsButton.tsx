@@ -3,18 +3,47 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { loadHistory, currentMonthKey, type MonthHistory } from '@/lib/points-system';
+import { createClient } from '@/lib/supabase/client';
 
 /**
- * PointsButton v4 — ícone-only no top-bar.
+ * PointsButton v5 — só visível pra admin.
  *
- * Mostra o tier atual como cor do ícone. Sem texto, só tooltip — toolbar
- * fica limpa. Pequeno glow respira quando há tier conquistado no mês.
+ * Pontos é um sistema interno do admin. Usuários comuns nem veem o botão.
  */
 export function PointsButton() {
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [tierName, setTierName] = useState<string | null>(null);
   const [tierColor, setTierColor] = useState<string>('#fbbf24');
 
+  // Detecta admin
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const supabase = createClient();
+        const { data: u } = await supabase.auth.getUser();
+        const uid = u.user?.id;
+        if (!uid) {
+          if (!cancelled) setIsAdmin(false);
+          return;
+        }
+        const { data } = await supabase
+          .from('profiles')
+          .select('is_admin')
+          .eq('id', uid)
+          .maybeSingle();
+        if (!cancelled) setIsAdmin(!!data?.is_admin);
+      } catch {
+        if (!cancelled) setIsAdmin(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isAdmin) return;
     function check() {
       const history = loadHistory();
       const cur = currentMonthKey();
@@ -29,7 +58,10 @@ export function PointsButton() {
     check();
     const id = setInterval(check, 5000);
     return () => clearInterval(id);
-  }, []);
+  }, [isAdmin]);
+
+  // Se ainda não sabemos se é admin OU não é admin → não renderiza
+  if (!isAdmin) return null;
 
   const active = !!tierName;
 
@@ -40,7 +72,6 @@ export function PointsButton() {
       title={active ? `${tierName} este mês` : 'Pontos'}
       className="topbar-icon group"
       style={{
-        // CSS vars consumidas pelo .topbar-icon (definido em globals.css)
         ['--ti-color' as string]: active ? tierColor : '#9c9ca6',
         ['--ti-glow' as string]: active ? tierColor + '70' : 'transparent',
       }}

@@ -3,13 +3,50 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
+/**
+ * Roteamento + autenticação + tier gating.
+ *
+ *   /login              → público
+ *   /register           → público (cadastro aberto pro tier 'free')
+ *   /verify, /forgot-password → desabilitados (redirect /login)
+ *   /                   → público (landing)
+ *
+ *  Após login:
+ *    • tier='admin' → acessa tudo
+ *    • tier='beta'  → acessa tudo (exceto rotas admin-only)
+ *    • tier='free'  → SÓ /tools (hub) + /tools/decupagem + /configuracoes.
+ *                     Tudo o mais redireciona pra /tools?locked=1.
+ *                     Dentro de /tools/decupagem, a opção "vídeo" é
+ *                     desabilitada na UI (e o backend também filtra).
+ */
+
 const PUBLIC_AUTH_ROUTES = [
   '/login',
+  '/register',
   '/access-revoked',
   '/auth',
   '/trocar-senha',
 ];
-const DISABLED_AUTH_ROUTES = ['/register', '/forgot-password', '/verify'];
+const DISABLED_AUTH_ROUTES = ['/forgot-password', '/verify'];
+
+// Rotas que o tier 'free' PODE acessar
+const FREE_ALLOWED_PREFIXES = [
+  '/tools', // só o hub exato é livre — abaixo filtramos ferramentas
+  '/configuracoes',
+  '/trocar-senha',
+];
+
+// Ferramentas específicas liberadas pro 'free'
+const FREE_ALLOWED_TOOLS = ['/tools/decupagem'];
+
+// Rotas exclusivamente do admin (mesmo beta não acessa)
+const ADMIN_ONLY_PREFIXES = [
+  '/admin',
+  '/tools/mind-ads',
+  '/tools/ltx-video',
+  '/tools/remover-elementos',
+  '/tools/points', // sistema de pontos é interno
+];
 
 export async function updateSession(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -22,7 +59,6 @@ export async function updateSession(request: NextRequest) {
   if (DISABLED_AUTH_ROUTES.some((p) => pathname.startsWith(p))) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
-    url.searchParams.set('beta', 'closed');
     return NextResponse.redirect(url);
   }
 
@@ -70,6 +106,13 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  if (user && pathname.startsWith('/register')) {
+    // Já logado tentando se cadastrar de novo → vai pra tools
+    const url = request.nextUrl.clone();
+    url.pathname = '/tools';
+    return NextResponse.redirect(url);
+  }
+
   if (
     user &&
     (pathname.startsWith('/tools') ||
@@ -85,13 +128,17 @@ export async function updateSession(request: NextRequest) {
 
     const { data: profile } = await adminClient
       .from('profiles')
-      .select('is_active, is_admin, must_change_password')
+      .select('is_active, is_admin, must_change_password, tier')
       .eq('id', user.id)
       .maybeSingle();
 
     const isActive = profile?.is_active === true;
     const isAdmin = profile?.is_admin === true;
     const mustChangePw = profile?.must_change_password === true;
+    // Tier — fallback derivado (compat) caso a coluna ainda não exista
+    const tier: 'free' | 'beta' | 'admin' =
+      (profile?.tier as 'free' | 'beta' | 'admin' | undefined) ??
+      (isAdmin ? 'admin' : isActive ? 'beta' : 'free');
 
     if (!isActive) {
       await supabase.auth.signOut();
@@ -100,38 +147,55 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
-    // Senha provisoria: redireciona pra trocar antes de qualquer coisa
     if (mustChangePw && !pathname.startsWith('/trocar-senha')) {
       const url = request.nextUrl.clone();
       url.pathname = '/trocar-senha';
       return NextResponse.redirect(url);
     }
-
-    // Se ja trocou e tenta voltar pra /trocar-senha, manda pra /tools
     if (!mustChangePw && pathname.startsWith('/trocar-senha')) {
       const url = request.nextUrl.clone();
       url.pathname = '/tools';
       return NextResponse.redirect(url);
     }
 
-    if (pathname.startsWith('/admin') && !isAdmin) {
-      const url = request.nextUrl.clone();
-      url.pathname = '/tools';
-      return NextResponse.redirect(url);
+    // ─── Bloqueio admin-only (mesmo beta não acessa) ───
+    if (ADMIN_ONLY_PREFIXES.some((p) => pathname.startsWith(p))) {
+      if (!isAdmin) {
+        const url = request.nextUrl.clone();
+        url.pathname = '/tools';
+        url.searchParams.set('locked', '1');
+        return NextResponse.redirect(url);
+      }
     }
 
-    // Mind Ads Suite — so admin acessa por enquanto
-    if (pathname.startsWith('/tools/mind-ads') && !isAdmin) {
-      const url = request.nextUrl.clone();
-      url.pathname = '/tools';
-      return NextResponse.redirect(url);
-    }
+    // ─── Bloqueio pro tier 'free' ───
+    if (tier === 'free') {
+      // Permitido: /tools (hub exato), /configuracoes/*, /trocar-senha,
+      // e a ferramenta /tools/decupagem
+      const isHubExact = pathname === '/tools';
+      const isAllowedTool = FREE_ALLOWED_TOOLS.some(
+        (p) => pathname === p || pathname.startsWith(p + '/'),
+      );
+      const isAllowedPrefix = FREE_ALLOWED_PREFIXES.some((p) =>
+        pathname.startsWith(p),
+      );
+      const isTool = pathname.startsWith('/tools/');
 
-    // LTX-Video 2.3 — só a conta admin
-    if (pathname.startsWith('/tools/ltx-video') && !isAdmin) {
-      const url = request.nextUrl.clone();
-      url.pathname = '/tools';
-      return NextResponse.redirect(url);
+      // Se é ferramenta mas não está na whitelist do free → bloqueia
+      if (isTool && !isAllowedTool) {
+        const url = request.nextUrl.clone();
+        url.pathname = '/tools';
+        url.searchParams.set('locked', '1');
+        return NextResponse.redirect(url);
+      }
+
+      // Outras rotas fora dos prefixos permitidos
+      if (!isHubExact && !isAllowedPrefix) {
+        const url = request.nextUrl.clone();
+        url.pathname = '/tools';
+        url.searchParams.set('locked', '1');
+        return NextResponse.redirect(url);
+      }
     }
   }
 
