@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "DarkoLab Downloader",
+  "name": "Auto Edit · Downloader",
   "version": "1.0.0",
-  "description": "Baixa videos/audio do YouTube, Instagram, TikTok, Pinterest (e +18) via motor local DarkoLab.",
+  "description": "Baixa vídeos e áudios do YouTube, Instagram, TikTok e Pinterest direto pra você.",
   "action": {
-    "default_title": "DarkoLab Downloader",
+    "default_title": "Auto Edit · Downloader",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon-16.png",

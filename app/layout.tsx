@@ -51,10 +51,13 @@ const serif = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
-  title: 'DARKO LAB',
+  title: 'Auto Edit',
   description: 'Suite criativa pra editores.',
   icons: {
-    icon: '/favicon.svg',
+    icon: [
+      { url: '/favicon.png', type: 'image/png' },
+      { url: '/auto-edit-logo@128.png', sizes: '128x128', type: 'image/png' },
+    ],
   },
 };
 

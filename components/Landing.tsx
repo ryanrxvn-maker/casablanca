@@ -703,7 +703,7 @@ function LandingFooter() {
             className="text-[13px] font-semibold tracking-[0.18em] text-white/80"
             style={{ fontFamily: 'var(--font-tech)' }}
           >
-            DARKO LAB
+            AUTO EDIT
           </span>
         </div>
         <p className="text-[12.5px] text-text-muted">

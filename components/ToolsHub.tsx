@@ -46,8 +46,8 @@ type ToolEntry = {
 const FEATURED: ToolEntry[] = [
   {
     href: '/tools/auto-broll',
-    label: 'Crie B-roll no ritmo do vídeo',
-    description: 'A IA escuta seu vídeo e monta cortes que entram no tempo certo.',
+    label: 'B-roll a partir do seu JSON',
+    description: 'Cola o arquivo JSON, deixa rodando. Os cortes saem prontos enquanto você vive a vida.',
     icon: <IconAutoBroll size={28} />,
     hue: 'rgba(240, 171, 252, 0.45)',
     badge: 'IA',
@@ -55,7 +55,7 @@ const FEATURED: ToolEntry[] = [
   {
     href: '/tools/troca-produto',
     label: 'Troque o produto sem regravar',
-    description: 'Substitui o produto do áudio sem perder a voz original.',
+    description: 'Substitui o produto do áudio. A voz original continua igual.',
     icon: <IconTrocaProduto size={28} />,
     hue: 'rgba(244, 114, 182, 0.45)',
     badge: 'IA',
@@ -63,7 +63,7 @@ const FEATURED: ToolEntry[] = [
   {
     href: '/tools/heygen-auto',
     label: 'Avatar que fala pra você',
-    description: 'Escreva o roteiro e receba o vídeo pronto com o seu avatar.',
+    description: 'Cola o roteiro, recebe o vídeo do seu avatar pronto.',
     icon: <IconHeyGenAuto size={28} />,
     hue: 'rgba(103, 232, 249, 0.45)',
     badge: 'IA',
@@ -233,7 +233,7 @@ export function ToolsHub() {
           style={{ fontFamily: 'var(--font-tech)' }}
         >
           <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-violet shadow-[0_0_10px_rgba(167,139,250,0.8)]" />
-          <span>DARKO LAB</span>
+          <span>AUTO EDIT</span>
         </div>
         <h1 className="hero-title">
           {greeting}{firstName ? `, ${firstName}` : ''}.
@@ -309,7 +309,7 @@ export function ToolsHub() {
           Feito por quem edita.
         </p>
         <p className="mt-1 text-[13px] text-text-muted">
-          DARKO LAB · {new Date().getFullYear()}
+          Auto Edit · {new Date().getFullYear()}
         </p>
       </section>
     </div>
@@ -353,56 +353,177 @@ function SectionTitle({
 function PromoBanner() {
   return (
     <div
-      className="promo-banner relative overflow-hidden rounded-[20px] border border-line/60 fade-in-up"
+      className="promo-banner group relative overflow-hidden rounded-[26px] border border-line/60 fade-in-up"
       style={{
         animationDelay: '80ms',
         background:
-          'linear-gradient(120deg, rgba(200,255,0,0.14) 0%, rgba(167,139,250,0.14) 50%, rgba(34,211,238,0.10) 100%), linear-gradient(180deg, #15151a, #0e0e10)',
+          'linear-gradient(120deg, rgba(200,255,0,0.16) 0%, rgba(167,139,250,0.18) 50%, rgba(34,211,238,0.12) 100%), linear-gradient(180deg, #15151a, #0a0a0c)',
       }}
     >
-      <div className="absolute inset-0 opacity-55" style={{ background: 'radial-gradient(55% 85% at 0% 50%, rgba(200,255,0,0.22), transparent 60%)' }} />
-      <div className="absolute inset-0 opacity-55" style={{ background: 'radial-gradient(55% 85% at 100% 50%, rgba(167,139,250,0.28), transparent 60%)' }} />
-
-      {/* Ícone decorativo do piloto à direita, atrás do texto */}
+      {/* Mesh gradient animado — duas manchas que pulsam fora de fase */}
       <div
         aria-hidden
-        className="pointer-events-none absolute -right-6 top-1/2 -translate-y-1/2 opacity-25 md:opacity-30"
-        style={{ filter: 'drop-shadow(0 0 32px rgba(200,255,0,0.4))' }}
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(60% 90% at 0% 50%, rgba(200,255,0,0.28), transparent 60%)',
+          animation: 'promo-pulse-1 6s ease-in-out infinite',
+        }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(60% 90% at 100% 50%, rgba(167,139,250,0.32), transparent 60%)',
+          animation: 'promo-pulse-2 7s ease-in-out infinite',
+        }}
+      />
+
+      {/* Linhas tech decorativas no fundo (grid sutil) */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.06]"
+        style={{
+          backgroundImage:
+            'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)',
+          backgroundSize: '40px 40px',
+        }}
+      />
+
+      {/* Sparkles flutuantes */}
+      <Sparkle className="absolute top-6 right-[30%]" delay={0} />
+      <Sparkle className="absolute top-[60%] right-[18%]" delay={800} />
+      <Sparkle className="absolute top-[28%] right-[8%]" delay={1600} />
+
+      {/* Ícone piloto grande à direita, com motion 3D */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 md:block"
+        style={{
+          filter:
+            'drop-shadow(0 0 36px rgba(200,255,0,0.42)) drop-shadow(0 0 18px rgba(167,139,250,0.38))',
+          animation: 'promo-icon-float 5.5s ease-in-out infinite',
+        }}
       >
-        <IconClickUpPilot size={180} strokeWidth={1.2} />
+        <div className="opacity-30 group-hover:opacity-45 transition-opacity duration-500">
+          <IconClickUpPilot size={240} strokeWidth={1.2} />
+        </div>
       </div>
 
-      <div className="relative flex flex-col items-start gap-4 px-6 py-7 md:flex-row md:items-center md:justify-between md:px-8">
-        <div className="max-w-[560px]">
+      <div className="relative flex flex-col items-start gap-6 px-7 py-10 md:flex-row md:items-center md:justify-between md:px-12 md:py-14">
+        <div className="max-w-[600px]">
           <div
-            className="mb-2 inline-flex items-center gap-2 rounded-full border border-lime/40 bg-black/40 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-lime"
-            style={{ fontFamily: 'var(--font-tech)' }}
+            className="mb-4 inline-flex items-center gap-2 rounded-full border border-lime/50 bg-black/50 px-3.5 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.22em] text-lime backdrop-blur-md"
+            style={{
+              fontFamily: 'var(--font-tech)',
+              boxShadow: '0 0 22px -6px rgba(200,255,0,0.55), inset 0 1px 0 rgba(255,255,255,0.08)',
+            }}
           >
-            <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.85)]" />
-            ClickUp Pilot
+            <span
+              className="inline-block h-2 w-2 animate-pulse-soft rounded-full bg-lime"
+              style={{ boxShadow: '0 0 10px rgba(200,255,0,0.95), 0 0 20px rgba(200,255,0,0.5)' }}
+            />
+            ClickUp Pilot · novo
           </div>
           <h3
-            className="text-2xl font-extrabold tracking-tight text-white md:text-[28px]"
-            style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
+            className="text-[28px] font-extrabold leading-[1.05] tracking-tight text-white md:text-[40px]"
+            style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.025em' }}
           >
-            Sua equipe edita no automático.
+            Sua equipe edita<br />
+            <span
+              style={{
+                background: 'linear-gradient(135deg, #c8ff00 0%, #a78bfa 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
+              no automático.
+            </span>
           </h3>
-          <p className="mt-1 text-[13.5px] text-white/75">
-            Conecta no seu ClickUp, lê os briefings e dispara os avatares sozinho. Você só revisa.
+          <p className="mt-3 max-w-[480px] text-[14.5px] leading-relaxed text-white/80">
+            Conecta no seu ClickUp, lê os briefings e dispara os avatares
+            sozinho. Você só revisa.
           </p>
+
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <Link
+              href="/tools/clickup-pilot"
+              className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full px-6 py-3 text-[13.5px] font-bold text-black"
+              style={{
+                background: 'linear-gradient(135deg, #c8ff00 0%, #a3e635 100%)',
+                boxShadow:
+                  'inset 0 1px 0 rgba(255,255,255,0.5), 0 12px 32px -8px rgba(200,255,0,0.55), 0 2px 6px rgba(0,0,0,0.4)',
+              }}
+            >
+              <span className="relative z-10">Conhecer o Pilot</span>
+              <span className="relative z-10 transition-transform duration-300 group-hover/btn:translate-x-1">
+                →
+              </span>
+              {/* Sheen */}
+              <span
+                aria-hidden
+                className="absolute inset-0 -translate-x-[120%] bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 group-hover/btn:translate-x-[120%]"
+              />
+            </Link>
+            <span
+              className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/55"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              · Em ~2 min
+            </span>
+          </div>
         </div>
-        <Link
-          href="/tools/clickup-pilot"
-          className="btn-glass-light inline-flex items-center gap-2 whitespace-nowrap"
-        >
-          <span>Conhecer</span>
-          <span className="text-base transition-transform duration-300 group-hover:translate-x-0.5">→</span>
-        </Link>
       </div>
+
+      <style jsx>{`
+        @keyframes promo-pulse-1 {
+          0%, 100% { opacity: 0.55; transform: scale(1); }
+          50% { opacity: 0.85; transform: scale(1.05); }
+        }
+        @keyframes promo-pulse-2 {
+          0%, 100% { opacity: 0.55; transform: scale(1.03); }
+          50% { opacity: 0.85; transform: scale(0.97); }
+        }
+        @keyframes promo-icon-float {
+          0%, 100% { transform: translateY(-50%) translateX(0) rotate(0); }
+          50% { transform: translateY(calc(-50% - 8px)) translateX(-4px) rotate(-3deg); }
+        }
+      `}</style>
     </div>
   );
 }
 
+function Sparkle({ className, delay = 0 }: { className?: string; delay?: number }) {
+  return (
+    <span
+      aria-hidden
+      className={'pointer-events-none ' + (className || '')}
+      style={{ animation: `sparkle-twinkle 2.6s ease-in-out infinite`, animationDelay: `${delay}ms` }}
+    >
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+        <path d="M7 0l1.2 4.8L13 6l-4.8 1.2L7 12l-1.2-4.8L0 6l4.8-1.2L7 0z" fill="#fff" opacity="0.9" />
+      </svg>
+      <style jsx>{`
+        @keyframes sparkle-twinkle {
+          0%, 100% { opacity: 0; transform: scale(0.6) rotate(0); }
+          40% { opacity: 1; transform: scale(1) rotate(90deg); }
+          60% { opacity: 1; transform: scale(1) rotate(120deg); }
+        }
+      `}</style>
+    </span>
+  );
+}
+
+/**
+ * FeaturedCard — card 3D rico com:
+ *   • Tilt seguindo o mouse (perspective + rotateX/Y, 3D real)
+ *   • Spotlight radial que segue o cursor (--gx/--gy)
+ *   • Glow ambiente que intensifica no hover
+ *   • Ícone com bounce + rotação e profundidade Z
+ *   • Conic border animada visível no hover
+ *   • Título com leve translate vertical no hover
+ */
 function FeaturedCard({
   entry,
   delay,
@@ -411,54 +532,120 @@ function FeaturedCard({
   delay: number;
 }) {
   return (
-    <Link
-      href={entry.href}
-      className="featured-card fade-in-up group relative block overflow-hidden rounded-[18px] border border-line/70 p-5 md:p-6"
-      style={{
-        animationDelay: `${delay}ms`,
-        background:
-          'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, #15151a, #0e0e10)',
-      }}
+    <div
+      className="featured-card-wrap fade-in-up"
+      style={{ animationDelay: `${delay}ms`, perspective: '1100px' }}
     >
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full opacity-70 blur-3xl transition-opacity duration-500 group-hover:opacity-100"
-        style={{ background: entry.hue }}
-      />
-      <div className="relative">
-        <div className="mb-4 flex items-center justify-between">
-          <span
-            className="flex h-12 w-12 items-center justify-center rounded-[14px] border border-white/8 bg-black/35 backdrop-blur-md transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-[6deg]"
+      <Link
+        href={entry.href}
+        onMouseMove={(e) => {
+          const el = e.currentTarget;
+          const rect = el.getBoundingClientRect();
+          const px = (e.clientX - rect.left) / rect.width;
+          const py = (e.clientY - rect.top) / rect.height;
+          el.style.setProperty('--gx', `${(px * 100).toFixed(1)}%`);
+          el.style.setProperty('--gy', `${(py * 100).toFixed(1)}%`);
+          const rotY = (px - 0.5) * 8;
+          const rotX = -(py - 0.5) * 8;
+          el.style.transform = `rotateX(${rotX.toFixed(2)}deg) rotateY(${rotY.toFixed(2)}deg)`;
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLElement).style.transform = 'rotateX(0) rotateY(0)';
+        }}
+        className="featured-card group relative block overflow-hidden rounded-[20px] border border-line/70 p-5 md:p-6"
+        style={{
+          background:
+            'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.22)), linear-gradient(180deg, #16161c, #0c0c10)',
+          transformStyle: 'preserve-3d',
+          transition:
+            'transform 0.35s cubic-bezier(.2,.8,.2,1), box-shadow 0.5s ease, border-color 0.4s ease',
+          willChange: 'transform',
+        }}
+      >
+        {/* Spotlight seguindo o cursor */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+          style={{
+            background: `radial-gradient(380px circle at var(--gx, 50%) var(--gy, 50%), ${entry.hue}, transparent 55%)`,
+          }}
+        />
+
+        {/* Glow ambient — canto superior direito */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-14 -top-14 h-44 w-44 rounded-full opacity-70 blur-3xl transition-all duration-500 group-hover:opacity-100"
+          style={{ background: entry.hue }}
+        />
+
+        {/* Conic border animada — só no hover */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 rounded-[20px] opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+          style={{
+            padding: '1px',
+            background:
+              'conic-gradient(from var(--angle, 0deg), transparent 0%, ' +
+              entry.hue +
+              ' 22%, transparent 50%, ' +
+              entry.hue +
+              ' 78%, transparent 100%)',
+            WebkitMask:
+              'linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)',
+            WebkitMaskComposite: 'xor',
+            maskComposite: 'exclude',
+            animation: 'card-border-spin 6s linear infinite',
+          }}
+        />
+
+        <div className="relative">
+          <div className="mb-5 flex items-center justify-between">
+            <span
+              className="flex h-14 w-14 items-center justify-center rounded-[16px] border border-white/10 bg-black/40 backdrop-blur-md transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:scale-110 group-hover:-rotate-[8deg]"
+              style={{
+                boxShadow: `0 0 32px -2px ${entry.hue}, inset 0 1px 0 rgba(255,255,255,0.12)`,
+                transform: 'translateZ(30px)',
+              }}
+            >
+              {entry.icon}
+            </span>
+            {entry.badge ? (
+              <span
+                className="rounded-full border border-violet/35 bg-violet/10 px-2.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.20em] text-violet backdrop-blur-md transition-transform duration-300 group-hover:scale-105"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                {entry.badge}
+              </span>
+            ) : null}
+          </div>
+          <h3
+            className="text-[18px] font-bold leading-snug tracking-tight text-white transition-transform duration-300 group-hover:-translate-y-0.5"
             style={{
-              boxShadow: `0 0 28px -4px ${entry.hue}, inset 0 1px 0 rgba(255,255,255,0.1)`,
+              fontFamily: 'var(--font-tech)',
+              letterSpacing: '-0.015em',
+              transform: 'translateZ(20px)',
             }}
           >
-            {entry.icon}
-          </span>
-          {entry.badge ? (
+            {entry.label}
+          </h3>
+          <p className="mt-1.5 text-[13.5px] leading-relaxed text-text-muted">
+            {entry.description}
+          </p>
+          <div
+            className="mt-6 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-text-dim transition-all duration-300 group-hover:text-white"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            <span>Abrir</span>
             <span
-              className="rounded-full border border-white/15 bg-black/30 px-2.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.18em] text-white/85"
-              style={{ fontFamily: 'var(--font-tech)' }}
+              className="flex h-6 w-6 items-center justify-center rounded-full border border-white/10 transition-all duration-300 group-hover:translate-x-1 group-hover:scale-110 group-hover:border-white/30"
+              style={{ background: 'rgba(255,255,255,0.02)' }}
             >
-              {entry.badge}
+              →
             </span>
-          ) : null}
+          </div>
         </div>
-        <h3
-          className="text-[17px] font-bold leading-snug tracking-tight text-white"
-          style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.01em' }}
-        >
-          {entry.label}
-        </h3>
-        <p className="mt-1.5 text-[13px] leading-relaxed text-text-muted">
-          {entry.description}
-        </p>
-        <div className="mt-5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-text-dim transition-all duration-300 group-hover:text-white" style={{ fontFamily: 'var(--font-tech)' }}>
-          <span>Abrir</span>
-          <span className="transition-transform duration-300 group-hover:translate-x-1">→</span>
-        </div>
-      </div>
-    </Link>
+      </Link>
+    </div>
   );
 }
 
