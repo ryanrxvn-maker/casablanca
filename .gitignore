@@ -38,3 +38,11 @@ next-env.d.ts
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# ProPainter models — baixados em runtime pelo Instalar.ps1
+engine/subtitle-remover-pkg/propainter/weights/*.pth
+engine/subtitle-remover-local/propainter/weights/*.pth
+
+# STTN model — baixado em runtime
+engine/subtitle-remover-pkg/sttn/infer_model.pth
+engine/subtitle-remover-local/sttn/infer_model.pth

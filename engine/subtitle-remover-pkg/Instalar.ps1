@@ -170,6 +170,8 @@ try {
       Invoke-Pip $py @(
         'fastapi==0.115.6', 'uvicorn[standard]==0.32.1', 'python-multipart==0.0.20',
         'opencv-python==4.10.0.84', 'numpy==1.26.4', 'Pillow==9.5.0',
+        'scipy==1.13.1', 'einops==0.8.2', 'timm==1.0.27',
+        'av==17.0.1', 'imageio-ffmpeg==0.6.0',
         'paddlepaddle==2.6.2', 'paddleocr==2.8.1',
         '--extra-index-url', 'https://download.pytorch.org/whl/cu121',
         'torch==2.4.1', 'simple-lama-inpainting==0.1.2'
@@ -179,6 +181,8 @@ try {
       Invoke-Pip $py @(
         'fastapi==0.115.6', 'uvicorn[standard]==0.32.1', 'python-multipart==0.0.20',
         'opencv-python==4.10.0.84', 'numpy==1.26.4', 'Pillow==9.5.0',
+        'scipy==1.13.1', 'einops==0.8.2', 'timm==1.0.27',
+        'av==17.0.1', 'imageio-ffmpeg==0.6.0',
         'paddlepaddle==2.6.2', 'paddleocr==2.8.1',
         'torch==2.4.1', 'simple-lama-inpainting==0.1.2'
       )
@@ -186,6 +190,28 @@ try {
     St 75 'Componentes instalados.'
   } else {
     St 78 'IA + dependencias ja instaladas (pulando download).'
+  }
+
+  # ---- 4b) Modelos ProPainter (~190 MB, baixa uma vez) ----
+  $ppDir = Join-Path $dst 'propainter\weights'
+  New-Item -ItemType Directory -Force -Path $ppDir | Out-Null
+  $ppFiles = @(
+    @{ Name='raft-things.pth'; Url='https://github.com/sczhou/ProPainter/releases/download/v0.1.0/raft-things.pth'; MinSize=20000000 },
+    @{ Name='recurrent_flow_completion.pth'; Url='https://github.com/sczhou/ProPainter/releases/download/v0.1.0/recurrent_flow_completion.pth'; MinSize=18000000 },
+    @{ Name='ProPainter.pth'; Url='https://github.com/sczhou/ProPainter/releases/download/v0.1.0/ProPainter.pth'; MinSize=140000000 }
+  )
+  $ppProgress = 78
+  foreach ($pp in $ppFiles) {
+    $dest = Join-Path $ppDir $pp.Name
+    if ((Test-Path $dest) -and (Get-Item $dest).Length -ge $pp.MinSize) { continue }
+    $ppProgress += 1
+    St $ppProgress ('Baixando modelo ProPainter ' + $pp.Name + '...')
+    try {
+      Invoke-WebRequest -UseBasicParsing -Uri $pp.Url -OutFile $dest
+    } catch {
+      # ProPainter eh opcional — se falhar, STTN continua disponivel
+      Write-Host ('Aviso: falhou baixar ' + $pp.Name + ' - ProPainter ficara indisponivel (STTN continua OK)')
+    }
   }
 
   # ---- 4) ffmpeg.exe ----

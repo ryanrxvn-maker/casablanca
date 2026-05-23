@@ -40,6 +40,8 @@ type ServerDeps = {
   numpy: boolean;
   paddleocr: boolean;
   lama: boolean;
+  sttn?: boolean;
+  propainter?: boolean;
   ffmpeg: boolean;
   /** 'cuda' se torch detectou GPU, senao 'cpu'. */
   device: 'cuda' | 'cpu';
@@ -452,13 +454,21 @@ export default function RemoverElementosPage() {
               <span className="mono ml-2 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
                 online · porta {server.state === 'online' ? server.port : port}
               </span>
-              {server.state === 'online' && server.deps.lama ? (
+              {server.state === 'online' && server.deps.propainter ? (
+                <span className="mono ml-1 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
+                  ProPainter ✓ {server.deps.device === 'cuda' ? 'GPU' : 'CPU'}
+                </span>
+              ) : server.state === 'online' && server.deps.sttn ? (
+                <span className="mono ml-1 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
+                  STTN ✓ {server.deps.device === 'cuda' ? 'GPU' : 'CPU'}
+                </span>
+              ) : server.state === 'online' && server.deps.lama ? (
                 <span className="mono ml-1 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
                   LaMa ✓ {server.deps.device === 'cuda' ? 'GPU' : 'CPU'}
                 </span>
               ) : (
                 <span className="mono ml-1 rounded-full bg-yellow-500/15 px-2 py-0.5 text-[10px] uppercase text-yellow-300">
-                  LaMa ✗ atualize o motor
+                  Motor incompleto · atualize
                 </span>
               )}
             </div>

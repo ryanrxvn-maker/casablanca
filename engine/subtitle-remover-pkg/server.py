@@ -254,7 +254,7 @@ async def process(
 ):
     """Sincrono: processa e devolve direto o MP4. Pra videos curtos."""
     _auth_or_403(origin, authorization, x_darko_token)
-    if mode not in ("auto", "sttn", "lama", "telea"):
+    if mode not in ("auto", "propainter", "sttn", "lama", "telea"):
         raise HTTPException(status_code=400, detail="mode must be auto|sttn|lama|telea")
 
     jid = uuid.uuid4().hex[:12]
@@ -306,7 +306,7 @@ async def create_job(
 ):
     """Assincrono: cria o job, retorna id; cliente faz polling em /jobs/{id}."""
     _auth_or_403(origin, authorization, x_darko_token)
-    if mode not in ("auto", "sttn", "lama", "telea"):
+    if mode not in ("auto", "propainter", "sttn", "lama", "telea"):
         raise HTTPException(status_code=400, detail="mode must be auto|sttn|lama|telea")
 
     jid = uuid.uuid4().hex[:12]

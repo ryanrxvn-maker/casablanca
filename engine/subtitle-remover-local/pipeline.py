@@ -50,6 +50,7 @@ import numpy as np
 _ocr_engine = None  # PaddleOCR
 _lama_engine = None  # SimpleLama
 _sttn_engine = None  # STTNInpaint
+_propainter_engine = None  # ProPainterInpaint
 
 
 def _get_sttn():
@@ -67,6 +68,22 @@ def _get_sttn():
         except Exception:
             return None
     return _sttn_engine
+
+
+def _get_propainter():
+    """Carrega ProPainter sob demanda. Retorna None se modelo nao disponivel."""
+    global _propainter_engine
+    if _propainter_engine is None:
+        try:
+            from propainter_engine import ProPainterInpaint, find_propainter_models
+            model_dir = find_propainter_models()
+            if not model_dir:
+                return None
+            _propainter_engine = ProPainterInpaint(model_dir=model_dir)
+        except Exception as e:
+            print(f"[pipeline] ProPainter unavailable: {e}", flush=True)
+            return None
+    return _propainter_engine
 
 
 def _get_ocr():
@@ -834,16 +851,34 @@ def process_video(
             # Fallback: processa em resolution original
             proc_W, proc_H = W, H
 
-    # ---- Modo auto: usa STTN se modelo disponivel (qualidade Vmake) ----
-    # STTN olha multiplos frames simultaneamente, reconstruindo textura
-    # real (pele, cabelo, fundo). Vs LaMa single-frame que fica borrado.
+    # ---- Modo auto: prioridade depende de GPU ----
+    #   CUDA + ProPainter: melhor qualidade (Vmake-level), ~150ms/frame
+    #   CPU + STTN frame-skip: qualidade boa, ~650ms/frame
+    #   Fallback LaMa: single-frame
+    #
+    # ProPainter em CPU eh inviavel (~16s/frame = horas pra um VSL).
+    # Por isso so eh usado quando GPU NVIDIA disponivel — ai vira a
+    # melhor opcao automaticamente.
     sttn = None
+    propainter = None
     if mode == "auto":
-        sttn = _get_sttn()
-        if sttn is not None:
-            mode = "sttn"
+        has_cuda = _detect_torch_device() == "cuda"
+        if has_cuda:
+            propainter = _get_propainter()
+        if propainter is not None:
+            mode = "propainter"
+            emit(0.02, "Using ProPainter (GPU, Vmake-level quality)...")
         else:
-            mode = "lama"
+            sttn = _get_sttn()
+            if sttn is not None:
+                mode = "sttn"
+                emit(0.02, "Using STTN (fast CPU mode)...")
+            else:
+                mode = "lama"
+                emit(0.02, "Using LaMa (fallback)...")
+    elif mode == "propainter":
+        # opt-in explicito — usuario quer ProPainter mesmo em CPU
+        propainter = _get_propainter()
 
     emit(0.04, "Sampling frames for text detection...")
     cap = cv2.VideoCapture(proc_in_path)
@@ -928,6 +963,50 @@ def process_video(
         # Qualidade significativamente superior ao LaMa pq usa contexto
         # entre frames pra reconstruir textura (pele, cabelo, fundo).
         # ============================================================
+        # ============================================================
+        # ProPainter (qualidade premium / Vmake-level)
+        # ============================================================
+        if mode == "propainter" and propainter is not None:
+            # ProPainter processa o video INTEIRO de uma vez (memoria
+            # permitindo). Pra videos longos divide internamente em
+            # subvideos de 80 frames com pad temporal pra continuidade.
+            cap = cv2.VideoCapture(proc_in_path)
+            total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+            frames_all = []
+            try:
+                while True:
+                    ok, frame = cap.read()
+                    if not ok or frame is None:
+                        break
+                    frames_all.append(frame)
+            finally:
+                cap.release()
+
+            emit(0.20, f"ProPainter: loading {len(frames_all)} frames...")
+
+            def _pp_progress(done, total_phases):
+                # done varia de 0..4. mapeia pra 0.20..0.92
+                p = 0.20 + (0.72 * (min(done, total_phases) / max(1, total_phases)))
+                emit(p, f"ProPainter phase {done:.1f}/{total_phases}")
+
+            cleaned = propainter(frames_all, mask, on_progress=_pp_progress)
+            for f in cleaned:
+                out_writer.write(f)
+            idx = len(cleaned)
+            out_writer.release()
+
+            emit(0.92, "Muxing original audio + clean video...")
+            _remux(silent_video, in_path, out_path, target_size=(W, H) if downscale_processing else None)
+            if downscale_processing and proc_in_path != in_path:
+                try: os.remove(proc_in_path)
+                except Exception: pass
+            emit(1.0, "Done.")
+            return {
+                "width": W, "height": H, "fps": fps,
+                "frames_processed": idx, "mode": "propainter",
+                "mask_area_ratio": float(mask.sum() / 255) / float(proc_W * proc_H),
+            }
+
         if mode == "sttn" and sttn is not None:
             # NOTA: testei multiprocessing (2 e 4 workers) e ficou MAIS
             # LENTO que single-process. Razao: torch + opencv ja paralelizam
@@ -935,9 +1014,6 @@ def process_video(
             # processos Python concorrentes faz N processos competirem por
             # cache + memoria + cores fisicos, com overhead de IPC que
             # mata o ganho. Single-process bem-orquestrado e mais rapido.
-            #
-            # Pra ir alem disso em CPU teria que mudar de modelo (E2FGVI
-            # light) ou usar GPU NVIDIA (pipeline ja detecta automatic).
             # Chunks menores = feedback de progresso mais frequente.
             # 25 frames eh sweet spot pra CPU (memoria OK + janela temporal
             # suficiente pra STTN ter contexto temporal de qualidade).
@@ -1186,6 +1262,8 @@ def check_runtime() -> dict:
         "numpy": True,
         "paddleocr": False,
         "lama": False,
+        "sttn": False,
+        "propainter": False,
         "ffmpeg": False,
         "device": "cpu",
     }
@@ -1208,9 +1286,22 @@ def check_runtime() -> dict:
         deps["ffmpeg"] = r.returncode == 0
     except Exception:
         pass
+    # Verifica STTN model presente
+    try:
+        from sttn_engine import find_sttn_model
+        deps["sttn"] = find_sttn_model() is not None
+    except Exception:
+        pass
+    # Verifica ProPainter models presentes (3 arquivos)
+    try:
+        from propainter_engine import find_propainter_models
+        deps["propainter"] = find_propainter_models() is not None
+    except Exception:
+        pass
     deps["device"] = _detect_torch_device()
-    # ready = todas as deps essenciais OK. LaMa eh nucleo agora (Smart Mode).
+    # ready = deps essenciais OK. ProPainter OR STTN OR LaMa suficiente.
+    has_inpaint = deps["propainter"] or deps["sttn"] or deps["lama"]
     return {
         "deps": deps,
-        "ready": all([deps["opencv"], deps["paddleocr"], deps["ffmpeg"], deps["lama"]]),
+        "ready": all([deps["opencv"], deps["paddleocr"], deps["ffmpeg"], has_inpaint]),
     }
