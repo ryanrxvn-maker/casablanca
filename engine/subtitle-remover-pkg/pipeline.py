@@ -659,6 +659,15 @@ def process_video(
         # entre frames pra reconstruir textura (pele, cabelo, fundo).
         # ============================================================
         if mode == "sttn" and sttn is not None:
+            # NOTA: testei multiprocessing (2 e 4 workers) e ficou MAIS
+            # LENTO que single-process. Razao: torch + opencv ja paralelizam
+            # internamente via OpenMP/MKL usando todos os cores. Spawnar
+            # processos Python concorrentes faz N processos competirem por
+            # cache + memoria + cores fisicos, com overhead de IPC que
+            # mata o ganho. Single-process bem-orquestrado e mais rapido.
+            #
+            # Pra ir alem disso em CPU teria que mudar de modelo (E2FGVI
+            # light) ou usar GPU NVIDIA (pipeline ja detecta automatic).
             # Chunks menores = feedback de progresso mais frequente.
             # 25 frames eh sweet spot pra CPU (memoria OK + janela temporal
             # suficiente pra STTN ter contexto temporal de qualidade).
