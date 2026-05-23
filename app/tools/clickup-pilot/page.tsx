@@ -195,6 +195,19 @@ type BatchTaskState = {
   /** ZIP 3 — versoes montadas + camuflagem (gerado se modo camuflagem ON) */
   camufladoZipUrl?: string;
   camufladoZipName?: string;
+  /** Stats numericas do pipeline pos-prod — usado pra detectar "parcial".
+   *  Quando phase='done' mas algum count !== expected, UI esconde TODOS os
+   *  botoes de download (takes/montados/camuflados) e exibe "⚠ parcial",
+   *  forçando user a Retomar pra completar. Sem este flag, a antiga logica
+   *  marcava 'pronto' mesmo com 12 de 16 partes (falso positivo). */
+  pipeStats?: {
+    expectedMontagens: number;
+    okMontagens: number;
+    okDecupados: number;
+    okCamuflados: number;
+    expectedDecupagem: boolean;
+    expectedCamuflagem: boolean;
+  };
   /** Plano serializavel pra RE-DISPARAR sem depender de taskAnalyses
    *  (que NAO sobrevive reload/navegacao). Sem isto, Retomar/Debug de
    *  uma task que falhou com 0 videoIds (ex: cota HeyGen) nao fazia
@@ -1677,6 +1690,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       }
 
       const totalSize = takesBlob.size + (montadoUrl ? assembled.reduce((n, it) => n + (it.decupado?.size || it.rawAssembled?.size || 0), 0) : 0);
+      const decupagemOn = isDecupagemEnabled(taskId);
+      const pipeStats = {
+        expectedMontagens: assembled.length,
+        okMontagens: assembled.filter((it) => !it.errors?.assemble && it.rawAssembled && it.rawAssembled.size > 0).length,
+        okDecupados: assembled.filter((it) => !!it.decupado).length,
+        okCamuflados: assembled.filter((it) => !!it.camuflado).length,
+        expectedDecupagem: decupagemOn,
+        expectedCamuflagem: camuflagemMode,
+      };
       setBatchStates((prev) => ({
         ...prev,
         [taskId]: {
@@ -1690,6 +1712,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           montadoZipName: montadoName,
           camufladoZipUrl: camuUrl,
           camufladoZipName: camuName,
+          pipeStats,
         },
       }));
     } catch (e) {
@@ -1905,6 +1928,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       }
 
       const totalSize = takesBlob.size + (montadoUrl ? assembled.reduce((n, it) => n + (it.decupado?.size || it.rawAssembled?.size || 0), 0) : 0);
+      const decupagemOn = isDecupagemEnabled(taskId);
+      const pipeStats = {
+        expectedMontagens: assembled.length,
+        okMontagens: assembled.filter((it) => !it.errors?.assemble && it.rawAssembled && it.rawAssembled.size > 0).length,
+        okDecupados: assembled.filter((it) => !!it.decupado).length,
+        okCamuflados: assembled.filter((it) => !!it.camuflado).length,
+        expectedDecupagem: decupagemOn,
+        expectedCamuflagem: camuflagemMode,
+      };
       setBatchStates((prev) => ({
         ...prev,
         [taskId]: {
@@ -1918,6 +1950,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           montadoZipName: montadoName,
           camufladoZipUrl: camuUrl,
           camufladoZipName: camuName,
+          pipeStats,
         },
       }));
     } catch (e) {
@@ -3725,10 +3758,31 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                       </div>
                       <ul className="grid gap-2">
                         {Object.values(batchStates).sort((a, b) => b.startedAt - a.startedAt).map((b) => {
-                          const phaseLabel = ({ queued: '⏳ na fila', dispatching: '🚀 disparando', rendering: '⚙ renderizando', downloading: '⬇ baixando', post: '✂ pos-producao', done: '✅ pronto', failed: '✗ falhou' })[b.phase];
-                          const phaseColor = b.phase === 'done' ? 'text-lime border-lime/40 bg-lime/10' : b.phase === 'failed' ? 'text-red-300 border-red-500/40 bg-red-500/10' : 'text-fuchsia-200 border-fuchsia-500/30 bg-fuchsia-500/5';
                           const partsDispatched = b.parts.filter(p => p.videoId).length;
                           const partsRendered = b.parts.filter(p => p.videoStatus === 'completed').length;
+                          // "Tudo OK" = todas partes dispararam, todas renderizaram E pipeline
+                          //  produziu o esperado (sem montagens/decupagens/camuflagens faltando).
+                          //  Só com tudo OK liberamos os botoes de download — se faltou algo,
+                          //  user precisa Retomar pra completar. Fallback p/ estados antigos
+                          //  (sem pipeStats): aceita se phase=done E tem montadoZipUrl.
+                          const dispatchOk = partsDispatched === b.parts.length;
+                          const renderOk = partsRendered === b.parts.length;
+                          const pipeOk = b.pipeStats
+                            ? (
+                                b.pipeStats.expectedMontagens > 0
+                                && b.pipeStats.okMontagens === b.pipeStats.expectedMontagens
+                                && (!b.pipeStats.expectedDecupagem || b.pipeStats.okDecupados === b.pipeStats.expectedMontagens)
+                                && (!b.pipeStats.expectedCamuflagem || b.pipeStats.okCamuflados === b.pipeStats.expectedMontagens)
+                              )
+                            : (b.phase === 'done' && !!b.montadoZipUrl);
+                          const allOk = dispatchOk && renderOk && pipeOk;
+                          const isPartialDone = b.phase === 'done' && !allOk;
+                          const phaseLabel = isPartialDone
+                            ? '⚠ parcial — Retomar'
+                            : ({ queued: '⏳ na fila', dispatching: '🚀 disparando', rendering: '⚙ renderizando', downloading: '⬇ baixando', post: '✂ pos-producao', done: '✅ pronto', failed: '✗ falhou' })[b.phase];
+                          const phaseColor = isPartialDone
+                            ? 'text-yellow-200 border-yellow-500/40 bg-yellow-500/10'
+                            : b.phase === 'done' ? 'text-lime border-lime/40 bg-lime/10' : b.phase === 'failed' ? 'text-red-300 border-red-500/40 bg-red-500/10' : 'text-fuchsia-200 border-fuchsia-500/30 bg-fuchsia-500/5';
                           const elapsedMs = (b.finishedAt || nowTick) - b.startedAt;
                           const elapsedMin = Math.floor(elapsedMs / 60000);
                           const elapsedSec = Math.floor((elapsedMs % 60000) / 1000);
@@ -3742,7 +3796,12 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   <span className="ml-2 text-text-muted">· {elapsedLabel}</span>
                                 </span>
                                 <div className="flex flex-wrap items-center gap-1.5">
-                                  {b.phase === 'done' && b.zipBlobUrl ? (
+                                  {/* Downloads SO aparecem se tudo deu certo (allOk).
+                                   *  Em estado 'parcial' (faltou disparar/renderizar/montar),
+                                   *  forçamos user a Retomar — evita publicar criativo
+                                   *  incompleto. Bug fixado: phase ia pra 'done' mesmo
+                                   *  com 12 de 16 partes dispatched + so 1 montagem. */}
+                                  {b.phase === 'done' && allOk && b.zipBlobUrl ? (
                                     <a
                                       href={b.zipBlobUrl}
                                       download={b.zipFilename}
@@ -3752,7 +3811,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       ⬇ takes
                                     </a>
                                   ) : null}
-                                  {b.phase === 'done' && b.montadoZipUrl ? (
+                                  {b.phase === 'done' && allOk && b.montadoZipUrl ? (
                                     <a
                                       href={b.montadoZipUrl}
                                       download={b.montadoZipName}
@@ -3762,7 +3821,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       ⬇ montados
                                     </a>
                                   ) : null}
-                                  {b.phase === 'done' && b.camufladoZipUrl ? (
+                                  {b.phase === 'done' && allOk && b.camufladoZipUrl ? (
                                     <a
                                       href={b.camufladoZipUrl}
                                       download={b.camufladoZipName}
@@ -3839,7 +3898,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                 const downloadProgress = b.phase === 'done' ? 1 : (b.phase === 'downloading' ? 0.5 : 0);
                                 const totalPct = b.phase === 'done' ? 100 :
                                   Math.round((dispatchProgress * 30 + renderProgress * 60 + downloadProgress * 10));
-                                const barColor = b.phase === 'done' ? 'bg-lime' : 'bg-fuchsia-400';
+                                const barColor = isPartialDone ? 'bg-yellow-400' : (b.phase === 'done' ? 'bg-lime' : 'bg-fuchsia-400');
                                 return (
                                   <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-bg-soft/60">
                                     <div
