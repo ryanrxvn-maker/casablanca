@@ -1,21 +1,10 @@
-# ===============================================================
-#  Auto Edit Downloader - Instalador
-#  ---------------------------------------------------------------
-#  CONSOLE VISIVEL (sem hidden window) pra reduzir trigger de
-#  antivirus. Sem VBS, sem Startup folder + .lnk — usa Task
-#  Scheduler nativo do Windows (schtasks). Tudo logado.
-# ===============================================================
-
-$ErrorActionPreference = 'Continue'  # nao interrompe em erros nao-fatais
+# Auto Edit Downloader - Instalador
+$ErrorActionPreference = 'Continue'
 $ProgressPreference    = 'Continue'
 
-# ---------- paths ----------
 $dst    = Join-Path $env:LOCALAPPDATA 'AutoEditDownloader'
 $src    = $PSScriptRoot
-$logDir = $dst
 $log    = Join-Path $dst 'install.log'
-
-# garante a pasta + log
 New-Item -ItemType Directory -Force -Path $dst | Out-Null
 
 function Log {
@@ -24,36 +13,17 @@ function Log {
   Write-Host $line
   try { Add-Content -LiteralPath $log -Value $line -Encoding UTF8 } catch {}
 }
-
-function Step {
-  param([int]$pct, [string]$msg)
-  Log ("[{0,3}%] {1}" -f $pct, $msg)
-}
-
-function Fail {
-  param([string]$msg, [int]$code = 1)
-  Log ("ERRO: {0}" -f $msg)
-  exit $code
-}
-
-# Captura de erro top-level (sem usar ErrorActionPreference=Stop
-# pra nao matar o script em warnings)
-trap {
-  Fail $_.Exception.Message 99
-}
+function Step { param([int]$pct, [string]$msg); Log ("[{0,3}%] {1}" -f $pct, $msg) }
+function Fail { param([string]$msg, [int]$code = 1); Log ("ERRO: {0}" -f $msg); exit $code }
+trap { Fail $_.Exception.Message 99 }
 
 Log '======================================================'
-Log ' Auto Edit Downloader — Instalador'
+Log ' Auto Edit Downloader - Instalador'
 Log ('  destino: {0}' -f $dst)
-Log ('  fonte  : {0}' -f $src)
 Log '======================================================'
 
-# Force TLS 1.2 pra todos os downloads (alguns CDNs rejeitam tls1.1)
-try {
-  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-} catch {}
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
 
-# ---------- mata instancia rodando ----------
 Step 2 'Parando instancia anterior do motor (se houver)...'
 try {
   Get-CimInstance Win32_Process -Filter "Name='node.exe'" `
@@ -61,164 +31,94 @@ try {
     | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 } catch { Log ('aviso: ' + $_.Exception.Message) }
 
-# ---------- copia arquivos do bundle ----------
 Step 5 'Copiando arquivos do motor...'
 New-Item -ItemType Directory -Force -Path (Join-Path $dst 'bin') | Out-Null
 foreach ($f in @('server.cjs', 'AutoEditDownloader.cmd', 'Desinstalar.ps1', 'LEIA-ME.txt')) {
   $sp = Join-Path $src $f
-  if (Test-Path $sp) {
-    Copy-Item $sp $dst -Force
-  }
+  if (Test-Path $sp) { Copy-Item $sp $dst -Force }
 }
-# legado: arquivo antigo "DarkoDownloader.cmd" — copia também se existir
-$legacy = Join-Path $src 'DarkoDownloader.cmd'
-if (Test-Path $legacy) { Copy-Item $legacy (Join-Path $dst 'AutoEditDownloader.cmd') -Force }
-
-# Cria o starter .cmd no destino se ainda não existir
 $starter = Join-Path $dst 'AutoEditDownloader.cmd'
-if (-not (Test-Path $starter)) {
-  $cmd = @"
-@echo off
-setlocal
-set ""HERE=%~dp0""
-cd /d ""%HERE%""
-set ""YTDLP_PATH=%HERE%bin\yt-dlp.exe""
-set ""FFMPEG_PATH=%HERE%bin\ffmpeg.exe""
-set ""PLAYWRIGHT_BROWSERS_PATH=%HERE%ms-playwright""
-if not defined DARKO_ALLOW_ADULT set ""DARKO_ALLOW_ADULT=1""
-echo [%DATE% %TIME%] start >> ""%HERE%engine.log""
-""%HERE%node\node.exe"" ""%HERE%server.cjs"" >> ""%HERE%engine.log"" 2>&1
-echo [%DATE% %TIME%] exit %ERRORLEVEL% >> ""%HERE%engine.log""
-"@
-  Set-Content -LiteralPath $starter -Value $cmd -Encoding ASCII
-}
 
 $tmp = Join-Path $env:TEMP ('AutoEditInstall_' + [Guid]::NewGuid().ToString('N').Substring(0,8))
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 
-# ---------- Node ----------
 $nodeExe = Join-Path $dst 'node\node.exe'
 if (-not (Test-Path $nodeExe)) {
   Step 12 'Baixando Node.js (~30 MB)...'
   $nodeZip = Join-Path $tmp 'node.zip'
   $nodeVer = 'v22.11.0'
-  try {
-    Invoke-WebRequest -UseBasicParsing -Uri ("https://nodejs.org/dist/$nodeVer/node-$nodeVer-win-x64.zip") -OutFile $nodeZip
-  } catch { Fail ('Falha baixando Node.js: ' + $_.Exception.Message) 11 }
-
-  if (-not (Test-Path $nodeZip) -or (Get-Item $nodeZip).Length -lt 1MB) {
-    Fail 'Download do Node.js veio incompleto.' 12
-  }
-
+  try { Invoke-WebRequest -UseBasicParsing -Uri ("https://nodejs.org/dist/$nodeVer/node-$nodeVer-win-x64.zip") -OutFile $nodeZip }
+  catch { Fail ('Falha baixando Node.js: ' + $_.Exception.Message) 11 }
+  if (-not (Test-Path $nodeZip) -or (Get-Item $nodeZip).Length -lt 1MB) { Fail 'Download do Node.js veio incompleto.' 12 }
   Step 20 'Extraindo Node.js...'
-  try { Expand-Archive -LiteralPath $nodeZip -DestinationPath $tmp -Force }
-  catch { Fail ('Falha extraindo Node.js: ' + $_.Exception.Message) 13 }
-
+  try { Expand-Archive -LiteralPath $nodeZip -DestinationPath $tmp -Force } catch { Fail ('Falha extraindo Node.js: ' + $_.Exception.Message) 13 }
   $nd = Get-ChildItem $tmp -Directory | Where-Object { $_.Name -like 'node-*win-x64' } | Select-Object -First 1
   if (-not $nd) { Fail 'Pasta do Node nao encontrada apos extracao.' 14 }
   New-Item -ItemType Directory -Force -Path (Join-Path $dst 'node') | Out-Null
   Copy-Item (Join-Path $nd.FullName '*') (Join-Path $dst 'node') -Recurse -Force
-} else {
-  Step 20 'Node.js ja instalado, pulando.'
-}
+} else { Step 20 'Node.js ja instalado, pulando.' }
 
 $node   = Join-Path $dst 'node\node.exe'
 $npmCli = Join-Path $dst 'node\node_modules\npm\bin\npm-cli.js'
 
-# ---------- Playwright (deps do motor) ----------
 if (-not (Test-Path (Join-Path $dst 'node_modules\playwright'))) {
   Step 32 'Instalando dependencias do motor...'
   '{ "name": "auto-edit-engine", "private": true }' | Set-Content -Encoding ASCII (Join-Path $dst 'package.json')
   & $node $npmCli install playwright@1.60.0 --omit=dev --no-audit --no-fund --prefix "$dst" *>> $log
-  if ($LASTEXITCODE -ne 0) {
-    Fail ('npm install falhou. Veja o log: ' + $log) 30
-  }
-} else {
-  Step 32 'Dependencias ja instaladas, pulando.'
-}
+  if ($LASTEXITCODE -ne 0) { Fail ('npm install falhou. Veja o log: ' + $log) 30 }
+} else { Step 32 'Dependencias ja instaladas, pulando.' }
 
-# ---------- Chromium ----------
 if (-not (Test-Path (Join-Path $dst 'ms-playwright\chromium-1223'))) {
   Step 48 'Baixando navegador embarcado (~140 MB)...'
   $env:PLAYWRIGHT_BROWSERS_PATH = (Join-Path $dst 'ms-playwright')
   & $node (Join-Path $dst 'node_modules\playwright\cli.js') install chromium *>> $log
-  if ($LASTEXITCODE -ne 0) {
-    Fail 'Falha baixando o navegador embarcado. Tente novamente em alguns segundos.' 40
-  }
-} else {
-  Step 48 'Navegador ja presente, pulando.'
-}
+  if ($LASTEXITCODE -ne 0) { Fail 'Falha baixando o navegador embarcado.' 40 }
+} else { Step 48 'Navegador ja presente, pulando.' }
 
-# ---------- yt-dlp ----------
 $yt = Join-Path $dst 'bin\yt-dlp.exe'
 if (-not (Test-Path $yt) -or (Get-Item $yt).Length -lt 5MB) {
   Step 78 'Baixando motor de download (yt-dlp)...'
-  try {
-    Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' -OutFile $yt
-  } catch { Fail ('Falha baixando yt-dlp: ' + $_.Exception.Message) 50 }
-} else {
-  Step 78 'yt-dlp ja presente, pulando.'
-}
+  try { Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' -OutFile $yt }
+  catch { Fail ('Falha baixando yt-dlp: ' + $_.Exception.Message) 50 }
+} else { Step 78 'yt-dlp ja presente, pulando.' }
 
-# ---------- ffmpeg ----------
 $ff = Join-Path $dst 'bin\ffmpeg.exe'
 if (-not (Test-Path $ff) -or (Get-Item $ff).Length -lt 10MB) {
   Step 87 'Baixando ffmpeg (~85 MB)...'
   $fz = Join-Path $tmp 'ff.zip'
-  try {
-    Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip' -OutFile $fz
-  } catch { Fail ('Falha baixando ffmpeg: ' + $_.Exception.Message) 60 }
-
+  try { Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip' -OutFile $fz }
+  catch { Fail ('Falha baixando ffmpeg: ' + $_.Exception.Message) 60 }
   Step 91 'Extraindo ffmpeg...'
   Expand-Archive -LiteralPath $fz -DestinationPath (Join-Path $tmp 'ff') -Force
   $fe = Get-ChildItem -Recurse -Path (Join-Path $tmp 'ff') -Filter ffmpeg.exe | Select-Object -First 1
   if (-not $fe) { Fail 'ffmpeg.exe nao encontrado apos extracao.' 61 }
   Copy-Item $fe.FullName $ff -Force
-} else {
-  Step 91 'ffmpeg ja presente, pulando.'
-}
-
+} else { Step 91 'ffmpeg ja presente, pulando.' }
 Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 
-# ---------- Auto-start via Task Scheduler (NAO Startup folder + VBS) ----------
-# schtasks e nativo Windows, nao dispara antivirus, roda como user logado.
+# Auto-start via Task Scheduler (NAO Startup folder + VBS = AV-safe)
 Step 94 'Configurando inicializacao com o Windows...'
 $taskName = 'AutoEditDownloader'
 try {
-  # Remove task antiga (se existir)
   schtasks /Delete /TN $taskName /F 2>$null | Out-Null
-
-  # Cria nova: roda no logon do usuario, sem prompt UAC
   $action = ('cmd.exe /c "{0}"' -f $starter)
-  $null = schtasks /Create `
-    /TN $taskName `
-    /TR $action `
-    /SC ONLOGON `
-    /RL LIMITED `
-    /F 2>&1
+  $null = schtasks /Create /TN $taskName /TR $action /SC ONLOGON /RL LIMITED /F 2>&1
   if ($LASTEXITCODE -ne 0) {
-    Log 'aviso: schtasks falhou, fallback para Startup folder'
-    # Fallback: shortcut visivel na Startup folder, mas SEM .vbs (mais limpo)
+    Log 'aviso: schtasks falhou, fallback para Startup folder (sem .vbs)'
     $startup = [Environment]::GetFolderPath('Startup')
     $wsh = New-Object -ComObject WScript.Shell
     $lnk = $wsh.CreateShortcut((Join-Path $startup 'Auto Edit Downloader.lnk'))
     $lnk.TargetPath = $starter
     $lnk.WorkingDirectory = $dst
-    $lnk.WindowStyle = 7  # minimized
+    $lnk.WindowStyle = 7
     $lnk.Save()
   }
-} catch {
-  Log ('aviso configurando autostart: ' + $_.Exception.Message)
-  # Nao fail — instalacao ainda funciona, so nao auto-inicia
-}
+} catch { Log ('aviso configurando autostart: ' + $_.Exception.Message) }
 
-# ---------- inicia o motor agora ----------
 Step 97 'Iniciando o motor...'
 Remove-Item (Join-Path $dst 'engine.log') -ErrorAction SilentlyContinue
-# Start-Process com -WindowStyle Minimized (NAO Hidden — Defender odeia Hidden)
 Start-Process -FilePath $starter -WindowStyle Minimized
 
-# Espera o /health responder
 $alive = $false
 $ports = @(47923, 47924, 47925, 47926, 47927, 47928)
 for ($i = 0; $i -lt 60; $i++) {
@@ -226,10 +126,7 @@ for ($i = 0; $i -lt 60; $i++) {
   foreach ($p in $ports) {
     try {
       $r = Invoke-WebRequest -UseBasicParsing -Uri ("http://127.0.0.1:$p/health") -TimeoutSec 1 -ErrorAction Stop
-      if ($r.Content -match 'darkolab-downloader-engine|auto-edit-downloader') {
-        $alive = $true
-        break
-      }
+      if ($r.Content -match 'darkolab-downloader-engine|auto-edit-downloader') { $alive = $true; break }
     } catch {}
   }
   if ($alive) { break }
@@ -237,10 +134,8 @@ for ($i = 0; $i -lt 60; $i++) {
 
 if ($alive) {
   Step 100 'Motor online. Instalacao concluida.'
-  Log ''
   Log 'PRONTO. A extensao Auto Edit Downloader ja deve detectar o motor.'
-  Log 'Abra um video no YouTube/TikTok/Instagram e clique no botao Baixar.'
   exit 0
 } else {
-  Fail "Motor instalado mas nao iniciou. Veja: $(Join-Path $dst 'engine.log')" 70
+  Fail ('Motor instalado mas nao iniciou. Veja: ' + (Join-Path $dst 'engine.log')) 70
 }

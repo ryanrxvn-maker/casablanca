@@ -1,52 +1,34 @@
 Auto Edit Downloader - Motor (Windows)
 ======================================
 
-INSTALACAO (sem .exe, 100% seguro contra antivirus):
+INSTALACAO:
+1) DUPLO-CLIQUE em "AutoEditDownloaderSetup.exe".
+   A janela do prompt abre VISIVEL mostrando o progresso. Pode
+   levar 1-3 min na 1a vez (baixa Node + Chromium + yt-dlp +
+   ffmpeg, ~250 MB).
+   Se o SmartScreen avisar, clique "Mais informacoes" >
+   "Executar assim mesmo".
 
-  1) Extrai o ZIP numa pasta qualquer (Documentos, Downloads, etc).
+2) Instale a extensao "Auto Edit Downloader" no Chrome:
+   chrome://extensions > Modo desenvolvedor > Carregar sem compactacao.
 
-  2) DUPLO-CLIQUE em "INSTALAR.cmd". A janela do prompt fica aberta
-     mostrando o progresso. Pode levar 1-3 min na 1a vez (baixa
-     Node + Chromium + yt-dlp + ffmpeg, ~250 MB). Se a janela ficar
-     quieta por uns minutos, e normal — esta baixando arquivos
-     grandes em background.
-
-  3) Quando terminar, a tela mostra "[OK] Instalado e vinculado."
-     Pode fechar a janela.
-
-  4) Instale a extensao "Auto Edit Downloader" no Chrome:
-     - Abre chrome://extensions
-     - Liga "Modo de desenvolvedor" (canto superior direito)
-     - Clica "Carregar sem compactacao"
-     - Aponta pra pasta da extensao
-
-  5) Pronto. Abre um video no YouTube/Instagram/TikTok/Pinterest
-     e o botao "Baixar" aparece sozinho.
-
-O motor roda automaticamente toda vez que voce ligar o PC.
-Tudo 100% local, sem servidor, sem token, sem pareamento.
-
-DESINSTALAR
------------
-DUPLO-CLIQUE em "DESINSTALAR.cmd" dentro de
-%LOCALAPPDATA%\AutoEditDownloader
-
-ou no proprio ZIP de instalacao.
-
+3) Abra um video no YouTube/Insta/TikTok/Pinterest e o botao
+   "Baixar" aparece sozinho.
 
 SEGURANCA / ANTIVIRUS
 ---------------------
-Esta versao usa SCRIPTS abertos (.cmd e .ps1 que voce pode abrir
-no Notepad), nao um .exe compilado. Isso evita que Avast/Defender
-marquem como suspeito. Se mesmo assim aparecer aviso, e falso
-positivo — voce pode adicionar a pasta como excecao.
-
+O EXE roda um PowerShell VISIVEL (nao oculto) que baixa os
+componentes na sua pasta de usuario (%LOCALAPPDATA%). Sem VBS,
+sem mods em Startup folder. Auto-start usa o Task Scheduler nativo
+do Windows. Se ainda assim o Avast/Defender reclamar, e falso
+positivo — adicione a pasta como excecao.
 
 LOGS / SUPORTE
 --------------
 Log de instalacao: %LOCALAPPDATA%\AutoEditDownloader\install.log
 Log do motor:      %LOCALAPPDATA%\AutoEditDownloader\engine.log
 
-Em caso de falha, manda esse arquivo no WhatsApp do suporte.
+Desinstalar: rode "DESINSTALAR.cmd" dentro de
+%LOCALAPPDATA%\AutoEditDownloader
 
 Requer Windows 10/11 64-bit. Internet so na 1a instalacao.

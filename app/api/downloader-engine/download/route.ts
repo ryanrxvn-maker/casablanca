@@ -1,88 +1,60 @@
 import { NextResponse } from 'next/server';
-import { readFile, readdir, stat } from 'fs/promises';
+import { createReadStream } from 'fs';
+import { stat } from 'fs/promises';
+import { Readable } from 'stream';
 import path from 'path';
-import JSZip from 'jszip';
 
 /**
  * GET /api/downloader-engine/download
  *
- * Entrega o motor como ZIP de scripts ABERTOS (.cmd + .ps1).
+ * Entrega AutoEditDownloaderSetup.exe — instalador nativo.
  *
- * Mudança crítica vs versão anterior:
- *   - Antes: servia DarkoDownloaderSetup.exe (stub C# compilado).
- *     Defender/Avast flagueavam como SUSPEITO em 100% das máquinas.
- *   - Agora: zip plain text com INSTALAR.cmd + Instalar.ps1.
- *     Scripts abertos = zero pattern de malware = zero falso positivo.
+ * Estratégia anti-antivírus (sem certificado de code signing):
+ *  - Console visível (target:exe não winexe)
+ *  - SEM ShowWindow hide, SEM -WindowStyle Hidden
+ *  - SEM VBS gerado dinamicamente
+ *  - SEM Startup folder mod direta — usa Task Scheduler (schtasks)
+ *  - Manifest XML com asInvoker (não pede UAC)
+ *  - AssemblyInfo com CompanyName/Description/Version completos
+ *  - PowerShell rodado sem flags suspeitas (-NoProfile -Bypass apenas)
+ *  - UseShellExecute=false → janela aparece no console pai
  *
- * Conteúdo do ZIP (de engine/pkg/):
- *   - INSTALAR.cmd            (duplo-clique para instalar)
- *   - Instalar.ps1            (script de instalação)
- *   - DESINSTALAR.cmd
- *   - Desinstalar.ps1
- *   - AutoEditDownloader.cmd  (starter do motor)
- *   - server.cjs              (bundle do motor)
- *   - LEIA-ME.txt
+ * Build: `node engine/build.mjs && node engine/package.mjs`
  *
- * Como funciona pro usuário final:
- *   1. Baixa AutoEditDownloader.zip
- *   2. Extrai numa pasta
- *   3. Duplo-clique em INSTALAR.cmd (janela visível, sem flag de AV)
- *   4. PS1 baixa Node + Chromium + yt-dlp + ffmpeg na pasta LOCALAPPDATA
- *   5. Configura auto-start via Task Scheduler (NÃO via VBS+Startup)
+ * Streaming pra time-to-first-byte mínimo — cliente começa a ver
+ * progresso assim que o servidor lê a 1ª chunk do disco.
  */
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 
-// pasta com os arquivos a empacotar
-function pkgDir() {
-  return path.join(process.cwd(), 'engine', 'pkg');
-}
-
-// nome interno do bundle de starter — vai como AutoEditDownloader.cmd
-// mesmo que o arquivo fonte se chame DarkoDownloader.cmd (legado).
-const STARTER_FILES_TO_RENAME: Record<string, string> = {
-  'DarkoDownloader.cmd': 'AutoEditDownloader.cmd',
-};
-
-async function buildZip(): Promise<Buffer> {
-  const dir = pkgDir();
-  const entries = await readdir(dir);
-  const zip = new JSZip();
-
-  for (const name of entries) {
-    const full = path.join(dir, name);
-    const s = await stat(full);
-    if (!s.isFile()) continue;
-    const buf = await readFile(full);
-    const target = STARTER_FILES_TO_RENAME[name] ?? name;
-    zip.file(target, buf);
-  }
-
-  return zip.generateAsync({
-    type: 'nodebuffer',
-    compression: 'DEFLATE',
-    compressionOptions: { level: 6 },
-  });
-}
-
 export async function GET() {
   try {
-    const buf = await buildZip();
-    return new NextResponse(new Uint8Array(buf), {
+    const exePath = path.join(
+      process.cwd(),
+      'engine',
+      'AutoEditDownloaderSetup.exe',
+    );
+    const st = await stat(exePath);
+    const node = createReadStream(exePath);
+    const webStream = Readable.toWeb(node) as unknown as ReadableStream<Uint8Array>;
+
+    return new NextResponse(webStream, {
       status: 200,
       headers: {
-        'content-type': 'application/zip',
-        'content-disposition': 'attachment; filename="AutoEditDownloader.zip"',
-        'content-length': String(buf.byteLength),
-        'cache-control': 'public, max-age=300',
+        'content-type': 'application/octet-stream',
+        'content-disposition':
+          'attachment; filename="AutoEditDownloaderSetup.exe"',
+        'content-length': String(st.size),
+        'cache-control': 'public, max-age=3600',
+        'x-accel-buffering': 'no',
       },
     });
   } catch (e) {
     return NextResponse.json(
       {
         error:
-          'Instalador indisponivel. Verifique se a pasta engine/pkg/ existe e tem os scripts (INSTALAR.cmd, Instalar.ps1, server.cjs, etc).',
+          'Instalador indisponivel. Gere com: node engine/build.mjs && node engine/package.mjs (cria engine/AutoEditDownloaderSetup.exe).',
         detail: e instanceof Error ? e.message : String(e),
       },
       { status: 503 },
