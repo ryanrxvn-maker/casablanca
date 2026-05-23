@@ -253,9 +253,9 @@ export default function DownloaderPage() {
             </strong>
           </div>
           <p className="mono mt-1 text-[11px] text-text-muted">
-            Instala uma vez. Aí aparece um botão <b>Baixar</b> direto nos
-            vídeos do YouTube, Instagram, TikTok, Pinterest (e +18) — sem
-            copiar link, sem depender de servidor.
+            Instala uma vez, em 1 clique. Aí aparece um botão <b>Baixar</b>{' '}
+            direto nos vídeos do YouTube, Instagram, TikTok, Pinterest (e
+            +18) — sem código, sem pareamento, sem servidor.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <a
@@ -263,7 +263,7 @@ export default function DownloaderPage() {
               className="btn-primary !py-2 text-xs"
               download
             >
-              1. Baixar o Motor (Windows)
+              1. Instalar o Motor (1 clique)
             </a>
             <a
               href="/api/downloader-extension/download"
@@ -279,45 +279,37 @@ export default function DownloaderPage() {
             </summary>
             <ol className="mono mt-2 list-decimal space-y-1 pl-5 text-[11px] text-text-muted">
               <li>
-                Baixa o <b>Motor</b> (botão 1), extrai o .zip numa pasta.
+                Clica em <b>1. Instalar o Motor</b> e dá <b>duplo-clique</b>{' '}
+                no{' '}
+                <code className="mono text-white">
+                  DarkoDownloaderSetup.exe
+                </code>{' '}
+                (ícone DARKO). Se o Windows avisar (SmartScreen),
+                &quot;Mais informações&quot; → &quot;Executar assim
+                mesmo&quot;. A UI DARKO mostra o progresso e finaliza com{' '}
+                <b>&quot;Instalado e vinculado!&quot;</b>.
               </li>
               <li>
-                Dentro da pasta, dê <b>duplo-clique</b> em{' '}
-                <code className="mono text-white">INSTALAR.cmd</code> (se o
-                Windows avisar, &quot;Mais informações&quot; → &quot;Executar
-                assim mesmo&quot;). Ele baixa tudo, instala, inicia junto com
-                o Windows e <b>copia o código de pareamento</b>.
+                Clica em <b>2. Baixar a Extensão</b> e extrai numa pasta.
+                Abre{' '}
+                <code className="mono text-white">chrome://extensions</code>,
+                liga o <i>Modo de desenvolvedor</i>, clica{' '}
+                <i>Carregar sem compactação</i> e seleciona a pasta.
               </li>
               <li>
-                Baixa a <b>Extensão</b> (botão 2), extrai numa pasta.
-              </li>
-              <li>
-                Abre <code className="mono text-white">chrome://extensions</code>
-                , liga o <i>Modo de desenvolvedor</i>, clica{' '}
-                <i>Carregar sem compactação</i> e seleciona a pasta da
-                extensão.
-              </li>
-              <li>
-                Clica no ícone da extensão → cola só o <b>código</b> (já
-                está copiado) → <i>Parear</i> (a porta é automática).
-                Perdeu o código? Duplo-clique em{' '}
-                <code className="mono text-white">CODIGO.cmd</code> ou abra o
-                atalho <i>&quot;DarkoLab Downloader - Codigo&quot;</i> no Menu
-                Iniciar.
-              </li>
-              <li>
-                Pronto. Abre um vídeo em qualquer site suportado e clica no
-                botão <b>⬇ Baixar</b> que aparece na página.
+                Pronto. <b>Não precisa colar código nem parear nada</b> — a
+                extensão pega o token do motor sozinha. Abre um vídeo em
+                qualquer site suportado e clica no botão{' '}
+                <b>⬇ Baixar</b> que aparece na página.
               </li>
             </ol>
             <p className="mono mt-2 text-[10px] text-text-muted">
               Requer Windows 64-bit. O motor roda no PC do usuário (não
               precisa do seu PC ligado nem de servidor). +18 já vem
-              habilitado. O download do Motor é leve (~16&nbsp;KB); o
-              duplo-clique em{' '}
-              <code className="mono text-white">INSTALAR.cmd</code> baixa Node
-              + yt-dlp + ffmpeg + Chromium (~250&nbsp;MB, uma vez,
-              ~1–2&nbsp;min) automaticamente.
+              habilitado. O instalador é leve (~50&nbsp;KB) e baixa Node +
+              yt-dlp + ffmpeg + Chromium (~250&nbsp;MB, uma vez,
+              ~1–2&nbsp;min) automaticamente. Componentes já presentes são
+              pulados.
             </p>
           </details>
         </div>
