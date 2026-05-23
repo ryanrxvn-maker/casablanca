@@ -6,6 +6,10 @@ import { FileUpload } from '@/components/FileUpload';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { CancelButton } from '@/components/CancelButton';
 import { useToolState } from '@/components/ToolsStateProvider';
+import { ToolStep, ToolAction, ToolResultCard } from '@/components/tool-kit';
+import { IconAudioSplit } from '@/components/ToolIcons';
+
+const HUE = 'rgba(34,211,238,0.4)';
 import {
   decodeAudioRobust,
   downloadBlob,
@@ -115,11 +119,11 @@ export default function AudioSplitPage() {
       title="Separar áudios"
       eyebrow="ÁUDIO"
       description="Quebra o áudio em pedaços pelas pausas. Sem cortar falas."
-      hue="rgba(34,211,238,0.4)"
+      hue={HUE}
+      icon={<IconAudioSplit size={56} />}
     >
-      <div className="flex flex-col gap-6">
-        <div>
-          <label className="label-field">Arquivo de áudio ou vídeo</label>
+      <div className="flex flex-col gap-5">
+        <ToolStep n={1} title="Áudio ou vídeo" hint="MP3, WAV, MP4, WEBM ou OGG" hue={HUE}>
           <FileUpload
             accept="audio/*,video/mp4,video/webm,video/ogg"
             value={file}
@@ -129,33 +133,33 @@ export default function AudioSplitPage() {
             }}
             hint="MP3, WAV, MP4, WEBM ou OGG"
           />
-        </div>
+        </ToolStep>
 
-        <div className="rounded-[12px] border border-line bg-bg px-4 py-3 text-xs text-text-muted">
-          A divisao procura as pausas mais longas do audio e quebra em partes
-          equilibradas (em media 4 partes por minuto de fala). Para remover
-          silencios use a ferramenta <span className="text-lime">Decupagem</span>.
-        </div>
+        <ToolStep n={2} title="Como divide" hint="Heurística inteligente de pausas" hue={HUE}>
+          <div className="rounded-[12px] border border-line bg-bg/40 px-4 py-3 text-xs text-text-muted leading-relaxed">
+            Procura as pausas mais longas e quebra em partes equilibradas
+            (~4 partes por minuto de fala). Pra remover silêncios use a{' '}
+            <span className="text-violet">Decupagem</span>.
+          </div>
+        </ToolStep>
 
-        <div className="flex flex-wrap gap-3">
-          <button
-            onClick={process}
-            className="btn-primary"
-            disabled={!file || processing}
-          >
-            {processing ? 'Processando...' : 'Processar'}
-          </button>
-          <button
-            onClick={() => {
-              reset();
-              setFile(null);
-            }}
-            className="btn-secondary"
-            disabled={processing}
-          >
-            Limpar
-          </button>
-        </div>
+        <ToolStep n={3} title={processing ? 'Processando…' : 'Processar'} hue={HUE}>
+          <div className="flex flex-wrap gap-3">
+            <ToolAction onClick={process} loading={processing} disabled={!file || processing}>
+              Processar
+            </ToolAction>
+            <button
+              onClick={() => {
+                reset();
+                setFile(null);
+              }}
+              className="btn-secondary"
+              disabled={processing}
+            >
+              Limpar
+            </button>
+          </div>
+        </ToolStep>
 
         {status ? (
           <div
@@ -189,40 +193,41 @@ export default function AudioSplitPage() {
         ) : null}
 
         {parts.length > 0 ? (
-          <div className="fade-in-up mt-2 border-t border-line pt-6">
-            <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-sm font-semibold uppercase tracking-widest text-text-muted">
-                Resultado ({parts.length} parte{parts.length > 1 ? 's' : ''})
-              </h3>
+          <div className="fade-in-up">
+            <ToolResultCard
+              title={`${parts.length} parte${parts.length > 1 ? 's' : ''}`}
+              meta={parts.length > 1 ? 'Pausas detectadas' : undefined}
+              hue={HUE}
+            >
               {parts.length > 1 ? (
-                <button onClick={downloadZip} className="btn-primary !py-2 text-xs">
-                  Baixar ZIP
-                </button>
+                <div className="mb-4">
+                  <ToolAction onClick={downloadZip}>Baixar ZIP</ToolAction>
+                </div>
               ) : null}
-            </div>
-            <ul className="flex flex-col gap-3">
-              {parts.map((p, idx) => (
-                <li
-                  key={p.index}
-                  className="fade-in-up flex flex-col gap-2"
-                  style={{ animationDelay: `${Math.min(idx, 8) * 50}ms` }}
-                >
-                  <div className="flex items-center justify-between text-xs text-text-muted">
-                    <span>
-                      Parte {p.index}
-                      <span className="mono text-text-dim"> · {formatTime(p.duration)}</span>
-                    </span>
-                    <button
-                      onClick={() => downloadPart(p)}
-                      className="btn-ghost !py-1 !px-2 text-xs"
-                    >
-                      Baixar
-                    </button>
-                  </div>
-                  <AudioPlayer src={p.url} />
-                </li>
-              ))}
-            </ul>
+              <ul className="flex flex-col gap-3">
+                {parts.map((p, idx) => (
+                  <li
+                    key={p.index}
+                    className="fade-in-up flex flex-col gap-2"
+                    style={{ animationDelay: `${Math.min(idx, 8) * 50}ms` }}
+                  >
+                    <div className="flex items-center justify-between text-xs text-text-muted">
+                      <span>
+                        Parte {p.index}
+                        <span className="mono text-text-dim"> · {formatTime(p.duration)}</span>
+                      </span>
+                      <button
+                        onClick={() => downloadPart(p)}
+                        className="btn-ghost !py-1 !px-2 text-xs"
+                      >
+                        Baixar
+                      </button>
+                    </div>
+                    <AudioPlayer src={p.url} />
+                  </li>
+                ))}
+              </ul>
+            </ToolResultCard>
           </div>
         ) : null}
       </div>

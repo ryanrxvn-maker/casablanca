@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useMemo } from 'react';
-import { ToolHero, ToolStep } from '@/components/tool-kit';
+import { ToolHero, ToolStep, ToolChoice, ToolSlider, ToolAction, ToolMetric } from '@/components/tool-kit';
 import { IconCompressor } from '@/components/ToolIcons';
+
+const HUE = 'rgba(129,140,248,0.4)';
 import { BatchFileUpload } from '@/components/BatchFileUpload';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { downloadBlob } from '@/lib/audio-engine';
@@ -280,11 +282,11 @@ export default function CompressorPage() {
         title="Compressor"
         eyebrow="VÍDEO"
         subtitle="Reduz o peso dos vídeos sem perder qualidade visível. Até vinte de uma vez."
-        hue="rgba(129,140,248,0.4)"
+        hue={HUE}
         icon={<IconCompressor size={56} />}
       />
       <div className="mt-6 flex flex-col gap-5">
-        <ToolStep n={1} title={`Solta os vídeos`} hint={`Até ${MAX_BATCH} arquivos`} hue="rgba(129,140,248,0.4)">
+        <ToolStep n={1} title="Solta os vídeos" hint={`Até ${MAX_BATCH} arquivos · MP4, WEBM ou MOV`} hue={HUE}>
           <BatchFileUpload
             accept="video/mp4,video/webm,video/quicktime"
             value={files}
@@ -293,117 +295,89 @@ export default function CompressorPage() {
             hint="MP4, WEBM ou MOV"
             disabled={processing}
           />
+          {files.length > 0 ? (
+            <div className="mt-3 grid grid-cols-2 gap-2.5 md:grid-cols-4">
+              <ToolMetric value={String(files.length)} label="Arquivos" />
+              <ToolMetric value={formatBytes(totalInput)} label="Entrada" />
+              <ToolMetric
+                value={totalDuration !== null ? formatDuration(totalDuration) : '…'}
+                label="Duração"
+              />
+              <ToolMetric
+                value={
+                  hasResults
+                    ? formatBytes(totalOutput)
+                    : '~' + formatBytes(totalEstimate)
+                }
+                label={hasResults ? 'Saída' : 'Previsão'}
+                accent="lime"
+              />
+            </div>
+          ) : null}
         </ToolStep>
 
-        {files.length > 0 ? (
-          <div className="grid gap-3 rounded-[12px] border border-line bg-bg p-4 sm:grid-cols-2 lg:grid-cols-4">
-            <div>
-              <div className="label-field">Arquivos</div>
-              <div className="mono text-sm text-white">{files.length}</div>
-            </div>
-            <div>
-              <div className="label-field">Total entrada</div>
-              <div className="mono text-sm text-white">
-                {formatBytes(totalInput)}
-              </div>
-            </div>
-            <div>
-              <div className="label-field">Duracao total</div>
-              <div className="mono text-sm text-white">
-                {totalDuration !== null
-                  ? formatDuration(totalDuration)
-                  : '...'}
-              </div>
-            </div>
-            <div>
-              <div className="label-field">
-                {hasResults ? 'Total saida' : 'Previsao total saida'}
-              </div>
-              <div className="mono text-sm text-lime">
-                {hasResults
-                  ? formatBytes(totalOutput)
-                  : '~ ' + formatBytes(totalEstimate)}
-              </div>
-              {!hasResults && totalInput > 0 && totalEstimate > 0 ? (
-                <div className="mt-0.5 text-[10px] text-text-dim">
-                  {Math.round((1 - totalEstimate / totalInput) * 100)}% menor
-                </div>
-              ) : null}
-            </div>
-          </div>
-        ) : null}
-
-        <div>
-          <div className="flex items-center justify-between">
-            <label className="label-field !mb-0">Qualidade (CRF)</label>
-            <span className="mono text-xs text-lime">{crf}</span>
-          </div>
-          <input
-            type="range"
+        <ToolStep n={2} title="Qualidade" hint="CRF mais alto = arquivo menor, mais perda visual" hue={HUE}>
+          <ToolSlider
+            label="CRF"
             min={18}
             max={35}
             step={1}
             value={crf}
-            onChange={(e) => setCrf(parseInt(e.target.value))}
-            className="mt-3"
+            onChange={(v) => setCrf(v)}
+            display={(v) => String(v)}
             disabled={processing}
           />
-          <div className="mt-2 flex justify-between text-[11px] uppercase tracking-widest text-text-muted">
+          <div className="mt-1 flex justify-between text-[10px] uppercase tracking-widest text-text-muted">
             <span>Alta qualidade</span>
             <span>Menor arquivo</span>
           </div>
-        </div>
+        </ToolStep>
 
-        <div>
-          <label className="label-field">Resolucao</label>
-          <div className="flex flex-wrap gap-2">
-            {(['original', '1080', '720', '480'] as const).map((r) => (
-              <button
-                key={r}
-                onClick={() => setResolution(r)}
-                disabled={processing}
-                className={
-                  'rounded-[12px] px-4 py-2 text-sm transition-all duration-200 active:scale-[0.97] disabled:opacity-50 ' +
-                  (resolution === r
-                    ? 'bg-lime font-semibold text-black shadow-[0_0_18px_-4px_rgba(200,255,0,0.6)]'
-                    : 'border border-line-strong text-text-muted hover:border-lime hover:text-white')
-                }
+        <ToolStep n={3} title="Resolução" hue={HUE}>
+          <ToolChoice
+            value={resolution}
+            onChange={(v) => !processing && setResolution(v as Resolution)}
+            options={[
+              { value: 'original', label: 'Original', sub: 'mantém' },
+              { value: '1080', label: '1080p', sub: 'Full HD' },
+              { value: '720', label: '720p', sub: 'HD' },
+              { value: '480', label: '480p', sub: 'leve' },
+            ]}
+            disabled={processing}
+            hue={HUE}
+          />
+        </ToolStep>
+
+        <ToolStep n={4} title={processing ? 'Comprimindo…' : 'Comprimir'} hue={HUE}>
+          <div className="flex flex-wrap gap-3">
+            {processing ? (
+              <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
+            ) : (
+              <ToolAction
+                onClick={processAll}
+                disabled={files.length === 0}
               >
-                {r === 'original' ? 'Original' : r + 'p'}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex flex-wrap gap-3">
-          {processing ? (
-            <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
-          ) : (
+                {`Comprimir ${files.length || ''} ${files.length === 1 ? 'vídeo' : 'vídeos'}`.trim()}
+              </ToolAction>
+            )}
             <button
-              onClick={processAll}
-              className="btn-primary"
-              disabled={files.length === 0}
-            >
-              {`Comprimir ${files.length || ''} ${files.length === 1 ? 'video' : 'videos'}`.trim()}
-            </button>
-          )}
-          <button
-            onClick={() => setFilesSafe([])}
-            className="btn-secondary"
-            disabled={processing || files.length === 0}
-          >
-            Limpar
-          </button>
-          {hasResults && !processing ? (
-            <button
-              onClick={downloadZip}
+              onClick={() => setFilesSafe([])}
               className="btn-secondary"
-              disabled={zipping}
+              disabled={processing || files.length === 0}
             >
-              {zipping ? 'Zipando...' : `Baixar ZIP (${doneJobs.length})`}
+              Limpar
             </button>
-          ) : null}
-        </div>
+            {hasResults && !processing ? (
+              <button
+                onClick={downloadZip}
+                className="btn-secondary"
+                disabled={zipping}
+              >
+                {zipping ? 'Zipando...' : `Baixar ZIP (${doneJobs.length})`}
+              </button>
+            ) : null}
+          </div>
+        </ToolStep>
 
         {stageMsg ? (
           <div

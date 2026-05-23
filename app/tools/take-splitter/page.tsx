@@ -16,6 +16,10 @@ import {
 import { CancelButton } from '@/components/CancelButton';
 import { buildZip } from '@/lib/zip-builder';
 import { formatBytes, formatTime } from '@/lib/utils';
+import { ToolStep, ToolSlider, ToolAction, ToolMetric } from '@/components/tool-kit';
+import { IconTakeSplitter } from '@/components/ToolIcons';
+
+const HUE = 'rgba(134,239,172,0.4)';
 
 /**
  * Take Splitter — separa um video em "takes" baseado nos cortes de cena
@@ -219,11 +223,11 @@ export default function TakeSplitterPage() {
       title="Separar takes"
       eyebrow="VÍDEO"
       description="Recebe o bruto, devolve cada take separado em um arquivo. Tudo direto no navegador, sem perder qualidade."
-      hue="rgba(134,239,172,0.4)"
+      hue={HUE}
+      icon={<IconTakeSplitter size={56} />}
     >
-      <div className="flex flex-col gap-6">
-        <div>
-          <label className="label-field">Vídeo</label>
+      <div className="flex flex-col gap-5">
+        <ToolStep n={1} title="Vídeo" hint="MP4, MOV, WEBM, MKV — até 2GB" hue={HUE}>
           <FileUpload
             accept="video/mp4,video/webm,video/quicktime,video/x-matroska"
             value={file}
@@ -234,36 +238,21 @@ export default function TakeSplitterPage() {
             hint="MP4, MOV, WEBM, MKV — ate 2GB"
           />
           {file ? (
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-muted">
-              <span>
-                {file.name} —{' '}
-                <span
-                  className={
-                    'mono ' +
-                    (file.size > MAX_FILE_BYTES ? 'text-red-300' : 'text-lime')
-                  }
-                >
-                  {formatBytes(file.size)}
-                </span>
-              </span>
+            <div className="mt-3 grid grid-cols-2 gap-2.5 md:grid-cols-3">
+              <ToolMetric value={formatBytes(file.size)} label="Tamanho" />
               {duration !== null ? (
-                <span>
-                  · <span className="mono text-lime">{formatTime(duration)}</span>
-                </span>
+                <ToolMetric value={formatTime(duration)} label="Duração" accent="lime" />
               ) : null}
             </div>
           ) : null}
           {sizeError ? (
-            <div className="mt-2 rounded-[8px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+            <div className="mt-3 rounded-[10px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
               {sizeError}
             </div>
           ) : null}
-        </div>
+        </ToolStep>
 
-        <div>
-          <label className="label-field" htmlFor="niche">
-            Nicho (vai no nome de cada take)
-          </label>
+        <ToolStep n={2} title="Nome dos arquivos" hint="Vai virar o sufixo de cada take" hue={HUE}>
           <input
             id="niche"
             type="text"
@@ -274,128 +263,106 @@ export default function TakeSplitterPage() {
             disabled={processing}
             maxLength={40}
           />
-          <p className="mt-1 text-[11px] text-text-muted">
-            Cada take sai como{' '}
-            <span className="mono text-lime">
+          <p className="mt-2 text-[11px] text-text-muted">
+            Saída:{' '}
+            <span className="mono text-violet">
               {takeFileName(1, niche || 'take')}
             </span>
             ,{' '}
-            <span className="mono text-lime">
+            <span className="mono text-violet">
               {takeFileName(2, niche || 'take')}
             </span>
-            , ... Caracteres especiais e acentos sao normalizados.
+            …
           </p>
-        </div>
+        </ToolStep>
 
-        <div>
-          <div className="flex items-center justify-between">
-            <label className="label-field !mb-0">Sensibilidade do corte</label>
-            <span className="mono text-xs text-lime">{threshold.toFixed(2)}</span>
-          </div>
-          <input
-            type="range"
+        <ToolStep n={3} title="Sensibilidade" hint="Quão sensível é a detecção de corte" hue={HUE}>
+          <ToolSlider
+            label="Threshold"
             min={0.1}
             max={0.6}
             step={0.05}
             value={threshold}
-            onChange={(e) => setThreshold(parseFloat(e.target.value))}
-            className="mt-3"
+            onChange={(v) => setThreshold(v)}
+            display={(v) => v.toFixed(2)}
             disabled={processing}
           />
-          <div className="mt-2 flex justify-between text-[11px] uppercase tracking-widest text-text-muted">
+          <div className="mt-1 flex justify-between text-[10px] uppercase tracking-widest text-text-muted">
             <span>Mais cortes</span>
             <span>Menos cortes</span>
           </div>
-          <p className="mt-2 text-[11px] text-text-muted">
-            0.30 e padrao bom pra documentario / entrevista. Aumenta pra 0.45+
-            se estiver pegando "cortes" falsos por movimento de camera. Diminui
-            pra 0.20 se quiser pegar transicoes mais sutis.
+          <p className="mt-3 text-[11px] text-text-muted leading-relaxed">
+            0.30 é padrão pra documentário/entrevista. Aumente pra 0.45+ se pega cortes falsos por movimento. Diminua pra 0.20 pra transições sutis.
           </p>
-        </div>
 
-        <div>
-          <div className="flex items-center justify-between">
-            <label className="label-field !mb-0">
-              Duracao minima por take
-            </label>
-            <span className="mono text-xs text-lime">{minDur}s</span>
+          <div className="mt-4">
+            <ToolSlider
+              label="Duração mínima por take"
+              min={1}
+              max={30}
+              step={1}
+              value={minDur}
+              onChange={(v) => setMinDur(Math.round(v))}
+              display={(v) => v + 's'}
+              disabled={processing}
+            />
           </div>
-          <input
-            type="range"
-            min={1}
-            max={30}
-            step={1}
-            value={minDur}
-            onChange={(e) => setMinDur(parseInt(e.target.value))}
-            className="mt-3"
-            disabled={processing}
-          />
-          <p className="mt-2 text-[11px] text-text-muted">
-            Cortes detectados que gerariam takes mais curtos que esse valor sao
-            fundidos com o seguinte (descarta falsos positivos tipo flash).
-          </p>
-        </div>
+        </ToolStep>
 
-        {/* Modo IA — verificacao Haiku Vision */}
-        <div className="rounded-[12px] border border-line bg-bg-soft/30 p-3">
+        <ToolStep n={4} title="Verificação IA" hint="Opcional — filtra falsos positivos" hue={HUE}>
           <label className="flex cursor-pointer items-start gap-3">
             <input
               type="checkbox"
               checked={useAi}
               onChange={(e) => setUseAi(e.target.checked)}
               disabled={processing}
-              className="mt-0.5 h-4 w-4 cursor-pointer accent-lime"
+              className="mt-0.5 h-4 w-4 cursor-pointer accent-violet"
             />
             <div className="flex-1">
               <div className="flex items-center gap-2 text-sm font-semibold">
-                <span className="text-white">Verificacao IA (precisao maxima)</span>
-                <span className="mono rounded-full bg-purple-500/10 px-2 py-0.5 text-[10px] uppercase text-purple-300">
+                <span className="text-white">Claude Haiku Vision</span>
+                <span className="mono rounded-full bg-violet/10 px-2 py-0.5 text-[10px] uppercase text-violet">
                   ~$0.05 / 5min
                 </span>
               </div>
-              <p className="mt-1 text-[11px] text-text-muted">
-                Claude Haiku Vision verifica cada corte detectado pelo scdet
-                comparando 1 frame antes/depois. Filtra falsos positivos (motion
-                blur, flash, transicoes) — so deixa cortes de cena REAIS.
-                Requer Anthropic key configurada.
+              <p className="mt-1 text-[11px] leading-relaxed text-text-muted">
+                Verifica cada corte comparando frame antes/depois. Filtra motion blur, flash e transições. Requer Anthropic key.
               </p>
             </div>
           </label>
-        </div>
+        </ToolStep>
 
-        <div className="flex flex-wrap gap-3">
-          {processing ? (
-            <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
-          ) : (
+        <ToolStep n={5} title={processing ? 'Detectando…' : 'Detectar e separar'} hue={HUE}>
+          <div className="flex flex-wrap gap-3">
+            {processing ? (
+              <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
+            ) : (
+              <ToolAction onClick={process} disabled={!file || !!sizeError}>
+                Detectar e Separar
+              </ToolAction>
+            )}
             <button
-              onClick={process}
-              className="btn-primary"
-              disabled={!file || !!sizeError}
-            >
-              Detectar e Separar
-            </button>
-          )}
-          <button
-            onClick={() => {
-              reset();
-              setFile(null);
-              setDuration(null);
-            }}
-            className="btn-secondary"
-            disabled={processing}
-          >
-            Limpar
-          </button>
-          {takes.length > 1 ? (
-            <button
-              onClick={downloadAllZip}
+              onClick={() => {
+                reset();
+                setFile(null);
+                setDuration(null);
+              }}
               className="btn-secondary"
-              disabled={zipping || processing}
+              disabled={processing}
             >
-              {zipping ? 'Zipando...' : `Baixar ZIP (${takes.length})`}
+              Limpar
             </button>
-          ) : null}
-        </div>
+            {takes.length > 1 ? (
+              <button
+                onClick={downloadAllZip}
+                className="btn-secondary"
+                disabled={zipping || processing}
+              >
+                {zipping ? 'Zipando...' : `Baixar ZIP (${takes.length})`}
+              </button>
+            ) : null}
+          </div>
+        </ToolStep>
 
         {error ? (
           <div

@@ -23,6 +23,9 @@ import {
   muxAudioIntoVideo,
 } from '@/lib/ffmpeg-worker';
 import { CancelButton } from '@/components/CancelButton';
+import { ToolStep, ToolChoice, ToolSlider, ToolAction } from '@/components/tool-kit';
+
+const HUE = 'rgba(45,212,191,0.4)';
 
 type OutFormat = 'mp4' | 'mp3' | 'wav';
 
@@ -298,119 +301,69 @@ export default function CamuflagemPage() {
       title="Camuflagem"
       eyebrow="ÁUDIO"
       description="Escolha pra quem você quer enganar. O selo só fica verde se realmente camuflar."
-      hue="rgba(45,212,191,0.4)"
+      hue={HUE}
       icon={<IconCamuflagem size={56} />}
     >
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-5">
         <MissingKeyBanner services={['assemblyai']} />
-        <div>
-          <div className="flex items-center justify-between">
-            <label className="label-field !mb-0">Intensidade da camuflagem</label>
-            <span className="mono text-xs text-violet">{volume}%</span>
-          </div>
-          <input
-            type="range"
+
+        <ToolStep n={1} title="Alvo" hint="Quem você quer enganar define o que conta como sucesso" hue={HUE}>
+          <ToolChoice
+            value={target}
+            onChange={(v) => !processingAll && setTarget(v as Target)}
+            options={[
+              { value: 'platforms', label: 'TikTok / Kwai', sub: 'YouTube' },
+              { value: 'single', label: 'IAs de ASR', sub: 'canal único' },
+              { value: 'universal', label: 'Todos', sub: 'mais difícil' },
+            ]}
+            disabled={processingAll}
+            hue={HUE}
+          />
+          <p className="mt-3 text-[11px] leading-relaxed text-text-muted">
+            {target === 'platforms'
+              ? 'TikTok/Kwai/YouTube reduzem o áudio pra mono somando os canais. A inversão de fase engana esses: eles escutam o WHITE.'
+              : target === 'single'
+                ? 'Engines que pegam UM canal isolado escutam o BLACK em volume cheio. A inversão de fase NÃO camufla contra elas.'
+                : 'Só fica verde se TODA IA (somadora E de canal único) escutar o WHITE.'}
+          </p>
+        </ToolStep>
+
+        <ToolStep n={2} title="Intensidade" hint="Quanto maior, mais difícil de detectar" hue={HUE}>
+          <ToolSlider
+            label="Volume da camuflagem"
             min={5}
             max={100}
             step={1}
             value={volume}
-            onChange={(e) => setVolume(parseInt(e.target.value))}
-            className="mt-3"
+            onChange={(v) => setVolume(Math.round(v))}
+            display={(v) => v + '%'}
             disabled={processingAll}
           />
-          <p className="mt-2 text-xs text-text-muted">
-            Quanto maior, mais difícil de detectar.
-          </p>
-        </div>
+        </ToolStep>
 
-        <div>
-          <label className="label-field">Formato de saída</label>
-          <div className="flex flex-wrap gap-2">
-            {(['mp4', 'mp3', 'wav'] as const).map((f) => {
-              const disabled = f === 'mp4' && mp4Disabled;
-              const active = format === f;
-              return (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => !disabled && setFormat(f)}
-                  disabled={processingAll || disabled}
-                  className={
-                    'rounded-[12px] px-4 py-2 text-sm transition-all duration-200 active:scale-[0.97] disabled:opacity-40 ' +
-                    (active
-                      ? 'bg-lime font-semibold text-black shadow-[0_0_18px_-4px_rgba(200,255,0,0.6)]'
-                      : 'border border-line-strong text-text-muted hover:border-lime hover:text-white')
-                  }
-                  title={
-                    disabled
-                      ? 'MP4 exige que todos os BLACK sejam arquivos de video.'
-                      : undefined
-                  }
-                >
-                  {f === 'mp4' ? 'MP4 (video + audio)' : f.toUpperCase()}
-                </button>
-              );
-            })}
-          </div>
+        <ToolStep n={3} title="Formato de saída" hue={HUE}>
+          <ToolChoice
+            value={format}
+            onChange={(v) => {
+              const disabled = v === 'mp4' && mp4Disabled;
+              if (!disabled && !processingAll) setFormat(v as OutFormat);
+            }}
+            options={[
+              { value: 'mp4', label: 'MP4', sub: 'vídeo + áudio' },
+              { value: 'mp3', label: 'MP3', sub: 'áudio' },
+              { value: 'wav', label: 'WAV', sub: 'áudio' },
+            ]}
+            disabled={processingAll}
+            hue={HUE}
+          />
           {format === 'mp4' ? (
-            <p className="mt-2 text-xs text-text-muted">
-              O BLACK mantem o video; apenas a trilha de audio e substituida pela
-              versao camuflada.
+            <p className="mt-2 text-[11px] text-text-muted">
+              O BLACK mantém o vídeo; só a trilha de áudio é substituída pela versão camuflada.
             </p>
           ) : null}
-        </div>
+        </ToolStep>
 
-        <div>
-          <label className="label-field">Quem você quer enganar</label>
-          <div className="flex flex-wrap gap-2">
-            {(
-              [
-                ['platforms', 'TikTok / Kwai / YouTube'],
-                ['single', 'IAs de transcrição'],
-                ['universal', 'Todos (mais difícil)'],
-              ] as const
-            ).map(([t, lbl]) => {
-              const active = target === t;
-              return (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setTarget(t)}
-                  disabled={processingAll}
-                  className={
-                    'rounded-[12px] px-4 py-2 text-sm transition-all duration-200 active:scale-[0.97] disabled:opacity-40 ' +
-                    (active
-                      ? 'bg-lime font-semibold text-black shadow-[0_0_18px_-4px_rgba(200,255,0,0.6)]'
-                      : 'border border-line-strong text-text-muted hover:border-lime hover:text-white')
-                  }
-                >
-                  {lbl}
-                </button>
-              );
-            })}
-          </div>
-          <p className="mt-2 text-xs text-text-muted">
-            {target === 'platforms' ? (
-              <>
-                TikTok/Kwai/YouTube reduzem o audio pra mono SOMANDO os canais
-                (o Content ID do YouTube faz a media — comprovado). A inversao
-                de fase engana esses: eles escutam o WHITE.
-              </>
-            ) : target === 'single' ? (
-              <>
-                Engines que pegam UM canal isolado escutam o BLACK em volume
-                cheio. A inversao de fase NAO camufla contra elas — e nao tem
-                como, sem o publico tambem ouvir o WHITE.
-              </>
-            ) : (
-              <>
-                So fica verde se TODO tipo de IA (somadora E de canal unico)
-                escutar o WHITE. A inversao de fase nunca passa aqui.
-              </>
-            )}
-          </p>
-        </div>
-
+        <ToolStep n={4} title="Pares BLACK + WHITE" hint="BLACK = público · WHITE = IA escuta" hue={HUE}>
         <div className="flex flex-col gap-4">
           {pairs.map((pair, i) => (
             <div
@@ -686,31 +639,31 @@ export default function CamuflagemPage() {
           ))}
         </div>
 
-        <div className="flex flex-wrap gap-3">
-          <button
-            onClick={addPair}
-            className="btn-secondary"
-            disabled={pairs.length >= 10 || processingAll}
-          >
-            + Adicionar par ({pairs.length}/10)
-          </button>
-          {processingAll ? (
-            <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
-          ) : (
+          <div className="mt-4 flex flex-wrap gap-3">
             <button
-              onClick={processAll}
-              className="btn-primary"
-              disabled={!pairs.some((p) => p.black && p.white)}
+              onClick={addPair}
+              className="btn-secondary"
+              disabled={pairs.length >= 10 || processingAll}
             >
-              Processar tudo
+              + Adicionar par ({pairs.length}/10)
             </button>
-          )}
-          {doneCount > 1 ? (
-            <button onClick={downloadAllZip} className="btn-secondary">
-              Baixar ZIP ({doneCount})
-            </button>
-          ) : null}
-        </div>
+            {processingAll ? (
+              <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
+            ) : (
+              <ToolAction
+                onClick={processAll}
+                disabled={!pairs.some((p) => p.black && p.white)}
+              >
+                Processar tudo
+              </ToolAction>
+            )}
+            {doneCount > 1 ? (
+              <button onClick={downloadAllZip} className="btn-secondary">
+                Baixar ZIP ({doneCount})
+              </button>
+            ) : null}
+          </div>
+        </ToolStep>
       </div>
     </ToolShell>
   );

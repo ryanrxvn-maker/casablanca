@@ -16,6 +16,10 @@ import {
 import { CancelButton } from '@/components/CancelButton';
 import { buildZip } from '@/lib/zip-builder';
 import { formatBytes } from '@/lib/utils';
+import { ToolStep, ToolChoice, ToolSlider, ToolAction } from '@/components/tool-kit';
+import { IconAcelerador } from '@/components/ToolIcons';
+
+const HUE = 'rgba(251,191,36,0.4)';
 
 type OutFormat = 'mp4' | 'mp3' | 'wav';
 
@@ -214,11 +218,11 @@ export default function AceleradorPage() {
       title="Mixer de Velocidade"
       eyebrow="VÍDEO / ÁUDIO"
       description="Acelera ou desacelera o vídeo/áudio sem ficar robótico."
-      hue="rgba(251,191,36,0.4)"
+      hue={HUE}
+      icon={<IconAcelerador size={56} />}
     >
-      <div className="flex flex-col gap-6">
-        <div>
-          <label className="label-field">Arquivos (até {MAX_BATCH})</label>
+      <div className="flex flex-col gap-5">
+        <ToolStep n={1} title="Arquivos" hint={`Até ${MAX_BATCH} · MP3, WAV, MP4, WEBM ou MOV`} hue={HUE}>
           <BatchFileUpload
             accept="audio/*,video/mp4,video/webm,video/quicktime"
             value={files}
@@ -227,39 +231,23 @@ export default function AceleradorPage() {
             hint="MP3, WAV, MP4, WEBM ou MOV"
             disabled={processing}
           />
-        </div>
+        </ToolStep>
 
-        <div>
-          <div className="flex items-center justify-between">
-            <label className="label-field !mb-0">Velocidade</label>
-            <span
-              className={
-                'mono text-xs ' +
-                (speedMode === 'slow'
-                  ? 'text-cyan-300'
-                  : speedMode === 'fast'
-                    ? 'text-lime'
-                    : 'text-text-muted')
-              }
-            >
-              {speed.toFixed(2)}x
-              <span className="ml-2 uppercase tracking-widest opacity-60">
-                {speedMode === 'slow'
-                  ? 'desacelerando'
-                  : speedMode === 'fast'
-                    ? 'acelerando'
-                    : 'original'}
-              </span>
-            </span>
-          </div>
-          <input
-            type="range"
+        <ToolStep n={2} title="Velocidade" hint="Pitch-corrigido — não fica robótico" hue={HUE}>
+          <ToolSlider
+            label={
+              speedMode === 'slow'
+                ? 'Desacelerando'
+                : speedMode === 'fast'
+                  ? 'Acelerando'
+                  : 'Original'
+            }
             min={0.5}
             max={3.0}
             step={0.05}
             value={speed}
-            onChange={(e) => setSpeed(parseFloat(e.target.value))}
-            className="mt-3"
+            onChange={(v) => setSpeed(v)}
+            display={(v) => v.toFixed(2) + 'x'}
             disabled={processing}
           />
           <div className="mono mt-1 flex justify-between text-[10px] uppercase tracking-widest text-text-muted">
@@ -267,7 +255,7 @@ export default function AceleradorPage() {
             <span>1.0x</span>
             <span>3.0x</span>
           </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
+          <div className="mt-3 flex flex-wrap gap-1.5">
             {[0.75, 0.85, 1.0, 1.25, 1.5, 2.0].map((preset) => {
               const active = Math.abs(speed - preset) < 0.001;
               return (
@@ -277,10 +265,10 @@ export default function AceleradorPage() {
                   onClick={() => setSpeed(preset)}
                   disabled={processing}
                   className={
-                    'mono rounded-[8px] px-2 py-1 text-[11px] transition-all duration-150 disabled:opacity-40 ' +
+                    'mono rounded-[8px] px-2.5 py-1 text-[11px] transition-all duration-150 disabled:opacity-40 ' +
                     (active
-                      ? 'bg-lime/90 font-semibold text-black'
-                      : 'border border-line-strong text-text-muted hover:border-lime hover:text-white')
+                      ? 'border border-violet/65 bg-violet/15 font-semibold text-white'
+                      : 'border border-line-strong text-text-muted hover:border-violet hover:text-white')
                   }
                 >
                   {preset.toFixed(2)}x
@@ -288,74 +276,60 @@ export default function AceleradorPage() {
               );
             })}
           </div>
-        </div>
+        </ToolStep>
 
-        <div>
-          <label className="label-field">Formato de saida</label>
-          <div className="flex flex-wrap gap-2">
-            {formatOptions.map((opt) => {
-              const active = format === opt.id;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => !opt.disabled && setFormat(opt.id)}
-                  disabled={processing || opt.disabled}
-                  className={
-                    'rounded-[12px] px-4 py-2 text-sm transition-all duration-200 active:scale-[0.97] disabled:opacity-40 ' +
-                    (active
-                      ? 'bg-lime font-semibold text-black shadow-[0_0_18px_-4px_rgba(200,255,0,0.6)]'
-                      : 'border border-line-strong text-text-muted hover:border-lime hover:text-white')
-                  }
-                  title={opt.disabled ? 'MP4 indisponivel: um dos arquivos nao e video' : undefined}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
-          </div>
+        <ToolStep n={3} title="Formato de saída" hue={HUE}>
+          <ToolChoice
+            value={format}
+            onChange={(v) => {
+              const o = formatOptions.find((x) => x.id === v);
+              if (o && !o.disabled && !processing) setFormat(v as OutFormat);
+            }}
+            options={formatOptions.map((o) => ({
+              value: o.id,
+              label: o.label.split(' ')[0],
+              sub: o.label.includes('video') ? 'vídeo' : 'áudio',
+            }))}
+            disabled={processing}
+            hue={HUE}
+          />
           {allVideos && format !== 'mp4' ? (
             <p className="mt-2 text-xs text-text-muted">
-              Saida de audio puro: o video sera descartado e so o audio
-              acelerado sera exportado.
+              Saída só de áudio: o vídeo é descartado e só o áudio acelerado é exportado.
             </p>
           ) : null}
-        </div>
+        </ToolStep>
 
-        <div className="flex flex-wrap gap-3">
-          {processing ? (
-            <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
-          ) : (
+        <ToolStep n={4} title={processing ? `${actionLabel}…` : actionLabel} hue={HUE}>
+          <div className="flex flex-wrap gap-3">
+            {processing ? (
+              <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
+            ) : (
+              <ToolAction
+                onClick={processAll}
+                disabled={files.length === 0 || speedMode === 'same'}
+              >
+                {`${actionLabel} ${files.length || ''}`.trim()}
+              </ToolAction>
+            )}
             <button
-              onClick={processAll}
-              className="btn-primary"
-              disabled={files.length === 0 || speedMode === 'same'}
-              title={
-                speedMode === 'same'
-                  ? 'Mova o slider para acelerar ou desacelerar'
-                  : undefined
-              }
-            >
-              {`${actionLabel} ${files.length || ''}`.trim()}
-            </button>
-          )}
-          <button
-            onClick={() => setFilesSafe([])}
-            className="btn-secondary"
-            disabled={processing || files.length === 0}
-          >
-            Limpar
-          </button>
-          {hasResults && !processing ? (
-            <button
-              onClick={downloadZip}
+              onClick={() => setFilesSafe([])}
               className="btn-secondary"
-              disabled={zipping}
+              disabled={processing || files.length === 0}
             >
-              {zipping ? 'Zipando...' : `Baixar ZIP (${doneJobs.length})`}
+              Limpar
             </button>
-          ) : null}
-        </div>
+            {hasResults && !processing ? (
+              <button
+                onClick={downloadZip}
+                className="btn-secondary"
+                disabled={zipping}
+              >
+                {zipping ? 'Zipando...' : `Baixar ZIP (${doneJobs.length})`}
+              </button>
+            ) : null}
+          </div>
+        </ToolStep>
 
         {stageMsg ? (
           <div

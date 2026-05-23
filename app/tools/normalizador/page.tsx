@@ -16,6 +16,10 @@ import {
 } from '@/lib/ffmpeg-worker';
 import { CancelButton } from '@/components/CancelButton';
 import { buildZip } from '@/lib/zip-builder';
+import { ToolStep, ToolChoice, ToolAction } from '@/components/tool-kit';
+import { IconNormalizador } from '@/components/ToolIcons';
+
+const HUE = 'rgba(94,234,212,0.4)';
 
 /**
  * Normalizador de Volume — equilibra o volume com compressor estatico.
@@ -211,11 +215,11 @@ export default function NormalizadorPage() {
       title="Normalizador"
       eyebrow="ÁUDIO"
       description="Iguala o volume dos arquivos. Voz baixa sobe, voz alta desce. Tudo no mesmo nível."
-      hue="rgba(94,234,212,0.4)"
+      hue={HUE}
+      icon={<IconNormalizador size={56} />}
     >
-      <div className="flex flex-col gap-6">
-        <div>
-          <label className="label-field">Arquivos (até {MAX_BATCH})</label>
+      <div className="flex flex-col gap-5">
+        <ToolStep n={1} title="Arquivos" hint={`Até ${MAX_BATCH} · MP3, WAV, MP4, WEBM ou MOV`} hue={HUE}>
           <BatchFileUpload
             accept="audio/*,video/mp4,video/webm,video/quicktime"
             value={files}
@@ -224,10 +228,9 @@ export default function NormalizadorPage() {
             hint="MP3, WAV, MP4, WEBM ou MOV"
             disabled={processing}
           />
-        </div>
+        </ToolStep>
 
-        <div>
-          <label className="label-field">Intensidade da normalizacao</label>
+        <ToolStep n={2} title="Intensidade" hint="Quanto agressiva é a compressão" hue={HUE}>
           <div className="grid gap-2 sm:grid-cols-3">
             {INTENSITY_OPTIONS.map((opt) => {
               const active = intensity === opt.id;
@@ -238,13 +241,16 @@ export default function NormalizadorPage() {
                   onClick={() => setIntensity(opt.id)}
                   disabled={processing}
                   className={
-                    'flex flex-col items-start gap-1 rounded-[12px] border px-4 py-3 text-left transition-all duration-200 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40 ' +
+                    'flex flex-col items-start gap-1 rounded-[14px] border px-4 py-3 text-left transition-all duration-200 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40 ' +
                     (active
-                      ? 'border-lime bg-lime/10 text-lime shadow-[0_0_18px_-4px_rgba(200,255,0,0.5)]'
-                      : 'border-line bg-bg text-text-muted hover:border-lime/50 hover:text-white')
+                      ? 'border-violet/65 bg-violet/12 text-white shadow-[0_0_22px_-6px_rgba(167,139,250,0.55)]'
+                      : 'border-line-strong bg-bg-soft/60 text-text-muted hover:border-violet/45 hover:-translate-y-[1px] hover:text-white')
                   }
                 >
-                  <span className="text-sm font-semibold uppercase tracking-widest">
+                  <span
+                    className="text-[13px] font-bold tracking-tight text-white"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
                     {opt.label}
                   </span>
                   <span className="text-[11px] leading-snug text-text-muted">
@@ -254,79 +260,59 @@ export default function NormalizadorPage() {
               );
             })}
           </div>
-        </div>
+        </ToolStep>
 
-        <div>
-          <label className="label-field">Formato de saida</label>
-          <div className="flex flex-wrap gap-2">
-            {(['mp4', 'mp3', 'wav'] as const).map((f) => {
-              const disabled = f === 'mp4' && (anyAudio || files.length === 0);
-              const active = output === f;
-              return (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => !disabled && setOutput(f)}
-                  disabled={processing || disabled}
-                  className={
-                    'rounded-[12px] px-4 py-2 text-sm transition-all duration-200 active:scale-[0.97] disabled:opacity-40 ' +
-                    (active
-                      ? 'bg-lime font-semibold text-black shadow-[0_0_18px_-4px_rgba(200,255,0,0.6)]'
-                      : 'border border-line-strong text-text-muted hover:border-lime hover:text-white')
-                  }
-                  title={
-                    disabled
-                      ? 'MP4 disponivel apenas quando todos os inputs sao video.'
-                      : undefined
-                  }
-                >
-                  {f === 'mp4' ? 'MP4 (video)' : f.toUpperCase()}
-                </button>
-              );
-            })}
-          </div>
-          {output === 'mp4' ? (
-            <p className="mt-2 text-xs text-text-muted">
-              O video original e mantido; apenas a trilha de audio e normalizada.
-            </p>
-          ) : (
-            <p className="mt-2 text-xs text-text-muted">
-              {allVideos
-                ? 'A imagem do video sera descartada — saida e somente audio normalizado.'
-                : 'Saida de audio normalizado.'}
-            </p>
-          )}
-        </div>
+        <ToolStep n={3} title="Formato de saída" hue={HUE}>
+          <ToolChoice
+            value={output}
+            onChange={(v) => {
+              const disabled = v === 'mp4' && (anyAudio || files.length === 0);
+              if (!disabled && !processing) setOutput(v as NormalizeOutFormat);
+            }}
+            options={[
+              { value: 'mp4', label: 'MP4', sub: 'vídeo' },
+              { value: 'mp3', label: 'MP3', sub: 'áudio' },
+              { value: 'wav', label: 'WAV', sub: 'áudio' },
+            ]}
+            disabled={processing}
+            hue={HUE}
+          />
+          <p className="mt-2 text-xs text-text-muted">
+            {output === 'mp4'
+              ? 'Vídeo mantido; só a trilha de áudio é normalizada.'
+              : allVideos
+                ? 'A imagem do vídeo é descartada — saída é só o áudio normalizado.'
+                : 'Saída de áudio normalizado.'}
+          </p>
+        </ToolStep>
 
-        <div className="flex flex-wrap gap-3">
-          {processing ? (
-            <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
-          ) : (
+        <ToolStep n={4} title={processing ? 'Normalizando…' : 'Normalizar'} hue={HUE}>
+          <div className="flex flex-wrap gap-3">
+            {processing ? (
+              <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
+            ) : (
+              <ToolAction onClick={processAll} disabled={files.length === 0}>
+                {`Normalizar ${files.length || ''}`.trim()}
+              </ToolAction>
+            )}
             <button
-              onClick={processAll}
-              className="btn-primary"
-              disabled={files.length === 0}
-            >
-              {`Normalizar ${files.length || ''}`.trim()}
-            </button>
-          )}
-          <button
-            onClick={() => setFilesSafe([])}
-            className="btn-secondary"
-            disabled={processing || files.length === 0}
-          >
-            Limpar
-          </button>
-          {hasResults && !processing ? (
-            <button
-              onClick={downloadZip}
+              onClick={() => setFilesSafe([])}
               className="btn-secondary"
-              disabled={zipping}
+              disabled={processing || files.length === 0}
             >
-              {zipping ? 'Zipando...' : `Baixar ZIP (${doneJobs.length})`}
+              Limpar
             </button>
-          ) : null}
-        </div>
+            {hasResults && !processing ? (
+              <button
+                onClick={downloadZip}
+                className="btn-secondary"
+                disabled={zipping}
+              >
+                {zipping ? 'Zipando...' : `Baixar ZIP (${doneJobs.length})`}
+              </button>
+            ) : null}
+          </div>
+        </ToolStep>
 
         {stageMsg ? (
           <div

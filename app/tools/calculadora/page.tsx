@@ -3,6 +3,10 @@
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { formatBRL } from '@/lib/utils';
+import { ToolStep, ToolSlider, ToolMetric, ToolResultCard } from '@/components/tool-kit';
+import { IconCalculadora } from '@/components/ToolIcons';
+
+const HUE = 'rgba(148,163,184,0.4)';
 
 const VPM_PRESETS = [50, 80, 100, 150, 200, 300] as const;
 
@@ -33,99 +37,84 @@ export default function CalculadoraPage() {
       title="Calculadora"
       eyebrow="OPERACIONAL"
       description="Quanto cobrar pelo projeto? Coloca os minutos, o valor e a gente fecha a conta."
-      hue="rgba(148,163,184,0.4)"
+      hue={HUE}
+      icon={<IconCalculadora size={56} />}
     >
-      <div className="flex flex-col gap-6">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label className="label-field" htmlFor="vpm">
+      <div className="flex flex-col gap-5">
+        <ToolStep n={1} title="Tabela de preço" hint="Quanto custa cada minuto entregue" hue={HUE}>
+          <label className="block">
+            <span
+              className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
               Valor por minuto (R$)
-            </label>
+            </span>
             <input
               id="vpm"
               inputMode="decimal"
               placeholder="0,00"
-              className="input-field"
+              className="input-field mt-2"
               value={valorPorMinuto}
               onChange={(e) => setValorPorMinuto(e.target.value)}
             />
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {VPM_PRESETS.map((v) => (
-                <button
-                  key={v}
-                  type="button"
-                  onClick={() => setValorPorMinuto(String(v))}
-                  className="mono rounded-full border border-line-strong px-2.5 py-0.5 text-[11px] text-text-muted transition-all duration-200 hover:border-lime hover:text-lime active:scale-[0.95]"
-                >
-                  R${v}
-                </button>
-              ))}
-            </div>
+          </label>
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {VPM_PRESETS.map((v) => (
+              <button
+                key={v}
+                type="button"
+                onClick={() => setValorPorMinuto(String(v))}
+                className={
+                  'mono rounded-full border px-3 py-1 text-[11px] transition-all duration-200 active:scale-[0.95] ' +
+                  (Math.abs(vpm - v) < 0.001
+                    ? 'border-violet/65 bg-violet/15 text-white'
+                    : 'border-line-strong text-text-muted hover:border-violet hover:text-white')
+                }
+              >
+                R${v}
+              </button>
+            ))}
           </div>
-          <div>
-            <label className="label-field" htmlFor="min">
-              Minutagem do projeto
-            </label>
-            <input
-              id="min"
-              inputMode="decimal"
-              placeholder="0"
-              className="input-field"
-              value={minutagem}
-              onChange={(e) => setMinutagem(e.target.value)}
-            />
-          </div>
-        </div>
+        </ToolStep>
 
-        <div>
-          <div className="flex items-center justify-between">
-            <label className="label-field !mb-0" htmlFor="desconto">
-              Desconto (%)
-            </label>
-            <span className="mono text-xs text-lime">{desconto}%</span>
-          </div>
+        <ToolStep n={2} title="Minutagem" hint="Quantos minutos finais o projeto entrega" hue={HUE}>
           <input
-            id="desconto"
-            type="range"
+            id="min"
+            inputMode="decimal"
+            placeholder="0"
+            className="input-field"
+            value={minutagem}
+            onChange={(e) => setMinutagem(e.target.value)}
+          />
+        </ToolStep>
+
+        <ToolStep n={3} title="Desconto" hint="Pra cliente recorrente ou pacote fechado" hue={HUE}>
+          <ToolSlider
+            label="Desconto"
             min={0}
             max={50}
             step={1}
             value={desconto}
-            onChange={(e) => setDescontoPct(e.target.value)}
-            className="mt-3"
+            onChange={(v) => setDescontoPct(String(v))}
+            display={(v) => v + '%'}
           />
-        </div>
+        </ToolStep>
 
-        <div className="card-3d card-pad tech-frame">
-          <div className="label-field">Total do orcamento</div>
-          <div
-            className="font-display font-black tracking-tight text-lime"
-            style={{ fontSize: 40, lineHeight: 1.05 }}
-          >
-            {formatBRL(total)}
+        <ToolResultCard
+          title="Orçamento"
+          meta={vpm > 0 && min > 0 ? `${min.toLocaleString('pt-BR')} min × ${formatBRL(vpm)}` : undefined}
+          hue={HUE}
+        >
+          <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3">
+            <ToolMetric value={formatBRL(subtotal)} label="Subtotal" />
+            <ToolMetric
+              value={desconto > 0 ? `-${formatBRL(valorDesconto)}` : '—'}
+              label={desconto > 0 ? `Desconto ${desconto}%` : 'Sem desconto'}
+              accent="rose"
+            />
+            <ToolMetric value={formatBRL(total)} label="Total" accent="lime" />
           </div>
-          <div className="mono mt-3 grid gap-1 text-xs text-text-muted">
-            <div>
-              <span className="mono text-white">{formatBRL(vpm)}</span>{' '}
-              ×{' '}
-              <span className="mono text-white">
-                {min.toLocaleString('pt-BR')} min
-              </span>{' '}
-              ={' '}
-              <span className="mono text-white">{formatBRL(subtotal)}</span>
-            </div>
-            {desconto > 0 ? (
-              <div>
-                Desconto{' '}
-                <span className="mono text-red-300">{desconto}%</span>{' '}
-                ={' '}
-                <span className="mono text-red-300">
-                  -{formatBRL(valorDesconto)}
-                </span>
-              </div>
-            ) : null}
-          </div>
-        </div>
+        </ToolResultCard>
       </div>
     </ToolShell>
   );
