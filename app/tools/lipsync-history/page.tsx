@@ -244,7 +244,12 @@ export default function LipsyncHistoryPage() {
   }, [entries]);
 
   return (
-    <ToolShell title="Histórico" eyebrow="AVATAR" description="Todo avatar gerado por aqui fica aqui. Pra você revisar quando quiser.">
+    <ToolShell
+      title="Histórico"
+      eyebrow="AVATAR"
+      description="Todo avatar gerado por aqui fica aqui. Pra você revisar quando quiser."
+      hue="rgba(168,85,247,0.42)"
+    >
       <div className="space-y-4">
         {/* Stats */}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">

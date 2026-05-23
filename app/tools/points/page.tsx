@@ -289,6 +289,7 @@ export default function PointsPage() {
       title="Seus pontos"
       eyebrow="CONQUISTAS"
       description="Cada entrega rende ponto. Cada meta rende medalha. Continue assim."
+      hue="rgba(251,191,36,0.42)"
     >
       {/* === VISOR PRINCIPAL === */}
       <div className="relative rounded-[16px] border border-cyan-500/40 bg-gradient-to-br from-bg-soft/80 to-bg/60 p-6 mb-5 overflow-hidden">

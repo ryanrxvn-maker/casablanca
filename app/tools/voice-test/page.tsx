@@ -16,6 +16,9 @@ import {
   type VoiceIsolatorMode,
 } from '@/lib/voice-isolator';
 import { downloadBlob } from '@/lib/audio-engine';
+import { ToolStep, ToolAction, ToolResultCard } from '@/components/tool-kit';
+
+const HUE = 'rgba(94,234,212,0.42)';
 
 type Result = {
   original: { blob: Blob; url: string; size: number; duration: number; channels: number };
@@ -102,11 +105,10 @@ export default function VoiceTestPage() {
       title="Isolar voz"
       eyebrow="ÁUDIO"
       description="Tira a música, deixa só a voz. Ideal pra usar com avatar e lipsync."
+      hue={HUE}
     >
       <div className="grid gap-5">
-        {/* Upload */}
-        <div>
-          <label className="label-field block mb-2">Áudio (MP3, WAV, M4A, OGG ou MP4)</label>
+        <ToolStep n={1} title="Áudio" hint="MP3, WAV, M4A, OGG ou MP4" hue={HUE}>
           <input
             type="file"
             accept="audio/*,video/mp4"
@@ -119,15 +121,13 @@ export default function VoiceTestPage() {
             disabled={processing}
           />
           {file && (
-            <p className="mono mt-1 text-xs text-text-muted">
+            <p className="mono mt-2 text-xs text-text-muted">
               {file.name} · {(file.size / 1024).toFixed(1)} KB
             </p>
           )}
-        </div>
+        </ToolStep>
 
-        {/* Mode */}
-        <div>
-          <label className="label-field block mb-2">Modo de isolacao</label>
+        <ToolStep n={2} title="Modo de isolação" hint="Auto detecta stereo/mono" hue={HUE}>
           <select
             value={mode}
             onChange={(e) => setMode(e.target.value as VoiceIsolatorMode)}
@@ -139,28 +139,24 @@ export default function VoiceTestPage() {
             <option value="bandpass">Bandpass + Compand (mono ou stereo fake)</option>
             <option value="aggressive">Aggressive (audio sujo com denoise pesado)</option>
           </select>
-        </div>
+        </ToolStep>
 
-        {/* Actions */}
-        <div className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={handleProcess}
-            disabled={!file || processing}
-            className="btn-primary"
-          >
-            {processing ? 'Processando...' : 'Isolar voz'}
-          </button>
-          {result && (
-            <button
-              type="button"
-              onClick={handleDownload}
-              className="btn-secondary"
-            >
-              ⬇ Baixar vocals.wav
-            </button>
-          )}
-        </div>
+        <ToolStep n={3} title={processing ? 'Isolando…' : 'Isolar voz'} hue={HUE}>
+          <div className="flex flex-wrap gap-3">
+            <ToolAction onClick={handleProcess} loading={processing} disabled={!file || processing}>
+              Isolar voz
+            </ToolAction>
+            {result && (
+              <button
+                type="button"
+                onClick={handleDownload}
+                className="btn-secondary"
+              >
+                ⬇ Baixar vocals.wav
+              </button>
+            )}
+          </div>
+        </ToolStep>
 
         {progress && processing && (
           <div className="rounded-md border border-line bg-bg-soft/40 px-3 py-2 text-xs">

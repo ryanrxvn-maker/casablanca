@@ -37,7 +37,6 @@ const TITLES: Record<string, string> = {
   '/tools/background': 'Tarefas em segundo plano',
   '/tools/lipsync-history': 'Histórico de avatares',
   '/tools/clickup-pilot': 'ClickUp Pilot',
-  '/tools/mind-ads': 'Mind Ads',
   '/tools/voice-test': 'Isolar voz',
   '/configuracoes': 'Configurações',
   '/configuracoes/api': 'Chaves de IA',

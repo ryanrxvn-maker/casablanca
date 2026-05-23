@@ -54,7 +54,6 @@ const PRO_ONLY_TOOLS = [
 // Rotas exclusivamente do admin (mesmo beta não acessa)
 const ADMIN_ONLY_PREFIXES = [
   '/admin',
-  '/tools/mind-ads',
   '/tools/ltx-video',
   '/tools/remover-elementos',
   '/tools/points', // sistema de pontos é interno

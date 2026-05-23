@@ -241,7 +241,12 @@ export default function BackgroundTasksPage() {
   }
 
   return (
-    <ToolShell title="Tarefas em segundo plano" eyebrow="FILA" description="Tudo o que está rodando agora. Você pode fechar a aba — o trabalho continua.">
+    <ToolShell
+      title="Tarefas em segundo plano"
+      eyebrow="FILA"
+      description="Tudo o que está rodando agora. Você pode fechar a aba — o trabalho continua."
+      hue="rgba(34,211,238,0.42)"
+    >
       <div className="space-y-4">
         {/* Top — contadores + acoes */}
         <div className="flex flex-wrap items-center gap-3 rounded-[14px] border border-line-strong bg-bg-soft/30 p-3">
