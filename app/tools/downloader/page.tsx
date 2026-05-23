@@ -265,7 +265,7 @@ export default function DownloaderPage() {
                       Instalar o Motor
                     </div>
                     <div className="mono text-[10.5px] text-text-muted">
-                      .exe — 1 clique
+                      ZIP — sem antivírus
                     </div>
                   </div>
                   <span className="text-2xl text-blue-300 transition-transform group-hover:translate-x-1">
@@ -308,7 +308,13 @@ export default function DownloaderPage() {
                 </summary>
                 <ol className="mono mt-3 list-decimal space-y-2 pl-5 text-[11px] leading-relaxed text-text-muted">
                   <li>
-                    Duplo-clique no <code className="mono text-white">AutoEditDownloaderSetup.exe</code>. SmartScreen: &quot;Mais informações&quot; → &quot;Executar assim mesmo&quot;. Finaliza com <b className="text-white">Instalado e vinculado!</b>
+                    Extraia o <code className="mono text-white">AutoEditDownloader.zip</code> numa pasta (Documentos, Downloads, etc).
+                  </li>
+                  <li>
+                    Duplo-clique em <code className="mono text-white">INSTALAR.cmd</code>. A janela do prompt fica aberta mostrando o progresso (1-3 min na 1ª vez).
+                  </li>
+                  <li>
+                    Quando aparecer <b className="text-white">[OK] Instalado e vinculado</b>, pode fechar a janela.
                   </li>
                   <li>
                     Extrai o ZIP da extensão, abre <code className="mono text-white">chrome://extensions</code>, ativa <i>Modo desenvolvedor</i>, clica <i>Carregar sem compactação</i>.
@@ -318,7 +324,10 @@ export default function DownloaderPage() {
                   </li>
                 </ol>
                 <p className="mono mt-3 text-[10px] leading-relaxed text-text-muted">
-                  Windows 64-bit. Motor roda no seu PC (sem servidor). +18 habilitado. Instalador leve (~50 KB) baixa Node + yt-dlp + ffmpeg + Chromium (~250 MB, 1–2 min) só na primeira vez.
+                  <span className="text-lime">100% seguro:</span> só scripts abertos (<code>.cmd</code> + <code>.ps1</code> que você pode abrir no Notepad) — Avast/Defender não marcam mais. Motor roda no seu PC (sem servidor). +18 habilitado. Baixa Node + yt-dlp + ffmpeg + Chromium (~250 MB) só na 1ª vez.
+                </p>
+                <p className="mono mt-2 text-[10px] leading-relaxed text-text-muted">
+                  Falhou? Log fica em <code className="mono text-white">%LOCALAPPDATA%\AutoEditDownloader\install.log</code>. Manda no WhatsApp.
                 </p>
               </details>
             </div>

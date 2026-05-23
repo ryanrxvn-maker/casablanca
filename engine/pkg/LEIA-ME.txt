@@ -1,17 +1,52 @@
-DarkoLab Downloader — Motor (Windows)
-=====================================
-1) DUPLO-CLIQUE em "DarkoDownloaderSetup.exe".
-   Baixa o necessario (Node + yt-dlp + ffmpeg + Chromium, ~250 MB)
-   UMA UNICA VEZ, configura auto-start no Windows e ja vincula a
-   extensao DarkoLab Downloader sozinho — sem codigo, sem pareamento.
-   Se o Windows avisar (SmartScreen), clique "Mais informacoes" >
-   "Executar assim mesmo".
+Auto Edit Downloader - Motor (Windows)
+======================================
 
-2) Instale a extensao "DarkoLab Downloader" no navegador
-   (chrome://extensions > modo dev > Carregar sem compactacao).
+INSTALACAO (sem .exe, 100% seguro contra antivirus):
 
-3) Pronto: em qualquer video (YouTube/Insta/TikTok/Pinterest/+18)
-   aparece o botao "Baixar". Roda 100% no seu PC, sem servidor.
+  1) Extrai o ZIP numa pasta qualquer (Documentos, Downloads, etc).
 
-Desinstalar: rode "DESINSTALAR.cmd" dentro de %LOCALAPPDATA%\DarkoDownloaderApp.
-Precisa de internet so na 1a instalacao. Requer Windows 64-bit.
+  2) DUPLO-CLIQUE em "INSTALAR.cmd". A janela do prompt fica aberta
+     mostrando o progresso. Pode levar 1-3 min na 1a vez (baixa
+     Node + Chromium + yt-dlp + ffmpeg, ~250 MB). Se a janela ficar
+     quieta por uns minutos, e normal — esta baixando arquivos
+     grandes em background.
+
+  3) Quando terminar, a tela mostra "[OK] Instalado e vinculado."
+     Pode fechar a janela.
+
+  4) Instale a extensao "Auto Edit Downloader" no Chrome:
+     - Abre chrome://extensions
+     - Liga "Modo de desenvolvedor" (canto superior direito)
+     - Clica "Carregar sem compactacao"
+     - Aponta pra pasta da extensao
+
+  5) Pronto. Abre um video no YouTube/Instagram/TikTok/Pinterest
+     e o botao "Baixar" aparece sozinho.
+
+O motor roda automaticamente toda vez que voce ligar o PC.
+Tudo 100% local, sem servidor, sem token, sem pareamento.
+
+DESINSTALAR
+-----------
+DUPLO-CLIQUE em "DESINSTALAR.cmd" dentro de
+%LOCALAPPDATA%\AutoEditDownloader
+
+ou no proprio ZIP de instalacao.
+
+
+SEGURANCA / ANTIVIRUS
+---------------------
+Esta versao usa SCRIPTS abertos (.cmd e .ps1 que voce pode abrir
+no Notepad), nao um .exe compilado. Isso evita que Avast/Defender
+marquem como suspeito. Se mesmo assim aparecer aviso, e falso
+positivo — voce pode adicionar a pasta como excecao.
+
+
+LOGS / SUPORTE
+--------------
+Log de instalacao: %LOCALAPPDATA%\AutoEditDownloader\install.log
+Log do motor:      %LOCALAPPDATA%\AutoEditDownloader\engine.log
+
+Em caso de falha, manda esse arquivo no WhatsApp do suporte.
+
+Requer Windows 10/11 64-bit. Internet so na 1a instalacao.

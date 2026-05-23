@@ -1,253 +1,246 @@
-# DarkoLab Downloader — instalador com TELA (design DARKO).
-# O trabalho pesado roda num Job de background; a janela WinForms so
-# mostra "Instalando...", barra de progresso e, no fim, o codigo.
-$ErrorActionPreference = 'Stop'
+# ===============================================================
+#  Auto Edit Downloader - Instalador
+#  ---------------------------------------------------------------
+#  CONSOLE VISIVEL (sem hidden window) pra reduzir trigger de
+#  antivirus. Sem VBS, sem Startup folder + .lnk — usa Task
+#  Scheduler nativo do Windows (schtasks). Tudo logado.
+# ===============================================================
 
-$src = $PSScriptRoot
-$dst = Join-Path $env:LOCALAPPDATA 'DarkoDownloaderApp'
-$status = Join-Path $env:TEMP 'darko-install-status.txt'
-Set-Content -LiteralPath $status -Value '2|Preparando...' -Encoding UTF8
+$ErrorActionPreference = 'Continue'  # nao interrompe em erros nao-fatais
+$ProgressPreference    = 'Continue'
 
-# esconde a janela de console (so a UI bonita aparece)
+# ---------- paths ----------
+$dst    = Join-Path $env:LOCALAPPDATA 'AutoEditDownloader'
+$src    = $PSScriptRoot
+$logDir = $dst
+$log    = Join-Path $dst 'install.log'
+
+# garante a pasta + log
+New-Item -ItemType Directory -Force -Path $dst | Out-Null
+
+function Log {
+  param([string]$msg)
+  $line = ('{0}  {1}' -f (Get-Date -Format 'HH:mm:ss'), $msg)
+  Write-Host $line
+  try { Add-Content -LiteralPath $log -Value $line -Encoding UTF8 } catch {}
+}
+
+function Step {
+  param([int]$pct, [string]$msg)
+  Log ("[{0,3}%] {1}" -f $pct, $msg)
+}
+
+function Fail {
+  param([string]$msg, [int]$code = 1)
+  Log ("ERRO: {0}" -f $msg)
+  exit $code
+}
+
+# Captura de erro top-level (sem usar ErrorActionPreference=Stop
+# pra nao matar o script em warnings)
+trap {
+  Fail $_.Exception.Message 99
+}
+
+Log '======================================================'
+Log ' Auto Edit Downloader — Instalador'
+Log ('  destino: {0}' -f $dst)
+Log ('  fonte  : {0}' -f $src)
+Log '======================================================'
+
+# Force TLS 1.2 pra todos os downloads (alguns CDNs rejeitam tls1.1)
 try {
-  Add-Type -Name W -Namespace Win -MemberDefinition '[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int c);'
-  [Win.W]::ShowWindow([Win.W]::GetConsoleWindow(),0) | Out-Null
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 } catch {}
 
-# ---- WORKER: roda em job, escreve "PCT|MSG" / "DONE|tok" / "ERR|msg" ----
-$workSrc = @'
-param($src,$dst,$nodeVer,$status)
-$ErrorActionPreference='Stop'
-$ProgressPreference='SilentlyContinue'
-[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
-function St($p,$m){ Set-Content -LiteralPath $status -Value ("$p|$m") -Encoding UTF8 }
+# ---------- mata instancia rodando ----------
+Step 2 'Parando instancia anterior do motor (se houver)...'
 try {
-  St 4 'Preparando...'
-  Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match 'server.cjs' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-  New-Item -ItemType Directory -Force -Path $dst | Out-Null
-  New-Item -ItemType Directory -Force -Path (Join-Path $dst 'bin') | Out-Null
-  Copy-Item (Join-Path $src 'server.cjs') $dst -Force
-  Copy-Item (Join-Path $src 'DarkoDownloader.cmd') $dst -Force
-  Copy-Item (Join-Path $src 'Desinstalar.ps1') $dst -Force
-  Copy-Item (Join-Path $src 'LEIA-ME.txt') $dst -Force -ErrorAction SilentlyContinue
-  $tmp = Join-Path $env:TEMP ('darko-dl-' + [Guid]::NewGuid().ToString('N'))
-  New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+  Get-CimInstance Win32_Process -Filter "Name='node.exe'" `
+    | Where-Object { $_.CommandLine -match 'server\.cjs' } `
+    | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+} catch { Log ('aviso: ' + $_.Exception.Message) }
 
-  if (-not (Test-Path (Join-Path $dst 'node\node.exe'))) {
-    St 12 'Baixando o Node...'
-    $nz = Join-Path $tmp 'node.zip'
-    Invoke-WebRequest -UseBasicParsing -Uri "https://nodejs.org/dist/$nodeVer/node-$nodeVer-win-x64.zip" -OutFile $nz
-    St 20 'Preparando o Node...'
-    Expand-Archive -LiteralPath $nz -DestinationPath $tmp -Force
-    $nd = Get-ChildItem $tmp -Directory | Where-Object { $_.Name -like 'node-*win-x64' } | Select-Object -First 1
-    New-Item -ItemType Directory -Force -Path (Join-Path $dst 'node') | Out-Null
-    Copy-Item (Join-Path $nd.FullName '*') (Join-Path $dst 'node') -Recurse -Force
+# ---------- copia arquivos do bundle ----------
+Step 5 'Copiando arquivos do motor...'
+New-Item -ItemType Directory -Force -Path (Join-Path $dst 'bin') | Out-Null
+foreach ($f in @('server.cjs', 'AutoEditDownloader.cmd', 'Desinstalar.ps1', 'LEIA-ME.txt')) {
+  $sp = Join-Path $src $f
+  if (Test-Path $sp) {
+    Copy-Item $sp $dst -Force
   }
-  $node = Join-Path $dst 'node\node.exe'
-  $npmCli = Join-Path $dst 'node\node_modules\npm\bin\npm-cli.js'
-
-  if (-not (Test-Path (Join-Path $dst 'node_modules\playwright'))) {
-    St 30 'Instalando componentes...'
-    '{ "name": "darko-engine", "private": true }' | Set-Content -Encoding ASCII (Join-Path $dst 'package.json')
-    & $node $npmCli install playwright@1.60.0 --omit=dev --no-audit --no-fund --prefix "$dst" 2>&1 | Out-Null
-  }
-  if (-not (Test-Path (Join-Path $dst 'ms-playwright\chromium-1223'))) {
-    St 45 'Baixando o navegador (a parte maior)...'
-    $env:PLAYWRIGHT_BROWSERS_PATH = (Join-Path $dst 'ms-playwright')
-    & $node (Join-Path $dst 'node_modules\playwright\cli.js') install chromium 2>&1 | Out-Null
-  }
-  $yt = Join-Path $dst 'bin\yt-dlp.exe'
-  if (-not (Test-Path $yt) -or (Get-Item $yt).Length -lt 5MB) {
-    St 78 'Baixando o motor de download...'
-    Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' -OutFile $yt
-  }
-  $ff = Join-Path $dst 'bin\ffmpeg.exe'
-  if (-not (Test-Path $ff) -or (Get-Item $ff).Length -lt 10MB) {
-    St 87 'Baixando o conversor de midia...'
-    $fz = Join-Path $tmp 'ff.zip'
-    Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip' -OutFile $fz
-    Expand-Archive -LiteralPath $fz -DestinationPath (Join-Path $tmp 'ff') -Force
-    $fe = Get-ChildItem -Recurse -Path (Join-Path $tmp 'ff') -Filter ffmpeg.exe | Select-Object -First 1
-    Copy-Item $fe.FullName $ff -Force
-  }
-  Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
-
-  St 93 'Configurando inicializacao...'
-  $vbs = Join-Path $dst 'run-hidden.vbs'
-  $vbsContent = "Set s = CreateObject(""WScript.Shell"")" + [char]13 + [char]10 + "d = CreateObject(""Scripting.FileSystemObject"").GetParentFolderName(WScript.ScriptFullName)" + [char]13 + [char]10 + "s.Run ""cmd /c """""" & d & ""\DarkoDownloader.cmd"""""", 0, False"
-  Set-Content -LiteralPath $vbs -Value $vbsContent -Encoding ASCII
-  $startup = [Environment]::GetFolderPath('Startup')
-  $wsh = New-Object -ComObject WScript.Shell
-  $lnk = $wsh.CreateShortcut((Join-Path $startup 'DarkoLab Downloader.lnk'))
-  $lnk.TargetPath = 'wscript.exe'
-  $lnk.Arguments = '"' + $vbs + '"'
-  $lnk.WorkingDirectory = $dst
-  $lnk.Save()
-
-  # (sem atalho de "Codigo" no Menu Iniciar — auto-pair via /pair acabou
-  # com a necessidade de o usuario ver/colar o token).
-
-  St 97 'Iniciando o motor...'
-  Remove-Item (Join-Path $dst 'engine.log') -ErrorAction SilentlyContinue
-  Start-Process wscript.exe -ArgumentList ('"' + $vbs + '"') -WindowStyle Hidden
-  # Espera o motor subir (ate 40s). Nao mostra mais o token pro usuario:
-  # a extensao pega via /pair sozinha. Sucesso = /health respondendo.
-  $alive = $false
-  for ($i=0; $i -lt 50; $i++) {
-    Start-Sleep -Milliseconds 800
-    try {
-      $r = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:47923/health' -TimeoutSec 2
-      if ($r.Content -match 'darkolab-downloader-engine') { $alive=$true; break }
-    } catch {}
-    foreach ($p in 47924,47925,47926,47927,47928) {
-      try {
-        $r = Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$p/health" -TimeoutSec 1
-        if ($r.Content -match 'darkolab-downloader-engine') { $alive=$true; break }
-      } catch {}
-    }
-    if ($alive) { break }
-  }
-  if ($alive) {
-    Set-Content -LiteralPath $status -Value 'DONE|ok' -Encoding UTF8
-  } else {
-    Set-Content -LiteralPath $status -Value ("ERR|O motor nao subiu. Log: " + (Join-Path $dst 'engine.log')) -Encoding UTF8
-  }
-} catch {
-  Set-Content -LiteralPath $status -Value ("ERR|" + $_.Exception.Message) -Encoding UTF8
 }
-'@
+# legado: arquivo antigo "DarkoDownloader.cmd" — copia também se existir
+$legacy = Join-Path $src 'DarkoDownloader.cmd'
+if (Test-Path $legacy) { Copy-Item $legacy (Join-Path $dst 'AutoEditDownloader.cmd') -Force }
 
-$job = Start-Job -ScriptBlock ([scriptblock]::Create($workSrc)) -ArgumentList $src,$dst,'v22.11.0',$status
+# Cria o starter .cmd no destino se ainda não existir
+$starter = Join-Path $dst 'AutoEditDownloader.cmd'
+if (-not (Test-Path $starter)) {
+  $cmd = @"
+@echo off
+setlocal
+set ""HERE=%~dp0""
+cd /d ""%HERE%""
+set ""YTDLP_PATH=%HERE%bin\yt-dlp.exe""
+set ""FFMPEG_PATH=%HERE%bin\ffmpeg.exe""
+set ""PLAYWRIGHT_BROWSERS_PATH=%HERE%ms-playwright""
+if not defined DARKO_ALLOW_ADULT set ""DARKO_ALLOW_ADULT=1""
+echo [%DATE% %TIME%] start >> ""%HERE%engine.log""
+""%HERE%node\node.exe"" ""%HERE%server.cjs"" >> ""%HERE%engine.log"" 2>&1
+echo [%DATE% %TIME%] exit %ERRORLEVEL% >> ""%HERE%engine.log""
+"@
+  Set-Content -LiteralPath $starter -Value $cmd -Encoding ASCII
+}
 
-# ----------------------------- UI (DARKO) -----------------------------
-try {
-  Add-Type -AssemblyName System.Windows.Forms
-  Add-Type -AssemblyName System.Drawing
-  $BG=[Drawing.Color]::FromArgb(11,13,12)
-  $CARD=[Drawing.Color]::FromArgb(20,24,22)
-  $LIME=[Drawing.Color]::FromArgb(200,255,0)
-  $TXT=[Drawing.Color]::FromArgb(232,234,233)
-  $MUT=[Drawing.Color]::FromArgb(138,143,139)
+$tmp = Join-Path $env:TEMP ('AutoEditInstall_' + [Guid]::NewGuid().ToString('N').Substring(0,8))
+New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 
-  $f=New-Object Windows.Forms.Form
-  $f.FormBorderStyle='None'; $f.StartPosition='CenterScreen'
-  $f.Size=New-Object Drawing.Size(520,300); $f.BackColor=$BG; $f.TopMost=$true
-  $f.ShowInTaskbar=$true; $f.Text='DarkoLab Downloader'
+# ---------- Node ----------
+$nodeExe = Join-Path $dst 'node\node.exe'
+if (-not (Test-Path $nodeExe)) {
+  Step 12 'Baixando Node.js (~30 MB)...'
+  $nodeZip = Join-Path $tmp 'node.zip'
+  $nodeVer = 'v22.11.0'
+  try {
+    Invoke-WebRequest -UseBasicParsing -Uri ("https://nodejs.org/dist/$nodeVer/node-$nodeVer-win-x64.zip") -OutFile $nodeZip
+  } catch { Fail ('Falha baixando Node.js: ' + $_.Exception.Message) 11 }
 
-  $accent=New-Object Windows.Forms.Panel
-  $accent.Size=New-Object Drawing.Size(520,4); $accent.Location=New-Object Drawing.Point(0,0)
-  $accent.BackColor=$LIME; $f.Controls.Add($accent)
-
-  $brand=New-Object Windows.Forms.Label
-  $brand.Text='DARKO LAB'; $brand.ForeColor=$LIME
-  $brand.Font=New-Object Drawing.Font('Segoe UI',15,[Drawing.FontStyle]::Bold)
-  $brand.AutoSize=$true; $brand.Location=New-Object Drawing.Point(34,34); $f.Controls.Add($brand)
-
-  $sub=New-Object Windows.Forms.Label
-  $sub.Text='Downloader - instalacao'; $sub.ForeColor=$MUT
-  $sub.Font=New-Object Drawing.Font('Segoe UI',9); $sub.AutoSize=$true
-  $sub.Location=New-Object Drawing.Point(36,64); $f.Controls.Add($sub)
-
-  $st=New-Object Windows.Forms.Label
-  $st.Text='Instalando...'; $st.ForeColor=$TXT
-  $st.Font=New-Object Drawing.Font('Segoe UI',13,[Drawing.FontStyle]::Bold)
-  $st.AutoSize=$false; $st.Size=New-Object Drawing.Size(452,28)
-  $st.Location=New-Object Drawing.Point(34,118); $f.Controls.Add($st)
-
-  $track=New-Object Windows.Forms.Panel
-  $track.Size=New-Object Drawing.Size(452,10); $track.Location=New-Object Drawing.Point(34,160)
-  $track.BackColor=$CARD; $f.Controls.Add($track)
-  $fill=New-Object Windows.Forms.Panel
-  $fill.Size=New-Object Drawing.Size(0,10); $fill.Location=New-Object Drawing.Point(0,0)
-  $fill.BackColor=$LIME; $track.Controls.Add($fill)
-
-  $hint=New-Object Windows.Forms.Label
-  $hint.Text='Baixando o necessario na 1a vez (~250 MB). Pode levar 1-2 min.'
-  $hint.ForeColor=$MUT; $hint.Font=New-Object Drawing.Font('Segoe UI',8)
-  $hint.AutoSize=$false; $hint.Size=New-Object Drawing.Size(452,20)
-  $hint.Location=New-Object Drawing.Point(34,182); $f.Controls.Add($hint)
-
-  $code=New-Object Windows.Forms.TextBox
-  $code.ReadOnly=$true; $code.BorderStyle='FixedSingle'
-  $code.BackColor=$CARD; $code.ForeColor=$LIME; $code.TextAlign='Center'
-  $code.Font=New-Object Drawing.Font('Consolas',11,[Drawing.FontStyle]::Bold)
-  $code.Size=New-Object Drawing.Size(452,28); $code.Location=New-Object Drawing.Point(34,150)
-  $code.Visible=$false; $f.Controls.Add($code)
-
-  $btnCopy=New-Object Windows.Forms.Button
-  $btnCopy.Text='Copiar codigo'; $btnCopy.FlatStyle='Flat'
-  $btnCopy.BackColor=$LIME; $btnCopy.ForeColor=$BG
-  $btnCopy.FlatAppearance.BorderSize=0
-  $btnCopy.Font=New-Object Drawing.Font('Segoe UI',9,[Drawing.FontStyle]::Bold)
-  $btnCopy.Size=New-Object Drawing.Size(150,34); $btnCopy.Location=New-Object Drawing.Point(34,200)
-  $btnCopy.Visible=$false; $f.Controls.Add($btnCopy)
-
-  $btnClose=New-Object Windows.Forms.Button
-  $btnClose.Text='Fechar'; $btnClose.FlatStyle='Flat'
-  $btnClose.BackColor=$CARD; $btnClose.ForeColor=$TXT
-  $btnClose.FlatAppearance.BorderColor=$MUT
-  $btnClose.Font=New-Object Drawing.Font('Segoe UI',9)
-  $btnClose.Size=New-Object Drawing.Size(110,34); $btnClose.Location=New-Object Drawing.Point(376,200)
-  $btnClose.Visible=$false; $f.Controls.Add($btnClose)
-
-  $script:tok=$null
-  $btnCopy.Add_Click({ if ($script:tok) { [Windows.Forms.Clipboard]::SetText($script:tok); $btnCopy.Text='Copiado!' } })
-  $btnClose.Add_Click({ $f.Close() })
-
-  # arrastar a janela (sem borda)
-  $script:drag=$false; $script:dx=0; $script:dy=0
-  $down={ $script:drag=$true; $script:dx=[Windows.Forms.Cursor]::Position.X-$f.Left; $script:dy=[Windows.Forms.Cursor]::Position.Y-$f.Top }
-  $move={ if($script:drag){ $f.Left=[Windows.Forms.Cursor]::Position.X-$script:dx; $f.Top=[Windows.Forms.Cursor]::Position.Y-$script:dy } }
-  $up={ $script:drag=$false }
-  $f.Add_MouseDown($down); $f.Add_MouseMove($move); $f.Add_MouseUp($up)
-  $brand.Add_MouseDown($down); $brand.Add_MouseMove($move); $brand.Add_MouseUp($up)
-
-  $script:spin=0
-  $tmr=New-Object Windows.Forms.Timer
-  $tmr.Interval=160
-  $tmr.Add_Tick({
-    $line=$null
-    try { $line=(Get-Content -LiteralPath $status -Raw -ErrorAction Stop).Trim() } catch {}
-    if (-not $line) { return }
-    $k=$line.Split('|',2)
-    if ($k[0] -eq 'DONE') {
-      $tmr.Stop()
-      $fill.Width=$track.Width
-      $st.Text='Instalado e vinculado!'
-      $hint.Text='Pronto. A extensao DarkoLab Downloader ja esta conectada — sem codigos, sem pareamento. Roda toda vez que voce ligar o PC.'
-      $btnClose.Visible=$true
-    } elseif ($k[0] -eq 'ERR') {
-      $tmr.Stop()
-      $st.Text='Falhou'
-      $st.ForeColor=[Drawing.Color]::FromArgb(255,107,107)
-      $hint.Text=$k[1]
-      $btnClose.Visible=$true
-    } else {
-      $p=0; [int]::TryParse($k[0],[ref]$p) | Out-Null
-      $tw=[int]($track.Width * ([Math]::Max(2,[Math]::Min(100,$p)) / 100.0))
-      if ($fill.Width -lt $tw) { $fill.Width=$tw }
-      $dots='.' * (1 + ($script:spin % 3))
-      $msg= if($k.Count -gt 1){ $k[1] } else { 'Instalando' }
-      $st.Text = $msg.TrimEnd('.') + $dots
-      $script:spin++
-    }
-  })
-  $tmr.Start()
-  $f.Add_FormClosing({ try{ $tmr.Stop() }catch{}; try{ Stop-Job $job -ErrorAction SilentlyContinue; Remove-Job $job -Force -ErrorAction SilentlyContinue }catch{} })
-  [Windows.Forms.Application]::EnableVisualStyles()
-  [void]$f.ShowDialog()
-} catch {
-  # fallback: sem GUI -> espera o job e mostra no console
-  try { [Win.W]::ShowWindow([Win.W]::GetConsoleWindow(),5) | Out-Null } catch {}
-  Write-Host 'Instalando DarkoLab Downloader (sem interface)...'
-  Wait-Job $job | Out-Null
-  $line=(Get-Content -LiteralPath $status -Raw -ErrorAction SilentlyContinue)
-  if ($line -match '^DONE\|') {
-    Write-Host ''
-    Write-Host 'DarkoLab Downloader instalado e vinculado a extensao.'
-    Write-Host '(roda automaticamente toda vez que o Windows liga)'
-  } else {
-    Write-Host ('Falhou: ' + $line)
+  if (-not (Test-Path $nodeZip) -or (Get-Item $nodeZip).Length -lt 1MB) {
+    Fail 'Download do Node.js veio incompleto.' 12
   }
-  Read-Host 'Enter para sair'
+
+  Step 20 'Extraindo Node.js...'
+  try { Expand-Archive -LiteralPath $nodeZip -DestinationPath $tmp -Force }
+  catch { Fail ('Falha extraindo Node.js: ' + $_.Exception.Message) 13 }
+
+  $nd = Get-ChildItem $tmp -Directory | Where-Object { $_.Name -like 'node-*win-x64' } | Select-Object -First 1
+  if (-not $nd) { Fail 'Pasta do Node nao encontrada apos extracao.' 14 }
+  New-Item -ItemType Directory -Force -Path (Join-Path $dst 'node') | Out-Null
+  Copy-Item (Join-Path $nd.FullName '*') (Join-Path $dst 'node') -Recurse -Force
+} else {
+  Step 20 'Node.js ja instalado, pulando.'
+}
+
+$node   = Join-Path $dst 'node\node.exe'
+$npmCli = Join-Path $dst 'node\node_modules\npm\bin\npm-cli.js'
+
+# ---------- Playwright (deps do motor) ----------
+if (-not (Test-Path (Join-Path $dst 'node_modules\playwright'))) {
+  Step 32 'Instalando dependencias do motor...'
+  '{ "name": "auto-edit-engine", "private": true }' | Set-Content -Encoding ASCII (Join-Path $dst 'package.json')
+  & $node $npmCli install playwright@1.60.0 --omit=dev --no-audit --no-fund --prefix "$dst" *>> $log
+  if ($LASTEXITCODE -ne 0) {
+    Fail ('npm install falhou. Veja o log: ' + $log) 30
+  }
+} else {
+  Step 32 'Dependencias ja instaladas, pulando.'
+}
+
+# ---------- Chromium ----------
+if (-not (Test-Path (Join-Path $dst 'ms-playwright\chromium-1223'))) {
+  Step 48 'Baixando navegador embarcado (~140 MB)...'
+  $env:PLAYWRIGHT_BROWSERS_PATH = (Join-Path $dst 'ms-playwright')
+  & $node (Join-Path $dst 'node_modules\playwright\cli.js') install chromium *>> $log
+  if ($LASTEXITCODE -ne 0) {
+    Fail 'Falha baixando o navegador embarcado. Tente novamente em alguns segundos.' 40
+  }
+} else {
+  Step 48 'Navegador ja presente, pulando.'
+}
+
+# ---------- yt-dlp ----------
+$yt = Join-Path $dst 'bin\yt-dlp.exe'
+if (-not (Test-Path $yt) -or (Get-Item $yt).Length -lt 5MB) {
+  Step 78 'Baixando motor de download (yt-dlp)...'
+  try {
+    Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe' -OutFile $yt
+  } catch { Fail ('Falha baixando yt-dlp: ' + $_.Exception.Message) 50 }
+} else {
+  Step 78 'yt-dlp ja presente, pulando.'
+}
+
+# ---------- ffmpeg ----------
+$ff = Join-Path $dst 'bin\ffmpeg.exe'
+if (-not (Test-Path $ff) -or (Get-Item $ff).Length -lt 10MB) {
+  Step 87 'Baixando ffmpeg (~85 MB)...'
+  $fz = Join-Path $tmp 'ff.zip'
+  try {
+    Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/GyanD/codexffmpeg/releases/download/7.1/ffmpeg-7.1-essentials_build.zip' -OutFile $fz
+  } catch { Fail ('Falha baixando ffmpeg: ' + $_.Exception.Message) 60 }
+
+  Step 91 'Extraindo ffmpeg...'
+  Expand-Archive -LiteralPath $fz -DestinationPath (Join-Path $tmp 'ff') -Force
+  $fe = Get-ChildItem -Recurse -Path (Join-Path $tmp 'ff') -Filter ffmpeg.exe | Select-Object -First 1
+  if (-not $fe) { Fail 'ffmpeg.exe nao encontrado apos extracao.' 61 }
+  Copy-Item $fe.FullName $ff -Force
+} else {
+  Step 91 'ffmpeg ja presente, pulando.'
+}
+
+Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+
+# ---------- Auto-start via Task Scheduler (NAO Startup folder + VBS) ----------
+# schtasks e nativo Windows, nao dispara antivirus, roda como user logado.
+Step 94 'Configurando inicializacao com o Windows...'
+$taskName = 'AutoEditDownloader'
+try {
+  # Remove task antiga (se existir)
+  schtasks /Delete /TN $taskName /F 2>$null | Out-Null
+
+  # Cria nova: roda no logon do usuario, sem prompt UAC
+  $action = ('cmd.exe /c "{0}"' -f $starter)
+  $null = schtasks /Create `
+    /TN $taskName `
+    /TR $action `
+    /SC ONLOGON `
+    /RL LIMITED `
+    /F 2>&1
+  if ($LASTEXITCODE -ne 0) {
+    Log 'aviso: schtasks falhou, fallback para Startup folder'
+    # Fallback: shortcut visivel na Startup folder, mas SEM .vbs (mais limpo)
+    $startup = [Environment]::GetFolderPath('Startup')
+    $wsh = New-Object -ComObject WScript.Shell
+    $lnk = $wsh.CreateShortcut((Join-Path $startup 'Auto Edit Downloader.lnk'))
+    $lnk.TargetPath = $starter
+    $lnk.WorkingDirectory = $dst
+    $lnk.WindowStyle = 7  # minimized
+    $lnk.Save()
+  }
+} catch {
+  Log ('aviso configurando autostart: ' + $_.Exception.Message)
+  # Nao fail — instalacao ainda funciona, so nao auto-inicia
+}
+
+# ---------- inicia o motor agora ----------
+Step 97 'Iniciando o motor...'
+Remove-Item (Join-Path $dst 'engine.log') -ErrorAction SilentlyContinue
+# Start-Process com -WindowStyle Minimized (NAO Hidden — Defender odeia Hidden)
+Start-Process -FilePath $starter -WindowStyle Minimized
+
+# Espera o /health responder
+$alive = $false
+$ports = @(47923, 47924, 47925, 47926, 47927, 47928)
+for ($i = 0; $i -lt 60; $i++) {
+  Start-Sleep -Milliseconds 700
+  foreach ($p in $ports) {
+    try {
+      $r = Invoke-WebRequest -UseBasicParsing -Uri ("http://127.0.0.1:$p/health") -TimeoutSec 1 -ErrorAction Stop
+      if ($r.Content -match 'darkolab-downloader-engine|auto-edit-downloader') {
+        $alive = $true
+        break
+      }
+    } catch {}
+  }
+  if ($alive) { break }
+}
+
+if ($alive) {
+  Step 100 'Motor online. Instalacao concluida.'
+  Log ''
+  Log 'PRONTO. A extensao Auto Edit Downloader ja deve detectar o motor.'
+  Log 'Abra um video no YouTube/TikTok/Instagram e clique no botao Baixar.'
+  exit 0
+} else {
+  Fail "Motor instalado mas nao iniciou. Veja: $(Join-Path $dst 'engine.log')" 70
 }

@@ -2,7 +2,9 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import { AuthShell } from '@/components/AuthShell';
+import { createClient } from '@/lib/supabase/client';
 
 function VerifyPhoneInner() {
   const router = useRouter();
@@ -72,19 +74,72 @@ function VerifyPhoneInner() {
     return '••• ••' + d.slice(-4);
   };
 
+  async function handleLogout() {
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+    } catch {}
+    router.replace('/login');
+    router.refresh();
+  }
+
   return (
     <AuthShell
       title="Confirme o telefone"
       subtitle={phone ? `Mandamos um código pra ${mask(phone)}.` : 'Mandamos um código por SMS.'}
       footer={
-        <span className="text-text-muted">
-          Errou o número?{' '}
-          <a href="/register" className="text-violet hover:text-white">
-            Voltar
-          </a>
-        </span>
+        <div className="flex flex-col gap-2 text-text-muted">
+          <span>
+            Errou o número?{' '}
+            <Link href="/register" className="text-violet hover:text-white">
+              Voltar pro cadastro
+            </Link>
+          </span>
+          <span className="text-[11px]">
+            Faço isso depois —{' '}
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="text-violet hover:text-white underline"
+            >
+              sair e voltar pro login
+            </button>
+          </span>
+        </div>
       }
     >
+      {/* Barra de fuga: home + voltar + sair — usuário NUNCA fica trancado */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <Link
+          href="/"
+          className="mono inline-flex items-center gap-1.5 rounded-full border border-line-strong px-3 py-1.5 text-[10.5px] uppercase tracking-widest text-text-muted transition hover:border-violet hover:text-violet"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+            <polyline points="9 22 9 12 15 12 15 22" />
+          </svg>
+          Início
+        </Link>
+        <button
+          type="button"
+          onClick={() => router.back()}
+          className="mono inline-flex items-center gap-1.5 rounded-full border border-line-strong px-3 py-1.5 text-[10.5px] uppercase tracking-widest text-text-muted transition hover:border-violet hover:text-violet"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M19 12H5" />
+            <polyline points="12 19 5 12 12 5" />
+          </svg>
+          Voltar
+        </button>
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="mono ml-auto inline-flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/5 px-3 py-1.5 text-[10.5px] uppercase tracking-widest text-red-300 transition hover:bg-red-500/15"
+        >
+          Sair
+        </button>
+      </div>
+
       <form onSubmit={verify} className="flex flex-col gap-4">
         <div>
           <label className="label-field" htmlFor="code">
