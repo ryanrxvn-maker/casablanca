@@ -21,7 +21,7 @@ export async function GET() {
     const { data: profiles, error } = await svc
       .from('profiles')
       .select(
-        'id, name, is_admin, is_active, activated_at, created_at, must_change_password, last_seen_at, last_ip, last_tool, last_tool_at',
+        'id, name, is_admin, is_active, activated_at, created_at, must_change_password, last_seen_at, last_ip, last_tool, last_tool_at, tier, phone, phone_verified, phone_verified_at, legacy_no_phone',
       )
       .eq('is_admin', false)
       .order('created_at', { ascending: false });

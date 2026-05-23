@@ -1,13 +1,16 @@
 import Link from 'next/link';
 import { Brand } from './Brand';
-import { DarkoLogo } from './DarkoLogo';
+import { SleepingRabbit } from './SleepingRabbit';
+import { SpaceMockup } from './SpaceMockup';
 import { SmokeText } from './SmokeText';
 
 /**
- * AuthShell v4 — login cinematográfico com SmokeText.
+ * AuthShell v5 — login cinematográfico com 2 animações:
+ *   1. Coelho dormindo com "Zzz" subindo (SleepingRabbit)
+ *   2. Mockup tipo Space gerando imagem (SpaceMockup)
  *
- * Layout 2 colunas: narrativa à esquerda, card à direita.
- * Textos da narrativa todos com efeito smoke no hover.
+ * Tudo do lado esquerdo. Card do form à direita.
+ * Copy nova: "Dormindo enquanto o Auto Edit trabalha".
  */
 export function AuthShell({
   title,
@@ -41,8 +44,9 @@ export function AuthShell({
         </div>
       </header>
 
-      <section className="relative z-10 flex flex-1 items-center justify-center px-5 py-12 md:py-20">
-        <div className="grid w-full max-w-[1100px] grid-cols-1 items-center gap-14 lg:grid-cols-[1.1fr_0.9fr]">
+      <section className="relative z-10 flex flex-1 items-center justify-center px-5 py-10 md:py-16">
+        <div className="grid w-full max-w-[1180px] grid-cols-1 items-center gap-14 lg:grid-cols-[1.15fr_0.85fr]">
+          {/* LEFT — animação cinematográfica */}
           <div
             className="order-2 fade-in-up lg:order-1"
             style={{ animationDelay: '120ms' }}
@@ -52,33 +56,35 @@ export function AuthShell({
               style={{ fontFamily: 'var(--font-tech)' }}
             >
               <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-violet shadow-[0_0_8px_rgba(167,139,250,0.85)]" />
-              SUITE DE AUTOMAÇÃO
+              ENQUANTO VOCÊ DORME
             </div>
             <h1
               className="hero-title"
-              style={{ fontSize: 'clamp(2.25rem, 5vw, 3.75rem)', lineHeight: 1.05 }}
+              style={{
+                fontSize: 'clamp(2.25rem, 5vw, 3.5rem)',
+                lineHeight: 1.05,
+              }}
             >
-              <SmokeText text="Liga a fila." className="block" />
-              <SmokeText text="Vai dormir." className="block" />
+              <SmokeText text="Dormindo." className="block" />
+              <span className="display-subtle block">
+                <SmokeText text="O estúdio trabalha." />
+              </span>
             </h1>
-            <p className="mt-5 max-w-[440px] text-[15px] leading-relaxed text-text-muted">
-              O estúdio fica acordado, editando por você.
-            </p>
 
-            <div className="mt-12 hidden lg:block">
-              <div className="relative w-fit">
-                <div
-                  aria-hidden
-                  className="absolute inset-0 -m-8 rounded-full opacity-60 blur-3xl"
-                  style={{ background: 'radial-gradient(circle, rgba(167,139,250,0.4), transparent 65%)' }}
-                />
-                <div className="relative animate-float-y">
-                  <DarkoLogo size={140} />
-                </div>
-              </div>
+            {/* Cenas animadas em grid */}
+            <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-[1.05fr_1fr]">
+              <SleepingRabbit />
+              <SpaceMockup />
             </div>
+
+            <p className="mt-6 max-w-[480px] text-[14.5px] leading-relaxed text-text-muted">
+              Você liga a automação, fecha o notebook e vai viver.
+              <br />
+              O Auto Edit cuida do resto — silencioso e fiel ao briefing.
+            </p>
           </div>
 
+          {/* RIGHT — card form */}
           <div
             className="order-1 lg:order-2 animate-fade-in-up"
             style={{ animationDelay: '60ms' }}

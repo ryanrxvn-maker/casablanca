@@ -9,24 +9,37 @@ import { createClient } from '@/lib/supabase/client';
 /**
  * /register — cadastro público pro tier 'free'.
  *
- * Novos signups recebem tier='free' automaticamente (forçado pelo trigger
- * profiles_protect_tier no banco). Após confirmar o email, podem logar e
- * usar Decupagem (limitado a áudio). Pra acesso completo, precisam ser
- * promovidos pra 'beta' pelo admin.
+ * Após signup: usuário recebe link de confirmação por email + é
+ * redirecionado pra /verify-phone (envia código SMS pro telefone).
  */
 export default function RegisterPage() {
   const router = useRouter();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState(false);
+
+  function normalizePhone(raw: string): string {
+    // Tira tudo que não é dígito, deixa só BR (+55) por padrão se não
+    // tiver código de país.
+    const digits = raw.replace(/\D/g, '');
+    if (!digits) return '';
+    if (digits.startsWith('55')) return '+' + digits;
+    if (digits.length >= 10 && digits.length <= 11) return '+55' + digits;
+    return '+' + digits;
+  }
 
   async function handleSignup(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    const phoneNorm = normalizePhone(phone);
+    if (!phoneNorm || phoneNorm.length < 12) {
+      setError('Telefone inválido. Use o formato (xx) 9xxxx-xxxx.');
+      return;
+    }
     if (password.length < 6) {
       setError('A senha precisa ter ao menos 6 caracteres.');
       return;
@@ -42,7 +55,7 @@ export default function RegisterPage() {
         email,
         password,
         options: {
-          data: { name: name.trim() || null },
+          data: { name: name.trim() || null, phone: phoneNorm },
           emailRedirectTo:
             typeof window !== 'undefined'
               ? `${window.location.origin}/auth/callback`
@@ -54,20 +67,28 @@ export default function RegisterPage() {
         return;
       }
 
-      // Garante o profile (compatibilidade — trigger SQL deve criar, mas
-      // alguns projetos não têm o handle_new_user, fazemos aqui também)
+      // Cria profile com phone (server-side ou client)
       if (data.user?.id) {
         try {
           await supabase.from('profiles').upsert({
             id: data.user.id,
             name: name.trim() || null,
+            phone: phoneNorm,
           });
         } catch {
-          /* ignora — RLS pode bloquear, mas se trigger SQL criar, ok */
+          /* ignora; pode haver trigger SQL */
         }
+        // Dispara envio do SMS
+        try {
+          await fetch('/api/auth/sms/send-code', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ phone: phoneNorm }),
+          });
+        } catch {}
       }
 
-      setDone(true);
+      router.replace(`/verify-phone?phone=${encodeURIComponent(phoneNorm)}`);
     } catch (e) {
       setError((e as Error).message ?? 'Falha ao criar conta.');
     } finally {
@@ -75,30 +96,9 @@ export default function RegisterPage() {
     }
   }
 
-  if (done) {
-    return (
-      <AuthShell
-        title="Conta criada"
-        subtitle="Confirme o email pra entrar."
-        footer={
-          <Link href="/login" className="text-violet hover:text-white">
-            Ir pro login →
-          </Link>
-        }
-      >
-        <div className="rounded-[12px] border border-violet/40 bg-violet/10 px-4 py-3 text-sm text-violet">
-          <p className="font-semibold">Enviamos um link de confirmação.</p>
-          <p className="mt-1 text-text-muted">
-            Clica no link do email pra ativar a conta. Depois é só fazer login.
-          </p>
-        </div>
-      </AuthShell>
-    );
-  }
-
   return (
     <AuthShell
-      title="Criar conta"
+      title="Criar conta grátis"
       subtitle="Liga a fila e vai dormir."
       footer={
         <span className="text-text-muted">
@@ -137,6 +137,24 @@ export default function RegisterPage() {
             onChange={(e) => setEmail(e.target.value)}
             placeholder="voce@exemplo.com"
           />
+        </div>
+
+        <div>
+          <label className="label-field" htmlFor="phone">
+            Telefone (WhatsApp/SMS)
+          </label>
+          <input
+            id="phone"
+            type="tel"
+            required
+            className="input-field"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="(11) 98765-4321"
+          />
+          <p className="mt-1.5 text-[11px] text-text-muted">
+            Vamos mandar um código por SMS pra confirmar.
+          </p>
         </div>
 
         <div>
@@ -186,7 +204,7 @@ export default function RegisterPage() {
         </button>
 
         <p className="mt-2 text-[11.5px] leading-relaxed text-text-muted">
-          A conta grátis libera a Decupagem de áudio. Pra acessar o resto, fale com o time.
+          A conta grátis libera Decupagem de áudio e Downloader. Pra acessar o resto, fale com o time.
         </p>
       </form>
     </AuthShell>

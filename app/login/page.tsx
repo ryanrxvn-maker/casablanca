@@ -38,9 +38,18 @@ function LoginInner() {
       title="Bem-vindo de volta"
       subtitle="Entre pra continuar de onde parou."
       footer={
-        <span className="text-text-muted">
-          Ainda não tem conta? Fale com o nosso time.
-        </span>
+        <div className="space-y-3">
+          <a
+            href="/register"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-violet/40 bg-violet/10 px-5 py-3 text-[13px] font-bold text-violet backdrop-blur-md transition-all duration-300 hover:-translate-y-[1px] hover:border-violet/70 hover:bg-violet/20"
+          >
+            Criar conta grátis
+            <span className="transition-transform duration-300 group-hover:translate-x-0.5">→</span>
+          </a>
+          <p className="text-[12px] text-text-muted">
+            A conta grátis libera Decupagem de áudio e Downloader.
+          </p>
+        </div>
       }
     >
       <form onSubmit={handleEmailLogin} className="flex flex-col gap-4">

@@ -23,6 +23,7 @@ type CookieToSet = { name: string; value: string; options: CookieOptions };
 const PUBLIC_AUTH_ROUTES = [
   '/login',
   '/register',
+  '/verify-phone',
   '/access-revoked',
   '/auth',
   '/trocar-senha',
@@ -37,7 +38,7 @@ const FREE_ALLOWED_PREFIXES = [
 ];
 
 // Ferramentas específicas liberadas pro 'free'
-const FREE_ALLOWED_TOOLS = ['/tools/decupagem'];
+const FREE_ALLOWED_TOOLS = ['/tools/decupagem', '/tools/downloader'];
 
 // Rotas exclusivamente do admin (mesmo beta não acessa)
 const ADMIN_ONLY_PREFIXES = [
@@ -128,17 +129,21 @@ export async function updateSession(request: NextRequest) {
 
     const { data: profile } = await adminClient
       .from('profiles')
-      .select('is_active, is_admin, must_change_password, tier')
+      .select(
+        'is_active, is_admin, must_change_password, tier, phone_verified, legacy_no_phone',
+      )
       .eq('id', user.id)
       .maybeSingle();
 
     const isActive = profile?.is_active === true;
     const isAdmin = profile?.is_admin === true;
     const mustChangePw = profile?.must_change_password === true;
-    // Tier — fallback derivado (compat) caso a coluna ainda não exista
     const tier: 'free' | 'beta' | 'admin' =
       (profile?.tier as 'free' | 'beta' | 'admin' | undefined) ??
       (isAdmin ? 'admin' : isActive ? 'beta' : 'free');
+    // Phone verified — usuários legacy (sem coluna phone) ficam dispensados.
+    const phoneVerified =
+      profile?.phone_verified === true || profile?.legacy_no_phone === true;
 
     if (!isActive) {
       await supabase.auth.signOut();
@@ -153,6 +158,18 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(url);
     }
     if (!mustChangePw && pathname.startsWith('/trocar-senha')) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/tools';
+      return NextResponse.redirect(url);
+    }
+
+    // Phone obrigatório: usuário precisa verificar antes de acessar tools
+    if (!phoneVerified && !pathname.startsWith('/verify-phone')) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/verify-phone';
+      return NextResponse.redirect(url);
+    }
+    if (phoneVerified && pathname.startsWith('/verify-phone')) {
       const url = request.nextUrl.clone();
       url.pathname = '/tools';
       return NextResponse.redirect(url);

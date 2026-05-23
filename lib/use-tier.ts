@@ -58,6 +58,7 @@ export function tierAllowsTool(tier: Tier | null, toolHref: string): boolean {
     // Beta acessa tudo exceto admin-only (filtrado em outro lugar)
     return true;
   }
-  // Free só pode usar a Decupagem
-  return toolHref === '/tools/decupagem' || toolHref.startsWith('/tools/decupagem/');
+  // Free acessa Decupagem (áudio) e Downloader
+  const allowed = ['/tools/decupagem', '/tools/downloader'];
+  return allowed.some((p) => toolHref === p || toolHref.startsWith(p + '/'));
 }

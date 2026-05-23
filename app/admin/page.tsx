@@ -31,6 +31,10 @@ type AdminUser = {
   last_ip: string | null;
   last_tool: string | null;
   last_tool_at: string | null;
+  tier?: 'free' | 'beta' | 'admin' | null;
+  phone?: string | null;
+  phone_verified?: boolean | null;
+  legacy_no_phone?: boolean | null;
 };
 
 const TOOL_LABELS: Record<string, string> = {
@@ -289,6 +293,25 @@ export default function AdminPage() {
                               <span className="mono text-xs text-text-muted">
                                 {u.email || '(sem email)'}
                               </span>
+                              {(() => {
+                                const tier = u.tier ?? (u.is_active ? 'beta' : 'free');
+                                const tierStyles =
+                                  tier === 'free'
+                                    ? 'bg-text-dim/15 text-text-muted'
+                                    : tier === 'beta'
+                                      ? 'bg-violet/15 text-violet'
+                                      : 'bg-lime/15 text-lime';
+                                return (
+                                  <span
+                                    className={
+                                      'mono rounded-full px-2 py-0.5 text-[9px] uppercase tracking-widest ' +
+                                      tierStyles
+                                    }
+                                  >
+                                    {tier}
+                                  </span>
+                                );
+                              })()}
                               {u.is_active ? (
                                 <span className="mono rounded-full bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime">
                                   ATIVO
@@ -298,6 +321,25 @@ export default function AdminPage() {
                                   INATIVO
                                 </span>
                               )}
+                              {u.phone_verified ? (
+                                <span
+                                  className="mono rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-emerald-300"
+                                  title="Telefone verificado"
+                                >
+                                  TEL ✓
+                                </span>
+                              ) : u.phone ? (
+                                <span
+                                  className="mono rounded-full bg-yellow-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-yellow-300"
+                                  title="Telefone não verificado"
+                                >
+                                  TEL ?
+                                </span>
+                              ) : u.legacy_no_phone ? (
+                                <span className="mono rounded-full bg-bg-soft/40 px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-dim">
+                                  LEGACY
+                                </span>
+                              ) : null}
                               {online ? (
                                 <span className="mono inline-flex items-center gap-1 rounded-full border border-lime/60 bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime">
                                   <span className="relative flex h-1.5 w-1.5">
@@ -330,6 +372,14 @@ export default function AdminPage() {
                                   Ultima ferramenta:{' '}
                                   <span className="text-text-muted">
                                     {toolLabel}
+                                  </span>
+                                </span>
+                              ) : null}
+                              {u.phone ? (
+                                <span>
+                                  Tel:{' '}
+                                  <span className="mono text-text-muted">
+                                    {u.phone}
                                   </span>
                                 </span>
                               ) : null}

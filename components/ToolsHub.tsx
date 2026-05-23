@@ -828,7 +828,7 @@ function LockedFlash() {
           ferramenta bloqueada
         </div>
         <p className="mt-1 text-[13.5px] text-white/85">
-          Sua conta grátis libera só a Decupagem de áudio. Pra acessar o resto, fale com o time.
+          Sua conta grátis libera Decupagem de áudio e Downloader. Pra acessar o resto, fale com o time.
         </p>
       </div>
     </div>
