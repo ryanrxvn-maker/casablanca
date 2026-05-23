@@ -117,15 +117,35 @@ export default function HeyGenAutoPage() {
    *  Cada hook vira 1 take. Body e splitado em ~20s pra cada take.
    *  Output final: 3 ZIPs igual clickup-pilot (takes individuais, montados
    *  HOOK[N]+BODY decupados, camuflados opcional). */
-  type StructuredInput = { text: string; audio: File | null };
+  type StructuredInput = { text: string; audios: File[] };
   const [structuredHooks, setStructuredHooks] = useState<StructuredInput[]>([
-    { text: '', audio: null },
+    { text: '', audios: [] },
   ]);
-  const [structuredBody, setStructuredBody] = useState<{ enabled: boolean; text: string; audio: File | null }>({
+  const [structuredBody, setStructuredBody] = useState<{
+    enabled: boolean;
+    text: string;
+    audios: File[];
+  }>({
     enabled: true,
     text: '',
-    audio: null,
+    audios: [],
   });
+
+  /**
+   * Ordena uma lista de Files por nome detectando "parte1, parte2, ..." ou
+   * "part1, p1" etc. Se não detectar número, mantém ordem original (estável).
+   */
+  function sortAudiosByPartName(files: File[]): File[] {
+    const re = /(?:parte|part|p)\s*[-_]?\s*(\d+)/i;
+    return [...files].sort((a, b) => {
+      const ma = re.exec(a.name);
+      const mb = re.exec(b.name);
+      if (ma && mb) return parseInt(ma[1], 10) - parseInt(mb[1], 10);
+      if (ma && !mb) return -1;
+      if (!ma && mb) return 1;
+      return a.name.localeCompare(b.name);
+    });
+  }
 
   /** ZIPs finais do pipeline pos-producao (montado/decupado/camuflado) */
   const [pipelineZips, setPipelineZips] = useState<{
@@ -626,7 +646,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
       if (forcedParts && forcedParts.length > 0 && forcedParts[idx]) {
         return forcedParts[idx].label;
       }
-      const hookCount = structuredHooks.filter((h) => mode === 'copy' ? h.text.trim() : h.audio).length;
+      const hookCount = structuredHooks.filter((h) => mode === 'copy' ? h.text.trim() : h.audios.length > 0).length;
       if (idx < hookCount) return `HOOK ${idx + 1}`;
       const bodyIdx = idx - hookCount;
       const totalParts = parts.length;
@@ -662,23 +682,44 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
         };
       });
     } else {
-      // Modo audio: hooks[].audio + body.audio
-      const hookFiles = structuredHooks.map((h) => h.audio).filter((f): f is File => !!f);
-      const bodyFile = structuredBody.enabled ? structuredBody.audio : null;
-      if (hookFiles.length === 0 && !bodyFile) {
-        setError('Faca upload de pelo menos 1 audio de hook OU body.');
+      // Modo audio: hooks[].audios[] + body.audios[]
+      // Cada audio (já ordenado por nome) vira UM job HeyGen.
+      // Hooks com múltiplas partes ficam labelados "HOOK N · parte M"
+      // pro pipeline post-prod entender que são partes do mesmo hook.
+      const hooksWithAudios = structuredHooks
+        .map((h, i) => ({ idx: i, files: h.audios }))
+        .filter((x) => x.files.length > 0);
+      const bodyFiles = structuredBody.enabled ? structuredBody.audios : [];
+      const totalAudios = hooksWithAudios.reduce((acc, h) => acc + h.files.length, 0) + bodyFiles.length;
+      if (totalAudios === 0) {
+        setError('Faça upload de pelo menos 1 áudio de hook OU body.');
         return;
       }
-      jobs = hookFiles.map((file, i) => ({
-        label: `HOOK ${i + 1}`,
-        audio: file,
-        avatarId: dynamicMode ? selectedAvatar?.id : undefined,
-      }));
-      if (bodyFile) {
-        jobs.push({
-          label: 'BODY',
-          audio: bodyFile,
-          avatarId: dynamicMode ? selectedAvatar?.id : undefined,
+
+      jobs = [];
+      hooksWithAudios.forEach((hook, hookIdx) => {
+        const hookNumber = hookIdx + 1;
+        hook.files.forEach((file, partIdx) => {
+          const label =
+            hook.files.length === 1
+              ? `HOOK ${hookNumber}`
+              : `HOOK ${hookNumber} · parte ${partIdx + 1}`;
+          jobs.push({
+            label,
+            audio: file,
+            avatarId: dynamicMode ? selectedAvatar?.id : undefined,
+          });
+        });
+      });
+      if (bodyFiles.length > 0) {
+        bodyFiles.forEach((file, partIdx) => {
+          const label =
+            bodyFiles.length === 1 ? 'BODY' : `BODY · parte ${partIdx + 1}`;
+          jobs.push({
+            label,
+            audio: file,
+            avatarId: dynamicMode ? selectedAvatar?.id : undefined,
+          });
         });
       }
     }
@@ -1004,17 +1045,132 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                           <input
                             type="file"
                             accept="audio/*"
+                            multiple
                             onChange={(e) => {
-                              const f = e.target.files?.[0] || null;
+                              const added = Array.from(e.target.files ?? []);
+                              if (added.length === 0) return;
                               setStructuredHooks((prev) =>
-                                prev.map((p, i) => (i === hi ? { ...p, audio: f } : p)),
+                                prev.map((p, i) =>
+                                  i === hi
+                                    ? {
+                                        ...p,
+                                        audios: sortAudiosByPartName([
+                                          ...p.audios,
+                                          ...added,
+                                        ]),
+                                      }
+                                    : p,
+                                ),
                               );
+                              // Limpa o input pra permitir re-upload do mesmo arquivo
+                              e.target.value = '';
                             }}
                             className="input-field file:mr-3 file:rounded-md file:border-0 file:bg-lime file:px-3 file:py-1 file:text-xs file:font-semibold file:text-black"
                             disabled={processing}
                           />
-                          {h.audio ? (
-                            <div className="text-[11px] text-text-muted">📎 {h.audio.name} ({(h.audio.size / (1024 * 1024)).toFixed(2)}MB)</div>
+                          {h.audios.length > 0 ? (
+                            <div className="grid gap-1.5 rounded-[10px] border border-line bg-bg/40 p-2">
+                              <div className="mono text-[10px] uppercase tracking-widest text-text-muted">
+                                {h.audios.length} áudio
+                                {h.audios.length === 1 ? '' : 's'} · ordem de
+                                execução
+                              </div>
+                              {h.audios.map((file, ai) => (
+                                <div
+                                  key={ai + '-' + file.name}
+                                  className="flex items-center gap-2 rounded-md border border-line-strong bg-bg/60 px-2 py-1.5 text-[11px]"
+                                >
+                                  <span className="mono w-6 shrink-0 text-center text-lime">
+                                    {ai + 1}
+                                  </span>
+                                  <span className="flex-1 truncate text-text">
+                                    {file.name}
+                                  </span>
+                                  <span className="mono shrink-0 text-text-muted">
+                                    {(file.size / (1024 * 1024)).toFixed(2)}MB
+                                  </span>
+                                  <div className="flex shrink-0 gap-0.5">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setStructuredHooks((prev) =>
+                                          prev.map((p, i) => {
+                                            if (i !== hi) return p;
+                                            if (ai === 0) return p;
+                                            const next = [...p.audios];
+                                            [next[ai - 1], next[ai]] = [
+                                              next[ai],
+                                              next[ai - 1],
+                                            ];
+                                            return { ...p, audios: next };
+                                          }),
+                                        )
+                                      }
+                                      disabled={ai === 0 || processing}
+                                      className="rounded p-0.5 text-text-muted transition hover:bg-bg hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+                                      title="Mover pra cima"
+                                    >
+                                      ▲
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setStructuredHooks((prev) =>
+                                          prev.map((p, i) => {
+                                            if (i !== hi) return p;
+                                            if (ai === p.audios.length - 1)
+                                              return p;
+                                            const next = [...p.audios];
+                                            [next[ai], next[ai + 1]] = [
+                                              next[ai + 1],
+                                              next[ai],
+                                            ];
+                                            return { ...p, audios: next };
+                                          }),
+                                        )
+                                      }
+                                      disabled={
+                                        ai === h.audios.length - 1 || processing
+                                      }
+                                      className="rounded p-0.5 text-text-muted transition hover:bg-bg hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+                                      title="Mover pra baixo"
+                                    >
+                                      ▼
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setStructuredHooks((prev) =>
+                                          prev.map((p, i) =>
+                                            i === hi
+                                              ? {
+                                                  ...p,
+                                                  audios: p.audios.filter(
+                                                    (_, k) => k !== ai,
+                                                  ),
+                                                }
+                                              : p,
+                                          ),
+                                        )
+                                      }
+                                      disabled={processing}
+                                      className="rounded p-0.5 text-text-muted transition hover:bg-red-500/15 hover:text-red-300"
+                                      title="Remover"
+                                    >
+                                      ×
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                              {h.audios.length > 1 ? (
+                                <div className="mono mt-0.5 text-[10px] text-text-muted">
+                                  💡 Dica: nomeie como{' '}
+                                  <span className="text-lime">parte1.mp3</span>,{' '}
+                                  <span className="text-lime">parte2.mp3</span>{' '}
+                                  pra ordenação automática.
+                                </div>
+                              ) : null}
+                            </div>
                           ) : null}
                         </div>
                       )}
@@ -1023,7 +1179,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                   {structuredHooks.length < 10 ? (
                     <button
                       type="button"
-                      onClick={() => setStructuredHooks((prev) => [...prev, { text: '', audio: null }])}
+                      onClick={() => setStructuredHooks((prev) => [...prev, { text: '', audios: [] }])}
                       disabled={processing}
                       className="mono rounded-[10px] border border-dashed border-line-strong bg-bg/30 py-2 px-3 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime/40 hover:bg-lime/5 hover:text-lime transition disabled:opacity-50"
                     >
@@ -1066,15 +1222,119 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                           <input
                             type="file"
                             accept="audio/*"
+                            multiple
                             onChange={(e) => {
-                              const f = e.target.files?.[0] || null;
-                              setStructuredBody((p) => ({ ...p, audio: f }));
+                              const added = Array.from(e.target.files ?? []);
+                              if (added.length === 0) return;
+                              setStructuredBody((p) => ({
+                                ...p,
+                                audios: sortAudiosByPartName([
+                                  ...p.audios,
+                                  ...added,
+                                ]),
+                              }));
+                              e.target.value = '';
                             }}
                             className="input-field file:mr-3 file:rounded-md file:border-0 file:bg-fuchsia-500 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-white"
                             disabled={processing}
                           />
-                          {structuredBody.audio ? (
-                            <div className="text-[11px] text-text-muted">📎 {structuredBody.audio.name} ({(structuredBody.audio.size / (1024 * 1024)).toFixed(2)}MB)</div>
+                          {structuredBody.audios.length > 0 ? (
+                            <div className="grid gap-1.5 rounded-[10px] border border-line bg-bg/40 p-2">
+                              <div className="mono text-[10px] uppercase tracking-widest text-text-muted">
+                                {structuredBody.audios.length} áudio
+                                {structuredBody.audios.length === 1 ? '' : 's'} ·
+                                ordem de execução
+                              </div>
+                              {structuredBody.audios.map((file, ai) => (
+                                <div
+                                  key={ai + '-' + file.name}
+                                  className="flex items-center gap-2 rounded-md border border-line-strong bg-bg/60 px-2 py-1.5 text-[11px]"
+                                >
+                                  <span className="mono w-6 shrink-0 text-center text-fuchsia-300">
+                                    {ai + 1}
+                                  </span>
+                                  <span className="flex-1 truncate text-text">
+                                    {file.name}
+                                  </span>
+                                  <span className="mono shrink-0 text-text-muted">
+                                    {(file.size / (1024 * 1024)).toFixed(2)}MB
+                                  </span>
+                                  <div className="flex shrink-0 gap-0.5">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setStructuredBody((p) => {
+                                          if (ai === 0) return p;
+                                          const next = [...p.audios];
+                                          [next[ai - 1], next[ai]] = [
+                                            next[ai],
+                                            next[ai - 1],
+                                          ];
+                                          return { ...p, audios: next };
+                                        })
+                                      }
+                                      disabled={ai === 0 || processing}
+                                      className="rounded p-0.5 text-text-muted transition hover:bg-bg hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+                                      title="Mover pra cima"
+                                    >
+                                      ▲
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setStructuredBody((p) => {
+                                          if (ai === p.audios.length - 1)
+                                            return p;
+                                          const next = [...p.audios];
+                                          [next[ai], next[ai + 1]] = [
+                                            next[ai + 1],
+                                            next[ai],
+                                          ];
+                                          return { ...p, audios: next };
+                                        })
+                                      }
+                                      disabled={
+                                        ai === structuredBody.audios.length - 1 ||
+                                        processing
+                                      }
+                                      className="rounded p-0.5 text-text-muted transition hover:bg-bg hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+                                      title="Mover pra baixo"
+                                    >
+                                      ▼
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setStructuredBody((p) => ({
+                                          ...p,
+                                          audios: p.audios.filter(
+                                            (_, k) => k !== ai,
+                                          ),
+                                        }))
+                                      }
+                                      disabled={processing}
+                                      className="rounded p-0.5 text-text-muted transition hover:bg-red-500/15 hover:text-red-300"
+                                      title="Remover"
+                                    >
+                                      ×
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                              {structuredBody.audios.length > 1 ? (
+                                <div className="mono mt-0.5 text-[10px] text-text-muted">
+                                  💡 Dica: nomeie como{' '}
+                                  <span className="text-fuchsia-300">
+                                    parte1.mp3
+                                  </span>
+                                  ,{' '}
+                                  <span className="text-fuchsia-300">
+                                    parte2.mp3
+                                  </span>{' '}
+                                  pra ordenação automática.
+                                </div>
+                              ) : null}
+                            </div>
                           ) : null}
                         </div>
                       )}
