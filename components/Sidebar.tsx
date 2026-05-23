@@ -320,6 +320,17 @@ export function Sidebar() {
               </div>
               <nav className="flex flex-col py-1 text-sm">
                 <Link
+                  href="/planos"
+                  onClick={() => setAccountOpen(false)}
+                  className="group flex items-center gap-3 px-4 py-2.5 text-text-muted transition hover:bg-bg hover:text-text"
+                >
+                  <span className="flex h-7 w-7 items-center justify-center rounded-[8px] border border-violet/30 bg-violet/10">
+                    <DotPlans />
+                  </span>
+                  <span className="flex-1">Ver planos</span>
+                  <span className="text-text-dim transition group-hover:translate-x-0.5 group-hover:text-violet">→</span>
+                </Link>
+                <Link
                   href="/configuracoes"
                   onClick={() => setAccountOpen(false)}
                   className="group flex items-center gap-3 px-4 py-2.5 text-text-muted transition hover:bg-bg hover:text-text"
@@ -495,6 +506,16 @@ function IconTrophy() {
 }
 
 /* ─── Mini ícones do dropdown da conta ─── */
+
+function DotPlans() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#c084fc" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 7l9-4 9 4-9 4z" />
+      <path d="M3 12l9 4 9-4" />
+      <path d="M3 17l9 4 9-4" />
+    </svg>
+  );
+}
 
 function DotGear() {
   return (

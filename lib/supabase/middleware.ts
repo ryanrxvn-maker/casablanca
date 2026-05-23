@@ -93,6 +93,7 @@ export async function updateSession(request: NextRequest) {
   const isPublicRoute =
     PUBLIC_AUTH_ROUTES.some((p) => pathname.startsWith(p)) ||
     pathname === '/' ||
+    pathname.startsWith('/planos') ||
     pathname.startsWith('/api/');
 
   if (!user && !isPublicRoute) {
@@ -127,7 +128,20 @@ export async function updateSession(request: NextRequest) {
       { cookies: { getAll: () => [], setAll: () => {} } },
     );
 
-    const { data: profile } = await adminClient
+    // Tentativa 1: select completo (com phone_verified/legacy_no_phone/tier)
+    // Se a migration 015 ainda não rodou, a coluna não existe — fazemos
+    // fallback pro select básico pra não quebrar o login do admin.
+    type ProfileShape = {
+      is_active: boolean | null;
+      is_admin: boolean | null;
+      must_change_password: boolean | null;
+      tier?: 'free' | 'beta' | 'admin' | null;
+      phone_verified?: boolean | null;
+      legacy_no_phone?: boolean | null;
+    };
+    let profile: ProfileShape | null = null;
+
+    const full = await adminClient
       .from('profiles')
       .select(
         'is_active, is_admin, must_change_password, tier, phone_verified, legacy_no_phone',
@@ -135,15 +149,36 @@ export async function updateSession(request: NextRequest) {
       .eq('id', user.id)
       .maybeSingle();
 
+    if (full.error) {
+      // Coluna ausente → cai pro select legado (assume tudo verificado)
+      const fallback = await adminClient
+        .from('profiles')
+        .select('is_active, is_admin, must_change_password')
+        .eq('id', user.id)
+        .maybeSingle();
+      profile = (fallback.data ?? null) as unknown as ProfileShape | null;
+    } else {
+      profile = (full.data ?? null) as unknown as ProfileShape | null;
+    }
+
     const isActive = profile?.is_active === true;
     const isAdmin = profile?.is_admin === true;
     const mustChangePw = profile?.must_change_password === true;
     const tier: 'free' | 'beta' | 'admin' =
       (profile?.tier as 'free' | 'beta' | 'admin' | undefined) ??
       (isAdmin ? 'admin' : isActive ? 'beta' : 'free');
-    // Phone verified — usuários legacy (sem coluna phone) ficam dispensados.
+
+    // ─── ADMIN BYPASS ─────────────────────────────────────────────────
+    // Admin nunca precisa de phone_verified. Se a coluna phone_verified
+    // for undefined (migration não rodou), também consideramos verificado
+    // pra não bloquear ninguém retroativamente.
     const phoneVerified =
-      profile?.phone_verified === true || profile?.legacy_no_phone === true;
+      isAdmin ||
+      profile?.phone_verified === true ||
+      profile?.legacy_no_phone === true ||
+      // Coluna ausente (signal: ambos undefined) → trata como verificado
+      (profile?.phone_verified === undefined &&
+        profile?.legacy_no_phone === undefined);
 
     if (!isActive) {
       await supabase.auth.signOut();
@@ -164,6 +199,7 @@ export async function updateSession(request: NextRequest) {
     }
 
     // Phone obrigatório: usuário precisa verificar antes de acessar tools
+    // (admin sempre passa via isAdmin bypass acima)
     if (!phoneVerified && !pathname.startsWith('/verify-phone')) {
       const url = request.nextUrl.clone();
       url.pathname = '/verify-phone';

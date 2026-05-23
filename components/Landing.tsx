@@ -72,10 +72,13 @@ function LandingHeader() {
       <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between px-5 md:px-8">
         <Brand href="/" />
         <div className="flex items-center gap-2">
+          <Link href="/planos" className="btn-ghost">
+            Planos
+          </Link>
           <Link href="/login" className="btn-ghost">
             Entrar
           </Link>
-          <Link href="/login" className="btn-primary">
+          <Link href="/register" className="btn-primary">
             Começar grátis
           </Link>
         </div>
