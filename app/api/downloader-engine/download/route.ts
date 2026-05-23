@@ -30,7 +30,7 @@ export async function GET() {
       status: 200,
       headers: {
         'content-type': 'application/octet-stream',
-        'content-disposition': 'attachment; filename="DarkoDownloaderSetup.exe"',
+        'content-disposition': 'attachment; filename="AutoEditDownloaderSetup.exe"',
         'content-length': String(st.size),
         'cache-control': 'public, max-age=3600',
       },

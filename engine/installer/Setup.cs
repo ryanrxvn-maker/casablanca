@@ -1,8 +1,8 @@
-// DarkoLab Downloader — Setup.exe (stub C# nativo)
+// Auto Edit Downloader — Setup.exe (stub C# nativo)
 //
 // Compilado com csc.exe v4 do .NET Framework (vem com Windows).
 // Tem o pkg.zip embutido como recurso. Quando rodado:
-//   1) extrai o zip pra %TEMP%\DarkoSetup_<rand>\
+//   1) extrai o zip pra %TEMP%\AutoEditSetup_<rand>\
 //   2) executa Instalar.ps1 com WindowStyle Hidden / Bypass
 //   3) sai imediatamente — a UI bonita do .ps1 segue rodando
 //
@@ -15,7 +15,7 @@ using System.IO.Compression;
 using System.Reflection;
 using System.Windows.Forms;
 
-namespace DarkoLab
+namespace AutoEdit
 {
     static class Setup
     {
@@ -24,10 +24,10 @@ namespace DarkoLab
         {
             try
             {
-                // 1) extrai o recurso pkg.zip pra %TEMP%\DarkoSetup_<rand>\
+                // 1) extrai o recurso pkg.zip pra %TEMP%\AutoEditSetup_<rand>\
                 string tmp = Path.Combine(
                     Path.GetTempPath(),
-                    "DarkoSetup_" + Guid.NewGuid().ToString("N").Substring(0, 8));
+                    "AutoEditSetup_" + Guid.NewGuid().ToString("N").Substring(0, 8));
                 Directory.CreateDirectory(tmp);
 
                 Assembly asm = Assembly.GetExecutingAssembly();
@@ -44,7 +44,7 @@ namespace DarkoLab
                 {
                     MessageBox.Show(
                         "Recurso interno faltando (pkg.zip). Baixe o instalador novamente.",
-                        "DarkoLab Downloader",
+                        "Auto Edit Downloader",
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return 2;
                 }
@@ -65,7 +65,7 @@ namespace DarkoLab
                 {
                     MessageBox.Show(
                         "Arquivo de instalacao ausente apos a extracao.",
-                        "DarkoLab Downloader",
+                        "Auto Edit Downloader",
                         MessageBoxButtons.OK, MessageBoxIcon.Error);
                     return 3;
                 }
@@ -86,7 +86,7 @@ namespace DarkoLab
             {
                 MessageBox.Show(
                     "Erro ao iniciar a instalacao:\r\n\r\n" + ex.Message,
-                    "DarkoLab Downloader",
+                    "Auto Edit Downloader",
                     MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return 1;
             }

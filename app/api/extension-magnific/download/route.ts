@@ -57,7 +57,7 @@ export async function GET() {
       headers: {
         'content-type': 'application/zip',
         'content-disposition':
-          'attachment; filename="darkolab-magnific-extension.zip"',
+          'attachment; filename="auto-edit-magnific-extension.zip"',
         'cache-control': 'public, max-age=3600',
       },
     });

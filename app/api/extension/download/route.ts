@@ -53,7 +53,7 @@ export async function GET() {
       headers: {
         'content-type': 'application/zip',
         'content-disposition':
-          'attachment; filename="darkolab-heygen-extension.zip"',
+          'attachment; filename="auto-edit-heygen-extension.zip"',
         'cache-control': 'public, max-age=3600',
       },
     });

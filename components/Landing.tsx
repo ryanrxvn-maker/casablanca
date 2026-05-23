@@ -38,6 +38,7 @@ export function Landing() {
       <HeroSection />
       <StatsRow />
       <PilotShowcase />
+      <PilotHowItWorks />
       <CapabilitiesSection />
       <ShowcaseSection />
       <FinalCTA />
@@ -281,20 +282,21 @@ function StatsRow() {
 
 function PilotShowcase() {
   return (
-    <section className="mx-auto mt-32 max-w-[1200px] px-5 md:px-8">
+    <section id="pilot" className="mx-auto mt-32 max-w-[1200px] px-5 md:px-8">
       <div
-        className="relative overflow-hidden rounded-[28px] border border-line/70 fade-in-up"
+        className="relative overflow-hidden rounded-[32px] border border-line/70 fade-in-up"
         style={{
           background:
-            'linear-gradient(120deg, rgba(200,255,0,0.16) 0%, rgba(167,139,250,0.20) 50%, rgba(34,211,238,0.12) 100%), linear-gradient(180deg, #15151a, #0a0a0c)',
+            'linear-gradient(120deg, rgba(200,255,0,0.18) 0%, rgba(167,139,250,0.22) 50%, rgba(34,211,238,0.14) 100%), linear-gradient(180deg, #15151a, #08080a)',
         }}
       >
-        {/* Pulsos animados */}
+        {/* Pulsos animados — fundo ambient */}
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0"
           style={{
-            background: 'radial-gradient(60% 90% at 0% 50%, rgba(200,255,0,0.28), transparent 60%)',
+            background:
+              'radial-gradient(55% 90% at 0% 50%, rgba(200,255,0,0.32), transparent 58%)',
             animation: 'promo-pulse-a 6s ease-in-out infinite',
           }}
         />
@@ -302,78 +304,109 @@ function PilotShowcase() {
           aria-hidden
           className="pointer-events-none absolute inset-0"
           style={{
-            background: 'radial-gradient(60% 90% at 100% 50%, rgba(167,139,250,0.34), transparent 60%)',
+            background:
+              'radial-gradient(55% 90% at 100% 50%, rgba(167,139,250,0.40), transparent 58%)',
             animation: 'promo-pulse-b 7s ease-in-out infinite',
           }}
         />
+
+        {/* Grid sutil */}
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 opacity-[0.06]"
           style={{
-            backgroundImage: 'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)',
-            backgroundSize: '44px 44px',
+            backgroundImage:
+              'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)',
+            backgroundSize: '46px 46px',
           }}
         />
-        <SparkleFloat className="absolute top-8 right-[28%]" delay={0} />
-        <SparkleFloat className="absolute top-[60%] right-[18%]" delay={900} />
-        <SparkleFloat className="absolute top-[25%] right-[8%]" delay={1800} />
 
+        {/* Sparkles */}
+        <SparkleFloat className="absolute top-10 right-[30%]" delay={0} />
+        <SparkleFloat className="absolute top-[55%] right-[20%]" delay={900} />
+        <SparkleFloat className="absolute top-[28%] right-[10%]" delay={1800} />
+        <SparkleFloat className="absolute bottom-12 left-[18%]" delay={2400} />
+
+        {/* Mockup HUD do Pilot */}
         <div
           aria-hidden
-          className="pointer-events-none absolute right-4 top-1/2 hidden -translate-y-1/2 lg:block"
-          style={{
-            filter: 'drop-shadow(0 0 38px rgba(200,255,0,0.42)) drop-shadow(0 0 20px rgba(167,139,250,0.38))',
-            animation: 'promo-icon-float 5.5s ease-in-out infinite',
-          }}
+          className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 lg:block"
         >
-          <div className="opacity-35">
-            <IconClickUpPilot size={280} strokeWidth={1.2} />
-          </div>
+          <PilotMockup />
         </div>
 
-        <div className="relative flex flex-col items-start gap-6 px-7 py-12 md:px-14 md:py-20">
+        {/* Conteúdo */}
+        <div className="relative flex flex-col items-start gap-7 px-7 py-14 md:px-14 md:py-24">
+          {/* Numeração editorial */}
           <div
-            className="inline-flex items-center gap-2 rounded-full border border-lime/50 bg-black/50 px-3.5 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.22em] text-lime backdrop-blur-md"
-            style={{
-              fontFamily: 'var(--font-tech)',
-              boxShadow: '0 0 22px -6px rgba(200,255,0,0.55), inset 0 1px 0 rgba(255,255,255,0.08)',
-            }}
+            className="flex items-baseline gap-3 text-white/35"
+            style={{ fontFamily: 'var(--font-mono)' }}
           >
+            <span className="text-[10.5px] tracking-[0.32em]">001</span>
+            <span className="h-px w-10 bg-white/25" />
             <span
-              className="inline-block h-2 w-2 animate-pulse-soft rounded-full bg-lime"
-              style={{ boxShadow: '0 0 10px rgba(200,255,0,0.95)' }}
-            />
-            ClickUp Pilot
+              className="text-[10.5px] uppercase tracking-[0.28em] text-lime"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              O CENTRO DA OPERAÇÃO
+            </span>
           </div>
 
           <h2
-            className="max-w-[760px] text-[34px] font-extrabold leading-[1.05] tracking-tight text-white md:text-[56px]"
-            style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.025em' }}
+            className="max-w-[820px] text-[36px] font-extrabold leading-[1] tracking-tight text-white md:text-[64px]"
+            style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.03em' }}
           >
             <SmokeText text="Você sai do escritório." className="block" />
-            <span className="block" style={{ background: 'linear-gradient(135deg, #c8ff00 0%, #a78bfa 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+            <span
+              className="block"
+              style={{
+                background:
+                  'linear-gradient(135deg, #c8ff00 0%, #a78bfa 60%, #67e8f9 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
               <SmokeText text="Ele continua editando." />
             </span>
           </h2>
 
-          <p className="max-w-[560px] text-[15px] leading-relaxed text-white/80">
-            O Pilot lê os briefings no ClickUp e dispara os avatares por conta própria.
+          <p className="max-w-[580px] text-[15.5px] leading-relaxed text-white/85">
+            O Pilot lê os briefings no seu ClickUp, identifica avatar e roteiro
+            de cada task, e dispara o lipsync sozinho no HeyGen — parte por
+            parte.
             <br />
-            Você acorda no outro dia com tudo pronto pra revisar.
+            <span className="text-white/65">
+              Você dorme. Acorda. Tudo já tá pronto pra revisar.
+            </span>
           </p>
 
-          <Link
-            href="/login"
-            className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full px-7 py-3.5 text-[14px] font-bold text-black"
-            style={{
-              background: 'linear-gradient(135deg, #c8ff00 0%, #a3e635 100%)',
-              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.5), 0 14px 36px -8px rgba(200,255,0,0.6)',
-            }}
-          >
-            <span className="relative z-10">Ver o Pilot em ação</span>
-            <span className="relative z-10 transition-transform duration-300 group-hover/btn:translate-x-1">→</span>
-            <span aria-hidden className="absolute inset-0 -translate-x-[120%] bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 group-hover/btn:translate-x-[120%]" />
-          </Link>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <Link
+              href="/login"
+              className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full px-7 py-3.5 text-[14px] font-bold text-black"
+              style={{
+                background:
+                  'linear-gradient(135deg, #c8ff00 0%, #a3e635 100%)',
+                boxShadow:
+                  'inset 0 1px 0 rgba(255,255,255,0.5), 0 14px 36px -8px rgba(200,255,0,0.6)',
+              }}
+            >
+              <span className="relative z-10">Ver o Pilot em ação</span>
+              <span className="relative z-10 transition-transform duration-300 group-hover/btn:translate-x-1">
+                →
+              </span>
+              <span
+                aria-hidden
+                className="absolute inset-0 -translate-x-[120%] bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 group-hover/btn:translate-x-[120%]"
+              />
+            </Link>
+            <a
+              href="#pilot-passos"
+              className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-6 py-3.5 text-[13.5px] font-bold text-white backdrop-blur-md transition-all duration-300 hover:-translate-y-[1px] hover:border-white/35 hover:bg-white/10"
+            >
+              Ver como funciona
+            </a>
+          </div>
         </div>
 
         <style jsx>{`
@@ -385,11 +418,415 @@ function PilotShowcase() {
             0%, 100% { opacity: 0.55; transform: scale(1.03); }
             50% { opacity: 0.9; transform: scale(0.97); }
           }
-          @keyframes promo-icon-float {
-            0%, 100% { transform: translateY(-50%) translateX(0) rotate(0); }
-            50% { transform: translateY(calc(-50% - 8px)) translateX(-4px) rotate(-3deg); }
-          }
         `}</style>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Mockup HUD do Pilot — placa "Em execução" + linha de progresso + cards
+ * com avatares simulados subindo na fila. Decorativo, mostra que tem fluxo.
+ */
+function PilotMockup() {
+  return (
+    <div
+      className="relative w-[320px] xl:w-[380px]"
+      style={{
+        filter:
+          'drop-shadow(0 30px 60px rgba(0,0,0,0.55)) drop-shadow(0 0 40px rgba(167,139,250,0.4))',
+      }}
+    >
+      {/* Janela principal */}
+      <div
+        className="relative overflow-hidden rounded-[18px] border border-white/12 bg-black/55 backdrop-blur-xl"
+        style={{
+          animation: 'pilot-window-float 6.5s ease-in-out infinite',
+        }}
+      >
+        {/* Top bar fake */}
+        <div className="flex items-center gap-1.5 border-b border-white/8 px-3.5 py-2.5">
+          <span className="h-2 w-2 rounded-full bg-red-400/70" />
+          <span className="h-2 w-2 rounded-full bg-amber-400/70" />
+          <span className="h-2 w-2 rounded-full bg-emerald-400/70" />
+          <span
+            className="ml-2 text-[9.5px] font-bold uppercase tracking-[0.18em] text-lime"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            · Pilot · em execução
+          </span>
+        </div>
+
+        {/* Linha de progresso */}
+        <div className="px-4 pt-4">
+          <div className="flex items-center justify-between">
+            <span
+              className="text-[10px] uppercase tracking-[0.18em] text-white/55"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              Fila do dia
+            </span>
+            <span
+              className="text-[11px] text-lime"
+              style={{ fontFamily: 'var(--font-mono)' }}
+            >
+              12 / 18
+            </span>
+          </div>
+          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+            <div
+              className="h-full rounded-full"
+              style={{
+                width: '66%',
+                background: 'linear-gradient(90deg, #c8ff00, #a78bfa, #67e8f9)',
+                boxShadow: '0 0 12px rgba(200,255,0,0.6)',
+                animation: 'pilot-bar-glow 2.4s ease-in-out infinite',
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Lista de tasks fake */}
+        <div className="space-y-2 px-4 py-4">
+          {[
+            { name: 'Lipsync · cena 04', state: 'done' },
+            { name: 'Lipsync · cena 05', state: 'done' },
+            { name: 'Lipsync · cena 06', state: 'running' },
+            { name: 'Lipsync · cena 07', state: 'queued' },
+            { name: 'Lipsync · cena 08', state: 'queued' },
+          ].map((t, i) => (
+            <div
+              key={i}
+              className="flex items-center justify-between rounded-[10px] border border-white/8 bg-white/[0.03] px-3 py-2"
+            >
+              <div className="flex items-center gap-2.5">
+                <span
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{
+                    background:
+                      t.state === 'done'
+                        ? '#c8ff00'
+                        : t.state === 'running'
+                          ? '#a78bfa'
+                          : '#3a3a44',
+                    boxShadow:
+                      t.state !== 'queued'
+                        ? `0 0 8px ${t.state === 'done' ? '#c8ff00' : '#a78bfa'}`
+                        : 'none',
+                    animation:
+                      t.state === 'running'
+                        ? 'pilot-pulse 1.2s ease-in-out infinite'
+                        : undefined,
+                  }}
+                />
+                <span className="text-[11.5px] font-medium text-white/90">
+                  {t.name}
+                </span>
+              </div>
+              <span
+                className="text-[9px] font-bold uppercase tracking-[0.14em]"
+                style={{
+                  fontFamily: 'var(--font-tech)',
+                  color:
+                    t.state === 'done'
+                      ? '#c8ff00'
+                      : t.state === 'running'
+                        ? '#c084fc'
+                        : '#5a5a64',
+                }}
+              >
+                {t.state === 'done'
+                  ? 'pronto'
+                  : t.state === 'running'
+                    ? 'rodando'
+                    : 'fila'}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Card flutuante secundário */}
+      <div
+        className="absolute -bottom-6 -left-6 rounded-[12px] border border-white/12 bg-black/65 px-3 py-2 backdrop-blur-xl"
+        style={{
+          animation: 'pilot-card-bob 7s ease-in-out infinite',
+          boxShadow: '0 16px 32px -10px rgba(0,0,0,0.6)',
+        }}
+      >
+        <div
+          className="text-[9px] font-bold uppercase tracking-[0.2em] text-lime"
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          ÚLTIMO MERGE
+        </div>
+        <div
+          className="mt-0.5 text-[11px] text-white/85"
+          style={{ fontFamily: 'var(--font-mono)' }}
+        >
+          AD15VN_PRPB06.mp4
+        </div>
+      </div>
+
+      <style jsx>{`
+        @keyframes pilot-window-float {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-10px); }
+        }
+        @keyframes pilot-card-bob {
+          0%, 100% { transform: translate(0, 0); }
+          50% { transform: translate(-4px, 8px); }
+        }
+        @keyframes pilot-bar-glow {
+          0%, 100% { box-shadow: 0 0 12px rgba(200,255,0,0.5); }
+          50% { box-shadow: 0 0 22px rgba(167,139,250,0.7); }
+        }
+        @keyframes pilot-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/* ────────────────────── PILOT — COMO FUNCIONA ────────────────────── */
+
+function PilotHowItWorks() {
+  const steps = [
+    {
+      n: '01',
+      title: 'Conecta seu ClickUp',
+      desc:
+        'Em meio minuto você vincula sua workspace ao Auto Edit. Tudo continua na sua conta — o Pilot só lê o que precisa.',
+      tint: 'rgba(200,255,0,0.45)',
+    },
+    {
+      n: '02',
+      title: 'Puxa as tasks do dia',
+      desc:
+        'Escolhe a data, o Pilot lista todas as tasks daquele dia. Cada uma já vem com a copy do briefing carregada.',
+      tint: 'rgba(167,139,250,0.5)',
+    },
+    {
+      n: '03',
+      title: 'Revisa task por task',
+      desc:
+        'Preview limpo de cada uma: roteiro, avatar sugerido pelo Pilot baseado na copy e dados extras. Você só confirma o que tá certo.',
+      tint: 'rgba(244,114,182,0.45)',
+    },
+    {
+      n: '04',
+      title: 'Confirma e desliga o monitor',
+      desc:
+        'O Pilot dispara os lipsyncs no HeyGen, parte por parte. Quando você volta, tá tudo montado, pronto pra ir pra edição final.',
+      tint: 'rgba(103,232,249,0.5)',
+    },
+  ];
+
+  return (
+    <section
+      id="pilot-passos"
+      className="mx-auto mt-32 max-w-[1200px] px-5 md:px-8"
+    >
+      {/* Cabeçalho */}
+      <div className="mb-12 max-w-[780px] fade-in-up">
+        <div
+          className="mb-3 inline-flex items-baseline gap-3 text-white/35"
+          style={{ fontFamily: 'var(--font-mono)' }}
+        >
+          <span className="text-[10.5px] tracking-[0.32em]">002</span>
+          <span className="h-px w-10 bg-white/25" />
+          <span
+            className="text-[10.5px] uppercase tracking-[0.28em] text-violet"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            COMO FUNCIONA
+          </span>
+        </div>
+        <h2
+          className="section-title text-[36px] md:text-[52px]"
+          style={{ lineHeight: 1.05 }}
+        >
+          <SmokeText text="Em 4 passos." className="block" />
+          <span className="display-subtle block">
+            <SmokeText text="Sem volta pro fluxo manual." />
+          </span>
+        </h2>
+      </div>
+
+      {/* Grid 4 passos */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {steps.map((s, i) => (
+          <div
+            key={s.n}
+            className="step-card group relative overflow-hidden rounded-[20px] border border-line/60 p-6 fade-in-up"
+            style={{
+              animationDelay: `${i * 90}ms`,
+              background:
+                'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.20)), linear-gradient(180deg, #15151a, #0c0c10)',
+            }}
+          >
+            <div
+              aria-hidden
+              className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full opacity-50 blur-3xl transition-opacity duration-500 group-hover:opacity-100"
+              style={{ background: s.tint }}
+            />
+            <div className="relative">
+              <div
+                className="text-[40px] font-extrabold leading-none"
+                style={{
+                  fontFamily: 'var(--font-tech)',
+                  letterSpacing: '-0.03em',
+                  background:
+                    'linear-gradient(135deg, #fff 0%, rgba(255,255,255,0.3) 100%)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                }}
+              >
+                {s.n}
+              </div>
+              <h3
+                className="mt-4 text-[17px] font-bold leading-snug tracking-tight text-white"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                {s.title}
+              </h3>
+              <p className="mt-2 text-[13.5px] leading-relaxed text-text-muted">
+                {s.desc}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Briefing — card de atenção */}
+      <div
+        className="mt-10 overflow-hidden rounded-[22px] border border-violet/35 fade-in-up"
+        style={{
+          animationDelay: '380ms',
+          background:
+            'linear-gradient(135deg, rgba(167,139,250,0.16) 0%, rgba(103,232,249,0.10) 100%), linear-gradient(180deg, #15151a, #0c0c10)',
+        }}
+      >
+        <div className="grid grid-cols-1 gap-8 px-7 py-8 md:grid-cols-[auto_1fr] md:px-10 md:py-10">
+          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-[18px] border border-violet/40 bg-violet/10">
+            <svg
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#c084fc"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+              <path d="M14 2v6h6" />
+              <path d="M9 13h6M9 17h4" />
+            </svg>
+          </div>
+          <div>
+            <div
+              className="mb-2 inline-flex items-center gap-2 rounded-full border border-violet/50 bg-black/40 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-violet backdrop-blur-md"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-violet shadow-[0_0_8px_rgba(167,139,250,0.85)]" />
+              ATENÇÃO · BRIEFING
+            </div>
+            <h3
+              className="text-[22px] font-extrabold leading-tight tracking-tight text-white md:text-[26px]"
+              style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
+            >
+              <SmokeText text="O briefing precisa estar no nosso formato." />
+            </h3>
+            <p className="mt-3 max-w-[640px] text-[14.5px] leading-relaxed text-white/85">
+              Você recebe um manual simples de como estruturar a copy de cada
+              task no ClickUp. O Pilot só consegue trabalhar com 100% de
+              assertividade quando o briefing segue esse padrão.
+              <br />
+              <span className="text-white/65">
+                Menos revisão. Menos retrabalho. Mais entrega.
+              </span>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Pra quem é */}
+      <div className="mt-10 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div
+          className="audience-card group relative overflow-hidden rounded-[22px] border border-lime/30 p-7 fade-in-up md:p-9"
+          style={{
+            animationDelay: '480ms',
+            background:
+              'linear-gradient(135deg, rgba(200,255,0,0.10), rgba(0,0,0,0.18)), linear-gradient(180deg, #15151a, #0c0c10)',
+          }}
+        >
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full opacity-50 blur-3xl transition-opacity duration-500 group-hover:opacity-90"
+            style={{ background: 'rgba(200,255,0,0.45)' }}
+          />
+          <div className="relative">
+            <div
+              className="mb-3 text-[10.5px] font-bold uppercase tracking-[0.22em] text-lime"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              SE VOCÊ É DONO DA OPERAÇÃO
+            </div>
+            <h3
+              className="text-[26px] font-extrabold leading-tight tracking-tight text-white md:text-[32px]"
+              style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
+            >
+              <SmokeText text="Você virou o editor." className="block" />
+              <span className="block text-lime">
+                <SmokeText text="Sem editar nada." />
+              </span>
+            </h3>
+            <p className="mt-3 text-[14px] leading-relaxed text-white/80">
+              Valida formato full UGC todo dia? Liga o Pilot e ele monta o dia
+              inteiro pra você. Você só aprova.
+            </p>
+          </div>
+        </div>
+
+        <div
+          className="audience-card group relative overflow-hidden rounded-[22px] border border-violet/35 p-7 fade-in-up md:p-9"
+          style={{
+            animationDelay: '560ms',
+            background:
+              'linear-gradient(135deg, rgba(167,139,250,0.14), rgba(0,0,0,0.18)), linear-gradient(180deg, #15151a, #0c0c10)',
+          }}
+        >
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full opacity-50 blur-3xl transition-opacity duration-500 group-hover:opacity-90"
+            style={{ background: 'rgba(167,139,250,0.5)' }}
+          />
+          <div className="relative">
+            <div
+              className="mb-3 text-[10.5px] font-bold uppercase tracking-[0.22em] text-violet"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              SE VOCÊ TEM EDITOR
+            </div>
+            <h3
+              className="text-[26px] font-extrabold leading-tight tracking-tight text-white md:text-[32px]"
+              style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
+            >
+              <SmokeText text="Ele entrega 5× mais." className="block" />
+              <span className="block text-violet">
+                <SmokeText text="Sem suar." />
+              </span>
+            </h3>
+            <p className="mt-3 text-[14px] leading-relaxed text-white/80">
+              O Pilot tira o trabalho repetitivo da frente dele. Sobra tempo
+              pra criatividade, pra polish, pra entregar mais. Sua operação
+              dobra de tamanho com a mesma equipe.
+            </p>
+          </div>
+        </div>
       </div>
     </section>
   );

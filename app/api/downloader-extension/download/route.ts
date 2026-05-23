@@ -54,7 +54,7 @@ export async function GET() {
       headers: {
         'content-type': 'application/zip',
         'content-disposition':
-          'attachment; filename="darkolab-downloader-extension.zip"',
+          'attachment; filename="auto-edit-downloader-extension.zip"',
         'cache-control': 'public, max-age=3600',
       },
     });
