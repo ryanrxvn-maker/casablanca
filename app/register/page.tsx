@@ -51,15 +51,21 @@ export default function RegisterPage() {
     setLoading(true);
     try {
       const supabase = createClient();
+      // Prefere NEXT_PUBLIC_SITE_URL (canônico) — evita link apontando
+      // pra preview deployment se o user testou em URL diferente. Cai
+      // pra origin atual se a env var não estiver setada.
+      const siteUrl =
+        process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, '') ||
+        (typeof window !== 'undefined' ? window.location.origin : '');
       const { data, error: signUpErr } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: { name: name.trim() || null, phone: phoneNorm },
-          emailRedirectTo:
-            typeof window !== 'undefined'
-              ? `${window.location.origin}/auth/callback`
-              : undefined,
+          // /auth/callback aceita tanto code (PKCE) quanto token_hash —
+          // funciona com qualquer template de email que o user
+          // configurar no Supabase Dashboard.
+          emailRedirectTo: siteUrl ? `${siteUrl}/auth/callback` : undefined,
         },
       });
       if (signUpErr) {
