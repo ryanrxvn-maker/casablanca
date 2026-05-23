@@ -35,8 +35,11 @@ export default function RegisterPage() {
   async function handleSignup(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    const phoneNorm = normalizePhone(phone);
-    if (!phoneNorm || phoneNorm.length < 12) {
+    // SMS opcional: telefone só é OBRIGATÓRIO se SMS_REQUIRED estiver ativo.
+    // Caso contrário, aceita qualquer string (incluindo vazia).
+    const smsRequired = process.env.NEXT_PUBLIC_SMS_REQUIRED === '1';
+    const phoneNorm = phone ? normalizePhone(phone) : '';
+    if (smsRequired && (!phoneNorm || phoneNorm.length < 12)) {
       setError('Telefone inválido. Use o formato (xx) 9xxxx-xxxx.');
       return;
     }
@@ -84,7 +87,14 @@ export default function RegisterPage() {
         } catch {
           /* ignora; pode haver trigger SQL */
         }
-        // Dispara envio do SMS
+      }
+
+      // SMS opcional: NEXT_PUBLIC_SMS_REQUIRED=1 reativa o flow SMS.
+      // Por padrão, signup vai direto pra /tools sem código por SMS
+      // (até Twilio estar configurado).
+      const smsRequired = process.env.NEXT_PUBLIC_SMS_REQUIRED === '1';
+
+      if (smsRequired && data.user?.id) {
         try {
           await fetch('/api/auth/sms/send-code', {
             method: 'POST',
@@ -92,9 +102,13 @@ export default function RegisterPage() {
             body: JSON.stringify({ phone: phoneNorm }),
           });
         } catch {}
+        router.replace(`/verify-phone?phone=${encodeURIComponent(phoneNorm)}`);
+        return;
       }
 
-      router.replace(`/verify-phone?phone=${encodeURIComponent(phoneNorm)}`);
+      // Sem SMS: vai direto pras ferramentas
+      router.replace('/tools');
+      router.refresh();
     } catch (e) {
       setError((e as Error).message ?? 'Falha ao criar conta.');
     } finally {
@@ -147,19 +161,18 @@ export default function RegisterPage() {
 
         <div>
           <label className="label-field" htmlFor="phone">
-            Telefone (WhatsApp/SMS)
+            Telefone <span className="text-text-muted">(opcional)</span>
           </label>
           <input
             id="phone"
             type="tel"
-            required
             className="input-field"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             placeholder="(11) 98765-4321"
           />
           <p className="mt-1.5 text-[11px] text-text-muted">
-            Vamos mandar um código por SMS pra confirmar.
+            Pra suporte por WhatsApp se precisar.
           </p>
         </div>
 

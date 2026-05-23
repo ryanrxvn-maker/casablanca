@@ -190,7 +190,13 @@ export async function updateSession(request: NextRequest) {
     // Admin nunca precisa de phone_verified. Se a coluna phone_verified
     // for undefined (migration não rodou), também consideramos verificado
     // pra não bloquear ninguém retroativamente.
+    //
+    // SMS_REQUIRED (env): default 'false' enquanto não houver Twilio
+    // configurado. Quando setar `SMS_REQUIRED=1` na Vercel, a verificação
+    // volta a ser obrigatória pra novos cadastros — admin sempre passa.
+    const smsRequired = process.env.SMS_REQUIRED === '1';
     const phoneVerified =
+      !smsRequired ||
       isAdmin ||
       profile?.phone_verified === true ||
       profile?.legacy_no_phone === true ||
