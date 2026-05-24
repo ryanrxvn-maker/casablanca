@@ -17,7 +17,7 @@ import {
 import { CancelButton } from '@/components/CancelButton';
 import { buildZip } from '@/lib/zip-builder';
 import { ToolStep, ToolChoice, ToolAction } from '@/components/tool-kit';
-import { IconNormalizador } from '@/components/ToolIcons';
+import { IconNormalizador, IconStepFiles, IconStepSliders, IconStepFormat } from '@/components/ToolIcons';
 
 const HUE = 'rgba(94,234,212,0.4)';
 
@@ -219,7 +219,7 @@ export default function NormalizadorPage() {
       icon={<IconNormalizador size={56} />}
     >
       <div className="flex flex-col gap-5">
-        <ToolStep n={1} title="Arquivos" hint={`Até ${MAX_BATCH} · MP3, WAV, MP4, WEBM ou MOV`} hue={HUE}>
+        <ToolStep n={1} icon={<IconStepFiles size={18} />} title="Arquivos" hint={`Até ${MAX_BATCH} · MP3, WAV, MP4, WEBM ou MOV`} hue={HUE}>
           <BatchFileUpload
             accept="audio/*,video/mp4,video/webm,video/quicktime"
             value={files}
@@ -230,7 +230,7 @@ export default function NormalizadorPage() {
           />
         </ToolStep>
 
-        <ToolStep n={2} title="Intensidade" hint="Quanto agressiva é a compressão" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepSliders size={18} />} title="Intensidade" hint="Quanto agressiva é a compressão" hue={HUE}>
           <div className="grid gap-2 sm:grid-cols-3">
             {INTENSITY_OPTIONS.map((opt) => {
               const active = intensity === opt.id;
@@ -262,7 +262,7 @@ export default function NormalizadorPage() {
           </div>
         </ToolStep>
 
-        <ToolStep n={3} title="Formato de saída" hue={HUE}>
+        <ToolStep n={3} icon={<IconStepFormat size={18} />} title="Formato de saída" hue={HUE}>
           <ToolChoice
             value={output}
             onChange={(v) => {

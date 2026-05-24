@@ -4,7 +4,7 @@ import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { formatBRL } from '@/lib/utils';
 import { ToolStep, ToolSlider, ToolMetric, ToolResultCard } from '@/components/tool-kit';
-import { IconCalculadora } from '@/components/ToolIcons';
+import { IconCalculadora, IconStepMoney, IconStepClock, IconStepTag } from '@/components/ToolIcons';
 
 const HUE = 'rgba(148,163,184,0.4)';
 
@@ -41,7 +41,7 @@ export default function CalculadoraPage() {
       icon={<IconCalculadora size={56} />}
     >
       <div className="flex flex-col gap-5">
-        <ToolStep n={1} title="Tabela de preço" hint="Quanto custa cada minuto entregue" hue={HUE}>
+        <ToolStep n={1} icon={<IconStepMoney size={18} />} title="Tabela de preço" hint="Quanto custa cada minuto entregue" hue={HUE}>
           <label className="block">
             <span
               className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
@@ -77,7 +77,7 @@ export default function CalculadoraPage() {
           </div>
         </ToolStep>
 
-        <ToolStep n={2} title="Minutagem" hint="Quantos minutos finais o projeto entrega" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepClock size={18} />} title="Minutagem" hint="Quantos minutos finais o projeto entrega" hue={HUE}>
           <input
             id="min"
             inputMode="decimal"
@@ -88,7 +88,7 @@ export default function CalculadoraPage() {
           />
         </ToolStep>
 
-        <ToolStep n={3} title="Desconto" hint="Pra cliente recorrente ou pacote fechado" hue={HUE}>
+        <ToolStep n={3} icon={<IconStepTag size={18} />} title="Desconto" hint="Pra cliente recorrente ou pacote fechado" hue={HUE}>
           <ToolSlider
             label="Desconto"
             min={0}

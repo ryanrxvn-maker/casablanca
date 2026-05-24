@@ -17,7 +17,7 @@ import { CancelButton } from '@/components/CancelButton';
 import { buildZip } from '@/lib/zip-builder';
 import { formatBytes, formatTime } from '@/lib/utils';
 import { ToolStep, ToolSlider, ToolAction, ToolMetric } from '@/components/tool-kit';
-import { IconTakeSplitter } from '@/components/ToolIcons';
+import { IconTakeSplitter, IconStepUpload, IconStepLabel, IconStepSliders, IconStepSparkle } from '@/components/ToolIcons';
 
 const HUE = 'rgba(134,239,172,0.4)';
 
@@ -227,7 +227,7 @@ export default function TakeSplitterPage() {
       icon={<IconTakeSplitter size={56} />}
     >
       <div className="flex flex-col gap-5">
-        <ToolStep n={1} title="Vídeo" hint="MP4, MOV, WEBM, MKV — até 2GB" hue={HUE}>
+        <ToolStep n={1} icon={<IconStepUpload size={18} />} title="Vídeo" hint="MP4, MOV, WEBM, MKV — até 2GB" hue={HUE}>
           <FileUpload
             accept="video/mp4,video/webm,video/quicktime,video/x-matroska"
             value={file}
@@ -252,7 +252,7 @@ export default function TakeSplitterPage() {
           ) : null}
         </ToolStep>
 
-        <ToolStep n={2} title="Nome dos arquivos" hint="Vai virar o sufixo de cada take" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepLabel size={18} />} title="Nome dos arquivos" hint="Vai virar o sufixo de cada take" hue={HUE}>
           <input
             id="niche"
             type="text"
@@ -276,7 +276,7 @@ export default function TakeSplitterPage() {
           </p>
         </ToolStep>
 
-        <ToolStep n={3} title="Sensibilidade" hint="Quão sensível é a detecção de corte" hue={HUE}>
+        <ToolStep n={3} icon={<IconStepSliders size={18} />} title="Sensibilidade" hint="Quão sensível é a detecção de corte" hue={HUE}>
           <ToolSlider
             label="Threshold"
             min={0.1}
@@ -309,7 +309,7 @@ export default function TakeSplitterPage() {
           </div>
         </ToolStep>
 
-        <ToolStep n={4} title="Verificação IA" hint="Opcional — filtra falsos positivos" hue={HUE}>
+        <ToolStep n={4} icon={<IconStepSparkle size={18} />} title="Verificação IA" hint="Opcional — filtra falsos positivos" hue={HUE}>
           <label className="flex cursor-pointer items-start gap-3">
             <input
               type="checkbox"

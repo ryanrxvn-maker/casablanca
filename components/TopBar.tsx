@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { BackgroundTasksButton } from './BackgroundTasksButton';
 import { ClickUpPilotButton } from './ClickUpPilotButton';
+import { GlobalSearchButton } from './GlobalSearch';
 import { LipsyncHistoryButton } from './LipsyncHistoryButton';
 import { PointsButton } from './PointsButton';
 
@@ -29,9 +30,9 @@ const TITLES: Record<string, string> = {
   '/tools/calculadora': 'Calculadora',
   '/tools/auto-broll': 'Auto B-roll',
   '/tools/troca-produto': 'Troca de produto',
-  '/tools/remover-elementos': 'Smart Remover',
-  '/tools/decupagem-copy': 'Smart Decup',
-  '/tools/copy-srt': 'SRT Generator',
+  '/tools/remover-elementos': 'Remover Legenda/Marca d’Água',
+  '/tools/decupagem-copy': 'Decupagem Inteligente',
+  '/tools/copy-srt': 'Gerador de SRT',
   '/tools/heygen-auto': 'HeyGen Auto',
   '/tools/points': 'Pontos',
   '/tools/background': 'Tarefas em segundo plano',
@@ -95,6 +96,8 @@ export function TopBar() {
 
         {/* Direita: cluster de ícones */}
         <div className="topbar-cluster">
+          <GlobalSearchButton />
+          <span aria-hidden className="topbar-divider" />
           <PointsButton />
           <span aria-hidden className="topbar-divider" />
           <BackgroundTasksButton />

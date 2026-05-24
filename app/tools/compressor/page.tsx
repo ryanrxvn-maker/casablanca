@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo } from 'react';
 import { ToolHero, ToolStep, ToolChoice, ToolSlider, ToolAction, ToolMetric } from '@/components/tool-kit';
-import { IconCompressor } from '@/components/ToolIcons';
+import { IconCompressor, IconStepUpload, IconStepSliders, IconStepFormat } from '@/components/ToolIcons';
 
 const HUE = 'rgba(129,140,248,0.4)';
 import { BatchFileUpload } from '@/components/BatchFileUpload';
@@ -286,7 +286,7 @@ export default function CompressorPage() {
         icon={<IconCompressor size={56} />}
       />
       <div className="mt-6 flex flex-col gap-5">
-        <ToolStep n={1} title="Solta os vídeos" hint={`Até ${MAX_BATCH} arquivos · MP4, WEBM ou MOV`} hue={HUE}>
+        <ToolStep n={1} icon={<IconStepUpload size={18} />} title="Solta os vídeos" hint={`Até ${MAX_BATCH} arquivos · MP4, WEBM ou MOV`} hue={HUE}>
           <BatchFileUpload
             accept="video/mp4,video/webm,video/quicktime"
             value={files}
@@ -316,7 +316,7 @@ export default function CompressorPage() {
           ) : null}
         </ToolStep>
 
-        <ToolStep n={2} title="Qualidade" hint="CRF mais alto = arquivo menor, mais perda visual" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepSliders size={18} />} title="Qualidade" hint="CRF mais alto = arquivo menor, mais perda visual" hue={HUE}>
           <ToolSlider
             label="CRF"
             min={18}
@@ -333,7 +333,7 @@ export default function CompressorPage() {
           </div>
         </ToolStep>
 
-        <ToolStep n={3} title="Resolução" hue={HUE}>
+        <ToolStep n={3} icon={<IconStepFormat size={18} />} title="Resolução" hue={HUE}>
           <ToolChoice
             value={resolution}
             onChange={(v) => !processing && setResolution(v as Resolution)}

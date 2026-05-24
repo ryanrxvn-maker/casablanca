@@ -143,25 +143,32 @@ export function IconAcelerador(p: IconProps) {
   );
 }
 
-/** Normalizador — gradient teal */
+/** Normalizador — equalizer bars FILLED (sem stroke fino que some) */
 export function IconNormalizador(p: IconProps) {
   const raw = useId();
   const id = `g-${raw.replace(/:/g, '')}`;
+  const url = `url(#${id})`;
   return (
-    <svg {...baseProps(p, `url(#${id})`)}>
+    <svg
+      width={p.size ?? 22}
+      height={p.size ?? 22}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+      className={p.className}
+    >
       <defs>
         <linearGradient id={id} x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stopColor="#5eead4" />
           <stop offset="100%" stopColor="#14b8a6" />
         </linearGradient>
       </defs>
-      <path d="M3 12h18" strokeDasharray="2 2" opacity="0.6" />
-      <path d="M5 8v8" />
-      <path d="M8 6v12" />
-      <path d="M11 9v6" />
-      <path d="M13 5v14" opacity="0.4" />
-      <path d="M16 10v4" />
-      <path d="M19 10v4" />
+      {/* Barras EQ — filled rects, bem visíveis em qualquer tamanho */}
+      <rect x="3"  y="9"  width="2.6" height="6"  rx="1" fill={url} opacity="0.55" />
+      <rect x="7"  y="6"  width="2.6" height="12" rx="1" fill={url} />
+      <rect x="11" y="3"  width="2.6" height="18" rx="1" fill={url} />
+      <rect x="15" y="6"  width="2.6" height="12" rx="1" fill={url} />
+      <rect x="19" y="9"  width="2.6" height="6"  rx="1" fill={url} opacity="0.55" />
     </svg>
   );
 }
@@ -384,6 +391,271 @@ export function IconWrench(p: IconProps) {
         </linearGradient>
       </defs>
       <path d="M14.7 6.3a4 4 0 00-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 005.4-5.4l-2.7 2.7-2.6-2.6 2.7-2.7z" />
+    </svg>
+  );
+}
+
+/* ─────────────────────── Step icons ────────────────────────────── */
+/**
+ * Ícones simbólicos que SUBSTITUEM o número de cada passo das
+ * ferramentas. Cada um remete à AÇÃO daquele passo (subir arquivo,
+ * ajustar config, executar, baixar, etc).
+ *
+ * Todos compartilham um wrapper compacto (24×24 viewBox) e usam
+ * stroke branco — herdam cor do contexto pelo `currentColor`. O
+ * gradiente fica por conta do badge do ToolStep (já tem hue próprio).
+ */
+function stepBase(p: IconProps) {
+  return {
+    width: p.size ?? 18,
+    height: p.size ?? 18,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: p.strokeWidth ?? 2,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    className: p.className,
+    'aria-hidden': true,
+  };
+}
+
+/** Upload — subir arquivo (passo de input) */
+export function IconStepUpload(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <path d="M12 16V4" />
+      <path d="M6 10l6-6 6 6" />
+      <path d="M4 20h16" />
+    </svg>
+  );
+}
+
+/** Link — colar URL */
+export function IconStepLink(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <path d="M10 14a4 4 0 015.66 0l3-3a4 4 0 00-5.66-5.66l-1.5 1.5" />
+      <path d="M14 10a4 4 0 01-5.66 0l-3 3a4 4 0 005.66 5.66l1.5-1.5" />
+    </svg>
+  );
+}
+
+/** Plug/Extensão — instalar ou conectar */
+export function IconStepPlug(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <path d="M9 2v6M15 2v6" />
+      <path d="M6 8h12v3a6 6 0 01-12 0V8z" />
+      <path d="M12 17v5" />
+    </svg>
+  );
+}
+
+/** Sliders — ajustes/configuração */
+export function IconStepSliders(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <path d="M4 6h12M4 18h7" />
+      <path d="M4 12h16" />
+      <circle cx="18" cy="6" r="2.2" />
+      <circle cx="13" cy="18" r="2.2" />
+      <circle cx="10" cy="12" r="2.2" />
+    </svg>
+  );
+}
+
+/** Gear — configuração geral */
+export function IconStepGear(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 00.3 1.8l.1.1a2 2 0 11-2.9 2.9l-.1-.1a1.7 1.7 0 00-1.8-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.5 1.7 1.7 0 00-1.8.3l-.1.1A2 2 0 113.1 16.9l.1-.1a1.7 1.7 0 00.3-1.8 1.7 1.7 0 00-1.5-1H1a2 2 0 010-4h.1A1.7 1.7 0 002.6 9a1.7 1.7 0 00-.3-1.8l-.1-.1A2 2 0 015.1 4.2l.1.1a1.7 1.7 0 001.8.3H7a1.7 1.7 0 001-1.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.8-.3l.1-.1a2 2 0 012.9 2.9l-.1.1a1.7 1.7 0 00-.3 1.8V9a1.7 1.7 0 001.5 1H23a2 2 0 010 4h-.1a1.7 1.7 0 00-1.5 1z" />
+    </svg>
+  );
+}
+
+/** Wand — IA / mágica / processar */
+export function IconStepWand(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <path d="M15 4v3M19 4v3M17 2v2M17 7v2" />
+      <path d="M4 20l11-11 3 3-11 11H4v-3z" />
+    </svg>
+  );
+}
+
+/** Play — executar / iniciar */
+export function IconStepPlay(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <path d="M7 4l13 8-13 8V4z" fill="currentColor" />
+    </svg>
+  );
+}
+
+/** Download — baixar resultado */
+export function IconStepDownload(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <path d="M12 4v12" />
+      <path d="M6 10l6 6 6-6" />
+      <path d="M4 20h16" />
+    </svg>
+  );
+}
+
+/** Text/Document — texto / copy */
+export function IconStepText(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <rect x="4" y="3" width="16" height="18" rx="2" />
+      <path d="M8 8h8M8 12h8M8 16h5" />
+    </svg>
+  );
+}
+
+/** Folder/Files — arquivos */
+export function IconStepFiles(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
+    </svg>
+  );
+}
+
+/** Money — preço / valor */
+export function IconStepMoney(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M15 9a3 3 0 00-3-2 2.5 2.5 0 000 5 2.5 2.5 0 010 5 3 3 0 01-3-2" />
+      <path d="M12 6v1M12 17v1" />
+    </svg>
+  );
+}
+
+/** Clock — minutagem / duração */
+export function IconStepClock(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+
+/** Tag — desconto / etiqueta */
+export function IconStepTag(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <path d="M20 12l-8 8-9-9V3h8l9 9z" />
+      <circle cx="7.5" cy="7.5" r="1.4" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+/** Mic — áudio / voz */
+export function IconStepMic(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <rect x="9" y="2" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0014 0" />
+      <path d="M12 18v3M9 21h6" />
+    </svg>
+  );
+}
+
+/** Speed — velocidade */
+export function IconStepSpeed(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <path d="M5 7l7 5-7 5V7z" fill="currentColor" />
+      <path d="M12 7l7 5-7 5V7z" fill="currentColor" />
+    </svg>
+  );
+}
+
+/** Format/Layers — formato de saída */
+export function IconStepFormat(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <path d="M12 3l9 5-9 5-9-5 9-5z" />
+      <path d="M3 13l9 5 9-5" />
+    </svg>
+  );
+}
+
+/** Target/Shield — alvo / segurança */
+export function IconStepTarget(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <circle cx="12" cy="12" r="9" />
+      <circle cx="12" cy="12" r="5" />
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+/** Pipeline / Workflow — fluxo de etapas */
+export function IconStepPipeline(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <circle cx="5" cy="6" r="2.2" />
+      <circle cx="19" cy="6" r="2.2" />
+      <circle cx="5" cy="18" r="2.2" />
+      <circle cx="19" cy="18" r="2.2" />
+      <path d="M7 6h10M7 18h10M5 8v8M19 8v8" />
+    </svg>
+  );
+}
+
+/** Scissors / Cut — corte */
+export function IconStepScissors(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <circle cx="6" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M8.5 8.5L20 20" />
+      <path d="M8.5 15.5L20 4" />
+    </svg>
+  );
+}
+
+/** Sparkle — IA / verificação */
+export function IconStepSparkle(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+/** Tag/Name — etiquetar / nomear */
+export function IconStepLabel(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <rect x="3" y="6" width="18" height="12" rx="2" />
+      <path d="M3 10h18" />
+    </svg>
+  );
+}
+
+/** Product Swap — troca de produto */
+export function IconStepSwap(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <path d="M4 8h13l-3-3M20 16H7l3 3" />
+    </svg>
+  );
+}
+
+/** Search — pesquisa */
+export function IconSearch(p: IconProps) {
+  return (
+    <svg {...stepBase(p)}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="M21 21l-4.3-4.3" />
     </svg>
   );
 }

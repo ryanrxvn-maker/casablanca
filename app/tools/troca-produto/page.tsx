@@ -9,7 +9,7 @@ import { useToolState } from '@/components/ToolsStateProvider';
 import { getFFmpeg } from '@/lib/ffmpeg-worker';
 import { fetchFile } from '@ffmpeg/util';
 import { ToolStep, ToolAction } from '@/components/tool-kit';
-import { IconTrocaProduto } from '@/components/ToolIcons';
+import { IconTrocaProduto, IconStepSwap, IconStepMic, IconStepPipeline } from '@/components/ToolIcons';
 import { TierGate } from '@/components/TierGate';
 
 const HUE = 'rgba(244,114,182,0.45)';
@@ -317,7 +317,7 @@ function TrocaProdutoInner() {
       <div className="grid gap-5">
         <MissingKeyBanner services={['assemblyai', 'elevenlabs']} />
 
-        <ToolStep n={1} title="Produtos" hint="Como o antigo aparece na fala + nome do novo" hue={HUE}>
+        <ToolStep n={1} icon={<IconStepSwap size={18} />} title="Produtos" hint="Como o antigo aparece na fala + nome do novo" hue={HUE}>
           <div className="grid gap-4 md:grid-cols-2">
             <label className="block">
               <span
@@ -354,7 +354,7 @@ function TrocaProdutoInner() {
           </div>
         </ToolStep>
 
-        <ToolStep n={2} title="Áudio da VSL" hint={`Até ${MAX_UPLOAD_BYTES / 1024 / 1024}MB · use Compressor se passar`} hue={HUE}>
+        <ToolStep n={2} icon={<IconStepMic size={18} />} title="Áudio da VSL" hint={`Até ${MAX_UPLOAD_BYTES / 1024 / 1024}MB · use Compressor se passar`} hue={HUE}>
           <input
             type="file"
             accept="audio/*,video/*"
@@ -430,7 +430,7 @@ function TrocaProdutoInner() {
           </div>
         )}
 
-        <ToolStep n={3} title="Pipeline" hint="Transcreve · localiza · clona voz · substitui" hue={HUE}>
+        <ToolStep n={3} icon={<IconStepPipeline size={18} />} title="Pipeline" hint="Transcreve · localiza · clona voz · substitui" hue={HUE}>
           <div className="flex flex-wrap gap-3">
             <button
               type="button"

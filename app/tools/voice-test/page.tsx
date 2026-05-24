@@ -17,6 +17,7 @@ import {
 } from '@/lib/voice-isolator';
 import { downloadBlob } from '@/lib/audio-engine';
 import { ToolStep, ToolAction, ToolResultCard } from '@/components/tool-kit';
+import { IconStepMic, IconStepSliders } from '@/components/ToolIcons';
 
 const HUE = 'rgba(94,234,212,0.42)';
 
@@ -108,7 +109,7 @@ export default function VoiceTestPage() {
       hue={HUE}
     >
       <div className="grid gap-5">
-        <ToolStep n={1} title="Áudio" hint="MP3, WAV, M4A, OGG ou MP4" hue={HUE}>
+        <ToolStep n={1} icon={<IconStepMic size={18} />} title="Áudio" hint="MP3, WAV, M4A, OGG ou MP4" hue={HUE}>
           <input
             type="file"
             accept="audio/*,video/mp4"
@@ -127,7 +128,7 @@ export default function VoiceTestPage() {
           )}
         </ToolStep>
 
-        <ToolStep n={2} title="Modo de isolação" hint="Auto detecta stereo/mono" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepSliders size={18} />} title="Modo de isolação" hint="Auto detecta stereo/mono" hue={HUE}>
           <select
             value={mode}
             onChange={(e) => setMode(e.target.value as VoiceIsolatorMode)}

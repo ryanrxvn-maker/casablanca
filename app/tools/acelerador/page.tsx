@@ -17,7 +17,7 @@ import { CancelButton } from '@/components/CancelButton';
 import { buildZip } from '@/lib/zip-builder';
 import { formatBytes } from '@/lib/utils';
 import { ToolStep, ToolChoice, ToolSlider, ToolAction } from '@/components/tool-kit';
-import { IconAcelerador } from '@/components/ToolIcons';
+import { IconAcelerador, IconStepFiles, IconStepSpeed, IconStepFormat } from '@/components/ToolIcons';
 
 const HUE = 'rgba(251,191,36,0.4)';
 
@@ -222,7 +222,7 @@ export default function AceleradorPage() {
       icon={<IconAcelerador size={56} />}
     >
       <div className="flex flex-col gap-5">
-        <ToolStep n={1} title="Arquivos" hint={`Até ${MAX_BATCH} · MP3, WAV, MP4, WEBM ou MOV`} hue={HUE}>
+        <ToolStep n={1} icon={<IconStepFiles size={18} />} title="Arquivos" hint={`Até ${MAX_BATCH} · MP3, WAV, MP4, WEBM ou MOV`} hue={HUE}>
           <BatchFileUpload
             accept="audio/*,video/mp4,video/webm,video/quicktime"
             value={files}
@@ -233,7 +233,7 @@ export default function AceleradorPage() {
           />
         </ToolStep>
 
-        <ToolStep n={2} title="Velocidade" hint="Pitch-corrigido — não fica robótico" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepSpeed size={18} />} title="Velocidade" hint="Pitch-corrigido — não fica robótico" hue={HUE}>
           <ToolSlider
             label={
               speedMode === 'slow'
@@ -278,7 +278,7 @@ export default function AceleradorPage() {
           </div>
         </ToolStep>
 
-        <ToolStep n={3} title="Formato de saída" hue={HUE}>
+        <ToolStep n={3} icon={<IconStepFormat size={18} />} title="Formato de saída" hue={HUE}>
           <ToolChoice
             value={format}
             onChange={(v) => {

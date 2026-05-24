@@ -110,20 +110,23 @@ export function ToolHero({
 
 /* ─────────────────── ToolStep ─────────────────── */
 /**
- * Bloco de passo numerado. Visual de cartão tipo HeyGen com tag "01",
- * título e conteúdo. Usar pra dividir a ferramenta em etapas claras.
+ * Bloco de passo. Visual de cartão tipo HeyGen com badge (ícone OU
+ * número), título e conteúdo. Quando `icon` é passado, o badge mostra
+ * o ícone em vez do número — passos viram visuais e auto-explicativos.
  */
 export function ToolStep({
   n,
   title,
   hint,
   hue = 'rgba(167,139,250,0.45)',
+  icon,
   children,
 }: {
   n: number | string;
   title: string;
   hint?: string;
   hue?: string;
+  icon?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -144,7 +147,7 @@ export function ToolStep({
       <div className="relative">
         <div className="mb-4 flex items-center gap-3">
           <span
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-[12px] font-bold tabular-nums"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border text-[12px] font-bold tabular-nums"
             style={{
               fontFamily: 'var(--font-tech)',
               color: '#fff',
@@ -153,7 +156,7 @@ export function ToolStep({
               boxShadow: `0 0 18px -4px ${hue}`,
             }}
           >
-            {typeof n === 'number' ? String(n).padStart(2, '0') : n}
+            {icon ? icon : typeof n === 'number' ? String(n).padStart(2, '0') : n}
           </span>
           <div className="flex-1">
             <h3

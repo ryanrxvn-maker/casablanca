@@ -7,7 +7,7 @@ import { AudioPlayer } from '@/components/AudioPlayer';
 import { CancelButton } from '@/components/CancelButton';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { ToolStep, ToolAction, ToolResultCard } from '@/components/tool-kit';
-import { IconAudioSplit } from '@/components/ToolIcons';
+import { IconAudioSplit, IconStepMic, IconStepScissors } from '@/components/ToolIcons';
 
 const HUE = 'rgba(34,211,238,0.4)';
 import {
@@ -123,7 +123,7 @@ export default function AudioSplitPage() {
       icon={<IconAudioSplit size={56} />}
     >
       <div className="flex flex-col gap-5">
-        <ToolStep n={1} title="Áudio ou vídeo" hint="MP3, WAV, MP4, WEBM ou OGG" hue={HUE}>
+        <ToolStep n={1} icon={<IconStepMic size={18} />} title="Áudio ou vídeo" hint="MP3, WAV, MP4, WEBM ou OGG" hue={HUE}>
           <FileUpload
             accept="audio/*,video/mp4,video/webm,video/ogg"
             value={file}
@@ -135,7 +135,7 @@ export default function AudioSplitPage() {
           />
         </ToolStep>
 
-        <ToolStep n={2} title="Como divide" hint="Heurística inteligente de pausas" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepScissors size={18} />} title="Como divide" hint="Heurística inteligente de pausas" hue={HUE}>
           <div className="rounded-[12px] border border-line bg-bg/40 px-4 py-3 text-xs text-text-muted leading-relaxed">
             Procura as pausas mais longas e quebra em partes equilibradas
             (~4 partes por minuto de fala). Pra remover silêncios use a{' '}

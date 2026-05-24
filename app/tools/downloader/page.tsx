@@ -5,7 +5,7 @@ import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { createClient } from '@/lib/supabase/client';
 import { ToolStep, ToolChoice, ToolAction } from '@/components/tool-kit';
-import { IconDownloader } from '@/components/ToolIcons';
+import { IconDownloader, IconStepPlug, IconStepLink, IconStepFormat, IconStepDownload } from '@/components/ToolIcons';
 
 type Mode = 'video' | 'audio-mp3' | 'audio-wav';
 type Quality = '1080' | '720' | '480' | 'best';
@@ -86,6 +86,15 @@ export default function DownloaderPage() {
     engine?: boolean;
   }>({ connected: false });
 
+  const [reChecking, setReChecking] = useState(false);
+  // ping() centralizado pra poder chamar do botão "Verificar de novo".
+  // Manda DL_PING; o bridge.js da extensão escuta e responde com DL_PONG
+  // contendo `engine` (true/false). Se ninguém responder em 1.2s,
+  // consideramos extensão NÃO instalada — assim o painel de install
+  // aparece logo na primeira carga.
+  const doPing = () =>
+    window.postMessage({ source: 'darko-dl', type: 'DL_PING' }, '*');
+
   useEffect(() => {
     let alive = true;
     function onMsg(e: MessageEvent) {
@@ -97,22 +106,39 @@ export default function DownloaderPage() {
         version: d.version,
         engine: d.engine === true,
       });
+      setReChecking(false);
     }
     window.addEventListener('message', onMsg);
-    const ping = () =>
-      window.postMessage({ source: 'darko-dl', type: 'DL_PING' }, '*');
-    ping();
-    const t1 = setTimeout(ping, 600);
-    const t2 = setTimeout(ping, 1800);
-    const t3 = setTimeout(ping, 3500);
+    doPing();
+    const t1 = setTimeout(doPing, 600);
+    const t2 = setTimeout(doPing, 1800);
+    const t3 = setTimeout(doPing, 3500);
+    // Polling contínuo: a cada 5s, faz um novo ping. Se o usuário
+    // abrir/fechar o motor, a UI atualiza sozinha em ≤5s. Pausa se a
+    // aba estiver oculta pra não ficar gastando ciclo.
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') doPing();
+    }, 5000);
     return () => {
       alive = false;
       window.removeEventListener('message', onMsg);
       clearTimeout(t1);
       clearTimeout(t2);
       clearTimeout(t3);
+      clearInterval(interval);
     };
   }, []);
+
+  // Re-check manual — usuário clicou "Verificar de novo" depois de
+  // (re)abrir o motor. Mostra spinner 1.5s pra dar sensação de ação.
+  function handleRecheck() {
+    setReChecking(true);
+    doPing();
+    setTimeout(doPing, 400);
+    setTimeout(doPing, 1200);
+    // se em 2s ainda não chegou nada, libera o botão de novo
+    setTimeout(() => setReChecking(false), 2500);
+  }
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [running, setRunning] = useState(false);
@@ -301,8 +327,8 @@ export default function DownloaderPage() {
       icon={<IconDownloader size={56} />}
     >
       <div className="flex flex-col gap-5">
-        <ToolStep n={1} title="Extensão + Motor" hint="Instala uma vez, baixa em qualquer site" hue={HUE}>
-          {ext.connected ? (
+        <ToolStep n={1} icon={<IconStepPlug size={18} />} title="Extensão + Motor" hint="Instala uma vez, baixa em qualquer site" hue={HUE}>
+          {ext.connected && ext.engine ? (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-3 text-sm">
               <div className="flex items-center gap-2">
                 <span className="relative flex h-2 w-2 shrink-0">
@@ -312,15 +338,102 @@ export default function DownloaderPage() {
                 <span className="text-lime">
                   Auto Edit · Downloader v{ext.version}
                 </span>
-                <span
-                  className={`mono ml-2 rounded-full px-2 py-0.5 text-[10px] uppercase ${
-                    ext.engine
-                      ? 'bg-lime/15 text-lime'
-                      : 'bg-red-500/15 text-red-300'
-                  }`}
-                >
-                  {ext.engine ? '✓ motor online' : '✗ motor offline'}
+                <span className="mono ml-2 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
+                  ✓ motor online
                 </span>
+              </div>
+            </div>
+          ) : ext.connected && !ext.engine ? (
+            // EXTENSÃO OK, MOTOR OFFLINE — caso típico de "Motor desconectado".
+            // Mostra painel orientativo, botão pra rechecar e link
+            // pra reinstalar o .exe caso esteja faltando.
+            <div className="rounded-[14px] border border-red-500/40 bg-red-500/[0.06] p-4">
+              <div className="flex items-start gap-3">
+                <span
+                  className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-red-500/50 bg-red-500/15"
+                  style={{ boxShadow: '0 0 18px -6px rgba(244,63,94,0.6)' }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fca5a5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 8v4M12 16h.01" />
+                  </svg>
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div
+                    className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-red-300"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    Motor desconectado
+                  </div>
+                  <div
+                    className="mt-0.5 text-[14px] font-bold tracking-tight text-white"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    Extensão instalada · motor local offline
+                  </div>
+                  <p className="mt-2 text-[12.5px] leading-relaxed text-text-muted">
+                    A extensão do navegador encontrou a página, mas o motor
+                    no seu computador não está rodando. Abre o atalho{' '}
+                    <b className="text-white">Auto Edit Downloader</b> no
+                    menu Iniciar (ou rebaixa o instalador) e depois clica
+                    em <b className="text-white">Verificar de novo</b>.
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={handleRecheck}
+                      disabled={reChecking}
+                      className="inline-flex items-center gap-2 rounded-full border border-lime/55 bg-lime/10 px-4 py-1.5 text-[11.5px] font-bold uppercase tracking-[0.14em] text-lime transition hover:bg-lime/20 disabled:opacity-60"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      {reChecking ? (
+                        <>
+                          <span className="inline-block h-3 w-3 animate-spin rounded-full border border-lime/40 border-t-lime" />
+                          Verificando…
+                        </>
+                      ) : (
+                        <>↻ Verificar de novo</>
+                      )}
+                    </button>
+                    <a
+                      href="/api/downloader-engine/download"
+                      download
+                      className="inline-flex items-center gap-2 rounded-full border border-blue-400/45 bg-blue-400/[0.08] px-4 py-1.5 text-[11.5px] font-bold uppercase tracking-[0.14em] text-blue-300 transition hover:bg-blue-400/20"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      ↓ Rebaixar Motor (.exe)
+                    </a>
+                    <span
+                      className="mono ml-1 text-[10px] text-text-muted"
+                      title="Verifica a cada 5 segundos enquanto a aba estiver aberta"
+                    >
+                      Auto-check: 5s
+                    </span>
+                  </div>
+                  <details className="mt-3 group">
+                    <summary
+                      className="cursor-pointer text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted hover:text-text"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      O motor não abre?
+                    </summary>
+                    <ol className="mono mt-2 list-decimal space-y-1.5 pl-5 text-[11px] leading-relaxed text-text-muted">
+                      <li>
+                        Vai em <code className="text-white">Iniciar → Auto Edit Downloader</code> e abre.
+                      </li>
+                      <li>
+                        Se não tiver o atalho, rebaixa o <code className="text-white">.exe</code> acima e roda como administrador.
+                      </li>
+                      <li>
+                        Antivírus pode ter colocado em quarentena —
+                        cheque <code className="text-white">%LOCALAPPDATA%\AutoEditDownloader\install.log</code>.
+                      </li>
+                      <li>
+                        Sem solução? Manda print do log no WhatsApp.
+                      </li>
+                    </ol>
+                  </details>
+                </div>
               </div>
             </div>
           ) : (
@@ -437,7 +550,7 @@ export default function DownloaderPage() {
           )}
         </ToolStep>
 
-        <ToolStep n={2} title="Links" hint="Cola um por linha — vários downloads em paralelo" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepLink size={18} />} title="Links" hint="Cola um por linha — vários downloads em paralelo" hue={HUE}>
           <div className="relative">
             <textarea
               id="urls"
@@ -496,7 +609,7 @@ export default function DownloaderPage() {
           )}
         </ToolStep>
 
-        <ToolStep n={3} title="Formato" hue={HUE}>
+        <ToolStep n={3} icon={<IconStepFormat size={18} />} title="Formato" hue={HUE}>
           <div className="flex flex-col gap-4">
             <ToolChoice
               value={mode}
@@ -527,6 +640,7 @@ export default function DownloaderPage() {
 
         <ToolStep
           n={4}
+          icon={<IconStepDownload size={18} />}
           title={(() => {
             if (!running) return 'Baixar';
             const doneCount = jobs.filter((j) => j.state === 'done').length;

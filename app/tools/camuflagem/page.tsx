@@ -1,7 +1,7 @@
 'use client';
 
 import { ToolShell } from '@/components/ToolShell';
-import { IconCamuflagem } from '@/components/ToolIcons';
+import { IconCamuflagem, IconStepTarget, IconStepSliders, IconStepFormat, IconStepFiles } from '@/components/ToolIcons';
 import { FileUpload } from '@/components/FileUpload';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
@@ -307,7 +307,7 @@ export default function CamuflagemPage() {
       <div className="flex flex-col gap-5">
         <MissingKeyBanner services={['assemblyai']} />
 
-        <ToolStep n={1} title="Alvo" hint="Quem você quer enganar define o que conta como sucesso" hue={HUE}>
+        <ToolStep n={1} icon={<IconStepTarget size={18} />} title="Alvo" hint="Quem você quer enganar define o que conta como sucesso" hue={HUE}>
           <ToolChoice
             value={target}
             onChange={(v) => !processingAll && setTarget(v as Target)}
@@ -328,7 +328,7 @@ export default function CamuflagemPage() {
           </p>
         </ToolStep>
 
-        <ToolStep n={2} title="Intensidade" hint="Quanto maior, mais difícil de detectar" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepSliders size={18} />} title="Intensidade" hint="Quanto maior, mais difícil de detectar" hue={HUE}>
           <ToolSlider
             label="Volume da camuflagem"
             min={5}
@@ -341,7 +341,7 @@ export default function CamuflagemPage() {
           />
         </ToolStep>
 
-        <ToolStep n={3} title="Formato de saída" hue={HUE}>
+        <ToolStep n={3} icon={<IconStepFormat size={18} />} title="Formato de saída" hue={HUE}>
           <ToolChoice
             value={format}
             onChange={(v) => {
@@ -363,7 +363,7 @@ export default function CamuflagemPage() {
           ) : null}
         </ToolStep>
 
-        <ToolStep n={4} title="Pares BLACK + WHITE" hint="BLACK = público · WHITE = IA escuta" hue={HUE}>
+        <ToolStep n={4} icon={<IconStepFiles size={18} />} title="Pares BLACK + WHITE" hint="BLACK = público · WHITE = IA escuta" hue={HUE}>
         <div className="flex flex-col gap-4">
           {pairs.map((pair, i) => (
             <div

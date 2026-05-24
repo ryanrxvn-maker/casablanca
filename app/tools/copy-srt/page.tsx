@@ -23,7 +23,7 @@ import {
   ToolResultCard,
   ToolMetric,
 } from '@/components/tool-kit';
-import { IconCopySRT } from '@/components/ToolIcons';
+import { IconCopySRT, IconStepMic, IconStepPlay, IconStepText } from '@/components/ToolIcons';
 
 /**
  * Copy → SRT — gera legendas SRT pulando a revisao manual.
@@ -196,7 +196,7 @@ export default function CopySrtPage() {
       <div className="flex flex-col gap-5">
         <MissingKeyBanner services={['groq']} />
 
-        <ToolStep n={1} title="Áudio ou vídeo" hint="MP3, WAV, MP4, MOV, WEBM — até 800MB e 60min" hue={HUE}>
+        <ToolStep n={1} icon={<IconStepMic size={18} />} title="Áudio ou vídeo" hint="MP3, WAV, MP4, MOV, WEBM — até 800MB e 60min" hue={HUE}>
           <ToolDropzone
             accept="audio/*,video/mp4,video/webm,video/quicktime,video/x-matroska"
             file={file}
@@ -233,6 +233,7 @@ export default function CopySrtPage() {
 
         <ToolStep
           n={2}
+          icon={<IconStepText size={18} />}
           title="Texto da copy"
           hint="Será o conteúdo exato do SRT — só os tempos vêm do áudio"
           hue={HUE}
@@ -264,7 +265,7 @@ export default function CopySrtPage() {
           </div>
         </ToolStep>
 
-        <ToolStep n={3} title="Gerar SRT" hue={HUE}>
+        <ToolStep n={3} icon={<IconStepPlay size={18} />} title="Gerar SRT" hue={HUE}>
           <div className="flex flex-wrap gap-3">
             {processing ? (
               <CancelButton onClick={handleCancel} label="Cancelar" />

@@ -21,7 +21,7 @@ import { CancelButton } from '@/components/CancelButton';
 import { useRef } from 'react';
 import { formatBytes, formatTime } from '@/lib/utils';
 import { ToolStep, ToolAction, ToolMetric } from '@/components/tool-kit';
-import { IconDecupageCopy } from '@/components/ToolIcons';
+import { IconDecupageCopy, IconStepUpload, IconStepText, IconStepScissors } from '@/components/ToolIcons';
 import { TierGate } from '@/components/TierGate';
 
 const HUE = 'rgba(232,121,249,0.45)';
@@ -293,7 +293,7 @@ function DecupagemCopyInner() {
       <div className="flex flex-col gap-5">
         <MissingKeyBanner services={['groq']} />
 
-        <ToolStep n={1} title="Vídeo bruto" hint="MP4, MOV, WEBM, MKV — até 800MB e 40min" hue={HUE}>
+        <ToolStep n={1} icon={<IconStepUpload size={18} />} title="Vídeo bruto" hint="MP4, MOV, WEBM, MKV — até 800MB e 40min" hue={HUE}>
           <FileUpload
             accept="video/mp4,video/webm,video/quicktime,video/x-matroska"
             value={file}
@@ -323,7 +323,7 @@ function DecupagemCopyInner() {
           ) : null}
         </ToolStep>
 
-        <ToolStep n={2} title="Copy / Script" hint="Cole na ordem desejada — frase por frase" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepText size={18} />} title="Copy / Script" hint="Cole na ordem desejada — frase por frase" hue={HUE}>
           <textarea
             id="copy"
             value={copyText}
@@ -356,7 +356,7 @@ function DecupagemCopyInner() {
           </div>
         </ToolStep>
 
-        <ToolStep n={3} title="Silêncios" hint="Decide se corta as pausas entre as falas" hue={HUE}>
+        <ToolStep n={3} icon={<IconStepScissors size={18} />} title="Silêncios" hint="Decide se corta as pausas entre as falas" hue={HUE}>
           <label className="flex items-start gap-3 text-sm">
             <input
               type="checkbox"

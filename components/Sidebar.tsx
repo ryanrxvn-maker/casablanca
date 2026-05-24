@@ -136,7 +136,7 @@ export function Sidebar() {
   // Calculadora é util pra todos (não é mais uma "ferramenta" do catálogo)
   extras.push({
     href: '/tools/calculadora',
-    label: 'Calc',
+    label: 'Calculadora',
     icon: <IconCalc />,
     match: (p) => p.startsWith('/tools/calculadora'),
   });
@@ -274,8 +274,9 @@ export function Sidebar() {
                           {it.icon}
                         </span>
                         <span
-                          className="text-[10px] font-semibold tracking-[0.04em]"
+                          className="max-w-full truncate px-1 text-center text-[9.5px] font-semibold leading-tight tracking-[0.02em]"
                           style={{ fontFamily: 'var(--font-tech)' }}
+                          title={it.label}
                         >
                           {it.label}
                         </span>

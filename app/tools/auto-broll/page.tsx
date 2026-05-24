@@ -18,6 +18,7 @@ import {
   type TakeState,
 } from '@/lib/magnific-pipeline';
 import { ToolStep } from '@/components/tool-kit';
+import { IconStepPlug, IconStepSliders, IconStepPipeline } from '@/components/ToolIcons';
 import { IconAutoBroll } from '@/components/ToolIcons';
 import { TierGate } from '@/components/TierGate';
 
@@ -240,7 +241,7 @@ function AutoBrollInner() {
         {/* Controle da fila Magnific (Retomar/Pausar/Debug) — funciona
             mesmo sem ter vindo do ClickUp Pilot */}
         <JobControlPanel scopes={['magnific']} />
-        <ToolStep n={1} title="Extensão Magnific" hint="Conecta à sua conta Premium+ — gera sem gastar crédito" hue={HUE}>
+        <ToolStep n={1} icon={<IconStepPlug size={18} />} title="Extensão Magnific" hint="Conecta à sua conta Premium+ — gera sem gastar crédito" hue={HUE}>
         {/* Extension status */}
         {extStatus.connected ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-3 text-sm">
@@ -314,7 +315,7 @@ function AutoBrollInner() {
         )}
         </ToolStep>
 
-        <ToolStep n={2} title="Configuração global" hint="Aplica a todos os jobs deste lote" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepSliders size={18} />} title="Configuração global" hint="Aplica a todos os jobs deste lote" hue={HUE}>
           <div className="grid gap-3 md:grid-cols-2">
             <label className="block">
               <span className="label-field">Modelo de imagem</span>
@@ -342,7 +343,7 @@ function AutoBrollInner() {
           </div>
         </ToolStep>
 
-        <ToolStep n={3} title="Jobs" hint="Cada lista de prompts dispara em seu próprio Space — rodam em série" hue={HUE}>
+        <ToolStep n={3} icon={<IconStepPipeline size={18} />} title="Jobs" hint="Cada lista de prompts dispara em seu próprio Space — rodam em série" hue={HUE}>
         {/* JOBS — cada lista JSON dispara separada, com seu próprio Space */}
         <div className="grid gap-4">
           {jobs.map((job, idx) => (
