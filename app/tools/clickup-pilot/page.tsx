@@ -4609,8 +4609,12 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                 </button>
                               </div>
 
-                              {/* MOTOR CONFIG — Avatar III/IV/V picker */}
-                              {a.status === 'ready' || a.status === 'partial' ? (
+                              {/* MOTOR CONFIG — Avatar III/IV/V picker.
+                                  ESCONDIDO quando ONLY MAGNIFIC tá ligado:
+                                  esse modo pula HeyGen totalmente (só dispara
+                                  Auto B-rolls), então não há avatar pra
+                                  escolher. Limpa a UI e elimina dúvida. */}
+                              {!onlyMagnificMode && (a.status === 'ready' || a.status === 'partial') ? (
                                 <div className="mt-2">
                                   <MotorConfigPicker
                                     config={getMotorConfig(a.taskId)}
