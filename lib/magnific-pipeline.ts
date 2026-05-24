@@ -98,20 +98,33 @@ export async function runMagnificPipeline(
   cfg: MagnificPipelineConfig,
   cb: PipelineCallbacks = {},
 ): Promise<RunnerResult> {
+  /**
+   * Defaults TRAVADOS — user exige "em hipótese alguma escolher outra coisa
+   * que não seja Nano Banana Pro/1K/9:16 + Kling 2.5/720p/9:16/10s".
+   *
+   * imageModel pode ser overridado APENAS pra 'nano-banana-pro' ou 'nano-banana-2'
+   * (sanidade interna). Resto é hardcoded — qualquer override é IGNORADO.
+   */
+  const allowedImageModels = ['nano-banana-pro', 'nano-banana-2'] as const;
+  type AllowedImg = typeof allowedImageModels[number];
+  const safeImageModel: AllowedImg =
+    cfg.imageModel && (allowedImageModels as readonly string[]).includes(cfg.imageModel)
+      ? (cfg.imageModel as AllowedImg)
+      : 'nano-banana-pro';
   const {
     spaceName,
     takes,
-    imageModel = 'nano-banana-2',
-    videoModel = 'kling-25',
     imageConcurrency = 12,
     videoConcurrency = 6,
     existingSpaceId,
-    aspect = '9:16',
-    imageQuality = '1K',
-    videoQuality = '720p',
-    videoDuration = 10,
     templateSpaceId,
   } = cfg;
+  const imageModel = safeImageModel;
+  const videoModel: VideoModel = 'kling-25';
+  const aspect: '9:16' = '9:16';
+  const imageQuality: '1K' = '1K';
+  const videoQuality: '720p' = '720p';
+  const videoDuration: 10 = 10;
   const { onProgress, signal } = cb;
 
   // Teto de tempo AGREGADO do job inteiro. O retry-rounds NAO pode

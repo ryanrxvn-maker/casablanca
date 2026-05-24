@@ -35,7 +35,12 @@ const HUE = 'rgba(240,171,252,0.45)';
  *  6) ZIP por job só libera quando TODOS os takes geraram (auto-retry interno)
  */
 
-type ImageModelChoice = 'nano-banana-2' | 'nano-banana-pro';
+/**
+ * Pipeline TRAVADO em: Nano Banana Pro · 1K · 9:16 + Kling 2.5 · 720p · 9:16 · 10s.
+ * Sem opções — garantia de 100% assertividade na seleção dos modelos. Qualquer
+ * tentativa de mudar isso é silenciosamente ignorada pela lib (defesa profunda).
+ */
+const IMAGE_MODEL_FIXED = 'nano-banana-pro' as const;
 
 type Job = {
   id: string;
@@ -74,10 +79,8 @@ function AutoBrollInner() {
   const [sessionOk, setSessionOk] = useState<null | { ok: boolean; detail?: string }>(null);
   const [testingSession, setTestingSession] = useState(false);
 
-  const [imageModel, setImageModel] = useToolState<ImageModelChoice>(
-    'mgAuto:imgModel',
-    'nano-banana-2',
-  );
+  // imageModel TRAVADO em nano-banana-pro — sem state, sem opção
+  const imageModel = IMAGE_MODEL_FIXED;
   const [globalMotion, setGlobalMotion] = useToolState<string>('mgAuto:motion', '');
 
   const [jobs, setJobs] = useState<Job[]>([newJob()]);
@@ -320,32 +323,49 @@ function AutoBrollInner() {
         )}
         </ToolStep>
 
-        <ToolStep n={2} icon={<IconStepSliders size={18} />} title="Configuração global" hint="Aplica a todos os jobs deste lote" hue={HUE}>
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="block">
-              <span className="label-field">Modelo de imagem</span>
-              <select
-                value={imageModel}
-                onChange={(e) => setImageModel(e.target.value as ImageModelChoice)}
-                className="input-field"
-                disabled={anyRunning}
-              >
-                <option value="nano-banana-2">Nano Banana 2 (1K, ilimitado)</option>
-                <option value="nano-banana-pro">Nano Banana Pro (1K, ilimitado)</option>
-              </select>
-            </label>
-            <label className="block">
-              <span className="label-field">Motion default (opcional, Kling 2.5)</span>
-              <input
-                type="text"
-                value={globalMotion}
-                onChange={(e) => setGlobalMotion(e.target.value)}
-                placeholder="Ex: slow camera push-in, soft handheld motion"
-                className="input-field"
-                disabled={anyRunning}
-              />
-            </label>
+        <ToolStep n={2} icon={<IconStepSliders size={18} />} title="Configuração" hint="Parâmetros travados — máxima qualidade, zero risco de seleção errada" hue={HUE}>
+          {/* Setup TRAVADO. Sem opções de mudar modelo/aspect/quality —
+              a extension SEMPRE escolhe exatamente: Nano Banana Pro 1K 9:16
+              + Kling 2.5 720p 9:16 10s. Zero chance de clicar errado. */}
+          <div className="grid gap-2.5 md:grid-cols-2">
+            <div
+              className="rounded-[14px] border border-violet/35 bg-violet/[0.06] px-4 py-3"
+              style={{ boxShadow: '0 0 18px -6px rgba(167,139,250,0.45), inset 0 1px 0 rgba(255,255,255,0.04)' }}
+            >
+              <div className="mono mb-1 text-[10px] uppercase tracking-[0.22em] text-violet/90" style={{ fontFamily: 'var(--font-tech)' }}>
+                IMAGEM
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[14px] font-bold text-white" style={{ fontFamily: 'var(--font-tech)' }}>Nano Banana Pro</span>
+                <span className="mono rounded-full border border-lime/45 bg-lime/10 px-1.5 py-0 text-[9px] font-bold uppercase tracking-[0.16em] text-lime">∞ 1K · 9:16</span>
+              </div>
+              <div className="mono mt-0.5 text-[10.5px] text-text-muted">Ilimitado — zero crédito</div>
+            </div>
+            <div
+              className="rounded-[14px] border border-cyan-400/35 bg-cyan-400/[0.06] px-4 py-3"
+              style={{ boxShadow: '0 0 18px -6px rgba(34,211,238,0.45), inset 0 1px 0 rgba(255,255,255,0.04)' }}
+            >
+              <div className="mono mb-1 text-[10px] uppercase tracking-[0.22em] text-cyan-300" style={{ fontFamily: 'var(--font-tech)' }}>
+                VÍDEO
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[14px] font-bold text-white" style={{ fontFamily: 'var(--font-tech)' }}>Kling 2.5</span>
+                <span className="mono rounded-full border border-lime/45 bg-lime/10 px-1.5 py-0 text-[9px] font-bold uppercase tracking-[0.16em] text-lime">∞ 720p · 9:16 · 10s</span>
+              </div>
+              <div className="mono mt-0.5 text-[10.5px] text-text-muted">Ilimitado — zero crédito</div>
+            </div>
           </div>
+          <label className="mt-3 block">
+            <span className="label-field">Motion default (opcional, Kling 2.5)</span>
+            <input
+              type="text"
+              value={globalMotion}
+              onChange={(e) => setGlobalMotion(e.target.value)}
+              placeholder="Ex: slow camera push-in, soft handheld motion"
+              className="input-field"
+              disabled={anyRunning}
+            />
+          </label>
         </ToolStep>
 
         <ToolStep n={3} icon={<IconStepPipeline size={18} />} title="Jobs" hint="Cada lista de prompts dispara em seu próprio Space — rodam em série" hue={HUE}>

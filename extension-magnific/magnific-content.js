@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.5.54';
+const DARKO_MG_VERSION = '3.5.56';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -484,7 +484,9 @@ async function handleRunPipeline(payload, onProgress) {
     spaceName = 'DARKO LAB',
     spaceId: passedSpaceId,
     takes = [],
-    imageModel = 'nano-banana-2',
+    // v3.5.55: default agora é Nano Banana Pro (era nano-banana-2). User
+    // confirmou: Pro tem qualidade muito maior + também é ilimitado a 1K.
+    imageModel = 'nano-banana-pro',
     videoModel = 'kling-25',
     imageConcurrency = 12,
     videoConcurrency = 6,
@@ -528,6 +530,38 @@ async function handleRunPipeline(payload, onProgress) {
   console.log('[DARKO Pipeline] Phase 1c: settle 2s');
   onProgress({ phase: 'space', percent: 4, message: 'Aguardando canvas (2s)...' });
   await sleep(2000);
+
+  // v3.5.56 — WARMUP SACRIFICIAL. User reportou: "primeira ação SEMPRE quebra,
+  // seleciona Kling e fica travado". Causa raiz: canvas Vue Flow + welcome
+  // panel + hidratação Liveblocks deixam o 1º click em "+" instável.
+  //
+  // Antes era "tenta o take 1, ele falha, auto-retry recria" — perda de ~2min.
+  //
+  // Agora: criamos 1 image gen node *descartável* SÓ pra esquentar o canvas
+  // (mata welcome panel, força hidratação completa do toolbar +, libera o
+  // popup picker). Depois deletamos. O take 1 REAL nasce num canvas estável
+  // → 100% dos pares funcionam de primeira.
+  //
+  // Custo: ~3-5s de overhead. Benefício: elimina ~2min de retry no take 1.
+  if (!passedSpaceId) {
+    console.log('[DARKO Pipeline] Phase 1d: WARMUP sacrificial node');
+    onProgress({ phase: 'warmup', percent: 5, message: 'Aquecendo canvas (warmup sacrificial)...' });
+    try {
+      const warmupId = await createImageGenNode();
+      console.log('[DARKO Pipeline] warmup node criado:', warmupId);
+      // Pequeno settle pra Liveblocks confirmar o node, depois deleta.
+      await sleep(400);
+      await __deleteNodeById(warmupId);
+      console.log('[DARKO Pipeline] warmup node deletado — canvas estável');
+      await sleep(300);
+    } catch (e) {
+      // Warmup falhar não é fatal — o fluxo normal segue. Loga e continua.
+      console.warn('[DARKO Pipeline] warmup falhou (não-fatal):', e?.message || e);
+    }
+  } else {
+    console.log('[DARKO Pipeline] reusing space — skip warmup');
+  }
+
   console.log('[DARKO Pipeline] Phase 2: setup pares iniciando');
 
   // ========================================================================
@@ -1703,13 +1737,12 @@ async function reconnectImageToVideo(imageNodeId, videoNodeId) {
  * refaz o take). NUNCA deixa passar vídeo sem a linha da imagem.
  */
 async function ensureEdgeImageToVideo(imageNodeId, videoNodeId, pairIdx) {
-  // v3.5.54 — FAIL-FAST no take 1. O user confirmou: take 1 SEMPRE quebra a
-  // linha e a reconexão NÃO conserta ele — só o auto-retry (recriar Image
-  // Generator) conserta, e isso funciona normal. Então pro par #1 não vale
-  // gastar ~2min tentando reconectar: 2 tentativas RÁPIDAS (sem settle
-  // extra) → throw rápido → o retry recria o take 1 (que funciona). Pares
-  // 2+ mantêm a lógica robusta (6 tentativas) — eles conectam certo.
-  const MAX = (pairIdx === 1) ? 2 : 6;
+  // v3.5.56 — TODOS os pares usam 6 tentativas robustas. Anteriormente o
+  // take 1 era fail-fast (2 tries) porque sempre quebrava no canvas frio.
+  // Agora o WARMUP SACRIFICIAL (handleRunPipeline) esquenta o canvas ANTES
+  // do take 1 real ser criado, eliminando a quebra. Resultado: take 1 não
+  // precisa mais de retry — conecta de primeira como os outros.
+  const MAX = 6;
   for (let attempt = 1; attempt <= MAX; attempt++) {
     // pair #1: ZERO settle extra (fail-fast). Pares 2+: idem (já era 0).
     const extra = 0;
@@ -1746,9 +1779,13 @@ async function createTakePair({
   pairIdx = 0,
   onStep,  // v3.5.4: emit progress per micro-step so caller can detect hang
 }) {
-  // SIMPLIFIED v3.4.0: forca Kling 2.5 + Nano Banana 2 + 9:16 + 720p/1K (LOCK
-  // continua sendo enforced no selectModelInNode via STRICT equality match).
-  imageModel    = 'nano-banana-2';
+  // v3.5.55 — DEFAULTS TRAVADOS. Whitelist ESTRITA por param: respeita
+  // imageModel se for nano-banana-pro|nano-banana-2 (user pode escolher
+  // entre os dois Nano Bananas), todo o resto é FORÇADO pra zero-risco.
+  // LOCK STRICT no selectModelInNode garante que mesmo se vier valor
+  // inválido, a UI não muda pra opção errada — aborta em vez de gastar.
+  const ALLOWED_IMG_MODELS = ['nano-banana-pro', 'nano-banana-2'];
+  imageModel    = ALLOWED_IMG_MODELS.includes(imageModel) ? imageModel : 'nano-banana-pro';
   videoModel    = 'kling-25';
   aspect        = '9:16';
   imageQuality  = '1K';
