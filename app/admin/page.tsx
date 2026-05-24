@@ -44,7 +44,6 @@ const TOOL_LABELS: Record<string, string> = {
   'audio-split': 'Audio Split',
   acelerador: 'Acelerador',
   normalizador: 'Normalizador',
-  'take-splitter': 'Separar Takes',
   calculadora: 'Calculadora',
   'auto-broll': 'Auto B-Roll',
   'troca-produto': 'Troca de Produto',

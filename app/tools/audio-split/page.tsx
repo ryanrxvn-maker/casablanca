@@ -116,7 +116,7 @@ export default function AudioSplitPage() {
 
   return (
     <ToolShell
-      title="Separar áudios"
+      title="Dividir áudios"
       eyebrow="ÁUDIO"
       description="Quebra o áudio em pedaços pelas pausas. Sem cortar falas."
       hue={HUE}

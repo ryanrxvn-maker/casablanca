@@ -74,8 +74,7 @@ const ALL_TOOLS: Tool[] = [
   { key: 'gerador-srt', label: 'Gerador de SRT' },
   { key: 'mixer-velocidade', label: 'Mixer de Velocidade' },
   { key: 'normalizador', label: 'Normalizador de Volume' },
-  { key: 'separar-audios', label: 'Separar áudios' },
-  { key: 'separar-takes', label: 'Separar takes' },
+  { key: 'separar-audios', label: 'Dividir áudios' },
   { key: 'compressor', label: 'Compressor' },
   { key: 'camuflagem', label: 'Camuflagem' },
   { key: 'troca-produto', label: 'Troca de produto' },
@@ -94,7 +93,6 @@ const UNLOCKED: Record<'free' | 'basic' | 'pro', Set<string>> = {
     'mixer-velocidade',
     'normalizador',
     'separar-audios',
-    'separar-takes',
     'compressor',
     'camuflagem',
   ]),
@@ -490,16 +488,31 @@ function PlanCard({
             </div>
 
             {/* Preço — Mensal: R$ X/mês · Anual: R$ X*12/ano + "12x de R$ X"
-                Pro com sale: original riscado em cima (também anualizado se anual). */}
-            <div className="mt-3 flex flex-col items-center justify-center gap-1">
+                Pro com sale: original riscado em cima (também anualizado se anual).
+                v3.1: sale e parcelado com muito mais peso visual. */}
+            <div className="mt-3 flex flex-col items-center justify-center gap-1.5">
               {hasSale && pricing.original ? (
                 <span
-                  className="mono text-[15px] font-semibold text-text-dim line-through decoration-rose-400/70 decoration-[1.5px]"
-                  style={{ fontFamily: 'var(--font-mono)' }}
+                  className="mono flex items-center gap-2 text-[18px] font-bold tracking-tight md:text-[20px]"
+                  style={{
+                    fontFamily: 'var(--font-tech)',
+                    color: '#fca5a5',
+                  }}
                 >
-                  {billing === 'annual'
-                    ? `De R$ ${(pricing.original * 12).toLocaleString('pt-BR')}/ano`
-                    : `De R$ ${pricing.original}/mês`}
+                  <span
+                    className="text-rose-300/70"
+                    style={{
+                      textDecoration: 'line-through',
+                      textDecorationColor: 'rgba(244,63,94,0.95)',
+                      textDecorationThickness: '2.5px',
+                    }}
+                  >
+                    De R${' '}
+                    {billing === 'annual'
+                      ? (pricing.original * 12).toLocaleString('pt-BR')
+                      : pricing.original}
+                    {billing === 'annual' ? '/ano' : '/mês'}
+                  </span>
                 </span>
               ) : null}
               <div className="flex items-baseline justify-center gap-1">
@@ -530,22 +543,56 @@ function PlanCard({
                 )}
               </div>
 
-              {/* Subtitle no anual: "ou 12x de R$ X" — pra dar ideia
-                  do peso mensal mesmo cobrando o ano todo. */}
+              {/* Badge "VOCÊ ECONOMIZA R$ X" só quando tem sale — dá
+                  peso REAL ao desconto, não só "−15%". */}
+              {hasSale && pricing.original ? (
+                <span
+                  className="economy-badge inline-flex items-center gap-1.5 rounded-full border border-rose-400/65 bg-gradient-to-r from-rose-500/20 to-fuchsia-500/20 px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.16em] text-rose-100 backdrop-blur-sm"
+                  style={{
+                    fontFamily: 'var(--font-tech)',
+                    boxShadow: '0 0 16px -3px rgba(244,63,94,0.55)',
+                  }}
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M7 17l10-10M7 7h10v10" />
+                  </svg>
+                  Você economiza R${' '}
+                  {billing === 'annual'
+                    ? ((pricing.original - pricing.price) * 12).toLocaleString('pt-BR') + '/ano'
+                    : (pricing.original - pricing.price) + '/mês'}
+                </span>
+              ) : null}
+
+              {/* Subtitle no anual: "ou 12x de R$ X" — agora com peso
+                  visual real (font maior, contrast box). */}
               {!isFree && billing === 'annual' ? (
-                <div className="mt-1 flex flex-col items-center gap-1.5">
-                  <span
-                    className="mono text-[12.5px] text-text-muted"
-                    style={{ fontFamily: 'var(--font-mono)' }}
+                <div className="mt-2 flex flex-col items-center gap-1.5">
+                  <div
+                    className="inline-flex items-center gap-2 rounded-[10px] border border-lime/35 bg-lime/[0.06] px-3 py-1.5"
+                    style={{
+                      boxShadow: '0 0 18px -6px rgba(200,255,0,0.45), inset 0 1px 0 rgba(255,255,255,0.05)',
+                    }}
                   >
-                    ou 12× de R$ {pricing.price}
-                  </span>
+                    <span
+                      className="text-[10px] font-bold uppercase tracking-[0.18em] text-lime/75"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      ou
+                    </span>
+                    <span
+                      className="mono text-[16px] font-bold text-white"
+                      style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.01em' }}
+                    >
+                      12×{' '}
+                      <span className="text-lime">R$ {pricing.price}</span>
+                    </span>
+                  </div>
                   <span
                     className="mono inline-flex items-center gap-1.5 rounded-full border border-lime/40 bg-lime/[0.06] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.16em] text-lime"
                     style={{ fontFamily: 'var(--font-tech)' }}
                   >
-                    <span className="inline-block h-1 w-1 rounded-full bg-lime" />
-                    economiza −{ANNUAL_DISCOUNT_PCT}%
+                    <span className="inline-block h-1 w-1 animate-pulse-soft rounded-full bg-lime" />
+                    economiza −{ANNUAL_DISCOUNT_PCT}% no anual
                   </span>
                 </div>
               ) : null}
@@ -733,6 +780,7 @@ function SaleBadge({ pct }: { pct: number }) {
  *  • Tilt no mouse + spotlight + sheen sweep
  *  • Ícone gradient próprio
  *  • Lock overlay com cadeado quando bloqueado naquele plano
+ *  • Clicável: scroll suave + highlight pulse na seção dedicada do catálogo
  */
 function FeaturedToolMini({
   tool,
@@ -745,8 +793,7 @@ function FeaturedToolMini({
   planHue: string;
 }) {
   const hue = tool.featuredHue || 'rgba(167,139,250,0.55)';
-  const handleMove = (e: ReactMouseEvent<HTMLDivElement>) => {
-    if (locked) return;
+  const handleMove = (e: ReactMouseEvent<HTMLButtonElement>) => {
     const el = e.currentTarget;
     const rect = el.getBoundingClientRect();
     const px = (e.clientX - rect.left) / rect.width;
@@ -756,18 +803,33 @@ function FeaturedToolMini({
     el.style.setProperty('--rx', `${(-(py - 0.5) * 8).toFixed(2)}deg`);
     el.style.setProperty('--ry', `${((px - 0.5) * 10).toFixed(2)}deg`);
   };
-  const handleLeave = (e: ReactMouseEvent<HTMLDivElement>) => {
+  const handleLeave = (e: ReactMouseEvent<HTMLButtonElement>) => {
     e.currentTarget.style.setProperty('--rx', '0deg');
     e.currentTarget.style.setProperty('--ry', '0deg');
   };
 
+  // Clica → scrolla pra seção dedicada e dá highlight pulse nela.
+  // Funciona MESMO quando bloqueado — assim o usuário sempre pode
+  // entender a ferramenta antes de decidir o plano. Anchor: tool-<key>
+  const handleClick = () => {
+    const id = `tool-${tool.key}`;
+    const target = document.getElementById(id);
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.classList.add('tool-info-highlight');
+    setTimeout(() => target.classList.remove('tool-info-highlight'), 2200);
+  };
+
   return (
     <div className="ftm-perspective" style={{ perspective: '700px' }}>
-      <div
+      <button
+        type="button"
         onMouseMove={handleMove}
         onMouseLeave={handleLeave}
+        onClick={handleClick}
+        aria-label={`Saiba mais sobre ${tool.label}`}
         className={
-          'ftm group relative overflow-hidden rounded-[14px] border p-3 ' +
+          'ftm group relative block w-full overflow-hidden rounded-[14px] border p-3 text-left ' +
           (locked ? 'ftm-locked' : '')
         }
         style={{
@@ -776,6 +838,7 @@ function FeaturedToolMini({
             : hue.replace('0.55', '0.45'),
           background:
             'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.25)), linear-gradient(180deg, #16161c, #0c0c10)',
+          cursor: 'pointer',
         }}
       >
         {/* Sparkles flutuantes (só quando unlocked) */}
@@ -878,17 +941,20 @@ function FeaturedToolMini({
             ) : null}
           </div>
         </div>
-      </div>
+      </button>
 
       <style jsx>{`
         .ftm {
           transform-style: preserve-3d;
           transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
           transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1), border-color 280ms ease;
-          cursor: ${locked ? 'not-allowed' : 'default'};
         }
         .ftm:hover {
-          border-color: ${locked ? 'rgba(90,90,100,0.55)' : hue};
+          border-color: ${hue};
+        }
+        .ftm:active {
+          transform: rotateX(0) rotateY(0) scale(0.97);
+          transition-duration: 80ms;
         }
         .ftm-icon {
           transition: transform 360ms cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -1174,6 +1240,11 @@ type ToolInfo = {
   hue: string;
   /** Featured cards visualmente turbinados */
   featured?: boolean;
+  /** Seção "Como funciona" — só aparece em featured. Lista de passos
+   * ordenados pra explicar o fluxo da ferramenta de forma direta. */
+  howItWorks?: { step: string; detail: string }[];
+  /** Bullets de benefícios concretos pra featured */
+  highlights?: string[];
 };
 
 const TOOL_DETAILS: ToolInfo[] = [
@@ -1186,6 +1257,29 @@ const TOOL_DETAILS: ToolInfo[] = [
     desc: 'Conecta no seu ClickUp, lê os briefings e dispara os avatares sozinho.',
     win: 'Saia do escritório. O Pilot continua editando. Você só revisa.',
     featured: true,
+    howItWorks: [
+      {
+        step: 'Conecta no ClickUp',
+        detail: 'Você cola o token da API ClickUp uma vez. O Pilot passa a ler todas as suas tasks com briefing.',
+      },
+      {
+        step: 'Lê o briefing',
+        detail: 'Cada task com a tag certa vira um job. O Pilot extrai roteiro, avatar, voz, idioma — sem você abrir nada.',
+      },
+      {
+        step: 'Dispara o avatar',
+        detail: 'O HeyGen entra automaticamente, gera o lipsync e devolve o link do vídeo direto na task — tudo logado.',
+      },
+      {
+        step: 'Você só revisa',
+        detail: 'Quando volta no ClickUp, as tasks já estão prontas pra publicar. Sem editor humano no meio.',
+      },
+    ],
+    highlights: [
+      'Pra equipe que entrega 20+ vídeos por dia',
+      'Roda 24/7 — disparos noturnos, finais de semana',
+      'Cada vídeo nasce com o briefing exato do cliente',
+    ],
   },
   {
     key: 'heygen-auto',
@@ -1195,6 +1289,29 @@ const TOOL_DETAILS: ToolInfo[] = [
     desc: 'Dispara todos os lipsyncs do dia no HeyGen com um clique.',
     win: 'Operação em escala. O time só revisa o que já está pronto.',
     featured: true,
+    howItWorks: [
+      {
+        step: 'Cola a lista de roteiros',
+        detail: 'Um por linha ou em CSV. Cada linha vira um job de avatar com voz, idioma e cenário definidos no preset.',
+      },
+      {
+        step: 'Escolhe avatar e voz',
+        detail: 'Avatares clonados ficam na memória — clique e seleciona em segundos. Vozes premium incluídas.',
+      },
+      {
+        step: 'Dispara em fila',
+        detail: 'Roda em paralelo até o limite da sua conta HeyGen. Pode fechar o navegador — segue no background.',
+      },
+      {
+        step: 'Baixa em ZIP',
+        detail: 'Quando termina, você recebe tudo num único pacote pronto pra revisar e publicar.',
+      },
+    ],
+    highlights: [
+      '50 vídeos saem em 1h de trabalho zero seu',
+      'Pode dormir e acordar com tudo entregue',
+      'Histórico completo — qualquer vídeo refeito em 1 clique',
+    ],
   },
   {
     key: 'auto-broll',
@@ -1204,6 +1321,29 @@ const TOOL_DETAILS: ToolInfo[] = [
     desc: 'Recebe um JSON e gera todos os B-rolls da campanha, em segundo plano.',
     win: 'Liga a fila, vai dormir. Acorda com a pasta cheia de cortes prontos.',
     featured: true,
+    howItWorks: [
+      {
+        step: 'Cola o JSON com os prompts',
+        detail: 'Lista de cenas — descrição visual de cada B-roll. Cada linha vira um clipe gerado em paralelo.',
+      },
+      {
+        step: 'Conecta a extensão Magnific',
+        detail: 'Usa SUA conta Premium+ — gera sem gastar crédito de API. A extensão controla o Magnific direto do navegador.',
+      },
+      {
+        step: 'Roda enquanto você faz outra coisa',
+        detail: 'Cada job dispara num Space próprio. Pode mandar 30 cenas e o backend distribui pra rodarem em série.',
+      },
+      {
+        step: 'Recebe a pasta pronta',
+        detail: 'Tudo zipado, nomeado pela cena, no formato e duração que você definiu no preset global.',
+      },
+    ],
+    highlights: [
+      'Funciona com Premium+ — zero custo extra de geração',
+      'Suporta lotes de 50+ cenas sem travamento',
+      'Cada cena vira um arquivo nomeado e pronto pra timeline',
+    ],
   },
   // ─── Demais ───
   {
@@ -1264,19 +1404,11 @@ const TOOL_DETAILS: ToolInfo[] = [
   },
   {
     key: 'separar-audios',
-    name: 'Separar áudios',
+    name: 'Dividir áudios',
     cat: 'Áudio',
     hue: 'rgba(34,211,238,0.5)',
     desc: 'Divide um áudio longo em pedaços, sempre respeitando as pausas.',
     win: 'Cada fala vira um arquivo. Sem cortar palavra no meio.',
-  },
-  {
-    key: 'separar-takes',
-    name: 'Separar takes',
-    cat: 'Vídeo',
-    hue: 'rgba(134,239,172,0.5)',
-    desc: 'Quebra um vídeo bruto em todas as takes individualmente.',
-    win: 'Ideal pra documentário, VSL e brutos longos. Cada take, um arquivo.',
   },
   {
     key: 'compressor',
@@ -1356,10 +1488,14 @@ function ToolsCatalog() {
 
 function ToolInfoCard({ tool, delay }: { tool: ToolInfo; delay: number }) {
   const accent = tool.hue.replace('0.55', '1').replace('0.5', '1');
+  // Featured ocupa span maior no grid quando tem howItWorks expandido.
+  const expanded = tool.featured && (tool.howItWorks?.length ?? 0) > 0;
   return (
     <div
+      id={`tool-${tool.key}`}
       className={
         'tool-info-card group fade-in-up relative overflow-hidden rounded-[18px] border p-5 transition-all duration-300 hover:-translate-y-[2px] ' +
+        (expanded ? 'md:col-span-2 lg:col-span-3 ' : '') +
         (tool.featured
           ? 'tool-info-featured border-violet/45 hover:border-violet/65'
           : 'border-line/60 hover:border-violet/40')
@@ -1440,6 +1576,93 @@ function ToolInfoCard({ tool, delay }: { tool: ToolInfo; delay: number }) {
           />
           <span>{tool.win}</span>
         </div>
+
+        {/* Seção "Como funciona" + Highlights — só featured */}
+        {expanded ? (
+          <div className="mt-5 grid grid-cols-1 gap-5 md:grid-cols-[1.4fr_1fr]">
+            <div>
+              <div
+                className="mb-3 inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.22em]"
+                style={{ fontFamily: 'var(--font-tech)', color: accent }}
+              >
+                <span
+                  className="inline-block h-1.5 w-1.5 rounded-full"
+                  style={{ background: accent, boxShadow: `0 0 8px ${accent}` }}
+                />
+                Como funciona
+              </div>
+              <ol className="flex flex-col gap-2.5">
+                {tool.howItWorks!.map((s, i) => (
+                  <li
+                    key={i}
+                    className="flex items-start gap-3 rounded-[12px] border border-line/50 bg-bg-soft/40 px-3.5 py-3"
+                  >
+                    <span
+                      className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[11px] font-bold tabular-nums"
+                      style={{
+                        fontFamily: 'var(--font-tech)',
+                        color: '#fff',
+                        borderColor: tool.hue,
+                        background: `linear-gradient(135deg, ${tool.hue}, transparent 70%), rgba(0,0,0,0.5)`,
+                        boxShadow: `0 0 14px -4px ${tool.hue}`,
+                      }}
+                    >
+                      {i + 1}
+                    </span>
+                    <div className="min-w-0">
+                      <div
+                        className="text-[13.5px] font-bold tracking-tight text-white"
+                        style={{ fontFamily: 'var(--font-tech)' }}
+                      >
+                        {s.step}
+                      </div>
+                      <p className="mt-0.5 text-[12.5px] leading-relaxed text-text-muted">
+                        {s.detail}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+
+            {tool.highlights?.length ? (
+              <div>
+                <div
+                  className="mb-3 inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.22em] text-lime"
+                  style={{ fontFamily: 'var(--font-tech)' }}
+                >
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
+                  Por que vale
+                </div>
+                <ul className="flex flex-col gap-2">
+                  {tool.highlights.map((h, i) => (
+                    <li
+                      key={i}
+                      className="flex items-start gap-2.5 rounded-[10px] border border-lime/25 bg-lime/[0.04] px-3 py-2.5 text-[13px] leading-snug text-white/95"
+                    >
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 12 12"
+                        fill="none"
+                        className="mt-1 shrink-0"
+                      >
+                        <path
+                          d="M2.5 6.5l2.5 2.5 5-5.5"
+                          stroke="#c8ff00"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                      <span>{h}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       <style jsx>{`
         @keyframes tool-info-conic {

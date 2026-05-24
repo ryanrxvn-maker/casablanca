@@ -39,7 +39,6 @@ import {
   IconRemoverElementos,
   IconSearch,
   IconStepGear,
-  IconTakeSplitter,
   IconTrocaProduto,
 } from './ToolIcons';
 
@@ -62,10 +61,9 @@ const ENTRIES: Entry[] = [
   { id: 'camuflagem', group: 'Ferramentas', label: 'Camuflagem', hint: 'Disfarça áudio dos detectores', href: '/tools/camuflagem', icon: <IconCamuflagem size={20} />, keywords: ['anti detector', 'meta', 'ia', 'whisper'] },
   { id: 'downloader', group: 'Ferramentas', label: 'Downloader', hint: 'Baixa vídeos de qualquer site', href: '/tools/downloader', icon: <IconDownloader size={20} />, keywords: ['youtube', 'tiktok', 'instagram', 'pinterest', 'baixar', 'download'] },
   { id: 'compressor', group: 'Ferramentas', label: 'Compressor', hint: 'Reduz peso do arquivo', href: '/tools/compressor', icon: <IconCompressor size={20} />, keywords: ['comprimir', 'reduzir', 'tamanho'] },
-  { id: 'audio-split', group: 'Ferramentas', label: 'Separar áudios', hint: 'Divide pelo silêncio', href: '/tools/audio-split', icon: <IconAudioSplit size={20} />, keywords: ['split', 'dividir', 'separar'] },
+  { id: 'audio-split', group: 'Ferramentas', label: 'Dividir áudios', hint: 'Divide pelo silêncio', href: '/tools/audio-split', icon: <IconAudioSplit size={20} />, keywords: ['split', 'dividir', 'separar'] },
   { id: 'acelerador', group: 'Ferramentas', label: 'Mixer de Velocidade', hint: 'Acelera/desacelera sem ficar robótico', href: '/tools/acelerador', icon: <IconAcelerador size={20} />, keywords: ['velocidade', 'speed', 'rápido', 'lento'] },
   { id: 'normalizador', group: 'Ferramentas', label: 'Normalizador', hint: 'Iguala volume de vários arquivos', href: '/tools/normalizador', icon: <IconNormalizador size={20} />, keywords: ['volume', 'loudness', 'lufs', 'normalizar'] },
-  { id: 'take-splitter', group: 'Ferramentas', label: 'Separar takes', hint: 'Quebra o vídeo em cada take', href: '/tools/take-splitter', icon: <IconTakeSplitter size={20} />, keywords: ['take', 'cena', 'scene'] },
   { id: 'calculadora', group: 'Ferramentas', label: 'Calculadora', hint: 'Cálculo de preço por minuto', href: '/tools/calculadora', icon: <IconCalculadora size={20} />, keywords: ['valor', 'preço', 'orçamento'] },
 
   // IA

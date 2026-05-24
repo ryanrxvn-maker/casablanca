@@ -19,7 +19,6 @@ import {
   IconHeyGenAuto,
   IconNormalizador,
   IconRemoverElementos,
-  IconTakeSplitter,
   IconTrocaProduto,
 } from './ToolIcons';
 
@@ -102,7 +101,7 @@ const BASE: ToolEntry[] = [
   },
   {
     href: '/tools/audio-split',
-    label: 'Separar áudios',
+    label: 'Dividir áudios',
     description: 'Divide o áudio em pedaços pelas pausas. Sem cortar falas.',
     icon: <IconAudioSplit size={26} />,
     hue: 'rgba(34, 211, 238, 0.4)',
@@ -120,13 +119,6 @@ const BASE: ToolEntry[] = [
     description: 'Iguala o volume de vários arquivos.',
     icon: <IconNormalizador size={26} />,
     hue: 'rgba(94, 234, 212, 0.4)',
-  },
-  {
-    href: '/tools/take-splitter',
-    label: 'Separar takes',
-    description: 'Quebra o vídeo em cada take automaticamente.',
-    icon: <IconTakeSplitter size={26} />,
-    hue: 'rgba(134, 239, 172, 0.4)',
   },
 ];
 
@@ -866,10 +858,9 @@ const TOOL_LABELS: Record<string, string> = {
   '/tools/remover-elementos': 'Remover Legenda/Marca d’Água',
   '/tools/camuflagem': 'Camuflagem',
   '/tools/compressor': 'Compressor',
-  '/tools/audio-split': 'Separar áudios',
+  '/tools/audio-split': 'Dividir áudios',
   '/tools/acelerador': 'Mixer de Velocidade',
   '/tools/normalizador': 'Normalizador',
-  '/tools/take-splitter': 'Separar takes',
   '/tools/copy-srt': 'Gerador de SRT',
   '/tools/calculadora': 'Calculadora',
   '/tools/ltx-video': 'LTX Video',

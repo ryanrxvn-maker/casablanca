@@ -16,7 +16,6 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/audio-split',
     '/tools/acelerador',
     '/tools/normalizador',
-    '/tools/take-splitter',
     '/tools/calculadora',
     '/tools/copy-srt',
     // ⚠ NÃO inclui: auto-broll, troca-produto, heygen-auto, decupagem-copy (smart decup), remover-elementos (smart remover), ltx-video, clickup-pilot
@@ -30,7 +29,6 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/audio-split',
     '/tools/acelerador',
     '/tools/normalizador',
-    '/tools/take-splitter',
     '/tools/calculadora',
     '/tools/remover-elementos',
     '/tools/copy-srt',
