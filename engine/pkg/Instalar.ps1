@@ -49,11 +49,24 @@ try {
 
 Step 5 'Copiando arquivos do motor...'
 New-Item -ItemType Directory -Force -Path (Join-Path $dst 'bin') | Out-Null
-foreach ($f in @('server.cjs', 'AutoEditDownloader.cmd', 'Desinstalar.ps1', 'LEIA-ME.txt')) {
+# Copia TODOS os arquivos do pacote (inclui DESINSTALAR.cmd visivel pro user)
+foreach ($f in @('server.cjs', 'AutoEditDownloader.cmd', 'Desinstalar.ps1', 'DESINSTALAR.cmd', 'LEIA-ME.txt')) {
   $sp = Join-Path $src $f
   if (Test-Path $sp) { Copy-Item $sp $dst -Force }
 }
 $starter = Join-Path $dst 'AutoEditDownloader.cmd'
+
+# Garante DESINSTALAR.cmd no destino mesmo se faltou no pacote
+$desinstalCmd = Join-Path $dst 'DESINSTALAR.cmd'
+if (-not (Test-Path $desinstalCmd)) {
+  $cmd = @"
+@echo off
+title Auto Edit Downloader - Desinstalar
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Desinstalar.ps1"
+exit
+"@
+  Set-Content -LiteralPath $desinstalCmd -Value $cmd -Encoding ASCII
+}
 
 $tmp = Join-Path $env:TEMP ('AutoEditInstall_' + [Guid]::NewGuid().ToString('N').Substring(0,8))
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null

@@ -133,7 +133,7 @@ async function main() {
     { stdio: 'inherit' },
   );
 
-  log('gerando icon.ico a partir dos PNGs da extensao (coelho DARKO)...');
+  log('gerando icon.ico a partir dos PNGs da extensao (coelho Auto Edit)...');
   const extIcons = path.join(here, '..', 'extension-downloader', 'icons');
   const icoPath = path.join(here, 'installer', 'icon.ico');
   execFileSync(
@@ -147,6 +147,10 @@ async function main() {
     ],
     { stdio: 'inherit' },
   );
+
+  // PNG do coelho 128x128 — embedado como AutoEdit.rabbit.png pra a UI
+  // WinForms desenhar no header (PictureBox 56x56 zoom)
+  const rabbitPng = path.join(extIcons, 'icon-128.png');
 
   log('compilando AutoEditDownloaderSetup.exe (csc.exe)...');
   const exeOut = path.join(here, 'AutoEditDownloaderSetup.exe');
@@ -176,6 +180,7 @@ async function main() {
       `/win32manifest:${manifestPath}`,
       `/resource:${zipOut},AutoEdit.pkg.zip`,
       `/resource:${icoPath},AutoEdit.icon.ico`,
+      `/resource:${rabbitPng},AutoEdit.rabbit.png`,
       '/reference:System.dll',
       '/reference:System.Drawing.dll',
       '/reference:System.Windows.Forms.dll',
@@ -268,11 +273,24 @@ try {
 
 Step 5 'Copiando arquivos do motor...'
 New-Item -ItemType Directory -Force -Path (Join-Path $dst 'bin') | Out-Null
-foreach ($f in @('server.cjs', 'AutoEditDownloader.cmd', 'Desinstalar.ps1', 'LEIA-ME.txt')) {
+# Copia TODOS os arquivos do pacote (inclui DESINSTALAR.cmd visivel pro user)
+foreach ($f in @('server.cjs', 'AutoEditDownloader.cmd', 'Desinstalar.ps1', 'DESINSTALAR.cmd', 'LEIA-ME.txt')) {
   $sp = Join-Path $src $f
   if (Test-Path $sp) { Copy-Item $sp $dst -Force }
 }
 $starter = Join-Path $dst 'AutoEditDownloader.cmd'
+
+# Garante DESINSTALAR.cmd no destino mesmo se faltou no pacote
+$desinstalCmd = Join-Path $dst 'DESINSTALAR.cmd'
+if (-not (Test-Path $desinstalCmd)) {
+  $cmd = @"
+@echo off
+title Auto Edit Downloader - Desinstalar
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Desinstalar.ps1"
+exit
+"@
+  Set-Content -LiteralPath $desinstalCmd -Value $cmd -Encoding ASCII
+}
 
 $tmp = Join-Path $env:TEMP ('AutoEditInstall_' + [Guid]::NewGuid().ToString('N').Substring(0,8))
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
