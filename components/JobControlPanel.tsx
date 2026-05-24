@@ -99,17 +99,23 @@ export function JobControlPanel({
     scope,
     taskId,
     label,
+    queued,
   }: {
     scope: 'heygen' | 'magnific';
     taskId: string;
     label: string;
+    /** true quando a task esta esperando vaga no semafaro do motor
+     *  (ClickUp Pilot, max 2 simultaneos no HeyGen). Botoes Retomar/Debug
+     *  ficam disabled — o motor promove automatico quando liberar. */
+    queued?: boolean;
   }) => (
     <div className="flex flex-wrap items-center gap-1.5">
       <button
         type="button"
         onClick={() => act(scope, taskId, 'retomar', label)}
-        className="mono rounded border border-cyan-500/60 bg-cyan-500/15 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25"
-        title="Retomar (abre o ClickUp Pilot e re-roda/baixa no motor real)"
+        disabled={!!queued}
+        className="mono rounded border border-cyan-500/60 bg-cyan-500/15 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-40 disabled:cursor-not-allowed"
+        title={queued ? 'Na fila — o motor promove automaticamente quando liberar vaga (max 2 lipsyncs simultaneos)' : 'Retomar (abre o ClickUp Pilot e re-roda/baixa no motor real)'}
       >
         🔄 Retomar
       </button>
@@ -124,8 +130,9 @@ export function JobControlPanel({
       <button
         type="button"
         onClick={() => act(scope, taskId, 'debug', label)}
-        className="mono rounded border border-fuchsia-500/50 bg-fuchsia-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20"
-        title="DEBUG (reserva p/ bugs/loop): aborta e recria do ZERO no motor"
+        disabled={!!queued}
+        className="mono rounded border border-fuchsia-500/50 bg-fuchsia-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+        title={queued ? 'Aguarde sair da fila' : 'DEBUG (reserva p/ bugs/loop): aborta e recria do ZERO no motor'}
       >
         🐞 Debug
       </button>
@@ -192,7 +199,7 @@ export function JobControlPanel({
                           <span className="ml-2 uppercase">{b.phase}</span>
                           <span className="ml-2 text-text-muted">· {dispatched}/{b.parts.length} disparados</span>
                         </span>
-                        <Btns scope="heygen" taskId={b.taskId} label={b.taskName || b.baseAdId} />
+                        <Btns scope="heygen" taskId={b.taskId} label={b.taskName || b.baseAdId} queued={b.phase === 'queued'} />
                       </div>
                       {b.message ? (
                         <div className="mono mt-1 text-[10px] text-text-muted">{b.message}</div>

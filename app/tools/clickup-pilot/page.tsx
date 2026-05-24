@@ -126,6 +126,19 @@ function markDispatched(taskId: string) {
   localStorage.setItem(DISPATCHED_KEY, JSON.stringify(m));
 }
 
+/** Limite global de lipsyncs HeyGen rodando em paralelo. Trava dura
+ *  contra clique multiplo (Retomar/Debug em varias tasks ao mesmo tempo)
+ *  E contra reload-storm (3+ batches restaurados como queued). Quem
+ *  passar do limite vira phase='queued' e o promoter inicia quando
+ *  liberar vaga. NAO mexer pra cima sem revisar throttling HeyGen. */
+const MAX_HEYGEN_PARALLEL = 2;
+
+/** Phases consideradas "ocupando slot" — soma destas vs MAX define se
+ *  ha vaga pra disparar mais uma. 'queued'/'done'/'failed' NAO ocupam. */
+const ACTIVE_BATCH_PHASES: ReadonlyArray<BatchTaskState['phase']> = [
+  'dispatching', 'rendering', 'downloading', 'post',
+];
+
 /** Persist batchStates entre reloads. zipBlobUrl nao sobrevive
  *  (Blob fica na memoria, e revogado no fechamento) — entao salva
  *  tudo menos isso. Permite retomar polling/download apos reload. */
@@ -1371,20 +1384,49 @@ function ClickUpPilotInner() {
   const [batchStates, setBatchStates] = useState<Record<string, BatchTaskState>>({});
   const batchCancelRef = useRef<Record<string, boolean>>({});
 
-  /** Restore persisted batch states no mount. Marca como "interrompido" qualquer
-   *  batch que estava rodando — videos podem ja ter renderizado no HeyGen.
-   *  Mostra botao "Retomar" pra re-poll + download. */
+  /** Semafaro de slots HeyGen (in-memory). Cresce quando um wrapper
+   *  gated PEGA o slot (acquireSlot ok) e decresce no finally. Sempre
+   *  reflete o numero REAL de runs ativos nesta aba — independente do
+   *  batchStates (que pode estar com phase 'queued' por race). */
+  const heygenSlotsRef = useRef<number>(0);
+  /** Dedup de wrappers gated por taskId. Se ja ha um wrapper esperando
+   *  vaga pra essa task, segundo clique e no-op (idempotente). */
+  const heygenPendingRef = useRef<Record<string, 'run' | 'resume'>>({});
+
+  /** Restore persisted batch states no mount. Tudo que estava ATIVO
+   *  (dispatching/rendering/downloading/post) OU ja em 'queued' antes
+   *  do reload volta como 'queued' — o promoter useEffect re-dispara
+   *  ate MAX_HEYGEN_PARALLEL automaticamente. Sem clique manual.
+   *
+   *  Por que NAO 'failed': videos podem ja ter sido submitted no HeyGen
+   *  (videoIds salvos em parts[]) — re-poll vai pegar eles prontos em
+   *  segundos. Marcar failed forcaria user a clicar Retomar em cada um.
+   *
+   *  'done'/'failed' antigos sao preservados como estavam — user decide
+   *  se Retomar ou nao. */
   useEffect(() => {
     const persisted = loadPersistedBatchStates() as Record<string, BatchTaskState>;
     if (Object.keys(persisted).length === 0) return;
     const restored: Record<string, BatchTaskState> = {};
+    let interruptedCount = 0;
     for (const [taskId, state] of Object.entries(persisted)) {
-      const wasRunning = state.phase !== 'done' && state.phase !== 'failed';
-      restored[taskId] = wasRunning
-        ? { ...state, phase: 'failed', message: '⚠ Pagina foi recarregada durante o run. Click Retomar pra re-checar status no HeyGen.' }
-        : state;
+      const wasInterrupted = state.phase !== 'done' && state.phase !== 'failed';
+      if (wasInterrupted) {
+        interruptedCount++;
+        restored[taskId] = {
+          ...state,
+          phase: 'queued',
+          message: '⏳ Re-iniciando apos reload — checkpoint preservado, retomando do ponto certo...',
+          finishedAt: undefined,
+        };
+      } else {
+        restored[taskId] = state;
+      }
     }
     setBatchStates(restored);
+    if (interruptedCount > 0) {
+      console.info(`[batch restore] ${interruptedCount} batch(es) interrompidos — re-enfileirados pro promoter.`);
+    }
   }, []);
 
   /** Persist batchStates a cada mudanca pra sobreviver reload. */
@@ -2183,41 +2225,59 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           ? 'Nenhuma task ready com JSON de B-rolls — rodando so HeyGen. Cole o JSON no botao "+" pra gerar B-rolls.'
           : null,
       );
-      const queue = [...ready];
-      const PARALLEL = 2;
-      const workers: Promise<void>[] = [];
-      for (let i = 0; i < PARALLEL; i++) {
-        workers.push((async () => {
-          while (queue.length > 0) {
-            const taskId = queue.shift()!;
-            await runTaskInBackground(taskId);
-          }
-        })());
+      // Marca TODAS como 'queued' imediatamente (skeleton de batchStates)
+      // e dispara via runHeyGenGated — o semafaro global de MAX_HEYGEN_PARALLEL
+      // garante max 2 simultaneos, mesmo com Retomar/Debug em flight de runs
+      // anteriores. O promoter cobre tasks que ficarem na fila se houver
+      // crash/reload no meio.
+      setBatchStates((prev) => {
+        const next = { ...prev };
+        for (const id of ready) {
+          const a = taskAnalyses[id];
+          if (!a) continue;
+          const baseAdId = a.baseAdId || a.taskName;
+          next[id] = {
+            ...(next[id] || { taskId: id, taskName: a.taskName, baseAdId, parts: [], startedAt: Date.now(), phase: 'queued' as const }),
+            phase: 'queued',
+            message: 'Na fila — aguardando vaga...',
+            finishedAt: undefined,
+          } as BatchTaskState;
+        }
+        return next;
+      });
+      for (const taskId of ready) {
+        void runHeyGenGated(taskId, 'run');
       }
-      await Promise.all(workers);
       return;
     }
 
-    // === Fluxo classico (nenhum toggle) — INALTERADO ===
+    // === Fluxo classico (nenhum toggle) ===
     const ready = Array.from(selectedTaskIds).filter((id) => taskAnalyses[id]?.status === 'ready');
     if (ready.length === 0) {
       setError('Nenhuma task ready selecionada. Confira que avatares + voz estao OK.');
       return;
     }
     setError(null);
-    // Dispara em paralelo (max 2 — cada uma usa 3 workers internos)
-    const queue = [...ready];
-    const PARALLEL = 2;
-    const workers: Promise<void>[] = [];
-    for (let i = 0; i < PARALLEL; i++) {
-      workers.push((async () => {
-        while (queue.length > 0) {
-          const taskId = queue.shift()!;
-          await runTaskInBackground(taskId);
-        }
-      })());
+    // Dispara TODAS pela gate; semafaro global limita a MAX_HEYGEN_PARALLEL.
+    // Tasks alem do limite ficam phase='queued' visivel ate o promoter pegar.
+    setBatchStates((prev) => {
+      const next = { ...prev };
+      for (const id of ready) {
+        const a = taskAnalyses[id];
+        if (!a) continue;
+        const baseAdId = a.baseAdId || a.taskName;
+        next[id] = {
+          ...(next[id] || { taskId: id, taskName: a.taskName, baseAdId, parts: [], startedAt: Date.now(), phase: 'queued' as const }),
+          phase: 'queued',
+          message: 'Na fila — aguardando vaga...',
+          finishedAt: undefined,
+        } as BatchTaskState;
+      }
+      return next;
+    });
+    for (const taskId of ready) {
+      void runHeyGenGated(taskId, 'run');
     }
-    await Promise.all(workers);
   }
 
   /** Ungate: quando o HeyGen Auto de uma task (MORE) conclui, libera o job
@@ -2456,10 +2516,92 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     batchCancelRef.current[taskId] = true;
   }
 
+  /** Wrapper gated: pega vaga no semafaro (MAX_HEYGEN_PARALLEL) ou marca
+   *  a task como 'queued' e poll-aguarda. O promoter useEffect ja monitora
+   *  e dispara automaticamente — esta funcao e' o caminho pros call-sites
+   *  manuais (Retomar/Debug/dispatchTask/startBatch). Idempotente: 2o
+   *  clique enquanto pendente e' no-op (heygenPendingRef dedup).
+   *
+   *  kind='run'    → runTaskInBackground (dispatch+poll+download+post)
+   *  kind='resume' → resumeTaskBatch (so re-poll+download+post, requer videoIds)
+   */
+  async function runHeyGenGated(taskId: string, kind: 'run' | 'resume') {
+    if (heygenPendingRef.current[taskId]) {
+      // Ja ha wrapper esperando ou rodando — clique extra ignorado.
+      return;
+    }
+    heygenPendingRef.current[taskId] = kind;
+    try {
+      // ESPERA VAGA — checa a cada 1s. batchCancelRef true sai sem rodar.
+      while (heygenSlotsRef.current >= MAX_HEYGEN_PARALLEL) {
+        if (batchCancelRef.current[taskId]) {
+          // User cancelou enquanto estava na fila — marca failed e sai.
+          setBatchStates((prev) => {
+            const cur = prev[taskId];
+            if (!cur) return prev;
+            return { ...prev, [taskId]: { ...cur, phase: 'failed', message: 'Cancelado na fila', finishedAt: Date.now() } };
+          });
+          return;
+        }
+        // Garante que UI mostra 'queued' enquanto espera vaga. Patch raso —
+        // nao toca em parts/replan/etc (esses ja foram preservados pelo
+        // ultimo setBatchStates de quem criou o queued, OU pelo restore).
+        setBatchStates((prev) => {
+          const cur = prev[taskId];
+          if (cur && cur.phase === 'queued') return prev; // ja marcado
+          if (!cur) return prev; // sem entrada — promoter cria, nao aqui
+          return { ...prev, [taskId]: { ...cur, phase: 'queued', message: `Aguardando vaga (${heygenSlotsRef.current}/${MAX_HEYGEN_PARALLEL} ocupados)...`, finishedAt: undefined } };
+        });
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      heygenSlotsRef.current++;
+      try {
+        // batchCancelRef pode ter sido setado entre espera e o try — re-checa.
+        if (batchCancelRef.current[taskId]) return;
+        batchCancelRef.current[taskId] = false;
+        if (kind === 'resume') {
+          await resumeTaskBatch(taskId);
+        } else {
+          await runTaskInBackground(taskId);
+        }
+      } finally {
+        heygenSlotsRef.current = Math.max(0, heygenSlotsRef.current - 1);
+      }
+    } finally {
+      delete heygenPendingRef.current[taskId];
+    }
+  }
+
+  /** PROMOTER — escaneia batchStates por entradas 'queued' e dispara
+   *  enquanto houver vaga. Roda quando batchStates muda (apos um run
+   *  finalizar, libera slot → promove proxima). Tambem no mount (resume
+   *  de reload). FIFO por startedAt (mais antigo primeiro).
+   *
+   *  Nao usa heygenPendingRef como filtro — runHeyGenGated faz dedup
+   *  interno. Aqui so checamos slots livres pra evitar disparar 10
+   *  wrappers a esmo (cada um faria 1 setTimeout — desperdicio). */
+  useEffect(() => {
+    if (heygenSlotsRef.current >= MAX_HEYGEN_PARALLEL) return;
+    const queued = Object.values(batchStates)
+      .filter((b) => b.phase === 'queued' && !heygenPendingRef.current[b.taskId])
+      .sort((a, b) => a.startedAt - b.startedAt);
+    if (queued.length === 0) return;
+    const freeSlots = MAX_HEYGEN_PARALLEL - heygenSlotsRef.current;
+    for (let i = 0; i < Math.min(freeSlots, queued.length); i++) {
+      const b = queued[i];
+      const kind: 'run' | 'resume' = b.parts.some((p) => p.videoId) ? 'resume' : 'run';
+      void runHeyGenGated(b.taskId, kind);
+    }
+    // ESLint: runHeyGenGated nao precisa estar em deps — ela usa refs/setters
+    // que sao estaveis. batchStates e a unica fonte real de mudanca.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batchStates]);
+
   /** RETOMAR (HeyGen lipsync) — funciona INDEPENDENTE da situacao:
    *  - tem videoIds disparados → re-checa status no HeyGen + re-baixa (rapido)
    *  - 0 disparados (ex: bloqueio/quota, erro antes do dispatch) → re-roda do
-   *    zero (TTS+upload+submit+poll+zip). Garante botao util sempre. */
+   *    zero (TTS+upload+submit+poll+zip). Garante botao util sempre.
+   *  Gated por MAX_HEYGEN_PARALLEL — se 2 ja rodando, vira 'queued'. */
   function retomarTaskBatch(taskId: string) {
     // s pode estar ausente no estado React logo apos navegar pro motor
     // (restore ainda nao reidratou) — caimos no localStorage autoritativo.
@@ -2468,15 +2610,39 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const eff = s || persisted;
     if (!eff) {
       // Sem estado nenhum: ultima tentativa via replan persistido.
-      if (loadPersistedReplan(taskId)) { void runTaskInBackground(taskId); }
+      const replan = loadPersistedReplan(taskId);
+      if (replan) {
+        // Cria stub 'queued' pra UI ter feedback enquanto espera vaga.
+        setBatchStates((prev) => ({
+          ...prev,
+          [taskId]: {
+            taskId,
+            taskName: replan.taskName,
+            baseAdId: replan.baseAdId,
+            phase: 'queued',
+            parts: [],
+            startedAt: Date.now(),
+            message: 'Na fila — aguardando vaga...',
+            replan,
+          },
+        }));
+        void runHeyGenGated(taskId, 'run');
+      }
       return;
     }
     batchCancelRef.current[taskId] = false;
-    if (eff.parts?.some((p) => p.videoId)) {
-      void resumeTaskBatch(taskId);
-    } else {
-      void runTaskInBackground(taskId);
-    }
+    const kind: 'run' | 'resume' = eff.parts?.some((p) => p.videoId) ? 'resume' : 'run';
+    // Marca 'queued' imediato pra UI esconder botoes — runHeyGenGated
+    // ajusta a mensagem assim que o loop de espera comeca, ou pula direto
+    // pro run/resume se ha vaga livre.
+    setBatchStates((prev) => {
+      const cur = prev[taskId];
+      if (!cur) return prev;
+      // Nao sobrescreve um state que ja esta rodando.
+      if (ACTIVE_BATCH_PHASES.includes(cur.phase as BatchTaskState['phase'])) return prev;
+      return { ...prev, [taskId]: { ...cur, phase: 'queued', message: 'Na fila — aguardando vaga...', finishedAt: undefined } };
+    });
+    void runHeyGenGated(taskId, kind);
   }
 
   /** PAUSAR (HeyGen lipsync) — aborta o processamento atual dessa task.
@@ -2493,12 +2659,21 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
 
   /** DEBUG (HeyGen lipsync) — reserva pra casos de bug: reinicia o processo
    *  de gerar os lips DESSA task do ZERO (re-dispatch completo). Aborta o
-   *  run atual e recomeca limpo. */
+   *  run atual e recomeca limpo. Gated por MAX_HEYGEN_PARALLEL. */
   function debugTaskBatch(taskId: string, skipConfirm = false) {
     if (!skipConfirm && !confirm('DEBUG: reiniciar a geracao de LIPS dessa task do zero?\n\nVai re-disparar TODAS as partes no HeyGen (cria videos novos).')) return;
     batchCancelRef.current[taskId] = true;
     // Pequeno delay deixa o run atual (se houver) abortar antes do restart.
-    setTimeout(() => { void runTaskInBackground(taskId); }, 300);
+    setTimeout(() => {
+      batchCancelRef.current[taskId] = false;
+      // Marca queued pra UI; runHeyGenGated promove direto se ha vaga.
+      setBatchStates((prev) => {
+        const cur = prev[taskId];
+        if (!cur) return prev;
+        return { ...prev, [taskId]: { ...cur, phase: 'queued', message: 'Debug — recriando do zero (aguardando vaga)...', finishedAt: undefined } };
+      });
+      void runHeyGenGated(taskId, 'run');
+    }, 300);
   }
 
   /** Baixa o ZIP de takes Magnific do IndexedDB (Blob URL nao sobrevive
@@ -2968,7 +3143,17 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     }
     setError(null);
     for (const sid of getSiblingTaskIds(taskId)) markDispatched(sid);
-    void runTaskInBackground(taskId);
+    // Marca queued pra UI consistente; promoter dispara direto se ha vaga.
+    setBatchStates((prev) => ({
+      ...prev,
+      [taskId]: {
+        ...(prev[taskId] || { taskId, taskName: a.taskName, baseAdId: a.baseAdId || a.taskName, parts: [], startedAt: Date.now(), phase: 'queued' as const }),
+        phase: 'queued',
+        message: 'Na fila — aguardando vaga...',
+        finishedAt: undefined,
+      } as BatchTaskState,
+    }));
+    void runHeyGenGated(taskId, 'run');
   }
 
   /** Copia SO o body falado dessa task pro clipboard — sem hooks, sem a
@@ -4337,19 +4522,29 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                     </a>
                                   ) : null}
                                   {/* RETOMAR / PAUSAR / DEBUG — sempre presentes,
-                                   *  funcionam independente da situacao da task */}
+                                   *  funcionam independente da situacao da task.
+                                   *  Quando phase='queued' (aguardando vaga no
+                                   *  semafaro de MAX_HEYGEN_PARALLEL=2), TODOS os
+                                   *  botoes ficam disabled — promoter dispara
+                                   *  automatico quando liberar vaga. ✕ continua
+                                   *  ativo pra user remover do batch se quiser. */}
                                   {(() => {
                                     const running = ['dispatching', 'rendering', 'downloading', 'post'].includes(b.phase);
+                                    const queued = b.phase === 'queued';
                                     return (
                                       <>
                                         <button
                                           type="button"
                                           onClick={() => retomarTaskBatch(b.taskId)}
-                                          disabled={running}
-                                          className="mono rounded border border-cyan-500/60 bg-cyan-500/15 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-40"
-                                          title={b.parts.some(p => p.videoId)
-                                            ? 'Re-checa status no HeyGen (videos podem estar prontos) + re-baixa'
-                                            : 'Re-roda a task do zero (TTS+upload+submit+poll+zip) — util quando 0 foram disparados'}
+                                          disabled={running || queued}
+                                          className="mono rounded border border-cyan-500/60 bg-cyan-500/15 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-40 disabled:cursor-not-allowed"
+                                          title={
+                                            queued
+                                              ? `Na fila — aguardando vaga (max ${MAX_HEYGEN_PARALLEL} simultaneos). O dispatch e' automatico assim que liberar.`
+                                              : (b.parts.some(p => p.videoId)
+                                                ? 'Re-checa status no HeyGen (videos podem estar prontos) + re-baixa'
+                                                : 'Re-roda a task do zero (TTS+upload+submit+poll+zip) — util quando 0 foram disparados')
+                                          }
                                         >
                                           🔄 Retomar
                                         </button>
@@ -4357,16 +4552,17 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                           type="button"
                                           onClick={() => pausarTaskBatch(b.taskId)}
                                           disabled={!running}
-                                          className="mono rounded border border-yellow-500/50 bg-yellow-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-yellow-200 hover:bg-yellow-500/20 disabled:opacity-40"
-                                          title="Aborta o processamento atual dessa task. Depois use Retomar."
+                                          className="mono rounded border border-yellow-500/50 bg-yellow-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-yellow-200 hover:bg-yellow-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                                          title={queued ? 'Tirar da fila — use ✕ pra remover.' : 'Aborta o processamento atual dessa task. Depois use Retomar.'}
                                         >
                                           ⏸ Pausar
                                         </button>
                                         <button
                                           type="button"
                                           onClick={() => debugTaskBatch(b.taskId)}
-                                          className="mono rounded border border-fuchsia-500/50 bg-fuchsia-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20"
-                                          title="DEBUG (reserva p/ bugs): reinicia a geracao de LIPS dessa task do ZERO"
+                                          disabled={queued}
+                                          className="mono rounded border border-fuchsia-500/50 bg-fuchsia-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+                                          title={queued ? 'Aguarde sair da fila pra usar Debug.' : 'DEBUG (reserva p/ bugs): reinicia a geracao de LIPS dessa task do ZERO'}
                                         >
                                           🐞 Debug
                                         </button>
@@ -4374,6 +4570,9 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                           <button
                                             type="button"
                                             onClick={() => {
+                                              // Se task estava 'queued', cancela pendencia antes
+                                              // de remover (senao runHeyGenGated continua tentando).
+                                              if (queued) batchCancelRef.current[b.taskId] = true;
                                               for (const url of [b.zipBlobUrl, b.montadoZipUrl, b.camufladoZipUrl]) {
                                                 if (url) { try { URL.revokeObjectURL(url); } catch {} }
                                               }
@@ -4383,7 +4582,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                               });
                                             }}
                                             className="mono rounded border border-line-strong px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
-                                            title="Remove esta entrada do painel"
+                                            title={queued ? 'Cancela e remove da fila' : 'Remove esta entrada do painel'}
                                           >
                                             ✕
                                           </button>
