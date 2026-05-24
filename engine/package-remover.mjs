@@ -39,7 +39,10 @@ const SKIP_FILES = new Set([
   'darko-icon-preview.png',
   '_BUILD-INSTALLER.md',
 ]);
-const SKIP_EXT = new Set(['.7z', '.zip']);
+const SKIP_EXT = new Set([
+  '.7z', '.zip',
+  '.pth',  // modelos PyTorch (sttn/infer_model.pth ~66 MB) — baixados pela API
+]);
 const SKIP_DIRS = new Set(['__pycache__']);
 
 async function main() {
