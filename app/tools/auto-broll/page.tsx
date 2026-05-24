@@ -19,6 +19,7 @@ import {
 } from '@/lib/magnific-pipeline';
 import { ToolStep } from '@/components/tool-kit';
 import { IconAutoBroll } from '@/components/ToolIcons';
+import { TierGate } from '@/components/TierGate';
 
 const HUE = 'rgba(240,171,252,0.45)';
 
@@ -58,6 +59,14 @@ function newJob(name = ''): Job {
 }
 
 export default function AutoBrollPage() {
+  return (
+    <TierGate require="pro" toolName="Auto B-roll">
+      <AutoBrollInner />
+    </TierGate>
+  );
+}
+
+function AutoBrollInner() {
   const [extStatus, setExtStatus] = useState<MagnificExtensionStatus>({
     connected: false,
   });

@@ -52,6 +52,7 @@ import { recallByVoiceName, rememberPairing, normalizeVoiceName, recallAvatarVoi
 import { Toggle3D } from '@/components/Toggle3D';
 import { ToggleRound3D, WirelessIcon, ScissorsIcon } from '@/components/ToggleRound3D';
 import { IconClickUpPilot } from '@/components/ToolIcons';
+import { TierGate } from '@/components/TierGate';
 import { getPilotTeam, setPilotTeam, getPilotEditor, setPilotEditor } from '@/lib/clickup-pilot-config';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
 import { runMagnificPipeline, parseMagnificPrompts } from '@/lib/magnific-pipeline';
@@ -338,6 +339,14 @@ function ClickUpPilotLocked({ tier }: { tier: 'free' | 'basic' | 'pro' | 'admin'
 }
 
 export default function ClickUpPilotPage() {
+  return (
+    <TierGate require="pro" toolName="ClickUp Pilot">
+      <ClickUpPilotInner />
+    </TierGate>
+  );
+}
+
+function ClickUpPilotInner() {
   const router = useRouter();
   const tier = useTier();
 

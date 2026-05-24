@@ -185,6 +185,8 @@ export function ToolsHub() {
   const tier = useTier();
   const params = useSearchParams();
   const lockedFlash = params.get('locked') === '1';
+  const lockedFrom = params.get('from') || '';
+  const lockedNeed = (params.get('need') as 'basic' | 'pro' | 'admin' | null) || null;
   const [isAdmin, setIsAdmin] = useState(false);
   const [firstName, setFirstName] = useState<string>('');
 
@@ -222,8 +224,12 @@ export function ToolsHub() {
 
   return (
     <div className="mx-auto w-full max-w-[1100px] px-5 md:px-8">
-      {/* Flash de "ferramenta bloqueada" — só pra free que tentou acessar */}
-      {lockedFlash && tier === 'free' ? <LockedFlash /> : null}
+      {/* Flash de "ferramenta bloqueada" — mostra pra qualquer tier
+          que tentou acessar algo que não pode. Inclui qual ferramenta
+          foi bloqueada + qual plano libera. */}
+      {lockedFlash ? (
+        <LockedFlash from={lockedFrom} need={lockedNeed} tier={tier} />
+      ) : null}
 
       {/* Saudação + descrição */}
       <section className="mb-8 animate-fade-in-up">
@@ -849,25 +855,116 @@ function LockIcon({ size = 18 }: { size?: number }) {
   );
 }
 
-function LockedFlash() {
+// Mapa de path → label legível (espelha TopBar). Usado pra mostrar
+// "HeyGen Auto requer Pro" em vez de "/tools/heygen-auto requer Pro".
+const TOOL_LABELS: Record<string, string> = {
+  '/tools/auto-broll': 'Auto B-roll',
+  '/tools/troca-produto': 'Troca de produto',
+  '/tools/heygen-auto': 'HeyGen Auto',
+  '/tools/decupagem-copy': 'Smart Decup',
+  '/tools/clickup-pilot': 'ClickUp Pilot',
+  '/tools/remover-elementos': 'Smart Remover',
+  '/tools/camuflagem': 'Camuflagem',
+  '/tools/compressor': 'Compressor',
+  '/tools/audio-split': 'Audio Split',
+  '/tools/acelerador': 'Mixer Velocidade',
+  '/tools/normalizador': 'Normalizador',
+  '/tools/take-splitter': 'Take Splitter',
+  '/tools/copy-srt': 'SRT Generator',
+  '/tools/calculadora': 'Calculadora',
+  '/tools/ltx-video': 'LTX Video',
+  '/tools/points': 'Pontos',
+  '/tools/lipsync-history': 'Histórico',
+  '/tools/background': 'Tarefas em background',
+};
+
+function LockedFlash({
+  from,
+  need,
+  tier,
+}: {
+  from: string;
+  need: 'basic' | 'pro' | 'admin' | null;
+  tier: 'free' | 'basic' | 'pro' | 'admin' | null;
+}) {
+  const toolName = TOOL_LABELS[from] || 'Esta ferramenta';
+  const needLabel =
+    need === 'admin' ? 'Admin' : need === 'pro' ? 'Pro' : need === 'basic' ? 'Basic' : null;
+  const tierLabel =
+    tier === 'free' ? 'FREE' : tier === 'basic' ? 'BASIC' : tier === 'pro' ? 'PRO' : 'ADMIN';
+
+  const accent =
+    need === 'admin'
+      ? 'rgba(200,255,0,0.45)'
+      : need === 'pro'
+        ? 'rgba(217,70,239,0.45)'
+        : 'rgba(192,132,252,0.45)';
+
   return (
     <div
-      role="status"
-      className="fade-in-up mb-6 flex items-start gap-3 rounded-[14px] border border-violet/40 bg-violet/10 px-5 py-4"
+      role="alert"
+      className="fade-in-up mb-6 flex items-start gap-3 rounded-[14px] border px-5 py-4"
+      style={{
+        borderColor: accent,
+        background:
+          'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.18)), linear-gradient(180deg, #15151a, #0c0c10)',
+      }}
     >
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-violet/40 bg-violet/15">
+      <span
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border"
+        style={{
+          borderColor: accent,
+          background: accent.replace('0.45', '0.15'),
+          boxShadow: `0 0 18px -4px ${accent}`,
+        }}
+      >
         <LockIcon size={16} />
       </span>
-      <div>
+      <div className="flex-1">
         <div
-          className="text-[12px] font-bold uppercase tracking-[0.18em] text-violet"
-          style={{ fontFamily: 'var(--font-tech)' }}
+          className="text-[10.5px] font-bold uppercase tracking-[0.22em]"
+          style={{ fontFamily: 'var(--font-tech)', color: accent.replace('0.45', '1') }}
         >
-          ferramenta bloqueada
+          Acesso bloqueado
         </div>
-        <p className="mt-1 text-[13.5px] text-white/85">
-          Sua conta grátis libera Decupagem de áudio e Downloader. Pra acessar o resto, fale com o time.
+        <p className="mt-1 text-[13.5px] leading-relaxed text-white/90">
+          <span className="font-bold text-white">{toolName}</span>{' '}
+          {needLabel ? (
+            <>
+              requer plano <span className="font-bold text-white">{needLabel}</span>.
+            </>
+          ) : (
+            <>não está disponível pro seu plano.</>
+          )}{' '}
+          <span className="mono text-[11px] text-text-muted">
+            Seu plano:{' '}
+            <span className="rounded-full border border-line-strong bg-bg-soft/60 px-2 py-0.5 text-[10px] uppercase tracking-widest">
+              {tierLabel}
+            </span>
+          </span>
         </p>
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          <a
+            href="/planos"
+            className="rounded-full border px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.14em] text-white transition-all hover:-translate-y-[1px]"
+            style={{
+              fontFamily: 'var(--font-tech)',
+              borderColor: accent,
+              background: accent.replace('0.45', '0.18'),
+            }}
+          >
+            Ver planos →
+          </a>
+          <a
+            href="https://wa.me/5531991262437"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-full border border-line-strong px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.14em] text-text-muted transition hover:border-lime/60 hover:text-lime"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            Falar no WhatsApp
+          </a>
+        </div>
       </div>
     </div>
   );

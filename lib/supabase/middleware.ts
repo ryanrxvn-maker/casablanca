@@ -235,13 +235,21 @@ export async function updateSession(request: NextRequest) {
       return NextResponse.redirect(url);
     }
 
+    // Helper local: monta o redirect pra /tools com info de qual rota
+    // foi bloqueada + qual tier era necessário (UX no LockedFlash).
+    function lockedRedirect(needTier: 'basic' | 'pro' | 'admin') {
+      const url = request.nextUrl.clone();
+      url.pathname = '/tools';
+      url.searchParams.set('locked', '1');
+      url.searchParams.set('from', pathname);
+      url.searchParams.set('need', needTier);
+      return NextResponse.redirect(url);
+    }
+
     // ─── Bloqueio admin-only (mesmo beta não acessa) ───
     if (ADMIN_ONLY_PREFIXES.some((p) => pathname.startsWith(p))) {
       if (!isAdmin) {
-        const url = request.nextUrl.clone();
-        url.pathname = '/tools';
-        url.searchParams.set('locked', '1');
-        return NextResponse.redirect(url);
+        return lockedRedirect('admin');
       }
     }
 
@@ -258,18 +266,17 @@ export async function updateSession(request: NextRequest) {
         pathname.startsWith(p),
       );
       const isTool = pathname.startsWith('/tools/');
+      const isProOnly = PRO_ONLY_TOOLS.some(
+        (p) => pathname === p || pathname.startsWith(p + '/'),
+      );
 
       if (isTool && !isAllowedTool) {
-        const url = request.nextUrl.clone();
-        url.pathname = '/tools';
-        url.searchParams.set('locked', '1');
-        return NextResponse.redirect(url);
+        // Free tentando acessar tool → se é Pro-only mostra "Pro",
+        // senão "Basic" (basic libera quase tudo)
+        return lockedRedirect(isProOnly ? 'pro' : 'basic');
       }
       if (!isHubExact && !isAllowedPrefix && !isExtraOk) {
-        const url = request.nextUrl.clone();
-        url.pathname = '/tools';
-        url.searchParams.set('locked', '1');
-        return NextResponse.redirect(url);
+        return lockedRedirect('basic');
       }
     }
 
@@ -279,10 +286,7 @@ export async function updateSession(request: NextRequest) {
         (p) => pathname === p || pathname.startsWith(p + '/'),
       );
       if (isProOnly) {
-        const url = request.nextUrl.clone();
-        url.pathname = '/tools';
-        url.searchParams.set('locked', '1');
-        return NextResponse.redirect(url);
+        return lockedRedirect('pro');
       }
     }
   }

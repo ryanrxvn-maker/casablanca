@@ -10,6 +10,7 @@ import { getFFmpeg } from '@/lib/ffmpeg-worker';
 import { fetchFile } from '@ffmpeg/util';
 import { ToolStep, ToolAction } from '@/components/tool-kit';
 import { IconTrocaProduto } from '@/components/ToolIcons';
+import { TierGate } from '@/components/TierGate';
 
 const HUE = 'rgba(244,114,182,0.45)';
 
@@ -93,6 +94,14 @@ async function readResponseJson(res: Response): Promise<{
 }
 
 export default function TrocaProdutoPage() {
+  return (
+    <TierGate require="pro" toolName="Troca de produto">
+      <TrocaProdutoInner />
+    </TierGate>
+  );
+}
+
+function TrocaProdutoInner() {
   const [file, setFile] = useToolState<File | null>('trocaProduto:file', null);
   const [oldProduct, setOldProduct] = useToolState<string>(
     'trocaProduto:oldProduct',

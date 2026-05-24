@@ -38,6 +38,7 @@ import {
   type ClonedVoice,
 } from '@/components/HeyGenVoicePicker';
 import { IconHeyGenAuto } from '@/components/ToolIcons';
+import { TierGate } from '@/components/TierGate';
 
 /**
  * HeyGen Auto Avatar — automacao do HeyGen sem API.
@@ -65,6 +66,14 @@ type SessionTest = {
 type PartResult = RunnerResult;
 
 export default function HeyGenAutoPage() {
+  return (
+    <TierGate require="pro" toolName="HeyGen Auto">
+      <HeyGenAutoInner />
+    </TierGate>
+  );
+}
+
+function HeyGenAutoInner() {
   const [extStatus, setExtStatus] = useState<ExtensionStatus>({
     connected: false,
   });

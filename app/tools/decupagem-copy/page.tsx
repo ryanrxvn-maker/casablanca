@@ -22,6 +22,7 @@ import { useRef } from 'react';
 import { formatBytes, formatTime } from '@/lib/utils';
 import { ToolStep, ToolAction, ToolMetric } from '@/components/tool-kit';
 import { IconDecupageCopy } from '@/components/ToolIcons';
+import { TierGate } from '@/components/TierGate';
 
 const HUE = 'rgba(232,121,249,0.45)';
 
@@ -57,6 +58,14 @@ type Cut = {
 };
 
 export default function DecupagemCopyPage() {
+  return (
+    <TierGate require="pro" toolName="Smart Decup">
+      <DecupagemCopyInner />
+    </TierGate>
+  );
+}
+
+function DecupagemCopyInner() {
   const [file, setFile] = useToolState<File | null>('decupcopy:file', null);
   const [copyText, setCopyText] = useToolState<string>('decupcopy:copy', '');
   const [processing, setProcessing] = useToolState<boolean>(
