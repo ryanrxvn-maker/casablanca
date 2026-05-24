@@ -23,7 +23,14 @@ import { buildZip, type ZipEntry } from '@/lib/zip-builder';
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 
-const FILES = ['manifest.json', 'background.js', 'popup.html', 'popup.css', 'popup.js'];
+const FILES = [
+  'manifest.json',
+  'background.js',
+  'popup.html',
+  'popup.css',
+  'popup.js',
+  'app-discover.js',
+];
 const ICONS = ['icon-16.png', 'icon-32.png', 'icon-48.png', 'icon-128.png'];
 
 export async function GET() {

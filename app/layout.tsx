@@ -60,6 +60,12 @@ export const metadata: Metadata = {
       { url: '/auto-edit-logo@128.png', sizes: '128x128', type: 'image/png' },
     ],
   },
+  // Marker pra extensão Freepik Sync auto-detectar este domínio como
+  // sendo o app Auto Edit. Content script (app-discover.js) lê esse meta
+  // e registra location.origin como endpoint do sync.
+  other: {
+    'auto-edit-app': 'true',
+  },
 };
 
 export default function RootLayout({

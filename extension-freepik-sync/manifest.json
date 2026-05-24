@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "DARKO LAB · Freepik Sync",
-  "version": "1.0.0",
-  "description": "Sincroniza sua conta Freepik/Magnific com DARKO LAB. Zero copy-paste — fica logado, fica conectado.",
+  "name": "Auto Edit · Freepik Sync",
+  "version": "1.0.1",
+  "description": "Sincroniza sua conta Freepik/Magnific com Auto Edit. Zero copy-paste — fica logado, fica conectado.",
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
@@ -20,14 +20,33 @@
     "https://*.magnific.com/*",
     "https://*.freepik.com/*",
     "https://*.vercel.app/*",
+    "https://*.auto-edit.com.br/*",
+    "https://*.auto-edit.com/*",
+    "https://auto-edit.com.br/*",
+    "https://auto-edit.com/*",
     "http://localhost/*",
     "http://localhost:*/*"
   ],
   "background": {
     "service_worker": "background.js"
   },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.vercel.app/*",
+        "https://*.auto-edit.com.br/*",
+        "https://*.auto-edit.com/*",
+        "https://auto-edit.com.br/*",
+        "https://auto-edit.com/*",
+        "http://localhost/*",
+        "http://localhost:*/*"
+      ],
+      "js": ["app-discover.js"],
+      "run_at": "document_end"
+    }
+  ],
   "action": {
-    "default_title": "DARKO LAB · Freepik Sync",
+    "default_title": "Auto Edit · Freepik Sync",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon-16.png",

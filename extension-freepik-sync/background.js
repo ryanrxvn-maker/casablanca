@@ -1,79 +1,80 @@
 /**
- * DARKO LAB · Freepik Sync — Service Worker
+ * Auto Edit · Freepik Sync — Service Worker
  *
  * Roda em background. Lê cookies de magnific.com (via chrome.cookies API,
- * que NÃO sofre CORS) e POSTa pro backend DARKO LAB que cifra + persiste.
+ * que NÃO sofre CORS) e POSTa pro backend Auto Edit que cifra + persiste.
+ *
+ * Discovery do endpoint:
+ *   1) Origin registrado por content-script app-discover.js (preferido)
+ *   2) Endpoint salvo manualmente pelo user no popup
+ *   3) Lista hardcoded de fallback (Vercel default + localhost)
  *
  * Triggers de sync:
  *   - Install / update
  *   - Browser startup
- *   - chrome.cookies.onChanged em magnific.com (login, logout, refresh)
- *   - Alarm a cada 30min (defesa contra cookie rotation que perdemos)
+ *   - chrome.cookies.onChanged em magnific.com
+ *   - Alarm a cada 30min
  *   - Mensagem manual do popup
+ *   - Registro novo de origin pelo content-script
  */
 
-const ALARM_KEY = 'darko-freepik-resync';
+const ALARM_KEY = 'autoedit-resync';
 const RESYNC_MIN = 30;
 const STORAGE_KEYS = {
-  endpoint: 'endpoint',      // URL base do DARKO LAB (configurável no popup)
-  lastSync: 'lastSync',      // timestamp do último sync ok
-  lastStatus: 'lastStatus',  // 'ok' | 'err' | 'no-login' | 'no-darko'
-  lastError: 'lastError',    // mensagem do último erro
-  plan: 'plan',              // plano Magnific detectado
-  userId: 'userId',          // user_id Magnific
+  endpoint: 'endpoint',          // URL manual (override)
+  discoveredOrigin: 'discoveredOrigin', // origin pego pelo content-script
+  lastSync: 'lastSync',
+  lastStatus: 'lastStatus',
+  lastError: 'lastError',
+  plan: 'plan',
+  userId: 'userId',
 };
 
-const DEFAULT_ENDPOINTS = [
-  // Tenta na ordem. Primeiro que responder com 200/401 é o ativo.
-  'https://www.darkolab.com',
-  'https://darkolab.com',
-  // localhost só pra dev:
+// Fallback final se não tiver origin descoberto nem manual setado
+const FALLBACK_ENDPOINTS = [
+  'https://casablanca.vercel.app',
   'http://localhost:3000',
 ];
 
 /* ───────────────────────── Cookie reader ───────────────────────── */
 
 async function readMagnificCookies() {
-  // chrome.cookies API roda em background — bypassa SameSite/CORS
   const all = await chrome.cookies.getAll({ domain: 'magnific.com' });
   if (!all || all.length === 0) {
-    return { ok: false, reason: 'no-login', cookies: [] };
+    return { ok: false, reason: 'no-login' };
   }
-  // Monta header `Cookie:` no formato `k1=v1; k2=v2;`
   const cookieHeader = all.map((c) => `${c.name}=${c.value}`).join('; ');
   const xsrfRaw = all.find((c) => c.name === 'XSRF-TOKEN')?.value;
-  if (!xsrfRaw) {
-    return { ok: false, reason: 'no-xsrf', cookies: all };
-  }
+  if (!xsrfRaw) return { ok: false, reason: 'no-xsrf' };
   let xsrfToken;
-  try {
-    xsrfToken = decodeURIComponent(xsrfRaw);
-  } catch {
-    xsrfToken = xsrfRaw;
-  }
+  try { xsrfToken = decodeURIComponent(xsrfRaw); } catch { xsrfToken = xsrfRaw; }
   return { ok: true, cookieHeader, xsrfToken };
 }
 
-/* ───────────────────────── Endpoint discovery ───────────────────────── */
+/* ───────────────────────── Endpoint resolution ───────────────────────── */
 
 async function resolveEndpoint() {
-  const stored = await chrome.storage.local.get(STORAGE_KEYS.endpoint);
+  const stored = await chrome.storage.local.get([
+    STORAGE_KEYS.endpoint,
+    STORAGE_KEYS.discoveredOrigin,
+  ]);
+  // Prioridade 1: manual override
   if (stored[STORAGE_KEYS.endpoint]) return stored[STORAGE_KEYS.endpoint];
-  // Auto-discovery: testa qual responde
-  for (const ep of DEFAULT_ENDPOINTS) {
+  // Prioridade 2: discovered via content-script
+  if (stored[STORAGE_KEYS.discoveredOrigin]) return stored[STORAGE_KEYS.discoveredOrigin];
+  // Prioridade 3: fallback list (probing)
+  for (const ep of FALLBACK_ENDPOINTS) {
     try {
       const r = await fetch(`${ep}/api/auto-broll-v2/save-creds`, {
         method: 'GET',
         credentials: 'include',
       });
-      // 401 (não logado DARKO) OU 200 (logado) → endpoint vivo
       if (r.status === 200 || r.status === 401) {
-        await chrome.storage.local.set({ [STORAGE_KEYS.endpoint]: ep });
+        // Cache como discovered pra próximos syncs
+        await chrome.storage.local.set({ [STORAGE_KEYS.discoveredOrigin]: ep });
         return ep;
       }
-    } catch {
-      /* tenta próximo */
-    }
+    } catch { /* tenta próximo */ }
   }
   return null;
 }
@@ -81,14 +82,17 @@ async function resolveEndpoint() {
 /* ───────────────────────── Sync ───────────────────────── */
 
 async function sync(reason = 'manual') {
-  console.log('[freepik-sync] tick', reason);
+  console.log('[autoedit-sync] tick', reason);
   const endpoint = await resolveEndpoint();
   if (!endpoint) {
-    await persistStatus('err', 'Não encontrei DARKO LAB online. Abra darkolab.com.');
-    return { ok: false, reason: 'no-darko' };
+    await persistStatus(
+      'no-darko',
+      'Abra Auto Edit numa aba uma vez (qualquer página). A extensão detecta o domínio automaticamente.',
+    );
+    return { ok: false, reason: 'no-endpoint' };
   }
 
-  // Confirma user logado no DARKO LAB (precisamos do session cookie pra POST)
+  // Confirma user logado no Auto Edit
   let darkoLogged = false;
   try {
     const r = await fetch(`${endpoint}/api/auto-broll-v2/save-creds`, {
@@ -96,11 +100,12 @@ async function sync(reason = 'manual') {
       credentials: 'include',
     });
     darkoLogged = r.status === 200;
-  } catch {
-    /* offline */
-  }
+  } catch { /* offline */ }
   if (!darkoLogged) {
-    await persistStatus('no-darko', 'Faça login em DARKO LAB nesse navegador.');
+    await persistStatus(
+      'no-darko',
+      `Faça login em ${new URL(endpoint).hostname} nesse navegador.`,
+    );
     return { ok: false, reason: 'no-darko-login', endpoint };
   }
 
@@ -170,38 +175,32 @@ function updateBadge(status) {
 
 /* ───────────────────────── Triggers ───────────────────────── */
 
-// Install / update
 chrome.runtime.onInstalled.addListener(() => {
-  console.log('[freepik-sync] installed');
+  console.log('[autoedit-sync] installed');
   chrome.alarms.create(ALARM_KEY, { periodInMinutes: RESYNC_MIN });
   sync('install');
 });
 
-// Browser startup
 chrome.runtime.onStartup.addListener(() => {
-  console.log('[freepik-sync] startup');
+  console.log('[autoedit-sync] startup');
   sync('startup');
 });
 
-// Alarm periódico
 chrome.alarms.onAlarm.addListener((a) => {
   if (a.name === ALARM_KEY) sync('alarm');
 });
 
-// Cookie change em magnific.com
 chrome.cookies.onChanged.addListener((info) => {
   const d = info.cookie?.domain || '';
   if (!/magnific\.com$/i.test(d)) return;
-  // Debounce: aglutina mudanças rápidas
-  clearTimeout(globalThis.__darkoSyncDebounce);
-  globalThis.__darkoSyncDebounce = setTimeout(() => sync('cookie-change'), 1500);
+  clearTimeout(globalThis.__autoeditSyncDebounce);
+  globalThis.__autoeditSyncDebounce = setTimeout(() => sync('cookie-change'), 1500);
 });
 
-// Mensagem do popup
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === 'sync-now') {
     sync('manual').then((r) => sendResponse(r));
-    return true; // async response
+    return true;
   }
   if (msg?.type === 'get-status') {
     chrome.storage.local
@@ -212,6 +211,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         STORAGE_KEYS.plan,
         STORAGE_KEYS.userId,
         STORAGE_KEYS.endpoint,
+        STORAGE_KEYS.discoveredOrigin,
       ])
       .then((s) => sendResponse(s));
     return true;
@@ -221,6 +221,21 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .set({ [STORAGE_KEYS.endpoint]: String(msg.endpoint || '').replace(/\/+$/, '') })
       .then(() => sync('endpoint-changed'))
       .then((r) => sendResponse(r));
+    return true;
+  }
+  if (msg?.type === 'register-app-origin') {
+    const o = String(msg.origin || '').replace(/\/+$/, '');
+    if (!o) { sendResponse({ ok: false }); return true; }
+    chrome.storage.local.get(STORAGE_KEYS.discoveredOrigin).then((cur) => {
+      if (cur[STORAGE_KEYS.discoveredOrigin] === o) {
+        sendResponse({ ok: true, unchanged: true });
+        return;
+      }
+      chrome.storage.local
+        .set({ [STORAGE_KEYS.discoveredOrigin]: o })
+        .then(() => sync('app-origin-discovered'))
+        .then((r) => sendResponse({ ok: true, discovered: o, syncResult: r }));
+    });
     return true;
   }
   return false;

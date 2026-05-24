@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>DARKO LAB · Freepik Sync</title>
+  <title>Auto Edit · Freepik Sync</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -10,7 +10,7 @@
     <header>
       <div class="brand">
         <span class="dot" id="dot"></span>
-        <strong>DARKO LAB</strong> · Freepik Sync
+        <strong>Auto Edit</strong> · Freepik Sync
       </div>
     </header>
 
@@ -23,24 +23,26 @@
       <div><span>Plano:</span> <strong id="metaPlan">—</strong></div>
       <div><span>User Magnific:</span> <strong id="metaUid">—</strong></div>
       <div><span>Último sync:</span> <strong id="metaLast">—</strong></div>
+      <div><span>App:</span> <strong id="metaEp">—</strong></div>
     </div>
 
     <div class="actions">
       <button id="btnSync" class="primary">Sincronizar agora</button>
       <button id="btnOpenMagnific" class="ghost">Abrir magnific.com</button>
-      <button id="btnOpenDarko" class="ghost">Abrir DARKO LAB</button>
+      <button id="btnOpenDarko" class="ghost">Abrir Auto Edit</button>
     </div>
 
     <details class="advanced">
-      <summary>Avançado</summary>
+      <summary>Avançado · endpoint manual</summary>
       <label>
-        Endpoint DARKO LAB
-        <input id="endpoint" type="url" placeholder="https://www.darkolab.com">
+        URL do Auto Edit
+        <input id="endpoint" type="url" placeholder="https://casablanca.vercel.app">
       </label>
       <button id="btnSaveEndpoint" class="ghost small">Salvar endpoint</button>
+      <p class="hint">Em geral nem precisa preencher — a extensão detecta automático quando você abre o Auto Edit em qualquer aba.</p>
     </details>
 
-    <footer>v1.0.0 · Auto-sync a cada 30min + on cookie change</footer>
+    <footer>v1.0.1 · Auto-sync · auto-detect domain</footer>
   </div>
 
   <script src="popup.js"></script>

@@ -12,7 +12,7 @@ const STATUS_MESSAGES = {
     dot: 'warn',
   },
   'no-darko': {
-    title: '⚠ Faça login em DARKO LAB',
+    title: '⚠ Auto Edit não detectado',
     cls: 'warn',
     dot: 'warn',
   },
@@ -34,13 +34,18 @@ function fmtTime(ts) {
   return new Date(ts).toLocaleString('pt-BR');
 }
 
+function hostnameOf(url) {
+  try { return new URL(url).hostname; } catch { return url; }
+}
+
 async function refresh() {
   const s = await send('get-status');
   const status = s?.lastStatus || 'no-login';
   const meta = STATUS_MESSAGES[status] || STATUS_MESSAGES.err;
+  const ep = s?.endpoint || s?.discoveredOrigin;
   const sub = s?.lastError ||
     (status === 'ok'
-      ? 'Cookies sincronizados. Pode disparar B-rolls em darkolab.com.'
+      ? `Sincronizado com ${hostnameOf(ep) || 'Auto Edit'}. Pode disparar B-rolls.`
       : 'Veja o passo a passo abaixo.');
 
   $('statusTitle').textContent = meta.title;
@@ -53,10 +58,12 @@ async function refresh() {
     $('metaPlan').textContent = s?.plan || '—';
     $('metaUid').textContent = s?.userId || '—';
     $('metaLast').textContent = fmtTime(s?.lastSync);
+    $('metaEp').textContent = hostnameOf(ep) || '—';
   } else {
     $('meta').hidden = true;
   }
   if (s?.endpoint) $('endpoint').value = s.endpoint;
+  else if (s?.discoveredOrigin) $('endpoint').placeholder = s.discoveredOrigin;
 }
 
 $('btnSync').addEventListener('click', async () => {
@@ -74,8 +81,8 @@ $('btnOpenMagnific').addEventListener('click', () => {
 
 $('btnOpenDarko').addEventListener('click', async () => {
   const s = await send('get-status');
-  const url = (s?.endpoint || 'https://www.darkolab.com') + '/configuracoes/magnific';
-  chrome.tabs.create({ url });
+  const base = s?.endpoint || s?.discoveredOrigin || 'https://casablanca.vercel.app';
+  chrome.tabs.create({ url: base + '/configuracoes/magnific' });
 });
 
 $('btnSaveEndpoint').addEventListener('click', async () => {
@@ -90,3 +97,5 @@ $('btnSaveEndpoint').addEventListener('click', async () => {
 });
 
 refresh();
+// Auto-refresh a cada 2s enquanto popup aberto
+setInterval(refresh, 2000);
