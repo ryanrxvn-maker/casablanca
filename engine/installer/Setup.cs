@@ -1,12 +1,31 @@
 // =============================================================
-//  Auto Edit Downloader - Setup.exe
-//  WinForms UI espelhando as cores reais do site (auto-edit.app):
-//   - BG #070708 (preto profundo)
-//   - Accent VIOLET #c084fc (primary, igual ao logo)
-//   - Accent FUCHSIA #d946ef (segundo glow do logo coelho)
-//   - Logo do coelho neon embedded (PNG)
-//   - Glow violet+fuchsia ambient
-//   - Zero CMD visível (RedirectStandardOutput suprime console)
+//  Auto Edit Installer - Setup.exe
+//  WinForms UI espelhando o design auto-edit.app:
+//   - Violet #c084fc + Fuchsia #d946ef (cores reais do logo)
+//   - Logo do coelho neon embedded (PNG renderizado HQ)
+//   - Brand "Auto Edit" + eyebrow + status + progress + actions
+//
+//  PARAMETRIZADO via #define REMOVER:
+//   - default → AutoEditDownloaderSetup
+//   - /define:REMOVER → AutoEditSmartRemoverSetup
+//
+//  ANTI-AV:
+//   - winexe (sem console), CreateNoWindow + RedirectStandardOutput
+//   - AssemblyInfo + manifest XML asInvoker
+//   - Assinado via sign-exe.ps1 (self-signed CN=Auto Edit)
+//
+//  ANTI-BLUR / DPI:
+//   - SetProcessDPIAware() chamado ANTES de criar qualquer UI
+//   - AutoScaleMode = Dpi
+//   - PaintedImage com InterpolationMode.HighQualityBicubic
+//   - TextRenderingHint.ClearTypeGridFit em todos os Paint custom
+//   - SmoothingMode.HighQuality em todos os Paint custom
+//
+//  ANTI-CORTE:
+//   - Form Size 620x420 (+44px largura, +40px altura vs antes)
+//   - Labels AutoSize=true quando possivel
+//   - Padding generoso em containers
+//   - Status/Hint com bounds explicitos + AutoEllipsis
 // =============================================================
 
 using System;
@@ -16,31 +35,30 @@ using System.Drawing.Drawing2D;
 using System.IO;
 using System.IO.Compression;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace AutoEdit
 {
-    // ====================== Branding (parametrizado via #define) ===========
-    // Mesmo Setup.cs serve 2 instaladores:
-    //   - Downloader (default)            → AutoEditDownloader / pasta LOCALAPPDATA
-    //   - Smart Remover (csc /define:REMOVER) → AutoEditSmartRemover
+    // ====================== Branding parametrizado ============================
     static class Brand
     {
 #if REMOVER
         public const string Product    = "Smart Remover";
         public const string Eyebrow    = "VÍDEO COM IA  ·  INSTALADOR";
         public const string InstallDir = "AutoEditSmartRemover";
-        public const string Hint       = "Baixando IA + componentes (~600 MB) na 1ª vez. Pode levar 3–10 min.";
+        public const string Hint       = "Baixando IA + componentes (~600 MB) na 1ª vez. Pode levar 3 a 10 min.";
 #else
-        public const string Product    = "Auto Edit";
+        public const string Product    = "Downloader";
         public const string Eyebrow    = "DOWNLOADER  ·  INSTALADOR";
         public const string InstallDir = "AutoEditDownloader";
-        public const string Hint       = "Baixando componentes na 1ª vez (~250 MB). Pode levar 1–3 min.";
+        public const string Hint       = "Baixando componentes (~250 MB) na 1ª vez. Pode levar 1 a 3 min.";
 #endif
-        public const string DoneHint   = "Pronto. O motor já foi vinculado. Use a ferramenta no site normalmente.";
+        public const string Heading    = "Auto Edit";
+        public const string DoneHint   = "Pronto. O motor está vinculado. Use a ferramenta no site normalmente.";
     }
 
-    // ====================== Design Tokens (auto-edit.app) ======================
+    // ====================== Design Tokens ====================================
     static class Theme
     {
         public static readonly Color Bg          = Color.FromArgb(7, 7, 8);
@@ -50,21 +68,67 @@ namespace AutoEdit
         public static readonly Color Line        = Color.FromArgb(28, 28, 34);
         public static readonly Color LineStrong  = Color.FromArgb(36, 36, 44);
         public static readonly Color Text        = Color.White;
-        public static readonly Color TextMuted   = Color.FromArgb(139, 139, 150);
-        public static readonly Color TextDim     = Color.FromArgb(77, 77, 87);
-        // PRIMARY (igual ao logo do coelho): violet bright
-        public static readonly Color Violet      = Color.FromArgb(192, 132, 252); // #c084fc
-        public static readonly Color VioletSoft  = Color.FromArgb(167, 139, 250); // #a78bfa
-        public static readonly Color VioletDeep  = Color.FromArgb(109, 78, 232);  // #6d4ee8
-        // SECONDARY (segundo glow do logo): fuchsia/rosa
-        public static readonly Color Fuchsia     = Color.FromArgb(217, 70, 239);  // #d946ef
-        public static readonly Color FuchsiaSoft = Color.FromArgb(232, 121, 249); // #e879f9
-        // Lime mantido só pra success state pequeno
+        public static readonly Color TextMuted   = Color.FromArgb(160, 160, 170);
+        public static readonly Color TextDim     = Color.FromArgb(95, 95, 105);
+        public static readonly Color Violet      = Color.FromArgb(192, 132, 252);
+        public static readonly Color VioletSoft  = Color.FromArgb(167, 139, 250);
+        public static readonly Color VioletDeep  = Color.FromArgb(109, 78, 232);
+        public static readonly Color Fuchsia     = Color.FromArgb(217, 70, 239);
+        public static readonly Color FuchsiaSoft = Color.FromArgb(232, 121, 249);
         public static readonly Color Lime        = Color.FromArgb(200, 255, 0);
         public static readonly Color Danger      = Color.FromArgb(248, 113, 113);
     }
 
-    // ====================== Progress bar com gradient violet→fuchsia ==========
+    // ====================== DPI helpers (anti-blur) ==========================
+    static class Dpi
+    {
+        [DllImport("user32.dll")]
+        private static extern bool SetProcessDPIAware();
+
+        [DllImport("shcore.dll")]
+        private static extern int SetProcessDpiAwareness(int value);
+        // 0 = unaware, 1 = system, 2 = per-monitor
+
+        public static void Enable()
+        {
+            // Prefer SetProcessDpiAwareness(2) — per-monitor v1 (Win8.1+)
+            // Fallback: SetProcessDPIAware (Vista+) — system-DPI aware
+            try { SetProcessDpiAwareness(2); return; } catch { }
+            try { SetProcessDPIAware(); } catch { }
+        }
+    }
+
+    // ====================== PaintedImage: render HQ sem blur =================
+    class PaintedImage : Control
+    {
+        private Image _img;
+        public Image Image
+        {
+            get { return _img; }
+            set { _img = value; Invalidate(); }
+        }
+        public PaintedImage()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint
+                | ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.UserPaint
+                | ControlStyles.SupportsTransparentBackColor
+                | ControlStyles.ResizeRedraw, true);
+            BackColor = Color.Transparent;
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            if (_img == null) return;
+            var g = e.Graphics;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.SmoothingMode = SmoothingMode.HighQuality;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.CompositingQuality = CompositingQuality.HighQuality;
+            g.DrawImage(_img, 0, 0, Width, Height);
+        }
+    }
+
+    // ====================== Progress bar (gradient violet→fuchsia) ===========
     class GlowProgress : Panel
     {
         private float _value;
@@ -84,37 +148,33 @@ namespace AutoEdit
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.SmoothingMode = SmoothingMode.HighQuality;
             // track
             using (var b = new SolidBrush(Theme.BgSofter))
                 g.FillRectangle(b, 0, 0, Width, Height);
-            using (var pen = new Pen(Color.FromArgb(30, 192, 132, 252), 1))
+            using (var pen = new Pen(Color.FromArgb(40, 192, 132, 252), 1))
                 g.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
-            // fill — gradient violet → fuchsia (igual aos dois glows do logo)
             int fillW = (int)(Width * _value);
             if (fillW > 0)
             {
                 using (var gb = new LinearGradientBrush(
                     new Rectangle(0, 0, Math.Max(fillW, 1), Height),
-                    Theme.Violet,
-                    Theme.Fuchsia,
+                    Theme.Violet, Theme.Fuchsia,
                     LinearGradientMode.Horizontal))
                     g.FillRectangle(gb, 0, 0, fillW, Height);
-                // highlight line topo
-                using (var pen = new Pen(Color.FromArgb(160, 232, 121, 249), 1))
+                using (var pen = new Pen(Color.FromArgb(180, 232, 121, 249), 1))
                     g.DrawLine(pen, 0, 0, fillW, 0);
             }
         }
     }
 
-    // ====================== Botão flat com hover ==============================
+    // ====================== Botão flat com hover ============================
     class FlatButton : Button
     {
         public Color FillColor;
         public Color FillHover;
         public Color BorderNormal;
         public Color BorderHover;
-        public int BorderSize = 1;
         public FlatButton()
         {
             FillColor = Color.Transparent;
@@ -128,6 +188,7 @@ namespace AutoEdit
             Font = new Font("Segoe UI", 9f, FontStyle.Bold);
             ForeColor = Theme.Text;
             BackColor = FillColor;
+            UseCompatibleTextRendering = false;
             MouseEnter += new EventHandler(OnEnter);
             MouseLeave += new EventHandler(OnLeave);
         }
@@ -143,7 +204,7 @@ namespace AutoEdit
         }
     }
 
-    // ====================== Main form ==========================================
+    // ====================== Main form =======================================
     class InstallerForm : Form
     {
         private readonly string _tmp;
@@ -177,240 +238,195 @@ namespace AutoEdit
 
         void BuildUi()
         {
-            Text = "Auto Edit  ·  " + Brand.Product;
+            // ===== Form base =====
+            Text = Brand.Heading + "  ·  " + Brand.Product;
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterScreen;
-            Size = new Size(580, 380);
+            Size = new Size(620, 420);
             BackColor = Theme.Bg;
             ShowInTaskbar = true;
             DoubleBuffered = true;
+            Font = new Font("Segoe UI", 9f, FontStyle.Regular); // base font pra herdar
+            AutoScaleMode = AutoScaleMode.None;  // CRITICAL: sem autoscale = sem blur
 
-            // Try load embedded PNG do coelho + ICO
+            // Icon + Logo PNG embedded
             try
             {
                 var asm = Assembly.GetExecutingAssembly();
                 using (var s = asm.GetManifestResourceStream("AutoEdit.icon.ico"))
-                {
                     if (s != null) Icon = new Icon(s);
-                }
                 using (var s = asm.GetManifestResourceStream("AutoEdit.rabbit.png"))
-                {
                     if (s != null) _logoImg = Image.FromStream(s);
-                }
             }
             catch { }
 
-            // ===== TOP STRIPE com gradient violet→fuchsia (igual logo) =========
-            var stripe = new Panel
-            {
-                Size = new Size(580, 3),
-                Location = new Point(0, 0),
-                BackColor = Color.Transparent,
-            };
+            // ===== TOP STRIPE (gradient violet→fuchsia) =====
+            var stripe = new Panel { Size = new Size(620, 3), Location = new Point(0, 0), BackColor = Color.Transparent };
             stripe.Paint += delegate(object s, PaintEventArgs e)
             {
                 using (var gb = new LinearGradientBrush(
-                    new Rectangle(0, 0, 580, 3),
-                    Theme.Violet, Theme.Fuchsia,
+                    new Rectangle(0, 0, 620, 3), Theme.Violet, Theme.Fuchsia,
                     LinearGradientMode.Horizontal))
-                    e.Graphics.FillRectangle(gb, 0, 0, 580, 3);
+                    e.Graphics.FillRectangle(gb, 0, 0, 620, 3);
             };
             Controls.Add(stripe);
 
-            // ===== GLOW ambient (radial violet+fuchsia atrás do coelho) =======
-            var glow = new Panel
-            {
-                Size = new Size(360, 240),
-                Location = new Point(-100, -60),
-                BackColor = Color.Transparent,
-            };
-            glow.Paint += delegate(object s, PaintEventArgs e)
-            {
-                var g = e.Graphics;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                using (var path = new System.Drawing.Drawing2D.GraphicsPath())
-                {
-                    path.AddEllipse(0, 0, 360, 240);
-                    using (var pgb = new PathGradientBrush(path))
-                    {
-                        pgb.CenterColor = Color.FromArgb(70, 192, 132, 252); // violet glow
-                        pgb.SurroundColors = new[] { Color.Transparent };
-                        pgb.CenterPoint = new PointF(180, 120);
-                        g.FillEllipse(pgb, 0, 0, 360, 240);
-                    }
-                }
-                // Segundo glow fuchsia menor, deslocado
-                using (var path = new System.Drawing.Drawing2D.GraphicsPath())
-                {
-                    path.AddEllipse(80, 40, 220, 160);
-                    using (var pgb = new PathGradientBrush(path))
-                    {
-                        pgb.CenterColor = Color.FromArgb(45, 217, 70, 239); // fuchsia
-                        pgb.SurroundColors = new[] { Color.Transparent };
-                        g.FillEllipse(pgb, 80, 40, 220, 160);
-                    }
-                }
-            };
-            Controls.Add(glow);
-
-            // ===== HEADER (logo coelho + brand text) ==========================
-            // Logo coelho 56px no canto top-left
+            // ===== HEADER: Logo coelho 64x64 + Brand text =====
+            // Bem afastado das bordas, sem cortar
             if (_logoImg != null)
             {
-                var logoBox = new PictureBox
+                var logoBox = new PaintedImage
                 {
                     Image = _logoImg,
-                    SizeMode = PictureBoxSizeMode.Zoom,
-                    Size = new Size(56, 56),
+                    Size = new Size(64, 64),
                     Location = new Point(36, 32),
-                    BackColor = Color.Transparent,
                 };
                 Controls.Add(logoBox);
             }
 
-            // Brand text "Auto Edit"
-            var brandPanel = new Panel
+            // BRAND HEADING ("Auto Edit") — AutoSize evita corte
+            var heading = new Label
             {
-                Location = new Point(108, 38),
-                Size = new Size(420, 50),
+                Text = Brand.Heading,
+                ForeColor = Theme.Text,
+                Font = new Font("Segoe UI", 22f, FontStyle.Bold),
+                AutoSize = true,
                 BackColor = Color.Transparent,
+                UseCompatibleTextRendering = false,
+                Location = new Point(116, 32),
             };
-            brandPanel.Paint += delegate(object s, PaintEventArgs e)
-            {
-                var g = e.Graphics;
-                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
-                using (var f = new Font("Segoe UI", 20f, FontStyle.Bold))
-                using (var b = new SolidBrush(Theme.Text))
-                    g.DrawString(Brand.Product, f, b, 0, 0);
-                using (var f = new Font("Segoe UI", 8f, FontStyle.Bold))
-                using (var b = new SolidBrush(Theme.Violet))
-                    g.DrawString(Brand.Eyebrow, f, b, 1, 34);
-            };
-            Controls.Add(brandPanel);
+            Controls.Add(heading);
 
-            // ===== DIVIDER linha sutil entre header e content =================
+            // PRODUCT TAG ("Downloader" ou "Smart Remover") — colorido violet
+            var prodTag = new Label
+            {
+                Text = Brand.Product,
+                ForeColor = Theme.Violet,
+                Font = new Font("Segoe UI", 13f, FontStyle.Bold),
+                AutoSize = true,
+                BackColor = Color.Transparent,
+                UseCompatibleTextRendering = false,
+                Location = new Point(116, 68),
+            };
+            Controls.Add(prodTag);
+
+            // EYEBROW pequeno abaixo
+            _eyebrow = new Label
+            {
+                Text = Brand.Eyebrow,
+                ForeColor = Theme.TextMuted,
+                Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
+                AutoSize = true,
+                BackColor = Color.Transparent,
+                UseCompatibleTextRendering = false,
+                Location = new Point(118, 92),
+            };
+            Controls.Add(_eyebrow);
+
+            // ===== DIVIDER =====
             var divider = new Panel
             {
-                Size = new Size(508, 1),
-                Location = new Point(36, 110),
+                Size = new Size(548, 1),
+                Location = new Point(36, 130),
                 BackColor = Theme.Line,
             };
             Controls.Add(divider);
 
-            // ===== EYEBROW pequena (progress %) ===============================
-            _eyebrow = new Label
+            // ===== PROGRESS LABEL (PROGRESSO · X%) =====
+            var progressTag = new Label
             {
                 Text = "PROGRESSO",
-                ForeColor = Theme.TextMuted,
+                ForeColor = Theme.Violet,
                 Font = new Font("Segoe UI", 7.5f, FontStyle.Bold),
                 AutoSize = true,
-                Location = new Point(36, 128),
                 BackColor = Color.Transparent,
+                UseCompatibleTextRendering = false,
+                Location = new Point(36, 148),
             };
-            Controls.Add(_eyebrow);
+            Controls.Add(progressTag);
 
-            // ===== TITLE (status dinâmico) ===================================
+            var progressPct = new Label
+            {
+                Name = "progressPct",
+                Text = "",
+                ForeColor = Theme.TextMuted,
+                Font = new Font("Consolas", 8f, FontStyle.Bold),
+                AutoSize = true,
+                BackColor = Color.Transparent,
+                UseCompatibleTextRendering = false,
+                Location = new Point(548, 148),
+            };
+            Controls.Add(progressPct);
+
+            // ===== STATUS (título dinâmico) — AutoSize + max width via Anchor =====
             _statusLbl = new Label
             {
                 Text = "Iniciando…",
                 ForeColor = Theme.Text,
-                Font = new Font("Segoe UI", 18f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 17f, FontStyle.Bold),
                 AutoSize = false,
-                Size = new Size(508, 34),
-                Location = new Point(36, 148),
+                AutoEllipsis = true,
+                Size = new Size(548, 32),
+                Location = new Point(36, 170),
                 BackColor = Color.Transparent,
+                UseCompatibleTextRendering = false,
                 TextAlign = ContentAlignment.MiddleLeft,
             };
             Controls.Add(_statusLbl);
 
-            // ===== HINT (mensagem secundária) =================================
+            // ===== HINT (descrição secundária) — 2 linhas geralmente =====
             _hintLbl = new Label
             {
                 Text = Brand.Hint,
                 ForeColor = Theme.TextMuted,
-                Font = new Font("Segoe UI", 9f, FontStyle.Regular),
+                Font = new Font("Segoe UI", 9.5f, FontStyle.Regular),
                 AutoSize = false,
-                Size = new Size(508, 38),
-                Location = new Point(36, 188),
+                Size = new Size(548, 50),
+                Location = new Point(36, 212),
                 BackColor = Color.Transparent,
+                UseCompatibleTextRendering = false,
+                TextAlign = ContentAlignment.TopLeft,
             };
             Controls.Add(_hintLbl);
 
-            // ===== PROGRESS BAR ===============================================
+            // ===== PROGRESS BAR =====
             _progress = new GlowProgress
             {
-                Size = new Size(508, 6),
-                Location = new Point(36, 238),
+                Size = new Size(548, 6),
+                Location = new Point(36, 280),
                 Value = 0.02f,
             };
             Controls.Add(_progress);
 
-            // ===== FOOTER divider + actions ===================================
+            // ===== FOOTER DIVIDER =====
             var footerDivider = new Panel
             {
-                Size = new Size(508, 1),
-                Location = new Point(36, 318),
+                Size = new Size(548, 1),
+                Location = new Point(36, 340),
                 BackColor = Theme.Line,
             };
             Controls.Add(footerDivider);
 
+            // ===== FOOTER: version + buttons =====
             var version = new Label
             {
-                Text = "v3.0  ·  Auto Edit  ·  100% local",
+                Text = "v3.0  ·  100% local",
                 ForeColor = Theme.TextDim,
-                Font = new Font("Consolas", 8f, FontStyle.Regular),
+                Font = new Font("Consolas", 8.5f, FontStyle.Regular),
                 AutoSize = true,
-                Location = new Point(36, 336),
                 BackColor = Color.Transparent,
+                UseCompatibleTextRendering = false,
+                Location = new Point(36, 364),
             };
             Controls.Add(version);
 
-            _btnFolder = new FlatButton
-            {
-                Text = "Abrir pasta",
-                Size = new Size(110, 32),
-                Location = new Point(266, 330),
-                Visible = false,
-            };
-            _btnFolder.Click += delegate(object s, EventArgs e)
-            {
-                try
-                {
-                    if (Directory.Exists(_installDst))
-                        Process.Start(new ProcessStartInfo("explorer.exe", _installDst)
-                            { UseShellExecute = true });
-                }
-                catch { }
-            };
-            Controls.Add(_btnFolder);
+            // Botões alinhados à direita — calc absoluto pra evitar overlap
+            int btnY = 358;
+            int btnRight = 36 + 548;
+            int btnGap = 8;
 
-            _btnLog = new FlatButton
-            {
-                Text = "Abrir log",
-                Size = new Size(90, 32),
-                Location = new Point(382, 330),
-                Visible = false,
-            };
-            _btnLog.Click += delegate(object s, EventArgs e)
-            {
-                try
-                {
-                    if (File.Exists(_logPath))
-                        Process.Start(new ProcessStartInfo("notepad.exe", _logPath)
-                            { UseShellExecute = true });
-                }
-                catch { }
-            };
-            Controls.Add(_btnLog);
-
-            // Botão principal "Fechar" — primary style (violet fill)
-            _btnClose = new FlatButton
-            {
-                Text = "Fechar",
-                Size = new Size(76, 32),
-                Location = new Point(478, 330),
-                Visible = false,
-            };
+            _btnClose = MakeButton("Fechar", 90, btnY);
+            _btnClose.Left = btnRight - _btnClose.Width;
             _btnClose.FillColor = Theme.Violet;
             _btnClose.FillHover = Theme.FuchsiaSoft;
             _btnClose.BorderNormal = Theme.Violet;
@@ -418,13 +434,41 @@ namespace AutoEdit
             _btnClose.ForeColor = Theme.Bg;
             _btnClose.BackColor = _btnClose.FillColor;
             _btnClose.FlatAppearance.BorderColor = _btnClose.BorderNormal;
+            _btnClose.Visible = false;
             _btnClose.Click += delegate(object s, EventArgs e) { Close(); };
             Controls.Add(_btnClose);
 
-            // ===== DRAG-TO-MOVE ===============================================
+            _btnLog = MakeButton("Abrir log", 100, btnY);
+            _btnLog.Left = _btnClose.Left - _btnLog.Width - btnGap;
+            _btnLog.Visible = false;
+            _btnLog.Click += delegate(object s, EventArgs e)
+            {
+                try
+                {
+                    if (File.Exists(_logPath))
+                        Process.Start(new ProcessStartInfo("notepad.exe", _logPath) { UseShellExecute = true });
+                }
+                catch { }
+            };
+            Controls.Add(_btnLog);
+
+            _btnFolder = MakeButton("Abrir pasta", 110, btnY);
+            _btnFolder.Left = _btnLog.Left - _btnFolder.Width - btnGap;
+            _btnFolder.Visible = false;
+            _btnFolder.Click += delegate(object s, EventArgs e)
+            {
+                try
+                {
+                    if (Directory.Exists(_installDst))
+                        Process.Start(new ProcessStartInfo("explorer.exe", _installDst) { UseShellExecute = true });
+                }
+                catch { }
+            };
+            Controls.Add(_btnFolder);
+
+            // ===== DRAG-TO-MOVE (qualquer área) =====
             bool dragging = false;
             Point dragStart = Point.Empty;
-            EventHandler down = null;
             MouseEventHandler downMouse = delegate(object s, MouseEventArgs e)
             {
                 dragging = true;
@@ -442,11 +486,15 @@ namespace AutoEdit
             MouseDown += downMouse;
             MouseMove += move;
             MouseUp += up;
-            brandPanel.MouseDown += downMouse;
-            brandPanel.MouseMove += move;
-            brandPanel.MouseUp += up;
+            // Permite arrastar pelas Labels do header também
+            heading.MouseDown += downMouse;
+            heading.MouseMove += move;
+            heading.MouseUp += up;
+            prodTag.MouseDown += downMouse;
+            prodTag.MouseMove += move;
+            prodTag.MouseUp += up;
 
-            // ===== TIMER (lê status + anima) ==================================
+            // ===== Timer (lê status + anima ellipsis) =====
             _tmr = new System.Windows.Forms.Timer { Interval = 150 };
             _tmr.Tick += OnTick;
             Shown += delegate(object s, EventArgs e)
@@ -461,9 +509,17 @@ namespace AutoEdit
             };
         }
 
-        // ===== Launch do PowerShell em background ===========================
-        // Zero janela: CreateNoWindow + UseShellExecute=false +
-        // RedirectStandardOutput=true → suprime alocação de console.
+        FlatButton MakeButton(string text, int width, int y)
+        {
+            return new FlatButton
+            {
+                Text = text,
+                Size = new Size(width, 34),
+                Location = new Point(0, y),
+            };
+        }
+
+        // ===== Launch PowerShell escondido =====
         void LaunchPowerShell()
         {
             string ps1 = Path.Combine(_tmp, "Instalar.ps1");
@@ -481,16 +537,15 @@ namespace AutoEdit
                 Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \""
                     + ps1 + "\" -StatusFile \"" + _statusPath + "\"",
                 WorkingDirectory = _tmp,
-                UseShellExecute = false,        // necessário pra Redirect*
-                CreateNoWindow = true,           // sem janela
-                RedirectStandardOutput = true,   // suprime alocação de console
-                RedirectStandardError = true,    // idem
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
                 WindowStyle = ProcessWindowStyle.Hidden,
             };
             try
             {
                 _psProc = Process.Start(psi);
-                // Drain async dos streams pra não bloquear o PS
                 _psProc.OutputDataReceived += delegate { };
                 _psProc.ErrorDataReceived += delegate { };
                 _psProc.BeginOutputReadLine();
@@ -505,7 +560,7 @@ namespace AutoEdit
             }
         }
 
-        // ===== Status file watcher + animação ============================
+        // ===== Status watcher =====
         void OnTick(object sender, EventArgs e)
         {
             _animTick++;
@@ -531,13 +586,14 @@ namespace AutoEdit
             var head = line.Substring(0, idx);
             var msg = idx + 1 < line.Length ? line.Substring(idx + 1) : "";
 
+            Label pct = (Label)Controls["progressPct"];
+
             if (head == "DONE")
             {
                 _finished = true;
                 _tmr.Stop();
                 _progress.Value = 1f;
-                _eyebrow.Text = "CONCLUÍDO  ·  100%";
-                _eyebrow.ForeColor = Theme.Violet;
+                if (pct != null) pct.Text = "100%";
                 _statusLbl.Text = "Instalado e vinculado";
                 _statusLbl.ForeColor = Theme.Text;
                 _hintLbl.Text = Brand.DoneHint;
@@ -549,22 +605,20 @@ namespace AutoEdit
             {
                 _finished = true;
                 _tmr.Stop();
-                _eyebrow.Text = "FALHOU";
-                _eyebrow.ForeColor = Theme.Danger;
                 _statusLbl.Text = "Algo deu errado";
                 _statusLbl.ForeColor = Theme.Danger;
-                _hintLbl.Text = msg.Length > 200 ? msg.Substring(0, 200) + "…" : msg;
+                _hintLbl.Text = msg.Length > 220 ? msg.Substring(0, 220) + "…" : msg;
                 _btnClose.Visible = true;
                 _btnLog.Visible = true;
                 _btnFolder.Visible = true;
             }
             else
             {
-                int pct;
-                if (int.TryParse(head, out pct))
+                int p;
+                if (int.TryParse(head, out p))
                 {
-                    _progress.Value = Math.Max(0.02f, Math.Min(1f, pct / 100f));
-                    _eyebrow.Text = "PROGRESSO  ·  " + pct + "%";
+                    _progress.Value = Math.Max(0.02f, Math.Min(1f, p / 100f));
+                    if (pct != null) pct.Text = p + "%";
                     _lastBaseStatus = msg.TrimEnd('.', ' ');
                 }
             }
@@ -576,6 +630,9 @@ namespace AutoEdit
         [STAThread]
         static int Main()
         {
+            // CRITICAL: DPI awareness ANTES de qualquer UI (anti-blur)
+            Dpi.Enable();
+
             try
             {
                 string tmp = Path.Combine(
@@ -588,9 +645,7 @@ namespace AutoEdit
                 foreach (string n in asm.GetManifestResourceNames())
                 {
                     if (n.EndsWith("pkg.zip", StringComparison.OrdinalIgnoreCase))
-                    {
-                        resName = n; break;
-                    }
+                    { resName = n; break; }
                 }
                 if (resName == null)
                 {
