@@ -236,18 +236,26 @@ namespace AutoEdit
             BuildUi();
         }
 
+        // Layout encadeado: cada controle ancora no Bottom do anterior + gap.
+        // Garante zero sobreposição em qualquer DPI/scaling — fonte cresce,
+        // labels crescem, próximos controles deslocam pra baixo automaticamente.
+        const int PAD_X = 40;
+        const int CONTENT_W = 540;  // 620 - 2*PAD_X = 540
+        const int FORM_W = 620;
+        const int FORM_H = 460;
+
         void BuildUi()
         {
             // ===== Form base =====
             Text = Brand.Heading + "  ·  " + Brand.Product;
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterScreen;
-            Size = new Size(620, 420);
+            Size = new Size(FORM_W, FORM_H);
             BackColor = Theme.Bg;
             ShowInTaskbar = true;
             DoubleBuffered = true;
-            Font = new Font("Segoe UI", 9f, FontStyle.Regular); // base font pra herdar
-            AutoScaleMode = AutoScaleMode.None;  // CRITICAL: sem autoscale = sem blur
+            Font = new Font("Segoe UI", 9f, FontStyle.Regular);
+            AutoScaleMode = AutoScaleMode.None;
 
             // Icon + Logo PNG embedded
             try
@@ -260,31 +268,38 @@ namespace AutoEdit
             }
             catch { }
 
-            // ===== TOP STRIPE (gradient violet→fuchsia) =====
-            var stripe = new Panel { Size = new Size(620, 3), Location = new Point(0, 0), BackColor = Color.Transparent };
+            // ===== TOP STRIPE 3px gradient (violet→fuchsia) =====
+            var stripe = new Panel { Size = new Size(FORM_W, 3), Location = new Point(0, 0), BackColor = Color.Transparent };
             stripe.Paint += delegate(object s, PaintEventArgs e)
             {
                 using (var gb = new LinearGradientBrush(
-                    new Rectangle(0, 0, 620, 3), Theme.Violet, Theme.Fuchsia,
+                    new Rectangle(0, 0, FORM_W, 3), Theme.Violet, Theme.Fuchsia,
                     LinearGradientMode.Horizontal))
-                    e.Graphics.FillRectangle(gb, 0, 0, 620, 3);
+                    e.Graphics.FillRectangle(gb, 0, 0, FORM_W, 3);
             };
             Controls.Add(stripe);
 
-            // ===== HEADER: Logo coelho 64x64 + Brand text =====
-            // Bem afastado das bordas, sem cortar
+            // ============================================================
+            // HEADER (logo + heading + product + eyebrow) — encadeado
+            // ============================================================
+            int yCursor = 36;  // padding top
+
+            // Logo coelho 72x72 (lado esquerdo, mantém posição fixa)
+            PaintedImage logoBox = null;
             if (_logoImg != null)
             {
-                var logoBox = new PaintedImage
+                logoBox = new PaintedImage
                 {
                     Image = _logoImg,
-                    Size = new Size(64, 64),
-                    Location = new Point(36, 32),
+                    Size = new Size(72, 72),
+                    Location = new Point(PAD_X, yCursor),
                 };
                 Controls.Add(logoBox);
             }
 
-            // BRAND HEADING ("Auto Edit") — AutoSize evita corte
+            int textX = PAD_X + 88;  // logo (72) + gap (16) = 88
+
+            // HEADING "Auto Edit" — AutoSize garante medida real DPI-aware
             var heading = new Label
             {
                 Text = Brand.Heading,
@@ -293,11 +308,11 @@ namespace AutoEdit
                 AutoSize = true,
                 BackColor = Color.Transparent,
                 UseCompatibleTextRendering = false,
-                Location = new Point(116, 32),
+                Location = new Point(textX, yCursor),
             };
-            Controls.Add(heading);
+            Controls.Add(heading);  // Add ANTES de ler Bottom — força layout
 
-            // PRODUCT TAG ("Downloader" ou "Smart Remover") — colorido violet
+            // PRODUCT tag — y baseado no Bottom REAL do heading
             var prodTag = new Label
             {
                 Text = Brand.Product,
@@ -306,11 +321,11 @@ namespace AutoEdit
                 AutoSize = true,
                 BackColor = Color.Transparent,
                 UseCompatibleTextRendering = false,
-                Location = new Point(116, 68),
+                Location = new Point(textX, heading.Bottom + 2),
             };
             Controls.Add(prodTag);
 
-            // EYEBROW pequeno abaixo
+            // EYEBROW small uppercase muted
             _eyebrow = new Label
             {
                 Text = Brand.Eyebrow,
@@ -319,20 +334,30 @@ namespace AutoEdit
                 AutoSize = true,
                 BackColor = Color.Transparent,
                 UseCompatibleTextRendering = false,
-                Location = new Point(118, 92),
+                Location = new Point(textX, prodTag.Bottom + 6),
             };
             Controls.Add(_eyebrow);
 
-            // ===== DIVIDER =====
+            // ============================================================
+            // DIVIDER — após o maior bottom (logo ou texto)
+            // ============================================================
+            int headerBottom = Math.Max(
+                logoBox != null ? logoBox.Bottom : 0,
+                _eyebrow.Bottom);
+            yCursor = headerBottom + 24;
+
             var divider = new Panel
             {
-                Size = new Size(548, 1),
-                Location = new Point(36, 130),
+                Size = new Size(CONTENT_W, 1),
+                Location = new Point(PAD_X, yCursor),
                 BackColor = Theme.Line,
             };
             Controls.Add(divider);
+            yCursor = divider.Bottom + 22;
 
-            // ===== PROGRESS LABEL (PROGRESSO · X%) =====
+            // ============================================================
+            // PROGRESS section (label + pct + status + hint + bar)
+            // ============================================================
             var progressTag = new Label
             {
                 Text = "PROGRESSO",
@@ -341,24 +366,27 @@ namespace AutoEdit
                 AutoSize = true,
                 BackColor = Color.Transparent,
                 UseCompatibleTextRendering = false,
-                Location = new Point(36, 148),
+                Location = new Point(PAD_X, yCursor),
             };
             Controls.Add(progressTag);
 
+            // Percentual à direita — alinhado pelo Right da content area
             var progressPct = new Label
             {
                 Name = "progressPct",
                 Text = "",
                 ForeColor = Theme.TextMuted,
-                Font = new Font("Consolas", 8f, FontStyle.Bold),
+                Font = new Font("Consolas", 9f, FontStyle.Bold),
                 AutoSize = true,
                 BackColor = Color.Transparent,
                 UseCompatibleTextRendering = false,
-                Location = new Point(548, 148),
+                Location = new Point(PAD_X + CONTENT_W - 40, yCursor),  // será reajustado quando texto preencher
+                TextAlign = ContentAlignment.MiddleRight,
             };
             Controls.Add(progressPct);
+            yCursor = progressTag.Bottom + 8;
 
-            // ===== STATUS (título dinâmico) — AutoSize + max width via Anchor =====
+            // STATUS title 17pt — height grande, dá 40px de bound
             _statusLbl = new Label
             {
                 Text = "Iniciando…",
@@ -366,66 +394,70 @@ namespace AutoEdit
                 Font = new Font("Segoe UI", 17f, FontStyle.Bold),
                 AutoSize = false,
                 AutoEllipsis = true,
-                Size = new Size(548, 32),
-                Location = new Point(36, 170),
+                Size = new Size(CONTENT_W, 36),
+                Location = new Point(PAD_X, yCursor),
                 BackColor = Color.Transparent,
                 UseCompatibleTextRendering = false,
                 TextAlign = ContentAlignment.MiddleLeft,
             };
             Controls.Add(_statusLbl);
+            yCursor = _statusLbl.Bottom + 8;
 
-            // ===== HINT (descrição secundária) — 2 linhas geralmente =====
+            // HINT 2-3 linhas — bound generoso
             _hintLbl = new Label
             {
                 Text = Brand.Hint,
                 ForeColor = Theme.TextMuted,
                 Font = new Font("Segoe UI", 9.5f, FontStyle.Regular),
                 AutoSize = false,
-                Size = new Size(548, 50),
-                Location = new Point(36, 212),
+                Size = new Size(CONTENT_W, 56),
+                Location = new Point(PAD_X, yCursor),
                 BackColor = Color.Transparent,
                 UseCompatibleTextRendering = false,
                 TextAlign = ContentAlignment.TopLeft,
             };
             Controls.Add(_hintLbl);
+            yCursor = _hintLbl.Bottom + 16;
 
-            // ===== PROGRESS BAR =====
+            // PROGRESS BAR
             _progress = new GlowProgress
             {
-                Size = new Size(548, 6),
-                Location = new Point(36, 280),
+                Size = new Size(CONTENT_W, 6),
+                Location = new Point(PAD_X, yCursor),
                 Value = 0.02f,
             };
             Controls.Add(_progress);
 
-            // ===== FOOTER DIVIDER =====
+            // ============================================================
+            // FOOTER fixo no fim da janela (não encadeado — ancora ao bottom)
+            // ============================================================
+            int footerY = FORM_H - 60;  // 60px do fim da janela
+
             var footerDivider = new Panel
             {
-                Size = new Size(548, 1),
-                Location = new Point(36, 340),
+                Size = new Size(CONTENT_W, 1),
+                Location = new Point(PAD_X, footerY - 18),
                 BackColor = Theme.Line,
             };
             Controls.Add(footerDivider);
 
-            // ===== FOOTER: version + buttons =====
             var version = new Label
             {
                 Text = "v3.0  ·  100% local",
                 ForeColor = Theme.TextDim,
-                Font = new Font("Consolas", 8.5f, FontStyle.Regular),
+                Font = new Font("Consolas", 9f, FontStyle.Regular),
                 AutoSize = true,
                 BackColor = Color.Transparent,
                 UseCompatibleTextRendering = false,
-                Location = new Point(36, 364),
+                Location = new Point(PAD_X, footerY + 4),
             };
             Controls.Add(version);
 
-            // Botões alinhados à direita — calc absoluto pra evitar overlap
-            int btnY = 358;
-            int btnRight = 36 + 548;
-            int btnGap = 8;
+            // Botões — direita, alinhados pelo bottom do form
+            int btnRight = PAD_X + CONTENT_W;
+            int btnGap = 10;
 
-            _btnClose = MakeButton("Fechar", 90, btnY);
+            _btnClose = MakeButton("Fechar", 96, footerY);
             _btnClose.Left = btnRight - _btnClose.Width;
             _btnClose.FillColor = Theme.Violet;
             _btnClose.FillHover = Theme.FuchsiaSoft;
@@ -438,7 +470,7 @@ namespace AutoEdit
             _btnClose.Click += delegate(object s, EventArgs e) { Close(); };
             Controls.Add(_btnClose);
 
-            _btnLog = MakeButton("Abrir log", 100, btnY);
+            _btnLog = MakeButton("Abrir log", 104, footerY);
             _btnLog.Left = _btnClose.Left - _btnLog.Width - btnGap;
             _btnLog.Visible = false;
             _btnLog.Click += delegate(object s, EventArgs e)
@@ -452,7 +484,7 @@ namespace AutoEdit
             };
             Controls.Add(_btnLog);
 
-            _btnFolder = MakeButton("Abrir pasta", 110, btnY);
+            _btnFolder = MakeButton("Abrir pasta", 116, footerY);
             _btnFolder.Left = _btnLog.Left - _btnFolder.Width - btnGap;
             _btnFolder.Visible = false;
             _btnFolder.Click += delegate(object s, EventArgs e)
@@ -465,6 +497,13 @@ namespace AutoEdit
                 catch { }
             };
             Controls.Add(_btnFolder);
+
+            // Re-alinha o progressPct à direita do progressTag (após ele renderizar)
+            progressPct.LocationChanged += delegate { };
+            HandleCreated += delegate
+            {
+                progressPct.Left = PAD_X + CONTENT_W - progressPct.PreferredSize.Width;
+            };
 
             // ===== DRAG-TO-MOVE (qualquer área) =====
             bool dragging = false;
@@ -588,12 +627,19 @@ namespace AutoEdit
 
             Label pct = (Label)Controls["progressPct"];
 
+            // Helper local pra re-alinhar o pct à direita após mudar texto
+            Action realignPct = delegate
+            {
+                if (pct != null)
+                    pct.Left = PAD_X + CONTENT_W - pct.PreferredSize.Width;
+            };
+
             if (head == "DONE")
             {
                 _finished = true;
                 _tmr.Stop();
                 _progress.Value = 1f;
-                if (pct != null) pct.Text = "100%";
+                if (pct != null) { pct.Text = "100%"; pct.ForeColor = Theme.Violet; realignPct(); }
                 _statusLbl.Text = "Instalado e vinculado";
                 _statusLbl.ForeColor = Theme.Text;
                 _hintLbl.Text = Brand.DoneHint;
@@ -605,6 +651,7 @@ namespace AutoEdit
             {
                 _finished = true;
                 _tmr.Stop();
+                if (pct != null) { pct.Text = "Erro"; pct.ForeColor = Theme.Danger; realignPct(); }
                 _statusLbl.Text = "Algo deu errado";
                 _statusLbl.ForeColor = Theme.Danger;
                 _hintLbl.Text = msg.Length > 220 ? msg.Substring(0, 220) + "…" : msg;
@@ -618,7 +665,7 @@ namespace AutoEdit
                 if (int.TryParse(head, out p))
                 {
                     _progress.Value = Math.Max(0.02f, Math.Min(1f, p / 100f));
-                    if (pct != null) pct.Text = p + "%";
+                    if (pct != null) { pct.Text = p + "%"; realignPct(); }
                     _lastBaseStatus = msg.TrimEnd('.', ' ');
                 }
             }
