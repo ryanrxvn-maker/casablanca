@@ -78,8 +78,9 @@ const ENTRIES: Entry[] = [
 
   // Atalhos
   { id: 'home', group: 'Atalhos', label: 'Início', hint: 'Hub principal', href: '/tools', icon: <IconSearch size={20} />, keywords: ['hub', 'home'] },
-  { id: 'pilot', group: 'Atalhos', label: 'ClickUp Pilot', hint: 'Conhecer o Pilot', href: '/pilot', icon: <IconClickUpPilot size={20} />, keywords: ['automação', 'clickup', 'avatar', 'briefing'] },
-  { id: 'pilot-tool', group: 'Atalhos', label: 'ClickUp Pilot — iniciar', hint: 'Disparar automação agora', href: '/tools/clickup-pilot', icon: <IconClickUpPilot size={20} />, keywords: ['automatizar', 'rodar'] },
+  // pilot-tool é renderizado como destaque (FEATURED) — não duplicar nos atalhos.
+  // Mantemos o id e as keywords aqui pra o scoring funcionar igual ao resto da app.
+  { id: 'pilot-tool', group: 'Atalhos', label: 'ClickUp Pilot', hint: 'Disparar automação agora', href: '/tools/clickup-pilot', icon: <IconClickUpPilot size={20} />, keywords: ['automatizar', 'rodar', 'automação', 'clickup', 'avatar', 'briefing', 'pilot'] },
   { id: 'background', group: 'Atalhos', label: 'Tarefas em segundo plano', hint: 'Acompanha jobs rodando', href: '/tools/background', icon: <IconStepGear size={20} />, keywords: ['bg', 'fila', 'job', 'running'] },
   { id: 'history', group: 'Atalhos', label: 'Histórico de avatares', hint: 'Lipsyncs anteriores', href: '/tools/lipsync-history', icon: <IconHeyGenAuto size={20} />, keywords: ['history', 'lipsync', 'avatar'] },
 
@@ -91,6 +92,66 @@ const ENTRIES: Entry[] = [
   // Conta
   { id: 'plans', group: 'Conta', label: 'Ver planos', hint: 'Free · Basic · Pro · Admin', href: '/planos', icon: <IconStepGear size={20} />, keywords: ['plan', 'upgrade', 'pro', 'basic'] },
 ];
+
+/**
+ * Destaques — sempre no topo da pesquisa em cards 3D premium.
+ *
+ *  ▸ ClickUp Pilot · HeyGen Auto · Auto B-roll são os 3 carros-chefe
+ *    do app. Quando o modal abre, eles aparecem em uma grid premium
+ *    acima da lista normal.
+ *  ▸ Cada um tem paleta própria (violeta, teal, ambar) — coerente
+ *    com a identidade dos ícones e da landing.
+ *  ▸ Quando o usuário digita, o destaque continua no topo SE bater
+ *    com a query; caso contrário some (mantém o foco do search).
+ */
+type FeaturedDef = {
+  id: string;
+  label: string;
+  hint: string;
+  href: string;
+  Icon: (p: { size?: number; strokeWidth?: number; className?: string }) => React.JSX.Element;
+  /** Cor primária — usada no gradient do ícone e da borda conic. */
+  primary: string;
+  /** Cor secundária — segunda parada do gradient. */
+  secondary: string;
+  /** RGB sem alfa, pra montar rgba() no glow/box-shadow dinâmico. */
+  glowRgb: string;
+};
+
+const FEATURED: FeaturedDef[] = [
+  {
+    id: 'pilot-tool',
+    label: 'ClickUp Pilot',
+    hint: 'Automação visual',
+    href: '/tools/clickup-pilot',
+    Icon: IconClickUpPilot,
+    primary: '#c084fc',
+    secondary: '#6d4ee8',
+    glowRgb: '167, 139, 250',
+  },
+  {
+    id: 'heygen-auto',
+    label: 'HeyGen Auto',
+    hint: 'Lipsync em lote',
+    href: '/tools/heygen-auto',
+    Icon: IconHeyGenAuto,
+    primary: '#5eead4',
+    secondary: '#06b6d4',
+    glowRgb: '45, 212, 191',
+  },
+  {
+    id: 'auto-broll',
+    label: 'Auto B-roll',
+    hint: 'Cortes no ritmo',
+    href: '/tools/auto-broll',
+    Icon: IconAutoBroll,
+    primary: '#f0abfc',
+    secondary: '#a78bfa',
+    glowRgb: '240, 171, 252',
+  },
+];
+
+const FEATURED_ID_SET = new Set(FEATURED.map((f) => f.id));
 
 /** Score 0-100. Quanto maior, mais relevante. 0 = não aparece. */
 function score(q: string, e: Entry): number {
@@ -421,19 +482,46 @@ function SearchModal({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
-  // Filtra + ordena por score
+  // Destaques sempre no topo. Sem query → todos. Com query → só os
+  // que batem (consistência com o resto da lista; evita ruído visual
+  // quando o usuário busca algo específico tipo "compressor").
+  const featuredVisible = useMemo(() => {
+    if (!q.trim()) return FEATURED;
+    return FEATURED.filter((f) => {
+      const e = ENTRIES.find((x) => x.id === f.id);
+      return e ? score(q, e) > 0 : false;
+    });
+  }, [q]);
+
+  // Resultados regulares — exclui IDs que já estão nos destaques
+  // pra não duplicar entre os cards 3D e a lista de baixo.
   const results = useMemo(() => {
-    const scored = ENTRIES.map((e) => ({ e, s: score(q, e) }))
+    const scored = ENTRIES
+      .filter((e) => !FEATURED_ID_SET.has(e.id))
+      .map((e) => ({ e, s: score(q, e) }))
       .filter((it) => it.s > 0)
       .sort((a, b) => b.s - a.s)
       .slice(0, 24);
     return scored.map((it) => it.e);
   }, [q]);
 
+  // Lista única pra keyboard nav: destaques primeiro, depois o resto.
+  // Ordem aqui = ordem visual → setActive(idx) corresponde 1:1.
+  type NavItem =
+    | { kind: 'featured'; def: FeaturedDef }
+    | { kind: 'regular'; entry: Entry };
+  const navList = useMemo<NavItem[]>(
+    () => [
+      ...featuredVisible.map((def) => ({ kind: 'featured' as const, def })),
+      ...results.map((entry) => ({ kind: 'regular' as const, entry })),
+    ],
+    [featuredVisible, results],
+  );
+
   // Reset highlight quando muda query
   useEffect(() => setActive(0), [q]);
 
-  // Agrupa por group, preservando ordem
+  // Agrupa regulares por group, preservando ordem
   const groups = useMemo(() => {
     const map = new Map<Entry['group'], Entry[]>();
     for (const r of results) {
@@ -445,9 +533,9 @@ function SearchModal({ onClose }: { onClose: () => void }) {
   }, [results]);
 
   const go = useCallback(
-    (e: Entry) => {
+    (href: string) => {
       onClose();
-      router.push(e.href);
+      router.push(href);
     },
     [onClose, router],
   );
@@ -458,14 +546,15 @@ function SearchModal({ onClose }: { onClose: () => void }) {
       onClose();
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setActive((v) => Math.min(results.length - 1, v + 1));
+      setActive((v) => Math.min(navList.length - 1, v + 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setActive((v) => Math.max(0, v - 1));
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      const sel = results[active];
-      if (sel) go(sel);
+      const sel = navList[active];
+      if (!sel) return;
+      go(sel.kind === 'featured' ? sel.def.href : sel.entry.href);
     }
   }
 
@@ -518,12 +607,47 @@ function SearchModal({ onClose }: { onClose: () => void }) {
 
         {/* Lista */}
         <div className="max-h-[60vh] overflow-y-auto p-2">
-          {results.length === 0 ? (
+          {navList.length === 0 ? (
             <div className="px-4 py-10 text-center text-sm text-text-muted">
               Nada encontrado pra <span className="text-white">“{q}”</span>.
             </div>
           ) : (
-            groups.map(([group, list]) => (
+            <>
+              {featuredVisible.length > 0 ? (
+                <div className="mb-3 px-1 pt-1">
+                  <div className="mb-2 flex items-center gap-2 px-2">
+                    <span
+                      className="featured-section-title"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      Destaques
+                    </span>
+                    <span aria-hidden className="featured-section-line" />
+                    <span
+                      aria-hidden
+                      className="featured-section-pulse"
+                      title="ferramentas estrela"
+                    />
+                  </div>
+                  <div className="featured-grid">
+                    {featuredVisible.map((def) => {
+                      const idx = runningIdx++;
+                      const isActive = idx === active;
+                      return (
+                        <FeaturedCard
+                          key={def.id}
+                          def={def}
+                          active={isActive}
+                          onFocusActive={() => setActive(idx)}
+                          onActivate={() => go(def.href)}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              {groups.map(([group, list]) => (
               <div key={group} className="mb-2">
                 <div
                   className="px-3 pb-1.5 pt-2 text-[10px] font-bold uppercase tracking-[0.22em] text-text-dim"
@@ -540,7 +664,7 @@ function SearchModal({ onClose }: { onClose: () => void }) {
                         <button
                           type="button"
                           onMouseEnter={() => setActive(idx)}
-                          onClick={() => go(e)}
+                          onClick={() => go(e.href)}
                           className={
                             'group flex w-full items-center gap-3 rounded-[12px] px-3 py-2.5 text-left transition ' +
                             (isActive
@@ -587,7 +711,8 @@ function SearchModal({ onClose }: { onClose: () => void }) {
                   })}
                 </ul>
               </div>
-            ))
+            ))}
+            </>
           )}
         </div>
 
@@ -605,7 +730,7 @@ function SearchModal({ onClose }: { onClose: () => void }) {
             <Kbd>esc</Kbd>
             <span>fechar</span>
           </div>
-          <span className="hidden md:inline">{results.length} resultados</span>
+          <span className="hidden md:inline">{navList.length} resultados</span>
         </div>
       </div>
 
@@ -617,6 +742,504 @@ function SearchModal({ onClose }: { onClose: () => void }) {
         @keyframes gs-pop-in {
           from { opacity: 0; transform: translateY(-12px) scale(0.97); }
           to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        /* Sem @property o browser não sabe interpolar a var como ângulo
+           — declarar permite a borda conic girar suave em vez de saltar. */
+        @property --fc-angle {
+          syntax: '<angle>';
+          inherits: false;
+          initial-value: 0deg;
+        }
+        /* Cabeçalho da seção Destaques + grid */
+        .featured-section-title {
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 0.22em;
+          text-transform: uppercase;
+          background: linear-gradient(
+            90deg,
+            #ffffff 0%,
+            rgba(255, 255, 255, 0.55) 100%
+          );
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+        }
+        .featured-section-line {
+          flex: 1;
+          height: 1px;
+          background: linear-gradient(
+            to right,
+            rgba(167, 139, 250, 0.55),
+            rgba(45, 212, 191, 0.4),
+            rgba(240, 171, 252, 0.32),
+            transparent
+          );
+        }
+        .featured-section-pulse {
+          width: 6px;
+          height: 6px;
+          border-radius: 9999px;
+          background: linear-gradient(135deg, #a78bfa, #5eead4);
+          box-shadow: 0 0 10px rgba(167, 139, 250, 0.8);
+          animation: featured-pulse 2.4s ease-in-out infinite;
+        }
+        @keyframes featured-pulse {
+          0%, 100% { transform: scale(1); opacity: 0.85; }
+          50%      { transform: scale(1.35); opacity: 1; }
+        }
+        /* Stack vertical full-width — cada destaque ganha o palco inteiro
+           pra ser realmente chamativo (vs grid compacto de 3 colunas). */
+        .featured-grid {
+          display: flex;
+          flex-direction: column;
+          gap: 9px;
+          padding: 0 2px;
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/**
+ * FeaturedCard — card 3D premium pros 3 destaques (Pilot/HeyGen/Auto B-roll).
+ *
+ *  ▸ Tilt 3D real conforme o mouse (rotateX/Y proporcional à posição).
+ *  ▸ Borda conic em gradient violeta→teal/ambar girando sempre, mais
+ *    rápida no hover (efeito "rim light" premium).
+ *  ▸ Spotlight radial seguindo o cursor (--gx/--gy CSS vars).
+ *  ▸ Sheen diagonal que varre no hover (mesmo padrão dos CTAs da landing).
+ *  ▸ Ambient glow colorido pulsando atrás (intensifica no hover/active).
+ *  ▸ Estrela cintilante no canto — assinatura "destaque".
+ *  ▸ Ícone elevado em translateZ no hover (saliência 3D real).
+ *  ▸ Active state quando teclado navega até ele.
+ */
+function FeaturedCard({
+  def,
+  active,
+  onFocusActive,
+  onActivate,
+}: {
+  def: FeaturedDef;
+  active: boolean;
+  onFocusActive: () => void;
+  onActivate: () => void;
+}) {
+  const Icon = def.Icon;
+
+  const handleMove = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    const el = e.currentTarget;
+    const rect = el.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width;
+    const py = (e.clientY - rect.top) / rect.height;
+    el.style.setProperty('--gx', `${(px * 100).toFixed(1)}%`);
+    el.style.setProperty('--gy', `${(py * 100).toFixed(1)}%`);
+    // Amplitude maior que o botão da TopBar pra dar peso 3D ao card.
+    const rotY = (px - 0.5) * 16;
+    const rotX = -(py - 0.5) * 12;
+    el.style.setProperty('--rx', `${rotX.toFixed(2)}deg`);
+    el.style.setProperty('--ry', `${rotY.toFixed(2)}deg`);
+  };
+
+  const handleLeave = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    e.currentTarget.style.setProperty('--rx', '0deg');
+    e.currentTarget.style.setProperty('--ry', '0deg');
+    e.currentTarget.style.setProperty('--gx', '50%');
+    e.currentTarget.style.setProperty('--gy', '50%');
+  };
+
+  return (
+    <div className="fc-perspective">
+      <button
+        type="button"
+        className={'fc-card' + (active ? ' is-active' : '')}
+        onClick={onActivate}
+        onMouseEnter={onFocusActive}
+        onMouseMove={handleMove}
+        onMouseLeave={handleLeave}
+        aria-label={`${def.label} — ${def.hint}`}
+        style={
+          {
+            '--fc-primary': def.primary,
+            '--fc-secondary': def.secondary,
+            '--fc-glow': def.glowRgb,
+          } as React.CSSProperties
+        }
+      >
+        {/* CAMADA 0 — ambient glow colorido pulsando atrás */}
+        <span aria-hidden className="fc-ambient" />
+        {/* CAMADA 1 — borda conic girando (rim light) */}
+        <span aria-hidden className="fc-conic" />
+        {/* CAMADA 2 — spotlight radial seguindo o cursor */}
+        <span aria-hidden className="fc-spotlight" />
+        {/* CAMADA 3 — textura grid sutil pra profundidade */}
+        <span aria-hidden className="fc-grid-tex" />
+        {/* CAMADA 4 — sheen diagonal no hover */}
+        <span aria-hidden className="fc-sheen" />
+
+        {/* ÍCONE — gradient pill grande à esquerda */}
+        <span className="fc-icon">
+          <Icon size={26} strokeWidth={1.7} />
+        </span>
+
+        {/* TEXTO — label + badge destaque + hint */}
+        <div className="fc-text">
+          <div className="fc-row">
+            <span className="fc-label" style={{ fontFamily: 'var(--font-tech)' }}>
+              {def.label}
+            </span>
+            <span
+              className="fc-badge"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              <span aria-hidden className="fc-badge-dot" />
+              Destaque
+            </span>
+          </div>
+          <div className="fc-hint">{def.hint}</div>
+        </div>
+
+        {/* SETA — indicador animado à direita */}
+        <span aria-hidden className="fc-arrow">→</span>
+      </button>
+
+      <style jsx>{`
+        .fc-perspective {
+          perspective: 1100px;
+          display: block;
+          width: 100%;
+        }
+
+        /* Card largão horizontal — ícone esq, texto centro, seta dir.
+           min-height generoso pra ter peso visual (vs lista compacta). */
+        .fc-card {
+          position: relative;
+          width: 100%;
+          min-height: 82px;
+          display: flex;
+          flex-direction: row;
+          align-items: center;
+          gap: 14px;
+          padding: 14px 16px 14px 14px;
+          border-radius: 16px;
+          border: 1px solid rgba(255, 255, 255, 0.09);
+          background:
+            linear-gradient(
+              122deg,
+              rgba(var(--fc-glow), 0.28) 0%,
+              rgba(var(--fc-glow), 0.08) 28%,
+              rgba(13, 13, 20, 0.82) 60%,
+              rgba(8, 8, 12, 0.92) 100%
+            );
+          overflow: hidden;
+          cursor: pointer;
+          isolation: isolate;
+          text-align: left;
+          color: #fff;
+          transform-style: preserve-3d;
+          transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg))
+            translateZ(0);
+          transition:
+            transform 340ms cubic-bezier(0.2, 0.9, 0.3, 1),
+            border-color 380ms ease,
+            box-shadow 420ms ease;
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.08),
+            inset 0 -1px 0 rgba(0, 0, 0, 0.55),
+            0 10px 28px -14px rgba(var(--fc-glow), 0.45),
+            0 1px 0 rgba(0, 0, 0, 0.6);
+        }
+
+        .fc-card:hover,
+        .fc-card.is-active {
+          border-color: rgba(var(--fc-glow), 0.6);
+          transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg))
+            translateZ(10px);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.16),
+            inset 0 -1px 0 rgba(0, 0, 0, 0.55),
+            0 26px 52px -14px rgba(var(--fc-glow), 0.65),
+            0 0 48px -8px rgba(var(--fc-glow), 0.55),
+            0 1px 0 rgba(0, 0, 0, 0.6);
+        }
+
+        .fc-card:focus-visible {
+          outline: none;
+          border-color: rgba(var(--fc-glow), 0.75);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.16),
+            0 0 0 2px rgba(var(--fc-glow), 0.45),
+            0 26px 52px -14px rgba(var(--fc-glow), 0.7),
+            0 0 48px -8px rgba(var(--fc-glow), 0.6);
+        }
+
+        .fc-card:active {
+          transform: rotateX(0deg) rotateY(0deg) scale(0.985);
+          transition-duration: 110ms;
+        }
+
+        /* CAMADA 0 — ambient glow pulsando */
+        .fc-ambient {
+          position: absolute;
+          inset: -18px;
+          z-index: -2;
+          border-radius: 24px;
+          background: radial-gradient(
+            55% 70% at 30% 25%,
+            rgba(var(--fc-glow), 0.42),
+            transparent 70%
+          );
+          opacity: 0.42;
+          filter: blur(14px);
+          transition: opacity 480ms ease;
+          animation: fc-ambient-pulse 4s ease-in-out infinite;
+          pointer-events: none;
+        }
+        .fc-card:hover .fc-ambient,
+        .fc-card.is-active .fc-ambient {
+          opacity: 1;
+        }
+        @keyframes fc-ambient-pulse {
+          0%, 100% { transform: scale(1); opacity: 0.4; }
+          50%      { transform: scale(1.08); opacity: 0.62; }
+        }
+
+        /* CAMADA 1 — conic border que gira sempre, mais rápida no hover */
+        .fc-conic {
+          position: absolute;
+          inset: 0;
+          border-radius: 16px;
+          padding: 1px;
+          background: conic-gradient(
+            from var(--fc-angle, 0deg),
+            transparent 0%,
+            var(--fc-primary, #a78bfa) 18%,
+            transparent 38%,
+            var(--fc-secondary, #c084fc) 62%,
+            transparent 90%
+          );
+          -webkit-mask:
+            linear-gradient(#000 0 0) content-box,
+            linear-gradient(#000 0 0);
+          -webkit-mask-composite: xor;
+          mask-composite: exclude;
+          opacity: 0.55;
+          transition: opacity 420ms ease;
+          animation: fc-conic-spin 6s linear infinite;
+          pointer-events: none;
+        }
+        .fc-card:hover .fc-conic,
+        .fc-card.is-active .fc-conic {
+          opacity: 1;
+          animation-duration: 2.4s;
+        }
+        @keyframes fc-conic-spin {
+          to { --fc-angle: 360deg; }
+        }
+
+        /* CAMADA 2 — spotlight radial seguindo cursor (maior pra card largão) */
+        .fc-spotlight {
+          position: absolute;
+          inset: 0;
+          border-radius: 16px;
+          background: radial-gradient(
+            240px circle at var(--gx, 50%) var(--gy, 50%),
+            rgba(255, 255, 255, 0.2),
+            transparent 60%
+          );
+          opacity: 0;
+          transition: opacity 320ms ease;
+          pointer-events: none;
+        }
+        .fc-card:hover .fc-spotlight {
+          opacity: 1;
+        }
+
+        /* CAMADA 3 — grid texture sutil (mais visível no topo) */
+        .fc-grid-tex {
+          position: absolute;
+          inset: 0;
+          border-radius: 16px;
+          background-image:
+            linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+            linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+          background-size: 18px 18px;
+          opacity: 0.5;
+          mask-image: radial-gradient(120% 95% at 25% 0%, #000 0%, transparent 65%);
+          -webkit-mask-image: radial-gradient(120% 95% at 25% 0%, #000 0%, transparent 65%);
+          pointer-events: none;
+        }
+
+        /* CAMADA 4 — sheen diagonal no hover */
+        .fc-sheen {
+          position: absolute;
+          inset: 0;
+          border-radius: 16px;
+          background: linear-gradient(
+            115deg,
+            transparent 30%,
+            rgba(255, 255, 255, 0.32) 50%,
+            transparent 70%
+          );
+          transform: translateX(-130%);
+          transition: transform 950ms cubic-bezier(0.2, 0.9, 0.3, 1);
+          pointer-events: none;
+        }
+        .fc-card:hover .fc-sheen {
+          transform: translateX(130%);
+        }
+
+        /* Ícone — gradient pill grande (48px) com elevação 3D real no hover.
+           Maior que o card antigo de grid 3-col pra puxar atenção em layout
+           full-width. shadow colorido vaza pra fora do card no hover. */
+        .fc-icon {
+          flex-shrink: 0;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 48px;
+          height: 48px;
+          border-radius: 14px;
+          background: linear-gradient(
+            135deg,
+            var(--fc-primary, #a78bfa),
+            var(--fc-secondary, #c084fc)
+          );
+          color: #0a0a0c;
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.45),
+            inset 0 -1px 0 rgba(0, 0, 0, 0.3),
+            0 14px 28px -8px rgba(var(--fc-glow), 0.7);
+          transition:
+            transform 360ms cubic-bezier(0.34, 1.56, 0.64, 1),
+            box-shadow 360ms ease;
+          position: relative;
+          z-index: 1;
+          transform: translateZ(0);
+        }
+        .fc-card:hover .fc-icon,
+        .fc-card.is-active .fc-icon {
+          transform: rotate(-6deg) scale(1.08) translateZ(18px);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.55),
+            inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+            0 22px 38px -8px rgba(var(--fc-glow), 0.85);
+        }
+
+        /* Bloco de texto — centro do card, ocupa o espaço sobrando */
+        .fc-text {
+          position: relative;
+          z-index: 1;
+          flex: 1;
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          gap: 4px;
+        }
+        .fc-row {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          min-width: 0;
+        }
+        .fc-label {
+          font-size: 15.5px;
+          font-weight: 800;
+          letter-spacing: -0.01em;
+          color: #fff;
+          line-height: 1.1;
+          text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          flex-shrink: 1;
+          min-width: 0;
+        }
+        .fc-hint {
+          font-size: 11.5px;
+          font-weight: 500;
+          color: rgba(255, 255, 255, 0.65);
+          letter-spacing: 0.005em;
+          line-height: 1.25;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        /* Badge DESTAQUE — chip pequeno colorido ao lado do label */
+        .fc-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          flex-shrink: 0;
+          padding: 2.5px 8px 2.5px 7px;
+          border-radius: 9999px;
+          font-size: 8.5px;
+          font-weight: 800;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+          color: #fff;
+          background: linear-gradient(
+            90deg,
+            rgba(var(--fc-glow), 0.32),
+            rgba(var(--fc-glow), 0.1)
+          );
+          border: 1px solid rgba(var(--fc-glow), 0.45);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.08),
+            0 4px 10px -4px rgba(var(--fc-glow), 0.45);
+          text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+        }
+        .fc-badge-dot {
+          width: 5px;
+          height: 5px;
+          border-radius: 9999px;
+          background: var(--fc-primary, #a78bfa);
+          box-shadow: 0 0 8px rgba(var(--fc-glow), 0.9);
+          animation: fc-badge-pulse 2s ease-in-out infinite;
+        }
+        @keyframes fc-badge-pulse {
+          0%, 100% { transform: scale(1); opacity: 0.85; }
+          50%      { transform: scale(1.4); opacity: 1; }
+        }
+
+        /* Seta — indicador no canto direito que desliza no hover */
+        .fc-arrow {
+          flex-shrink: 0;
+          position: relative;
+          z-index: 1;
+          font-size: 18px;
+          line-height: 1;
+          color: rgba(255, 255, 255, 0.32);
+          font-family: var(--font-mono, ui-monospace);
+          transition:
+            transform 360ms cubic-bezier(0.2, 0.9, 0.3, 1),
+            color 320ms ease,
+            text-shadow 320ms ease;
+          transform: translateZ(0);
+        }
+        .fc-card:hover .fc-arrow,
+        .fc-card.is-active .fc-arrow {
+          color: var(--fc-primary, #a78bfa);
+          transform: translateX(5px) translateZ(8px);
+          text-shadow: 0 0 14px rgba(var(--fc-glow), 0.85);
+        }
+
+        /* Responsivo — em telas estreitas o card encolhe mas mantém impacto */
+        @media (max-width: 520px) {
+          .fc-card { min-height: 74px; padding: 12px 13px 12px 12px; gap: 12px; }
+          .fc-icon { width: 42px; height: 42px; border-radius: 12px; }
+          .fc-label { font-size: 14px; }
+          .fc-hint { font-size: 11px; }
+          .fc-badge { display: none; }
+          .fc-arrow { font-size: 16px; }
+        }
+
+        /* Respeitar prefers-reduced-motion — sem giros nem pulse */
+        @media (prefers-reduced-motion: reduce) {
+          .fc-card { transition-duration: 0ms; }
+          .fc-conic, .fc-ambient, .fc-star { animation: none; }
         }
       `}</style>
     </div>
