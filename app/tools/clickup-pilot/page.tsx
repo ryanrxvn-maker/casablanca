@@ -55,7 +55,7 @@ import { IconClickUpPilot } from '@/components/ToolIcons';
 import { TierGate } from '@/components/TierGate';
 import { getPilotTeam, setPilotTeam, getPilotEditor, setPilotEditor } from '@/lib/clickup-pilot-config';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
-import { runMagnificPipeline, parseMagnificPrompts } from '@/lib/magnific-pipeline';
+import { parseMagnificPrompts } from '@/lib/magnific-pipeline';
 import { runMagnificPipelineV2 } from '@/lib/magnific-pipeline-v2';
 import { abortAllMagnific } from '@/lib/magnific-extension-bridge';
 import {
@@ -388,10 +388,6 @@ function ClickUpPilotInner() {
   /** More Magnific: alem do HeyGen normal, gera B-Rolls extras Magnific pra complementar.
    *  Adiciona pasta /broll/ no ZIP final com takes Kling 2.5. */
   const [moreMagnificMode, setMoreMagnificMode] = useToolState<boolean>('clickup-pilot:moreMagnific', false);
-  /** API DIRETA (v2): server-side via cookies Magnific. 10x mais rapido, sem
-   *  extension, sem aba aberta. Default OFF — user precisa configurar
-   *  /configuracoes/magnific primeiro. */
-  const [magnificApiV2, setMagnificApiV2] = useToolState<boolean>('clickup-pilot:magnificApiV2', false);
 
 
   /** JSON de B-rolls colado por task (caixa "+" inline). Persistido em
@@ -2329,11 +2325,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           });
           return;
         }
-        // V2: API direta server-side (10x mais rapido). V1: extension/Spaces.
-        const pipelineRunner = magnificApiV2
-          ? runMagnificPipelineV2
-          : runMagnificPipeline;
-        const res = await pipelineRunner(
+        // SEMPRE V2 — API direta server-side (10x mais rápido, sem extension).
+        const res = await runMagnificPipelineV2(
           { spaceName: job.adName, takes },
           {
             signal: ac.signal,
@@ -3776,30 +3769,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                     variant="cyan"
                     icon={<span className="text-base">➕</span>}
                   />
-                  <Toggle3D
-                    on={magnificApiV2}
-                    onChange={setMagnificApiV2}
-                    label="API Direta (v2)"
-                    hint="Server-side: 10x mais rapido, sem extension"
-                    variant="lime"
-                    icon={<span className="text-base">⚡</span>}
-                  />
                 </div>
-                {magnificApiV2 ? (
-                  <div className="mt-3 rounded-[12px] border border-lime/30 bg-lime/5 p-3 text-[11px] text-text-muted">
-                    <span className="font-semibold text-lime">API DIRETA ON.</span>{' '}
-                    Dispara via /api/auto-broll-v2/generate. Requer configurar
-                    cookies em{' '}
-                    <a
-                      href="/configuracoes/magnific"
-                      className="text-lime underline"
-                    >
-                      /configuracoes/magnific
-                    </a>
-                    . 12 imagens + 6 videos simultaneos. Sem extension, sem
-                    abrir Spaces.
-                  </div>
-                ) : null}
 
                 {/* Camuflagem inputs — so quando ON */}
                 {camuflagemMode ? (

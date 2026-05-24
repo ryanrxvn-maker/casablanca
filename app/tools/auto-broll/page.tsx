@@ -5,18 +5,56 @@ import { ToolShell } from '@/components/ToolShell';
 import { JobControlPanel } from '@/components/JobControlPanel';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { CancelButton } from '@/components/CancelButton';
-import {
-  detectMagnificExtension,
-  testMagnificSession,
-  type MagnificExtensionStatus,
-} from '@/lib/magnific-extension-bridge';
+/**
+ * V2 API direta — substituiu o bridge da extension.
+ * Mantém formato { connected, version? } pra preservar a UI existente.
+ */
+type MagnificExtensionStatus =
+  | { connected: true; version: string }
+  | { connected: false };
+
+async function detectMagnificExtension(): Promise<MagnificExtensionStatus> {
+  try {
+    const r = await fetch('/api/auto-broll-v2/save-creds', { method: 'GET' });
+    if (!r.ok) return { connected: false };
+    const j = (await r.json()) as {
+      configured: boolean;
+      magnificUserId: number | null;
+      plan: string | null;
+    };
+    if (!j.configured) return { connected: false };
+    return {
+      connected: true,
+      version: `${j.plan || 'Magnific'} · user ${j.magnificUserId}`,
+    };
+  } catch {
+    return { connected: false };
+  }
+}
+
+async function testMagnificSession(): Promise<{
+  ok: boolean;
+  detail?: string;
+  endpoint?: string;
+}> {
+  try {
+    const r = await fetch('/api/auto-broll-v2/save-creds', { method: 'GET' });
+    const j = (await r.json()) as { configured?: boolean; plan?: string };
+    if (r.ok && j.configured) {
+      return { ok: true, detail: `Conectado · ${j.plan || 'Magnific'}`, endpoint: 'api-v2' };
+    }
+    return { ok: false, detail: 'Cookies Magnific não configurados em /configuracoes/magnific.' };
+  } catch (e) {
+    return { ok: false, detail: (e as Error).message };
+  }
+}
 import {
   parseMagnificPrompts,
-  runMagnificPipeline,
   type MagnificTakeInput,
   type PipelineProgress,
   type TakeState,
 } from '@/lib/magnific-pipeline';
+import { runMagnificPipelineV2 } from '@/lib/magnific-pipeline-v2';
 import { ToolStep } from '@/components/tool-kit';
 import { IconStepPlug, IconStepSliders, IconStepPipeline } from '@/components/ToolIcons';
 import { IconAutoBroll } from '@/components/ToolIcons';
@@ -144,7 +182,9 @@ function AutoBrollInner() {
 
   async function runJob(job: Job) {
     if (!extStatus.connected) {
-      patchJob(job.id, { error: 'Extension Magnific não detectada.' });
+      patchJob(job.id, {
+        error: 'Magnific não conectado. Configure os cookies em /configuracoes/magnific.',
+      });
       return;
     }
     // Defesa anti-double-click: se já rodando OU se já existe AbortController
@@ -161,13 +201,13 @@ function AutoBrollInner() {
     abortRefs.current[job.id] = ac;
     patchJob(job.id, { status: 'running', error: null, zip: null, progress: null });
     try {
-      const r = await runMagnificPipeline(
+      // SEMPRE V2 — API direta Magnific server-side. Sem extension, sem aba aberta.
+      const r = await runMagnificPipelineV2(
         {
           spaceName: job.name.trim() || `DARKO_BROLLS_${job.id}`,
           takes,
           imageModel,
           videoModel: 'kling-25',
-          // SEM templateSpaceId / spaceId → cada job cria SEU PRÓPRIO space
         },
         {
           signal: ac.signal,
@@ -259,7 +299,7 @@ function AutoBrollInner() {
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
               </span>
               <span className="text-lime">
-                Extensão DARKO LAB Magnific v{extStatus.version}
+                Magnific conectado · {extStatus.version}
               </span>
               {sessionOk?.ok ? (
                 <span className="mono ml-2 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
@@ -286,35 +326,44 @@ function AutoBrollInner() {
               <span className="text-yellow-300">⚠</span>
               <div className="flex-1 text-xs text-yellow-300/90">
                 <strong className="text-yellow-300">
-                  Extensão DARKO LAB Magnific não instalada
+                  Magnific não conectado
                 </strong>
-                . Você precisa dela pra gerar B-Rolls (usa sua conta Magnific
-                Premium+ logada — NUNCA gasta créditos).
-                <details className="mt-2">
+                . A pipeline dispara server-side via API direta (12 imagens + 6
+                vídeos simultâneos, Unlimited mode, zero créditos).
+                <details className="mt-2" open>
                   <summary className="cursor-pointer text-yellow-300/80 hover:text-yellow-200 select-none">
-                    Como instalar (passo a passo)
+                    Como conectar (passo a passo)
                   </summary>
                   <ol className="mt-2 list-decimal space-y-1 pl-5 text-yellow-300/80">
                     <li>
-                      Baixa o pacote:{' '}
+                      Abre{' '}
                       <a
-                        href="/api/extension-magnific/download"
+                        href="https://www.magnific.com"
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="underline hover:text-lime"
-                        download
                       >
-                        darkolab-magnific-extension.zip
-                      </a>
+                        magnific.com
+                      </a>{' '}
+                      logado na sua conta Freepik Premium+
                     </li>
-                    <li>Descompacta numa pasta</li>
                     <li>
-                      Abre <code className="mono">chrome://extensions</code>
+                      F12 → Console → cola{' '}
+                      <code className="mono">document.cookie</code> → copia o
+                      resultado
                     </li>
-                    <li>Liga &quot;Modo de desenvolvedor&quot;</li>
-                    <li>&quot;Carregar sem compactação&quot; → seleciona a pasta</li>
                     <li>
-                      Login no <code className="mono">www.magnific.com</code> (Premium+)
+                      Abre{' '}
+                      <a
+                        href="/configuracoes/magnific"
+                        className="underline hover:text-lime"
+                      >
+                        /configuracoes/magnific
+                      </a>{' '}
+                      e cola no campo
                     </li>
-                    <li>Volta aqui — extensão auto-detecta</li>
+                    <li>O XSRF é extraído automático — clica &ldquo;Validar e Salvar&rdquo;</li>
+                    <li>Volta aqui — status auto-detecta</li>
                   </ol>
                 </details>
               </div>
