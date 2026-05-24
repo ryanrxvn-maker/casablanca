@@ -154,7 +154,6 @@ const AI: ToolEntry[] = [
     icon: <IconRemoverElementos size={26} />,
     hue: 'rgba(244, 114, 182, 0.42)',
     badge: 'IA',
-    adminOnly: true,
   },
   {
     href: '/tools/decupagem-copy',

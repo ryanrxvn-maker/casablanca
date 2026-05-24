@@ -3,7 +3,7 @@ import { createReadStream } from 'fs';
 import { stat } from 'fs/promises';
 import { Readable } from 'stream';
 import path from 'path';
-import { requireAdmin } from '@/app/api/admin/_helpers';
+import { requirePro } from '@/app/api/admin/_helpers';
 
 /**
  * GET /api/subtitle-remover-engine/installer
@@ -25,7 +25,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 30;
 
 export async function GET(req: NextRequest) {
-  const guard = await requireAdmin();
+  const guard = await requirePro();
   if (!guard.ok) return guard.response;
 
   const { searchParams } = new URL(req.url);

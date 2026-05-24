@@ -20,6 +20,56 @@ export function jsonError(message: string, status = 500, detail?: string) {
 }
 
 /**
+ * Garante que o caller é Pro OU Admin (tiers que pagam pelas
+ * ferramentas de IA pesada, como Smart Remover).
+ * Beta legado também é tratado como Pro.
+ */
+export async function requirePro(): Promise<
+  { ok: true; userId: string; isAdmin: boolean } | { ok: false; response: NextResponse }
+> {
+  try {
+    const supabase = createServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { ok: false, response: jsonError('Não autenticado.', 401) };
+    }
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('is_admin, is_active, tier')
+      .eq('id', user.id)
+      .maybeSingle();
+    if (error) {
+      return { ok: false, response: jsonError('Falha ao validar tier.', 500, error.message) };
+    }
+    if (!profile?.is_active) {
+      return { ok: false, response: jsonError('Conta inativa.', 403) };
+    }
+    const isAdmin = profile?.is_admin === true;
+    const rawTier = (profile as { tier?: string } | null)?.tier ?? '';
+    const isPro = rawTier === 'pro' || rawTier === 'beta';
+    if (!isAdmin && !isPro) {
+      return {
+        ok: false,
+        response: jsonError(
+          'Recurso disponível só pra contas Pro. Ver /planos.',
+          403,
+        ),
+      };
+    }
+    return { ok: true, userId: user.id, isAdmin };
+  } catch (e) {
+    return {
+      ok: false,
+      response: jsonError(
+        'Erro ao validar tier.',
+        500,
+        e instanceof Error ? e.message : String(e),
+      ),
+    };
+  }
+}
+
+/**
  * Garante que o caller eh admin autenticado. Retorna jsonError se nao for.
  * Caso seja, retorna o user_id do admin chamando.
  */

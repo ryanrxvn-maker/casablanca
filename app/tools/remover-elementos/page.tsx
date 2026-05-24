@@ -8,7 +8,7 @@ import { useToolState } from '@/components/ToolsStateProvider';
 import { downloadBlob } from '@/lib/audio-engine';
 import { buildZip } from '@/lib/zip-builder';
 import { formatBytes } from '@/lib/utils';
-import { createClient } from '@/lib/supabase/client';
+import { useTier, tierCanAutomate } from '@/lib/use-tier';
 import { IconRemoverElementos } from '@/components/ToolIcons';
 
 /**
@@ -103,37 +103,17 @@ function newJob(file: File): Job {
 }
 
 export default function RemoverElementosPage() {
-  // ---------- Admin gate (client-side) ----------
-  const [adminCheck, setAdminCheck] = useState<
-    'loading' | 'allowed' | 'denied'
-  >('loading');
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const supabase = createClient();
-        const { data: u } = await supabase.auth.getUser();
-        const uid = u.user?.id;
-        if (!uid) {
-          if (!cancelled) setAdminCheck('denied');
-          return;
-        }
-        const { data } = await supabase
-          .from('profiles')
-          .select('is_admin')
-          .eq('id', uid)
-          .maybeSingle();
-        if (cancelled) return;
-        setAdminCheck(data?.is_admin ? 'allowed' : 'denied');
-      } catch {
-        if (!cancelled) setAdminCheck('denied');
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // ---------- Tier gate (client-side) ----------
+  // Smart Remover é Pro+ (Pro/Admin liberam). Free/Basic não acessam.
+  // O middleware já bloqueia via PRO_ONLY_TOOLS — esse gate é só pra
+  // mostrar UI consistente caso o user chegue aqui de algum link.
+  const tier = useTier();
+  const adminCheck: 'loading' | 'allowed' | 'denied' =
+    tier === null
+      ? 'loading'
+      : tierCanAutomate(tier)  // admin OU pro
+        ? 'allowed'
+        : 'denied';
 
   // ---------- Server status (zero-config: sem token) ----------
   const [server, setServer] = useState<ServerStatus>({ state: 'checking' });
@@ -420,11 +400,42 @@ export default function RemoverElementosPage() {
   if (adminCheck === 'denied') {
     return (
       <ToolShell
-        title="Acesso restrito"
-        description="Esta ferramenta esta disponivel apenas para a conta admin."
+        title="Smart Remover"
+        eyebrow="VÍDEO COM IA"
+        description="Disponível só pra contas Pro."
+        hue="rgba(244,114,182,0.45)"
       >
-        <div className="rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-          Acesso negado.
+        <div className="flex flex-col items-start gap-4 rounded-[16px] border border-violet/30 bg-violet/5 p-6">
+          <div className="flex items-start gap-3">
+            <span className="mt-1 text-2xl">🔒</span>
+            <div>
+              <h3
+                className="text-[18px] font-bold tracking-tight text-white"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                Smart Remover é Pro
+              </h3>
+              <p className="mt-1 text-[13px] leading-relaxed text-text-muted">
+                Remove legenda hardcoded + marca d&apos;água usando IA local (PaddleOCR + LaMa neural inpainting). Roda no seu PC, sem custo por uso. Disponível só pra contas Pro.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href="/planos"
+              className="rounded-full border border-violet/60 bg-violet/15 px-4 py-2 text-[12px] font-bold uppercase tracking-[0.14em] text-violet-100 transition hover:bg-violet/25"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              Ver planos →
+            </a>
+            <a
+              href="https://wa.me/5531991262437"
+              className="rounded-full border border-line-strong bg-bg-soft/60 px-4 py-2 text-[12px] font-bold uppercase tracking-[0.14em] text-text-muted transition hover:border-lime hover:text-lime"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              Falar no WhatsApp
+            </a>
+          </div>
         </div>
       </ToolShell>
     );

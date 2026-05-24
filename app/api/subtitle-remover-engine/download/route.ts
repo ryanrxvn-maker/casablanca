@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { readFile, readdir } from 'fs/promises';
 import path from 'path';
 import { buildZip } from '@/lib/zip-builder';
-import { requireAdmin } from '@/app/api/admin/_helpers';
+import { requirePro } from '@/app/api/admin/_helpers';
 
 /**
  * GET /api/subtitle-remover-engine/download
@@ -13,16 +13,14 @@ import { requireAdmin } from '@/app/api/admin/_helpers';
  * O Instalar.ps1 baixa Python 3.11 embed + paddleocr + opencv +
  * ffmpeg NO PC do usuario na 1a vez (~400 MB, ~3-5 min).
  *
- * Admin-only enquanto a ferramenta nao for liberada pros alunos —
- * quando for, basta remover o requireAdmin().
+ * Liberada para tier Pro (e Admin). Free/Basic recebem 403.
  */
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 
 export async function GET() {
-  // Mantem a ferramenta restrita a admin no estado atual.
-  const guard = await requireAdmin();
+  const guard = await requirePro();
   if (!guard.ok) return guard.response;
 
   try {

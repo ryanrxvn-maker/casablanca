@@ -50,15 +50,15 @@ const PRO_ONLY_TOOLS = [
   '/tools/auto-broll',
   '/tools/troca-produto',
   '/tools/heygen-auto',
-  '/tools/decupagem-copy', // Smart Decup
+  '/tools/decupagem-copy',     // Smart Decup
   '/tools/clickup-pilot',
+  '/tools/remover-elementos',  // Smart Remover (legenda + marca d'água)
 ];
 
 // Rotas exclusivamente do admin (mesmo beta não acessa)
 const ADMIN_ONLY_PREFIXES = [
   '/admin',
   '/tools/ltx-video',
-  '/tools/remover-elementos',
   '/tools/points', // sistema de pontos é interno
 ];
 

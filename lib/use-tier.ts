@@ -18,9 +18,8 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/normalizador',
     '/tools/take-splitter',
     '/tools/calculadora',
-    '/tools/remover-elementos',
     '/tools/copy-srt',
-    // ⚠ NÃO inclui: auto-broll, troca-produto, heygen-auto, decupagem-copy (smart decup), ltx-video, clickup-pilot
+    // ⚠ NÃO inclui: auto-broll, troca-produto, heygen-auto, decupagem-copy (smart decup), remover-elementos (smart remover), ltx-video, clickup-pilot
   ]),
   pro: new Set([
     // pro = tudo
