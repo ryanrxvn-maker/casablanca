@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { createClient } from '@/lib/supabase/client';
@@ -118,6 +118,16 @@ export default function DownloaderPage() {
   const [running, setRunning] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adult, setAdult] = useState(false);
+  // Timestamp em que a sessão de download começou — usado pra cronometrar
+  // o tempo de resolução (sensação de "rápido pra iniciar")
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  // Tick a cada 1s pra forçar re-render do contador de segundos
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [running]);
 
   useEffect(() => {
     let alive = true;
@@ -264,7 +274,10 @@ export default function DownloaderPage() {
     }));
     setJobs(initial);
     setRunning(true);
-    const CONCURRENCY = 3;
+    setStartedAt(Date.now());
+    // Concorrência maior = inicia mais downloads em paralelo,
+    // reduz percepção de "esperar a vez"
+    const CONCURRENCY = 6;
     let next = 0;
     async function worker() {
       while (next < urls.length) {
@@ -512,15 +525,72 @@ export default function DownloaderPage() {
           </div>
         </ToolStep>
 
-        <ToolStep n={4} title={running ? 'Baixando…' : 'Baixar'} hue={HUE}>
+        <ToolStep
+          n={4}
+          title={(() => {
+            if (!running) return 'Baixar';
+            const doneCount = jobs.filter((j) => j.state === 'done').length;
+            const total = jobs.length;
+            if (doneCount === total) return `Concluído · ${total}/${total}`;
+            return `Baixando · ${doneCount}/${total}`;
+          })()}
+          hue={HUE}
+        >
           <ToolAction
             onClick={handleStart}
-            loading={running}
+            loading={false}
             disabled={urls.length === 0 || running}
           >
-            {urls.length > 1
-              ? `Baixar ${urls.length} arquivos`
-              : 'Baixar'}
+            {(() => {
+              // Estado padrão: botão de start
+              if (!running) {
+                return urls.length > 1
+                  ? `Baixar ${urls.length} arquivos`
+                  : 'Baixar';
+              }
+              // Em execução: calcula agregado de bytes ou estado
+              const active = jobs.filter(
+                (j) => j.state === 'resolving' || j.state === 'downloading',
+              );
+              const doneCount = jobs.filter((j) => j.state === 'done').length;
+              const total = jobs.length;
+              if (doneCount === total) return '✓ Concluído';
+
+              // Soma de bytes recebidos / total de TODOS os jobs com size conhecido
+              let receivedSum = 0;
+              let totalSum = 0;
+              let knownCount = 0;
+              for (const j of jobs) {
+                if (j.state === 'done' && j.progress) {
+                  // contabiliza o total final do job concluído
+                  if (j.progress.total) {
+                    totalSum += j.progress.total;
+                    receivedSum += j.progress.total;
+                    knownCount++;
+                  }
+                } else if (j.progress && j.progress.total) {
+                  totalSum += j.progress.total;
+                  receivedSum += j.progress.received;
+                  knownCount++;
+                }
+              }
+
+              // Se temos bytes conhecidos pra calcular %
+              if (knownCount > 0 && totalSum > 0) {
+                const pct = Math.min(
+                  100,
+                  Math.round((receivedSum / totalSum) * 100),
+                );
+                return `${pct}% baixado  ·  ${doneCount}/${total}`;
+              }
+
+              // Sem bytes ainda — mostra "Localizando…" com cronômetro
+              if (active.length > 0 && startedAt) {
+                const sec = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+                return `Localizando…  ${sec}s`;
+              }
+              return `Iniciando…  ${doneCount}/${total}`;
+            })()}
           </ToolAction>
 
           {jobs.length > 0 && (
