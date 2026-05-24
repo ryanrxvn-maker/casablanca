@@ -29,6 +29,8 @@ import { createClient } from '@/lib/supabase/server';
 import {
   generateImage,
   generateVideoFromImage,
+  assertZeroCreditCost,
+  createBatchPoller,
   type MagnificCreds,
 } from '@/lib/magnific-api-server';
 import { decryptSecret } from '@/lib/secrets';
@@ -136,9 +138,36 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // 🛡️ GUARD: confirma Unlimited mode + simula custo zero ANTES de disparar.
+  // Se algo gastaria créditos, ABORTA (412) antes de tocar quota.
+  try {
+    const guard = await assertZeroCreditCost(creds);
+    if (guard.status.usagePercent >= 100) {
+      return NextResponse.json(
+        {
+          error: `Quota Unlimited estourada (${guard.status.usagePercent}%). Throttle ativo — disparar pode falhar. Reset em ${guard.status.cycleResetDate || 'breve'}.`,
+        },
+        { status: 429 },
+      );
+    }
+  } catch (e) {
+    return NextResponse.json(
+      {
+        error:
+          'Guard anti-créditos REJEITOU disparo: ' +
+          (e instanceof Error ? e.message : String(e)),
+      },
+      { status: 402 },
+    );
+  }
+
   // 2 semáforos separados — respeita limites real do Magnific
   const imgSem = new Semaphore(imageConcurrency);
   const vidSem = new Semaphore(videoConcurrency);
+
+  // 1 poller batch compartilhado (1 GET /creations?ids[]=... pra TODOS os
+  // identifiers ativos por ciclo, em vez de 1 GET por creation).
+  const poller = createBatchPoller(creds);
 
   const results: TakeResult[] = takes.map((t, i) => ({
     idx: i + 1,
@@ -149,6 +178,7 @@ export async function POST(req: NextRequest) {
   // Dispara N takes em paralelo. Cada take faz image (sem semáforo de
   // pair, mas com semáforo image) → video (semáforo video). Image e video
   // de diferentes takes podem rodar simultâneos respeitando os limites.
+  try {
   await Promise.all(
     takes.map(async (take, i) => {
       const t0 = Date.now();
@@ -162,7 +192,7 @@ export async function POST(req: NextRequest) {
             aspectRatio: '9:16',
             resolution: '1k',
             smartPrompt: true,
-          });
+          }, poller);
           if (img.status !== 'completed' || !img.url) {
             results[i].error = `Image falhou: ${img.status}`;
             results[i].imageMs = Date.now() - t0;
@@ -185,7 +215,7 @@ export async function POST(req: NextRequest) {
             aspectRatio: '9:16',
             resolution: '720p',
             duration: 10,
-          });
+          }, poller);
           if (vid.status !== 'completed' || !vid.url) {
             results[i].error = `Video falhou: ${vid.status}`;
             results[i].videoMs = Date.now() - tVid;
@@ -201,6 +231,10 @@ export async function POST(req: NextRequest) {
       }
     }),
   );
+  } finally {
+    // Encerra o loop de batch polling
+    poller.stop();
+  }
 
   return NextResponse.json({
     total: takes.length,

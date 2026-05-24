@@ -97,6 +97,145 @@ async function magnificFetch(
   return fetch(url, { ...init, headers, body });
 }
 
+/* ───────────────────────── Anti-credit guards ───────────────────────── */
+
+export type UnlimitedStatus = {
+  /** Modo Unlimited ATIVO (custo zero pra modelos elegíveis). */
+  isEnabled: boolean;
+  /** % consumido do ciclo (0-100+). 100+ = throttle ativo. */
+  usagePercent: number;
+  /** Data de reset do ciclo (ISO yyyy-mm-dd). */
+  cycleResetDate?: string;
+  /** Banido por abuso. */
+  isBanned: boolean;
+};
+
+/**
+ * Confirma se a conta está em Unlimited mode (custo 0).
+ * Se desligado → disparar gastaria créditos reais → BLOQUEAR.
+ */
+export async function getUnlimitedStatus(
+  creds: MagnificCreds,
+): Promise<UnlimitedStatus> {
+  const r = await magnificFetch(creds, '/unlimited-status');
+  if (!r.ok) throw new Error(`unlimited-status falhou: ${r.status}`);
+  const j = (await r.json()) as {
+    is_unlimited_mode_enabled?: boolean;
+    is_banned?: boolean;
+    usage?: { percent?: number };
+    unlimited_cycle_reset_date?: string;
+  };
+  return {
+    isEnabled: !!j.is_unlimited_mode_enabled,
+    isBanned: !!j.is_banned,
+    usagePercent: j.usage?.percent ?? 0,
+    cycleResetDate: j.unlimited_cycle_reset_date,
+  };
+}
+
+export type SimulateItem = {
+  model: string;
+  quantity: number;
+  config: Record<string, unknown>;
+};
+
+export type SimulateResult = {
+  /** Créditos que SERIAM cobrados. 0 = zero cobrança garantida. */
+  totalCredits: number;
+  /** Todos items elegíveis pra Unlimited. */
+  hasUnlimited: boolean;
+  /** Créditos restantes na conta. */
+  remaining: number;
+  /** Custo real em compute (info, não cobrado se hasUnlimited). */
+  realCost: number;
+  /** Per-item: cada um é Unlimited? */
+  itemsUnlimited: boolean[];
+};
+
+/**
+ * Simula custo ANTES de disparar de verdade. Se vai cobrar créditos,
+ * aborta o pipeline — o user exige zero cobrança.
+ */
+export async function simulateGeneration(
+  creds: MagnificCreds,
+  items: SimulateItem[],
+): Promise<SimulateResult> {
+  const r = await magnificFetch(creds, '/v2/ai/simulate-generation', {
+    method: 'POST',
+    jsonBody: { items, forceCredits: false },
+  });
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    throw new Error(`simulate-generation falhou (${r.status}): ${txt.slice(0, 300)}`);
+  }
+  const j = (await r.json()) as {
+    items: Array<{ isUnlimited: boolean }>;
+    total: {
+      credits: number;
+      hasUnlimited: boolean;
+      remaining: number;
+      realCost?: number;
+    };
+  };
+  return {
+    totalCredits: j.total.credits ?? 0,
+    hasUnlimited: !!j.total.hasUnlimited,
+    remaining: j.total.remaining ?? 0,
+    realCost: j.total.realCost ?? 0,
+    itemsUnlimited: j.items.map((i) => !!i.isUnlimited),
+  };
+}
+
+/**
+ * Guard combinado: confirma Unlimited ON + simula custo zero pros 2 modelos.
+ * Se alguma checagem falhar, joga erro descritivo (rota deve retornar 402).
+ */
+export async function assertZeroCreditCost(creds: MagnificCreds): Promise<{
+  status: UnlimitedStatus;
+  image: SimulateResult;
+  video: SimulateResult;
+}> {
+  const status = await getUnlimitedStatus(creds);
+  if (status.isBanned) {
+    throw new Error('Conta Magnific BANIDA.');
+  }
+  if (!status.isEnabled) {
+    throw new Error('Unlimited mode DESLIGADO no Magnific — disparar agora cobraria créditos.');
+  }
+  const [image, video] = await Promise.all([
+    simulateGeneration(creds, [
+      {
+        model: 'imagen-nano-banana-2-flash',
+        quantity: 1,
+        config: { resolution: '1k', variant: 'standard', tier: 'mid' },
+      },
+    ]),
+    simulateGeneration(creds, [
+      {
+        model: 'kling-25',
+        quantity: 1,
+        config: {
+          resolution: '720p',
+          variant: 'standard',
+          tier: 'mid',
+          duration: 10,
+        },
+      },
+    ]),
+  ]);
+  if (image.totalCredits > 0 || !image.hasUnlimited) {
+    throw new Error(
+      `Nano Banana NÃO está em Unlimited (cobraria ${image.totalCredits} créditos).`,
+    );
+  }
+  if (video.totalCredits > 0 || !video.hasUnlimited) {
+    throw new Error(
+      `Kling 2.5 NÃO está em Unlimited (cobraria ${video.totalCredits} créditos).`,
+    );
+  }
+  return { status, image, video };
+}
+
 /* ───────────────────────── Auth verify ───────────────────────── */
 
 /** Confirma que as credenciais funcionam. Retorna { userId, plan, credits }. */
@@ -129,6 +268,7 @@ export async function verifyCredentials(creds: MagnificCreds): Promise<{
 export async function generateImage(
   creds: MagnificCreds,
   input: ImageGenInput,
+  sharedPoller?: BatchPoller,
 ): Promise<CreationResult> {
   const model = input.model || DEFAULT_IMAGE_MODEL;
   const aspectRatio = input.aspectRatio || '9:16';
@@ -203,7 +343,10 @@ export async function generateImage(
   const creation = rendered.creation;
   if (!creation?.identifier) throw new Error('render/v4 image: sem creation.identifier');
 
-  // 3) Poll until complete
+  // 3) Poll — usa poller compartilhado se fornecido (batch dedup)
+  if (sharedPoller) {
+    return sharedPoller.poll(creation.identifier, POLL_TIMEOUT_IMG_MS);
+  }
   return pollCreation(creds, creation.identifier, POLL_TIMEOUT_IMG_MS);
 }
 
@@ -219,6 +362,7 @@ export async function generateImage(
 export async function generateVideoFromImage(
   creds: MagnificCreds,
   input: VideoGenInput,
+  sharedPoller?: BatchPoller,
 ): Promise<CreationResult> {
   const model = input.model || DEFAULT_VIDEO_MODEL;
   const aspectRatio = input.aspectRatio || '9:16';
@@ -287,62 +431,173 @@ export async function generateVideoFromImage(
     throw new Error('generate video: sem creation.identifier no response');
   }
 
+  if (sharedPoller) {
+    return sharedPoller.poll(creation.identifier, POLL_TIMEOUT_VID_MS);
+  }
   return pollCreation(creds, creation.identifier, POLL_TIMEOUT_VID_MS);
 }
 
-/* ───────────────────────── Polling ───────────────────────── */
+/* ───────────────────────── Polling (batch) ───────────────────────── */
 
+/**
+ * Faz 1 GET pra TODOS os identifiers de uma vez.
+ * Endpoint: GET /app/api/creations?ids[]=A&ids[]=B&limit=N
+ * Resposta: { data: [...creations] }
+ *
+ * IDs não encontrados são silenciosamente omitidos (não dão erro).
+ */
+export async function pollCreationsBatch(
+  creds: MagnificCreds,
+  identifiers: string[],
+): Promise<Map<string, CreationResult>> {
+  const map = new Map<string, CreationResult>();
+  if (identifiers.length === 0) return map;
+  const qs =
+    identifiers.map((id) => `ids[]=${encodeURIComponent(id)}`).join('&') +
+    `&limit=${identifiers.length}`;
+  const r = await magnificFetch(creds, `/creations?${qs}`);
+  if (!r.ok) {
+    throw new Error(`Batch polling falhou (${r.status})`);
+  }
+  const j = (await r.json()) as {
+    data?: Array<{
+      id: number;
+      identifier: string;
+      family: string;
+      status: string;
+      url?: string;
+      metadata?: Record<string, unknown>;
+    }>;
+  };
+  for (const c of j.data || []) {
+    const status: CreationResult['status'] =
+      c.status === 'completed' || c.status === 'failed' ? c.status : 'pending';
+    map.set(c.identifier, {
+      id: c.id,
+      identifier: c.identifier,
+      family: c.family,
+      status,
+      url: c.url,
+      metadata: c.metadata,
+    });
+  }
+  return map;
+}
+
+/**
+ * Poller centralizado: 1 loop, 1 request HTTP/ciclo, distribui resultados
+ * pra todos identifiers inscritos via Promises.
+ *
+ * Uso:
+ *   const poller = createBatchPoller(creds);
+ *   const result = await poller.poll(identifier, timeoutMs); // dezenas em paralelo OK
+ *   poller.stop();
+ */
+export type BatchPoller = {
+  poll(identifier: string, timeoutMs: number): Promise<CreationResult>;
+  stop(): void;
+  activeCount(): number;
+};
+
+export function createBatchPoller(creds: MagnificCreds): BatchPoller {
+  type Sub = {
+    identifier: string;
+    deadline: number;
+    resolve: (r: CreationResult) => void;
+    reject: (e: Error) => void;
+  };
+  const subs = new Map<string, Sub>();
+  let loopTimer: ReturnType<typeof setInterval> | null = null;
+  let stopped = false;
+
+  async function tick() {
+    if (stopped) return;
+    const now = Date.now();
+    // Expira subscriptions que estouraram timeout
+    for (const [id, sub] of subs) {
+      if (now > sub.deadline) {
+        subs.delete(id);
+        sub.reject(new Error(`Polling timeout pra ${id}`));
+      }
+    }
+    if (subs.size === 0) return;
+    const ids = Array.from(subs.keys());
+    let map: Map<string, CreationResult>;
+    try {
+      map = await pollCreationsBatch(creds, ids);
+    } catch (e) {
+      // Network blip — só loga, mantém subs vivas
+      console.warn('[magnific-batch-poll] tick falhou:', e);
+      return;
+    }
+    for (const [id, sub] of subs) {
+      const result = map.get(id);
+      if (!result) continue; // ainda não apareceu (race após render)
+      if (result.status === 'completed' && result.url) {
+        subs.delete(id);
+        sub.resolve(result);
+      } else if (result.status === 'failed') {
+        subs.delete(id);
+        sub.resolve(result); // não throw — let caller decide
+      }
+      // pending → continua aguardando próximo tick
+    }
+  }
+
+  function ensureLoop() {
+    if (loopTimer || stopped) return;
+    loopTimer = setInterval(() => {
+      void tick();
+    }, POLL_INTERVAL_MS);
+    // Primeiro tick rápido (não espera 2s)
+    setTimeout(() => void tick(), 100);
+  }
+
+  return {
+    poll(identifier, timeoutMs) {
+      if (stopped) return Promise.reject(new Error('Poller parado.'));
+      return new Promise<CreationResult>((resolve, reject) => {
+        subs.set(identifier, {
+          identifier,
+          deadline: Date.now() + timeoutMs,
+          resolve,
+          reject,
+        });
+        ensureLoop();
+      });
+    },
+    stop() {
+      stopped = true;
+      if (loopTimer) {
+        clearInterval(loopTimer);
+        loopTimer = null;
+      }
+      for (const [id, sub] of subs) {
+        sub.reject(new Error(`Poller parado antes de ${id} completar.`));
+      }
+      subs.clear();
+    },
+    activeCount() {
+      return subs.size;
+    },
+  };
+}
+
+/**
+ * Compatibilidade: poll single creation usando batch internamente.
+ * Mantém API anterior pra chamadas pontuais (1 creation só).
+ */
 async function pollCreation(
   creds: MagnificCreds,
   identifier: string,
   timeoutMs: number,
 ): Promise<CreationResult> {
-  const deadline = Date.now() + timeoutMs;
-  let lastStatus: string | undefined;
-  while (Date.now() < deadline) {
-    const r = await magnificFetch(creds, `/creation/${identifier}`);
-    if (!r.ok) {
-      // 404 pode acontecer logo após render (race) — retry
-      if (r.status === 404) {
-        await sleep(POLL_INTERVAL_MS);
-        continue;
-      }
-      throw new Error(`Polling creation falhou (${r.status})`);
-    }
-    const j = (await r.json()) as {
-      id: number;
-      identifier: string;
-      family: string;
-      tool: string;
-      status: string;
-      url?: string;
-      metadata?: Record<string, unknown>;
-    };
-    lastStatus = j.status;
-    if (j.status === 'completed' && j.url) {
-      return {
-        id: j.id,
-        identifier: j.identifier,
-        family: j.family,
-        status: 'completed',
-        url: j.url,
-        metadata: j.metadata,
-      };
-    }
-    if (j.status === 'failed') {
-      return {
-        id: j.id,
-        identifier: j.identifier,
-        family: j.family,
-        status: 'failed',
-        metadata: j.metadata,
-      };
-    }
-    await sleep(POLL_INTERVAL_MS);
+  const poller = createBatchPoller(creds);
+  try {
+    return await poller.poll(identifier, timeoutMs);
+  } finally {
+    poller.stop();
   }
-  throw new Error(
-    `Polling timeout (${timeoutMs / 1000}s) — última status: ${lastStatus || 'desconhecido'}`,
-  );
 }
 
 /* ───────────────────────── Pipeline completo (image + video) ───────────────────────── */

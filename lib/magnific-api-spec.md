@@ -213,6 +213,70 @@ Response: array de 127 modelos. Cada um tem:
 - slug, tool, status, defaults, inputs, outputs, metadata
 ```
 
+## Batch Polling — `GET /creations?ids[]=...`
+
+**ÓTIMO** — 1 request retorna status de TODOS os identifiers ativos.
+Reduz polling de N requests/ciclo pra 1.
+
+```
+GET /app/api/creations?ids[]=A&ids[]=B&limit=N&lang=en_US&user_id={uid}
+
+Response: 200
+{
+  "data": [
+    {
+      "id": 3037776397,
+      "identifier": "hEZ77FuvqL",
+      "family": "bd55ee92-...",
+      "tool": "video-generator",
+      "status": "completed",      // ou "pending", "failed"
+      "url": "https://pikaso.cdnpk.net/.../render.mp4?token=...",
+      "metadata": {
+        "api": "kling", "mode": "25", "slug": "kling-25",
+        "resolution": "720p", "duration": 10, "fps": 24,
+        "width": 1300, "height": 708,
+        "status": "completed", "expectTime": 17,
+        "prompt": "...", "keyframes": {...}
+      },
+      "preview": "...", "large_preview": "...",
+      "created_at": "...", "is_watermarked": false
+    }
+  ]
+}
+```
+
+IDs não encontrados são SILENCIOSAMENTE omitidos (não dão 404).
+Implementado em `lib/magnific-api-server.ts:createBatchPoller()`.
+
+## Anti-Credit Guards
+
+**Antes de disparar** (route auto-broll-v2/generate chama `assertZeroCreditCost()`):
+
+### GET /unlimited-status
+```
+Response:
+{
+  "is_banned": false,
+  "is_relaxed_mode": false,
+  "is_unlimited_mode_enabled": true,    // ← se false: ABORTA
+  "unlimited_cycle_reset_date": "2026-06-13",
+  "usage": {"metric": "cost", "percent": 87}   // ← >= 100: throttle ativo
+}
+```
+
+### POST /v2/ai/simulate-generation
+```
+Body: {"items":[{"model":"kling-25","quantity":1,"config":{"resolution":"720p","tier":"mid","duration":10}}], "forceCredits":false}
+
+Response:
+{
+  "items": [{"isUnlimited": true, "costPerImage": 28, ...}],
+  "total": {"credits": 0, "hasUnlimited": true, "remaining": 413, "realCost": 28}
+}
+```
+
+`total.credits > 0` OU `total.hasUnlimited: false` → ABORTA disparo (rota retorna 402).
+
 ## Wallet / Limits
 ```
 GET /app/api/wallet?wallet_id={uid}&lang=en_US&user_id={uid}
