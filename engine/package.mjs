@@ -153,25 +153,32 @@ async function main() {
   rmSync(exeOut, { force: true });
   const signScript = path.join(here, 'installer', 'sign-exe.ps1');
 
-  // Anti-AV strategy:
-  //   /target:EXE     → console application (janela visível, sem hide flags)
-  //   AssemblyInfo.cs → metadata (CompanyName/Description/Version) que o
-  //                     Defender lê pra calcular o trust score
+  // Anti-AV strategy (mesma estratégia anterior, agora com WinForms UI):
+  //   /target:winexe  → Windows GUI app (sem console). Padrão clássico
+  //                     de Windows installer — Defender entende bem.
+  //                     CMD escondido SÓ via target:winexe NÃO levanta
+  //                     heurística (é o padrão de qualquer GUI app).
+  //   AssemblyInfo.cs → metadata (CompanyName/Description/Version)
   //   /win32manifest  → manifest XML com asInvoker + supportedOS Win10
-  //   SEM /optimize+  → optimize+ ofusca código (gatilho de heurística)
+  //   SEM /optimize+  → optimize ofusca código (gatilho de heurística)
   //   SEM packer/UPX  → packers são THE classic malware sign
-  //   /resource:zip   → recurso embutido, lido pelo Setup.cs por nome
+  //   /resource:zip   → pkg.zip embed (Setup.cs extrai por nome)
+  //   /resource:ico   → coelho embed (usado como Icon do Form)
+  //   POST-BUILD      → sign-exe.ps1 assina com self-signed cert
   const manifestPath = path.join(here, 'installer', 'AutoEditDownloaderSetup.manifest');
   execFileSync(
     csc,
     [
       '/nologo',
-      '/target:exe',         // console app — janela visível
+      '/target:winexe',      // Windows app (sem console)
       '/platform:anycpu',
       `/win32icon:${icoPath}`,
       `/win32manifest:${manifestPath}`,
       `/resource:${zipOut},AutoEdit.pkg.zip`,
+      `/resource:${icoPath},AutoEdit.icon.ico`,
       '/reference:System.dll',
+      '/reference:System.Drawing.dll',
+      '/reference:System.Windows.Forms.dll',
       '/reference:System.IO.Compression.dll',
       '/reference:System.IO.Compression.FileSystem.dll',
       `/out:${exeOut}`,
@@ -211,6 +218,10 @@ async function main() {
 // ===============================================================
 const INSTALAR_PS1 = `
 # Auto Edit Downloader - Instalador
+# Quando chamado pelo Setup.exe (WinForms UI), recebe -StatusFile que
+# escrevemos no formato "PCT|MSG" pra UI ler e mostrar progresso.
+param([string]$StatusFile)
+
 $ErrorActionPreference = 'Continue'
 $ProgressPreference    = 'Continue'
 
@@ -225,8 +236,20 @@ function Log {
   Write-Host $line
   try { Add-Content -LiteralPath $log -Value $line -Encoding UTF8 } catch {}
 }
-function Step { param([int]$pct, [string]$msg); Log ("[{0,3}%] {1}" -f $pct, $msg) }
-function Fail { param([string]$msg, [int]$code = 1); Log ("ERRO: {0}" -f $msg); exit $code }
+function WriteStatus { param([string]$head, [string]$msg)
+  if ($StatusFile) {
+    try { Set-Content -LiteralPath $StatusFile -Value ("$head|$msg") -Encoding UTF8 } catch {}
+  }
+}
+function Step { param([int]$pct, [string]$msg)
+  Log ("[{0,3}%] {1}" -f $pct, $msg)
+  WriteStatus $pct $msg
+}
+function Fail { param([string]$msg, [int]$code = 1)
+  Log ("ERRO: {0}" -f $msg)
+  WriteStatus 'ERR' $msg
+  exit $code
+}
 trap { Fail $_.Exception.Message 99 }
 
 Log '======================================================'
@@ -345,8 +368,9 @@ for ($i = 0; $i -lt 60; $i++) {
 }
 
 if ($alive) {
-  Step 100 'Motor online. Instalacao concluida.'
+  Step 100 'Motor online'
   Log 'PRONTO. A extensao Auto Edit Downloader ja deve detectar o motor.'
+  WriteStatus 'DONE' 'ok'
   exit 0
 } else {
   Fail ('Motor instalado mas nao iniciou. Veja: ' + (Join-Path $dst 'engine.log')) 70

@@ -1,4 +1,8 @@
 # Auto Edit Downloader - Instalador
+# Quando chamado pelo Setup.exe (WinForms UI), recebe -StatusFile que
+# escrevemos no formato "PCT|MSG" pra UI ler e mostrar progresso.
+param([string]$StatusFile)
+
 $ErrorActionPreference = 'Continue'
 $ProgressPreference    = 'Continue'
 
@@ -13,8 +17,20 @@ function Log {
   Write-Host $line
   try { Add-Content -LiteralPath $log -Value $line -Encoding UTF8 } catch {}
 }
-function Step { param([int]$pct, [string]$msg); Log ("[{0,3}%] {1}" -f $pct, $msg) }
-function Fail { param([string]$msg, [int]$code = 1); Log ("ERRO: {0}" -f $msg); exit $code }
+function WriteStatus { param([string]$head, [string]$msg)
+  if ($StatusFile) {
+    try { Set-Content -LiteralPath $StatusFile -Value ("$head|$msg") -Encoding UTF8 } catch {}
+  }
+}
+function Step { param([int]$pct, [string]$msg)
+  Log ("[{0,3}%] {1}" -f $pct, $msg)
+  WriteStatus $pct $msg
+}
+function Fail { param([string]$msg, [int]$code = 1)
+  Log ("ERRO: {0}" -f $msg)
+  WriteStatus 'ERR' $msg
+  exit $code
+}
 trap { Fail $_.Exception.Message 99 }
 
 Log '======================================================'
@@ -133,8 +149,9 @@ for ($i = 0; $i -lt 60; $i++) {
 }
 
 if ($alive) {
-  Step 100 'Motor online. Instalacao concluida.'
+  Step 100 'Motor online'
   Log 'PRONTO. A extensao Auto Edit Downloader ja deve detectar o motor.'
+  WriteStatus 'DONE' 'ok'
   exit 0
 } else {
   Fail ('Motor instalado mas nao iniciou. Veja: ' + (Join-Path $dst 'engine.log')) 70

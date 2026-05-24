@@ -376,13 +376,13 @@ export default function DownloaderPage() {
                 </summary>
                 <ol className="mono mt-3 list-decimal space-y-2 pl-5 text-[11px] leading-relaxed text-text-muted">
                   <li>
-                    Duplo-clique no <code className="mono text-white">AutoEditDownloaderSetup.exe</code>. A janela do prompt abre VISÍVEL mostrando o progresso (1-3 min na 1ª vez).
+                    Duplo-clique no <code className="mono text-white">AutoEditDownloaderSetup.exe</code>. Abre a janela Auto Edit (preta com accent lime, igual ao site) mostrando o progresso. <span className="text-lime">Sem CMD piscando.</span>
                   </li>
                   <li>
                     Se o SmartScreen avisar: <i>&quot;Mais informações&quot;</i> → <i>&quot;Executar assim mesmo&quot;</i>.
                   </li>
                   <li>
-                    Quando aparecer <b className="text-white">[ OK ] Instalado e vinculado com sucesso</b>, pode fechar.
+                    Quando o título virar <b className="text-lime">&quot;Instalado e vinculado&quot;</b>, clica <i>Fechar</i>.
                   </li>
                   <li>
                     Extrai o ZIP da extensão, abre <code className="mono text-white">chrome://extensions</code>, ativa <i>Modo desenvolvedor</i>, clica <i>Carregar sem compactação</i>.
