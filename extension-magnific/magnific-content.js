@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.5.57';
+const DARKO_MG_VERSION = '3.5.58';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -97,6 +97,67 @@ window.__darko_recent = function (n = 50) {
   return window.__darko_mg_log.slice(-n);
 };
 __darko_log('boot', 'content script online v=' + DARKO_MG_VERSION);
+
+// ===================== ANTI-THROTTLE (background tabs) ==================
+// v3.5.58 — Quando a aba do Magnific fica em background (user trabalhando
+// em outra janela), Chrome reduz timers pra 1Hz após ~5min. Isso faz o
+// pipeline LENTO (waitFor de 1-2s viram 30-90s) e pode causar timeouts.
+//
+// Solução clássica: silent oscillator com volume 0. Chrome detecta a aba
+// como "produzindo áudio" e isenta de throttle. SEM som audível pro user
+// (gain=0). É a mesma técnica usada por sites de jogos/conferência.
+//
+// Só liga DURANTE o pipeline (ativado em handleRunPipeline, desliga no
+// fim). Não fica ligado o tempo todo — só quando faz diferença.
+const __darko_audio = {
+  ctx: null,
+  osc: null,
+  gain: null,
+  active: false,
+  safetyTimer: null,
+  start() {
+    if (this.active) return;
+    try {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      this.ctx = new AC();
+      this.osc = this.ctx.createOscillator();
+      this.gain = this.ctx.createGain();
+      // VOLUME ZERO — inaudível mas Chrome marca aba como "audible"
+      this.gain.gain.value = 0;
+      this.osc.frequency.value = 440;
+      this.osc.connect(this.gain);
+      this.gain.connect(this.ctx.destination);
+      this.osc.start();
+      this.active = true;
+      __darko_log('antithrottle-on', 'silent oscillator started');
+      // Safety: se algo der ruim e o stop() não for chamado, mata sozinho
+      // em 60 min. Pipeline real raramente passa de 40min.
+      if (this.safetyTimer) clearTimeout(this.safetyTimer);
+      this.safetyTimer = setTimeout(() => {
+        __darko_log('antithrottle-safety', 'auto-stop após 60min (safety fallback)');
+        this.stop();
+      }, 60 * 60 * 1000);
+    } catch (e) {
+      __darko_log('antithrottle-fail', 'audio context falhou', { error: String(e?.message || e) });
+    }
+  },
+  stop() {
+    if (this.safetyTimer) { clearTimeout(this.safetyTimer); this.safetyTimer = null; }
+    if (!this.active) return;
+    try {
+      if (this.osc) { this.osc.stop(); this.osc.disconnect(); }
+      if (this.gain) { this.gain.disconnect(); }
+      if (this.ctx && this.ctx.close) { this.ctx.close(); }
+    } catch { /* ignora */ }
+    this.osc = null;
+    this.gain = null;
+    this.ctx = null;
+    this.active = false;
+    __darko_log('antithrottle-off', 'silent oscillator stopped');
+  },
+};
+window.__darko_audio = __darko_audio; // util pra debug manual
 // ========================================================================
 
 // ===================== v3.5.38 USERSNAP CRASH SHIM (MAIN WORLD) =========
@@ -545,6 +606,9 @@ async function handleRunPipeline(payload, onProgress) {
     imageModel: payload?.imageModel,
     videoModel: payload?.videoModel,
   });
+  // v3.5.58 — anti-throttle ON enquanto o pipeline roda. Permite ao
+  // user minimizar/cobrir a aba do Magnific sem performance penalty.
+  __darko_audio.start();
   const {
     spaceName = 'DARKO LAB',
     spaceId: passedSpaceId,
@@ -860,6 +924,10 @@ async function handleRunPipeline(payload, onProgress) {
     : null;
 
   onProgress({ phase: 'done', percent: 100, message: 'Pipeline completa.' });
+  // v3.5.58 — pipeline completou OK, libera o oscillator. Outros paths
+  // de saída (throw) são cobertos pelo safety auto-stop em __darko_audio
+  // ativado no start() (timer 60min).
+  __darko_audio.stop();
   return {
     spaceId: space.spaceId,
     spaceUrl: space.url,
@@ -1922,10 +1990,18 @@ async function createTakePair({
   log('1c.1) model OK');
   // v3.5.34: removed inter-step sleep 100ms (event-driven waits inside select* handle it)
 
-  // 1c.2) Select aspect (LOCKED — dropdown popup)
+  // 1c.2) Select aspect (LOCKED — dropdown popup), SKIP se já correto
   log('1c.2) configureImage selectAspect 9:16');
   await __uiMutex.run('1c.2', async () => {
     await selectNodeForEdit(imageNodeId);
+    // v3.5.58 SKIP-IF-CORRECT: Nano Banana Pro novo já vem 9:16 default.
+    // Se o botão de aspect já mostra o valor target, pula o click. Zero
+    // risco de loop — é só early-return em rota que já existia.
+    const btnsNow = nodeButtons(imageNodeId);
+    if (btnsNow.includes(aspect)) {
+      log('1c.2) SKIP — aspect já está em ' + aspect);
+      return;
+    }
     await selectAspectInNode(findNodeElement(imageNodeId), aspect);
   });
   log('1c.2) aspect OK');
@@ -1935,10 +2011,19 @@ async function createTakePair({
   log('1c.3) configureImage select quality=' + targetImgQ);
   await __uiMutex.run('1c.3', async () => {
     await selectNodeForEdit(imageNodeId);
-    try {
-      await selectQualityInNode(findNodeElement(imageNodeId), targetImgQ);
-    } catch (e) {
-      throw new Error(`IMAGE_QUALITY_FAIL pair#${pairIdx}: ${e.message}`);
+    // v3.5.58 SKIP-IF-CORRECT: lê resolution btn ANTES; se já 1K, pula
+    // o click mas MANTÉM o verify final (defesa em camadas).
+    const imgNodeProbe = findNodeElement(imageNodeId);
+    const probeResBtn = imgNodeProbe?.querySelector('[data-cy="node-control-selector-resolution"]');
+    const probeRes = probeResBtn ? (probeResBtn.textContent || '').trim() : '';
+    if (probeRes !== targetImgQ) {
+      try {
+        await selectQualityInNode(findNodeElement(imageNodeId), targetImgQ);
+      } catch (e) {
+        throw new Error(`IMAGE_QUALITY_FAIL pair#${pairIdx}: ${e.message}`);
+      }
+    } else {
+      log('1c.3) SKIP click — quality já em ' + targetImgQ);
     }
     const imgNodeFinal = findNodeElement(imageNodeId);
     if (imgNodeFinal) { try { imgNodeFinal.click(); } catch {} await sleep(100); }
@@ -1978,10 +2063,15 @@ async function createTakePair({
   await __uiMutex.run('2c.1', () => configureVideoGenNodeLockOnly(videoNodeId, videoModel));
   log('2c.1) model locked OK');
 
-  // 2c.2) Video aspect (LOCKED)
+  // 2c.2) Video aspect (LOCKED), SKIP se já correto
   log('2c.2) configureVideo selectAspect 9:16');
   await __uiMutex.run('2c.2', async () => {
     await selectNodeForEdit(videoNodeId);
+    const btnsNow = nodeButtons(videoNodeId);
+    if (btnsNow.includes(aspect)) {
+      log('2c.2) SKIP — aspect já está em ' + aspect);
+      return;
+    }
     await selectAspectInNode(findNodeElement(videoNodeId), aspect);
   });
   log('2c.2) aspect OK');
@@ -1990,10 +2080,18 @@ async function createTakePair({
   log('2c.3) configureVideo select quality=' + videoQuality);
   await __uiMutex.run('2c.3', async () => {
     await selectNodeForEdit(videoNodeId);
-    try {
-      await selectQualityInNode(findNodeElement(videoNodeId), videoQuality);
-    } catch (e) {
-      throw new Error(`VIDEO_QUALITY_FAIL pair#${pairIdx}: ${e.message}`);
+    // SKIP-IF-CORRECT (mantém verify final como defesa)
+    const vidProbe = findNodeElement(videoNodeId);
+    const probeBtn = vidProbe?.querySelector('[data-cy="node-control-selector-resolution"]');
+    const probeQ = probeBtn ? (probeBtn.textContent || '').trim() : '';
+    if (probeQ !== videoQuality) {
+      try {
+        await selectQualityInNode(findNodeElement(videoNodeId), videoQuality);
+      } catch (e) {
+        throw new Error(`VIDEO_QUALITY_FAIL pair#${pairIdx}: ${e.message}`);
+      }
+    } else {
+      log('2c.3) SKIP click — quality já em ' + videoQuality);
     }
   });
   const vidNodeFinal = findNodeElement(videoNodeId);
@@ -2008,6 +2106,13 @@ async function createTakePair({
   log('2c.4) configureVideo selectDuration ' + videoDuration + 's');
   await __uiMutex.run('2c.4', async () => {
     await selectNodeForEdit(videoNodeId);
+    // SKIP-IF-CORRECT: Kling 2.5 default = 10s. Se já é, pula.
+    const btnsNow = nodeButtons(videoNodeId);
+    const targetLabel = videoDuration + 's';
+    if (btnsNow.includes(targetLabel)) {
+      log('2c.4) SKIP — duration já está em ' + targetLabel);
+      return;
+    }
     await selectDurationInNode(findNodeElement(videoNodeId), videoDuration);
   });
   log('2c.4) duration OK');
