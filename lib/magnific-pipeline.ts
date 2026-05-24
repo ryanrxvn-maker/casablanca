@@ -389,6 +389,35 @@ export async function runMagnificPipeline(
  * curvas, texto antes/depois, vírgula final — JSON.parse estrito falha e cai
  * no modo texto que super-conta. Aqui sanitizamos e extraímos o array/obj.
  */
+/**
+ * BUG REAL detectado em teste (2026-05): LLMs/cópias do ChatGPT/Claude
+ * frequentemente geram JSON com NEWLINES LITERAIS dentro de strings
+ * (ex: `"imagePrompt": "linha1\nlinha2"` com \n REAL). JSON.parse rejeita
+ * (RFC 8259 proíbe control chars em strings). Sanitização: escapar
+ * \n \r \t literais que estão DENTRO de strings (preserva todos fora).
+ */
+function __escapeLiteralControlsInStrings(s: string): string {
+  let out = '';
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc) { out += ch; esc = false; continue; }
+      if (ch === '\\') { out += ch; esc = true; continue; }
+      if (ch === '"') { out += ch; inStr = false; continue; }
+      if (ch === '\n') { out += '\\n'; continue; }
+      if (ch === '\r') { out += '\\r'; continue; }
+      if (ch === '\t') { out += '\\t'; continue; }
+      out += ch;
+    } else {
+      if (ch === '"') { out += ch; inStr = true; continue; }
+      out += ch;
+    }
+  }
+  return out;
+}
+
 function __extractJson(raw: string): any | null {
   let s = raw.trim();
   // 1) remove cercas markdown ```json ... ``` (ou ``` ... ```)
@@ -403,6 +432,13 @@ function __extractJson(raw: string): any | null {
   };
   let j = tryParse(s);
   if (j != null) return j;
+  // 3b) tenta com escape de newlines literais dentro de strings
+  const escaped = __escapeLiteralControlsInStrings(s);
+  if (escaped !== s) {
+    j = tryParse(escaped);
+    if (j != null) return j;
+    s = escaped; // usa o sanitizado pros próximos steps
+  }
   // 4) extrai o maior bloco [...] ou {...} (ignora prosa antes/depois)
   const firstArr = s.indexOf('[');
   const lastArr = s.lastIndexOf(']');
@@ -433,6 +469,9 @@ function __extractObjects(raw: string): any[] {
   let s = raw.trim();
   s = s.replace(/^```[a-zA-Z]*\s*/m, '').replace(/```\s*$/m, '');
   s = s.replace(/[“”„‟″‶]/g, '"').replace(/[‘’‚‛′‵]/g, "'");
+  // Mesma sanitização: escape de newlines literais dentro de strings
+  // pra cada bloco { ... } extraído fazer JSON.parse com sucesso.
+  s = __escapeLiteralControlsInStrings(s);
   const objs: any[] = [];
   let depth = 0;
   let start = -1;
