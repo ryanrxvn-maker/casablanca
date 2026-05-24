@@ -64,7 +64,15 @@ export default function MagnificConfigPage() {
 
   useEffect(() => {
     load();
-  }, []);
+    // Polling rápido (3s) enquanto desconectado — pra detectar quando a
+    // extensão Freepik Sync acabou de sincronizar e ficar 'conectado' sem o
+    // user precisar dar refresh.
+    const id = setInterval(() => {
+      if (!status?.configured) load();
+    }, 3000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status?.configured]);
 
   /**
    * Tenta extrair XSRF-TOKEN automaticamente do cookie completo,
@@ -202,14 +210,75 @@ export default function MagnificConfigPage() {
             </div>
           </div>
 
-          {/* TUTORIAL */}
-          <div className="mb-4 rounded-[12px] border border-line bg-bg p-4">
-            <h4 className="mb-2 text-xs font-semibold uppercase tracking-widest text-lime">
-              Como pegar os cookies
-            </h4>
-            <ol className="space-y-1 text-[12px] text-text-muted">
+          {/* PATH 1 — EXTENSION (RECOMENDADO) */}
+          <div className="mb-4 rounded-[12px] border-2 border-lime/40 bg-lime/[0.04] p-5">
+            <div className="mb-3 flex items-center gap-2">
+              <span className="rounded-full bg-lime px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-black">
+                Recomendado
+              </span>
+              <h4 className="text-sm font-semibold uppercase tracking-widest text-lime">
+                Extensão Freepik Sync
+              </h4>
+            </div>
+            <p className="mb-3 text-[12px] text-text-muted">
+              Instala 1 vez. Fica logado no Freepik = fica conectado. Sincroniza
+              automático quando o cookie renova. Zero copy/paste.
+            </p>
+            <ol className="mb-4 space-y-1.5 text-[12px] text-text-muted">
               <li>
-                1. Abra{' '}
+                1.{' '}
+                <a
+                  href="/api/extension-freepik-sync/download"
+                  download
+                  className="text-lime underline hover:text-white"
+                >
+                  Baixar darkolab-freepik-sync.zip
+                </a>
+              </li>
+              <li>2. Descompactar numa pasta qualquer</li>
+              <li>
+                3. Abrir{' '}
+                <code className="mono rounded bg-bg-soft px-1.5 py-0.5 text-[11px]">
+                  chrome://extensions
+                </code>
+              </li>
+              <li>
+                4. Ativar &ldquo;Modo de desenvolvedor&rdquo; (canto superior direito)
+              </li>
+              <li>
+                5. Clicar &ldquo;Carregar sem compactação&rdquo; → escolher a pasta
+              </li>
+              <li>
+                6. Logar em{' '}
+                <a
+                  href="https://www.magnific.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-lime underline"
+                >
+                  magnific.com
+                </a>{' '}
+                (conta Freepik Premium+)
+              </li>
+              <li>7. Pronto — extensão sincroniza automático em ~3 segundos</li>
+            </ol>
+            <a
+              href="/api/extension-freepik-sync/download"
+              download
+              className="btn-primary inline-block"
+            >
+              ⬇ Baixar Extensão
+            </a>
+          </div>
+
+          {/* PATH 2 — MANUAL (FALLBACK) */}
+          <details className="mb-4 rounded-[12px] border border-line bg-bg p-4">
+            <summary className="cursor-pointer text-xs font-semibold uppercase tracking-widest text-text-muted hover:text-white">
+              Manual (fallback se extensão não funcionar)
+            </summary>
+            <div className="mt-3">
+              <p className="mb-2 text-[11px] text-text-muted">
+                Em{' '}
                 <a
                   href="https://www.magnific.com"
                   target="_blank"
@@ -218,72 +287,54 @@ export default function MagnificConfigPage() {
                 >
                   magnific.com
                 </a>{' '}
-                logado na sua conta Freepik Premium+.
-              </li>
-              <li>
-                2. Pressione F12 → aba <span className="text-white">Application</span>{' '}
-                (ou Storage) → <span className="text-white">Cookies</span> →{' '}
-                <span className="text-white">https://www.magnific.com</span>.
-              </li>
-              <li>
-                3. Selecione TODOS os cookies (Ctrl+A) → copie. OU rode no DevTools
-                Console:{' '}
+                logado: F12 → Console → cola{' '}
                 <code className="rounded bg-bg-soft px-1.5 py-0.5 text-[11px] text-lime">
                   document.cookie
                 </code>{' '}
-                e copie o resultado.
-              </li>
-              <li>
-                4. Cole o cookie abaixo — o XSRF-TOKEN é extraído automaticamente.
-              </li>
-            </ol>
-          </div>
-
-          {/* FORM */}
-          <div className="rounded-[12px] border border-line bg-bg p-4">
-            <label className="block">
-              <span className="text-[11px] uppercase tracking-widest text-text-muted">
-                Cookie completo (header Cookie:)
-              </span>
-              <textarea
-                value={cookie}
-                onChange={(e) => {
-                  setCookie(e.target.value);
-                  tryAutoFillXsrf(e.target.value);
-                }}
-                placeholder="laravel_session=abc...; XSRF-TOKEN=eyJ...; magnific_user=..."
-                rows={5}
-                className="input-field mt-1 w-full font-mono text-[11px]"
-                disabled={saving}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </label>
-
-            <label className="mt-3 block">
-              <span className="text-[11px] uppercase tracking-widest text-text-muted">
-                XSRF-TOKEN (decodificado — preenchido automático se possível)
-              </span>
-              <input
-                type="text"
-                value={xsrf}
-                onChange={(e) => setXsrf(e.target.value)}
-                placeholder="eyJpdiI6Ii..."
-                className="input-field mt-1 w-full font-mono text-[11px]"
-                disabled={saving}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </label>
-
-            <button
-              onClick={save}
-              disabled={saving || cookie.length < 50 || xsrf.length < 20}
-              className="btn-primary mt-4"
-            >
-              {saving ? 'Validando + salvando…' : 'Validar e Salvar'}
-            </button>
-          </div>
+                → copia o resultado.
+              </p>
+              <label className="block">
+                <span className="text-[11px] uppercase tracking-widest text-text-muted">
+                  Cookie completo
+                </span>
+                <textarea
+                  value={cookie}
+                  onChange={(e) => {
+                    setCookie(e.target.value);
+                    tryAutoFillXsrf(e.target.value);
+                  }}
+                  placeholder="laravel_session=abc...; XSRF-TOKEN=eyJ...;"
+                  rows={4}
+                  className="input-field mt-1 w-full font-mono text-[11px]"
+                  disabled={saving}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+              <label className="mt-3 block">
+                <span className="text-[11px] uppercase tracking-widest text-text-muted">
+                  XSRF-TOKEN (auto se possível)
+                </span>
+                <input
+                  type="text"
+                  value={xsrf}
+                  onChange={(e) => setXsrf(e.target.value)}
+                  placeholder="eyJpdiI6Ii..."
+                  className="input-field mt-1 w-full font-mono text-[11px]"
+                  disabled={saving}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+              <button
+                onClick={save}
+                disabled={saving || cookie.length < 50 || xsrf.length < 20}
+                className="btn-primary mt-4"
+              >
+                {saving ? 'Validando + salvando…' : 'Validar e Salvar'}
+              </button>
+            </div>
+          </details>
 
           {/* SECURITY NOTE */}
           <div className="mt-6 rounded-[12px] border border-lime/30 bg-lime/5 p-4">

@@ -18,14 +18,40 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
+ * CORS helper: a extensão Freepik Sync chama esse endpoint do origin
+ * `chrome-extension://<id>` com `credentials: 'include'`. Precisamos:
+ *  - Echar Access-Control-Allow-Origin com o origin exato (não *) pra
+ *    poder usar Allow-Credentials.
+ *  - Allow-Credentials: true pra o cookie supabase-auth-token passar.
+ */
+function corsHeaders(req: NextRequest): Record<string, string> {
+  const origin = req.headers.get('origin') || '';
+  const isExt = origin.startsWith('chrome-extension://') || origin.startsWith('moz-extension://');
+  if (!isExt) return {};
+  return {
+    'Access-Control-Allow-Origin': origin,
+    'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'content-type',
+    'Access-Control-Max-Age': '86400',
+    Vary: 'Origin',
+  };
+}
+
+export async function OPTIONS(req: NextRequest) {
+  return new NextResponse(null, { status: 204, headers: corsHeaders(req) });
+}
+
+/**
  * GET — retorna status atual sem expor cookies em plaintext.
  * Resposta: { configured, magnificUserId, plan, updatedAt }
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const cors = corsHeaders(req);
   const supabase = await createClient();
   const { data: userData } = await supabase.auth.getUser();
   if (!userData.user) {
-    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401, headers: cors });
   }
   const { data: row } = await supabase
     .from('user_secrets')
@@ -37,17 +63,18 @@ export async function GET() {
     magnificUserId: row?.magnific_user_id ?? null,
     plan: row?.magnific_plan ?? null,
     updatedAt: row?.magnific_updated_at ?? null,
-  });
+  }, { headers: cors });
 }
 
 /**
  * DELETE — remove credenciais.
  */
-export async function DELETE() {
+export async function DELETE(req: NextRequest) {
+  const cors = corsHeaders(req);
   const supabase = await createClient();
   const { data: userData } = await supabase.auth.getUser();
   if (!userData.user) {
-    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401, headers: cors });
   }
   const { error } = await supabase
     .from('user_secrets')
@@ -60,16 +87,17 @@ export async function DELETE() {
     })
     .eq('user_id', userData.user.id);
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message }, { status: 500, headers: cors });
   }
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true }, { headers: cors });
 }
 
 export async function POST(req: NextRequest) {
+  const cors = corsHeaders(req);
   const supabase = await createClient();
   const { data: userData } = await supabase.auth.getUser();
   if (!userData.user) {
-    return NextResponse.json({ error: 'Não autenticado' }, { status: 401 });
+    return NextResponse.json({ error: 'Não autenticado' }, { status: 401, headers: cors });
   }
   const userId = userData.user.id;
 
@@ -77,12 +105,12 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: 'JSON inválido' }, { status: 400 });
+    return NextResponse.json({ error: 'JSON inválido' }, { status: 400, headers: cors });
   }
   if (!body.cookie || !body.xsrfToken) {
     return NextResponse.json(
       { error: 'Faltam campos: cookie, xsrfToken' },
-      { status: 400 },
+      { status: 400, headers: cors },
     );
   }
 
@@ -106,7 +134,7 @@ export async function POST(req: NextRequest) {
           'Credenciais inválidas no Magnific: ' +
           (e instanceof Error ? e.message : String(e)),
       },
-      { status: 401 },
+      { status: 401, headers: cors },
     );
   }
 
@@ -124,7 +152,7 @@ export async function POST(req: NextRequest) {
           'Falha ao cifrar credenciais (SECRETS_ENCRYPTION_KEY ausente?): ' +
           (e instanceof Error ? e.message : String(e)),
       },
-      { status: 500 },
+      { status: 500, headers: cors },
     );
   }
 
@@ -139,7 +167,7 @@ export async function POST(req: NextRequest) {
   if (upsertErr) {
     return NextResponse.json(
       { error: 'Falha ao persistir: ' + upsertErr.message },
-      { status: 500 },
+      { status: 500, headers: cors },
     );
   }
 
@@ -148,5 +176,5 @@ export async function POST(req: NextRequest) {
     magnificUserId,
     plan: plan || 'desconhecido',
     credits: credits ?? null,
-  });
+  }, { headers: cors });
 }
