@@ -2147,6 +2147,18 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           : null,
       );
       for (const id of withJson) enqueueMagnificForTask(id, false);
+      // Desmarca tasks que foram pra fila — somem da lista de revisão e
+      // o usuário não confunde "essa eu já disparei?". O job continua
+      // visível e controlável no painel "Fila Magnific" abaixo.
+      // Mantém as tasks que ficaram pra trás (sem JSON) selecionadas pra
+      // o user saber que ainda tem trabalho a fazer nelas.
+      if (withJson.length > 0) {
+        setSelectedTaskIds((prev) => {
+          const next = new Set(prev);
+          for (const id of withJson) next.delete(id);
+          return next;
+        });
+      }
       return;
     }
 
@@ -4682,19 +4694,12 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                         </button>
                                       </>
                                     ) : null}
-                                    {/* Disparo unico inteligente — respeita o toggle. A regra
-                                     *  de 1 Magnific por vez e AUTOMATICA (fila serial), nao
-                                     *  depende de botao. */}
-                                    {onlyMagnificMode ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => dispatchTaskToMagnific(a.taskId)}
-                                        className="mono rounded border border-lime bg-lime/20 px-3 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30"
-                                        title="Only Magnific: enfileira so os B-Rolls dessa task (sem HeyGen). Fila serial 1/vez automatica. Cole o JSON antes."
-                                      >
-                                        🍌 Disparar
-                                      </button>
-                                    ) : (
+                                    {/* Disparo individual.
+                                     *  ONLY MAGNIFIC: SEM botão individual — só o botão grande
+                                     *  "Iniciar X tasks em background" dispara tudo de uma vez.
+                                     *  Evita duplo-fluxo e mantém a operação batch limpa.
+                                     *  MORE / Clássico: mantém botão individual. */}
+                                    {!onlyMagnificMode ? (
                                       <button
                                         type="button"
                                         onClick={() => moreMagnificMode ? dispatchTaskToMagnific(a.taskId) : dispatchTaskToHeyGen(a.taskId)}
@@ -4704,7 +4709,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       >
                                         ▶ Disparar
                                       </button>
-                                    )}
+                                    ) : null}
                                   </div>
                                 ) : null}
                               </div>
