@@ -215,9 +215,7 @@ namespace AutoEdit
         private Label _hintLbl;
         private Label _eyebrow;
         private GlowProgress _progress;
-        private FlatButton _btnClose;
-        private FlatButton _btnLog;
-        private FlatButton _btnFolder;
+        private FlatButton _btnFinalize;
         private Image _logoImg;
         private string _logPath;
         private string _installDst;
@@ -453,50 +451,20 @@ namespace AutoEdit
             };
             Controls.Add(version);
 
-            // Botões — direita, alinhados pelo bottom do form
-            int btnRight = PAD_X + CONTENT_W;
-            int btnGap = 10;
-
-            _btnClose = MakeButton("Fechar", 96, footerY);
-            _btnClose.Left = btnRight - _btnClose.Width;
-            _btnClose.FillColor = Theme.Violet;
-            _btnClose.FillHover = Theme.FuchsiaSoft;
-            _btnClose.BorderNormal = Theme.Violet;
-            _btnClose.BorderHover = Theme.Fuchsia;
-            _btnClose.ForeColor = Theme.Bg;
-            _btnClose.BackColor = _btnClose.FillColor;
-            _btnClose.FlatAppearance.BorderColor = _btnClose.BorderNormal;
-            _btnClose.Visible = false;
-            _btnClose.Click += delegate(object s, EventArgs e) { Close(); };
-            Controls.Add(_btnClose);
-
-            _btnLog = MakeButton("Abrir log", 104, footerY);
-            _btnLog.Left = _btnClose.Left - _btnLog.Width - btnGap;
-            _btnLog.Visible = false;
-            _btnLog.Click += delegate(object s, EventArgs e)
-            {
-                try
-                {
-                    if (File.Exists(_logPath))
-                        Process.Start(new ProcessStartInfo("notepad.exe", _logPath) { UseShellExecute = true });
-                }
-                catch { }
-            };
-            Controls.Add(_btnLog);
-
-            _btnFolder = MakeButton("Abrir pasta", 116, footerY);
-            _btnFolder.Left = _btnLog.Left - _btnFolder.Width - btnGap;
-            _btnFolder.Visible = false;
-            _btnFolder.Click += delegate(object s, EventArgs e)
-            {
-                try
-                {
-                    if (Directory.Exists(_installDst))
-                        Process.Start(new ProcessStartInfo("explorer.exe", _installDst) { UseShellExecute = true });
-                }
-                catch { }
-            };
-            Controls.Add(_btnFolder);
+            // Botão único "Finalizar" — primary violet, alinhado à direita.
+            // Aparece SÓ quando termina (DONE ou ERR no status).
+            _btnFinalize = MakeButton("Finalizar", 132, footerY);
+            _btnFinalize.Left = (PAD_X + CONTENT_W) - _btnFinalize.Width;
+            _btnFinalize.FillColor = Theme.Violet;
+            _btnFinalize.FillHover = Theme.FuchsiaSoft;
+            _btnFinalize.BorderNormal = Theme.Violet;
+            _btnFinalize.BorderHover = Theme.Fuchsia;
+            _btnFinalize.ForeColor = Theme.Bg;
+            _btnFinalize.BackColor = _btnFinalize.FillColor;
+            _btnFinalize.FlatAppearance.BorderColor = _btnFinalize.BorderNormal;
+            _btnFinalize.Visible = false;
+            _btnFinalize.Click += delegate(object s, EventArgs e) { Close(); };
+            Controls.Add(_btnFinalize);
 
             // Re-alinha o progressPct à direita do progressTag (após ele renderizar)
             progressPct.LocationChanged += delegate { };
@@ -567,7 +535,7 @@ namespace AutoEdit
                 _statusLbl.Text = "Erro de extração";
                 _statusLbl.ForeColor = Theme.Danger;
                 _hintLbl.Text = "Arquivo de instalação não encontrado. Baixe novamente.";
-                _btnClose.Visible = true;
+                _btnFinalize.Visible = true;
                 return;
             }
             var psi = new ProcessStartInfo
@@ -595,7 +563,7 @@ namespace AutoEdit
                 _statusLbl.Text = "Falhou ao iniciar";
                 _statusLbl.ForeColor = Theme.Danger;
                 _hintLbl.Text = ex.Message;
-                _btnClose.Visible = true;
+                _btnFinalize.Visible = true;
             }
         }
 
@@ -643,9 +611,7 @@ namespace AutoEdit
                 _statusLbl.Text = "Instalado e vinculado";
                 _statusLbl.ForeColor = Theme.Text;
                 _hintLbl.Text = Brand.DoneHint;
-                _btnClose.Visible = true;
-                _btnLog.Visible = true;
-                _btnFolder.Visible = true;
+                _btnFinalize.Visible = true;
             }
             else if (head == "ERR")
             {
@@ -655,9 +621,7 @@ namespace AutoEdit
                 _statusLbl.Text = "Algo deu errado";
                 _statusLbl.ForeColor = Theme.Danger;
                 _hintLbl.Text = msg.Length > 220 ? msg.Substring(0, 220) + "…" : msg;
-                _btnClose.Visible = true;
-                _btnLog.Visible = true;
-                _btnFolder.Visible = true;
+                _btnFinalize.Visible = true;
             }
             else
             {
