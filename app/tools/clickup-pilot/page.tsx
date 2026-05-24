@@ -4126,16 +4126,21 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                               className="h-4 w-4 shrink-0 cursor-pointer accent-fuchsia-400"
                             />
                           ) : null}
-                          <ToggleRound3D
-                            on={isDecupagemEnabled(t.id)}
-                            onChange={(v) => setDecupagemFor(t.id, v)}
-                            size="sm"
-                            variant="lime"
-                            title={isDecupagemEnabled(t.id)
-                              ? 'Decupagem ON — vai cortar silencios desse AD'
-                              : 'Decupagem OFF — AD vem montado, sem cortes'}
-                            icon={<ScissorsIcon className="h-3.5 w-3.5" />}
-                          />
+                          {/* Toggle de decupagem — escondido em ONLY MAGNIFIC
+                              porque esse modo pula HeyGen totalmente (sem
+                              lipsync = sem necessidade de cortar silêncios). */}
+                          {!onlyMagnificMode ? (
+                            <ToggleRound3D
+                              on={isDecupagemEnabled(t.id)}
+                              onChange={(v) => setDecupagemFor(t.id, v)}
+                              size="sm"
+                              variant="lime"
+                              title={isDecupagemEnabled(t.id)
+                                ? 'Decupagem ON — vai cortar silencios desse AD'
+                                : 'Decupagem OFF — AD vem montado, sem cortes'}
+                              icon={<ScissorsIcon className="h-3.5 w-3.5" />}
+                            />
+                          ) : null}
                           <button
                             type="button"
                             onClick={() => bulkMode ? toggleTaskSelected(t.id) : openTask(t)}
