@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.5.56';
+const DARKO_MG_VERSION = '3.5.57';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -39,6 +39,65 @@ if (window.__darkolab_magnific_loaded__) {
   window.__darkolab_magnific_version = DARKO_MG_VERSION;
   console.log('[DARKO Magnific Content] online v=' + DARKO_MG_VERSION);
 }
+
+// ======================= TELEMETRIA VERBOSE =============================
+// v3.5.57 — captura ring buffer de até 2000 eventos com timestamp pra debug
+// sem precisar de live testing. User roda __darko_dump() no console pra
+// copiar tudo formatado e me mandar.
+//
+// API exposta:
+//   window.__darko_mg_log         — array de eventos [{t, kind, msg, data}]
+//   window.__darko_dump()         — copia JSON do log pro clipboard + retorna
+//   window.__darko_clear()        — limpa o log
+//   window.__darko_recent(n=50)   — retorna últimos N eventos
+const __DARKO_LOG_CAP = 2000;
+window.__darko_mg_log = window.__darko_mg_log || [];
+function __darko_log(kind, msg, data) {
+  try {
+    const e = { t: Date.now(), iso: new Date().toISOString(), kind, msg };
+    if (data !== undefined) {
+      // Sanitiza: max 500 chars por valor pra não estourar memória
+      const safe = (v) => {
+        try {
+          const s = typeof v === 'string' ? v : JSON.stringify(v);
+          return s.length > 500 ? s.slice(0, 500) + '…(trunc)' : s;
+        } catch { return String(v).slice(0, 500); }
+      };
+      e.data = safe(data);
+    }
+    window.__darko_mg_log.push(e);
+    if (window.__darko_mg_log.length > __DARKO_LOG_CAP) {
+      window.__darko_mg_log.splice(0, window.__darko_mg_log.length - __DARKO_LOG_CAP);
+    }
+  } catch { /* nunca falha o pipeline por causa de log */ }
+}
+window.__darko_dump = async function () {
+  const payload = {
+    version: DARKO_MG_VERSION,
+    capturedAt: new Date().toISOString(),
+    url: location.href,
+    userAgent: navigator.userAgent,
+    eventCount: window.__darko_mg_log.length,
+    events: window.__darko_mg_log,
+  };
+  const json = JSON.stringify(payload, null, 2);
+  try {
+    await navigator.clipboard.writeText(json);
+    console.log('%c[DARKO dump] %d eventos copiados pro clipboard (' + json.length + ' chars). Cola e manda.', 'color:#c8ff00;font-weight:bold', payload.eventCount);
+  } catch (e) {
+    console.warn('[DARKO dump] clipboard falhou, retornando JSON:', e.message);
+  }
+  return json;
+};
+window.__darko_clear = function () {
+  window.__darko_mg_log = [];
+  console.log('[DARKO] log limpo');
+};
+window.__darko_recent = function (n = 50) {
+  return window.__darko_mg_log.slice(-n);
+};
+__darko_log('boot', 'content script online v=' + DARKO_MG_VERSION);
+// ========================================================================
 
 // ===================== v3.5.38 USERSNAP CRASH SHIM (MAIN WORLD) =========
 // RAIZ do crash recorrente (v3.5.33→v3.5.37): Magnific's useSpacesUsersnap
@@ -480,6 +539,12 @@ async function handleDownloadAsset(payload) {
  * }
  */
 async function handleRunPipeline(payload, onProgress) {
+  __darko_log('pipeline-start', 'handleRunPipeline ENTRY', {
+    takeCount: payload?.takes?.length,
+    spaceName: payload?.spaceName,
+    imageModel: payload?.imageModel,
+    videoModel: payload?.videoModel,
+  });
   const {
     spaceName = 'DARKO LAB',
     spaceId: passedSpaceId,
@@ -545,20 +610,25 @@ async function handleRunPipeline(payload, onProgress) {
   // Custo: ~3-5s de overhead. Benefício: elimina ~2min de retry no take 1.
   if (!passedSpaceId) {
     console.log('[DARKO Pipeline] Phase 1d: WARMUP sacrificial node');
+    __darko_log('warmup-start', 'criando node sacrificial');
     onProgress({ phase: 'warmup', percent: 5, message: 'Aquecendo canvas (warmup sacrificial)...' });
+    const warmupStartT = Date.now();
     try {
       const warmupId = await createImageGenNode();
-      console.log('[DARKO Pipeline] warmup node criado:', warmupId);
+      __darko_log('warmup-created', 'node criado', { id: warmupId, ms: Date.now() - warmupStartT });
       // Pequeno settle pra Liveblocks confirmar o node, depois deleta.
       await sleep(400);
       await __deleteNodeById(warmupId);
+      __darko_log('warmup-done', 'node deletado — canvas estável', { totalMs: Date.now() - warmupStartT });
       console.log('[DARKO Pipeline] warmup node deletado — canvas estável');
       await sleep(300);
     } catch (e) {
       // Warmup falhar não é fatal — o fluxo normal segue. Loga e continua.
+      __darko_log('warmup-fail', 'NÃO FATAL', { error: e?.message || String(e), ms: Date.now() - warmupStartT });
       console.warn('[DARKO Pipeline] warmup falhou (não-fatal):', e?.message || e);
     }
   } else {
+    __darko_log('warmup-skip', 'reusing space');
     console.log('[DARKO Pipeline] reusing space — skip warmup');
   }
 
@@ -1743,6 +1813,7 @@ async function ensureEdgeImageToVideo(imageNodeId, videoNodeId, pairIdx) {
   // do take 1 real ser criado, eliminando a quebra. Resultado: take 1 não
   // precisa mais de retry — conecta de primeira como os outros.
   const MAX = 6;
+  __darko_log('edge-start', '#' + pairIdx + ' ensureEdge MAX=' + MAX, { initialCount: __edgeCount() });
   for (let attempt = 1; attempt <= MAX; attempt++) {
     // pair #1: ZERO settle extra (fail-fast). Pares 2+: idem (já era 0).
     const extra = 0;
@@ -1755,6 +1826,7 @@ async function ensureEdgeImageToVideo(imageNodeId, videoNodeId, pairIdx) {
 
     if (!dragged) {
       // handles não estavam prontos/on-screen — NÃO conta, retry com pausa maior
+      __darko_log('edge-drag-fail', '#' + pairIdx + ' attempt ' + attempt, { reason: 'handles offscreen' });
       console.warn(`[ensureEdge] pair#${pairIdx} drag não executou (attempt ${attempt}/${MAX}) — re-scroll+retry`);
       await sleep(800 + extra);
       continue;
@@ -1763,12 +1835,15 @@ async function ensureEdgeImageToVideo(imageNodeId, videoNodeId, pairIdx) {
     //  - criou edge novo (after>before: estava solto, consertou), OU
     //  - já existia e Vue Flow deduplicou (after===before E before>0)
     if (after > before || (before > 0 && after >= before)) {
+      __darko_log('edge-ok', '#' + pairIdx + ' edge confirmado', { attempt, before, after });
       console.log(`[ensureEdge] pair#${pairIdx} edge OK (attempt ${attempt}, ${before}→${after})`);
       return true;
     }
+    __darko_log('edge-no-create', '#' + pairIdx + ' drag ok mas sem edge', { attempt, before, after });
     console.warn(`[ensureEdge] pair#${pairIdx} drag ok mas sem edge (attempt ${attempt}, ${before}→${after}) — retry`);
     await sleep(600 + extra);
   }
+  __darko_log('edge-FAIL', '#' + pairIdx + ' EDGE_RECONNECT_FAIL após ' + MAX + ' tentativas');
   throw new Error('EDGE_RECONNECT_FAIL pair#' + pairIdx +
     ': não consegui reconectar image→video após ' + MAX + ' tentativas — take vai pro auto-retry (nunca gera vídeo solto).');
 }
@@ -1792,10 +1867,21 @@ async function createTakePair({
   videoQuality  = '720p';
   videoDuration = (videoDuration === 5 || videoDuration === '5s') ? 5 : 10;
 
+  const __takeStartT = Date.now();
+  __darko_log('takepair-start', '#' + pairIdx + ' iniciando', {
+    imageModel, videoModel, aspect, imageQuality, videoQuality, videoDuration,
+    promptLen: (imagePrompt || '').length,
+  });
   // v3.5.4 GRANULAR LOGGING + ONSTEP — emit per micro-step pra detectar hang
   const log = (step, extra) => {
     const msg = `[DARKO TakePair #${pairIdx}] ${step}`;
     console.log(msg, extra || '');
+    // Telemetria: cada micro-step com timestamp relativo
+    __darko_log('takepair-step', '#' + pairIdx + ' ' + step, {
+      pair: pairIdx,
+      elapsedMs: Date.now() - __takeStartT,
+      extra: extra ? String(extra).slice(0, 200) : undefined,
+    });
     if (typeof onStep === 'function') {
       try { onStep(`#${pairIdx} ${step}` + (extra ? ' ' + String(extra).slice(0, 60) : '')); } catch {}
     }
