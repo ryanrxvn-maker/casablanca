@@ -144,6 +144,11 @@ function AutoBrollInner() {
       patchJob(job.id, { error: 'Extension Magnific não detectada.' });
       return;
     }
+    // Defesa anti-double-click: se já rodando OU se já existe AbortController
+    // ativo pra este job, é re-clique acidental — no-op.
+    if (job.status === 'running' || abortRefs.current[job.id]) {
+      return;
+    }
     const takes = parseJob(job.raw);
     if (!takes.length) {
       patchJob(job.id, { error: 'Sem prompts válidos nesta lista.' });

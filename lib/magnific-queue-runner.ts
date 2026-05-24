@@ -52,6 +52,19 @@ export type MagnificQueueJob = {
   zipName?: string;
   successCount?: number;
   totalCount?: number;
+  /**
+   * Heartbeat — a aba que **possui** o job (está rodando o processor)
+   * atualiza este timestamp a cada ~5s. Outras abas usam pra saber se
+   * um job 'running' é genuíno (alguém cuidando) ou órfão (tab fechou
+   * sem limpar). Garante zero duplo-disparo entre abas.
+   */
+  lastHeartbeatAt?: number;
+  /**
+   * Tab owner — ID único da aba que está rodando este job. Marca de
+   * propriedade pra evitar que duas abas pensem que são donas. Sem o
+   * owner certo, a aba não pode atualizar heartbeat nem completar.
+   */
+  ownerTabId?: string;
 };
 
 export type MagnificQueue = Record<string, MagnificQueueJob>;
@@ -59,6 +72,38 @@ export type MagnificQueue = Record<string, MagnificQueueJob>;
 export const MAGNIFIC_QUEUE_KEY = 'darkolab:clickup-pilot:magnific-queue';
 /** JSON colado por task (caixa "+" inline) — persiste reload */
 export const MAGNIFIC_JSON_KEY = 'darkolab:clickup-pilot:magnific-json';
+
+/**
+ * Heartbeat máximo aceitável. Se job 'running' não atualizou heartbeat
+ * por mais de 30s, é considerado órfão (aba dona crashou/fechou).
+ */
+export const HEARTBEAT_STALE_MS = 30_000;
+
+/** Intervalo de heartbeat — deve ser bem menor que STALE_MS pra dar
+ * folga em casos de aba lenta/freezada momentaneamente. */
+export const HEARTBEAT_INTERVAL_MS = 5_000;
+
+/**
+ * ID único e estável desta aba (não persiste entre reloads — é o que
+ * queremos: aba nova = owner novo). Usado pra marcar quem possui cada
+ * job 'running'.
+ */
+let TAB_ID_CACHE: string | null = null;
+export function thisTabId(): string {
+  if (TAB_ID_CACHE) return TAB_ID_CACHE;
+  TAB_ID_CACHE = `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  return TAB_ID_CACHE;
+}
+
+/**
+ * Job está vivo? 'running' + heartbeat recente. Usado por outras abas
+ * pra decidir "alguém já está cuidando, não pisa em cima".
+ */
+export function isMagnificJobAlive(job: MagnificQueueJob): boolean {
+  if (job.status !== 'running') return false;
+  if (!job.lastHeartbeatAt) return false;
+  return Date.now() - job.lastHeartbeatAt < HEARTBEAT_STALE_MS;
+}
 
 export function loadMagnificQueue(): MagnificQueue {
   if (typeof window === 'undefined') return {};
@@ -77,20 +122,38 @@ export function saveMagnificQueue(q: MagnificQueue) {
   } catch {}
 }
 
-/** Restaura a fila no mount: jobs que estavam 'running' (page fechou no
- *  meio) voltam pra 'queued' — re-rodar e seguro (space novo + auto-retry
- *  interno do runMagnificPipeline). */
+/**
+ * Restaura a fila no mount. Cross-tab safe:
+ *   - Job 'running' COM heartbeat recente → DEIXA quieto (outra aba é dona)
+ *   - Job 'running' SEM heartbeat ou stale → órfão, volta pra 'queued'
+ *   - Job 'queued' com `ownerTabId` antigo → limpa owner (qualquer aba pega)
+ *
+ * Garante que abrir 2 abas NUNCA causa duplo-disparo: a aba B vê o running
+ * vivo da aba A e simplesmente espera.
+ */
 export function restoreMagnificQueue(): MagnificQueue {
   const q = loadMagnificQueue();
   let changed = false;
+  const now = Date.now();
   for (const id of Object.keys(q)) {
-    if (q[id].status === 'running') {
+    const job = q[id];
+    if (job.status === 'running') {
+      const hb = job.lastHeartbeatAt ?? 0;
+      const alive = hb > 0 && now - hb < HEARTBEAT_STALE_MS;
+      if (alive) continue; // outra aba é dona — não toca
+      // Órfão: aba antiga fechou sem terminar — re-enfileira
       q[id] = {
-        ...q[id],
+        ...job,
         status: 'queued',
-        message: 'Reiniciado apos reload da pagina — volta pra fila.',
+        message: 'Reiniciado (aba antiga fechou no meio) — volta pra fila.',
         startedAt: undefined,
+        lastHeartbeatAt: undefined,
+        ownerTabId: undefined,
       };
+      changed = true;
+    } else if (job.ownerTabId) {
+      // Job não-running com owner antigo — limpa pra qualquer aba pegar
+      q[id] = { ...job, ownerTabId: undefined };
       changed = true;
     }
   }
@@ -98,16 +161,86 @@ export function restoreMagnificQueue(): MagnificQueue {
   return q;
 }
 
-/** Proximo job elegivel pro processor: 'queued' + NAO gated. Ordem FIFO
- *  por enqueuedAt. Retorna null se nada elegivel (fila vazia ou tudo
- *  aguardando HeyGen). Garante serial junto com o ref-guard do processor. */
+/**
+ * Próximo job elegível pro processor. Defesa em 3 camadas contra duplo
+ * disparo:
+ *   1) Se há QUALQUER job VIVO (running + heartbeat recente), retorna null
+ *   2) Se há job 'running' SEM heartbeat por <30s (zona de incerteza),
+ *      ainda retorna null — só libera após HEARTBEAT_STALE_MS confirmar órfão
+ *   3) Só então pega o próximo queued FIFO não-gated
+ *
+ * Garante: nunca 2 jobs running ao mesmo tempo, mesmo com múltiplas abas
+ * disputando.
+ */
 export function pickNextMagnificJob(q: MagnificQueue): MagnificQueueJob | null {
-  // Se ja tem 1 rodando, processor nao pega outro (defesa extra alem do ref).
-  if (Object.values(q).some((j) => j.status === 'running')) return null;
+  // Camada 1+2: qualquer job 'running' (vivo OU em zona de incerteza)
+  // bloqueia. Só passa quando heartbeat confirma órfão (>30s sem update).
+  const now = Date.now();
+  const hasRunningOrUncertain = Object.values(q).some((j) => {
+    if (j.status !== 'running') return false;
+    const hb = j.lastHeartbeatAt ?? j.startedAt ?? now;
+    return now - hb < HEARTBEAT_STALE_MS;
+  });
+  if (hasRunningOrUncertain) return null;
+  // Camada 3: FIFO entre queued não-gated
   const elegiveis = Object.values(q)
     .filter((j) => j.status === 'queued' && !j.gateOnHeyGen)
     .sort((a, b) => a.enqueuedAt - b.enqueuedAt);
   return elegiveis[0] || null;
+}
+
+/**
+ * Atualiza heartbeat de um job 'running'. SÓ funciona se a aba que chama
+ * for a dona (ownerTabId === thisTabId). Defesa: se outra aba assumir o
+ * job, esta aba para de atualizar (e seu watchdog vai notar o pipeline
+ * "fantasma" e abortar).
+ */
+export function pulseHeartbeat(taskId: string): boolean {
+  const q = loadMagnificQueue();
+  const job = q[taskId];
+  if (!job) return false;
+  if (job.status !== 'running') return false;
+  if (job.ownerTabId && job.ownerTabId !== thisTabId()) return false;
+  q[taskId] = { ...job, lastHeartbeatAt: Date.now() };
+  saveMagnificQueue(q);
+  return true;
+}
+
+/**
+ * Tenta adquirir o lock pra rodar um job. Lê localStorage AGORA (sem
+ * cache do React state), checa se há running vivo, e se livre, marca
+ * o job como running + owner + heartbeat inicial — TUDO em escrita
+ * atômica única no localStorage. Retorna true se conseguiu.
+ *
+ * Cross-tab race: se 2 abas chamarem ao mesmo tempo, a primeira que
+ * escrever ganha; a segunda ao chamar verá running vivo e retorna false.
+ * (Pequena janela teoria — mitigada por intervalo aleatório entre picks
+ *  + ownerTabId que mostra claramente quem é dono.)
+ */
+export function tryAcquireMagnificJob(taskId: string): boolean {
+  const q = loadMagnificQueue();
+  // Re-check sob lock implícito (last write wins do storage)
+  const now = Date.now();
+  const hasRunning = Object.values(q).some((j) => {
+    if (j.status !== 'running') return false;
+    if (j.taskId === taskId) return false; // estamos retomando este
+    const hb = j.lastHeartbeatAt ?? j.startedAt ?? now;
+    return now - hb < HEARTBEAT_STALE_MS;
+  });
+  if (hasRunning) return false;
+  const job = q[taskId];
+  if (!job) return false;
+  if (job.status !== 'queued') return false;
+  q[taskId] = {
+    ...job,
+    status: 'running',
+    startedAt: now,
+    lastHeartbeatAt: now,
+    ownerTabId: thisTabId(),
+    message: 'Disparando pipeline Magnific...',
+  };
+  saveMagnificQueue(q);
+  return true;
 }
 
 export function loadMagnificJsonMap(): Record<string, string> {

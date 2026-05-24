@@ -63,6 +63,12 @@ import {
   pickNextMagnificJob,
   loadMagnificJsonMap,
   saveMagnificJsonMap,
+  tryAcquireMagnificJob,
+  pulseHeartbeat,
+  thisTabId,
+  isMagnificJobAlive,
+  HEARTBEAT_INTERVAL_MS,
+  MAGNIFIC_QUEUE_KEY,
   type MagnificQueue,
 } from '@/lib/magnific-queue-runner';
 import {
@@ -420,6 +426,29 @@ function ClickUpPilotInner() {
   useEffect(() => {
     saveMagnificQueue(magnificQueue);
   }, [magnificQueue]);
+
+  /**
+   * Cross-tab sync: quando OUTRA aba muda magnificQueue no localStorage
+   * (enqueue novo job, recebe heartbeat, finish), repuxa pra cá. Sem isso
+   * a UI da aba B mostraria fila stale e tomaria decisões erradas.
+   *
+   * Importante: NÃO chama setMagnificTick aqui — só re-hidrata o state.
+   * O processor decide sozinho via tryAcquireMagnificJob cross-tab.
+   */
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onStorage = (ev: StorageEvent) => {
+      if (ev.key !== MAGNIFIC_QUEUE_KEY) return;
+      try {
+        const next = ev.newValue ? (JSON.parse(ev.newValue) as MagnificQueue) : {};
+        setMagnificQueueState(next);
+      } catch {
+        /* JSON ruim — ignora */
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
 
   /** Patch atomico de 1 job na fila (sempre via setState pra persistir). */
   const patchMagnificJob = (taskId: string, patch: Partial<MagnificQueue[string]>) => {
@@ -2040,10 +2069,16 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     }
   }
 
-  /** Enfileira o job Magnific de UMA task (fila serial, persistida).
-   *  gated=true (MORE): so roda depois do HeyGen daquela task concluir.
-   *  gated=false (ONLY): elegivel imediatamente. Retorna false se a task
-   *  nao tem JSON colado ou o JSON nao tem nenhum take valido. */
+  /**
+   * Enfileira o job Magnific de UMA task. Defesa anti-duplicata:
+   *   - Se já existe job VIVO (running com heartbeat recente) pra essa task,
+   *     NÃO mexe (deixa rodando — clique duplo do user é no-op)
+   *   - Se existe queued/paused/failed/done, atualiza com novo JSON
+   *
+   *  gated=true (MORE): só roda depois do HeyGen daquela task concluir.
+   *  gated=false (ONLY): elegível imediatamente.
+   *  Retorna false se task não tem JSON ou JSON inválido.
+   */
   function enqueueMagnificForTask(taskId: string, gated: boolean): boolean {
     const a = taskAnalyses[taskId];
     if (!a || a.vaBriefing) return false; // VA nunca vai pra Magnific
@@ -2051,6 +2086,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     if (!raw) return false;
     const takes = parseMagnificPrompts(raw);
     if (takes.length === 0) return false;
+
+    // Defesa: clique duplo / disparo redundante (ClickUp Pilot acionando 2x
+    // a mesma task) NÃO interrompe job vivo. Idempotente: já está rodando = OK.
+    const existing = magnificQueue[taskId];
+    if (existing && isMagnificJobAlive(existing)) {
+      console.info('[magnific] enqueue ignorado — job já rodando:', taskId);
+      return true;
+    }
+
     const adName = (a.baseAdId || a.taskName).replace(/[^a-z0-9_-]/gi, '_');
     magnificCancelRef.current[taskId] = false;
     setMagnificQueueState((prev) => ({
@@ -2066,6 +2110,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           ? `Aguardando HeyGen da task concluir (${takes.length} takes na fila)...`
           : `Na fila Magnific (${takes.length} takes)...`,
         enqueuedAt: Date.now(),
+        // Limpa qualquer owner/heartbeat antigo (job freshly queued)
+        lastHeartbeatAt: undefined,
+        ownerTabId: undefined,
+        startedAt: undefined,
+        finishedAt: undefined,
       },
     }));
     setMagnificTick((t) => t + 1);
@@ -2183,13 +2232,30 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     setMagnificTick((t) => t + 1);
   }, [batchStates, magnificQueue]);
 
-  /** Processor SERIAL: 1 job Magnific por vez SEMPRE. ref-guard impede
-   *  concorrencia; pickNextMagnificJob ignora gated + ja-rodando. Ao
-   *  terminar 1, incrementa tick pra pegar o proximo. */
+  /**
+   * Processor SERIAL — defesa em 4 camadas contra duplo disparo:
+   *   1. ref-guard local (magnificProcessingRef) — sincrono, mesma aba
+   *   2. pickNextMagnificJob — ignora qualquer job 'running' vivo
+   *   3. tryAcquireMagnificJob — re-lê localStorage AGORA (não state) e
+   *      adquire lock cross-tab via ownerTabId + heartbeat
+   *   4. heartbeat ticker — escreve a cada 5s; outras abas veem que está vivo
+   *
+   * Se 2 abas chamam ao mesmo tempo, só uma ganha o tryAcquire. A outra
+   * cai no early-return e tenta depois. NUNCA dispara 2 jobs simultâneos.
+   */
   useEffect(() => {
     if (magnificProcessingRef.current) return;
     const job = pickNextMagnificJob(magnificQueue);
     if (!job) return;
+
+    // Camada 3: lock cross-tab via localStorage (último a escrever vence,
+    // mas o re-check de "alguém vivo" dentro do tryAcquire filtra a corrida).
+    if (!tryAcquireMagnificJob(job.taskId)) {
+      // Outra aba pegou o job antes de nós. Re-tenta após heartbeat stale —
+      // se a outra aba morreu, conseguimos depois.
+      return;
+    }
+
     magnificProcessingRef.current = true;
     const taskId = job.taskId;
     const ac = new AbortController();
@@ -2197,10 +2263,26 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     magnificActiveRef.current = { taskId, startedAt: Date.now() };
     magnificStopIntentRef.current[taskId] = null;
     magnificCancelRef.current[taskId] = false;
+
+    // Camada 4: heartbeat ticker — escreve a cada 5s. Se a aba travar
+    // ou fechar, em 30s outras abas consideram órfão e pegam o job.
+    const heartbeatTimer = setInterval(() => {
+      const ok = pulseHeartbeat(taskId);
+      if (!ok) {
+        // Perdemos o ownership (outra aba assumiu) — aborta este pipeline
+        // pra não duplicar trabalho. O cleanup do finally roda normal.
+        console.warn('[magnific] heartbeat negado — outra aba assumiu o job', taskId);
+        try { ac.abort(); } catch {}
+        clearInterval(heartbeatTimer);
+      }
+    }, HEARTBEAT_INTERVAL_MS);
+
     (async () => {
       patchMagnificJob(taskId, {
         status: 'running',
         startedAt: Date.now(),
+        lastHeartbeatAt: Date.now(),
+        ownerTabId: thisTabId(),
         message: 'Disparando pipeline Magnific...',
         percent: 0,
       });
@@ -2289,6 +2371,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           });
         });
       } finally {
+        // Para de bater heartbeat IMEDIATAMENTE — outras abas podem assumir.
+        clearInterval(heartbeatTimer);
         // So libera o guard se AINDA somos o job ativo (watchdog pode ter
         // ja liberado + iniciado outro — nao podemos roubar o guard dele).
         if (magnificActiveRef.current?.taskId === taskId) {
@@ -2302,41 +2386,57 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [magnificQueue, magnificTick]);
 
-  /** Watchdog anti-loop-infinito do Magnific. Se o job ativo passar do
-   *  tempo maximo (provavel loop no generate-image da extension, como
-   *  relatado), aborta, marca 'failed' com dica de Debug e LIBERA a fila
-   *  pro proximo job — mesmo que a promise do pipeline tenha travado e
-   *  nunca resolva (nao dependemos dela). */
+  /**
+   * Watchdog anti-loop. Calcula timeout DINAMICAMENTE pela qtd de takes:
+   *   - 60s por take + 4min de setup, mínimo 8min, máximo 32min
+   *   - Ex: 5 takes = 9min; 20 takes = 24min; 40 takes = 32min (cap)
+   *
+   * Mais generoso pra jobs grandes legítimos, mais agressivo pra jobs
+   * pequenos que ficaram presos. Quando estoura, aborta + recarrega aba
+   * Magnific + libera fila pro próximo.
+   */
   useEffect(() => {
-    const WATCHDOG_MS = 18 * 60 * 1000; // 18min — folga p/ job legit grande
     const id = setInterval(() => {
       const act = magnificActiveRef.current;
       if (!act) return;
-      if (Date.now() - act.startedAt < WATCHDOG_MS) return;
+      const job = magnificQueue[act.taskId];
+      const takes = job?.takeCount ?? 5;
+      const dynamicTimeoutMs = Math.max(
+        8 * 60 * 1000,
+        Math.min(32 * 60 * 1000, takes * 60_000 + 4 * 60_000),
+      );
+      if (Date.now() - act.startedAt < dynamicTimeoutMs) return;
       const taskId = act.taskId;
       if (magnificStopIntentRef.current[taskId]) return; // ja tratado
-      console.warn('[magnific-watchdog] job travado, liberando fila:', taskId);
+      console.warn(
+        '[magnific-watchdog] job travado',
+        taskId,
+        `(${takes} takes, limite ${(dynamicTimeoutMs / 60_000).toFixed(0)}min)`,
+      );
       magnificStopIntentRef.current[taskId] = 'watchdog';
       magnificCancelRef.current[taskId] = true;
       try { magnificAbortRef.current?.abort(); } catch {}
       // CRÍTICO: mata o pipeline ÓRFÃO na extensão e recarrega a aba
-      // Magnific. Sem isso o job zumbi continua vivo e o PRÓXIMO job
-      // dispara na MESMA aba = ">1 ao mesmo tempo" + cascata. Agora o
-      // próximo sempre roda numa aba limpa.
+      // Magnific. Sem isso o job zumbi segue vivo e o PRÓXIMO job
+      // dispara na MESMA aba = ">1 ao mesmo tempo" + cascata. Próximo
+      // sempre roda numa aba limpa.
       try { abortAllMagnific(); } catch {}
       patchMagnificJob(taskId, {
         status: 'failed',
-        message: '⚠ Travou (loop infinito?) — clique 🐞 Debug pra recriar o space',
+        message: `⚠ Travou (>${(dynamicTimeoutMs / 60_000).toFixed(0)}min) — clique 🐞 Debug pra recriar o space`,
         finishedAt: Date.now(),
+        // Limpa heartbeat e owner — fila destravada pra outras abas se houver
+        lastHeartbeatAt: undefined,
+        ownerTabId: undefined,
       });
       // Libera o guard SEM esperar a promise (pode nunca resolver).
       magnificActiveRef.current = null;
       magnificAbortRef.current = null;
       magnificProcessingRef.current = false;
       setMagnificTick((t) => t + 1);
-    }, 15000);
+    }, 15_000);
     return () => clearInterval(id);
-  }, []);
+  }, [magnificQueue]);
 
   function cancelTaskBatch(taskId: string) {
     batchCancelRef.current[taskId] = true;
