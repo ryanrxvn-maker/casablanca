@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.5.60';
+const DARKO_MG_VERSION = '3.5.61';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -672,6 +672,17 @@ async function handleRunPipeline(payload, onProgress) {
   // → 100% dos pares funcionam de primeira.
   //
   // Custo: ~3-5s de overhead. Benefício: elimina ~2min de retry no take 1.
+  // v3.5.61 — AUTO-ZOOM 100%. Canvas em zoom 21% (vimos no log do user!)
+  // faz popups de dropdown renderizarem em coords absurdas (x negativo,
+  // off-screen). Zoom 100% normaliza coords, popups abrem dentro da
+  // viewport, CDP click acerta de primeira. Best-effort — não fatal.
+  try {
+    await normalizeCanvasZoom();
+    __darko_log('zoom-normalized', '100%');
+  } catch (e) {
+    __darko_log('zoom-normalize-fail', 'não-fatal', { error: String(e?.message || e) });
+  }
+
   if (!passedSpaceId) {
     console.log('[DARKO Pipeline] Phase 1d: WARMUP sacrificial node');
     __darko_log('warmup-start', 'criando node sacrificial');
@@ -1222,6 +1233,45 @@ const __uiMutex = {
 
 function spaceURL(id) {
   return 'https://www.magnific.com/app/spaces/' + id;
+}
+
+/**
+ * v3.5.61 — Normaliza o zoom do canvas pra ~100%. Em zoom muito baixo
+ * (21% no caso do user) os popups de dropdown renderizam em coords
+ * estranhas (x negativo, off-screen). 100% garante coords previsíveis.
+ *
+ * Estratégia em camadas:
+ *   1. Manipular CSS transform direto do .vue-flow__viewport (mais
+ *      garantido — Vue Flow respeita transform via CSS variable)
+ *   2. Atalho de teclado Ctrl+0 (zoom reset padrão do Vue Flow se ativo)
+ *
+ * Best-effort: não joga throw, se nada funcionar pipeline continua.
+ */
+async function normalizeCanvasZoom() {
+  const viewport = document.querySelector('.vue-flow__viewport, .vue-flow__transformationpane');
+  if (!viewport) return false;
+  const tr = (getComputedStyle(viewport).transform || '').toString();
+  // Parse "matrix(a, b, c, d, tx, ty)" — a = scaleX
+  const m = tr.match(/matrix\(([^)]+)\)/);
+  if (!m) return false;
+  const parts = m[1].split(',').map((s) => parseFloat(s.trim()));
+  const scale = parts[0] || 1;
+  if (scale >= 0.85 && scale <= 1.15) {
+    // Já está perto de 100%, não mexe
+    return true;
+  }
+  // Força reset: substitui scale por 1.0 mantendo translate
+  const tx = parts[4] || 0;
+  const ty = parts[5] || 0;
+  try {
+    viewport.style.transform = `translate(${tx}px, ${ty}px) scale(1)`;
+    // Trigger Vue Flow recalc via fake resize event
+    window.dispatchEvent(new Event('resize'));
+    await sleep(300);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function currentSpaceId() {
@@ -2069,15 +2119,57 @@ async function createTakePair({
   await __uiMutex.run('1b', () => setNodePromptByUuid(imageNodeId, imagePrompt));
   log('1b) prompt OK');
 
-  // 1c.1) Select model Nano Banana 2 (LOCKED — usa dropdown popup)
-  log('1c.1) configureImage selectModel Nano Banana 2');
+  // 1c.1) Select model Nano Banana Pro (LOCKED) + VERIFY ESTRITO
+  // v3.5.61 — vimos no log do user que o image gen rodou com "Google
+  // Imagen 3" em vez de Nano Banana Pro. Significa que selectModel
+  // falhou silenciosamente. Agora: após selecionar, LÊ o botão de
+  // modelo e CONFIRMA que mudou. Se não, retry 2x; se ainda errado,
+  // THROW (auto-retry recria o pair em vez de gerar com modelo errado).
+  const targetImageModelName = modelDisplayName(imageModel);
+  log('1c.1) configureImage selectModel ' + targetImageModelName);
   await __uiMutex.run('1c.1', async () => {
-    await selectNodeForEdit(imageNodeId);
-    const imgNodeEl = findNodeElement(imageNodeId);
-    if (!imgNodeEl) throw new Error('Image node sumiu apos select: ' + imageNodeId);
-    await selectModelInNode(imgNodeEl, modelDisplayName(imageModel));
+    const MAX = 3;
+    let lastSeen = '';
+    for (let attempt = 1; attempt <= MAX; attempt++) {
+      await selectNodeForEdit(imageNodeId);
+      const imgNodeEl = findNodeElement(imageNodeId);
+      if (!imgNodeEl) throw new Error('Image node sumiu apos select: ' + imageNodeId);
+
+      // Skip click se modelo JÁ é o target
+      const btnsNow = nodeButtons(imageNodeId);
+      const alreadyOk = btnsNow.some((t) => t === targetImageModelName || t.includes(targetImageModelName));
+      if (alreadyOk) {
+        log('1c.1) modelo já correto (attempt ' + attempt + ') — skip');
+        break;
+      }
+
+      try {
+        await selectModelInNode(imgNodeEl, targetImageModelName);
+      } catch (e) {
+        log('1c.1) selectModel attempt ' + attempt + ' threw', e.message);
+      }
+
+      // Verify pós-click: lê de novo o node
+      await selectNodeForEdit(imageNodeId);
+      await sleep(250);
+      const btnsAfter = nodeButtons(imageNodeId);
+      lastSeen = btnsAfter.find((t) =>
+        /Google Nano Banana|Google Imagen|Stable Diffusion|DALL/i.test(t),
+      ) || '(nenhum botão de modelo visível)';
+      const isCorrect = btnsAfter.some((t) => t === targetImageModelName || t.includes(targetImageModelName));
+      if (isCorrect) {
+        log('1c.1) model OK (attempt ' + attempt + ')');
+        break;
+      }
+      log('1c.1) model WRONG (attempt ' + attempt + '/' + MAX + ') — visto: ' + lastSeen);
+      if (attempt === MAX) {
+        throw new Error(
+          `IMAGE_MODEL_LOCK_FAIL pair#${pairIdx}: modelo final="${lastSeen}" (esperado "${targetImageModelName}") ` +
+          `— ABORTA pra não gerar com modelo errado. Auto-retry vai recriar o pair.`
+        );
+      }
+    }
   });
-  log('1c.1) model OK');
   // v3.5.34: removed inter-step sleep 100ms (event-driven waits inside select* handle it)
 
   // 1c.2) Select aspect (LOCKED — dropdown popup), SKIP se já correto
