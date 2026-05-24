@@ -80,7 +80,6 @@ const ALL_TOOLS: Tool[] = [
   { key: 'camuflagem', label: 'Camuflagem' },
   { key: 'troca-produto', label: 'Troca de produto' },
   { key: 'decupagem-inteligente', label: 'Decupagem Inteligente' },
-  { key: 'removedor-pro', label: 'Removedor de Legenda (em lote)' },
 ];
 
 /** Quais ferramentas cada plano libera (por `key` da ALL_TOOLS). */
@@ -490,14 +489,17 @@ function PlanCard({
               {plan.name}
             </div>
 
-            {/* Preço com original riscado (se sale) */}
+            {/* Preço — Mensal: R$ X/mês · Anual: R$ X*12/ano + "12x de R$ X"
+                Pro com sale: original riscado em cima (também anualizado se anual). */}
             <div className="mt-3 flex flex-col items-center justify-center gap-1">
               {hasSale && pricing.original ? (
                 <span
                   className="mono text-[15px] font-semibold text-text-dim line-through decoration-rose-400/70 decoration-[1.5px]"
                   style={{ fontFamily: 'var(--font-mono)' }}
                 >
-                  De R$ {pricing.original}/mês
+                  {billing === 'annual'
+                    ? `De R$ ${(pricing.original * 12).toLocaleString('pt-BR')}/ano`
+                    : `De R$ ${pricing.original}/mês`}
                 </span>
               ) : null}
               <div className="flex items-baseline justify-center gap-1">
@@ -513,24 +515,39 @@ function PlanCard({
                     WebkitTextFillColor: hasSale ? 'transparent' : undefined,
                   }}
                 >
-                  {isFree ? 'R$ 0' : `R$ ${pricing.price}`}
+                  {isFree
+                    ? 'R$ 0'
+                    : billing === 'annual'
+                      ? `R$ ${(pricing.price * 12).toLocaleString('pt-BR')}`
+                      : `R$ ${pricing.price}`}
                 </span>
-                {!isFree ? (
-                  <span className="text-[15px] text-text-muted">/mês</span>
-                ) : (
+                {isFree ? (
                   <span className="text-[15px] text-text-muted">/sempre</span>
+                ) : billing === 'annual' ? (
+                  <span className="text-[15px] text-text-muted">/ano</span>
+                ) : (
+                  <span className="text-[15px] text-text-muted">/mês</span>
                 )}
               </div>
 
-              {/* Hint quando billing=annual: "cobrado 12x" */}
+              {/* Subtitle no anual: "ou 12x de R$ X" — pra dar ideia
+                  do peso mensal mesmo cobrando o ano todo. */}
               {!isFree && billing === 'annual' ? (
-                <span
-                  className="mono mt-1 inline-flex items-center gap-1.5 rounded-full border border-lime/40 bg-lime/[0.06] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.16em] text-lime"
-                  style={{ fontFamily: 'var(--font-tech)' }}
-                >
-                  <span className="inline-block h-1 w-1 rounded-full bg-lime" />
-                  no plano anual · −{ANNUAL_DISCOUNT_PCT}%
-                </span>
+                <div className="mt-1 flex flex-col items-center gap-1.5">
+                  <span
+                    className="mono text-[12.5px] text-text-muted"
+                    style={{ fontFamily: 'var(--font-mono)' }}
+                  >
+                    ou 12× de R$ {pricing.price}
+                  </span>
+                  <span
+                    className="mono inline-flex items-center gap-1.5 rounded-full border border-lime/40 bg-lime/[0.06] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.16em] text-lime"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    <span className="inline-block h-1 w-1 rounded-full bg-lime" />
+                    economiza −{ANNUAL_DISCOUNT_PCT}%
+                  </span>
+                </div>
               ) : null}
             </div>
           </div>
@@ -1292,14 +1309,6 @@ const TOOL_DETAILS: ToolInfo[] = [
     hue: 'rgba(232,121,249,0.55)',
     desc: 'A IA decupa o vídeo seguindo a copy do roteiro com precisão.',
     win: 'Diz o que tem que ser dito, a IA escolhe a melhor take e monta.',
-  },
-  {
-    key: 'removedor-pro',
-    name: 'Removedor de Legenda (em lote)',
-    cat: 'IA',
-    hue: 'rgba(244,114,182,0.55)',
-    desc: 'Versão mais agressiva do Removedor — limpa em lote sem revisão.',
-    win: 'Batch de centenas de vídeos. A IA limpa todos, você só recebe pronto.',
   },
 ];
 
