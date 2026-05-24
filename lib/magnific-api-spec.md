@@ -121,22 +121,75 @@ Response 200:
 
 URL é **signed** (token expira em ~3 dias).
 
-## Video Generation Pipeline (PARCIALMENTE VALIDADO)
+## Video Generation Pipeline (VALIDADO LIVE 2026-05-24)
 
-Mesmo padrão. Confirmado que `/app/api/render/v4` aceita tool de video — retornou 422 com erros específicos:
-- `tool: "image-to-video"` → invalid (precisa achar o nome correto via captura real)
-- `width: required` (NÃO aceita 0, precisa valor exato)
-- `height: required`
-- `resolution: "720p"` → invalid (precisa achar enum certo)
+**DIFERENTE do image** — endpoint próprio `/app/api/generate?return_creations=true`, payload aninhado em `video.clips[]`, **sem reserve step**, criação + polling direto.
 
-**TODO captura final** (precisa user disparar via UI):
-- `tool` exato pra video (provavelmente `text-to-video` ou `image-to-video`)
-- `mode` = `kling-25` confirmado
-- `width`/`height` exatos pra 9:16 720p
-- `resolution` enum válido (talvez `"hd"` ou `"720p_9_16"`)
-- `duration` aceita
-- Como passa `start_image` (URL ou file?)
-- Talvez tenha `start-ttv-v2` ou similar pra reserve tokens primeiro
+### POST /app/api/generate?return_creations=true
+
+```
+POST /app/api/generate?return_creations=true&lang=en_US&user_id={uid}
+
+Body:
+{
+  "video": {
+    "family": "c512f5b6-c20c-43b3-962d-645902ce14f3",  // UUID gerado client-side
+    "clips": [
+      {
+        "position": 0,
+        "prompt": "slow zoom in",
+        "negativePrompt": "",
+        "name": "slow zoom in",  // até 80 chars
+        "family": "c512f5b6-...",  // mesmo UUID do video
+        "aspectRatio": "9:16",  // ou "16:9", "1:1"
+        "cameraMotion": null,
+        "duration": 10,  // 5 ou 10
+        "api": "kling",  // família do modelo
+        "model": "kling",
+        "mode": "25",  // versão (25, 26, 21)
+        "slug": "kling-25",
+        "extraParameters": {},
+        "withSoundEffects": false,
+        "promptType": "basic",
+        "resolution": "720p",  // ou "1080p"
+        "keyframes": {
+          "start": {
+            "type": "image",
+            "url": "https://pikaso.cdnpk.net/private/production/.../render.png?token=..."
+          }
+        },
+        "audioUrl": "",
+        "voices": [],
+        "boardUuid": null,
+        "videoPreset": "custom"
+      }
+    ]
+  }
+}
+
+Response: 200
+{
+  "success": true,
+  "data": {
+    "creations": [
+      {
+        "id": 3037745891,
+        "identifier": "abc123XYZ",  // ← polling key
+        "family": "c512f5b6-..."
+      }
+    ]
+  }
+}
+```
+
+### Polling
+Mesma rota do image: `GET /app/api/creation/{identifier}` → `status: "completed"` + `url` final.
+
+### Map modelo → api/mode
+- `kling-25` → `{api: "kling", mode: "25"}`
+- `kling-26` → `{api: "kling", mode: "26"}`
+- `kling-21` → `{api: "kling", mode: "21"}`
+- `wan-2-5`, `google-veo3`, etc seguem mesma estrutura (api = família, mode = versão).
 
 ## Modelos confirmados disponíveis (user Premium+)
 

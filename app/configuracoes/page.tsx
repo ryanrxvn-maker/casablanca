@@ -139,6 +139,7 @@ export default function ConfiguracoesPage() {
 
   const sections = [
     { id: 'apis', label: 'Chaves IA' },
+    { id: 'magnific', label: 'Magnific' },
     { id: 'email', label: 'Email' },
     { id: 'senha', label: 'Senha' },
     { id: 'sessao', label: 'Sessão' },
@@ -203,6 +204,34 @@ export default function ConfiguracoesPage() {
                     </div>
                     <div className="mt-1 text-[13px] text-text-muted">
                       Conecte suas chaves. O crédito sai da sua conta.
+                    </div>
+                  </div>
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full border border-line-strong text-text-dim transition group-hover:border-lime group-hover:text-lime">
+                    →
+                  </span>
+                </div>
+              </a>
+            </section>
+
+            {/* Magnific */}
+            <section id="magnific" className="fade-in-up" style={{ animationDelay: '60ms' }}>
+              <a
+                href="/configuracoes/magnific"
+                className="card-tool block p-5 md:p-6"
+              >
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="mb-1 flex items-center gap-2">
+                      <span className="pill-lime text-[9px]">B-ROLL v2</span>
+                    </div>
+                    <div
+                      className="text-[17px] font-bold tracking-tight text-white"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      Magnific (Freepik)
+                    </div>
+                    <div className="mt-1 text-[13px] text-text-muted">
+                      Conecte sua sessão Magnific.com — 12 imagens + 6 vídeos em paralelo.
                     </div>
                   </div>
                   <span className="flex h-9 w-9 items-center justify-center rounded-full border border-line-strong text-text-dim transition group-hover:border-lime group-hover:text-lime">

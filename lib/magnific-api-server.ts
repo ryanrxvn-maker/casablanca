@@ -212,14 +212,9 @@ export async function generateImage(
 /**
  * Gera 1 vídeo animando uma imagem (image-to-video). Kling 2.5 720p 10s 9:16.
  *
- * ATENÇÃO: payload de video AINDA não 100% validado. Falta capturar:
- * - `tool` exato (provavelmente "image-to-video")
- * - `width`/`height` exatos pra 9:16 720p (provavelmente 720x1280)
- * - `resolution` enum válido
- * - como passa `start_image` (URL ou ID)
- *
- * Implementação atual usa hipóteses inteligentes. Se 422, mostra mensagem
- * com erros do Magnific pra ajustar.
+ * VALIDADO LIVE (2026-05): endpoint POST /app/api/generate?return_creations=true.
+ * Payload é diferente do image — aninhado em `video.clips[]`, sem reserve step.
+ * Direto cria + polling.
  */
 export async function generateVideoFromImage(
   creds: MagnificCreds,
@@ -229,62 +224,70 @@ export async function generateVideoFromImage(
   const aspectRatio = input.aspectRatio || '9:16';
   const resolution = input.resolution || '720p';
   const duration = input.duration || 10;
-  const seed = input.seed ?? Math.floor(Math.random() * 1_000_000);
 
-  // Dimensões pra 9:16 720p ← chute baseado em padrão Kling
-  const dims =
-    aspectRatio === '9:16'
-      ? { width: 720, height: 1280 }
-      : aspectRatio === '16:9'
-        ? { width: 1280, height: 720 }
-        : { width: 720, height: 720 };
+  // Family UUID gerado client-side (compartilhado entre clips da mesma submissão)
+  const family = crypto.randomUUID();
 
-  // HIPÓTESE 1: mesmo padrão start-tti-v2 mas pra video (start-ttv-v2 OU mesmo start-tti-v2 com mode video)
-  // HIPÓTESE 2: render/v4 direto com tool diferente
-  // Tentando HIPÓTESE 2 primeiro (mais provável baseado em 422 anterior)
+  // Map model slug → api/model/mode (descoberto via captura real)
+  const modelMap: Record<VideoModel, { api: string; mode: string; slug: string }> = {
+    'kling-25': { api: 'kling', mode: '25', slug: 'kling-25' },
+    'kling-26': { api: 'kling', mode: '26', slug: 'kling-26' },
+    'kling-21': { api: 'kling', mode: '21', slug: 'kling-21' },
+  };
+  const m = modelMap[model] || modelMap['kling-25'];
 
-  const r = await magnificFetch(creds, '/render/v4', {
+  const r = await magnificFetch(creds, '/generate?return_creations=true', {
     method: 'POST',
     jsonBody: {
-      tool: 'image-to-video',
-      mode: model,
-      family: '00000000-0000-0000-0000-000000000000', // sem reserve por agora
-      prompt: input.prompt,
-      start_image_url: input.startImageUrl,
-      width: dims.width,
-      height: dims.height,
-      seed,
-      aspect_ratio: aspectRatio,
-      resolution,
-      duration,
-      thinking_level: 'minimal',
-      request_token: 'unlimited',
-      force_credits: false,
-      metadata: {
-        inputPrompt: input.prompt,
-        aspectRatio,
-        mode: model,
-        unlimited: true,
-        startImage: input.startImageUrl,
+      video: {
+        family,
+        clips: [
+          {
+            position: 0,
+            prompt: input.prompt,
+            negativePrompt: '',
+            name: input.prompt.slice(0, 80),
+            family,
+            aspectRatio,
+            cameraMotion: null,
+            duration,
+            api: m.api,
+            model: m.api,
+            mode: m.mode,
+            slug: m.slug,
+            extraParameters: {},
+            withSoundEffects: false,
+            promptType: 'basic',
+            resolution,
+            keyframes: {
+              start: {
+                type: 'image',
+                url: input.startImageUrl,
+              },
+            },
+            audioUrl: '',
+            voices: [],
+            boardUuid: null,
+            videoPreset: 'custom',
+          },
+        ],
       },
-      smart_prompt: true,
-      num_images: 1,
     },
   });
   if (!r.ok) {
     const txt = await r.text().catch(() => '');
-    throw new Error(
-      `render/v4 video falhou (${r.status}): ${txt.slice(0, 500)} — ` +
-        `payload de video precisa de ajustes (ver magnific-api-spec.md)`,
-    );
+    throw new Error(`generate video falhou (${r.status}): ${txt.slice(0, 500)}`);
   }
   const rendered = (await r.json()) as {
-    creation?: { id: number; identifier: string; family: string };
+    success?: boolean;
+    data?: { creations?: Array<{ id: number; identifier: string; family: string }> };
   };
-  if (!rendered.creation?.identifier)
-    throw new Error('render/v4 video: sem creation.identifier');
+  const creation = rendered.data?.creations?.[0];
+  if (!creation?.identifier) {
+    throw new Error('generate video: sem creation.identifier no response');
+  }
 
-  return pollCreation(creds, rendered.creation.identifier, POLL_TIMEOUT_VID_MS);
+  return pollCreation(creds, creation.identifier, POLL_TIMEOUT_VID_MS);
 }
 
 /* ───────────────────────── Polling ───────────────────────── */

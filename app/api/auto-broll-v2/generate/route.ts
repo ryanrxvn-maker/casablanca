@@ -10,10 +10,16 @@
  *     { "imagePrompt": "...", "videoPrompt": "..." },
  *     ...
  *   ],
- *   "concurrency": 5  // opcional, default 5
+ *   "imageConcurrency": 12,  // max image gens simultâneos (Magnific limit)
+ *   "videoConcurrency": 6    // max video gens simultâneos (Kling limit)
  * }
  *
- * Response: streaming NDJSON ou JSON com URLs finais.
+ * Response: JSON com URLs finais por take + métricas.
+ *
+ * Pipeline:
+ *   1. Dispara N images em paralelo (limit 12 simultâneos)
+ *   2. Conforme cada image pronta, ENFILEIRA video pro Kling (limit 6 simultâneos)
+ *   3. Pipeline image+video por take roda end-to-end paralelo respeitando limites
  *
  * Auth: lê cookies Magnific do user (salvos via /api/auto-broll-v2/save-creds).
  */
@@ -21,12 +27,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import {
-  generateBrollPair,
+  generateImage,
+  generateVideoFromImage,
   type MagnificCreds,
 } from '@/lib/magnific-api-server';
+import { decryptSecret } from '@/lib/secrets';
 
 export const runtime = 'nodejs';
-export const maxDuration = 300; // 5 min — videos Kling podem demorar
+export const maxDuration = 300; // 5min de Vercel cap
 export const dynamic = 'force-dynamic';
 
 type TakeInput = {
@@ -40,13 +48,35 @@ type TakeResult = {
   videoPrompt: string;
   imageUrl?: string;
   videoUrl?: string;
-  error?: string;
   imageMs?: number;
   videoMs?: number;
+  error?: string;
 };
 
+/**
+ * Semaphore simples — limita N operações simultâneas.
+ * Usado pra respeitar limites Magnific: 12 image gens / 6 video gens.
+ */
+class Semaphore {
+  private active = 0;
+  private queue: Array<() => void> = [];
+  constructor(public readonly max: number) {}
+  async acquire(): Promise<void> {
+    if (this.active < this.max) {
+      this.active++;
+      return;
+    }
+    await new Promise<void>((resolve) => this.queue.push(resolve));
+    this.active++;
+  }
+  release(): void {
+    this.active--;
+    const next = this.queue.shift();
+    if (next) next();
+  }
+}
+
 export async function POST(req: NextRequest) {
-  // Auth do user no nosso app
   const supabase = await createClient();
   const { data: userData } = await supabase.auth.getUser();
   if (!userData.user) {
@@ -54,8 +84,7 @@ export async function POST(req: NextRequest) {
   }
   const userId = userData.user.id;
 
-  // Body
-  let body: { takes?: TakeInput[]; concurrency?: number };
+  let body: { takes?: TakeInput[]; imageConcurrency?: number; videoConcurrency?: number };
   try {
     body = await req.json();
   } catch {
@@ -65,9 +94,13 @@ export async function POST(req: NextRequest) {
   if (takes.length === 0) {
     return NextResponse.json({ error: 'Nenhum take fornecido' }, { status: 400 });
   }
-  const concurrency = Math.max(1, Math.min(8, body.concurrency || 5));
+  // Limites Magnific descobertos via captura live:
+  //   - start-tti-v2 reserva 24 tokens, mas Magnific UI faz ~12 simultâneo
+  //   - Kling 2.5: 6 simultâneo no UI (semáforo na extension também era 6)
+  const imageConcurrency = Math.max(1, Math.min(12, body.imageConcurrency || 12));
+  const videoConcurrency = Math.max(1, Math.min(6, body.videoConcurrency || 6));
 
-  // Carrega creds do user (salvos previamente)
+  // Carrega creds
   const { data: credsRow } = await supabase
     .from('user_secrets')
     .select('magnific_cookie, magnific_xsrf_token, magnific_user_id')
@@ -82,51 +115,99 @@ export async function POST(req: NextRequest) {
       { status: 412 },
     );
   }
-  const creds: MagnificCreds = {
-    cookie: credsRow.magnific_cookie,
-    xsrfToken: credsRow.magnific_xsrf_token || '',
-    userId: credsRow.magnific_user_id,
-  };
+  // Decifra cookie + xsrf
+  let creds: MagnificCreds;
+  try {
+    creds = {
+      cookie: decryptSecret(credsRow.magnific_cookie),
+      xsrfToken: credsRow.magnific_xsrf_token
+        ? decryptSecret(credsRow.magnific_xsrf_token)
+        : '',
+      userId: credsRow.magnific_user_id,
+    };
+  } catch (e) {
+    return NextResponse.json(
+      {
+        error:
+          'Falha ao decifrar credenciais. Reconfigure em /configuracoes/magnific. ' +
+          (e instanceof Error ? e.message : String(e)),
+      },
+      { status: 500 },
+    );
+  }
 
-  // Processa em paralelo limitado por concurrency
+  // 2 semáforos separados — respeita limites real do Magnific
+  const imgSem = new Semaphore(imageConcurrency);
+  const vidSem = new Semaphore(videoConcurrency);
+
   const results: TakeResult[] = takes.map((t, i) => ({
     idx: i + 1,
     imagePrompt: t.imagePrompt,
-    videoPrompt: t.videoPrompt || '',
+    videoPrompt: t.videoPrompt || t.imagePrompt,
   }));
 
-  let next = 0;
-  async function worker() {
-    while (true) {
-      const i = next++;
-      if (i >= takes.length) break;
-      const take = takes[i];
+  // Dispara N takes em paralelo. Cada take faz image (sem semáforo de
+  // pair, mas com semáforo image) → video (semáforo video). Image e video
+  // de diferentes takes podem rodar simultâneos respeitando os limites.
+  await Promise.all(
+    takes.map(async (take, i) => {
       const t0 = Date.now();
       try {
-        const pair = await generateBrollPair(
-          creds,
-          take.imagePrompt,
-          take.videoPrompt || take.imagePrompt,
-        );
-        results[i].imageUrl = pair.image.url;
-        results[i].videoUrl = pair.video.url;
-        results[i].imageMs = pair.image.metadata?.elapsedTime as number | undefined;
-        results[i].videoMs = pair.video.metadata?.elapsedTime as number | undefined;
+        // === IMAGE ===
+        await imgSem.acquire();
+        let imageUrl: string;
+        try {
+          const img = await generateImage(creds, {
+            prompt: take.imagePrompt,
+            aspectRatio: '9:16',
+            resolution: '1k',
+            smartPrompt: true,
+          });
+          if (img.status !== 'completed' || !img.url) {
+            results[i].error = `Image falhou: ${img.status}`;
+            results[i].imageMs = Date.now() - t0;
+            return;
+          }
+          imageUrl = img.url;
+          results[i].imageUrl = imageUrl;
+          results[i].imageMs = Date.now() - t0;
+        } finally {
+          imgSem.release();
+        }
+
+        // === VIDEO ===
+        const tVid = Date.now();
+        await vidSem.acquire();
+        try {
+          const vid = await generateVideoFromImage(creds, {
+            prompt: take.videoPrompt || take.imagePrompt,
+            startImageUrl: imageUrl,
+            aspectRatio: '9:16',
+            resolution: '720p',
+            duration: 10,
+          });
+          if (vid.status !== 'completed' || !vid.url) {
+            results[i].error = `Video falhou: ${vid.status}`;
+            results[i].videoMs = Date.now() - tVid;
+            return;
+          }
+          results[i].videoUrl = vid.url;
+          results[i].videoMs = Date.now() - tVid;
+        } finally {
+          vidSem.release();
+        }
       } catch (e) {
         results[i].error = e instanceof Error ? e.message : String(e);
-        results[i].imageMs = Date.now() - t0;
       }
-    }
-  }
-  const workers = Array.from({ length: Math.min(concurrency, takes.length) }, () =>
-    worker(),
+    }),
   );
-  await Promise.all(workers);
 
   return NextResponse.json({
     total: takes.length,
     success: results.filter((r) => r.videoUrl).length,
     failed: results.filter((r) => r.error).length,
+    imageConcurrency,
+    videoConcurrency,
     results,
   });
 }
