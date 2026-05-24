@@ -13,7 +13,15 @@
  */
 
 import { useRouter } from 'next/navigation';
-import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   IconAcelerador,
   IconAudioSplit,
@@ -106,14 +114,25 @@ function score(q: string, e: Entry): number {
   return 0;
 }
 
+/**
+ * Botão "Pesquisar" — pílula 3D estilo CTA da landing /planos.
+ *
+ *  ▸ Tilt 3D suave conforme o mouse (rotateX/Y baseado em posição relativa)
+ *  ▸ Spotlight radial que segue o cursor (--gx/--gy)
+ *  ▸ Sheen sweep diagonal no hover (faixa branca desliza de -120% a +120%)
+ *  ▸ Glow violet ambiente que intensifica no hover
+ *  ▸ Press effect com scale + lift inverso no :active
+ *  ▸ Sem "Ctrl K" visível — atalho continua ativo (Cmd/Ctrl+K, "/")
+ *
+ * Vive solto na TopBar (fora do .topbar-cluster) pra ter espaço pra
+ * respirar a pílula maior.
+ */
 export function GlobalSearchButton() {
   const [open, setOpen] = useState(false);
-  const isMacRef = useRef(false);
-  useEffect(() => {
-    isMacRef.current = /Mac|iPhone|iPad/i.test(navigator.platform);
-  }, []);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
 
-  // Atalho global Ctrl/⌘+K
+  // Atalho global Ctrl/⌘+K (e "/" pra quem prefere). Mantido mesmo
+  // sem o chip visível: poder pra power-users sem poluir a UI.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const isCmd = e.metaKey || e.ctrlKey;
@@ -129,45 +148,251 @@ export function GlobalSearchButton() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  const handleMove = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    const el = e.currentTarget;
+    const rect = el.getBoundingClientRect();
+    const px = (e.clientX - rect.left) / rect.width;
+    const py = (e.clientY - rect.top) / rect.height;
+    el.style.setProperty('--gx', `${(px * 100).toFixed(1)}%`);
+    el.style.setProperty('--gy', `${(py * 100).toFixed(1)}%`);
+    const rotY = (px - 0.5) * 12;
+    const rotX = -(py - 0.5) * 10;
+    el.style.setProperty('--rx', `${rotX.toFixed(2)}deg`);
+    el.style.setProperty('--ry', `${rotY.toFixed(2)}deg`);
+  };
+
+  const handleLeave = (e: ReactMouseEvent<HTMLButtonElement>) => {
+    e.currentTarget.style.setProperty('--rx', '0deg');
+    e.currentTarget.style.setProperty('--ry', '0deg');
+  };
+
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="topbar-btn topbar-search"
-        aria-label="Pesquisar"
-        title="Pesquisar (Ctrl+K)"
-      >
-        <IconSearch size={16} />
-        <span
-          className="ml-1.5 hidden text-[11.5px] font-semibold tracking-tight text-text-muted md:inline"
-          style={{ fontFamily: 'var(--font-tech)' }}
+      <div className="search-perspective">
+        <button
+          ref={btnRef}
+          type="button"
+          onClick={() => setOpen(true)}
+          onMouseMove={handleMove}
+          onMouseLeave={handleLeave}
+          className="search-btn group"
+          aria-label="Pesquisar"
+          title="Pesquisar"
         >
-          Pesquisar
-        </span>
-        <span
-          className="ml-2 hidden rounded-md border border-line-strong bg-bg/40 px-1.5 py-0.5 text-[9.5px] font-bold text-text-dim md:inline"
-          style={{ fontFamily: 'var(--font-mono)' }}
-          suppressHydrationWarning
-        >
-          {isMacRef.current ? '⌘K' : 'Ctrl K'}
-        </span>
-      </button>
+          {/* CAMADA 0 — base com gradient sutil + glow ambient (sempre on) */}
+          <span aria-hidden className="search-ambient" />
+
+          {/* CAMADA 1 — borda cônica animada (conic gradient gira no hover) */}
+          <span aria-hidden className="search-conic" />
+
+          {/* CAMADA 2 — spotlight radial que segue o mouse */}
+          <span aria-hidden className="search-spotlight" />
+
+          {/* CAMADA 3 — sheen diagonal (faixa branca) */}
+          <span aria-hidden className="search-sheen" />
+
+          {/* CAMADA 4 — conteúdo (ícone + texto) */}
+          <span className="search-icon">
+            <IconSearch size={15} />
+          </span>
+          <span
+            className="search-label"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            Pesquisar
+          </span>
+        </button>
+      </div>
       {open ? <SearchModal onClose={() => setOpen(false)} /> : null}
+
       <style jsx>{`
-        .topbar-search {
+        .search-perspective {
+          perspective: 800px;
+          display: inline-block;
+        }
+
+        .search-btn {
+          position: relative;
           display: inline-flex;
           align-items: center;
-          padding: 0 10px;
-          height: 32px;
-          min-width: 36px;
-          border-radius: 10px;
-          color: rgba(255, 255, 255, 0.78);
-          transition: background 200ms ease, color 200ms ease, transform 200ms ease;
+          gap: 8px;
+          height: 36px;
+          padding: 0 16px 0 13px;
+          border-radius: 9999px;
+          border: 1px solid rgba(167, 139, 250, 0.32);
+          color: #f5f5f7;
+          background:
+            linear-gradient(
+              135deg,
+              rgba(167, 139, 250, 0.18) 0%,
+              rgba(45, 212, 191, 0.06) 60%,
+              rgba(15, 15, 20, 0.85) 100%
+            );
+          overflow: hidden;
+          cursor: pointer;
+          isolation: isolate;
+          transform-style: preserve-3d;
+          transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg))
+            translateY(0px);
+          transition:
+            transform 220ms cubic-bezier(0.2, 0.9, 0.3, 1),
+            border-color 280ms ease,
+            box-shadow 320ms ease;
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.08),
+            inset 0 -1px 0 rgba(0, 0, 0, 0.4),
+            0 6px 18px -8px rgba(167, 139, 250, 0.35),
+            0 1px 0 rgba(0, 0, 0, 0.45);
         }
-        .topbar-search:hover {
-          background: rgba(167, 139, 250, 0.1);
+
+        .search-btn:hover {
+          border-color: rgba(167, 139, 250, 0.6);
+          transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg))
+            translateY(-1.5px);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.12),
+            inset 0 -1px 0 rgba(0, 0, 0, 0.45),
+            0 14px 30px -10px rgba(167, 139, 250, 0.55),
+            0 0 28px -6px rgba(94, 234, 212, 0.4),
+            0 1px 0 rgba(0, 0, 0, 0.45);
+        }
+
+        /* PRESS — afunda + scale + reset do tilt (sensação de clique físico) */
+        .search-btn:active {
+          transform: rotateX(0deg) rotateY(0deg) translateY(0px) scale(0.96);
+          transition-duration: 80ms;
+          box-shadow:
+            inset 0 2px 4px rgba(0, 0, 0, 0.45),
+            inset 0 0 0 1px rgba(167, 139, 250, 0.35),
+            0 2px 8px -2px rgba(167, 139, 250, 0.4);
+        }
+
+        /* CAMADA 0 — ambient pulse (sempre on, intensifica no hover) */
+        .search-ambient {
+          position: absolute;
+          inset: -10px;
+          z-index: -2;
+          border-radius: 9999px;
+          background: radial-gradient(
+            50% 80% at 50% 50%,
+            rgba(167, 139, 250, 0.28),
+            transparent 70%
+          );
+          opacity: 0.35;
+          filter: blur(8px);
+          transition: opacity 400ms ease;
+          animation: search-ambient-pulse 3.4s ease-in-out infinite;
+          pointer-events: none;
+        }
+        .search-btn:hover .search-ambient {
+          opacity: 0.85;
+        }
+        @keyframes search-ambient-pulse {
+          0%, 100% { transform: scale(1); }
+          50%      { transform: scale(1.04); }
+        }
+
+        /* CAMADA 1 — conic border que gira no hover (efeito "rim light") */
+        .search-conic {
+          position: absolute;
+          inset: 0;
+          border-radius: 9999px;
+          padding: 1px;
+          background: conic-gradient(
+            from var(--angle, 0deg),
+            transparent 0%,
+            rgba(167, 139, 250, 0.7) 25%,
+            transparent 50%,
+            rgba(94, 234, 212, 0.7) 75%,
+            transparent 100%
+          );
+          -webkit-mask:
+            linear-gradient(#000 0 0) content-box,
+            linear-gradient(#000 0 0);
+          -webkit-mask-composite: xor;
+          mask-composite: exclude;
+          opacity: 0;
+          transition: opacity 400ms ease;
+          animation: search-conic-spin 4s linear infinite paused;
+          pointer-events: none;
+        }
+        .search-btn:hover .search-conic {
+          opacity: 1;
+          animation-play-state: running;
+        }
+        @keyframes search-conic-spin {
+          to { --angle: 360deg; }
+        }
+
+        /* CAMADA 2 — spotlight radial que segue o cursor */
+        .search-spotlight {
+          position: absolute;
+          inset: 0;
+          border-radius: 9999px;
+          background: radial-gradient(
+            120px circle at var(--gx, 50%) var(--gy, 50%),
+            rgba(255, 255, 255, 0.16),
+            transparent 60%
+          );
+          opacity: 0;
+          transition: opacity 280ms ease;
+          pointer-events: none;
+        }
+        .search-btn:hover .search-spotlight {
+          opacity: 1;
+        }
+
+        /* CAMADA 3 — sheen sweep no hover (mesmo padrão dos CTAs da landing) */
+        .search-sheen {
+          position: absolute;
+          inset: 0;
+          border-radius: 9999px;
+          background: linear-gradient(
+            115deg,
+            transparent 30%,
+            rgba(255, 255, 255, 0.32) 50%,
+            transparent 70%
+          );
+          transform: translateX(-120%);
+          transition: transform 800ms cubic-bezier(0.2, 0.9, 0.3, 1);
+          pointer-events: none;
+        }
+        .search-btn:hover .search-sheen {
+          transform: translateX(120%);
+        }
+
+        /* CAMADA 4 — ícone com glow próprio */
+        .search-icon {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 22px;
+          height: 22px;
+          border-radius: 9999px;
+          background: linear-gradient(135deg, #c084fc, #6d4ee8);
+          color: #0a0a0c;
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.4),
+            0 4px 10px -2px rgba(167, 139, 250, 0.6);
+          transition: transform 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+        .search-btn:hover .search-icon {
+          transform: rotate(-8deg) scale(1.08);
+        }
+
+        /* Texto — quase invisível em mobile (só ícone) */
+        .search-label {
+          font-size: 12px;
+          font-weight: 700;
+          letter-spacing: -0.005em;
           color: #fff;
+          line-height: 1;
+          white-space: nowrap;
+          text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+        }
+        @media (max-width: 640px) {
+          .search-btn { padding: 0 10px; gap: 0; }
+          .search-label { display: none; }
         }
       `}</style>
     </>

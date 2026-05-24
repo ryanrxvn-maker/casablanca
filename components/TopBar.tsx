@@ -3,6 +3,7 @@
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { BackgroundTasksButton } from './BackgroundTasksButton';
+import { CalculadoraButton } from './CalculadoraButton';
 import { ClickUpPilotButton } from './ClickUpPilotButton';
 import { GlobalSearchButton } from './GlobalSearch';
 import { LipsyncHistoryButton } from './LipsyncHistoryButton';
@@ -94,15 +95,17 @@ export function TopBar() {
           ) : null}
         </div>
 
-        {/* Direita: cluster de ícones */}
-        <div className="topbar-cluster">
+        {/* Direita: pílula de busca (3D) + cluster de ícones */}
+        <div className="flex items-center gap-3">
           <GlobalSearchButton />
-          <span aria-hidden className="topbar-divider" />
-          <PointsButton />
-          <span aria-hidden className="topbar-divider" />
-          <BackgroundTasksButton />
-          <LipsyncHistoryButton />
-          <ClickUpPilotButton />
+          <div className="topbar-cluster">
+            <CalculadoraButton />
+            <span aria-hidden className="topbar-divider" />
+            <PointsButton />
+            <BackgroundTasksButton />
+            <LipsyncHistoryButton />
+            <ClickUpPilotButton />
+          </div>
         </div>
       </div>
     </header>
