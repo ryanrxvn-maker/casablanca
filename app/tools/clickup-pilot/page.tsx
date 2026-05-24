@@ -4425,12 +4425,31 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                           </button>
                         ) : null}
                       </div>
+                      {/* activeJobTaskId é calculado dentro do map (linha
+                          abaixo) pra ser sempre consistente com o snapshot
+                          atual da fila. Regra: só a task EM PROCESSO aceita
+                          comandos; outras na fila ficam aguardando vez. */}
+                      {(() => {
+                        // Snapshot único do running atual — usado em todos os jobs do map
+                        const activeJobTaskId = Object.values(magnificQueue).find((x) => x.status === 'running')?.taskId;
+                        const sortedJobs = Object.values(magnificQueue).sort((a, b) => b.enqueuedAt - a.enqueuedAt);
+                        return (
                       <ul className="grid gap-2">
-                        {Object.values(magnificQueue).sort((a, b) => b.enqueuedAt - a.enqueuedAt).map((j) => {
+                        {sortedJobs.map((j) => {
+                          const isActive = j.status === 'running';
+                          const isOtherRunning = !!activeJobTaskId && activeJobTaskId !== j.taskId;
+                          // Bloqueia interações com tasks na fila enquanto OUTRA está rodando.
+                          // Mantém terminais (done/failed) interativas — usuário baixa/remove à vontade.
+                          const blockedByQueue =
+                            isOtherRunning && (j.status === 'queued' || j.status === 'paused');
                           const stLabel = ({
-                            queued: j.gateOnHeyGen ? '⏳ aguardando HeyGen' : '⏳ na fila',
+                            queued: j.gateOnHeyGen
+                              ? '⏳ aguardando HeyGen'
+                              : blockedByQueue
+                                ? '⏳ aguardando vez na fila'
+                                : '⏳ na fila',
                             running: '⚙ gerando B-rolls',
-                            paused: '⏸ pausado',
+                            paused: blockedByQueue ? '⏸ pausado · aguardando vez' : '⏸ pausado',
                             done: '✅ pronto',
                             failed: '✗ falhou',
                           } as Record<typeof j.status, string>)[j.status];
@@ -4441,13 +4460,32 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                             : 'text-text-muted border-line-strong bg-bg-soft/40';
                           const pct = j.status === 'done' ? 100 : j.status === 'failed' ? 0 : (j.percent || (j.status === 'running' ? 5 : 0));
                           const jobRunning = j.status === 'running';
+                          // Tooltip explicativo quando botão está bloqueado pela fila
+                          const blockedReason = blockedByQueue
+                            ? 'Bloqueado: aguardando a task em processo terminar (fila serial).'
+                            : null;
                           return (
-                            <li key={j.taskId} className={`rounded-[10px] border ${stColor} p-2`}>
+                            <li
+                              key={j.taskId}
+                              className={`rounded-[10px] border ${stColor} p-2 transition-opacity ${
+                                blockedByQueue ? 'opacity-60' : ''
+                              }`}
+                            >
                               <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
                                 <span className="mono">
                                   <strong className="text-white">{j.adName}</strong>
                                   <span className="ml-2">{stLabel}</span>
                                   <span className="ml-2 text-text-muted">· {j.takeCount} take{j.takeCount === 1 ? '' : 's'}</span>
+                                  {isActive ? (
+                                    <span
+                                      className="ml-2 inline-flex items-center gap-1 rounded-full border border-cyan-400/60 bg-cyan-500/15 px-1.5 py-0 text-[9px] font-bold uppercase tracking-[0.16em] text-cyan-200"
+                                      style={{ fontFamily: 'var(--font-tech)' }}
+                                      title="Esta task está em processo agora — só ela aceita comandos"
+                                    >
+                                      <span className="inline-block h-1 w-1 animate-pulse-soft rounded-full bg-cyan-300" />
+                                      EM PROCESSO
+                                    </span>
+                                  ) : null}
                                 </span>
                                 <div className="flex flex-wrap items-center gap-1.5">
                                   {j.status === 'done' && j.zipKey ? (
@@ -4460,32 +4498,34 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       ⬇ takes
                                     </button>
                                   ) : null}
-                                  {/* PAUSAR / RETOMAR / DEBUG — serial garantido:
-                                   *  outro job so inicia se este estiver pausado/
-                                   *  finalizado (pickNextMagnificJob ignora running). */}
+                                  {/* PAUSAR / RETOMAR / DEBUG — quando outra task está
+                                   *  rodando, estes botões ficam BLOQUEADOS pra
+                                   *  tasks da fila/pausadas (regra serial estrita).
+                                   *  Só a task EM PROCESSO controla seus botões. */}
                                   <button
                                     type="button"
                                     onClick={() => pauseMagnificJob(j.taskId)}
-                                    disabled={j.status === 'paused' || j.status === 'done'}
-                                    className="mono rounded border border-yellow-500/50 bg-yellow-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-yellow-200 hover:bg-yellow-500/20 disabled:opacity-40"
-                                    title="Para o job (rodando ou na fila). Libera a vez pra outro."
+                                    disabled={blockedByQueue || j.status === 'paused' || j.status === 'done'}
+                                    className="mono rounded border border-yellow-500/50 bg-yellow-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-yellow-200 hover:bg-yellow-500/20 disabled:cursor-not-allowed disabled:opacity-30"
+                                    title={blockedReason ?? 'Para o job (rodando ou na fila). Libera a vez pra outro.'}
                                   >
                                     ⏸ Pausar
                                   </button>
                                   <button
                                     type="button"
                                     onClick={() => resumeMagnificJob(j.taskId)}
-                                    disabled={jobRunning || j.status === 'done'}
-                                    className="mono rounded border border-cyan-500/60 bg-cyan-500/15 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-40"
-                                    title="Volta o job pra fila — roda quando nenhum outro estiver rodando (serial 1/vez)"
+                                    disabled={blockedByQueue || jobRunning || j.status === 'done'}
+                                    className="mono rounded border border-cyan-500/60 bg-cyan-500/15 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-30"
+                                    title={blockedReason ?? 'Volta o job pra fila — roda quando nenhum outro estiver rodando (serial 1/vez)'}
                                   >
                                     🔄 Retomar
                                   </button>
                                   <button
                                     type="button"
                                     onClick={() => debugMagnificJob(j.taskId)}
-                                    className="mono rounded border border-fuchsia-500/50 bg-fuchsia-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20"
-                                    title="DEBUG (reserva p/ bugs/loop): aborta e recria do ZERO num space novo"
+                                    disabled={blockedByQueue}
+                                    className="mono rounded border border-fuchsia-500/50 bg-fuchsia-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20 disabled:cursor-not-allowed disabled:opacity-30"
+                                    title={blockedReason ?? 'DEBUG (reserva p/ bugs/loop): aborta e recria do ZERO num space novo'}
                                   >
                                     🐞 Debug
                                   </button>
@@ -4493,7 +4533,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                     type="button"
                                     onClick={() => removeMagnificJob(j.taskId)}
                                     className="mono rounded border border-line-strong px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
-                                    title="Remove esse job da fila"
+                                    title="Remove esse job da fila (sempre disponível pra liberar espaço)"
                                   >
                                     ✕
                                   </button>
@@ -4514,6 +4554,8 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                           );
                         })}
                       </ul>
+                        );
+                      })()}
                     </div>
                   ) : null}
 
