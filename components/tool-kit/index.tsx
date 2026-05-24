@@ -110,19 +110,25 @@ export function ToolHero({
 
 /* ─────────────────── ToolStep ─────────────────── */
 /**
- * Bloco de passo. Visual de cartão tipo HeyGen com badge (ícone OU
- * número), título e conteúdo. Quando `icon` é passado, o badge mostra
- * o ícone em vez do número — passos viram visuais e auto-explicativos.
+ * Bloco de passo. Visual de cartão tipo HeyGen com badge (ícone),
+ * título e conteúdo.
+ *
+ * IMPORTANTE: o badge SEMPRE mostra um ícone — números (01/02/03) foram
+ * removidos por completo do design. A prop `n` ainda existe pra
+ * compatibilidade com a ordem dos steps no JSX, mas nunca é renderizada.
+ * Se nenhum `icon` for passado, cai num bullet genérico (•) — mas o
+ * correto é cada step passar um ícone simbólico do que faz.
  */
 export function ToolStep({
-  n,
+  n: _n,
   title,
   hint,
   hue = 'rgba(167,139,250,0.45)',
   icon,
   children,
 }: {
-  n: number | string;
+  /** Mantido só pra compat — não é mais renderizado. */
+  n?: number | string;
   title: string;
   hint?: string;
   hue?: string;
@@ -147,16 +153,24 @@ export function ToolStep({
       <div className="relative">
         <div className="mb-4 flex items-center gap-3">
           <span
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border text-[12px] font-bold tabular-nums"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border"
             style={{
-              fontFamily: 'var(--font-tech)',
               color: '#fff',
               borderColor: hue,
               background: `linear-gradient(135deg, ${hue}, transparent 70%), rgba(0,0,0,0.5)`,
               boxShadow: `0 0 18px -4px ${hue}`,
             }}
           >
-            {icon ? icon : typeof n === 'number' ? String(n).padStart(2, '0') : n}
+            {icon ? (
+              icon
+            ) : (
+              // Fallback: bullet genérico (NUNCA mostra número).
+              // Significa "esqueci de passar icon" — visualmente neutro
+              // até alguém adicionar o ícone real.
+              <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+                <circle cx="5" cy="5" r="3" fill="currentColor" opacity="0.85" />
+              </svg>
+            )}
           </span>
           <div className="flex-1">
             <h3

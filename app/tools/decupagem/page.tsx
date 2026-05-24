@@ -11,7 +11,12 @@ import {
   ToolResultCard,
   ToolMetric,
 } from '@/components/tool-kit';
-import { IconDecupagem } from '@/components/ToolIcons';
+import {
+  IconDecupagem,
+  IconStepUpload,
+  IconStepFormat,
+  IconStepSliders,
+} from '@/components/ToolIcons';
 import { useToolState } from '@/components/ToolsStateProvider';
 import {
   decodeAudioRobust,
@@ -263,6 +268,7 @@ export default function DecupagemPage() {
         {/* PASSO 1 — UPLOAD */}
         <ToolStep
           n={1}
+          icon={<IconStepUpload size={18} />}
           title="Solta o arquivo"
           hint="MP3, WAV, MP4, WEBM ou MOV"
           hue="rgba(163,230,53,0.4)"
@@ -284,6 +290,7 @@ export default function DecupagemPage() {
         {fileIsVideo ? (
           <ToolStep
             n={2}
+            icon={<IconStepFormat size={18} />}
             title="Como você quer receber?"
             hint={isFree ? 'A conta grátis exporta só áudio' : 'Escolhe o formato de saída'}
             hue="rgba(167,139,250,0.4)"
@@ -312,6 +319,7 @@ export default function DecupagemPage() {
         {effectiveKind === 'audio' ? (
           <ToolStep
             n={fileIsVideo ? 3 : 2}
+            icon={<IconStepFormat size={18} />}
             title="Formato do áudio"
             hue="rgba(34,211,238,0.4)"
           >
@@ -327,6 +335,7 @@ export default function DecupagemPage() {
         {/* PASSO 4 — TOLERÂNCIA */}
         <ToolStep
           n={effectiveKind === 'audio' ? (fileIsVideo ? 4 : 3) : 3}
+          icon={<IconStepSliders size={18} />}
           title="Quanto de silêncio manter?"
           hint="Pouco = corte agressivo. Muito = fala respira"
           hue="rgba(244,114,182,0.4)"
