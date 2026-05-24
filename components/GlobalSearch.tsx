@@ -882,20 +882,11 @@ function FeaturedCard({
           <Icon size={26} strokeWidth={1.7} />
         </span>
 
-        {/* TEXTO — label + badge destaque + hint */}
+        {/* TEXTO — label + hint (sem badge, já é destaque pelo próprio card) */}
         <div className="fc-text">
-          <div className="fc-row">
-            <span className="fc-label" style={{ fontFamily: 'var(--font-tech)' }}>
-              {def.label}
-            </span>
-            <span
-              className="fc-badge"
-              style={{ fontFamily: 'var(--font-tech)' }}
-            >
-              <span aria-hidden className="fc-badge-dot" />
-              Destaque
-            </span>
-          </div>
+          <span className="fc-label" style={{ fontFamily: 'var(--font-tech)' }}>
+            {def.label}
+          </span>
           <div className="fc-hint">{def.hint}</div>
         </div>
 
@@ -1137,12 +1128,6 @@ function FeaturedCard({
           justify-content: center;
           gap: 4px;
         }
-        .fc-row {
-          display: flex;
-          align-items: center;
-          gap: 9px;
-          min-width: 0;
-        }
         .fc-label {
           font-size: 15.5px;
           font-weight: 800;
@@ -1165,43 +1150,6 @@ function FeaturedCard({
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
-        }
-
-        /* Badge DESTAQUE — chip pequeno colorido ao lado do label */
-        .fc-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 5px;
-          flex-shrink: 0;
-          padding: 2.5px 8px 2.5px 7px;
-          border-radius: 9999px;
-          font-size: 8.5px;
-          font-weight: 800;
-          letter-spacing: 0.18em;
-          text-transform: uppercase;
-          color: #fff;
-          background: linear-gradient(
-            90deg,
-            rgba(var(--fc-glow), 0.32),
-            rgba(var(--fc-glow), 0.1)
-          );
-          border: 1px solid rgba(var(--fc-glow), 0.45);
-          box-shadow:
-            inset 0 1px 0 rgba(255, 255, 255, 0.08),
-            0 4px 10px -4px rgba(var(--fc-glow), 0.45);
-          text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
-        }
-        .fc-badge-dot {
-          width: 5px;
-          height: 5px;
-          border-radius: 9999px;
-          background: var(--fc-primary, #a78bfa);
-          box-shadow: 0 0 8px rgba(var(--fc-glow), 0.9);
-          animation: fc-badge-pulse 2s ease-in-out infinite;
-        }
-        @keyframes fc-badge-pulse {
-          0%, 100% { transform: scale(1); opacity: 0.85; }
-          50%      { transform: scale(1.4); opacity: 1; }
         }
 
         /* Seta — indicador no canto direito que desliza no hover */
@@ -1232,7 +1180,6 @@ function FeaturedCard({
           .fc-icon { width: 42px; height: 42px; border-radius: 12px; }
           .fc-label { font-size: 14px; }
           .fc-hint { font-size: 11px; }
-          .fc-badge { display: none; }
           .fc-arrow { font-size: 16px; }
         }
 
