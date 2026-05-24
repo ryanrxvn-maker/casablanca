@@ -130,6 +130,18 @@ function AutoBrollInner() {
     detectMagnificExtension().then((s) => {
       if (!cancelled) setExtStatus(s);
     });
+    // Re-check a cada 3s enquanto não conectado — pra detectar a extensão
+    // Freepik Sync sincronizando os cookies sem precisar dar refresh.
+    const poll = setInterval(() => {
+      detectMagnificExtension().then((s) => {
+        if (cancelled) return;
+        setExtStatus((prev) => {
+          // Só atualiza se mudou — evita re-render desnecessário
+          if (prev.connected === s.connected) return prev;
+          return s;
+        });
+      });
+    }, 3000);
     try {
       const raw = sessionStorage.getItem('darkolab:auto-broll:handoff');
       if (raw) {
@@ -154,6 +166,7 @@ function AutoBrollInner() {
     }
     return () => {
       cancelled = true;
+      clearInterval(poll);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -321,49 +334,65 @@ function AutoBrollInner() {
             </button>
           </div>
         ) : (
-          <div className="rounded-[12px] border border-yellow-500/40 bg-yellow-500/10 px-4 py-3">
-            <div className="flex items-start gap-2">
-              <span className="text-yellow-300">⚠</span>
-              <div className="flex-1 text-xs text-yellow-300/90">
-                <strong className="text-yellow-300">
-                  Magnific não conectado
-                </strong>
-                . A pipeline dispara server-side via API direta (12 imagens + 6
-                vídeos simultâneos, Unlimited mode, zero créditos).
-                <details className="mt-2" open>
-                  <summary className="cursor-pointer text-yellow-300/80 hover:text-yellow-200 select-none">
-                    Como conectar (passo a passo)
+          <div className="rounded-[12px] border-2 border-lime/40 bg-lime/[0.05] px-4 py-4">
+            <div className="flex items-start gap-3">
+              <span className="text-2xl leading-none">🔌</span>
+              <div className="flex-1">
+                <div className="mb-1 flex items-center gap-2">
+                  <strong className="text-sm text-lime">
+                    Magnific não conectado
+                  </strong>
+                  <span className="rounded-full bg-lime px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-black">
+                    1 clique
+                  </span>
+                </div>
+                <p className="mb-3 text-[12px] text-text-muted">
+                  Instala a extensão Chrome (1x) → loga em Freepik → conectado
+                  pra sempre. Auto-sync invisível, zero copy/paste.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <a
+                    href="/api/extension-freepik-sync/download"
+                    download
+                    className="btn-primary inline-flex items-center gap-2"
+                  >
+                    ⬇ Baixar Extensão
+                  </a>
+                  <a
+                    href="/configuracoes/magnific"
+                    className="rounded-[12px] border border-line px-4 py-2 text-xs text-text-muted transition hover:border-lime hover:text-lime"
+                  >
+                    Passo a passo →
+                  </a>
+                </div>
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-[11px] text-text-muted hover:text-white select-none">
+                    Instalação manual (avançado)
                   </summary>
-                  <ol className="mt-2 list-decimal space-y-1 pl-5 text-yellow-300/80">
+                  <ol className="mt-2 list-decimal space-y-1 pl-5 text-[11px] text-text-muted">
+                    <li>Baixa o ZIP no botão acima</li>
+                    <li>Descompacta numa pasta qualquer</li>
                     <li>
                       Abre{' '}
+                      <code className="mono">chrome://extensions</code>
+                    </li>
+                    <li>Ativa &ldquo;Modo de desenvolvedor&rdquo;</li>
+                    <li>
+                      Clica &ldquo;Carregar sem compactação&rdquo; → escolhe a pasta
+                    </li>
+                    <li>
+                      Loga em{' '}
                       <a
                         href="https://www.magnific.com"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="underline hover:text-lime"
+                        className="text-lime underline"
                       >
                         magnific.com
                       </a>{' '}
-                      logado na sua conta Freepik Premium+
+                      (Freepik Premium+)
                     </li>
-                    <li>
-                      F12 → Console → cola{' '}
-                      <code className="mono">document.cookie</code> → copia o
-                      resultado
-                    </li>
-                    <li>
-                      Abre{' '}
-                      <a
-                        href="/configuracoes/magnific"
-                        className="underline hover:text-lime"
-                      >
-                        /configuracoes/magnific
-                      </a>{' '}
-                      e cola no campo
-                    </li>
-                    <li>O XSRF é extraído automático — clica &ldquo;Validar e Salvar&rdquo;</li>
-                    <li>Volta aqui — status auto-detecta</li>
+                    <li>Volta aqui — status auto-atualiza em ~3s</li>
                   </ol>
                 </details>
               </div>
