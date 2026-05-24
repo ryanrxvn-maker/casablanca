@@ -392,8 +392,30 @@ export default function DownloaderPage() {
                   </li>
                 </ol>
                 <p className="mono mt-3 text-[10px] leading-relaxed text-text-muted">
-                  <span className="text-lime">Anti-antivírus:</span> EXE com metadata completa (publisher, versão, descrição), manifest XML <code>asInvoker</code> (sem UAC), PowerShell visível, sem VBS, sem mods em Startup. Auto-start usa Task Scheduler nativo. Motor roda no seu PC (sem servidor). Baixa Node + yt-dlp + ffmpeg + Chromium (~250 MB) só na 1ª vez.
+                  <span className="text-lime">Anti-antivírus:</span> EXE <b className="text-white">assinado digitalmente</b> (Publisher: Auto Edit, timestamp DigiCert), metadata completa (versão 3.0, descrição, copyright), manifest XML <code>asInvoker</code> (sem UAC), PowerShell visível, sem VBS, sem mods em Startup. Auto-start usa Task Scheduler nativo.
                 </p>
+
+                {/* Fallback: ZIP sem .exe — pra casos extremos onde mesmo o
+                    .exe assinado é bloqueado por AV corporativo paranóico. */}
+                <div className="mt-3 rounded-[10px] border border-yellow-500/30 bg-yellow-500/5 px-3 py-2.5">
+                  <div
+                    className="mb-1 text-[10.5px] font-bold uppercase tracking-[0.18em] text-yellow-300"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    Antivírus ainda bloqueia?
+                  </div>
+                  <p className="mono text-[10.5px] leading-relaxed text-yellow-200/90">
+                    Baixa a versão <b>sem .exe</b> (só scripts <code>.cmd</code> + <code>.ps1</code> abertos — você consegue abrir no Notepad). Avast/Defender quase nunca bloqueiam:
+                  </p>
+                  <a
+                    href="/api/downloader-engine/download?format=zip"
+                    download
+                    className="mono mt-2 inline-flex items-center gap-2 rounded-full border border-yellow-500/60 bg-yellow-500/15 px-3 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.14em] text-yellow-100 transition hover:bg-yellow-500/25"
+                  >
+                    ↓ Baixar versão ZIP (alternativa)
+                  </a>
+                </div>
+
                 <p className="mono mt-2 text-[10px] leading-relaxed text-text-muted">
                   Falhou? Log em <code className="mono text-white">%LOCALAPPDATA%\AutoEditDownloader\install.log</code>. Manda no WhatsApp.
                 </p>

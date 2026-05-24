@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { createReadStream } from 'fs';
 import { stat } from 'fs/promises';
 import { Readable } from 'stream';
@@ -28,23 +28,28 @@ import path from 'path';
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // ?format=zip → entrega o pkg.zip (scripts puros, sem .exe)
+  // Pra casos extremos onde AV ainda bloqueia o .exe assinado.
+  const { searchParams } = new URL(req.url);
+  const wantZip = searchParams.get('format') === 'zip';
+
+  const fileName = wantZip
+    ? 'AutoEditDownloader.zip'
+    : 'AutoEditDownloaderSetup.exe';
+  const localName = wantZip ? 'pkg.zip' : 'AutoEditDownloaderSetup.exe';
+
   try {
-    const exePath = path.join(
-      process.cwd(),
-      'engine',
-      'AutoEditDownloaderSetup.exe',
-    );
-    const st = await stat(exePath);
-    const node = createReadStream(exePath);
+    const filePath = path.join(process.cwd(), 'engine', localName);
+    const st = await stat(filePath);
+    const node = createReadStream(filePath);
     const webStream = Readable.toWeb(node) as unknown as ReadableStream<Uint8Array>;
 
     return new NextResponse(webStream, {
       status: 200,
       headers: {
-        'content-type': 'application/octet-stream',
-        'content-disposition':
-          'attachment; filename="AutoEditDownloaderSetup.exe"',
+        'content-type': wantZip ? 'application/zip' : 'application/octet-stream',
+        'content-disposition': `attachment; filename="${fileName}"`,
         'content-length': String(st.size),
         'cache-control': 'public, max-age=3600',
         'x-accel-buffering': 'no',
@@ -53,8 +58,9 @@ export async function GET() {
   } catch (e) {
     return NextResponse.json(
       {
-        error:
-          'Instalador indisponivel. Gere com: node engine/build.mjs && node engine/package.mjs (cria engine/AutoEditDownloaderSetup.exe).',
+        error: wantZip
+          ? 'ZIP fallback indisponivel. Gere com: node engine/package.mjs (cria engine/pkg.zip).'
+          : 'Instalador indisponivel. Gere com: node engine/build.mjs && node engine/package.mjs.',
         detail: e instanceof Error ? e.message : String(e),
       },
       { status: 503 },

@@ -151,6 +151,7 @@ async function main() {
   log('compilando AutoEditDownloaderSetup.exe (csc.exe)...');
   const exeOut = path.join(here, 'AutoEditDownloaderSetup.exe');
   rmSync(exeOut, { force: true });
+  const signScript = path.join(here, 'installer', 'sign-exe.ps1');
 
   // Anti-AV strategy:
   //   /target:EXE     → console application (janela visível, sem hide flags)
@@ -180,9 +181,26 @@ async function main() {
     { stdio: 'inherit' },
   );
 
+  // Assina o .exe via self-signed cert (reduz heurística AV)
+  log('assinando o .exe (self-signed cert)...');
+  try {
+    execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', signScript,
+        '-Exe', exeOut,
+      ],
+      { stdio: 'inherit' },
+    );
+  } catch (e) {
+    log('AVISO: assinatura falhou (continua sem assinar): ' + e.message);
+  }
+
   log('pronto:');
   log('  -> ' + exeOut + '  (distribuir SO ISSO pro usuario)');
-  log('  -> ' + zipOut + '  (zip cru, opcional)');
+  log('  -> ' + zipOut + '  (zip cru, alternativa pra quem trava no .exe)');
   log('  -> ' + pkg + '\\   (pasta crua, opcional)');
 }
 
