@@ -53,7 +53,7 @@ export async function GET() {
       status: 200,
       headers: {
         'content-type': 'application/zip',
-        'content-disposition': 'attachment; filename="darkolab-freepik-sync.zip"',
+        'content-disposition': 'attachment; filename="auto-edit-freepik-sync.zip"',
         'cache-control': 'public, max-age=3600',
       },
     });
