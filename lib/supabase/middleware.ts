@@ -307,10 +307,20 @@ function checkOrigin(request: NextRequest): NextResponse | null {
   const candidate = origin || (referer ? new URL(referer).origin : null);
   if (!candidate) return null;
 
+  // Browser extensions (Chrome/Firefox) podem chamar a API — usadas pra
+  // sincronizar cookies de magnific.com com /api/auto-broll-v2/save-creds.
+  // Não há como saber o ID exato da extensão antes do publish, então
+  // confiamos no protocolo + na autenticação Supabase do endpoint.
+  const isBrowserExtension =
+    candidate.startsWith('chrome-extension://') ||
+    candidate.startsWith('moz-extension://') ||
+    candidate.startsWith('safari-web-extension://');
+
   const isAllowed =
     candidate === selfOrigin ||
     (allowedOrigin && candidate === allowedOrigin) ||
-    candidate.endsWith('.vercel.app');
+    candidate.endsWith('.vercel.app') ||
+    isBrowserExtension;
 
   if (!isAllowed) {
     return new NextResponse(

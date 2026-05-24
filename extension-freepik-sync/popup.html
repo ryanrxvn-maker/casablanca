@@ -10,39 +10,40 @@
     <header>
       <div class="brand">
         <span class="dot" id="dot"></span>
-        <strong>Auto Edit</strong> · Freepik Sync
+        <span><strong>AUTO EDIT</strong> <span class="sep">/</span> Freepik Sync</span>
       </div>
     </header>
 
     <div class="status" id="status">
       <div class="title" id="statusTitle">Verificando…</div>
-      <div class="sub" id="statusSub"></div>
+      <div class="sub" id="statusSub">Sincronizando sua sessão Freepik com Auto Edit.</div>
     </div>
 
     <div class="meta" id="meta" hidden>
-      <div><span>Plano:</span> <strong id="metaPlan">—</strong></div>
-      <div><span>User Magnific:</span> <strong id="metaUid">—</strong></div>
-      <div><span>Último sync:</span> <strong id="metaLast">—</strong></div>
-      <div><span>App:</span> <strong id="metaEp">—</strong></div>
+      <div><span>Plano</span> <strong id="metaPlan">—</strong></div>
+      <div><span>User Magnific</span> <strong id="metaUid">—</strong></div>
+      <div><span>Último sync</span> <strong id="metaLast">—</strong></div>
+      <div><span>App</span> <strong id="metaEp">—</strong></div>
     </div>
 
-    <div class="actions">
-      <button id="btnSync" class="primary">Sincronizar agora</button>
-      <button id="btnOpenMagnific" class="ghost">Abrir magnific.com</button>
-      <button id="btnOpenDarko" class="ghost">Abrir Auto Edit</button>
+    <div class="actions" id="actions">
+      <button id="btnOpenMagnific">magnific.com</button>
+      <button id="btnOpenDarko">Auto Edit</button>
     </div>
 
     <details class="advanced">
-      <summary>Avançado · endpoint manual</summary>
-      <label>
-        URL do Auto Edit
-        <input id="endpoint" type="url" placeholder="https://casablanca.vercel.app">
-      </label>
-      <button id="btnSaveEndpoint" class="ghost small">Salvar endpoint</button>
-      <p class="hint">Em geral nem precisa preencher — a extensão detecta automático quando você abre o Auto Edit em qualquer aba.</p>
+      <summary>Diagnóstico</summary>
+      <button id="btnSync" class="full">Re-sincronizar agora</button>
+      <label>URL do Auto Edit (override)</label>
+      <input id="endpoint" type="url" placeholder="auto-detectado">
+      <button id="btnSaveEndpoint">Salvar endpoint</button>
+      <p class="hint">
+        Em uso normal nada disso é necessário. A extensão sincroniza
+        automaticamente quando você loga no Freepik ou abre o Auto Edit.
+      </p>
     </details>
 
-    <footer>v1.0.1 · Auto-sync · auto-detect domain</footer>
+    <footer>v1.0.2 · Auto-sync invisível</footer>
   </div>
 
   <script src="popup.js"></script>

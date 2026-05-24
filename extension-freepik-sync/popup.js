@@ -72,7 +72,7 @@ $('btnSync').addEventListener('click', async () => {
   await send('sync-now');
   await refresh();
   $('btnSync').disabled = false;
-  $('btnSync').textContent = 'Sincronizar agora';
+  $('btnSync').textContent = 'Re-sincronizar agora';
 });
 
 $('btnOpenMagnific').addEventListener('click', () => {
