@@ -7,11 +7,17 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
 
+#if REMOVER
+[assembly: AssemblyTitle("Auto Edit Smart Remover Setup")]
+[assembly: AssemblyDescription("Instalador do motor local do Auto Edit Smart Remover — baixa Python, PaddleOCR, LaMa e ffmpeg para uso offline.")]
+[assembly: AssemblyProduct("Auto Edit Smart Remover")]
+#else
 [assembly: AssemblyTitle("Auto Edit Downloader Setup")]
 [assembly: AssemblyDescription("Instalador do motor local do Auto Edit Downloader — baixa Node, ffmpeg, yt-dlp e Chromium para uso offline.")]
+[assembly: AssemblyProduct("Auto Edit Downloader")]
+#endif
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("Auto Edit")]
-[assembly: AssemblyProduct("Auto Edit Downloader")]
 [assembly: AssemblyCopyright("Copyright (c) Auto Edit 2026")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]

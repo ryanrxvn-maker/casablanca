@@ -20,6 +20,26 @@ using System.Windows.Forms;
 
 namespace AutoEdit
 {
+    // ====================== Branding (parametrizado via #define) ===========
+    // Mesmo Setup.cs serve 2 instaladores:
+    //   - Downloader (default)            → AutoEditDownloader / pasta LOCALAPPDATA
+    //   - Smart Remover (csc /define:REMOVER) → AutoEditSmartRemover
+    static class Brand
+    {
+#if REMOVER
+        public const string Product    = "Smart Remover";
+        public const string Eyebrow    = "VÍDEO COM IA  ·  INSTALADOR";
+        public const string InstallDir = "AutoEditSmartRemover";
+        public const string Hint       = "Baixando IA + componentes (~600 MB) na 1ª vez. Pode levar 3–10 min.";
+#else
+        public const string Product    = "Auto Edit";
+        public const string Eyebrow    = "DOWNLOADER  ·  INSTALADOR";
+        public const string InstallDir = "AutoEditDownloader";
+        public const string Hint       = "Baixando componentes na 1ª vez (~250 MB). Pode levar 1–3 min.";
+#endif
+        public const string DoneHint   = "Pronto. O motor já foi vinculado. Use a ferramenta no site normalmente.";
+    }
+
     // ====================== Design Tokens (auto-edit.app) ======================
     static class Theme
     {
@@ -150,14 +170,14 @@ namespace AutoEdit
             _statusPath = statusPath;
             _installDst = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "AutoEditDownloader");
+                Brand.InstallDir);
             _logPath = Path.Combine(_installDst, "install.log");
             BuildUi();
         }
 
         void BuildUi()
         {
-            Text = "Auto Edit Downloader";
+            Text = "Auto Edit  ·  " + Brand.Product;
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterScreen;
             Size = new Size(580, 380);
@@ -261,11 +281,10 @@ namespace AutoEdit
                 g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
                 using (var f = new Font("Segoe UI", 20f, FontStyle.Bold))
                 using (var b = new SolidBrush(Theme.Text))
-                    g.DrawString("Auto Edit", f, b, 0, 0);
+                    g.DrawString(Brand.Product, f, b, 0, 0);
                 using (var f = new Font("Segoe UI", 8f, FontStyle.Bold))
                 using (var b = new SolidBrush(Theme.Violet))
-                    g.DrawString("DOWNLOADER · INSTALADOR",
-                        f, b, 1, 34);
+                    g.DrawString(Brand.Eyebrow, f, b, 1, 34);
             };
             Controls.Add(brandPanel);
 
@@ -307,7 +326,7 @@ namespace AutoEdit
             // ===== HINT (mensagem secundária) =================================
             _hintLbl = new Label
             {
-                Text = "Baixando componentes na 1ª vez (~250 MB). Pode levar 1–3 min.",
+                Text = Brand.Hint,
                 ForeColor = Theme.TextMuted,
                 Font = new Font("Segoe UI", 9f, FontStyle.Regular),
                 AutoSize = false,
@@ -521,8 +540,7 @@ namespace AutoEdit
                 _eyebrow.ForeColor = Theme.Violet;
                 _statusLbl.Text = "Instalado e vinculado";
                 _statusLbl.ForeColor = Theme.Text;
-                _hintLbl.Text = "Pronto. A extensão Auto Edit Downloader já detectou o motor. " +
-                    "Abre um vídeo no YouTube/TikTok/Instagram e clica no botão Baixar.";
+                _hintLbl.Text = Brand.DoneHint;
                 _btnClose.Visible = true;
                 _btnLog.Visible = true;
                 _btnFolder.Visible = true;
