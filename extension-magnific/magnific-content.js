@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.5.59';
+const DARKO_MG_VERSION = '3.5.60';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -1548,12 +1548,47 @@ async function pressEnterOnInput(input) {
 /**
  * v3.5.1: REAL MOUSE CLICK via chrome.debugger CDP — pra option clicks em
  * dropdowns Magnific (que bloqueou dispatched events com isTrusted check).
+ *
+ * v3.5.60 — ON-SCREEN GUARD. **BUG REAL detectado em produção**: Magnific
+ * renderiza popup options em coordenadas off-screen (x negativo) quando o
+ * node está perto da borda do canvas. CDP click em coord negativa cai
+ * FORA da viewport, atingindo elementos errados (sidebar, link "back" do
+ * Magnific) e causando "Leaving room" → sai do space inteiro → pipeline
+ * morre. Defesa em 2 camadas:
+ *   1. scrollIntoView no próprio elemento (tenta trazer pra viewport)
+ *   2. re-read rect; se AINDA off-screen, return false → caller cai pro
+ *      dispatched event fallback (não precisa de coord física)
  */
 async function clickViaCDP(el) {
   if (!el) return false;
   try {
-    const r = el.getBoundingClientRect();
+    let r = el.getBoundingClientRect();
     if (!r || r.width === 0) return false;
+
+    const inViewport = (rect) =>
+      rect.x >= 0 && rect.y >= 0 &&
+      rect.x + rect.width <= window.innerWidth &&
+      rect.y + rect.height <= window.innerHeight &&
+      rect.width > 0 && rect.height > 0;
+
+    if (!inViewport(r)) {
+      console.warn('[clickViaCDP] elemento OFF-SCREEN (x=' + r.x.toFixed(0) + ',y=' + r.y.toFixed(0) + ') — tentando scrollIntoView');
+      try { __darko_log('cdp-offscreen', 'tentando scroll', { x: r.x, y: r.y, w: r.width, h: r.height }); } catch {}
+      try { el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }); } catch {
+        try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch {}
+      }
+      // Espera 2 frames pra layout commit + re-mensura
+      await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+      r = el.getBoundingClientRect();
+    }
+    if (!inViewport(r)) {
+      // Ainda off-screen — recusa CDP. Caller cai pro dispatched event que
+      // funciona com elemento off-screen (event bubbling DOM, sem coord física).
+      console.warn('[clickViaCDP] ainda off-screen após scroll — abortando CDP, deixando fallback dispatch');
+      try { __darko_log('cdp-recused-offscreen', 'fallback dispatch', { x: r.x, y: r.y }); } catch {}
+      return false;
+    }
+
     const x = Math.round(r.x + r.width / 2);
     const y = Math.round(r.y + r.height / 2);
     return await new Promise((resolve) => {
