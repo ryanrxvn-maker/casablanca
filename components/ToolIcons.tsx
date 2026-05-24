@@ -173,6 +173,55 @@ export function IconNormalizador(p: IconProps) {
   );
 }
 
+/** Separador de Áudio — 3 ondas separadas (voz/SFX/instrumental), gradient violet/teal */
+export function IconSeparadorAudio(p: IconProps) {
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
+  const url = `url(#${id})`;
+  return (
+    <svg
+      width={p.size ?? 22}
+      height={p.size ?? 22}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+      className={p.className}
+    >
+      <defs>
+        <linearGradient id={id} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#a78bfa" />
+          <stop offset="50%" stopColor="#5eead4" />
+          <stop offset="100%" stopColor="#f472b6" />
+        </linearGradient>
+      </defs>
+      {/* 3 ondas senoidais empilhadas, cada uma representando 1 stem */}
+      <path
+        d="M2 6 Q5 3, 8 6 T14 6 T22 6"
+        stroke={url}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        fill="none"
+      />
+      <path
+        d="M2 12 Q5 9, 8 12 T14 12 T22 12"
+        stroke={url}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        fill="none"
+        opacity="0.75"
+      />
+      <path
+        d="M2 18 Q5 15, 8 18 T14 18 T22 18"
+        stroke={url}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        fill="none"
+        opacity="0.5"
+      />
+    </svg>
+  );
+}
+
 /** Take Splitter — gradient verde/teal */
 export function IconTakeSplitter(p: IconProps) {
   const raw = useId();

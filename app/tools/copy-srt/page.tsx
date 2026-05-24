@@ -187,9 +187,9 @@ export default function CopySrtPage() {
 
   return (
     <ToolShell
-      title="SRT Generator"
-      eyebrow="TEXTO COM IA"
-      description="Gera legendas prontas no tempo do seu áudio pra importar no editor. Texto exato da copy."
+      title="Gerador de SRT"
+      eyebrow="LEGENDA · IA"
+      description="Gera legendas .srt no tempo exato do seu áudio. Texto que aparece é a sua copy — perfeitamente alinhada palavra-a-palavra, com quebra inteligente (42 chars/linha, CPS ≤17)."
       hue={HUE}
       icon={<IconCopySRT size={56} />}
     >

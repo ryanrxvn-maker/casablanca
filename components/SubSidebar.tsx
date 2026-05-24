@@ -17,6 +17,7 @@ import {
   IconHeyGenAuto,
   IconNormalizador,
   IconRemoverElementos,
+  IconSeparadorAudio,
   IconTrocaProduto,
 } from './ToolIcons';
 
@@ -36,6 +37,7 @@ const BASE_ITEMS: Item[] = [
   { href: '/tools/audio-split', label: 'Dividir áudios', icon: <IconAudioSplit size={20} />, hue: 'rgba(34,211,238,0.4)' },
   { href: '/tools/acelerador', label: 'Mixer de Velocidade', icon: <IconAcelerador size={20} />, hue: 'rgba(251,191,36,0.4)' },
   { href: '/tools/normalizador', label: 'Normalizador', icon: <IconNormalizador size={20} />, hue: 'rgba(94,234,212,0.4)' },
+  { href: '/tools/separador-audio', label: 'Separador de Áudio', icon: <IconSeparadorAudio size={20} />, hue: 'rgba(167,139,250,0.45)' },
 ];
 
 const AI_ITEMS: Item[] = [

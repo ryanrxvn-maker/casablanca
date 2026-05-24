@@ -79,6 +79,7 @@ const ALL_TOOLS: Tool[] = [
   { key: 'camuflagem', label: 'Camuflagem' },
   { key: 'troca-produto', label: 'Troca de produto' },
   { key: 'decupagem-inteligente', label: 'Decupagem Inteligente' },
+  { key: 'separador-audio', label: 'Separador de Áudio (voz/SFX/inst)' },
 ];
 
 /** Quais ferramentas cada plano libera (por `key` da ALL_TOOLS). */
@@ -1441,6 +1442,14 @@ const TOOL_DETAILS: ToolInfo[] = [
     hue: 'rgba(232,121,249,0.55)',
     desc: 'A IA decupa o vídeo seguindo a copy do roteiro com precisão.',
     win: 'Diz o que tem que ser dito, a IA escolhe a melhor take e monta.',
+  },
+  {
+    key: 'separador-audio',
+    name: 'Separador de Áudio',
+    cat: 'IA',
+    hue: 'rgba(167,139,250,0.55)',
+    desc: 'Separa voz, instrumental e SFX em 3 trilhas com modelo Demucs v4.',
+    win: 'Refaz mixagem, reusa só a voz, isola o beat. Qualidade absurda.',
   },
 ];
 

@@ -27,6 +27,7 @@ const TITLES: Record<string, string> = {
   '/tools/audio-split': 'Dividir áudios',
   '/tools/acelerador': 'Mixer de Velocidade',
   '/tools/normalizador': 'Normalizador',
+  '/tools/separador-audio': 'Separador de Áudio',
   '/tools/calculadora': 'Calculadora',
   '/tools/auto-broll': 'Auto B-roll',
   '/tools/troca-produto': 'Troca de produto',

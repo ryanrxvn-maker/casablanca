@@ -403,6 +403,7 @@ const BASE_PATHS = [
   '/tools/audio-split',
   '/tools/acelerador',
   '/tools/normalizador',
+  '/tools/separador-audio',
 ];
 const AI_PATHS = [
   '/tools/auto-broll',

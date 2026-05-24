@@ -19,6 +19,7 @@ import {
   IconHeyGenAuto,
   IconNormalizador,
   IconRemoverElementos,
+  IconSeparadorAudio,
   IconTrocaProduto,
 } from './ToolIcons';
 
@@ -119,6 +120,13 @@ const BASE: ToolEntry[] = [
     description: 'Iguala o volume de vários arquivos.',
     icon: <IconNormalizador size={26} />,
     hue: 'rgba(94, 234, 212, 0.4)',
+  },
+  {
+    href: '/tools/separador-audio',
+    label: 'Separador de Áudio',
+    description: 'Separa voz, instrumental e SFX em trilhas independentes.',
+    icon: <IconSeparadorAudio size={26} />,
+    hue: 'rgba(167, 139, 250, 0.45)',
   },
 ];
 
@@ -861,6 +869,7 @@ const TOOL_LABELS: Record<string, string> = {
   '/tools/audio-split': 'Dividir áudios',
   '/tools/acelerador': 'Mixer de Velocidade',
   '/tools/normalizador': 'Normalizador',
+  '/tools/separador-audio': 'Separador de Áudio',
   '/tools/copy-srt': 'Gerador de SRT',
   '/tools/calculadora': 'Calculadora',
   '/tools/ltx-video': 'LTX Video',
