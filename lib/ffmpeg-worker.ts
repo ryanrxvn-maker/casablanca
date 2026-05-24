@@ -267,10 +267,28 @@ export async function compressVideo(
   opts: RunOptions = {},
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  return compressVideoOn(ff, file, params, opts);
+}
+
+/**
+ * Versão "lower-level" do compressVideo que aceita uma instância FFmpeg
+ * já carregada (vinda do pool). Permite paralelismo real — várias
+ * instâncias do pool podem comprimir simultaneamente em workers próprios.
+ *
+ * Nomes de arquivo dentro do FFmpeg são únicos por chamada (timestamp +
+ * random) pra dois jobs paralelos não colidirem no FS virtual.
+ */
+export async function compressVideoOn(
+  ff: FFmpeg,
+  file: Blob,
+  params: { crf: number; resolution: 'original' | '1080' | '720' | '480' },
+  opts: RunOptions = {},
+): Promise<Blob> {
   const { fetchFile } = await import('@ffmpeg/util');
 
-  const inputName = 'in.' + guessExt(file, 'mp4');
-  const outputName = 'out.mp4';
+  const uniq = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const inputName = `in_${uniq}.${guessExt(file, 'mp4')}`;
+  const outputName = `out_${uniq}.mp4`;
 
   const progressHandler = wireProgress(ff, opts.onProgress);
 
@@ -278,20 +296,11 @@ export async function compressVideo(
     await ff.writeFile(inputName, await fetchFile(file));
     const args: string[] = ['-i', inputName];
     if (params.resolution !== 'original') {
-      // fast_bilinear e ~30-40% mais rapido que o scaler default e a perda
-      // visual em escala downward (1080->720->480) e imperceptivel.
+      // fast_bilinear é ~30-40% mais rápido que o scaler default; perda
+      // visual em downscale (1080→720→480) é imperceptível.
       args.push('-vf', `scale=-2:${params.resolution}:flags=fast_bilinear`);
     }
-    // ENCODE: preset ultrafast + x264-params agressivos.
-    //
-    // Mudancas vs versao anterior (preset veryfast + tune fastdecode):
-    //   - ultrafast e ~2x mais rapido que veryfast no WASM single-threaded
-    //   - bframes=0 + ref=1 elimina look-ahead pesado
-    //   - rc-lookahead=10 (default 40) reduz buffer interno do encoder
-    //   - aq-mode=1 simplifica adaptive quantization
-    //
-    // Em CRF 23, o arquivo final fica ~10-15% maior que com veryfast, mas
-    // o tempo de encode cai pela metade. O usuario regula o tradeoff via CRF.
+    // ENCODE: preset ultrafast + x264-params agressivos pra wasm.
     args.push(
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
@@ -1041,57 +1050,48 @@ export async function extractFrameAt(
   }
 }
 
-export type NormalizeIntensity = 'suave' | 'padrao' | 'forte';
-
-const NORMALIZE_PRESETS: Record<NormalizeIntensity, string> = {
-  // Threshold mais alto + ratio menor = comprime so os picos mais altos.
-  // Bom pra material que ja esta razoavel mas tem alguns picos a controlar.
-  suave: [
-    'highpass=f=80',
-    'acompressor=threshold=-20dB:ratio=2.5:attack=8:release=200:makeup=2',
-    'alimiter=limit=0.95',
-    'loudnorm=I=-16:LRA=11:TP=-1.5',
-  ].join(','),
-
-  // Dois estagios de compressor + limiter. Captura voz alta e voz baixa
-  // numa mesma faixa estreita. Recomendado para VSL com 2+ pessoas.
-  padrao: [
-    'highpass=f=80',
-    'acompressor=threshold=-26dB:ratio=4:attack=5:release=120:makeup=4',
-    'acompressor=threshold=-18dB:ratio=2.5:attack=3:release=80:makeup=2',
-    'alimiter=limit=0.95',
-    'loudnorm=I=-16:LRA=7:TP=-1.5',
-  ].join(','),
-
-  // Achata tudo de forma agressiva (estilo broadcast). Voz baixa e voz
-  // alta saem praticamente no mesmo volume percebido.
-  forte: [
-    'highpass=f=80',
-    'acompressor=threshold=-30dB:ratio=8:attack=2:release=60:makeup=6',
-    'acompressor=threshold=-20dB:ratio=4:attack=2:release=50:makeup=3',
-    'alimiter=limit=0.97',
-    'loudnorm=I=-14:LRA=5:TP=-1.0',
-  ].join(','),
-};
+/**
+ * Pipeline ÚNICO de normalização — calibrado pra "equalizar vozes" entre
+ * múltiplos avatares no mesmo clip. Faz exatamente o que o usuário pede:
+ * voz baixa sobe, voz alta desce, ambas ficam confortáveis de ouvir.
+ *
+ * Por que essa cadeia:
+ *  1. `highpass=80`     — corta rumble (ar-condicionado, mesa, etc)
+ *  2. `dynaudnorm`      — gain dinâmico per-frame com janela gaussiana de
+ *                          15 frames de 150ms = ~2.25s de smoothing. Cada
+ *                          fala é trazida pro mesmo nível percebido sem
+ *                          "bombear" entre as transições. **Esse é o
+ *                          filtro principal pra equalizar vozes**.
+ *  3. `acompressor`     — polimento: 2.5:1 a -18dB pra controlar picos
+ *                          que sobraram do dynaudnorm
+ *  4. `alimiter`        — teto -0.3dB pra garantir 0 clipping
+ *  5. `loudnorm=I=-16`  — LUFS final padrão broadcast (Spotify/podcast)
+ *
+ * Output: MP4 mantém vídeo + re-encode rápido do áudio; MP3/WAV descarta
+ * vídeo. Sem opções de intensidade — uma resposta pra um problema.
+ */
+const NORMALIZE_FILTER = [
+  'highpass=f=80',
+  'dynaudnorm=f=150:g=15:n=1:p=0.85:r=0.7:m=8',
+  'acompressor=threshold=-18dB:ratio=2.5:attack=5:release=80:makeup=2',
+  'alimiter=limit=0.97',
+  'loudnorm=I=-16:LRA=7:TP=-1.5',
+].join(',');
 
 export type NormalizeOutFormat = 'mp4' | 'mp3' | 'wav';
 
 /**
- * Normaliza o volume de um arquivo (video ou audio).
+ * Equaliza o volume de vozes diferentes num mesmo arquivo.
  *
- * - Se output for MP4: mantem o video, re-encoda audio com dynaudnorm aplicado.
- *   So funciona se o input tiver trilha de video.
- * - Se output for MP3/WAV: descarta video (se houver) e gera so audio normalizado.
+ * Caso típico: vídeo com 2 avatares — um foi gravado alto, outro baixo.
+ * Sai daqui com ambos no mesmo nível confortável.
  *
- * O filtro `dynaudnorm` faz o que o usuario quer ver: trechos baixos sobem,
- * trechos altos baixam, voz fica equilibrada ao longo do clip.
+ * - Se output for MP4: mantem o vídeo, re-encoda áudio com pipeline aplicado
+ * - Se output for MP3/WAV: descarta vídeo (se houver) e gera só áudio
  */
 export async function normalizeVolume(
   file: Blob,
-  params: {
-    intensity: NormalizeIntensity;
-    output: NormalizeOutFormat;
-  },
+  params: { output: NormalizeOutFormat },
   opts: RunOptions = {},
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
@@ -1099,7 +1099,7 @@ export async function normalizeVolume(
 
   const inputName = 'in.' + guessExt(file, 'mp4');
   const outputName = 'out.' + params.output;
-  const filter = NORMALIZE_PRESETS[params.intensity];
+  const filter = NORMALIZE_FILTER;
   const progressHandler = wireProgress(ff, opts.onProgress);
 
   try {

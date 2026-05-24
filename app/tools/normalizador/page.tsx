@@ -10,14 +10,13 @@ import {
   cancelFFmpeg,
   isCancellationError,
   normalizeVolume,
-  type NormalizeIntensity,
   type NormalizeOutFormat,
   type FFProgress,
 } from '@/lib/ffmpeg-worker';
 import { CancelButton } from '@/components/CancelButton';
 import { buildZip } from '@/lib/zip-builder';
 import { ToolStep, ToolChoice, ToolAction } from '@/components/tool-kit';
-import { IconNormalizador, IconStepFiles, IconStepSliders, IconStepFormat } from '@/components/ToolIcons';
+import { IconNormalizador, IconStepFiles, IconStepFormat } from '@/components/ToolIcons';
 
 const HUE = 'rgba(94,234,212,0.4)';
 
@@ -66,34 +65,8 @@ function makeJob(file: File): Job {
   };
 }
 
-const INTENSITY_OPTIONS: Array<{
-  id: NormalizeIntensity;
-  label: string;
-  description: string;
-}> = [
-  {
-    id: 'suave',
-    label: 'Suave',
-    description: 'So picos altos. Preserva mais a dinamica original.',
-  },
-  {
-    id: 'padrao',
-    label: 'Padrão',
-    description: 'Compressor de 2 estagios. Recomendado para 2+ pessoas.',
-  },
-  {
-    id: 'forte',
-    label: 'Forte',
-    description: 'Achata broadcast-style. Tudo no mesmo nivel.',
-  },
-];
-
 export default function NormalizadorPage() {
   const [files, setFiles] = useToolState<File[]>('normalizador:files', []);
-  const [intensity, setIntensity] = useToolState<NormalizeIntensity>(
-    'normalizador:intensity',
-    'padrao',
-  );
   const [output, setOutput] = useToolState<NormalizeOutFormat>(
     'normalizador:output',
     'mp4',
@@ -149,7 +122,7 @@ export default function NormalizadorPage() {
         try {
           const blob = await normalizeVolume(
             job.file,
-            { intensity, output },
+            { output },
             {
               onProgress: (p: FFProgress) =>
                 updateJob(job.id, { progress: Math.round(p.ratio * 100) }),
@@ -204,7 +177,7 @@ export default function NormalizadorPage() {
           data: j.resultBlob!,
         })),
       );
-      await downloadBlob(zip, 'normalizado_' + intensity + '.zip');
+      await downloadBlob(zip, 'normalizado.zip');
     } finally {
       setZipping(false);
     }
@@ -213,8 +186,8 @@ export default function NormalizadorPage() {
   return (
     <ToolShell
       title="Normalizador"
-      eyebrow="ÁUDIO"
-      description="Iguala o volume dos arquivos. Voz baixa sobe, voz alta desce. Tudo no mesmo nível."
+      eyebrow="ÁUDIO · MULTI-AVATAR"
+      description="Tem 2 ou mais vozes no mesmo vídeo, uma alta e outra baixa? Ele resolve. Todas as vozes saem no mesmo nível confortável de ouvir."
       hue={HUE}
       icon={<IconNormalizador size={56} />}
     >
@@ -230,39 +203,7 @@ export default function NormalizadorPage() {
           />
         </ToolStep>
 
-        <ToolStep n={2} icon={<IconStepSliders size={18} />} title="Intensidade" hint="Quanto agressiva é a compressão" hue={HUE}>
-          <div className="grid gap-2 sm:grid-cols-3">
-            {INTENSITY_OPTIONS.map((opt) => {
-              const active = intensity === opt.id;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => setIntensity(opt.id)}
-                  disabled={processing}
-                  className={
-                    'flex flex-col items-start gap-1 rounded-[14px] border px-4 py-3 text-left transition-all duration-200 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40 ' +
-                    (active
-                      ? 'border-violet/65 bg-violet/12 text-white shadow-[0_0_22px_-6px_rgba(167,139,250,0.55)]'
-                      : 'border-line-strong bg-bg-soft/60 text-text-muted hover:border-violet/45 hover:-translate-y-[1px] hover:text-white')
-                  }
-                >
-                  <span
-                    className="text-[13px] font-bold tracking-tight text-white"
-                    style={{ fontFamily: 'var(--font-tech)' }}
-                  >
-                    {opt.label}
-                  </span>
-                  <span className="text-[11px] leading-snug text-text-muted">
-                    {opt.description}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </ToolStep>
-
-        <ToolStep n={3} icon={<IconStepFormat size={18} />} title="Formato de saída" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepFormat size={18} />} title="Formato de saída" hue={HUE}>
           <ToolChoice
             value={output}
             onChange={(v) => {
@@ -286,7 +227,7 @@ export default function NormalizadorPage() {
           </p>
         </ToolStep>
 
-        <ToolStep n={4} title={processing ? 'Normalizando…' : 'Normalizar'} hue={HUE}>
+        <ToolStep n={3} title={processing ? 'Normalizando…' : 'Normalizar'} hue={HUE}>
           <div className="flex flex-wrap gap-3">
             {processing ? (
               <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
