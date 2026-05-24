@@ -31,7 +31,7 @@
  * PUSH PATTERN: sendResponse({accepted:true}) + chrome.runtime.sendMessage
  */
 
-const DARKO_MG_VERSION = '3.5.58';
+const DARKO_MG_VERSION = '3.5.59';
 if (window.__darkolab_magnific_loaded__) {
   console.log('[DARKO Magnific Content] JA carregado v=' + window.__darkolab_magnific_version);
 } else {
@@ -1261,6 +1261,7 @@ async function waitFor(predicate, timeoutMs = 30000, pollMs = 80) {
  * Response shape: { data: { uuid, name, type:'space', metadata:{space_creation_id}, ... } }
  */
 async function ensureSpaceWithName(name) {
+  __darko_log('space-create-start', 'POST /spaces', { name });
   const r = await fetchJson('/app/api/spaces', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -1273,10 +1274,26 @@ async function ensureSpaceWithName(name) {
       r.json?.id ||
       r.json?.data?.id ||
       r.json?.space_id;
-    if (id) return { spaceId: id, url: spaceURL(id) };
+    if (id) {
+      __darko_log('space-create-ok', 'via API', { id });
+      return { spaceId: id, url: spaceURL(id) };
+    }
+    __darko_log('space-create-no-id', 'API 2xx mas sem id', { resp: r.json });
+  } else {
+    __darko_log('space-create-api-fail', 'POST /spaces falhou', { status: r.status });
   }
   // Fallback DOM
-  return await createSpaceViaDOM(name);
+  __darko_log('space-create-fallback-dom', 'tentando via DOM');
+  const dom = await createSpaceViaDOM(name);
+  // v3.5.59 — defesa: fallback DOM PRECISA retornar {spaceId,url} válido.
+  // Se retornar inválido, throw claro pra handleRunPipeline não acessar
+  // .spaceId em undefined e travar com TypeError.
+  if (!dom || !dom.spaceId) {
+    __darko_log('space-create-FATAL', 'fallback DOM também falhou', { dom });
+    throw new Error('SPACE_CREATE_FAIL: API e fallback DOM falharam. Auth do Magnific pode ter expirado — recarregue a aba.');
+  }
+  __darko_log('space-create-ok', 'via DOM', { id: dom.spaceId });
+  return dom;
 }
 
 /**
@@ -1290,6 +1307,7 @@ async function ensureSpaceWithName(name) {
  * route change e re-render sem reload. Script async sobrevive intacto.
  */
 async function navigateToSpace(spaceId) {
+  __darko_log('navigate-start', 'target=' + spaceId, { currentUrl: location.pathname });
   if (currentSpaceId() === spaceId) {
     // Same space already — but still need to verify canvas is ready
     try {
@@ -1297,6 +1315,7 @@ async function navigateToSpace(spaceId) {
     } catch (e) {
       console.warn('[navigateToSpace] toolbar nao apareceu apos URL match');
     }
+    __darko_log('navigate-already-here', 'spaceId match');
     return;
   }
 
@@ -1324,6 +1343,7 @@ async function navigateToSpace(spaceId) {
     await waitFor(() => currentSpaceId() === spaceId, 8000);
   } catch (e) {
     console.warn('[navigateToSpace] SPA nao reagiu a pushState, fallback hard nav');
+    __darko_log('navigate-soft-fail', 'SPA push falhou, fazendo hard nav', { url: location.pathname });
     location.href = spaceURL(spaceId);
     await sleep(3500);
   }
@@ -1335,10 +1355,45 @@ async function navigateToSpace(spaceId) {
     console.log('[navigateToSpace] toolbar OK — canvas pronto');
   } catch (e) {
     console.warn('[navigateToSpace] toolbar nao apareceu em 15s — segue tentando');
+    __darko_log('navigate-toolbar-timeout', 'toolbar 15s timeout', { url: location.pathname });
   }
   // v3.5.11: bump settle to 2500ms — Liveblocks fetch + Vue Flow render do
   // new space precisa ~2-3s pos-toolbar-visible.
   await sleep(2500);
+
+  // v3.5.59 — VERIFICAÇÃO FINAL ROBUSTA. Se chegamos aqui MAS NÃO estamos no
+  // space target, era o cenário "aba parou em /spaces" (Vue Router/Liveblocks
+  // engasgaram). Hard reload do URL do space + revalida. NUNCA deixa o pipeline
+  // seguir com URL errada (=ficaria criando nodes no space ERRADO ou na lista).
+  const finalId = currentSpaceId();
+  if (finalId !== spaceId) {
+    __darko_log('navigate-RECOVER', 'aba ficou em URL errada após nav', {
+      expected: spaceId,
+      actual: finalId,
+      url: location.pathname,
+    });
+    console.warn('[navigateToSpace] RECOVER: URL final errada, forçando reload limpo');
+    location.replace(spaceURL(spaceId));
+    await sleep(5000);
+    const afterReload = currentSpaceId();
+    if (afterReload !== spaceId) {
+      __darko_log('navigate-FATAL', 'reload não consertou — abortando', {
+        expected: spaceId,
+        actual: afterReload,
+        url: location.pathname,
+      });
+      throw new Error(
+        `NAVIGATE_FATAL: aba ficou em "${location.pathname}" em vez de space ${spaceId}. ` +
+        `Provável: Magnific lento ou auth expirou. Recarregue a aba do Magnific manualmente.`
+      );
+    }
+    // Re-espera toolbar pós-reload
+    try {
+      await waitFor(() => document.querySelector('button[data-cy="board-main-toolbar-add-button"]'), 20000);
+    } catch {}
+    await sleep(2000);
+  }
+  __darko_log('navigate-done', 'space ' + spaceId + ' OK', { url: location.pathname });
 }
 
 // ========================= TEMPLATE SPACE (v3.2.0) =========================
