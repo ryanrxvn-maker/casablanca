@@ -1506,10 +1506,9 @@ export function AutoBrollHowItWorks() {
               <SmokeText text="Cola, dispara, vai fazer outra coisa." />
             </h3>
             <p className="mt-3 max-w-[640px] text-[14.5px] leading-relaxed text-white/85">
-              12 imagens e 6 vídeos em paralelo, qualidade Magnific travada
-              em Nano Banana 1K + Kling 2.5 720p · 10s · 9:16. Sem
-              configuração, sem janela aberta no Magnific, sem clicar
-              &ldquo;Generate&rdquo; um por um.
+              Qualidade Magnific travada em Nano Banana 1K + Kling 2.5
+              720p · 10s · 9:16. Sem configuração, sem janela do Magnific
+              aberta, sem clicar &ldquo;Generate&rdquo; um por um.
               <br />
               <span className="text-white/65">
                 Acabou o lote? O ZIP cai pronto, nomeado, pronto pra

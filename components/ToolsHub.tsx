@@ -731,8 +731,8 @@ function AutoBrollSlide({ canStartAutomation }: { canStartAutomation: boolean })
             </span>
           </h3>
           <p className="mt-3 max-w-[480px] text-[14.5px] leading-relaxed text-white/80">
-            Cole a lista de prompts. 12 imagens e 6 vídeos em paralelo,
-            qualidade Magnific, zero crédito gasto.
+            Cole a lista de prompts e aperte o play. Qualidade Magnific
+            travada, zero crédito gasto, ZIP cai pronto.
           </p>
 
           <div className="mt-6 flex flex-wrap items-center gap-3">

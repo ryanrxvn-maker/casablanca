@@ -157,7 +157,7 @@ export default function MagnificConfigPage() {
       <main className="container-app flex-1 py-10">
         <ToolShell
           title="Magnific (Auto B-Roll v2)"
-          description="Conecta sua conta Magnific.com (Freepik Premium+) à pipeline server-side. 12 imagens + 6 vídeos simultâneos via API direta — 10x mais rápido que a extension. Cookies cifrados AES-256-GCM, só você acessa."
+          description="Conecta sua conta Magnific.com (Freepik Premium+) à pipeline server-side. Disparo em série otimizado, qualidade travada, zero crédito gasto. Cookies cifrados AES-256-GCM, só você acessa."
         >
           <div className="mb-4 flex items-center gap-3">
             <Link href="/configuracoes" className="btn-ghost text-xs">

@@ -231,7 +231,7 @@ export default function ConfiguracoesPage() {
                       Magnific (Freepik)
                     </div>
                     <div className="mt-1 text-[13px] text-text-muted">
-                      Conecte sua sessão Magnific.com — 12 imagens + 6 vídeos em paralelo.
+                      Conecte sua sessão Magnific.com pra disparar B-rolls direto daqui.
                     </div>
                   </div>
                   <span className="flex h-9 w-9 items-center justify-center rounded-full border border-line-strong text-text-dim transition group-hover:border-lime group-hover:text-lime">

@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from 'react';
  *  - Mesh gradient background (animated, breathing)
  *  - Grid lines + corner accents
  *  - Bunny mascote 3D que segue o mouse com parallax
- *  - Stats counters live (12 img / 6 vid / 10s / 1k / 720p)
+ *  - Stats pills: 9:16 / 10s / ZIP entrega pronta
  *  - Pipeline visualization: 4 etapas conectadas por glow trail
  *  - Eyebrow tag + title gigante com gradient text + sub
  *  - Floating particles
@@ -164,9 +164,9 @@ export function AutoBrollHero() {
 
           {/* Stats */}
           <div className="mt-2 grid max-w-xl grid-cols-3 gap-3">
-            <StatPill value="12" label="img/paralelo" />
-            <StatPill value="6" label="vid/paralelo" />
+            <StatPill value="9:16" label="vertical · vivo" />
             <StatPill value="10s" label="por take" />
+            <StatPill value="ZIP" label="entrega pronta" />
           </div>
         </div>
 
