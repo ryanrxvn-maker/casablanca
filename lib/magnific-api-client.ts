@@ -253,8 +253,10 @@ export async function generateVideoFromImage(input: VideoGenInput): Promise<Crea
   };
   const m = modelMap[model] || modelMap['kling-25'];
 
+  // 2026-05-24: Magnific moveu o endpoint de POST /app/api/generate (agora 405)
+  // pra POST /app/api/video/generate. Mesma shape de payload.
   const r = await magnificFetch(
-    `/app/api/generate?return_creations=true&lang=en_US&user_id=${uid}`,
+    `/app/api/video/generate?return_creations=true&lang=en_US&user_id=${uid}`,
     {
       method: 'POST',
       body: {

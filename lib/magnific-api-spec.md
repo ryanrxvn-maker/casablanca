@@ -125,10 +125,14 @@ URL é **signed** (token expira em ~3 dias).
 
 **DIFERENTE do image** — endpoint próprio `/app/api/generate?return_creations=true`, payload aninhado em `video.clips[]`, **sem reserve step**, criação + polling direto.
 
-### POST /app/api/generate?return_creations=true
+### POST /app/api/video/generate?return_creations=true
+
+**ATUALIZADO 2026-05-24:** Endpoint mudou de `/app/api/generate` → `/app/api/video/generate`.
+A rota antiga retorna 405 (Magnific reorganizou). Resposta agora vem com
+`{success:true, message:"Video generation started successfully", data:{creations:[...]}}`.
 
 ```
-POST /app/api/generate?return_creations=true&lang=en_US&user_id={uid}
+POST /app/api/video/generate?return_creations=true&lang=en_US&user_id={uid}
 
 Body:
 {
