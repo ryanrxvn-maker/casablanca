@@ -4984,11 +4984,52 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       {a.vaBriefing.depoimentoText ? ' + 1 depoimento' : ''}.
                                     </div>
                                     {a.vaBriefing.linkAdFilename ? (
-                                      <div className="mt-2 mono text-[10px] flex items-center gap-2">
+                                      <div className="mt-2 mono text-[10px] flex flex-wrap items-center gap-2">
                                         <span className="text-text-muted">AD original:</span>
                                         <span className="rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-cyan-200">📎 {a.vaBriefing.linkAdFilename}</span>
                                         {a.vaBriefing.linkAdFileId ? (
-                                          <span className="mono text-[9px] uppercase tracking-widest text-lime">✓ Drive ID detectado</span>
+                                          <>
+                                            <span className="mono text-[9px] uppercase tracking-widest text-lime">✓ Drive ID detectado</span>
+                                            <a
+                                              href={`https://drive.google.com/uc?export=download&id=${a.vaBriefing.linkAdFileId}`}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="mono rounded border border-lime/40 bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime hover:bg-lime/20"
+                                              title="Baixa o AD original do Drive (mesmo arquivo que vai pro pipeline VA)"
+                                            >
+                                              ↓ Baixar AD
+                                            </a>
+                                            {/* Fallback pra arquivos grandes (>50MB Drive bloqueia link direto):
+                                                força download via extension usando os cookies autenticados */}
+                                            <button
+                                              type="button"
+                                              onClick={async () => {
+                                                try {
+                                                  const { downloadDriveFileViaExtension } = await import('@/lib/heygen-extension-bridge');
+                                                  const dl = await downloadDriveFileViaExtension(a.vaBriefing!.linkAdFileId!);
+                                                  if (!dl.ok) {
+                                                    alert('Falha download via extension: ' + dl.error);
+                                                    return;
+                                                  }
+                                                  const blob = new Blob([dl.bytes as BlobPart], { type: 'video/mp4' });
+                                                  const url = URL.createObjectURL(blob);
+                                                  const aEl = document.createElement('a');
+                                                  aEl.href = url;
+                                                  aEl.download = a.vaBriefing!.linkAdFilename || `${a.vaBriefing!.baseAdId.replace(/\s+/g, '')}.mp4`;
+                                                  document.body.appendChild(aEl);
+                                                  aEl.click();
+                                                  document.body.removeChild(aEl);
+                                                  setTimeout(() => URL.revokeObjectURL(url), 5000);
+                                                } catch (e) {
+                                                  alert('Erro: ' + ((e as Error)?.message || String(e)));
+                                                }
+                                              }}
+                                              className="mono rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/20"
+                                              title="Baixa via extension Chrome (pra videos grandes que Drive bloqueia link direto)"
+                                            >
+                                              ↓ Via extensão
+                                            </button>
+                                          </>
                                         ) : (
                                           <span className="mono text-[9px] uppercase tracking-widest text-yellow-300">⚠ Sem Drive ID — link não detectado</span>
                                         )}
