@@ -1546,14 +1546,15 @@ export function AutoBrollHowItWorks() {
               className="text-[26px] font-extrabold leading-tight tracking-tight text-white md:text-[32px]"
               style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
             >
-              <SmokeText text="50 B-rolls num dia." className="block" />
+              <SmokeText text="500 B-rolls num dia." className="block" />
               <span className="block text-violet">
                 <SmokeText text="Sem abrir Magnific." />
               </span>
             </h3>
             <p className="mt-3 text-[14px] leading-relaxed text-white/80">
-              Cola a lista de cada ad e dispara em lote. Vai almoçar e volta
-              com a pasta pronta. Nunca mais clica em &ldquo;Generate&rdquo; um por um.
+              Cole as listas dos ads do dia inteiro e dispare em lote.
+              Almoça, dorme, treina — quando volta, tá tudo pronto pra timeline.
+              Nunca mais clica em &ldquo;Generate&rdquo; um por um.
             </p>
           </div>
         </div>
@@ -1582,14 +1583,15 @@ export function AutoBrollHowItWorks() {
               className="text-[26px] font-extrabold leading-tight tracking-tight text-white md:text-[32px]"
               style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
             >
-              <SmokeText text="Cliente recebe a pasta." className="block" />
+              <SmokeText text="Você recebe a pasta." className="block" />
               <span className="block text-lime">
-                <SmokeText text="Você nem tocou no Magnific." />
+                <SmokeText text="Pronta pra timeline." />
               </span>
             </h3>
             <p className="mt-3 text-[14px] leading-relaxed text-white/80">
-              Equipe pequena entregando como agência grande. Cada conta usa
-              seu próprio Freepik — escala sem comprometer qualidade nem custo.
+              Acabou de virar editor de uma operação grande sem editar nada.
+              Cada conta usa seu próprio Freepik — você escala sem
+              comprometer qualidade nem inflar custo.
             </p>
           </div>
         </div>
