@@ -282,69 +282,116 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   /* ──────────── MAGNIFIC PROXY ──────────── */
   // Page (via content script) pede pra extensao fazer fetch em magnific.com.
-  // Browser context = passa Cloudflare TLS fingerprint + cookies session full.
+  //
+  // CRÍTICO: usamos chrome.scripting.executeScript pra rodar o fetch DENTRO
+  // de uma aba magnific.com aberta. Mesma origem, cookies + session + CSRF
+  // exatos que o user usa. Bypassa todos os problemas de cookie partitioning
+  // do service worker + 419 CSRF mismatch.
   if (msg?.type === 'magnific-fetch') {
     (async () => {
       try {
-        const init = msg.init || {};
-        const path = msg.path || '/';
-        const url = path.startsWith('http')
-          ? path
-          : `https://www.magnific.com${path.startsWith('/') ? '' : '/'}${path}`;
-        // Pega XSRF mais atual dos cookies pra header automatico
-        let xsrf = null;
-        try {
-          const ck = await chrome.cookies.get({
+        const tabs = await chrome.tabs.query({
+          url: ['https://www.magnific.com/*', 'https://magnific.com/*'],
+        });
+        let tab = tabs[0];
+        if (!tab) {
+          // Cria aba magnific em background pra ter contexto
+          tab = await chrome.tabs.create({
             url: 'https://www.magnific.com/',
-            name: 'XSRF-TOKEN',
+            active: false,
           });
-          if (ck?.value) xsrf = decodeURIComponent(ck.value);
-        } catch {}
-        const headers = {
-          accept: 'application/json',
-          'X-Requested-With': 'XMLHttpRequest',
-          ...(init.headers || {}),
-        };
-        if (xsrf && !headers['X-XSRF-TOKEN'] && !headers['x-xsrf-token']) {
-          headers['X-XSRF-TOKEN'] = xsrf;
+          // Aguarda load
+          await new Promise((resolve) => {
+            const listener = (tabId, info) => {
+              if (tabId === tab.id && info.status === 'complete') {
+                chrome.tabs.onUpdated.removeListener(listener);
+                resolve();
+              }
+            };
+            chrome.tabs.onUpdated.addListener(listener);
+            setTimeout(() => {
+              chrome.tabs.onUpdated.removeListener(listener);
+              resolve();
+            }, 15000);
+          });
         }
-        const fetchInit = {
-          method: init.method || 'GET',
-          headers,
-          credentials: 'include',
-        };
-        if (init.body !== undefined) {
-          if (typeof init.body === 'string') {
-            fetchInit.body = init.body;
-          } else {
-            headers['content-type'] = headers['content-type'] || 'application/json';
-            fetchInit.body = JSON.stringify(init.body);
-          }
-        }
-        const r = await fetch(url, fetchInit);
-        const ct = r.headers.get('content-type') || '';
-        let body;
-        let bodyType;
-        if (ct.includes('application/json')) {
-          body = await r.text(); // text pra serializar
-          bodyType = 'json-text';
-        } else {
-          body = await r.text();
-          bodyType = 'text';
+
+        // Injeta + executa fetch no contexto da aba (page context = perfect creds)
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          world: 'MAIN', // page context
+          args: [msg.path || '/', msg.init || {}],
+          func: async (path, init) => {
+            try {
+              const url = path.startsWith('http')
+                ? path
+                : `${location.origin}${path.startsWith('/') ? '' : '/'}${path}`;
+              const headers = {
+                accept: 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                ...(init.headers || {}),
+              };
+              // XSRF do document.cookie (mesma que axios da page usa)
+              try {
+                const m = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
+                if (m && !headers['X-XSRF-TOKEN'] && !headers['x-xsrf-token']) {
+                  headers['X-XSRF-TOKEN'] = decodeURIComponent(m[1]);
+                }
+              } catch {}
+              const opts = {
+                method: init.method || 'GET',
+                headers,
+                credentials: 'include',
+                cache: 'no-store',
+              };
+              if (init.body !== undefined) {
+                if (typeof init.body === 'string') {
+                  opts.body = init.body;
+                } else {
+                  headers['content-type'] = headers['content-type'] || 'application/json';
+                  opts.body = JSON.stringify(init.body);
+                }
+              }
+              const r = await fetch(url, opts);
+              const text = await r.text();
+              const respHeaders = {};
+              r.headers.forEach((v, k) => {
+                respHeaders[k] = v;
+              });
+              return {
+                __ok: true,
+                ok: r.ok,
+                status: r.status,
+                statusText: r.statusText,
+                headers: respHeaders,
+                body: text,
+                url: r.url,
+              };
+            } catch (e) {
+              return { __ok: false, error: String(e?.message || e) };
+            }
+          },
+        });
+        const result = results?.[0]?.result;
+        if (!result || result.__ok === false) {
+          sendResponse({
+            ok: false,
+            error: result?.error || 'Erro desconhecido no chrome.scripting',
+          });
+          return;
         }
         sendResponse({
-          ok: r.ok,
-          status: r.status,
-          statusText: r.statusText,
-          headers: Object.fromEntries(r.headers.entries()),
-          body,
-          bodyType,
-          url: r.url,
+          ok: result.ok,
+          status: result.status,
+          statusText: result.statusText,
+          headers: result.headers,
+          body: result.body,
+          url: result.url,
         });
       } catch (e) {
         sendResponse({
           ok: false,
-          error: String(e?.message || e),
+          error: 'magnific-fetch falhou: ' + String(e?.message || e),
         });
       }
     })();
