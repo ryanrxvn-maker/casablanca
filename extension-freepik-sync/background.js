@@ -42,8 +42,22 @@ const FALLBACK_ENDPOINTS = [
 /* ───────────────────────── Cookie reader ───────────────────────── */
 
 async function readMagnificCookies() {
-  const all = await chrome.cookies.getAll({ domain: 'magnific.com' });
-  if (!all || all.length === 0) {
+  // URL-based filter captura EXATAMENTE os cookies que o browser
+  // enviaria pra magnific.com — incluindo HttpOnly, Secure,
+  // SameSite=Lax e cookies de subdominios (www, app, etc).
+  // Domain-based filter pode perder cookies de www subdomain.
+  const fromWww = await chrome.cookies.getAll({ url: 'https://www.magnific.com/' });
+  const fromApex = await chrome.cookies.getAll({ url: 'https://magnific.com/' });
+  // Merge (dedup por name+domain)
+  const seen = new Set();
+  const all = [];
+  for (const c of [...fromWww, ...fromApex]) {
+    const key = `${c.name}@${c.domain}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    all.push(c);
+  }
+  if (all.length === 0) {
     return { ok: false, reason: 'no-login' };
   }
   const cookieHeader = all.map((c) => `${c.name}=${c.value}`).join('; ');
@@ -51,7 +65,13 @@ async function readMagnificCookies() {
   if (!xsrfRaw) return { ok: false, reason: 'no-xsrf' };
   let xsrfToken;
   try { xsrfToken = decodeURIComponent(xsrfRaw); } catch { xsrfToken = xsrfRaw; }
-  return { ok: true, cookieHeader, xsrfToken };
+  // Debug: total + sample dos cookies-chave (sem expor valor)
+  console.log(
+    '[autoedit-sync] cookies capturados:',
+    all.length,
+    all.map((c) => c.name).join(','),
+  );
+  return { ok: true, cookieHeader, xsrfToken, cookieCount: all.length };
 }
 
 /* ───────────────────────── Endpoint resolution ───────────────────────── */
