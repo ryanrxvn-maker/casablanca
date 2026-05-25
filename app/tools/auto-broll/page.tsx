@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ToolShell } from '@/components/ToolShell';
 import { JobControlPanel } from '@/components/JobControlPanel';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { CancelButton } from '@/components/CancelButton';
@@ -77,9 +76,9 @@ import {
 import { runMagnificPipelineV2 } from '@/lib/magnific-pipeline-v2';
 import { ToolStep } from '@/components/tool-kit';
 import { IconStepPlug, IconStepSliders, IconStepPipeline } from '@/components/ToolIcons';
-import { IconAutoBroll } from '@/components/ToolIcons';
 import { TierGate } from '@/components/TierGate';
 import { TakeCard } from './TakeCard';
+import { AutoBrollHero } from './AutoBrollHero';
 
 const HUE = 'rgba(240,171,252,0.45)';
 
@@ -313,13 +312,9 @@ function AutoBrollInner() {
   const anyRunning = jobs.some((j) => j.status === 'running');
 
   return (
-    <ToolShell
-      title="Auto B-roll"
-      eyebrow="VÍDEO COM IA"
-      description="Cola a sua lista, deixa rodando. Os B-rolls saem prontos enquanto você faz outra coisa."
-      hue={HUE}
-      icon={<IconAutoBroll size={56} />}
-    >
+    <div className="mx-auto w-full max-w-[1200px] px-5 pt-6 md:px-8 md:pt-8">
+      <AutoBrollHero />
+      <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
       <div className="grid gap-5">
         {/* Controle da fila Magnific (Retomar/Pausar/Debug) — funciona
             mesmo sem ter vindo do ClickUp Pilot */}
@@ -575,7 +570,8 @@ function AutoBrollInner() {
           </div>
         </ToolStep>
       </div>
-    </ToolShell>
+      </div>
+    </div>
   );
 }
 
