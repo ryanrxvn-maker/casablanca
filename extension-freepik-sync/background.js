@@ -280,6 +280,77 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .then((r) => sendResponse(r));
     return true;
   }
+  /* ──────────── MAGNIFIC PROXY ──────────── */
+  // Page (via content script) pede pra extensao fazer fetch em magnific.com.
+  // Browser context = passa Cloudflare TLS fingerprint + cookies session full.
+  if (msg?.type === 'magnific-fetch') {
+    (async () => {
+      try {
+        const init = msg.init || {};
+        const path = msg.path || '/';
+        const url = path.startsWith('http')
+          ? path
+          : `https://www.magnific.com${path.startsWith('/') ? '' : '/'}${path}`;
+        // Pega XSRF mais atual dos cookies pra header automatico
+        let xsrf = null;
+        try {
+          const ck = await chrome.cookies.get({
+            url: 'https://www.magnific.com/',
+            name: 'XSRF-TOKEN',
+          });
+          if (ck?.value) xsrf = decodeURIComponent(ck.value);
+        } catch {}
+        const headers = {
+          accept: 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+          ...(init.headers || {}),
+        };
+        if (xsrf && !headers['X-XSRF-TOKEN'] && !headers['x-xsrf-token']) {
+          headers['X-XSRF-TOKEN'] = xsrf;
+        }
+        const fetchInit = {
+          method: init.method || 'GET',
+          headers,
+          credentials: 'include',
+        };
+        if (init.body !== undefined) {
+          if (typeof init.body === 'string') {
+            fetchInit.body = init.body;
+          } else {
+            headers['content-type'] = headers['content-type'] || 'application/json';
+            fetchInit.body = JSON.stringify(init.body);
+          }
+        }
+        const r = await fetch(url, fetchInit);
+        const ct = r.headers.get('content-type') || '';
+        let body;
+        let bodyType;
+        if (ct.includes('application/json')) {
+          body = await r.text(); // text pra serializar
+          bodyType = 'json-text';
+        } else {
+          body = await r.text();
+          bodyType = 'text';
+        }
+        sendResponse({
+          ok: r.ok,
+          status: r.status,
+          statusText: r.statusText,
+          headers: Object.fromEntries(r.headers.entries()),
+          body,
+          bodyType,
+          url: r.url,
+        });
+      } catch (e) {
+        sendResponse({
+          ok: false,
+          error: String(e?.message || e),
+        });
+      }
+    })();
+    return true; // async
+  }
+
   if (msg?.type === 'register-app-origin') {
     const o = String(msg.origin || '').replace(/\/+$/, '');
     if (!o) { sendResponse({ ok: false }); return true; }
