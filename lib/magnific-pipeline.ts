@@ -60,7 +60,7 @@ export type TakeState =
   | { idx: number; status: 'image-done'; imageUrl: string }
   | { idx: number; status: 'video-done'; imageUrl: string; videoUrl: string }
   | { idx: number; status: 'downloading'; videoUrl: string }
-  | { idx: number; status: 'ready'; videoUrl: string; mp4Size: number }
+  | { idx: number; status: 'ready'; videoUrl: string; mp4Size: number; imageUrl?: string }
   | { idx: number; status: 'failed'; error: string };
 
 export type PipelineProgress = {

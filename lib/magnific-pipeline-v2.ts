@@ -316,7 +316,12 @@ export async function runMagnificPipelineV2(
         name: `take_${String(s.idx).padStart(2, '0')}.mp4`,
         data: ab,
       });
-      patchTake(s.idx, { status: 'ready', videoUrl: s.videoUrl, mp4Size: ab.byteLength });
+      patchTake(s.idx, {
+        status: 'ready',
+        videoUrl: s.videoUrl,
+        mp4Size: ab.byteLength,
+        imageUrl: s.imageUrl, // preserva pra poster do preview
+      });
       downloaded++;
       emit(
         `Baixados ${downloaded} take(s)...`,

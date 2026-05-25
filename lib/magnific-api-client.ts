@@ -67,9 +67,9 @@ export type SimulateResult = {
 
 const DEFAULT_IMAGE_MODEL: ImageModel = 'imagen-nano-banana-2-flash';
 const DEFAULT_VIDEO_MODEL: VideoModel = 'kling-25';
-const POLL_INTERVAL_MS = 2000;
-const POLL_TIMEOUT_IMG_MS = 180_000;
-const POLL_TIMEOUT_VID_MS = 900_000;
+const POLL_INTERVAL_MS = 2500;
+const POLL_TIMEOUT_IMG_MS = 240_000; // 4min — Nano Banana raramente passa 30s
+const POLL_TIMEOUT_VID_MS = 1_800_000; // 30min — Kling 2.5 pode levar até 15-20min sob carga; damos folga 2x
 
 /* ────────── User id ────────── */
 

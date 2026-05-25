@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { TakeState } from '@/lib/magnific-pipeline';
 
 /**
@@ -55,13 +56,14 @@ export function TakeCard({ take, position, total }: Props) {
     take.status === 'video-done' || take.status === 'ready'
       ? take.videoUrl
       : null;
-  // Image URL como poster (NÃO mostrar separadamente — só como first-frame do video).
-  // Status 'ready' não carrega imageUrl no state (descartado pós-download),
-  // mas o <video> pega o primeiro frame nativamente sem poster.
+  // Image URL como poster — preview visível assim que o vídeo fica pronto,
+  // sem precisar clicar. Suportado em image-done, video-done E ready.
   const posterUrl =
     take.status === 'image-done'
       ? take.imageUrl
       : take.status === 'video-done'
+      ? take.imageUrl
+      : take.status === 'ready'
       ? take.imageUrl
       : null;
 
@@ -146,8 +148,7 @@ export function TakeCard({ take, position, total }: Props) {
         transformStyle: 'preserve-3d',
       }}
     >
-      {/* HEADER bar — só take number + status quando READY ou FAILED.
-          Durante loading não mostra pill, deixa a animação falar. */}
+      {/* HEADER bar — só TAKE NN/MM, zero pill. Visual silencioso. */}
       <div className="relative z-10 flex items-center justify-between px-3 py-2">
         <span
           className="mono text-[10px] font-bold uppercase tracking-[0.14em] text-white"
@@ -159,21 +160,18 @@ export function TakeCard({ take, position, total }: Props) {
           </span>
           <span className="text-text-dim">/{String(total).padStart(2, '0')}</span>
         </span>
-        {meta.tone === 'ready' || meta.tone === 'err' ? (
-          <StatusPill tone={meta.tone} label={meta.label} />
-        ) : null}
       </div>
 
       {/* BODY 9:16 aspect */}
       <div className="relative mx-3 mb-3 aspect-[9/16] overflow-hidden rounded-[10px] border border-line bg-black">
         {videoUrl ? (
           <>
-            {/* Video poster — clique abre modal fullscreen */}
+            {/* Video poster — preview aparece sem clicar (poster=imageUrl) */}
             <video
               ref={videoRef}
               src={videoUrl}
               poster={posterUrl || undefined}
-              preload="metadata"
+              preload="auto"
               playsInline
               muted
               loop
@@ -183,7 +181,7 @@ export function TakeCard({ take, position, total }: Props) {
             <button
               type="button"
               onClick={openExpanded}
-              className="absolute inset-0 flex cursor-zoom-in items-center justify-center"
+              className="absolute inset-0 flex cursor-pointer items-center justify-center"
               aria-label="Assistir em tela maior"
             >
               <span
@@ -334,18 +332,23 @@ export function TakeCard({ take, position, total }: Props) {
         }
       `}</style>
 
-      {/* ─────────── EXPANDED MODAL ─────────── */}
-      {expanded && videoUrl && (
-        <ExpandedVideoModal
-          videoUrl={videoUrl}
-          posterUrl={posterUrl || undefined}
-          takeIdx={take.idx}
-          total={total}
-          onClose={() => setExpanded(false)}
-          onDownload={downloadOne}
-          downloading={downloading}
-        />
-      )}
+      {/* ─────────── EXPANDED MODAL via PORTAL ─────────── */}
+      {/* Portal escapa do contexto 3D do card (perspective transform
+          cria stacking context que clipa fixed positioning). */}
+      {expanded && videoUrl && typeof window !== 'undefined'
+        ? createPortal(
+            <ExpandedVideoModal
+              videoUrl={videoUrl}
+              posterUrl={posterUrl || undefined}
+              takeIdx={take.idx}
+              total={total}
+              onClose={() => setExpanded(false)}
+              onDownload={downloadOne}
+              downloading={downloading}
+            />,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
