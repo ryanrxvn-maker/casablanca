@@ -231,7 +231,7 @@ export function LipSyncHero3D() {
               transition: 'transform 0.6s cubic-bezier(.2,.8,.2,1)',
             }}
           >
-            <AvatarUGC />
+            <RoboticFace3D />
           </div>
 
           {/* Bunny mini observador — easter egg */}
@@ -285,8 +285,21 @@ export function LipSyncHero3D() {
   );
 }
 
-/* ---- AvatarUGC ---- Avatar 3D animado SVG sendo gerado --------- */
-function AvatarUGC() {
+/* ---- RoboticFace3D — rosto cyborg ultra futurista ---------------- */
+/**
+ * Cabeca robotica:
+ *  - Plataforma facial hexagonal cromada (silver/cyan/violet gradient)
+ *  - Visor HUD escuro com 2 LEDs cyan-violet brilhantes (olhos scanner)
+ *  - Scan line horizontal varrendo o visor
+ *  - Antena no topo com pulse LED
+ *  - Boca-equalizer: 11 barras de audio dentro de uma fenda horizontal,
+ *    cada barra animando em frequencia diferente (parece voz sendo
+ *    sintetizada de verdade)
+ *  - Vents laterais, status LEDs, circuit traces
+ *  - HUD brackets [ ] em volta do visor
+ *  - Halo HUD rotativo com tick marks tipo radar
+ */
+function RoboticFace3D() {
   return (
     <div
       className="relative h-full w-full"
@@ -296,231 +309,364 @@ function AvatarUGC() {
         viewBox="0 0 360 400"
         width="100%"
         height="100%"
-        className="drop-shadow-[0_30px_60px_rgba(232,121,249,0.4)]"
+        className="drop-shadow-[0_30px_60px_rgba(103,232,249,0.4)]"
         style={{ overflow: 'visible' }}
       >
         <defs>
-          {/* Gradient skin */}
-          <radialGradient id="ugc-skin" cx="50%" cy="42%" r="60%">
-            <stop offset="0%" stopColor="#ffe7f7" />
-            <stop offset="40%" stopColor="#f4c4e0" />
-            <stop offset="100%" stopColor="#b85099" />
-          </radialGradient>
-          {/* Gradient hair */}
-          <linearGradient id="ugc-hair" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#2a1147" />
-            <stop offset="60%" stopColor="#4c2a85" />
-            <stop offset="100%" stopColor="#a78bfa" />
+          {/* Chrome face gradient */}
+          <linearGradient id="bot-chrome" x1="0%" y1="0%" x2="50%" y2="100%">
+            <stop offset="0%" stopColor="#1a1a24" />
+            <stop offset="25%" stopColor="#5a5a72" />
+            <stop offset="50%" stopColor="#a8a8c4" />
+            <stop offset="70%" stopColor="#4a4a5e" />
+            <stop offset="100%" stopColor="#1a1a24" />
           </linearGradient>
-          {/* Gradient backdrop */}
-          <radialGradient id="ugc-bg" cx="50%" cy="55%" r="60%">
-            <stop offset="0%" stopColor="rgba(232,121,249,0.35)" />
-            <stop offset="60%" stopColor="rgba(167,139,250,0.18)" />
+          {/* Inner panel — darker */}
+          <linearGradient id="bot-panel" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#2a2a38" />
+            <stop offset="100%" stopColor="#0e0e16" />
+          </linearGradient>
+          {/* Visor — dark glass with cyan tint */}
+          <linearGradient id="bot-visor" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#050810" />
+            <stop offset="50%" stopColor="#0a1420" />
+            <stop offset="100%" stopColor="#050810" />
+          </linearGradient>
+          {/* Eye core glow */}
+          <radialGradient id="bot-eye" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="#e0f9ff" />
+            <stop offset="30%" stopColor="#67e8f9" />
+            <stop offset="70%" stopColor="#a78bfa" />
+            <stop offset="100%" stopColor="rgba(167,139,250,0)" />
+          </radialGradient>
+          {/* Backdrop circle */}
+          <radialGradient id="bot-bg" cx="50%" cy="55%" r="60%">
+            <stop offset="0%" stopColor="rgba(103,232,249,0.28)" />
+            <stop offset="50%" stopColor="rgba(167,139,250,0.18)" />
             <stop offset="100%" stopColor="transparent" />
           </radialGradient>
-          {/* Mouth gradient */}
-          <linearGradient id="ugc-mouth" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#7a1a3b" />
-            <stop offset="100%" stopColor="#3a0a1b" />
+          {/* Mouth slot interior */}
+          <linearGradient id="bot-mouth-bg" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#000000" />
+            <stop offset="100%" stopColor="#0a1018" />
           </linearGradient>
-          {/* Glow filter */}
-          <filter id="ugc-glow">
-            <feGaussianBlur stdDeviation="4" result="blur" />
+          {/* Equalizer bar gradient */}
+          <linearGradient id="bot-eq" x1="0%" y1="100%" x2="0%" y2="0%">
+            <stop offset="0%" stopColor="#a78bfa" />
+            <stop offset="50%" stopColor="#67e8f9" />
+            <stop offset="100%" stopColor="#e879f9" />
+          </linearGradient>
+          {/* Glow filter strong */}
+          <filter id="bot-glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="3.5" result="blur" />
             <feMerge>
               <feMergeNode in="blur" />
               <feMergeNode in="SourceGraphic" />
             </feMerge>
           </filter>
-          {/* Wireframe pattern (build-in animation) */}
-          <pattern id="ugc-wire" patternUnits="userSpaceOnUse" width="16" height="16">
-            <path
-              d="M0 8 L16 8 M8 0 L8 16"
-              stroke="rgba(232,121,249,0.4)"
-              strokeWidth="0.5"
-            />
-          </pattern>
+          {/* Glow filter soft */}
+          <filter id="bot-glow-soft" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="2" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
         </defs>
 
-        {/* Background circle */}
-        <circle cx="180" cy="200" r="170" fill="url(#ugc-bg)" />
+        {/* BACKDROP */}
+        <circle cx="180" cy="200" r="170" fill="url(#bot-bg)" />
 
-        {/* Halo arc */}
-        <circle
-          cx="180"
-          cy="200"
-          r="155"
-          fill="none"
-          stroke="rgba(232,121,249,0.5)"
-          strokeWidth="1.2"
-          strokeDasharray="3 7"
-          style={{ animation: 'avRotate 30s linear infinite', transformOrigin: '180px 200px' }}
-        />
-
-        {/* Wireframe sketch building */}
-        <g style={{ animation: 'avBuild 4s ease-in-out infinite' }} opacity="0.6">
-          <ellipse cx="180" cy="190" rx="85" ry="98" fill="url(#ugc-wire)" />
-        </g>
-
-        {/* HEAD */}
-        <ellipse
-          cx="180"
-          cy="190"
-          rx="84"
-          ry="96"
-          fill="url(#ugc-skin)"
-          filter="url(#ugc-glow)"
-        />
-
-        {/* Hair top */}
-        <path
-          d="M 95 158 Q 110 90 180 95 Q 250 100 265 158 Q 254 130 230 122 Q 200 132 180 122 Q 160 132 130 122 Q 106 130 95 158 Z"
-          fill="url(#ugc-hair)"
-          filter="url(#ugc-glow)"
-        />
-
-        {/* Hair side strand */}
-        <path
-          d="M 100 158 Q 92 200 102 240 Q 110 220 108 198 Q 106 178 100 158 Z"
-          fill="url(#ugc-hair)"
-          opacity="0.9"
-        />
-
-        {/* Cheek blush left */}
-        <ellipse cx="130" cy="218" rx="14" ry="9" fill="rgba(232,121,249,0.45)" />
-        {/* Cheek blush right */}
-        <ellipse cx="228" cy="218" rx="14" ry="9" fill="rgba(232,121,249,0.45)" />
-
-        {/* EYE LEFT — closed/lash style (calm) */}
-        <g>
-          <path
-            d="M 142 178 Q 152 173 162 178"
-            stroke="#2a1147"
-            strokeWidth="2.5"
-            fill="none"
-            strokeLinecap="round"
-          />
-          <path
-            d="M 144 175 L 144 172 M 150 174 L 150 170 M 156 174 L 156 170 M 161 175 L 161 172"
-            stroke="#2a1147"
-            strokeWidth="1.2"
-            strokeLinecap="round"
-          />
-          {/* small sparkle */}
-          <circle cx="151" cy="180" r="1.2" fill="#fff" opacity="0.9" />
-        </g>
-
-        {/* EYE RIGHT */}
-        <g>
-          <path
-            d="M 198 178 Q 208 173 218 178"
-            stroke="#2a1147"
-            strokeWidth="2.5"
-            fill="none"
-            strokeLinecap="round"
-          />
-          <path
-            d="M 200 175 L 200 172 M 206 174 L 206 170 M 212 174 L 212 170 M 217 175 L 217 172"
-            stroke="#2a1147"
-            strokeWidth="1.2"
-            strokeLinecap="round"
-          />
-          <circle cx="207" cy="180" r="1.2" fill="#fff" opacity="0.9" />
-        </g>
-
-        {/* Nose */}
-        <path
-          d="M 178 198 Q 174 218 178 232 Q 184 232 184 226"
-          stroke="rgba(106,30,68,0.6)"
-          strokeWidth="1.8"
-          fill="none"
-          strokeLinecap="round"
-        />
-
-        {/* MOUTH — animated lipsync */}
-        <g style={{ animation: 'avMouth 0.9s ease-in-out infinite', transformOrigin: '180px 252px' }}>
-          {/* Mouth opening (oval gets taller/shorter) */}
-          <ellipse
+        {/* HUD halo with tick marks (rotating radar style) */}
+        <g style={{ animation: 'avRotate 28s linear infinite', transformOrigin: '180px 200px' }}>
+          <circle
             cx="180"
-            cy="252"
-            rx="20"
-            ry="9"
-            fill="url(#ugc-mouth)"
-            stroke="rgba(106,30,68,0.85)"
-            strokeWidth="1.4"
-          />
-          {/* Teeth top */}
-          <rect x="167" y="245" width="26" height="4.5" rx="1.2" fill="#fff" opacity="0.92" />
-          {/* Tongue hint */}
-          <ellipse cx="180" cy="256" rx="10" ry="3" fill="#d6427a" opacity="0.85" />
-          {/* Lips top */}
-          <path
-            d="M 158 246 Q 170 240 180 244 Q 190 240 202 246"
-            stroke="#a8336a"
-            strokeWidth="2.2"
+            cy="200"
+            r="158"
             fill="none"
-            strokeLinecap="round"
+            stroke="rgba(103,232,249,0.45)"
+            strokeWidth="1"
+            strokeDasharray="2 18"
           />
-          {/* Lips bottom */}
+          {/* 4 cardinal tick marks (longer) */}
+          {[0, 90, 180, 270].map((deg) => (
+            <line
+              key={deg}
+              x1="180"
+              y1="42"
+              x2="180"
+              y2="50"
+              stroke="rgba(103,232,249,0.85)"
+              strokeWidth="2"
+              transform={`rotate(${deg} 180 200)`}
+            />
+          ))}
+          {/* radar sweep */}
           <path
-            d="M 160 258 Q 180 268 200 258"
-            stroke="#a8336a"
-            strokeWidth="2.2"
-            fill="none"
-            strokeLinecap="round"
+            d="M 180 200 L 180 50 A 150 150 0 0 1 285 100 Z"
+            fill="url(#bot-bg)"
+            opacity="0.4"
           />
         </g>
 
-        {/* Chin shadow */}
-        <ellipse
-          cx="180"
-          cy="278"
-          rx="36"
-          ry="6"
-          fill="rgba(106,30,68,0.18)"
-        />
+        {/* Outer HUD bracket corners */}
+        <g stroke="rgba(103,232,249,0.7)" strokeWidth="1.5" fill="none">
+          <path d="M 60 100 L 60 80 L 80 80" />
+          <path d="M 300 80 L 280 80 L 280 100" />
+          <path d="M 60 300 L 60 320 L 80 320" />
+          <path d="M 300 320 L 280 320 L 280 300" />
+        </g>
 
-        {/* Earring sparkle (UGC vibe) */}
-        <circle cx="100" cy="218" r="2.5" fill="#fff" opacity="0.95" />
-        <circle cx="260" cy="218" r="2.5" fill="#fff" opacity="0.95" />
+        {/* ANTENNA on top */}
+        <g style={{ animation: 'antPulse 1.6s ease-in-out infinite' }}>
+          <line x1="180" y1="88" x2="180" y2="62" stroke="#a8a8c4" strokeWidth="2.5" />
+          <circle cx="180" cy="58" r="5" fill="#67e8f9" filter="url(#bot-glow)" />
+          <circle cx="180" cy="58" r="2.5" fill="#e0f9ff" />
+          {/* Side antenna tips */}
+          <line x1="160" y1="92" x2="156" y2="74" stroke="#a8a8c4" strokeWidth="2" />
+          <circle cx="156" cy="72" r="2.2" fill="#e879f9" />
+          <line x1="200" y1="92" x2="204" y2="74" stroke="#a8a8c4" strokeWidth="2" />
+          <circle cx="204" cy="72" r="2.2" fill="#e879f9" />
+        </g>
 
-        {/* Audio waveform overlay (mouth output simulation) */}
+        {/* HEAD — Hexagonal angular shape */}
+        <g filter="url(#bot-glow-soft)">
+          {/* Main face plate (chrome) */}
+          <path
+            d="M 110 110
+               L 250 110
+               L 282 145
+               L 282 230
+               L 260 270
+               L 220 296
+               L 140 296
+               L 100 270
+               L 78 230
+               L 78 145 Z"
+            fill="url(#bot-chrome)"
+            stroke="rgba(103,232,249,0.55)"
+            strokeWidth="1.5"
+          />
+          {/* Inner darker plate */}
+          <path
+            d="M 122 122
+               L 238 122
+               L 264 152
+               L 264 224
+               L 245 258
+               L 212 280
+               L 148 280
+               L 115 258
+               L 96 224
+               L 96 152 Z"
+            fill="url(#bot-panel)"
+            opacity="0.85"
+          />
+        </g>
+
+        {/* Forehead HUD strip */}
+        <g>
+          <rect x="135" y="132" width="90" height="6" rx="1" fill="rgba(103,232,249,0.15)" stroke="rgba(103,232,249,0.5)" strokeWidth="0.6" />
+          {Array.from({ length: 8 }).map((_, i) => (
+            <rect
+              key={i}
+              x={140 + i * 10}
+              y="133.5"
+              width="6"
+              height="3"
+              fill={i < 5 ? '#67e8f9' : 'rgba(103,232,249,0.25)'}
+              style={{ animation: `hudBlink ${1 + (i % 3) * 0.3}s ease-in-out ${i * 0.1}s infinite` }}
+            />
+          ))}
+        </g>
+
+        {/* VISOR — dark glass */}
+        <g>
+          {/* Visor brackets [ ] */}
+          <path d="M 96 168 L 92 168 L 92 210 L 96 210" stroke="rgba(103,232,249,0.75)" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+          <path d="M 264 168 L 268 168 L 268 210 L 264 210" stroke="rgba(103,232,249,0.75)" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+
+          {/* Visor body */}
+          <rect
+            x="105"
+            y="162"
+            width="150"
+            height="52"
+            rx="14"
+            fill="url(#bot-visor)"
+            stroke="rgba(103,232,249,0.4)"
+            strokeWidth="1.2"
+          />
+          {/* Visor reflection top */}
+          <rect x="110" y="165" width="140" height="14" rx="8" fill="rgba(167,139,250,0.08)" />
+
+          {/* Scan line varrendo */}
+          <rect
+            x="105"
+            y="162"
+            width="150"
+            height="2"
+            fill="rgba(103,232,249,0.85)"
+            style={{
+              animation: 'visorScan 2.6s ease-in-out infinite',
+              filter: 'drop-shadow(0 0 6px rgba(103,232,249,0.9))',
+            }}
+          />
+
+          {/* Eye LEFT — LED core + scanner crosshair */}
+          <g style={{ animation: 'eyePulse 2.2s ease-in-out infinite' }}>
+            <circle cx="146" cy="188" r="14" fill="url(#bot-eye)" filter="url(#bot-glow)" />
+            <circle cx="146" cy="188" r="6" fill="#e0f9ff" />
+            <circle cx="146" cy="188" r="2.5" fill="#67e8f9" />
+            {/* crosshair */}
+            <line x1="128" y1="188" x2="164" y2="188" stroke="rgba(103,232,249,0.45)" strokeWidth="0.8" />
+            <line x1="146" y1="170" x2="146" y2="206" stroke="rgba(103,232,249,0.45)" strokeWidth="0.8" />
+          </g>
+
+          {/* Eye RIGHT */}
+          <g style={{ animation: 'eyePulse 2.2s ease-in-out 0.4s infinite' }}>
+            <circle cx="214" cy="188" r="14" fill="url(#bot-eye)" filter="url(#bot-glow)" />
+            <circle cx="214" cy="188" r="6" fill="#e0f9ff" />
+            <circle cx="214" cy="188" r="2.5" fill="#67e8f9" />
+            <line x1="196" y1="188" x2="232" y2="188" stroke="rgba(103,232,249,0.45)" strokeWidth="0.8" />
+            <line x1="214" y1="170" x2="214" y2="206" stroke="rgba(103,232,249,0.45)" strokeWidth="0.8" />
+          </g>
+
+          {/* Tiny HUD text dots in corners */}
+          <circle cx="113" cy="170" r="1.2" fill="#e879f9" />
+          <circle cx="247" cy="170" r="1.2" fill="#e879f9" />
+          <circle cx="113" cy="206" r="1.2" fill="#67e8f9" />
+          <circle cx="247" cy="206" r="1.2" fill="#67e8f9" />
+        </g>
+
+        {/* NOSE — vent bridge */}
+        <g>
+          <rect x="174" y="222" width="12" height="22" rx="2" fill="rgba(20,20,28,0.85)" stroke="rgba(103,232,249,0.35)" strokeWidth="0.6" />
+          {/* 3 horizontal vent lines */}
+          <line x1="176" y1="228" x2="184" y2="228" stroke="rgba(103,232,249,0.55)" strokeWidth="0.7" />
+          <line x1="176" y1="233" x2="184" y2="233" stroke="rgba(103,232,249,0.55)" strokeWidth="0.7" />
+          <line x1="176" y1="238" x2="184" y2="238" stroke="rgba(103,232,249,0.55)" strokeWidth="0.7" />
+        </g>
+
+        {/* MOUTH — equalizer slot */}
+        <g>
+          {/* Mouth bracket corners */}
+          <path d="M 130 250 L 128 250 L 128 274 L 130 274" stroke="rgba(232,121,249,0.7)" strokeWidth="1.2" fill="none" />
+          <path d="M 230 250 L 232 250 L 232 274 L 230 274" stroke="rgba(232,121,249,0.7)" strokeWidth="1.2" fill="none" />
+
+          {/* Slot body */}
+          <rect
+            x="135"
+            y="252"
+            width="90"
+            height="22"
+            rx="3"
+            fill="url(#bot-mouth-bg)"
+            stroke="rgba(232,121,249,0.55)"
+            strokeWidth="1"
+          />
+
+          {/* Equalizer bars dentro do slot */}
+          <g clipPath="inset(252 0 0 0 round 3)">
+            {Array.from({ length: 11 }).map((_, i) => (
+              <rect
+                key={i}
+                x={140 + i * 7.5}
+                y="256"
+                width="4"
+                height="14"
+                rx="1.5"
+                fill="url(#bot-eq)"
+                style={{
+                  animation: `eqBar 0.55s ease-in-out ${i * 0.07}s infinite alternate`,
+                  transformOrigin: `${142 + i * 7.5}px 263px`,
+                  filter: 'drop-shadow(0 0 3px rgba(232,121,249,0.65))',
+                }}
+              />
+            ))}
+          </g>
+
+          {/* Mouth glow underneath */}
+          <ellipse cx="180" cy="280" rx="60" ry="6" fill="rgba(232,121,249,0.35)" filter="url(#bot-glow)" />
+        </g>
+
+        {/* CHEEK VENTS — left */}
+        <g stroke="rgba(103,232,249,0.5)" strokeWidth="1.2" strokeLinecap="round">
+          <line x1="98" y1="218" x2="112" y2="218" />
+          <line x1="98" y1="226" x2="112" y2="226" />
+          <line x1="98" y1="234" x2="112" y2="234" />
+          <line x1="98" y1="242" x2="112" y2="242" />
+        </g>
+        {/* CHEEK VENTS — right */}
+        <g stroke="rgba(103,232,249,0.5)" strokeWidth="1.2" strokeLinecap="round">
+          <line x1="248" y1="218" x2="262" y2="218" />
+          <line x1="248" y1="226" x2="262" y2="226" />
+          <line x1="248" y1="234" x2="262" y2="234" />
+          <line x1="248" y1="242" x2="262" y2="242" />
+        </g>
+
+        {/* Status LEDs (cheekbones) */}
+        <circle cx="125" cy="220" r="2" fill="#e879f9" style={{ animation: 'ledBlink 1.4s ease-in-out infinite' }} />
+        <circle cx="235" cy="220" r="2" fill="#67e8f9" style={{ animation: 'ledBlink 1.4s ease-in-out 0.7s infinite' }} />
+
+        {/* Chin bottom plate detail */}
+        <path d="M 158 290 L 202 290 L 195 296 L 165 296 Z" fill="rgba(20,20,28,0.85)" stroke="rgba(103,232,249,0.4)" strokeWidth="0.8" />
+
+        {/* External audio waveform (sound radiating out) */}
         <g
-          transform="translate(180 320)"
+          transform="translate(180 332)"
           style={{ animation: 'avWaveOpacity 2s ease-in-out infinite' }}
         >
-          {Array.from({ length: 11 }).map((_, i) => {
-            const offset = i - 5;
+          {Array.from({ length: 13 }).map((_, i) => {
+            const offset = i - 6;
             return (
               <rect
                 key={i}
-                x={offset * 8 - 1.5}
+                x={offset * 9 - 1.5}
                 y="-8"
                 width="3"
                 height="16"
                 rx="1.5"
-                fill="#e879f9"
+                fill="#67e8f9"
                 style={{
                   animation: `avWave 0.6s ease-in-out ${i * 0.08}s infinite alternate`,
                   transformOrigin: 'center',
+                  filter: 'drop-shadow(0 0 4px rgba(103,232,249,0.7))',
                 }}
               />
             );
           })}
         </g>
 
-        {/* Mic icon (subtle) */}
-        <g transform="translate(290 70)" opacity="0.85">
-          <circle r="12" fill="rgba(232,121,249,0.18)" stroke="rgba(232,121,249,0.7)" strokeWidth="1.2" />
+        {/* Floating icon — mic */}
+        <g transform="translate(290 70)" opacity="0.9" style={{ animation: 'iconFloat 4s ease-in-out infinite' }}>
+          <circle r="13" fill="rgba(232,121,249,0.16)" stroke="rgba(232,121,249,0.8)" strokeWidth="1.3" />
           <rect x="-2.5" y="-6" width="5" height="9" rx="2" fill="#e879f9" />
           <path d="M -5 1 Q -5 6 0 6 Q 5 6 5 1" stroke="#e879f9" strokeWidth="1.4" fill="none" strokeLinecap="round" />
           <line x1="0" y1="6" x2="0" y2="9" stroke="#e879f9" strokeWidth="1.4" />
         </g>
 
-        {/* Camera icon (subtle) */}
-        <g transform="translate(60 70)" opacity="0.85">
-          <circle r="12" fill="rgba(167,139,250,0.18)" stroke="rgba(167,139,250,0.7)" strokeWidth="1.2" />
-          <rect x="-7" y="-4" width="14" height="9" rx="1.5" fill="none" stroke="#a78bfa" strokeWidth="1.4" />
-          <circle r="2.5" fill="#a78bfa" cy="0.5" />
+        {/* Floating icon — camera */}
+        <g transform="translate(60 70)" opacity="0.9" style={{ animation: 'iconFloat 4s ease-in-out 1.5s infinite' }}>
+          <circle r="13" fill="rgba(103,232,249,0.16)" stroke="rgba(103,232,249,0.8)" strokeWidth="1.3" />
+          <rect x="-7" y="-4" width="14" height="9" rx="1.5" fill="none" stroke="#67e8f9" strokeWidth="1.4" />
+          <circle r="2.5" fill="#67e8f9" cy="0.5" />
+        </g>
+
+        {/* HUD txt — left bottom */}
+        <g
+          fontFamily="monospace"
+          fontSize="8"
+          fill="rgba(103,232,249,0.7)"
+          style={{ animation: 'hudBlink 1.6s ease-in-out infinite' }}
+        >
+          <text x="60" y="350">[ NEURAL · LATENT ]</text>
+          <text x="60" y="362">SYNC 99.7%</text>
+        </g>
+        {/* HUD txt — right bottom */}
+        <g fontFamily="monospace" fontSize="8" fill="rgba(232,121,249,0.7)">
+          <text x="232" y="350" textAnchor="start">[ PHONEME · LOCK ]</text>
+          <text x="232" y="362">FPS 32</text>
         </g>
       </svg>
 
@@ -533,15 +679,32 @@ function AvatarUGC() {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
-        @keyframes avBuild {
-          0%, 100% { opacity: 0; }
-          50% { opacity: 0.5; }
+        @keyframes antPulse {
+          0%, 100% { opacity: 0.85; }
+          50% { opacity: 1; transform: translateY(-1px); }
         }
-        @keyframes avMouth {
-          0%, 100% { transform: scaleY(0.5) scaleX(1); }
-          25% { transform: scaleY(1.6) scaleX(0.8); }
-          50% { transform: scaleY(0.4) scaleX(1.1); }
-          75% { transform: scaleY(1.2) scaleX(0.9); }
+        @keyframes visorScan {
+          0% { transform: translateY(0); opacity: 0; }
+          15% { opacity: 1; }
+          50% { transform: translateY(48px); opacity: 1; }
+          85% { opacity: 1; }
+          100% { transform: translateY(0); opacity: 0; }
+        }
+        @keyframes eyePulse {
+          0%, 100% { opacity: 0.9; }
+          50% { opacity: 1; transform: scale(1.06); transform-origin: center; }
+        }
+        @keyframes eqBar {
+          from { transform: scaleY(0.18); }
+          to { transform: scaleY(1.4); }
+        }
+        @keyframes ledBlink {
+          0%, 100% { opacity: 0.4; }
+          50% { opacity: 1; }
+        }
+        @keyframes hudBlink {
+          0%, 100% { opacity: 0.55; }
+          50% { opacity: 1; }
         }
         @keyframes avWave {
           from { transform: scaleY(0.3); }
@@ -550,6 +713,10 @@ function AvatarUGC() {
         @keyframes avWaveOpacity {
           0%, 100% { opacity: 0.55; }
           50% { opacity: 1; }
+        }
+        @keyframes iconFloat {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-6px); }
         }
       `}</style>
     </div>
