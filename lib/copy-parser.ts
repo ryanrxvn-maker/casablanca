@@ -1163,19 +1163,25 @@ export function parseVABriefing(
 
   // 1. Detecta header VA: PRIORIZA linha que contenha AD code + "Variação de avatar".
   // Fallback: primeira linha com "Variação de avatar".
+  //
+  // CRITICAL — preferencia pela ULTIMA ocorrencia quando o mesmo AD code
+  // aparece em multiplas LEVAS do doc (LEVA 01 antiga + LEVA 03 nova).
+  // User esclareceu 2026-05-25: "caso tenha mesma nomenclatura de AD da
+  // task repetindo na VA, 2 iguais no docs, nesse caso voce dar preferencia
+  // a que foi colocada mais recente no docs".
   let vaHeaderIdx = -1;
   if (adCode) {
-    // 1a) Tenta achar header DESSE AD especifico
+    // 1a) Acha header DESSE AD especifico — overwriting pra ficar com o ULTIMO
     const adRegex = new RegExp(adCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
     for (let i = 0; i < lines.length; i++) {
       if (/varia[cç][aã]o\s+de\s+avatar/i.test(lines[i]) && adRegex.test(lines[i])) {
-        vaHeaderIdx = i;
-        break;
+        vaHeaderIdx = i; // SEM break → pega o ULTIMO match (mais recente no doc)
       }
     }
   }
   if (vaHeaderIdx < 0) {
-    // 1b) Fallback: primeira "Variação de avatar" (comportamento antigo)
+    // 1b) Fallback: primeira "Variação de avatar" — doc unico-AD mantem
+    // comportamento antigo
     for (let i = 0; i < lines.length; i++) {
       if (/varia[cç][aã]o\s+de\s+avatar/i.test(lines[i])) {
         vaHeaderIdx = i;
