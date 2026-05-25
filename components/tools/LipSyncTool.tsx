@@ -249,29 +249,11 @@ export default function LipSyncTool() {
   /* ─── Upload helpers ────────────────────────────────────────── */
 
   /**
-   * Upload pro Fal storage via nosso /api/fal/proxy.
-   *
-   * Em vez de usar fal.storage.upload() do SDK (que nao expoe progress),
-   * fazemos POST direto pro proxy com XHR pra capturar progress real.
-   * O proxy server-side delega pro endpoint do Fal (https://rest.fal.ai/storage/upload).
-   *
-   * Implementacao seguindo o protocolo do SDK: o cliente faz:
-   *  1. POST /storage/upload/initiate-multipart (ou simple)
-   *  2. PUT no upload_url retornado com o arquivo
-   *  3. POST /storage/upload/complete-multipart
-   *
-   * Mais simples: usa fal.storage.upload diretamente — ele ja faz tudo.
-   * Como nao temos progress real do SDK, simulamos progressao baseada
-   * em tempo (assumindo X MB/s media) — visualmente mais util que
-   * congelado em "Enviando...".
+   * Upload pro Replicate Files API via nosso /api/replicate/upload.
+   * Mostra progresso estimado por tempo (como o SDK do Replicate
+   * tambem nao expoe progress real do XHR).
    */
   async function uploadToFal(file: File, onProgress?: (pct: number) => void): Promise<string> {
-    const { fal } = await import('@fal-ai/client');
-    fal.config({ proxyUrl: '/api/fal/proxy' });
-
-    // Simula progresso baseado em tamanho do arquivo e tempo decorrido.
-    // Assume taxa media ~3 MB/s (conservadora pra dial-ups; em fibra eh muito + rapida).
-    // Para no maximo 95% e finaliza quando o upload real termina.
     const estimatedMs = Math.max(2000, (file.size / 1024 / 1024 / 3) * 1000);
     let stop = false;
     const start = Date.now();
@@ -287,10 +269,14 @@ export default function LipSyncTool() {
     }
 
     try {
-      const url = await fal.storage.upload(file);
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/api/replicate/upload', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok || !data.url) throw new Error(data?.error || `Upload falhou: ${res.status}`);
       stop = true;
       onProgress?.(100);
-      return url;
+      return data.url as string;
     } catch (e) {
       stop = true;
       throw e;

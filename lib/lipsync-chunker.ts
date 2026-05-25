@@ -125,12 +125,18 @@ async function splitFast(
 }
 
 /**
- * Sobe um arquivo pro Fal storage (via proxy interno).
+ * Sobe um arquivo pro Replicate Files API (via nosso proxy interno).
+ * Retorna URL publica acessivel pelos modelos.
  */
 async function uploadChunk(file: File): Promise<string> {
-  const { fal } = await import('@fal-ai/client');
-  fal.config({ proxyUrl: '/api/fal/proxy' });
-  return fal.storage.upload(file);
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch('/api/replicate/upload', { method: 'POST', body: fd });
+  const data = await res.json();
+  if (!res.ok || !data.url) {
+    throw new Error(data?.error || `Upload falhou: ${res.status}`);
+  }
+  return data.url as string;
 }
 
 /**
@@ -139,13 +145,15 @@ async function uploadChunk(file: File): Promise<string> {
 async function generateChunk(
   video_url: string,
   audio_url: string,
-  pro: boolean,
-  syncMode: string,
+  _pro: boolean,
+  _syncMode: string,
 ): Promise<string> {
+  // Replicate Wav2Lip nao tem 'pro'/'sync_mode' — apenas video+audio.
+  // Mantemos a assinatura pra compat mas ignoramos esses params.
   const res = await fetch('/api/tools/lipsync', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ video_url, audio_url, pro, sync_mode: syncMode }),
+    body: JSON.stringify({ video_url, audio_url }),
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
