@@ -327,33 +327,78 @@ function AutoBrollInner() {
         <ToolStep n={1} icon={<IconStepPlug size={18} />} title="Extensão Magnific" hint="Conecta à sua conta Premium+ — gera sem gastar crédito" hue={HUE}>
         {/* Extension status */}
         {extStatus.connected ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-3 text-sm">
-            <div className="flex items-center gap-2">
-              <span className="relative flex h-2 w-2 shrink-0">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
-              </span>
-              <span className="text-lime">
-                Magnific conectado · {extStatus.version}
-              </span>
-              {sessionOk?.ok ? (
-                <span className="mono ml-2 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
-                  ✓ {sessionOk.detail || 'sessão OK'}
-                </span>
-              ) : sessionOk && !sessionOk.ok ? (
-                <span className="mono ml-2 rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] uppercase text-red-300">
-                  ✗ {sessionOk.detail}
-                </span>
-              ) : null}
+          <div
+            className="relative overflow-hidden rounded-[16px] border border-lime/35 bg-gradient-to-br from-lime/[0.08] via-bg-soft/40 to-bg/30 p-4 backdrop-blur-md"
+            style={{
+              boxShadow:
+                'inset 0 1px 0 rgba(200,255,0,0.10), 0 12px 30px -14px rgba(200,255,0,0.30), 0 0 50px -22px rgba(200,255,0,0.45)',
+            }}
+          >
+            {/* Glow decorativo no canto */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full opacity-40 blur-3xl"
+              style={{ background: 'radial-gradient(circle, rgba(200,255,0,0.5), transparent 70%)' }}
+            />
+            <div className="relative flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-lime/40 bg-lime/10">
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_10px_rgba(200,255,0,0.95)]" />
+                  </span>
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <span
+                    className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-lime"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    Magnific · Conectado
+                  </span>
+                  <span className="text-[13px] font-semibold text-white">
+                    {extStatus.version}
+                  </span>
+                  {sessionOk?.ok ? (
+                    <span
+                      className="mono mt-0.5 inline-flex w-fit items-center gap-1 rounded-full bg-lime/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-lime"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      ✓ {sessionOk.detail || 'sessão validada'}
+                    </span>
+                  ) : sessionOk && !sessionOk.ok ? (
+                    <span
+                      className="mono mt-0.5 inline-flex w-fit items-center gap-1 rounded-full bg-red-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-red-300"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      ✗ {sessionOk.detail}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleTestSession}
+                disabled={testingSession}
+                className="mono inline-flex items-center gap-1.5 rounded-[10px] border border-lime/30 bg-bg-soft/60 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-text-muted backdrop-blur transition-all hover:border-lime hover:bg-lime/5 hover:text-lime active:translate-y-px disabled:opacity-50"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                {testingSession ? (
+                  <>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="animate-spin">
+                      <circle cx="12" cy="12" r="10" strokeDasharray="32 32" />
+                    </svg>
+                    Testando
+                  </>
+                ) : (
+                  <>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <path d="M9 12l2 2 4-4M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Testar sessão
+                  </>
+                )}
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={handleTestSession}
-              disabled={testingSession}
-              className="rounded-md border border-line-strong bg-bg-soft px-3 py-1 text-[11px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime disabled:opacity-50"
-            >
-              {testingSession ? 'Testando...' : 'Testar sessão Magnific'}
-            </button>
           </div>
         ) : (
           <div
@@ -450,33 +495,23 @@ function AutoBrollInner() {
           {/* Setup TRAVADO. Sem opções de mudar modelo/aspect/quality —
               a extension SEMPRE escolhe exatamente: Nano Banana Pro 1K 9:16
               + Kling 2.5 720p 9:16 10s. Zero chance de clicar errado. */}
-          <div className="grid gap-2.5 md:grid-cols-2">
-            <div
-              className="rounded-[14px] border border-violet/35 bg-violet/[0.06] px-4 py-3"
-              style={{ boxShadow: '0 0 18px -6px rgba(167,139,250,0.45), inset 0 1px 0 rgba(255,255,255,0.04)' }}
-            >
-              <div className="mono mb-1 text-[10px] uppercase tracking-[0.22em] text-violet/90" style={{ fontFamily: 'var(--font-tech)' }}>
-                IMAGEM
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[14px] font-bold text-white" style={{ fontFamily: 'var(--font-tech)' }}>Nano Banana Pro</span>
-                <span className="mono rounded-full border border-lime/45 bg-lime/10 px-1.5 py-0 text-[9px] font-bold uppercase tracking-[0.16em] text-lime">∞ 1K · 9:16</span>
-              </div>
-              <div className="mono mt-0.5 text-[10.5px] text-text-muted">Ilimitado — zero crédito</div>
-            </div>
-            <div
-              className="rounded-[14px] border border-cyan-400/35 bg-cyan-400/[0.06] px-4 py-3"
-              style={{ boxShadow: '0 0 18px -6px rgba(34,211,238,0.45), inset 0 1px 0 rgba(255,255,255,0.04)' }}
-            >
-              <div className="mono mb-1 text-[10px] uppercase tracking-[0.22em] text-cyan-300" style={{ fontFamily: 'var(--font-tech)' }}>
-                VÍDEO
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[14px] font-bold text-white" style={{ fontFamily: 'var(--font-tech)' }}>Kling 2.5</span>
-                <span className="mono rounded-full border border-lime/45 bg-lime/10 px-1.5 py-0 text-[9px] font-bold uppercase tracking-[0.16em] text-lime">∞ 720p · 9:16 · 10s</span>
-              </div>
-              <div className="mono mt-0.5 text-[10.5px] text-text-muted">Ilimitado — zero crédito</div>
-            </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <ModelCard
+              kind="image"
+              label="Imagem"
+              model="Nano Banana Pro"
+              specs={['1K', '9:16']}
+              icon="🍌"
+              tint="violet"
+            />
+            <ModelCard
+              kind="video"
+              label="Vídeo"
+              model="Kling 2.5"
+              specs={['720p', '9:16', '10s']}
+              icon="🎬"
+              tint="cyan"
+            />
           </div>
           <label className="mt-3 block">
             <span className="label-field">Motion default (opcional, Kling 2.5)</span>
@@ -578,30 +613,71 @@ function JobCard({
   const hasSpace = !!p?.spaceUrl;
 
   return (
-    <div className="rounded-[14px] border border-line bg-bg-soft/40 p-4">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <span className="mono text-xs font-bold uppercase tracking-widest text-lime">
-          JOB {index + 1}/{total}
-        </span>
+    <div
+      className="relative overflow-hidden rounded-[18px] border border-line bg-gradient-to-br from-bg-soft/60 via-bg/40 to-bg-soft/30 p-5 backdrop-blur-md transition-all duration-500 hover:border-violet/40"
+      style={{
+        boxShadow:
+          'inset 0 1px 0 rgba(255,255,255,0.04), 0 16px 36px -18px rgba(0,0,0,0.6)',
+      }}
+    >
+      {/* Decorative corner glow */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full opacity-20 blur-3xl"
+        style={{ background: 'radial-gradient(circle, rgba(167,139,250,0.6), transparent 70%)' }}
+      />
+
+      <div className="relative mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-3">
+          <div
+            className="flex h-9 w-9 items-center justify-center rounded-[10px] border border-violet/40 bg-violet/10"
+            style={{ boxShadow: '0 0 16px -4px rgba(167,139,250,0.45)' }}
+          >
+            <span className="text-[16px] font-extrabold text-violet" style={{ fontFamily: 'var(--font-tech)' }}>
+              {String(index + 1).padStart(2, '0')}
+            </span>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <span
+              className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-lime"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              Job {index + 1} <span className="text-text-dim">/ {total}</span>
+            </span>
+            <span className="text-[11px] text-text-muted">
+              {running ? (
+                <span className="inline-flex items-center gap-1">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet opacity-60" />
+                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-violet" />
+                  </span>
+                  Rodando em segundo plano
+                </span>
+              ) : (
+                <span>Pronto pra disparar</span>
+              )}
+            </span>
+          </div>
+        </div>
         <div className="flex items-center gap-2">
-          {/* BOTÃO 3D — abre o Space DESTE job (só se quiser ver o processo) */}
           <button
             type="button"
             onClick={onOpenSpace}
             disabled={!hasSpace}
             title={
               hasSpace
-                ? 'Abre o Space deste job no Magnific (nova aba). O processo já roda em segundo plano — isto é só pra você acompanhar se quiser.'
+                ? 'Abre o Space deste job no Magnific (nova aba)'
                 : 'O Space aparece aqui assim que o job começar'
             }
             className={
-              'group relative inline-flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 text-xs font-bold transition-all ' +
+              'group relative inline-flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-all ' +
               (hasSpace
-                ? 'border border-cyan-300/60 bg-gradient-to-b from-cyan-400/25 to-cyan-600/10 text-cyan-200 shadow-[0_3px_0_rgba(34,211,238,0.35),0_6px_14px_rgba(34,211,238,0.25)] hover:translate-y-[1px] hover:shadow-[0_2px_0_rgba(34,211,238,0.35),0_4px_10px_rgba(34,211,238,0.25)] active:translate-y-[3px] active:shadow-none'
-                : 'cursor-not-allowed border border-line bg-bg/40 text-text-muted opacity-50')
+                ? 'border border-cyan-300/60 bg-gradient-to-b from-cyan-400/25 to-cyan-600/10 text-cyan-200 shadow-[0_3px_0_rgba(34,211,238,0.35),0_6px_14px_rgba(34,211,238,0.25)] hover:translate-y-[1px] hover:shadow-[0_2px_0_rgba(34,211,238,0.35)] active:translate-y-[3px] active:shadow-none'
+                : 'cursor-not-allowed border border-line bg-bg/40 text-text-muted opacity-40')
             }
+            style={{ fontFamily: 'var(--font-tech)' }}
           >
-            🧊 VER SPACE 3D
+            🧊 Ver Space
           </button>
           {total > 1 && !running && (
             <button
@@ -616,47 +692,95 @@ function JobCard({
         </div>
       </div>
 
-      <div className="grid gap-3">
+      <div className="relative grid gap-4">
+        {/* Nome do AD */}
         <label className="block">
-          <span className="label-field">Código do AD / Nome do Space</span>
+          <span
+            className="mono mb-1.5 block text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            Código do AD / Nome do Space
+          </span>
           <input
             type="text"
             value={job.name}
             onChange={(e) => onName(e.target.value)}
             placeholder={`Ex: AD15VN-PRPB06 (job ${index + 1})`}
-            className="input-field"
+            className="w-full rounded-[12px] border border-line bg-bg/60 px-4 py-3 text-sm font-medium text-white placeholder:text-text-dim focus:border-violet/60 focus:outline-none focus:ring-2 focus:ring-violet/20 disabled:opacity-50"
             disabled={running}
           />
         </label>
 
-        <label className="block">
-          <span className="label-field">
-            Prompts deste job (JSON do Claude ou texto numerado)
-          </span>
-          <textarea
-            value={job.raw}
-            onChange={(e) => onRaw(e.target.value)}
-            placeholder={`[ { "imagePrompt": "...", "videoPrompt": "..." }, ... ]`}
-            rows={8}
-            className="input-field resize-y font-mono text-xs"
-            disabled={running}
-          />
-          <div className="mt-1 text-xs text-text-muted">
-            Detectados: <span className="mono text-lime">{takesCount}</span> takes
+        {/* JSON code editor */}
+        <div>
+          <div className="mb-1.5 flex items-center justify-between">
+            <span
+              className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              Prompts do job
+              <span className="mx-2 text-text-dim">·</span>
+              <span className="text-violet">JSON do Claude</span> ou texto numerado
+            </span>
+            {takesCount > 0 && (
+              <span
+                className="mono inline-flex items-center gap-1.5 rounded-full border border-lime/40 bg-lime/10 px-2.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.14em] text-lime"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor">
+                  <circle cx="12" cy="12" r="5" />
+                </svg>
+                {takesCount} take{takesCount === 1 ? '' : 's'} detectados
+              </span>
+            )}
           </div>
-        </label>
+          <div
+            className="relative overflow-hidden rounded-[12px] border border-line bg-black/60 transition-colors focus-within:border-violet/60"
+            style={{
+              boxShadow:
+                'inset 0 1px 0 rgba(255,255,255,0.04), inset 0 0 0 1px rgba(0,0,0,0.4)',
+            }}
+          >
+            {/* Code-editor strip */}
+            <div className="flex items-center gap-1.5 border-b border-line bg-bg-soft/60 px-3 py-1.5">
+              <span className="h-2 w-2 rounded-full bg-red-500/60" />
+              <span className="h-2 w-2 rounded-full bg-amber-400/60" />
+              <span className="h-2 w-2 rounded-full bg-lime/60" />
+              <span
+                className="ml-2 text-[10px] text-text-dim"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                prompts.json
+              </span>
+              <span className="ml-auto text-[9px] text-text-dim">
+                {job.raw.length} chars
+              </span>
+            </div>
+            <textarea
+              value={job.raw}
+              onChange={(e) => onRaw(e.target.value)}
+              placeholder={`[\n  { "imagePrompt": "...", "videoPrompt": "..." },\n  ...\n]`}
+              rows={8}
+              className="block w-full resize-y bg-transparent px-4 py-3 font-mono text-[11.5px] leading-relaxed text-white placeholder:text-text-dim focus:outline-none disabled:opacity-50"
+              disabled={running}
+              spellCheck={false}
+            />
+          </div>
+        </div>
       </div>
 
       {job.error && (
         <div
           role="alert"
-          className="mt-3 rounded-[10px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300"
+          className="mt-3 flex items-start gap-2 rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300 shadow-[0_0_22px_-8px_rgba(239,68,68,0.45)]"
         >
-          {job.error}
+          <span className="mt-0.5 text-base">⚠</span>
+          <span className="flex-1 leading-relaxed">{job.error}</span>
         </div>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-3">
+      {/* ACTIONS BAR — hero CTA + secondary */}
+      <div className="relative mt-4 flex flex-wrap items-center gap-3">
         {running ? (
           <CancelButton onClick={onCancel} label="Cancelar este job" />
         ) : (
@@ -664,29 +788,37 @@ function JobCard({
             type="button"
             onClick={onRun}
             disabled={!extConnected || takesCount === 0}
-            className="btn-primary"
+            className="group relative inline-flex items-center gap-2 overflow-hidden rounded-full bg-gradient-to-r from-violet via-violet-deep to-cyan-400 px-6 py-3 text-[13px] font-extrabold uppercase tracking-[0.12em] text-white shadow-[0_12px_30px_-10px_rgba(109,78,232,0.65),inset_0_1px_0_rgba(255,255,255,0.3)] transition-all duration-300 hover:scale-[1.03] hover:shadow-[0_18px_42px_-10px_rgba(109,78,232,0.85)] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100"
+            style={{ fontFamily: 'var(--font-tech)' }}
           >
-            Disparar {takesCount || 0} take{takesCount === 1 ? '' : 's'}
+            <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/30 to-transparent transition-transform duration-700 group-hover:translate-x-full" />
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+            <span className="relative">
+              Disparar {takesCount || 0} take{takesCount === 1 ? '' : 's'}
+            </span>
           </button>
         )}
         <button
           type="button"
           onClick={onDebug}
           disabled={!extConnected || takesCount === 0}
-          className="mono rounded-md border border-fuchsia-500/50 bg-fuchsia-500/10 px-3 py-1.5 text-[11px] uppercase tracking-widest text-fuchsia-200 transition hover:bg-fuchsia-500/20 disabled:opacity-40"
-          title="DEBUG (reserva p/ bugs/loop): aborta o atual e recria do ZERO num space novo"
+          className="mono inline-flex items-center gap-1.5 rounded-[10px] border border-fuchsia-500/50 bg-fuchsia-500/10 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-fuchsia-200 transition-all hover:bg-fuchsia-500/20 active:translate-y-px disabled:opacity-40"
+          title="Aborta o atual e recria do ZERO num space novo"
+          style={{ fontFamily: 'var(--font-tech)' }}
         >
           🐞 Debug
         </button>
         {job.zip && (
-          <button type="button" onClick={onDownload} className="btn-secondary">
-            Baixar {job.zip.name} ({(job.zip.blob.size / 1024 / 1024).toFixed(1)} MB)
+          <button
+            type="button"
+            onClick={onDownload}
+            className="mono inline-flex items-center gap-1.5 rounded-[10px] border border-lime/50 bg-lime/10 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-lime transition-all hover:bg-lime/20 active:translate-y-px"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            ⬇ Baixar ZIP ({(job.zip.blob.size / 1024 / 1024).toFixed(1)} MB)
           </button>
-        )}
-        {running && (
-          <span className="mono rounded-full border border-line bg-bg/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-text-muted">
-            rodando em 2º plano
-          </span>
         )}
       </div>
 
@@ -775,3 +907,115 @@ function JobCard({
 }
 
 // TakeRow legado removido — substituído pelo TakeCard grid 3D.
+
+/* ────────────────────────────────────────────────────────────────────
+ * ModelCard — card 3D mostrando o modelo travado (Nano Banana / Kling)
+ * com hover lift + glow tinted + animação border shine
+ * ──────────────────────────────────────────────────────────────────── */
+function ModelCard({
+  kind,
+  label,
+  model,
+  specs,
+  icon,
+  tint,
+}: {
+  kind: 'image' | 'video';
+  label: string;
+  model: string;
+  specs: string[];
+  icon: string;
+  tint: 'violet' | 'cyan';
+}) {
+  const tintCls =
+    tint === 'violet'
+      ? {
+          border: 'border-violet/30 hover:border-violet/65',
+          glow: 'rgba(167,139,250,0.45)',
+          accent: 'text-violet',
+          bg: 'from-violet/[0.08] via-transparent to-bg/30',
+        }
+      : {
+          border: 'border-cyan-400/30 hover:border-cyan-400/65',
+          glow: 'rgba(34,211,238,0.45)',
+          accent: 'text-cyan-300',
+          bg: 'from-cyan-400/[0.08] via-transparent to-bg/30',
+        };
+  return (
+    <div
+      className={`group relative overflow-hidden rounded-[16px] border ${tintCls.border} bg-gradient-to-br ${tintCls.bg} p-4 transition-all duration-500 hover:-translate-y-1`}
+      style={{
+        boxShadow: `inset 0 1px 0 rgba(255,255,255,0.05), 0 14px 32px -16px ${tintCls.glow}, 0 0 0 0 ${tintCls.glow}`,
+        transformStyle: 'preserve-3d',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.08), 0 24px 48px -16px ${tintCls.glow}, 0 0 60px -12px ${tintCls.glow}`;
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.05), 0 14px 32px -16px ${tintCls.glow}, 0 0 0 0 ${tintCls.glow}`;
+      }}
+    >
+      {/* Border shine animation */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 rounded-[16px] opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+        style={{
+          background:
+            'linear-gradient(120deg, transparent 30%, rgba(255,255,255,0.06) 50%, transparent 70%)',
+          backgroundSize: '200% 100%',
+          animation: 'modelShine 2.5s ease-in-out infinite',
+        }}
+      />
+      <div className="relative flex items-start gap-3">
+        <div
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] border ${tintCls.border} bg-bg-soft/50 text-xl transition-transform duration-500 group-hover:scale-110 group-hover:rotate-[-6deg]`}
+        >
+          {icon}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span
+              className={`mono text-[9px] font-bold uppercase tracking-[0.22em] ${tintCls.accent}`}
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              {label}
+            </span>
+            <span
+              className="mono inline-flex items-center gap-1 rounded-full border border-lime/45 bg-lime/10 px-1.5 py-0 text-[8.5px] font-bold uppercase tracking-[0.14em] text-lime"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              ∞ unlimited
+            </span>
+          </div>
+          <div
+            className="mt-0.5 truncate text-[16px] font-extrabold text-white"
+            style={{ fontFamily: 'var(--font-tech)', letterSpacing: '0.01em' }}
+          >
+            {model}
+          </div>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {specs.map((s) => (
+              <span
+                key={s}
+                className="mono rounded border border-line/80 bg-bg/40 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-widest text-text-muted"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                {s}
+              </span>
+            ))}
+          </div>
+          <div className="mono mt-2 text-[10px] text-text-dim" style={{ fontFamily: 'var(--font-tech)' }}>
+            Zero crédito · qualidade trava
+          </div>
+        </div>
+      </div>
+      <style jsx>{`
+        @keyframes modelShine {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
