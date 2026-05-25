@@ -167,6 +167,69 @@ export async function runMagnificPipelineV2(
     6,
   );
 
+  // ───────── Retry policy ─────────
+  // Magnific às vezes retorna status:'failed' por NSFW filter, server load,
+  // race condition de Cloudflare/Cloudfront. Auto-retry com seed novo até
+  // MAX_RETRIES vezes antes de desistir.
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY_MS = 2000;
+
+  async function generateImageWithRetry(
+    prompt: string,
+    onAttempt: (n: number) => void,
+  ): Promise<{ url: string }> {
+    let lastErr: Error | null = null;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      onAttempt(attempt);
+      try {
+        const img = await generateImage({
+          prompt,
+          aspectRatio: '9:16',
+          resolution: '1k',
+          smartPrompt: true,
+          // Seed novo a cada tentativa pra evitar reproduzir mesmo erro
+          seed: Math.floor(Math.random() * 1_000_000),
+        });
+        if (img.status === 'completed' && img.url) return { url: img.url };
+        lastErr = new Error(`Magnific retornou status:${img.status}`);
+      } catch (e) {
+        lastErr = e instanceof Error ? e : new Error(String(e));
+      }
+      if (attempt < MAX_RETRIES) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
+      }
+    }
+    throw lastErr || new Error('Image falhou após retries');
+  }
+
+  async function generateVideoWithRetry(
+    prompt: string,
+    startImageUrl: string,
+    onAttempt: (n: number) => void,
+  ): Promise<{ url: string }> {
+    let lastErr: Error | null = null;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      onAttempt(attempt);
+      try {
+        const vid = await generateVideoFromImage({
+          prompt,
+          startImageUrl,
+          aspectRatio: '9:16',
+          resolution: '720p',
+          duration: 10,
+        });
+        if (vid.status === 'completed' && vid.url) return { url: vid.url };
+        lastErr = new Error(`Magnific retornou status:${vid.status}`);
+      } catch (e) {
+        lastErr = e instanceof Error ? e : new Error(String(e));
+      }
+      if (attempt < MAX_RETRIES) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
+      }
+    }
+    throw lastErr || new Error('Video falhou após retries');
+  }
+
   // ───────── Pipeline por take ─────────
   await Promise.all(
     takes.map(async (take) => {
@@ -182,15 +245,16 @@ export async function runMagnificPipelineV2(
             message: 'Gerando imagem (Nano Banana 2 Flash)...',
           });
           emit(`Take ${take.idx}: imagem...`, 'running', undefined as unknown as number);
-          const img = await generateImage({
-            prompt: take.imagePrompt,
-            aspectRatio: '9:16',
-            resolution: '1k',
-            smartPrompt: true,
+          const img = await generateImageWithRetry(take.imagePrompt, (n) => {
+            if (n > 1) {
+              patchTake(take.idx, {
+                status: 'running',
+                phase: 'image-gen',
+                percent: 10,
+                message: `Imagem retry ${n}/${MAX_RETRIES} (seed novo)...`,
+              });
+            }
           });
-          if (img.status !== 'completed' || !img.url) {
-            throw new Error(`Image falhou: ${img.status}`);
-          }
           imageUrl = img.url;
           patchTake(take.idx, { status: 'image-done', imageUrl });
         } finally {
@@ -209,16 +273,22 @@ export async function runMagnificPipelineV2(
             imageUrl,
           });
           emit(`Take ${take.idx}: vídeo...`, 'running', undefined as unknown as number);
-          const vid = await generateVideoFromImage({
-            prompt: take.videoPrompt || take.imagePrompt,
-            startImageUrl: imageUrl,
-            aspectRatio: '9:16',
-            resolution: '720p',
-            duration: 10,
-          });
-          if (vid.status !== 'completed' || !vid.url) {
-            throw new Error(`Video falhou: ${vid.status}`);
-          }
+          const vid = await generateVideoWithRetry(
+            take.videoPrompt || take.imagePrompt,
+            imageUrl,
+            (n) => {
+              if (n > 1) {
+                patchTake(take.idx, {
+                  status: 'running',
+                  phase: 'video-gen',
+                  percent: 40,
+                  message: `Vídeo retry ${n}/${MAX_RETRIES}...`,
+                  // @ts-expect-error compat
+                  imageUrl,
+                });
+              }
+            },
+          );
           patchTake(take.idx, { status: 'video-done', imageUrl, videoUrl: vid.url });
         } finally {
           vidSem.release();
