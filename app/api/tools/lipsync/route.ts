@@ -52,6 +52,7 @@ interface LipSyncBody {
   audio_url?: string;
   // v1
   sync_mode_v1?: 'cut_off' | 'loop' | 'bounce' | 'silence' | 'remap';
+  v1_pro?: boolean;
   // v2
   guidance_scale?: number;
   loop_mode?: 'loop' | 'pingpong';
@@ -99,23 +100,32 @@ export async function POST(req: Request) {
     let modelLabel: string;
 
     if (version === 'v1') {
-      // V1: Sync.so V2 (lipsync-1.9.0-beta) — DreamFace tech
+      // V1: Sync.so V2 — DreamFace tech.
+      // Fal mudou: agora aceita 'lipsync-2' (rapido/barato) ou
+      // 'lipsync-2-pro' (qualidade superior). Default: lipsync-2.
+      // Os types do SDK estao desatualizados (mencionam lipsync-1.x)
+      // mas a API real rejeita esses com 422.
       const syncMode = body.sync_mode_v1 ?? 'cut_off';
+      const useProV1 = body.v1_pro === true;
+      const modelV1: 'lipsync-2' | 'lipsync-2-pro' = useProV1 ? 'lipsync-2-pro' : 'lipsync-2';
       const input = {
         video_url,
         audio_url,
-        model: 'lipsync-1.9.0-beta' as const,
+        model: modelV1,
         sync_mode: syncMode,
-      };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any;
       result = await fal.subscribe('fal-ai/sync-lipsync/v2', {
         input,
         logs: false,
       });
-      modelLabel = 'sync-lipsync/v2 (1.9.0-beta)';
+      modelLabel = `sync-lipsync/v2 (${modelV1})`;
     } else {
       // V2: LatentSync ByteDance
+      // Fal mudou: guidance_scale max eh 2 (nao 4 como o SDK type sugere).
+      // Sweet spot eh 1.5 — natural e nao distorce.
       const guidanceScale =
-        typeof body.guidance_scale === 'number' ? clamp(body.guidance_scale, 1, 4) : 2.5;
+        typeof body.guidance_scale === 'number' ? clamp(body.guidance_scale, 1, 2) : 1.5;
       const loopMode: 'loop' | 'pingpong' =
         body.loop_mode === 'pingpong' ? 'pingpong' : 'loop';
       const seed =

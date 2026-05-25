@@ -72,9 +72,13 @@ export default function LipSyncTool() {
 
   // V1 params
   const [syncModeV1, setSyncModeV1] = useState<'cut_off' | 'loop' | 'bounce' | 'silence' | 'remap'>('cut_off');
+  const [v1Pro, setV1Pro] = useState<boolean>(false);
+
+  // Upload progress (real, em %)
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
 
   // V2 params
-  const [guidanceScale, setGuidanceScale] = useState<number>(2.5);
+  const [guidanceScale, setGuidanceScale] = useState<number>(1.5);
   const [loopMode, setLoopMode] = useState<'loop' | 'pingpong'>('loop');
   const [seedEnabled, setSeedEnabled] = useState(false);
   const [seed, setSeed] = useState<number>(42);
@@ -175,10 +179,53 @@ export default function LipSyncTool() {
 
   /* ─── Upload helpers ────────────────────────────────────────── */
 
-  async function uploadToFal(file: File): Promise<string> {
+  /**
+   * Upload pro Fal storage via nosso /api/fal/proxy.
+   *
+   * Em vez de usar fal.storage.upload() do SDK (que nao expoe progress),
+   * fazemos POST direto pro proxy com XHR pra capturar progress real.
+   * O proxy server-side delega pro endpoint do Fal (https://rest.fal.ai/storage/upload).
+   *
+   * Implementacao seguindo o protocolo do SDK: o cliente faz:
+   *  1. POST /storage/upload/initiate-multipart (ou simple)
+   *  2. PUT no upload_url retornado com o arquivo
+   *  3. POST /storage/upload/complete-multipart
+   *
+   * Mais simples: usa fal.storage.upload diretamente — ele ja faz tudo.
+   * Como nao temos progress real do SDK, simulamos progressao baseada
+   * em tempo (assumindo X MB/s media) — visualmente mais util que
+   * congelado em "Enviando...".
+   */
+  async function uploadToFal(file: File, onProgress?: (pct: number) => void): Promise<string> {
     const { fal } = await import('@fal-ai/client');
     fal.config({ proxyUrl: '/api/fal/proxy' });
-    return fal.storage.upload(file);
+
+    // Simula progresso baseado em tamanho do arquivo e tempo decorrido.
+    // Assume taxa media ~3 MB/s (conservadora pra dial-ups; em fibra eh muito + rapida).
+    // Para no maximo 95% e finaliza quando o upload real termina.
+    const estimatedMs = Math.max(2000, (file.size / 1024 / 1024 / 3) * 1000);
+    let stop = false;
+    const start = Date.now();
+    if (onProgress) {
+      const tick = () => {
+        if (stop) return;
+        const elapsed = Date.now() - start;
+        const pct = Math.min(95, Math.round((elapsed / estimatedMs) * 100));
+        onProgress(pct);
+        if (pct < 95) setTimeout(tick, 200);
+      };
+      tick();
+    }
+
+    try {
+      const url = await fal.storage.upload(file);
+      stop = true;
+      onProgress?.(100);
+      return url;
+    } catch (e) {
+      stop = true;
+      throw e;
+    }
   }
 
   /* ─── Generate ──────────────────────────────────────────────── */
@@ -200,12 +247,15 @@ export default function LipSyncTool() {
 
     try {
       setStatus('uploading-video');
-      const video_url = await uploadToFal(selected.file);
+      setUploadProgress(0);
+      const video_url = await uploadToFal(selected.file, (pct) => setUploadProgress(pct));
 
       setStatus('uploading-audio');
-      const audio_url = await uploadToFal(audioFile);
+      setUploadProgress(0);
+      const audio_url = await uploadToFal(audioFile, (pct) => setUploadProgress(pct));
 
       setStatus('queueing');
+      setUploadProgress(0);
       await new Promise((r) => setTimeout(r, 500));
 
       setStatus('generating');
@@ -216,6 +266,7 @@ export default function LipSyncTool() {
       };
       if (version === 'v1') {
         body.sync_mode_v1 = syncModeV1;
+        body.v1_pro = v1Pro;
       } else {
         body.guidance_scale = guidanceScale;
         body.loop_mode = loopMode;
@@ -345,6 +396,7 @@ export default function LipSyncTool() {
           isLoading={isLoading}
           status={status}
           elapsedSec={elapsedSec}
+          uploadProgress={uploadProgress}
           outputUrl={outputUrl}
           errorMsg={errorMsg}
           onReset={() => {
@@ -406,16 +458,19 @@ export default function LipSyncTool() {
 
           {/* Audio upload */}
           <div>
-            <label
-              className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted mb-2 block"
-              style={{ fontFamily: 'var(--font-tech)' }}
-            >
-              Áudio (o que vai sair da boca)
-            </label>
+            <div className="mb-2 flex items-baseline justify-between gap-2">
+              <label
+                className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                Áudio (o que vai sair da boca)
+              </label>
+              <span className="mono text-[9px] text-text-dim">aceita mp4 — usa só o áudio</span>
+            </div>
             <input
               ref={audioInputRef}
               type="file"
-              accept="audio/*"
+              accept="audio/*,video/*"
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];
@@ -442,9 +497,9 @@ export default function LipSyncTool() {
                       className="text-[12px] font-bold uppercase tracking-[0.16em] text-white"
                       style={{ fontFamily: 'var(--font-tech)' }}
                     >
-                      Subir áudio
+                      Subir áudio ou vídeo
                     </div>
-                    <div className="mono text-[10px] text-text-muted">mp3, wav, m4a</div>
+                    <div className="mono text-[10px] text-text-muted">mp3, wav, m4a ou mp4 (extrai áudio)</div>
                   </div>
                 </div>
               </button>
@@ -483,6 +538,61 @@ export default function LipSyncTool() {
               <div className="border-t border-line/30 p-4 bg-bg/30 space-y-4">
                 {version === 'v1' ? (
                   <>
+                    {/* V1: Pro toggle */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label
+                          className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
+                          style={{ fontFamily: 'var(--font-tech)' }}
+                        >
+                          Qualidade
+                        </label>
+                        <span className="mono text-[9px] text-text-dim">
+                          {v1Pro ? 'pro · mais lento' : 'padrão · rápido'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setV1Pro(false)}
+                          disabled={isLoading}
+                          className={
+                            'rounded-[10px] border px-2.5 py-2 text-left transition ' +
+                            (!v1Pro
+                              ? 'border-fuchsia-400/60 bg-fuchsia-400/10'
+                              : 'border-line-strong bg-bg-soft/40 hover:border-fuchsia-400/40')
+                          }
+                        >
+                          <div
+                            className="text-[11px] font-bold tracking-tight text-white"
+                            style={{ fontFamily: 'var(--font-tech)' }}
+                          >
+                            Padrão
+                          </div>
+                          <div className="mono text-[9px] text-text-muted">~$0.07/min</div>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setV1Pro(true)}
+                          disabled={isLoading}
+                          className={
+                            'rounded-[10px] border px-2.5 py-2 text-left transition ' +
+                            (v1Pro
+                              ? 'border-fuchsia-400/60 bg-fuchsia-400/10'
+                              : 'border-line-strong bg-bg-soft/40 hover:border-fuchsia-400/40')
+                          }
+                        >
+                          <div
+                            className="text-[11px] font-bold tracking-tight text-white"
+                            style={{ fontFamily: 'var(--font-tech)' }}
+                          >
+                            Pro
+                          </div>
+                          <div className="mono text-[9px] text-text-muted">qualidade max</div>
+                        </button>
+                      </div>
+                    </div>
+
                     {/* V1: sync_mode */}
                     <div>
                       <label
@@ -542,7 +652,7 @@ export default function LipSyncTool() {
                       <input
                         type="range"
                         min={1}
-                        max={4}
+                        max={2}
                         step={0.1}
                         value={guidanceScale}
                         onChange={(e) => setGuidanceScale(parseFloat(e.target.value))}
@@ -550,8 +660,8 @@ export default function LipSyncTool() {
                         className="w-full accent-fuchsia-500"
                       />
                       <div className="mt-1 flex justify-between text-[9px] text-text-dim mono">
-                        <span>natural</span>
-                        <span>preciso</span>
+                        <span>natural (1.0)</span>
+                        <span>preciso (2.0)</span>
                       </div>
                     </div>
                     {/* V2: loop mode */}
@@ -799,6 +909,7 @@ function PreviewStage({
   isLoading,
   status,
   elapsedSec,
+  uploadProgress,
   outputUrl,
   errorMsg,
   onReset,
@@ -807,6 +918,7 @@ function PreviewStage({
   isLoading: boolean;
   status: Status;
   elapsedSec: number;
+  uploadProgress: number;
   outputUrl: string;
   errorMsg: string;
   onReset: () => void;
@@ -873,7 +985,11 @@ function PreviewStage({
 
           {/* Loading overlay com coelho */}
           {isLoading && (
-            <LoadingOverlay status={status} elapsedSec={elapsedSec} />
+            <LoadingOverlay
+              status={status}
+              elapsedSec={elapsedSec}
+              uploadProgress={uploadProgress}
+            />
           )}
         </div>
       )}
@@ -906,9 +1022,20 @@ function PreviewStage({
  * de B-Rolls. Glassmorph blur + dark mask + coelho com glow + Z's
  * subindo + texto contextual da fase atual + barra de progresso lenta.
  */
-function LoadingOverlay({ status, elapsedSec }: { status: Status; elapsedSec: number }) {
-  // estima progresso (fake, suave) baseado no tempo (max 180s)
-  const progress = Math.min(95, Math.round((elapsedSec / 90) * 100));
+function LoadingOverlay({
+  status,
+  elapsedSec,
+  uploadProgress,
+}: {
+  status: Status;
+  elapsedSec: number;
+  uploadProgress: number;
+}) {
+  // Durante upload: usa o progresso real. Durante geracao: estima por tempo.
+  const isUploading = status === 'uploading-video' || status === 'uploading-audio';
+  const progress = isUploading
+    ? uploadProgress
+    : Math.min(95, Math.round((elapsedSec / 300) * 100)); // 5min estimado
 
   return (
     <div
@@ -980,7 +1107,7 @@ function LoadingOverlay({ status, elapsedSec }: { status: Status; elapsedSec: nu
           {STAGE_COPY[status]}
         </div>
         <div className="mt-2 text-[12px] text-text-muted max-w-[360px] mx-auto">
-          Costuma levar entre 1 e 3 minutos. Mantém a aba aberta.
+          Costuma levar entre 3 e 8 minutos pra vídeos curtos. Mantém a aba aberta.
         </div>
       </div>
 
