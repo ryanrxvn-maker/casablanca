@@ -1107,7 +1107,7 @@ function LoadingOverlay({
           {STAGE_COPY[status]}
         </div>
         <div className="mt-2 text-[12px] text-text-muted max-w-[360px] mx-auto">
-          Costuma levar entre 3 e 8 minutos pra vídeos curtos. Mantém a aba aberta.
+          V1 leva ~5-10 min · V2 leva ~10-15 min. Mantém a aba aberta.
         </div>
       </div>
 
