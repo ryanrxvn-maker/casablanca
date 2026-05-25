@@ -76,6 +76,32 @@ const POLL_TIMEOUT_VID_MS = 900_000; // 15min — Kling 2.5 é ~5-10min
 
 /* ───────────────────────── HTTP helper ───────────────────────── */
 
+/**
+ * User-Agent + headers de Chrome real. Sem isso, Cloudflare devolve
+ * 403 "That request didn't look like it came from a real browser"
+ * mesmo com cookies válidos (incluindo __cf_bm e __cf_clearance).
+ *
+ * Versão fixa de Chrome 131 — suficiente pra passar o fingerprint do
+ * Cloudflare em 2026.
+ */
+const BROWSER_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
+const BROWSER_HEADERS_BASE: Record<string, string> = {
+  'User-Agent': BROWSER_UA,
+  'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+  'Accept-Encoding': 'gzip, deflate, br',
+  'Origin': 'https://www.magnific.com',
+  'Referer': 'https://www.magnific.com/',
+  'Sec-Fetch-Site': 'same-origin',
+  'Sec-Fetch-Mode': 'cors',
+  'Sec-Fetch-Dest': 'empty',
+  'Sec-Ch-Ua':
+    '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+  'Sec-Ch-Ua-Mobile': '?0',
+  'Sec-Ch-Ua-Platform': '"Windows"',
+};
+
 async function magnificFetch(
   creds: MagnificCreds,
   path: string,
@@ -83,6 +109,7 @@ async function magnificFetch(
 ): Promise<Response> {
   const url = `${BASE}${path}${path.includes('?') ? '&' : '?'}lang=en_US&user_id=${creds.userId}`;
   const headers: Record<string, string> = {
+    ...BROWSER_HEADERS_BASE,
     accept: 'application/json',
     cookie: creds.cookie,
     'X-Requested-With': 'XMLHttpRequest',
@@ -263,10 +290,13 @@ export async function verifyCredentials(creds: MagnificCreds): Promise<{
   credits?: number;
   walletId?: string;
 }> {
-  // Magnific aceita /auth/verify sem user_id na query (descoberto live)
+  // Magnific aceita /auth/verify sem user_id na query (descoberto live).
+  // Headers de browser real são CRÍTICOS aqui — sem User-Agent + Origin +
+  // Sec-Fetch-*, Cloudflare bloqueia com 403 antes de chegar no Magnific.
   const url = `${BASE}/auth/verify?lang=en_US`;
   const r = await fetch(url, {
     headers: {
+      ...BROWSER_HEADERS_BASE,
       accept: 'application/json',
       cookie: creds.cookie,
       'X-Requested-With': 'XMLHttpRequest',
