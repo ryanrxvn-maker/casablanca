@@ -72,7 +72,6 @@ export function TakeCard({ take, position, total }: Props) {
       : null;
 
   const failedMsg = take.status === 'failed' ? take.error : null;
-  const runMsg = take.status === 'running' ? take.message : null;
   const runPercent = take.status === 'running' ? take.percent : 0;
 
   function togglePlay() {
@@ -153,7 +152,8 @@ export function TakeCard({ take, position, total }: Props) {
         transformStyle: 'preserve-3d',
       }}
     >
-      {/* HEADER bar */}
+      {/* HEADER bar — só take number + status quando READY ou FAILED.
+          Durante loading não mostra pill, deixa a animação falar. */}
       <div className="relative z-10 flex items-center justify-between px-3 py-2">
         <span
           className="mono text-[10px] font-bold uppercase tracking-[0.14em] text-white"
@@ -165,7 +165,9 @@ export function TakeCard({ take, position, total }: Props) {
           </span>
           <span className="text-text-dim">/{String(total).padStart(2, '0')}</span>
         </span>
-        <StatusPill tone={meta.tone} label={meta.label} />
+        {meta.tone === 'ready' || meta.tone === 'err' ? (
+          <StatusPill tone={meta.tone} label={meta.label} />
+        ) : null}
       </div>
 
       {/* BODY 9:16 aspect */}
@@ -292,36 +294,28 @@ export function TakeCard({ take, position, total }: Props) {
                 style={{ animation: 'cardShimmer 2.4s ease-in-out infinite' }}
               />
             </div>
-            {/* Bunny logo animado */}
-            <div className="relative z-10 flex flex-col items-center gap-3">
+            {/* Bunny logo animado — sem textos, só a animação */}
+            <div className="relative z-10 flex items-center justify-center">
+              {/* Aura halo atrás do bunny */}
+              <div
+                aria-hidden
+                className="absolute h-24 w-24 rounded-full"
+                style={{
+                  background:
+                    'radial-gradient(circle, rgba(167,139,250,0.45), rgba(200,255,0,0.10) 50%, transparent 75%)',
+                  filter: 'blur(14px)',
+                  animation: 'bunnyAuraSoft 3s ease-in-out infinite',
+                }}
+              />
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src="/auto-edit-logo@64.png"
                 alt="Auto Edit"
-                width={40}
-                height={40}
-                className="drop-shadow-[0_0_12px_rgba(167,139,250,0.7)]"
-                style={{ animation: 'bunnyHop 1.4s ease-in-out infinite' }}
+                width={48}
+                height={48}
+                className="relative z-10 drop-shadow-[0_0_18px_rgba(167,139,250,0.85)]"
+                style={{ animation: 'bunnyHop 1.6s ease-in-out infinite' }}
               />
-              <div
-                className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-violet"
-                style={{ fontFamily: 'var(--font-tech)' }}
-              >
-                {take.status === 'running' && take.phase === 'image-gen'
-                  ? 'Compondo o frame'
-                  : take.status === 'running' && take.phase === 'video-gen'
-                  ? 'Renderizando o movimento'
-                  : take.status === 'image-done'
-                  ? 'Frame entregue · video em fila'
-                  : take.status === 'downloading'
-                  ? 'Arquivando o take'
-                  : 'Aguardando início'}
-              </div>
-              {runMsg && (
-                <p className="px-4 text-center text-[10px] leading-relaxed text-text-muted line-clamp-2">
-                  {runMsg.replace(/^Imagem\s+/i, 'Frame ').replace(/^Vídeo\s+/i, 'Render ').replace(/\(seed novo\)/, '· novo ângulo')}
-                </p>
-              )}
             </div>
             {/* Progress bar bottom */}
             {(take.status === 'running' || take.status === 'image-done') && (
@@ -356,6 +350,10 @@ export function TakeCard({ take, position, total }: Props) {
           25% { transform: translateY(-6px) scale(1.04) rotate(0deg); }
           50% { transform: translateY(-10px) scale(1.08) rotate(3deg); }
           75% { transform: translateY(-6px) scale(1.04) rotate(0deg); }
+        }
+        @keyframes bunnyAuraSoft {
+          0%, 100% { transform: scale(0.85); opacity: 0.7; }
+          50% { transform: scale(1.15); opacity: 1; }
         }
       `}</style>
 
