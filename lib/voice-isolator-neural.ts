@@ -73,22 +73,26 @@ export async function isolateVoiceNeural(
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
 
+  let vocalsBlob: Blob | null = null;
   let vocalsUrl: string | null = null;
   let lastErr: NeuralIsolatorError | null = null;
 
   // === TENTATIVA 1: Replicate Demucs (PRIMARY — confiável) ===
+  // Route retorna audio/wav direto (server baixou do Replicate pra evitar CORS).
   try {
     const r = await fetch('/api/voice-isolate-pro', {
       method: 'POST',
       body: form,
       signal: ctrl.signal,
     });
-    if (r.ok) {
-      const j = (await r.json()) as { vocals_url?: string };
-      if (j?.vocals_url) {
-        vocalsUrl = j.vocals_url;
-        opts.onProgress?.('Demucs Replicate completou. Baixando voz...', 80);
-      }
+    if (r.ok && r.headers.get('content-type')?.includes('audio')) {
+      vocalsBlob = await r.blob();
+      vocalsUrl = r.headers.get('x-vocals-url') || 'replicate-direct';
+      opts.onProgress?.('Demucs Replicate completou.', 95);
+    } else if (r.ok) {
+      // Talvez ainda esteja na shape antiga {vocals_url}
+      const j = (await r.json().catch(() => null)) as { vocals_url?: string } | null;
+      if (j?.vocals_url) vocalsUrl = j.vocals_url;
     } else {
       const j = await r.json().catch(() => ({}) as Record<string, unknown>);
       lastErr = {
@@ -108,10 +112,11 @@ export async function isolateVoiceNeural(
   }
 
   // === TENTATIVA 2 (fallback): HF Space via /api/separador-audio ===
-  if (!vocalsUrl) {
+  // Só roda se Replicate não retornou blob. HF retorna URL externa, precisa
+  // de download separado.
+  if (!vocalsBlob && !vocalsUrl) {
     opts.onProgress?.('Replicate indisponível — tentando HF Space...', 30);
     try {
-      // Cria FormData novo pq o anterior já foi consumido pelo fetch
       const form2 = new FormData();
       form2.append('audio', audioBlob, filename);
       const r = await fetch('/api/separador-audio', {
@@ -148,33 +153,34 @@ export async function isolateVoiceNeural(
 
   clearTimeout(timer);
 
-  if (!vocalsUrl) {
+  // Se Replicate retornou blob direto, pula download. Senão precisa baixar
+  // do vocalsUrl (HF path ou shape antiga).
+  if (!vocalsBlob && vocalsUrl) {
+    opts.onProgress?.('Baixando voz isolada...', 90);
+    try {
+      const r = await fetch(vocalsUrl);
+      if (!r.ok) {
+        return {
+          ok: false,
+          kind: 'network',
+          error: `Falha download vocals: HTTP ${r.status}`,
+        };
+      }
+      vocalsBlob = await r.blob();
+    } catch (e) {
+      return {
+        ok: false,
+        kind: 'network',
+        error: 'Falha ao baixar vocals: ' + (e as Error)?.message,
+      };
+    }
+  }
+
+  if (!vocalsBlob) {
     return lastErr || {
       ok: false,
       kind: 'runtime',
       error: 'Nenhum provedor de neural isolation respondeu OK',
-    };
-  }
-
-  opts.onProgress?.('Baixando voz isolada...', 90);
-
-  // 2. Baixa o stem vocals (URL é HuggingFace Space — pode demorar)
-  let vocalsBlob: Blob;
-  try {
-    const r = await fetch(vocalsUrl);
-    if (!r.ok) {
-      return {
-        ok: false,
-        kind: 'network',
-        error: `Falha download vocals: HTTP ${r.status}`,
-      };
-    }
-    vocalsBlob = await r.blob();
-  } catch (e) {
-    return {
-      ok: false,
-      kind: 'network',
-      error: 'Falha ao baixar vocals: ' + (e as Error)?.message,
     };
   }
 

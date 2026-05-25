@@ -240,9 +240,41 @@ export async function POST(req: Request) {
       );
     }
 
-    return NextResponse.json({
-      vocals_url: vocalsUrl,
-      model: DEMUCS_MODEL,
+    // 4. Server-side download do vocals.wav (replicate.delivery não tem CORS
+    // pro browser). Retornamos os bytes diretos como audio/wav pro client
+    // baixar via blob() sem CORS issue.
+    let vocalsBytes: ArrayBuffer;
+    try {
+      const dl = await fetch(vocalsUrl);
+      if (!dl.ok) throw new Error(`HTTP ${dl.status}`);
+      vocalsBytes = await dl.arrayBuffer();
+    } catch (e) {
+      return NextResponse.json(
+        {
+          error: `Falha baixar vocals do Replicate: ${(e as Error)?.message}`,
+          vocals_url: vocalsUrl, // ainda devolve URL pra debug
+          kind: 'network',
+        },
+        { status: 502 },
+      );
+    }
+
+    if (vocalsBytes.byteLength < 1024) {
+      return NextResponse.json(
+        { error: `vocals.wav muito pequeno (${vocalsBytes.byteLength} bytes)`, kind: 'runtime' },
+        { status: 502 },
+      );
+    }
+
+    // Retorna bytes diretos. Client faz r.blob() pra consumir.
+    return new NextResponse(vocalsBytes, {
+      status: 200,
+      headers: {
+        'content-type': 'audio/wav',
+        'content-length': String(vocalsBytes.byteLength),
+        'x-demucs-model': DEMUCS_MODEL,
+        'x-vocals-url': vocalsUrl,
+      },
     });
   } catch (e) {
     const msg = (e as Error)?.message || String(e);
