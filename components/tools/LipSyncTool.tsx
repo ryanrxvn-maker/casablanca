@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { LipSyncHero3D } from '@/app/tools/lipsync/LipSyncHero3D';
+import { runChunkedLipSync, type ChunkProgress } from '@/lib/lipsync-chunker';
 
 /**
  * LipSyncTool — UI estilo DreamFace com 2 motores (V1 / V2).
@@ -73,6 +74,9 @@ export default function LipSyncTool() {
   // Upload progress (real, em %)
   const [uploadProgress, setUploadProgress] = useState<number>(0);
 
+  // Chunk progress (so quando video > 30s e usa chunking)
+  const [chunkProgress, setChunkProgress] = useState<ChunkProgress | null>(null);
+
   const [advanced, setAdvanced] = useState(false);
 
   const videoInputRef = useRef<HTMLInputElement | null>(null);
@@ -90,19 +94,35 @@ export default function LipSyncTool() {
      - Vertical com cabeca cortada: bordas geram artefato
      - Arquivo muito grande: upload lento e pode dar timeout
   */
-  const videoIssues: Array<{ severity: 'block' | 'warn'; text: string }> = (() => {
+  const videoIssues: Array<{ severity: 'block' | 'warn' | 'info'; text: string }> = (() => {
     if (!selected || !selected.meta) return [];
-    const issues: Array<{ severity: 'block' | 'warn'; text: string }> = [];
+    const issues: Array<{ severity: 'block' | 'warn' | 'info'; text: string }> = [];
     const { w, h, dur } = selected.meta;
     const minDim = Math.min(w, h);
-    if (minDim < 480) issues.push({ severity: 'block', text: `Resolução ${w}×${h} é muito baixa (mín 480p). Dentes vão ficar borrados.` });
-    else if (minDim < 720) issues.push({ severity: 'warn', text: `Resolução ${w}×${h} é OK, mas 720p+ dá boca mais nítida.` });
-    if (dur > 60) issues.push({ severity: 'warn', text: `Vídeo de ${dur.toFixed(0)}s é longo. Cada minuto extra = mais chance de glitch em frames complicados.` });
+    const maxDim = Math.max(w, h);
+
+    // Resolucao
+    if (minDim < 480) issues.push({ severity: 'block', text: `Resolução ${w}×${h} muito baixa (mín 480p). Dentes vão sair borrados.` });
+    else if (maxDim > 1920) issues.push({ severity: 'block', text: `Resolução ${w}×${h} acima de 1080p. Reduz pra max 1920px no lado maior.` });
+    else if (minDim < 720) issues.push({ severity: 'info', text: `${w}×${h} — OK. 720p+ dá boca mais nítida (mas funciona).` });
+
+    // Duracao
     if (dur < 2) issues.push({ severity: 'block', text: `Vídeo de ${dur.toFixed(1)}s é muito curto — a IA precisa de pelo menos 2s.` });
-    if (selected.file.size > 100 * 1024 * 1024) issues.push({ severity: 'warn', text: `Arquivo ${(selected.file.size / 1024 / 1024).toFixed(0)}MB — upload vai demorar 30-60s.` });
+    else if (dur > 600) issues.push({ severity: 'block', text: `Vídeo de ${Math.round(dur)}s acima de 10 min. Limite máximo pra qualidade garantida.` });
+    else if (dur > 30) {
+      const numChunks = Math.ceil(dur / 25);
+      issues.push({
+        severity: 'info',
+        text: `Vídeo de ${Math.round(dur)}s — vai ser dividido em ${numChunks} trechos de ~25s, processados em paralelo. Qualidade max em cada trecho.`,
+      });
+    }
+
+    if (selected.file.size > 200 * 1024 * 1024) issues.push({ severity: 'warn', text: `Arquivo ${(selected.file.size / 1024 / 1024).toFixed(0)}MB grande — upload pode demorar.` });
+
     return issues;
   })();
   const hasBlockingIssue = videoIssues.some((i) => i.severity === 'block');
+  const willChunk = selected?.meta ? selected.meta.dur > 30 : false;
 
   /* ─── Tickers ───────────────────────────────────────────────── */
 
@@ -257,6 +277,30 @@ export default function LipSyncTool() {
     startTicker();
 
     try {
+      const dur = selected.meta?.dur ?? 0;
+      const shouldChunk = dur > 30;
+
+      if (shouldChunk) {
+        // CHUNKED FLOW — video longo, divide em pedacos
+        setStatus('generating');
+        setChunkProgress(null);
+        const finalUrl = await runChunkedLipSync({
+          videoFile: selected.file,
+          audioFile,
+          durationSec: dur,
+          pro: usePro,
+          syncMode,
+          chunkDurationSec: 25,
+          concurrency: 3,
+          onProgress: (p) => setChunkProgress(p),
+        });
+        setOutputUrl(finalUrl);
+        setStatus('done');
+        stopTicker();
+        return;
+      }
+
+      // SINGLE FLOW — video curto
       setStatus('uploading-video');
       setUploadProgress(0);
       const video_url = await uploadToFal(selected.file, (pct) => setUploadProgress(pct));
@@ -311,6 +355,7 @@ export default function LipSyncTool() {
     setOutputUrl('');
     setStatus('idle');
     setErrorMsg('');
+    setChunkProgress(null);
     stopTicker();
     setElapsedSec(0);
   }
@@ -401,11 +446,13 @@ export default function LipSyncTool() {
           status={status}
           elapsedSec={elapsedSec}
           uploadProgress={uploadProgress}
+          chunkProgress={chunkProgress}
           outputUrl={outputUrl}
           errorMsg={errorMsg}
           onReset={() => {
             setOutputUrl('');
             setStatus('idle');
+            setChunkProgress(null);
           }}
         />
 
@@ -629,22 +676,27 @@ export default function LipSyncTool() {
           {/* WARNINGS - issues do video */}
           {selected && videoIssues.length > 0 && (
             <div className="space-y-1.5">
-              {videoIssues.map((issue, i) => (
-                <div
-                  key={i}
-                  className={
-                    'rounded-[10px] border px-3 py-2 text-[11px] leading-snug ' +
-                    (issue.severity === 'block'
-                      ? 'border-red-500/55 bg-red-500/10 text-red-200'
-                      : 'border-amber-400/45 bg-amber-400/10 text-amber-200')
-                  }
-                >
-                  <span className="font-bold">
-                    {issue.severity === 'block' ? '✕ Bloqueado: ' : '⚠ '}
-                  </span>
-                  {issue.text}
-                </div>
-              ))}
+              {videoIssues.map((issue, i) => {
+                const styles =
+                  issue.severity === 'block'
+                    ? 'border-red-500/55 bg-red-500/10 text-red-200'
+                    : issue.severity === 'warn'
+                      ? 'border-amber-400/45 bg-amber-400/10 text-amber-200'
+                      : 'border-cyan-400/40 bg-cyan-400/10 text-cyan-200';
+                const prefix =
+                  issue.severity === 'block' ? '✕ Bloqueado: ' :
+                  issue.severity === 'warn' ? '⚠ ' :
+                  'ℹ ';
+                return (
+                  <div
+                    key={i}
+                    className={`rounded-[10px] border px-3 py-2 text-[11px] leading-snug ${styles}`}
+                  >
+                    <span className="font-bold">{prefix}</span>
+                    {issue.text}
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -820,6 +872,7 @@ function PreviewStage({
   status,
   elapsedSec,
   uploadProgress,
+  chunkProgress,
   outputUrl,
   errorMsg,
   onReset,
@@ -829,6 +882,7 @@ function PreviewStage({
   status: Status;
   elapsedSec: number;
   uploadProgress: number;
+  chunkProgress: ChunkProgress | null;
   outputUrl: string;
   errorMsg: string;
   onReset: () => void;
@@ -899,6 +953,7 @@ function PreviewStage({
               status={status}
               elapsedSec={elapsedSec}
               uploadProgress={uploadProgress}
+              chunkProgress={chunkProgress}
             />
           )}
         </div>
@@ -936,16 +991,34 @@ function LoadingOverlay({
   status,
   elapsedSec,
   uploadProgress,
+  chunkProgress,
 }: {
   status: Status;
   elapsedSec: number;
   uploadProgress: number;
+  chunkProgress: ChunkProgress | null;
 }) {
   // Durante upload: usa o progresso real. Durante geracao: estima por tempo.
   const isUploading = status === 'uploading-video' || status === 'uploading-audio';
-  const progress = isUploading
-    ? uploadProgress
-    : Math.min(95, Math.round((elapsedSec / 300) * 100)); // 5min estimado
+  const isChunked = !!chunkProgress;
+
+  const progress = isChunked
+    ? Math.round((chunkProgress.doneChunks / Math.max(1, chunkProgress.totalChunks)) * 100)
+    : isUploading
+      ? uploadProgress
+      : Math.min(95, Math.round((elapsedSec / 300) * 100));
+
+  const chunkPhaseLabel = chunkProgress
+    ? chunkProgress.phase === 'splitting'
+      ? 'Dividindo o vídeo em trechos…'
+      : chunkProgress.phase === 'uploading'
+        ? 'Enviando trechos pro motor…'
+        : chunkProgress.phase === 'generating'
+          ? `Gerando ${chunkProgress.doneChunks} de ${chunkProgress.totalChunks} trechos…`
+          : chunkProgress.phase === 'concat'
+            ? 'Juntando os trechos…'
+            : 'Pronto.'
+    : null;
 
   return (
     <div
@@ -1014,12 +1087,36 @@ function LoadingOverlay({
           className="text-[18px] md:text-[22px] font-extrabold tracking-tight text-white max-w-[420px]"
           style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
         >
-          {STAGE_COPY[status]}
+          {chunkPhaseLabel ?? STAGE_COPY[status]}
         </div>
         <div className="mt-2 text-[12px] text-text-muted max-w-[360px] mx-auto">
-          V1 leva ~5-10 min · V2 leva ~10-15 min. Mantém a aba aberta.
+          {isChunked
+            ? 'Dividindo em trechos paralelos pra qualidade máxima do começo ao fim.'
+            : 'Padrão ~5 min · Pro ~10 min. Mantém a aba aberta.'}
         </div>
       </div>
+
+      {/* Chunk grid — so quando esta chunkando */}
+      {isChunked && chunkProgress && (
+        <div className="grid grid-flow-col auto-cols-fr gap-1 max-w-[420px] w-full px-4">
+          {chunkProgress.chunks.map((c) => {
+            const tone =
+              c.status === 'done' ? 'bg-lime/80 border-lime' :
+              c.status === 'generating' ? 'bg-fuchsia-400/40 border-fuchsia-400 animate-pulse' :
+              c.status === 'uploading' ? 'bg-violet/40 border-violet animate-pulse' :
+              c.status === 'concat' ? 'bg-cyan-400/50 border-cyan-400 animate-pulse' :
+              c.status === 'error' ? 'bg-red-500/40 border-red-500' :
+              'bg-white/5 border-white/15';
+            return (
+              <div
+                key={c.index}
+                className={`h-1.5 rounded-full border ${tone} transition-colors`}
+                title={`Trecho ${c.index + 1} · ${c.status}`}
+              />
+            );
+          })}
+        </div>
+      )}
 
       {/* Progress bar */}
       <div className="w-[260px] max-w-[80%]">
