@@ -1152,12 +1152,35 @@ export function parseVABriefing(
   if (!fullDocText) return null;
   const lines = fullDocText.split(/\r?\n/);
 
-  // 1. Detecta header VA: linha que contem 'Variação de avatar'
+  // 0. EXTRAI AD CODE do task name (ex 'VA - AD07G1VN - PRPB06' → 'AD07G1VN')
+  // CRITICAL: doc pode ter MULTIPLAS sections VA (uma por AD). Sem esse scope,
+  // o parser sempre pegava a primeira section, mesmo que a task seja de outro AD.
+  // Bug visto live em 2026-05-25: task "VA - AD07G1VN-PRPB06" deveria parsear
+  // a section "AD07G1VN-PRPB06" (com AVA03+04), mas pegava a section "AD03G1VN"
+  // (com AVA01-06). Fix: prioriza header que contenha o AD code da task.
+  const adCodeMatch = baseAdIdOrTaskName.match(/AD\d+[A-Z]+/i);
+  const adCode = adCodeMatch ? adCodeMatch[0].toUpperCase() : null;
+
+  // 1. Detecta header VA: PRIORIZA linha que contenha AD code + "Variação de avatar".
+  // Fallback: primeira linha com "Variação de avatar".
   let vaHeaderIdx = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (/varia[cç][aã]o\s+de\s+avatar/i.test(lines[i])) {
-      vaHeaderIdx = i;
-      break;
+  if (adCode) {
+    // 1a) Tenta achar header DESSE AD especifico
+    const adRegex = new RegExp(adCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    for (let i = 0; i < lines.length; i++) {
+      if (/varia[cç][aã]o\s+de\s+avatar/i.test(lines[i]) && adRegex.test(lines[i])) {
+        vaHeaderIdx = i;
+        break;
+      }
+    }
+  }
+  if (vaHeaderIdx < 0) {
+    // 1b) Fallback: primeira "Variação de avatar" (comportamento antigo)
+    for (let i = 0; i < lines.length; i++) {
+      if (/varia[cç][aã]o\s+de\s+avatar/i.test(lines[i])) {
+        vaHeaderIdx = i;
+        break;
+      }
     }
   }
   if (vaHeaderIdx < 0) return null;
@@ -1167,6 +1190,17 @@ export function parseVABriefing(
   const header = lines[vaHeaderIdx].trim();
   const baseMatch = header.match(/^(.+?)\s*[-–—]\s*varia[cç][aã]o/i);
   const baseAdId = baseMatch ? baseMatch[1].trim() : baseAdIdOrTaskName;
+
+  // 2.5 BOUND END OF SECTION: proxima ocorrencia de "Variação de avatar"
+  // marca o inicio da section seguinte (outro AD). Sem isso, o parser
+  // varria avatares e gancho/body de sections seguintes.
+  let vaSectionEnd = lines.length;
+  for (let i = vaHeaderIdx + 1; i < lines.length; i++) {
+    if (/varia[cç][aã]o\s+de\s+avatar/i.test(lines[i])) {
+      vaSectionEnd = i;
+      break;
+    }
+  }
 
   // 3. Link do AD: linha "Link do ad: <filename>" ou similar.
   // Aceita filenames com acentos/cedilha (ex: AÇAFRÃO.mp4) — regex
@@ -1198,9 +1232,10 @@ export function parseVABriefing(
 
   // 4. Avatares de variacao: linhas tipo "<base>-AVA<NN>" seguidas de "Avatar <filename>"
   // Tambem aceita: AVAxx + Avatar @username.mp4
+  // SCOPED a section atual (vaSectionEnd = inicio da proxima section ou EOF)
   const allAvatares: VAAvatar[] = [];
   const seenAvaCodes = new Set<string>();
-  for (let i = vaHeaderIdx; i < lines.length; i++) {
+  for (let i = vaHeaderIdx; i < vaSectionEnd; i++) {
     const t = lines[i].trim();
     // Match codigo AVA: base + -AVA<NN>
     const avaCodeMatch = t.match(/^(?:.*[-–—]\s*)?AVA\s*(\d+)\b/i);
@@ -1235,34 +1270,35 @@ export function parseVABriefing(
     : allAvatares;
 
   // 5. Gancho (texto): seccao apos "Gancho" ate proxima heading (Body/Depoimento)
+  // SCOPED a vaSectionEnd pra nao puxar gancho da section seguinte
   let hookText = '';
-  const gIdx = lines.findIndex((l, i) => i > vaHeaderIdx && /^gancho\s*$/i.test(l.trim()));
+  const gIdx = lines.findIndex((l, i) => i > vaHeaderIdx && i < vaSectionEnd && /^gancho\s*$/i.test(l.trim()));
   if (gIdx >= 0) {
-    let end = lines.length;
-    for (let i = gIdx + 1; i < lines.length; i++) {
+    let end = vaSectionEnd;
+    for (let i = gIdx + 1; i < vaSectionEnd; i++) {
       const t = lines[i].trim();
       if (/^body\s*$/i.test(t) || /^depoimento\b/i.test(t)) { end = i; break; }
     }
     hookText = lines.slice(gIdx + 1, end).join('\n').trim().replace(/\s*\[[a-z]{1,3}\]/gi, '');
   }
 
-  // 6. Body
+  // 6. Body — SCOPED a vaSectionEnd
   let bodyText = '';
-  const bIdx = lines.findIndex((l, i) => i > vaHeaderIdx && /^body\s*$/i.test(l.trim()));
+  const bIdx = lines.findIndex((l, i) => i > vaHeaderIdx && i < vaSectionEnd && /^body\s*$/i.test(l.trim()));
   if (bIdx >= 0) {
-    let end = lines.length;
-    for (let i = bIdx + 1; i < lines.length; i++) {
+    let end = vaSectionEnd;
+    for (let i = bIdx + 1; i < vaSectionEnd; i++) {
       const t = lines[i].trim();
       if (/^depoimento\b/i.test(t)) { end = i; break; }
     }
     bodyText = lines.slice(bIdx + 1, end).join('\n').trim().replace(/\s*\[[a-z]{1,3}\]/gi, '');
   }
 
-  // 7. Depoimento (opcional)
+  // 7. Depoimento (opcional) — SCOPED a vaSectionEnd
   let depoimentoText: string | null = null;
   let depoimentoUsername: string | null = null;
   let depoimentoFileId: string | null = null;
-  const dIdx = lines.findIndex((l, i) => i > vaHeaderIdx && /^depoimento\s+com\s+avatar\s*[:\-]/i.test(l.trim()));
+  const dIdx = lines.findIndex((l, i) => i > vaHeaderIdx && i < vaSectionEnd && /^depoimento\s+com\s+avatar\s*[:\-]/i.test(l.trim()));
   if (dIdx >= 0) {
     const depLine = lines[dIdx].trim();
     const mUser = depLine.match(/depoimento\s+com\s+avatar\s*[:\-]\s*[^@a-z0-9]*@?([a-zA-Z0-9_][a-zA-Z0-9._-]+?)(?:\.(?:mp4|mov))?\s*$/i);
