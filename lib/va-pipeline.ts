@@ -21,6 +21,7 @@
 import { decodeAudioRobust, detectSilences } from './audio-engine';
 import { extractAudio, concatAvatarParts, concatVideosFast, cutVideoSegments, overlaySegmentsOnVideo } from './ffmpeg-worker';
 import { isolateVoice, type VoiceIsolatorMode } from './voice-isolator';
+import { isolateVoiceNeural } from './voice-isolator-neural';
 import { detectFacePresence, type SegmentFaceResult } from './face-detector';
 
 export type VAPipelineAvatar = {
@@ -246,74 +247,119 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
 
   // 1.5. Voice isolation — OBRIGATORIO pra VA (sem musica/SFX/ruido).
   //
-  // CRITICAL: user reportou 2026-05-25 que voz ia COM trilha sonora pro HeyGen.
-  // Causa: try/catch silencioso permitia audio raw passar adiante quando
-  // isolation falhava. Agora:
-  //   1. Isolation SEMPRE roda (useVoiceIsolation:false → ainda roda + warning)
-  //   2. 1 retry em modo mais agressivo se falhar primeira tentativa
-  //   3. Se AMBAS falharem → ABORTA pipeline (erro hard)
-  //   4. Validação: blob isolado tem que ter tamanho > 1KB (não pode ser vazio)
+  // ESTRATEGIA EM CASCATA (qualidade > velocidade):
+  //   1. Demucs neural via HF Space (qualidade PROFISSIONAL — sem artefatos)
+  //   2. Se Demucs falhar/timeout/quota: FFmpeg local aggressive (fallback)
+  //   3. Se AMBOS falharem: ABORTA pipeline (zero chance de trilha vazar)
+  //
+  // Por que Demucs primeiro:
+  //   FFmpeg filter (highpass+lowpass+afftdn) deixa artefatos audíveis,
+  //   altera o timbre, gera "bolha" residual da música. Demucs v4 (Meta)
+  //   é state-of-the-art em music source separation — separa voz dos outros
+  //   stems (drums/bass/other) com qualidade studio-grade.
+  //
+  // CRITICAL: user reportou 2026-05-25 que (a) audio ia com trilha sonora
+  // e (b) qualidade da voz isolada ficava ruim com artefatos. Fix:
+  //   - Demucs neural como default (qualidade pro)
+  //   - useVoiceIsolation:false IGNORADO (sempre roda)
+  //   - Validação: blob isolado > 1KB
+  //   - Fallback graceful entre métodos
   const useVoiceIsolation = input.useVoiceIsolation !== false;
   if (!useVoiceIsolation) {
     console.warn('[va-pipeline] useVoiceIsolation=false IGNORADO — VA exige audio limpo. Forçando isolation.');
   }
-  let audioBlob: Blob;
-  const isolatorMode = input.voiceIsolatorMode ?? 'aggressive';
+  let audioBlob: Blob | null = null;
+  let isolationMethod = 'pending';
+
+  // === TENTATIVA 1: Demucs neural (qualidade profissional) ===
   progress({
     stage: 'isolate_voice',
-    message: `Isolando voz (modo ${isolatorMode}) — obrigatório p/ VA limpa...`,
+    message: 'Isolando voz com Demucs neural (qualidade profissional)...',
     percent: 10,
   });
-
-  async function tryIsolate(mode: VoiceIsolatorMode): Promise<Blob> {
-    const out = await isolateVoice(rawAudioBlob, {
-      mode,
-      format: 'wav',
-      onProgress: (p) => {
+  try {
+    const neural = await isolateVoiceNeural(rawAudioBlob, {
+      onProgress: (msg, pct) => {
         progress({
           stage: 'isolate_voice',
-          message: `Isolando voz · ${mode} · ${Math.round(p.ratio * 100)}%`,
-          percent: 10 + Math.round(p.ratio * 4),
+          message: `Demucs · ${msg}`,
+          percent: 10 + Math.round(((pct ?? 0) / 100) * 4),
         });
       },
+      timeoutMs: 5 * 60 * 1000, // 5min — Demucs em ZeroGPU pode demorar
     });
-    if (!out || out.size < 1024) {
-      throw new Error(`isolation retornou blob inválido (${out?.size ?? 0} bytes)`);
-    }
-    return out;
-  }
-
-  try {
-    audioBlob = await tryIsolate(isolatorMode);
-    progress({
-      stage: 'isolate_voice',
-      message: `Voz isolada (${isolatorMode}) — HeyGen vai receber audio limpo.`,
-      percent: 14,
-    });
-  } catch (e1) {
-    // Retry com modo mais agressivo
-    console.warn('[va-pipeline] isolation falhou (primeira), tentando aggressive:', e1);
-    progress({
-      stage: 'isolate_voice',
-      message: 'Primeira tentativa falhou — re-tentando com filtro mais pesado...',
-      percent: 12,
-    });
-    try {
-      audioBlob = await tryIsolate('aggressive');
+    if (neural.ok && neural.vocalsBlob.size > 1024) {
+      audioBlob = neural.vocalsBlob;
+      isolationMethod = 'demucs-neural';
+      const secs = Math.round(neural.elapsedMs / 1000);
       progress({
         stage: 'isolate_voice',
-        message: 'Voz isolada (retry aggressive) — HeyGen vai receber audio limpo.',
+        message: `Voz isolada com Demucs neural em ${secs}s — sem artefatos, timbre preservado.`,
         percent: 14,
       });
-    } catch (e2) {
-      // ABORTA — NÃO pode mandar audio com trilha pro HeyGen
-      const msg = (e2 as Error)?.message || String(e2);
-      throw new Error(
-        `Voice isolation falhou 2x — NÃO podemos mandar audio com trilha pro HeyGen. ` +
-        `Erro: ${msg}. Tenta recarregar a página (ffmpeg-wasm) e disparar de novo.`,
-      );
+    } else if (!neural.ok) {
+      console.warn(`[va-pipeline] Demucs neural falhou (${neural.kind}): ${neural.error}. Caindo pro ffmpeg fallback...`);
+    }
+  } catch (e) {
+    console.warn('[va-pipeline] Demucs neural throw inesperado:', e);
+  }
+
+  // === TENTATIVA 2 (fallback): FFmpeg local aggressive ===
+  if (!audioBlob) {
+    const isolatorMode = input.voiceIsolatorMode ?? 'aggressive';
+    progress({
+      stage: 'isolate_voice',
+      message: `Demucs indisponível — fallback FFmpeg ${isolatorMode}...`,
+      percent: 11,
+    });
+
+    async function tryFfmpeg(mode: VoiceIsolatorMode): Promise<Blob> {
+      const out = await isolateVoice(rawAudioBlob, {
+        mode,
+        format: 'wav',
+        onProgress: (p) => {
+          progress({
+            stage: 'isolate_voice',
+            message: `FFmpeg · ${mode} · ${Math.round(p.ratio * 100)}%`,
+            percent: 11 + Math.round(p.ratio * 3),
+          });
+        },
+      });
+      if (!out || out.size < 1024) {
+        throw new Error(`ffmpeg retornou blob inválido (${out?.size ?? 0} bytes)`);
+      }
+      return out;
+    }
+
+    try {
+      audioBlob = await tryFfmpeg(isolatorMode);
+      isolationMethod = `ffmpeg-${isolatorMode}`;
+      progress({
+        stage: 'isolate_voice',
+        message: `Voz isolada (ffmpeg ${isolatorMode}). Qualidade menor que Demucs.`,
+        percent: 14,
+      });
+    } catch (e1) {
+      console.warn('[va-pipeline] ffmpeg primeira tentativa falhou:', e1);
+      try {
+        audioBlob = await tryFfmpeg('aggressive');
+        isolationMethod = 'ffmpeg-aggressive-retry';
+        progress({
+          stage: 'isolate_voice',
+          message: 'Voz isolada (ffmpeg aggressive retry).',
+          percent: 14,
+        });
+      } catch (e2) {
+        const msg = (e2 as Error)?.message || String(e2);
+        throw new Error(
+          `Voice isolation falhou em TODAS as tentativas (Demucs neural + ffmpeg 2x). ` +
+          `Erro final: ${msg}. NÃO podemos mandar audio com trilha pro HeyGen — abortando. ` +
+          `Tenta recarregar a página e disparar de novo.`,
+        );
+      }
     }
   }
+  console.log(`[va-pipeline] voice isolation OK via: ${isolationMethod} · ${audioBlob.size} bytes`);
 
   // 2. Decode + detect silencios + plan boundaries
   progress({ stage: 'split_audio', message: 'Analisando silencios pra split sem cortar fala...', percent: 15 });
