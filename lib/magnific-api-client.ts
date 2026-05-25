@@ -317,19 +317,23 @@ export async function pollCreationsBatch(
       identifier: string;
       family: string;
       status: string;
-      url?: string;
-      metadata?: Record<string, unknown>;
+      url?: string | null;
+      metadata?: Record<string, unknown> & { url?: string };
     }>;
   };
   for (const c of j.data || []) {
     const status: CreationResult['status'] =
       c.status === 'completed' || c.status === 'failed' ? c.status : 'pending';
+    // VIDEOS: c.url é null, URL real está em c.metadata.url
+    // IMAGES: c.url está populado no top-level
+    // Fallback chain pra cobrir ambos.
+    const url = c.url || c.metadata?.url || undefined;
     map.set(c.identifier, {
       id: c.id,
       identifier: c.identifier,
       family: c.family,
       status,
-      url: c.url,
+      url,
       metadata: c.metadata,
     });
   }
