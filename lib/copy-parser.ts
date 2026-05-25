@@ -1152,36 +1152,72 @@ export function parseVABriefing(
   if (!fullDocText) return null;
   const lines = fullDocText.split(/\r?\n/);
 
-  // 0. EXTRAI AD CODE do task name (ex 'VA - AD07G1VN - PRPB06' → 'AD07G1VN')
-  // CRITICAL: doc pode ter MULTIPLAS sections VA (uma por AD). Sem esse scope,
-  // o parser sempre pegava a primeira section, mesmo que a task seja de outro AD.
-  // Bug visto live em 2026-05-25: task "VA - AD07G1VN-PRPB06" deveria parsear
-  // a section "AD07G1VN-PRPB06" (com AVA03+04), mas pegava a section "AD03G1VN"
-  // (com AVA01-06). Fix: prioriza header que contenha o AD code da task.
-  const adCodeMatch = baseAdIdOrTaskName.match(/AD\d+[A-Z]+/i);
+  // 0. EXTRAI AD CODE COMPLETO + VARIANT do task name.
+  //
+  // Ex 'VA - AD07G1VN - PRPB06':
+  //   adCode   = 'AD07G1VN'  (alfanumerico depois de AD\d+)
+  //   variant  = 'PRPB06'    (discriminador segundo nivel)
+  //
+  // CRITICAL: doc pode ter MULTIPLAS sections VA mesmo dentro do mesmo AD code
+  // (uma por variant: PRPB04, PRPB05, PRPB06). Sem casar AMBOS, parser pegava
+  // a ultima section do AD ignorando o variant correto.
+  //
+  // Bug visto live em 2026-05-25 (segunda iteracao): task "VA - AD07G1VN - PRPB06"
+  // deveria parsear "AD07G1VN-PRPB06" (com AVA03+04), mas regex antiga `AD\d+[A-Z]+`
+  // capturava só "AD07G" (parava no dígito '1'), e sem o variant pegava qualquer
+  // section AD07G* — geralmente a errada.
+  //
+  // Fix: regex `AD\d+[A-Z0-9]+` captura alfanumericos completos (AD07G1VN).
+  // E adicionamos extracao do variant (PRPB\d+, VFPB\d+, ME\d* etc.).
+  const adCodeMatch = baseAdIdOrTaskName.match(/AD\d+[A-Z0-9]*/i);
   const adCode = adCodeMatch ? adCodeMatch[0].toUpperCase() : null;
 
-  // 1. Detecta header VA: PRIORIZA linha que contenha AD code + "Variação de avatar".
-  // Fallback: primeira linha com "Variação de avatar".
+  // Variant: PRPB##, VFPB##, VRWA##, MEPB##, ME##, etc. — qualquer token
+  // alfanumerico de 2+ letras + digitos APOS o AD code.
+  let variant: string | null = null;
+  if (adCode) {
+    const afterAd = baseAdIdOrTaskName.slice(
+      baseAdIdOrTaskName.toUpperCase().indexOf(adCode) + adCode.length,
+    );
+    const variantMatch = afterAd.match(/\b([A-Z]{2,}\d+)\b/i);
+    if (variantMatch) variant = variantMatch[1].toUpperCase();
+  }
+
+  // 1. Detecta header VA: PRIORIZA linha que contenha AD code + variant +
+  // "Variação de avatar". Fallback: só AD code. Fallback: primeira VA do doc.
   //
-  // CRITICAL — preferencia pela ULTIMA ocorrencia quando o mesmo AD code
-  // aparece em multiplas LEVAS do doc (LEVA 01 antiga + LEVA 03 nova).
+  // CRITICAL — preferencia pela ULTIMA ocorrencia quando o MESMO AD code +
+  // variant aparece em multiplas LEVAS do doc (LEVA 01 antiga + LEVA 03 nova).
   // User esclareceu 2026-05-25: "caso tenha mesma nomenclatura de AD da
   // task repetindo na VA, 2 iguais no docs, nesse caso voce dar preferencia
   // a que foi colocada mais recente no docs".
+  const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   let vaHeaderIdx = -1;
-  if (adCode) {
-    // 1a) Acha header DESSE AD especifico — overwriting pra ficar com o ULTIMO
-    const adRegex = new RegExp(adCode.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+  if (adCode && variant) {
+    // 1a) AD code + variant — exige AMBOS no header → match exato da task
+    const adRe = new RegExp(escape(adCode), 'i');
+    const vrRe = new RegExp(escape(variant), 'i');
     for (let i = 0; i < lines.length; i++) {
-      if (/varia[cç][aã]o\s+de\s+avatar/i.test(lines[i]) && adRegex.test(lines[i])) {
-        vaHeaderIdx = i; // SEM break → pega o ULTIMO match (mais recente no doc)
+      if (
+        /varia[cç][aã]o\s+de\s+avatar/i.test(lines[i]) &&
+        adRe.test(lines[i]) &&
+        vrRe.test(lines[i])
+      ) {
+        vaHeaderIdx = i; // SEM break → ULTIMA ocorrencia (mais recente)
+      }
+    }
+  }
+  if (vaHeaderIdx < 0 && adCode) {
+    // 1b) Só AD code (variant ausente ou nao bateu) — ainda preferindo ultimo
+    const adRe = new RegExp(escape(adCode), 'i');
+    for (let i = 0; i < lines.length; i++) {
+      if (/varia[cç][aã]o\s+de\s+avatar/i.test(lines[i]) && adRe.test(lines[i])) {
+        vaHeaderIdx = i;
       }
     }
   }
   if (vaHeaderIdx < 0) {
-    // 1b) Fallback: primeira "Variação de avatar" — doc unico-AD mantem
-    // comportamento antigo
+    // 1c) Fallback final: primeira "Variação de avatar" do doc
     for (let i = 0; i < lines.length; i++) {
       if (/varia[cç][aã]o\s+de\s+avatar/i.test(lines[i])) {
         vaHeaderIdx = i;
