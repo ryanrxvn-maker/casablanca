@@ -22,6 +22,7 @@ import { buildZip, type ZipEntry } from '@/lib/zip-builder';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
+export const dynamic = 'force-dynamic'; // sempre regera pra refletir extension atualizada
 
 const FILES = [
   'manifest.json',
@@ -54,7 +55,7 @@ export async function GET() {
       headers: {
         'content-type': 'application/zip',
         'content-disposition': 'attachment; filename="auto-edit-freepik-sync.zip"',
-        'cache-control': 'public, max-age=3600',
+        'cache-control': 'no-store, max-age=0',
       },
     });
   } catch (e) {
