@@ -144,7 +144,39 @@ async function sync(reason = 'manual') {
     return { ok: false, reason: ck.reason };
   }
 
-  // POST pro backend
+  // VERIFY no browser (passa Cloudflare — backend Node nao passa TLS fingerprint).
+  // Resultado: pegamos fpId + plan AQUI e mandamos pro backend ja validado.
+  let verified;
+  try {
+    const vr = await fetch('https://www.magnific.com/app/api/auth/verify?lang=en_US', {
+      credentials: 'include',
+      headers: { accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      cache: 'no-store',
+    });
+    if (!vr.ok) {
+      await persistStatus('err', `Magnific auth verify falhou: ${vr.status}. Relogue em magnific.com.`);
+      return { ok: false, reason: 'verify-failed', status: vr.status };
+    }
+    const j = await vr.json();
+    const u = j.userData;
+    if (!u || (!u.fpId && !u.id)) {
+      await persistStatus('err', 'Resposta verify sem userData. Relogue em magnific.com.');
+      return { ok: false, reason: 'verify-no-userdata' };
+    }
+    const fpId = typeof u.fpId === 'string' ? parseInt(u.fpId, 10) : u.fpId;
+    verified = {
+      userId: fpId || u.id,
+      plan: (u.hasRealFreepikPremium || u.freepikPremium) ? 'Premium+' : 'Free',
+      email: u.email,
+      walletId: u.walletId,
+    };
+    console.log('[autoedit-sync] verify OK:', { uid: verified.userId, plan: verified.plan });
+  } catch (e) {
+    await persistStatus('err', `Erro chamando verify: ${e.message || e}`);
+    return { ok: false, reason: 'verify-error', error: String(e.message || e) };
+  }
+
+  // POST pro backend (com dados ja verificados — backend pula a validacao)
   try {
     const r = await fetch(`${endpoint}/api/auto-broll-v2/save-creds`, {
       method: 'POST',
@@ -153,6 +185,8 @@ async function sync(reason = 'manual') {
       body: JSON.stringify({
         cookie: ck.cookieHeader,
         xsrfToken: ck.xsrfToken,
+        // Pre-verified data — backend confia (chamou /auth/verify no browser do user)
+        preVerified: verified,
       }),
     });
     const j = await r.json().catch(() => ({}));

@@ -101,7 +101,24 @@ export async function POST(req: NextRequest) {
   }
   const userId = userData.user.id;
 
-  let body: { cookie?: string; xsrfToken?: string; userId?: number };
+  let body: {
+    cookie?: string;
+    xsrfToken?: string;
+    userId?: number;
+    /**
+     * Pre-verified pela extensão no browser do user (passa Cloudflare).
+     * Se presente, backend pula verifyCredentials (que falha por TLS
+     * fingerprint do Node vs Chrome). Confiança ok porque a extensão
+     * roda no escopo do user logado em Auto Edit — só pode afetar o
+     * próprio user_secrets.
+     */
+    preVerified?: {
+      userId?: number;
+      plan?: string;
+      email?: string;
+      walletId?: string;
+    };
+  };
   try {
     body = await req.json();
   } catch {
@@ -114,28 +131,37 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Descobre userId se não passou (via /auth/verify do Magnific)
+  // Descobre userId — preferência: preVerified (extensão), fallback: verifyCredentials
   let magnificUserId = body.userId;
   let plan: string | undefined;
   let credits: number | undefined;
-  try {
-    const v = await verifyCredentials({
-      cookie: body.cookie,
-      xsrfToken: body.xsrfToken,
-      userId: magnificUserId || 0,
-    });
-    magnificUserId = v.userId;
-    plan = v.plan;
-    credits = v.credits;
-  } catch (e) {
-    return NextResponse.json(
-      {
-        error:
-          'Credenciais inválidas no Magnific: ' +
-          (e instanceof Error ? e.message : String(e)),
-      },
-      { status: 401, headers: cors },
-    );
+
+  if (body.preVerified?.userId) {
+    // Caminho rápido: extensão já validou no browser real (passou Cloudflare)
+    magnificUserId = body.preVerified.userId;
+    plan = body.preVerified.plan;
+    credits = undefined;
+  } else {
+    // Fallback: backend tenta validar via fetch (pode falhar por Cloudflare TLS)
+    try {
+      const v = await verifyCredentials({
+        cookie: body.cookie,
+        xsrfToken: body.xsrfToken,
+        userId: magnificUserId || 0,
+      });
+      magnificUserId = v.userId;
+      plan = v.plan;
+      credits = v.credits;
+    } catch (e) {
+      return NextResponse.json(
+        {
+          error:
+            'Credenciais inválidas no Magnific: ' +
+            (e instanceof Error ? e.message : String(e)),
+        },
+        { status: 401, headers: cors },
+      );
+    }
   }
 
   // Persist no DB com cifragem AES-256-GCM.
