@@ -38,8 +38,9 @@ export function Landing() {
       <HeroSection />
       <StatsRow />
       <PilotShowcase />
-      <AutoBrollShowcase />
       <PilotHowItWorks />
+      <AutoBrollShowcase />
+      <AutoBrollHowItWorks />
       <CapabilitiesSection />
       <ShowcaseSection />
       <FinalCTA />
@@ -561,81 +562,323 @@ function AutoBrollShowcase() {
   );
 }
 
-/** Mini grid de B-rolls cinematic — animação de cards aparecendo + bunny loading */
+/** CINEMATIC B-roll generation showcase — grid with real visual storytelling */
 function BrollShowcaseGrid() {
+  // 6 cards in a 3x2 layout (larger than before). Different states cycle:
+  // ready (with scene gradient + play overlay), rendering (color sweep
+  // + bunny pulse), composing (image stage with scanner line).
+  const states: Array<'ready' | 'rendering' | 'composing'> = [
+    'ready',
+    'rendering',
+    'ready',
+    'composing',
+    'ready',
+    'rendering',
+  ];
+  const scenePalettes = [
+    ['#c8ff00', '#a78bfa', '#0a0a0c'],  // 01 lime → violet
+    ['#67e8f9', '#a78bfa', '#0a0a0c'],  // 02 cyan → violet
+    ['#f0abfc', '#c8ff00', '#0a0a0c'],  // 03 pink → lime
+    ['#a78bfa', '#6d4ee8', '#0a0a0c'],  // 04 violet
+    ['#fbbf24', '#a78bfa', '#0a0a0c'],  // 05 amber → violet
+    ['#a3e635', '#67e8f9', '#0a0a0c'],  // 06 lime → cyan
+  ];
+
   return (
-    <div className="grid grid-cols-3 gap-2.5" style={{ width: 340 }}>
-      {Array.from({ length: 9 }).map((_, i) => {
-        const ready = [0, 2, 3, 5, 7].includes(i);
+    <div
+      className="relative grid grid-cols-3 gap-3"
+      style={{
+        width: 420,
+        perspective: '1200px',
+      }}
+    >
+      {states.map((state, i) => {
+        const [c1, c2, c3] = scenePalettes[i];
+        const isReady = state === 'ready';
+        const isRendering = state === 'rendering';
+        const tilt = i % 2 === 0 ? 'rotateY(-6deg)' : 'rotateY(6deg)';
         return (
           <div
             key={i}
-            className="relative overflow-hidden rounded-[10px] border"
+            className="cinemaCard relative overflow-hidden rounded-[12px] border"
             style={{
               aspectRatio: '9/16',
-              borderColor: ready ? 'rgba(200,255,0,0.5)' : 'rgba(167,139,250,0.4)',
-              background: ready
-                ? 'linear-gradient(135deg, rgba(200,255,0,0.15), rgba(167,139,250,0.10), rgba(0,0,0,0.7))'
-                : 'linear-gradient(135deg, rgba(167,139,250,0.15), rgba(0,0,0,0.8))',
-              boxShadow: ready
-                ? '0 6px 22px -8px rgba(200,255,0,0.45)'
-                : '0 6px 22px -8px rgba(167,139,250,0.4)',
-              animation: `brollShowcasePop 0.7s ease-out ${i * 0.12}s backwards`,
+              transform: tilt,
+              transformStyle: 'preserve-3d',
+              borderColor: isReady
+                ? 'rgba(200,255,0,0.55)'
+                : 'rgba(167,139,250,0.5)',
+              background: `linear-gradient(135deg, ${c1}20 0%, ${c2}25 50%, ${c3} 100%)`,
+              boxShadow: isReady
+                ? `0 10px 30px -8px ${c1}66, 0 0 40px -10px ${c1}55, inset 0 1px 0 rgba(255,255,255,0.08)`
+                : `0 10px 30px -10px ${c2}55, inset 0 1px 0 rgba(255,255,255,0.05)`,
+              animation: `cardEntrance 0.8s ease-out ${i * 0.14}s backwards`,
             }}
           >
-            <div className="absolute inset-0 flex items-center justify-center">
-              {ready ? (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c8ff00" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="6 4 20 12 6 20 6 4" fill="#c8ff00" fillOpacity="0.3" />
-                </svg>
-              ) : (
+            {/* ── Background scene (animated gradient mesh per card) ── */}
+            <div
+              aria-hidden
+              className="absolute inset-0 opacity-90"
+              style={{
+                background: `radial-gradient(60% 60% at ${30 + i * 7}% ${20 + i * 8}%, ${c1}99, transparent 60%), radial-gradient(50% 50% at ${70 - i * 5}% ${80 - i * 6}%, ${c2}88, transparent 65%)`,
+                animation: `meshDrift 8s ease-in-out ${i * 0.5}s infinite alternate`,
+                mixBlendMode: 'screen',
+              }}
+            />
+
+            {/* Film grain overlay */}
+            <div
+              aria-hidden
+              className="absolute inset-0 opacity-25"
+              style={{
+                backgroundImage:
+                  'url("data:image/svg+xml;utf8,<svg xmlns=\\"http://www.w3.org/2000/svg\\" width=\\"60\\" height=\\"60\\"><filter id=\\"n\\"><feTurbulence type=\\"fractalNoise\\" baseFrequency=\\"0.9\\"/></filter><rect width=\\"60\\" height=\\"60\\" filter=\\"url(%23n)\\" opacity=\\"0.5\\"/></svg>")',
+                mixBlendMode: 'overlay',
+              }}
+            />
+
+            {/* ── Rendering: vertical scanner line + color sweep ── */}
+            {isRendering && (
+              <>
                 <div
-                  className="h-3 w-3 rounded-full bg-violet"
+                  aria-hidden
+                  className="absolute inset-0"
                   style={{
-                    boxShadow: '0 0 10px rgba(167,139,250,0.8)',
-                    animation: 'brollPulse 1.6s ease-in-out infinite',
-                    animationDelay: `${i * 0.2}s`,
+                    background: `linear-gradient(180deg, transparent 0%, ${c1}66 50%, transparent 100%)`,
+                    transform: 'translateY(-100%)',
+                    animation: `scanLine 2.4s ease-in-out ${i * 0.2}s infinite`,
+                    filter: 'blur(2px)',
                   }}
                 />
+                {/* Color burst from center */}
+                <div
+                  aria-hidden
+                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+                  style={{
+                    width: 80,
+                    height: 80,
+                    background: `radial-gradient(circle, ${c1}88, transparent 70%)`,
+                    filter: 'blur(20px)',
+                    animation: `burstPulse 3s ease-in-out ${i * 0.3}s infinite`,
+                  }}
+                />
+              </>
+            )}
+
+            {/* ── Composing: pixel grid build-up effect ── */}
+            {state === 'composing' && (
+              <div
+                aria-hidden
+                className="absolute inset-0 opacity-60"
+                style={{
+                  backgroundImage:
+                    'linear-gradient(to right, rgba(167,139,250,0.4) 1px, transparent 1px), linear-gradient(to bottom, rgba(167,139,250,0.4) 1px, transparent 1px)',
+                  backgroundSize: '8px 8px',
+                  animation: 'pixelBuild 4s linear infinite',
+                }}
+              />
+            )}
+
+            {/* Glow halo for ready */}
+            {isReady && (
+              <div
+                aria-hidden
+                className="absolute inset-0"
+                style={{
+                  background: `radial-gradient(circle at 50% 60%, ${c1}33, transparent 60%)`,
+                  animation: `readyGlow 3s ease-in-out infinite`,
+                }}
+              />
+            )}
+
+            {/* ── Top label ── */}
+            <div
+              className="absolute left-1.5 top-1.5 z-10 flex items-center gap-1 rounded bg-black/65 px-1.5 py-0.5 backdrop-blur-sm"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              <span
+                className="text-[8px] font-bold uppercase tracking-widest"
+                style={{ color: isReady ? '#c8ff00' : '#a78bfa' }}
+              >
+                TAKE
+              </span>
+              <span className="text-[8px] font-black text-white">
+                {String(i + 1).padStart(2, '0')}
+              </span>
+            </div>
+
+            {/* ── Status pill top-right ── */}
+            <div
+              className="absolute right-1.5 top-1.5 z-10 rounded-full bg-black/65 px-1.5 py-0.5 backdrop-blur-sm"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              {isReady ? (
+                <span className="flex items-center gap-1 text-[7.5px] font-bold uppercase tracking-widest text-lime">
+                  <svg width="6" height="6" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="12" cy="12" r="6" />
+                  </svg>
+                  PRONTO
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-[7.5px] font-bold uppercase tracking-widest text-violet">
+                  <span className="relative flex h-1.5 w-1.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet opacity-70" />
+                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-violet" />
+                  </span>
+                  {state === 'composing' ? 'FRAME' : 'VIDEO'}
+                </span>
               )}
             </div>
-            {!ready && (
-              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-line/40">
+
+            {/* ── Centerpiece ── */}
+            <div className="absolute inset-0 z-[5] flex items-center justify-center">
+              {isReady ? (
+                /* Play icon big */
                 <div
-                  className="h-full bg-gradient-to-r from-violet via-violet-deep to-cyan-400"
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-black/40 backdrop-blur-md transition-transform"
                   style={{
-                    animation: `brollGrow 3s ease-in-out infinite`,
-                    animationDelay: `${i * 0.3}s`,
-                    boxShadow: '0 0 8px rgba(167,139,250,0.6)',
+                    boxShadow: `0 0 20px ${c1}88, inset 0 0 0 1px ${c1}99`,
+                  }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="white">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                </div>
+              ) : (
+                /* Bunny dot/icon with aura */
+                <div className="relative flex items-center justify-center">
+                  <div
+                    aria-hidden
+                    className="absolute h-16 w-16 rounded-full"
+                    style={{
+                      background: `radial-gradient(circle, ${c1}aa, transparent 60%)`,
+                      filter: 'blur(8px)',
+                      animation: `bunnyAura 2s ease-in-out infinite`,
+                    }}
+                  />
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src="/auto-edit-logo@64.png"
+                    alt=""
+                    width={28}
+                    height={28}
+                    className="relative z-10 drop-shadow-[0_0_12px_rgba(167,139,250,0.9)]"
+                    style={{
+                      animation: 'bunnyMini 1.4s ease-in-out infinite',
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* ── Bottom bar: progress (loading) ou MB (ready) ── */}
+            {isReady ? (
+              <div className="absolute bottom-0 left-0 right-0 px-1.5 pb-1">
+                <div
+                  className="flex items-center justify-between text-[7px] font-bold uppercase tracking-widest"
+                  style={{ fontFamily: 'var(--font-tech)' }}
+                >
+                  <span className="text-white/80">10s · 720p</span>
+                  <span className="text-lime">5.2 MB</span>
+                </div>
+              </div>
+            ) : (
+              <div className="absolute bottom-0 left-0 right-0 h-1 bg-black/40">
+                <div
+                  className="h-full"
+                  style={{
+                    background: `linear-gradient(90deg, ${c1}, ${c2})`,
+                    animation: `progressFill 3.5s ease-in-out ${i * 0.3}s infinite`,
+                    boxShadow: `0 0 8px ${c1}99`,
                   }}
                 />
               </div>
             )}
+
+            {/* Subtle border glow ring */}
             <div
-              className="absolute top-1 left-1 rounded bg-black/60 px-1 py-0.5 text-[7px] font-bold uppercase tracking-widest backdrop-blur"
+              aria-hidden
+              className="pointer-events-none absolute inset-0 rounded-[12px]"
               style={{
-                fontFamily: 'var(--font-tech)',
-                color: ready ? '#c8ff00' : '#a78bfa',
+                boxShadow: isReady
+                  ? `inset 0 0 0 1px ${c1}44`
+                  : `inset 0 0 0 1px ${c1}33`,
               }}
-            >
-              {String(i + 1).padStart(2, '0')}
-            </div>
+            />
           </div>
         );
       })}
+
+      {/* Floating particles between cards */}
+      {Array.from({ length: 12 }).map((_, i) => (
+        <span
+          key={`p${i}`}
+          aria-hidden
+          className="pointer-events-none absolute h-1 w-1 rounded-full"
+          style={{
+            left: `${10 + (i * 23) % 80}%`,
+            top: `${(i * 17) % 100}%`,
+            background: i % 2 ? '#c8ff00' : '#a78bfa',
+            boxShadow: `0 0 8px ${i % 2 ? '#c8ff00' : '#a78bfa'}cc`,
+            animation: `floatParticle ${4 + (i % 3)}s ease-in-out ${i * 0.4}s infinite`,
+            opacity: 0.6,
+          }}
+        />
+      ))}
+
       <style jsx>{`
-        @keyframes brollShowcasePop {
-          from { opacity: 0; transform: scale(0.85) translateY(10px); }
-          to { opacity: 1; transform: scale(1) translateY(0); }
+        .cinemaCard {
+          will-change: transform;
         }
-        @keyframes brollPulse {
-          0%, 100% { opacity: 0.5; transform: scale(0.8); }
-          50% { opacity: 1; transform: scale(1.15); }
+        @keyframes cardEntrance {
+          from {
+            opacity: 0;
+            transform: scale(0.85) translateY(20px) rotateY(var(--rY, 0));
+          }
+          to {
+            opacity: 1;
+          }
         }
-        @keyframes brollGrow {
-          0% { width: 5%; }
-          70% { width: 85%; }
-          100% { width: 95%; }
+        @keyframes meshDrift {
+          0% { transform: translate(0, 0); }
+          50% { transform: translate(6px, -8px); }
+          100% { transform: translate(-4px, 6px); }
+        }
+        @keyframes scanLine {
+          0% { transform: translateY(-100%); opacity: 0; }
+          10% { opacity: 1; }
+          90% { opacity: 1; }
+          100% { transform: translateY(200%); opacity: 0; }
+        }
+        @keyframes burstPulse {
+          0%, 100% { opacity: 0.5; transform: translate(-50%, -50%) scale(0.8); }
+          50% { opacity: 1; transform: translate(-50%, -50%) scale(1.3); }
+        }
+        @keyframes pixelBuild {
+          0% { opacity: 0.2; transform: scale(1); }
+          50% { opacity: 0.7; transform: scale(1.02); }
+          100% { opacity: 0.2; transform: scale(1); }
+        }
+        @keyframes readyGlow {
+          0%, 100% { opacity: 0.7; }
+          50% { opacity: 1; }
+        }
+        @keyframes bunnyAura {
+          0%, 100% { transform: scale(0.85); opacity: 0.7; }
+          50% { transform: scale(1.15); opacity: 1; }
+        }
+        @keyframes bunnyMini {
+          0%, 100% { transform: translateY(0) rotate(-3deg) scale(1); }
+          50% { transform: translateY(-4px) rotate(3deg) scale(1.08); }
+        }
+        @keyframes progressFill {
+          0% { width: 8%; }
+          70% { width: 88%; }
+          100% { width: 96%; }
+        }
+        @keyframes floatParticle {
+          0%, 100% { transform: translate(0, 0); opacity: 0.3; }
+          50% { transform: translate(8px, -14px); opacity: 0.9; }
         }
       `}</style>
     </div>
@@ -1042,6 +1285,246 @@ export function PilotHowItWorks() {
               O Pilot tira o trabalho repetitivo da frente dele. Sobra tempo
               pra criatividade, pra polish, pra entregar mais. Sua operação
               dobra de tamanho com a mesma equipe.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ────────────── AUTO B-ROLL · HOW IT WORKS ────────────── */
+export function AutoBrollHowItWorks() {
+  const steps = [
+    {
+      n: '01',
+      title: 'Cola sua lista de prompts',
+      desc:
+        'JSON do Claude ou texto numerado — qualquer formato funciona. O parser entende ambos e já mostra quantos takes vai gerar.',
+      tint: 'rgba(167,139,250,0.5)',
+    },
+    {
+      n: '02',
+      title: 'Aperta o play',
+      desc:
+        '12 imagens e 6 vídeos em paralelo. Nano Banana compõe o frame inicial, Kling 2.5 renderiza o movimento. Tudo na sua conta Magnific Unlimited.',
+      tint: 'rgba(200,255,0,0.45)',
+    },
+    {
+      n: '03',
+      title: 'Acompanha em tempo real',
+      desc:
+        'Cada take vira um card 9:16 ao vivo: vê o vídeo nascer, expande pra tela cheia, baixa o MP4 individual antes mesmo dos outros terminarem.',
+      tint: 'rgba(240,171,252,0.45)',
+    },
+    {
+      n: '04',
+      title: 'Pega o ZIP organizado',
+      desc:
+        'Quando o último take termina, sai um ZIP nomeado com todos os MP4s prontos pra timeline. Sem renomear, sem organizar.',
+      tint: 'rgba(103,232,249,0.5)',
+    },
+  ];
+
+  return (
+    <section
+      id="broll-passos"
+      className="mx-auto mt-32 max-w-[1200px] px-5 md:px-8"
+    >
+      {/* Cabeçalho */}
+      <div className="mb-12 max-w-[780px] fade-in-up">
+        <div
+          className="mb-3 inline-flex items-baseline gap-3 text-white/35"
+          style={{ fontFamily: 'var(--font-mono)' }}
+        >
+          <span className="text-[10.5px] tracking-[0.32em]">004</span>
+          <span className="h-px w-10 bg-white/25" />
+          <span
+            className="text-[10.5px] uppercase tracking-[0.28em] text-violet"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            COMO O AUTO B-ROLL FUNCIONA
+          </span>
+        </div>
+        <h2
+          className="section-title text-[36px] md:text-[52px]"
+          style={{ lineHeight: 1.05 }}
+        >
+          <SmokeText text="4 passos." className="block" />
+          <span className="display-subtle block">
+            <SmokeText text="Do JSON à pasta pronta." />
+          </span>
+        </h2>
+      </div>
+
+      {/* Grid 4 passos */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {steps.map((s, i) => (
+          <div
+            key={s.n}
+            className="step-card group relative overflow-hidden rounded-[20px] border border-line/60 p-6 fade-in-up"
+            style={{
+              animationDelay: `${i * 90}ms`,
+              background:
+                'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.20)), linear-gradient(180deg, #15151a, #0c0c10)',
+            }}
+          >
+            <div
+              aria-hidden
+              className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full opacity-50 blur-3xl transition-opacity duration-500 group-hover:opacity-100"
+              style={{ background: s.tint }}
+            />
+            <div className="relative">
+              <div
+                className="text-[40px] font-extrabold leading-none"
+                style={{
+                  fontFamily: 'var(--font-tech)',
+                  letterSpacing: '-0.03em',
+                  background:
+                    'linear-gradient(135deg, #fff 0%, rgba(255,255,255,0.3) 100%)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                }}
+              >
+                {s.n}
+              </div>
+              <h3
+                className="mt-4 text-[17px] font-bold leading-snug tracking-tight text-white"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                {s.title}
+              </h3>
+              <p className="mt-2 text-[13.5px] leading-relaxed text-text-muted">
+                {s.desc}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Tech callout — modelos travados */}
+      <div
+        className="mt-10 overflow-hidden rounded-[22px] border border-lime/35 fade-in-up"
+        style={{
+          animationDelay: '380ms',
+          background:
+            'linear-gradient(135deg, rgba(200,255,0,0.10) 0%, rgba(167,139,250,0.10) 100%), linear-gradient(180deg, #15151a, #0c0c10)',
+        }}
+      >
+        <div className="grid grid-cols-1 gap-8 px-7 py-8 md:grid-cols-[auto_1fr] md:px-10 md:py-10">
+          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-[18px] border border-lime/40 bg-lime/10">
+            <svg
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#c8ff00"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 2v6m0 0l-3-3m3 3l3-3" />
+              <rect x="3" y="11" width="18" height="11" rx="2" />
+              <circle cx="12" cy="17" r="1.5" fill="#c8ff00" />
+            </svg>
+          </div>
+          <div>
+            <div
+              className="mb-2 inline-flex items-center gap-2 rounded-full border border-lime/50 bg-black/40 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-lime backdrop-blur-md"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.85)]" />
+              QUALIDADE TRAVADA · ZERO CRÉDITO
+            </div>
+            <h3
+              className="text-[22px] font-extrabold leading-tight tracking-tight text-white md:text-[26px]"
+              style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
+            >
+              <SmokeText text="Sempre Nano Banana 1K + Kling 2.5 720p · 10s · 9:16." />
+            </h3>
+            <p className="mt-3 max-w-[640px] text-[14.5px] leading-relaxed text-white/85">
+              Sua conta Magnific Unlimited paga zero crédito por take. O Auto
+              B-roll não deixa selecionar modelo errado, qualidade menor ou
+              proporção fora do padrão — é só apertar play.
+              <br />
+              <span className="text-white/65">
+                Você foca no criativo. A qualidade vem garantida.
+              </span>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Pra quem é */}
+      <div className="mt-10 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div
+          className="audience-card group relative overflow-hidden rounded-[22px] border border-violet/35 p-7 fade-in-up md:p-9"
+          style={{
+            animationDelay: '480ms',
+            background:
+              'linear-gradient(135deg, rgba(167,139,250,0.14), rgba(0,0,0,0.18)), linear-gradient(180deg, #15151a, #0c0c10)',
+          }}
+        >
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full opacity-50 blur-3xl transition-opacity duration-500 group-hover:opacity-90"
+            style={{ background: 'rgba(167,139,250,0.5)' }}
+          />
+          <div className="relative">
+            <div
+              className="mb-3 text-[10.5px] font-bold uppercase tracking-[0.22em] text-violet"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              SE VOCÊ EDITA UGC EM ESCALA
+            </div>
+            <h3
+              className="text-[26px] font-extrabold leading-tight tracking-tight text-white md:text-[32px]"
+              style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
+            >
+              <SmokeText text="50 B-rolls num dia." className="block" />
+              <span className="block text-violet">
+                <SmokeText text="Sem abrir Magnific." />
+              </span>
+            </h3>
+            <p className="mt-3 text-[14px] leading-relaxed text-white/80">
+              Cola a lista de cada ad e dispara em lote. Vai almoçar e volta
+              com a pasta pronta. Nunca mais clica em &ldquo;Generate&rdquo; um por um.
+            </p>
+          </div>
+        </div>
+
+        <div
+          className="audience-card group relative overflow-hidden rounded-[22px] border border-lime/30 p-7 fade-in-up md:p-9"
+          style={{
+            animationDelay: '560ms',
+            background:
+              'linear-gradient(135deg, rgba(200,255,0,0.10), rgba(0,0,0,0.18)), linear-gradient(180deg, #15151a, #0c0c10)',
+          }}
+        >
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full opacity-50 blur-3xl transition-opacity duration-500 group-hover:opacity-90"
+            style={{ background: 'rgba(200,255,0,0.45)' }}
+          />
+          <div className="relative">
+            <div
+              className="mb-3 text-[10.5px] font-bold uppercase tracking-[0.22em] text-lime"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              SE VOCÊ É AGÊNCIA / ESCRITÓRIO
+            </div>
+            <h3
+              className="text-[26px] font-extrabold leading-tight tracking-tight text-white md:text-[32px]"
+              style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
+            >
+              <SmokeText text="Cliente recebe a pasta." className="block" />
+              <span className="block text-lime">
+                <SmokeText text="Você nem tocou no Magnific." />
+              </span>
+            </h3>
+            <p className="mt-3 text-[14px] leading-relaxed text-white/80">
+              Equipe pequena entregando como agência grande. Cada conta usa
+              seu próprio Freepik — escala sem comprometer qualidade nem custo.
             </p>
           </div>
         </div>
