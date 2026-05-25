@@ -60,7 +60,7 @@ type Cut = {
 
 export default function DecupagemCopyPage() {
   return (
-    <TierGate require="pro" toolName="Smart Decup">
+    <TierGate require="pro" toolName="Decupagem Inteligente">
       <DecupagemCopyInner />
     </TierGate>
   );
@@ -288,7 +288,7 @@ function DecupagemCopyInner() {
       <ToolHero3D
         eyebrow="WHISPER · DECUPAGEM INTELIGENTE"
         eyebrow2="A IA MONTA POR VOCÊ"
-        title="Smart Decup"
+        title="Decupagem Inteligente"
         subtitle={
           <>
             Manda o vídeo bruto + a copy final.{' '}

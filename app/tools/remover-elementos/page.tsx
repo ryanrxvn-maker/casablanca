@@ -106,7 +106,7 @@ function newJob(file: File): Job {
 
 export default function RemoverElementosPage() {
   return (
-    <TierGate require="pro" toolName="Smart Remover">
+    <TierGate require="pro" toolName="Removedor de Legenda">
       <RemoverElementosInner />
     </TierGate>
   );
@@ -413,7 +413,7 @@ function RemoverElementosInner() {
       <ToolHero3D
         eyebrow="VÍDEO LIMPO · IA LOCAL"
         eyebrow2="ZERO CRÉDITO · 100% OFFLINE"
-        title="Smart Remover"
+        title={"Removedor de Legenda / Marca d'Água"}
         subtitle={
           <>
             Limpa legenda queimada e marca d&apos;água.{' '}
