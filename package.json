@@ -11,6 +11,7 @@
     "test": "tsc lib/decupagem-matcher.ts lib/decupagem-matcher.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck && node .test-tmp/decupagem-matcher.test.js"
   },
   "dependencies": {
+    "@fal-ai/client": "^1.10.1",
     "@ffmpeg/ffmpeg": "^0.12.10",
     "@ffmpeg/util": "^0.12.1",
     "@gradio/client": "^2.2.0",
