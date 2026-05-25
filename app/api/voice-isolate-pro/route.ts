@@ -26,10 +26,10 @@ import Replicate from 'replicate';
 export const runtime = 'nodejs';
 export const maxDuration = 300; // 5 min — Demucs Replicate raro passa de 2min
 
-// Modelo Demucs v4 no Replicate. ryan5453/demucs aceita stem='vocals'
-// e retorna URL única (não array de stems) quando especifica stem.
-// Sem version → SDK pega latest automaticamente.
-const DEMUCS_MODEL = 'ryan5453/demucs';
+// Modelo Demucs no Replicate. cjwbw/demucs é o mais estabelecido (~30k runs).
+// Same owner do cjwbw/wav2lip que o lipsync usa.
+// Override possível via env REPLICATE_DEMUCS_MODEL pra trocar sem deploy.
+const DEMUCS_MODEL = (process.env.REPLICATE_DEMUCS_MODEL || 'cjwbw/demucs') as `${string}/${string}`;
 
 export async function POST(req: Request) {
   const token = process.env.REPLICATE_API_TOKEN;
@@ -104,45 +104,77 @@ export async function POST(req: Request) {
     );
   }
 
-  // 2. Roda Demucs — stem='vocals' retorna 1 URL diretamente
+  // 2. Roda Demucs. cjwbw/demucs aceita inputs diferentes de outros forks —
+  // mandamos MULTIPLAS chaves redundantes pra robustez (server ignora as
+  // que nao reconhece).
   const replicate = new Replicate({ auth: token });
   try {
-    const output = (await replicate.run(DEMUCS_MODEL as `${string}/${string}`, {
+    const output = (await replicate.run(DEMUCS_MODEL, {
       input: {
+        // audio fields (cjwbw, ryan5453, etc usam diferentes nomes)
         audio: audioUrl,
-        stem: 'vocals',     // só queremos voz
-        model: 'htdemucs',  // default, hybrid transformer
-        shifts: 1,          // qualidade vs velocidade (1 = fast, padrão)
+        audio_file: audioUrl,
+        // stem selection (priorizar vocals)
+        stem: 'vocals',
+        stems: 'vocals',
+        target: 'vocals',
+        // model (cjwbw usa model_name, outros usam model)
+        model: 'htdemucs',
+        model_name: 'htdemucs',
+        // output format (preserva qualidade)
+        output_format: 'wav',
+        mp3: false,
+        wav: true,
+        // performance/quality knobs
+        shifts: 1,
         overlap: 0.25,
         clip_mode: 'rescale',
-        mp3_output: false,  // WAV preserva qualidade
-        mp3_bitrate: 320,
       },
     })) as unknown;
 
-    // Output shape: pode ser string URL OU array OU FileOutput (SDK >0.32)
-    let vocalsUrl: string | null = null;
-    if (typeof output === 'string') {
-      vocalsUrl = output;
-    } else if (Array.isArray(output)) {
-      vocalsUrl = typeof output[0] === 'string' ? output[0] : null;
-    } else if (output && typeof output === 'object') {
-      const o = output as Record<string, unknown>;
-      // SDK file-like: { url() => string }
-      if (typeof (o as { url?: unknown }).url === 'function') {
-        try {
-          vocalsUrl = (o as { url: () => string }).url();
-        } catch {}
+    // Tenta extrair URL de "vocals" — output pode ser:
+    //  - string URL única (stem=vocals respeitado)
+    //  - array [drums, bass, other, vocals] (cjwbw/demucs convention)
+    //  - dict { vocals, drums, bass, other }
+    //  - FileOutput object com .url()
+    const extractUrl = (v: unknown): string | null => {
+      if (!v) return null;
+      if (typeof v === 'string') return v.startsWith('http') ? v : null;
+      if (typeof v === 'object') {
+        const o = v as Record<string, unknown>;
+        if (typeof (o as { url?: unknown }).url === 'function') {
+          try { return (o as { url: () => string }).url(); } catch { return null; }
+        }
+        if (typeof o.url === 'string' && o.url.startsWith('http')) return o.url;
       }
-      // Objeto stems-by-name
-      if (!vocalsUrl && typeof o.vocals === 'string') vocalsUrl = o.vocals as string;
+      return null;
+    };
+
+    let vocalsUrl: string | null = extractUrl(output);
+
+    if (!vocalsUrl && Array.isArray(output)) {
+      // Procura URL com 'vocals' no path PRIMEIRO; senão pega o último
+      // (convenção cjwbw/demucs: [drums, bass, other, vocals])
+      const urls = output.map(extractUrl).filter(Boolean) as string[];
+      vocalsUrl = urls.find((u) => /vocals?/i.test(u)) || urls[urls.length - 1] || null;
+    }
+
+    if (!vocalsUrl && output && typeof output === 'object') {
+      const o = output as Record<string, unknown>;
+      // Procura key 'vocals' / 'vocal' / 'voice'
+      for (const key of ['vocals', 'vocal', 'voice', 'output', 'audio']) {
+        if (o[key]) {
+          vocalsUrl = extractUrl(o[key]);
+          if (vocalsUrl) break;
+        }
+      }
     }
 
     if (!vocalsUrl) {
       return NextResponse.json(
         {
-          error: 'Demucs Replicate não retornou URL de vocals',
-          detail: JSON.stringify(output).slice(0, 500),
+          error: 'Demucs Replicate retornou output mas não conseguimos extrair URL de vocals',
+          detail: JSON.stringify(output).slice(0, 800),
           kind: 'runtime',
         },
         { status: 502 },
