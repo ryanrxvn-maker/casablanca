@@ -439,10 +439,15 @@ export type CreateVideoParams = {
    *  voz mas com timing/conteudo espelhando o audio uploaded. HeyGen
    *  aceita varias nomenclaturas; mandamos todas pra robustez. */
   voiceMirroring?: boolean;
+  /** Voice ID HeyGen pra usar como Mirror Voice (sobrescreve voz default
+   *  do avatar). Combinado com voiceMirroring:true, o HeyGen sintetiza
+   *  o video falando com ESSA voz, usando o audio uploaded como timing
+   *  reference. Sem isso, HeyGen usa voz default do avatar. */
+  voiceId?: string;
 };
 
 export async function createVideo(params: CreateVideoParams): Promise<{ video_id: string; avatar_id: string }> {
-  const { title, avatarId, engine, audio, orientation = 'portrait', resolution, motionPrompt, voiceMirroring } = params;
+  const { title, avatarId, engine, audio, orientation = 'portrait', resolution, motionPrompt, voiceMirroring, voiceId } = params;
   const eng = ENGINES[engine];
   if (!eng) throw new Error(`Motor desconhecido: ${engine}`);
 
@@ -459,7 +464,7 @@ export async function createVideo(params: CreateVideoParams): Promise<{ video_id
     words: audio.words,
     text: audio.text || '',
   };
-  // Voice Mirroring: avatar fala com SUA propria voz espelhando o audio
+  // Voice Mirroring: avatar fala com voz especifica espelhando o audio
   // uploaded (timing/cadencia). HeyGen UI mostra checkbox "Voice
   // Mirroring" no Quick Create. Mandamos as variantes mais provaveis de
   // param name (server ignora as que nao conhece).
@@ -467,6 +472,13 @@ export async function createVideo(params: CreateVideoParams): Promise<{ video_id
     audio_data.voice_mirroring = true;
     audio_data.enable_voice_mirroring = true;
     audio_data.mirror_voice = true;
+  }
+  // Voice ID override (user escolheu uma voz especifica pra mirror).
+  // HeyGen aceita varias keys — mandamos todas as conhecidas pra robustez.
+  if (voiceId) {
+    audio_data.voice_id = voiceId;
+    audio_data.mirror_voice_id = voiceId;
+    audio_data.target_voice_id = voiceId;
   }
 
   const body: Record<string, any> = {
@@ -485,6 +497,10 @@ export async function createVideo(params: CreateVideoParams): Promise<{ video_id
     // Tambem no body root, caso HeyGen leia de la
     body.voice_mirroring = true;
     body.enable_voice_mirroring = true;
+  }
+  if (voiceId) {
+    body.voice_id = voiceId;
+    body.mirror_voice_id = voiceId;
   }
   const r = await jsonCall('POST', '/v2/avatar/shortcut/submit', body);
   if (!r.ok) {
@@ -757,7 +773,7 @@ export async function processJob(
       onStep: (step, info) => onProgress?.(`upload-${step}`, info),
     });
 
-    onProgress?.('submitting', { duration: audio.duration, voiceMirroring: !!job.voiceMirroring });
+    onProgress?.('submitting', { duration: audio.duration, voiceMirroring: !!job.voiceMirroring, voiceId: job.voiceId || null });
     const created = await createVideo({
       title: job.title,
       avatarId: job.avatarId,
@@ -767,6 +783,7 @@ export async function processJob(
       resolution: job.resolution,
       motionPrompt: job.motionPrompt,
       voiceMirroring: job.voiceMirroring,
+      voiceId: job.voiceId, // VA: voz custom do user (Mirror Voice ID)
     });
 
     if (job.title && job.title !== 'Avatar Video') {
