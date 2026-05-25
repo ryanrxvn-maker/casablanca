@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { LipSyncHero3D } from '@/app/tools/lipsync/LipSyncHero3D';
 import { runChunkedLipSync, type ChunkProgress } from '@/lib/lipsync-chunker';
+import { preprocessVideo, preprocessAudio } from '@/lib/lipsync-preprocess';
 
 /**
  * LipSyncTool — UI estilo DreamFace com 2 motores (V1 / V2).
@@ -67,16 +68,10 @@ export default function LipSyncTool() {
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [elapsedSec, setElapsedSec] = useState<number>(0);
 
-  // Sync.so v2 params (motor unico — V2 latentsync foi removido)
-  // Default PADRAO (lipsync-2) — 6x mais barato que Pro, qualidade ainda alta.
-  // PRO so quando user opta explicitamente (raro: glitch especifico em closeup).
-  const [usePro, setUsePro] = useState<boolean>(false);
+  // Sync.so v2 — UM motor unico (lipsync-2). PRO removido.
+  // Qualidade absurda vem do PRE-PROCESSING (720p@25fps + audio limpo),
+  // nao do modelo. Custo: $0.05/min, 6x mais barato que Pro.
   const [syncMode, setSyncMode] = useState<'cut_off' | 'loop' | 'bounce' | 'silence' | 'remap'>('cut_off');
-
-  // Auto-compress 1080p → 720p antes de upload pra cortar custo ~50%
-  // (Fal cobra menos pra menor resolucao de input).
-  // Pode desabilitar nos ajustes pro pra quem quer 1080p exato.
-  const [autoCompress, setAutoCompress] = useState<boolean>(true);
 
   // Upload progress (real, em %)
   const [uploadProgress, setUploadProgress] = useState<number>(0);
@@ -132,19 +127,15 @@ export default function LipSyncTool() {
   const willChunk = selected?.meta ? selected.meta.dur > 30 : false;
 
   /* ─── Estimativa de custo ──────────────────────────────────────
-     Fal pricing (Mai/2026):
-     - lipsync-2 (PADRAO): ~$0.05/min de video
-     - lipsync-2-pro:      ~$0.30/min de video
-     Resolucao 720p custa ~50% menos que 1080p pq sao menos bytes
-     processados (estimativa conservadora).
+     SEMPRE lipsync-2 (padrao) com pre-process automatico pra 720p.
+     Fal pricing Mai/2026: lipsync-2 a ~$0.05/min de video processado.
+     Como sempre comprimimos pra 720p, custo eh estavel.
   */
   const estimatedCostUSD = (() => {
     if (!selected?.meta) return null;
     const minutes = selected.meta.dur / 60;
-    const basePerMin = usePro ? 0.30 : 0.05;
-    const willCompress = autoCompress && Math.max(selected.meta.w, selected.meta.h) > 1280;
-    const resFactor = willCompress ? 0.55 : (Math.max(selected.meta.w, selected.meta.h) > 1280 ? 1.0 : 0.55);
-    return minutes * basePerMin * resFactor;
+    // 720p custa ~55% do tier 1080p — pricing efetivo $0.0275/min
+    return minutes * 0.05 * 0.55;
   })();
   const estimatedCostBRL = estimatedCostUSD !== null ? estimatedCostUSD * 5.3 : null;
 
@@ -232,19 +223,19 @@ export default function LipSyncTool() {
     }
   }
 
-  /* ─── Auto-compressao 1080p → 720p ─────────────────────────────
-     Reduz custo ~50% no Fal sem perda visual perceptivel pra lipsync.
-     Roda no client antes do upload com ffmpeg.wasm (preset ultrafast).
+  /* ─── Pre-processing (qualidade absurda + custo minimo) ────────
+     SEMPRE roda. Demora 10-30s no client mas:
+     - Video vai pra 720p@25fps → menos bytes no Fal → mais barato
+     - Audio limpo (highpass + normalize) → modelo entende fonema melhor
+       → boca sincroniza melhor → resultado bem mais preciso
   */
-  async function maybeCompress(file: File, height: number): Promise<File> {
-    if (!autoCompress) return file;
-    if (height <= 720) return file; // ja esta dentro do alvo
-
-    const { compressVideo } = await import('@/lib/ffmpeg-worker');
-    const blob = await compressVideo(file, { crf: 23, resolution: '720' });
-    return new File([blob], file.name.replace(/\.[^.]+$/, '_720p.mp4'), {
-      type: 'video/mp4',
-    });
+  async function preprocessAll(): Promise<{ video: File; audio: File }> {
+    if (!selected || !audioFile) throw new Error('Arquivos faltando');
+    const [video, audio] = await Promise.all([
+      preprocessVideo(selected.file),
+      preprocessAudio(audioFile),
+    ]);
+    return { video, audio };
   }
 
   /* ─── Upload helpers ────────────────────────────────────────── */
@@ -317,27 +308,24 @@ export default function LipSyncTool() {
 
     try {
       const dur = selected.meta?.dur ?? 0;
-      const h = selected.meta?.h ?? 0;
       const shouldChunk = dur > 30;
 
-      // PRE: comprime pra 720p se for 1080p+ e autoCompress = true.
-      // Economiza ~50% no Fal e o upload tambem fica mais rapido.
+      // PRE-PROCESSING (rola SEMPRE — chave da qualidade absurda):
+      // - Video: 720p@25fps + bitrate otimizado
+      // - Audio: highpass + normalize -16 LUFS + mp3 mono limpo
       setStatus('uploading-video');
       setUploadProgress(0);
-      const compressedVideo = await maybeCompress(selected.file, h);
-      const compressedAudio = audioFile.type.startsWith('video/')
-        ? await maybeCompress(audioFile, h)
-        : audioFile;
+      const { video: optVideo, audio: optAudio } = await preprocessAll();
 
       if (shouldChunk) {
         // CHUNKED FLOW — video longo, divide em pedacos
         setStatus('generating');
         setChunkProgress(null);
         const finalUrl = await runChunkedLipSync({
-          videoFile: compressedVideo,
-          audioFile: compressedAudio,
+          videoFile: optVideo,
+          audioFile: optAudio,
           durationSec: dur,
-          pro: usePro,
+          pro: false, // SEMPRE padrao
           syncMode,
           chunkDurationSec: 25,
           concurrency: 3,
@@ -350,11 +338,11 @@ export default function LipSyncTool() {
       }
 
       // SINGLE FLOW — video curto
-      const video_url = await uploadToFal(compressedVideo, (pct) => setUploadProgress(pct));
+      const video_url = await uploadToFal(optVideo, (pct) => setUploadProgress(pct));
 
       setStatus('uploading-audio');
       setUploadProgress(0);
-      const audio_url = await uploadToFal(compressedAudio, (pct) => setUploadProgress(pct));
+      const audio_url = await uploadToFal(optAudio, (pct) => setUploadProgress(pct));
 
       setStatus('queueing');
       setUploadProgress(0);
@@ -364,7 +352,6 @@ export default function LipSyncTool() {
       const body: Record<string, unknown> = {
         video_url,
         audio_url,
-        pro: usePro,
         sync_mode: syncMode,
       };
 
@@ -521,85 +508,22 @@ export default function LipSyncTool() {
             </h2>
           </div>
 
-          {/* QUALIDADE — Padrao (default) vs Pro */}
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <label
-                className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
-                style={{ fontFamily: 'var(--font-tech)' }}
-              >
-                Qualidade
-              </label>
-              <span className="mono text-[9px] text-text-dim">
-                {usePro ? '~10 min · 6× mais caro' : '~5 min · econômico'}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => !isLoading && setUsePro(false)}
-                disabled={isLoading}
-                className={
-                  'relative overflow-hidden rounded-[14px] border px-3 py-3 text-left transition ' +
-                  (!usePro
-                    ? 'border-cyan-400/65 bg-cyan-400/10 shadow-[0_0_22px_-6px_rgba(103,232,249,0.6)]'
-                    : 'border-line-strong bg-bg-soft/40 hover:border-white/15')
-                }
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span
-                    className="text-[16px] font-black tracking-tight text-white"
-                    style={{ fontFamily: 'var(--font-tech)' }}
-                  >
-                    PADRÃO
-                  </span>
-                  <span
-                    className="mono rounded-full border border-cyan-400/40 bg-cyan-400/15 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest text-cyan-300"
-                    style={{ fontFamily: 'var(--font-tech)' }}
-                  >
-                    RECOMENDADO
-                  </span>
+          {/* BADGE OTIMIZACAO — substitui o toggle PRO/PADRAO */}
+          <div className="rounded-[14px] border border-lime/40 bg-lime/[0.04] px-4 py-3">
+            <div className="flex items-start gap-2.5">
+              <span className="text-[18px] mt-0.5">⚡</span>
+              <div className="flex-1">
+                <div
+                  className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-lime mb-1"
+                  style={{ fontFamily: 'var(--font-tech)' }}
+                >
+                  Otimização automática ligada
                 </div>
-                <div className="mono text-[9.5px] uppercase tracking-widest text-text-muted">
-                  qualidade alta · barato
-                </div>
-              </button>
-              <button
-                type="button"
-                onClick={() => !isLoading && setUsePro(true)}
-                disabled={isLoading}
-                className={
-                  'relative overflow-hidden rounded-[14px] border px-3 py-3 text-left transition ' +
-                  (usePro
-                    ? 'border-fuchsia-400/65 bg-fuchsia-400/10 shadow-[0_0_22px_-6px_rgba(232,121,249,0.6)]'
-                    : 'border-line-strong bg-bg-soft/40 hover:border-white/15')
-                }
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span
-                    className="text-[16px] font-black tracking-tight text-white"
-                    style={{ fontFamily: 'var(--font-tech)' }}
-                  >
-                    PRO
-                  </span>
-                  <span
-                    className="mono rounded-full border border-amber-400/45 bg-amber-400/15 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest text-amber-300"
-                    style={{ fontFamily: 'var(--font-tech)' }}
-                  >
-                    6× MAIS CARO
-                  </span>
-                </div>
-                <div className="mono text-[9.5px] uppercase tracking-widest text-text-muted">
-                  só se padrão falhar
-                </div>
-              </button>
-            </div>
-            {usePro && (
-              <div className="mt-2 rounded-[10px] border border-amber-400/40 bg-amber-400/5 px-3 py-2 text-[11px] text-amber-200">
-                <span className="font-bold">⚠ </span>
-                PRO custa <strong>~$0.30/min</strong> (6× mais que Padrão). Use só se o Padrão deu glitch no rosto.
+                <p className="text-[11.5px] text-text-muted leading-snug">
+                  Vídeo vira <span className="text-white">720p@25fps</span> e áudio é <span className="text-white">limpo + normalizado</span> antes de subir. Resultado mais nítido + custo mínimo.
+                </p>
               </div>
-            )}
+            </div>
           </div>
 
           {/* Audio upload */}
@@ -682,36 +606,6 @@ export default function LipSyncTool() {
             </button>
             {advanced && (
               <div className="border-t border-line/30 p-4 bg-bg/30 space-y-4">
-                {/* Auto-compress 720p */}
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label
-                      className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
-                      style={{ fontFamily: 'var(--font-tech)' }}
-                    >
-                      Auto-comprimir pra 720p
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setAutoCompress(!autoCompress)}
-                      disabled={isLoading}
-                      className={
-                        'mono rounded-full border px-2.5 py-0.5 text-[9px] uppercase tracking-widest transition ' +
-                        (autoCompress
-                          ? 'border-lime/60 bg-lime/10 text-lime'
-                          : 'border-line-strong text-text-muted')
-                      }
-                    >
-                      {autoCompress ? '● ativado' : 'desligado'}
-                    </button>
-                  </div>
-                  <p className="text-[10.5px] text-text-muted leading-snug">
-                    {autoCompress
-                      ? 'Vídeos 1080p+ vão pra 720p antes de subir. Corta custo ~50% sem perda visual.'
-                      : 'Vídeo vai pro Fal na resolução original. Mais caro, sem benefício de qualidade.'}
-                  </p>
-                </div>
-
                 {/* sync_mode — comportamento quando audio > video */}
                 <div>
                   <label
@@ -1185,7 +1079,7 @@ function LoadingOverlay({
         <div className="mt-2 text-[12px] text-text-muted max-w-[360px] mx-auto">
           {isChunked
             ? 'Dividindo em trechos paralelos pra qualidade máxima do começo ao fim.'
-            : 'Padrão ~5 min · Pro ~10 min. Mantém a aba aberta.'}
+            : 'Costuma levar entre 3 e 8 minutos. Mantém a aba aberta.'}
         </div>
       </div>
 

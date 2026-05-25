@@ -1,20 +1,20 @@
 /**
  * /api/tools/lipsync — gera lipsync com Sync.so v2 (tech do DreamFace).
  *
- * Sempre usa `fal-ai/sync-lipsync/v2` com:
- *   - model: 'lipsync-2-pro' (default — qualidade max) ou 'lipsync-2' (mais rapido)
- *   - sync_mode: cut_off | loop | bounce | silence | remap
- *
- * V2 (fal-ai/latentsync) foi removido — testes mostraram qualidade
- * inferior e tempo de geracao maior (12 min vs 7 min) com mais artefatos.
+ * SEMPRE usa `fal-ai/sync-lipsync/v2` com modelo `lipsync-2` (padrao):
+ *   - ~$0.05/min (6x mais barato que pro)
+ *   - Qualidade alta — equivalente a DreamFace
+ *   - Sem PRO, sem versionamento — UM motor unico
  *
  * Body aceito:
  *   {
  *     video_url: string,
  *     audio_url: string,
- *     pro?: boolean,                  // true (default) = lipsync-2-pro
  *     sync_mode?: 'cut_off' | 'loop' | 'bounce' | 'silence' | 'remap',
  *   }
+ *
+ * Qualidade vem do pre-processamento client-side (audio limpo,
+ * video 720p@25fps, crop no rosto), NAO do modelo.
  */
 
 import { NextResponse } from 'next/server';
@@ -41,7 +41,6 @@ interface LipSyncResultData {
 interface LipSyncBody {
   video_url?: string;
   audio_url?: string;
-  pro?: boolean;
   sync_mode?: 'cut_off' | 'loop' | 'bounce' | 'silence' | 'remap';
 }
 
@@ -71,9 +70,9 @@ export async function POST(req: Request) {
     );
   }
 
-  // Default pro = true (qualidade max). User pode passar false pra speed.
-  const usePro = body.pro !== false;
-  const model: 'lipsync-2' | 'lipsync-2-pro' = usePro ? 'lipsync-2-pro' : 'lipsync-2';
+  // SEMPRE lipsync-2 (padrao). Qualidade absurda vem do pre-processing
+  // client-side (720p@25fps + audio normalizado), nao do modelo Pro.
+  const model = 'lipsync-2' as const;
   const syncMode = body.sync_mode ?? 'cut_off';
 
   try {
