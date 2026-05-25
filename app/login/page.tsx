@@ -92,7 +92,7 @@ function LoginInner() {
         };
       } else if (diag.reason === 'banned' || diag.reason === 'revoked') {
         cta = {
-          href: 'https://wa.me/5531991262437',
+          href: 'https://wa.me/5534991262437',
           label: 'Falar no WhatsApp',
         };
       }

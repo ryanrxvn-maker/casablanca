@@ -158,7 +158,7 @@ export function TierGate({
               <span className="transition-transform group-hover:translate-x-1">→</span>
             </a>
             <a
-              href="https://wa.me/5531991262437"
+              href="https://wa.me/5534991262437"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 rounded-full border border-line-strong bg-bg-soft/60 px-4 py-2.5 text-[12.5px] font-bold uppercase tracking-[0.14em] text-text-muted transition hover:border-lime/60 hover:text-lime"

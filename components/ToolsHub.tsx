@@ -1269,7 +1269,7 @@ function LockedFlash({
             Ver planos →
           </a>
           <a
-            href="https://wa.me/5531991262437"
+            href="https://wa.me/5534991262437"
             target="_blank"
             rel="noopener noreferrer"
             className="rounded-full border border-line-strong px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.14em] text-text-muted transition hover:border-lime/60 hover:text-lime"

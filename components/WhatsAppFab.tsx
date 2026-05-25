@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 
-const WA_LINK = 'https://wa.me/5531991262437';
+const WA_LINK = 'https://wa.me/5534991262437';
 
 /**
  * Floating Action Button do WhatsApp.

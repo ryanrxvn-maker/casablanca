@@ -23,7 +23,7 @@ import { SmokeText } from './SmokeText';
  *  • Nomes 100% PT-BR (sem Smart Remover, sem SRT Generator)
  */
 
-const WHATSAPP = 'https://wa.me/5531991262437';
+const WHATSAPP = 'https://wa.me/5534991262437';
 
 /* ─────────────────────── Dados ─────────────────────── */
 
