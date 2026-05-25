@@ -531,20 +531,21 @@ function SmokeParticles({ active, returning }: { active: boolean; returning: boo
  *    em 25/05/2026)
  */
 
-const HUMAN_AVATARS = [
-  '/lipsync-avatar-1.jpg',
-  '/lipsync-avatar-2.jpg',
-  '/lipsync-avatar-3.jpg',
-  '/lipsync-avatar-4.jpg',
-  '/lipsync-avatar-5.jpg',
+/**
+ * Lista de videos de UGC creator falando (hospedados em /public).
+ * Se quiser adicionar mais, salva em /public/lipsync-talking-{N}.mp4
+ * e adiciona aqui no array.
+ */
+const TALKING_VIDEOS = [
+  '/lipsync-talking-1.mp4',
 ];
 
 function HumanFaceClean() {
-  const [avatarSrc, setAvatarSrc] = useState<string>(HUMAN_AVATARS[0]);
+  // pick random video on mount (futureproof — caso o user adicione mais)
+  const [videoSrc, setVideoSrc] = useState<string>(TALKING_VIDEOS[0]);
 
   useEffect(() => {
-    // pick random on mount
-    setAvatarSrc(HUMAN_AVATARS[Math.floor(Math.random() * HUMAN_AVATARS.length)]);
+    setVideoSrc(TALKING_VIDEOS[Math.floor(Math.random() * TALKING_VIDEOS.length)]);
   }, []);
 
   return (
@@ -591,17 +592,18 @@ function HumanFaceClean() {
               'inset 0 0 0 2px rgba(255,255,255,0.08), 0 20px 60px rgba(232,121,249,0.45), 0 0 0 1px rgba(0,0,0,0.4)',
           }}
         >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={avatarSrc}
-            alt=""
-            aria-hidden
+          {/* Video da pessoa falando — autoplay/loop/muted pra fluir.
+              Substitui foto estatica e da o efeito "ela ta falando" real. */}
+          <video
+            src={videoSrc}
+            autoPlay
+            muted
+            loop
+            playsInline
+            preload="auto"
             className="absolute inset-0 h-full w-full object-cover"
-            draggable={false}
             style={{
               filter: 'saturate(1.08) contrast(1.04)',
-              animation: 'hfTalkPulse 0.9s ease-in-out infinite',
-              transformOrigin: 'center 65%',
             }}
           />
           {/* Color overlay sutil pra integrar com tema */}
