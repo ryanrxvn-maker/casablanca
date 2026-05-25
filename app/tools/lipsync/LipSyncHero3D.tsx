@@ -359,19 +359,28 @@ function MorphAvatar({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
           <HumanFaceClean />
         </div>
 
-        {/* SCAN OVERLAY — only during return */}
+        {/* CIRCULAR FLASH — circular sweep instead of retangular scan.
+            Aparece com clip-path radial pra nao deixar borda quadrada visivel. */}
         {returning && (
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-0"
+            className="pointer-events-none absolute inset-0 rounded-full overflow-hidden"
             style={{
-              background:
-                'linear-gradient(180deg, transparent 0%, rgba(103,232,249,0.6) 50%, transparent 100%)',
-              backgroundSize: '100% 6px',
-              animation: 'robotScanIn 0.85s ease-out forwards',
-              mixBlendMode: 'screen',
+              animation: 'circularFlash 0.85s ease-out forwards',
+              clipPath: 'circle(50% at 50% 50%)',
             }}
-          />
+          >
+            <div
+              className="absolute inset-0"
+              style={{
+                background:
+                  'conic-gradient(from 0deg, transparent 0deg, rgba(103,232,249,0.85) 30deg, rgba(232,121,249,0.6) 60deg, transparent 90deg, transparent 360deg)',
+                animation: 'circularSweep 0.85s ease-out forwards',
+                mixBlendMode: 'screen',
+                filter: 'blur(6px)',
+              }}
+            />
+          </div>
         )}
       </div>
 
@@ -431,11 +440,14 @@ function MorphAvatar({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
           40% { opacity: 0.6; filter: blur(3px) hue-rotate(20deg); }
           100% { opacity: 1; transform: scale(1) rotate(0deg); filter: blur(0px) hue-rotate(0deg); }
         }
-        @keyframes robotScanIn {
-          0% { background-position: 0 -120px; opacity: 0; }
-          15% { opacity: 1; }
-          85% { opacity: 1; }
-          100% { background-position: 0 360px; opacity: 0; }
+        @keyframes circularFlash {
+          0% { opacity: 0; transform: scale(0.7); }
+          25% { opacity: 1; transform: scale(1); }
+          100% { opacity: 0; transform: scale(1.15); }
+        }
+        @keyframes circularSweep {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(540deg); }
         }
       `}</style>
     </div>
@@ -523,6 +535,8 @@ const HUMAN_AVATARS = [
   '/lipsync-avatar-1.jpg',
   '/lipsync-avatar-2.jpg',
   '/lipsync-avatar-3.jpg',
+  '/lipsync-avatar-4.jpg',
+  '/lipsync-avatar-5.jpg',
 ];
 
 function HumanFaceClean() {
@@ -586,6 +600,8 @@ function HumanFaceClean() {
             draggable={false}
             style={{
               filter: 'saturate(1.08) contrast(1.04)',
+              animation: 'hfTalkPulse 0.9s ease-in-out infinite',
+              transformOrigin: 'center 65%',
             }}
           />
           {/* Color overlay sutil pra integrar com tema */}
@@ -608,6 +624,23 @@ function HumanFaceClean() {
               mixBlendMode: 'soft-light',
             }}
           />
+          {/* Mouth-area glow pulse — sugere fala */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute"
+            style={{
+              left: '38%',
+              top: '64%',
+              width: '24%',
+              height: '14%',
+              borderRadius: '50%',
+              background:
+                'radial-gradient(ellipse at center, rgba(232,121,249,0.55), rgba(167,139,250,0.25) 50%, transparent 80%)',
+              filter: 'blur(8px)',
+              mixBlendMode: 'screen',
+              animation: 'hfMouthGlow 0.6s ease-in-out infinite alternate',
+            }}
+          />
           {/* Bottom vinheta */}
           <div
             aria-hidden
@@ -616,6 +649,53 @@ function HumanFaceClean() {
               boxShadow: 'inset 0 -40px 60px -20px rgba(0,0,0,0.55)',
             }}
           />
+        </div>
+
+        {/* FALANDO indicator — appears next to face */}
+        <div
+          className="absolute z-30 pointer-events-none"
+          style={{
+            left: '-8%',
+            top: '38%',
+          }}
+        >
+          <div
+            className="mono inline-flex items-center gap-1.5 rounded-full border border-fuchsia-400/55 bg-black/65 px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.18em] text-fuchsia-300 backdrop-blur-md"
+            style={{
+              fontFamily: 'var(--font-tech)',
+              animation: 'hfTalkBadge 1.4s ease-in-out infinite',
+              boxShadow: '0 0 18px -4px rgba(232,121,249,0.7)',
+            }}
+          >
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-fuchsia-300 opacity-75" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-fuchsia-300" />
+            </span>
+            FALANDO
+          </div>
+        </div>
+
+        {/* Audio bars side — at mouth height, simulating voice output */}
+        <div
+          className="absolute z-30 pointer-events-none flex items-end gap-[2px]"
+          style={{
+            right: '-14%',
+            top: '60%',
+            height: 28,
+          }}
+        >
+          {Array.from({ length: 5 }).map((_, i) => (
+            <span
+              key={i}
+              className="block w-[3px] rounded-full bg-gradient-to-t from-fuchsia-500 to-fuchsia-200"
+              style={{
+                height: '100%',
+                animation: `hfBars 0.5s ease-in-out ${i * 0.08}s infinite alternate`,
+                transformOrigin: 'bottom',
+                filter: 'drop-shadow(0 0 4px rgba(232,121,249,0.7))',
+              }}
+            />
+          ))}
         </div>
       </div>
 
@@ -711,6 +791,32 @@ function HumanFaceClean() {
         @keyframes hfRingSpin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
+        }
+        @keyframes hfTalkPulse {
+          0%, 100% {
+            transform: scale(1);
+            filter: saturate(1.08) contrast(1.04) brightness(1);
+          }
+          30% {
+            transform: scale(1.005);
+            filter: saturate(1.12) contrast(1.05) brightness(1.03);
+          }
+          60% {
+            transform: scale(1.002);
+            filter: saturate(1.06) contrast(1.04) brightness(0.99);
+          }
+        }
+        @keyframes hfMouthGlow {
+          from { opacity: 0.35; transform: scaleX(0.85) scaleY(0.7); }
+          to { opacity: 0.85; transform: scaleX(1.15) scaleY(1.1); }
+        }
+        @keyframes hfTalkBadge {
+          0%, 100% { transform: translateY(0); opacity: 0.95; }
+          50% { transform: translateY(-3px); opacity: 1; }
+        }
+        @keyframes hfBars {
+          from { transform: scaleY(0.2); }
+          to { transform: scaleY(1); }
         }
       `}</style>
     </div>
