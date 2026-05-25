@@ -73,13 +73,13 @@ import {
   parseMagnificPrompts,
   type MagnificTakeInput,
   type PipelineProgress,
-  type TakeState,
 } from '@/lib/magnific-pipeline';
 import { runMagnificPipelineV2 } from '@/lib/magnific-pipeline-v2';
 import { ToolStep } from '@/components/tool-kit';
 import { IconStepPlug, IconStepSliders, IconStepPipeline } from '@/components/ToolIcons';
 import { IconAutoBroll } from '@/components/ToolIcons';
 import { TierGate } from '@/components/TierGate';
+import { TakeCard } from './TakeCard';
 
 const HUE = 'rgba(240,171,252,0.45)';
 
@@ -691,82 +691,87 @@ function JobCard({
       </div>
 
       {p && (
-        <div className="mt-3 rounded-xl border border-line bg-bg/30 p-3">
-          <div className="mb-2 flex items-center justify-between text-xs">
-            <span className="text-text-muted">
-              {hasSpace ? 'Space ativo (use 🧊 VER SPACE 3D)' : 'Preparando Space…'}
-            </span>
-            <span className="mono text-lime">
-              {p.ready}/{p.total} prontos
-            </span>
+        <div className="mt-4 space-y-4">
+          {/* HERO BAR — progresso global + ações */}
+          <div className="relative overflow-hidden rounded-[14px] border border-line bg-gradient-to-r from-bg-soft/60 via-bg/40 to-bg-soft/60 p-4 backdrop-blur-md">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    Pipeline
+                  </span>
+                  <span
+                    className="text-[10px] font-bold uppercase tracking-[0.14em] text-lime"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    {p.ready}/{p.total} prontos
+                  </span>
+                  {p.phase && (
+                    <span
+                      className="mono rounded-full border border-violet/40 bg-violet/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-violet"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      {p.phase}
+                    </span>
+                  )}
+                </div>
+                {p.message && (
+                  <p className="text-[11px] italic text-text-muted">{p.message}</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {job.zip ? (
+                  <button
+                    type="button"
+                    onClick={onDownload}
+                    className="group relative inline-flex items-center gap-2 overflow-hidden rounded-full border border-lime/60 bg-lime/95 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-black shadow-[0_8px_22px_-8px_rgba(200,255,0,0.55)] transition-all hover:scale-[1.03]"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
+                    </svg>
+                    Baixar ZIP ({(job.zip.blob.size / 1024 / 1024).toFixed(1)} MB)
+                  </button>
+                ) : (
+                  <span
+                    className="mono rounded-full border border-line bg-bg/60 px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    ZIP final sai quando todos terminam
+                  </span>
+                )}
+              </div>
+            </div>
+            {/* Progress bar global */}
+            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-line/40">
+              <div
+                className="h-full bg-gradient-to-r from-violet via-violet-deep to-lime transition-all duration-700"
+                style={{
+                  width: `${Math.round((p.ready / Math.max(p.total, 1)) * 100)}%`,
+                  boxShadow: '0 0 14px rgba(167,139,250,0.6)',
+                }}
+              />
+            </div>
           </div>
-          {p.message && (
-            <p className="mb-2 text-xs italic text-text-muted">{p.message}</p>
-          )}
-          <ul className="grid gap-1.5">
-            {p.takes.map((t) => (
-              <TakeRow key={t.idx} t={t} />
+
+          {/* GRID DE TAKES */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
+            {p.takes.map((t, i) => (
+              <TakeCard
+                key={t.idx}
+                take={t}
+                position={i + 1}
+                total={p.takes.length}
+              />
             ))}
-          </ul>
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-function TakeRow({ t }: { t: TakeState }) {
-  let badge: { label: string; color: string } = { label: 'idle', color: 'text-text-muted' };
-  let percent = 0;
-  let detail = '';
-  switch (t.status) {
-    case 'idle':
-      badge = { label: 'idle', color: 'text-text-muted' };
-      break;
-    case 'running':
-      badge = { label: t.phase || 'run', color: 'text-cyan-300' };
-      percent = t.percent;
-      detail = t.message;
-      break;
-    case 'image-done':
-      badge = { label: 'img-ok', color: 'text-cyan-400' };
-      percent = 100;
-      break;
-    case 'video-done':
-      badge = { label: 'video-ok', color: 'text-amber-400' };
-      percent = 100;
-      break;
-    case 'downloading':
-      badge = { label: 'dl', color: 'text-purple-300' };
-      break;
-    case 'ready':
-      badge = { label: 'ready', color: 'text-lime' };
-      percent = 100;
-      detail = `${(t.mp4Size / 1024 / 1024).toFixed(1)} MB`;
-      break;
-    case 'failed':
-      badge = { label: 'err', color: 'text-red-300' };
-      detail = t.error;
-      break;
-  }
-  return (
-    <li className="flex items-center gap-2 text-xs">
-      <span className="mono w-14 text-text-muted">take{t.idx}</span>
-      <span className={`mono w-16 ${badge.color}`}>{badge.label}</span>
-      <div className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-bg">
-        <div
-          className={`absolute left-0 top-0 h-full transition-all ${
-            t.status === 'ready'
-              ? 'bg-lime'
-              : t.status === 'failed'
-              ? 'bg-red-500/60'
-              : 'bg-cyan-400/70'
-          }`}
-          style={{ width: `${Math.max(percent, t.status === 'ready' ? 100 : 0)}%` }}
-        />
-      </div>
-      <span className="hidden md:block w-[280px] truncate text-text-muted">
-        {detail}
-      </span>
-    </li>
-  );
-}
+// TakeRow legado removido — substituído pelo TakeCard grid 3D.
