@@ -126,16 +126,22 @@ export default function LipSyncTool() {
   const hasBlockingIssue = videoIssues.some((i) => i.severity === 'block');
   const willChunk = selected?.meta ? selected.meta.dur > 30 : false;
 
-  /* ─── Estimativa de custo ──────────────────────────────────────
-     SEMPRE lipsync-2 (padrao) com pre-process automatico pra 720p.
-     Fal pricing Mai/2026: lipsync-2 a ~$0.05/min de video processado.
-     Como sempre comprimimos pra 720p, custo eh estavel.
+  /* ─── Estimativa de custo (com Smart Boost 95/5) ──────────────
+     Vídeo curto (1 chunk): 100% padrao = $0.0275/min
+     Vídeo com chunks: 95% padrao + 5% pro (cap 2 chunks) ≈ $0.034/min médio
   */
   const estimatedCostUSD = (() => {
     if (!selected?.meta) return null;
     const minutes = selected.meta.dur / 60;
-    // 720p custa ~55% do tier 1080p — pricing efetivo $0.0275/min
-    return minutes * 0.05 * 0.55;
+    const dur = selected.meta.dur;
+    if (dur <= 30) return minutes * 0.05 * 0.55; // single, sem boost
+    // chunked: estima # chunks e # pro
+    const numChunks = Math.ceil(dur / 25);
+    const numPro = Math.min(2, Math.ceil(numChunks * 0.05));
+    const proRatio = numPro / numChunks;
+    const padraoRatio = 1 - proRatio;
+    const blendedPerMin = (padraoRatio * 0.05 + proRatio * 0.30) * 0.55;
+    return minutes * blendedPerMin;
   })();
   const estimatedCostBRL = estimatedCostUSD !== null ? estimatedCostUSD * 5.3 : null;
 
@@ -321,7 +327,8 @@ export default function LipSyncTool() {
 
       if (shouldChunk) {
         // CHUNKED FLOW — passa o MESMO arquivo pros 2 inputs do chunker.
-        // O chunker vai splittar 1 vez e usar o mesmo chunk como video+audio.
+        // smartBoostRatio: 0.05 = top 5% chunks (max 2 por video) usam Pro.
+        // Custo medio ~$0.034/min, cabe em R$54/mes pra 300min.
         setStatus('generating');
         setChunkProgress(null);
         const finalUrl = await runChunkedLipSync({
@@ -332,6 +339,7 @@ export default function LipSyncTool() {
           syncMode,
           chunkDurationSec: 25,
           concurrency: 3,
+          smartBoostRatio: 0.05, // Smart Boost: 5% chunks no Pro
           onProgress: (p) => setChunkProgress(p),
         });
         setOutputUrl(finalUrl);
@@ -368,7 +376,18 @@ export default function LipSyncTool() {
         throw new Error(data?.error || `HTTP ${res.status}`);
       }
 
-      setOutputUrl(data.output_video_url);
+      // POS-PROCESSING gratuito: aplica filtros visuais (unsharp+denoise+
+      // grading) pra esconder "mascara" do queixo e devolver nitidez aos
+      // dentes. Adiciona ~20-40s mas zero custo. Mesma melhora do flow chunked.
+      const { postprocessLipSyncOutput } = await import('@/lib/lipsync-postprocess');
+      const rawRes = await fetch(data.output_video_url);
+      if (!rawRes.ok) throw new Error('Falha baixando output do Fal');
+      const rawBlob = await rawRes.blob();
+      const polishedBlob = await postprocessLipSyncOutput(rawBlob);
+      const polishedFile = new File([polishedBlob], 'lipsync_polished.mp4', { type: 'video/mp4' });
+      const polishedUrl = await uploadToFal(polishedFile);
+
+      setOutputUrl(polishedUrl);
       setStatus('done');
       stopTicker();
     } catch (err) {

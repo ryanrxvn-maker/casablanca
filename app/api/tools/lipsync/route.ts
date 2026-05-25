@@ -42,6 +42,9 @@ interface LipSyncBody {
   video_url?: string;
   audio_url?: string;
   sync_mode?: 'cut_off' | 'loop' | 'bounce' | 'silence' | 'remap';
+  /** Smart Boost: chunker passa true SO em chunks marcados pra Pro
+   *  (top 5% por energia). Default false. */
+  pro?: boolean;
 }
 
 export async function POST(req: Request) {
@@ -70,9 +73,11 @@ export async function POST(req: Request) {
     );
   }
 
-  // SEMPRE lipsync-2 (padrao). Qualidade absurda vem do pre-processing
-  // client-side (720p@25fps + audio normalizado), nao do modelo Pro.
-  const model = 'lipsync-2' as const;
+  // Default: lipsync-2 (padrao). Smart Boost passa pro=true SO em chunks
+  // selecionados (top 5% por energia, max 2 por video) → custo medio
+  // ainda fica em $0.034/min (R$54/mes pra 300min).
+  const usePro = body.pro === true;
+  const model: 'lipsync-2' | 'lipsync-2-pro' = usePro ? 'lipsync-2-pro' : 'lipsync-2';
   const syncMode = body.sync_mode ?? 'cut_off';
 
   try {

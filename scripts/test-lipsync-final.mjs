@@ -27,7 +27,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const VIDEO_PATH = 'C:/Users/Silas/OneDrive/Área de Trabalho/TESTE LIP ME.mp4';
 const CHUNK_SEC = 25;
 const CONCURRENCY = 3;
-const MODEL = 'lipsync-2'; // PADRAO — sem pro
+const SMART_BOOST_RATIO = 0.05; // 5% dos chunks (max 2) re-rodam no Pro
 const SYNC_MODE = 'cut_off';
 
 /* Load FAL_KEY */
@@ -164,20 +164,28 @@ console.log(`✓ Upload em ${fmtTime(Date.now() - tUp)}\n`);
 
 const videoChunks = chunkFiles; // alias pra compat com codigo abaixo
 
-/* 5. GERA PARALELO com lipsync-2 (PADRAO) */
-console.log(`═══ 5. GERA com ${MODEL} (concurrency=${CONCURRENCY}) ═══`);
+/* 5. GERA PARALELO com Smart Boost (95% padrao + 5% pro nos top-N) */
+// Heuristica: chunks com mais bytes = mais movimento = candidatos a Pro
+const chunkSizes = await Promise.all(chunkFiles.map(async (p) => (await stat(p)).size));
+const indexed = chunkSizes.map((s, i) => ({ i, s }));
+indexed.sort((a, b) => b.s - a.s);
+const numPro = Math.min(2, Math.ceil(chunkFiles.length * SMART_BOOST_RATIO));
+const boostIdx = new Set(indexed.slice(0, numPro).map((x) => x.i));
+console.log(`═══ 5. GERA com Smart Boost: ${numPro}/${chunkFiles.length} chunks no PRO (idx: ${[...boostIdx].join(',')}) ═══`);
+
 const tGen = Date.now();
 const outputs = await runWithConcurrency(
   uploads,
   async (up, i) => {
     const cT0 = Date.now();
+    const model = boostIdx.has(i) ? 'lipsync-2-pro' : 'lipsync-2';
     const result = await fal.subscribe('fal-ai/sync-lipsync/v2', {
-      input: { video_url: up.video_url, audio_url: up.audio_url, model: MODEL, sync_mode: SYNC_MODE },
+      input: { video_url: up.video_url, audio_url: up.audio_url, model, sync_mode: SYNC_MODE },
       logs: false,
     });
     const outUrl = result.data?.video?.url;
     if (!outUrl) throw new Error(`Chunk ${i}: sem output`);
-    process.stdout.write(`  ✓ chunk ${i + 1}/${videoChunks.length} em ${fmtTime(Date.now() - cT0)}\n`);
+    process.stdout.write(`  ✓ chunk ${i + 1}/${videoChunks.length} [${model}] em ${fmtTime(Date.now() - cT0)}\n`);
     return outUrl;
   },
   CONCURRENCY,
@@ -198,15 +206,34 @@ const downPaths = await Promise.all(outputs.map(async (url, i) => {
 }));
 console.log(`✓ Download em ${fmtTime(Date.now() - tDown)}\n`);
 
-/* 7. CONCAT */
-console.log('═══ 7. CONCAT ═══');
+/* 7a. CONCAT */
+console.log('═══ 7a. CONCAT ═══');
 const tCat = Date.now();
 const listPath = join(tmpDir, 'list.txt');
 await writeFile(listPath, downPaths.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join('\n'));
+const concatPath = join(tmpDir, 'concat.mp4');
+await runCmd('ffmpeg', ['-fflags', '+genpts', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', '-avoid_negative_ts', 'make_zero', '-movflags', '+faststart', '-y', concatPath], 'concat');
+const catStat = await stat(concatPath);
+console.log(`✓ Concat em ${fmtTime(Date.now() - tCat)} — ${(catStat.size / 1024 / 1024).toFixed(1)}MB\n`);
+
+/* 7b. POS-PROCESSING (filtros visuais — corrige artefatos) */
+console.log('═══ 7b. POS-PROCESSING (unsharp + denoise + grading) ═══');
+const tPost = Date.now();
 const finalPath = join(tmpDir, 'lipsync_final.mp4');
-await runCmd('ffmpeg', ['-fflags', '+genpts', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', '-avoid_negative_ts', 'make_zero', '-movflags', '+faststart', '-y', finalPath], 'concat');
+await runCmd('ffmpeg', [
+  '-i', concatPath,
+  '-vf', 'hqdn3d=1:1:4:4,unsharp=5:5:0.7:5:5:0.0,eq=contrast=1.04:saturation=1.05:gamma=0.98,format=yuv420p',
+  '-c:v', 'libx264',
+  '-preset', 'veryfast',
+  '-crf', '20',
+  '-pix_fmt', 'yuv420p',
+  '-c:a', 'copy',
+  '-movflags', '+faststart',
+  '-y',
+  finalPath,
+], 'postprocess');
 const finalStat = await stat(finalPath);
-console.log(`✓ Concat em ${fmtTime(Date.now() - tCat)} — Final: ${(finalStat.size / 1024 / 1024).toFixed(1)}MB\n`);
+console.log(`✓ Pos-process em ${fmtTime(Date.now() - tPost)} — Final: ${(finalStat.size / 1024 / 1024).toFixed(1)}MB\n`);
 
 /* 8. UPLOAD FINAL */
 console.log('═══ 8. UPLOAD FINAL pro Fal storage ═══');
@@ -222,8 +249,9 @@ console.log('✅ PIPELINE FINAL COMPLETO');
 console.log('═══════════════════════════════════════════════');
 console.log(`Tempo total: ${fmtTime(Date.now() - T0)}`);
 console.log(`Chunks: ${videoChunks.length} × ${CHUNK_SEC}s`);
-console.log(`Modelo: ${MODEL} (PADRAO)`);
+console.log(`Smart Boost: ${numPro}/${chunkFiles.length} chunks no PRO`);
 console.log(`Pre-process: 720p@25fps + audio limpo`);
+console.log(`Pos-process: hqdn3d + unsharp + grading`);
 console.log(`Output: ${(finalStat.size / 1024 / 1024).toFixed(1)}MB`);
 console.log();
 console.log('🎬 URL FINAL:');

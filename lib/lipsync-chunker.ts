@@ -19,6 +19,7 @@
  */
 
 import { getFFmpeg, concatVideosFast, type FFLog, type FFLoadStage } from './ffmpeg-worker';
+import { postprocessLipSyncOutput } from './lipsync-postprocess';
 
 /** Tamanho default do chunk em segundos. Sweet spot pra qualidade/velocidade. */
 export const DEFAULT_CHUNK_SEC = 25;
@@ -53,6 +54,13 @@ export interface LipSyncChunkOptions {
   syncMode: 'cut_off' | 'loop' | 'bounce' | 'silence' | 'remap';
   chunkDurationSec?: number;
   concurrency?: number;
+  /**
+   * Smart Boost: re-roda OS chunks mais problematicos (selecionados por
+   * heuristica de energia de audio) no lipsync-2-pro em vez do padrao.
+   * Default: 0.05 = 5% dos chunks. Max 2 chunks por video pra controlar custo.
+   * Passar 0 desativa boost.
+   */
+  smartBoostRatio?: number;
   onProgress?: (p: ChunkProgress) => void;
   onLog?: FFLog;
   onStage?: FFLoadStage;
@@ -143,6 +151,33 @@ async function generateChunk(
   if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
   if (!data.output_video_url) throw new Error('Sem output_video_url');
   return data.output_video_url as string;
+}
+
+/**
+ * Estima "energia de audio" de um chunk mp4 sem decodificar.
+ * Aproximacao: usa o BYTE SIZE do chunk como proxy. Chunks com mais
+ * movimento (boca aberta, fala enfatica) tem mais detalhes visuais E
+ * audio mais dinamico → tamanho maior. Heuristica grosseira mas funcional.
+ *
+ * Pra ser mais preciso, daria pra decodar e medir RMS do audio, mas o
+ * custo (CPU + tempo) nao vale a pena pra essa otimizacao.
+ */
+function chunkEnergyScore(chunk: Blob): number {
+  return chunk.size;
+}
+
+/**
+ * Seleciona os indices dos N chunks com maior "energia" pra usar Pro.
+ * Garante max 2 chunks por video pra controlar custo.
+ */
+function selectBoostIndices(chunks: Blob[], ratio: number): Set<number> {
+  if (ratio <= 0) return new Set();
+  const maxBoost = Math.min(2, Math.ceil(chunks.length * ratio));
+  if (maxBoost === 0) return new Set();
+
+  const scored = chunks.map((c, i) => ({ idx: i, score: chunkEnergyScore(c) }));
+  scored.sort((a, b) => b.score - a.score); // descending
+  return new Set(scored.slice(0, maxBoost).map((s) => s.idx));
 }
 
 /**
@@ -246,7 +281,16 @@ export async function runChunkedLipSync(opts: LipSyncChunkOptions): Promise<stri
     concurrency,
   );
 
-  /* ───────── 3. GERA PARALELO ───────── */
+  /* ───────── 3. GERA PARALELO (com Smart Boost 95/5) ─────────
+     Heuristica: chunks com maior "energia" (proxy: tamanho em bytes)
+     tem mais movimento facial → mais artefato → vale Pro. Max 2 por video. */
+  const boostRatio = opts.smartBoostRatio ?? 0;
+  const boostIndices = selectBoostIndices(videoChunks, boostRatio);
+  const proCount = boostIndices.size;
+  if (proCount > 0) {
+    console.info(`[lipsync-chunker] Smart Boost: ${proCount}/${videoChunks.length} chunks em PRO`);
+  }
+
   chunks.forEach((c) => (c.status = 'generating'));
   emit('generating');
 
@@ -255,7 +299,8 @@ export async function runChunkedLipSync(opts: LipSyncChunkOptions): Promise<stri
     async (chunk, i) => {
       try {
         const { video_url, audio_url } = uploadResults[i];
-        const outputUrl = await generateChunk(video_url, audio_url, opts.pro, opts.syncMode);
+        const usePro = opts.pro || boostIndices.has(i);
+        const outputUrl = await generateChunk(video_url, audio_url, usePro, opts.syncMode);
         chunk.status = 'done';
         chunk.outputUrl = outputUrl;
         emit('generating');
@@ -286,10 +331,17 @@ export async function runChunkedLipSync(opts: LipSyncChunkOptions): Promise<stri
   );
 
   // Concat sem re-encode
-  const finalBlob = await concatVideosFast(outputBlobs, { onLog: opts.onLog, onStage: opts.onStage });
+  const concatBlob = await concatVideosFast(outputBlobs, { onLog: opts.onLog, onStage: opts.onStage });
+
+  // POS-PROCESSING gratuito: aplica filtros visuais que escondem
+  // a "mascara" do queixo e devolvem nitidez aos dentes.
+  // Adiciona ~20-40s mas zero custo no Fal.
+  const finalBlob = await postprocessLipSyncOutput(concatBlob, {
+    onLog: opts.onLog,
+    onStage: opts.onStage,
+  });
 
   // Sobe o vídeo final pro Fal storage pra ter uma URL servivel pelo player.
-  // (Alternativa: criar object URL local, mas se a aba reload some.)
   const finalFile = new File([finalBlob], 'lipsync_final.mp4', { type: 'video/mp4' });
   const finalUrl = await uploadChunk(finalFile);
 
