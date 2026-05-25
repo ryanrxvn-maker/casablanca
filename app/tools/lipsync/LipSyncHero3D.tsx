@@ -130,13 +130,13 @@ export function LipSyncHero3D() {
               className="mono inline-flex items-center gap-1 rounded-full border border-violet/40 bg-violet/10 px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.22em] text-violet"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
-              ◆ LATENTSYNC · BYTEDANCE
+              ◆ DUAL ENGINE · V1 / V2
             </span>
             <span
               className="mono inline-flex items-center gap-1 rounded-full border border-cyan-400/35 bg-cyan-400/10 px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.22em] text-cyan-300"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
-              4K · ZERO TRAVA
+              ALTA DEFINIÇÃO · ZERO TRAVA
             </span>
           </div>
 
@@ -163,96 +163,30 @@ export function LipSyncHero3D() {
           </div>
 
           <p className="max-w-[540px] text-[15px] leading-relaxed text-text-muted md:text-[17px]">
-            Sobe o vídeo do rosto. Sobe o áudio. A IA reconstroi cada
-            fonema, cada respiração, cada microexpressão da boca em
-            sincronia perfeita com a fala. Sem dentes torto, sem olho
-            morto, sem aquele jeito artificial. <span className="text-white">É como se a pessoa tivesse falado aquilo de verdade.</span>
+            Sobe o vídeo do rosto. Sobe o áudio. <span className="text-white">A boca da pessoa passa a falar exatamente o que tá no áudio</span> — com naturalidade absurda. Sem cara de IA, sem dentes torto, sem olho morto.
           </p>
 
-          {/* PIPELINE — 5 etapas */}
+          {/* PIPELINE — 4 etapas, sem jargao */}
           <div className="mt-1 flex flex-wrap items-center gap-1">
-            <Step icon="🎬" label="VÍDEO" sub="rosto fonte" />
+            <Step icon="🎬" label="VÍDEO" sub="o rosto" />
             <Arrow />
-            <Step icon="🎙" label="ÁUDIO" sub="fala alvo" />
+            <Step icon="🎙" label="ÁUDIO" sub="a fala" />
             <Arrow />
-            <Step icon="🧠" label="LATENT" sub="encoder neural" tone="text-fuchsia-300" />
+            <Step icon="✨" label="MAGIA" sub="a IA encaixa" tone="text-fuchsia-300" />
             <Arrow />
-            <Step icon="👄" label="SYNC" sub="boca + dentes" tone="text-violet" />
-            <Arrow />
-            <Step icon="🎞" label="RENDER" sub="export 1080p" tone="text-cyan-300" />
+            <Step icon="🎞" label="ENTREGA" sub="vídeo pronto" tone="text-cyan-300" />
           </div>
 
           {/* METRICAS */}
           <div className="mt-2 grid max-w-[540px] grid-cols-3 gap-3">
-            <Metric value="60–180s" label="GERAÇÃO" />
-            <Metric value="32 FPS" label="OUTPUT" accent="violet" />
-            <Metric value="$0.07" label="POR VÍDEO" accent="lime" />
+            <Metric value="1–3 min" label="GERAÇÃO" />
+            <Metric value="2 modelos" label="V1 + V2" accent="violet" />
+            <Metric value="HD" label="SAÍDA" accent="lime" />
           </div>
         </div>
 
-        {/* LADO DIREITO — Avatar UGC 3D animado */}
-        <div className="relative mx-auto h-[360px] w-[300px] md:h-[400px] md:w-[360px]">
-          {/* Aura */}
-          <div
-            aria-hidden
-            className="absolute inset-[-10%] rounded-full blur-3xl"
-            style={{
-              background:
-                'radial-gradient(circle, rgba(232,121,249,0.5), rgba(167,139,250,0.2) 50%, transparent 80%)',
-              animation: 'lipAura 5s ease-in-out infinite',
-            }}
-          />
-
-          {/* Ring rotativo externo */}
-          <div
-            aria-hidden
-            className="absolute inset-0 rounded-full border border-fuchsia-400/30"
-            style={{ animation: 'lipRing 24s linear infinite' }}
-          />
-          <div
-            aria-hidden
-            className="absolute inset-[-12px] rounded-full border border-violet/25"
-            style={{
-              animation: 'lipRing 36s linear infinite reverse',
-            }}
-          />
-          <div
-            aria-hidden
-            className="absolute inset-[-26px] rounded-full border border-cyan-400/20 border-dashed"
-            style={{ animation: 'lipRing 60s linear infinite' }}
-          />
-
-          {/* AVATAR — wrapped em parallax */}
-          <div
-            className="relative h-full w-full"
-            style={{
-              transformStyle: 'preserve-3d',
-              transform: `perspective(1200px) rotateX(${tiltX}deg) rotateY(${tiltY}deg)`,
-              transition: 'transform 0.6s cubic-bezier(.2,.8,.2,1)',
-            }}
-          >
-            <RoboticFace3D />
-          </div>
-
-          {/* Bunny mini observador — easter egg */}
-          <div
-            className="absolute bottom-[-8px] right-[-12px] z-20"
-            style={{
-              animation: 'bunnyPeek 4s ease-in-out infinite',
-              filter: 'drop-shadow(0 0 16px rgba(167,139,250,0.6))',
-            }}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/auto-edit-logo@128.png"
-              alt=""
-              aria-hidden
-              width={72}
-              height={72}
-              style={{ transform: 'rotate(-8deg)' }}
-            />
-          </div>
-        </div>
+        {/* LADO DIREITO — Avatar morph robot ↔ human */}
+        <MorphAvatar tiltX={tiltX} tiltY={tiltY} />
       </div>
 
       <style jsx>{`
@@ -279,6 +213,549 @@ export function LipSyncHero3D() {
         @keyframes bunnyPeek {
           0%, 100% { transform: translateY(0); }
           50% { transform: translateY(-8px); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/* ---- MorphAvatar — wrapper com morph robot ↔ human + smoke + portal */
+/**
+ * Estados visuais:
+ *   - idle:    robot 100%, human 0%, smoke 0%, portal 0%
+ *   - hover:   robot 0%, human 100%, smoke fade (curto durante transicao)
+ *   - leave:   portal scan-in expand + robot materializa de volta
+ *
+ * Tudo via CSS transitions com timing diferente em cada camada
+ * pra ficar fluido. Sem state machines complexas, sem timers em
+ * cascata — so duas variaveis booleanas e deixa o CSS coreografar.
+ */
+function MorphAvatar({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
+  const [hover, setHover] = useState(false);
+  const [returning, setReturning] = useState(false);
+  const returnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function onEnter() {
+    if (returnTimerRef.current) {
+      clearTimeout(returnTimerRef.current);
+      returnTimerRef.current = null;
+    }
+    setReturning(false);
+    setHover(true);
+  }
+
+  function onLeave() {
+    setHover(false);
+    // Liga o "portal return" effect por 900ms
+    setReturning(true);
+    if (returnTimerRef.current) clearTimeout(returnTimerRef.current);
+    returnTimerRef.current = setTimeout(() => {
+      setReturning(false);
+      returnTimerRef.current = null;
+    }, 900);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (returnTimerRef.current) clearTimeout(returnTimerRef.current);
+    };
+  }, []);
+
+  return (
+    <div
+      className="relative mx-auto h-[360px] w-[300px] md:h-[400px] md:w-[360px]"
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+    >
+      {/* Aura — sempre presente */}
+      <div
+        aria-hidden
+        className="absolute inset-[-10%] rounded-full blur-3xl"
+        style={{
+          background: hover
+            ? 'radial-gradient(circle, rgba(103,232,249,0.5), rgba(232,121,249,0.25) 50%, transparent 80%)'
+            : 'radial-gradient(circle, rgba(232,121,249,0.5), rgba(167,139,250,0.2) 50%, transparent 80%)',
+          animation: 'lipAura 5s ease-in-out infinite',
+          transition: 'background 0.6s',
+        }}
+      />
+
+      {/* Rings rotativos */}
+      <div
+        aria-hidden
+        className="absolute inset-0 rounded-full border border-fuchsia-400/30"
+        style={{ animation: 'lipRing 24s linear infinite' }}
+      />
+      <div
+        aria-hidden
+        className="absolute inset-[-12px] rounded-full border border-violet/25"
+        style={{ animation: 'lipRing 36s linear infinite reverse' }}
+      />
+      <div
+        aria-hidden
+        className="absolute inset-[-26px] rounded-full border border-cyan-400/20 border-dashed"
+        style={{ animation: 'lipRing 60s linear infinite' }}
+      />
+
+      {/* Portal ring — aparece no return */}
+      {returning && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 rounded-full"
+          style={{
+            border: '2px solid rgba(103,232,249,0.85)',
+            boxShadow:
+              '0 0 60px rgba(103,232,249,0.6), inset 0 0 40px rgba(103,232,249,0.5)',
+            animation: 'portalExpand 0.85s ease-out forwards',
+          }}
+        />
+      )}
+
+      {/* Smoke particles — aparecem na transicao */}
+      <SmokeParticles active={hover} returning={returning} />
+
+      {/* Wrapper parallax 3D — comum aos dois rostos */}
+      <div
+        className="relative h-full w-full"
+        style={{
+          transformStyle: 'preserve-3d',
+          transform: `perspective(1200px) rotateX(${tiltX}deg) rotateY(${tiltY}deg)`,
+          transition: 'transform 0.6s cubic-bezier(.2,.8,.2,1)',
+        }}
+      >
+        {/* ROBOT LAYER */}
+        <div
+          className="morph-layer"
+          style={{
+            opacity: hover ? 0 : 1,
+            transform: hover
+              ? 'scale(0.78) rotate(-3deg)'
+              : returning
+                ? 'scale(1) rotate(0deg)'
+                : 'scale(1) rotate(0deg)',
+            filter: hover ? 'blur(10px) hue-rotate(40deg)' : 'blur(0px) hue-rotate(0deg)',
+            transition:
+              'opacity 0.45s cubic-bezier(.4,0,.2,1), transform 0.6s cubic-bezier(.34,1.56,.64,1), filter 0.45s ease-out',
+            animation: returning ? 'robotMaterialize 0.85s cubic-bezier(.2,.8,.2,1)' : undefined,
+          }}
+        >
+          <RoboticFace3D />
+        </div>
+
+        {/* HUMAN LAYER */}
+        <div
+          className="morph-layer"
+          style={{
+            opacity: hover ? 1 : 0,
+            transform: hover
+              ? 'scale(1) rotate(0deg)'
+              : 'scale(1.1) rotate(2deg)',
+            filter: hover ? 'blur(0px)' : 'blur(8px)',
+            transition:
+              'opacity 0.5s cubic-bezier(.4,0,.2,1) 0.15s, transform 0.7s cubic-bezier(.34,1.56,.64,1) 0.1s, filter 0.5s ease-out 0.1s',
+            pointerEvents: 'none',
+          }}
+        >
+          <HumanFaceClean />
+        </div>
+
+        {/* SCAN OVERLAY — only during return */}
+        {returning && (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background:
+                'linear-gradient(180deg, transparent 0%, rgba(103,232,249,0.6) 50%, transparent 100%)',
+              backgroundSize: '100% 6px',
+              animation: 'robotScanIn 0.85s ease-out forwards',
+              mixBlendMode: 'screen',
+            }}
+          />
+        )}
+      </div>
+
+      {/* Bunny easter egg */}
+      <div
+        className="absolute bottom-[-8px] right-[-12px] z-20"
+        style={{
+          animation: 'bunnyPeek 4s ease-in-out infinite',
+          filter: 'drop-shadow(0 0 16px rgba(167,139,250,0.6))',
+          opacity: hover ? 0.4 : 1,
+          transition: 'opacity 0.4s',
+        }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/auto-edit-logo@128.png"
+          alt=""
+          aria-hidden
+          width={72}
+          height={72}
+          style={{ transform: 'rotate(-8deg)' }}
+        />
+      </div>
+
+      {/* Hint label */}
+      <div
+        className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 z-30"
+        style={{
+          opacity: hover ? 1 : 0.55,
+          transition: 'opacity 0.3s',
+        }}
+      >
+        <span
+          className="mono inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-black/45 px-3 py-1 text-[9.5px] font-bold uppercase tracking-[0.18em] text-white/85 backdrop-blur"
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          {hover ? '◉ humano' : '◉ passe o mouse'}
+        </span>
+      </div>
+
+      <style jsx>{`
+        .morph-layer {
+          position: absolute;
+          inset: 0;
+          width: 100%;
+          height: 100%;
+          will-change: opacity, transform, filter;
+          backface-visibility: hidden;
+        }
+        @keyframes portalExpand {
+          0% { transform: scale(0.6); opacity: 0; }
+          30% { opacity: 1; }
+          100% { transform: scale(1.4); opacity: 0; }
+        }
+        @keyframes robotMaterialize {
+          0% { opacity: 0; transform: scale(0.85) rotate(-5deg); filter: blur(8px) hue-rotate(60deg); }
+          40% { opacity: 0.6; filter: blur(3px) hue-rotate(20deg); }
+          100% { opacity: 1; transform: scale(1) rotate(0deg); filter: blur(0px) hue-rotate(0deg); }
+        }
+        @keyframes robotScanIn {
+          0% { background-position: 0 -120px; opacity: 0; }
+          15% { opacity: 1; }
+          85% { opacity: 1; }
+          100% { background-position: 0 360px; opacity: 0; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/* ---- SmokeParticles — particulas que aparecem na transicao ------- */
+function SmokeParticles({ active, returning }: { active: boolean; returning: boolean }) {
+  const visible = active || returning;
+  // 14 particulas com angulos predeterminados pra parecer uma nuvem realista
+  const particles = Array.from({ length: 14 }, (_, i) => {
+    const angle = (i / 14) * Math.PI * 2 + (i % 2 === 0 ? 0.3 : -0.3);
+    const dist = 60 + (i % 4) * 25;
+    return {
+      key: i,
+      x: Math.cos(angle) * dist,
+      y: Math.sin(angle) * dist * 0.7,
+      size: 28 + (i % 5) * 8,
+      delay: i * 35,
+    };
+  });
+
+  if (!visible) return null;
+
+  return (
+    <div aria-hidden className="pointer-events-none absolute inset-0 z-10">
+      {particles.map((p) => (
+        <span
+          key={p.key}
+          className="absolute left-1/2 top-1/2 rounded-full"
+          style={{
+            width: p.size,
+            height: p.size,
+            marginLeft: -p.size / 2,
+            marginTop: -p.size / 2,
+            background:
+              p.key % 3 === 0
+                ? 'radial-gradient(circle, rgba(103,232,249,0.55), transparent 70%)'
+                : p.key % 3 === 1
+                  ? 'radial-gradient(circle, rgba(232,121,249,0.5), transparent 70%)'
+                  : 'radial-gradient(circle, rgba(167,139,250,0.5), transparent 70%)',
+            filter: 'blur(8px)',
+            animation: `smokePuff 0.9s ease-out ${p.delay}ms forwards`,
+            ['--tx' as string]: `${p.x}px`,
+            ['--ty' as string]: `${p.y}px`,
+          }}
+        />
+      ))}
+      <style jsx>{`
+        @keyframes smokePuff {
+          0% {
+            transform: translate(0, 0) scale(0.3);
+            opacity: 0;
+          }
+          25% {
+            opacity: 1;
+          }
+          100% {
+            transform: translate(var(--tx), var(--ty)) scale(1.4);
+            opacity: 0;
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/* ---- HumanFaceClean — rosto humano UGC estilizado, clean -------- */
+/**
+ * NAO eh o boneco UGC cartoon antigo (que ficou esquisito). Eh um
+ * busto humano estilizado, baixa-poligonais, gradiente quente,
+ * com sombra e iluminacao. Olho aberto sutil, sorriso confiante,
+ * cabelo simples. Para servir de "humano genérico" em contraste
+ * com o ciborgue.
+ */
+function HumanFaceClean() {
+  return (
+    <div
+      className="relative h-full w-full"
+      style={{ animation: 'avFloat 6s ease-in-out infinite' }}
+    >
+      <svg
+        viewBox="0 0 360 400"
+        width="100%"
+        height="100%"
+        className="drop-shadow-[0_30px_60px_rgba(232,121,249,0.4)]"
+        style={{ overflow: 'visible' }}
+      >
+        <defs>
+          {/* Skin warm gradient */}
+          <radialGradient id="hf-skin" cx="50%" cy="42%" r="65%">
+            <stop offset="0%" stopColor="#fce4d4" />
+            <stop offset="55%" stopColor="#e8b89a" />
+            <stop offset="100%" stopColor="#7a4030" />
+          </radialGradient>
+          {/* Hair gradient */}
+          <linearGradient id="hf-hair" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#1a0e1f" />
+            <stop offset="55%" stopColor="#3a2540" />
+            <stop offset="100%" stopColor="#7c4f87" />
+          </linearGradient>
+          {/* Backdrop */}
+          <radialGradient id="hf-bg" cx="50%" cy="55%" r="60%">
+            <stop offset="0%" stopColor="rgba(232,121,249,0.28)" />
+            <stop offset="60%" stopColor="rgba(167,139,250,0.18)" />
+            <stop offset="100%" stopColor="transparent" />
+          </radialGradient>
+          {/* Lip gradient */}
+          <linearGradient id="hf-lip" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#c25a6e" />
+            <stop offset="100%" stopColor="#8a3548" />
+          </linearGradient>
+          <filter id="hf-glow">
+            <feGaussianBlur stdDeviation="3" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+
+        {/* Backdrop */}
+        <circle cx="180" cy="200" r="170" fill="url(#hf-bg)" />
+
+        {/* HUD halo (mantem o estilo do robot) */}
+        <circle
+          cx="180"
+          cy="200"
+          r="158"
+          fill="none"
+          stroke="rgba(232,121,249,0.4)"
+          strokeWidth="1"
+          strokeDasharray="2 18"
+          style={{ animation: 'avRotate 30s linear infinite', transformOrigin: '180px 200px' }}
+        />
+
+        {/* SHOULDERS / bust */}
+        <path
+          d="M 70 380 Q 90 320 130 300 L 230 300 Q 270 320 290 380 Z"
+          fill="#2a1a2e"
+          stroke="rgba(232,121,249,0.4)"
+          strokeWidth="1"
+        />
+        {/* Neck */}
+        <rect x="158" y="260" width="44" height="50" rx="8" fill="url(#hf-skin)" opacity="0.85" />
+
+        {/* HEAD shape — soft oval */}
+        <path
+          d="M 110 195
+             Q 110 130 145 110
+             Q 165 100 180 100
+             Q 195 100 215 110
+             Q 250 130 250 195
+             Q 250 240 230 270
+             Q 210 290 180 290
+             Q 150 290 130 270
+             Q 110 240 110 195 Z"
+          fill="url(#hf-skin)"
+          filter="url(#hf-glow)"
+        />
+
+        {/* Hair — modern, casual swoop */}
+        <path
+          d="M 105 175
+             Q 100 125 140 100
+             Q 170 88 195 92
+             Q 235 100 252 140
+             Q 256 165 252 195
+             Q 246 168 230 156
+             Q 215 152 200 158
+             Q 188 144 170 148
+             Q 148 152 132 168
+             Q 118 178 110 195
+             Q 104 188 105 175 Z"
+          fill="url(#hf-hair)"
+          filter="url(#hf-glow)"
+        />
+
+        {/* Hair side strand */}
+        <path
+          d="M 108 178 Q 102 220 110 252 Q 114 230 116 208 Q 116 192 108 178 Z"
+          fill="url(#hf-hair)"
+          opacity="0.95"
+        />
+
+        {/* Cheek light blush */}
+        <ellipse cx="135" cy="220" rx="13" ry="7" fill="rgba(232,121,249,0.35)" />
+        <ellipse cx="225" cy="220" rx="13" ry="7" fill="rgba(232,121,249,0.35)" />
+
+        {/* Eyebrow left */}
+        <path
+          d="M 138 175 Q 148 169 162 173"
+          stroke="#1a0e1f"
+          strokeWidth="3"
+          fill="none"
+          strokeLinecap="round"
+        />
+        {/* Eyebrow right */}
+        <path
+          d="M 198 173 Q 212 169 222 175"
+          stroke="#1a0e1f"
+          strokeWidth="3"
+          fill="none"
+          strokeLinecap="round"
+        />
+
+        {/* Eye left — open with iris (animated blink) */}
+        <g style={{ animation: 'hfBlink 5s ease-in-out infinite' }}>
+          <ellipse cx="150" cy="190" rx="8" ry="4.5" fill="#fff" />
+          <circle cx="150" cy="190" r="3.5" fill="#3a2540" />
+          <circle cx="150" cy="190" r="1.8" fill="#0a0612" />
+          <circle cx="151.2" cy="188.8" r="0.9" fill="#fff" />
+        </g>
+
+        {/* Eye right */}
+        <g style={{ animation: 'hfBlink 5s ease-in-out infinite' }}>
+          <ellipse cx="210" cy="190" rx="8" ry="4.5" fill="#fff" />
+          <circle cx="210" cy="190" r="3.5" fill="#3a2540" />
+          <circle cx="210" cy="190" r="1.8" fill="#0a0612" />
+          <circle cx="211.2" cy="188.8" r="0.9" fill="#fff" />
+        </g>
+
+        {/* Nose subtle */}
+        <path
+          d="M 178 205 Q 175 222 178 235 Q 182 237 184 233"
+          stroke="rgba(122,64,48,0.5)"
+          strokeWidth="1.6"
+          fill="none"
+          strokeLinecap="round"
+        />
+        {/* Nose tip shadow */}
+        <ellipse cx="180" cy="236" rx="6" ry="2" fill="rgba(122,64,48,0.25)" />
+
+        {/* MOUTH — animated speaking (subtle morph) */}
+        <g style={{ animation: 'hfMouth 0.9s ease-in-out infinite', transformOrigin: '180px 255px' }}>
+          {/* Lower lip darker */}
+          <path
+            d="M 158 258
+               Q 168 254 180 256
+               Q 192 254 202 258
+               Q 200 268 180 270
+               Q 160 268 158 258 Z"
+            fill="url(#hf-lip)"
+          />
+          {/* Upper lip */}
+          <path
+            d="M 158 256
+               Q 165 250 175 252
+               Q 180 246 185 252
+               Q 195 250 202 256
+               Q 192 254 180 256
+               Q 168 254 158 256 Z"
+            fill="url(#hf-lip)"
+            opacity="0.9"
+          />
+          {/* teeth hint */}
+          <rect x="170" y="257" width="20" height="2.5" rx="0.8" fill="#fff" opacity="0.85" />
+          {/* lip highlight */}
+          <path
+            d="M 170 256 Q 180 254 190 256"
+            stroke="rgba(255,200,210,0.5)"
+            strokeWidth="0.6"
+            fill="none"
+          />
+        </g>
+
+        {/* Chin shadow */}
+        <ellipse cx="180" cy="282" rx="32" ry="5" fill="rgba(122,64,48,0.18)" />
+
+        {/* Earring sparkle */}
+        <circle cx="116" cy="220" r="2" fill="#fff" opacity="0.9" />
+        <circle cx="244" cy="220" r="2" fill="#fff" opacity="0.9" />
+
+        {/* Audio waveform outside (sound) */}
+        <g
+          transform="translate(180 332)"
+          style={{ animation: 'avWaveOpacity 2s ease-in-out infinite' }}
+        >
+          {Array.from({ length: 13 }).map((_, i) => {
+            const offset = i - 6;
+            return (
+              <rect
+                key={i}
+                x={offset * 9 - 1.5}
+                y="-8"
+                width="3"
+                height="16"
+                rx="1.5"
+                fill="#e879f9"
+                style={{
+                  animation: `avWave 0.6s ease-in-out ${i * 0.08}s infinite alternate`,
+                  transformOrigin: 'center',
+                  filter: 'drop-shadow(0 0 4px rgba(232,121,249,0.6))',
+                }}
+              />
+            );
+          })}
+        </g>
+
+        {/* HUD txt */}
+        <g fontFamily="monospace" fontSize="8" fill="rgba(232,121,249,0.7)">
+          <text x="60" y="350">[ HUMAN · MODE ]</text>
+          <text x="60" y="362">SYNC IDLE</text>
+        </g>
+        <g fontFamily="monospace" fontSize="8" fill="rgba(167,139,250,0.7)">
+          <text x="232" y="350">[ READY · TO TALK ]</text>
+          <text x="232" y="362">FPS 32</text>
+        </g>
+      </svg>
+
+      <style jsx>{`
+        @keyframes hfBlink {
+          0%, 92%, 100% { transform: scaleY(1); transform-origin: center; }
+          95% { transform: scaleY(0.1); }
+        }
+        @keyframes hfMouth {
+          0%, 100% { transform: scaleY(1) scaleX(1); }
+          25% { transform: scaleY(1.18) scaleX(0.92); }
+          50% { transform: scaleY(0.85) scaleX(1.05); }
+          75% { transform: scaleY(1.1) scaleX(0.96); }
         }
       `}</style>
     </div>

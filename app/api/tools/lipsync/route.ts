@@ -1,13 +1,26 @@
 /**
- * /api/tools/lipsync — gera lipsync via fal-ai/latentsync.
+ * /api/tools/lipsync — gera lipsync com 2 motores:
  *
- * Aceita parametros customizaveis pelo usuario admin:
- *   - guidance_scale (1.0-4.0, default 2.5) — quanto a boca segue o audio
- *   - loop_mode ('loop' | 'pingpong', default 'loop') — quando audio > video
- *   - seed (numero, opcional) — reproduzir resultado
+ *   V1 = fal-ai/sync-lipsync/v2 (modelo lipsync-1.9.0-beta)
+ *        Tech do DreamFace. Boca super natural, melhor pra rostos
+ *        humanos reais. Params: model, sync_mode.
  *
- * O timeout no Hobby Vercel eh 60s; lipsync demora 60-180s.
- * Por isso, configurado pro plano Pro (maxDuration=300).
+ *   V2 = fal-ai/latentsync (atual). ByteDance LatentSync.
+ *        Mais agressivo no sync, melhor pra closeups. Params:
+ *        guidance_scale, loop_mode, seed.
+ *
+ * Body aceito:
+ *   {
+ *     version: 'v1' | 'v2',
+ *     video_url: string,
+ *     audio_url: string,
+ *     // V1 only:
+ *     sync_mode_v1?: 'cut_off' | 'loop' | 'bounce' | 'silence' | 'remap',
+ *     // V2 only:
+ *     guidance_scale?: number (1-4),
+ *     loop_mode?: 'loop' | 'pingpong',
+ *     seed?: number,
+ *   }
  */
 
 import { NextResponse } from 'next/server';
@@ -21,7 +34,7 @@ fal.config({
   credentials: process.env.FAL_KEY,
 });
 
-interface LatentSyncResultData {
+interface LipSyncResultData {
   video?: {
     url?: string;
     content_type?: string;
@@ -31,9 +44,15 @@ interface LatentSyncResultData {
   video_url?: string;
 }
 
+type Version = 'v1' | 'v2';
+
 interface LipSyncBody {
+  version?: Version;
   video_url?: string;
   audio_url?: string;
+  // v1
+  sync_mode_v1?: 'cut_off' | 'loop' | 'bounce' | 'silence' | 'remap';
+  // v2
   guidance_scale?: number;
   loop_mode?: 'loop' | 'pingpong';
   seed?: number;
@@ -41,6 +60,10 @@ interface LipSyncBody {
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(Math.max(n, lo), hi);
+}
+
+function extractOutputUrl(data: LipSyncResultData | undefined): string | null {
+  return data?.video?.url ?? data?.video_url ?? null;
 }
 
 export async function POST(req: Request) {
@@ -69,39 +92,64 @@ export async function POST(req: Request) {
     );
   }
 
-  const guidanceScale =
-    typeof body.guidance_scale === 'number' ? clamp(body.guidance_scale, 1, 4) : 2.5;
-  const loopMode: 'loop' | 'pingpong' =
-    body.loop_mode === 'pingpong' ? 'pingpong' : 'loop';
-  const seed = typeof body.seed === 'number' && Number.isFinite(body.seed) ? body.seed : undefined;
+  const version: Version = body.version === 'v2' ? 'v2' : 'v1';
 
   try {
-    const input: {
-      video_url: string;
-      audio_url: string;
-      guidance_scale: number;
-      loop_mode: 'loop' | 'pingpong';
-      seed?: number;
-    } = {
-      video_url,
-      audio_url,
-      guidance_scale: guidanceScale,
-      loop_mode: loopMode,
-    };
-    if (seed !== undefined) input.seed = seed;
+    let result;
+    let modelLabel: string;
 
-    const result = await fal.subscribe('fal-ai/latentsync', {
-      input,
-      logs: false,
-    });
+    if (version === 'v1') {
+      // V1: Sync.so V2 (lipsync-1.9.0-beta) — DreamFace tech
+      const syncMode = body.sync_mode_v1 ?? 'cut_off';
+      const input = {
+        video_url,
+        audio_url,
+        model: 'lipsync-1.9.0-beta' as const,
+        sync_mode: syncMode,
+      };
+      result = await fal.subscribe('fal-ai/sync-lipsync/v2', {
+        input,
+        logs: false,
+      });
+      modelLabel = 'sync-lipsync/v2 (1.9.0-beta)';
+    } else {
+      // V2: LatentSync ByteDance
+      const guidanceScale =
+        typeof body.guidance_scale === 'number' ? clamp(body.guidance_scale, 1, 4) : 2.5;
+      const loopMode: 'loop' | 'pingpong' =
+        body.loop_mode === 'pingpong' ? 'pingpong' : 'loop';
+      const seed =
+        typeof body.seed === 'number' && Number.isFinite(body.seed) ? body.seed : undefined;
 
-    const data = result.data as LatentSyncResultData | undefined;
-    const outputUrl = data?.video?.url ?? data?.video_url ?? null;
+      const input: {
+        video_url: string;
+        audio_url: string;
+        guidance_scale: number;
+        loop_mode: 'loop' | 'pingpong';
+        seed?: number;
+      } = {
+        video_url,
+        audio_url,
+        guidance_scale: guidanceScale,
+        loop_mode: loopMode,
+      };
+      if (seed !== undefined) input.seed = seed;
+
+      result = await fal.subscribe('fal-ai/latentsync', {
+        input,
+        logs: false,
+      });
+      modelLabel = 'latentsync';
+    }
+
+    const data = result.data as LipSyncResultData | undefined;
+    const outputUrl = extractOutputUrl(data);
 
     if (!outputUrl) {
       return NextResponse.json(
         {
           error: 'Fal.ai nao retornou URL do video gerado.',
+          model: modelLabel,
           details: result.data,
         },
         { status: 502 },
@@ -110,15 +158,16 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
+      version,
+      model: modelLabel,
       output_video_url: outputUrl,
-      params: { guidance_scale: guidanceScale, loop_mode: loopMode, seed },
       details: result.data,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error('[lipsync API]', message);
+    console.error('[lipsync API]', version, message);
     return NextResponse.json(
-      { error: message || 'Erro interno.' },
+      { error: message || 'Erro interno.', version },
       { status: 500 },
     );
   }
