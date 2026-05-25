@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
+import { ToolHero3D } from '@/components/ToolHero3D';
 import { BatchFileUpload } from '@/components/BatchFileUpload';
 import { CancelButton } from '@/components/CancelButton';
 import { useToolState } from '@/components/ToolsStateProvider';
@@ -408,13 +409,31 @@ function RemoverElementosInner() {
   const motorOnline = server.state === 'online' && server.ready;
 
   return (
-    <ToolShell
-      title="Smart Remover"
-      eyebrow="VÍDEO COM IA"
-      description="Remove legenda e marca d’água sem deixar borrão. A IA reconstrói o fundo."
-      hue="rgba(244,114,182,0.45)"
-      icon={<IconRemoverElementos size={56} />}
-    >
+    <div className="mx-auto w-full max-w-[1200px] px-5 pt-6 md:px-8 md:pt-8">
+      <ToolHero3D
+        eyebrow="VÍDEO LIMPO · IA LOCAL"
+        eyebrow2="ZERO CRÉDITO · 100% OFFLINE"
+        title="Smart Remover"
+        subtitle={
+          <>
+            Limpa legenda queimada e marca d&apos;água.{' '}
+            <span className="font-semibold text-white">A IA reconstrói o fundo</span> — sem borrão, sem mancha, sem censura barata.
+          </>
+        }
+        tint="fuchsia"
+        pipeline={[
+          { icon: '🎥', label: 'Vídeo', sub: 'MP4 com legenda', tone: 'text-text-muted' },
+          { icon: '👁', label: 'Detecta', sub: 'Frame a frame', tone: 'text-fuchsia-300' },
+          { icon: '🩹', label: 'Inpaint', sub: 'Reconstrói fundo', tone: 'text-pink-300' },
+          { icon: '✨', label: 'Limpo', sub: 'Mesma cena', tone: 'text-lime' },
+        ]}
+        stats={[
+          { value: 'Local', label: 'no seu PC' },
+          { value: 'Batch', label: 'vários ao mesmo tempo' },
+          { value: 'MP4', label: 'sai pronto' },
+        ]}
+      />
+      <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
       <div className="flex flex-col gap-6">
         {/* === BANNER UNICO — zero-config (sem pareamento manual) === */}
         {motorOnline ? (
@@ -689,7 +708,8 @@ function RemoverElementosInner() {
           </ul>
         ) : null}
       </div>
-    </ToolShell>
+      </div>
+    </div>
   );
 }
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo } from 'react';
 import { ToolShell } from '@/components/ToolShell';
+import { ToolHero3D } from '@/components/ToolHero3D';
 import { FileUpload } from '@/components/FileUpload';
 import { CostHint } from '@/components/CostHint';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
@@ -283,13 +284,31 @@ function DecupagemCopyInner() {
   }
 
   return (
-    <ToolShell
-      title="Smart Decup"
-      eyebrow="VÍDEO COM IA"
-      description="Decupa o vídeo seguindo a sua copy. A IA escolhe a melhor take de cada frase e monta tudo na ordem certa."
-      hue={HUE}
-      icon={<IconDecupageCopy size={56} />}
-    >
+    <div className="mx-auto w-full max-w-[1200px] px-5 pt-6 md:px-8 md:pt-8">
+      <ToolHero3D
+        eyebrow="WHISPER · DECUPAGEM INTELIGENTE"
+        eyebrow2="A IA MONTA POR VOCÊ"
+        title="Smart Decup"
+        subtitle={
+          <>
+            Manda o vídeo bruto + a copy final.{' '}
+            <span className="font-semibold text-white">A IA escolhe a melhor take de cada frase</span> e monta tudo na ordem certa — você só revisa e exporta.
+          </>
+        }
+        tint="fuchsia"
+        pipeline={[
+          { icon: '🎞', label: 'Vídeo bruto', sub: 'Todas as takes', tone: 'text-text-muted' },
+          { icon: '📝', label: 'Copy final', sub: 'O texto certo', tone: 'text-fuchsia-300' },
+          { icon: '🧠', label: 'Whisper + IA', sub: 'Match por frase', tone: 'text-violet' },
+          { icon: '✂', label: 'Timeline', sub: 'Cortes prontos', tone: 'text-lime' },
+        ]}
+        stats={[
+          { value: '~2min', label: 'pra processar' },
+          { value: 'XML', label: 'pro Premiere' },
+          { value: 'MP4', label: 'pré-cortado' },
+        ]}
+      />
+      <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
       <div className="flex flex-col gap-5">
         <MissingKeyBanner services={['groq']} />
 
@@ -504,6 +523,7 @@ function DecupagemCopyInner() {
           </div>
         ) : null}
       </div>
-    </ToolShell>
+      </div>
+    </div>
   );
 }

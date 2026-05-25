@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ToolShell } from '@/components/ToolShell';
+import { ToolHero3D } from '@/components/ToolHero3D';
 import { JobControlPanel } from '@/components/JobControlPanel';
 import { CancelButton } from '@/components/CancelButton';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
@@ -37,7 +37,6 @@ import {
   type VoiceOption,
   type ClonedVoice,
 } from '@/components/HeyGenVoicePicker';
-import { IconHeyGenAuto } from '@/components/ToolIcons';
 import { TierGate } from '@/components/TierGate';
 
 /**
@@ -809,13 +808,31 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
 
   return (
     <>
-      <ToolShell
-        title="HeyGen Auto"
-        eyebrow="VÍDEO COM IA"
-        description="Cola o roteiro ou os áudios, recebe o vídeo do seu avatar falando tudo na ordem certa."
-        hue="rgba(103,232,249,0.45)"
-        icon={<IconHeyGenAuto size={56} />}
-      >
+      <div className="mx-auto w-full max-w-[1200px] px-5 pt-6 md:px-8 md:pt-8">
+        <ToolHero3D
+          eyebrow="HEYGEN · LIPSYNC EM SÉRIE"
+          eyebrow2="DISPARA · DORME · ACORDA PRONTO"
+          title="HeyGen Auto"
+          subtitle={
+            <>
+              Cola roteiro ou áudios.{' '}
+              <span className="font-semibold text-white">Seu avatar fala tudo na ordem certa</span>, sem você abrir o HeyGen pra clicar &ldquo;Generate&rdquo; cinquenta vezes.
+            </>
+          }
+          tint="cyan"
+          pipeline={[
+            { icon: '📜', label: 'Roteiro', sub: 'Texto ou áudios', tone: 'text-text-muted' },
+            { icon: '🤖', label: 'Avatar', sub: 'Da sua biblioteca', tone: 'text-cyan-300' },
+            { icon: '🎙', label: 'Lipsync', sub: 'HeyGen em fila', tone: 'text-violet' },
+            { icon: '🎞', label: 'MP4 final', sub: 'Pronto pra edição', tone: 'text-lime' },
+          ]}
+          stats={[
+            { value: '2×', label: 'em paralelo' },
+            { value: 'Fila', label: 'recupera após queda' },
+            { value: 'ZIP', label: 'entrega organizada' },
+          ]}
+        />
+        <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
           {/* Controle de jobs HeyGen (Retomar/Pausar/Debug) — funciona
               mesmo sem ter vindo do ClickUp Pilot */}
           <div className="mb-5">
@@ -1588,7 +1605,8 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
               </div>
             ) : null}
           </div>
-      </ToolShell>
+        </div>
+      </div>
     </>
   );
 }

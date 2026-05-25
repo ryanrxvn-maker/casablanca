@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { ToolShell } from '@/components/ToolShell';
+import { ToolHero3D } from '@/components/ToolHero3D';
 import { CostHint } from '@/components/CostHint';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { estimateTrocaProduto } from '@/lib/cost-estimator';
@@ -9,7 +9,7 @@ import { useToolState } from '@/components/ToolsStateProvider';
 import { getFFmpeg } from '@/lib/ffmpeg-worker';
 import { fetchFile } from '@ffmpeg/util';
 import { ToolStep, ToolAction } from '@/components/tool-kit';
-import { IconTrocaProduto, IconStepSwap, IconStepMic, IconStepPipeline } from '@/components/ToolIcons';
+import { IconStepSwap, IconStepMic, IconStepPipeline } from '@/components/ToolIcons';
 import { TierGate } from '@/components/TierGate';
 
 const HUE = 'rgba(244,114,182,0.45)';
@@ -307,13 +307,31 @@ function TrocaProdutoInner() {
   const busy = stage !== 'idle' && stage !== 'done' && stage !== 'error';
 
   return (
-    <ToolShell
-      title="Troca de produto"
-      eyebrow="ÁUDIO COM IA"
-      description="Substitui o produto do áudio. A voz original continua igual."
-      hue={HUE}
-      icon={<IconTrocaProduto size={56} />}
-    >
+    <div className="mx-auto w-full max-w-[1200px] px-5 pt-6 md:px-8 md:pt-8">
+      <ToolHero3D
+        eyebrow="ELEVENLABS · TROCA DE PRODUTO"
+        eyebrow2="MESMA VOZ · MESMO TIMING"
+        title="Troca de Produto"
+        subtitle={
+          <>
+            Substitui o nome do produto no áudio.{' '}
+            <span className="font-semibold text-white">A voz original continua exatamente igual</span> — clonagem instantânea + dublagem nas mesmas marcações.
+          </>
+        }
+        tint="pink"
+        pipeline={[
+          { icon: '🎤', label: 'Áudio', sub: 'Original', tone: 'text-text-muted' },
+          { icon: '🧠', label: 'Detecta', sub: 'AssemblyAI', tone: 'text-cyan-300' },
+          { icon: '🪞', label: 'Clona voz', sub: 'ElevenLabs IVC', tone: 'text-pink-300' },
+          { icon: '🎬', label: 'MP3 final', sub: 'Mesmo timing', tone: 'text-lime' },
+        ]}
+        stats={[
+          { value: '~3min', label: 'por áudio' },
+          { value: '1×', label: 'clonagem voz' },
+          { value: 'MP3', label: 'pronto pro corte' },
+        ]}
+      />
+      <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
       <div className="grid gap-5">
         <MissingKeyBanner services={['assemblyai', 'elevenlabs']} />
 
@@ -554,7 +572,8 @@ function TrocaProdutoInner() {
           </section>
         )}
       </div>
-    </ToolShell>
+      </div>
+    </div>
   );
 }
 
