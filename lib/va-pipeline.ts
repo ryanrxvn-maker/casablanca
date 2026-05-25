@@ -244,47 +244,74 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
     : new Blob([input.adVideoBytes as BlobPart], { type: 'video/mp4' });
   const rawAudioBlob = await extractAudio(adVideoBlob);
 
-  // 1.5. Voice isolation — CRITICO pra lipsync limpo (sem musica/SFX/ruido)
-  // Default true + mode 'aggressive' (denoise pesado pra ADs com musica forte).
-  // Pra desligar (debug): useVoiceIsolation:false. Pra modo conservador: voiceIsolatorMode:'auto'.
+  // 1.5. Voice isolation — OBRIGATORIO pra VA (sem musica/SFX/ruido).
+  //
+  // CRITICAL: user reportou 2026-05-25 que voz ia COM trilha sonora pro HeyGen.
+  // Causa: try/catch silencioso permitia audio raw passar adiante quando
+  // isolation falhava. Agora:
+  //   1. Isolation SEMPRE roda (useVoiceIsolation:false → ainda roda + warning)
+  //   2. 1 retry em modo mais agressivo se falhar primeira tentativa
+  //   3. Se AMBAS falharem → ABORTA pipeline (erro hard)
+  //   4. Validação: blob isolado tem que ter tamanho > 1KB (não pode ser vazio)
   const useVoiceIsolation = input.useVoiceIsolation !== false;
-  let audioBlob: Blob = rawAudioBlob;
-  if (useVoiceIsolation) {
-    // VA tem musica de fundo quase SEMPRE. Default 'aggressive' = afftdn pesado +
-    // compand agressivo + center extraction quando stereo. Se user sobrescrever,
-    // respeita.
-    const isolatorMode = input.voiceIsolatorMode ?? 'aggressive';
+  if (!useVoiceIsolation) {
+    console.warn('[va-pipeline] useVoiceIsolation=false IGNORADO — VA exige audio limpo. Forçando isolation.');
+  }
+  let audioBlob: Blob;
+  const isolatorMode = input.voiceIsolatorMode ?? 'aggressive';
+  progress({
+    stage: 'isolate_voice',
+    message: `Isolando voz (modo ${isolatorMode}) — obrigatório p/ VA limpa...`,
+    percent: 10,
+  });
+
+  async function tryIsolate(mode: VoiceIsolatorMode): Promise<Blob> {
+    const out = await isolateVoice(rawAudioBlob, {
+      mode,
+      format: 'wav',
+      onProgress: (p) => {
+        progress({
+          stage: 'isolate_voice',
+          message: `Isolando voz · ${mode} · ${Math.round(p.ratio * 100)}%`,
+          percent: 10 + Math.round(p.ratio * 4),
+        });
+      },
+    });
+    if (!out || out.size < 1024) {
+      throw new Error(`isolation retornou blob inválido (${out?.size ?? 0} bytes)`);
+    }
+    return out;
+  }
+
+  try {
+    audioBlob = await tryIsolate(isolatorMode);
     progress({
       stage: 'isolate_voice',
-      message: `Isolando voz (modo ${isolatorMode})...`,
-      percent: 10,
+      message: `Voz isolada (${isolatorMode}) — HeyGen vai receber audio limpo.`,
+      percent: 14,
+    });
+  } catch (e1) {
+    // Retry com modo mais agressivo
+    console.warn('[va-pipeline] isolation falhou (primeira), tentando aggressive:', e1);
+    progress({
+      stage: 'isolate_voice',
+      message: 'Primeira tentativa falhou — re-tentando com filtro mais pesado...',
+      percent: 12,
     });
     try {
-      audioBlob = await isolateVoice(rawAudioBlob, {
-        mode: isolatorMode,
-        format: 'wav',
-        onProgress: (p) => {
-          progress({
-            stage: 'isolate_voice',
-            message: `Isolando voz · ${isolatorMode} · ${Math.round(p.ratio * 100)}%`,
-            percent: 10 + Math.round(p.ratio * 4),
-          });
-        },
-      });
+      audioBlob = await tryIsolate('aggressive');
       progress({
         stage: 'isolate_voice',
-        message: `Voz isolada (${isolatorMode}) — lipsync vai usar audio limpo.`,
+        message: 'Voz isolada (retry aggressive) — HeyGen vai receber audio limpo.',
         percent: 14,
       });
-    } catch (e) {
-      // Se isolation falhar, NAO aborta: usa audio raw com warning.
-      console.warn('[va-pipeline] voice isolation falhou, usando audio raw:', e);
-      progress({
-        stage: 'isolate_voice',
-        message: 'Voice isolation falhou — seguindo com audio raw (lipsync pode ficar misturado).',
-        percent: 14,
-      });
-      audioBlob = rawAudioBlob;
+    } catch (e2) {
+      // ABORTA — NÃO pode mandar audio com trilha pro HeyGen
+      const msg = (e2 as Error)?.message || String(e2);
+      throw new Error(
+        `Voice isolation falhou 2x — NÃO podemos mandar audio com trilha pro HeyGen. ` +
+        `Erro: ${msg}. Tenta recarregar a página (ffmpeg-wasm) e disparar de novo.`,
+      );
     }
   }
 

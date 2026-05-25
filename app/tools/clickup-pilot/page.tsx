@@ -3556,6 +3556,16 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         return { avaCode: av.avaCode, avatarId: choice.id, avatarName: choice.name };
       });
 
+      // Map de avaCode → voiceId (Mirror Voice escolhido pelo user).
+      // CRITICAL: ate 2026-05-25, vaVoiceChoice era salvo mas IGNORADO no
+      // dispatch → HeyGen usava voz default do avatar (= voz original do AD).
+      // Fix: ler aqui + passar no closure pra dispatchAudioTake usar.
+      const voiceByAva: Record<string, string | null> = {};
+      for (const av of va.avatares) {
+        const choice = vaVoiceChoice[`${taskId}:${av.avaCode}`];
+        voiceByAva[av.avaCode] = choice?.id || null;
+      }
+
       const pipeRes = await runVAPipeline({
         baseAdId: va.baseAdId.replace(/\s+/g, ''),
         adVideoBytes: dl.bytes,
@@ -3565,16 +3575,24 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: p.stage, percent: p.percent, message: p.message } }));
         },
         // === VA DE AVATAR: API processJob (Quick Create) + Voice Mirroring ===
-        // Mesmo fluxo de task normal (que JA FUNCIONA), com 2 diferencas:
-        //   1. voiceMirroring: true → avatar fala com a propria voz
+        // Mesmo fluxo de task normal (que JA FUNCIONA), com 3 diferencas:
+        //   1. voiceMirroring: true → avatar fala com voz selecionada
         //      (equivalente ao checkbox "Voice Mirroring" do Quick Create)
-        //   2. Output mantem timing exato do audio original — NUNCA
+        //   2. voiceId: id da voz escolhida em CompactVoiceSelector — sem
+        //      isso, HeyGen usa voz default do avatar (= voz do AD original
+        //      via audio uploaded). COM voiceId, HeyGen sintetiza com a voz.
+        //   3. Output mantem timing exato do audio original — NUNCA
         //      decupa. Concat na ordem = video final 1:1 com o AD.
-        // Studio cena-por-cena foi abandonado: dispara paywall e
-        // requer Pro plan pra esses avatares custom.
         dispatchAudioTake: async ({ avatarId, audioBytes, audioFilename, label }) => {
           const { processJob } = await import('@/lib/heygen-api-direct');
           const file = new File([audioBytes as BlobPart], audioFilename || `${label}.wav`, { type: 'audio/wav' });
+          // Descobre o avaCode pelo avatarId pra puxar a voz certa
+          const avFromId = va.avatares.find((a) => {
+            const c = vaAvatarChoice[`${taskId}:${a.avaCode}`];
+            return c?.id === avatarId;
+          });
+          const voiceId = avFromId ? voiceByAva[avFromId.avaCode] : null;
+          console.log(`[VA dispatch ${label}] avatarId=${avatarId} voiceId=${voiceId || '(default)'}`);
           const job = await processJob({
             file,
             avatarId,
@@ -3582,6 +3600,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             engine: 'iii',
             orientation: 'portrait',
             voiceMirroring: true, // ← KEY: VA usa Voice Mirroring sempre
+            voiceId: voiceId || undefined, // ← FIX 2026-05-25: passa voz selecionada
           }, {
             onProgress: (stage: string) => {
               console.log(`[VA dispatch ${label}] ${stage}`);
