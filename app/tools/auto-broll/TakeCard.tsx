@@ -168,6 +168,7 @@ export function TakeCard({ take, position, total }: Props) {
       <div className="relative mx-3 mb-3 aspect-[9/16] overflow-hidden rounded-[10px] border border-line bg-black">
         {videoUrl ? (
           <>
+            {/* Video poster — clique abre modal fullscreen */}
             <video
               ref={videoRef}
               src={videoUrl}
@@ -176,14 +177,13 @@ export function TakeCard({ take, position, total }: Props) {
               playsInline
               muted
               loop
-              className="absolute inset-0 h-full w-full cursor-zoom-in object-cover"
-              onClick={openExpanded}
+              className="pointer-events-none absolute inset-0 h-full w-full object-cover"
             />
-            {/* Play+Expand overlay — clique abre modal grande direto */}
+            {/* Click target gigante = todo o video. Abre modal. */}
             <button
               type="button"
               onClick={openExpanded}
-              className="absolute inset-0 flex cursor-zoom-in items-center justify-center transition-opacity"
+              className="absolute inset-0 flex cursor-zoom-in items-center justify-center"
               aria-label="Assistir em tela maior"
             >
               <span
@@ -191,8 +191,8 @@ export function TakeCard({ take, position, total }: Props) {
                 style={{ boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
               >
                 <svg
-                  width="24"
-                  height="24"
+                  width="26"
+                  height="26"
                   viewBox="0 0 24 24"
                   fill="currentColor"
                   className="text-white group-hover:text-black"
@@ -201,26 +201,25 @@ export function TakeCard({ take, position, total }: Props) {
                   <path d="M8 5v14l11-7z" />
                 </svg>
               </span>
-              {/* Hint "Expandir" no hover */}
-              <span
-                className="mono pointer-events-none absolute bottom-3 right-3 flex items-center gap-1 rounded-full bg-black/70 px-2 py-1 text-[9px] font-bold uppercase tracking-widest text-white opacity-0 backdrop-blur transition-opacity duration-300 group-hover:opacity-100"
-                style={{ fontFamily: 'var(--font-tech)' }}
-              >
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
-                </svg>
-                Expandir
-              </span>
             </button>
-            {/* Top-right download button (apenas, sem expand separado pra não confundir) */}
-            <div
-              className={
-                'pointer-events-auto absolute right-2 top-2 transition-all duration-300 ' +
-                (hovered || downloading
-                  ? 'translate-y-0 opacity-100'
-                  : '-translate-y-1 opacity-0 group-hover:translate-y-0 group-hover:opacity-100')
-              }
-            >
+            {/* Top-right: 2 icones SO (sempre visiveis em mobile, fade-in no hover desktop) */}
+            <div className="pointer-events-auto absolute right-1.5 top-1.5 z-20 flex items-center gap-1.5">
+              {/* Expand icon */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openExpanded();
+                }}
+                aria-label="Expandir"
+                title="Expandir"
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-white/25 bg-black/65 text-white backdrop-blur-md transition-all hover:scale-110 hover:border-white/70 hover:bg-black/85 active:scale-95"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                </svg>
+              </button>
+              {/* Download icon */}
               <button
                 type="button"
                 onClick={(e) => {
@@ -228,26 +227,18 @@ export function TakeCard({ take, position, total }: Props) {
                   downloadOne();
                 }}
                 disabled={downloading}
-                className="flex items-center gap-1.5 rounded-full border border-emerald-500/60 bg-emerald-500/95 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white shadow-[0_4px_12px_rgba(16,185,129,0.55)] transition-all hover:scale-105 disabled:opacity-60"
-                style={{ fontFamily: 'var(--font-tech)' }}
+                aria-label="Baixar MP4"
                 title="Baixar MP4"
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-emerald-500/70 bg-emerald-500/95 text-white shadow-[0_4px_14px_rgba(16,185,129,0.5)] transition-all hover:scale-110 hover:bg-emerald-400 active:scale-95 disabled:opacity-60"
               >
                 {downloading ? (
-                  <>⏳ Baixando</>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin">
+                    <circle cx="12" cy="12" r="10" strokeDasharray="32 32" />
+                  </svg>
                 ) : (
-                  <>
-                    <svg
-                      width="10"
-                      height="10"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="3"
-                    >
-                      <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
-                    </svg>
-                    MP4
-                  </>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
+                  </svg>
                 )}
               </button>
             </div>
