@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useTier, tierAllowsTool, tierCanAutomate } from '@/lib/use-tier';
@@ -377,13 +377,112 @@ function PromoBanner({
   tier: 'free' | 'basic' | 'pro' | 'admin' | null;
   isAdmin: boolean;
 }) {
-  // "Iniciar automação" só liberado pra Pro ou admin
   const canStartAutomation = isAdmin || tierCanAutomate(tier);
   return (
+    <PromoCarousel
+      slides={[
+        <PilotSlide key="pilot" canStartAutomation={canStartAutomation} />,
+        <AutoBrollSlide key="broll" canStartAutomation={canStartAutomation} />,
+      ]}
+    />
+  );
+}
+
+/* ────────── CAROUSEL WRAPPER ────────── */
+function PromoCarousel({ slides }: { slides: React.ReactNode[] }) {
+  const [idx, setIdx] = useState(0);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+
+  function go(n: number) {
+    const safe = ((n % slides.length) + slides.length) % slides.length;
+    setIdx(safe);
+    const el = scrollerRef.current;
+    if (el) {
+      const w = el.clientWidth;
+      el.scrollTo({ left: w * safe, behavior: 'smooth' });
+    }
+  }
+
+  function onScroll() {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const w = el.clientWidth;
+    const i = Math.round(el.scrollLeft / w);
+    if (i !== idx) setIdx(i);
+  }
+
+  return (
+    <div className="relative fade-in-up" style={{ animationDelay: '80ms' }}>
+      <div
+        ref={scrollerRef}
+        onScroll={onScroll}
+        className="hide-scrollbar flex snap-x snap-mandatory overflow-x-auto scroll-smooth"
+        style={{ scrollbarWidth: 'none' }}
+      >
+        {slides.map((s, i) => (
+          <div key={i} className="w-full shrink-0 snap-center">
+            {s}
+          </div>
+        ))}
+      </div>
+
+      {/* Arrows */}
+      {slides.length > 1 && (
+        <>
+          <button
+            type="button"
+            aria-label="Anterior"
+            onClick={() => go(idx - 1)}
+            className="absolute left-2 top-1/2 z-10 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/50 text-white backdrop-blur-md transition-all hover:scale-110 hover:border-white/60 hover:bg-black/80 md:flex"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M15 6l-6 6 6 6" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            aria-label="Próximo"
+            onClick={() => go(idx + 1)}
+            className="absolute right-2 top-1/2 z-10 hidden h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/50 text-white backdrop-blur-md transition-all hover:scale-110 hover:border-white/60 hover:bg-black/80 md:flex"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M9 6l6 6-6 6" />
+            </svg>
+          </button>
+        </>
+      )}
+
+      {/* Dots */}
+      <div className="mt-3 flex items-center justify-center gap-2">
+        {slides.map((_, i) => (
+          <button
+            key={i}
+            type="button"
+            onClick={() => go(i)}
+            aria-label={`Ir pro card ${i + 1}`}
+            className={
+              'h-1.5 rounded-full transition-all duration-300 ' +
+              (i === idx ? 'w-8 bg-lime shadow-[0_0_8px_rgba(200,255,0,0.6)]' : 'w-1.5 bg-white/30 hover:bg-white/60')
+            }
+          />
+        ))}
+      </div>
+
+      <style jsx>{`
+        .hide-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/* ────────── SLIDE 1: PILOT ────────── */
+function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
+  return (
     <div
-      className="promo-banner group relative overflow-hidden rounded-[26px] border border-line/60 fade-in-up"
+      className="promo-banner group relative overflow-hidden rounded-[26px] border border-line/60"
       style={{
-        animationDelay: '80ms',
         background:
           'linear-gradient(120deg, rgba(200,255,0,0.16) 0%, rgba(167,139,250,0.18) 50%, rgba(34,211,238,0.12) 100%), linear-gradient(180deg, #15151a, #0a0a0c)',
       }}
@@ -540,6 +639,220 @@ function PromoBanner({
         @keyframes promo-icon-float {
           0%, 100% { transform: translateY(-50%) translateX(0) rotate(0); }
           50% { transform: translateY(calc(-50% - 8px)) translateX(-4px) rotate(-3deg); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/* ────────── SLIDE 2: AUTO B-ROLL ────────── */
+function AutoBrollSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
+  return (
+    <div
+      className="group relative overflow-hidden rounded-[26px] border border-violet/30"
+      style={{
+        background:
+          'linear-gradient(120deg, rgba(167,139,250,0.20) 0%, rgba(240,171,252,0.16) 50%, rgba(200,255,0,0.10) 100%), linear-gradient(180deg, #15151a, #0a0a0c)',
+      }}
+    >
+      {/* Mesh pulses */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(60% 90% at 0% 50%, rgba(167,139,250,0.32), transparent 60%)',
+          animation: 'promo-pulse-1 6s ease-in-out infinite',
+        }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(60% 90% at 100% 50%, rgba(200,255,0,0.22), transparent 60%)',
+          animation: 'promo-pulse-2 7s ease-in-out infinite',
+        }}
+      />
+      {/* Grid */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.06]"
+        style={{
+          backgroundImage:
+            'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)',
+          backgroundSize: '40px 40px',
+        }}
+      />
+      {/* Sparkles */}
+      <Sparkle className="absolute top-6 right-[30%]" delay={0} />
+      <Sparkle className="absolute top-[60%] right-[18%]" delay={800} />
+      <Sparkle className="absolute top-[28%] right-[8%]" delay={1600} />
+
+      {/* Mini take cards animados à direita — simula B-rolls sendo gerados */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute right-6 top-1/2 hidden -translate-y-1/2 lg:block"
+      >
+        <BrollMiniGrid />
+      </div>
+
+      <div className="relative flex flex-col items-start gap-6 px-7 py-10 md:flex-row md:items-center md:justify-between md:px-12 md:py-14">
+        <div className="max-w-[600px]">
+          <div
+            className="mb-4 inline-flex items-center gap-2 rounded-full border border-violet/55 bg-black/50 px-3.5 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.22em] text-violet backdrop-blur-md"
+            style={{
+              fontFamily: 'var(--font-tech)',
+              boxShadow:
+                '0 0 22px -6px rgba(167,139,250,0.55), inset 0 1px 0 rgba(255,255,255,0.08)',
+            }}
+          >
+            <span
+              className="inline-block h-2 w-2 animate-pulse-soft rounded-full bg-violet"
+              style={{
+                boxShadow: '0 0 10px rgba(167,139,250,0.95), 0 0 20px rgba(167,139,250,0.5)',
+              }}
+            />
+            Auto B-Roll · em série
+          </div>
+          <h3
+            className="text-[28px] font-extrabold leading-[1.05] tracking-tight text-white md:text-[40px]"
+            style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.025em' }}
+          >
+            B-rolls saem prontos<br />
+            <span
+              style={{
+                background: 'linear-gradient(135deg, #a78bfa 0%, #c8ff00 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
+              enquanto você dorme.
+            </span>
+          </h3>
+          <p className="mt-3 max-w-[480px] text-[14.5px] leading-relaxed text-white/80">
+            Cole a lista de prompts. 12 imagens e 6 vídeos em paralelo,
+            qualidade Magnific, zero crédito gasto.
+          </p>
+
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <Link
+              href="/tools/auto-broll"
+              className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full border border-white/20 bg-black/60 px-6 py-3 text-[13.5px] font-bold text-white backdrop-blur-md transition-all duration-300 hover:-translate-y-[1px] hover:border-white/45 hover:bg-black/80"
+              style={{
+                boxShadow:
+                  'inset 0 1px 0 rgba(255,255,255,0.06), 0 12px 28px -10px rgba(0,0,0,0.7)',
+              }}
+            >
+              <span className="relative z-10">Conhecer Auto B-roll</span>
+              <span className="relative z-10 transition-transform duration-300 group-hover/btn:translate-x-1">
+                →
+              </span>
+            </Link>
+
+            {canStartAutomation ? (
+              <Link
+                href="/tools/auto-broll"
+                className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full px-6 py-3 text-[13.5px] font-bold text-white"
+                style={{
+                  background:
+                    'linear-gradient(135deg, #a78bfa 0%, #6d4ee8 60%, #4f3ddb 100%)',
+                  boxShadow:
+                    'inset 0 1px 0 rgba(255,255,255,0.4), 0 12px 32px -8px rgba(167,139,250,0.6), 0 2px 6px rgba(0,0,0,0.4)',
+                }}
+              >
+                <span className="relative z-10">Disparar agora</span>
+                <span className="relative z-10 transition-transform duration-300 group-hover/btn:translate-x-1">
+                  →
+                </span>
+                <span
+                  aria-hidden
+                  className="absolute inset-0 -translate-x-[120%] bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 group-hover/btn:translate-x-[120%]"
+                />
+              </Link>
+            ) : (
+              <Link
+                href="/planos"
+                title="Disponível só no plano Pro"
+                className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full border border-violet/35 bg-violet/5 px-6 py-3 text-[13.5px] font-bold text-violet/70 backdrop-blur-md transition-all duration-300 hover:border-violet/55 hover:text-violet"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="4" y="11" width="16" height="10" rx="2" />
+                  <path d="M8 11V7a4 4 0 018 0v4" />
+                </svg>
+                <span className="relative z-10">Disparar agora</span>
+              </Link>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Mini grid 3x2 simulando B-rolls em geração — animação ambient pro card */
+function BrollMiniGrid() {
+  return (
+    <div
+      className="grid grid-cols-3 gap-2"
+      style={{ width: 260 }}
+    >
+      {Array.from({ length: 6 }).map((_, i) => {
+        const ready = [1, 3, 4].includes(i); // simula alguns prontos
+        return (
+          <div
+            key={i}
+            className="relative overflow-hidden rounded-[8px] border"
+            style={{
+              aspectRatio: '9/16',
+              borderColor: ready ? 'rgba(200,255,0,0.45)' : 'rgba(167,139,250,0.35)',
+              background: ready
+                ? 'linear-gradient(135deg, rgba(200,255,0,0.15), rgba(0,0,0,0.6))'
+                : 'linear-gradient(135deg, rgba(167,139,250,0.12), rgba(0,0,0,0.7))',
+              boxShadow: ready
+                ? '0 4px 16px -6px rgba(200,255,0,0.4)'
+                : '0 4px 16px -6px rgba(167,139,250,0.35)',
+              animation: `brollPop 0.6s ease-out ${i * 0.15}s backwards`,
+            }}
+          >
+            {/* Bunny mini (loading state) ou check (ready) */}
+            <div className="absolute inset-0 flex items-center justify-center">
+              {ready ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c8ff00" strokeWidth="3">
+                  <path d="M5 13l4 4L19 7" />
+                </svg>
+              ) : (
+                <div
+                  className="h-2.5 w-2.5 rounded-full bg-violet"
+                  style={{ animation: 'brollDot 1.4s ease-in-out infinite', animationDelay: `${i * 0.2}s` }}
+                />
+              )}
+            </div>
+            {/* Progress bar bottom for loading */}
+            {!ready && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-line/40">
+                <div
+                  className="h-full bg-gradient-to-r from-violet via-violet-deep to-cyan-400"
+                  style={{ animation: `brollProgress 3s ease-in-out infinite`, animationDelay: `${i * 0.3}s` }}
+                />
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <style jsx>{`
+        @keyframes brollPop {
+          from { opacity: 0; transform: scale(0.85) translateY(8px); }
+          to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        @keyframes brollDot {
+          0%, 100% { opacity: 0.4; transform: scale(0.85); }
+          50% { opacity: 1; transform: scale(1.1); }
+        }
+        @keyframes brollProgress {
+          0% { width: 5%; }
+          70% { width: 85%; }
+          100% { width: 95%; }
         }
       `}</style>
     </div>

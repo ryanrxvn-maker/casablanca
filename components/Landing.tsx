@@ -38,6 +38,7 @@ export function Landing() {
       <HeroSection />
       <StatsRow />
       <PilotShowcase />
+      <AutoBrollShowcase />
       <PilotHowItWorks />
       <CapabilitiesSection />
       <ShowcaseSection />
@@ -424,6 +425,220 @@ function PilotShowcase() {
         `}</style>
       </div>
     </section>
+  );
+}
+
+/* ─────────────────── AUTO B-ROLL SHOWCASE ─────────────────── */
+
+function AutoBrollShowcase() {
+  return (
+    <section id="auto-broll" className="mx-auto mt-20 max-w-[1200px] px-5 md:px-8">
+      <div
+        className="relative overflow-hidden rounded-[32px] border border-violet/35 fade-in-up"
+        style={{
+          background:
+            'linear-gradient(120deg, rgba(167,139,250,0.22) 0%, rgba(240,171,252,0.18) 50%, rgba(200,255,0,0.10) 100%), linear-gradient(180deg, #15151a, #08080a)',
+        }}
+      >
+        {/* Pulsos */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(55% 90% at 100% 50%, rgba(167,139,250,0.40), transparent 58%)',
+            animation: 'promo-pulse-a 6.5s ease-in-out infinite',
+          }}
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(55% 90% at 0% 50%, rgba(200,255,0,0.22), transparent 58%)',
+            animation: 'promo-pulse-b 7.5s ease-in-out infinite',
+          }}
+        />
+        {/* Grid */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-[0.06]"
+          style={{
+            backgroundImage:
+              'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)',
+            backgroundSize: '46px 46px',
+          }}
+        />
+        <SparkleFloat className="absolute top-10 left-[30%]" delay={0} />
+        <SparkleFloat className="absolute top-[55%] left-[20%]" delay={900} />
+        <SparkleFloat className="absolute top-[28%] left-[10%]" delay={1800} />
+        <SparkleFloat className="absolute bottom-12 right-[18%]" delay={2400} />
+
+        {/* Mockup grid de B-rolls à esquerda */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute left-3 top-1/2 hidden -translate-y-1/2 lg:block"
+        >
+          <BrollShowcaseGrid />
+        </div>
+
+        {/* Conteúdo direita */}
+        <div className="relative flex flex-col items-end gap-7 px-7 py-14 text-right md:px-14 md:py-24">
+          <div
+            className="flex items-baseline gap-3 text-white/35"
+            style={{ fontFamily: 'var(--font-mono)' }}
+          >
+            <span
+              className="text-[10.5px] uppercase tracking-[0.28em] text-violet"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              VÍDEOS EM ESCALA
+            </span>
+            <span className="h-px w-10 bg-white/25" />
+            <span className="text-[10.5px] tracking-[0.32em]">002</span>
+          </div>
+
+          <h2
+            className="max-w-[820px] text-[36px] font-extrabold leading-[1] tracking-tight text-white md:text-[64px]"
+            style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.03em' }}
+          >
+            <SmokeText text="Sua lista de prompts." className="block" />
+            <span
+              className="block"
+              style={{
+                background:
+                  'linear-gradient(135deg, #a78bfa 0%, #f0abfc 50%, #c8ff00 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
+              <SmokeText text="10 B-rolls em paralelo." />
+            </span>
+          </h2>
+
+          <p className="max-w-[560px] text-[15.5px] leading-relaxed text-white/85">
+            Cole o JSON. Dispare. Vá fazer outra coisa.
+            <br />
+            <span className="text-white/65">
+              Cada take é renderizado em Kling 2.5 720p sobre frame Nano Banana 1K
+              — qualidade Magnific, zero crédito.
+            </span>
+          </p>
+
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <Link
+              href="/tools/auto-broll"
+              className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full px-7 py-3.5 text-[14px] font-bold text-white"
+              style={{
+                background:
+                  'linear-gradient(135deg, #a78bfa 0%, #6d4ee8 60%, #4f3ddb 100%)',
+                boxShadow:
+                  'inset 0 1px 0 rgba(255,255,255,0.4), 0 14px 36px -10px rgba(167,139,250,0.65)',
+              }}
+            >
+              <span className="relative z-10">Disparar B-rolls</span>
+              <span className="relative z-10 transition-transform duration-300 group-hover/btn:translate-x-1">
+                →
+              </span>
+              <span
+                aria-hidden
+                className="absolute inset-0 -translate-x-[120%] bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 group-hover/btn:translate-x-[120%]"
+              />
+            </Link>
+            <Link
+              href="/tools/auto-broll"
+              className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full border border-white/25 bg-black/50 px-6 py-3 text-[13.5px] font-bold text-white/90 backdrop-blur-md transition-all duration-300 hover:border-white/50 hover:bg-black/70"
+            >
+              <span className="relative z-10">Como funciona</span>
+              <span className="relative z-10 transition-transform duration-300 group-hover/btn:translate-x-1">
+                →
+              </span>
+            </Link>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/** Mini grid de B-rolls cinematic — animação de cards aparecendo + bunny loading */
+function BrollShowcaseGrid() {
+  return (
+    <div className="grid grid-cols-3 gap-2.5" style={{ width: 340 }}>
+      {Array.from({ length: 9 }).map((_, i) => {
+        const ready = [0, 2, 3, 5, 7].includes(i);
+        return (
+          <div
+            key={i}
+            className="relative overflow-hidden rounded-[10px] border"
+            style={{
+              aspectRatio: '9/16',
+              borderColor: ready ? 'rgba(200,255,0,0.5)' : 'rgba(167,139,250,0.4)',
+              background: ready
+                ? 'linear-gradient(135deg, rgba(200,255,0,0.15), rgba(167,139,250,0.10), rgba(0,0,0,0.7))'
+                : 'linear-gradient(135deg, rgba(167,139,250,0.15), rgba(0,0,0,0.8))',
+              boxShadow: ready
+                ? '0 6px 22px -8px rgba(200,255,0,0.45)'
+                : '0 6px 22px -8px rgba(167,139,250,0.4)',
+              animation: `brollShowcasePop 0.7s ease-out ${i * 0.12}s backwards`,
+            }}
+          >
+            <div className="absolute inset-0 flex items-center justify-center">
+              {ready ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#c8ff00" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="6 4 20 12 6 20 6 4" fill="#c8ff00" fillOpacity="0.3" />
+                </svg>
+              ) : (
+                <div
+                  className="h-3 w-3 rounded-full bg-violet"
+                  style={{
+                    boxShadow: '0 0 10px rgba(167,139,250,0.8)',
+                    animation: 'brollPulse 1.6s ease-in-out infinite',
+                    animationDelay: `${i * 0.2}s`,
+                  }}
+                />
+              )}
+            </div>
+            {!ready && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-line/40">
+                <div
+                  className="h-full bg-gradient-to-r from-violet via-violet-deep to-cyan-400"
+                  style={{
+                    animation: `brollGrow 3s ease-in-out infinite`,
+                    animationDelay: `${i * 0.3}s`,
+                    boxShadow: '0 0 8px rgba(167,139,250,0.6)',
+                  }}
+                />
+              </div>
+            )}
+            <div
+              className="absolute top-1 left-1 rounded bg-black/60 px-1 py-0.5 text-[7px] font-bold uppercase tracking-widest backdrop-blur"
+              style={{
+                fontFamily: 'var(--font-tech)',
+                color: ready ? '#c8ff00' : '#a78bfa',
+              }}
+            >
+              {String(i + 1).padStart(2, '0')}
+            </div>
+          </div>
+        );
+      })}
+      <style jsx>{`
+        @keyframes brollShowcasePop {
+          from { opacity: 0; transform: scale(0.85) translateY(10px); }
+          to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        @keyframes brollPulse {
+          0%, 100% { opacity: 0.5; transform: scale(0.8); }
+          50% { opacity: 1; transform: scale(1.15); }
+        }
+        @keyframes brollGrow {
+          0% { width: 5%; }
+          70% { width: 85%; }
+          100% { width: 95%; }
+        }
+      `}</style>
+    </div>
   );
 }
 

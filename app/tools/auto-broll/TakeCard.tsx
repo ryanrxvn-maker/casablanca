@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { TakeState } from '@/lib/magnific-pipeline';
 
 /**
@@ -27,19 +27,19 @@ type Props = {
 function statusMeta(status: TakeState['status']) {
   switch (status) {
     case 'idle':
-      return { label: 'AGUARDANDO', tone: 'idle' as const };
+      return { label: 'NA FILA', tone: 'idle' as const };
     case 'running':
-      return { label: 'GERANDO', tone: 'loading' as const };
+      return { label: 'EM PRODUÇÃO', tone: 'loading' as const };
     case 'image-done':
-      return { label: 'IMAGEM PRONTA', tone: 'mid' as const };
+      return { label: 'FRAME OK', tone: 'mid' as const };
     case 'video-done':
-      return { label: 'VÍDEO PRONTO', tone: 'ready' as const };
+      return { label: 'RENDERIZADO', tone: 'ready' as const };
     case 'downloading':
-      return { label: 'BAIXANDO', tone: 'loading' as const };
+      return { label: 'ARQUIVANDO', tone: 'loading' as const };
     case 'ready':
-      return { label: 'PRONTO', tone: 'ready' as const };
+      return { label: 'ENTREGUE', tone: 'ready' as const };
     case 'failed':
-      return { label: 'FALHOU', tone: 'err' as const };
+      return { label: 'ERRO', tone: 'err' as const };
   }
 }
 
@@ -48,6 +48,7 @@ export function TakeCard({ take, position, total }: Props) {
   const [playing, setPlaying] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   const meta = statusMeta(take.status);
   // Video URL disponível em video-done e ready
@@ -209,15 +210,29 @@ export function TakeCard({ take, position, total }: Props) {
                 </svg>
               </span>
             </button>
-            {/* Top-right action: download — appears on hover */}
+            {/* Top-right actions: download + expand — appear on hover */}
             <div
               className={
-                'pointer-events-auto absolute right-2 top-2 transition-all duration-300 ' +
+                'pointer-events-auto absolute right-2 top-2 flex items-center gap-1.5 transition-all duration-300 ' +
                 (hovered || downloading
                   ? 'translate-y-0 opacity-100'
                   : '-translate-y-1 opacity-0 group-hover:translate-y-0 group-hover:opacity-100')
               }
             >
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setExpanded(true);
+                  if (videoRef.current) videoRef.current.pause();
+                }}
+                className="flex h-7 w-7 items-center justify-center rounded-full border border-white/20 bg-black/60 text-white backdrop-blur transition-all hover:scale-110 hover:border-white/60 hover:bg-black/80"
+                title="Expandir"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+                </svg>
+              </button>
               <button
                 type="button"
                 onClick={(e) => {
@@ -293,18 +308,18 @@ export function TakeCard({ take, position, total }: Props) {
                 style={{ fontFamily: 'var(--font-tech)' }}
               >
                 {take.status === 'running' && take.phase === 'image-gen'
-                  ? 'Pintando imagem'
+                  ? 'Compondo o frame'
                   : take.status === 'running' && take.phase === 'video-gen'
-                  ? 'Animando vídeo'
+                  ? 'Renderizando o movimento'
                   : take.status === 'image-done'
-                  ? 'Imagem ok · prox. vídeo'
+                  ? 'Frame entregue · video em fila'
                   : take.status === 'downloading'
-                  ? 'Baixando MP4'
-                  : 'Na fila'}
+                  ? 'Arquivando o take'
+                  : 'Aguardando início'}
               </div>
               {runMsg && (
-                <p className="mono px-3 text-center text-[9px] uppercase tracking-widest text-text-dim line-clamp-2">
-                  {runMsg}
+                <p className="px-4 text-center text-[10px] leading-relaxed text-text-muted line-clamp-2">
+                  {runMsg.replace(/^Imagem\s+/i, 'Frame ').replace(/^Vídeo\s+/i, 'Render ').replace(/\(seed novo\)/, '· novo ângulo')}
                 </p>
               )}
             </div>
@@ -343,9 +358,119 @@ export function TakeCard({ take, position, total }: Props) {
           75% { transform: translateY(-6px) scale(1.04) rotate(0deg); }
         }
       `}</style>
+
+      {/* ─────────── EXPANDED MODAL ─────────── */}
+      {expanded && videoUrl && (
+        <ExpandedVideoModal
+          videoUrl={videoUrl}
+          posterUrl={posterUrl || undefined}
+          takeIdx={take.idx}
+          total={total}
+          onClose={() => setExpanded(false)}
+          onDownload={downloadOne}
+          downloading={downloading}
+        />
+      )}
     </div>
   );
 }
+
+/* ─────────── EXPANDED VIDEO MODAL ─────────── */
+function ExpandedVideoModal({
+  videoUrl,
+  posterUrl,
+  takeIdx,
+  total,
+  onClose,
+  onDownload,
+  downloading,
+}: {
+  videoUrl: string;
+  posterUrl?: string;
+  takeIdx: number;
+  total: number;
+  onClose: () => void;
+  onDownload: () => void;
+  downloading: boolean;
+}) {
+  // ESC para fechar + lock scroll
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 p-6 backdrop-blur-md"
+      onClick={onClose}
+      style={{ animation: 'modalFadeIn 0.25s ease-out' }}
+    >
+      {/* Top bar */}
+      <div
+        className="absolute left-0 right-0 top-0 flex items-center justify-between gap-3 px-6 py-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <span
+          className="mono text-[11px] font-bold uppercase tracking-[0.18em] text-white"
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          Take <span className="text-lime">{String(takeIdx).padStart(2, '0')}</span>
+          <span className="text-text-dim"> / {String(total).padStart(2, '0')}</span>
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onDownload}
+            disabled={downloading}
+            className="mono inline-flex items-center gap-2 rounded-full border border-lime/60 bg-lime/95 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-black shadow-[0_8px_24px_-8px_rgba(200,255,0,0.5)] transition-all hover:scale-105 disabled:opacity-60"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+              <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
+            </svg>
+            {downloading ? 'Baixando' : 'Baixar MP4'}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-black/60 text-white backdrop-blur transition-all hover:scale-110 hover:border-white/60 hover:bg-black/80"
+            title="Fechar (ESC)"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M6 6l12 12M6 18L18 6" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      {/* Video */}
+      <video
+        src={videoUrl}
+        poster={posterUrl}
+        controls
+        autoPlay
+        playsInline
+        onClick={(e) => e.stopPropagation()}
+        className="max-h-[90vh] max-w-full rounded-[14px] shadow-[0_30px_80px_rgba(0,0,0,0.8)]"
+        style={{ aspectRatio: '9/16' }}
+      />
+      <style jsx>{`
+        @keyframes modalFadeIn {
+          from { opacity: 0; backdrop-filter: blur(0); }
+          to { opacity: 1; backdrop-filter: blur(12px); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 
 function StatusPill({
   tone,

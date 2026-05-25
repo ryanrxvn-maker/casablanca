@@ -242,7 +242,7 @@ export async function runMagnificPipelineV2(
             status: 'running',
             phase: 'image-gen',
             percent: 10,
-            message: 'Gerando imagem (Nano Banana 2 Flash)...',
+            message: 'Compondo frame inicial · Nano Banana 1K',
           });
           emit(`Take ${take.idx}: imagem...`, 'running', undefined as unknown as number);
           const img = await generateImageWithRetry(take.imagePrompt, (n) => {
@@ -251,7 +251,7 @@ export async function runMagnificPipelineV2(
                 status: 'running',
                 phase: 'image-gen',
                 percent: 10,
-                message: `Imagem retry ${n}/${MAX_RETRIES} (seed novo)...`,
+                message: `Recompondo · ${n}ª variação`,
               });
             }
           });
@@ -268,7 +268,7 @@ export async function runMagnificPipelineV2(
             status: 'running',
             phase: 'video-gen',
             percent: 40,
-            message: 'Animando (Kling 2.5, ~5-8min)...',
+            message: 'Renderizando movimento · Kling 2.5 (~6min)',
             // @ts-expect-error mantém compat
             imageUrl,
           });
@@ -282,7 +282,7 @@ export async function runMagnificPipelineV2(
                   status: 'running',
                   phase: 'video-gen',
                   percent: 40,
-                  message: `Vídeo retry ${n}/${MAX_RETRIES}...`,
+                  message: `Re-renderizando · ${n}ª passada`,
                   // @ts-expect-error compat
                   imageUrl,
                 });
