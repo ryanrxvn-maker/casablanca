@@ -528,7 +528,7 @@ function AutoBrollShowcase() {
 
           <div className="mt-2 flex flex-wrap items-center gap-3">
             <Link
-              href="/tools/auto-broll"
+              href="/login"
               className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full px-7 py-3.5 text-[14px] font-bold text-white"
               style={{
                 background:
@@ -546,15 +546,12 @@ function AutoBrollShowcase() {
                 className="absolute inset-0 -translate-x-[120%] bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 group-hover/btn:translate-x-[120%]"
               />
             </Link>
-            <Link
-              href="/tools/auto-broll"
-              className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full border border-white/25 bg-black/50 px-6 py-3 text-[13.5px] font-bold text-white/90 backdrop-blur-md transition-all duration-300 hover:border-white/50 hover:bg-black/70"
+            <a
+              href="#broll-passos"
+              className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[0.04] px-6 py-3.5 text-[13.5px] font-bold text-white backdrop-blur-md transition-all duration-300 hover:-translate-y-[1px] hover:border-white/35 hover:bg-white/10"
             >
-              <span className="relative z-10">Como funciona</span>
-              <span className="relative z-10 transition-transform duration-300 group-hover/btn:translate-x-1">
-                →
-              </span>
-            </Link>
+              Ver como funciona
+            </a>
           </div>
         </div>
       </div>
@@ -1402,11 +1399,79 @@ export function AutoBrollHowItWorks() {
         ))}
       </div>
 
-      {/* Tech callout — modelos travados */}
+      {/* REQUISITO — Freepik Premium+ */}
       <div
-        className="mt-10 overflow-hidden rounded-[22px] border border-lime/35 fade-in-up"
+        className="mt-10 overflow-hidden rounded-[22px] border border-amber-400/40 fade-in-up"
         style={{
           animationDelay: '380ms',
+          background:
+            'linear-gradient(135deg, rgba(251,191,36,0.10) 0%, rgba(167,139,250,0.08) 100%), linear-gradient(180deg, #15151a, #0c0c10)',
+        }}
+      >
+        <div className="grid grid-cols-1 gap-8 px-7 py-8 md:grid-cols-[auto_1fr] md:px-10 md:py-10">
+          <div
+            className="flex h-16 w-16 shrink-0 items-center justify-center rounded-[18px] border border-amber-400/50 bg-amber-400/10"
+            style={{ boxShadow: '0 0 30px -8px rgba(251,191,36,0.4)' }}
+          >
+            <svg
+              width="32"
+              height="32"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#fbbf24"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 2L9 9H2l5.5 4-2 7L12 16l6.5 4-2-7L22 9h-7z" />
+            </svg>
+          </div>
+          <div>
+            <div
+              className="mb-2 inline-flex items-center gap-2 rounded-full border border-amber-400/55 bg-black/40 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-amber-300 backdrop-blur-md"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-amber-300 shadow-[0_0_8px_rgba(251,191,36,0.85)]" />
+              PRÉ-REQUISITO
+            </div>
+            <h3
+              className="text-[22px] font-extrabold leading-tight tracking-tight text-white md:text-[26px]"
+              style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
+            >
+              <SmokeText text="Precisa de Freepik Premium+ ativa." />
+            </h3>
+            <p className="mt-3 max-w-[640px] text-[14.5px] leading-relaxed text-white/85">
+              O Auto B-roll usa o <strong className="text-white">seu</strong>{' '}
+              acesso ao Magnific (Freepik Premium+). Cada take roda na sua
+              conta, no modo Unlimited — você não paga crédito nenhum por
+              vídeo, só a mensalidade do Freepik.
+              <br />
+              <span className="text-white/65">
+                Sem Premium+ ativa não tem como gerar. É a única dependência
+                externa da ferramenta.
+              </span>
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <a
+                href="https://www.freepik.com/pricing"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mono inline-flex items-center gap-1.5 rounded-full border border-amber-400/50 bg-amber-400/10 px-3 py-1.5 text-[10.5px] font-bold uppercase tracking-widest text-amber-300 transition-all hover:bg-amber-400/20 hover:-translate-y-px"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                Ver planos Freepik
+                <span>↗</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* QUALIDADE + ZERO CRÉDITO callout */}
+      <div
+        className="mt-6 overflow-hidden rounded-[22px] border border-lime/35 fade-in-up"
+        style={{
+          animationDelay: '440ms',
           background:
             'linear-gradient(135deg, rgba(200,255,0,0.10) 0%, rgba(167,139,250,0.10) 100%), linear-gradient(180deg, #15151a, #0c0c10)',
         }}
@@ -1423,9 +1488,7 @@ export function AutoBrollHowItWorks() {
               strokeLinecap="round"
               strokeLinejoin="round"
             >
-              <path d="M12 2v6m0 0l-3-3m3 3l3-3" />
-              <rect x="3" y="11" width="18" height="11" rx="2" />
-              <circle cx="12" cy="17" r="1.5" fill="#c8ff00" />
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
             </svg>
           </div>
           <div>
@@ -1434,21 +1497,23 @@ export function AutoBrollHowItWorks() {
               style={{ fontFamily: 'var(--font-tech)' }}
             >
               <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.85)]" />
-              QUALIDADE TRAVADA · ZERO CRÉDITO
+              FLUXO RÁPIDO · ZERO CRÉDITO
             </div>
             <h3
               className="text-[22px] font-extrabold leading-tight tracking-tight text-white md:text-[26px]"
               style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
             >
-              <SmokeText text="Sempre Nano Banana 1K + Kling 2.5 720p · 10s · 9:16." />
+              <SmokeText text="Cola, dispara, vai fazer outra coisa." />
             </h3>
             <p className="mt-3 max-w-[640px] text-[14.5px] leading-relaxed text-white/85">
-              Sua conta Magnific Unlimited paga zero crédito por take. O Auto
-              B-roll não deixa selecionar modelo errado, qualidade menor ou
-              proporção fora do padrão — é só apertar play.
+              12 imagens e 6 vídeos em paralelo, qualidade Magnific travada
+              em Nano Banana 1K + Kling 2.5 720p · 10s · 9:16. Sem
+              configuração, sem janela aberta no Magnific, sem clicar
+              &ldquo;Generate&rdquo; um por um.
               <br />
               <span className="text-white/65">
-                Você foca no criativo. A qualidade vem garantida.
+                Acabou o lote? O ZIP cai pronto, nomeado, pronto pra
+                timeline.
               </span>
             </p>
           </div>
