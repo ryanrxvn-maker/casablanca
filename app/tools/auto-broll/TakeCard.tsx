@@ -45,7 +45,6 @@ function statusMeta(status: TakeState['status']) {
 
 export function TakeCard({ take, position, total }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [playing, setPlaying] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -74,16 +73,11 @@ export function TakeCard({ take, position, total }: Props) {
   const failedMsg = take.status === 'failed' ? take.error : null;
   const runPercent = take.status === 'running' ? take.percent : 0;
 
-  function togglePlay() {
+  function openExpanded() {
+    // Pausa inline preview se rodando, abre modal fullscreen
     const v = videoRef.current;
-    if (!v) return;
-    if (v.paused) {
-      v.play().catch(() => {});
-      setPlaying(true);
-    } else {
-      v.pause();
-      setPlaying(false);
-    }
+    if (v && !v.paused) v.pause();
+    setExpanded(true);
   }
 
   async function downloadOne() {
@@ -137,7 +131,7 @@ export function TakeCard({ take, position, total }: Props) {
       className={
         'take-card-3d group relative flex flex-col overflow-hidden rounded-[14px] border transition-all duration-300 ' +
         (meta.tone === 'ready'
-          ? 'border-lime/40 bg-gradient-to-b from-lime/[0.04] to-bg-soft/40 shadow-[0_8px_24px_-12px_rgba(200,255,0,0.25)] hover:shadow-[0_20px_40px_-16px_rgba(200,255,0,0.5),0_0_36px_-12px_rgba(200,255,0,0.4)] hover:border-lime/70'
+          ? 'border-emerald-500/40 bg-gradient-to-b from-emerald-600/[0.06] to-bg-soft/40 shadow-[0_8px_24px_-12px_rgba(16,185,129,0.25)] hover:shadow-[0_20px_40px_-16px_rgba(16,185,129,0.45),0_0_36px_-12px_rgba(16,185,129,0.35)] hover:border-emerald-500/70'
           : meta.tone === 'err'
           ? 'border-red-500/40 bg-gradient-to-b from-red-500/[0.05] to-bg-soft/40 shadow-[0_8px_24px_-12px_rgba(239,68,68,0.25)] hover:shadow-[0_20px_40px_-16px_rgba(239,68,68,0.5)] hover:border-red-500/70'
           : meta.tone === 'mid'
@@ -180,42 +174,48 @@ export function TakeCard({ take, position, total }: Props) {
               poster={posterUrl || undefined}
               preload="metadata"
               playsInline
+              muted
               loop
-              onPlay={() => setPlaying(true)}
-              onPause={() => setPlaying(false)}
-              className="absolute inset-0 h-full w-full object-cover"
+              className="absolute inset-0 h-full w-full cursor-zoom-in object-cover"
+              onClick={openExpanded}
             />
-            {/* Play overlay */}
+            {/* Play+Expand overlay — clique abre modal grande direto */}
             <button
               type="button"
-              onClick={togglePlay}
-              className="absolute inset-0 flex items-center justify-center transition-opacity"
-              aria-label={playing ? 'Pausar' : 'Reproduzir'}
+              onClick={openExpanded}
+              className="absolute inset-0 flex cursor-zoom-in items-center justify-center transition-opacity"
+              aria-label="Assistir em tela maior"
             >
               <span
-                className={
-                  'flex h-14 w-14 items-center justify-center rounded-full backdrop-blur-md transition-all duration-300 ' +
-                  (playing
-                    ? 'scale-0 bg-black/0 opacity-0'
-                    : 'scale-100 bg-black/60 opacity-100 group-hover:scale-110 group-hover:bg-lime/90')
-                }
+                className="flex h-16 w-16 items-center justify-center rounded-full bg-black/55 backdrop-blur-md transition-all duration-300 group-hover:scale-110 group-hover:bg-emerald-500/90"
+                style={{ boxShadow: '0 8px 32px rgba(0,0,0,0.5)' }}
               >
                 <svg
-                  width="22"
-                  height="22"
+                  width="24"
+                  height="24"
                   viewBox="0 0 24 24"
                   fill="currentColor"
-                  className={playing ? 'text-white' : 'text-white group-hover:text-black'}
+                  className="text-white group-hover:text-black"
                   style={{ marginLeft: 3 }}
                 >
                   <path d="M8 5v14l11-7z" />
                 </svg>
               </span>
+              {/* Hint "Expandir" no hover */}
+              <span
+                className="mono pointer-events-none absolute bottom-3 right-3 flex items-center gap-1 rounded-full bg-black/70 px-2 py-1 text-[9px] font-bold uppercase tracking-widest text-white opacity-0 backdrop-blur transition-opacity duration-300 group-hover:opacity-100"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+                </svg>
+                Expandir
+              </span>
             </button>
-            {/* Top-right actions: download + expand — appear on hover */}
+            {/* Top-right download button (apenas, sem expand separado pra não confundir) */}
             <div
               className={
-                'pointer-events-auto absolute right-2 top-2 flex items-center gap-1.5 transition-all duration-300 ' +
+                'pointer-events-auto absolute right-2 top-2 transition-all duration-300 ' +
                 (hovered || downloading
                   ? 'translate-y-0 opacity-100'
                   : '-translate-y-1 opacity-0 group-hover:translate-y-0 group-hover:opacity-100')
@@ -225,24 +225,10 @@ export function TakeCard({ take, position, total }: Props) {
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setExpanded(true);
-                  if (videoRef.current) videoRef.current.pause();
-                }}
-                className="flex h-7 w-7 items-center justify-center rounded-full border border-white/20 bg-black/60 text-white backdrop-blur transition-all hover:scale-110 hover:border-white/60 hover:bg-black/80"
-                title="Expandir"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                  <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
                   downloadOne();
                 }}
                 disabled={downloading}
-                className="flex items-center gap-1.5 rounded-full border border-lime/60 bg-lime/95 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-black shadow-[0_4px_12px_rgba(200,255,0,0.45)] transition-all hover:scale-105 disabled:opacity-60"
+                className="flex items-center gap-1.5 rounded-full border border-emerald-500/60 bg-emerald-500/95 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-white shadow-[0_4px_12px_rgba(16,185,129,0.55)] transition-all hover:scale-105 disabled:opacity-60"
                 style={{ fontFamily: 'var(--font-tech)' }}
                 title="Baixar MP4"
               >
@@ -267,7 +253,7 @@ export function TakeCard({ take, position, total }: Props) {
             </div>
             {mp4Mb && (
               <div className="absolute bottom-2 left-2 rounded-full bg-black/70 px-2 py-0.5 backdrop-blur-sm">
-                <span className="mono text-[9px] font-semibold uppercase tracking-widest text-lime">
+                <span className="mono text-[9px] font-semibold uppercase tracking-widest text-emerald-300">
                   {mp4Mb} MB
                 </span>
               </div>
@@ -482,7 +468,7 @@ function StatusPill({
     loading:
       'border-violet/50 bg-violet/15 text-violet shadow-[0_0_10px_rgba(167,139,250,0.35)]',
     mid: 'border-cyan-400/50 bg-cyan-400/15 text-cyan-300',
-    ready: 'border-lime/60 bg-lime/20 text-lime shadow-[0_0_12px_rgba(200,255,0,0.45)]',
+    ready: 'border-emerald-500/60 bg-emerald-500/15 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.35)]',
     err: 'border-red-500/60 bg-red-500/15 text-red-300',
   }[tone];
   return (
@@ -499,7 +485,7 @@ function StatusPill({
           <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-violet" />
         </span>
       )}
-      {tone === 'ready' && <span className="text-lime">✓</span>}
+      {tone === 'ready' && <span className="text-emerald-400">✓</span>}
       {tone === 'err' && <span>✕</span>}
       {label}
     </span>
