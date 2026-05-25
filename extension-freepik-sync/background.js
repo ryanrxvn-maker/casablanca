@@ -30,8 +30,11 @@ const STORAGE_KEYS = {
   userId: 'userId',
 };
 
-// Fallback final se não tiver origin descoberto nem manual setado
+// Fallback se não tiver origin descoberto nem manual setado.
+// IDEALMENTE não usado — o content script app-discover.js registra
+// o origin assim que user abre qualquer página do Auto Edit.
 const FALLBACK_ENDPOINTS = [
+  'https://casablanca-ashen.vercel.app',
   'https://casablanca.vercel.app',
   'http://localhost:3000',
 ];

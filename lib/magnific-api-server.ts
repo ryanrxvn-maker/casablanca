@@ -238,24 +238,70 @@ export async function assertZeroCreditCost(creds: MagnificCreds): Promise<{
 
 /* ───────────────────────── Auth verify ───────────────────────── */
 
-/** Confirma que as credenciais funcionam. Retorna { userId, plan, credits }. */
+/** Confirma que as credenciais funcionam. Retorna { userId, plan, credits }.
+ *
+ * IMPORTANTE: shape real do /auth/verify (capturado live 2026-05-24):
+ *   {
+ *     userData: {
+ *       id: 156031909,            // ID interno do Magnific (nao usado em queries)
+ *       fpId: "188211386",        // ID do Freepik — ESSE vai em ?user_id=... das outras chamadas
+ *       email, name, displayName, avatar,
+ *       freepikPremium: true,     // Premium+ flag
+ *       hasRealFreepikPremium: true,
+ *       walletId: "uuid",         // pra GET /wallet?wallet_id=...
+ *       creditSystemEnabled, ...
+ *     },
+ *     folders: [...]
+ *   }
+ *
+ * Por isso a chave de "user_id" pra autenticar é o `fpId`, não o `id`.
+ */
 export async function verifyCredentials(creds: MagnificCreds): Promise<{
   userId: number;
   email?: string;
   plan?: string;
   credits?: number;
+  walletId?: string;
 }> {
-  const r = await magnificFetch(creds, '/auth/verify');
-  if (!r.ok) throw new Error(`Auth verify falhou: ${r.status}`);
+  // Magnific aceita /auth/verify sem user_id na query (descoberto live)
+  const url = `${BASE}/auth/verify?lang=en_US`;
+  const r = await fetch(url, {
+    headers: {
+      accept: 'application/json',
+      cookie: creds.cookie,
+      'X-Requested-With': 'XMLHttpRequest',
+    },
+  });
+  if (!r.ok) {
+    const txt = await r.text().catch(() => '');
+    throw new Error(`Auth verify falhou: ${r.status} ${txt.slice(0, 200)}`);
+  }
   const j = (await r.json()) as {
-    user?: { id?: number; email?: string; plan?: string; credits?: number };
+    userData?: {
+      id?: number;
+      fpId?: string | number;
+      email?: string;
+      freepikPremium?: boolean;
+      hasRealFreepikPremium?: boolean;
+      walletId?: string;
+    };
   };
-  if (!j.user?.id) throw new Error('Auth verify: user.id ausente');
+  const u = j.userData;
+  if (!u || (!u.fpId && !u.id)) {
+    throw new Error('Auth verify: userData ausente (sessao invalida?)');
+  }
+  // fpId vem como string — converte pra number
+  const fpId = typeof u.fpId === 'string' ? parseInt(u.fpId, 10) : u.fpId;
+  const userId = fpId || u.id || 0;
+  // Plano: derivado dos flags do Freepik
+  const isPremium = !!(u.hasRealFreepikPremium || u.freepikPremium);
+  const plan = isPremium ? 'Premium+' : 'Free';
   return {
-    userId: j.user.id,
-    email: j.user.email,
-    plan: j.user.plan,
-    credits: j.user.credits,
+    userId,
+    email: u.email,
+    plan,
+    credits: undefined, // disponivel via /wallet?wallet_id=... se precisar
+    walletId: u.walletId,
   };
 }
 
