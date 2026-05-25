@@ -22,7 +22,6 @@ import { LipSyncHero3D } from '@/app/tools/lipsync/LipSyncHero3D';
  * O selecionado vira o "fonte" da geracao.
  */
 
-type Version = 'v1' | 'v2';
 type Status =
   | 'idle'
   | 'uploading-video'
@@ -67,21 +66,12 @@ export default function LipSyncTool() {
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [elapsedSec, setElapsedSec] = useState<number>(0);
 
-  // Engine version
-  const [version, setVersion] = useState<Version>('v1');
-
-  // V1 params
-  const [syncModeV1, setSyncModeV1] = useState<'cut_off' | 'loop' | 'bounce' | 'silence' | 'remap'>('cut_off');
-  const [v1Pro, setV1Pro] = useState<boolean>(false);
+  // Sync.so v2 params (motor unico — V2 latentsync foi removido)
+  const [usePro, setUsePro] = useState<boolean>(true); // default PRO pra qualidade max
+  const [syncMode, setSyncMode] = useState<'cut_off' | 'loop' | 'bounce' | 'silence' | 'remap'>('cut_off');
 
   // Upload progress (real, em %)
   const [uploadProgress, setUploadProgress] = useState<number>(0);
-
-  // V2 params
-  const [guidanceScale, setGuidanceScale] = useState<number>(1.5);
-  const [loopMode, setLoopMode] = useState<'loop' | 'pingpong'>('loop');
-  const [seedEnabled, setSeedEnabled] = useState(false);
-  const [seed, setSeed] = useState<number>(42);
 
   const [advanced, setAdvanced] = useState(false);
 
@@ -92,6 +82,27 @@ export default function LipSyncTool() {
 
   const isLoading = status !== 'idle' && status !== 'done' && status !== 'error';
   const selected = videos.find((v) => v.id === selectedId) ?? null;
+
+  /* ─── Validacao do video ─────────────────────────────────────
+     Detecta problemas conhecidos que causam glitches no lipsync:
+     - Resolucao baixa: dentes ficam borrados
+     - Vídeo muito longo: mais frames pra modelo errar
+     - Vertical com cabeca cortada: bordas geram artefato
+     - Arquivo muito grande: upload lento e pode dar timeout
+  */
+  const videoIssues: Array<{ severity: 'block' | 'warn'; text: string }> = (() => {
+    if (!selected || !selected.meta) return [];
+    const issues: Array<{ severity: 'block' | 'warn'; text: string }> = [];
+    const { w, h, dur } = selected.meta;
+    const minDim = Math.min(w, h);
+    if (minDim < 480) issues.push({ severity: 'block', text: `Resolução ${w}×${h} é muito baixa (mín 480p). Dentes vão ficar borrados.` });
+    else if (minDim < 720) issues.push({ severity: 'warn', text: `Resolução ${w}×${h} é OK, mas 720p+ dá boca mais nítida.` });
+    if (dur > 60) issues.push({ severity: 'warn', text: `Vídeo de ${dur.toFixed(0)}s é longo. Cada minuto extra = mais chance de glitch em frames complicados.` });
+    if (dur < 2) issues.push({ severity: 'block', text: `Vídeo de ${dur.toFixed(1)}s é muito curto — a IA precisa de pelo menos 2s.` });
+    if (selected.file.size > 100 * 1024 * 1024) issues.push({ severity: 'warn', text: `Arquivo ${(selected.file.size / 1024 / 1024).toFixed(0)}MB — upload vai demorar 30-60s.` });
+    return issues;
+  })();
+  const hasBlockingIssue = videoIssues.some((i) => i.severity === 'block');
 
   /* ─── Tickers ───────────────────────────────────────────────── */
 
@@ -260,18 +271,11 @@ export default function LipSyncTool() {
 
       setStatus('generating');
       const body: Record<string, unknown> = {
-        version,
         video_url,
         audio_url,
+        pro: usePro,
+        sync_mode: syncMode,
       };
-      if (version === 'v1') {
-        body.sync_mode_v1 = syncModeV1;
-        body.v1_pro = v1Pro;
-      } else {
-        body.guidance_scale = guidanceScale;
-        body.loop_mode = loopMode;
-        if (seedEnabled) body.seed = seed;
-      }
 
       const res = await fetch('/api/tools/lipsync', {
         method: 'POST',
@@ -423,36 +427,78 @@ export default function LipSyncTool() {
             </h2>
           </div>
 
-          {/* V1 / V2 toggle */}
+          {/* QUALIDADE — Pro vs Padrao */}
           <div>
             <div className="mb-2 flex items-center justify-between">
               <label
                 className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
                 style={{ fontFamily: 'var(--font-tech)' }}
               >
-                Motor
+                Qualidade
               </label>
-              <span className="mono text-[9px] text-text-dim">{version === 'v1' ? 'DreamFace style' : 'Closeup boost'}</span>
+              <span className="mono text-[9px] text-text-dim">
+                {usePro ? '~10 min · max quality' : '~5 min · rápido'}
+              </span>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <EngineCard
-                version="v1"
-                active={version === 'v1'}
-                onClick={() => !isLoading && setVersion('v1')}
-                badge="DREAMFACE"
-                title="V1"
-                sub="natural, suave"
-                color="fuchsia"
-              />
-              <EngineCard
-                version="v2"
-                active={version === 'v2'}
-                onClick={() => !isLoading && setVersion('v2')}
-                badge="ULTRA"
-                title="V2"
-                sub="closeup, preciso"
-                color="cyan"
-              />
+              <button
+                type="button"
+                onClick={() => !isLoading && setUsePro(true)}
+                disabled={isLoading}
+                className={
+                  'relative overflow-hidden rounded-[14px] border px-3 py-3 text-left transition ' +
+                  (usePro
+                    ? 'border-fuchsia-400/65 bg-fuchsia-400/10 shadow-[0_0_22px_-6px_rgba(232,121,249,0.6)]'
+                    : 'border-line-strong bg-bg-soft/40 hover:border-white/15')
+                }
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span
+                    className="text-[16px] font-black tracking-tight text-white"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    PRO
+                  </span>
+                  <span
+                    className="mono rounded-full border border-fuchsia-400/45 bg-fuchsia-400/15 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest text-fuchsia-300"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    RECOMENDADO
+                  </span>
+                </div>
+                <div className="mono text-[9.5px] uppercase tracking-widest text-text-muted">
+                  zero glitch · dentes nítidos
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => !isLoading && setUsePro(false)}
+                disabled={isLoading}
+                className={
+                  'relative overflow-hidden rounded-[14px] border px-3 py-3 text-left transition ' +
+                  (!usePro
+                    ? 'border-cyan-400/65 bg-cyan-400/10 shadow-[0_0_22px_-6px_rgba(103,232,249,0.6)]'
+                    : 'border-line-strong bg-bg-soft/40 hover:border-white/15')
+                }
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span
+                    className="text-[16px] font-black tracking-tight text-white"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    PADRÃO
+                  </span>
+                  <span
+                    className="mono rounded-full border border-cyan-400/40 bg-cyan-400/15 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest text-cyan-300"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    RÁPIDO
+                  </span>
+                </div>
+                <div className="mono text-[9.5px] uppercase tracking-widest text-text-muted">
+                  metade do tempo · qualidade boa
+                </div>
+              </button>
             </div>
           </div>
 
@@ -536,213 +582,77 @@ export default function LipSyncTool() {
             </button>
             {advanced && (
               <div className="border-t border-line/30 p-4 bg-bg/30 space-y-4">
-                {version === 'v1' ? (
-                  <>
-                    {/* V1: Pro toggle */}
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <label
-                          className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
-                          style={{ fontFamily: 'var(--font-tech)' }}
-                        >
-                          Qualidade
-                        </label>
-                        <span className="mono text-[9px] text-text-dim">
-                          {v1Pro ? 'pro · mais lento' : 'padrão · rápido'}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setV1Pro(false)}
-                          disabled={isLoading}
-                          className={
-                            'rounded-[10px] border px-2.5 py-2 text-left transition ' +
-                            (!v1Pro
-                              ? 'border-fuchsia-400/60 bg-fuchsia-400/10'
-                              : 'border-line-strong bg-bg-soft/40 hover:border-fuchsia-400/40')
-                          }
-                        >
-                          <div
-                            className="text-[11px] font-bold tracking-tight text-white"
-                            style={{ fontFamily: 'var(--font-tech)' }}
-                          >
-                            Padrão
-                          </div>
-                          <div className="mono text-[9px] text-text-muted">~$0.07/min</div>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setV1Pro(true)}
-                          disabled={isLoading}
-                          className={
-                            'rounded-[10px] border px-2.5 py-2 text-left transition ' +
-                            (v1Pro
-                              ? 'border-fuchsia-400/60 bg-fuchsia-400/10'
-                              : 'border-line-strong bg-bg-soft/40 hover:border-fuchsia-400/40')
-                          }
-                        >
-                          <div
-                            className="text-[11px] font-bold tracking-tight text-white"
-                            style={{ fontFamily: 'var(--font-tech)' }}
-                          >
-                            Pro
-                          </div>
-                          <div className="mono text-[9px] text-text-muted">qualidade max</div>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* V1: sync_mode */}
-                    <div>
-                      <label
-                        className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted mb-2 block"
-                        style={{ fontFamily: 'var(--font-tech)' }}
-                      >
-                        Quando o áudio é maior que o vídeo
-                      </label>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {(
-                          [
-                            { v: 'cut_off', label: 'Cortar', sub: 'corta ao fim do vídeo' },
-                            { v: 'loop', label: 'Loop', sub: 'reinicia do começo' },
-                            { v: 'bounce', label: 'Bounce', sub: 'vai e volta' },
-                            { v: 'silence', label: 'Silêncio', sub: 'segura último frame' },
-                          ] as const
-                        ).map((opt) => (
-                          <button
-                            key={opt.v}
-                            type="button"
-                            onClick={() => setSyncModeV1(opt.v)}
-                            disabled={isLoading}
-                            className={
-                              'rounded-[10px] border px-2.5 py-2 text-left transition ' +
-                              (syncModeV1 === opt.v
-                                ? 'border-fuchsia-400/60 bg-fuchsia-400/10'
-                                : 'border-line-strong bg-bg-soft/40 hover:border-fuchsia-400/40')
-                            }
-                          >
-                            <div
-                              className="text-[11px] font-bold tracking-tight text-white"
-                              style={{ fontFamily: 'var(--font-tech)' }}
-                            >
-                              {opt.label}
-                            </div>
-                            <div className="mono text-[9px] text-text-muted">{opt.sub}</div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    {/* V2: guidance scale */}
-                    <div>
-                      <div className="mb-2 flex items-center justify-between">
-                        <label
-                          className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
-                          style={{ fontFamily: 'var(--font-tech)' }}
-                        >
-                          Intensidade
-                        </label>
-                        <span className="mono text-[12px] text-fuchsia-300 font-bold">
-                          {guidanceScale.toFixed(1)}
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min={1}
-                        max={2}
-                        step={0.1}
-                        value={guidanceScale}
-                        onChange={(e) => setGuidanceScale(parseFloat(e.target.value))}
+                {/* sync_mode — comportamento quando audio > video */}
+                <div>
+                  <label
+                    className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted mb-2 block"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    Quando o áudio é maior que o vídeo
+                  </label>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(
+                      [
+                        { v: 'cut_off', label: 'Cortar', sub: 'corta no fim do vídeo' },
+                        { v: 'loop', label: 'Loop', sub: 'reinicia do começo' },
+                        { v: 'bounce', label: 'Bounce', sub: 'vai e volta' },
+                        { v: 'silence', label: 'Silêncio', sub: 'segura último frame' },
+                      ] as const
+                    ).map((opt) => (
+                      <button
+                        key={opt.v}
+                        type="button"
+                        onClick={() => setSyncMode(opt.v)}
                         disabled={isLoading}
-                        className="w-full accent-fuchsia-500"
-                      />
-                      <div className="mt-1 flex justify-between text-[9px] text-text-dim mono">
-                        <span>natural (1.0)</span>
-                        <span>preciso (2.0)</span>
-                      </div>
-                    </div>
-                    {/* V2: loop mode */}
-                    <div>
-                      <label
-                        className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted mb-2 block"
-                        style={{ fontFamily: 'var(--font-tech)' }}
+                        className={
+                          'rounded-[10px] border px-2.5 py-2 text-left transition ' +
+                          (syncMode === opt.v
+                            ? 'border-fuchsia-400/60 bg-fuchsia-400/10'
+                            : 'border-line-strong bg-bg-soft/40 hover:border-fuchsia-400/40')
+                        }
                       >
-                        Loop do vídeo
-                      </label>
-                      <div className="grid grid-cols-2 gap-1.5">
-                        {(['loop', 'pingpong'] as const).map((m) => (
-                          <button
-                            key={m}
-                            type="button"
-                            onClick={() => setLoopMode(m)}
-                            disabled={isLoading}
-                            className={
-                              'rounded-[10px] border px-2.5 py-2 text-left transition ' +
-                              (loopMode === m
-                                ? 'border-fuchsia-400/60 bg-fuchsia-400/10'
-                                : 'border-line-strong bg-bg-soft/40 hover:border-fuchsia-400/40')
-                            }
-                          >
-                            <div
-                              className="text-[11px] font-bold tracking-tight text-white"
-                              style={{ fontFamily: 'var(--font-tech)' }}
-                            >
-                              {m === 'loop' ? '🔁 Loop' : '↔ Ping-pong'}
-                            </div>
-                            <div className="mono text-[9px] text-text-muted">
-                              {m === 'loop' ? 'reinicia' : 'inverte'}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    {/* V2: seed */}
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <label
-                          className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
+                        <div
+                          className="text-[11px] font-bold tracking-tight text-white"
                           style={{ fontFamily: 'var(--font-tech)' }}
                         >
-                          Seed
-                        </label>
-                        <button
-                          type="button"
-                          onClick={() => setSeedEnabled(!seedEnabled)}
-                          disabled={isLoading}
-                          className={
-                            'mono rounded-full border px-2.5 py-0.5 text-[9px] uppercase tracking-widest ' +
-                            (seedEnabled
-                              ? 'border-fuchsia-400/60 bg-fuchsia-400/10 text-fuchsia-300'
-                              : 'border-line-strong text-text-muted')
-                          }
-                        >
-                          {seedEnabled ? '● fixo' : 'random'}
-                        </button>
-                      </div>
-                      {seedEnabled && (
-                        <input
-                          type="number"
-                          value={seed}
-                          onChange={(e) => setSeed(parseInt(e.target.value) || 0)}
-                          disabled={isLoading}
-                          className="mono w-full rounded-[10px] border border-line-strong bg-bg/40 px-3 py-2 text-[12px] text-white focus:border-fuchsia-400/60 focus:outline-none"
-                        />
-                      )}
-                    </div>
-                  </>
-                )}
+                          {opt.label}
+                        </div>
+                        <div className="mono text-[9px] text-text-muted">{opt.sub}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
           </div>
+
+          {/* WARNINGS - issues do video */}
+          {selected && videoIssues.length > 0 && (
+            <div className="space-y-1.5">
+              {videoIssues.map((issue, i) => (
+                <div
+                  key={i}
+                  className={
+                    'rounded-[10px] border px-3 py-2 text-[11px] leading-snug ' +
+                    (issue.severity === 'block'
+                      ? 'border-red-500/55 bg-red-500/10 text-red-200'
+                      : 'border-amber-400/45 bg-amber-400/10 text-amber-200')
+                  }
+                >
+                  <span className="font-bold">
+                    {issue.severity === 'block' ? '✕ Bloqueado: ' : '⚠ '}
+                  </span>
+                  {issue.text}
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* GENERATE button */}
           <button
             type="button"
             onClick={handleGenerate}
-            disabled={!selected || !audioFile || isLoading}
+            disabled={!selected || !audioFile || isLoading || hasBlockingIssue}
             className="ultra-btn group relative w-full overflow-hidden rounded-[16px] border border-fuchsia-400/55 px-5 py-4 transition disabled:opacity-40 disabled:cursor-not-allowed"
             style={{
               background:
@@ -1190,75 +1100,7 @@ function Zfloat({ delay }: { delay: number }) {
   );
 }
 
-/* ═══════════════════════ EngineCard ═══════════════════════ */
-
-function EngineCard({
-  version,
-  active,
-  onClick,
-  badge,
-  title,
-  sub,
-  color,
-}: {
-  version: Version;
-  active: boolean;
-  onClick: () => void;
-  badge: string;
-  title: string;
-  sub: string;
-  color: 'fuchsia' | 'cyan';
-}) {
-  const activeBorder = color === 'fuchsia' ? 'border-fuchsia-400/65' : 'border-cyan-400/65';
-  const activeBg = color === 'fuchsia' ? 'bg-fuchsia-400/10' : 'bg-cyan-400/10';
-  const activeGlow =
-    color === 'fuchsia'
-      ? 'shadow-[0_0_22px_-6px_rgba(232,121,249,0.6)]'
-      : 'shadow-[0_0_22px_-6px_rgba(103,232,249,0.6)]';
-  const badgeColor =
-    color === 'fuchsia'
-      ? 'border-fuchsia-400/45 bg-fuchsia-400/15 text-fuchsia-300'
-      : 'border-cyan-400/45 bg-cyan-400/15 text-cyan-300';
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      data-version={version}
-      className={
-        'relative overflow-hidden rounded-[14px] border px-3 py-3 text-left transition ' +
-        (active ? `${activeBorder} ${activeBg} ${activeGlow}` : 'border-line-strong bg-bg-soft/40 hover:border-white/15')
-      }
-    >
-      <div className="flex items-center justify-between mb-1">
-        <span
-          className="text-[18px] font-black tracking-tight text-white"
-          style={{ fontFamily: 'var(--font-tech)' }}
-        >
-          {title}
-        </span>
-        <span
-          className={`mono rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest ${badgeColor}`}
-          style={{ fontFamily: 'var(--font-tech)' }}
-        >
-          {badge}
-        </span>
-      </div>
-      <div className="mono text-[9.5px] uppercase tracking-widest text-text-muted">{sub}</div>
-      {active && (
-        <span
-          aria-hidden
-          className="absolute right-2 top-2 inline-block h-2 w-2 rounded-full"
-          style={{
-            background: color === 'fuchsia' ? '#e879f9' : '#67e8f9',
-            boxShadow: `0 0 10px ${color === 'fuchsia' ? 'rgba(232,121,249,0.9)' : 'rgba(103,232,249,0.9)'}`,
-            display: 'none',
-          }}
-        />
-      )}
-    </button>
-  );
-}
+/* EngineCard removido — agora usamos botoes Pro/Padrao inline */
 
 /* ═══════════════════════ AudioMiniPlayer ═══════════════════════ */
 
