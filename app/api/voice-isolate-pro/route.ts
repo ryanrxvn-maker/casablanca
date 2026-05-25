@@ -31,6 +31,39 @@ export const maxDuration = 300; // 5 min — Demucs Replicate raro passa de 2min
 // Override possível via env REPLICATE_DEMUCS_MODEL pra trocar sem deploy.
 const DEMUCS_MODEL = (process.env.REPLICATE_DEMUCS_MODEL || 'cjwbw/demucs') as `${string}/${string}`;
 
+// GET — diagnóstico. Tenta resolver versão atual de uma lista de candidatos
+// e retorna qual está disponível. ?model=owner/name pra testar específico.
+export async function GET(req: Request) {
+  const token = process.env.REPLICATE_API_TOKEN;
+  if (!token) return NextResponse.json({ error: 'sem token' }, { status: 500 });
+  const url = new URL(req.url);
+  const specific = url.searchParams.get('model');
+  const candidates = specific ? [specific] : [
+    DEMUCS_MODEL,
+    'lucataco/demucs',
+    'nateraw/demucs',
+    'fofr/demucs',
+    'andreasjansson/demucs',
+    'cjwbw/demucs',
+    'ryan5453/demucs',
+  ];
+  const Rep = (await import('replicate')).default;
+  const replicate = new Rep({ auth: token });
+  const results: Array<{ model: string; ok: boolean; versionId?: string; error?: string }> = [];
+  for (const m of candidates) {
+    const [owner, name] = m.split('/');
+    if (!owner || !name) { results.push({ model: m, ok: false, error: 'slug inválido' }); continue; }
+    try {
+      const info = await replicate.models.get(owner, name);
+      const vid = (info as { latest_version?: { id?: string } })?.latest_version?.id;
+      results.push({ model: m, ok: !!vid, versionId: vid });
+    } catch (e) {
+      results.push({ model: m, ok: false, error: ((e as Error)?.message || String(e)).slice(0, 120) });
+    }
+  }
+  return NextResponse.json({ current: DEMUCS_MODEL, results });
+}
+
 export async function POST(req: Request) {
   const token = process.env.REPLICATE_API_TOKEN;
   if (!token) {
@@ -104,12 +137,38 @@ export async function POST(req: Request) {
     );
   }
 
-  // 2. Roda Demucs. cjwbw/demucs aceita inputs diferentes de outros forks —
-  // mandamos MULTIPLAS chaves redundantes pra robustez (server ignora as
-  // que nao reconhece).
+  // 2. Resolve a VERSION HASH atual do modelo (Replicate exige version pra
+  // modelos user-contributed; só "blessed" models aceitam /v1/models/{slug}/predictions
+  // sem version. Demucs forks são todos user-contributed.)
   const replicate = new Replicate({ auth: token });
+  const [owner, name] = DEMUCS_MODEL.split('/');
+  let versionId: string | null = null;
   try {
-    const output = (await replicate.run(DEMUCS_MODEL, {
+    // GET /v1/models/{owner}/{name} retorna { latest_version: { id: "..." } }
+    const modelInfo = await replicate.models.get(owner, name);
+    versionId = (modelInfo as { latest_version?: { id?: string } })?.latest_version?.id || null;
+  } catch (e) {
+    const msg = (e as Error)?.message || String(e);
+    return NextResponse.json(
+      {
+        error: `Modelo ${DEMUCS_MODEL} nao encontrado no Replicate: ${msg}`,
+        hint: 'Define REPLICATE_DEMUCS_MODEL no Vercel pra outro modelo (ex: lucataco/demucs).',
+        kind: 'config',
+      },
+      { status: 502 },
+    );
+  }
+  if (!versionId) {
+    return NextResponse.json(
+      { error: `${DEMUCS_MODEL} sem versão publicada`, kind: 'config' },
+      { status: 502 },
+    );
+  }
+
+  // 3. Roda Demucs com version explícita. Inputs redundantes pra robustez.
+  try {
+    const versioned = `${DEMUCS_MODEL}:${versionId}` as `${string}/${string}:${string}`;
+    const output = (await replicate.run(versioned, {
       input: {
         // audio fields (cjwbw, ryan5453, etc usam diferentes nomes)
         audio: audioUrl,
