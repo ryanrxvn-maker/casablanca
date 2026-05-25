@@ -1,18 +1,13 @@
 /**
  * /api/tools/lipsync — gera lipsync via fal-ai/latentsync.
  *
- * Fluxo:
- *  1. requireAdmin (so admin acessa essa rota)
- *  2. recebe { video_url, audio_url } ja uploadados pro storage do Fal
- *     (o client fez upload via /api/fal/proxy + fal.storage.upload)
- *  3. chama fal.run("fal-ai/latentsync", { input: {...} })
- *  4. retorna { success, output_video_url, details }
+ * Aceita parametros customizaveis pelo usuario admin:
+ *   - guidance_scale (1.0-4.0, default 2.5) — quanto a boca segue o audio
+ *   - loop_mode ('loop' | 'pingpong', default 'loop') — quando audio > video
+ *   - seed (numero, opcional) — reproduzir resultado
  *
- * O Fal.ai cobra ~$0.05-0.15 por geracao (depende do video).
  * O timeout no Hobby Vercel eh 60s; lipsync demora 60-180s.
- * Por isso, configurado pro plano Pro (maxDuration=300). Se a conta
- * estiver no Hobby, vai estourar timeout — mas o job continua rodando
- * no Fal e o user pode ver status no dashboard deles.
+ * Por isso, configurado pro plano Pro (maxDuration=300).
  */
 
 import { NextResponse } from 'next/server';
@@ -36,6 +31,18 @@ interface LatentSyncResultData {
   video_url?: string;
 }
 
+interface LipSyncBody {
+  video_url?: string;
+  audio_url?: string;
+  guidance_scale?: number;
+  loop_mode?: 'loop' | 'pingpong';
+  seed?: number;
+}
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.min(Math.max(n, lo), hi);
+}
+
 export async function POST(req: Request) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
@@ -47,7 +54,7 @@ export async function POST(req: Request) {
     );
   }
 
-  let body: { video_url?: string; audio_url?: string };
+  let body: LipSyncBody;
   try {
     body = await req.json();
   } catch {
@@ -62,14 +69,29 @@ export async function POST(req: Request) {
     );
   }
 
+  const guidanceScale =
+    typeof body.guidance_scale === 'number' ? clamp(body.guidance_scale, 1, 4) : 2.5;
+  const loopMode: 'loop' | 'pingpong' =
+    body.loop_mode === 'pingpong' ? 'pingpong' : 'loop';
+  const seed = typeof body.seed === 'number' && Number.isFinite(body.seed) ? body.seed : undefined;
+
   try {
+    const input: {
+      video_url: string;
+      audio_url: string;
+      guidance_scale: number;
+      loop_mode: 'loop' | 'pingpong';
+      seed?: number;
+    } = {
+      video_url,
+      audio_url,
+      guidance_scale: guidanceScale,
+      loop_mode: loopMode,
+    };
+    if (seed !== undefined) input.seed = seed;
+
     const result = await fal.subscribe('fal-ai/latentsync', {
-      input: {
-        video_url,
-        audio_url,
-        guidance_scale: 2.5,
-        loop_mode: 'loop',
-      },
+      input,
       logs: false,
     });
 
@@ -89,6 +111,7 @@ export async function POST(req: Request) {
     return NextResponse.json({
       success: true,
       output_video_url: outputUrl,
+      params: { guidance_scale: guidanceScale, loop_mode: loopMode, seed },
       details: result.data,
     });
   } catch (err) {

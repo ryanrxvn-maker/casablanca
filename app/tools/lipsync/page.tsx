@@ -178,7 +178,7 @@ where id = '${d.userId ?? '<seu-user-id>'}';`}
   }
 
   return (
-    <main className="min-h-screen bg-bg py-8">
+    <main className="min-h-screen bg-bg pt-8 pb-20">
       <LipSyncTool />
     </main>
   );
