@@ -503,51 +503,137 @@ function SmokeParticles({ active, returning }: { active: boolean; returning: boo
   );
 }
 
-/* ---- HumanFaceClean — rosto humano UGC estilizado, clean -------- */
+/* ---- HumanFaceClean — UGC creator real photo + ultra premium framing */
 /**
- * NAO eh o boneco UGC cartoon antigo (que ficou esquisito). Eh um
- * busto humano estilizado, baixa-poligonais, gradiente quente,
- * com sombra e iluminacao. Olho aberto sutil, sorriso confiante,
- * cabelo simples. Para servir de "humano genérico" em contraste
- * com o ciborgue.
+ * Substitui o SVG cartoon (que ficou ruim) por uma FOTO REAL de
+ * creator UGC, com framing fotorealistico premium:
+ *
+ *  - Foto circular com soft mask (vinheta nos cantos pra blend)
+ *  - Frame conic-gradient rotativo (rainbow) na borda
+ *  - Halo glow externo intenso
+ *  - HUD brackets [ ] flutuantes nos cantos
+ *  - Aspect breath subtle (scale 1 ↔ 1.025)
+ *  - Audio waveform embaixo
+ *  - Pick aleatorio entre 3 avatares pra variedade
+ *  - Imagens hospedadas localmente em /public (Unsplash CC-0, baixadas
+ *    em 25/05/2026)
  */
+
+const HUMAN_AVATARS = [
+  '/lipsync-avatar-1.jpg',
+  '/lipsync-avatar-2.jpg',
+  '/lipsync-avatar-3.jpg',
+];
+
 function HumanFaceClean() {
+  const [avatarSrc, setAvatarSrc] = useState<string>(HUMAN_AVATARS[0]);
+
+  useEffect(() => {
+    // pick random on mount
+    setAvatarSrc(HUMAN_AVATARS[Math.floor(Math.random() * HUMAN_AVATARS.length)]);
+  }, []);
+
   return (
     <div
       className="relative h-full w-full"
       style={{ animation: 'avFloat 6s ease-in-out infinite' }}
     >
+      {/* PHOTO CIRCLE — main visual */}
+      <div
+        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
+        style={{
+          width: '82%',
+          aspectRatio: '1',
+          animation: 'hfBreath 4.5s ease-in-out infinite',
+        }}
+      >
+        {/* Outer gradient ring */}
+        <div
+          aria-hidden
+          className="absolute inset-[-6px] rounded-full"
+          style={{
+            background:
+              'conic-gradient(from 0deg, #e879f9, #a78bfa, #67e8f9, #c8ff00, #e879f9)',
+            animation: 'hfRingSpin 9s linear infinite',
+            filter: 'blur(2px)',
+            opacity: 0.85,
+          }}
+        />
+        {/* Inner mask (dark rim) */}
+        <div
+          aria-hidden
+          className="absolute inset-[-2px] rounded-full"
+          style={{
+            background: 'radial-gradient(circle, transparent 92%, rgba(0,0,0,0.6) 100%)',
+            zIndex: 2,
+          }}
+        />
+
+        {/* Photo */}
+        <div
+          className="absolute inset-0 rounded-full overflow-hidden"
+          style={{
+            boxShadow:
+              'inset 0 0 0 2px rgba(255,255,255,0.08), 0 20px 60px rgba(232,121,249,0.45), 0 0 0 1px rgba(0,0,0,0.4)',
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={avatarSrc}
+            alt=""
+            aria-hidden
+            className="absolute inset-0 h-full w-full object-cover"
+            draggable={false}
+            style={{
+              filter: 'saturate(1.08) contrast(1.04)',
+            }}
+          />
+          {/* Color overlay sutil pra integrar com tema */}
+          <div
+            aria-hidden
+            className="absolute inset-0"
+            style={{
+              background:
+                'radial-gradient(120% 80% at 30% 20%, rgba(232,121,249,0.15), transparent 60%), radial-gradient(120% 80% at 80% 80%, rgba(103,232,249,0.12), transparent 60%)',
+              mixBlendMode: 'overlay',
+            }}
+          />
+          {/* Top rim light */}
+          <div
+            aria-hidden
+            className="absolute inset-x-0 top-0 h-1/3"
+            style={{
+              background:
+                'linear-gradient(180deg, rgba(255,255,255,0.18), transparent 100%)',
+              mixBlendMode: 'soft-light',
+            }}
+          />
+          {/* Bottom vinheta */}
+          <div
+            aria-hidden
+            className="absolute inset-0 rounded-full"
+            style={{
+              boxShadow: 'inset 0 -40px 60px -20px rgba(0,0,0,0.55)',
+            }}
+          />
+        </div>
+      </div>
+
+      {/* SVG overlay com framing/HUD/waveform — fica POR CIMA da foto */}
       <svg
         viewBox="0 0 360 400"
         width="100%"
         height="100%"
-        className="drop-shadow-[0_30px_60px_rgba(232,121,249,0.4)]"
-        style={{ overflow: 'visible' }}
+        className="relative drop-shadow-[0_30px_60px_rgba(232,121,249,0.4)]"
+        style={{ overflow: 'visible', pointerEvents: 'none' }}
       >
         <defs>
-          {/* Skin warm gradient */}
-          <radialGradient id="hf-skin" cx="50%" cy="42%" r="65%">
-            <stop offset="0%" stopColor="#fce4d4" />
-            <stop offset="55%" stopColor="#e8b89a" />
-            <stop offset="100%" stopColor="#7a4030" />
-          </radialGradient>
-          {/* Hair gradient */}
-          <linearGradient id="hf-hair" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#1a0e1f" />
-            <stop offset="55%" stopColor="#3a2540" />
-            <stop offset="100%" stopColor="#7c4f87" />
-          </linearGradient>
           {/* Backdrop */}
           <radialGradient id="hf-bg" cx="50%" cy="55%" r="60%">
             <stop offset="0%" stopColor="rgba(232,121,249,0.28)" />
             <stop offset="60%" stopColor="rgba(167,139,250,0.18)" />
             <stop offset="100%" stopColor="transparent" />
           </radialGradient>
-          {/* Lip gradient */}
-          <linearGradient id="hf-lip" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#c25a6e" />
-            <stop offset="100%" stopColor="#8a3548" />
-          </linearGradient>
           <filter id="hf-glow">
             <feGaussianBlur stdDeviation="3" result="blur" />
             <feMerge>
@@ -557,10 +643,10 @@ function HumanFaceClean() {
           </filter>
         </defs>
 
-        {/* Backdrop */}
+        {/* Backdrop circle (atras da foto) */}
         <circle cx="180" cy="200" r="170" fill="url(#hf-bg)" />
 
-        {/* HUD halo (mantem o estilo do robot) */}
+        {/* HUD halo external */}
         <circle
           cx="180"
           cy="200"
@@ -572,146 +658,17 @@ function HumanFaceClean() {
           style={{ animation: 'avRotate 30s linear infinite', transformOrigin: '180px 200px' }}
         />
 
-        {/* SHOULDERS / bust */}
-        <path
-          d="M 70 380 Q 90 320 130 300 L 230 300 Q 270 320 290 380 Z"
-          fill="#2a1a2e"
-          stroke="rgba(232,121,249,0.4)"
-          strokeWidth="1"
-        />
-        {/* Neck */}
-        <rect x="158" y="260" width="44" height="50" rx="8" fill="url(#hf-skin)" opacity="0.85" />
-
-        {/* HEAD shape — soft oval */}
-        <path
-          d="M 110 195
-             Q 110 130 145 110
-             Q 165 100 180 100
-             Q 195 100 215 110
-             Q 250 130 250 195
-             Q 250 240 230 270
-             Q 210 290 180 290
-             Q 150 290 130 270
-             Q 110 240 110 195 Z"
-          fill="url(#hf-skin)"
-          filter="url(#hf-glow)"
-        />
-
-        {/* Hair — modern, casual swoop */}
-        <path
-          d="M 105 175
-             Q 100 125 140 100
-             Q 170 88 195 92
-             Q 235 100 252 140
-             Q 256 165 252 195
-             Q 246 168 230 156
-             Q 215 152 200 158
-             Q 188 144 170 148
-             Q 148 152 132 168
-             Q 118 178 110 195
-             Q 104 188 105 175 Z"
-          fill="url(#hf-hair)"
-          filter="url(#hf-glow)"
-        />
-
-        {/* Hair side strand */}
-        <path
-          d="M 108 178 Q 102 220 110 252 Q 114 230 116 208 Q 116 192 108 178 Z"
-          fill="url(#hf-hair)"
-          opacity="0.95"
-        />
-
-        {/* Cheek light blush */}
-        <ellipse cx="135" cy="220" rx="13" ry="7" fill="rgba(232,121,249,0.35)" />
-        <ellipse cx="225" cy="220" rx="13" ry="7" fill="rgba(232,121,249,0.35)" />
-
-        {/* Eyebrow left */}
-        <path
-          d="M 138 175 Q 148 169 162 173"
-          stroke="#1a0e1f"
-          strokeWidth="3"
-          fill="none"
-          strokeLinecap="round"
-        />
-        {/* Eyebrow right */}
-        <path
-          d="M 198 173 Q 212 169 222 175"
-          stroke="#1a0e1f"
-          strokeWidth="3"
-          fill="none"
-          strokeLinecap="round"
-        />
-
-        {/* Eye left — open with iris (animated blink) */}
-        <g style={{ animation: 'hfBlink 5s ease-in-out infinite' }}>
-          <ellipse cx="150" cy="190" rx="8" ry="4.5" fill="#fff" />
-          <circle cx="150" cy="190" r="3.5" fill="#3a2540" />
-          <circle cx="150" cy="190" r="1.8" fill="#0a0612" />
-          <circle cx="151.2" cy="188.8" r="0.9" fill="#fff" />
+        {/* HUD brackets em volta da foto */}
+        <g stroke="rgba(232,121,249,0.75)" strokeWidth="1.5" fill="none">
+          <path d="M 50 130 L 50 110 L 70 110" />
+          <path d="M 310 110 L 290 110 L 290 130" />
+          <path d="M 50 290 L 50 310 L 70 310" />
+          <path d="M 310 310 L 290 310 L 290 290" />
         </g>
 
-        {/* Eye right */}
-        <g style={{ animation: 'hfBlink 5s ease-in-out infinite' }}>
-          <ellipse cx="210" cy="190" rx="8" ry="4.5" fill="#fff" />
-          <circle cx="210" cy="190" r="3.5" fill="#3a2540" />
-          <circle cx="210" cy="190" r="1.8" fill="#0a0612" />
-          <circle cx="211.2" cy="188.8" r="0.9" fill="#fff" />
-        </g>
-
-        {/* Nose subtle */}
-        <path
-          d="M 178 205 Q 175 222 178 235 Q 182 237 184 233"
-          stroke="rgba(122,64,48,0.5)"
-          strokeWidth="1.6"
-          fill="none"
-          strokeLinecap="round"
-        />
-        {/* Nose tip shadow */}
-        <ellipse cx="180" cy="236" rx="6" ry="2" fill="rgba(122,64,48,0.25)" />
-
-        {/* MOUTH — animated speaking (subtle morph) */}
-        <g style={{ animation: 'hfMouth 0.9s ease-in-out infinite', transformOrigin: '180px 255px' }}>
-          {/* Lower lip darker */}
-          <path
-            d="M 158 258
-               Q 168 254 180 256
-               Q 192 254 202 258
-               Q 200 268 180 270
-               Q 160 268 158 258 Z"
-            fill="url(#hf-lip)"
-          />
-          {/* Upper lip */}
-          <path
-            d="M 158 256
-               Q 165 250 175 252
-               Q 180 246 185 252
-               Q 195 250 202 256
-               Q 192 254 180 256
-               Q 168 254 158 256 Z"
-            fill="url(#hf-lip)"
-            opacity="0.9"
-          />
-          {/* teeth hint */}
-          <rect x="170" y="257" width="20" height="2.5" rx="0.8" fill="#fff" opacity="0.85" />
-          {/* lip highlight */}
-          <path
-            d="M 170 256 Q 180 254 190 256"
-            stroke="rgba(255,200,210,0.5)"
-            strokeWidth="0.6"
-            fill="none"
-          />
-        </g>
-
-        {/* Chin shadow */}
-        <ellipse cx="180" cy="282" rx="32" ry="5" fill="rgba(122,64,48,0.18)" />
-
-        {/* Earring sparkle */}
-        <circle cx="116" cy="220" r="2" fill="#fff" opacity="0.9" />
-        <circle cx="244" cy="220" r="2" fill="#fff" opacity="0.9" />
-
-        {/* Audio waveform outside (sound) */}
+        {/* Audio waveform outside (sound radiando) */}
         <g
-          transform="translate(180 332)"
+          transform="translate(180 360)"
           style={{ animation: 'avWaveOpacity 2s ease-in-out infinite' }}
         >
           {Array.from({ length: 13 }).map((_, i) => {
@@ -736,26 +693,24 @@ function HumanFaceClean() {
         </g>
 
         {/* HUD txt */}
-        <g fontFamily="monospace" fontSize="8" fill="rgba(232,121,249,0.7)">
-          <text x="60" y="350">[ HUMAN · MODE ]</text>
-          <text x="60" y="362">SYNC IDLE</text>
+        <g fontFamily="monospace" fontSize="8" fill="rgba(232,121,249,0.75)">
+          <text x="40" y="385">[ CREATOR · MODE ]</text>
+          <text x="40" y="395">READY TO TALK</text>
         </g>
-        <g fontFamily="monospace" fontSize="8" fill="rgba(167,139,250,0.7)">
-          <text x="232" y="350">[ READY · TO TALK ]</text>
-          <text x="232" y="362">FPS 32</text>
+        <g fontFamily="monospace" fontSize="8" fill="rgba(103,232,249,0.75)">
+          <text x="232" y="385">[ HD · NATURAL ]</text>
+          <text x="232" y="395">SYNC LOCKED</text>
         </g>
       </svg>
 
       <style jsx>{`
-        @keyframes hfBlink {
-          0%, 92%, 100% { transform: scaleY(1); transform-origin: center; }
-          95% { transform: scaleY(0.1); }
+        @keyframes hfBreath {
+          0%, 100% { transform: translate(-50%, -50%) scale(1); }
+          50% { transform: translate(-50%, -50%) scale(1.025); }
         }
-        @keyframes hfMouth {
-          0%, 100% { transform: scaleY(1) scaleX(1); }
-          25% { transform: scaleY(1.18) scaleX(0.92); }
-          50% { transform: scaleY(0.85) scaleX(1.05); }
-          75% { transform: scaleY(1.1) scaleX(0.96); }
+        @keyframes hfRingSpin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
       `}</style>
     </div>
