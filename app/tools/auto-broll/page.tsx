@@ -6,29 +6,45 @@ import { JobControlPanel } from '@/components/JobControlPanel';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { CancelButton } from '@/components/CancelButton';
 /**
- * V2 API direta — substituiu o bridge da extension.
- * Mantém formato { connected, version? } pra preservar a UI existente.
+ * Status duplo: DB (cookies cifrados) + bridge da extensão (live).
+ *
+ * Estados possíveis:
+ *  - connected:true                       → DB ok + extensão ativa = pronto
+ *  - connected:false, reason:'no-ext'     → DB ok mas extensão removida = reinstalar
+ *  - connected:false, reason:'no-creds'   → DB vazio = primeira instalação
  */
 type MagnificExtensionStatus =
   | { connected: true; version: string }
-  | { connected: false };
+  | { connected: false; reason: 'no-ext' | 'no-creds' | 'error'; detail?: string };
 
 async function detectMagnificExtension(): Promise<MagnificExtensionStatus> {
   try {
+    // 1) Confere DB
     const r = await fetch('/api/auto-broll-v2/save-creds', { method: 'GET' });
-    if (!r.ok) return { connected: false };
+    if (!r.ok) return { connected: false, reason: 'error', detail: `HTTP ${r.status}` };
     const j = (await r.json()) as {
       configured: boolean;
       magnificUserId: number | null;
       plan: string | null;
     };
-    if (!j.configured) return { connected: false };
+    if (!j.configured) return { connected: false, reason: 'no-creds' };
+
+    // 2) Confere extensão (bridge ping)
+    const { isExtensionInstalled } = await import('@/lib/magnific-bridge');
+    const extOk = await isExtensionInstalled(true); // force re-check
+    if (!extOk) {
+      return {
+        connected: false,
+        reason: 'no-ext',
+        detail: 'Cookies salvos mas extensão removida ou desabilitada.',
+      };
+    }
     return {
       connected: true,
       version: `${j.plan || 'Magnific'} · user ${j.magnificUserId}`,
     };
-  } catch {
-    return { connected: false };
+  } catch (e) {
+    return { connected: false, reason: 'error', detail: (e as Error).message };
   }
 }
 
@@ -40,10 +56,15 @@ async function testMagnificSession(): Promise<{
   try {
     const r = await fetch('/api/auto-broll-v2/save-creds', { method: 'GET' });
     const j = (await r.json()) as { configured?: boolean; plan?: string };
-    if (r.ok && j.configured) {
-      return { ok: true, detail: `Conectado · ${j.plan || 'Magnific'}`, endpoint: 'api-v2' };
+    if (!r.ok || !j.configured) {
+      return { ok: false, detail: 'Cookies Magnific não configurados.' };
     }
-    return { ok: false, detail: 'Cookies Magnific não configurados em /configuracoes/magnific.' };
+    const { isExtensionInstalled } = await import('@/lib/magnific-bridge');
+    const extOk = await isExtensionInstalled(true);
+    if (!extOk) {
+      return { ok: false, detail: 'Extensão removida — reinstale em /configuracoes/magnific.' };
+    }
+    return { ok: true, detail: `Conectado · ${j.plan || 'Magnific'}`, endpoint: 'api-v2' };
   } catch (e) {
     return { ok: false, detail: (e as Error).message };
   }
@@ -113,6 +134,7 @@ export default function AutoBrollPage() {
 function AutoBrollInner() {
   const [extStatus, setExtStatus] = useState<MagnificExtensionStatus>({
     connected: false,
+    reason: 'no-creds',
   });
   const [sessionOk, setSessionOk] = useState<null | { ok: boolean; detail?: string }>(null);
   const [testingSession, setTestingSession] = useState(false);
@@ -334,21 +356,44 @@ function AutoBrollInner() {
             </button>
           </div>
         ) : (
-          <div className="rounded-[12px] border-2 border-lime/40 bg-lime/[0.05] px-4 py-4">
+          <div
+            className={
+              extStatus.reason === 'no-ext'
+                ? 'rounded-[12px] border-2 border-amber-400/50 bg-amber-400/[0.06] px-4 py-4'
+                : 'rounded-[12px] border-2 border-lime/40 bg-lime/[0.05] px-4 py-4'
+            }
+          >
             <div className="flex items-start gap-3">
-              <span className="text-2xl leading-none">🔌</span>
+              <span className="text-2xl leading-none">
+                {extStatus.reason === 'no-ext' ? '⚠️' : '🔌'}
+              </span>
               <div className="flex-1">
                 <div className="mb-1 flex items-center gap-2">
-                  <strong className="text-sm text-lime">
-                    Magnific não conectado
+                  <strong
+                    className={
+                      extStatus.reason === 'no-ext'
+                        ? 'text-sm text-amber-300'
+                        : 'text-sm text-lime'
+                    }
+                  >
+                    {extStatus.reason === 'no-ext'
+                      ? 'Extensão removida ou desabilitada'
+                      : 'Magnific não conectado'}
                   </strong>
-                  <span className="rounded-full bg-lime px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-black">
-                    1 clique
+                  <span
+                    className={
+                      extStatus.reason === 'no-ext'
+                        ? 'rounded-full bg-amber-400 px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-black'
+                        : 'rounded-full bg-lime px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-black'
+                    }
+                  >
+                    {extStatus.reason === 'no-ext' ? 'reinstalar' : '1 clique'}
                   </span>
                 </div>
                 <p className="mb-3 text-[12px] text-text-muted">
-                  Instala a extensão Chrome (1x) → loga em Freepik → conectado
-                  pra sempre. Auto-sync invisível, zero copy/paste.
+                  {extStatus.reason === 'no-ext'
+                    ? 'Seus cookies ainda estão salvos no banco, mas a extensão não responde. Reinstala pra voltar a disparar.'
+                    : 'Instala a extensão Chrome (1x) → loga em Freepik → conectado pra sempre. Auto-sync invisível, zero copy/paste.'}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <a

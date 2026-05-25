@@ -27,6 +27,8 @@ type Status = {
   magnificUserId: number | null;
   plan: string | null;
   updatedAt: string | null;
+  /** Live: bridge da extensão respondendo? */
+  extensionAlive?: boolean;
 };
 
 export default function MagnificConfigPage() {
@@ -54,7 +56,15 @@ export default function MagnificConfigPage() {
       const r = await fetch('/api/auto-broll-v2/save-creds', { method: 'GET' });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || 'Falha.');
-      setStatus(j as Status);
+      // Checa também se extensão tá viva (bridge ping)
+      let extensionAlive = false;
+      try {
+        const { isExtensionInstalled } = await import('@/lib/magnific-bridge');
+        extensionAlive = await isExtensionInstalled(true);
+      } catch {
+        /* bridge import falhou — assume false */
+      }
+      setStatus({ ...(j as Status), extensionAlive });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -177,9 +187,13 @@ export default function MagnificConfigPage() {
                     <span className="mono rounded-full bg-white/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted">
                       CARREGANDO…
                     </span>
-                  ) : status?.configured ? (
+                  ) : status?.configured && status?.extensionAlive ? (
                     <span className="mono rounded-full bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime">
                       CONECTADO · USER {status.magnificUserId}
+                    </span>
+                  ) : status?.configured && !status?.extensionAlive ? (
+                    <span className="mono rounded-full bg-amber-400/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-amber-300">
+                      EXTENSÃO REMOVIDA · COOKIES SALVOS
                     </span>
                   ) : (
                     <span className="mono rounded-full bg-red-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-red-300">
@@ -195,6 +209,11 @@ export default function MagnificConfigPage() {
                     {status.updatedAt
                       ? new Date(status.updatedAt).toLocaleString('pt-BR')
                       : '—'}
+                    {!status?.extensionAlive ? (
+                      <span className="text-amber-300">
+                        {' · '}Reinstale a extensão pra voltar a disparar.
+                      </span>
+                    ) : null}
                   </p>
                 ) : null}
               </div>
