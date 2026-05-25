@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { LipSyncHero3D } from '@/app/tools/lipsync/LipSyncHero3D';
 import { runChunkedLipSync, type ChunkProgress } from '@/lib/lipsync-chunker';
-import { preprocessVideo, preprocessAudio } from '@/lib/lipsync-preprocess';
+import { preprocessForLipSync } from '@/lib/lipsync-preprocess';
 
 /**
  * LipSyncTool — UI estilo DreamFace com 2 motores (V1 / V2).
@@ -223,19 +223,21 @@ export default function LipSyncTool() {
     }
   }
 
-  /* ─── Pre-processing (qualidade absurda + custo minimo) ────────
-     SEMPRE roda. Demora 10-30s no client mas:
-     - Video vai pra 720p@25fps → menos bytes no Fal → mais barato
-     - Audio limpo (highpass + normalize) → modelo entende fonema melhor
-       → boca sincroniza melhor → resultado bem mais preciso
+  /* ─── Pre-processing UNIFICADO (sincronia perfeita) ────────────
+     Gera UM SO arquivo mp4 com video otimizado (720p@25fps) + audio
+     limpo embutido (highpass+normalize+mono). Usa esse arquivo
+     como video_url E audio_url no Sync.so → sincronia garantida
+     matematicamente. Sem drift, sem chunks dessincronizados.
   */
-  async function preprocessAll(): Promise<{ video: File; audio: File }> {
+  async function preprocessSync(): Promise<File> {
     if (!selected || !audioFile) throw new Error('Arquivos faltando');
-    const [video, audio] = await Promise.all([
-      preprocessVideo(selected.file),
-      preprocessAudio(audioFile),
-    ]);
-    return { video, audio };
+    // Se audio for o mesmo video (user subiu mp4 nos dois campos),
+    // nao precisa passar audioOverride. Senao, mixa os dois.
+    const sameSource = audioFile === selected.file;
+    return preprocessForLipSync(
+      selected.file,
+      sameSource ? null : audioFile,
+    );
   }
 
   /* ─── Upload helpers ────────────────────────────────────────── */
@@ -310,22 +312,23 @@ export default function LipSyncTool() {
       const dur = selected.meta?.dur ?? 0;
       const shouldChunk = dur > 30;
 
-      // PRE-PROCESSING (rola SEMPRE — chave da qualidade absurda):
-      // - Video: 720p@25fps + bitrate otimizado
-      // - Audio: highpass + normalize -16 LUFS + mp3 mono limpo
+      // PRE-PROCESSING UNIFICADO: 1 arquivo mp4 com video + audio
+      // otimizado embutido. Sync.so vai usar ele pra ambos os campos
+      // → sincronia perfeita garantida.
       setStatus('uploading-video');
       setUploadProgress(0);
-      const { video: optVideo, audio: optAudio } = await preprocessAll();
+      const optFile = await preprocessSync();
 
       if (shouldChunk) {
-        // CHUNKED FLOW — video longo, divide em pedacos
+        // CHUNKED FLOW — passa o MESMO arquivo pros 2 inputs do chunker.
+        // O chunker vai splittar 1 vez e usar o mesmo chunk como video+audio.
         setStatus('generating');
         setChunkProgress(null);
         const finalUrl = await runChunkedLipSync({
-          videoFile: optVideo,
-          audioFile: optAudio,
+          videoFile: optFile,
+          audioFile: optFile, // MESMO arquivo — Sync.so extrai audio
           durationSec: dur,
-          pro: false, // SEMPRE padrao
+          pro: false,
           syncMode,
           chunkDurationSec: 25,
           concurrency: 3,
@@ -337,12 +340,10 @@ export default function LipSyncTool() {
         return;
       }
 
-      // SINGLE FLOW — video curto
-      const video_url = await uploadToFal(optVideo, (pct) => setUploadProgress(pct));
-
-      setStatus('uploading-audio');
-      setUploadProgress(0);
-      const audio_url = await uploadToFal(optAudio, (pct) => setUploadProgress(pct));
+      // SINGLE FLOW — sobe 1 vez, usa pra video E audio
+      const url = await uploadToFal(optFile, (pct) => setUploadProgress(pct));
+      const video_url = url;
+      const audio_url = url;
 
       setStatus('queueing');
       setUploadProgress(0);

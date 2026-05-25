@@ -195,18 +195,30 @@ export async function runChunkedLipSync(opts: LipSyncChunkOptions): Promise<stri
     });
   }
 
-  /* ───────── 1. SPLIT ───────── */
+  /* ───────── 1. SPLIT ─────────
+     Se video e audio sao o MESMO arquivo (caso do preprocess unificado),
+     so splitamos 1 vez e usamos o mesmo chunk pra ambos. Garante numero
+     identico de chunks e sincronia perfeita. */
   emit('splitting');
   chunks.forEach((c) => (c.status = 'splitting'));
   emit('splitting');
 
-  const [videoChunks, audioChunks] = await Promise.all([
-    splitFast(opts.videoFile, chunkSec, 'mp4', 'video/mp4', opts.onLog, opts.onStage),
-    splitFast(opts.audioFile, chunkSec, guessAudioExt(opts.audioFile), opts.audioFile.type || 'audio/mpeg', opts.onLog, opts.onStage),
-  ]);
+  const isSameFile = opts.videoFile === opts.audioFile;
 
-  // Ajusta numero real de chunks (pode diferir da estimativa se duracao do
-  // arquivo nao for exatamente o que metadata disse).
+  let videoChunks: Blob[];
+  let audioChunks: Blob[];
+
+  if (isSameFile) {
+    videoChunks = await splitFast(opts.videoFile, chunkSec, 'mp4', 'video/mp4', opts.onLog, opts.onStage);
+    audioChunks = videoChunks; // MESMOS blobs — sync absoluta
+  } else {
+    [videoChunks, audioChunks] = await Promise.all([
+      splitFast(opts.videoFile, chunkSec, 'mp4', 'video/mp4', opts.onLog, opts.onStage),
+      splitFast(opts.audioFile, chunkSec, guessAudioExt(opts.audioFile), opts.audioFile.type || 'audio/mpeg', opts.onLog, opts.onStage),
+    ]);
+  }
+
+  // Ajusta numero real de chunks (pode diferir da estimativa).
   const realChunks = Math.min(videoChunks.length, audioChunks.length);
   if (realChunks < chunks.length) chunks.length = realChunks;
 
