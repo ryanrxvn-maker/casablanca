@@ -137,6 +137,15 @@ export async function assertZeroCreditCost(): Promise<void> {
   const status = await getUnlimitedStatus();
   if (status.isBanned) throw new Error('Conta Magnific BANIDA.');
   if (!status.isEnabled) throw new Error('Unlimited mode DESLIGADO no Magnific.');
+  // CAP CHECK: se usage > 100%, Magnific bloqueia gerações silenciosamente
+  // (devolve HTML paywall). Detectamos AQUI antes de começar o batch.
+  if (status.usagePercent > 100) {
+    throw new Error(
+      `Conta Magnific atingiu CAP DO CICLO (usage ${status.usagePercent}% > 100%). ` +
+      `Magnific bloqueou gerações até o reset em ${status.cycleResetDate || '?'}. ` +
+      `Use outra conta Premium+ ou aguarde reset.`
+    );
+  }
   const [img, vid] = await Promise.all([
     simulateGeneration([
       {

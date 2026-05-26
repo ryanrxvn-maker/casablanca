@@ -122,8 +122,15 @@ class ThrottledSemaphore {
  */
 function isRetryableError(e: unknown): boolean {
   const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
-  // NSFW / policy = permanente (NÃO retry)
+  // PERMANENTES (NÃO retry — só desperdiça tempo):
+  //  - NSFW / content policy → prompt bloqueado, retry com seed novo não resolve
+  //  - MAGNIFIC_CAP_EXCEEDED → conta estourou usage do ciclo, server devolve
+  //    HTML paywall. Retry só queima tempo. User tem que aguardar reset
+  //    OU usar outra conta.
   if (msg.includes('nsfw') || msg.includes('blocked by') || msg.includes('content policy')) {
+    return false;
+  }
+  if (msg.includes('magnific_cap_exceeded') || msg.includes('cap do ciclo') || msg.includes('paywall')) {
     return false;
   }
   // Tudo que parece rede/server = retryable
