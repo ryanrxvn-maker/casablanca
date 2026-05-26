@@ -97,6 +97,19 @@ export async function magnificFetch(
         return;
       }
       const body: string = m.body ?? '';
+      // DETECÇÃO DE PAYWALL/CAP EXCEEDED: Magnific retorna 200 + HTML quando
+      // a conta estoura o cap do ciclo (usage > 100%). Em vez de devolver
+      // 429 ou JSON com erro, ele silenciosamente serve a página HTML.
+      // Detectamos isso e transformamos em erro permanente claro.
+      const isHtmlResponse = body.trim().toLowerCase().startsWith('<!doctype');
+      if (isHtmlResponse && /api\/v2\/ai\/(start-tti|simulate-generation)|api\/generate/.test(path)) {
+        reject(new Error(
+          'MAGNIFIC_CAP_EXCEEDED: conta atingiu cap do ciclo (usage > 100%). ' +
+          'Magnific bloqueou a geração e devolveu HTML do paywall. ' +
+          'Verifique seu usage em magnific.com/account ou aguarde reset do ciclo.'
+        ));
+        return;
+      }
       resolve({
         ok: !!m.ok,
         status: m.status ?? 0,
