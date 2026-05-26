@@ -250,6 +250,38 @@ function AutoBrollInner() {
       );
       if (r.ok && r.complete && r.zipBlob && r.zipName) {
         patchJob(job.id, { status: 'done', zip: { blob: r.zipBlob, name: r.zipName } });
+        // Persiste no histórico — user pode re-baixar mesmo depois de reload
+        try {
+          const { saveZip } = await import('@/lib/zip-store');
+          const key = `broll:${job.id}:${Date.now()}:zip`;
+          await saveZip(key, r.zipBlob, r.zipName);
+          // Atualiza index em localStorage com manifest do batch
+          const histKey = 'darkolab:auto-broll:history';
+          const hist = (() => { try { return JSON.parse(localStorage.getItem(histKey) || '[]'); } catch { return []; } })();
+          hist.unshift({
+            jobId: job.id,
+            spaceName: job.name || `BROLL_${job.id}`,
+            zipKey: key,
+            zipName: r.zipName,
+            totalTakes: takes.length,
+            successCount: r.successCount,
+            failedCount: r.failedCount,
+            // URLs Magnific dos takes — pra reconstruir caso ZIP seja deletado
+            takeUrls: r.takes.map((t: any) => ({
+              idx: t.idx,
+              status: t.status,
+              videoUrl: t.videoUrl || null,
+              imageUrl: t.imageUrl || null,
+            })),
+            createdAt: Date.now(),
+          });
+          // Mantém só os últimos 50 batches
+          localStorage.setItem(histKey, JSON.stringify(hist.slice(0, 50)));
+          // Avisa o componente de histórico pra re-render
+          window.dispatchEvent(new Event('darkolab:auto-broll:history-changed'));
+        } catch (e) {
+          console.warn('[auto-broll] persist history falhou:', e);
+        }
       } else if (r.complete === false) {
         const miss = (r.missingIdxs || []).join(', ');
         patchJob(job.id, {
@@ -569,9 +601,141 @@ function AutoBrollInner() {
             )}
           </div>
         </ToolStep>
+        <BrollHistorySection />
       </div>
       </div>
     </div>
+  );
+}
+
+function BrollHistorySection() {
+  const [hist, setHist] = useState<Array<{
+    jobId: string;
+    spaceName: string;
+    zipKey: string;
+    zipName: string;
+    totalTakes: number;
+    successCount: number;
+    failedCount: number;
+    takeUrls: Array<{ idx: number; status: string; videoUrl: string | null; imageUrl: string | null }>;
+    createdAt: number;
+  }>>([]);
+  const [loading, setLoading] = useState<string | null>(null);
+
+  function load() {
+    try {
+      const raw = localStorage.getItem('darkolab:auto-broll:history');
+      setHist(raw ? JSON.parse(raw) : []);
+    } catch {
+      setHist([]);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    const h = () => load();
+    window.addEventListener('darkolab:auto-broll:history-changed', h);
+    return () => window.removeEventListener('darkolab:auto-broll:history-changed', h);
+  }, []);
+
+  async function redownload(item: typeof hist[number]) {
+    setLoading(item.zipKey);
+    try {
+      const { loadZip } = await import('@/lib/zip-store');
+      const z = await loadZip(item.zipKey);
+      if (z) {
+        const a = document.createElement('a');
+        a.href = z.blobUrl;
+        a.download = z.filename;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(z.blobUrl), 5000);
+      } else {
+        // ZIP perdido — tenta reconstruir baixando URLs Magnific
+        if (!confirm('ZIP não está mais no cache local. Reconstruir baixando dos URLs Magnific?\n(Pode levar 30-60s.)')) return;
+        const JSZip = (await import('jszip')).default;
+        const zip = new JSZip();
+        let n = 0;
+        for (const t of item.takeUrls) {
+          if (!t.videoUrl) continue;
+          try {
+            const r = await fetch(t.videoUrl);
+            if (!r.ok) continue;
+            const ab = await r.arrayBuffer();
+            zip.file(`take_${String(t.idx).padStart(2, '0')}.mp4`, ab);
+            n++;
+          } catch {}
+        }
+        if (n === 0) { alert('Nenhum vídeo Magnific acessível mais. URLs podem ter expirado.'); return; }
+        const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = item.zipName;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+      }
+    } catch (e) {
+      alert('Erro: ' + ((e as Error)?.message || String(e)));
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  async function remove(item: typeof hist[number]) {
+    if (!confirm(`Remover "${item.spaceName}" do histórico?`)) return;
+    try {
+      const { deleteZip } = await import('@/lib/zip-store');
+      await deleteZip(item.zipKey);
+    } catch {}
+    const next = hist.filter((h) => h.zipKey !== item.zipKey);
+    localStorage.setItem('darkolab:auto-broll:history', JSON.stringify(next));
+    setHist(next);
+  }
+
+  if (hist.length === 0) return null;
+
+  return (
+    <ToolStep n={4} icon={<IconStepPipeline size={18} />} title={`Histórico (${hist.length})`} hint="Re-baixe ZIPs gerados anteriormente, mesmo após reload" hue={HUE}>
+      <div className="grid gap-2">
+        {hist.map((item) => {
+          const ts = new Date(item.createdAt);
+          const dateStr = ts.toLocaleDateString('pt-BR') + ' ' + ts.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+          return (
+            <div
+              key={item.zipKey}
+              className="flex items-center gap-3 rounded-[12px] border border-line/60 bg-bg-soft/40 px-4 py-3 backdrop-blur-sm hover:border-violet/40 transition"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="mono text-[11px] uppercase tracking-widest text-violet truncate">{item.spaceName}</div>
+                <div className="mt-0.5 flex flex-wrap gap-2 text-[10px] text-text-muted">
+                  <span>{dateStr}</span>
+                  <span>·</span>
+                  <span className="text-lime">{item.successCount}/{item.totalTakes} ok</span>
+                  {item.failedCount > 0 && (<><span>·</span><span className="text-yellow-300">{item.failedCount} falhas</span></>)}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => redownload(item)}
+                disabled={loading === item.zipKey}
+                className="rounded-[8px] border border-lime/40 bg-lime/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-lime hover:bg-lime/20 disabled:opacity-50"
+                title="Baixar ZIP novamente"
+              >
+                {loading === item.zipKey ? '...' : '↓ Baixar'}
+              </button>
+              <button
+                type="button"
+                onClick={() => remove(item)}
+                className="rounded-[8px] border border-text-muted/30 bg-bg/40 px-2 py-1.5 text-[11px] text-text-muted hover:border-red-500/40 hover:text-red-300"
+                title="Remover do histórico"
+              >
+                ×
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </ToolStep>
   );
 }
 
