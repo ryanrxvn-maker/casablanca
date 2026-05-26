@@ -391,12 +391,29 @@ export async function runMagnificPipelineV2(
 
         // === VIDEO ===
         await vidSem.acquire();
+        const vidStartedAt = Date.now();
+        // Timer mostra elapsed time. Kling 2.5 sob carga pesada pode levar
+        // 30-60min — user pediu "esperar em paz". Mostramos o relógio
+        // andando pra dar feedback visual de que tá vivo.
+        const tickTimer = setInterval(() => {
+          const elapsedMin = (Date.now() - vidStartedAt) / 60_000;
+          patchTake(take.idx, {
+            status: 'running',
+            phase: 'video-gen',
+            percent: 40,
+            message: elapsedMin < 6
+              ? `Renderizando movimento · Kling 2.5 · ${elapsedMin.toFixed(1)}min`
+              : `Render sob carga — esperando em paz · ${elapsedMin.toFixed(0)}min decorridos`,
+            // @ts-expect-error mantém compat
+            imageUrl,
+          });
+        }, 15_000);
         try {
           patchTake(take.idx, {
             status: 'running',
             phase: 'video-gen',
             percent: 40,
-            message: 'Renderizando movimento · Kling 2.5 (~6min)',
+            message: 'Renderizando movimento · Kling 2.5 (iniciando)',
             // @ts-expect-error mantém compat
             imageUrl,
           });
@@ -410,7 +427,7 @@ export async function runMagnificPipelineV2(
                   status: 'running',
                   phase: 'video-gen',
                   percent: 40,
-                  message: `Re-renderizando · ${n}ª passada`,
+                  message: `Re-render · ${n}ª passada (paciência, vai render)`,
                   // @ts-expect-error compat
                   imageUrl,
                 });
@@ -419,6 +436,7 @@ export async function runMagnificPipelineV2(
           );
           patchTake(take.idx, { status: 'video-done', imageUrl, videoUrl: vid.url });
         } finally {
+          clearInterval(tickTimer);
           vidSem.release();
         }
       } catch (e) {
