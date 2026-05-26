@@ -148,10 +148,12 @@ function isRetryableError(e: unknown): boolean {
   );
 }
 
-/** Backoff escalonado pra erros transientes. Vai até 5min e mantém.
- *  Empírico: Magnific cooldowns longos quando você bate forte.  */
+/** Backoff escalonado pra erros transientes. Início suave (3s) pra não
+ *  pausar o pipeline cedo demais; cresce até 3min. Empírico: Magnific
+ *  responde bem com retries curtos no início, só pede pause longa em
+ *  abuse real (429 sustentado).  */
 function backoffMs(attempt: number): number {
-  const ladder = [5_000, 10_000, 20_000, 40_000, 60_000, 90_000, 120_000, 180_000, 240_000, 300_000];
+  const ladder = [3_000, 6_000, 10_000, 20_000, 30_000, 45_000, 60_000, 90_000, 120_000, 180_000];
   return ladder[Math.min(attempt - 1, ladder.length - 1)];
 }
 
@@ -253,34 +255,55 @@ export async function runMagnificPipelineV2(
     6,
   );
 
-  // ───────── Retry policy (MUITO mais tolerante) ─────────
-  // Magnific retorna 3 tipos de falha:
-  //   1. 429 "Too Many Attempts" — bate rate limit, server diz pra esperar
-  //   2. Failed to fetch / network — Cloudflare derruba TLS, extension perde
-  //      bridge, browser fecha aba, timeout. SEMPRE recuperável.
-  //   3. status:'failed' (NSFW filter) — PERMANENTE, prompt bateu policy
-  //
-  // User pediu: "GARANTIA QUE NUNCA FALHE". Estratégia:
-  //   - Retryable errors: 20 tentativas com backoff 5s→5min, propaga
-  //     cooldown global pro semáforo (todos os outros workers pausam)
-  //   - Permanent (NSFW): 3 retries com seed novo (NSFW evasion). Sem
-  //     dar pra evadir, marca failed.
-  //   - status:'failed' sem motivo claro: 5 retries (assume transitório)
+  // ───────── Retry policy (tolerante + bounded) ─────────
+  // User pediu: "NUNCA falhe por não esperar" + "JAMAIS travar infinito".
+  // Equilíbrio:
+  //   - Per-take HARD CAP: 15min em retries (não no render real do Kling
+  //     que pode levar 60min — esse é polling do status). Se demora 15min
+  //     SÓ pra conseguir disparar, marca failed e segue (outros 29 takes
+  //     não pagam pela falha de 1).
+  //   - GLOBAL WATCHDOG: se NENHUM take avançou fase em 5min, aborta
+  //     pipeline com erro claro ("extension caiu / Magnific bloqueado").
+  //   - Telemetria visível: cada wait/retry vira mensagem no take card.
   const MAX_RETRIES_NETWORK = 20;
   const MAX_RETRIES_STATUS_FAILED = 5;
   const RETRY_DELAY_STATUS_MS = 3000;
+  const PER_TAKE_RETRY_BUDGET_MS = 15 * 60_000; // 15min total em retries
+  const GLOBAL_WATCHDOG_MS = 5 * 60_000;        // 5min sem progresso → abort
+
+  // Watchdog: marca o timestamp do último progresso de QUALQUER take.
+  // Se passar GLOBAL_WATCHDOG_MS sem update, signal aborta tudo.
+  let lastProgressAt = Date.now();
+  function noteProgress() { lastProgressAt = Date.now(); }
+  const watchdogAbort = new AbortController();
+  const watchdogTimer = setInterval(() => {
+    if (Date.now() - lastProgressAt > GLOBAL_WATCHDOG_MS) {
+      console.error(`[pipeline] WATCHDOG: ${GLOBAL_WATCHDOG_MS/60000}min sem progresso. Abortando.`);
+      watchdogAbort.abort();
+      clearInterval(watchdogTimer);
+    }
+  }, 30_000);
 
   async function generateImageWithRetry(
     prompt: string,
-    onAttempt: (n: number) => void,
+    onAttempt: (n: number, msg?: string) => void,
   ): Promise<{ url: string }> {
+    const budgetStart = Date.now();
     let lastErr: Error | null = null;
     let netAttempt = 0;
     let statusAttempt = 0;
     const HARD_CAP = MAX_RETRIES_NETWORK + MAX_RETRIES_STATUS_FAILED;
     for (let total = 1; total <= HARD_CAP; total++) {
+      // BUDGET CHECK — desiste se ficou 15min só em retry
+      if (Date.now() - budgetStart > PER_TAKE_RETRY_BUDGET_MS) {
+        throw lastErr || new Error(`Budget esgotado (${PER_TAKE_RETRY_BUDGET_MS/60000}min em retries)`);
+      }
+      if (watchdogAbort.signal.aborted) {
+        throw new Error('Pipeline abortado por watchdog (5min sem progresso geral)');
+      }
       onAttempt(total);
       try {
+        noteProgress();
         const img = await generateImage({
           prompt,
           aspectRatio: '9:16',
@@ -288,8 +311,8 @@ export async function runMagnificPipelineV2(
           smartPrompt: true,
           seed: Math.floor(Math.random() * 1_000_000),
         });
+        noteProgress();
         if (img.status === 'completed' && img.url) return { url: img.url };
-        // Magnific retornou status non-completed — tenta de novo
         lastErr = new Error(`Magnific status:${img.status}`);
         statusAttempt++;
         if (statusAttempt >= MAX_RETRIES_STATUS_FAILED) throw lastErr;
@@ -300,14 +323,20 @@ export async function runMagnificPipelineV2(
           netAttempt++;
           if (netAttempt > MAX_RETRIES_NETWORK) throw lastErr;
           const waitMs = backoffMs(netAttempt);
-          console.warn(`[img] retryable error #${netAttempt}/${MAX_RETRIES_NETWORK} — backoff ${waitMs/1000}s — ${lastErr.message.slice(0, 80)}`);
-          imgSem.setCooldown(Date.now() + waitMs);
+          const errSnip = lastErr.message.slice(0, 60);
+          console.warn(`[img] retryable #${netAttempt}/${MAX_RETRIES_NETWORK} — wait ${waitMs/1000}s — ${errSnip}`);
+          // Telemetria visível no take card
+          onAttempt(total, `Rede falhou (${errSnip}) — wait ${Math.round(waitMs/1000)}s · retry ${netAttempt}/20`);
+          // Só propaga cooldown GLOBAL pra outros workers se backoff >= 60s
+          // (= é um problema sério, não só uma falha pontual). Pra falhas
+          // rápidas, esse worker espera sozinho.
+          if (waitMs >= 60_000) imgSem.setCooldown(Date.now() + Math.min(waitMs, 60_000));
           await new Promise((r) => setTimeout(r, waitMs));
         } else {
-          // Permanente (NSFW/policy) — retry com seed novo até MAX_STATUS
           statusAttempt++;
           if (statusAttempt >= MAX_RETRIES_STATUS_FAILED) throw lastErr;
-          console.warn(`[img] permanent error attempt#${statusAttempt} — re-seed`);
+          console.warn(`[img] non-net err attempt#${statusAttempt}`);
+          onAttempt(total, `Falha (${lastErr.message.slice(0,40)}) — re-seed`);
           await new Promise((r) => setTimeout(r, RETRY_DELAY_STATUS_MS * statusAttempt));
         }
       }
@@ -318,15 +347,24 @@ export async function runMagnificPipelineV2(
   async function generateVideoWithRetry(
     prompt: string,
     startImageUrl: string,
-    onAttempt: (n: number) => void,
+    onAttempt: (n: number, msg?: string) => void,
   ): Promise<{ url: string }> {
+    const budgetStart = Date.now();
     let lastErr: Error | null = null;
     let netAttempt = 0;
     let statusAttempt = 0;
     const HARD_CAP = MAX_RETRIES_NETWORK + MAX_RETRIES_STATUS_FAILED;
     for (let total = 1; total <= HARD_CAP; total++) {
+      // BUDGET pra retries — render real do Kling não conta (é dentro do generateVideoFromImage polling)
+      if (Date.now() - budgetStart > PER_TAKE_RETRY_BUDGET_MS) {
+        throw lastErr || new Error(`Budget de retries esgotado`);
+      }
+      if (watchdogAbort.signal.aborted) {
+        throw new Error('Pipeline abortado por watchdog');
+      }
       onAttempt(total);
       try {
+        noteProgress();
         const vid = await generateVideoFromImage({
           prompt,
           startImageUrl,
@@ -334,6 +372,7 @@ export async function runMagnificPipelineV2(
           resolution: '720p',
           duration: 10,
         });
+        noteProgress();
         if (vid.status === 'completed' && vid.url) return { url: vid.url };
         lastErr = new Error(`Magnific status:${vid.status}`);
         statusAttempt++;
@@ -345,12 +384,15 @@ export async function runMagnificPipelineV2(
           netAttempt++;
           if (netAttempt > MAX_RETRIES_NETWORK) throw lastErr;
           const waitMs = backoffMs(netAttempt);
-          console.warn(`[vid] retryable error #${netAttempt}/${MAX_RETRIES_NETWORK} — backoff ${waitMs/1000}s — ${lastErr.message.slice(0, 80)}`);
-          vidSem.setCooldown(Date.now() + waitMs);
+          const errSnip = lastErr.message.slice(0, 60);
+          console.warn(`[vid] retryable #${netAttempt}/${MAX_RETRIES_NETWORK} — wait ${waitMs/1000}s — ${errSnip}`);
+          onAttempt(total, `Rede (${errSnip}) — wait ${Math.round(waitMs/1000)}s · retry ${netAttempt}/20`);
+          if (waitMs >= 60_000) vidSem.setCooldown(Date.now() + Math.min(waitMs, 60_000));
           await new Promise((r) => setTimeout(r, waitMs));
         } else {
           statusAttempt++;
           if (statusAttempt >= MAX_RETRIES_STATUS_FAILED) throw lastErr;
+          onAttempt(total, `Falha (${lastErr.message.slice(0,40)}) — re-seed`);
           await new Promise((r) => setTimeout(r, RETRY_DELAY_STATUS_MS * statusAttempt));
         }
       }
@@ -373,13 +415,13 @@ export async function runMagnificPipelineV2(
             message: 'Compondo frame inicial · Nano Banana 1K',
           });
           emit(`Take ${take.idx}: imagem...`, 'running', undefined as unknown as number);
-          const img = await generateImageWithRetry(take.imagePrompt, (n) => {
-            if (n > 1) {
+          const img = await generateImageWithRetry(take.imagePrompt, (n, customMsg) => {
+            if (n > 1 || customMsg) {
               patchTake(take.idx, {
                 status: 'running',
                 phase: 'image-gen',
                 percent: 10,
-                message: `Recompondo · ${n}ª variação`,
+                message: customMsg || `Recompondo · ${n}ª variação`,
               });
             }
           });
@@ -421,13 +463,13 @@ export async function runMagnificPipelineV2(
           const vid = await generateVideoWithRetry(
             take.videoPrompt || take.imagePrompt,
             imageUrl,
-            (n) => {
-              if (n > 1) {
+            (n, customMsg) => {
+              if (n > 1 || customMsg) {
                 patchTake(take.idx, {
                   status: 'running',
                   phase: 'video-gen',
                   percent: 40,
-                  message: `Re-render · ${n}ª passada (paciência, vai render)`,
+                  message: customMsg || `Re-render · ${n}ª passada (paciência, vai render)`,
                   // @ts-expect-error compat
                   imageUrl,
                 });
@@ -446,6 +488,7 @@ export async function runMagnificPipelineV2(
     }),
   );
   poller.stop();
+  clearInterval(watchdogTimer);
 
   // ───────── Download MP4s ─────────
   emit('Baixando vídeos finais...', 'downloading', 90);
