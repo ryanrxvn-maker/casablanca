@@ -248,14 +248,15 @@ function AutoBrollInner() {
           onProgress: (p) => patchJob(job.id, { progress: p }),
         },
       );
-      if (r.ok && r.complete && r.zipBlob && r.zipName) {
-        patchJob(job.id, { status: 'done', zip: { blob: r.zipBlob, name: r.zipName } });
-        // Persiste no histórico — user pode re-baixar mesmo depois de reload
+      // PERSISTE NO HISTÓRICO sempre que tiver pelo menos 1 sucesso —
+      // mesmo batch parcial vale a pena salvar pra user re-baixar depois.
+      // (Antes salvava só quando complete=true. Agora salva sempre que houver
+      // zipBlob e ao menos 1 take ok.)
+      if (r.zipBlob && r.zipName && r.successCount > 0) {
         try {
           const { saveZip } = await import('@/lib/zip-store');
           const key = `broll:${job.id}:${Date.now()}:zip`;
           await saveZip(key, r.zipBlob, r.zipName);
-          // Atualiza index em localStorage com manifest do batch
           const histKey = 'darkolab:auto-broll:history';
           const hist = (() => { try { return JSON.parse(localStorage.getItem(histKey) || '[]'); } catch { return []; } })();
           hist.unshift({
@@ -266,7 +267,6 @@ function AutoBrollInner() {
             totalTakes: takes.length,
             successCount: r.successCount,
             failedCount: r.failedCount,
-            // URLs Magnific dos takes — pra reconstruir caso ZIP seja deletado
             takeUrls: r.takes.map((t: any) => ({
               idx: t.idx,
               status: t.status,
@@ -275,18 +275,22 @@ function AutoBrollInner() {
             })),
             createdAt: Date.now(),
           });
-          // Mantém só os últimos 50 batches
           localStorage.setItem(histKey, JSON.stringify(hist.slice(0, 50)));
-          // Avisa o componente de histórico pra re-render
           window.dispatchEvent(new Event('darkolab:auto-broll:history-changed'));
         } catch (e) {
           console.warn('[auto-broll] persist history falhou:', e);
         }
+      }
+      if (r.ok && r.complete && r.zipBlob && r.zipName) {
+        patchJob(job.id, { status: 'done', zip: { blob: r.zipBlob, name: r.zipName } });
       } else if (r.complete === false) {
         const miss = (r.missingIdxs || []).join(', ');
+        // Mesmo incompleto, se temos ZIP parcial deixa baixar — user reclamou
+        // que perdia takes ok quando alguns falhavam.
         patchJob(job.id, {
           status: 'error',
-          error: `Ainda faltou take(s) ${miss || '?'} (${r.successCount}/${takes.length}) mesmo após auto-retry. Rode de novo — reaproveita o mesmo space e completa só os faltantes.`,
+          zip: r.zipBlob && r.zipName ? { blob: r.zipBlob, name: r.zipName } : null,
+          error: `${r.successCount}/${takes.length} ok. Faltaram: ${miss || '?'}. ZIP parcial disponível abaixo + entrada criada no Histórico. Rode de novo no mesmo space pra completar os faltantes.`,
         });
       } else {
         patchJob(job.id, {

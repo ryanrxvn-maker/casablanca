@@ -108,20 +108,50 @@ class ThrottledSemaphore {
   }
 }
 
-/** Detecta se um erro é 429 / rate limit do Magnific. */
-function is429Error(e: unknown): boolean {
+/** Detecta se um erro é "retryable" — vale fazer backoff e tentar de novo:
+ *   - 429 / rate limit
+ *   - Failed to fetch / network errors (Cloudflare drop, extension reconnect)
+ *   - timeouts
+ *   - 5xx server errors
+ *   - "fetch failed"
+ *
+ *  Erros NÃO retryable (= falha permanente, marcar failed):
+ *   - NSFW content blocked
+ *   - 4xx (exceto 429)
+ *   - "blocked by policy"
+ */
+function isRetryableError(e: unknown): boolean {
   const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  // NSFW / policy = permanente (NÃO retry)
+  if (msg.includes('nsfw') || msg.includes('blocked by') || msg.includes('content policy')) {
+    return false;
+  }
+  // Tudo que parece rede/server = retryable
   return (
     msg.includes('429') ||
     msg.includes('too many') ||
     msg.includes('rate limit') ||
-    msg.includes('rate_limit')
+    msg.includes('rate_limit') ||
+    msg.includes('failed to fetch') ||
+    msg.includes('fetch failed') ||
+    msg.includes('network') ||
+    msg.includes('timeout') ||
+    msg.includes('econnreset') ||
+    msg.includes('socket hang up') ||
+    msg.includes('502') ||
+    msg.includes('503') ||
+    msg.includes('504') ||
+    msg.includes('cloudflare') ||
+    msg.includes('extension') ||
+    msg.includes('bridge') ||
+    msg.includes('disconnected')
   );
 }
 
-/** Backoff exponencial pra 429: 10s, 30s, 60s, 120s, 240s. */
-function backoff429ms(attempt: number): number {
-  const ladder = [10_000, 30_000, 60_000, 120_000, 240_000];
+/** Backoff escalonado pra erros transientes. Vai até 5min e mantém.
+ *  Empírico: Magnific cooldowns longos quando você bate forte.  */
+function backoffMs(attempt: number): number {
+  const ladder = [5_000, 10_000, 20_000, 40_000, 60_000, 90_000, 120_000, 180_000, 240_000, 300_000];
   return ladder[Math.min(attempt - 1, ladder.length - 1)];
 }
 
@@ -223,27 +253,32 @@ export async function runMagnificPipelineV2(
     6,
   );
 
-  // ───────── Retry policy ─────────
-  // Magnific retorna status:'failed' por NSFW filter, server load, race
-  // condition de Cloudflare/Cloudfront. Ou 429 "Too Many Attempts" por burst.
+  // ───────── Retry policy (MUITO mais tolerante) ─────────
+  // Magnific retorna 3 tipos de falha:
+  //   1. 429 "Too Many Attempts" — bate rate limit, server diz pra esperar
+  //   2. Failed to fetch / network — Cloudflare derruba TLS, extension perde
+  //      bridge, browser fecha aba, timeout. SEMPRE recuperável.
+  //   3. status:'failed' (NSFW filter) — PERMANENTE, prompt bateu policy
   //
-  // Estratégia em camadas:
-  //   429   → backoff exponencial (10s/30s/60s/120s/240s) + propaga global
-  //           cooldown pro semáforo (todos pausam)
-  //   outros → retry imediato com seed novo (NSFW evasion)
-  //   max 5 retries totais (3 por 429 + 3 por outros)
-  const MAX_RETRIES_429 = 5;
-  const MAX_RETRIES_OTHER = 3;
-  const RETRY_DELAY_OTHER_MS = 3000;
+  // User pediu: "GARANTIA QUE NUNCA FALHE". Estratégia:
+  //   - Retryable errors: 20 tentativas com backoff 5s→5min, propaga
+  //     cooldown global pro semáforo (todos os outros workers pausam)
+  //   - Permanent (NSFW): 3 retries com seed novo (NSFW evasion). Sem
+  //     dar pra evadir, marca failed.
+  //   - status:'failed' sem motivo claro: 5 retries (assume transitório)
+  const MAX_RETRIES_NETWORK = 20;
+  const MAX_RETRIES_STATUS_FAILED = 5;
+  const RETRY_DELAY_STATUS_MS = 3000;
 
   async function generateImageWithRetry(
     prompt: string,
     onAttempt: (n: number) => void,
   ): Promise<{ url: string }> {
     let lastErr: Error | null = null;
-    let attempt429 = 0;
-    let attemptOther = 0;
-    for (let total = 1; total <= MAX_RETRIES_429 + MAX_RETRIES_OTHER; total++) {
+    let netAttempt = 0;
+    let statusAttempt = 0;
+    const HARD_CAP = MAX_RETRIES_NETWORK + MAX_RETRIES_STATUS_FAILED;
+    for (let total = 1; total <= HARD_CAP; total++) {
       onAttempt(total);
       try {
         const img = await generateImage({
@@ -254,28 +289,30 @@ export async function runMagnificPipelineV2(
           seed: Math.floor(Math.random() * 1_000_000),
         });
         if (img.status === 'completed' && img.url) return { url: img.url };
-        lastErr = new Error(`Magnific retornou status:${img.status}`);
-        attemptOther++;
-        if (attemptOther >= MAX_RETRIES_OTHER) throw lastErr;
-        await new Promise((r) => setTimeout(r, RETRY_DELAY_OTHER_MS * attemptOther));
+        // Magnific retornou status non-completed — tenta de novo
+        lastErr = new Error(`Magnific status:${img.status}`);
+        statusAttempt++;
+        if (statusAttempt >= MAX_RETRIES_STATUS_FAILED) throw lastErr;
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_STATUS_MS * statusAttempt));
       } catch (e) {
         lastErr = e instanceof Error ? e : new Error(String(e));
-        if (is429Error(e)) {
-          attempt429++;
-          if (attempt429 > MAX_RETRIES_429) throw lastErr;
-          const waitMs = backoff429ms(attempt429);
-          console.warn(`[img] 429 attempt#${attempt429} — backoff ${waitMs/1000}s + propaga p/ todos`);
-          // Pausa GLOBAL: todos os outros workers de imagem também esperam
+        if (isRetryableError(e)) {
+          netAttempt++;
+          if (netAttempt > MAX_RETRIES_NETWORK) throw lastErr;
+          const waitMs = backoffMs(netAttempt);
+          console.warn(`[img] retryable error #${netAttempt}/${MAX_RETRIES_NETWORK} — backoff ${waitMs/1000}s — ${lastErr.message.slice(0, 80)}`);
           imgSem.setCooldown(Date.now() + waitMs);
           await new Promise((r) => setTimeout(r, waitMs));
         } else {
-          attemptOther++;
-          if (attemptOther >= MAX_RETRIES_OTHER) throw lastErr;
-          await new Promise((r) => setTimeout(r, RETRY_DELAY_OTHER_MS * attemptOther));
+          // Permanente (NSFW/policy) — retry com seed novo até MAX_STATUS
+          statusAttempt++;
+          if (statusAttempt >= MAX_RETRIES_STATUS_FAILED) throw lastErr;
+          console.warn(`[img] permanent error attempt#${statusAttempt} — re-seed`);
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_STATUS_MS * statusAttempt));
         }
       }
     }
-    throw lastErr || new Error('Image falhou após retries');
+    throw lastErr || new Error('Image falhou após retries totais');
   }
 
   async function generateVideoWithRetry(
@@ -284,9 +321,10 @@ export async function runMagnificPipelineV2(
     onAttempt: (n: number) => void,
   ): Promise<{ url: string }> {
     let lastErr: Error | null = null;
-    let attempt429 = 0;
-    let attemptOther = 0;
-    for (let total = 1; total <= MAX_RETRIES_429 + MAX_RETRIES_OTHER; total++) {
+    let netAttempt = 0;
+    let statusAttempt = 0;
+    const HARD_CAP = MAX_RETRIES_NETWORK + MAX_RETRIES_STATUS_FAILED;
+    for (let total = 1; total <= HARD_CAP; total++) {
       onAttempt(total);
       try {
         const vid = await generateVideoFromImage({
@@ -297,27 +335,27 @@ export async function runMagnificPipelineV2(
           duration: 10,
         });
         if (vid.status === 'completed' && vid.url) return { url: vid.url };
-        lastErr = new Error(`Magnific retornou status:${vid.status}`);
-        attemptOther++;
-        if (attemptOther >= MAX_RETRIES_OTHER) throw lastErr;
-        await new Promise((r) => setTimeout(r, RETRY_DELAY_OTHER_MS * attemptOther));
+        lastErr = new Error(`Magnific status:${vid.status}`);
+        statusAttempt++;
+        if (statusAttempt >= MAX_RETRIES_STATUS_FAILED) throw lastErr;
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_STATUS_MS * statusAttempt));
       } catch (e) {
         lastErr = e instanceof Error ? e : new Error(String(e));
-        if (is429Error(e)) {
-          attempt429++;
-          if (attempt429 > MAX_RETRIES_429) throw lastErr;
-          const waitMs = backoff429ms(attempt429);
-          console.warn(`[vid] 429 attempt#${attempt429} — backoff ${waitMs/1000}s`);
+        if (isRetryableError(e)) {
+          netAttempt++;
+          if (netAttempt > MAX_RETRIES_NETWORK) throw lastErr;
+          const waitMs = backoffMs(netAttempt);
+          console.warn(`[vid] retryable error #${netAttempt}/${MAX_RETRIES_NETWORK} — backoff ${waitMs/1000}s — ${lastErr.message.slice(0, 80)}`);
           vidSem.setCooldown(Date.now() + waitMs);
           await new Promise((r) => setTimeout(r, waitMs));
         } else {
-          attemptOther++;
-          if (attemptOther >= MAX_RETRIES_OTHER) throw lastErr;
-          await new Promise((r) => setTimeout(r, RETRY_DELAY_OTHER_MS * attemptOther));
+          statusAttempt++;
+          if (statusAttempt >= MAX_RETRIES_STATUS_FAILED) throw lastErr;
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_STATUS_MS * statusAttempt));
         }
       }
     }
-    throw lastErr || new Error('Video falhou após retries');
+    throw lastErr || new Error('Video falhou após retries totais');
   }
 
   // ───────── Pipeline por take ─────────
