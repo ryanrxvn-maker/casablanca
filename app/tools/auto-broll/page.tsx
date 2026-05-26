@@ -692,10 +692,26 @@ function BrollHistorySection() {
     setHist(next);
   }
 
-  if (hist.length === 0) return null;
-
   return (
-    <ToolStep n={4} icon={<IconStepPipeline size={18} />} title={`Histórico (${hist.length})`} hint="Re-baixe ZIPs gerados anteriormente, mesmo após reload" hue={HUE}>
+    <ToolStep
+      n={4}
+      icon={<IconStepPipeline size={18} />}
+      title={hist.length === 0 ? 'Histórico' : `Histórico (${hist.length})`}
+      hint="Re-baixe ZIPs gerados anteriormente, mesmo após reload"
+      hue={HUE}
+    >
+      {hist.length === 0 ? (
+        <div className="rounded-[12px] border border-line/40 bg-bg-soft/30 p-4 text-center">
+          <div className="mono text-[10px] uppercase tracking-widest text-text-muted mb-1">
+            Sem batches finalizados ainda
+          </div>
+          <div className="text-[11px] text-text-dim">
+            Quando um job completar, ele será salvo aqui automaticamente.
+            <br />
+            Você poderá re-baixar o ZIP mesmo após reload, ou reconstruir a partir das URLs Magnific.
+          </div>
+        </div>
+      ) : (
       <div className="grid gap-2">
         {hist.map((item) => {
           const ts = new Date(item.createdAt);
@@ -735,6 +751,7 @@ function BrollHistorySection() {
           );
         })}
       </div>
+      )}
     </ToolStep>
   );
 }
