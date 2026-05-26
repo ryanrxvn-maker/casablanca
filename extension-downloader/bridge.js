@@ -43,7 +43,10 @@
     if (d.type === 'DL_PING' || d.type === 'DL_TEST') announce();
   });
 
-  // anuncia proativamente (a pagina pode ja estar ouvindo)
-  announce();
-  setTimeout(announce, 800);
+  // HEARTBEAT: anuncia proativamente em multiplos timings pra cobrir
+  // race condition de quem chegou primeiro (page listener pode estar
+  // sendo registrado enquanto a extension já anunciou).
+  // Burst inicial + heartbeat contínuo cada 3s.
+  [0, 100, 300, 600, 1500, 3000].forEach((delay) => setTimeout(announce, delay));
+  setInterval(announce, 3000);
 })();
