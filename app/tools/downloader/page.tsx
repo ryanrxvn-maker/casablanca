@@ -80,64 +80,124 @@ export default function DownloaderPage() {
     'downloader:quality',
     '1080',
   );
+  // Cache localStorage: se foi conectado nos últimos 10min, começa
+  // otimisticamente como connected — evita "desconectado" flash no reload.
+  // User pediu: "conectou uma vez, fica conectado a menos que exclua a extensão".
+  const EXT_CACHE_KEY = 'darkolab:downloader:ext-cache';
+  const CACHE_TTL_MS = 10 * 60 * 1000; // 10min
+  function loadCachedExt(): { connected: boolean; version?: string; engine?: boolean } {
+    try {
+      const raw = localStorage.getItem(EXT_CACHE_KEY);
+      if (!raw) return { connected: false };
+      const c = JSON.parse(raw) as { connected: boolean; version?: string; engine?: boolean; ts: number };
+      if (Date.now() - c.ts > CACHE_TTL_MS) return { connected: false };
+      return { connected: c.connected, version: c.version, engine: c.engine };
+    } catch { return { connected: false }; }
+  }
+  function saveCachedExt(v: { connected: boolean; version?: string; engine?: boolean }) {
+    try {
+      localStorage.setItem(EXT_CACHE_KEY, JSON.stringify({ ...v, ts: Date.now() }));
+    } catch {}
+  }
+
   const [ext, setExt] = useState<{
     connected: boolean;
     version?: string;
     engine?: boolean;
-  }>({ connected: false });
+  }>(() => loadCachedExt()); // 🔥 começa otimisticamente do cache
 
   const [reChecking, setReChecking] = useState(false);
-  // ping() centralizado pra poder chamar do botão "Verificar de novo".
-  // Manda DL_PING; o bridge.js da extensão escuta e responde com DL_PONG
-  // contendo `engine` (true/false). Se ninguém responder em 1.2s,
-  // consideramos extensão NÃO instalada — assim o painel de install
-  // aparece logo na primeira carga.
   const doPing = () =>
     window.postMessage({ source: 'darko-dl', type: 'DL_PING' }, '*');
 
   useEffect(() => {
     let alive = true;
+    // Contador de pings SEM RESPOSTA consecutivos.
+    // Só marcamos desconectado após N fails SEGUIDOS — anti-flicker.
+    // (User: "uma vez conectado, fica conectado.")
+    let missedPings = 0;
+    const MAX_MISSED = 5; // 5 pings × 2s = 10s sem resposta → desconectado
+    let lastPongAt = 0;
+    let pendingPing = false;
+
     function onMsg(e: MessageEvent) {
       const d = e.data;
       if (!d || d.source !== 'darko-dl-ext' || d.type !== 'DL_PONG') return;
       if (!alive) return;
-      setExt({
-        connected: true,
-        version: d.version,
-        engine: d.engine === true,
-      });
+      lastPongAt = Date.now();
+      missedPings = 0;
+      pendingPing = false;
+      const next = { connected: true, version: d.version, engine: d.engine === true };
+      setExt(next);
+      saveCachedExt(next);
       setReChecking(false);
     }
     window.addEventListener('message', onMsg);
-    doPing();
-    const t1 = setTimeout(doPing, 600);
-    const t2 = setTimeout(doPing, 1800);
-    const t3 = setTimeout(doPing, 3500);
-    // Polling contínuo: a cada 5s, faz um novo ping. Se o usuário
-    // abrir/fechar o motor, a UI atualiza sozinha em ≤5s. Pausa se a
-    // aba estiver oculta pra não ficar gastando ciclo.
+
+    // Burst inicial — pings agressivos pra pegar a extension em qualquer
+    // estado de inicialização (cobre race condition de quem chegou primeiro).
+    const initialPings = [0, 50, 200, 500, 1000, 2000, 4000];
+    const timers: ReturnType<typeof setTimeout>[] = initialPings.map((delay) =>
+      setTimeout(() => alive && doPing(), delay),
+    );
+
+    // Polling 2s — mais responsivo que 5s antigo
     const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') doPing();
-    }, 5000);
+      if (!alive) return;
+      if (document.visibilityState !== 'visible') return;
+      pendingPing = true;
+      doPing();
+      // Após 1.5s sem pong, conta como missed
+      setTimeout(() => {
+        if (!alive || !pendingPing) return;
+        pendingPing = false;
+        missedPings++;
+        if (missedPings >= MAX_MISSED) {
+          // Só zera connected se passou MAX_MISSED inteiros sem pong.
+          // Anti-flicker: extensão pode dar pequenos glitches sem desconectar.
+          setExt((prev) => {
+            if (!prev.connected) return prev;
+            const next = { ...prev, connected: false };
+            saveCachedExt(next);
+            return next;
+          });
+        }
+      }, 1500);
+    }, 2000);
+
+    // Re-ping AGRESSIVO ao voltar pra tab (visibility change)
+    function onVis() {
+      if (document.visibilityState === 'visible') {
+        doPing();
+        setTimeout(doPing, 200);
+        setTimeout(doPing, 600);
+      }
+    }
+    document.addEventListener('visibilitychange', onVis);
+
+    // Re-ping ao reconectar à rede
+    function onOnline() {
+      missedPings = 0;
+      doPing();
+      setTimeout(doPing, 500);
+    }
+    window.addEventListener('online', onOnline);
+
     return () => {
       alive = false;
       window.removeEventListener('message', onMsg);
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('online', onOnline);
+      timers.forEach(clearTimeout);
       clearInterval(interval);
     };
   }, []);
 
-  // Re-check manual — usuário clicou "Verificar de novo" depois de
-  // (re)abrir o motor. Mostra spinner 1.5s pra dar sensação de ação.
+  // Re-check manual — burst agressivo
   function handleRecheck() {
     setReChecking(true);
-    doPing();
-    setTimeout(doPing, 400);
-    setTimeout(doPing, 1200);
-    // se em 2s ainda não chegou nada, libera o botão de novo
-    setTimeout(() => setReChecking(false), 2500);
+    [0, 200, 500, 1000, 2000].forEach((d) => setTimeout(doPing, d));
+    setTimeout(() => setReChecking(false), 3000);
   }
 
   const [jobs, setJobs] = useState<Job[]>([]);
