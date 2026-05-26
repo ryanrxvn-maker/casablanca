@@ -49,24 +49,80 @@ type RunnerResultV2 = {
 const DEFAULT_IMAGE_CONC = 12;
 const DEFAULT_VIDEO_CONC = 6;
 
-/** Semáforo simples — limita N operações simultâneas. */
-class Semaphore {
+// Throttle de DISPARO (não de concurrência): garante intervalo mínimo entre
+// dois acquire() consecutivos pra evitar burst de N requests simultâneas que
+// causa 429 "Too Many Attempts" no Magnific.
+//
+// Empírico: 12 imagens em <1s sempre vira 429. Espaçando ~800ms entre cada
+// disparo (12 * 800ms = ~10s pra mandar todas), Magnific aceita tranquilo.
+const IMAGE_DISPATCH_INTERVAL_MS = 800;
+const VIDEO_DISPATCH_INTERVAL_MS = 1500;
+
+/** Semáforo com throttle de disparo: limita N simultâneas E espaça acquires
+ *  por intervalMs mínimos. Também tem "global cooldown" que pausa TUDO
+ *  quando detectamos 429 (set via setCooldown). */
+class ThrottledSemaphore {
   private active = 0;
   private queue: Array<() => void> = [];
-  constructor(public readonly max: number) {}
-  async acquire(): Promise<void> {
-    if (this.active < this.max) {
-      this.active++;
-      return;
-    }
-    await new Promise<void>((resolve) => this.queue.push(resolve));
-    this.active++;
+  private lastDispatchAt = 0;
+  /** Quando >0: tudo pausa até esse timestamp. Setado por 429 detection. */
+  private cooldownUntilMs = 0;
+
+  constructor(
+    public readonly max: number,
+    public readonly intervalMs: number,
+    public readonly label: string,
+  ) {}
+
+  /** Pausa TODOS os acquire ativos + futuros até `untilMs`. */
+  setCooldown(untilMs: number): void {
+    if (untilMs > this.cooldownUntilMs) this.cooldownUntilMs = untilMs;
   }
+
+  async acquire(): Promise<void> {
+    // 1. Espera vaga no semáforo
+    if (this.active >= this.max) {
+      await new Promise<void>((resolve) => this.queue.push(resolve));
+    }
+    this.active++;
+
+    // 2. Respeita global cooldown (429 backoff)
+    if (this.cooldownUntilMs > Date.now()) {
+      const wait = this.cooldownUntilMs - Date.now();
+      console.warn(`[${this.label} sem] cooldown 429 — esperando ${Math.round(wait/1000)}s`);
+      await new Promise((r) => setTimeout(r, wait));
+    }
+
+    // 3. Throttle: garante intervalo mínimo desde último dispatch
+    const sinceLast = Date.now() - this.lastDispatchAt;
+    if (sinceLast < this.intervalMs) {
+      await new Promise((r) => setTimeout(r, this.intervalMs - sinceLast));
+    }
+    this.lastDispatchAt = Date.now();
+  }
+
   release(): void {
     this.active--;
     const next = this.queue.shift();
     if (next) next();
   }
+}
+
+/** Detecta se um erro é 429 / rate limit do Magnific. */
+function is429Error(e: unknown): boolean {
+  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  return (
+    msg.includes('429') ||
+    msg.includes('too many') ||
+    msg.includes('rate limit') ||
+    msg.includes('rate_limit')
+  );
+}
+
+/** Backoff exponencial pra 429: 10s, 30s, 60s, 120s, 240s. */
+function backoff429ms(attempt: number): number {
+  const ladder = [10_000, 30_000, 60_000, 120_000, 240_000];
+  return ladder[Math.min(attempt - 1, ladder.length - 1)];
 }
 
 export async function runMagnificPipelineV2(
@@ -156,47 +212,67 @@ export async function runMagnificPipelineV2(
     };
   }
 
-  // ───────── Semáforos + batch poller compartilhado ─────────
-  const imgSem = new Semaphore(imageConcurrency);
-  const vidSem = new Semaphore(videoConcurrency);
+  // ───────── Semáforos com throttle + cooldown ─────────
+  const imgSem = new ThrottledSemaphore(imageConcurrency, IMAGE_DISPATCH_INTERVAL_MS, 'img');
+  const vidSem = new ThrottledSemaphore(videoConcurrency, VIDEO_DISPATCH_INTERVAL_MS, 'vid');
   const poller = createBatchPoller();
 
   emit(
-    `Disparando ${total} takes (${imageConcurrency} img / ${videoConcurrency} vid simultâneo)...`,
+    `Disparando ${total} takes (${imageConcurrency} img · ${videoConcurrency} vid · disparo escalonado anti-429)...`,
     'dispatch',
     6,
   );
 
   // ───────── Retry policy ─────────
-  // Magnific às vezes retorna status:'failed' por NSFW filter, server load,
-  // race condition de Cloudflare/Cloudfront. Auto-retry com seed novo até
-  // MAX_RETRIES vezes antes de desistir.
-  const MAX_RETRIES = 3;
-  const RETRY_DELAY_MS = 2000;
+  // Magnific retorna status:'failed' por NSFW filter, server load, race
+  // condition de Cloudflare/Cloudfront. Ou 429 "Too Many Attempts" por burst.
+  //
+  // Estratégia em camadas:
+  //   429   → backoff exponencial (10s/30s/60s/120s/240s) + propaga global
+  //           cooldown pro semáforo (todos pausam)
+  //   outros → retry imediato com seed novo (NSFW evasion)
+  //   max 5 retries totais (3 por 429 + 3 por outros)
+  const MAX_RETRIES_429 = 5;
+  const MAX_RETRIES_OTHER = 3;
+  const RETRY_DELAY_OTHER_MS = 3000;
 
   async function generateImageWithRetry(
     prompt: string,
     onAttempt: (n: number) => void,
   ): Promise<{ url: string }> {
     let lastErr: Error | null = null;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      onAttempt(attempt);
+    let attempt429 = 0;
+    let attemptOther = 0;
+    for (let total = 1; total <= MAX_RETRIES_429 + MAX_RETRIES_OTHER; total++) {
+      onAttempt(total);
       try {
         const img = await generateImage({
           prompt,
           aspectRatio: '9:16',
           resolution: '1k',
           smartPrompt: true,
-          // Seed novo a cada tentativa pra evitar reproduzir mesmo erro
           seed: Math.floor(Math.random() * 1_000_000),
         });
         if (img.status === 'completed' && img.url) return { url: img.url };
         lastErr = new Error(`Magnific retornou status:${img.status}`);
+        attemptOther++;
+        if (attemptOther >= MAX_RETRIES_OTHER) throw lastErr;
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_OTHER_MS * attemptOther));
       } catch (e) {
         lastErr = e instanceof Error ? e : new Error(String(e));
-      }
-      if (attempt < MAX_RETRIES) {
-        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
+        if (is429Error(e)) {
+          attempt429++;
+          if (attempt429 > MAX_RETRIES_429) throw lastErr;
+          const waitMs = backoff429ms(attempt429);
+          console.warn(`[img] 429 attempt#${attempt429} — backoff ${waitMs/1000}s + propaga p/ todos`);
+          // Pausa GLOBAL: todos os outros workers de imagem também esperam
+          imgSem.setCooldown(Date.now() + waitMs);
+          await new Promise((r) => setTimeout(r, waitMs));
+        } else {
+          attemptOther++;
+          if (attemptOther >= MAX_RETRIES_OTHER) throw lastErr;
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_OTHER_MS * attemptOther));
+        }
       }
     }
     throw lastErr || new Error('Image falhou após retries');
@@ -208,8 +284,10 @@ export async function runMagnificPipelineV2(
     onAttempt: (n: number) => void,
   ): Promise<{ url: string }> {
     let lastErr: Error | null = null;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      onAttempt(attempt);
+    let attempt429 = 0;
+    let attemptOther = 0;
+    for (let total = 1; total <= MAX_RETRIES_429 + MAX_RETRIES_OTHER; total++) {
+      onAttempt(total);
       try {
         const vid = await generateVideoFromImage({
           prompt,
@@ -220,11 +298,23 @@ export async function runMagnificPipelineV2(
         });
         if (vid.status === 'completed' && vid.url) return { url: vid.url };
         lastErr = new Error(`Magnific retornou status:${vid.status}`);
+        attemptOther++;
+        if (attemptOther >= MAX_RETRIES_OTHER) throw lastErr;
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_OTHER_MS * attemptOther));
       } catch (e) {
         lastErr = e instanceof Error ? e : new Error(String(e));
-      }
-      if (attempt < MAX_RETRIES) {
-        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * attempt));
+        if (is429Error(e)) {
+          attempt429++;
+          if (attempt429 > MAX_RETRIES_429) throw lastErr;
+          const waitMs = backoff429ms(attempt429);
+          console.warn(`[vid] 429 attempt#${attempt429} — backoff ${waitMs/1000}s`);
+          vidSem.setCooldown(Date.now() + waitMs);
+          await new Promise((r) => setTimeout(r, waitMs));
+        } else {
+          attemptOther++;
+          if (attemptOther >= MAX_RETRIES_OTHER) throw lastErr;
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_OTHER_MS * attemptOther));
+        }
       }
     }
     throw lastErr || new Error('Video falhou após retries');
