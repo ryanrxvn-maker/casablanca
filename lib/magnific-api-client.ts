@@ -68,8 +68,9 @@ export type SimulateResult = {
 const DEFAULT_IMAGE_MODEL: ImageModel = 'imagen-nano-banana-2-flash';
 const DEFAULT_VIDEO_MODEL: VideoModel = 'kling-25';
 const POLL_INTERVAL_MS = 2500;
-const POLL_TIMEOUT_IMG_MS = 240_000; // 4min — Nano Banana raramente passa 30s
-const POLL_TIMEOUT_VID_MS = 1_800_000; // 30min — Kling 2.5 pode levar até 15-20min sob carga; damos folga 2x
+const POLL_TIMEOUT_IMG_MS = 600_000; // 10min — Nano Banana raramente passa de 1min, folga 10x
+const POLL_TIMEOUT_VID_MS = 5_400_000; // 90min — Kling 2.5 sob carga MUITO pesada chega 30-60min;
+                                       // damos folga generosa. User pediu "esperar em paz".
 
 /* ────────── User id ────────── */
 
@@ -349,7 +350,8 @@ export type BatchPoller = {
 export function createBatchPoller(): BatchPoller {
   type Sub = {
     identifier: string;
-    deadline: number;
+    deadline: number;       // absolute timestamp ms (extended on outages)
+    startedAt: number;
     resolve: (r: CreationResult) => void;
     reject: (e: Error) => void;
   };
@@ -363,7 +365,7 @@ export function createBatchPoller(): BatchPoller {
     for (const [id, sub] of subs) {
       if (now > sub.deadline) {
         subs.delete(id);
-        sub.reject(new Error(`Polling timeout pra ${id}`));
+        sub.reject(new Error(`Polling timeout pra ${id} após ${Math.round((now - sub.startedAt)/60000)}min`));
       }
     }
     if (subs.size === 0) return;
@@ -372,7 +374,14 @@ export function createBatchPoller(): BatchPoller {
     try {
       m = await pollCreationsBatch(ids);
     } catch (e) {
-      console.warn('[magnific-batch] tick falhou', e);
+      // FETCH FALHOU — extension/rede problema. Estende o deadline de TODAS
+      // as subs em uso pelo tempo que ficamos sem conseguir polar (= 1 tick).
+      // Assim "esperar em paz" mesmo durante outages de rede: deadline não
+      // consome quando a gente nem consegue checar status.
+      console.warn(`[magnific-batch] tick falhou (estendendo deadlines):`, (e as Error)?.message);
+      for (const sub of subs.values()) {
+        sub.deadline += POLL_INTERVAL_MS + 1000; // estende +tick + buffer
+      }
       return;
     }
     for (const [id, sub] of subs) {
@@ -385,6 +394,7 @@ export function createBatchPoller(): BatchPoller {
         subs.delete(id);
         sub.resolve(r);
       }
+      // status 'pending'/'processing' → continua aguardando paciente
     }
   }
 
@@ -398,7 +408,8 @@ export function createBatchPoller(): BatchPoller {
     poll(identifier, timeoutMs) {
       if (stopped) return Promise.reject(new Error('Poller parado.'));
       return new Promise((resolve, reject) => {
-        subs.set(identifier, { identifier, deadline: Date.now() + timeoutMs, resolve, reject });
+        const now = Date.now();
+        subs.set(identifier, { identifier, deadline: now + timeoutMs, startedAt: now, resolve, reject });
         ensure();
       });
     },
