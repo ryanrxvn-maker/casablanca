@@ -66,8 +66,21 @@ function adIdChars(s: string): Map<string, number> {
   return m;
 }
 
-/** Heading contém TODOS os chars do task ID? (ordem irrelevante) */
-function headingContainsTaskChars(heading: string, taskId: string): boolean {
+/** Extrai o número do AD (ex "AD23VN" → "23", "AD234ABC" → "234").
+ *  Crítico pra distinguir AD23 de AD234 — chars containment não basta. */
+function extractAdNumber(s: string): string | null {
+  const m = s.toUpperCase().match(/^AD(\d+)/);
+  return m ? m[1] : null;
+}
+
+/** Heading match fuzzy: mesmos chars + mesmo número de AD.
+ *  Ex válido:    "AD23VN" ↔ "AD23G1VN-RIPSZ"  (chars task ⊆ chars heading, mesmo AD23)
+ *  Ex inválido:  "AD23"   ↔ "AD234ABCDE"       (AD23 ≠ AD234, mesmo containment)
+ *  Ex inválido:  "AD23VN" ↔ "AD23QR-XYZ"      (sem V e N no heading)  */
+function headingMatchesTaskFuzzy(heading: string, taskId: string): boolean {
+  const taskNum = extractAdNumber(taskId);
+  const headNum = extractAdNumber(heading);
+  if (!taskNum || !headNum || taskNum !== headNum) return false;
   const taskChars = adIdChars(taskId);
   const headChars = adIdChars(heading);
   for (const [c, n] of taskChars) {
@@ -76,57 +89,79 @@ function headingContainsTaskChars(heading: string, taskId: string): boolean {
   return true;
 }
 
+/** Encontra o próximo heading AD após startIdx (delimita section). */
+function findNextAdHeading(lines: string[], startIdx: number): number {
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    if (AD_HEADING_RE.test(lines[i].trim())) return i;
+  }
+  return lines.length;
+}
+
+/** Heurística: section tem conteúdo de copy (hooks/body)?
+ *  Usado pra escolher a melhor entre candidatas — intro (só link/instruções)
+ *  perde pra body (com HOOK/BODY headings). */
+function sectionHasCopyContent(section: string): boolean {
+  return /^\s*(hook\b|h\d+\b|body\b|parte\s*\d+|texto\b)/im.test(section);
+}
+
 export function findAdSection(text: string, adIdOrPrefix: string): string | null {
   if (!text) return null;
   const lines = text.split(/\r?\n/);
   const targetUp = adIdOrPrefix.toUpperCase().trim();
 
-  // Coleta TODOS os candidatos com score, e escolhe o melhor.
-  // (Antes pegava o primeiro match — perdia o melhor se aparecia
-  //  heading "intro" antes do heading "body".)
-  type Cand = { idx: number; score: number; line: string };
+  // Coleta TODOS os candidatos com score + tamanho da section + presença
+  // de copy. Em empate de score, prefere quem tem hook/body real.
+  type Cand = { idx: number; score: number; line: string; sectionLen: number; hasCopy: boolean };
   const cands: Cand[] = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim().toUpperCase();
     if (!AD_HEADING_RE.test(line)) continue;
-
-    // Score 100: match exato
+    let score = 0;
     if (line === targetUp) {
-      cands.push({ idx: i, score: 100, line });
-      continue;
-    }
-    // Score 90: prefix com separador (mais provável que prefix-sem-separador)
-    if (line.startsWith(targetUp + ' ') || line.startsWith(targetUp + '-')) {
-      cands.push({ idx: i, score: 90, line });
-      continue;
-    }
-    // Score 80: containment de chars (mesmos chars alfa-num, ordem livre).
-    //  Resolve "AD23VN - RIPSZ - G1" ↔ "AD23G1VN-RIPSZ".
-    //  Só aceita se quantidade de chars EXTRAS no heading <= 2 (anti-FP).
-    if (headingContainsTaskChars(line, targetUp)) {
+      score = 100;
+    } else if (line.startsWith(targetUp + ' ') || line.startsWith(targetUp + '-')) {
+      score = 90;
+    } else if (headingMatchesTaskFuzzy(line, targetUp)) {
+      // Mesmo AD número + chars task ⊆ chars heading. Cobre o caso onde o
+      // copywriter funde sufixo no meio (AD23VN-RIPSZ-G1 ↔ AD23G1VN-RIPSZ)
+      // OU usa heading completo onde o target é só base AD (AD23VN ↔ AD23G1VN-RIPSZ).
       const taskLen = targetUp.replace(/[^A-Z0-9]/g, '').length;
       const headLen = line.replace(/[^A-Z0-9]/g, '').length;
-      const extraChars = headLen - taskLen;
-      if (extraChars <= 2) {
-        cands.push({ idx: i, score: 80 - extraChars, line });
-      }
+      const extra = headLen - taskLen;
+      score = Math.max(60, 80 - Math.floor(extra / 2));
     }
+    if (score === 0) continue;
+    const endIdx = findNextAdHeading(lines, i);
+    const section = lines.slice(i, endIdx).join('\n');
+    cands.push({
+      idx: i,
+      score,
+      line,
+      sectionLen: endIdx - i,
+      hasCopy: sectionHasCopyContent(section),
+    });
   }
 
   if (cands.length === 0) return null;
-  // Pega o de maior score; em empate, pega o primeiro (estável).
-  cands.sort((a, b) => b.score - a.score || a.idx - b.idx);
-  const startIdx = cands[0].idx;
 
-  // Procura o proximo heading AD pra delimitar a secao
-  let endIdx = lines.length;
-  for (let i = startIdx + 1; i < lines.length; i++) {
-    if (AD_HEADING_RE.test(lines[i].trim())) {
-      endIdx = i;
-      break;
-    }
-  }
-  return lines.slice(startIdx, endIdx).join('\n');
+  // Ordenação inteligente:
+  //   1. hasCopy DESC (section com hook/body > section só com link/instruções)
+  //   2. score DESC
+  //   3. sectionLen DESC (intro é curta, body é longa)
+  //   4. idx ASC (estável)
+  // Resolve caso copywriter usa heading "intro" antes do heading "body":
+  //   "AD25VN - RIPSZ" (intro: só Link do avatar, Instruções) score=90, !hasCopy
+  //   "AD25G1VN-RIPSZ" (body: HOOK, BODY, ...)             score=80, hasCopy
+  //   → escolhe o body (hasCopy vence score).
+  cands.sort((a, b) => {
+    if (a.hasCopy !== b.hasCopy) return a.hasCopy ? -1 : 1;
+    if (b.score !== a.score) return b.score - a.score;
+    if (b.sectionLen !== a.sectionLen) return b.sectionLen - a.sectionLen;
+    return a.idx - b.idx;
+  });
+  const best = cands[0];
+  const endIdx = findNextAdHeading(lines, best.idx);
+  return lines.slice(best.idx, endIdx).join('\n');
 }
 
 /** Lista de prefixos de role que NAO sao avatares — sao metadados sobre
