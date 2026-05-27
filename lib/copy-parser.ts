@@ -144,24 +144,27 @@ export function findAdSection(text: string, adIdOrPrefix: string): string | null
 
   if (cands.length === 0) return null;
 
-  // Ordenação inteligente:
-  //   1. hasCopy DESC (section com hook/body > section só com link/instruções)
-  //   2. score DESC
-  //   3. sectionLen DESC (intro é curta, body é longa)
-  //   4. idx ASC (estável)
-  // Resolve caso copywriter usa heading "intro" antes do heading "body":
-  //   "AD25VN - RIPSZ" (intro: só Link do avatar, Instruções) score=90, !hasCopy
-  //   "AD25G1VN-RIPSZ" (body: HOOK, BODY, ...)             score=80, hasCopy
-  //   → escolhe o body (hasCopy vence score).
-  cands.sort((a, b) => {
-    if (a.hasCopy !== b.hasCopy) return a.hasCopy ? -1 : 1;
-    if (b.score !== a.score) return b.score - a.score;
-    if (b.sectionLen !== a.sectionLen) return b.sectionLen - a.sectionLen;
-    return a.idx - b.idx;
-  });
-  const best = cands[0];
-  const endIdx = findNextAdHeading(lines, best.idx);
-  return lines.slice(best.idx, endIdx).join('\n');
+  // MERGE de headings consecutivos do mesmo AD.
+  //
+  // Quando copywriter escreve:
+  //   AD23VN - RIPSZ         ← intro (Link do avatar)
+  //   AD23G1VN-RIPSZ         ← body (HOOK, BODY)
+  //   AD24VN - RIPSZ         ← OUTRO AD
+  //
+  // Ambos os primeiros são candidates do task AD23VN. A section deve incluir
+  // AMBOS (avatar tá no intro, copy tá no body). Estratégia: start = primeiro
+  // candidato, end = próximo heading que NÃO é candidato (= outro AD).
+  cands.sort((a, b) => a.idx - b.idx);
+  const candIdxSet = new Set(cands.map((c) => c.idx));
+  const startIdx = cands[0].idx;
+  let endIdx = lines.length;
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    if (AD_HEADING_RE.test(lines[i].trim()) && !candIdxSet.has(i)) {
+      endIdx = i;
+      break;
+    }
+  }
+  return lines.slice(startIdx, endIdx).join('\n');
 }
 
 /** Lista de prefixos de role que NAO sao avatares — sao metadados sobre
