@@ -44,24 +44,79 @@ const AD_HEADING_RE = /^AD\d+[A-Z0-9]*\s*-\s*[A-Z0-9]+/i;
 
 /**
  * Localiza a secao do AD especifico no texto bruto do doc.
- * Aceita ad ID exato OU prefixo (ex "AD135GL").
+ *
+ * Aceita 3 níveis de match (do mais estrito ao mais relaxado):
+ *   1. EXATO/PREFIX: linha === task OU starts-with (já era)
+ *   2. CONTAINMENT por chars: mesmos chars alfa-num em qualquer ordem.
+ *      Resolve casos onde o copywriter reorganiza o ID:
+ *        Task:        "AD23VN - RIPSZ - G1"
+ *        Doc heading: "AD23G1VN-RIPSZ"
+ *      → mesmos chars (A,D,2,3,V,N,R,I,P,S,Z,G,1), só ordem mudou. MATCH.
+ *   3. PREFIX por base (fallback final): "AD135GL" prefix → casa qualquer
+ *      heading que comece com isso (já era).
+ *
+ * User esclareceu 2026-05-27: copywriter às vezes funde sufixos no meio
+ * do AD code (G1 → AD23G1VN). Parser tem que ser inteligente.
  */
+function adIdChars(s: string): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const c of s.toUpperCase().replace(/[^A-Z0-9]/g, '')) {
+    m.set(c, (m.get(c) || 0) + 1);
+  }
+  return m;
+}
+
+/** Heading contém TODOS os chars do task ID? (ordem irrelevante) */
+function headingContainsTaskChars(heading: string, taskId: string): boolean {
+  const taskChars = adIdChars(taskId);
+  const headChars = adIdChars(heading);
+  for (const [c, n] of taskChars) {
+    if ((headChars.get(c) || 0) < n) return false;
+  }
+  return true;
+}
+
 export function findAdSection(text: string, adIdOrPrefix: string): string | null {
   if (!text) return null;
   const lines = text.split(/\r?\n/);
   const targetUp = adIdOrPrefix.toUpperCase().trim();
 
-  let startIdx = -1;
+  // Coleta TODOS os candidatos com score, e escolhe o melhor.
+  // (Antes pegava o primeiro match — perdia o melhor se aparecia
+  //  heading "intro" antes do heading "body".)
+  type Cand = { idx: number; score: number; line: string };
+  const cands: Cand[] = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim().toUpperCase();
     if (!AD_HEADING_RE.test(line)) continue;
-    // Match exato ou prefixo
-    if (line === targetUp || line.startsWith(targetUp + ' ') || line.startsWith(targetUp + '-')) {
-      startIdx = i;
-      break;
+
+    // Score 100: match exato
+    if (line === targetUp) {
+      cands.push({ idx: i, score: 100, line });
+      continue;
+    }
+    // Score 90: prefix com separador (mais provável que prefix-sem-separador)
+    if (line.startsWith(targetUp + ' ') || line.startsWith(targetUp + '-')) {
+      cands.push({ idx: i, score: 90, line });
+      continue;
+    }
+    // Score 80: containment de chars (mesmos chars alfa-num, ordem livre).
+    //  Resolve "AD23VN - RIPSZ - G1" ↔ "AD23G1VN-RIPSZ".
+    //  Só aceita se quantidade de chars EXTRAS no heading <= 2 (anti-FP).
+    if (headingContainsTaskChars(line, targetUp)) {
+      const taskLen = targetUp.replace(/[^A-Z0-9]/g, '').length;
+      const headLen = line.replace(/[^A-Z0-9]/g, '').length;
+      const extraChars = headLen - taskLen;
+      if (extraChars <= 2) {
+        cands.push({ idx: i, score: 80 - extraChars, line });
+      }
     }
   }
-  if (startIdx < 0) return null;
+
+  if (cands.length === 0) return null;
+  // Pega o de maior score; em empate, pega o primeiro (estável).
+  cands.sort((a, b) => b.score - a.score || a.idx - b.idx);
+  const startIdx = cands[0].idx;
 
   // Procura o proximo heading AD pra delimitar a secao
   let endIdx = lines.length;
