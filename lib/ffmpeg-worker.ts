@@ -1231,7 +1231,7 @@ export async function concatAvatarParts(
     inputNames.forEach((_, i) => {
       filterParts.push(
         `[${i}:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,format=yuv420p,setpts=PTS-STARTPTS[v${i}]`,
-        `[${i}:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,asetpts=PTS-STARTPTS[a${i}]`,
+        `[${i}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS[a${i}]`,
       );
       concatInputs.push(`[v${i}][a${i}]`);
     });
@@ -1253,7 +1253,9 @@ export async function concatAvatarParts(
       '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
       '-pix_fmt', 'yuv420p',
       '-c:a', 'aac',
-      '-b:a', '160k',
+      '-b:a', '192k',
+      '-ar', '48000',
+      '-ac', '2',
       '-movflags', '+faststart',
       outputName,
     ]);
@@ -1299,16 +1301,35 @@ export async function concatVideosFast(
     const list = inputNames.map((n) => `file '${n}'`).join('\n');
     await ff.writeFile(listName, new TextEncoder().encode(list));
 
-    opts.onStage?.(`Concat rapido (${inputNames.length} partes, sem re-encode)...`);
-    // -fflags +genpts: regenera timestamps (essencial pra Web Audio API decodar
-    //   o audio do output - sem isso o audio decode falha em concat demuxer)
-    // -avoid_negative_ts make_zero: forca primeiro timestamp = 0
+    opts.onStage?.(`Concat rapido (${inputNames.length} partes)...`);
+    // VIDEO: -c:v copy (zero re-encode, mantém qualidade original)
+    // AUDIO: SEMPRE re-encode com SR/codec normalizados.
+    //
+    // User reportou áudio robótico em alguns trechos da montagem (2026-05-27).
+    // Causa: -c copy preserva o codec/SR original de cada parte. Se HeyGen
+    // retorna parts com:
+    //   - SR diferentes (44.1k em alguns, 48k em outros) → re-sampling errado
+    //   - AAC LC vs HE-AAC v1 vs v2 → frame size mismatch
+    //   - bitrate diferente → glitches na junção
+    // A concat demuxer com -c copy NÃO resampleia, só junta frames como vem
+    // → fica robótico/clicking/pitch shift entre parts.
+    //
+    // Fix: força AAC 48k stereo 192k pra todas as parts no concat. Custo de
+    // re-encode de audio é desprezível (~5% do tempo total) vs ganho de
+    // qualidade. Video continua -c copy (rápido).
+    //
+    // -fflags +genpts: regenera timestamps (Web Audio API decode no decupagem)
     await ff.exec([
       '-fflags', '+genpts',
       '-f', 'concat',
       '-safe', '0',
       '-i', listName,
-      '-c', 'copy',
+      '-c:v', 'copy',
+      '-c:a', 'aac',
+      '-ar', '48000',
+      '-ac', '2',
+      '-b:a', '192k',
+      '-af', 'aresample=async=1:first_pts=0',
       '-avoid_negative_ts', 'make_zero',
       '-movflags', '+faststart',
       outputName,
@@ -1581,7 +1602,9 @@ export async function removeAvatarSilences(
       '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
       '-pix_fmt', 'yuv420p',
       '-c:a', 'aac',
-      '-b:a', '160k',
+      '-b:a', '192k',
+      '-ar', '48000',
+      '-ac', '2',
       '-movflags', '+faststart',
       outputName,
     ]);
