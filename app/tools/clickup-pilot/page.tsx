@@ -1714,7 +1714,14 @@ function ClickUpPilotInner() {
         try {
           const bytes = await downloadVideoBytes(status.videoUrl);
           zip.file(fname, bytes);
-          partBlobs[i] = { label: part.label, blob: new Blob([bytes as BlobPart], { type: 'video/mp4' }) };
+          const partBlob = new Blob([bytes as BlobPart], { type: 'video/mp4' });
+          partBlobs[i] = { label: part.label, blob: partBlob };
+          // PERSIST IDB pra RETOMAR — cada parte gravada AGORA, na hora do download.
+          // Resume hidrata daqui sem precisar re-baixar do HeyGen (URLs expiram).
+          try {
+            const { saveBlob } = await import('@/lib/zip-store');
+            await saveBlob(`pilot:${taskId}:part:${part.label}`, partBlob, 'video/mp4');
+          } catch (e) { console.warn('[pilot] persist part blob falhou:', e); }
           downloaded++;
           setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], message: `Baixando: ${downloaded}/${validIds.length}` } }));
         } catch (e) {
@@ -1935,17 +1942,48 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         },
       });
 
-      setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'downloading', message: `Baixando ${validIds.length} videos...` } }));
+      setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'downloading', message: `Hidratando blobs do cache local...` } }));
       const JSZip = (await import('jszip')).default;
       const zip = new JSZip();
-      // Coleta blobs em memoria pra rodar o pipeline pos-producao (igual
-      // runTaskBatch faz). Sem isso, retomar so entrega o ZIP de takes e
-      // o user perde montado/decupado/camuflado.
       const partBlobs: Array<{ label: string; blob: Blob | null }> =
         state.parts.map((p) => ({ label: p.label, blob: null }));
-      let downloaded = 0;
+
+      // === HIDRATAÇÃO RETOMAR (fix 2026-05-27) ===
+      // Antes de re-baixar do HeyGen, tenta hidratar cada parte do IndexedDB
+      // (foram salvas no primeiro download via saveBlob). HeyGen URLs expiram
+      // após 24-72h — sem cache local, RETOMAR ficaria sem como reconstruir.
+      let hydrated = 0;
+      try {
+        const { loadBlob } = await import('@/lib/zip-store');
+        for (let i = 0; i < state.parts.length; i++) {
+          const p = state.parts[i];
+          try {
+            const blob = await loadBlob(`pilot:${taskId}:part:${p.label}`, 'video/mp4');
+            if (blob && blob.size > 1024) {
+              partBlobs[i] = { label: p.label, blob };
+              // Adiciona ao ZIP também (pra que o ZIP de takes saia completo)
+              zip.file(p.renamedTo, new Uint8Array(await blob.arrayBuffer()));
+              hydrated++;
+            }
+          } catch (e) { console.warn(`[pilot resume] hidratacao da parte ${p.label} falhou:`, e); }
+        }
+      } catch (e) { console.warn('[pilot resume] loadBlob global falhou:', e); }
+
+      setBatchStates((prev) => ({
+        ...prev,
+        [taskId]: {
+          ...prev[taskId],
+          message: hydrated > 0
+            ? `Cache: ${hydrated}/${state.parts.length} parts hidratadas. Baixando faltantes...`
+            : `Baixando ${validIds.length} videos do HeyGen...`,
+        },
+      }));
+
+      let downloaded = hydrated;
       const downloadOne = async (idx: number) => {
         if (batchCancelRef.current[taskId]) return;
+        // SKIP se já hidratou do IDB
+        if (partBlobs[idx]?.blob) return;
         const part = state.parts[idx];
         if (!part.videoId) {
           zip.file(`${part.renamedTo.replace('.mp4', '')}_NAO_DISPAROU.txt`, `Erro: ${part.error || 'sem videoId'}`);
@@ -1959,7 +1997,13 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         try {
           const bytes = await downloadVideoBytes(status.videoUrl);
           zip.file(part.renamedTo, bytes);
-          partBlobs[idx] = { label: part.label, blob: new Blob([bytes as BlobPart], { type: 'video/mp4' }) };
+          const partBlob = new Blob([bytes as BlobPart], { type: 'video/mp4' });
+          partBlobs[idx] = { label: part.label, blob: partBlob };
+          // Persist no IDB pra próximo RETOMAR
+          try {
+            const { saveBlob } = await import('@/lib/zip-store');
+            await saveBlob(`pilot:${taskId}:part:${part.label}`, partBlob, 'video/mp4');
+          } catch {}
           downloaded++;
           setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], message: `Baixando: ${downloaded}/${validIds.length}` } }));
         } catch (e) {

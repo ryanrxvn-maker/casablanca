@@ -104,3 +104,58 @@ export async function getStorageEstimate(): Promise<{ usage: number; quota: numb
   const e = await navigator.storage.estimate();
   return { usage: e.usage || 0, quota: e.quota || 0 };
 }
+
+/* ============================================================
+ * BLOB STORE — persiste blobs MP4 individuais (não só ZIPs).
+ * Usado pelo Pilot pra que RETOMAR consiga remontar SEM precisar
+ * re-baixar do HeyGen (URLs expiram + sobrecarrega).
+ * ============================================================ */
+
+export async function saveBlob(key: string, blob: Blob, mime = 'video/mp4'): Promise<void> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const rec: ZipRecord = { key, filename: key.replace(/[^a-z0-9._-]/gi, '_') + '.bin', bytes, size: bytes.length, createdAt: Date.now() };
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(rec);
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
+
+export async function loadBlob(key: string, mime = 'video/mp4'): Promise<Blob | null> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).get(key);
+    req.onsuccess = () => {
+      db.close();
+      const rec = req.result as ZipRecord | undefined;
+      if (!rec) return resolve(null);
+      resolve(new Blob([rec.bytes as BlobPart], { type: mime }));
+    };
+    req.onerror = () => { db.close(); reject(req.error); };
+  });
+}
+
+/** Limpa todos os blobs de um taskId (cleanup após batch completar). */
+export async function deletePrefix(prefix: string): Promise<number> {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    let count = 0;
+    const cur = tx.objectStore(STORE).openCursor();
+    cur.onsuccess = (e: any) => {
+      const c = e.target.result as IDBCursorWithValue | null;
+      if (c) {
+        const v = c.value as ZipRecord;
+        if (v.key.startsWith(prefix)) { c.delete(); count++; }
+        c.continue();
+      } else {
+        db.close();
+        resolve(count);
+      }
+    };
+    cur.onerror = () => { db.close(); reject(cur.error); };
+  });
+}
