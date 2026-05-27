@@ -1031,9 +1031,31 @@ function ClickUpPilotInner() {
           const sectionForVaCheck = baseAdIdForVaCheck
             ? (findAdSection(docR.text, baseAdIdForVaCheck) || '')
             : '';
-          // So conta como VA se: task name e VA, OU a secao DESSE ad
-          // especifico tem o marker. Doc-wide check foi removido.
-          if (isVATask(task.name) || /varia[cç][aã]o\s+de\s+avatar/i.test(sectionForVaCheck)) {
+          // Detector VA ESTRITO — só conta se "Variação de avatar" aparece
+          // como HEADING de seção (não texto narrativo nas Instruções).
+          //
+          // FALSO POSITIVO que dava antes (user reportou 2026-05-27):
+          //   "Instruções para edição: Esse criativo é uma variação de
+          //   avatar do AD119G1. Só altera o avatar..."
+          // → texto descritivo, NÃO é VA real. Mas regex pegava igual.
+          //
+          // VA REAL aparece como:
+          //   "AD07G1VN-PRPB06 - Variação de avatar - SILAS"  (heading com -)
+          //   "Variação de Avatar"                              (linha isolada)
+          //   "Variação de avatar:" / "Variação de avatar -"   (label/separador)
+          function hasVaHeaderInSection(section: string): boolean {
+            const lines = section.split(/\r?\n/);
+            for (const line of lines) {
+              const t = line.trim();
+              if (!t) continue;
+              // Padrão 1: heading "AD... - Variação de avatar..."
+              if (/^[A-Z0-9]+(?:[-\s][A-Z0-9]+)*\s*[-–—]\s*varia[cç][aã]o\s+de\s+avatar\b/i.test(t)) return true;
+              // Padrão 2: linha começando com "Variação de avatar" (curta, tipo heading)
+              if (/^varia[cç][aã]o\s+de\s+avatar\s*[-–—:]?/i.test(t) && t.length < 80) return true;
+            }
+            return false;
+          }
+          if (isVATask(task.name) || hasVaHeaderInSection(sectionForVaCheck)) {
             // Extrai quais AVAs estao indicados na NOMENCLATURA da task
             // (ex 'VA - AD03G1VN - ... - AVA05 e 06 - Silas' → [5, 6]).
             // Se task indicar AVAs especificas, parser SO retorna esses
