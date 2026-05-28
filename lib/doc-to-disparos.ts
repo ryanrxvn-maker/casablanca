@@ -70,8 +70,6 @@ export type DiscoverResult = {
 };
 
 const AD_HEADING_RE = /^AD\d+[A-Z0-9]*\s*-\s*[A-Z0-9]+/i;
-/** Token AD no inicio da linha (com ou sem sufixo " - XXX") */
-const AD_TOKEN_RE = /^(AD\d+[A-Z0-9]*)/i;
 
 /** Normaliza um token AD pro seu BASE id removendo o infixo G<N> dos siblings.
  *  "AD139G1GL" -> "AD139GL" · "AD139GL" -> "AD139GL" · "AD23G2VN" -> "AD23VN". */
@@ -79,9 +77,25 @@ export function toBaseAdId(token: string): string {
   return token.toUpperCase().replace(/G\d+/, '');
 }
 
+/**
+ * Extrai o base AD id de uma LINHA de heading, cobrindo as 2 convencoes
+ * DARKO + removendo o infixo G<N> dos siblings:
+ *   "AD139GL - VFPB04"     → "AD139GL"  (sufixo colado, variant após " - ")
+ *   "AD139G1GL-VFPB04"     → "AD139GL"
+ *   "AD01 - PV"            → "AD01PV"   (sufixo após " - ")
+ *   "AD01G1-PV"            → "AD01PV"
+ */
+function baseFromHeadingLine(line: string): string | null {
+  // Captura AD<num> + sufixo colado opcional + (opcional " - SUFIXO")
+  const m = line.match(/^AD\d+[A-Z0-9]*(?:\s*[-–—]\s*[A-Z0-9]+)?/i);
+  if (!m) return null;
+  const code = m[0].toUpperCase().replace(/G\d+/, ''); // tira infixo de sibling
+  return extractAdIds(code).baseAdId;
+}
+
 /** Descobre TODOS os base AD ids presentes em headings do doc, em ordem de
  *  aparicao e sem duplicar. So considera linhas que casam o formato de
- *  heading "AD<num><sufixo> - XXX". */
+ *  heading "AD<num><sufixo> - XXX". Cobre as 2 convencoes (colada e " - "). */
 export function discoverBaseAdIds(text: string): string[] {
   if (!text) return [];
   const out: string[] = [];
@@ -89,10 +103,8 @@ export function discoverBaseAdIds(text: string): string[] {
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!AD_HEADING_RE.test(line)) continue;
-    const m = line.match(AD_TOKEN_RE);
-    if (!m) continue;
-    const base = toBaseAdId(m[1]);
-    if (seen.has(base)) continue;
+    const base = baseFromHeadingLine(line);
+    if (!base || seen.has(base)) continue;
     seen.add(base);
     out.push(base);
   }
@@ -292,9 +304,18 @@ export function buildDisparoForAd(
  */
 export function extractAdIds(nomenclature: string): { baseAdId: string; fullAdId: string } {
   const raw = nomenclature.trim();
-  const baseMatch = raw.match(/AD\d+[A-Z]+/i);
-  const baseAdId = baseMatch ? baseMatch[0].toUpperCase() : raw.toUpperCase();
-  const fullMatch = raw.match(/AD\d+[A-Z0-9]*\s*-\s*[A-Z0-9]+/i);
+  // Base = AD<num> + 1o bloco de letras (colado OU separado por espaco/traco).
+  //   "AD139GL - VFPB04" → "AD139" + "GL"  (letras coladas vencem; ignora " - VFPB04")
+  //   "AD01 - PV"        → "AD01"  + "PV"  (sem letra colada → pega "PV" após o traco)
+  const m = raw.match(/AD(\d+)\s*[-–—]?\s*([A-Za-z]+)/i);
+  let baseAdId: string;
+  if (m) {
+    baseAdId = `AD${m[1]}${m[2].toUpperCase()}`;
+  } else {
+    const m2 = raw.match(/AD\d+/i);
+    baseAdId = m2 ? m2[0].toUpperCase() : raw.toUpperCase();
+  }
+  const fullMatch = raw.match(/AD\d+[A-Z0-9]*\s*[-–—]\s*[A-Z0-9]+/i);
   const fullAdId = fullMatch ? fullMatch[0].toUpperCase() : raw.toUpperCase();
   return { baseAdId, fullAdId };
 }

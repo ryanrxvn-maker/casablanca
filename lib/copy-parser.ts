@@ -514,14 +514,21 @@ export function parseGlobalAvatarLinks(section: string): Array<{ role: string; u
  */
 export function findGSiblings(fullDocText: string, baseAdId: string): Array<{ gNum: number; heading: string; section: string }> {
   if (!fullDocText) return [];
-  // Extrai a parte numerica + sufixo "GL" do base (ex AD139GL → "AD139", "GL")
-  const m = baseAdId.toUpperCase().match(/^(AD\d+)([A-Z]+)$/);
+  // Extrai numero + sufixo do base. Normaliza removendo espacos/traco antes
+  // (cobre 2 convencoes DARKO):
+  //   "AD139GL"      → num "AD139", suffix "GL"   (sufixo colado)
+  //   "AD01 - PV"    → num "AD01",  suffix "PV"   (sufixo apos " - ")
+  const norm = baseAdId.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const m = norm.match(/^(AD\d+)([A-Z]+)$/);
   if (!m) return [];
-  const numPart = m[1]; // "AD139"
-  const suffix = m[2]; // "GL"
-  // Procura headings tipo "AD139G<N>GL-XXX"
+  const numPart = m[1]; // "AD139" | "AD01"
+  const suffix = m[2]; // "GL" | "PV"
+  // Procura headings de sibling em AMBAS as convencoes:
+  //   "AD139G1GL-XXX"  (sufixo colado no G)
+  //   "AD01G1-PV"      (sufixo apos traco/espaco depois do G<N>)
+  // O separador [-\s]? entre G<N> e o sufixo e OPCIONAL.
   const lines = fullDocText.split(/\r?\n/);
-  const re = new RegExp(`^${numPart}G(\\d+)${suffix}\\b`, 'i');
+  const re = new RegExp(`^${numPart}G(\\d+)[-\\s]?${suffix}\\b`, 'i');
   const found: Array<{ gNum: number; lineStart: number; heading: string }> = [];
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim();
