@@ -524,6 +524,17 @@ export async function muxAudioIntoVideo(
  * Corta um video em varios segmentos [start, end] (em segundos) e concatena
  * tudo em um unico MP4 de saida. Usado pela Decupagem-em-video.
  */
+// Máximo de segmentos por passada de filter_complex. Acima disso o
+// ffmpeg-wasm (single-thread, heap limitado ~2GB) ESTOURA A MEMÓRIA num
+// vídeo full-HD e aborta sem mensagem ("erro desconhecido").
+//
+// User reportou (2026-05-28): vídeo de 202s gerava 86 segmentos de fala →
+// filter_complex de 173 linhas re-encodando 1080x1920 → crash do WASM.
+// Solução: processa em BATCHES de N segmentos, gera sub-vídeos, depois
+// concatena com concat demuxer (leve). Mantém precisão (re-encode exato
+// por segmento) sem estourar memória.
+const MAX_SEGMENTS_PER_PASS = 12;
+
 export async function cutVideoSegments(
   file: Blob,
   segments: Array<{ start: number; end: number }>,
@@ -534,36 +545,27 @@ export async function cutVideoSegments(
 
   const ext = guessExt(file, 'mp4');
   const inputName = 'in.' + ext;
-  const outputName = 'out.mp4';
   const progressHandler = wireProgress(ff, opts.onProgress);
 
-  try {
-    await ff.writeFile(inputName, await fetchFile(file));
-
-    // Monta filter_complex com [0:v]trim + [0:a]atrim para cada segmento,
-    // e depois concat tudo num unico video/audio.
+  // Roda UMA passada de filter_complex pra um subconjunto de segmentos →
+  // grava num arquivo de saída. Re-encode preciso (trim exato).
+  async function cutBatch(segs: Array<{ start: number; end: number }>, outName: string): Promise<void> {
     const filterLines: string[] = [];
     const concatInputs: string[] = [];
-    segments.forEach((seg, i) => {
+    segs.forEach((seg, i) => {
       const start = seg.start.toFixed(3);
       const end = seg.end.toFixed(3);
       filterLines.push(
         `[0:v]trim=start=${start}:end=${end},setpts=PTS-STARTPTS[v${i}]`,
-        `[0:a]atrim=start=${start}:end=${end},asetpts=PTS-STARTPTS[a${i}]`,
+        // áudio normalizado 48k stereo pra concat consistente (sem robótico)
+        `[0:a]atrim=start=${start}:end=${end},aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[a${i}]`,
       );
       concatInputs.push(`[v${i}][a${i}]`);
     });
-    filterLines.push(
-      `${concatInputs.join('')}concat=n=${segments.length}:v=1:a=1[outv][outa]`,
-    );
-    const filterComplex = filterLines.join(';');
-
-    // Preset "ultrafast" + tune zerolatency + CRF um pouco maior pra
-    // maximizar velocidade no WASM single-threaded. A Decupagem corta muitos
-    // segmentos (ate dezenas), entao cada segundo de encoder importa.
+    filterLines.push(`${concatInputs.join('')}concat=n=${segs.length}:v=1:a=1[outv][outa]`);
     await ff.exec([
       '-i', inputName,
-      '-filter_complex', filterComplex,
+      '-filter_complex', filterLines.join(';'),
       '-map', '[outv]',
       '-map', '[outa]',
       '-c:v', 'libx264',
@@ -572,16 +574,61 @@ export async function cutVideoSegments(
       '-crf', '26',
       '-g', '60',
       '-c:a', 'aac',
-      '-b:a', '128k',
+      '-b:a', '192k',
+      '-ar', '48000',
+      '-ac', '2',
       '-movflags', '+faststart',
-      outputName,
+      outName,
     ]);
-    const data = await ff.readFile(outputName);
+  }
+
+  const batchOutputs: string[] = [];
+  try {
+    await ff.writeFile(inputName, await fetchFile(file));
+
+    // Caminho rápido: poucos segmentos → 1 passada só (comportamento antigo).
+    if (segments.length <= MAX_SEGMENTS_PER_PASS) {
+      await cutBatch(segments, 'out.mp4');
+      const data = await ff.readFile('out.mp4');
+      await safeDelete(ff, 'out.mp4');
+      return toBlob(data, 'video/mp4');
+    }
+
+    // Caminho em batches: divide em grupos de MAX_SEGMENTS_PER_PASS.
+    const numBatches = Math.ceil(segments.length / MAX_SEGMENTS_PER_PASS);
+    opts.onStage?.(`Decupando ${segments.length} segmentos em ${numBatches} lotes (anti-estouro de memória)...`);
+    for (let b = 0; b < numBatches; b++) {
+      const slice = segments.slice(b * MAX_SEGMENTS_PER_PASS, (b + 1) * MAX_SEGMENTS_PER_PASS);
+      const outName = `cut_batch_${String(b).padStart(2, '0')}.mp4`;
+      opts.onStage?.(`Decupando lote ${b + 1}/${numBatches} (${slice.length} segmentos)...`);
+      await cutBatch(slice, outName);
+      batchOutputs.push(outName);
+    }
+
+    // Concatena os sub-vídeos via concat demuxer. Como cada batch saiu com
+    // codec/SR/dimensões idênticos (mesmo encode), o -c copy junta sem dor.
+    const listName = 'cut_concat_list.txt';
+    const list = batchOutputs.map((n) => `file '${n}'`).join('\n');
+    await ff.writeFile(listName, new TextEncoder().encode(list));
+    opts.onStage?.(`Juntando ${numBatches} lotes decupados...`);
+    await ff.exec([
+      '-fflags', '+genpts',
+      '-f', 'concat',
+      '-safe', '0',
+      '-i', listName,
+      '-c', 'copy',
+      '-avoid_negative_ts', 'make_zero',
+      '-movflags', '+faststart',
+      'out.mp4',
+    ]);
+    const data = await ff.readFile('out.mp4');
+    await safeDelete(ff, listName);
+    await safeDelete(ff, 'out.mp4');
     return toBlob(data, 'video/mp4');
   } finally {
     if (progressHandler) ff.off('progress', progressHandler);
     await safeDelete(ff, inputName);
-    await safeDelete(ff, outputName);
+    for (const n of batchOutputs) await safeDelete(ff, n);
   }
 }
 
