@@ -16,6 +16,7 @@ import {
   toBaseAdId,
   type AvatarCandidate,
 } from './doc-to-disparos';
+import { matchAvatar } from './copy-parser';
 
 let failures = 0;
 function assert(cond: boolean, msg: string) {
@@ -146,6 +147,19 @@ console.log('\nnomenclatura inexistente:');
 const miss = buildDisparosFromNomenclatures(DOC, ['AD999XX - NOPE', 'AD139GL'], CANDIDATES);
 assert(miss.disparos.length === 1, 'acha só o que existe');
 assert(miss.notFound.includes('AD999XX - NOPE'), 'reporta o não-encontrado');
+
+/* ----------------- matchAvatar por ID (talking-photo @numero) ----------------- */
+console.log('\nmatchAvatar por ID (avatar referenciado pelo id cru):');
+const libWithId = [
+  { id: '749477393444762056', name: 'Foto Avatar', groupName: 'Fotos', voiceName: '@vozqualquer' },
+  { id: 'abc123', name: 'Outro', groupName: 'X', voiceName: '@outro' },
+];
+const mId = matchAvatar('@749477393444762056', libWithId);
+assert(!!mId && mId.id === '749477393444762056', 'match exato por id (@749477393444762056)');
+const mIdPrefix = matchAvatar('Avatar 749477393444762056.mp4', libWithId);
+assert(!!mIdPrefix && mIdPrefix.id === '749477393444762056', 'match por id mesmo com prefixo "Avatar "');
+const mIdNone = matchAvatar('@000000000000', libWithId);
+assert(mIdNone === null || mIdNone.id !== '749477393444762056', 'id diferente NAO casa');
 
 /* ----------------- convenção "AD01 - PV" (sufixo após traço) ----------------- */
 console.log('\nconvenção AD01 - PV (sufixo após " - " + siblings AD01G1-PV):');
