@@ -20,6 +20,7 @@ import {
 import { runHeyGenJobs, type RunnerJob, type RunnerResult } from '@/lib/heygen-job-runner';
 import {
   buildDisparosFromDoc,
+  buildDisparosFromNomenclatures,
   type AvatarCandidate,
   type DiscoveredDisparo,
 } from '@/lib/doc-to-disparos';
@@ -295,6 +296,10 @@ function HeyGenAutoInner() {
   const [docError, setDocError] = useState<string | null>(null);
   const [docPreview, setDocPreview] = useState<DiscoveredDisparo[] | null>(null);
   const [docSelected, setDocSelected] = useState<Record<string, boolean>>({});
+  /** Nomenclaturas de AD digitadas pelo user (1 campo por AD). Quando ao menos
+   *  1 esta preenchida, busca SO esses ADs no doc (igual nome de task do
+   *  ClickUp Pilot). Vazias → auto-descobre todos os ADs do doc. */
+  const [docAdNames, setDocAdNames] = useState<string[]>(['']);
 
   /* --------------- Extension detection --------------- */
   useEffect(() => {
@@ -972,14 +977,32 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
               thumb: l.thumb ?? null,
             })),
           );
-    const res = buildDisparosFromDoc(text, snapCandidates);
-    if (res.disparos.length === 0) {
-      setDocError(res.diagnostic);
-      return;
+    // Nomenclaturas digitadas pelo user → busca SO esses ADs (igual nome de
+    // task do ClickUp Pilot). Nenhuma preenchida → auto-descobre todos.
+    const names = docAdNames.map((s) => s.trim()).filter(Boolean);
+    let disparos: DiscoveredDisparo[];
+    if (names.length > 0) {
+      const r = buildDisparosFromNomenclatures(text, names, snapCandidates);
+      if (r.disparos.length === 0) {
+        setDocError(r.diagnostic);
+        return;
+      }
+      // Achou alguns mas faltaram outros → mostra preview + avisa quais faltaram
+      if (r.notFound.length > 0) {
+        setDocError(`⚠ Não achei no doc: ${r.notFound.join(', ')}. Confere a nomenclatura.`);
+      }
+      disparos = r.disparos;
+    } else {
+      const res = buildDisparosFromDoc(text, snapCandidates);
+      if (res.disparos.length === 0) {
+        setDocError(res.diagnostic);
+        return;
+      }
+      disparos = res.disparos;
     }
-    setDocPreview(res.disparos);
+    setDocPreview(disparos);
     const sel: Record<string, boolean> = {};
-    for (const d of res.disparos) sel[d.baseAdId] = true;
+    for (const d of disparos) sel[d.baseAdId] = true;
     setDocSelected(sel);
   }
 
@@ -1018,6 +1041,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     setDocText('');
     setDocLink('');
     setDocFileName(null);
+    setDocAdNames(['']);
   }
 
   /* ===================== Fila: adicionar config atual + processar ===================== */
@@ -2423,6 +2447,57 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                 )}
               </div>
             )}
+
+            {/* Nomenclaturas dos ADs (1 campo por AD) — igual nome de task do
+                ClickUp Pilot. Vazio = auto-descobre todos os ADs do doc. */}
+            <div className="mt-5 rounded-[12px] border border-line bg-bg/40 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="mono text-[10px] uppercase tracking-widest text-cyan-300">
+                  Nomenclaturas dos ADs (opcional)
+                </span>
+                <span className="text-[10px] text-text-muted">
+                  vazio = pega todos do doc
+                </span>
+              </div>
+              <div className="grid gap-2">
+                {docAdNames.map((name, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="mono w-5 shrink-0 text-center text-[11px] text-text-muted">
+                      {i + 1}
+                    </span>
+                    <input
+                      type="text"
+                      value={name}
+                      onChange={(e) =>
+                        setDocAdNames((prev) => prev.map((n, k) => (k === i ? e.target.value : n)))
+                      }
+                      placeholder="Ex: AD139GL - VFPB04"
+                      className="input-field flex-1 font-mono text-sm"
+                      disabled={docFetching}
+                    />
+                    {docAdNames.length > 1 ? (
+                      <button
+                        type="button"
+                        onClick={() => setDocAdNames((prev) => prev.filter((_, k) => k !== i))}
+                        disabled={docFetching}
+                        className="shrink-0 rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-text-muted transition hover:border-red-500/60 hover:text-red-300"
+                        title="Remover este AD"
+                      >
+                        ×
+                      </button>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => setDocAdNames((prev) => [...prev, ''])}
+                disabled={docFetching || docAdNames.length >= 30}
+                className="mono mt-2 rounded-[10px] border border-dashed border-cyan-400/40 bg-cyan-400/5 px-3 py-1.5 text-[10px] uppercase tracking-widest text-cyan-300 transition hover:bg-cyan-400/10 disabled:opacity-40"
+              >
+                + adicionar AD
+              </button>
+            </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
               <button

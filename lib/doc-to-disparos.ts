@@ -219,13 +219,15 @@ function safeNameOf(s: string): string {
 }
 
 /**
- * Constroi um disparo pra um base AD especifico. Tenta o parser DARKO
- * (G[N]=Hook[N]); se nao houver hooks/body, cai pro parser legado
- * (parseAdSection — parts auto-detectadas). Retorna null se nada parseavel.
+ * Núcleo compartilhado: tenta o parser DARKO (G[N]=Hook[N]) pelo `baseAdId`;
+ * se nao houver hooks/body, cai pro parser legado (parseAdSection) usando
+ * `fullAdId` (a nomenclatura completa com sufixo, ex "AD139GL - VFPB04").
+ * Retorna null se nada parseavel.
  */
-export function buildDisparoForAd(
+function buildDisparoCore(
   text: string,
   baseAdId: string,
+  fullAdId: string,
   candidates: AvatarCandidate[],
 ): DiscoveredDisparo | null {
   // 1) Parser DARKO LAB (preferido)
@@ -243,8 +245,10 @@ export function buildDisparoForAd(
     }
   }
 
-  // 2) Parser legado (secao com avatares + parts auto-detectadas)
-  const legacy = parseAdSection(text, baseAdId);
+  // 2) Parser legado (secao com avatares + parts auto-detectadas). Tenta a
+  // nomenclatura completa, depois so o 1o token (igual o clickup-pilot).
+  const legacy =
+    parseAdSection(text, fullAdId) || parseAdSection(text, fullAdId.split(/\s|-/)[0]);
   if (legacy && legacy.parts.length > 0) {
     const { matchedByRole, unmatched } = buildAvatarMatch(legacy.avatars, candidates);
     const pick = makePicker(matchedByRole);
@@ -268,6 +272,83 @@ export function buildDisparoForAd(
   }
 
   return null;
+}
+
+/** Constroi um disparo pra um base AD ja normalizado (ex "AD139GL"). */
+export function buildDisparoForAd(
+  text: string,
+  baseAdId: string,
+  candidates: AvatarCandidate[],
+): DiscoveredDisparo | null {
+  return buildDisparoCore(text, baseAdId, baseAdId, candidates);
+}
+
+/**
+ * Extrai o base AD id (ex "AD139GL") + a nomenclatura completa de um texto
+ * digitado pelo user — MESMA logica do runParser do clickup-pilot a partir
+ * do nome da task.
+ *   "AD139GL - VFPB04"        → base "AD139GL", full "AD139GL - VFPB04"
+ *   "AD15VN - PRPB06 - G1"    → base "AD15VN",  full "AD15VN - PRPB06"
+ */
+export function extractAdIds(nomenclature: string): { baseAdId: string; fullAdId: string } {
+  const raw = nomenclature.trim();
+  const baseMatch = raw.match(/AD\d+[A-Z]+/i);
+  const baseAdId = baseMatch ? baseMatch[0].toUpperCase() : raw.toUpperCase();
+  const fullMatch = raw.match(/AD\d+[A-Z0-9]*\s*-\s*[A-Z0-9]+/i);
+  const fullAdId = fullMatch ? fullMatch[0].toUpperCase() : raw.toUpperCase();
+  return { baseAdId, fullAdId };
+}
+
+/**
+ * Constroi um disparo a partir de uma NOMENCLATURA digitada (ex
+ * "AD139GL - VFPB04"). Procura esse AD no doc com a inteligencia do
+ * clickup-pilot. Retorna null se nao achar.
+ */
+export function buildDisparoForNomenclature(
+  text: string,
+  nomenclature: string,
+  candidates: AvatarCandidate[],
+): DiscoveredDisparo | null {
+  if (!text || !nomenclature.trim()) return null;
+  const { baseAdId, fullAdId } = extractAdIds(nomenclature);
+  const d = buildDisparoCore(text, baseAdId, fullAdId, candidates);
+  // Preserva a nomenclatura digitada como nome do AD (mais claro pro user)
+  if (d && nomenclature.trim()) {
+    return { ...d, baseAdId: nomenclature.trim(), safeName: safeNameOf(nomenclature) };
+  }
+  return d;
+}
+
+/**
+ * Resolve uma lista de nomenclaturas digitadas pelo user. Cada uma vira um
+ * disparo (na ordem digitada). Retorna tambem as que NAO foram achadas.
+ */
+export function buildDisparosFromNomenclatures(
+  text: string,
+  nomenclatures: string[],
+  candidates: AvatarCandidate[],
+): { disparos: DiscoveredDisparo[]; notFound: string[]; diagnostic: string } {
+  if (!text || !text.trim()) {
+    return { disparos: [], notFound: [], diagnostic: 'Doc vazio — cole/importe a copy.' };
+  }
+  const disparos: DiscoveredDisparo[] = [];
+  const notFound: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of nomenclatures) {
+    const name = raw.trim();
+    if (!name || seen.has(name.toUpperCase())) continue;
+    seen.add(name.toUpperCase());
+    const d = buildDisparoForNomenclature(text, name, candidates);
+    if (d) disparos.push(d);
+    else notFound.push(name);
+  }
+  let diagnostic = '';
+  if (disparos.length > 0) diagnostic = `${disparos.length} AD(s) encontrado(s).`;
+  if (notFound.length > 0) {
+    diagnostic += `${diagnostic ? ' ' : ''}Nao achei no doc: ${notFound.join(', ')}.`;
+  }
+  if (!diagnostic) diagnostic = 'Digite pelo menos 1 nomenclatura de AD.';
+  return { disparos, notFound, diagnostic };
 }
 
 /**

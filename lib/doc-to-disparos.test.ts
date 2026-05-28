@@ -10,6 +10,8 @@
 
 import {
   buildDisparosFromDoc,
+  buildDisparosFromNomenclatures,
+  extractAdIds,
   discoverBaseAdIds,
   toBaseAdId,
   type AvatarCandidate,
@@ -121,6 +123,29 @@ console.log('\nonlyBaseAdId (single):');
 const single = buildDisparosFromDoc(DOC, CANDIDATES, { onlyBaseAdId: 'AD139GL' });
 assert(single.disparos.length === 1, 'restringe a 1 disparo');
 assert(!!single.disparos[0] && single.disparos[0].baseAdId.toUpperCase().includes('AD139'), 'disparo certo');
+
+/* ----------------- extractAdIds (igual runParser do clickup-pilot) ----------------- */
+console.log('\nextractAdIds:');
+const e1 = extractAdIds('AD139GL - VFPB04');
+assert(e1.baseAdId === 'AD139GL', 'base de "AD139GL - VFPB04" → AD139GL');
+assert(e1.fullAdId === 'AD139GL - VFPB04', 'full preservado');
+const e2 = extractAdIds('AD200GL - PRPB01 - extra');
+assert(e2.baseAdId === 'AD200GL', 'base de "AD200GL - PRPB01 - extra" → AD200GL');
+
+/* ----------------- buildDisparosFromNomenclatures (campos digitados) ----------------- */
+console.log('\nbuildDisparosFromNomenclatures (campos do user):');
+const byName = buildDisparosFromNomenclatures(DOC, ['AD139GL - VFPB04', 'AD200GL - PRPB01'], CANDIDATES);
+console.log('  diagnostic =', byName.diagnostic);
+assert(byName.disparos.length === 2, `2 disparos pelas nomenclaturas (got ${byName.disparos.length})`);
+assert(byName.notFound.length === 0, 'nenhuma nomenclatura perdida');
+assert(byName.disparos[0].baseAdId === 'AD139GL - VFPB04', 'preserva a nomenclatura digitada como nome');
+const h1 = byName.disparos[0].parts.find((p) => p.label === 'HOOK 1');
+assert(!!h1 && h1.avatarId === 'av_renato', 'match de avatar igual o auto (HOOK 1 → Renato)');
+
+console.log('\nnomenclatura inexistente:');
+const miss = buildDisparosFromNomenclatures(DOC, ['AD999XX - NOPE', 'AD139GL'], CANDIDATES);
+assert(miss.disparos.length === 1, 'acha só o que existe');
+assert(miss.notFound.includes('AD999XX - NOPE'), 'reporta o não-encontrado');
 
 /* ----------------- copy crua sem nomenclatura AD ----------------- */
 console.log('\ncopy crua (sem heading AD):');
