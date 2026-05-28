@@ -153,18 +153,26 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     console.log(`[clickup-pilot-pipeline] assemble ${filename}: pecas=${piecesIdx.length}`, piecesIdx.map(i=>parts[i]?.label));
 
     const blobs: Blob[] = [];
-    let assembleErr: string | undefined;
+    const skippedLabels: string[] = [];
     for (const i of piecesIdx) {
       const p = parts[i];
       if (!p?.blob) {
-        assembleErr = `Parte "${p?.label || '?'}" sem video disponivel`;
-        break;
+        // PARTE SEM BLOB — PULA, não aborta. Comum: BODY vazia
+        // ("(vazio — esse part nao vai gerar nada)") nunca dispara/renderiza,
+        // OU 1 parte falhou no download mas as outras estão OK.
+        // User reportou (2026-05-27): RETOMAR travava porque 1 parte vazia
+        // fazia break → montagem inteira abortava. Agora monta com o que tem.
+        skippedLabels.push(p?.label || '?');
+        continue;
       }
       blobs.push(p.blob);
     }
-    if (assembleErr || blobs.length === 0) {
-      console.warn(`[clickup-pilot-pipeline] assemble ${filename}: SKIP - ${assembleErr || 'sem partes'}`);
-      out.push({ filename, rawAssembled: blobs[0] || new Blob(), errors: { assemble: assembleErr || 'sem partes' } });
+    if (skippedLabels.length > 0) {
+      console.warn(`[clickup-pilot-pipeline] assemble ${filename}: PULOU ${skippedLabels.length} parte(s) sem video (${skippedLabels.join(', ')}), montando com ${blobs.length} disponíveis`);
+    }
+    if (blobs.length === 0) {
+      console.warn(`[clickup-pilot-pipeline] assemble ${filename}: SKIP - nenhuma parte com video`);
+      out.push({ filename, rawAssembled: new Blob(), errors: { assemble: 'nenhuma parte com video disponivel' } });
       continue;
     }
 

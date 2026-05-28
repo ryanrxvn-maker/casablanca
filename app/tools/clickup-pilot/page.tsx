@@ -1918,29 +1918,59 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const adNameClean = state.baseAdId.replace(/[^A-Z0-9]/gi, '_');
     const validIds = validParts.map((p) => p.videoId!);
 
-    setBatchStates((prev) => ({
-      ...prev,
-      [taskId]: { ...prev[taskId], phase: 'rendering', message: `Re-checando status de ${validIds.length} videos no HeyGen...`, finishedAt: undefined },
-    }));
-
     try {
-      const finalStatuses = await pollVideosUntilReady(validIds, {
-        intervalMs: 8000,
-        timeoutMs: 30 * 60 * 1000,
-        isCancelled: () => !!batchCancelRef.current[taskId],
-        onStatus: (st) => {
-          const done = Object.values(st).filter((s) => s.status === 'completed').length;
-          setBatchStates((prev) => {
-            const s = prev[taskId];
-            if (!s) return prev;
-            const newParts = s.parts.map((p) => {
-              const ps = p.videoId ? st[p.videoId] : null;
-              return ps ? { ...p, videoStatus: ps.status } : p;
+      // === PRÉ-HIDRATAÇÃO do IDB (fix 2026-05-28) ===
+      // ANTES de re-pollar/re-baixar do HeyGen, verifica quantas parts já
+      // estão no cache local. Se TODAS as parts COM videoId já têm blob no
+      // IDB, pula poll + download (HeyGen URLs já podem ter expirado, e não
+      // faz sentido re-baixar o que já temos). Vai direto pra montagem.
+      //
+      // User reportou (2026-05-28): batch com 9/9 renderizados + 1 parte
+      // vazia ficava travando no RETOMAR. Causa: pollVideosUntilReady +
+      // re-download desnecessário + montagem abortava por causa da parte vazia.
+      setBatchStates((prev) => ({
+        ...prev,
+        [taskId]: { ...prev[taskId], phase: 'downloading', message: 'Verificando cache local...', finishedAt: undefined },
+      }));
+      const { loadBlob } = await import('@/lib/zip-store');
+      let cachedCount = 0;
+      for (const p of validParts) {
+        try {
+          const b = await loadBlob(`pilot:${taskId}:part:${p.label}`, 'video/mp4');
+          if (b && b.size > 1024) cachedCount++;
+        } catch {}
+      }
+      const allCached = cachedCount >= validParts.length;
+      console.log(`[pilot resume] cache: ${cachedCount}/${validParts.length} parts no IDB. allCached=${allCached}`);
+
+      // Só polla HeyGen se NÃO temos tudo em cache. Se já temos, finalStatuses
+      // fica vazio (download loop vai pular tudo e usar só o cache).
+      let finalStatuses: Awaited<ReturnType<typeof pollVideosUntilReady>> = {};
+      if (!allCached) {
+        setBatchStates((prev) => ({
+          ...prev,
+          [taskId]: { ...prev[taskId], phase: 'rendering', message: `Re-checando ${validIds.length} videos no HeyGen (${cachedCount} já em cache)...` },
+        }));
+        finalStatuses = await pollVideosUntilReady(validIds, {
+          intervalMs: 8000,
+          timeoutMs: 30 * 60 * 1000,
+          isCancelled: () => !!batchCancelRef.current[taskId],
+          onStatus: (st) => {
+            const done = Object.values(st).filter((s) => s.status === 'completed').length;
+            setBatchStates((prev) => {
+              const s = prev[taskId];
+              if (!s) return prev;
+              const newParts = s.parts.map((p) => {
+                const ps = p.videoId ? st[p.videoId] : null;
+                return ps ? { ...p, videoStatus: ps.status } : p;
+              });
+              return { ...prev, [taskId]: { ...s, parts: newParts, message: `Renderizando: ${done}/${validIds.length} prontos` } };
             });
-            return { ...prev, [taskId]: { ...s, parts: newParts, message: `Renderizando: ${done}/${validIds.length} prontos` } };
-          });
-        },
-      });
+          },
+        });
+      } else {
+        console.log('[pilot resume] tudo em cache — pulando poll do HeyGen, indo direto pra montagem');
+      }
 
       setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'downloading', message: `Hidratando blobs do cache local...` } }));
       const JSZip = (await import('jszip')).default;
