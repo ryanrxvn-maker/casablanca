@@ -6,11 +6,69 @@
 // operacao, varre as portas conhecidas, acha o motor vivo e pega o
 // token atual via /pair. Storage local serve so de cache rapido.
 
+// ═══════════════════════════════════════════════════════════════
+// KEEPALIVE MV3 (fix 2026-05-28) — service worker NUNCA hiberna.
+//
+// Problema: Chrome MV3 mata o service worker após ~30s ocioso. Quando
+// morto, a página vê "desconectado" mesmo com o motor local rodando.
+// User reportou: "downloader desconecta e para de funcionar pra todos".
+//
+// Solução em 3 camadas:
+//  1. chrome.alarms a cada 0.4min (24s < 30s) → acorda o SW antes de
+//     hibernar. NUNCA morre.
+//  2. Cache de status no storage (engineUp/enginePort/checkedAt) →
+//     o ping responde INSTANTÂNEO do cache, sem esperar o fetch localhost.
+//  3. Re-check do engine no alarm → cache sempre fresco (<24s de idade).
+// ═══════════════════════════════════════════════════════════════
+
+const KEEPALIVE_ALARM = 'darko-keepalive';
+const ENGINE_CACHE_TTL_MS = 30_000; // cache vale 30s
+
+/** Re-descobre o engine + atualiza cache no storage. Idempotente. */
+async function recheckEngine() {
+  try {
+    const { port } = await getCfg();
+    const eng = await discoverEngine(port || 47923);
+    await chrome.storage.local.set({
+      engineUp: !!eng,
+      enginePortCache: eng ? eng.port : (port || 47923),
+      engineCheckedAt: Date.now(),
+    });
+    return eng;
+  } catch {
+    // não derruba o cache num erro pontual de rede; só marca timestamp
+    return null;
+  }
+}
+
+/** Lê o status cacheado (rápido, sem fetch). */
+function getEngineCache() {
+  return new Promise((r) =>
+    chrome.storage.local.get(['engineUp', 'enginePortCache', 'engineCheckedAt'], (v) => r(v || {})),
+  );
+}
+
+function ensureKeepalive() {
+  // periodInMinutes 0.4 = 24s. Mínimo de produção do Chrome é 0.5 (30s),
+  // mas valores menores funcionam em unpacked; o Chrome clampa pra 0.5 se
+  // necessário — 30s ainda mantém vivo o suficiente combinado com o cache.
+  chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.4 });
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === KEEPALIVE_ALARM) {
+    // O simples fato do handler rodar já reseta o timer de hibernação.
+    // Aproveita pra manter o cache do engine fresco.
+    recheckEngine();
+  }
+});
+
 function prewarmToken() {
+  ensureKeepalive();
   let tries = 0;
   const tick = () => {
     tries++;
-    discoverEngine(47923)
+    recheckEngine()
       .then((eng) => {
         if (!eng && tries < 30) setTimeout(tick, 2000); // ~1min de tentativas
       })
@@ -22,6 +80,8 @@ function prewarmToken() {
 }
 chrome.runtime.onInstalled.addListener(() => prewarmToken());
 chrome.runtime.onStartup.addListener(() => prewarmToken());
+// Também garante keepalive quando o SW acorda por qualquer evento
+ensureKeepalive();
 
 function getCfg() {
   return new Promise((r) =>
@@ -197,11 +257,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg && msg.type === 'darko-ping-engine') {
     (async () => {
-      const { port } = await getCfg();
-      const eng = await discoverEngine(port || 47923);
+      ensureKeepalive(); // garante alarm vivo a cada ping também
+      const cache = await getEngineCache();
+      const cacheAge = Date.now() - (cache.engineCheckedAt || 0);
+
+      // Cache FRESCO (<30s): responde NA HORA com o status conhecido.
+      // Evita a página marcar "desconectado" enquanto o fetch localhost
+      // demora ou o SW está acordando. Re-verifica em background.
+      if (cache.engineCheckedAt && cacheAge < ENGINE_CACHE_TTL_MS) {
+        sendResponse({ connected: !!cache.engineUp, port: cache.enginePortCache || 47923 });
+        recheckEngine(); // atualiza pra próxima (fire-and-forget)
+        return;
+      }
+
+      // Cache velho/ausente: verifica agora (primeira vez ou >30s parado).
+      const eng = await recheckEngine();
       sendResponse({
         connected: !!eng,
-        port: eng ? eng.port : port || 47923,
+        port: eng ? eng.port : (cache.enginePortCache || 47923),
       });
     })();
     return true;
