@@ -29,7 +29,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   mod
 ));
 
-// lib/headless-grab.ts
+// ../lib/headless-grab.ts
 var headless_grab_exports = {};
 __export(headless_grab_exports, {
   grabMedia: () => grabMedia
@@ -165,7 +165,7 @@ async function grabMedia(pageUrl) {
 }
 var UA, JUNK, browserP;
 var init_headless_grab = __esm({
-  "lib/headless-grab.ts"() {
+  "../lib/headless-grab.ts"() {
     "use strict";
     UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
     JUNK = /(plyr\.io|blank\.mp4|sample\.mp4|placeholder|googletag|doubleclick|trafficjunky|adtng|histats|popads|\/ads?\/|\.vtt|\.jpg|\.jpeg|\.png|\.webp|sprite|thumb)/i;
@@ -173,7 +173,7 @@ var init_headless_grab = __esm({
   }
 });
 
-// engine/server.ts
+// server.ts
 var import_http = __toESM(require("http"));
 var import_fs = require("fs");
 var import_promises2 = require("fs/promises");
@@ -181,7 +181,7 @@ var import_crypto = __toESM(require("crypto"));
 var import_os2 = __toESM(require("os"));
 var import_path2 = __toESM(require("path"));
 
-// lib/downloader-core.ts
+// ../lib/downloader-core.ts
 var import_child_process = require("child_process");
 var import_promises = require("fs/promises");
 var import_os = __toESM(require("os"));
@@ -739,7 +739,7 @@ async function processDownload(input) {
   }
 }
 
-// engine/server.ts
+// server.ts
 var VERSION = "1.0.0";
 var DEFAULT_PORT = 47923;
 function configDir() {

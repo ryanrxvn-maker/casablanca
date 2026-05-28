@@ -100,6 +100,21 @@ export default function DownloaderPage() {
     } catch {}
   }
 
+  // Versão MÍNIMA recomendada da extensão+motor. Abaixo disso, a versão
+  // antiga sofre de: (a) service worker MV3 hibernando (desconecta sozinho)
+  // e (b) janela preta de console no startup. A v1.4.0 corrige os dois.
+  const MIN_EXT_VERSION = [1, 4, 0];
+  function isOutdatedVersion(v?: string): boolean {
+    if (!v) return false; // sem info de versão → não alarma
+    const parts = v.split('.').map((n) => parseInt(n, 10) || 0);
+    for (let i = 0; i < MIN_EXT_VERSION.length; i++) {
+      const cur = parts[i] || 0;
+      if (cur < MIN_EXT_VERSION[i]) return true;
+      if (cur > MIN_EXT_VERSION[i]) return false;
+    }
+    return false; // igual = atualizado
+  }
+
   const [ext, setExt] = useState<{
     connected: boolean;
     version?: string;
@@ -388,6 +403,56 @@ export default function DownloaderPage() {
     >
       <div className="flex flex-col gap-5">
         <ToolStep n={1} icon={<IconStepPlug size={18} />} title="Extensão + Motor" hint="Instala uma vez, baixa em qualquer site" hue={HUE}>
+          {/* AVISO DE ATUALIZAÇÃO (contas não-admin) — versão antiga sofre
+              de desconexão automática + janela preta. v1.4.0 corrige.
+              Admin (você) já aplicou o fix manualmente, então não vê isso. */}
+          {!isAdmin && ext.connected && isOutdatedVersion(ext.version) && (
+            <div
+              className="mb-3 rounded-[14px] border border-amber-400/50 bg-amber-400/[0.08] p-4"
+              style={{ boxShadow: '0 0 20px -8px rgba(251,191,36,0.5)' }}
+            >
+              <div className="flex items-start gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-amber-400/50 bg-amber-400/15 text-lg">
+                  ⚠
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div
+                    className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-amber-300"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    Atualização importante disponível
+                  </div>
+                  <div
+                    className="mt-0.5 text-[14px] font-bold tracking-tight text-white"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    Reinstale a nova versão pra funcionar 100%
+                  </div>
+                  <p className="mt-2 text-[12.5px] leading-relaxed text-text-muted">
+                    Sua versão atual (<b className="text-white">v{ext.version}</b>) pode
+                    <b className="text-white"> desconectar sozinha</b> e mostrar uma
+                    <b className="text-white"> janela preta</b> ao ligar o PC. A nova
+                    versão corrige os dois — fica conectada pra sempre e roda invisível.
+                  </p>
+                  <ol className="mono mt-2.5 list-decimal space-y-1 pl-5 text-[11.5px] leading-relaxed text-text-muted">
+                    <li>Baixe e rode o novo instalador no botão abaixo.</li>
+                    <li>Em <code className="text-white">chrome://extensions</code>, remova a extensão antiga e carregue a nova pasta.</li>
+                    <li>Pronto — não desconecta mais nem aparece janela preta.</li>
+                  </ol>
+                  <div className="mt-3">
+                    <a
+                      href="/api/downloader-engine/download"
+                      download
+                      className="inline-flex items-center gap-2 rounded-full border border-amber-400/55 bg-amber-400/15 px-4 py-1.5 text-[11.5px] font-bold uppercase tracking-[0.14em] text-amber-200 transition hover:bg-amber-400/25"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      ↓ Baixar nova versão (corrigida)
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
           {ext.connected && ext.engine ? (
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-[12px] border border-lime/40 bg-lime/5 px-4 py-3 text-sm">
               <div className="flex items-center gap-2">
