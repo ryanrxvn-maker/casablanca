@@ -2603,50 +2603,98 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                 <div className="mono text-[10px] uppercase tracking-widest text-text-muted">
                   {docPreview.length} AD(s) detectado(s) — escolha quais enfileirar
                 </div>
-                <div className="grid max-h-[320px] gap-2 overflow-y-auto pr-1">
+                <div className="grid max-h-[420px] gap-2 overflow-y-auto pr-1">
                   {docPreview.map((d) => {
                     const checked = !!docSelected[d.baseAdId];
                     const missing = d.parts.some((p) => !p.avatarId);
+                    const hooks = d.parts.filter((p) => /^HOOK/i.test(p.label));
+                    const bodyParts = d.parts.filter((p) => /^BODY/i.test(p.label));
+                    const others = d.parts.filter(
+                      (p) => !/^HOOK/i.test(p.label) && !/^BODY/i.test(p.label),
+                    );
+                    const bodyText = bodyParts.map((p) => p.text || '').join(' ').trim();
+                    // Avatares únicos casados (nome) — resumo no topo do card
+                    const avatarNames = Array.from(
+                      new Set(d.parts.map((p) => p.avatarName).filter(Boolean) as string[]),
+                    );
                     return (
-                      <label
+                      <div
                         key={d.baseAdId}
                         className={
-                          'flex cursor-pointer items-start gap-3 rounded-[12px] border px-3 py-2.5 transition ' +
+                          'rounded-[12px] border px-3 py-2.5 transition ' +
                           (checked ? 'border-cyan-400/50 bg-cyan-400/5' : 'border-line bg-bg-soft/30')
                         }
                       >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(e) =>
-                            setDocSelected((prev) => ({ ...prev, [d.baseAdId]: e.target.checked }))
-                          }
-                          className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-cyan-400"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="mono text-sm text-white">{d.baseAdId}</span>
-                            <span className="mono rounded-full border border-line-strong px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted">
-                              {d.parts.length} partes
-                            </span>
-                            {d.fromDarkoBriefing ? null : (
-                              <span className="mono rounded-full bg-yellow-500/15 px-2 py-0.5 text-[9px] uppercase tracking-widest text-yellow-300">
-                                copy genérica
+                        <label className="flex cursor-pointer items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) =>
+                              setDocSelected((prev) => ({ ...prev, [d.baseAdId]: e.target.checked }))
+                            }
+                            className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-cyan-400"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="mono text-sm text-white">{d.baseAdId}</span>
+                              <span className="mono rounded-full border border-line-strong px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted">
+                                {hooks.length} hook{hooks.length === 1 ? '' : 's'}
+                                {bodyParts.length > 0 ? ` · body ${bodyParts.length} take${bodyParts.length === 1 ? '' : 's'}` : ''}
                               </span>
-                            )}
+                              {d.fromDarkoBriefing ? null : (
+                                <span className="mono rounded-full bg-yellow-500/15 px-2 py-0.5 text-[9px] uppercase tracking-widest text-yellow-300">
+                                  copy genérica
+                                </span>
+                              )}
+                            </div>
+                            {/* Avatar casado */}
+                            <div className="mt-1 text-[11px]">
+                              {avatarNames.length > 0 ? (
+                                <span className="text-lime">🎭 {avatarNames.join(', ')}</span>
+                              ) : (
+                                <span className="text-yellow-300">
+                                  ⚠ {d.unmatchedAvatars.length ? d.unmatchedAvatars.join(', ') : 'avatar não casado'} — usa fallback
+                                </span>
+                              )}
+                              {missing && avatarNames.length > 0 ? (
+                                <span className="text-yellow-300"> · algumas partes em fallback</span>
+                              ) : null}
+                            </div>
                           </div>
-                          <div className="mt-1 text-[11px] text-text-muted">
-                            {d.parts
-                              .map((p) => `${p.label}→${p.avatarName || '—'}`)
-                              .join(' · ')}
-                          </div>
-                          {missing ? (
-                            <div className="mt-1 text-[11px] text-yellow-300">
-                              ⚠ {d.unmatchedAvatars.length ? d.unmatchedAvatars.join(', ') : 'avatar não casado'} — usa fallback.
+                        </label>
+
+                        {/* TEXTO real dos hooks + body */}
+                        <div className="mt-2 grid gap-1.5 pl-7">
+                          {hooks.map((h, i) => (
+                            <div key={i} className="rounded-md border border-line bg-bg/40 px-2 py-1.5">
+                              <div className="mono text-[9px] uppercase tracking-widest text-fuchsia-200">
+                                {h.label}
+                              </div>
+                              <div className="mt-0.5 text-[11px] text-text">
+                                {h.text}
+                              </div>
+                            </div>
+                          ))}
+                          {others.map((o, i) => (
+                            <div key={`o${i}`} className="rounded-md border border-line bg-bg/40 px-2 py-1.5">
+                              <div className="mono text-[9px] uppercase tracking-widest text-text-muted">
+                                {o.label}
+                              </div>
+                              <div className="mt-0.5 text-[11px] text-text">{o.text}</div>
+                            </div>
+                          ))}
+                          {bodyText ? (
+                            <div className="rounded-md border border-line bg-bg/40 px-2 py-1.5">
+                              <div className="mono text-[9px] uppercase tracking-widest text-cyan-300">
+                                BODY · {bodyParts.length} take{bodyParts.length === 1 ? '' : 's'} (~20s cada)
+                              </div>
+                              <div className="mt-0.5 max-h-[120px] overflow-y-auto whitespace-pre-wrap text-[11px] text-text-muted">
+                                {bodyText}
+                              </div>
                             </div>
                           ) : null}
                         </div>
-                      </label>
+                      </div>
                     );
                   })}
                 </div>
