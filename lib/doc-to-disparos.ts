@@ -46,6 +46,9 @@ export type DisparoPart = {
   avatarName: string | null;
   /** Voz override (vem do avatar casado, se houver) */
   voiceId: string | null;
+  /** Role/speaker do briefing (ex "Doutor", "Mulher") — agrupa partes em
+   *  slots de avatar. null quando nao ha role explicito. */
+  role: string | null;
 };
 
 export type DiscoveredDisparo = {
@@ -190,6 +193,7 @@ function partsFromBriefing(
       avatarId: av?.id || null,
       avatarName: av?.name || null,
       voiceId: av?.voiceId ?? null,
+      role: h.role ?? null,
     });
   }
 
@@ -219,6 +223,7 @@ function partsFromBriefing(
         avatarId: av?.id || null,
         avatarName: av?.name || null,
         voiceId: av?.voiceId ?? null,
+        role: seg.role ?? null,
       });
     }
   }
@@ -272,6 +277,7 @@ function buildDisparoCore(
         avatarId: av?.id || null,
         avatarName: av?.name || null,
         voiceId: av?.voiceId ?? null,
+        role: null,
       };
     });
     return {
@@ -406,6 +412,7 @@ export function buildDisparosFromDoc(
           avatarId: av?.id || null,
           avatarName: av?.name || null,
           voiceId: av?.voiceId ?? null,
+          role: null,
         };
       });
       return {

@@ -108,6 +108,12 @@ if (d1) {
   const body = d1.parts.filter((p) => /^BODY/.test(p.label));
   assert(body.length >= 1, `AD139 tem body (got ${body.length})`);
   assert(body.every((b) => b.avatarId === 'av_renato'), 'BODY (Doutor) → Renato');
+  // role nas partes (input dos slots de avatar/voz no preview)
+  assert(!!hook1 && (hook1.role || '').toLowerCase() === 'doutor', 'HOOK 1 carrega role "Doutor"');
+  assert(!!hook2 && (hook2.role || '').toLowerCase() === 'mulher', 'HOOK 2 carrega role "Mulher"');
+  // slots distintos por role = 2 (Doutor, Mulher)
+  const roleKeys = Array.from(new Set(d1.parts.map((p) => (p.role || '').toLowerCase())));
+  assert(roleKeys.length === 2, `AD139 tem 2 slots de avatar por role (got ${roleKeys.length})`);
   // Texto sanitizado: nao deve conter o filename nem o label "Doutor:"
   assert(!!hook1 && !/@renatomartins1|\.mp4/i.test(hook1.text), 'HOOK 1 sem filename vazado');
   assert(!!hook1 && !/^Doutor:/i.test(hook1.text.trim()), 'HOOK 1 sem label Doutor vazado');

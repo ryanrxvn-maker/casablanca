@@ -39,6 +39,7 @@ import {
   type AvatarOption,
 } from '@/components/HeyGenAvatarPicker';
 import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
+import { CompactVoiceSelector } from '@/components/CompactVoiceSelector';
 import { getLibrarySnapshot, reloadLibrary, subscribeLibrary } from '@/lib/heygen-library-cache';
 import {
   HeyGenVoicePicker,
@@ -261,6 +262,28 @@ function HeyGenAutoInner() {
     return flat;
   }, [librarySnap.groups]);
 
+  /** Lookup AvatarOption (com thumb/voiceId) por id — pra resolver o avatar
+   *  sugerido em cada slot do preview de import. */
+  const avatarById = useMemo(() => {
+    const m = new Map<string, AvatarOption>();
+    for (const g of librarySnap.groups) {
+      for (const l of g.looks) {
+        m.set(l.id, {
+          id: l.id,
+          name: l.name,
+          thumb: l.thumb,
+          videoPreview: l.videoPreview,
+          type: l.type,
+          version: l.version,
+          groupId: l.groupId,
+          groupName: g.name,
+          voiceId: (l as any).voiceId ?? null,
+        });
+      }
+    }
+    return m;
+  }, [librarySnap.groups]);
+
   /* ===================== Fila de disparos (multi-disparo) ===================== */
   type QueuePart = {
     label: string;
@@ -304,6 +327,18 @@ function HeyGenAutoInner() {
   /** Toggle 3D "pegar todos": quando ON, ignora/bloqueia as nomenclaturas e
    *  identifica TODOS os ADs do doc automaticamente. */
   const [docAutoAll, setDocAutoAll] = useState(false);
+  /** Slots de avatar por AD (agrupados por role/speaker) — permite trocar o
+   *  avatar e a voz de cada speaker do AD antes de enfileirar (igual pilot).
+   *  Key = baseAdId. */
+  type DocSlot = {
+    role: string; // chave de agrupamento (lowercase; '' = sem role)
+    roleLabel: string; // exibicao
+    avatarId: string | null;
+    avatarName: string | null;
+    defaultVoiceId: string | null; // voz padrao do avatar casado
+    voiceOverride: { id: string; name: string } | null; // voz custom escolhida
+  };
+  const [docSlots, setDocSlots] = useState<Record<string, DocSlot[]>>({});
 
   /* --------------- Extension detection --------------- */
   useEffect(() => {
@@ -966,6 +1001,37 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     return await file.text();
   }
 
+  /** Agrupa as partes de um AD em slots de avatar (1 por role/speaker). */
+  function buildSlotsForDisparo(d: DiscoveredDisparo): DocSlot[] {
+    const order: string[] = [];
+    const seen = new Set<string>();
+    for (const p of d.parts) {
+      const key = (p.role || '').toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        order.push(key);
+      }
+    }
+    return order.map((key, idx) => {
+      const part = d.parts.find((p) => (p.role || '').toLowerCase() === key)!;
+      return {
+        role: key,
+        roleLabel: part.role || (order.length === 1 ? 'Avatar' : `Avatar ${idx + 1}`),
+        avatarId: part.avatarId,
+        avatarName: part.avatarName,
+        defaultVoiceId: part.voiceId,
+        voiceOverride: null,
+      };
+    });
+  }
+
+  function updateDocSlot(baseAdId: string, slotIdx: number, patch: Partial<DocSlot>) {
+    setDocSlots((prev) => ({
+      ...prev,
+      [baseAdId]: (prev[baseAdId] || []).map((s, i) => (i === slotIdx ? { ...s, ...patch } : s)),
+    }));
+  }
+
   /** Analisa o doc (busca o link OU usa o texto importado), roda a inteligencia
    *  do ClickUp Pilot e gera o preview de disparos. */
   async function parseDocAndPreview() {
@@ -1059,8 +1125,13 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     }
     setDocPreview(disparos);
     const sel: Record<string, boolean> = {};
-    for (const d of disparos) sel[d.baseAdId] = true;
+    const slotsMap: Record<string, DocSlot[]> = {};
+    for (const d of disparos) {
+      sel[d.baseAdId] = true;
+      slotsMap[d.baseAdId] = buildSlotsForDisparo(d);
+    }
     setDocSelected(sel);
+    setDocSlots(slotsMap);
   }
 
   /** Enfileira os disparos selecionados no preview do doc. */
@@ -1069,18 +1140,24 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     const items: QueueItem[] = [];
     for (const d of docPreview) {
       if (!docSelected[d.baseAdId]) continue;
+      // Aplica os slots editados (avatar/voz por speaker) nas partes do AD.
+      const slots = docSlots[d.baseAdId] || [];
+      const slotByRole = new Map(slots.map((s) => [s.role, s]));
       items.push({
         id: `doc:${d.baseAdId}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`,
         adName: d.baseAdId,
         safeName: d.safeName,
         mode: 'copy',
-        parts: d.parts.map((p) => ({
-          label: p.label,
-          text: p.text,
-          avatarId: p.avatarId,
-          avatarName: p.avatarName,
-          voiceId: p.voiceId,
-        })),
+        parts: d.parts.map((p) => {
+          const slot = slotByRole.get((p.role || '').toLowerCase()) || slots[0];
+          return {
+            label: p.label,
+            text: p.text,
+            avatarId: slot?.avatarId ?? p.avatarId,
+            avatarName: slot?.avatarName ?? p.avatarName,
+            voiceId: slot?.voiceOverride?.id ?? slot?.defaultVoiceId ?? p.voiceId,
+          };
+        }),
         motor: motorConfig.kind === 'global' ? motorConfig.motor : motor,
         decupagem: decupagemEnabled,
         source: 'doc',
@@ -1100,6 +1177,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     setDocFileName(null);
     setDocAdNames(['']);
     setDocAutoAll(false);
+    setDocSlots({});
   }
 
   /* ===================== Fila: adicionar config atual + processar ===================== */
@@ -2406,7 +2484,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
           onClick={() => setDocModalOpen(false)}
         >
           <div
-            className="mt-6 w-full max-w-[680px] rounded-[20px] border border-cyan-400/30 bg-bg-soft/95 p-5 shadow-[0_0_60px_-12px_rgba(34,211,238,0.5)] md:p-7"
+            className="mt-6 w-full max-w-[920px] rounded-[20px] border border-cyan-400/30 bg-bg-soft/95 p-5 shadow-[0_0_60px_-12px_rgba(34,211,238,0.5)] md:p-7"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-4 flex items-start justify-between">
@@ -2606,7 +2684,6 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                 <div className="grid max-h-[420px] gap-2 overflow-y-auto pr-1">
                   {docPreview.map((d) => {
                     const checked = !!docSelected[d.baseAdId];
-                    const missing = d.parts.some((p) => !p.avatarId);
                     const hooks = d.parts.filter((p) => /^HOOK/i.test(p.label));
                     const bodyParts = d.parts.filter((p) => /^BODY/i.test(p.label));
                     const others = d.parts.filter(
@@ -2647,21 +2724,81 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                                 </span>
                               )}
                             </div>
-                            {/* Avatar casado */}
+                            {/* Resumo dos avatares casados */}
                             <div className="mt-1 text-[11px]">
                               {avatarNames.length > 0 ? (
                                 <span className="text-lime">🎭 {avatarNames.join(', ')}</span>
                               ) : (
                                 <span className="text-yellow-300">
-                                  ⚠ {d.unmatchedAvatars.length ? d.unmatchedAvatars.join(', ') : 'avatar não casado'} — usa fallback
+                                  ⚠ {d.unmatchedAvatars.length ? d.unmatchedAvatars.join(', ') : 'avatar não casado'} — escolha abaixo
                                 </span>
                               )}
-                              {missing && avatarNames.length > 0 ? (
-                                <span className="text-yellow-300"> · algumas partes em fallback</span>
-                              ) : null}
                             </div>
                           </div>
                         </label>
+
+                        {/* Slots de avatar: thumb + trocar avatar + escolher voz, por speaker */}
+                        {(docSlots[d.baseAdId] || []).length > 0 ? (
+                          <div className="mt-2 grid gap-2 rounded-md border border-cyan-400/20 bg-cyan-400/5 p-2">
+                            <div className="mono text-[9px] uppercase tracking-widest text-cyan-300">
+                              Avatares deste AD ({(docSlots[d.baseAdId] || []).length}) — troque o avatar e a voz de cada um
+                            </div>
+                            {(docSlots[d.baseAdId] || []).map((slot, si) => {
+                              const selectedOpt: AvatarOption | null = slot.avatarId
+                                ? avatarById.get(slot.avatarId) ?? ({
+                                    id: slot.avatarId,
+                                    name: slot.avatarName || slot.avatarId,
+                                    thumb: null,
+                                    videoPreview: null,
+                                    type: 'avatar',
+                                    version: 'III',
+                                    voiceId: slot.defaultVoiceId,
+                                  } as AvatarOption)
+                                : null;
+                              const effVoiceId = slot.voiceOverride?.id || slot.defaultVoiceId || null;
+                              return (
+                                <div
+                                  key={si}
+                                  className="grid gap-2 rounded-md border border-line bg-bg/40 p-2 sm:grid-cols-[180px_1fr]"
+                                >
+                                  <div className="grid gap-1">
+                                    <div className="mono text-[9px] uppercase tracking-widest text-fuchsia-200">
+                                      {slot.roleLabel}
+                                    </div>
+                                    <CompactAvatarPicker
+                                      selected={selectedOpt}
+                                      setSelected={(a) =>
+                                        updateDocSlot(d.baseAdId, si, {
+                                          avatarId: a?.id || null,
+                                          avatarName: a?.name || null,
+                                          defaultVoiceId: (a as any)?.voiceId ?? null,
+                                          voiceOverride: null,
+                                        })
+                                      }
+                                      label={`Avatar pra ${slot.roleLabel}`}
+                                    />
+                                  </div>
+                                  <div className="grid content-start gap-1">
+                                    <div className="mono text-[9px] uppercase tracking-widest text-text-muted">
+                                      voz {!effVoiceId ? '· ⚠ sem voz padrão — escolha uma' : ''}
+                                    </div>
+                                    <CompactVoiceSelector
+                                      selected={slot.voiceOverride}
+                                      setSelected={(v) => updateDocSlot(d.baseAdId, si, { voiceOverride: v })}
+                                    />
+                                    {slot.voiceOverride ? (
+                                      <span className="mono text-[9px] text-lime">voz custom: {slot.voiceOverride.name}</span>
+                                    ) : slot.defaultVoiceId ? (
+                                      <span className="mono text-[9px] text-text-muted">usando a voz do avatar</span>
+                                    ) : (
+                                      <span className="mono text-[9px] text-yellow-300">sem voz definida</span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
 
                         {/* TEXTO real dos hooks + body */}
                         <div className="mt-2 grid gap-1.5 pl-7">
