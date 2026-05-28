@@ -47,6 +47,24 @@ async function main() {
   mkdirSync(pkg, { recursive: true });
   cpSync(path.join(here, 'dist', 'server.cjs'), path.join(pkg, 'server.cjs'));
 
+  // ── Runner.exe: launcher SILENCIOSO (winexe, sem console) ──
+  // Substitui o `cmd.exe /c AutoEditDownloader.cmd` que mostrava a
+  // janela preta no startup. Roda o node 100% hidden.
+  log('compilando AutoEditRunner.exe (launcher hidden)...');
+  const cscRunner = 'C:\\Windows\\Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe';
+  const runnerExe = path.join(pkg, 'AutoEditRunner.exe');
+  execFileSync(
+    cscRunner,
+    [
+      '/nologo',
+      '/target:winexe', // GUI app = SEM janela de console
+      '/platform:anycpu',
+      `/out:${runnerExe}`,
+      path.join(here, 'installer', 'Runner.cs'),
+    ],
+    { stdio: 'inherit' },
+  );
+
   writeFileSync(
     path.join(pkg, 'AutoEditDownloader.cmd'),
     [
@@ -274,11 +292,14 @@ try {
 Step 5 'Copiando arquivos do motor...'
 New-Item -ItemType Directory -Force -Path (Join-Path $dst 'bin') | Out-Null
 # Copia TODOS os arquivos do pacote (inclui DESINSTALAR.cmd visivel pro user)
-foreach ($f in @('server.cjs', 'AutoEditDownloader.cmd', 'Desinstalar.ps1', 'DESINSTALAR.cmd', 'LEIA-ME.txt')) {
+# AutoEditRunner.exe = launcher SILENCIOSO (sem janela preta no startup)
+foreach ($f in @('server.cjs', 'AutoEditRunner.exe', 'AutoEditDownloader.cmd', 'Desinstalar.ps1', 'DESINSTALAR.cmd', 'LEIA-ME.txt')) {
   $sp = Join-Path $src $f
   if (Test-Path $sp) { Copy-Item $sp $dst -Force }
 }
-$starter = Join-Path $dst 'AutoEditDownloader.cmd'
+# Starter = Runner.exe (hidden). Fallback pro .cmd se o runner faltar.
+$runnerExe = Join-Path $dst 'AutoEditRunner.exe'
+$starter = if (Test-Path $runnerExe) { $runnerExe } else { Join-Path $dst 'AutoEditDownloader.cmd' }
 
 # Garante DESINSTALAR.cmd no destino mesmo se faltou no pacote
 $desinstalCmd = Join-Path $dst 'DESINSTALAR.cmd'
@@ -352,9 +373,17 @@ Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 # Auto-start via Task Scheduler (NAO Startup folder + VBS = AV-safe)
 Step 94 'Configurando inicializacao com o Windows...'
 $taskName = 'AutoEditDownloader'
+$usingRunner = (Test-Path $runnerExe)
 try {
   schtasks /Delete /TN $taskName /F 2>$null | Out-Null
-  $action = ('cmd.exe /c "{0}"' -f $starter)
+  # Se temos o Runner.exe (winexe SEM console), a task roda ELE DIRETO —
+  # sem cmd.exe /c (que abria a janela preta). Runner.exe não mostra nada.
+  # Fallback (.cmd legado): roda via cmd minimizado.
+  if ($usingRunner) {
+    $action = ('"{0}"' -f $starter)
+  } else {
+    $action = ('cmd.exe /c "{0}"' -f $starter)
+  }
   $null = schtasks /Create /TN $taskName /TR $action /SC ONLOGON /RL LIMITED /F 2>&1
   if ($LASTEXITCODE -ne 0) {
     Log 'aviso: schtasks falhou, fallback para Startup folder (sem .vbs)'
@@ -370,7 +399,12 @@ try {
 
 Step 97 'Iniciando o motor...'
 Remove-Item (Join-Path $dst 'engine.log') -ErrorAction SilentlyContinue
-Start-Process -FilePath $starter -WindowStyle Minimized
+# Runner.exe (winexe) inicia hidden; .cmd legado vai minimizado.
+if ($usingRunner) {
+  Start-Process -FilePath $starter -WorkingDirectory $dst
+} else {
+  Start-Process -FilePath $starter -WindowStyle Minimized
+}
 
 $alive = $false
 $ports = @(47923, 47924, 47925, 47926, 47927, 47928)
