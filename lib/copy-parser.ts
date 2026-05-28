@@ -1486,7 +1486,7 @@ export function parseVABriefing(
 export function matchAvatar(
   username: string,
   candidates: Array<{ id: string; name: string; groupName?: string; voiceName?: string | null }>,
-): { id: string; name: string; groupName?: string; score: number; matchedBy?: 'voice_name_exact' | 'voice_name_fuzzy' | 'name_exact' | 'name_contains' | 'group_exact' | 'group_contains' | 'name_tokens' | 'voice_name_contains' } | null {
+): { id: string; name: string; groupName?: string; score: number; matchedBy?: 'voice_name_exact' | 'voice_name_fuzzy' | 'name_exact' | 'name_contains' | 'group_exact' | 'group_contains' | 'name_tokens' | 'voice_name_contains' | 'id_exact' | 'id_contains' } | null {
   if (!username || !candidates.length) return null;
   // Normaliza username: tira @, .mp4/.mov, mantem letras+digitos
   const norm = (s: string) => s.toLowerCase().replace(/^@/, '').replace(/\.mp4$|\.mov$/i, '').replace(/[^a-z0-9]/g, '');
@@ -1504,13 +1504,20 @@ export function matchAvatar(
     const vnCore = norm(stripVer(vn));
     const nm = norm(c.name || '');
     const gn = norm(c.groupName || '');
+    // ID do avatar/look HeyGen — alguns briefings referenciam o avatar pelo
+    // ID cru (ex "@749477393444762056" = talking-photo id). matchAvatar antes
+    // so olhava nome/voz/grupo e perdia esses. Agora casa pelo id tambem.
+    const idn = norm(c.id || '');
 
     // EXACT matches (220-200) — usuario nomeou identico ao briefing
     if (vnNorm && vnNorm === u) { score = 220; matchedBy = 'voice_name_exact'; }
+    else if (idn && idn === u) { score = 215; matchedBy = 'id_exact'; }
     else if (nm && nm === u) { score = 210; matchedBy = 'name_exact'; }
     else if (gn && gn === u) { score = 200; matchedBy = 'group_exact'; }
     // CONTAINS matches (180-140) — substring de qualquer lado
     else if (vnNorm && (vnNorm.includes(u) || u.includes(vnNorm))) { score = 180; matchedBy = 'voice_name_contains'; }
+    // id_contains: so pra ids longos (evita falso-positivo com numero curto)
+    else if (idn && u.length >= 8 && (idn.includes(u) || u.includes(idn))) { score = 175; matchedBy = 'id_contains'; }
     else if (nm && (nm.includes(u) || u.includes(nm))) { score = 170; matchedBy = 'name_contains'; }
     else if (vnCore && uCore && vnCore === uCore) { score = 150; matchedBy = 'voice_name_fuzzy'; }
     else if (gn && (gn.includes(u) || u.includes(gn))) { score = 140; matchedBy = 'group_contains'; }

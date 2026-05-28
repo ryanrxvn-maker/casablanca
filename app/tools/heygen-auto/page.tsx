@@ -1011,11 +1011,12 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
       setDocError(docTab === 'file' ? 'Importe um arquivo .txt ou .docx primeiro.' : 'Doc vazio.');
       return;
     }
-    // Garante biblioteca carregada pra casar avatares
+    // Garante biblioteca carregada pra casar avatares. Se vazia, FORCA reload
+    // (full fetch) — senao alguns avatares ficam sem candidato e caem em fallback.
     if (avatarCandidates.length === 0) {
       setDocFetching(true);
       try {
-        await reloadLibrary(false);
+        await reloadLibrary(true);
       } catch {}
       setDocFetching(false);
     }
