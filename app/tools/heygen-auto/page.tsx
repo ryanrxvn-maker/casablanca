@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ToolHero3D } from '@/components/ToolHero3D';
 import { DocImport3DButton } from '@/components/DocImport3DButton';
+import { Toggle3DIcon } from '@/components/Toggle3DIcon';
 import { JobControlPanel } from '@/components/JobControlPanel';
 import { CancelButton } from '@/components/CancelButton';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
@@ -300,6 +301,9 @@ function HeyGenAutoInner() {
    *  1 esta preenchida, busca SO esses ADs no doc (igual nome de task do
    *  ClickUp Pilot). Vazias → auto-descobre todos os ADs do doc. */
   const [docAdNames, setDocAdNames] = useState<string[]>(['']);
+  /** Toggle 3D "pegar todos": quando ON, ignora/bloqueia as nomenclaturas e
+   *  identifica TODOS os ADs do doc automaticamente. */
+  const [docAutoAll, setDocAutoAll] = useState(false);
 
   /* --------------- Extension detection --------------- */
   useEffect(() => {
@@ -978,8 +982,9 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
             })),
           );
     // Nomenclaturas digitadas pelo user → busca SO esses ADs (igual nome de
-    // task do ClickUp Pilot). Nenhuma preenchida → auto-descobre todos.
-    const names = docAdNames.map((s) => s.trim()).filter(Boolean);
+    // task do ClickUp Pilot). Nenhuma preenchida (ou toggle "pegar todos"
+    // ligado) → auto-descobre TODOS os ADs do doc.
+    const names = docAutoAll ? [] : docAdNames.map((s) => s.trim()).filter(Boolean);
     let disparos: DiscoveredDisparo[];
     if (names.length > 0) {
       const r = buildDisparosFromNomenclatures(text, names, snapCandidates);
@@ -1042,6 +1047,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     setDocLink('');
     setDocFileName(null);
     setDocAdNames(['']);
+    setDocAutoAll(false);
   }
 
   /* ===================== Fila: adicionar config atual + processar ===================== */
@@ -2448,15 +2454,50 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
               </div>
             )}
 
+            {/* Toggle 3D "pegar TODOS os ADs do doc" — quando ON bloqueia as
+                nomenclaturas e identifica todas as tasks/ADs do documento. */}
+            <div className="mt-5 flex items-center gap-3 rounded-[12px] border border-fuchsia-500/30 bg-fuchsia-500/5 p-3">
+              <Toggle3DIcon
+                on={docAutoAll}
+                onChange={setDocAutoAll}
+                ariaLabel="Pegar todos os ADs do doc automaticamente"
+                variant="fuchsia"
+                disabled={docFetching}
+                icon={
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="7" height="7" rx="1" />
+                    <rect x="14" y="3" width="7" height="7" rx="1" />
+                    <rect x="3" y="14" width="7" height="7" rx="1" />
+                    <rect x="14" y="14" width="7" height="7" rx="1" />
+                  </svg>
+                }
+              />
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold text-white">
+                  {docAutoAll ? 'Pegando TODOS os ADs do doc' : 'Pegar todos os ADs do doc'}
+                </div>
+                <div className="text-[11px] text-text-muted">
+                  {docAutoAll
+                    ? 'Identifica todas as tasks/ADs do documento — as nomenclaturas abaixo ficam bloqueadas.'
+                    : 'Ligue pra ignorar as nomenclaturas e enfileirar TODOS os ADs encontrados.'}
+                </div>
+              </div>
+            </div>
+
             {/* Nomenclaturas dos ADs (1 campo por AD) — igual nome de task do
-                ClickUp Pilot. Vazio = auto-descobre todos os ADs do doc. */}
-            <div className="mt-5 rounded-[12px] border border-line bg-bg/40 p-3">
+                ClickUp Pilot. Bloqueado quando "pegar todos" esta ON. */}
+            <div
+              className={
+                'mt-3 rounded-[12px] border border-line bg-bg/40 p-3 transition-opacity ' +
+                (docAutoAll ? 'pointer-events-none opacity-40' : '')
+              }
+            >
               <div className="mb-2 flex items-center justify-between">
                 <span className="mono text-[10px] uppercase tracking-widest text-cyan-300">
                   Nomenclaturas dos ADs (opcional)
                 </span>
                 <span className="text-[10px] text-text-muted">
-                  vazio = pega todos do doc
+                  {docAutoAll ? 'bloqueado (pegando todos)' : 'vazio = pega todos do doc'}
                 </span>
               </div>
               <div className="grid gap-2">
@@ -2473,13 +2514,13 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                       }
                       placeholder="Ex: AD139GL - VFPB04"
                       className="input-field flex-1 font-mono text-sm"
-                      disabled={docFetching}
+                      disabled={docFetching || docAutoAll}
                     />
                     {docAdNames.length > 1 ? (
                       <button
                         type="button"
                         onClick={() => setDocAdNames((prev) => prev.filter((_, k) => k !== i))}
-                        disabled={docFetching}
+                        disabled={docFetching || docAutoAll}
                         className="shrink-0 rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-text-muted transition hover:border-red-500/60 hover:text-red-300"
                         title="Remover este AD"
                       >
@@ -2492,7 +2533,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
               <button
                 type="button"
                 onClick={() => setDocAdNames((prev) => [...prev, ''])}
-                disabled={docFetching || docAdNames.length >= 30}
+                disabled={docFetching || docAutoAll || docAdNames.length >= 30}
                 className="mono mt-2 rounded-[10px] border border-dashed border-cyan-400/40 bg-cyan-400/5 px-3 py-1.5 text-[10px] uppercase tracking-widest text-cyan-300 transition hover:bg-cyan-400/10 disabled:opacity-40"
               >
                 + adicionar AD
