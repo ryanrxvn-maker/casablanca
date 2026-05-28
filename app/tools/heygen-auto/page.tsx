@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ToolHero3D } from '@/components/ToolHero3D';
+import { DocImport3DButton } from '@/components/DocImport3DButton';
 import { JobControlPanel } from '@/components/JobControlPanel';
 import { CancelButton } from '@/components/CancelButton';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
@@ -16,7 +17,12 @@ import {
   testHeygenSession,
   type ExtensionStatus,
 } from '@/lib/heygen-extension-bridge';
-import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
+import { runHeyGenJobs, type RunnerJob, type RunnerResult } from '@/lib/heygen-job-runner';
+import {
+  buildDisparosFromDoc,
+  type AvatarCandidate,
+  type DiscoveredDisparo,
+} from '@/lib/doc-to-disparos';
 import { MotorConfigPicker } from '@/components/MotorConfigPicker';
 import { defaultMotorConfig, resolveMotors, estimateSecondsFromText, estimateSecondsFromAudio, type MotorConfig } from '@/lib/motor-config';
 import {
@@ -31,7 +37,7 @@ import {
   type AvatarOption,
 } from '@/components/HeyGenAvatarPicker';
 import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
-import { getLibrarySnapshot, reloadLibrary } from '@/lib/heygen-library-cache';
+import { getLibrarySnapshot, reloadLibrary, subscribeLibrary } from '@/lib/heygen-library-cache';
 import {
   HeyGenVoicePicker,
   type VoiceOption,
@@ -175,6 +181,13 @@ function HeyGenAutoInner() {
     false,
   );
 
+  /* --------------- Decupagem (tesoura) — corta silêncios no montado --------- */
+  /** Default ON pra preservar o comportamento antigo (era hardcoded true). */
+  const [decupagemEnabled, setDecupagemEnabled] = useToolState<boolean>(
+    'hgauto:decupagem',
+    true,
+  );
+
   /* --------------- Modo Camuflagem (3a pasta com audio camuflado) --------- */
   const [camuflagemMode, setCamuflagemMode] = useToolState<boolean>(
     'hgauto:camuflagem',
@@ -218,6 +231,70 @@ function HeyGenAutoInner() {
   const downloadCancelRef = useRef<boolean>(false);
 
   const safeName = (adName.trim() || 'heygen').replace(/[^a-z0-9_-]/gi, '_');
+
+  /* ===================== Biblioteca HeyGen (candidatos p/ match) ===================== */
+  const [librarySnap, setLibrarySnap] = useState(() => getLibrarySnapshot());
+  useEffect(() => {
+    const unsub = subscribeLibrary(() => setLibrarySnap({ ...getLibrarySnapshot() }));
+    if (librarySnap.groups.length === 0 && !librarySnap.loading) {
+      reloadLibrary(false);
+    }
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const avatarCandidates: AvatarCandidate[] = useMemo(() => {
+    const flat: AvatarCandidate[] = [];
+    for (const g of librarySnap.groups) {
+      for (const l of g.looks) {
+        flat.push({
+          id: l.id,
+          name: l.name,
+          groupName: g.name,
+          voiceName: (l as any).voiceName ?? null,
+          voiceId: (l as any).voiceId ?? null,
+          thumb: l.thumb ?? null,
+        });
+      }
+    }
+    return flat;
+  }, [librarySnap.groups]);
+
+  /* ===================== Fila de disparos (multi-disparo) ===================== */
+  type QueuePart = {
+    label: string;
+    text?: string;
+    audio?: File;
+    avatarId?: string | null;
+    avatarName?: string | null;
+    voiceId?: string | null;
+  };
+  type QueueItem = {
+    id: string;
+    adName: string;
+    safeName: string;
+    mode: Mode;
+    parts: QueuePart[];
+    motor: Motor;
+    decupagem: boolean;
+    source: 'manual' | 'doc';
+    unmatched?: string[];
+    status: 'pending' | 'running' | 'done' | 'failed';
+    message?: string;
+  };
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [queueRunning, setQueueRunning] = useState(false);
+  const queueCancelRef = useRef(false);
+
+  /* ===================== Modal de importar copy do Docs ===================== */
+  const [docModalOpen, setDocModalOpen] = useState(false);
+  const [docTab, setDocTab] = useState<'link' | 'file'>('link');
+  const [docLink, setDocLink] = useState('');
+  const [docText, setDocText] = useState('');
+  const [docFileName, setDocFileName] = useState<string | null>(null);
+  const [docFetching, setDocFetching] = useState(false);
+  const [docError, setDocError] = useState<string | null>(null);
+  const [docPreview, setDocPreview] = useState<DiscoveredDisparo[] | null>(null);
+  const [docSelected, setDocSelected] = useState<Record<string, boolean>>({});
 
   /* --------------- Extension detection --------------- */
   useEffect(() => {
@@ -461,7 +538,7 @@ function HeyGenAutoInner() {
           const pipeRes = await runPostPipeline({
             baseAdId: safeName,
             parts: partBlobs,
-            decupagem: true,
+            decupagem: decupagemEnabled,
             camuflagem: false, // camuflagem fica no zip dedicado abaixo
             onProgress: (p) => {
               setDownloadStage(`${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}`);
@@ -494,7 +571,7 @@ Labels nao reconhecidas: ${pipeRes.diagnostics.unrecognizedLabels.join(', ') || 
 Items finais:
 ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'ERRO ('+it.errors.assemble+')' : 'OK'} | decupagem=${it.errors?.decupagem ? 'ERRO ('+it.errors.decupagem+')' : (it.decupado ? 'OK ('+(it.decupado.size/(1024*1024)).toFixed(1)+'MB)' : '?')}`).join('\n')}`);
           const blobMont = await zipMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
-          pipeMontadoName = `${safeName}_montado_decupado.zip`;
+          pipeMontadoName = `${safeName}_montado_${decupagemEnabled ? 'decupado' : 'sem_decupagem'}.zip`;
           if (bId) {
             try {
               const { saveZip } = await import('@/lib/zip-store');
@@ -804,6 +881,490 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
       setProcessing(false);
       cancelRef.current = false;
     }
+  }
+
+  /* ===================== Importar copy do Docs (link/arquivo) ===================== */
+
+  /** Extrai texto puro de um arquivo. Suporta .txt (texto direto) e .docx
+   *  (descompacta word/document.xml via JSZip e extrai os runs <w:t>). */
+  async function extractTextFromFile(file: File): Promise<string> {
+    const name = file.name.toLowerCase();
+    if (name.endsWith('.docx')) {
+      // Decodifica entidades XML: numericas (&#8220; aspas curvas do Docs,
+      // &#x2014; etc) + nomeadas. &amp; por ULTIMO pra nao re-decodificar.
+      const decodeXml = (s: string) =>
+        s
+          .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+          .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(parseInt(d, 10)))
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&apos;/g, "'")
+          .replace(/&amp;/g, '&');
+      const JSZip = (await import('jszip')).default;
+      const zip = await JSZip.loadAsync(await file.arrayBuffer());
+      const xml = await zip.file('word/document.xml')?.async('string');
+      if (!xml) throw new Error('Arquivo .docx invalido (sem word/document.xml).');
+      const paras = xml.split(/<\/w:p>/).map((seg) => {
+        // <w:tab/> vira tab; <w:br/> e <w:cr/> viram quebra DENTRO do paragrafo
+        const withBreaks = seg
+          .replace(/<w:tab\/>/g, '\t')
+          .replace(/<w:(?:br|cr)\b[^>]*\/>/g, '\n');
+        const runs = [...withBreaks.matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g)].map((m) => m[1]);
+        return runs.join('');
+      });
+      return decodeXml(paras.join('\n'));
+    }
+    // .txt / colado / outros formatos de texto
+    return await file.text();
+  }
+
+  /** Analisa o doc (busca o link OU usa o texto importado), roda a inteligencia
+   *  do ClickUp Pilot e gera o preview de disparos. */
+  async function parseDocAndPreview() {
+    setDocError(null);
+    setDocPreview(null);
+    let text = docText;
+    if (docTab === 'link') {
+      if (!docLink.trim()) {
+        setDocError('Cole o link do Google Docs (compartilhado como "qualquer pessoa com o link").');
+        return;
+      }
+      setDocFetching(true);
+      try {
+        const r = await fetch(`/api/docs/fetch?url=${encodeURIComponent(docLink.trim())}`);
+        const j = await r.json();
+        if (!j.ok) {
+          setDocError(j.error || 'Falha ao buscar o doc.');
+          return;
+        }
+        text = j.text || '';
+        setDocText(text);
+      } catch (e) {
+        setDocError(`Falha ao buscar: ${(e as Error)?.message}`);
+        return;
+      } finally {
+        setDocFetching(false);
+      }
+    }
+    if (!text.trim()) {
+      setDocError(docTab === 'file' ? 'Importe um arquivo .txt ou .docx primeiro.' : 'Doc vazio.');
+      return;
+    }
+    // Garante biblioteca carregada pra casar avatares
+    if (avatarCandidates.length === 0) {
+      setDocFetching(true);
+      try {
+        await reloadLibrary(false);
+      } catch {}
+      setDocFetching(false);
+    }
+    const snapCandidates: AvatarCandidate[] =
+      avatarCandidates.length > 0
+        ? avatarCandidates
+        : getLibrarySnapshot().groups.flatMap((g) =>
+            g.looks.map((l) => ({
+              id: l.id,
+              name: l.name,
+              groupName: g.name,
+              voiceName: (l as any).voiceName ?? null,
+              voiceId: (l as any).voiceId ?? null,
+              thumb: l.thumb ?? null,
+            })),
+          );
+    const res = buildDisparosFromDoc(text, snapCandidates);
+    if (res.disparos.length === 0) {
+      setDocError(res.diagnostic);
+      return;
+    }
+    setDocPreview(res.disparos);
+    const sel: Record<string, boolean> = {};
+    for (const d of res.disparos) sel[d.baseAdId] = true;
+    setDocSelected(sel);
+  }
+
+  /** Enfileira os disparos selecionados no preview do doc. */
+  function enqueueSelectedDocDisparos() {
+    if (!docPreview) return;
+    const items: QueueItem[] = [];
+    for (const d of docPreview) {
+      if (!docSelected[d.baseAdId]) continue;
+      items.push({
+        id: `doc:${d.baseAdId}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`,
+        adName: d.baseAdId,
+        safeName: d.safeName,
+        mode: 'copy',
+        parts: d.parts.map((p) => ({
+          label: p.label,
+          text: p.text,
+          avatarId: p.avatarId,
+          avatarName: p.avatarName,
+          voiceId: p.voiceId,
+        })),
+        motor: motorConfig.kind === 'global' ? motorConfig.motor : motor,
+        decupagem: decupagemEnabled,
+        source: 'doc',
+        unmatched: d.unmatchedAvatars,
+        status: 'pending',
+      });
+    }
+    if (items.length === 0) {
+      setDocError('Selecione pelo menos 1 AD pra adicionar à fila.');
+      return;
+    }
+    setQueue((prev) => [...prev, ...items]);
+    setDocModalOpen(false);
+    setDocPreview(null);
+    setDocText('');
+    setDocLink('');
+    setDocFileName(null);
+  }
+
+  /* ===================== Fila: adicionar config atual + processar ===================== */
+
+  function labelForQueueIndex(idx: number, hookCount: number, totalParts: number): string {
+    if (forcedParts && forcedParts[idx]) return forcedParts[idx].label;
+    if (idx < hookCount) return `HOOK ${idx + 1}`;
+    const bodyIdx = idx - hookCount;
+    const bodyTotal = totalParts - hookCount;
+    if (bodyTotal === 1) return 'BODY';
+    return `BODY ${bodyIdx + 1}`;
+  }
+
+  /** Captura a configuracao atual (avatar + copy/audios + modos) como 1 item
+   *  da fila, sem disparar agora. Permite empilhar varios ADs manualmente. */
+  function addCurrentToQueue() {
+    if (!selectedAvatar) {
+      setError('Selecione um avatar antes de adicionar à fila.');
+      return;
+    }
+    const qparts: QueuePart[] = [];
+    if (mode === 'copy') {
+      if (parts.length === 0) {
+        setError('Preencha pelo menos 1 HOOK pra adicionar à fila.');
+        return;
+      }
+      const hookCount =
+        forcedParts && forcedParts.length > 0
+          ? forcedParts.filter((p) => /^HOOK/i.test(p.label)).length
+          : structuredHooks.filter((h) => h.text.trim()).length;
+      const fixedVoice =
+        overrideVoice && selectedVoice ? selectedVoice.id : selectedAvatar.voiceId || null;
+      parts.forEach((text, i) => {
+        const av = dynamicMode ? partAvatars[i] || selectedAvatar : selectedAvatar;
+        qparts.push({
+          label: labelForQueueIndex(i, hookCount, parts.length),
+          text,
+          avatarId: av?.id || selectedAvatar.id,
+          avatarName: av?.name || selectedAvatar.name,
+          voiceId: dynamicMode && !overrideVoice ? av?.voiceId || null : fixedVoice,
+        });
+      });
+    } else {
+      const hookFiles = structuredHooks.map((h) => h.audio).filter((f): f is File => !!f);
+      const bodyFiles = structuredBody.enabled ? structuredBody.audios : [];
+      if (hookFiles.length === 0 && bodyFiles.length === 0) {
+        setError('Faça upload de pelo menos 1 áudio pra adicionar à fila.');
+        return;
+      }
+      hookFiles.forEach((file, i) =>
+        qparts.push({
+          label: `HOOK ${i + 1}`,
+          audio: file,
+          avatarId: selectedAvatar.id,
+          avatarName: selectedAvatar.name,
+        }),
+      );
+      bodyFiles.forEach((file, i) =>
+        qparts.push({
+          label: bodyFiles.length === 1 ? 'BODY' : `BODY · parte ${i + 1}`,
+          audio: file,
+          avatarId: selectedAvatar.id,
+          avatarName: selectedAvatar.name,
+        }),
+      );
+    }
+    setQueue((prev) => [
+      ...prev,
+      {
+        id: `manual:${safeName}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`,
+        adName: adName.trim() || safeName,
+        safeName,
+        mode,
+        parts: qparts,
+        motor: motorConfig.kind === 'global' ? motorConfig.motor : motor,
+        decupagem: decupagemEnabled,
+        source: 'manual',
+        status: 'pending',
+      },
+    ]);
+    setError(null);
+  }
+
+  function removeFromQueue(id: string) {
+    setQueue((prev) => prev.filter((q) => q.id !== id));
+  }
+
+  function cancelQueue() {
+    queueCancelRef.current = true;
+  }
+
+  /** Helper: baixa um blob como arquivo (auto-download). */
+  function triggerDownload(blob: Blob, filename: string): string {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return url;
+  }
+
+  /**
+   * Roda UM item da fila ponta-a-ponta: dispara as partes no HeyGen, espera
+   * renderizar, baixa MP4s, zipa takes + montado (com/sem decupagem) +
+   * camuflado (se ligado). Auto-contido — NAO toca no run()/downloadAllAsZip()
+   * do fluxo manual. Reusa exatamente as mesmas libs.
+   */
+  async function runDisparoSpec(
+    item: QueueItem,
+    cbs: { onStage: (m: string) => void; isCancelled: () => boolean },
+  ): Promise<void> {
+    const safe = item.safeName;
+    const batchId = `heygenauto:${safe}:${Date.now()}`;
+    const fallbackAvatar =
+      item.parts.find((p) => p.avatarId)?.avatarId || selectedAvatar?.id || '';
+    const fallbackVoice =
+      item.parts.find((p) => p.voiceId)?.voiceId || selectedAvatar?.voiceId || undefined;
+    if (!fallbackAvatar && item.parts.some((p) => !p.avatarId)) {
+      throw new Error('Sem avatar resolvido pra alguma parte (cria o avatar no HeyGen ou ajusta a copy).');
+    }
+
+    const jobs: RunnerJob[] = item.parts.map((p) => ({
+      label: p.label,
+      copy: item.mode === 'copy' ? p.text : undefined,
+      audio: item.mode === 'audio' ? p.audio : undefined,
+      avatarId: p.avatarId || undefined,
+      voiceId: p.voiceId || undefined,
+      motor: item.motor,
+    }));
+
+    const mirrorParts = (collected: RunnerResult[]) =>
+      jobs.map((j, i) => {
+        const rr = collected.find((c) => c.index === i + 1);
+        return {
+          label: j.label,
+          videoId: rr?.videoId ?? null,
+          error: rr?.error ?? null,
+          renamedTo: `${j.label}.mp4`,
+        };
+      });
+
+    upsertSharedBatch(batchId, {
+      taskName: safe,
+      baseAdId: safe,
+      phase: 'dispatching',
+      parts: mirrorParts([]),
+      startedAt: Date.now(),
+      message: 'Disparando partes no HeyGen (fila)...',
+    });
+
+    const collected: RunnerResult[] = [];
+    const finalResults = await runHeyGenJobs(jobs, {
+      parallel: 3,
+      mode: item.mode,
+      avatarId: fallbackAvatar,
+      voiceId: fallbackVoice,
+      motor: item.motor,
+      adNameSafe: safe,
+      isCancelled: cbs.isCancelled,
+      onProgress: (m) => cbs.onStage(m),
+      onResult: (r) => {
+        collected.push(r);
+        upsertSharedBatch(batchId, { parts: mirrorParts(collected) });
+      },
+    });
+
+    const ready = finalResults.filter((r) => r.videoId);
+    if (ready.length === 0) {
+      upsertSharedBatch(batchId, {
+        phase: 'failed',
+        parts: mirrorParts(finalResults),
+        message: 'Todos os disparos falharam (cota/limite HeyGen?).',
+        finishedAt: Date.now(),
+      });
+      throw new Error('Nenhuma parte foi disparada (cota/limite HeyGen?).');
+    }
+
+    upsertSharedBatch(batchId, {
+      phase: 'downloading',
+      parts: mirrorParts(finalResults),
+      message: 'Renderizando + baixando no HeyGen...',
+    });
+
+    const ids = ready.map((r) => r.videoId!);
+    cbs.onStage(`Renderizando ${ids.length} partes no HeyGen...`);
+    const final = await pollVideosUntilReady(ids, {
+      intervalMs: 8000,
+      timeoutMs: 30 * 60 * 1000,
+      isCancelled: cbs.isCancelled,
+      onStatus: (statuses) => {
+        const done = Object.values(statuses).filter((s) => s.status === 'completed').length;
+        const failed = Object.values(statuses).filter((s) => s.status === 'failed').length;
+        cbs.onStage(`Renderizando: ${done}/${ids.length} prontos${failed > 0 ? `, ${failed} falhou` : ''}...`);
+      },
+    });
+    if (cbs.isCancelled()) throw new Error('Cancelado pelo usuário.');
+
+    const JSZip = (await import('jszip')).default;
+    const { saveZip } = await import('@/lib/zip-store');
+
+    // ZIP 1 — takes individuais
+    const zip = new JSZip();
+    const partBlobs: Array<{ label: string; blob: Blob | null }> = [];
+    for (let i = 0; i < ready.length; i++) {
+      if (cbs.isCancelled()) throw new Error('Cancelado pelo usuário.');
+      const part = ready[i];
+      const status = final[part.videoId!];
+      cbs.onStage(`Baixando parte ${i + 1}/${ready.length} (${part.label})...`);
+      if (status?.status !== 'completed' || !status.videoUrl) {
+        zip.file(`${part.label}_FAILED.txt`, `Status: ${status?.status || 'unknown'}\nErro: ${status?.error || 'sem video_url'}`);
+        partBlobs.push({ label: part.label, blob: null });
+        continue;
+      }
+      try {
+        const bytes = await downloadVideoBytes(status.videoUrl);
+        zip.file(`${part.label}.mp4`, bytes);
+        partBlobs.push({ label: part.label, blob: new Blob([bytes as BlobPart], { type: 'video/mp4' }) });
+      } catch (e) {
+        zip.file(`${part.label}_DOWNLOAD_ERROR.txt`, String((e as Error)?.message || e));
+        partBlobs.push({ label: part.label, blob: null });
+      }
+    }
+    cbs.onStage('Zipando takes...');
+    const takesBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+    const takesName = `${safe}_takes.zip`;
+    try {
+      await saveZip(`batch:${batchId}:takes`, takesBlob, takesName);
+      upsertSharedBatch(batchId, { zipFilename: takesName });
+    } catch {}
+    const takesUrl = triggerDownload(takesBlob, takesName);
+    setTimeout(() => URL.revokeObjectURL(takesUrl), 5000);
+
+    // ZIP 2 — montado HOOK[N]+BODY (com/sem decupagem)
+    if (partBlobs.some((p) => p.blob)) {
+      cbs.onStage(`Montando HOOK+BODY${item.decupagem ? ' + decupagem' : ''}...`);
+      try {
+        const { runPostPipeline } = await import('@/lib/clickup-pilot-pipeline');
+        const pipeRes = await runPostPipeline({
+          baseAdId: safe,
+          parts: partBlobs,
+          decupagem: item.decupagem,
+          camuflagem: false,
+          onProgress: (p) => cbs.onStage(`${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}`),
+        });
+        const zipMont = new JSZip();
+        for (const it of pipeRes.items) {
+          if (it.decupado) {
+            zipMont.file(it.filename, it.decupado);
+          } else if (it.rawAssembled && it.rawAssembled.size > 0 && !it.errors?.assemble) {
+            zipMont.file(it.filename.replace('.mp4', item.decupagem ? '_sem_decupagem.mp4' : '.mp4'), it.rawAssembled);
+            if (item.decupagem) {
+              zipMont.file(`${it.filename.replace('.mp4', '')}_DECUPAGEM_ERRO.txt`, it.errors?.decupagem || 'erro desconhecido');
+            }
+          } else {
+            zipMont.file(`${it.filename.replace('.mp4', '')}_ERRO.txt`, `Assemble: ${it.errors?.assemble || 'OK'}\nDecupagem: ${it.errors?.decupagem || 'OK'}`);
+          }
+        }
+        const blobMont = await zipMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+        const montName = `${safe}_montado_${item.decupagem ? 'decupado' : 'sem_decupagem'}.zip`;
+        try {
+          await saveZip(`batch:${batchId}:montado`, blobMont, montName);
+          upsertSharedBatch(batchId, { montadoZipName: montName });
+        } catch {}
+        const montUrl = triggerDownload(blobMont, montName);
+        setTimeout(() => URL.revokeObjectURL(montUrl), 5000);
+      } catch (e) {
+        console.error('[hgauto fila pipeline] falhou:', e);
+      }
+    }
+
+    // ZIP 3 — camuflado (se modo camuflagem ligado + WHITE selecionado)
+    if (camuflagemMode && camuflagemWhite) {
+      cbs.onStage('Aplicando camuflagem em cada take...');
+      try {
+        let whiteBlob: Blob = camuflagemWhite;
+        if ((camuflagemWhite.type || '').startsWith('video/') || /\.(mp4|mov|webm|mkv)$/i.test(camuflagemWhite.name)) {
+          whiteBlob = await extractAudio(camuflagemWhite);
+        }
+        const zipCamu = new JSZip();
+        for (let i = 0; i < partBlobs.length; i++) {
+          const p = partBlobs[i];
+          if (!p.blob) continue;
+          cbs.onStage(`Camuflando ${i + 1}/${partBlobs.length} (${p.label})...`);
+          try {
+            const blackAudio = await extractAudio(p.blob);
+            const camuWav = await camuflar({ black: blackAudio, white: whiteBlob, volumePercent: camuflagemVolume });
+            const camuVid = await muxAudioIntoVideo(p.blob, camuWav);
+            zipCamu.file(`${p.label}_camuflado.mp4`, camuVid);
+          } catch (e) {
+            zipCamu.file(`${p.label}_CAMUFLAGEM_ERROR.txt`, String((e as Error)?.message || e));
+          }
+        }
+        const blobCamu = await zipCamu.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+        const camuName = `${safe}_camuflado.zip`;
+        try {
+          await saveZip(`batch:${batchId}:camo`, blobCamu, camuName);
+          upsertSharedBatch(batchId, { camufladoZipName: camuName });
+        } catch {}
+        const camuUrl = triggerDownload(blobCamu, camuName);
+        setTimeout(() => URL.revokeObjectURL(camuUrl), 5000);
+      } catch (e) {
+        console.warn('[hgauto fila camuflagem] falhou:', e);
+      }
+    }
+
+    upsertSharedBatch(batchId, { phase: 'done', message: 'Pronto — ZIPs no disco (lipsync-history).', finishedAt: Date.now() });
+  }
+
+  /** Processa a fila inteira em sequencia (1 disparo por vez). */
+  async function processQueue() {
+    if (!extStatus.connected) {
+      setError('Extensao DARKO LAB nao detectada. Instale primeiro.');
+      return;
+    }
+    const snapshot = queue.filter((q) => q.status !== 'done');
+    if (snapshot.length === 0) return;
+    setError(null);
+    setQueueRunning(true);
+    queueCancelRef.current = false;
+    for (const item of snapshot) {
+      if (queueCancelRef.current) break;
+      setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: 'running', message: 'Iniciando...' } : q)));
+      try {
+        await runDisparoSpec(item, {
+          onStage: (m) => setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, message: m } : q))),
+          isCancelled: () => queueCancelRef.current,
+        });
+        setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: 'done', message: '✓ ZIPs baixados' } : q)));
+      } catch (e) {
+        // Cancelamento intencional NAO e falha — volta o item pra 'pending'
+        // pra poder reprocessar depois.
+        const canceled = queueCancelRef.current;
+        const msg = canceled
+          ? 'Cancelado — reprocessar quando quiser.'
+          : (e as Error)?.message || 'Falha desconhecida.';
+        setQueue((prev) =>
+          prev.map((q) =>
+            q.id === item.id ? { ...q, status: canceled ? 'pending' : 'failed', message: msg } : q,
+          ),
+        );
+        if (canceled) break;
+      }
+    }
+    setQueueRunning(false);
+    queueCancelRef.current = false;
   }
 
   return (
@@ -1277,6 +1838,21 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
             {/* Modo Camuflagem — gera 2a ZIP com cada take camuflado no audio */}
             <section className="border-t border-line pt-6">
               <h2 className="label-field !mb-3">Modos extra</h2>
+              <div className="mb-3 flex flex-wrap gap-3">
+                <Toggle3D
+                  on={decupagemEnabled}
+                  onChange={setDecupagemEnabled}
+                  label={decupagemEnabled ? 'Decupagem ON' : 'Decupagem OFF'}
+                  hint="Corta silêncios/respiros no vídeo montado HOOK+BODY"
+                  variant="cyan"
+                  icon={<span className="text-base">✂️</span>}
+                />
+              </div>
+              <p className="mb-3 text-[11px] text-text-muted">
+                {decupagemEnabled
+                  ? '✂️ Decupagem LIGADA: o ZIP montado sai com os cortes (silêncios removidos).'
+                  : '✂️ Decupagem DESLIGADA: o ZIP montado sai com HOOK+BODY colados crus, sem cortar nada.'}
+              </p>
               <Toggle3D
                 on={camuflagemMode}
                 onChange={setCamuflagemMode}
@@ -1474,6 +2050,139 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
               ) : null}
             </section>
 
+            {/* Fila de disparos + importar copy do Docs */}
+            <section className="border-t border-line pt-6">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="label-field !mb-1">Fila de disparos</h2>
+                  <p className="text-[11px] text-text-muted">
+                    Empilhe vários ADs e dispare tudo em sequência — igual ao ClickUp Pilot,
+                    mas sem precisar do ClickUp. Importe a copy de um Google Docs (link ou
+                    arquivo) e ele identifica HOOK / BODY / avatar sozinho.
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-3">
+                  <DocImport3DButton
+                    onClick={() => {
+                      setDocError(null);
+                      setDocModalOpen(true);
+                    }}
+                    disabled={queueRunning}
+                    pulse={queue.length === 0}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={addCurrentToQueue}
+                  disabled={queueRunning || processing || !selectedAvatar}
+                  className="rounded-[10px] border border-line-strong px-3 py-2 text-xs text-text-muted transition hover:border-cyan-400 hover:text-cyan-300 disabled:opacity-40"
+                  title="Captura o avatar + copy/áudios atuais como um disparo na fila"
+                >
+                  + Adicionar config atual à fila
+                </button>
+                {queue.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setQueue([])}
+                    disabled={queueRunning}
+                    className="rounded-[10px] border border-line-strong px-3 py-2 text-xs text-text-muted transition hover:border-red-500/60 hover:text-red-300 disabled:opacity-40"
+                  >
+                    Limpar fila
+                  </button>
+                ) : null}
+              </div>
+
+              {queue.length > 0 ? (
+                <div className="mt-4 grid gap-2">
+                  {queue.map((item) => {
+                    const tone =
+                      item.status === 'done'
+                        ? 'border-lime/40 bg-lime/5'
+                        : item.status === 'running'
+                          ? 'border-cyan-400/50 bg-cyan-400/5'
+                          : item.status === 'failed'
+                            ? 'border-red-500/40 bg-red-500/5'
+                            : 'border-line bg-bg-soft/30';
+                    const sym =
+                      item.status === 'done' ? '✓' : item.status === 'running' ? '◷' : item.status === 'failed' ? '✗' : '•';
+                    const missingAvatar = item.parts.some((p) => !p.avatarId);
+                    return (
+                      <div key={item.id} className={'rounded-[12px] border px-3 py-2.5 ' + tone}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="mono text-sm text-white">
+                                {sym} {item.adName}
+                              </span>
+                              <span className="mono rounded-full border border-line-strong px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted">
+                                {item.source === 'doc' ? 'docs' : 'manual'} · {item.mode} · motor {item.motor}
+                              </span>
+                              {item.decupagem ? (
+                                <span className="mono rounded-full bg-cyan-400/15 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-300">
+                                  ✂️ decupa
+                                </span>
+                              ) : (
+                                <span className="mono rounded-full bg-bg px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted">
+                                  sem decupa
+                                </span>
+                              )}
+                            </div>
+                            <div className="mt-1 text-[11px] text-text-muted">
+                              {item.parts.length} parte{item.parts.length === 1 ? '' : 's'}:{' '}
+                              {item.parts.map((p) => p.label).join(', ')}
+                            </div>
+                            {missingAvatar ? (
+                              <div className="mt-1 text-[11px] text-yellow-300">
+                                ⚠ alguma parte sem avatar casado{item.unmatched?.length ? ` (${item.unmatched.join(', ')})` : ''} — vai usar o avatar selecionado como fallback.
+                              </div>
+                            ) : null}
+                            {item.message ? (
+                              <div className={'mono mt-1 text-[10px] uppercase tracking-widest ' + (item.status === 'failed' ? 'text-red-300' : item.status === 'done' ? 'text-lime' : 'text-cyan-300')}>
+                                {item.message}
+                              </div>
+                            ) : null}
+                          </div>
+                          {!queueRunning ? (
+                            <button
+                              type="button"
+                              onClick={() => removeFromQueue(item.id)}
+                              className="shrink-0 rounded p-1 text-text-muted transition hover:bg-red-500/15 hover:text-red-300"
+                              title="Remover da fila"
+                            >
+                              ×
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  <div className="mt-1 flex flex-wrap gap-3">
+                    {queueRunning ? (
+                      <CancelButton onClick={cancelQueue} label="Parar fila (após o disparo atual)" />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={processQueue}
+                        disabled={!extStatus.connected || queue.filter((q) => q.status !== 'done').length === 0}
+                        className="btn-primary"
+                      >
+                        ▶ Processar fila ({queue.filter((q) => q.status !== 'done').length})
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-4 rounded-[12px] border border-dashed border-line bg-bg-soft/20 px-4 py-6 text-center text-[12px] text-text-muted">
+                  Fila vazia. Clique no botão acima pra importar uma copy do Docs, ou use
+                  &ldquo;Adicionar config atual à fila&rdquo;.
+                </div>
+              )}
+            </section>
+
             {/* Action */}
             <div className="flex flex-wrap gap-3 border-t border-line pt-6">
               {processing ? (
@@ -1607,6 +2316,196 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
           </div>
         </div>
       </div>
+
+      {/* ===================== Modal: importar copy do Google Docs ===================== */}
+      {docModalOpen ? (
+        <div
+          className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm md:p-8"
+          onClick={() => setDocModalOpen(false)}
+        >
+          <div
+            className="mt-6 w-full max-w-[680px] rounded-[20px] border border-cyan-400/30 bg-bg-soft/95 p-5 shadow-[0_0_60px_-12px_rgba(34,211,238,0.5)] md:p-7"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-4 flex items-start justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-white">Importar copy do Google Docs</h3>
+                <p className="mt-1 text-[12px] text-text-muted">
+                  Lê com a mesma inteligência do ClickUp Pilot: identifica AD, HOOK 1/2/…,
+                  BODY e casa o avatar de cada parte. Cada AD vira um disparo na fila.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDocModalOpen(false)}
+                className="shrink-0 rounded-lg border border-line-strong px-2.5 py-1 text-sm text-text-muted hover:border-red-500/60 hover:text-red-300"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Tabs */}
+            <div className="mb-4 flex gap-2">
+              {(
+                [
+                  { id: 'link' as const, label: '🔗 Link do Docs' },
+                  { id: 'file' as const, label: '📄 Importar arquivo (.txt / .docx)' },
+                ]
+              ).map((t) => {
+                const active = docTab === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      setDocTab(t.id);
+                      setDocError(null);
+                      setDocPreview(null);
+                    }}
+                    className={
+                      'flex-1 rounded-[12px] px-4 py-2.5 text-sm transition-all active:scale-[0.98] ' +
+                      (active
+                        ? 'bg-cyan-400 font-semibold text-black'
+                        : 'border border-line-strong text-text-muted hover:border-cyan-400 hover:text-white')
+                    }
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {docTab === 'link' ? (
+              <div className="grid gap-2">
+                <input
+                  type="url"
+                  value={docLink}
+                  onChange={(e) => setDocLink(e.target.value)}
+                  placeholder="https://docs.google.com/document/d/.../edit"
+                  className="input-field"
+                  disabled={docFetching}
+                />
+                <p className="text-[11px] text-text-muted">
+                  O doc precisa estar como &ldquo;Qualquer pessoa com o link pode visualizar&rdquo;.
+                </p>
+              </div>
+            ) : (
+              <div className="grid gap-2">
+                <input
+                  type="file"
+                  accept=".txt,.docx,text/plain"
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = '';
+                    if (!f) return;
+                    setDocError(null);
+                    setDocPreview(null);
+                    setDocFileName(f.name);
+                    try {
+                      const txt = await extractTextFromFile(f);
+                      setDocText(txt);
+                    } catch (err) {
+                      setDocError(`Falha ao ler arquivo: ${(err as Error)?.message}`);
+                      setDocText('');
+                    }
+                  }}
+                  className="input-field file:mr-3 file:rounded-md file:border-0 file:bg-cyan-400 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-black"
+                  disabled={docFetching}
+                />
+                {docFileName ? (
+                  <p className="text-[11px] text-cyan-300">
+                    📎 {docFileName} {docText ? `(${docText.length} chars lidos)` : ''}
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-text-muted">
+                    Exporte do Google Docs como .txt ou .docx (Arquivo → Fazer download).
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={parseDocAndPreview}
+                disabled={docFetching || (docTab === 'link' ? !docLink.trim() : !docText.trim())}
+                className="btn-primary"
+              >
+                {docFetching ? 'Lendo…' : '🧠 Analisar copy'}
+              </button>
+            </div>
+
+            {docError ? (
+              <div className="mt-3 rounded-[12px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300">
+                {docError}
+              </div>
+            ) : null}
+
+            {/* Preview dos disparos detectados */}
+            {docPreview && docPreview.length > 0 ? (
+              <div className="mt-4 grid gap-2">
+                <div className="mono text-[10px] uppercase tracking-widest text-text-muted">
+                  {docPreview.length} AD(s) detectado(s) — escolha quais enfileirar
+                </div>
+                <div className="grid max-h-[320px] gap-2 overflow-y-auto pr-1">
+                  {docPreview.map((d) => {
+                    const checked = !!docSelected[d.baseAdId];
+                    const missing = d.parts.some((p) => !p.avatarId);
+                    return (
+                      <label
+                        key={d.baseAdId}
+                        className={
+                          'flex cursor-pointer items-start gap-3 rounded-[12px] border px-3 py-2.5 transition ' +
+                          (checked ? 'border-cyan-400/50 bg-cyan-400/5' : 'border-line bg-bg-soft/30')
+                        }
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) =>
+                            setDocSelected((prev) => ({ ...prev, [d.baseAdId]: e.target.checked }))
+                          }
+                          className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-cyan-400"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="mono text-sm text-white">{d.baseAdId}</span>
+                            <span className="mono rounded-full border border-line-strong px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted">
+                              {d.parts.length} partes
+                            </span>
+                            {d.fromDarkoBriefing ? null : (
+                              <span className="mono rounded-full bg-yellow-500/15 px-2 py-0.5 text-[9px] uppercase tracking-widest text-yellow-300">
+                                copy genérica
+                              </span>
+                            )}
+                          </div>
+                          <div className="mt-1 text-[11px] text-text-muted">
+                            {d.parts
+                              .map((p) => `${p.label}→${p.avatarName || '—'}`)
+                              .join(' · ')}
+                          </div>
+                          {missing ? (
+                            <div className="mt-1 text-[11px] text-yellow-300">
+                              ⚠ {d.unmatchedAvatars.length ? d.unmatchedAvatars.join(', ') : 'avatar não casado'} — usa fallback.
+                            </div>
+                          ) : null}
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+                <button
+                  type="button"
+                  onClick={enqueueSelectedDocDisparos}
+                  className="btn-primary mt-1"
+                >
+                  + Adicionar {Object.values(docSelected).filter(Boolean).length} à fila
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }
