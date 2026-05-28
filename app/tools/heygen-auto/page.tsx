@@ -2454,52 +2454,37 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
               </div>
             )}
 
-            {/* Toggle 3D "pegar TODOS os ADs do doc" — quando ON bloqueia as
-                nomenclaturas e identifica todas as tasks/ADs do documento. */}
-            <div className="mt-5 flex items-center gap-3 rounded-[12px] border border-fuchsia-500/30 bg-fuchsia-500/5 p-3">
-              <Toggle3DIcon
-                on={docAutoAll}
-                onChange={setDocAutoAll}
-                ariaLabel="Pegar todos os ADs do doc automaticamente"
-                variant="fuchsia"
-                disabled={docFetching}
-                icon={
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="7" height="7" rx="1" />
-                    <rect x="14" y="3" width="7" height="7" rx="1" />
-                    <rect x="3" y="14" width="7" height="7" rx="1" />
-                    <rect x="14" y="14" width="7" height="7" rx="1" />
-                  </svg>
-                }
-              />
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-semibold text-white">
-                  {docAutoAll ? 'Pegando TODOS os ADs do doc' : 'Pegar todos os ADs do doc'}
-                </div>
-                <div className="text-[11px] text-text-muted">
-                  {docAutoAll
-                    ? 'Identifica todas as tasks/ADs do documento — as nomenclaturas abaixo ficam bloqueadas.'
-                    : 'Ligue pra ignorar as nomenclaturas e enfileirar TODOS os ADs encontrados.'}
-                </div>
-              </div>
-            </div>
-
             {/* Nomenclaturas dos ADs (1 campo por AD) — igual nome de task do
-                ClickUp Pilot. Bloqueado quando "pegar todos" esta ON. */}
+                ClickUp Pilot. Bloqueado quando o toggle "pegar todos" esta ON.
+                O toggle 3D (sem texto, animado ao ligar) fica no header. */}
             <div
-              className={
-                'mt-3 rounded-[12px] border border-line bg-bg/40 p-3 transition-opacity ' +
-                (docAutoAll ? 'pointer-events-none opacity-40' : '')
-              }
+              className="mt-5 rounded-[12px] border border-line bg-bg/40 p-3"
             >
-              <div className="mb-2 flex items-center justify-between">
+              <div className="mb-2 flex items-center justify-between gap-2">
                 <span className="mono text-[10px] uppercase tracking-widest text-cyan-300">
                   Nomenclaturas dos ADs (opcional)
                 </span>
-                <span className="text-[10px] text-text-muted">
-                  {docAutoAll ? 'bloqueado (pegando todos)' : 'vazio = pega todos do doc'}
-                </span>
+                <Toggle3DIcon
+                  on={docAutoAll}
+                  onChange={setDocAutoAll}
+                  ariaLabel="Pegar TODOS os ADs do doc (bloqueia as nomenclaturas)"
+                  variant="fuchsia"
+                  disabled={docFetching}
+                  icon={
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="3" width="7" height="7" rx="1" />
+                      <rect x="14" y="3" width="7" height="7" rx="1" />
+                      <rect x="3" y="14" width="7" height="7" rx="1" />
+                      <rect x="14" y="14" width="7" height="7" rx="1" />
+                    </svg>
+                  }
+                />
               </div>
+              <div
+                className={
+                  'transition-opacity ' + (docAutoAll ? 'pointer-events-none opacity-40' : '')
+                }
+              >
               <div className="grid gap-2">
                 {docAdNames.map((name, i) => (
                   <div key={i} className="flex items-center gap-2">
@@ -2538,6 +2523,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
               >
                 + adicionar AD
               </button>
+              </div>
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
