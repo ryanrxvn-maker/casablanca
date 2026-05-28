@@ -4577,13 +4577,22 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                           // "Tudo OK" = todas partes COM CONTEÚDO dispararam + renderizaram E
                           //  pipeline produziu o esperado.
                           //
-                          // CRITICAL (fix 2026-05-28): partes VAZIAS (BODY vazia
-                          //  "(esse part nao gera nada)") têm videoId=null e NUNCA disparam.
-                          //  Antes: dispatchOk = (9 === 10) → sempre false → batch
-                          //  eternamente "parcial" mesmo 100% correto. Agora excluímos
-                          //  partes vazias do denominador. Parte vazia = sem videoId E
-                          //  sem error (não foi tentada). Parte que FALHOU disparo tem error.
-                          const expectableParts = b.parts.filter(p => p.videoId || (p as any).error);
+                          // CRITICAL (fix 2026-05-28 v2): partes VAZIAS (BODY vazia
+                          //  "(esse part nao gera nada)") têm videoId=null E um error
+                          //  específico: "processJob: precisa de `file` OU `text`" —
+                          //  porque não há texto pra disparar. Essas NÃO contam como
+                          //  faltantes (são intencionalmente vazias).
+                          //
+                          //  Distinção:
+                          //   - Parte VAZIA: sem videoId + error de "precisa de file/text"
+                          //     OU sem error nenhum → IGNORA
+                          //   - Parte que FALHOU de verdade (network, NSFW, etc): sem
+                          //     videoId + error REAL → conta como faltante
+                          const isEmptyPart = (p: any) => !p.videoId && (
+                            !p.error ||
+                            /precisa de\s*[`'"]?(file|text|audio|texto)|vazio|sem (texto|conte)|empty|nao vai gerar/i.test(String(p.error))
+                          );
+                          const expectableParts = b.parts.filter(p => !isEmptyPart(p));
                           const dispatchOk = expectableParts.length > 0 && expectableParts.every(p => !!p.videoId);
                           const renderOk = expectableParts.filter(p => p.videoId).every(p => !p.videoStatus || p.videoStatus === 'completed');
                           const pipeOk = b.pipeStats
