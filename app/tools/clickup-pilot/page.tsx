@@ -45,6 +45,7 @@ import { useTier, tierCanAutomate } from '@/lib/use-tier';
 import Link from 'next/link';
 import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
 import { CompactVoiceSelector } from '@/components/CompactVoiceSelector';
+import { LipsyncPreviewCard, type LipsyncTake } from '@/components/LipsyncPreviewCard';
 import { MotorConfigPicker, MotorSlotPicker } from '@/components/MotorConfigPicker';
 import { defaultMotorConfig, resolveMotors, estimateSecondsFromText, type MotorConfig, type Motor } from '@/lib/motor-config';
 import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
@@ -206,7 +207,7 @@ type BatchTaskState = {
   /** queued | dispatching | rendering | downloading | post (concat+decupagem+camo) | done | failed */
   phase: 'queued' | 'dispatching' | 'rendering' | 'downloading' | 'post' | 'done' | 'failed';
   /** Per-part status durante dispatch (parteN: error|null) */
-  parts: Array<{ label: string; videoId: string | null; videoStatus?: VideoStatus['status']; error?: string | null; renamedTo: string }>;
+  parts: Array<{ label: string; videoId: string | null; videoStatus?: VideoStatus['status']; videoUrl?: string | null; error?: string | null; renamedTo: string }>;
   message?: string;
   startedAt: number;
   finishedAt?: number;
@@ -1682,7 +1683,7 @@ function ClickUpPilotInner() {
             if (!s) return prev;
             const newParts = s.parts.map((p) => {
               const ps = p.videoId ? st[p.videoId] : null;
-              return ps ? { ...p, videoStatus: ps.status } : p;
+              return ps ? { ...p, videoStatus: ps.status, videoUrl: ps.status === 'completed' ? ps.videoUrl || null : p.videoUrl ?? null } : p;
             });
             return { ...prev, [taskId]: { ...s, parts: newParts, message: `Renderizando: ${done}/${validIds.length} prontos` } };
           });
@@ -1962,7 +1963,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
               if (!s) return prev;
               const newParts = s.parts.map((p) => {
                 const ps = p.videoId ? st[p.videoId] : null;
-                return ps ? { ...p, videoStatus: ps.status } : p;
+                return ps ? { ...p, videoStatus: ps.status, videoUrl: ps.status === 'completed' ? ps.videoUrl || null : p.videoUrl ?? null } : p;
               });
               return { ...prev, [taskId]: { ...s, parts: newParts, message: `Renderizando: ${done}/${validIds.length} prontos` } };
             });
@@ -4753,6 +4754,39 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                               {b.message ? (
                                 <div className="mono mt-0.5 text-[10px] text-text-muted">{b.message}</div>
                               ) : null}
+
+                              {/* Preview dos takes (loading → vídeo jogável), igual Auto B-roll */}
+                              {b.parts.some((p) => p.videoId) ? (() => {
+                                const previews: LipsyncTake[] = b.parts
+                                  .filter((p) => p.videoId)
+                                  .map((p) => ({
+                                    label: p.label,
+                                    status: p.videoStatus || 'processing',
+                                    videoUrl: p.videoUrl ?? null,
+                                    error: p.error ?? null,
+                                  }));
+                                const donePv = previews.filter((p) => p.status === 'completed').length;
+                                const pct = previews.length > 0 ? Math.round((100 * donePv) / previews.length) : 0;
+                                return (
+                                  <div className="mt-2">
+                                    <div className="mono mb-1.5 text-[9px] uppercase tracking-widest text-text-muted">
+                                      Preview dos takes ({donePv}/{previews.length} prontos)
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+                                      {previews.map((t, ti) => (
+                                        <LipsyncPreviewCard
+                                          key={ti}
+                                          take={t}
+                                          position={ti + 1}
+                                          total={previews.length}
+                                          percent={pct}
+                                          fileBase={b.baseAdId || b.taskName}
+                                        />
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })() : null}
                             </li>
                           );
                         })}
