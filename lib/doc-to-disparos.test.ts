@@ -235,6 +235,74 @@ console.log('  diagnostic =', rawRes.diagnostic, '| parts =', rawRes.disparos[0]
 assert(rawRes.disparos.length === 1, 'copy crua → 1 disparo');
 assert(!!rawRes.disparos[0] && rawRes.disparos[0].parts.length >= 2, 'copy crua → HOOK + BODY parseados');
 
+/* ----------------- SLOTS de avatar/voz (replica a lógica do page) ----------------- */
+// Replica buildSlotsForDisparo + a aplicação dos slots no enqueue (page.tsx),
+// pra provar que trocar avatar/voz por speaker propaga certo pras partes.
+type Slot = {
+  role: string;
+  roleLabel: string;
+  avatarId: string | null;
+  avatarName: string | null;
+  defaultVoiceId: string | null;
+  voiceOverride: { id: string; name: string } | null;
+};
+function buildSlots(d: { parts: Array<{ role: string | null; avatarId: string | null; avatarName: string | null; voiceId: string | null }> }): Slot[] {
+  const order: string[] = [];
+  const seen = new Set<string>();
+  for (const p of d.parts) {
+    const key = (p.role || '').toLowerCase();
+    if (!seen.has(key)) { seen.add(key); order.push(key); }
+  }
+  return order.map((key, idx) => {
+    const part = d.parts.find((p) => (p.role || '').toLowerCase() === key)!;
+    return {
+      role: key,
+      roleLabel: part.role || (order.length === 1 ? 'Avatar' : `Avatar ${idx + 1}`),
+      avatarId: part.avatarId,
+      avatarName: part.avatarName,
+      defaultVoiceId: part.voiceId,
+      voiceOverride: null,
+    };
+  });
+}
+function applySlots(
+  d: { parts: Array<{ label: string; role: string | null; avatarId: string | null; avatarName: string | null; voiceId: string | null }> },
+  slots: Slot[],
+) {
+  const byRole = new Map(slots.map((s) => [s.role, s]));
+  return d.parts.map((p) => {
+    const slot = byRole.get((p.role || '').toLowerCase()) || slots[0];
+    return {
+      label: p.label,
+      avatarId: slot?.avatarId ?? p.avatarId,
+      avatarName: slot?.avatarName ?? p.avatarName,
+      voiceId: slot?.voiceOverride?.id ?? slot?.defaultVoiceId ?? p.voiceId,
+    };
+  });
+}
+
+console.log('\nslots de avatar/voz (troca por speaker propaga pras partes):');
+{
+  const dd = buildDisparosFromDoc(DOC, CANDIDATES).disparos.find((x) => x.baseAdId.toUpperCase().includes('AD139'))!;
+  const slots = buildSlots(dd);
+  assert(slots.length === 2, `2 slots (Doutor, Mulher) (got ${slots.length})`);
+  assert(slots[0].avatarId === 'av_renato', 'slot Doutor inicia com Renato');
+  assert(slots[1].avatarId === 'av_marcella', 'slot Mulher inicia com Marcella');
+
+  // Troca o avatar do Doutor pra "av_outro" + voz custom
+  slots[0] = { ...slots[0], avatarId: 'av_outro', avatarName: 'Outro Avatar', defaultVoiceId: 'voice_outro', voiceOverride: { id: 'voice_custom', name: 'Voz Custom' } };
+  // Só troca a voz da Mulher (mantém avatar)
+  slots[1] = { ...slots[1], voiceOverride: { id: 'voice_mulher_custom', name: 'Voz Mulher Custom' } };
+
+  const finalParts = applySlots(dd, slots);
+  const h1 = finalParts.find((p) => p.label === 'HOOK 1')!; // Doutor
+  const h2 = finalParts.find((p) => p.label === 'HOOK 2')!; // Mulher
+  const body = finalParts.filter((p) => /^BODY/.test(p.label));
+  assert(h1.avatarId === 'av_outro' && h1.voiceId === 'voice_custom', 'HOOK 1 (Doutor) pegou avatar+voz trocados');
+  assert(body.every((b) => b.avatarId === 'av_outro' && b.voiceId === 'voice_custom'), 'BODY (Doutor) também trocou junto');
+  assert(h2.avatarId === 'av_marcella' && h2.voiceId === 'voice_mulher_custom', 'HOOK 2 (Mulher) manteve avatar e trocou só a voz');
+}
+
 /* ----------------- doc vazio ----------------- */
 console.log('\nedge cases:');
 const empty = buildDisparosFromDoc('', CANDIDATES);
