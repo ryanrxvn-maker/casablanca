@@ -147,6 +147,62 @@ const miss = buildDisparosFromNomenclatures(DOC, ['AD999XX - NOPE', 'AD139GL'], 
 assert(miss.disparos.length === 1, 'acha só o que existe');
 assert(miss.notFound.includes('AD999XX - NOPE'), 'reporta o não-encontrado');
 
+/* ----------------- convenção "AD01 - PV" (sufixo após traço) ----------------- */
+console.log('\nconvenção AD01 - PV (sufixo após " - " + siblings AD01G1-PV):');
+const DOC_PV = `
+Instruções gerais para edição:
+Cada anúncio abaixo deve ser feito duas versões.
+
+AD01 - PV
+Link do avatar: surgerv-2.mp4 - clonar voz
+Instruções para edição: Edição mais UGC com poucos inserts.
+https://www.tiktok.com/@viralmusichitsofficial/video/123
+https://drive.google.com/drive/folders/abc
+
+AD01G1-PV
+Se teu amigão fica mole quando ela tá de boca, o viagra não vai resolver o seu problema…
+
+AD01G2-PV
+A diabetes, a pressão alta, não causam disfunção. Causa fuga venosa, por isso nada do que você toma resolve.
+
+BODY
+Existem 4 tipos de disfunção erétil. O seu médico diz que é um e as pílulas tratam outra. E tudo que você tentou foi feito para um problema que você não tem. O viagra é feito exatamente pra forçar o sangue entrar, mas se é só isso não resolve. Presta atenção nos próximos segundos que eu vou te explicar o caminho certo pra resolver isso de vez.
+
+AD02 - PV
+Link do avatar: surgerv-2.mp4 - clonar voz
+
+AD02G1-PV
+Outro gancho qualquer aqui pra testar o segundo anúncio do documento.
+
+BODY
+Corpo do segundo anúncio com bastante texto pra garantir que o split por tempo gere pelo menos um take de body sem cortar frase no meio do caminho.
+`;
+const CAND_PV: AvatarCandidate[] = [
+  { id: 'av_surgerv', name: 'Surgerv', groupName: 'Surgerv', voiceName: '@surgerv-2', voiceId: 'v_surgerv' },
+  { id: 'av_x', name: 'Outro', groupName: 'Outro', voiceName: '@naotem9', voiceId: 'v_x' },
+];
+
+const pvName = buildDisparosFromNomenclatures(DOC_PV, ['AD01 - PV'], CAND_PV);
+console.log('  diagnostic =', pvName.diagnostic, '| parts =', pvName.disparos[0]?.parts.map((p) => `${p.label}→${p.avatarName ?? 'NULL'}`));
+assert(pvName.disparos.length === 1, 'AD01 - PV → 1 disparo');
+if (pvName.disparos[0]) {
+  const d = pvName.disparos[0];
+  assert(d.fromDarkoBriefing, 'AD01 - PV parseado pelo DARKO (não genérico)');
+  const hooks = d.parts.filter((p) => /^HOOK/.test(p.label));
+  assert(hooks.length === 2, `AD01 tem 2 hooks (got ${hooks.length})`);
+  assert(d.parts.some((p) => /^BODY/.test(p.label)), 'AD01 tem body');
+  assert(d.parts.every((p) => p.avatarId === 'av_surgerv'), 'avatar surgerv-2 casado em todas as partes');
+  const h1 = d.parts.find((p) => p.label === 'HOOK 1');
+  assert(!!h1 && /viagra/i.test(h1.text), 'HOOK 1 = texto do AD01G1');
+  assert(!!h1 && !/\.mp4|Link do avatar/i.test(h1.text), 'HOOK 1 sem avatar/link vazado');
+}
+
+console.log('\nAD01 - PV via auto-descoberta (toggle pegar todos):');
+const pvAuto = buildDisparosFromDoc(DOC_PV, CAND_PV);
+console.log('  detectedAdIds =', pvAuto.detectedAdIds);
+assert(pvAuto.disparos.length === 2, `auto acha 2 ADs (got ${pvAuto.disparos.length})`);
+assert(pvAuto.detectedAdIds.includes('AD01PV') && pvAuto.detectedAdIds.includes('AD02PV'), 'bases AD01PV + AD02PV');
+
 /* ----------------- copy crua sem nomenclatura AD ----------------- */
 console.log('\ncopy crua (sem heading AD):');
 const RAW = `HOOK 1:
