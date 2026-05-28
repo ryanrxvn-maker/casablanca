@@ -4574,13 +4574,18 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                         {Object.values(batchStates).sort((a, b) => b.startedAt - a.startedAt).map((b) => {
                           const partsDispatched = b.parts.filter(p => p.videoId).length;
                           const partsRendered = b.parts.filter(p => p.videoStatus === 'completed').length;
-                          // "Tudo OK" = todas partes dispararam, todas renderizaram E pipeline
-                          //  produziu o esperado (sem montagens/decupagens/camuflagens faltando).
-                          //  Só com tudo OK liberamos os botoes de download — se faltou algo,
-                          //  user precisa Retomar pra completar. Fallback p/ estados antigos
-                          //  (sem pipeStats): aceita se phase=done E tem montadoZipUrl.
-                          const dispatchOk = partsDispatched === b.parts.length;
-                          const renderOk = partsRendered === b.parts.length;
+                          // "Tudo OK" = todas partes COM CONTEÚDO dispararam + renderizaram E
+                          //  pipeline produziu o esperado.
+                          //
+                          // CRITICAL (fix 2026-05-28): partes VAZIAS (BODY vazia
+                          //  "(esse part nao gera nada)") têm videoId=null e NUNCA disparam.
+                          //  Antes: dispatchOk = (9 === 10) → sempre false → batch
+                          //  eternamente "parcial" mesmo 100% correto. Agora excluímos
+                          //  partes vazias do denominador. Parte vazia = sem videoId E
+                          //  sem error (não foi tentada). Parte que FALHOU disparo tem error.
+                          const expectableParts = b.parts.filter(p => p.videoId || (p as any).error);
+                          const dispatchOk = expectableParts.length > 0 && expectableParts.every(p => !!p.videoId);
+                          const renderOk = expectableParts.filter(p => p.videoId).every(p => !p.videoStatus || p.videoStatus === 'completed');
                           const pipeOk = b.pipeStats
                             ? (
                                 b.pipeStats.expectedMontagens > 0
