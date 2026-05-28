@@ -305,10 +305,23 @@ function HeyGenAutoInner() {
     unmatched?: string[];
     status: 'pending' | 'running' | 'done' | 'failed';
     message?: string;
+    /** Progresso 0..100 + fase atual (pra barra de carregamento). */
+    progress?: number;
+    phase?: 'dispatching' | 'rendering' | 'downloading' | 'post' | 'done' | 'failed';
+    /** Id do batch no store compartilhado (chave dos ZIPs no IndexedDB). */
+    batchId?: string;
+    /** videoIds disparados — permite RETOMAR sem re-disparar (re-poll+download). */
+    videoIds?: string[];
+    /** Resultado por parte (pra Debug). */
+    partResults?: { label: string; videoId: string | null; error: string | null }[];
+    /** Nomes dos ZIPs salvos no disco (download quando pronto). */
+    zips?: { takes?: string; montado?: string; camo?: string };
   };
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [queueRunning, setQueueRunning] = useState(false);
   const queueCancelRef = useRef(false);
+  /** Debug aberto por item (UI). */
+  const [queueDebugOpen, setQueueDebugOpen] = useState<Record<string, boolean>>({});
 
   /* ===================== Modal de importar copy do Docs ===================== */
   const [docModalOpen, setDocModalOpen] = useState(false);
@@ -1289,17 +1302,26 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
    */
   async function runDisparoSpec(
     item: QueueItem,
-    cbs: { onStage: (m: string) => void; isCancelled: () => boolean },
+    cbs: {
+      onStage: (m: string) => void;
+      onUpdate: (patch: Partial<QueueItem>) => void;
+      isCancelled: () => boolean;
+      /** Quando presente, NAO re-dispara: re-poll + re-download desses ids. */
+      resumeVideoIds?: string[];
+    },
   ): Promise<void> {
     const safe = item.safeName;
-    const batchId = `heygenauto:${safe}:${Date.now()}`;
+    const batchId = item.batchId || `heygenauto:${safe}:${Date.now()}`;
+    const resuming = !!(cbs.resumeVideoIds && cbs.resumeVideoIds.length > 0);
+    const stage = (m: string, progress?: number, phase?: QueueItem['phase']) => {
+      cbs.onStage(m);
+      cbs.onUpdate({ message: m, ...(progress != null ? { progress } : {}), ...(phase ? { phase } : {}) });
+    };
+
     const fallbackAvatar =
       item.parts.find((p) => p.avatarId)?.avatarId || selectedAvatar?.id || '';
     const fallbackVoice =
       item.parts.find((p) => p.voiceId)?.voiceId || selectedAvatar?.voiceId || undefined;
-    if (!fallbackAvatar && item.parts.some((p) => !p.avatarId)) {
-      throw new Error('Sem avatar resolvido pra alguma parte (cria o avatar no HeyGen ou ajusta a copy).');
-    }
 
     const jobs: RunnerJob[] = item.parts.map((p) => ({
       label: p.label,
@@ -1321,50 +1343,72 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
         };
       });
 
-    upsertSharedBatch(batchId, {
-      taskName: safe,
-      baseAdId: safe,
-      phase: 'dispatching',
-      parts: mirrorParts([]),
-      startedAt: Date.now(),
-      message: 'Disparando partes no HeyGen (fila)...',
-    });
+    cbs.onUpdate({ batchId });
 
-    const collected: RunnerResult[] = [];
-    const finalResults = await runHeyGenJobs(jobs, {
-      parallel: 3,
-      mode: item.mode,
-      avatarId: fallbackAvatar,
-      voiceId: fallbackVoice,
-      motor: item.motor,
-      adNameSafe: safe,
-      isCancelled: cbs.isCancelled,
-      onProgress: (m) => cbs.onStage(m),
-      onResult: (r) => {
-        collected.push(r);
-        upsertSharedBatch(batchId, { parts: mirrorParts(collected) });
-      },
-    });
-
-    const ready = finalResults.filter((r) => r.videoId);
-    if (ready.length === 0) {
+    // ===== Fase 1: DISPATCH (pulada no resume) =====
+    let ready: Array<{ label: string; videoId: string }>;
+    if (resuming) {
+      // Reconstroi a lista de takes prontos a partir dos partResults salvos.
+      const pr = item.partResults || [];
+      ready = pr.filter((p) => p.videoId).map((p) => ({ label: p.label, videoId: p.videoId! }));
+      // Fallback: se nao temos labels, casa os ids com os labels dos jobs por ordem
+      if (ready.length === 0) {
+        ready = (cbs.resumeVideoIds || []).map((vid, i) => ({ label: jobs[i]?.label || `parte${i + 1}`, videoId: vid }));
+      }
+      stage(`Retomando ${ready.length} takes (sem re-disparar)...`, 40, 'rendering');
+    } else {
+      if (!fallbackAvatar && item.parts.some((p) => !p.avatarId)) {
+        throw new Error('Sem avatar resolvido pra alguma parte (cria o avatar no HeyGen ou ajusta a copy).');
+      }
       upsertSharedBatch(batchId, {
-        phase: 'failed',
-        parts: mirrorParts(finalResults),
-        message: 'Todos os disparos falharam (cota/limite HeyGen?).',
-        finishedAt: Date.now(),
+        taskName: safe,
+        baseAdId: safe,
+        phase: 'dispatching',
+        parts: mirrorParts([]),
+        startedAt: Date.now(),
+        message: 'Disparando partes no HeyGen (fila)...',
       });
-      throw new Error('Nenhuma parte foi disparada (cota/limite HeyGen?).');
+      stage('Disparando partes no HeyGen...', 5, 'dispatching');
+
+      const collected: RunnerResult[] = [];
+      const finalResults = await runHeyGenJobs(jobs, {
+        parallel: 3,
+        mode: item.mode,
+        avatarId: fallbackAvatar,
+        voiceId: fallbackVoice,
+        motor: item.motor,
+        adNameSafe: safe,
+        isCancelled: cbs.isCancelled,
+        onProgress: (m) => cbs.onStage(m),
+        onResult: (r) => {
+          collected.push(r);
+          upsertSharedBatch(batchId, { parts: mirrorParts(collected) });
+          const pct = 5 + Math.round((30 * collected.length) / Math.max(1, jobs.length));
+          cbs.onUpdate({ progress: pct, message: `Disparado ${collected.length}/${jobs.length}...` });
+        },
+      });
+
+      // Salva partResults + videoIds no item (pra Retomar + Debug)
+      const pr = mirrorParts(finalResults).map((p) => ({ label: p.label, videoId: p.videoId, error: p.error }));
+      const okIds = finalResults.filter((r) => r.videoId).map((r) => r.videoId!);
+      cbs.onUpdate({ partResults: pr, videoIds: okIds });
+
+      ready = finalResults.filter((r) => r.videoId).map((r) => ({ label: r.label, videoId: r.videoId! }));
+      if (ready.length === 0) {
+        upsertSharedBatch(batchId, {
+          phase: 'failed',
+          parts: mirrorParts(finalResults),
+          message: 'Todos os disparos falharam (cota/limite HeyGen?).',
+          finishedAt: Date.now(),
+        });
+        throw new Error('Nenhuma parte foi disparada (cota/limite HeyGen?).');
+      }
     }
 
-    upsertSharedBatch(batchId, {
-      phase: 'downloading',
-      parts: mirrorParts(finalResults),
-      message: 'Renderizando + baixando no HeyGen...',
-    });
-
-    const ids = ready.map((r) => r.videoId!);
-    cbs.onStage(`Renderizando ${ids.length} partes no HeyGen...`);
+    // ===== Fase 2: RENDER (poll) =====
+    upsertSharedBatch(batchId, { phase: 'downloading', message: 'Renderizando + baixando no HeyGen...' });
+    const ids = ready.map((r) => r.videoId);
+    stage(`Renderizando ${ids.length} partes no HeyGen...`, 40, 'rendering');
     const final = await pollVideosUntilReady(ids, {
       intervalMs: 8000,
       timeoutMs: 30 * 60 * 1000,
@@ -1372,7 +1416,8 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
       onStatus: (statuses) => {
         const done = Object.values(statuses).filter((s) => s.status === 'completed').length;
         const failed = Object.values(statuses).filter((s) => s.status === 'failed').length;
-        cbs.onStage(`Renderizando: ${done}/${ids.length} prontos${failed > 0 ? `, ${failed} falhou` : ''}...`);
+        const pct = 40 + Math.round((35 * done) / Math.max(1, ids.length));
+        stage(`Renderizando: ${done}/${ids.length} prontos${failed > 0 ? `, ${failed} falhou` : ''}...`, pct);
       },
     });
     if (cbs.isCancelled()) throw new Error('Cancelado pelo usuário.');
@@ -1380,14 +1425,15 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     const JSZip = (await import('jszip')).default;
     const { saveZip } = await import('@/lib/zip-store');
 
-    // ZIP 1 — takes individuais
+    // ===== Fase 3: DOWNLOAD takes =====
+    cbs.onUpdate({ phase: 'downloading' });
     const zip = new JSZip();
     const partBlobs: Array<{ label: string; blob: Blob | null }> = [];
     for (let i = 0; i < ready.length; i++) {
       if (cbs.isCancelled()) throw new Error('Cancelado pelo usuário.');
       const part = ready[i];
-      const status = final[part.videoId!];
-      cbs.onStage(`Baixando parte ${i + 1}/${ready.length} (${part.label})...`);
+      const status = final[part.videoId];
+      stage(`Baixando parte ${i + 1}/${ready.length} (${part.label})...`, 75 + Math.round((15 * (i + 1)) / ready.length));
       if (status?.status !== 'completed' || !status.videoUrl) {
         zip.file(`${part.label}_FAILED.txt`, `Status: ${status?.status || 'unknown'}\nErro: ${status?.error || 'sem video_url'}`);
         partBlobs.push({ label: part.label, blob: null });
@@ -1402,19 +1448,20 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
         partBlobs.push({ label: part.label, blob: null });
       }
     }
-    cbs.onStage('Zipando takes...');
+    stage('Zipando takes...', 90, 'post');
     const takesBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
     const takesName = `${safe}_takes.zip`;
     try {
       await saveZip(`batch:${batchId}:takes`, takesBlob, takesName);
       upsertSharedBatch(batchId, { zipFilename: takesName });
     } catch {}
+    cbs.onUpdate({ zips: { ...(item.zips || {}), takes: takesName } });
     const takesUrl = triggerDownload(takesBlob, takesName);
     setTimeout(() => URL.revokeObjectURL(takesUrl), 5000);
 
-    // ZIP 2 — montado HOOK[N]+BODY (com/sem decupagem)
+    // ===== Fase 4: MONTADO (HOOK+BODY, com/sem decupagem) =====
     if (partBlobs.some((p) => p.blob)) {
-      cbs.onStage(`Montando HOOK+BODY${item.decupagem ? ' + decupagem' : ''}...`);
+      stage(`Montando HOOK+BODY${item.decupagem ? ' + decupagem' : ''}...`, 92, 'post');
       try {
         const { runPostPipeline } = await import('@/lib/clickup-pilot-pipeline');
         const pipeRes = await runPostPipeline({
@@ -1422,7 +1469,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
           parts: partBlobs,
           decupagem: item.decupagem,
           camuflagem: false,
-          onProgress: (p) => cbs.onStage(`${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}`),
+          onProgress: (p) => stage(`${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}`, 92 + Math.round((5 * p.doneCount) / Math.max(1, p.totalCount))),
         });
         const zipMont = new JSZip();
         for (const it of pipeRes.items) {
@@ -1443,6 +1490,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
           await saveZip(`batch:${batchId}:montado`, blobMont, montName);
           upsertSharedBatch(batchId, { montadoZipName: montName });
         } catch {}
+        cbs.onUpdate({ zips: { ...(item.zips || {}), takes: takesName, montado: montName } });
         const montUrl = triggerDownload(blobMont, montName);
         setTimeout(() => URL.revokeObjectURL(montUrl), 5000);
       } catch (e) {
@@ -1450,9 +1498,9 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
       }
     }
 
-    // ZIP 3 — camuflado (se modo camuflagem ligado + WHITE selecionado)
+    // ===== Fase 5: CAMUFLADO (opcional) =====
     if (camuflagemMode && camuflagemWhite) {
-      cbs.onStage('Aplicando camuflagem em cada take...');
+      stage('Aplicando camuflagem em cada take...', 98, 'post');
       try {
         let whiteBlob: Blob = camuflagemWhite;
         if ((camuflagemWhite.type || '').startsWith('video/') || /\.(mp4|mov|webm|mkv)$/i.test(camuflagemWhite.name)) {
@@ -1462,7 +1510,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
         for (let i = 0; i < partBlobs.length; i++) {
           const p = partBlobs[i];
           if (!p.blob) continue;
-          cbs.onStage(`Camuflando ${i + 1}/${partBlobs.length} (${p.label})...`);
+          stage(`Camuflando ${i + 1}/${partBlobs.length} (${p.label})...`, 98);
           try {
             const blackAudio = await extractAudio(p.blob);
             const camuWav = await camuflar({ black: blackAudio, white: whiteBlob, volumePercent: camuflagemVolume });
@@ -1478,6 +1526,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
           await saveZip(`batch:${batchId}:camo`, blobCamu, camuName);
           upsertSharedBatch(batchId, { camufladoZipName: camuName });
         } catch {}
+        cbs.onUpdate({ zips: { ...(item.zips || {}), takes: takesName, camo: camuName } });
         const camuUrl = triggerDownload(blobCamu, camuName);
         setTimeout(() => URL.revokeObjectURL(camuUrl), 5000);
       } catch (e) {
@@ -1486,6 +1535,58 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     }
 
     upsertSharedBatch(batchId, { phase: 'done', message: 'Pronto — ZIPs no disco (lipsync-history).', finishedAt: Date.now() });
+    cbs.onUpdate({ progress: 100, phase: 'done' });
+  }
+
+  /** Baixa um ZIP salvo no IndexedDB (key batch:<batchId>:<kind>). */
+  async function downloadQueueZip(batchId: string, kind: 'takes' | 'montado' | 'camo') {
+    try {
+      const { loadZip } = await import('@/lib/zip-store');
+      const z = await loadZip(`batch:${batchId}:${kind}`);
+      if (!z) {
+        setError('ZIP não está mais no disco (pode ter sido limpo). Retome o item pra regerar.');
+        return;
+      }
+      const a = document.createElement('a');
+      a.href = z.blobUrl;
+      a.download = z.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(z.blobUrl), 10000);
+    } catch (e) {
+      setError(`Falha ao baixar do disco: ${(e as Error)?.message}`);
+    }
+  }
+
+  /** Retoma UM item (re-poll + re-download dos videoIds, sem re-disparar se já
+   *  disparou). Roda fora da fila sequencial — pode rodar avulso. */
+  async function resumeQueueItem(id: string) {
+    const item = queue.find((q) => q.id === id);
+    if (!item) return;
+    if (!extStatus.connected) {
+      setError('Extensao DARKO LAB nao detectada.');
+      return;
+    }
+    queueCancelRef.current = false;
+    setQueue((prev) => prev.map((q) => (q.id === id ? { ...q, status: 'running', message: 'Retomando...' } : q)));
+    const patch = (p: Partial<QueueItem>) => setQueue((prev) => prev.map((q) => (q.id === id ? { ...q, ...p } : q)));
+    try {
+      await runDisparoSpec(item, {
+        onStage: () => {},
+        onUpdate: patch,
+        isCancelled: () => queueCancelRef.current,
+        resumeVideoIds: item.videoIds && item.videoIds.length > 0 ? item.videoIds : undefined,
+      });
+      patch({ status: 'done', message: '✓ ZIPs baixados' });
+    } catch (e) {
+      const canceled = queueCancelRef.current;
+      patch({
+        status: canceled ? 'pending' : 'failed',
+        phase: canceled ? undefined : 'failed',
+        message: canceled ? 'Pausado — retome quando quiser.' : (e as Error)?.message || 'Falha.',
+      });
+    }
   }
 
   /** Processa a fila inteira em sequencia (1 disparo por vez). */
@@ -1501,13 +1602,14 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     queueCancelRef.current = false;
     for (const item of snapshot) {
       if (queueCancelRef.current) break;
-      setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: 'running', message: 'Iniciando...' } : q)));
+      setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: 'running', message: 'Iniciando...', progress: 0, phase: 'dispatching' } : q)));
       try {
         await runDisparoSpec(item, {
-          onStage: (m) => setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, message: m } : q))),
+          onStage: () => {},
+          onUpdate: (patch) => setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, ...patch } : q))),
           isCancelled: () => queueCancelRef.current,
         });
-        setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: 'done', message: '✓ ZIPs baixados' } : q)));
+        setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: 'done', message: '✓ ZIPs baixados', progress: 100, phase: 'done' } : q)));
       } catch (e) {
         // Cancelamento intencional NAO e falha — volta o item pra 'pending'
         // pra poder reprocessar depois.
@@ -2305,7 +2407,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                               </div>
                             ) : null}
                           </div>
-                          {!queueRunning ? (
+                          {item.status !== 'running' ? (
                             <button
                               type="button"
                               onClick={() => removeFromQueue(item.id)}
@@ -2316,6 +2418,115 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                             </button>
                           ) : null}
                         </div>
+
+                        {/* Barra de progresso (igual ClickUp Pilot) */}
+                        {item.status === 'running' || (item.progress != null && item.progress > 0 && item.progress < 100) ? (
+                          <div className="mt-2">
+                            <div className="h-2 w-full overflow-hidden rounded-full bg-bg">
+                              <div
+                                className={
+                                  'h-full rounded-full transition-all duration-500 ' +
+                                  (item.status === 'failed' ? 'bg-red-400' : 'bg-gradient-to-r from-cyan-400 to-lime')
+                                }
+                                style={{ width: `${Math.max(3, item.progress ?? 0)}%` }}
+                              />
+                            </div>
+                            <div className="mono mt-0.5 text-right text-[9px] text-text-muted">
+                              {item.phase ? `${item.phase} · ` : ''}{item.progress ?? 0}%
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {/* Controles: Pausar / Retomar / Debug + downloads */}
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          {item.status === 'running' ? (
+                            <button
+                              type="button"
+                              onClick={cancelQueue}
+                              className="mono rounded-md border border-yellow-500/40 bg-yellow-500/10 px-2.5 py-1 text-[10px] uppercase tracking-widest text-yellow-300 transition hover:bg-yellow-500/20"
+                            >
+                              ⏸ Pausar
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => resumeQueueItem(item.id)}
+                              disabled={queueRunning || !extStatus.connected}
+                              className="mono rounded-md border border-cyan-400/40 bg-cyan-400/10 px-2.5 py-1 text-[10px] uppercase tracking-widest text-cyan-300 transition hover:bg-cyan-400/20 disabled:opacity-40"
+                              title={item.videoIds?.length ? 'Retoma sem re-disparar (re-renderiza + baixa os mesmos vídeos)' : 'Roda esse AD agora'}
+                            >
+                              🔄 {item.videoIds?.length ? 'Retomar' : 'Rodar'}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setQueueDebugOpen((p) => ({ ...p, [item.id]: !p[item.id] }))}
+                            className="mono rounded-md border border-line-strong px-2.5 py-1 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-fuchsia-400 hover:text-fuchsia-300"
+                          >
+                            🐞 Debug
+                          </button>
+
+                          {/* Downloads quando pronto (ZIPs no disco) */}
+                          {item.zips?.montado ? (
+                            <button
+                              type="button"
+                              onClick={() => item.batchId && downloadQueueZip(item.batchId, 'montado')}
+                              className="mono rounded-md border border-lime/50 bg-lime/10 px-2.5 py-1 text-[10px] uppercase tracking-widest text-lime transition hover:bg-lime/20"
+                              title={item.zips.montado}
+                            >
+                              ⬇ Montado
+                            </button>
+                          ) : null}
+                          {item.zips?.takes ? (
+                            <button
+                              type="button"
+                              onClick={() => item.batchId && downloadQueueZip(item.batchId, 'takes')}
+                              className="mono rounded-md border border-line-strong px-2.5 py-1 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime"
+                              title={item.zips.takes}
+                            >
+                              ⬇ Takes
+                            </button>
+                          ) : null}
+                          {item.zips?.camo ? (
+                            <button
+                              type="button"
+                              onClick={() => item.batchId && downloadQueueZip(item.batchId, 'camo')}
+                              className="mono rounded-md border border-fuchsia-500/40 px-2.5 py-1 text-[10px] uppercase tracking-widest text-fuchsia-300 transition hover:bg-fuchsia-500/10"
+                              title={item.zips.camo}
+                            >
+                              ⬇ Camuflado
+                            </button>
+                          ) : null}
+                        </div>
+
+                        {/* Painel de Debug */}
+                        {queueDebugOpen[item.id] ? (
+                          <div className="mt-2 rounded-md border border-fuchsia-500/30 bg-bg/60 p-2">
+                            <div className="mono text-[9px] uppercase tracking-widest text-fuchsia-200">
+                              Debug · batch {item.batchId || '(não iniciado)'}
+                            </div>
+                            <ul className="mt-1 grid gap-0.5">
+                              {(item.partResults && item.partResults.length > 0
+                                ? item.partResults
+                                : item.parts.map((p) => ({ label: p.label, videoId: null, error: null }))
+                              ).map((pr, i) => (
+                                <li key={i} className="mono flex items-center justify-between gap-2 text-[10px]">
+                                  <span className="text-text">{pr.label}</span>
+                                  {pr.error ? (
+                                    <span className="text-red-300">✗ {pr.error.slice(0, 60)}</span>
+                                  ) : pr.videoId ? (
+                                    <span className="text-lime">✓ {pr.videoId.slice(0, 14)}…</span>
+                                  ) : (
+                                    <span className="text-text-muted">— pendente</span>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                            <div className="mono mt-1 text-[9px] text-text-muted">
+                              avatares: {Array.from(new Set(item.parts.map((p) => p.avatarName || p.avatarId || '—'))).join(', ')}
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     );
                   })}
