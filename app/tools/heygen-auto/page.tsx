@@ -40,6 +40,7 @@ import {
 } from '@/components/HeyGenAvatarPicker';
 import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
 import { CompactVoiceSelector } from '@/components/CompactVoiceSelector';
+import { LipsyncPreviewCard, type LipsyncTake } from '@/components/LipsyncPreviewCard';
 import { getLibrarySnapshot, reloadLibrary, subscribeLibrary } from '@/lib/heygen-library-cache';
 import {
   HeyGenVoicePicker,
@@ -316,6 +317,8 @@ function HeyGenAutoInner() {
     partResults?: { label: string; videoId: string | null; error: string | null }[];
     /** Nomes dos ZIPs salvos no disco (download quando pronto). */
     zips?: { takes?: string; montado?: string; camo?: string };
+    /** Preview por take (loading → vídeo jogável), igual Auto B-roll. */
+    takePreviews?: LipsyncTake[];
   };
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [queueRunning, setQueueRunning] = useState(false);
@@ -1408,6 +1411,18 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     // ===== Fase 2: RENDER (poll) =====
     upsertSharedBatch(batchId, { phase: 'downloading', message: 'Renderizando + baixando no HeyGen...' });
     const ids = ready.map((r) => r.videoId);
+    // Inicializa os previews por take (loading) — vão virando vídeo jogável.
+    const buildPreviews = (statuses: Record<string, VideoStatus>): LipsyncTake[] =>
+      ready.map((r) => {
+        const s = statuses[r.videoId];
+        return {
+          label: r.label,
+          status: s?.status || 'pending',
+          videoUrl: s?.status === 'completed' ? s.videoUrl || null : null,
+          error: s?.error || null,
+        };
+      });
+    cbs.onUpdate({ takePreviews: buildPreviews({}) });
     stage(`Renderizando ${ids.length} partes no HeyGen...`, 40, 'rendering');
     const final = await pollVideosUntilReady(ids, {
       intervalMs: 8000,
@@ -1418,9 +1433,12 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
         const failed = Object.values(statuses).filter((s) => s.status === 'failed').length;
         const pct = 40 + Math.round((35 * done) / Math.max(1, ids.length));
         stage(`Renderizando: ${done}/${ids.length} prontos${failed > 0 ? `, ${failed} falhou` : ''}...`, pct);
+        cbs.onUpdate({ takePreviews: buildPreviews(statuses) });
       },
     });
     if (cbs.isCancelled()) throw new Error('Cancelado pelo usuário.');
+    // Finaliza previews com as URLs prontas (mantém jogável após o download).
+    cbs.onUpdate({ takePreviews: buildPreviews(final) });
 
     const JSZip = (await import('jszip')).default;
     const { saveZip } = await import('@/lib/zip-store');
@@ -2524,6 +2542,27 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                             </ul>
                             <div className="mono mt-1 text-[9px] text-text-muted">
                               avatares: {Array.from(new Set(item.parts.map((p) => p.avatarName || p.avatarId || '—'))).join(', ')}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {/* Preview dos takes (loading → vídeo jogável), igual Auto B-roll */}
+                        {item.takePreviews && item.takePreviews.length > 0 ? (
+                          <div className="mt-3">
+                            <div className="mono mb-2 text-[9px] uppercase tracking-widest text-text-muted">
+                              Preview dos takes ({item.takePreviews.filter((t) => t.status === 'completed').length}/{item.takePreviews.length} prontos)
+                            </div>
+                            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+                              {item.takePreviews.map((t, ti) => (
+                                <LipsyncPreviewCard
+                                  key={ti}
+                                  take={t}
+                                  position={ti + 1}
+                                  total={item.takePreviews!.length}
+                                  percent={item.progress ?? 0}
+                                  fileBase={item.safeName}
+                                />
+                              ))}
                             </div>
                           </div>
                         ) : null}
