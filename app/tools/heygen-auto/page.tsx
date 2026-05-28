@@ -894,6 +894,44 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
 
   /* ===================== Importar copy do Docs (link/arquivo) ===================== */
 
+  /**
+   * Busca o Google Doc PELA EXTENSAO (mesma estrategia do ClickUp Pilot):
+   * a extensao roda no navegador logado e consegue ler docs PRIVADOS que voce
+   * tem acesso. Postamos HG_FETCH_DOC e esperamos HG_DOC_RESULT. Fallback
+   * (server /api/docs/fetch) so le docs publicos. Requer extensao v4.0.15+.
+   */
+  function fetchDocViaExtension(
+    url: string,
+  ): Promise<{ ok: boolean; text?: string; error?: string }> {
+    return new Promise((resolve) => {
+      if (typeof window === 'undefined') {
+        resolve({ ok: false, error: 'Sem window.' });
+        return;
+      }
+      const requestId = `doc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const handler = (ev: MessageEvent) => {
+        if (
+          ev.data?.source === 'darkolab-ext' &&
+          ev.data?.type === 'HG_DOC_RESULT' &&
+          ev.data?.requestId === requestId
+        ) {
+          window.removeEventListener('message', handler);
+          clearTimeout(timeout);
+          resolve({ ok: !!ev.data.ok, text: ev.data.text, error: ev.data.error });
+        }
+      };
+      window.addEventListener('message', handler);
+      window.postMessage({ source: 'darkolab', type: 'HG_FETCH_DOC', requestId, url }, '*');
+      const timeout = setTimeout(() => {
+        window.removeEventListener('message', handler);
+        resolve({
+          ok: false,
+          error: 'Timeout 30s — extensao nao respondeu (atualize pra v4.0.15+ e recarregue).',
+        });
+      }, 30000);
+    });
+  }
+
   /** Extrai texto puro de um arquivo. Suporta .txt (texto direto) e .docx
    *  (descompacta word/document.xml via JSZip e extrai os runs <w:t>). */
   async function extractTextFromFile(file: File): Promise<string> {
@@ -941,14 +979,27 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
       }
       setDocFetching(true);
       try {
-        const r = await fetch(`/api/docs/fetch?url=${encodeURIComponent(docLink.trim())}`);
-        const j = await r.json();
-        if (!j.ok) {
-          setDocError(j.error || 'Falha ao buscar o doc.');
-          return;
+        // 1) Extensao primeiro — le docs PRIVADOS com a sessao logada do
+        //    navegador (igual ClickUp Pilot).
+        const extR = await fetchDocViaExtension(docLink.trim());
+        if (extR.ok && extR.text) {
+          text = extR.text;
+          setDocText(text);
+        } else {
+          // 2) Fallback servidor (so docs publicos).
+          const r = await fetch(`/api/docs/fetch?url=${encodeURIComponent(docLink.trim())}`);
+          const j = await r.json();
+          if (!j.ok) {
+            setDocError(
+              `${j.error || 'Falha ao buscar o doc.'}${
+                extR.error ? ` · extensão: ${extR.error}` : ''
+              }`,
+            );
+            return;
+          }
+          text = j.text || '';
+          setDocText(text);
         }
-        text = j.text || '';
-        setDocText(text);
       } catch (e) {
         setDocError(`Falha ao buscar: ${(e as Error)?.message}`);
         return;
@@ -2416,7 +2467,9 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                   disabled={docFetching}
                 />
                 <p className="text-[11px] text-text-muted">
-                  O doc precisa estar como &ldquo;Qualquer pessoa com o link pode visualizar&rdquo;.
+                  Lê docs <span className="text-cyan-300">privados</span> pela extensão (usa a
+                  conta logada no navegador). Sem extensão, o doc precisa estar como
+                  &ldquo;Qualquer pessoa com o link pode visualizar&rdquo;.
                 </p>
               </div>
             ) : (
