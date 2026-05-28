@@ -1987,11 +1987,20 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         const { loadBlob } = await import('@/lib/zip-store');
         for (let i = 0; i < state.parts.length; i++) {
           const p = state.parts[i];
+          // CRITICAL (fix 2026-05-28): SÓ hidrata partes que TÊM videoId.
+          // Partes vazias (BODY vazia "(esse part nao gera nada)") têm
+          // videoId=null e NUNCA deveriam ter blob — mas execuções antigas
+          // podem ter deixado lixo no IDB (ex: BODY 1 com 308KB corrompido).
+          // Incluir esse lixo na montagem fazia a DECUPAGEM travar ao tentar
+          // decodar o áudio inválido. Pulamos = montagem limpa só com partes reais.
+          if (!p.videoId) {
+            console.log(`[pilot resume] pulando parte sem videoId (vazia): ${p.label}`);
+            continue;
+          }
           try {
             const blob = await loadBlob(`pilot:${taskId}:part:${p.label}`, 'video/mp4');
             if (blob && blob.size > 1024) {
               partBlobs[i] = { label: p.label, blob };
-              // Adiciona ao ZIP também (pra que o ZIP de takes saia completo)
               zip.file(p.renamedTo, new Uint8Array(await blob.arrayBuffer()));
               hydrated++;
             }

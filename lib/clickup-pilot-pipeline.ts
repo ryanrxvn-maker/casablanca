@@ -216,14 +216,24 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     if (!item.rawAssembled || item.errors?.assemble) continue;
     onProgress?.({ stage: 'decupando', currentFilename: item.filename, doneCount: g, totalCount: total });
 
+    // TIMEOUT defensivo: ffmpeg-wasm pode TRAVAR (loop infinito) num decode
+    // de áudio corrompido. Sem timeout, o pipeline ficava pendurado pra sempre
+    // (user reportou RETOMAR travando, 2026-05-28). Cap de 3min por decupagem
+    // — se passar, desiste dessa parte e segue (entrega o montado raw).
+    const withTimeout = <T,>(p: Promise<T>, ms: number, label: string): Promise<T> =>
+      Promise.race([
+        p,
+        new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`${label} timeout ${ms / 1000}s`)), ms)),
+      ]);
+
     const tryDecup = async (source: Blob): Promise<{ ok: true; decupado: Blob } | { ok: false; reason: string }> => {
       try {
-        const audioBuf = await decodeAudioRobust(source);
+        const audioBuf = await withTimeout(decodeAudioRobust(source), 120_000, 'decodeAudio');
         const silences = detectSilences(audioBuf);
         const segments = computeSpeechSegments(silences, audioBuf.duration, keepSilenceSec);
         console.log(`[clickup-pilot-pipeline] decup ${item.filename}: ${silences.length} silencios, ${segments.length} segmentos de fala`);
         if (segments.length === 0) return { ok: false, reason: 'Sem fala detectada' };
-        const decupado = await cutVideoSegments(source, segments);
+        const decupado = await withTimeout(cutVideoSegments(source, segments), 180_000, 'cutVideo');
         return { ok: true, decupado };
       } catch (e) {
         return { ok: false, reason: (e as Error)?.message || 'falha decupagem' };
