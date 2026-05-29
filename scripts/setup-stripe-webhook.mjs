@@ -25,7 +25,7 @@ if (!key || !key.startsWith('sk_')) {
 }
 const isLive = key.startsWith('sk_live_');
 
-const base = (process.argv[2] || 'https://casablanca-ashen.vercel.app').replace(/\/$/, '');
+const base = (process.argv[2] || 'https://www.darkoautoedit.com').replace(/\/$/, '');
 const url = `${base}/api/billing/webhook`;
 // Assinatura recorrente: criação, cobranças (1a + renovações) e mudanças de status.
 const EVENTS = [
