@@ -51,21 +51,98 @@ const serif = Instrument_Serif({
   display: 'swap',
 });
 
+const SITE_URL = 'https://www.darkoautoedit.com';
+const SITE_DESC =
+  'Automatize decupagem, B-roll, lipsync e legendas. Ligue a fila e vá dormir — o estúdio entrega. Ferramentas de edição de vídeo no automático, direto no navegador.';
+
 export const metadata: Metadata = {
-  title: 'Auto Edit',
-  description: 'Suite criativa pra editores.',
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: 'Auto Edit — Automação de edição de vídeo com IA',
+    template: '%s · Auto Edit',
+  },
+  description: SITE_DESC,
+  keywords: [
+    'automação de edição de vídeo',
+    'decupagem automática',
+    'gerar b-roll com IA',
+    'lipsync em lote',
+    'remover legenda de vídeo',
+    'editor de vídeo automático',
+    'automação UGC',
+    'HeyGen em lote',
+    'gerador de legenda SRT',
+    'compressor de vídeo online',
+    'editar vídeo com IA',
+    'Auto Edit',
+  ],
+  applicationName: 'Auto Edit',
+  authors: [{ name: 'Auto Edit' }],
+  creator: 'Auto Edit',
+  publisher: 'Auto Edit',
+  alternates: { canonical: '/' },
+  openGraph: {
+    type: 'website',
+    locale: 'pt_BR',
+    url: SITE_URL,
+    siteName: 'Auto Edit',
+    title: 'Auto Edit — Automação de edição de vídeo com IA',
+    description: SITE_DESC,
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Auto Edit — Automação de edição de vídeo com IA',
+    description: SITE_DESC,
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
+  },
   icons: {
     icon: [
       { url: '/favicon.png', type: 'image/png' },
       { url: '/auto-edit-logo@128.png', sizes: '128x128', type: 'image/png' },
     ],
+    apple: [{ url: '/auto-edit-logo@256.png', sizes: '256x256' }],
   },
-  // Marker pra extensão Freepik Sync auto-detectar este domínio como
-  // sendo o app Auto Edit. Content script (app-discover.js) lê esse meta
-  // e registra location.origin como endpoint do sync.
+  // Marker pra extensão Freepik Sync auto-detectar este domínio.
   other: {
     'auto-edit-app': 'true',
   },
+};
+
+/** JSON-LD (structured data) pra rich results no Google. */
+const JSON_LD = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'Organization',
+      '@id': `${SITE_URL}/#org`,
+      name: 'Auto Edit',
+      url: SITE_URL,
+      logo: `${SITE_URL}/auto-edit-logo@256.png`,
+    },
+    {
+      '@type': 'SoftwareApplication',
+      name: 'Auto Edit',
+      applicationCategory: 'MultimediaApplication',
+      operatingSystem: 'Web',
+      url: SITE_URL,
+      description: SITE_DESC,
+      inLanguage: 'pt-BR',
+      offers: [
+        { '@type': 'Offer', name: 'Free', price: '0', priceCurrency: 'BRL' },
+        { '@type': 'Offer', name: 'Basic', price: '57', priceCurrency: 'BRL' },
+        { '@type': 'Offer', name: 'Pro', price: '116', priceCurrency: 'BRL' },
+      ],
+    },
+  ],
 };
 
 export default function RootLayout({
@@ -79,6 +156,11 @@ export default function RootLayout({
       className={`${display.variable} ${mono.variable} ${tech.variable} ${serif.variable}`}
     >
       <body>
+        <script
+          type="application/ld+json"
+          // JSON estático do app (sem input de usuário) — seguro.
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(JSON_LD) }}
+        />
         <FloatingOrbs />
         <MouseGlow />
         <RippleRoot />
