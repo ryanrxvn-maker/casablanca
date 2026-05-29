@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { CardUpdate } from '@/components/CardUpdate';
 
 /**
  * /configuracoes/assinatura — gestão de assinatura 100% nativa (sem portal
@@ -62,6 +63,7 @@ export default function AssinaturaPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [editCard, setEditCard] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -208,6 +210,30 @@ export default function AssinaturaPage() {
                     : '—'
                 }
               />
+            </div>
+
+            {/* Atualizar cartão (nativo, Elements) */}
+            <div className="mt-4">
+              {editCard ? (
+                <div className="rounded-[14px] border border-line/60 bg-black/20 p-4">
+                  <CardUpdate
+                    onDone={() => {
+                      setEditCard(false);
+                      setToast('Cartão atualizado com sucesso.');
+                      load();
+                    }}
+                    onCancel={() => setEditCard(false)}
+                  />
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setEditCard(true)}
+                  className="text-[13px] text-violet hover:text-white"
+                >
+                  Atualizar cartão →
+                </button>
+              )}
             </div>
 
             {sub.cancel_at_period_end ? (
