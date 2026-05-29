@@ -26,6 +26,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { requireTier } from '@/lib/require-tier';
 import {
   generateImage,
   generateVideoFromImage,
@@ -79,6 +80,8 @@ class Semaphore {
 }
 
 export async function POST(req: NextRequest) {
+  const gate = await requireTier('pro');
+  if (!gate.ok) return gate.response;
   const supabase = await createClient();
   const { data: userData } = await supabase.auth.getUser();
   if (!userData.user) {

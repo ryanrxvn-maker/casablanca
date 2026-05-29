@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getUserKey } from '@/lib/user-keys';
+import { requireTier } from '@/lib/require-tier';
 
 /**
  * GET /api/heygen/voices?q=
@@ -20,6 +21,8 @@ function jsonError(message: string, status = 500, detail?: string) {
 
 export async function GET(req: Request) {
   try {
+    const gate = await requireTier('pro');
+    if (!gate.ok) return gate.response;
     const keyResult = await getUserKey('heygen');
     if ('response' in keyResult) return keyResult.response;
     const apiKey = keyResult.key;

@@ -16,6 +16,7 @@
  * headers: { 'x-clickup-token': 'pk_...' }
  */
 import { NextResponse } from 'next/server';
+import { requireTier } from '@/lib/require-tier';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -32,6 +33,8 @@ function jsonError(message: string, status = 400, detail?: string) {
 
 export async function POST(req: Request) {
   try {
+    const gate = await requireTier('pro');
+    if (!gate.ok) return gate.response;
     const token = req.headers.get('x-clickup-token');
     if (!token) return jsonError('Falta header x-clickup-token.', 401);
 

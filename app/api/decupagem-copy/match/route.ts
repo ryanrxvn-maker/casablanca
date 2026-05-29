@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getUserKey } from '@/lib/user-keys';
+import { requireTier } from '@/lib/require-tier';
 import { matchCopyWindowed, type Word } from '@/lib/decupagem-matcher';
 
 /**
@@ -26,6 +27,8 @@ function jsonError(message: string, status = 500, detail?: string) {
 
 export async function POST(req: Request) {
   try {
+    const gate = await requireTier('pro');
+    if (!gate.ok) return gate.response;
     let form: FormData;
     try {
       form = await req.formData();

@@ -23,8 +23,6 @@ import { SmokeText } from './SmokeText';
  *  • Nomes 100% PT-BR (sem Smart Remover, sem SRT Generator)
  */
 
-const WHATSAPP = 'https://wa.me/5534991262437';
-
 /* ─────────────────────── Dados ─────────────────────── */
 
 type Featured = 'pilot' | 'heygen' | 'broll';
@@ -692,29 +690,9 @@ function PlanCard({
             })}
           </ul>
 
-          {/* CTA → WhatsApp pra todos */}
+          {/* CTA — Free → cadastro · Basic/Pro → checkout Stripe */}
           <div className="mt-8">
-            <a
-              href={WHATSAPP}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="plan-cta group/btn relative block w-full overflow-hidden rounded-full border px-5 py-3.5 text-center text-[13.5px] font-bold transition-all duration-300 hover:-translate-y-[1px]"
-              style={{
-                borderColor: plan.borderHue,
-                color: '#fff',
-                background:
-                  'linear-gradient(135deg, ' +
-                  plan.glowHue +
-                  ', transparent 70%), rgba(0,0,0,0.4)',
-                boxShadow: `0 12px 28px -10px ${plan.glowHue}`,
-              }}
-            >
-              <span className="relative z-10">{plan.cta}</span>
-              <span
-                aria-hidden
-                className="absolute inset-0 -translate-x-[120%] bg-gradient-to-r from-transparent via-white/30 to-transparent transition-transform duration-700 group-hover/btn:translate-x-[120%]"
-              />
-            </a>
+            <PlanCTA plan={plan} billing={billing} />
           </div>
         </div>
       </div>
@@ -729,6 +707,87 @@ function PlanCard({
         }
       `}</style>
     </div>
+  );
+}
+
+/* ─────────────────────── PlanCTA (botão de ação do plano) ─────────────────────── */
+/**
+ * Free → leva pro cadastro. Basic/Pro → dispara o checkout Stripe respeitando
+ * o ciclo (mensal/anual) selecionado no toggle. Se não estiver logado, o
+ * endpoint responde 401 e mandamos pro cadastro com retorno pra /planos.
+ */
+function PlanCTA({ plan, billing }: { plan: Plan; billing: Billing }) {
+  const [loading, setLoading] = useState(false);
+
+  const sharedClass =
+    'plan-cta group/btn relative block w-full overflow-hidden rounded-full border px-5 py-3.5 text-center text-[13.5px] font-bold transition-all duration-300 hover:-translate-y-[1px] disabled:cursor-wait disabled:opacity-80';
+  const sharedStyle = {
+    borderColor: plan.borderHue,
+    color: '#fff',
+    background:
+      'linear-gradient(135deg, ' + plan.glowHue + ', transparent 70%), rgba(0,0,0,0.4)',
+    boxShadow: `0 12px 28px -10px ${plan.glowHue}`,
+  } as const;
+
+  const sheen = (
+    <span
+      aria-hidden
+      className="absolute inset-0 -translate-x-[120%] bg-gradient-to-r from-transparent via-white/30 to-transparent transition-transform duration-700 group-hover/btn:translate-x-[120%]"
+    />
+  );
+
+  if (plan.id === 'free') {
+    return (
+      <Link href="/register" className={sharedClass} style={sharedStyle}>
+        <span className="relative z-10">{plan.cta}</span>
+        {sheen}
+      </Link>
+    );
+  }
+
+  const startCheckout = async () => {
+    if (loading) return;
+    setLoading(true);
+    try {
+      const res = await fetch('/api/billing/checkout', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ plan: plan.id, billing }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        url?: string;
+        error?: string;
+        need?: string;
+      };
+      if (res.status === 401 || data.need === 'login') {
+        window.location.href = '/register?next=/planos';
+        return;
+      }
+      if (data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      alert(data.error || 'Não foi possível iniciar o checkout. Tente de novo.');
+    } catch {
+      alert('Falha de conexão ao iniciar o checkout.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={startCheckout}
+      disabled={loading}
+      className={sharedClass}
+      style={sharedStyle}
+    >
+      <span className="relative z-10">
+        {loading ? 'Redirecionando…' : plan.cta}
+      </span>
+      {sheen}
+    </button>
   );
 }
 

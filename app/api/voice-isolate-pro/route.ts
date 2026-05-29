@@ -22,6 +22,7 @@
 
 import { NextResponse } from 'next/server';
 import Replicate from 'replicate';
+import { requireTier } from '@/lib/require-tier';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300; // 5 min — Demucs Replicate raro passa de 2min
@@ -34,6 +35,8 @@ const DEMUCS_MODEL = (process.env.REPLICATE_DEMUCS_MODEL || 'cjwbw/demucs') as `
 // GET — diagnóstico. Tenta resolver versão atual de uma lista de candidatos
 // e retorna qual está disponível. ?model=owner/name pra testar específico.
 export async function GET(req: Request) {
+  const gate = await requireTier('pro');
+  if (!gate.ok) return gate.response;
   const token = process.env.REPLICATE_API_TOKEN;
   if (!token) return NextResponse.json({ error: 'sem token' }, { status: 500 });
   const url = new URL(req.url);
@@ -65,6 +68,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const gate = await requireTier('pro');
+  if (!gate.ok) return gate.response;
   const token = process.env.REPLICATE_API_TOKEN;
   if (!token) {
     return NextResponse.json(

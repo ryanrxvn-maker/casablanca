@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { separateAudio } from '@/lib/audio-separator-server';
 import { MAX_AUDIO_MB } from '@/lib/audio-separator';
+import { requireTier } from '@/lib/require-tier';
 
 export const runtime = 'nodejs';
 // Demucs em ZeroGPU pode levar 2-5 min num clip de 5min
@@ -19,6 +20,8 @@ export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
+  const gate = await requireTier('pro');
+  if (!gate.ok) return gate.response;
   let form: FormData;
   try {
     form = await req.formData();
