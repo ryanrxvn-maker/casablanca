@@ -27,8 +27,16 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
+// Endpoint de automação (MCP) — FECHADO por padrão em produção. Pra usar,
+// defina ENABLE_TEMP_STORE=1 no ambiente. Sem a flag, responde 404 e some.
+const ENABLED = process.env.ENABLE_TEMP_STORE === '1';
+
 function jsonCors(body: any, status = 200) {
   return NextResponse.json(body, { status, headers: CORS_HEADERS });
+}
+
+function disabledResponse() {
+  return jsonCors({ error: 'not found' }, 404);
 }
 
 function gc() {
@@ -43,6 +51,7 @@ export async function OPTIONS() {
 }
 
 export async function POST(req: Request) {
+  if (!ENABLED) return disabledResponse();
   try {
     const body = await req.json().catch(() => null);
     if (!body || typeof body.key !== 'string' || typeof body.value !== 'string') {
@@ -60,6 +69,7 @@ export async function POST(req: Request) {
 }
 
 export async function GET(req: Request) {
+  if (!ENABLED) return disabledResponse();
   try {
     const url = new URL(req.url);
     const key = url.searchParams.get('key');

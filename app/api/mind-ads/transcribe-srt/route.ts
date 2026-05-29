@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getUserKey } from '@/lib/user-keys';
+import { requireTier } from '@/lib/require-tier';
 import { buildSrtFromCopyAndWords, type Word } from '@/lib/srt-builder';
 
 /**
@@ -30,6 +31,10 @@ function jsonError(message: string, status = 500, detail?: string) {
 }
 
 export async function POST(req: Request) {
+  // Tier gating: Mind Ads é feature paga (mesmo com BYOK, não é pra free).
+  const gate = await requireTier('basic');
+  if (!gate.ok) return gate.response;
+
   try {
     let form: FormData;
     try {
