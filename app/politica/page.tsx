@@ -39,24 +39,34 @@ export default function PoliticaPage() {
 
         <div className="flex flex-col gap-8 text-[15px] leading-relaxed text-text-muted">
           <Section title="1. Como funciona a cobrança">
-            Os planos pagos (Basic e Pro) são <strong className="text-white">assinaturas recorrentes</strong>{' '}
-            cobradas no cartão de crédito. Você escolhe o ciclo:
+            Os planos pagos (Basic e Pro) são cobrados no cartão de crédito.
+            Você escolhe o ciclo, e cada um funciona de um jeito:
             <ul className="mt-3 list-disc pl-5">
-              <li><strong className="text-white">Mensal</strong> — cobrado uma vez por mês.</li>
-              <li><strong className="text-white">Anual</strong> — cobrado uma vez por ano (12 meses de acesso por cobrança).</li>
+              <li>
+                <strong className="text-white">Mensal</strong> — assinatura{' '}
+                <strong className="text-white">recorrente</strong>: cobra uma vez por mês e renova
+                automaticamente até você cancelar.
+              </li>
+              <li>
+                <strong className="text-white">Anual</strong> — pagamento{' '}
+                <strong className="text-white">único</strong> (que você pode parcelar no cartão em
+                até 12×). Libera <strong className="text-white">12 meses</strong> de acesso e{' '}
+                <strong className="text-white">não renova automaticamente</strong>: ao fim do
+                período, você decide se contrata de novo.
+              </li>
             </ul>
             <p className="mt-3">
-              A renovação é <strong className="text-white">automática</strong> ao fim de cada ciclo,
-              no mesmo cartão, até que você cancele. O valor de cada cobrança é
-              exatamente o do plano escolhido, sem taxas escondidas.
+              O valor é exatamente o do plano escolhido, sem taxas escondidas.
             </p>
           </Section>
 
-          <Section title="2. Renovação e falha de pagamento">
-            Antes de cada renovação a cobrança é feita automaticamente. Se o
-            cartão falhar, tentamos novamente por alguns dias. Persistindo a
-            falha, a assinatura é <strong className="text-white">suspensa</strong> e o acesso aos recursos
-            pagos volta ao plano gratuito — sem cobrança de multa.
+          <Section title="2. Renovação e falha de pagamento (plano mensal)">
+            No <strong className="text-white">plano mensal</strong>, antes de cada renovação a
+            cobrança é feita automaticamente. Se o cartão falhar, tentamos
+            novamente por alguns dias; persistindo a falha, a assinatura é{' '}
+            <strong className="text-white">suspensa</strong> e o acesso volta ao plano gratuito,
+            sem multa. O <strong className="text-white">plano anual</strong> não tem renovação
+            automática — o acesso expira ao fim dos 12 meses.
           </Section>
 
           <Section title="3. Cancelamento — a qualquer momento">

@@ -2,7 +2,13 @@ import { NextResponse } from 'next/server';
 import type Stripe from 'stripe';
 import { getStripe } from '@/lib/stripe';
 import { serviceClient } from '@/app/api/admin/_helpers';
-import { isPaidTier, type PaidTier } from '@/lib/plan-prices';
+import {
+  isPaidTier,
+  isBilling,
+  periodEndFrom,
+  type PaidTier,
+  type Billing,
+} from '@/lib/plan-prices';
 
 /**
  * POST /api/billing/webhook  (Stripe → servidor)
@@ -93,6 +99,71 @@ async function recordInvoice(invoice: InvoiceLike, sub: SubLike) {
     );
 }
 
+/** ANUAL = pagamento único: libera acesso por 1 ano (não renova). */
+async function grantOneTime(session: Stripe.Checkout.Session) {
+  const userId = session.metadata?.userId;
+  const planRaw = session.metadata?.plan ?? '';
+  if (!userId || !isPaidTier(planRaw)) return;
+  const plan = planRaw as PaidTier;
+  const billing = session.metadata?.billing;
+  const period: Billing = isBilling(billing ?? '') ? (billing as Billing) : 'annual';
+  const customerId =
+    typeof session.customer === 'string' ? session.customer : session.customer?.id;
+
+  await serviceClient()
+    .from('profiles')
+    .update({
+      stripe_customer_id: customerId ?? null,
+      stripe_subscription_id: null, // não é assinatura
+      subscription_status: 'paid', // expira em current_period_end (require-tier)
+      subscription_plan: plan,
+      tier: plan,
+      current_period_end: periodEndFrom(period).toISOString(),
+    })
+    .eq('id', userId);
+}
+
+/** Grava o comprovante de um pagamento único (anual). Idempotente por session. */
+async function recordOneTimePayment(session: Stripe.Checkout.Session) {
+  const userId = session.metadata?.userId;
+  if (!userId) return;
+  const piId =
+    typeof session.payment_intent === 'string'
+      ? session.payment_intent
+      : (session.payment_intent as { id: string } | null)?.id ?? null;
+
+  let receiptUrl: string | null = null;
+  if (piId) {
+    try {
+      const pi = await getStripe().paymentIntents.retrieve(piId, {
+        expand: ['latest_charge'],
+      });
+      const charge = pi.latest_charge as Stripe.Charge | null;
+      receiptUrl = charge?.receipt_url ?? null;
+    } catch {
+      /* sem comprovante agora */
+    }
+  }
+
+  await serviceClient()
+    .from('payments')
+    .upsert(
+      {
+        user_id: userId,
+        email: session.customer_details?.email ?? session.customer_email ?? null,
+        amount: session.amount_total ?? 0,
+        currency: session.currency ?? 'brl',
+        plan: (session.metadata?.plan as PaidTier) ?? null,
+        billing: session.metadata?.billing ?? null,
+        status: 'paid',
+        stripe_payment_intent: piId,
+        stripe_checkout_session: session.id,
+        receipt_url: receiptUrl,
+      },
+      { onConflict: 'stripe_checkout_session' },
+    );
+}
+
 export async function POST(req: Request) {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!secret) {
@@ -121,13 +192,20 @@ export async function POST(req: Request) {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session;
-        const subId =
-          typeof session.subscription === 'string'
-            ? session.subscription
-            : session.subscription?.id;
-        if (subId) {
-          const sub = (await stripe.subscriptions.retrieve(subId)) as SubLike;
-          await applySubscription(sub);
+        if (session.mode === 'subscription') {
+          // MENSAL recorrente
+          const subId =
+            typeof session.subscription === 'string'
+              ? session.subscription
+              : session.subscription?.id;
+          if (subId) {
+            const sub = (await stripe.subscriptions.retrieve(subId)) as SubLike;
+            await applySubscription(sub);
+          }
+        } else if (session.mode === 'payment' && session.payment_status === 'paid') {
+          // ANUAL pagamento único (parcelável) — libera 1 ano
+          await grantOneTime(session);
+          await recordOneTimePayment(session);
         }
         break;
       }

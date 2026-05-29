@@ -256,9 +256,11 @@ export function Plans() {
           Todos os planos rodam no seu computador. Seus arquivos nunca saem
           da sua máquina.
         </p>
-        <p className="mx-auto mt-3 max-w-[560px] text-center text-[12px] text-text-dim">
-          Assinatura no cartão · <strong className="text-text-muted">renova automaticamente</strong> ·
-          cancele quando quiser sem multa.{' '}
+        <p className="mx-auto mt-3 max-w-[620px] text-center text-[12px] text-text-dim">
+          <strong className="text-text-muted">Mensal:</strong> assinatura que renova
+          automaticamente — cancele quando quiser sem multa.{' '}
+          <strong className="text-text-muted">Anual:</strong> pagamento único,
+          parcele em até 12× no cartão — acesso por 12 meses.{' '}
           <Link href="/politica" className="text-violet hover:text-white">
             Política de cancelamento e reembolso
           </Link>

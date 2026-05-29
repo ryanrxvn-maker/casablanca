@@ -91,31 +91,59 @@ export async function POST(req: Request) {
         req.headers.get('origin') ||
         '').replace(/\/$/, '');
 
-    const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
-      customer: customerId,
-      payment_method_types: ['card'], // recorrência: só cartão
-      line_items: [
-        {
-          quantity: 1,
-          price_data: {
-            currency: 'brl',
-            unit_amount: amount,
-            recurring: { interval: stripeInterval(billing) },
-            product_data: {
-              name: `${PLAN_LABEL[plan]} — ${periodLabel}`,
+    const productName = `${PLAN_LABEL[plan]} — ${periodLabel}`;
+    const metadata = { userId: user.id, plan, billing };
+    const successUrl = `${base}/tools?upgraded=1`;
+    const cancelUrl = `${base}/planos?canceled=1`;
+
+    let session;
+    if (billing === 'annual') {
+      // ANUAL = pagamento ÚNICO (libera 1 ano) → permite PARCELAMENTO no cartão.
+      session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        customer: customerId,
+        payment_method_types: ['card'],
+        payment_method_options: { card: { installments: { enabled: true } } },
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency: 'brl',
+              unit_amount: amount,
+              product_data: { name: productName },
             },
           },
-        },
-      ],
-      allow_promotion_codes: true,
-      subscription_data: {
-        metadata: { userId: user.id, plan, billing },
-      },
-      success_url: `${base}/tools?upgraded=1`,
-      cancel_url: `${base}/planos?canceled=1`,
-      metadata: { userId: user.id, plan, billing },
-    });
+        ],
+        allow_promotion_codes: true,
+        payment_intent_data: { metadata },
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        metadata,
+      });
+    } else {
+      // MENSAL = assinatura recorrente (renova automático).
+      session = await stripe.checkout.sessions.create({
+        mode: 'subscription',
+        customer: customerId,
+        payment_method_types: ['card'],
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency: 'brl',
+              unit_amount: amount,
+              recurring: { interval: stripeInterval(billing) },
+              product_data: { name: productName },
+            },
+          },
+        ],
+        allow_promotion_codes: true,
+        subscription_data: { metadata },
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        metadata,
+      });
+    }
 
     return NextResponse.json({ url: session.url });
   } catch (e) {
