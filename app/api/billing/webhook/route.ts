@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type Stripe from 'stripe';
 import { getStripe } from '@/lib/stripe';
 import { serviceClient } from '@/app/api/admin/_helpers';
+import { notifyOwner, brlFromCents } from '@/lib/notify';
 import {
   isPaidTier,
   isBilling,
@@ -97,6 +98,16 @@ async function recordInvoice(invoice: InvoiceLike, sub: SubLike) {
       },
       { onConflict: 'stripe_checkout_session' },
     );
+
+  // Avisa o dono — só cobranças reais (ignora R$0 de cortesia/cupom).
+  if ((invoice.amount_paid ?? 0) > 0) {
+    await notifyOwner(
+      `💰 Nova cobrança · ${brlFromCents(invoice.amount_paid ?? 0)}`,
+      `<p><b>Plano:</b> ${sub.metadata?.plan ?? '—'} (${sub.metadata?.billing ?? '—'})<br>` +
+        `<b>Valor:</b> ${brlFromCents(invoice.amount_paid ?? 0)}<br>` +
+        `<b>Cliente:</b> ${invoice.customer_email ?? '—'}</p>`,
+    );
+  }
 }
 
 /** ANUAL = pagamento único: libera acesso por 1 ano (não renova). */
@@ -162,6 +173,15 @@ async function recordOneTimePayment(session: Stripe.Checkout.Session) {
       },
       { onConflict: 'stripe_checkout_session' },
     );
+
+  if ((session.amount_total ?? 0) > 0) {
+    await notifyOwner(
+      `💰 Nova venda (anual) · ${brlFromCents(session.amount_total ?? 0)}`,
+      `<p><b>Plano:</b> ${session.metadata?.plan ?? '—'} (anual)<br>` +
+        `<b>Valor:</b> ${brlFromCents(session.amount_total ?? 0)}<br>` +
+        `<b>Cliente:</b> ${session.customer_details?.email ?? session.customer_email ?? '—'}</p>`,
+    );
+  }
 }
 
 export async function POST(req: Request) {
@@ -240,6 +260,13 @@ export async function POST(req: Request) {
         if (userId) await svc.from('profiles').update(patch).eq('id', userId);
         else if (customerId)
           await svc.from('profiles').update(patch).eq('stripe_customer_id', customerId);
+
+        await notifyOwner(
+          '⚠️ Assinatura cancelada',
+          `<p>Um cliente cancelou a assinatura.<br>` +
+            `<b>Plano:</b> ${sub.metadata?.plan ?? '—'}<br>` +
+            `<b>Customer:</b> ${customerId ?? '—'}</p>`,
+        );
         break;
       }
       default:

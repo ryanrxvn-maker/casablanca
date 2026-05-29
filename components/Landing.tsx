@@ -127,7 +127,7 @@ function HeroSection() {
             className="mt-8 flex flex-wrap items-center gap-3 fade-in-up"
             style={{ animationDelay: '600ms' }}
           >
-            <Link href="/login" className="btn-primary group">
+            <Link href="/register" className="btn-primary group">
               <span>Começar agora</span>
               <span className="transition-transform duration-300 group-hover:translate-x-1">→</span>
             </Link>
@@ -387,7 +387,7 @@ function PilotShowcase() {
 
           <div className="mt-2 flex flex-wrap items-center gap-3">
             <Link
-              href="/login"
+              href="/register"
               className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full px-7 py-3.5 text-[14px] font-bold text-black"
               style={{
                 background:
@@ -528,7 +528,7 @@ function AutoBrollShowcase() {
 
           <div className="mt-2 flex flex-wrap items-center gap-3">
             <Link
-              href="/login"
+              href="/register"
               className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full px-7 py-3.5 text-[14px] font-bold text-white"
               style={{
                 background:
@@ -1778,7 +1778,7 @@ function ShowcaseSection() {
             ))}
           </ul>
           <div className="mt-8">
-            <Link href="/login" className="btn-primary group">
+            <Link href="/register" className="btn-primary group">
               <span>Começar agora</span>
               <span className="transition-transform duration-300 group-hover:translate-x-1">→</span>
             </Link>
