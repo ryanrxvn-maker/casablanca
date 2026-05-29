@@ -89,9 +89,18 @@ export default function RegisterPage() {
         }
       }
 
+      // Guarda nome/telefone pra gravar no profile DEPOIS da confirmação
+      // (na /verify, quando já existe sessão).
+      try {
+        sessionStorage.setItem(
+          'casablanca:pending-signup',
+          JSON.stringify({ name: name.trim() || null, phone: phoneNorm }),
+        );
+      } catch {
+        /* sessionStorage indisponível — segue */
+      }
+
       // SMS opcional: NEXT_PUBLIC_SMS_REQUIRED=1 reativa o flow SMS.
-      // Por padrão, signup vai direto pra /tools sem código por SMS
-      // (até Twilio estar configurado).
       const smsRequired = process.env.NEXT_PUBLIC_SMS_REQUIRED === '1';
 
       if (smsRequired && data.user?.id) {
@@ -106,9 +115,8 @@ export default function RegisterPage() {
         return;
       }
 
-      // Sem SMS: vai direto pras ferramentas
-      router.replace('/tools');
-      router.refresh();
+      // Vai IMEDIATAMENTE pra tela de confirmação por código (email).
+      router.replace(`/verify?email=${encodeURIComponent(email)}`);
     } catch (e) {
       setError((e as Error).message ?? 'Falha ao criar conta.');
     } finally {

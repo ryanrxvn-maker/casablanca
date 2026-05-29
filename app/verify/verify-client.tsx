@@ -69,10 +69,12 @@ export default function VerifyClient() {
     }
     setLoading(true);
     const supabase = createClient();
+    // 'signup' = token do email "Confirm signup". Se a conta já existia e
+    // o código veio de um reenvio de confirmação, 'signup' também resolve.
     const { data, error: vErr } = await supabase.auth.verifyOtp({
       email,
       token,
-      type: 'email',
+      type: 'signup',
     });
     if (vErr) {
       setLoading(false);
