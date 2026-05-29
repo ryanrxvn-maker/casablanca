@@ -57,6 +57,17 @@ export async function POST(req: Request) {
     let customerId = (profile as { stripe_customer_id?: string | null } | null)
       ?.stripe_customer_id ?? null;
 
+    // Valida o customer salvo: se foi criado em OUTRO modo (ex: cus_ de teste
+    // e agora estamos em live) ou foi deletado, o Stripe não acha → recriamos.
+    if (customerId) {
+      try {
+        const existing = await stripe.customers.retrieve(customerId);
+        if ((existing as { deleted?: boolean }).deleted) customerId = null;
+      } catch {
+        customerId = null; // não existe neste modo (test↔live) → recria abaixo
+      }
+    }
+
     if (!customerId) {
       const customer = await stripe.customers.create({
         email: user.email ?? undefined,
