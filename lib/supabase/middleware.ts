@@ -79,6 +79,15 @@ export async function updateSession(request: NextRequest) {
 
   let supabaseResponse = NextResponse.next({ request });
 
+  // Copia os cookies de sessão (incl. refresh) pro response de um redirect.
+  // Sem isso, quando a sessão é renovada E ocorre um redirect, os cookies
+  // novos são perdidos → usuário desloga sozinho (bug clássico @supabase/ssr).
+  const redir = (url: URL): NextResponse => {
+    const res = NextResponse.redirect(url);
+    supabaseResponse.cookies.getAll().forEach((c) => res.cookies.set(c));
+    return res;
+  };
+
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -115,20 +124,20 @@ export async function updateSession(request: NextRequest) {
   if (!user && !isPublicRoute) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
-    return NextResponse.redirect(url);
+    return redir(url);
   }
 
   if (user && pathname.startsWith('/login')) {
     const url = request.nextUrl.clone();
     url.pathname = '/tools';
-    return NextResponse.redirect(url);
+    return redir(url);
   }
 
   if (user && pathname.startsWith('/register')) {
     // Já logado tentando se cadastrar de novo → vai pra tools
     const url = request.nextUrl.clone();
     url.pathname = '/tools';
-    return NextResponse.redirect(url);
+    return redir(url);
   }
 
   if (
@@ -221,18 +230,18 @@ export async function updateSession(request: NextRequest) {
       await supabase.auth.signOut();
       const url = request.nextUrl.clone();
       url.pathname = '/access-revoked';
-      return NextResponse.redirect(url);
+      return redir(url);
     }
 
     if (mustChangePw && !pathname.startsWith('/trocar-senha')) {
       const url = request.nextUrl.clone();
       url.pathname = '/trocar-senha';
-      return NextResponse.redirect(url);
+      return redir(url);
     }
     if (!mustChangePw && pathname.startsWith('/trocar-senha')) {
       const url = request.nextUrl.clone();
       url.pathname = '/tools';
-      return NextResponse.redirect(url);
+      return redir(url);
     }
 
     // Phone obrigatório: usuário precisa verificar antes de acessar tools
@@ -240,12 +249,12 @@ export async function updateSession(request: NextRequest) {
     if (!phoneVerified && !pathname.startsWith('/verify-phone')) {
       const url = request.nextUrl.clone();
       url.pathname = '/verify-phone';
-      return NextResponse.redirect(url);
+      return redir(url);
     }
     if (phoneVerified && pathname.startsWith('/verify-phone')) {
       const url = request.nextUrl.clone();
       url.pathname = '/tools';
-      return NextResponse.redirect(url);
+      return redir(url);
     }
 
     // Helper local: monta o redirect pra /tools com info de qual rota
@@ -256,7 +265,7 @@ export async function updateSession(request: NextRequest) {
       url.searchParams.set('locked', '1');
       url.searchParams.set('from', pathname);
       url.searchParams.set('need', needTier);
-      return NextResponse.redirect(url);
+      return redir(url);
     }
 
     // ─── Bloqueio admin-only (mesmo beta não acessa) ───

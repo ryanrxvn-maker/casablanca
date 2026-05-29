@@ -343,7 +343,7 @@ export function Sidebar() {
                   <span className="flex h-7 w-7 items-center justify-center rounded-[8px] border border-violet/30 bg-violet/10">
                     <DotPlans />
                   </span>
-                  <span className="flex-1">Ver planos</span>
+                  <span className="flex-1 font-semibold text-lime">Upgrade</span>
                   <span className="text-text-dim transition group-hover:translate-x-0.5 group-hover:text-violet">→</span>
                 </Link>
                 <Link
