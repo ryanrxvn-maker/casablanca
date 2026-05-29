@@ -1,5 +1,6 @@
 'use client';
 
+import { useRef, useState } from 'react';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import {
   ToolHero,
@@ -39,21 +40,21 @@ type OutputKind = 'video' | 'audio';
 type AudioFmt = 'wav' | 'mp3';
 
 type Result =
-  | {
-      kind: 'video';
-      blob: Blob;
-      url: string;
-      originalDur: number;
-      newDur: number;
-    }
-  | {
-      kind: 'audio';
-      blob: Blob;
-      url: string;
-      format: AudioFmt;
-      originalDur: number;
-      newDur: number;
-    };
+  | { kind: 'video'; blob: Blob; url: string; originalDur: number; newDur: number }
+  | { kind: 'audio'; blob: Blob; url: string; format: AudioFmt; originalDur: number; newDur: number };
+
+type QueueStatus = 'pending' | 'processing' | 'done' | 'error';
+type QueueItem = {
+  id: string;
+  file: File;
+  status: QueueStatus;
+  stage?: string;
+  progress?: number | null;
+  result?: Result;
+  error?: string;
+};
+
+const MAX_QUEUE = 10;
 
 function isVideoFile(file: File): boolean {
   if (file.type.startsWith('video/')) return true;
@@ -65,10 +66,6 @@ function baseName(name?: string | null) {
   return name.replace(/\.[^.]+$/, '').replace(/\s+/g, '_');
 }
 
-/**
- * A partir das regioes silenciosas, calcula as regioes com fala (complemento),
- * mantendo `keepSilence` segundos nas bordas pra manter o corte natural.
- */
 function computeSpeechSegments(
   silences: Array<{ start: number; end: number }>,
   totalDur: number,
@@ -91,164 +88,177 @@ function computeSpeechSegments(
 export default function DecupagemPage() {
   const tier = useTier();
   const isFree = tier === 'free';
-  const [file, setFile] = useToolState<File | null>('decupagem:file', null);
-  const [keepSilence, setKeepSilence] = useToolState<number>(
-    'decupagem:keepSilence',
-    0.05,
-  );
-  const [outputKind, setOutputKind] = useToolState<OutputKind>(
-    'decupagem:outputKind',
-    'video',
-  );
-  const [audioFormat, setAudioFormat] = useToolState<AudioFmt>(
-    'decupagem:audioFormat',
-    'mp3',
-  );
-  const [processing, setProcessing] = useToolState<boolean>(
-    'decupagem:processing',
-    false,
-  );
-  const [status, setStatus] = useToolState<string | null>(
-    'decupagem:status',
-    null,
-  );
-  const [progress, setProgress] = useToolState<number | null>(
-    'decupagem:progress',
-    null,
-  );
-  const [error, setError] = useToolState<string | null>(
-    'decupagem:error',
-    null,
-  );
-  const [result, setResult] = useToolState<Result | null>(
-    'decupagem:result',
-    null,
-  );
 
-  const fileIsVideo = file ? isVideoFile(file) : false;
-  // Free é forçado a 'audio' — segurança UI (server também bloqueia).
-  const effectiveKind: OutputKind = isFree
-    ? 'audio'
-    : fileIsVideo
-      ? outputKind
-      : 'audio';
+  // FILA de até 10 arquivos. useState (File não serializa pra persistir).
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const cancelRef = useRef(false);
 
-  function reset() {
-    if (result) URL.revokeObjectURL(result.url);
-    setResult(null);
-    setStatus(null);
-    setError(null);
-    setProgress(null);
+  // Configs GLOBAIS (aplicam a todos os arquivos da fila) — persistem.
+  const [keepSilence, setKeepSilence] = useToolState<number>('decupagem:keepSilence', 0.05);
+  const [outputKind, setOutputKind] = useToolState<OutputKind>('decupagem:outputKind', 'video');
+  const [audioFormat, setAudioFormat] = useToolState<AudioFmt>('decupagem:audioFormat', 'mp3');
+  const [processing, setProcessing] = useState(false);
+
+  // Free é forçado a 'audio'. Vídeo só pra pagos.
+  const queueHasVideo = queue.some((q) => isVideoFile(q.file));
+
+  function patchItem(id: string, patch: Partial<QueueItem>) {
+    setQueue((prev) => prev.map((q) => (q.id === id ? { ...q, ...patch } : q)));
   }
 
-  async function process() {
-    if (!file) return;
-    reset();
-    setProcessing(true);
-    try {
-      if (effectiveKind === 'audio') {
-        await processAudio();
-      } else {
-        await processVideo();
-      }
-    } catch (e) {
-      console.error(e);
-      if (isCancellationError(e)) {
-        setStatus('Cancelado.');
-        setError(null);
-      } else {
-        setError((e as Error).message ?? 'Não foi possível processar.');
-        setStatus(null);
-      }
-    } finally {
-      setProcessing(false);
-      setProgress(null);
-    }
-  }
-
-  async function processAudio() {
-    if (!file) return;
-    setStatus('Carregando...');
-    const decoded = await decodeAudioRobust(file, () => setStatus('Carregando...'));
-    setStatus('Cortando silêncios...');
-    const trimmed = trimSilences(decoded, keepSilence);
-
-    let blob: Blob;
-    if (audioFormat === 'wav') {
-      setStatus('Gerando arquivo...');
-      blob = encodeWAV(trimmed);
-    } else {
-      setStatus('Gerando arquivo...');
-      const wav = encodeWAV(trimmed);
-      blob = await extractAudioAs(wav, 'mp3', {
-        onStage: () => setStatus('Gerando arquivo...'),
-        onProgress: ({ ratio }) => setProgress(ratio),
-      });
-    }
-
-    setResult({
-      kind: 'audio',
-      blob,
-      url: URL.createObjectURL(blob),
-      format: audioFormat,
-      originalDur: decoded.duration,
-      newDur: trimmed.duration,
+  function addFiles(files: File[]) {
+    setQueue((prev) => {
+      const room = MAX_QUEUE - prev.length;
+      if (room <= 0) return prev;
+      const accepted = files.slice(0, room).map((f) => ({
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        file: f,
+        status: 'pending' as QueueStatus,
+      }));
+      return [...prev, ...accepted];
     });
-    setStatus(null);
   }
 
-  async function processVideo() {
-    if (!file) return;
-    setStatus('Analisando...');
-    const decoded = await decodeAudioRobust(file, () => setStatus('Analisando...'));
+  function removeItem(id: string) {
+    setQueue((prev) => {
+      const it = prev.find((q) => q.id === id);
+      if (it?.result) URL.revokeObjectURL(it.result.url);
+      return prev.filter((q) => q.id !== id);
+    });
+  }
+
+  function clearQueue() {
+    queue.forEach((q) => q.result && URL.revokeObjectURL(q.result.url));
+    setQueue([]);
+  }
+
+  // Processa UM arquivo → retorna Result (não mexe em state global).
+  async function processOne(
+    item: QueueItem,
+    onStage: (s: string) => void,
+    onProgress: (r: number | null) => void,
+  ): Promise<Result> {
+    const file = item.file;
+    const fileIsVideo = isVideoFile(file);
+    const effectiveKind: OutputKind = isFree ? 'audio' : fileIsVideo ? outputKind : 'audio';
+
+    if (effectiveKind === 'audio') {
+      onStage('Carregando...');
+      const decoded = await decodeAudioRobust(file, () => onStage('Carregando...'));
+      onStage('Cortando silêncios...');
+      const trimmed = trimSilences(decoded, keepSilence);
+      let blob: Blob;
+      if (audioFormat === 'wav') {
+        onStage('Gerando arquivo...');
+        blob = encodeWAV(trimmed);
+      } else {
+        onStage('Gerando arquivo...');
+        const wav = encodeWAV(trimmed);
+        blob = await extractAudioAs(wav, 'mp3', {
+          onStage: () => onStage('Gerando arquivo...'),
+          onProgress: ({ ratio }) => onProgress(ratio),
+        });
+      }
+      return {
+        kind: 'audio',
+        blob,
+        url: URL.createObjectURL(blob),
+        format: audioFormat,
+        originalDur: decoded.duration,
+        newDur: trimmed.duration,
+      };
+    }
+
+    // vídeo
+    onStage('Analisando...');
+    const decoded = await decodeAudioRobust(file, () => onStage('Analisando...'));
     const silences = detectSilences(decoded);
-    const segments = computeSpeechSegments(
-      silences,
-      decoded.duration,
-      keepSilence,
-    );
-
+    const segments = computeSpeechSegments(silences, decoded.duration, keepSilence);
     if (segments.length === 0) {
-      throw new Error(
-        'Não consegui detectar a fala. Tente diminuir a tolerância de silêncio.',
-      );
+      throw new Error('Não consegui detectar a fala. Diminui a tolerância de silêncio.');
     }
-
     const newDur = segments.reduce((a, s) => a + (s.end - s.start), 0);
-
-    setStatus(
-      `Cortando ${segments.length} trechos de fala (FFmpeg)...`,
-    );
+    onStage(`Cortando ${segments.length} trechos de fala...`);
     const blob = await cutVideoSegments(file, segments, {
-      onStage: (s) => setStatus(s),
-      onProgress: ({ ratio }) => setProgress(ratio),
+      onStage: (s) => onStage(s),
+      onProgress: ({ ratio }) => onProgress(ratio),
     });
-
-    setResult({
+    return {
       kind: 'video',
       blob,
       url: URL.createObjectURL(blob),
       originalDur: decoded.duration,
       newDur,
-    });
-    setStatus(null);
+    };
   }
 
-  async function download() {
-    if (!result || !file) return;
-    const base = baseName(file.name);
-    if (result.kind === 'video') {
-      await downloadBlob(result.blob, base + '_decupado.mp4');
-    } else {
-      await downloadBlob(result.blob, base + '_decupado.' + result.format);
+  // Processa a FILA — 1 por vez (sequencial).
+  async function processQueue() {
+    if (processing) return;
+    cancelRef.current = false;
+    setProcessing(true);
+    try {
+      for (const item of queue) {
+        if (cancelRef.current) break;
+        if (item.status === 'done') continue; // já processado, pula
+        patchItem(item.id, { status: 'processing', stage: 'Iniciando...', progress: null, error: undefined });
+        try {
+          const result = await processOne(
+            item,
+            (s) => patchItem(item.id, { stage: s }),
+            (r) => patchItem(item.id, { progress: r }),
+          );
+          patchItem(item.id, { status: 'done', result, stage: undefined, progress: null });
+        } catch (e) {
+          if (isCancellationError(e)) {
+            patchItem(item.id, { status: 'pending', stage: undefined, progress: null });
+            break;
+          }
+          patchItem(item.id, {
+            status: 'error',
+            error: (e as Error)?.message || 'Falha ao processar.',
+            stage: undefined,
+            progress: null,
+          });
+        }
+      }
+    } finally {
+      setProcessing(false);
     }
   }
 
-  const reducedPct =
-    result && result.originalDur > 0
-      ? Math.max(0, Math.round((1 - result.newDur / result.originalDur) * 100))
-      : 0;
+  function cancelAll() {
+    cancelRef.current = true;
+    cancelFFmpeg();
+  }
 
+  async function downloadOne(item: QueueItem) {
+    if (!item.result) return;
+    const base = baseName(item.file.name);
+    const ext = item.result.kind === 'video' ? 'mp4' : item.result.format;
+    await downloadBlob(item.result.blob, `${base}_decupado.${ext}`);
+  }
+
+  async function downloadAll() {
+    const done = queue.filter((q) => q.result);
+    if (done.length === 0) return;
+    const JSZip = (await import('jszip')).default;
+    const zip = new JSZip();
+    const used = new Set<string>();
+    for (const q of done) {
+      const r = q.result!;
+      const ext = r.kind === 'video' ? 'mp4' : r.format;
+      let name = `${baseName(q.file.name)}_decupado.${ext}`;
+      let i = 2;
+      while (used.has(name)) { name = `${baseName(q.file.name)}_decupado_${i++}.${ext}`; }
+      used.add(name);
+      zip.file(name, r.blob);
+    }
+    const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+    await downloadBlob(blob, `decupagem_${done.length}_arquivos.zip`);
+  }
+
+  const doneCount = queue.filter((q) => q.status === 'done').length;
   const audioOptions = [
     { value: 'mp3' as const, label: 'MP3', sub: 'menor' },
     { value: 'wav' as const, label: 'WAV', sub: 'qualidade máx' },
@@ -258,45 +268,127 @@ export default function DecupagemPage() {
     <div className="mx-auto w-full max-w-[920px] px-5 md:px-8">
       <ToolHero
         title="Decupagem"
-        eyebrow="VÍDEO / ÁUDIO"
-        subtitle="Corta os silêncios. Envia áudio, recebe áudio. Envia vídeo, recebe vídeo."
+        eyebrow="VÍDEO / ÁUDIO · FILA ATÉ 10"
+        subtitle="Corta os silêncios em lote. Joga até 10 arquivos, processa 1 por vez. Vídeo→vídeo, áudio→áudio."
         hue="rgba(163,230,53,0.4)"
         icon={<IconDecupagem size={56} />}
       />
 
       <div className="mt-6 grid gap-5">
-        {/* PASSO 1 — UPLOAD */}
+        {/* PASSO 1 — UPLOAD (FILA) */}
         <ToolStep
           n={1}
           icon={<IconStepUpload size={18} />}
-          title="Solta o arquivo"
-          hint="MP3, WAV, MP4, WEBM ou MOV"
+          title={`Solta os arquivos (até ${MAX_QUEUE})`}
+          hint="MP3, WAV, MP4, WEBM ou MOV — vários de uma vez"
           hue="rgba(163,230,53,0.4)"
         >
           <ToolDropzone
             accept="audio/*,video/mp4,video/webm,video/quicktime"
-            file={file}
-            onFile={(f) => {
-              reset();
-              setFile(f);
-            }}
-            hint="Até 2 GB. Arraste pra cá ou clique pra escolher."
+            file={null}
+            onFile={() => {}}
+            multiple
+            onFiles={addFiles}
+            hint={`Arraste vários ou clique. ${queue.length}/${MAX_QUEUE} na fila.`}
             hue="rgba(163,230,53,0.5)"
-            disabled={processing}
+            disabled={processing || queue.length >= MAX_QUEUE}
           />
+
+          {/* LISTA DA FILA */}
+          {queue.length > 0 ? (
+            <div className="mt-3 grid gap-2">
+              {queue.map((item, idx) => {
+                const itemIsVideo = isVideoFile(item.file);
+                const reduced =
+                  item.result && item.result.originalDur > 0
+                    ? Math.max(0, Math.round((1 - item.result.newDur / item.result.originalDur) * 100))
+                    : 0;
+                return (
+                  <div
+                    key={item.id}
+                    className={
+                      'rounded-[12px] border px-3.5 py-2.5 transition ' +
+                      (item.status === 'done'
+                        ? 'border-lime/40 bg-lime/[0.06]'
+                        : item.status === 'error'
+                          ? 'border-red-500/40 bg-red-500/[0.06]'
+                          : item.status === 'processing'
+                            ? 'border-lime/50 bg-lime/[0.04] scan-line'
+                            : 'border-line bg-bg-soft/40')
+                    }
+                  >
+                    <div className="flex items-center gap-3">
+                      {/* índice / status badge */}
+                      <span
+                        className={
+                          'mono flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ' +
+                          (item.status === 'done'
+                            ? 'bg-lime/20 text-lime'
+                            : item.status === 'error'
+                              ? 'bg-red-500/20 text-red-300'
+                              : item.status === 'processing'
+                                ? 'bg-lime/15 text-lime'
+                                : 'bg-line text-text-muted')
+                        }
+                      >
+                        {item.status === 'done' ? '✓' : item.status === 'error' ? '✕' : idx + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[12.5px] font-semibold text-white">
+                          {item.file.name}
+                        </div>
+                        <div className="mono text-[10px] text-text-muted">
+                          {(item.file.size / (1024 * 1024)).toFixed(1)} MB · {itemIsVideo ? 'vídeo' : 'áudio'}
+                          {item.status === 'processing' && item.stage ? ` · ${item.stage}` : ''}
+                          {item.status === 'done' && item.result ? ` · −${reduced}% · ${formatTime(item.result.newDur)}` : ''}
+                          {item.status === 'error' ? ` · ${item.error}` : ''}
+                          {item.status === 'pending' ? ' · na fila' : ''}
+                        </div>
+                        {item.status === 'processing' && item.progress != null ? (
+                          <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-line">
+                            <div className="h-full bg-lime transition-all" style={{ width: `${Math.round(item.progress * 100)}%` }} />
+                          </div>
+                        ) : null}
+                      </div>
+                      {/* ações por item */}
+                      {item.status === 'done' ? (
+                        <button
+                          type="button"
+                          onClick={() => downloadOne(item)}
+                          className="shrink-0 rounded-full border border-lime/50 bg-lime/10 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-lime hover:bg-lime/20"
+                        >
+                          ↓ Baixar
+                        </button>
+                      ) : null}
+                      {!processing ? (
+                        <button
+                          type="button"
+                          onClick={() => removeItem(item.id)}
+                          className="shrink-0 rounded-full border border-text-muted/30 px-2 py-1 text-[11px] text-text-muted hover:border-red-500/40 hover:text-red-300"
+                          title="Remover da fila"
+                        >
+                          ×
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
         </ToolStep>
 
-        {/* PASSO 2 — SAÍDA (só pra vídeo) */}
-        {fileIsVideo ? (
+        {/* PASSO 2 — SAÍDA (só se a fila tem vídeo) */}
+        {queueHasVideo ? (
           <ToolStep
             n={2}
             icon={<IconStepFormat size={18} />}
-            title="Como você quer receber?"
-            hint={isFree ? 'A conta grátis exporta só áudio' : 'Escolhe o formato de saída'}
+            title="Como receber os vídeos?"
+            hint={isFree ? 'A conta grátis exporta só áudio' : 'Aplica a todos os vídeos da fila'}
             hue="rgba(167,139,250,0.4)"
           >
             <ToolChoice
-              value={effectiveKind}
+              value={isFree ? 'audio' : outputKind}
               onChange={(v) => {
                 if (v === 'video' && isFree) return;
                 setOutputKind(v);
@@ -307,34 +399,25 @@ export default function DecupagemPage() {
               ]}
               disabled={processing}
             />
-            {isFree ? (
-              <p className="mt-2 text-[11.5px] text-violet">
-                🔒 Vídeo bloqueado no plano grátis.
-              </p>
-            ) : null}
+            {isFree ? <p className="mt-2 text-[11.5px] text-violet">🔒 Vídeo bloqueado no plano grátis.</p> : null}
           </ToolStep>
         ) : null}
 
-        {/* PASSO 3 — FORMATO DE ÁUDIO (se for saída áudio) */}
-        {effectiveKind === 'audio' ? (
+        {/* PASSO 3 — FORMATO DE ÁUDIO */}
+        {(isFree || outputKind === 'audio' || !queueHasVideo) ? (
           <ToolStep
-            n={fileIsVideo ? 3 : 2}
+            n={queueHasVideo ? 3 : 2}
             icon={<IconStepFormat size={18} />}
             title="Formato do áudio"
             hue="rgba(34,211,238,0.4)"
           >
-            <ToolChoice
-              value={audioFormat}
-              onChange={setAudioFormat}
-              options={audioOptions}
-              disabled={processing}
-            />
+            <ToolChoice value={audioFormat} onChange={setAudioFormat} options={audioOptions} disabled={processing} />
           </ToolStep>
         ) : null}
 
         {/* PASSO 4 — TOLERÂNCIA */}
         <ToolStep
-          n={effectiveKind === 'audio' ? (fileIsVideo ? 4 : 3) : 3}
+          n={queueHasVideo ? 4 : 3}
           icon={<IconStepSliders size={18} />}
           title="Quanto de silêncio manter?"
           hint="Pouco = corte agressivo. Muito = fala respira"
@@ -355,107 +438,45 @@ export default function DecupagemPage() {
         {/* AÇÃO */}
         <div className="flex flex-wrap items-center gap-3">
           {processing ? (
-            <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar" />
+            <CancelButton onClick={cancelAll} label="Cancelar fila" />
           ) : (
-            <ToolAction onClick={process} disabled={!file} variant="lime">
-              Decupar agora
+            <ToolAction onClick={processQueue} disabled={queue.length === 0} variant="lime">
+              {doneCount > 0 && doneCount < queue.length
+                ? `Continuar fila (${queue.length - doneCount} restantes)`
+                : `Decupar fila (${queue.length})`}
             </ToolAction>
           )}
-          <button
-            onClick={() => {
-              reset();
-              setFile(null);
-            }}
-            className="btn-ghost"
-            disabled={processing}
-          >
-            Limpar
+          {doneCount >= 2 ? (
+            <button onClick={downloadAll} className="btn-lime !py-2.5 text-xs" disabled={processing}>
+              ↓ Baixar todos (ZIP)
+            </button>
+          ) : null}
+          <button onClick={clearQueue} className="btn-ghost" disabled={processing || queue.length === 0}>
+            Limpar fila
           </button>
         </div>
 
-        {/* STATUS */}
-        {status ? (
-          <div
-            className={
-              'rounded-[14px] border px-4 py-3 text-xs ' +
-              (processing
-                ? 'scan-line border-lime/40 bg-lime/5 text-lime'
-                : 'border-line bg-bg-soft/40 text-text-muted')
-            }
-          >
-            <div className="flex items-center gap-2">
-              {processing ? (
-                <span className="relative flex h-2 w-2 shrink-0">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
-                </span>
-              ) : null}
-              <span
-                className="mono uppercase tracking-widest"
-                style={{ fontFamily: 'var(--font-tech)' }}
-              >
-                {status}
-              </span>
-            </div>
-            {progress !== null ? (
-              <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-line">
-                <div
-                  className="h-full bg-lime transition-all"
-                  style={{ width: `${Math.round(progress * 100)}%` }}
-                />
+        {/* PREVIEW do último pronto (opcional) */}
+        {(() => {
+          const lastDone = [...queue].reverse().find((q) => q.status === 'done' && q.result);
+          if (!lastDone?.result) return null;
+          const r = lastDone.result;
+          const reduced = r.originalDur > 0 ? Math.max(0, Math.round((1 - r.newDur / r.originalDur) * 100)) : 0;
+          return (
+            <ToolResultCard title={`Preview: ${lastDone.file.name}`} meta={`${reduced}% menor`}>
+              <div className="mb-4 grid gap-2.5 sm:grid-cols-3">
+                <ToolMetric value={formatTime(r.originalDur)} label="Original" />
+                <ToolMetric value={formatTime(r.newDur)} label="Após decupagem" accent="lime" />
+                <ToolMetric value={`–${reduced}%`} label="Redução" accent="lime" />
               </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        {/* ERRO */}
-        {error ? (
-          <div
-            key={error}
-            role="alert"
-            className="error-shake rounded-[14px] border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300"
-          >
-            {error}
-          </div>
-        ) : null}
-
-        {/* RESULTADO */}
-        {result ? (
-          <ToolResultCard
-            title="Decupagem concluída"
-            meta={`${reducedPct}% menor`}
-          >
-            <div className="mb-4 grid gap-2.5 sm:grid-cols-3">
-              <ToolMetric
-                value={formatTime(result.originalDur)}
-                label="Original"
-              />
-              <ToolMetric
-                value={formatTime(result.newDur)}
-                label="Após decupagem"
-                accent="lime"
-              />
-              <ToolMetric value={`–${reducedPct}%`} label="Redução" accent="lime" />
-            </div>
-            {result.kind === 'video' ? (
-              <video
-                src={result.url}
-                controls
-                className="w-full rounded-[14px] border border-lime/30 bg-bg shadow-[0_0_28px_-12px_rgba(200,255,0,0.4)]"
-              />
-            ) : (
-              <AudioPlayer src={result.url} label="Preview" />
-            )}
-            <div className="mt-4 flex justify-end">
-              <button onClick={download} className="btn-lime !py-2.5 text-xs">
-                Baixar{' '}
-                {result.kind === 'video'
-                  ? 'MP4'
-                  : result.format.toUpperCase()}
-              </button>
-            </div>
-          </ToolResultCard>
-        ) : null}
+              {r.kind === 'video' ? (
+                <video src={r.url} controls className="w-full rounded-[14px] border border-lime/30 bg-bg shadow-[0_0_28px_-12px_rgba(200,255,0,0.4)]" />
+              ) : (
+                <AudioPlayer src={r.url} label="Preview" />
+              )}
+            </ToolResultCard>
+          );
+        })()}
       </div>
     </div>
   );
