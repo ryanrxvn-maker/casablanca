@@ -1,68 +1,106 @@
 <!--
   Auto Edit — template "Confirm signup" (código de 6 dígitos).
   Cole em: Supabase Dashboard -> Authentication -> Email Templates -> Confirm signup.
-  IMPORTANTE: usa {{ .Token }} (código) — NÃO use {{ .ConfirmationURL }} aqui,
-  senão o Supabase manda link mágico em vez do código.
+  Usa {{ .Token }} (código). NÃO use {{ .ConfirmationURL }} aqui.
 
-  O logo aponta pra URL absoluta (email não acessa arquivos locais). Troque
-  pela URL do domínio quando registrar (ex: https://autoedit.com/auto-edit-logo@256.png).
+  Design premium com profundidade (gradiente + sombras em camadas). A animação
+  no bloco <style> é progressive enhancement: Apple Mail/clientes modernos
+  mostram o glow pulsando; Gmail ignora e exibe a versão estática.
+  Pra movimento garantido em todo cliente, troque o logo por um GIF animado.
 -->
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#08080b;margin:0;padding:32px 0;font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
+<style>
+  @keyframes ae-glow {
+    0%, 100% { box-shadow: 0 0 0 1px rgba(167,139,250,0.35), 0 0 22px -2px rgba(167,139,250,0.55); }
+    50%      { box-shadow: 0 0 0 1px rgba(103,232,249,0.55), 0 0 40px 2px rgba(167,139,250,0.85); }
+  }
+  @keyframes ae-float {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-4px); }
+  }
+  .ae-code-box { animation: ae-glow 2.6s ease-in-out infinite; }
+  .ae-logo     { animation: ae-float 4s ease-in-out infinite; }
+</style>
+
+<!-- Preheader (preview do inbox, escondido no corpo) -->
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;">
+  Seu código de acesso ao Auto Edit chegou. Válido por poucos minutos.
+</div>
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#070709;margin:0;padding:32px 0;font-family:'Segoe UI',Helvetica,Arial,sans-serif;">
   <tr>
     <td align="center">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:linear-gradient(180deg,#15151a,#0b0b0e);border:1px solid rgba(167,139,250,0.25);border-radius:20px;overflow:hidden;">
-        <!-- Header / logo -->
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:linear-gradient(180deg,#16161c,#0a0a0d);border:1px solid rgba(167,139,250,0.22);border-radius:22px;overflow:hidden;box-shadow:0 30px 60px -24px rgba(0,0,0,0.9);">
+
+        <!-- Barra neon de topo -->
         <tr>
-          <td align="center" style="padding:36px 32px 8px 32px;">
-            <img src="https://casablanca-ashen.vercel.app/auto-edit-logo@256.png" width="64" height="64" alt="Auto Edit" style="display:block;border:0;filter:drop-shadow(0 0 14px rgba(167,139,250,0.7));" />
-            <div style="margin-top:14px;font-size:13px;font-weight:700;letter-spacing:4px;text-transform:uppercase;color:#c084fc;">
+          <td style="height:4px;background:linear-gradient(90deg,#a855f7 0%,#67e8f9 50%,#c8ff00 100%);line-height:4px;font-size:0;">&nbsp;</td>
+        </tr>
+
+        <!-- Logo + wordmark -->
+        <tr>
+          <td align="center" style="padding:40px 32px 6px 32px;">
+            <img class="ae-logo" src="https://casablanca-ashen.vercel.app/auto-edit-logo@256.png" width="66" height="66" alt="Auto Edit" style="display:block;border:0;filter:drop-shadow(0 0 16px rgba(167,139,250,0.75));" />
+            <div style="margin-top:16px;font-size:12px;font-weight:700;letter-spacing:5px;text-transform:uppercase;color:#c084fc;">
               AUTO&nbsp;EDIT
             </div>
           </td>
         </tr>
-        <!-- Título -->
+
+        <!-- Headline + copy -->
         <tr>
-          <td align="center" style="padding:18px 36px 0 36px;">
-            <h1 style="margin:0;font-size:24px;font-weight:800;color:#ffffff;letter-spacing:-0.5px;">
-              Confirme seu email
+          <td align="center" style="padding:20px 38px 0 38px;">
+            <h1 style="margin:0;font-size:26px;font-weight:800;color:#ffffff;letter-spacing:-0.6px;line-height:1.2;">
+              Falta um passo.
             </h1>
-            <p style="margin:10px 0 0 0;font-size:14px;line-height:1.6;color:#9c9ca6;">
-              Use o código abaixo pra ativar sua conta. Ele expira em alguns minutos.
+            <p style="margin:12px 0 0 0;font-size:15px;line-height:1.65;color:#a6a6b2;">
+              Use o código abaixo pra confirmar seu email e liberar seu acesso.
+              Depois disso, é só ligar a fila — <strong style="color:#d8b4fe;font-weight:600;">o estúdio trabalha enquanto você dorme.</strong>
             </p>
           </td>
         </tr>
+
         <!-- Código -->
         <tr>
-          <td align="center" style="padding:28px 36px;">
-            <div style="display:inline-block;padding:18px 28px;border-radius:16px;background:rgba(167,139,250,0.08);border:1px solid rgba(167,139,250,0.35);">
-              <span style="font-size:38px;font-weight:800;letter-spacing:12px;color:#d8b4fe;font-family:'Courier New',monospace;">
+          <td align="center" style="padding:30px 38px 10px 38px;">
+            <div style="font-size:10.5px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:#6b6b78;margin-bottom:12px;">
+              Seu código
+            </div>
+            <div class="ae-code-box" style="display:inline-block;padding:20px 30px;border-radius:16px;background:linear-gradient(180deg,rgba(167,139,250,0.12),rgba(103,232,249,0.05));border:1px solid rgba(167,139,250,0.35);box-shadow:0 0 22px -2px rgba(167,139,250,0.55);">
+              <span style="font-size:40px;font-weight:800;letter-spacing:14px;color:#e9d5ff;font-family:'Courier New',monospace;text-shadow:0 0 18px rgba(216,180,254,0.6);">
                 {{ .Token }}
               </span>
             </div>
-          </td>
-        </tr>
-        <!-- Aviso -->
-        <tr>
-          <td align="center" style="padding:0 36px 8px 36px;">
-            <p style="margin:0;font-size:12.5px;line-height:1.6;color:#6b6b75;">
-              Se você não criou uma conta na Auto Edit, pode ignorar este email com segurança.
+            <p style="margin:16px 0 0 0;font-size:12.5px;color:#7a7a86;">
+              Válido por poucos minutos · não compartilhe com ninguém.
             </p>
           </td>
         </tr>
+
+        <!-- Reforço de segurança -->
+        <tr>
+          <td align="center" style="padding:18px 40px 4px 40px;">
+            <p style="margin:0;font-size:12.5px;line-height:1.6;color:#6b6b75;">
+              Não foi você que criou esta conta? Pode ignorar este email — sem o código, ninguém entra.
+            </p>
+          </td>
+        </tr>
+
         <!-- Divisor -->
         <tr>
-          <td style="padding:24px 36px 0 36px;">
-            <div style="height:1px;background:rgba(255,255,255,0.06);"></div>
+          <td style="padding:26px 40px 0 40px;">
+            <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.08),transparent);"></div>
           </td>
         </tr>
+
         <!-- Footer -->
         <tr>
-          <td align="center" style="padding:18px 36px 32px 36px;">
-            <p style="margin:0;font-size:11px;color:#5a5a64;letter-spacing:1px;text-transform:uppercase;">
-              Auto Edit · O estúdio trabalha enquanto você dorme
+          <td align="center" style="padding:18px 40px 34px 40px;">
+            <p style="margin:0;font-size:11px;color:#5a5a64;letter-spacing:1.5px;text-transform:uppercase;">
+              Auto Edit — o estúdio que edita enquanto você dorme
             </p>
           </td>
         </tr>
+
       </table>
     </td>
   </tr>
