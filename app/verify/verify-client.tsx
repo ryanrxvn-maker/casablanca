@@ -23,11 +23,23 @@ export default function VerifyClient() {
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
   const [resentMsg, setResentMsg] = useState<string | null>(null);
+  // Cooldown do reenvio (Supabase limita o intervalo). Começa contando se o
+  // usuário chegou do cadastro (um código acabou de ser enviado).
+  const [cooldown, setCooldown] = useState<number>(() =>
+    params.get('email') ? 60 : 0,
+  );
   const refs = useRef<(HTMLInputElement | null)[]>([]);
 
   useEffect(() => {
     refs.current[0]?.focus();
   }, []);
+
+  // Contador regressivo do reenvio.
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const id = setTimeout(() => setCooldown((c) => Math.max(0, c - 1)), 1000);
+    return () => clearTimeout(id);
+  }, [cooldown]);
 
   function setDigit(idx: number, v: string) {
     const clean = v.replace(/\D/g, '').slice(0, 1);
@@ -78,7 +90,7 @@ export default function VerifyClient() {
     });
     if (vErr) {
       setLoading(false);
-      setError(vErr.message);
+      setError(traduzErro(vErr.message));
       return;
     }
 
@@ -123,6 +135,7 @@ export default function VerifyClient() {
   }
 
   async function handleResend() {
+    if (cooldown > 0 || resending) return;
     setError(null);
     setResentMsg(null);
     if (!email) {
@@ -137,10 +150,18 @@ export default function VerifyClient() {
     });
     setResending(false);
     if (rErr) {
-      setError(rErr.message);
+      const msg = rErr.message || '';
+      const sec = msg.match(/after (\d+)\s*seconds?/i);
+      if (sec) {
+        setCooldown(parseInt(sec[1], 10));
+        setError(`Aguarde ${sec[1]}s pra reenviar o código.`);
+      } else {
+        setError(traduzErro(msg));
+      }
       return;
     }
-    setResentMsg('Novo codigo enviado. Verifique seu email.');
+    setCooldown(60);
+    setResentMsg('Novo código enviado. Confira seu email (e o spam).');
   }
 
   return (
@@ -230,12 +251,30 @@ export default function VerifyClient() {
         <button
           type="button"
           onClick={handleResend}
-          disabled={resending}
+          disabled={resending || cooldown > 0}
           className="btn-ghost text-xs"
         >
-          {resending ? 'Reenviando...' : 'Reenviar codigo'}
+          {resending
+            ? 'Reenviando...'
+            : cooldown > 0
+              ? `Reenviar em ${cooldown}s`
+              : 'Reenviar código'}
         </button>
       </form>
     </AuthShell>
   );
+}
+
+/** Traduz mensagens de erro do Supabase pra PT-BR amigável. */
+function traduzErro(msg: string): string {
+  const m = (msg || '').toLowerCase();
+  if (m.includes('expired'))
+    return 'Código expirado. Clique em "Reenviar código" pra receber um novo.';
+  if (m.includes('invalid') || m.includes('incorrect') || m.includes('token'))
+    return 'Código inválido. Confira os 6 dígitos e tente de novo.';
+  if (m.includes('seconds') || m.includes('rate'))
+    return 'Muitas tentativas. Aguarde um instante e tente de novo.';
+  if (m.includes('not found') || m.includes('no user'))
+    return 'Não encontramos uma conta com esse email.';
+  return msg || 'Não foi possível validar o código.';
 }
