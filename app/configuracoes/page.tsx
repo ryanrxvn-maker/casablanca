@@ -26,7 +26,6 @@ export default function ConfiguracoesPage() {
   const [emailBusy, setEmailBusy] = useState(false);
   const [passBusy, setPassBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
-  const [billingBusy, setBillingBusy] = useState(false);
   const [toast, setToast] = useState<
     { kind: 'ok' | 'err'; msg: string } | null
   >(null);
@@ -53,27 +52,6 @@ export default function ConfiguracoesPage() {
   function flash(kind: 'ok' | 'err', msg: string) {
     setToast({ kind, msg });
     setTimeout(() => setToast((c) => (c?.msg === msg ? null : c)), 3200);
-  }
-
-  async function handleManageBilling() {
-    if (billingBusy) return;
-    setBillingBusy(true);
-    try {
-      const res = await fetch('/api/billing/portal', { method: 'POST' });
-      const data = (await res.json().catch(() => ({}))) as {
-        url?: string;
-        error?: string;
-      };
-      if (data.url) {
-        window.location.href = data.url;
-        return;
-      }
-      flash('err', data.error || 'Você ainda não tem uma assinatura ativa.');
-    } catch {
-      flash('err', 'Falha de conexão ao abrir o portal.');
-    } finally {
-      setBillingBusy(false);
-    }
   }
 
   async function handleChangeEmail(e: React.FormEvent) {
@@ -298,14 +276,12 @@ export default function ConfiguracoesPage() {
                       o fim do período já pago.
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleManageBilling}
-                    disabled={billingBusy}
+                  <a
+                    href="/configuracoes/assinatura"
                     className="btn-ghost shrink-0 whitespace-nowrap"
                   >
-                    {billingBusy ? 'Abrindo…' : 'Gerenciar'}
-                  </button>
+                    Gerenciar
+                  </a>
                 </div>
               </div>
             </section>

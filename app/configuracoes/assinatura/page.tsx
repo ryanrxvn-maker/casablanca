@@ -1,0 +1,354 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
+
+/**
+ * /configuracoes/assinatura — gestão de assinatura 100% nativa (sem portal
+ * externo / sem marca de terceiros). Mostra plano, valor, próxima cobrança,
+ * cartão, status e histórico de faturas; cancela/reativa direto na nossa API.
+ */
+
+type Sub = {
+  id: string;
+  status: string;
+  plan: string | null;
+  billing: string | null;
+  amount: number | null;
+  currency: string;
+  interval: string | null;
+  current_period_end: number | null;
+  cancel_at_period_end: boolean;
+  card: { brand: string; last4: string; exp_month: number; exp_year: number } | null;
+};
+type Invoice = {
+  id: string;
+  amount: number;
+  currency: string;
+  created: number;
+  status: string | null;
+  url: string | null;
+};
+type Data = { subscription: Sub | null; invoices?: Invoice[]; tier: string };
+
+const brl = (c: number) =>
+  (c / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const dateFmt = (unix: number) =>
+  new Date(unix * 1000).toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  });
+
+const PLAN_HUE: Record<string, string> = {
+  pro: '#c084fc',
+  basic: '#f472b6',
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  active: 'Ativa',
+  trialing: 'Em teste',
+  past_due: 'Pagamento pendente',
+  unpaid: 'Pagamento em atraso',
+  canceled: 'Cancelada',
+  admin_grant: 'Cortesia',
+};
+
+export default function AssinaturaPage() {
+  const router = useRouter();
+  const [data, setData] = useState<Data | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch('/api/billing/subscription', { cache: 'no-store' });
+      if (res.status === 401) {
+        router.replace('/login');
+        return;
+      }
+      const j = (await res.json()) as Data;
+      setData(j);
+    } finally {
+      setLoading(false);
+    }
+  }, [router]);
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: u }) => {
+      if (!u.user) {
+        router.replace('/login');
+        return;
+      }
+      load();
+    });
+  }, [load, router]);
+
+  async function act(action: 'cancel' | 'reactivate') {
+    setBusy(true);
+    setToast(null);
+    try {
+      const res = await fetch('/api/billing/cancel', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setToast(j.error || 'Falha na operação.');
+        return;
+      }
+      setConfirmCancel(false);
+      setToast(
+        action === 'cancel'
+          ? 'Assinatura cancelada. Você mantém o acesso até o fim do período pago.'
+          : 'Assinatura reativada. Sua renovação volta ao normal.',
+      );
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const sub = data?.subscription ?? null;
+  const hue = sub?.plan ? PLAN_HUE[sub.plan] ?? '#a78bfa' : '#a78bfa';
+
+  return (
+    <div className="mx-auto w-full max-w-[760px] px-5 md:px-8">
+      <div className="animate-fade-in-up mb-8">
+        <Link href="/configuracoes" className="text-[12px] text-text-muted hover:text-white">
+          ← Configurações
+        </Link>
+        <h1 className="section-title mt-2">Minha assinatura</h1>
+        <p className="mt-2 text-sm text-text-muted">
+          Seu plano, cobranças e cancelamento — tudo aqui.
+        </p>
+      </div>
+
+      {loading ? (
+        <div className="rounded-[16px] border border-line bg-bg-soft/60 p-8 text-center text-sm text-text-muted">
+          <span className="loading-dots">Carregando</span>
+        </div>
+      ) : !sub ? (
+        <div
+          className="rounded-[18px] border border-line/70 p-8 text-center"
+          style={{ background: 'linear-gradient(180deg,#15151a,#0b0b0e)' }}
+        >
+          <div className="text-[16px] font-bold text-white" style={{ fontFamily: 'var(--font-tech)' }}>
+            {data?.tier && data.tier !== 'free'
+              ? `Você está no plano ${data.tier.toUpperCase()} (cortesia)`
+              : 'Você ainda não tem uma assinatura'}
+          </div>
+          <p className="mx-auto mt-2 max-w-[420px] text-[13.5px] text-text-muted">
+            {data?.tier && data.tier !== 'free'
+              ? 'Seu acesso foi liberado manualmente pela equipe — não há cobrança recorrente.'
+              : 'Escolha um plano pra desbloquear as ferramentas premium.'}
+          </p>
+          <Link href="/planos" className="btn-primary mt-5 inline-block">
+            Ver planos
+          </Link>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-5">
+          {/* Card do plano */}
+          <div
+            className="relative overflow-hidden rounded-[20px] border p-6 md:p-7"
+            style={{
+              borderColor: hue + '66',
+              background: 'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.2)), linear-gradient(180deg,#15151a,#0b0b0e)',
+              boxShadow: `0 0 40px -22px ${hue}`,
+            }}
+          >
+            <div
+              aria-hidden
+              className="pointer-events-none absolute -right-8 -top-8 h-28 w-28 rounded-full opacity-40 blur-2xl"
+              style={{ background: hue }}
+            />
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div
+                  className="text-[11px] font-bold uppercase tracking-[0.2em]"
+                  style={{ fontFamily: 'var(--font-tech)', color: hue }}
+                >
+                  Plano {sub.plan ?? ''}
+                </div>
+                <div className="mt-1 flex items-baseline gap-1">
+                  <span
+                    className="text-[34px] font-extrabold tracking-tight text-white"
+                    style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
+                  >
+                    {sub.amount != null ? brl(sub.amount) : '—'}
+                  </span>
+                  <span className="text-[14px] text-text-muted">
+                    /{sub.interval === 'year' ? 'ano' : 'mês'}
+                  </span>
+                </div>
+              </div>
+              <StatusBadge sub={sub} hue={hue} />
+            </div>
+
+            {/* Próxima cobrança / cancelamento */}
+            <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <InfoRow
+                label={sub.cancel_at_period_end ? 'Acesso até' : 'Próxima cobrança'}
+                value={sub.current_period_end ? dateFmt(sub.current_period_end) : '—'}
+              />
+              <InfoRow
+                label="Forma de pagamento"
+                value={
+                  sub.card
+                    ? `${sub.card.brand.toUpperCase()} •••• ${sub.card.last4} · ${String(
+                        sub.card.exp_month,
+                      ).padStart(2, '0')}/${sub.card.exp_year}`
+                    : '—'
+                }
+              />
+            </div>
+
+            {sub.cancel_at_period_end ? (
+              <div className="mt-5 rounded-[12px] border border-amber-400/40 bg-amber-400/10 px-4 py-3 text-[13px] text-amber-200">
+                Cancelamento agendado. Você continua com acesso até{' '}
+                <strong>{sub.current_period_end ? dateFmt(sub.current_period_end) : 'o fim do período'}</strong>.
+                Mudou de ideia?
+              </div>
+            ) : null}
+
+            {/* Ações */}
+            <div className="mt-6 flex flex-wrap items-center gap-3">
+              {sub.cancel_at_period_end ? (
+                <button
+                  type="button"
+                  onClick={() => act('reactivate')}
+                  disabled={busy}
+                  className="btn-primary"
+                >
+                  {busy ? 'Reativando…' : 'Reativar assinatura'}
+                </button>
+              ) : !confirmCancel ? (
+                <button
+                  type="button"
+                  onClick={() => setConfirmCancel(true)}
+                  className="btn-ghost"
+                >
+                  Cancelar assinatura
+                </button>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2 rounded-[12px] border border-rose-400/40 bg-rose-500/10 px-3 py-2">
+                  <span className="text-[13px] text-rose-100">
+                    Cancelar mesmo? Você mantém o acesso até o fim do período pago.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => act('cancel')}
+                    disabled={busy}
+                    className="rounded-full bg-rose-500 px-4 py-1.5 text-[12.5px] font-bold text-white hover:bg-rose-600"
+                  >
+                    {busy ? 'Cancelando…' : 'Sim, cancelar'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmCancel(false)}
+                    className="text-[12.5px] text-text-muted hover:text-white"
+                  >
+                    Voltar
+                  </button>
+                </div>
+              )}
+              <Link href="/planos" className="text-[13px] text-violet hover:text-white">
+                Trocar de plano
+              </Link>
+            </div>
+          </div>
+
+          {toast ? (
+            <div className="rounded-[12px] border border-lime/40 bg-lime/10 px-4 py-3 text-[13px] text-lime">
+              {toast}
+            </div>
+          ) : null}
+
+          {/* Histórico de faturas */}
+          <div
+            className="rounded-[18px] border border-line/70 p-5 md:p-6"
+            style={{ background: 'linear-gradient(180deg,#131318,#0b0b0e)' }}
+          >
+            <h2
+              className="mb-4 text-[12px] font-bold uppercase tracking-[0.18em] text-text-muted"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              Histórico de faturas
+            </h2>
+            {data?.invoices && data.invoices.length > 0 ? (
+              <ul className="flex flex-col divide-y divide-line/40">
+                {data.invoices.map((inv) => (
+                  <li key={inv.id} className="flex items-center justify-between gap-3 py-2.5 text-[13px]">
+                    <span className="text-text-muted">
+                      {new Date(inv.created * 1000).toLocaleDateString('pt-BR')}
+                    </span>
+                    <span className="font-bold text-white">{brl(inv.amount)}</span>
+                    <span className="text-[11px] uppercase text-text-dim">
+                      {inv.status === 'paid' ? 'pago' : inv.status ?? ''}
+                    </span>
+                    {inv.url ? (
+                      <a
+                        href={inv.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-violet hover:underline"
+                      >
+                        comprovante →
+                      </a>
+                    ) : (
+                      <span className="text-text-dim">—</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="py-4 text-center text-[13px] text-text-dim">
+                Nenhuma fatura ainda.
+              </p>
+            )}
+          </div>
+
+          <p className="text-center text-[12px] text-text-dim">
+            Ao cancelar, seguimos a{' '}
+            <Link href="/politica" className="text-violet hover:text-white">
+              Política de Cancelamento
+            </Link>
+            . Pagamentos processados com segurança.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatusBadge({ sub, hue }: { sub: Sub; hue: string }) {
+  const canceling = sub.cancel_at_period_end;
+  const label = canceling ? 'Cancela em breve' : STATUS_LABEL[sub.status] ?? sub.status;
+  const color = canceling ? '#fbbf24' : sub.status === 'active' ? '#c8ff00' : hue;
+  return (
+    <span
+      className="rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-wide"
+      style={{ color, border: `1px solid ${color}66`, background: `${color}1a` }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[12px] border border-line/50 bg-black/20 px-4 py-3">
+      <div className="text-[10.5px] font-bold uppercase tracking-[0.16em] text-text-dim">
+        {label}
+      </div>
+      <div className="mt-1 text-[14px] font-semibold text-white">{value}</div>
+    </div>
+  );
+}
