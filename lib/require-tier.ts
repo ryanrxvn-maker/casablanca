@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { isPaidExpired } from '@/lib/plan-prices';
 
 /**
  * Guard de tier server-side pra route handlers (/api/*).
@@ -45,7 +46,7 @@ export async function requireTier(min: Tier): Promise<TierGate> {
 
     const { data: profile, error } = await supabase
       .from('profiles')
-      .select('is_admin, is_active, tier')
+      .select('is_admin, is_active, tier, subscription_status, current_period_end')
       .eq('id', user.id)
       .maybeSingle();
 
@@ -66,13 +67,23 @@ export async function requireTier(min: Tier): Promise<TierGate> {
       };
     }
 
+    const p = profile as {
+      tier?: string | null;
+      subscription_status?: string | null;
+      current_period_end?: string | null;
+    } | null;
     const isAdmin = profile?.is_admin === true;
-    const raw = ((profile as { tier?: string | null } | null)?.tier ?? '').toString();
+    const raw = (p?.tier ?? '').toString();
     let tier: Tier;
     if (isAdmin) tier = 'admin';
     else if (raw === 'pro' || raw === 'beta') tier = 'pro';
     else if (raw === 'basic') tier = 'basic';
     else tier = 'free';
+
+    // Acesso pago vencido → cai pra free (admin nunca expira).
+    if (!isAdmin && isPaidExpired(p?.subscription_status, p?.current_period_end)) {
+      tier = 'free';
+    }
 
     if (RANK[tier] < RANK[min]) {
       return {

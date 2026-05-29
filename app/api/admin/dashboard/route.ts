@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireTier } from '@/lib/require-tier';
 import { serviceClient } from '@/app/api/admin/_helpers';
+import { isPaidExpired } from '@/lib/plan-prices';
 
 /**
  * GET /api/admin/dashboard — métricas agregadas pro painel do dono.
@@ -30,10 +31,13 @@ type ProfileRow = {
   last_ip: string | null;
   created_at: string | null;
   traffic_source: string | null;
+  current_period_end: string | null;
 };
 
 function resolveTier(p: ProfileRow): 'free' | 'basic' | 'pro' | 'admin' {
   if (p.is_admin) return 'admin';
+  // Acesso pago vencido conta como free.
+  if (isPaidExpired(p.subscription_status, p.current_period_end)) return 'free';
   const t = (p.tier ?? '').toString();
   if (t === 'pro' || t === 'beta') return 'pro';
   if (t === 'basic') return 'basic';
@@ -49,7 +53,7 @@ export async function GET() {
   const { data: profilesData, error: pErr } = await svc
     .from('profiles')
     .select(
-      'id, name, email, tier, is_admin, is_active, subscription_plan, subscription_status, last_seen_at, last_tool, last_tool_at, last_ip, created_at, traffic_source',
+      'id, name, email, tier, is_admin, is_active, subscription_plan, subscription_status, last_seen_at, last_tool, last_tool_at, last_ip, created_at, traffic_source, current_period_end',
     )
     .order('created_at', { ascending: false })
     .limit(2000);
@@ -83,9 +87,10 @@ export async function GET() {
     const tier = resolveTier(p);
     tiers[tier] += 1;
 
-    const activeSub =
-      p.subscription_status === 'active' || p.subscription_status === 'trialing';
-    if (activeSub && (p.subscription_plan === 'basic' || p.subscription_plan === 'pro')) {
+    const paidActive =
+      p.subscription_status === 'paid' &&
+      !isPaidExpired(p.subscription_status, p.current_period_end);
+    if (paidActive && (p.subscription_plan === 'basic' || p.subscription_plan === 'pro')) {
       paying[p.subscription_plan] += 1;
     }
 

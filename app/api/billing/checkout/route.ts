@@ -2,15 +2,16 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { serviceClient } from '@/app/api/admin/_helpers';
 import { getStripe } from '@/lib/stripe';
-import { priceIdFor, isPaidTier, isBilling } from '@/lib/plan-prices';
+import { PRICE_AMOUNT, PLAN_LABEL, isPaidTier, isBilling } from '@/lib/plan-prices';
 
 /**
  * POST /api/billing/checkout
  * body: { plan: 'basic' | 'pro', billing: 'monthly' | 'annual' }
  *
- * Cria uma Checkout Session de assinatura recorrente no Stripe e devolve
- * { url } pra redirecionar. Exige login. O tier só é promovido pelo WEBHOOK
- * após o pagamento confirmar — nunca aqui.
+ * Cria uma Checkout Session de PAGAMENTO ÚNICO (mode=payment) e devolve
+ * { url }. Aceita os métodos habilitados no painel (cartão/PIX/boleto).
+ * Exige login. O acesso só é liberado pelo WEBHOOK quando o pagamento
+ * confirma — nunca aqui. Sem assinatura recorrente.
  */
 
 export const runtime = 'nodejs';
@@ -41,15 +42,8 @@ export async function POST(req: Request) {
       );
     }
 
-    const priceId = priceIdFor(plan, billing);
-    if (!priceId) {
-      return NextResponse.json(
-        {
-          error: `Price ID não configurado pra ${plan}/${billing}. Configure STRIPE_PRICE_${plan.toUpperCase()}_${billing.toUpperCase()} no ambiente.`,
-        },
-        { status: 500 },
-      );
-    }
+    const amount = PRICE_AMOUNT[plan][billing];
+    const periodLabel = billing === 'annual' ? 'Anual' : 'Mensal';
 
     // Reusa o Customer do Stripe se já existir; senão cria.
     const svc = serviceClient();
@@ -81,16 +75,30 @@ export async function POST(req: Request) {
         '').replace(/\/$/, '');
 
     const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
+      mode: 'payment',
       customer: customerId,
-      line_items: [{ price: priceId, quantity: 1 }],
+      // payment_method_types omitido de propósito: o Checkout usa os métodos
+      // habilitados no painel Stripe (cartão, PIX, boleto). Habilite PIX/boleto
+      // em Settings > Payment methods pra eles aparecerem.
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: 'brl',
+            unit_amount: amount,
+            product_data: {
+              name: `${PLAN_LABEL[plan]} — ${periodLabel}`,
+            },
+          },
+        },
+      ],
       allow_promotion_codes: true,
+      payment_intent_data: {
+        metadata: { userId: user.id, plan, billing },
+      },
       success_url: `${base}/tools?upgraded=1`,
       cancel_url: `${base}/planos?canceled=1`,
-      subscription_data: {
-        metadata: { userId: user.id, plan },
-      },
-      metadata: { userId: user.id, plan },
+      metadata: { userId: user.id, plan, billing },
     });
 
     return NextResponse.json({ url: session.url });

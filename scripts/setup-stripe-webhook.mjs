@@ -19,38 +19,42 @@ if (!key || !key.startsWith('sk_')) {
 
 const base = (process.argv[2] || 'https://casablanca-ashen.vercel.app').replace(/\/$/, '');
 const url = `${base}/api/billing/webhook`;
+// Pagamento único: confirmação síncrona (cartão/PIX) + assíncrona (boleto/PIX pendente).
 const EVENTS = [
   'checkout.session.completed',
-  'customer.subscription.updated',
-  'customer.subscription.deleted',
+  'checkout.session.async_payment_succeeded',
+  'checkout.session.async_payment_failed',
 ];
 
 const stripe = new Stripe(key);
 
 const existing = await stripe.webhookEndpoints.list({ limit: 100 });
-for (const ep of existing.data) {
-  if (ep.url === url) {
-    await stripe.webhookEndpoints.del(ep.id);
-    console.log(`• Endpoint antigo removido: ${ep.id}`);
-  }
+const match = existing.data.find((ep) => ep.url === url);
+
+if (match) {
+  // Atualiza só os eventos — MANTÉM o mesmo signing secret (não precisa
+  // re-colar na Vercel).
+  await stripe.webhookEndpoints.update(match.id, { enabled_events: EVENTS });
+  console.log(`\n✓ Webhook atualizado (secret inalterado): ${match.id}`);
+  console.log(`  URL: ${url}`);
+  console.log(`  Eventos: ${EVENTS.join(', ')}`);
+  console.log('\nNada pra mudar na Vercel — o STRIPE_WEBHOOK_SECRET continua o mesmo.');
+} else {
+  const ep = await stripe.webhookEndpoints.create({
+    url,
+    enabled_events: EVENTS,
+    description: 'AutoEdit billing (acesso por pagamento unico)',
+  });
+  console.log(`\n✓ Webhook criado: ${ep.id}`);
+  console.log(`  URL: ${url}`);
+  console.log(`  Eventos: ${EVENTS.join(', ')}`);
+
+  let updated = envTxt;
+  const re = /^STRIPE_WEBHOOK_SECRET=.*$/m;
+  if (re.test(updated)) updated = updated.replace(re, `STRIPE_WEBHOOK_SECRET=${ep.secret}`);
+  else updated += `\nSTRIPE_WEBHOOK_SECRET=${ep.secret}`;
+  writeFileSync(ENV_PATH, updated, 'utf8');
+
+  console.log(`\n=== COLE ISSO NA VERCEL (Environment Variables, Production) ===`);
+  console.log(`STRIPE_WEBHOOK_SECRET=${ep.secret}`);
 }
-
-const ep = await stripe.webhookEndpoints.create({
-  url,
-  enabled_events: EVENTS,
-  description: 'AutoEdit billing (tier sync)',
-});
-
-console.log(`\n✓ Webhook criado: ${ep.id}`);
-console.log(`  URL: ${url}`);
-console.log(`  Eventos: ${EVENTS.join(', ')}`);
-
-// Grava local pra dev; o que importa pra prod é por na Vercel.
-let updated = envTxt;
-const re = /^STRIPE_WEBHOOK_SECRET=.*$/m;
-if (re.test(updated)) updated = updated.replace(re, `STRIPE_WEBHOOK_SECRET=${ep.secret}`);
-else updated += `\nSTRIPE_WEBHOOK_SECRET=${ep.secret}`;
-writeFileSync(ENV_PATH, updated, 'utf8');
-
-console.log(`\n=== COLE ISSO NA VERCEL (Environment Variables, Production) ===`);
-console.log(`STRIPE_WEBHOOK_SECRET=${ep.secret}`);

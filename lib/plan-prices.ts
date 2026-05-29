@@ -1,10 +1,9 @@
 /**
- * Mapa entre planos pagos do AutoEdit e os Price IDs do Stripe.
+ * Planos pagos do AutoEdit. Modelo: PAGAMENTO ÚNICO por período (não há
+ * assinatura recorrente). O cliente paga via cartão/PIX/boleto e libera
+ * acesso por 1 mês ou 1 ano; depois precisa pagar de novo (sem auto-renovar).
  *
- * Os Price IDs vêm de variáveis de ambiente (criados uma vez no painel Stripe).
- * Assim trocar de preço/conta é só mexer no .env — sem deploy de código.
- *
- * Preços (referência da vitrine /planos):
+ * Preços (em centavos de BRL):
  *   Basic  → R$ 57/mês  · R$ 540/ano
  *   Pro    → R$ 116/mês · R$ 1.104/ano
  */
@@ -12,30 +11,34 @@
 export type PaidTier = 'basic' | 'pro';
 export type Billing = 'monthly' | 'annual';
 
-const PRICE_ENV: Record<PaidTier, Record<Billing, string | undefined>> = {
-  basic: {
-    monthly: process.env.STRIPE_PRICE_BASIC_MONTHLY,
-    annual: process.env.STRIPE_PRICE_BASIC_ANNUAL,
-  },
-  pro: {
-    monthly: process.env.STRIPE_PRICE_PRO_MONTHLY,
-    annual: process.env.STRIPE_PRICE_PRO_ANNUAL,
-  },
+/** Valor em centavos (BRL) por plano + período. Usado no Checkout (price_data). */
+export const PRICE_AMOUNT: Record<PaidTier, Record<Billing, number>> = {
+  basic: { monthly: 5700, annual: 54000 },
+  pro: { monthly: 11600, annual: 110400 },
 };
 
-/** Price ID do Stripe pra um plano+ciclo. undefined se env não setada. */
-export function priceIdFor(tier: PaidTier, billing: Billing): string | undefined {
-  return PRICE_ENV[tier]?.[billing];
+export const PLAN_LABEL: Record<PaidTier, string> = {
+  basic: 'AutoEdit Basic',
+  pro: 'AutoEdit Pro',
+};
+
+/** Fim do acesso a partir de `from` (default agora) pro período escolhido. */
+export function periodEndFrom(billing: Billing, from: Date = new Date()): Date {
+  const d = new Date(from);
+  if (billing === 'annual') d.setFullYear(d.getFullYear() + 1);
+  else d.setMonth(d.getMonth() + 1);
+  return d;
 }
 
-/** Dado um Price ID do Stripe (vindo do webhook), qual tier ele concede. */
-export function tierForPriceId(priceId: string): PaidTier | null {
-  for (const tier of ['basic', 'pro'] as PaidTier[]) {
-    for (const billing of ['monthly', 'annual'] as Billing[]) {
-      if (PRICE_ENV[tier][billing] === priceId) return tier;
-    }
-  }
-  return null;
+/** True se um acesso pago (status='paid') já venceu. Tiers manuais/admin
+ *  (status != 'paid') nunca expiram por aqui. */
+export function isPaidExpired(
+  status: string | null | undefined,
+  periodEnd: string | null | undefined,
+): boolean {
+  if (status !== 'paid') return false;
+  if (!periodEnd) return false;
+  return new Date(periodEnd).getTime() < Date.now();
 }
 
 export function isPaidTier(v: string): v is PaidTier {

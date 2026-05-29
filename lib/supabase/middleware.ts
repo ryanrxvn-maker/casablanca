@@ -1,5 +1,6 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { isPaidExpired } from '@/lib/plan-prices';
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -151,13 +152,15 @@ export async function updateSession(request: NextRequest) {
       tier?: 'free' | 'beta' | 'admin' | null;
       phone_verified?: boolean | null;
       legacy_no_phone?: boolean | null;
+      subscription_status?: string | null;
+      current_period_end?: string | null;
     };
     let profile: ProfileShape | null = null;
 
     const full = await adminClient
       .from('profiles')
       .select(
-        'is_active, is_admin, must_change_password, tier, phone_verified, legacy_no_phone',
+        'is_active, is_admin, must_change_password, tier, phone_verified, legacy_no_phone, subscription_status, current_period_end',
       )
       .eq('id', user.id)
       .maybeSingle();
@@ -185,6 +188,14 @@ export async function updateSession(request: NextRequest) {
     else if (rawTier === 'basic') tier = 'basic';
     else if (rawTier === 'free') tier = 'free';
     else tier = isActive ? 'free' : 'free';
+
+    // Acesso pago vencido → cai pra free (admin nunca expira).
+    if (
+      !isAdmin &&
+      isPaidExpired(profile?.subscription_status, profile?.current_period_end)
+    ) {
+      tier = 'free';
+    }
 
     // ─── ADMIN BYPASS ─────────────────────────────────────────────────
     // Admin nunca precisa de phone_verified. Se a coluna phone_verified
