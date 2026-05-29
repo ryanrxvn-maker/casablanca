@@ -216,6 +216,8 @@ export function ToolDropzone({
   hue = 'rgba(167,139,250,0.45)',
   disabled,
   icon,
+  multiple,
+  onFiles,
 }: {
   accept: string;
   file: File | null;
@@ -224,6 +226,10 @@ export function ToolDropzone({
   hue?: string;
   disabled?: boolean;
   icon?: ReactNode;
+  /** Quando true, aceita múltiplos arquivos e chama onFiles. Retrocompatível:
+   *  sem multiple, comportamento single-file inalterado. */
+  multiple?: boolean;
+  onFiles?: (files: File[]) => void;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   return (
@@ -247,6 +253,11 @@ export function ToolDropzone({
         e.preventDefault();
         if (disabled) return;
         e.currentTarget.classList.remove('drag-active');
+        if (multiple && onFiles) {
+          const fs = Array.from(e.dataTransfer.files || []);
+          if (fs.length) onFiles(fs);
+          return;
+        }
         const f = e.dataTransfer.files?.[0];
         if (f) onFile(f);
       }}
@@ -257,8 +268,17 @@ export function ToolDropzone({
         type="file"
         accept={accept}
         disabled={disabled}
+        multiple={multiple}
         className="hidden"
-        onChange={(e) => onFile(e.target.files?.[0] || null)}
+        onChange={(e) => {
+          if (multiple && onFiles) {
+            const fs = Array.from(e.target.files || []);
+            if (fs.length) onFiles(fs);
+            e.target.value = ''; // permite re-selecionar os mesmos
+            return;
+          }
+          onFile(e.target.files?.[0] || null);
+        }}
       />
 
       {/* Glow no hover */}
