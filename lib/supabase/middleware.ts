@@ -108,6 +108,8 @@ export async function updateSession(request: NextRequest) {
     PUBLIC_AUTH_ROUTES.some((p) => pathname.startsWith(p)) ||
     pathname === '/' ||
     pathname.startsWith('/planos') ||
+    pathname.startsWith('/termos') ||
+    pathname.startsWith('/politica') ||
     pathname.startsWith('/api/');
 
   if (!user && !isPublicRoute) {
