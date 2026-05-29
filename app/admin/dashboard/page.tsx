@@ -38,7 +38,26 @@ type Dash = {
   }>;
   toolRanking: Array<{ tool: string; count: number }>;
   trafficSources: Array<{ source: string; count: number }>;
+  payments: Array<{
+    id: number;
+    email: string | null;
+    amount: number;
+    currency: string;
+    plan: string | null;
+    billing: string | null;
+    status: string;
+    receipt_url: string | null;
+    created_at: string | null;
+  }>;
+  revenueTotal: number;
 };
+
+function brl(centavos: number): string {
+  return (centavos / 100).toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  });
+}
 
 const TIER_COLOR: Record<string, string> = {
   free: '#8b8b96',
@@ -285,6 +304,79 @@ export default function DashboardPage() {
               </div>
             ) : (
               <Empty>Ninguém online no momento.</Empty>
+            )
+          ) : (
+            <Skeleton h={120} />
+          )}
+        </Panel>
+      </section>
+
+      {/* Pagamentos / Comprovantes */}
+      <section className="relative z-10 mt-6">
+        <Panel
+          title={`Pagamentos / comprovantes${
+            data ? ` · ${brl(data.revenueTotal)} arrecadado` : ''
+          }`}
+        >
+          {data ? (
+            data.payments.length ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-[13px]">
+                  <thead>
+                    <tr className="text-[10.5px] uppercase tracking-[0.16em] text-text-dim">
+                      <th className="pb-2 pr-4">Cliente</th>
+                      <th className="pb-2 pr-4">Plano</th>
+                      <th className="pb-2 pr-4">Valor</th>
+                      <th className="pb-2 pr-4">Data</th>
+                      <th className="pb-2 pr-4">Status</th>
+                      <th className="pb-2">Comprovante</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.payments.map((p) => (
+                      <tr key={p.id} className="border-t border-line/40">
+                        <td className="py-2 pr-4 text-white">{p.email || '—'}</td>
+                        <td className="py-2 pr-4 capitalize text-text-muted">
+                          {p.plan || '—'}
+                          {p.billing ? (
+                            <span className="text-text-dim">
+                              {' '}
+                              · {p.billing === 'annual' ? 'anual' : 'mensal'}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="py-2 pr-4 font-bold text-lime">{brl(p.amount)}</td>
+                        <td className="py-2 pr-4 text-text-muted">
+                          {p.created_at
+                            ? new Date(p.created_at).toLocaleString('pt-BR')
+                            : '—'}
+                        </td>
+                        <td className="py-2 pr-4">
+                          <span className="rounded-full border border-lime/45 bg-lime/10 px-2 py-0.5 text-[10px] font-bold uppercase text-lime">
+                            {p.status === 'paid' ? 'pago' : p.status}
+                          </span>
+                        </td>
+                        <td className="py-2">
+                          {p.receipt_url ? (
+                            <a
+                              href={p.receipt_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-violet underline-offset-2 hover:underline"
+                            >
+                              Ver comprovante →
+                            </a>
+                          ) : (
+                            <span className="text-text-dim">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <Empty>Nenhum pagamento registrado ainda.</Empty>
             )
           ) : (
             <Skeleton h={120} />

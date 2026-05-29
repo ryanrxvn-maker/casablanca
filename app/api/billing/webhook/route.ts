@@ -50,6 +50,42 @@ async function grantAccess(session: Stripe.Checkout.Session) {
       current_period_end: periodEnd,
     })
     .eq('id', userId);
+
+  // ─── Trilha de auditoria: registra o pagamento + link do comprovante ───
+  const piId =
+    typeof session.payment_intent === 'string'
+      ? session.payment_intent
+      : session.payment_intent?.id ?? null;
+
+  let receiptUrl: string | null = null;
+  if (piId) {
+    try {
+      const pi = await getStripe().paymentIntents.retrieve(piId, {
+        expand: ['latest_charge'],
+      });
+      const charge = pi.latest_charge as Stripe.Charge | null;
+      receiptUrl = charge?.receipt_url ?? null;
+    } catch {
+      /* sem comprovante agora — não bloqueia o registro */
+    }
+  }
+
+  // Idempotente: a checkout_session é UNIQUE, então reentregas não duplicam.
+  await svc.from('payments').upsert(
+    {
+      user_id: userId,
+      email: session.customer_details?.email ?? session.customer_email ?? null,
+      amount: session.amount_total ?? 0,
+      currency: session.currency ?? 'brl',
+      plan: plan as PaidTier,
+      billing: period,
+      status: 'paid',
+      stripe_payment_intent: piId,
+      stripe_checkout_session: session.id,
+      receipt_url: receiptUrl,
+    },
+    { onConflict: 'stripe_checkout_session' },
+  );
 }
 
 export async function POST(req: Request) {

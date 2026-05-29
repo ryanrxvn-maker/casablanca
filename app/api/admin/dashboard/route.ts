@@ -148,6 +148,25 @@ export async function GET() {
     .map(([source, count]) => ({ source, count }))
     .sort((a, b) => b.count - a.count);
 
+  // ─── Pagamentos (trilha de auditoria + comprovantes) ───
+  const { data: paymentsData } = await svc
+    .from('payments')
+    .select('id, email, amount, currency, plan, billing, status, receipt_url, created_at')
+    .order('created_at', { ascending: false })
+    .limit(100);
+  const payments = (paymentsData ?? []) as Array<{
+    id: number;
+    email: string | null;
+    amount: number;
+    currency: string;
+    plan: string | null;
+    billing: string | null;
+    status: string;
+    receipt_url: string | null;
+    created_at: string | null;
+  }>;
+  const revenueTotal = payments.reduce((s, p) => s + (p.amount || 0), 0);
+
   return NextResponse.json({
     now: new Date(nowMs).toISOString(),
     totals: {
@@ -170,5 +189,7 @@ export async function GET() {
     recentSignups,
     toolRanking,
     trafficSources,
+    payments,
+    revenueTotal,
   });
 }
