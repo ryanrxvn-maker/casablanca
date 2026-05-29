@@ -2,16 +2,22 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { serviceClient } from '@/app/api/admin/_helpers';
 import { getStripe } from '@/lib/stripe';
-import { PRICE_AMOUNT, PLAN_LABEL, isPaidTier, isBilling } from '@/lib/plan-prices';
+import {
+  PRICE_AMOUNT,
+  PLAN_LABEL,
+  stripeInterval,
+  isPaidTier,
+  isBilling,
+} from '@/lib/plan-prices';
 
 /**
  * POST /api/billing/checkout
  * body: { plan: 'basic' | 'pro', billing: 'monthly' | 'annual' }
  *
- * Cria uma Checkout Session de PAGAMENTO ÚNICO (mode=payment) e devolve
- * { url }. Aceita os métodos habilitados no painel (cartão/PIX/boleto).
- * Exige login. O acesso só é liberado pelo WEBHOOK quando o pagamento
- * confirma — nunca aqui. Sem assinatura recorrente.
+ * Cria uma Checkout Session de ASSINATURA RECORRENTE (mode=subscription),
+ * só cartão (recorrência não suporta PIX/boleto), e devolve { url }. Exige
+ * login. O acesso só é concedido pelo WEBHOOK quando o pagamento confirma —
+ * nunca aqui. Renova automaticamente até o cliente cancelar no portal.
  */
 
 export const runtime = 'nodejs';
@@ -86,17 +92,16 @@ export async function POST(req: Request) {
         '').replace(/\/$/, '');
 
     const session = await stripe.checkout.sessions.create({
-      mode: 'payment',
+      mode: 'subscription',
       customer: customerId,
-      // payment_method_types omitido de propósito: o Checkout usa os métodos
-      // habilitados no painel Stripe (cartão, PIX, boleto). Habilite PIX/boleto
-      // em Settings > Payment methods pra eles aparecerem.
+      payment_method_types: ['card'], // recorrência: só cartão
       line_items: [
         {
           quantity: 1,
           price_data: {
             currency: 'brl',
             unit_amount: amount,
+            recurring: { interval: stripeInterval(billing) },
             product_data: {
               name: `${PLAN_LABEL[plan]} — ${periodLabel}`,
             },
@@ -104,7 +109,7 @@ export async function POST(req: Request) {
         },
       ],
       allow_promotion_codes: true,
-      payment_intent_data: {
+      subscription_data: {
         metadata: { userId: user.id, plan, billing },
       },
       success_url: `${base}/tools?upgraded=1`,

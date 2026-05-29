@@ -27,11 +27,12 @@ const isLive = key.startsWith('sk_live_');
 
 const base = (process.argv[2] || 'https://casablanca-ashen.vercel.app').replace(/\/$/, '');
 const url = `${base}/api/billing/webhook`;
-// Pagamento único: confirmação síncrona (cartão/PIX) + assíncrona (boleto/PIX pendente).
+// Assinatura recorrente: criação, cobranças (1a + renovações) e mudanças de status.
 const EVENTS = [
   'checkout.session.completed',
-  'checkout.session.async_payment_succeeded',
-  'checkout.session.async_payment_failed',
+  'invoice.paid',
+  'customer.subscription.updated',
+  'customer.subscription.deleted',
 ];
 
 const stripe = new Stripe(key);

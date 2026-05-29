@@ -26,6 +26,7 @@ export default function ConfiguracoesPage() {
   const [emailBusy, setEmailBusy] = useState(false);
   const [passBusy, setPassBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [billingBusy, setBillingBusy] = useState(false);
   const [toast, setToast] = useState<
     { kind: 'ok' | 'err'; msg: string } | null
   >(null);
@@ -52,6 +53,27 @@ export default function ConfiguracoesPage() {
   function flash(kind: 'ok' | 'err', msg: string) {
     setToast({ kind, msg });
     setTimeout(() => setToast((c) => (c?.msg === msg ? null : c)), 3200);
+  }
+
+  async function handleManageBilling() {
+    if (billingBusy) return;
+    setBillingBusy(true);
+    try {
+      const res = await fetch('/api/billing/portal', { method: 'POST' });
+      const data = (await res.json().catch(() => ({}))) as {
+        url?: string;
+        error?: string;
+      };
+      if (data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      flash('err', data.error || 'Você ainda não tem uma assinatura ativa.');
+    } catch {
+      flash('err', 'Falha de conexão ao abrir o portal.');
+    } finally {
+      setBillingBusy(false);
+    }
   }
 
   async function handleChangeEmail(e: React.FormEvent) {
@@ -145,6 +167,7 @@ export default function ConfiguracoesPage() {
   }
 
   const sections = [
+    { id: 'assinatura', label: 'Assinatura' },
     { id: 'apis', label: 'Chaves IA' },
     { id: 'magnific', label: 'Magnific' },
     { id: 'email', label: 'Email' },
@@ -254,6 +277,38 @@ export default function ConfiguracoesPage() {
                 `}</style>
               </section>
             ) : null}
+
+            {/* Assinatura */}
+            <section id="assinatura" className="fade-in-up" style={{ animationDelay: '30ms' }}>
+              <div className="card-tool block p-5 md:p-6">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="mb-1 flex items-center gap-2">
+                      <span className="pill-lime text-[9px]">PLANO</span>
+                    </div>
+                    <div
+                      className="text-[17px] font-bold tracking-tight text-white"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      Assinatura
+                    </div>
+                    <div className="mt-1 text-[13px] text-text-muted">
+                      Gerencie seu plano, atualize o cartão, baixe recibos ou
+                      cancele quando quiser. Ao cancelar, o acesso continua até
+                      o fim do período já pago.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleManageBilling}
+                    disabled={billingBusy}
+                    className="btn-ghost shrink-0 whitespace-nowrap"
+                  >
+                    {billingBusy ? 'Abrindo…' : 'Gerenciar'}
+                  </button>
+                </div>
+              </div>
+            </section>
 
             {/* Chaves IA */}
             <section id="apis" className="fade-in-up" style={{ animationDelay: '40ms' }}>

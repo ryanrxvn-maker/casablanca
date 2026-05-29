@@ -22,7 +22,13 @@ export const PLAN_LABEL: Record<PaidTier, string> = {
   pro: 'AutoEdit Pro',
 };
 
-/** Fim do acesso a partir de `from` (default agora) pro período escolhido. */
+/** Intervalo de cobrança recorrente do Stripe pro período escolhido. */
+export function stripeInterval(billing: Billing): 'month' | 'year' {
+  return billing === 'annual' ? 'year' : 'month';
+}
+
+/** Fim do acesso a partir de `from` (default agora) pro período escolhido.
+ *  (legado do modelo de pagamento único — mantido pra compatibilidade). */
 export function periodEndFrom(billing: Billing, from: Date = new Date()): Date {
   const d = new Date(from);
   if (billing === 'annual') d.setFullYear(d.getFullYear() + 1);
@@ -30,15 +36,25 @@ export function periodEndFrom(billing: Billing, from: Date = new Date()): Date {
   return d;
 }
 
-/** True se um acesso pago (status='paid') já venceu. Tiers manuais/admin
- *  (status != 'paid') nunca expiram por aqui. */
+/** True se o acesso pago já venceu — rede de segurança além do webhook.
+ *  • 'paid' (modelo único legado): expira exatamente no fim do período.
+ *  • 'active'/'trialing' (recorrente): só expira se o fim do período já
+ *    passou + 3 dias de tolerância (absorve atraso de webhook/retentativa;
+ *    o normal é o webhook derrubar pra free assim que vira past_due/canceled).
+ *  • canceled/past_due/unpaid: o webhook já setou tier=free → ignora aqui.
+ *  Tiers manuais/admin (status null) nunca expiram. */
 export function isPaidExpired(
   status: string | null | undefined,
   periodEnd: string | null | undefined,
 ): boolean {
-  if (status !== 'paid') return false;
   if (!periodEnd) return false;
-  return new Date(periodEnd).getTime() < Date.now();
+  const end = new Date(periodEnd).getTime();
+  if (status === 'paid') return end < Date.now();
+  if (status === 'active' || status === 'trialing') {
+    const GRACE_MS = 3 * 24 * 60 * 60 * 1000;
+    return end + GRACE_MS < Date.now();
+  }
+  return false;
 }
 
 export function isPaidTier(v: string): v is PaidTier {

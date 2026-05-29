@@ -256,6 +256,14 @@ export function Plans() {
           Todos os planos rodam no seu computador. Seus arquivos nunca saem
           da sua máquina.
         </p>
+        <p className="mx-auto mt-3 max-w-[560px] text-center text-[12px] text-text-dim">
+          Assinatura no cartão · <strong className="text-text-muted">renova automaticamente</strong> ·
+          cancele quando quiser sem multa.{' '}
+          <Link href="/politica" className="text-violet hover:text-white">
+            Política de cancelamento e reembolso
+          </Link>
+          .
+        </p>
       </section>
 
       {/* Lista de ferramentas */}
@@ -265,9 +273,12 @@ export function Plans() {
       <footer className="relative z-10 mx-auto max-w-[1280px] px-5 pb-12 md:px-8">
         <div className="flex flex-col items-start justify-between gap-6 border-t border-line/60 pt-8 md:flex-row md:items-center">
           <Brand href="/" />
-          <p className="text-[12.5px] text-text-muted">
-            Auto Edit · © {new Date().getFullYear()}
-          </p>
+          <div className="flex items-center gap-4 text-[12.5px] text-text-muted">
+            <Link href="/politica" className="hover:text-white">
+              Política
+            </Link>
+            <span>Auto Edit · © {new Date().getFullYear()}</span>
+          </div>
         </div>
       </footer>
     </main>
@@ -562,8 +573,7 @@ function PlanCard({
                 </span>
               ) : null}
 
-              {/* Subtitle no anual: "ou 12x de R$ X" — agora com peso
-                  visual real (font maior, contrast box). */}
+              {/* Subtitle no anual: equivalente mensal (cobrado 1x/ano). */}
               {!isFree && billing === 'annual' ? (
                 <div className="mt-2 flex flex-col items-center gap-1.5">
                   <div
@@ -576,14 +586,13 @@ function PlanCard({
                       className="text-[10px] font-bold uppercase tracking-[0.18em] text-lime/75"
                       style={{ fontFamily: 'var(--font-tech)' }}
                     >
-                      ou
+                      equivale a
                     </span>
                     <span
                       className="mono text-[16px] font-bold text-white"
                       style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.01em' }}
                     >
-                      12×{' '}
-                      <span className="text-lime">R$ {pricing.price}</span>
+                      <span className="text-lime">R$ {pricing.price}</span>/mês
                     </span>
                   </div>
                   <span
