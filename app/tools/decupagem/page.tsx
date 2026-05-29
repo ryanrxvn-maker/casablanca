@@ -456,27 +456,44 @@ export default function DecupagemPage() {
           </button>
         </div>
 
-        {/* PREVIEW do último pronto (opcional) */}
-        {(() => {
-          const lastDone = [...queue].reverse().find((q) => q.status === 'done' && q.result);
-          if (!lastDone?.result) return null;
-          const r = lastDone.result;
-          const reduced = r.originalDur > 0 ? Math.max(0, Math.round((1 - r.newDur / r.originalDur) * 100)) : 0;
-          return (
-            <ToolResultCard title={`Preview: ${lastDone.file.name}`} meta={`${reduced}% menor`}>
-              <div className="mb-4 grid gap-2.5 sm:grid-cols-3">
-                <ToolMetric value={formatTime(r.originalDur)} label="Original" />
-                <ToolMetric value={formatTime(r.newDur)} label="Após decupagem" accent="lime" />
-                <ToolMetric value={`–${reduced}%`} label="Redução" accent="lime" />
-              </div>
-              {r.kind === 'video' ? (
-                <video src={r.url} controls className="w-full rounded-[14px] border border-lime/30 bg-bg shadow-[0_0_28px_-12px_rgba(200,255,0,0.4)]" />
-              ) : (
-                <AudioPlayer src={r.url} label="Preview" />
-              )}
-            </ToolResultCard>
-          );
-        })()}
+        {/* PREVIEW de TODOS os arquivos prontos */}
+        {doneCount > 0 ? (
+          <div className="grid gap-4">
+            <div className="mono text-[10px] uppercase tracking-widest text-lime">
+              {doneCount} pronto{doneCount === 1 ? '' : 's'} — preview + download de cada
+            </div>
+            {queue
+              .filter((q) => q.status === 'done' && q.result)
+              .map((item) => {
+                const r = item.result!;
+                const reduced = r.originalDur > 0 ? Math.max(0, Math.round((1 - r.newDur / r.originalDur) * 100)) : 0;
+                return (
+                  <ToolResultCard key={item.id} title={item.file.name} meta={`${reduced}% menor`}>
+                    <div className="mb-4 grid gap-2.5 sm:grid-cols-3">
+                      <ToolMetric value={formatTime(r.originalDur)} label="Original" />
+                      <ToolMetric value={formatTime(r.newDur)} label="Após decupagem" accent="lime" />
+                      <ToolMetric value={`–${reduced}%`} label="Redução" accent="lime" />
+                    </div>
+                    {r.kind === 'video' ? (
+                      <video
+                        src={r.url}
+                        controls
+                        preload="metadata"
+                        className="w-full rounded-[14px] border border-lime/30 bg-bg shadow-[0_0_28px_-12px_rgba(200,255,0,0.4)]"
+                      />
+                    ) : (
+                      <AudioPlayer src={r.url} label="Preview" />
+                    )}
+                    <div className="mt-4 flex justify-end">
+                      <button onClick={() => downloadOne(item)} className="btn-lime !py-2.5 text-xs">
+                        Baixar {r.kind === 'video' ? 'MP4' : r.format.toUpperCase()}
+                      </button>
+                    </div>
+                  </ToolResultCard>
+                );
+              })}
+          </div>
+        ) : null}
       </div>
     </div>
   );
