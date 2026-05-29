@@ -3,7 +3,10 @@
  * imprime o signing secret (whsec_). Idempotente: se já existir um endpoint
  * pra essa URL, deleta e recria pra garantir um secret fresco.
  *
- * Uso: node scripts/setup-stripe-webhook.mjs https://SEU-DOMINIO
+ * Uso (teste, usa a chave do .env.local):
+ *   node scripts/setup-stripe-webhook.mjs https://SEU-DOMINIO
+ * Uso (produção, passa a chave live como 2o argumento — NÃO grava no .env.local):
+ *   node scripts/setup-stripe-webhook.mjs https://SEU-DOMINIO sk_live_xxx
  */
 import Stripe from 'stripe';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -11,11 +14,16 @@ import { resolve } from 'node:path';
 
 const ENV_PATH = resolve(process.cwd(), '.env.local');
 const envTxt = readFileSync(ENV_PATH, 'utf8');
-const key = envTxt.match(/^STRIPE_SECRET_KEY=(.*)$/m)?.[1];
+
+// Chave: prefere o 3o argumento (sk_live_ pra produção); senão lê do .env.local.
+const keyArg = process.argv[3];
+const fromArg = !!(keyArg && keyArg.startsWith('sk_'));
+const key = fromArg ? keyArg : envTxt.match(/^STRIPE_SECRET_KEY=(.*)$/m)?.[1];
 if (!key || !key.startsWith('sk_')) {
-  console.error('STRIPE_SECRET_KEY ausente no .env.local');
+  console.error('Chave Stripe ausente. Passe sk_live_... como 2o arg ou configure STRIPE_SECRET_KEY no .env.local');
   process.exit(1);
 }
+const isLive = key.startsWith('sk_live_');
 
 const base = (process.argv[2] || 'https://casablanca-ashen.vercel.app').replace(/\/$/, '');
 const url = `${base}/api/billing/webhook`;
@@ -45,15 +53,19 @@ if (match) {
     enabled_events: EVENTS,
     description: 'AutoEdit billing (acesso por pagamento unico)',
   });
-  console.log(`\n✓ Webhook criado: ${ep.id}`);
+  console.log(`\n✓ Webhook criado (${isLive ? 'LIVE' : 'TESTE'}): ${ep.id}`);
   console.log(`  URL: ${url}`);
   console.log(`  Eventos: ${EVENTS.join(', ')}`);
 
-  let updated = envTxt;
-  const re = /^STRIPE_WEBHOOK_SECRET=.*$/m;
-  if (re.test(updated)) updated = updated.replace(re, `STRIPE_WEBHOOK_SECRET=${ep.secret}`);
-  else updated += `\nSTRIPE_WEBHOOK_SECRET=${ep.secret}`;
-  writeFileSync(ENV_PATH, updated, 'utf8');
+  // Só grava no .env.local quando é a chave de TESTE (do arquivo). Pra LIVE
+  // (chave passada por argumento) NÃO grava — o secret live vai só pra Vercel.
+  if (!fromArg) {
+    let updated = envTxt;
+    const re = /^STRIPE_WEBHOOK_SECRET=.*$/m;
+    if (re.test(updated)) updated = updated.replace(re, `STRIPE_WEBHOOK_SECRET=${ep.secret}`);
+    else updated += `\nSTRIPE_WEBHOOK_SECRET=${ep.secret}`;
+    writeFileSync(ENV_PATH, updated, 'utf8');
+  }
 
   console.log(`\n=== COLE ISSO NA VERCEL (Environment Variables, Production) ===`);
   console.log(`STRIPE_WEBHOOK_SECRET=${ep.secret}`);
