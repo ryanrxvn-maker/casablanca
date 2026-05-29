@@ -13,10 +13,31 @@ const nextConfig = {
   },
 
   async headers() {
+    // CSP afinada pro stack: Next (inline), FFmpeg WASM (wasm-unsafe-eval +
+    // workers blob), Stripe Elements (js/frames), Supabase (api/realtime).
+    // Bloqueia script/frame/conexão de qualquer outra origem.
+    const csp = [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://js.stripe.com https://va.vercel-scripts.com",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob: https:",
+      "font-src 'self' data:",
+      "media-src 'self' blob: data: https:",
+      "worker-src 'self' blob:",
+      "connect-src 'self' blob: data: https://*.supabase.co wss://*.supabase.co https://*.stripe.com",
+      "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self' https://checkout.stripe.com",
+      "frame-ancestors 'none'",
+      'upgrade-insecure-requests',
+    ].join('; ');
+
     return [
       {
         source: '/(.*)',
         headers: [
+          { key: 'Content-Security-Policy', value: csp },
           // FFmpeg WASM precisa de SharedArrayBuffer -> exige cross-origin
           // isolation. credentialless permite carregar mídia do Supabase
           // Storage sem header CORP em cada asset.

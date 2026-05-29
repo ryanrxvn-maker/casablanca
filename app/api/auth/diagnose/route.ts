@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { rateLimit, clientIp } from '@/lib/rate-limit';
 
 /**
  * POST /api/auth/diagnose
@@ -36,6 +37,17 @@ type DiagnoseResp = {
 };
 
 export async function POST(req: Request) {
+  // Rate-limit anti-enumeração/abuso: 8 req/min por IP.
+  if (!rateLimit(`diagnose:${clientIp(req)}`, 8, 60_000)) {
+    return NextResponse.json<DiagnoseResp>(
+      {
+        reason: 'unknown',
+        message: 'Muitas tentativas. Aguarde um minuto e tente de novo.',
+        canResend: false,
+      },
+      { status: 429 },
+    );
+  }
   try {
     const { email } = (await req.json()) as { email?: string };
     const cleanEmail = String(email || '').trim().toLowerCase();
