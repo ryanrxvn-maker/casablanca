@@ -17,6 +17,7 @@ import { ClickUpPilotStatusSection } from '@/components/ClickUpPilotStatusSectio
 export default function ConfiguracoesPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [email, setEmail] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
@@ -38,6 +39,12 @@ export default function ConfiguracoesPage() {
         return;
       }
       setEmail(data.user.email ?? '');
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('is_admin')
+        .eq('id', data.user.id)
+        .maybeSingle();
+      setIsAdmin((prof as { is_admin?: boolean } | null)?.is_admin === true);
       setLoading(false);
     })();
   }, [router]);
@@ -185,6 +192,69 @@ export default function ConfiguracoesPage() {
           </aside>
 
           <div className="flex flex-col gap-5">
+            {/* Dashboard (cérebro) — só admin */}
+            {isAdmin ? (
+              <section className="fade-in-up" style={{ animationDelay: '20ms' }}>
+                <a href="/admin/dashboard" className="brain-btn group relative block overflow-hidden rounded-[20px] p-[1.5px]">
+                  <span aria-hidden className="brain-btn-border" />
+                  <span className="relative flex items-center justify-between gap-4 rounded-[19px] bg-[#0c0c11] px-6 py-6">
+                    <span className="flex items-center gap-4">
+                      <span className="brain-btn-icon relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl">
+                        <svg width="30" height="30" viewBox="0 0 120 120" fill="none">
+                          <path d="M60 18c-10-8-26-6-30 6-10 2-16 12-12 22-6 6-5 18 3 22-1 10 8 18 18 16 5 6 16 6 21 0 10 2 19-6 18-16 8-4 9-16 3-22 4-10-2-20-12-22-4-12-20-14-30-6z" stroke="#d8b4fe" strokeWidth="3" fill="rgba(168,85,247,0.12)" />
+                          <path d="M60 22v76M44 30c8 6 8 18 0 24s-8 18 0 24M76 30c-8 6-8 18 0 24s8 18 0 24" stroke="rgba(216,180,254,0.6)" strokeWidth="2" fill="none" />
+                        </svg>
+                      </span>
+                      <span>
+                        <span className="mb-1 inline-flex items-center gap-2">
+                          <span className="rounded-full border border-lime/50 bg-lime/10 px-2 py-0 text-[9px] font-bold uppercase tracking-[0.18em] text-lime" style={{ fontFamily: 'var(--font-tech)' }}>
+                            CÉREBRO
+                          </span>
+                        </span>
+                        <span className="block text-[18px] font-bold tracking-tight text-white" style={{ fontFamily: 'var(--font-tech)' }}>
+                          Dashboard
+                        </span>
+                        <span className="mt-1 block text-[13px] text-text-muted">
+                          Online agora, acessos, origem, planos e ferramentas — tudo num lugar.
+                        </span>
+                      </span>
+                    </span>
+                    <span className="flex h-10 w-10 items-center justify-center rounded-full border border-violet/40 text-violet transition group-hover:border-violet group-hover:bg-violet/10">
+                      →
+                    </span>
+                  </span>
+                </a>
+                <style jsx>{`
+                  .brain-btn-border {
+                    position: absolute;
+                    inset: 0;
+                    border-radius: 20px;
+                    background: conic-gradient(from var(--a, 0deg), rgba(168,85,247,0.9), rgba(103,232,249,0.6), rgba(200,255,0,0.6), rgba(168,85,247,0.9));
+                    animation: brain-btn-spin 5s linear infinite;
+                  }
+                  .brain-btn {
+                    box-shadow: 0 18px 40px -18px rgba(168,85,247,0.7);
+                    transition: transform 0.35s cubic-bezier(0.22,1,0.36,1);
+                  }
+                  .brain-btn:hover {
+                    transform: translateY(-2px);
+                  }
+                  .brain-btn-icon {
+                    background: radial-gradient(circle at 50% 40%, rgba(168,85,247,0.35), rgba(0,0,0,0.4));
+                    border: 1px solid rgba(168,85,247,0.5);
+                    box-shadow: 0 0 22px -4px rgba(168,85,247,0.8);
+                    transition: transform 0.4s cubic-bezier(0.34,1.56,0.64,1);
+                  }
+                  .brain-btn:hover .brain-btn-icon {
+                    transform: scale(1.08) rotate(-4deg);
+                  }
+                  @keyframes brain-btn-spin {
+                    to { --a: 360deg; }
+                  }
+                `}</style>
+              </section>
+            ) : null}
+
             {/* Chaves IA */}
             <section id="apis" className="fade-in-up" style={{ animationDelay: '40ms' }}>
               <a
