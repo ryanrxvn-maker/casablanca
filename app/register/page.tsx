@@ -19,6 +19,7 @@ export default function RegisterPage() {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [agreed, setAgreed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,6 +50,10 @@ export default function RegisterPage() {
     }
     if (password !== confirm) {
       setError('As senhas não coincidem.');
+      return;
+    }
+    if (!agreed) {
+      setError('Você precisa aceitar os Termos de Uso e a Política pra continuar.');
       return;
     }
     setLoading(true);
@@ -216,6 +221,26 @@ export default function RegisterPage() {
           />
         </div>
 
+        <label className="flex items-start gap-2.5 text-[12.5px] leading-snug text-text-muted">
+          <input
+            type="checkbox"
+            checked={agreed}
+            onChange={(e) => setAgreed(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 accent-violet"
+          />
+          <span>
+            Li e concordo com os{' '}
+            <Link href="/termos" target="_blank" className="text-violet hover:text-white">
+              Termos de Uso
+            </Link>{' '}
+            e a{' '}
+            <Link href="/politica" target="_blank" className="text-violet hover:text-white">
+              Política de Cancelamento
+            </Link>
+            .
+          </span>
+        </label>
+
         {error ? (
           <div
             key={error}
@@ -226,7 +251,7 @@ export default function RegisterPage() {
           </div>
         ) : null}
 
-        <button type="submit" className="btn-primary" disabled={loading}>
+        <button type="submit" className="btn-primary" disabled={loading || !agreed}>
           {loading ? <span className="loading-dots">Criando</span> : 'Criar conta'}
         </button>
       </form>

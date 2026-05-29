@@ -215,6 +215,11 @@ export default function DashboardPage() {
         </Panel>
       </section>
 
+      {/* Controle de usuários */}
+      <section className="relative z-10 mt-6">
+        <UserControl />
+      </section>
+
       {/* Duas colunas: ferramentas + tráfego */}
       <section className="relative z-10 mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Panel title="Ferramentas mais usadas (30d)">
@@ -532,6 +537,216 @@ function Skeleton({ h }: { h: number }) {
   );
 }
 
+/* ───────────────────── Controle de usuários ───────────────────── */
+
+type SearchUser = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  tier: string;
+  subscription_status: string | null;
+  access: 'paid' | 'comp' | 'anomaly' | 'free';
+  current_period_end: string | null;
+  last_ip: string | null;
+  payments: Array<{
+    amount: number;
+    currency: string;
+    plan: string | null;
+    billing: string | null;
+    status: string;
+    receipt_url: string | null;
+    created_at: string | null;
+  }>;
+};
+
+const ACCESS_META: Record<
+  SearchUser['access'],
+  { label: string; color: string; bg: string }
+> = {
+  paid: { label: 'PAGO', color: '#c8ff00', bg: 'rgba(200,255,0,0.12)' },
+  comp: { label: 'ADMIN', color: '#67e8f9', bg: 'rgba(103,232,249,0.12)' },
+  anomaly: { label: '⚠ ANOMALIA', color: '#fca5a5', bg: 'rgba(244,63,94,0.15)' },
+  free: { label: 'FREE', color: '#9c9ca6', bg: 'rgba(255,255,255,0.04)' },
+};
+
+function UserControl() {
+  const [q, setQ] = useState('');
+  const [users, setUsers] = useState<SearchUser[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  async function search(query: string) {
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `/api/admin/user-search?q=${encodeURIComponent(query)}`,
+        { cache: 'no-store' },
+      );
+      const j = await res.json();
+      setUsers(res.ok ? (j.users as SearchUser[]) : []);
+    } catch {
+      setUsers([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function setTier(u: SearchUser, tier: 'free' | 'basic' | 'pro') {
+    if (u.tier === tier) return;
+    const reason =
+      window.prompt(
+        `Mudar ${u.email || u.name || 'usuário'} para ${tier.toUpperCase()}.\nMotivo (opcional, fica registrado na auditoria):`,
+        '',
+      ) ?? '';
+    setBusyId(u.id);
+    try {
+      const res = await fetch('/api/admin/set-tier', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: u.id, tier, reason }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(j.error || 'Falha ao mudar tier.');
+        return;
+      }
+      await search(q); // recarrega
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <Panel title="Controle de usuários">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          search(q);
+        }}
+        className="mb-4 flex gap-2"
+      >
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Buscar por nome ou email…"
+          className="flex-1 rounded-[12px] border border-line-strong bg-black/40 px-4 py-2.5 text-[14px] text-white outline-none transition focus:border-violet"
+        />
+        <button
+          type="submit"
+          className="rounded-[12px] border border-violet/50 bg-violet/15 px-5 text-[13px] font-bold text-violet transition hover:bg-violet/25"
+        >
+          {loading ? '…' : 'Buscar'}
+        </button>
+      </form>
+
+      {users === null ? (
+        <Empty>Digite um nome/email e busque pra gerenciar.</Empty>
+      ) : users.length === 0 ? (
+        <Empty>Nenhum usuário encontrado.</Empty>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {users.map((u) => {
+            const meta = ACCESS_META[u.access];
+            return (
+              <div
+                key={u.id}
+                className="rounded-[14px] border border-line/60 bg-black/20 p-4"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-[14px] font-bold text-white">
+                      {u.name || '—'}
+                    </div>
+                    <div className="truncate text-[12.5px] text-text-muted">
+                      {u.email || u.id.slice(0, 8)}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide"
+                      style={{ color: meta.color, background: meta.bg, border: `1px solid ${meta.color}55` }}
+                    >
+                      {meta.label}
+                    </span>
+                    <span className="rounded-full border border-line/70 px-2.5 py-1 text-[10px] font-bold uppercase text-text-muted">
+                      {u.tier}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Ações de tier */}
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <span className="text-[10.5px] uppercase tracking-[0.16em] text-text-dim">
+                    Definir:
+                  </span>
+                  {(['free', 'basic', 'pro'] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      disabled={busyId === u.id || u.tier === t}
+                      onClick={() => setTier(u, t)}
+                      className={
+                        'rounded-full border px-3 py-1 text-[11px] font-bold uppercase transition disabled:opacity-40 ' +
+                        (u.tier === t
+                          ? 'border-violet/60 bg-violet/20 text-violet'
+                          : 'border-line-strong text-text-muted hover:border-white hover:text-white')
+                      }
+                    >
+                      {t}
+                    </button>
+                  ))}
+                  {u.last_ip ? (
+                    <span className="ml-auto font-mono text-[11px] text-text-dim">
+                      IP {u.last_ip}
+                    </span>
+                  ) : null}
+                </div>
+
+                {/* Comprovantes */}
+                {u.payments.length > 0 ? (
+                  <div className="mt-3 border-t border-line/40 pt-2.5">
+                    <div className="mb-1.5 text-[10.5px] uppercase tracking-[0.16em] text-text-dim">
+                      Comprovantes ({u.payments.length})
+                    </div>
+                    <ul className="flex flex-col gap-1.5">
+                      {u.payments.slice(0, 6).map((p, i) => (
+                        <li key={i} className="flex items-center justify-between gap-3 text-[12.5px]">
+                          <span className="text-text-muted">
+                            {brl(p.amount)} · {p.plan || '—'}
+                            {p.created_at
+                              ? ` · ${new Date(p.created_at).toLocaleDateString('pt-BR')}`
+                              : ''}
+                          </span>
+                          {p.receipt_url ? (
+                            <a
+                              href={p.receipt_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="shrink-0 text-violet hover:underline"
+                            >
+                              comprovante →
+                            </a>
+                          ) : (
+                            <span className="text-text-dim">—</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : u.access === 'anomaly' ? (
+                  <div className="mt-2 text-[12px] text-rose-300">
+                    ⚠ Tier pago sem nenhum comprovante e sem concessão de admin — investigar.
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 /* ───────────────────── Cérebro 3D (SVG neural) ───────────────────── */
 
 function Brain3D() {
@@ -670,7 +885,7 @@ function CodeRain() {
     <canvas
       ref={ref}
       aria-hidden
-      className="pointer-events-none absolute inset-0 z-0 opacity-60"
+      className="pointer-events-none absolute inset-0 z-0 opacity-[0.14]"
     />
   );
 }
