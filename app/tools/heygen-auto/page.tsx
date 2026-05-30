@@ -1715,29 +1715,32 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
               <div className="mb-5 rounded-[12px] border border-yellow-500/40 bg-yellow-500/10 px-4 py-3">
                 <div className="flex items-start gap-2">
                   <span className="text-yellow-300">⚠</span>
-                  <div className="flex-1 text-xs text-yellow-300/90">
+                  <div className="flex-1 text-xs text-yellow-300">
                     <strong className="text-yellow-300">
                       Extensao DARKO LAB nao instalada
                     </strong>
                     . Voce precisa dela pra gerar avatares (a automacao usa sua
                     conta HeyGen logada, sem consumir API).
-                    <details className="mt-2">
-                      <summary className="cursor-pointer text-yellow-300/80 hover:text-yellow-200">
+                    <div className="mt-3">
+                      <a
+                        href="/api/extension/download"
+                        download
+                        className="btn-lime inline-flex items-center gap-2 !px-4 !py-2 text-[12px]"
+                      >
+                        ⬇ Baixar extensao (.zip)
+                      </a>
+                    </div>
+                    <details className="mt-3" open>
+                      <summary className="cursor-pointer font-semibold text-yellow-300 hover:text-yellow-200">
                         Como instalar (passo a passo)
                       </summary>
-                      <ol className="mt-2 list-decimal space-y-1 pl-5 text-yellow-300/80">
+                      <ol className="mt-2 list-decimal space-y-1 pl-5 text-yellow-300">
                         <li>
-                          Baixa o pacote da extensao:{' '}
-                          <a
-                            href="/api/extension/download"
-                            className="underline hover:text-lime"
-                            download
-                          >
-                            darkolab-heygen-extension.zip
-                          </a>
+                          Clica no botao{' '}
+                          <strong>&quot;Baixar extensao (.zip)&quot;</strong> acima
                         </li>
                         <li>
-                          Descompacta numa pasta no seu computador
+                          Descompacta o .zip numa pasta no seu computador
                         </li>
                         <li>
                           Abre <code className="mono">chrome://extensions</code>
@@ -1752,7 +1755,8 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                           Faz login no HeyGen normalmente em outra aba
                         </li>
                         <li>
-                          Volta aqui — a extensao deve aparecer como conectada
+                          Volta aqui e atualize a pagina (F5) — a extensao deve
+                          aparecer como conectada
                         </li>
                       </ol>
                     </details>
