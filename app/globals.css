@@ -1126,6 +1126,23 @@ html[data-theme='light'] .btn-primary {
   color: #ffffff;
 }
 
+/* Botão Pesquisar no claro: pílula ÚNICA e limpa. Esconde as camadas
+   decorativas (halo/borda cônica/spotlight/sheen) que criavam o efeito
+   de "2 botões". */
+html[data-theme='light'] .search-ambient,
+html[data-theme='light'] .search-conic,
+html[data-theme='light'] .search-spotlight,
+html[data-theme='light'] .search-sheen {
+  display: none !important;
+}
+html[data-theme='light'] .search-btn {
+  background: rgb(var(--bg-elev)) !important;
+  border-color: rgb(var(--line-strong)) !important;
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--line)),
+    0 1px 2px rgba(0, 0, 0, 0.06) !important;
+}
+
 /* Scrollbar no claro */
 html[data-theme='light'] ::-webkit-scrollbar-track {
   background: rgb(var(--bg-soft));
