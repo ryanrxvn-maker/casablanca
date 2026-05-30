@@ -1120,6 +1120,40 @@ html[data-theme='light'] .text-rose-300,
 html[data-theme='light'] .text-red-300 {
   color: rgb(var(--text)) !important;
 }
+/* Mesma rede de segurança para as VARIANTES COM OPACIDADE do Tailwind
+   (ex.: text-yellow-300/80, text-amber-300/90). Essas geram classes
+   diferentes (.text-yellow-300\/80) que os seletores acima NAO pegam, entao
+   o texto sumia no modo claro (banner "extensao nao instalada" era ilegivel).
+   Os seletores de atributo abaixo cobrem qualquer nivel de opacidade. */
+html[data-theme='light'] [class*='text-white/'],
+html[data-theme='light'] [class*='text-amber-200/'],
+html[data-theme='light'] [class*='text-amber-300/'],
+html[data-theme='light'] [class*='text-amber-400/'],
+html[data-theme='light'] [class*='text-yellow-200/'],
+html[data-theme='light'] [class*='text-yellow-300/'],
+html[data-theme='light'] [class*='text-yellow-400/'],
+html[data-theme='light'] [class*='text-lime-200/'],
+html[data-theme='light'] [class*='text-lime-300/'],
+html[data-theme='light'] [class*='text-green-300/'],
+html[data-theme='light'] [class*='text-emerald-300/'],
+html[data-theme='light'] [class*='text-teal-200/'],
+html[data-theme='light'] [class*='text-teal-300/'],
+html[data-theme='light'] [class*='text-cyan-200/'],
+html[data-theme='light'] [class*='text-cyan-300/'],
+html[data-theme='light'] [class*='text-sky-300/'],
+html[data-theme='light'] [class*='text-blue-300/'],
+html[data-theme='light'] [class*='text-indigo-300/'],
+html[data-theme='light'] [class*='text-violet-200/'],
+html[data-theme='light'] [class*='text-violet-300/'],
+html[data-theme='light'] [class*='text-purple-200/'],
+html[data-theme='light'] [class*='text-purple-300/'],
+html[data-theme='light'] [class*='text-fuchsia-300/'],
+html[data-theme='light'] [class*='text-pink-200/'],
+html[data-theme='light'] [class*='text-pink-300/'],
+html[data-theme='light'] [class*='text-rose-300/'],
+html[data-theme='light'] [class*='text-red-300/'] {
+  color: rgb(var(--text)) !important;
+}
 /* Botões de acento mantêm texto claro legível no claro. */
 html[data-theme='light'] .btn-lime,
 html[data-theme='light'] .btn-primary {
