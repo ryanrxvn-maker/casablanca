@@ -1,6 +1,6 @@
 /**
  * DARKO LAB Magnific - Bridge content script
- * Roda em darkolab.vercel.app e localhost. Ponte entre a pagina (window.postMessage)
+ * Roda em darkoautoedit.com e localhost. Ponte entre a pagina (window.postMessage)
  * e o background worker (chrome.runtime.sendMessage).
  *
  * Mensagens suportadas (source: 'darkolab-magnific' → bridge):

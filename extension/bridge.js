@@ -1,6 +1,6 @@
 /**
  * DARKO LAB Extension - Bridge content script
- * Roda em darkolab.vercel.app e localhost. Faz a ponte entre a pagina
+ * Roda em darkoautoedit.com e localhost. Faz a ponte entre a pagina
  * (window.postMessage) e o background worker (chrome.runtime.sendMessage).
  */
 

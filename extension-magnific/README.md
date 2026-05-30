@@ -24,7 +24,7 @@ Usa sua propria conta logada em Magnific — **NUNCA gasta creditos**
 
 A extension roda em 2 contextos:
 
-1. **`bridge.js`** carrega no DARKO LAB (`darkolab.vercel.app` e
+1. **`bridge.js`** carrega no DARKO LAB (`darkoautoedit.com` e
    `localhost`) e faz ponte entre a pagina e o background worker
 2. **`magnific-content.js`** carrega em `www.magnific.com` e executa
    a automacao no Magnific (criar Spaces, configurar nodes Image

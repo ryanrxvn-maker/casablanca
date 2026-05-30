@@ -1,7 +1,7 @@
 /**
  * Ephemeral cross-tab data store. Memoria em-processo (some no proximo deploy).
  * Uso: passar texto entre 2 tabs de origens diferentes (ex: docs.google.com →
- * casablanca-ashen.vercel.app) durante automacao MCP.
+ * www.darkoautoedit.com) durante automacao MCP.
  *
  * NAO usar pra dado sensivel ou persistente. TTL 5min, max 1MB por entry.
  *
