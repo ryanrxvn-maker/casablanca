@@ -502,7 +502,7 @@ function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
       className="promo-banner group relative overflow-hidden rounded-[26px] border border-line/60"
       style={{
         background:
-          'linear-gradient(120deg, rgba(200,255,0,0.16) 0%, rgba(167,139,250,0.18) 50%, rgba(34,211,238,0.12) 100%), linear-gradient(180deg, #15151a, #0a0a0c)',
+          'linear-gradient(120deg, rgba(200,255,0,0.16) 0%, rgba(167,139,250,0.18) 50%, rgba(34,211,238,0.12) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #0a0a0c)',
       }}
     >
       {/* Mesh gradient animado — duas manchas que pulsam fora de fase */}
@@ -670,7 +670,7 @@ function AutoBrollSlide({ canStartAutomation }: { canStartAutomation: boolean })
       className="group relative overflow-hidden rounded-[26px] border border-violet/30"
       style={{
         background:
-          'linear-gradient(120deg, rgba(167,139,250,0.20) 0%, rgba(240,171,252,0.16) 50%, rgba(200,255,0,0.10) 100%), linear-gradient(180deg, #15151a, #0a0a0c)',
+          'linear-gradient(120deg, rgba(167,139,250,0.20) 0%, rgba(240,171,252,0.16) 50%, rgba(200,255,0,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #0a0a0c)',
       }}
     >
       {/* Mesh pulses */}
@@ -1100,7 +1100,7 @@ function ToolCard({
       : 'hover:-translate-y-[2px] hover:border-violet/45');
   const style: React.CSSProperties = {
     animationDelay: `${delay}ms`,
-    background: 'linear-gradient(180deg, #15151a 0%, #0e0e10 100%)',
+    background: 'linear-gradient(180deg, rgb(var(--bg-softer)) 0%, rgb(var(--bg-soft)) 100%)',
     boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
   };
   const body = (
@@ -1256,7 +1256,7 @@ function LockedFlash({
       style={{
         borderColor: accent,
         background:
-          'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.18)), linear-gradient(180deg, #15151a, #0c0c10)',
+          'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
       }}
     >
       <span

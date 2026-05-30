@@ -55,7 +55,7 @@ export function ToolHero({
         className="relative flex flex-col gap-3 px-6 py-8 md:flex-row md:items-center md:justify-between md:px-8 md:py-10"
         style={{
           background:
-            'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, #15151a, #0c0c10)',
+            'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
         }}
       >
         <div className="flex-1">
@@ -140,7 +140,7 @@ export function ToolStep({
       className="tool-step relative overflow-hidden rounded-[20px] border border-line/60 p-5 transition-colors duration-300 hover:border-violet/30 md:p-7"
       style={{
         background:
-          'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.16)), linear-gradient(180deg, #15151a, #0c0c10)',
+          'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.16)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
       }}
     >
       {/* Glow do passo */}
@@ -590,7 +590,7 @@ export function ToolResultCard({
       className="result-card relative overflow-hidden rounded-[18px] border p-5 md:p-6"
       style={{
         background:
-          'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, #15151a, #0c0c10)',
+          'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
         borderColor: 'rgba(200,255,0,0.32)',
       }}
     >

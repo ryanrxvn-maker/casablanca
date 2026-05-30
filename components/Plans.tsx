@@ -467,7 +467,7 @@ function PlanCard({
           className="relative flex h-full flex-col rounded-[28px] px-6 py-8 md:px-7 md:py-10"
           style={{
             background:
-              'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.20)), linear-gradient(180deg, #15151a, #0a0a0c)',
+              'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.20)), linear-gradient(180deg, rgb(var(--bg-softer)), #0a0a0c)',
           }}
         >
           {/* Badges no topo — pode ter "MAIS POPULAR" + "OFERTA" */}
@@ -1583,7 +1583,7 @@ function ToolInfoCard({ tool, delay }: { tool: ToolInfo; delay: number }) {
         animationDelay: `${delay}ms`,
         background: tool.featured
           ? `linear-gradient(180deg, rgba(255,255,255,0.045), rgba(0,0,0,0.25)), linear-gradient(180deg, #181820, #0c0c10)`
-          : 'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.20)), linear-gradient(180deg, #15151a, #0c0c10)',
+          : 'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.20)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
         boxShadow: tool.featured
           ? `0 0 32px -16px ${tool.hue}, inset 0 1px 0 rgba(255,255,255,0.05)`
           : undefined,

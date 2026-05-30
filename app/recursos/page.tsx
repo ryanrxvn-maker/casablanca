@@ -57,7 +57,7 @@ export default function RecursosHub() {
               className="group rounded-[18px] border border-line/60 p-6 transition-all duration-300 hover:-translate-y-1 hover:border-violet/40"
               style={{
                 background:
-                  'linear-gradient(180deg, rgba(255,255,255,0.022), rgba(0,0,0,0.16)), linear-gradient(180deg, #15151a, #0e0e10)',
+                  'linear-gradient(180deg, rgba(255,255,255,0.022), rgba(0,0,0,0.16)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
               }}
             >
               <div

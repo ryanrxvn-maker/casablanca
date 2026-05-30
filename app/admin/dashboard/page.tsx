@@ -446,7 +446,7 @@ function StatCard({
       style={{
         borderColor: hue.replace('0.6', '0.4'),
         background:
-          'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.25)), linear-gradient(180deg, #15151a, #0b0b0e)',
+          'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.25)), linear-gradient(180deg, rgb(var(--bg-softer)), #0b0b0e)',
         boxShadow: `0 0 30px -16px ${hue}`,
       }}
     >

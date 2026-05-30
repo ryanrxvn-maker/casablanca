@@ -8,42 +8,44 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Tons base — preto profundo com gradiente sutil em cinzas
+        // Tokens via CSS vars (globals.css) → tema-aware (dark/light).
+        // Em modo ESCURO as vars valem exatamente os hex antigos, então o
+        // dark fica pixel-idêntico. O modo claro só sobrescreve as vars.
         bg: {
-          DEFAULT: '#070708',
-          soft: '#0e0e10',
-          softer: '#15151a',
-          elev: '#1a1a20',
+          DEFAULT: 'rgb(var(--bg) / <alpha-value>)',
+          soft: 'rgb(var(--bg-soft) / <alpha-value>)',
+          softer: 'rgb(var(--bg-softer) / <alpha-value>)',
+          elev: 'rgb(var(--bg-elev) / <alpha-value>)',
         },
         line: {
-          DEFAULT: '#1c1c22',
-          strong: '#24242c',
-          glow: '#2e2e38',
+          DEFAULT: 'rgb(var(--line) / <alpha-value>)',
+          strong: 'rgb(var(--line-strong) / <alpha-value>)',
+          glow: 'rgb(var(--line-glow) / <alpha-value>)',
         },
         text: {
-          DEFAULT: '#ffffff',
-          muted: '#8b8b96',
-          dim: '#4d4d57',
+          DEFAULT: 'rgb(var(--text) / <alpha-value>)',
+          muted: 'rgb(var(--text-muted) / <alpha-value>)',
+          dim: 'rgb(var(--text-dim) / <alpha-value>)',
         },
         // Lime — acento PRIMARIO da marca. Usar com parcimonia: CTA, dots ativos, brand.
         lime: {
-          DEFAULT: '#c8ff00',
+          DEFAULT: 'rgb(var(--lime) / <alpha-value>)',
           soft: 'rgba(200, 255, 0, 0.10)',
         },
         // Violeta — acento SECUNDARIO. Estados AI, premium, "inteligente".
         violet: {
-          DEFAULT: '#a78bfa',
+          DEFAULT: 'rgb(var(--violet) / <alpha-value>)',
           soft: 'rgba(167, 139, 250, 0.12)',
-          deep: '#6d4ee8',
+          deep: 'rgb(var(--violet-deep) / <alpha-value>)',
         },
         // Ambar — acento TERCIARIO. Pontos, conquistas, warnings suaves.
         amber: {
-          DEFAULT: '#f5c842',
+          DEFAULT: 'rgb(var(--amber) / <alpha-value>)',
           soft: 'rgba(245, 200, 66, 0.12)',
         },
         // Ciano frio — info, processing
         cyan: {
-          DEFAULT: '#67e8f9',
+          DEFAULT: 'rgb(var(--cyan) / <alpha-value>)',
           soft: 'rgba(103, 232, 249, 0.10)',
         },
       },

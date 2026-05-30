@@ -205,6 +205,14 @@ export default function RootLayout({
       className={`${display.variable} ${mono.variable} ${tech.variable} ${serif.variable}`}
     >
       <body>
+        {/* Anti-flash: aplica o tema salvo ANTES da pintura. Default = dark
+            (sem atributo); só seta data-theme quando for claro. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "(function(){try{if(localStorage.getItem('theme')==='light'){document.documentElement.setAttribute('data-theme','light');}}catch(e){}})();",
+          }}
+        />
         <script
           type="application/ld+json"
           // JSON estático do app (sem input de usuário) — seguro.

@@ -93,7 +93,7 @@ export function AuthShell({
               className="auth-card relative overflow-hidden rounded-[24px] border border-line/70 p-7 md:p-9"
               style={{
                 background:
-                  'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, #15151a 0%, #0e0e10 100%)',
+                  'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)) 0%, rgb(var(--bg-soft)) 100%)',
                 boxShadow:
                   '0 1px 0 rgba(255,255,255,0.06) inset, 0 36px 72px -24px rgba(0,0,0,0.95), 0 0 64px -16px rgba(167,139,250,0.22)',
               }}

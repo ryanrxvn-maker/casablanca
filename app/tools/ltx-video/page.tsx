@@ -322,7 +322,7 @@ export default function LtxVideoPage() {
                 className={
                   'inline-block h-2 w-2 rounded-full ' +
                   (pool.estRemainingToday > 0
-                    ? 'bg-lime shadow-[0_0_10px_var(--lime)]'
+                    ? 'bg-lime shadow-[0_0_10px_rgb(var(--lime))]'
                     : 'bg-red-500')
                 }
               />

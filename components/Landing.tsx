@@ -110,7 +110,7 @@ function HeroSection() {
             <SmokeText text="Edição no automático." className="block" />
             <span className="block" style={{ marginTop: '0.2em' }}>
               <span className="display-subtle" style={{ fontSize: 'clamp(1.8rem, 4vw, 3rem)', lineHeight: '1.1' }}>
-                <span style={{ color: 'var(--violet)' }}>
+                <span style={{ color: 'rgb(var(--violet))' }}>
                   <SmokeText text="Você dorme, o estúdio entrega." />
                 </span>
               </span>
@@ -240,7 +240,7 @@ function AvatarStack() {
           key={i}
           className="h-8 w-8 rounded-full border-2 border-bg"
           style={{
-            background: `linear-gradient(135deg, ${c}, #1a1a20)`,
+            background: `linear-gradient(135deg, ${c}, rgb(var(--bg-elev)))`,
             boxShadow: `inset 0 1px 0 rgba(255,255,255,0.2), 0 0 12px -4px ${c}`,
           }}
         />
@@ -294,7 +294,7 @@ function PilotShowcase() {
         className="relative overflow-hidden rounded-[32px] border border-line/70 fade-in-up"
         style={{
           background:
-            'linear-gradient(120deg, rgba(200,255,0,0.18) 0%, rgba(167,139,250,0.22) 50%, rgba(34,211,238,0.14) 100%), linear-gradient(180deg, #15151a, #08080a)',
+            'linear-gradient(120deg, rgba(200,255,0,0.18) 0%, rgba(167,139,250,0.22) 50%, rgba(34,211,238,0.14) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #08080a)',
         }}
       >
         {/* Pulsos animados — fundo ambient */}
@@ -440,7 +440,7 @@ function AutoBrollShowcase() {
         className="relative overflow-hidden rounded-[32px] border border-violet/35 fade-in-up"
         style={{
           background:
-            'linear-gradient(120deg, rgba(167,139,250,0.22) 0%, rgba(240,171,252,0.18) 50%, rgba(200,255,0,0.10) 100%), linear-gradient(180deg, #15151a, #08080a)',
+            'linear-gradient(120deg, rgba(167,139,250,0.22) 0%, rgba(240,171,252,0.18) 50%, rgba(200,255,0,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #08080a)',
         }}
       >
         {/* Pulsos */}
@@ -1124,7 +1124,7 @@ export function PilotHowItWorks() {
             style={{
               animationDelay: `${i * 90}ms`,
               background:
-                'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.20)), linear-gradient(180deg, #15151a, #0c0c10)',
+                'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.20)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
             }}
           >
             <div
@@ -1166,7 +1166,7 @@ export function PilotHowItWorks() {
         style={{
           animationDelay: '380ms',
           background:
-            'linear-gradient(135deg, rgba(167,139,250,0.16) 0%, rgba(103,232,249,0.10) 100%), linear-gradient(180deg, #15151a, #0c0c10)',
+            'linear-gradient(135deg, rgba(167,139,250,0.16) 0%, rgba(103,232,249,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
         }}
       >
         <div className="grid grid-cols-1 gap-8 px-7 py-8 md:grid-cols-[auto_1fr] md:px-10 md:py-10">
@@ -1220,7 +1220,7 @@ export function PilotHowItWorks() {
           style={{
             animationDelay: '480ms',
             background:
-              'linear-gradient(135deg, rgba(200,255,0,0.10), rgba(0,0,0,0.18)), linear-gradient(180deg, #15151a, #0c0c10)',
+              'linear-gradient(135deg, rgba(200,255,0,0.10), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
           }}
         >
           <div
@@ -1256,7 +1256,7 @@ export function PilotHowItWorks() {
           style={{
             animationDelay: '560ms',
             background:
-              'linear-gradient(135deg, rgba(167,139,250,0.14), rgba(0,0,0,0.18)), linear-gradient(180deg, #15151a, #0c0c10)',
+              'linear-gradient(135deg, rgba(167,139,250,0.14), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
           }}
         >
           <div
@@ -1365,7 +1365,7 @@ export function AutoBrollHowItWorks() {
             style={{
               animationDelay: `${i * 90}ms`,
               background:
-                'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.20)), linear-gradient(180deg, #15151a, #0c0c10)',
+                'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.20)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
             }}
           >
             <div
@@ -1407,7 +1407,7 @@ export function AutoBrollHowItWorks() {
         style={{
           animationDelay: '380ms',
           background:
-            'linear-gradient(135deg, rgba(251,191,36,0.10) 0%, rgba(167,139,250,0.08) 100%), linear-gradient(180deg, #15151a, #0c0c10)',
+            'linear-gradient(135deg, rgba(251,191,36,0.10) 0%, rgba(167,139,250,0.08) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
         }}
       >
         <div className="grid grid-cols-1 gap-8 px-7 py-8 md:grid-cols-[auto_1fr] md:px-10 md:py-10">
@@ -1475,7 +1475,7 @@ export function AutoBrollHowItWorks() {
         style={{
           animationDelay: '440ms',
           background:
-            'linear-gradient(135deg, rgba(200,255,0,0.10) 0%, rgba(167,139,250,0.10) 100%), linear-gradient(180deg, #15151a, #0c0c10)',
+            'linear-gradient(135deg, rgba(200,255,0,0.10) 0%, rgba(167,139,250,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
         }}
       >
         <div className="grid grid-cols-1 gap-8 px-7 py-8 md:grid-cols-[auto_1fr] md:px-10 md:py-10">
@@ -1528,7 +1528,7 @@ export function AutoBrollHowItWorks() {
           style={{
             animationDelay: '480ms',
             background:
-              'linear-gradient(135deg, rgba(167,139,250,0.14), rgba(0,0,0,0.18)), linear-gradient(180deg, #15151a, #0c0c10)',
+              'linear-gradient(135deg, rgba(167,139,250,0.14), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
           }}
         >
           <div
@@ -1565,7 +1565,7 @@ export function AutoBrollHowItWorks() {
           style={{
             animationDelay: '560ms',
             background:
-              'linear-gradient(135deg, rgba(200,255,0,0.10), rgba(0,0,0,0.18)), linear-gradient(180deg, #15151a, #0c0c10)',
+              'linear-gradient(135deg, rgba(200,255,0,0.10), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
           }}
         >
           <div
@@ -1709,7 +1709,7 @@ function CapabilityCard({
       style={{
         animationDelay: `${delay}ms`,
         background:
-          'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, #15151a, #0e0e10)',
+          'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
       }}
     >
       <div
@@ -1775,7 +1775,7 @@ function FaqSection() {
             style={{
               animationDelay: `${i * 50}ms`,
               background:
-                'linear-gradient(180deg, rgba(255,255,255,0.022), rgba(0,0,0,0.16)), linear-gradient(180deg, #15151a, #0e0e10)',
+                'linear-gradient(180deg, rgba(255,255,255,0.022), rgba(0,0,0,0.16)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
             }}
           >
             <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 md:px-6 md:py-5">
@@ -1882,7 +1882,7 @@ function ShowcaseVisual() {
       style={{
         animationDelay: '150ms',
         background:
-          'linear-gradient(150deg, rgba(167,139,250,0.16), rgba(0,0,0,0)) , linear-gradient(180deg, #15151a, #0a0a0c)',
+          'linear-gradient(150deg, rgba(167,139,250,0.16), rgba(0,0,0,0)) , linear-gradient(180deg, rgb(var(--bg-softer)), #0a0a0c)',
       }}
     >
       <div
@@ -1951,7 +1951,7 @@ function FinalCTA() {
         className="relative overflow-hidden rounded-[28px] border border-line/60 px-6 py-14 text-center md:px-12 md:py-20"
         style={{
           background:
-            'linear-gradient(135deg, rgba(167,139,250,0.18) 0%, rgba(244,114,182,0.10) 50%, rgba(103,232,249,0.08) 100%), linear-gradient(180deg, #15151a, #0a0a0c)',
+            'linear-gradient(135deg, rgba(167,139,250,0.18) 0%, rgba(244,114,182,0.10) 50%, rgba(103,232,249,0.08) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #0a0a0c)',
         }}
       >
         <div

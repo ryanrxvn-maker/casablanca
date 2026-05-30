@@ -30,14 +30,12 @@ interface LipSyncBody {
   video_url?: string;
   audio_url?: string;
   smooth?: boolean;
-  pads?: [number, number, number, number];
+  pads?: string; // formato "top bottom left right" (ex: "0 15 0 0")
 }
 
-// Model: cjwbw/wav2lip — wav2lip GAN model on Replicate.
-// Hash explicito da versao garante reprodutibilidade.
-// Pode atualizar pra versao mais recente conferindo https://replicate.com/cjwbw/wav2lip
-const WAV2LIP_MODEL =
-  'cjwbw/wav2lip:8d65e3f4f4af1a23e6c0b7c63ab7a8a6ed14e4a4e8e51bf6f8f7cd83a4c4f8fc';
+// Model: devxpy/cog-wav2lip — Wav2Lip oficial no Replicate.
+// (cjwbw/wav2lip foi removido em 2024.)
+const WAV2LIP_MODEL = 'devxpy/cog-wav2lip';
 
 export async function POST(req: Request) {
   const guard = await requireAdmin();
@@ -71,18 +69,19 @@ export async function POST(req: Request) {
   try {
     // Wav2Lip input:
     //  - face: video do rosto (URL)
-    //  - audio: audio com a fala (URL)
-    //  - pads: padding em volta da boca [top, bottom, left, right]
-    //  - smooth: smoothing temporal pra evitar tremor (default true)
+    //  - audio: audio/video com fala (URL)
+    //  - pads: string "top bottom left right" (default "0 15 0 0" — +chin)
+    //  - smooth: smoothing temporal pra evitar tremor
     const input = {
       face: video_url,
       audio: audio_url,
       smooth: body.smooth ?? true,
-      pads: body.pads ?? [0, 10, 0, 0],
+      pads: body.pads ?? '0 15 0 0',
+      resize_factor: 1,
     };
 
     const output = await replicate.run(
-      WAV2LIP_MODEL as `${string}/${string}:${string}`,
+      WAV2LIP_MODEL as `${string}/${string}`,
       { input },
     );
 
