@@ -29,7 +29,7 @@ import {
   type ParsedDarkoBriefing,
   type ParsedVABriefing,
 } from '@/lib/copy-parser';
-import { splitCopyIntoParts, cloneVoiceViaExtension } from '@/lib/heygen-extension-bridge';
+import { splitCopyIntoParts, cloneVoiceViaExtension, detectExtension } from '@/lib/heygen-extension-bridge';
 import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
 import {
   pollVideosUntilReady,
@@ -954,6 +954,39 @@ function ClickUpPilotInner() {
     }
     setError(null);
     setAnalyzing(true);
+    // PREFLIGHT: a leitura do doc depende do bridge da extensao injetado
+    // NESTE dominio. Extensoes antigas (<4.15.2) so injetam em *.vercel.app,
+    // entao em darkoautoedit.com o bridge nao carrega e o HG_FETCH_DOC cai no
+    // vazio ate o timeout de 30s — hang silencioso por task. Detecta antes
+    // (700ms) e falha rapido com instrucao de reinstalar.
+    const MIN_EXT_VERSION = '4.15.2';
+    const ext = await detectExtension();
+    const cmpVer = (a: string, b: string) => {
+      const pa = a.split('.').map((n) => parseInt(n, 10) || 0);
+      const pb = b.split('.').map((n) => parseInt(n, 10) || 0);
+      for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const d = (pa[i] || 0) - (pb[i] || 0);
+        if (d !== 0) return d;
+      }
+      return 0;
+    };
+    if (!ext.connected) {
+      setAnalyzing(false);
+      setError(
+        `Extensao Auto Edit nao detectada neste dominio (darkoautoedit.com). ` +
+          `Se voce instalou uma versao antiga, ela so funciona no dominio vercel.app. ` +
+          `Baixe a versao atual em /api/extension/download, recarregue em chrome://extensions e atualize esta pagina (F5).`,
+      );
+      return;
+    }
+    if (ext.version && ext.version !== '?' && cmpVer(ext.version, MIN_EXT_VERSION) < 0) {
+      setAnalyzing(false);
+      setError(
+        `Extensao desatualizada (v${ext.version}). A leitura de docs exige v${MIN_EXT_VERSION}+. ` +
+          `Baixe a versao atual em /api/extension/download e recarregue em chrome://extensions.`,
+      );
+      return;
+    }
     // Force reload library — pega avatares recem criados (user pode ter
     // acabado de criar voice clones alinhadas com nomes do briefing)
     await reloadLibrary(true);
