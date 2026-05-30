@@ -137,6 +137,40 @@ function AutoBrollInner() {
   });
   const [sessionOk, setSessionOk] = useState<null | { ok: boolean; detail?: string }>(null);
   const [testingSession, setTestingSession] = useState(false);
+  // Conta Magnific ATIVA (lida dos cookies da aba magnific.com).
+  // Atualiza sozinha a cada 30s — quando user logar em outra conta no
+  // Freepik, em até 30s o app reflete (e o batch novo invalida na hora).
+  const [activeAccount, setActiveAccount] = useState<{ fpId: number; name?: string; email?: string } | null>(null);
+  const [refreshingAccount, setRefreshingAccount] = useState(false);
+  useEffect(() => {
+    if (!extStatus.connected) return;
+    let alive = true;
+    async function fetchAccount(force = false) {
+      try {
+        const { getCurrentAccount } = await import('@/lib/magnific-api-client');
+        const acc = await getCurrentAccount(force);
+        if (alive) setActiveAccount({ fpId: acc.fpId, name: acc.name, email: acc.email });
+      } catch (e) {
+        if (alive) console.warn('[auto-broll] fetch account falhou:', e);
+      }
+    }
+    fetchAccount();
+    const id = setInterval(() => fetchAccount(), 30_000);
+    return () => { alive = false; clearInterval(id); };
+  }, [extStatus.connected]);
+  async function handleRefreshAccount() {
+    setRefreshingAccount(true);
+    try {
+      const { invalidateUserIdCache, getCurrentAccount } = await import('@/lib/magnific-api-client');
+      invalidateUserIdCache();
+      const acc = await getCurrentAccount(true);
+      setActiveAccount({ fpId: acc.fpId, name: acc.name, email: acc.email });
+    } catch (e) {
+      console.warn('[auto-broll] refresh account falhou:', e);
+    } finally {
+      setRefreshingAccount(false);
+    }
+  }
 
   // imageModel TRAVADO em nano-banana-pro — sem state, sem opção
   const imageModel = IMAGE_MODEL_FIXED;
@@ -389,6 +423,23 @@ function AutoBrollInner() {
                   <span className="text-[13px] font-semibold text-white">
                     {extStatus.version}
                   </span>
+                  {activeAccount ? (
+                    <span className="mono mt-0.5 inline-flex w-fit items-center gap-1.5 text-[10px] text-text-muted" style={{ fontFamily: 'var(--font-tech)' }}>
+                      <span className="text-cyan-300">↳</span>
+                      <span className="text-white/85" title={`fpId ${activeAccount.fpId}`}>
+                        {activeAccount.email || activeAccount.name || `fpId ${activeAccount.fpId}`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleRefreshAccount}
+                        disabled={refreshingAccount}
+                        className="ml-1 rounded-full border border-cyan-500/30 bg-cyan-500/[0.08] px-2 py-0.5 text-[8.5px] font-bold uppercase tracking-[0.14em] text-cyan-200 hover:bg-cyan-500/15 disabled:opacity-50"
+                        title="Re-checa a conta (após trocar no magnific.com)"
+                      >
+                        {refreshingAccount ? '…' : '↻ trocar'}
+                      </button>
+                    </span>
+                  ) : null}
                   {sessionOk?.ok ? (
                     <span
                       className="mono mt-0.5 inline-flex w-fit items-center gap-1 rounded-full bg-lime/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-lime"

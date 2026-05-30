@@ -72,40 +72,64 @@ const POLL_TIMEOUT_IMG_MS = 600_000; // 10min — Nano Banana raramente passa de
 const POLL_TIMEOUT_VID_MS = 5_400_000; // 90min — Kling 2.5 sob carga MUITO pesada chega 30-60min;
                                        // damos folga generosa. User pediu "esperar em paz".
 
-/* ────────── User id ────────── */
+/* ────────── User id / conta ativa ────────── */
 
-let cachedUserId: number | null = null;
-let cachedUserIdAt = 0;
-// TTL curto (60s): a cada minuto re-checa o /auth/verify pra detectar
-// troca de conta Freepik SEM precisar reload. User só precisa logar
-// em outra conta no magnific.com — em até 60s o app reflete sozinho.
-const USER_ID_TTL_MS = 60_000;
+export type MagnificAccount = {
+  fpId: number;
+  name?: string;
+  email?: string;
+  avatar?: string;
+};
 
-/** Invalida o cache do fpId. Use quando souber que o user trocou de conta. */
+let cachedAccount: MagnificAccount | null = null;
+let cachedAt = 0;
+// TTL curto (30s): a cada 30s re-checa /auth/verify pra detectar troca
+// de conta Freepik. User só desloga/loga no magnific.com → em até 30s
+// o app reflete. Cada novo batch invalida ANTES (preflight) → 0s de delay.
+const ACCOUNT_TTL_MS = 30_000;
+
+/** Invalida o cache da conta ativa. Use quando souber que o user trocou. */
 export function invalidateUserIdCache(): void {
-  cachedUserId = null;
-  cachedUserIdAt = 0;
+  cachedAccount = null;
+  cachedAt = 0;
+}
+
+/** Listener registrados pra notificar UI quando conta muda. */
+const accountChangeListeners = new Set<(acc: MagnificAccount) => void>();
+export function onAccountChange(cb: (acc: MagnificAccount) => void): () => void {
+  accountChangeListeners.add(cb);
+  return () => accountChangeListeners.delete(cb);
+}
+
+/** Pega a conta ATIVA do Magnific (lendo cookies vivos da aba magnific.com).
+ *  Cache TTL 30s — re-busca automático detecta troca de conta sem reload. */
+export async function getCurrentAccount(forceFresh = false): Promise<MagnificAccount> {
+  const now = Date.now();
+  if (!forceFresh && cachedAccount && now - cachedAt < ACCOUNT_TTL_MS) return cachedAccount;
+  const r = await magnificFetch('/app/api/auth/verify?lang=en_US');
+  if (!r.ok) throw new Error(`auth/verify falhou: ${r.status}`);
+  const j = r.json() as {
+    userData?: { fpId?: string | number; id?: number; name?: string; email?: string; avatar?: string };
+  };
+  const u = j.userData;
+  if (!u) throw new Error('auth/verify sem userData (sessão Freepik expirou?)');
+  const fpId = typeof u.fpId === 'string' ? parseInt(u.fpId, 10) : u.fpId;
+  const id = fpId || u.id || 0;
+  if (!id) throw new Error('Sem fpId/id em auth/verify');
+  const acc: MagnificAccount = { fpId: id, name: u.name, email: u.email, avatar: u.avatar };
+  // Notifica troca de conta
+  if (cachedAccount && cachedAccount.fpId !== acc.fpId) {
+    console.log(`[magnific] conta trocada: fpId ${cachedAccount.fpId} → ${acc.fpId} (${acc.email || acc.name || '?'})`);
+    for (const cb of accountChangeListeners) { try { cb(acc); } catch {} }
+  }
+  cachedAccount = acc;
+  cachedAt = now;
+  return acc;
 }
 
 async function getUserId(): Promise<number> {
-  const now = Date.now();
-  // Cache fresco (<60s) → reusa. Senão re-busca pra detectar troca de conta.
-  if (cachedUserId && now - cachedUserIdAt < USER_ID_TTL_MS) return cachedUserId;
-  const r = await magnificFetch('/app/api/auth/verify?lang=en_US');
-  if (!r.ok) throw new Error(`auth/verify falhou: ${r.status}`);
-  const j = r.json() as { userData?: { fpId?: string | number; id?: number } };
-  const u = j.userData;
-  if (!u) throw new Error('auth/verify sem userData');
-  const fpId = typeof u.fpId === 'string' ? parseInt(u.fpId, 10) : u.fpId;
-  const uid = fpId || u.id || 0;
-  if (!uid) throw new Error('Sem fpId/id em auth/verify');
-  // Log se mudou (debug + visibilidade pra user no console)
-  if (cachedUserId && cachedUserId !== uid) {
-    console.log(`[magnific] conta trocada: ${cachedUserId} → ${uid} (cookies da aba magnific.com)`);
-  }
-  cachedUserId = uid;
-  cachedUserIdAt = now;
-  return uid;
+  const acc = await getCurrentAccount();
+  return acc.fpId;
 }
 
 /* ────────── Guards ────────── */
@@ -150,8 +174,12 @@ export async function simulateGeneration(
   };
 }
 
-/** Confirma Unlimited ON + custo zero pros 2 modelos. Throws se alguma falha. */
+/** Confirma Unlimited ON + custo zero pros 2 modelos. Throws se alguma falha.
+ *  CRÍTICO: invalida cache de conta no INÍCIO. Se user trocou de conta
+ *  Freepik nesse meio tempo (logout/login no magnific.com), o batch
+ *  vai usar a conta NOVA, não a velha em cache. Zero delay. */
 export async function assertZeroCreditCost(): Promise<void> {
+  invalidateUserIdCache(); // força re-fetch /auth/verify com cookies vivos
   const status = await getUnlimitedStatus();
   if (status.isBanned) throw new Error('Conta Magnific BANIDA.');
   if (!status.isEnabled) throw new Error('Unlimited mode DESLIGADO no Magnific.');
