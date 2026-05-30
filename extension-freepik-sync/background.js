@@ -34,8 +34,8 @@ const STORAGE_KEYS = {
 // IDEALMENTE não usado — o content script app-discover.js registra
 // o origin assim que user abre qualquer página do Auto Edit.
 const FALLBACK_ENDPOINTS = [
-  'https://casablanca-ashen.vercel.app',
-  'https://casablanca.vercel.app',
+  'https://www.darkoautoedit.com',
+  'https://darkoautoedit.com',
   'http://localhost:3000',
 ];
 

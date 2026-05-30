@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Auto Edit · Freepik Sync",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Sincroniza sua conta Freepik/Magnific com Auto Edit. Zero copy-paste — fica logado, fica conectado.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -21,11 +21,10 @@
     "https://magnific.com/*",
     "https://*.magnific.com/*",
     "https://*.freepik.com/*",
+    "https://www.darkoautoedit.com/*",
+    "https://darkoautoedit.com/*",
+    "https://*.darkoautoedit.com/*",
     "https://*.vercel.app/*",
-    "https://*.auto-edit.com.br/*",
-    "https://*.auto-edit.com/*",
-    "https://auto-edit.com.br/*",
-    "https://auto-edit.com/*",
     "http://localhost/*",
     "http://localhost:*/*"
   ],
@@ -35,11 +34,10 @@
   "content_scripts": [
     {
       "matches": [
+        "https://www.darkoautoedit.com/*",
+        "https://darkoautoedit.com/*",
+        "https://*.darkoautoedit.com/*",
         "https://*.vercel.app/*",
-        "https://*.auto-edit.com.br/*",
-        "https://*.auto-edit.com/*",
-        "https://auto-edit.com.br/*",
-        "https://auto-edit.com/*",
         "http://localhost/*",
         "http://localhost:*/*"
       ],

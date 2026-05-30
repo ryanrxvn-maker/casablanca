@@ -81,7 +81,7 @@ $('btnOpenMagnific').addEventListener('click', () => {
 
 $('btnOpenDarko').addEventListener('click', async () => {
   const s = await send('get-status');
-  const base = s?.endpoint || s?.discoveredOrigin || 'https://casablanca.vercel.app';
+  const base = s?.endpoint || s?.discoveredOrigin || 'https://www.darkoautoedit.com';
   chrome.tabs.create({ url: base + '/configuracoes/magnific' });
 });
 
