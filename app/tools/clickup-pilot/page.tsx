@@ -249,6 +249,10 @@ type BatchTaskState = {
    *  "Atualizar montagem" que re-roda runPostPipeline. Persiste no
    *  localStorage pra sobreviver reload. */
   dirtyParts?: string[];
+  /** Doc URL (Google Docs) da task — pra botao "abrir doc" no card. */
+  docUrl?: string;
+  /** ClickUp task URL — fallback se docUrl nao foi capturado. */
+  taskUrl?: string;
 };
 
 type RoleSlot = {
@@ -294,6 +298,12 @@ type TaskAnalysis = {
    *  AD original, N avatares de variacao). Quando presente, UI renderiza
    *  alternativa em vez do fluxo normal. */
   vaBriefing?: ParsedVABriefing;
+  /** Google Docs URL extraido do custom field "DOC DA COPY" ou da descricao
+   *  da task. Persistido pra mostrar botao "abrir doc" sem ter que ir
+   *  manualmente no ClickUp puxar o link. */
+  docUrl?: string;
+  /** ClickUp URL direto da task (atalho — vem do feed da listagem). */
+  taskUrl?: string;
 };
 
 /**
@@ -1049,6 +1059,11 @@ function ClickUpPilotInner() {
           const det = await getTask(task.id);
           const docField = (det.custom_fields || ([] as any[])).find((f: any) => /DOC DA COPY/i.test(f.name || ''));
           const docUrl = docField?.value || extractDocLinks(det.description || det.text_content)[0];
+          // Persiste docUrl + taskUrl pra UI poder abrir direto sem ter q ir no ClickUp.
+          setTaskAnalyses((prev) => ({
+            ...prev,
+            [task.id]: { ...prev[task.id], docUrl: docUrl || undefined, taskUrl: (det as any).url || (task as any).url || undefined },
+          }));
           if (!docUrl) {
             setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: 'Sem doc URL (custom field "DOC DA COPY" vazio + sem link na descricao)' } }));
             continue;
@@ -1671,6 +1686,7 @@ function ClickUpPilotInner() {
     // Limpa flag de cancel de runs anteriores
     batchCancelRef.current[taskId] = false;
 
+    const aForUrl = taskAnalyses[taskId];
     setBatchStates((prev) => ({
       ...prev,
       [taskId]: {
@@ -1680,6 +1696,9 @@ function ClickUpPilotInner() {
         startedAt: Date.now(),
         message: 'TTS + upload + submit por parte...',
         replan,
+        // Preserva docUrl/taskUrl se ja existiam (re-run) OU pega da analise
+        docUrl: prev[taskId]?.docUrl || aForUrl?.docUrl,
+        taskUrl: prev[taskId]?.taskUrl || aForUrl?.taskUrl,
       },
     }));
 
@@ -4682,50 +4701,10 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                       >
                         {tasks.length}
                       </span>
-                      {bulkMode && selectedTaskIds.size > 0 ? (
-                        <span className="mono rounded-full border border-fuchsia-500/45 bg-fuchsia-500/10 px-2.5 py-0.5 text-[11px] font-bold text-fuchsia-200">
-                          {selectedTaskIds.size} sel
-                        </span>
-                      ) : null}
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <label
-                        className={
-                          'group flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.16em] transition-all ' +
-                          (bulkMode
-                            ? 'border-fuchsia-500/65 bg-fuchsia-500/15 text-fuchsia-100'
-                            : 'border-line-strong text-text-muted hover:border-fuchsia-500/45 hover:text-fuchsia-200')
-                        }
-                        style={{ fontFamily: 'var(--font-tech)' }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={bulkMode}
-                          onChange={(e) => { setBulkMode(e.target.checked); if (!e.target.checked) clearSelected(); }}
-                          className="h-3.5 w-3.5 cursor-pointer accent-fuchsia-400"
-                        />
-                        Modo BATCH
-                      </label>
-                      {bulkMode ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={selectAllTasks}
-                            className="mono rounded-full border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime"
-                          >
-                            Selecionar todas
-                          </button>
-                          <button
-                            type="button"
-                            onClick={clearSelected}
-                            disabled={selectedTaskIds.size === 0}
-                            className="mono rounded-full border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-red-500/60 hover:text-red-300 disabled:opacity-40"
-                          >
-                            Limpar
-                          </button>
-                        </>
-                      ) : null}
-                    </div>
+                    {/* Modo BATCH removido — click 1x na task analisa direto.
+                     *  Estado bulkMode mantido por compat com handlers existentes
+                     *  mas UI nao expoe mais o toggle. */}
                   </div>
                   {/* Filtros premium — Período + Prioridade + Data específica */}
                   <div
@@ -4949,17 +4928,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                       const gSuffix = t.name.match(/\s*[-–—]\s*(G\d+)\s*$/i)?.[1] || null;
                       return (
                         <li key={t.id} className="flex items-center gap-2">
-                          {bulkMode ? (
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => toggleTaskSelected(t.id)}
-                              className="h-4 w-4 shrink-0 cursor-pointer accent-fuchsia-400"
-                            />
-                          ) : null}
-                          {/* Toggle de decupagem — escondido em ONLY MAGNIFIC
-                              porque esse modo pula HeyGen totalmente (sem
-                              lipsync = sem necessidade de cortar silêncios). */}
+                          {/* Toggle de decupagem — escondido em ONLY MAGNIFIC */}
                           {!onlyMagnificMode ? (
                             <ToggleRound3D
                               on={isDecupagemEnabled(t.id)}
@@ -4974,32 +4943,40 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                           ) : null}
                           <button
                             type="button"
-                            onClick={() => bulkMode ? toggleTaskSelected(t.id) : openTask(t)}
+                            onClick={() => openTask(t)}
                             className={
-                              'flex-1 rounded-[10px] border px-3 py-2 text-left text-sm transition ' +
-                              (isOpen || isChecked
-                                ? 'border-lime bg-lime/10'
-                                : 'border-line bg-bg-soft/40 hover:border-lime/60')
+                              'group/task flex-1 rounded-[12px] border bg-gradient-to-br px-3.5 py-2.5 text-left transition-all duration-200 ' +
+                              (isOpen
+                                ? 'border-lime/65 from-lime/10 via-lime/[0.04] to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_18px_-8px_rgba(200,255,0,0.45)]'
+                                : 'border-white/8 from-white/[0.04] via-white/[0.015] to-transparent hover:border-lime/45 hover:-translate-y-[1px] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_8px_20px_-10px_rgba(200,255,0,0.35)]')
                             }
                           >
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="mono text-xs text-lime flex items-center gap-2 flex-wrap">
-                                {t.name}
+                            <div className="flex items-center justify-between gap-3">
+                              {/* LADO ESQUERDO: nome + pills de meta */}
+                              <div className="flex min-w-0 flex-1 items-center gap-2 flex-wrap">
+                                <span
+                                  className="mono text-[13px] font-semibold text-white truncate"
+                                  style={{ fontFamily: 'var(--font-tech)' }}
+                                >
+                                  {t.name}
+                                </span>
                                 {hasSiblings && gSuffix ? (
                                   <span
-                                    className="mono rounded-full border border-cyan-500/40 bg-cyan-500/10 px-1.5 py-0.5 text-[8px] uppercase tracking-widest text-cyan-200"
-                                    title={`Tasks irmas (mesma copy): ${siblingsAll.map(s => s.name.match(/G\d+\s*$/i)?.[0] || '?').filter(Boolean).join(' + ')}. Selecionar uma marca todas — analisamos 1x.`}
+                                    className="mono inline-flex items-center gap-1 rounded-full border border-cyan-400/45 bg-cyan-400/12 px-2 py-[3px] text-[9px] font-bold uppercase tracking-[0.14em] text-cyan-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+                                    title={`Tasks irmas: ${siblingsAll.map(s => s.name.match(/G\d+\s*$/i)?.[0] || '?').filter(Boolean).join(' + ')}`}
                                   >
-                                    🔗 grupo {siblingsAll.length}Gs
+                                    <span className="opacity-80">⌥</span> {siblingsAll.length}Gs
                                   </span>
                                 ) : null}
                                 {t.priority?.priority === 'urgent' ? (
-                                  <span className="mono rounded-full border border-red-500/60 bg-red-500/20 px-1.5 py-0.5 text-[8px] uppercase tracking-widest text-red-300">
-                                    🔴 urgent
+                                  <span className="mono inline-flex items-center gap-1 rounded-full border border-red-400/55 bg-red-500/18 px-2 py-[3px] text-[9px] font-bold uppercase tracking-[0.14em] text-red-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.7)]" />
+                                    Urgente
                                   </span>
                                 ) : t.priority?.priority === 'high' ? (
-                                  <span className="mono rounded-full border border-orange-500/60 bg-orange-500/20 px-1.5 py-0.5 text-[8px] uppercase tracking-widest text-orange-300">
-                                    🟠 high
+                                  <span className="mono inline-flex items-center gap-1 rounded-full border border-orange-400/55 bg-orange-500/18 px-2 py-[3px] text-[9px] font-bold uppercase tracking-[0.14em] text-orange-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-orange-400 shadow-[0_0_6px_rgba(251,146,60,0.7)]" />
+                                    Alta
                                   </span>
                                 ) : null}
                                 {(() => {
@@ -5012,65 +4989,57 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   const tomorrow = today.getTime() + DAY;
                                   const dueDate = new Date(due);
                                   let label = '';
-                                  let cls = 'text-text-muted border-line bg-bg/40';
+                                  let cls = '';
+                                  let dotCls = '';
                                   if (due < today.getTime()) {
                                     const daysAgo = Math.floor((today.getTime() - due) / DAY);
-                                    label = `⚠ ${daysAgo}d atrasada`;
-                                    cls = 'text-red-300 border-red-500/60 bg-red-500/15';
+                                    label = `${daysAgo}d atrasada`;
+                                    cls = 'border-red-400/55 bg-red-500/18 text-red-200';
+                                    dotCls = 'bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.7)]';
                                   } else if (due < tomorrow) {
-                                    label = '📅 hoje';
-                                    cls = 'text-amber-300 border-amber-400/60 bg-amber-400/15';
+                                    label = 'Hoje';
+                                    cls = 'border-amber-400/60 bg-amber-400/18 text-amber-100';
+                                    dotCls = 'bg-amber-300 shadow-[0_0_6px_rgba(252,211,77,0.7)]';
                                   } else {
                                     const daysAhead = Math.ceil((due - now) / DAY);
-                                    label = daysAhead <= 7 ? `📅 ${daysAhead}d` : dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-                                    cls = daysAhead <= 3 ? 'text-cyan-200 border-cyan-500/40 bg-cyan-500/10' : 'text-text-muted border-line-strong bg-bg/40';
+                                    label = daysAhead <= 7 ? `${daysAhead}d` : dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+                                    cls = daysAhead <= 3 ? 'border-cyan-400/45 bg-cyan-400/15 text-cyan-100' : 'border-white/12 bg-white/[0.04] text-text-muted';
+                                    dotCls = daysAhead <= 3 ? 'bg-cyan-300' : 'bg-white/40';
                                   }
                                   return (
-                                    <span className={`mono rounded-full border px-1.5 py-0.5 text-[8px] uppercase tracking-widest ${cls}`}>
+                                    <span className={`mono inline-flex items-center gap-1 rounded-full border px-2 py-[3px] text-[9px] font-bold uppercase tracking-[0.14em] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] ${cls}`}>
+                                      <span className={`h-1.5 w-1.5 rounded-full ${dotCls}`} />
                                       {label}
                                     </span>
                                   );
                                 })()}
-                              </span>
-                              <span
-                                className="mono rounded-full px-2 py-0.5 text-[9px] uppercase tracking-widest"
-                                style={{ backgroundColor: t.status?.color + '33', color: t.status?.color }}
-                              >
-                                {t.status?.status}
-                              </span>
-                            </div>
-                            {t.list?.name ? (
-                              <div className="mono mt-0.5 text-[10px] text-text-muted">
-                                {t.space?.name ? `${t.space.name} / ` : ''}
-                                {t.folder?.name ? `${t.folder.name} / ` : ''}
-                                {t.list.name}
                               </div>
-                            ) : null}
+                              {/* LADO DIREITO: status pill maior + chevron */}
+                              <div className="flex shrink-0 items-center gap-2">
+                                <span
+                                  className="mono rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]"
+                                  style={{
+                                    backgroundColor: (t.status?.color || '#888') + '24',
+                                    color: t.status?.color || '#888',
+                                    border: `1px solid ${(t.status?.color || '#888')}55`,
+                                  }}
+                                >
+                                  {t.status?.status}
+                                </span>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-white/30 transition-transform group-hover/task:translate-x-0.5 group-hover/task:text-lime">
+                                  <path d="m9 18 6-6-6-6" />
+                                </svg>
+                              </div>
+                            </div>
+                            {/* SUBTITLE REMOVIDO pelo user (folder/list info era ruido). */}
                           </button>
                         </li>
                       );
                     })}
                   </ul>
 
-                  {bulkMode && selectedTaskIds.size > 0 ? (
-                    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-[10px] border border-fuchsia-500/40 bg-fuchsia-500/10 p-3">
-                      <span className="mono flex-1 text-[11px] text-fuchsia-200">
-                        ⚙ {selectedTaskIds.size} selecionada{selectedTaskIds.size === 1 ? '' : 's'}
-                        {(() => {
-                          const ready = Array.from(selectedTaskIds).filter(id => taskAnalyses[id]?.status === 'ready').length;
-                          return ready > 0 ? ` · ${ready} ready pra disparar` : '';
-                        })()}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={analyzeSelected}
-                        disabled={analyzing}
-                        className="mono rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime disabled:opacity-50"
-                      >
-                        {analyzing ? 'Analisando...' : `🔍 Analisar (${selectedTaskIds.size})`}
-                      </button>
-                    </div>
-                  ) : null}
+                  {/* Bottom bulk-action bar removido — modo BATCH descontinuado.
+                   *  Click na task ja vai direto pro openTask(t). */}
 
                   {/* Painel batch — tasks rodando ou completas */}
                   {Object.keys(batchStates).length > 0 ? (
@@ -5206,6 +5175,8 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                               dirtyPartsCount={(b.dirtyParts || []).length}
                               onRebuild={() => void rebuildMontage(b.taskId)}
                               isRebuilding={rebuildingTaskId === b.taskId}
+                              docUrl={b.docUrl || taskAnalyses[b.taskId]?.docUrl}
+                              taskUrl={b.taskUrl || taskAnalyses[b.taskId]?.taskUrl}
                             >
                               {previewsNode}
                             </BatchJobCard3D>
@@ -5487,6 +5458,24 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                           {(taskMagnificJson[a.taskId] || '').trim() ? '＋ JSON ✓' : '＋ JSON'}
                                         </button>
                                       </>
+                                    ) : null}
+                                    {/* Botao "abrir doc da copy" — atalho direto pro Google Doc
+                                     *  sem ter que ir manualmente no ClickUp puxar o link.
+                                     *  Aparece se a analise capturou docUrl. Fallback pro task URL. */}
+                                    {(a.docUrl || a.taskUrl) ? (
+                                      <a
+                                        href={a.docUrl || a.taskUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="mono inline-flex items-center gap-1 rounded border border-cyan-500/55 bg-cyan-500/15 px-2.5 py-1 text-[10px] uppercase tracking-widest text-cyan-100 transition hover:scale-[1.04] hover:bg-cyan-500/25 hover:shadow-[0_4px_14px_-4px_rgba(34,211,238,0.5)]"
+                                        title={a.docUrl ? 'Abrir doc da copy no Google Docs' : 'Abrir task no ClickUp'}
+                                      >
+                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                          <path d="M14 2v6h6" /><path d="M9 13h6M9 17h6" />
+                                        </svg>
+                                        Doc
+                                      </a>
                                     ) : null}
                                     {/* Disparo individual.
                                      *  ONLY MAGNIFIC: SEM botão individual — só o botão grande

@@ -66,6 +66,12 @@ export type BatchJob3DProps = {
   onRebuild?: () => void;
   /** Spinner quando rebuild ta rodando. */
   isRebuilding?: boolean;
+  /** Doc URL (Google Docs) — mostra botao "abrir doc" se presente. */
+  docUrl?: string;
+  /** Fallback: ClickUp task URL — mostrado se docUrl ausente. */
+  taskUrl?: string;
+  /** Default minimizado (so header + buttons + progress). Default true. */
+  defaultMinimized?: boolean;
 };
 
 // ───────────────────────── Botão 3D icon-only ─────────────────────────
@@ -216,6 +222,19 @@ const IconAlert = ({ size = 12 }: { size?: number }) => (
 const IconClock = ({ size = 12 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
 );
+const IconDoc = ({ size = 16 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+    <path d="M14 2v6h6" />
+    <path d="M9 13h6M9 17h6M9 9h2" />
+  </svg>
+);
+const IconChevron = ({ size = 14, open }: { size?: number; open?: boolean }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
+    style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 200ms ease-out' }}>
+    <path d="m6 9 6 6 6-6" />
+  </svg>
+);
 const IconRebuild = ({ size = 16 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
     {/* Hammer-like icon — re-montar */}
@@ -300,9 +319,13 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     dirtyPartsCount = 0,
     onRebuild,
     isRebuilding = false,
+    docUrl,
+    taskUrl,
+    defaultMinimized = true,
   } = props;
 
   const [tilt, setTilt] = useState<{ x: number; y: number } | null>(null);
+  const [expanded, setExpanded] = useState(!defaultMinimized);
 
   const phaseInfo = PHASE_MAP[phase];
   // Override pra parcial
@@ -372,6 +395,22 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
+              {/* ABRIR DOC — vai direto pro Google Doc da copy sem ter que ir
+               *  no ClickUp manualmente puxar o link. Fallback pro task URL
+               *  do ClickUp se docUrl nao foi capturado. */}
+              {(docUrl || taskUrl) ? (
+                <a
+                  href={docUrl || taskUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-gradient-to-b from-white/10 via-white/[0.04] to-transparent text-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-white/30 hover:text-white hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_8px_20px_-6px_rgba(255,255,255,0.18)] active:translate-y-0 active:scale-95 transition-[transform,box-shadow]"
+                  title={docUrl ? 'Abrir doc da copy' : 'Abrir task no ClickUp'}
+                  aria-label={docUrl ? 'Abrir doc da copy' : 'Abrir task no ClickUp'}
+                >
+                  <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/15 to-transparent" aria-hidden />
+                  <span className="relative"><IconDoc size={16} /></span>
+                </a>
+              ) : null}
               {/* DOWNLOAD UNICO — baixa tudo o que existe (takes + montados +
                *  camuflados se houver) num clique so. Browser enfileira os
                *  downloads automaticamente. Pequeno delay entre cada disparo
@@ -456,17 +495,33 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
               {!isRunning ? (
                 <Btn3D icon={<IconX size={14} />} color="neutral" title="Remover" onClick={onRemove} />
               ) : null}
+              {/* TOGGLE EXPAND/COLLAPSE — chevron 3D neutro, ultimo da fila */}
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                className="group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/12 bg-gradient-to-b from-white/8 via-white/[0.03] to-transparent text-text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-white/30 hover:text-white hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_8px_20px_-6px_rgba(255,255,255,0.18)] active:translate-y-0 active:scale-95 transition-[transform,box-shadow]"
+                title={expanded ? 'Recolher' : 'Expandir takes'}
+                aria-label={expanded ? 'Recolher' : 'Expandir'}
+                aria-expanded={expanded}
+              >
+                <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/15 to-transparent" aria-hidden />
+                <span className="relative"><IconChevron size={14} open={expanded} /></span>
+              </button>
             </div>
           </div>
 
-          {/* Stats line — humanizada */}
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-text-muted">
-            <StatPill value={partsTotal} label="cortes" />
-            <StatPill value={partsDispatched} label="enviados" highlight={phase === 'dispatching'} />
-            <StatPill value={partsRendered} label="prontos" highlight={phase === 'rendering'} accent={partsRendered === partsTotal ? 'lime' : undefined} />
-          </div>
+          {/* Stats line — humanizada. So aparece quando expandido. */}
+          {expanded ? (
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-text-muted">
+              <StatPill value={partsTotal} label="cortes" />
+              <StatPill value={partsDispatched} label="enviados" highlight={phase === 'dispatching'} />
+              <StatPill value={partsRendered} label="prontos" highlight={phase === 'rendering'} accent={partsRendered === partsTotal ? 'lime' : undefined} />
+            </div>
+          ) : null}
 
-          {/* Progress bar 3D animada */}
+          {/* Progress bar 3D animada — SEMPRE visivel se rodando (mesmo minimizado).
+           *  User pediu: "se ta minimizada e gerando entao voce ver apenas a
+           *  barrinha de carregamento animada carregando o processo". */}
           {showProgress ? (
             <div className="mt-2.5">
               <div className="relative h-[6px] w-full overflow-hidden rounded-full bg-white/[0.05] shadow-[inset_0_1px_2px_rgba(0,0,0,0.5)]">
@@ -480,19 +535,19 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                   </span>
                 </div>
               </div>
-              <div className="mt-1 flex items-center justify-between text-[9px] text-text-muted/80">
-                <span>{friendlyMsg || phaseInfo.label}</span>
-                <span className="mono">{barPct}%</span>
-              </div>
+              {expanded ? (
+                <div className="mt-1 flex items-center justify-between text-[9px] text-text-muted/80">
+                  <span>{friendlyMsg || phaseInfo.label}</span>
+                  <span className="mono">{barPct}%</span>
+                </div>
+              ) : null}
             </div>
-          ) : (
-            friendlyMsg ? (
-              <div className="mono mt-1.5 text-[10px] text-text-muted">{friendlyMsg}</div>
-            ) : null
-          )}
+          ) : expanded && friendlyMsg ? (
+            <div className="mono mt-1.5 text-[10px] text-text-muted">{friendlyMsg}</div>
+          ) : null}
 
-          {/* Preview takes — slot pra children */}
-          {children ? <div className="mt-3">{children}</div> : null}
+          {/* Preview takes — so renderiza children se expandido */}
+          {expanded && children ? <div className="mt-3">{children}</div> : null}
         </div>
       </div>
 
