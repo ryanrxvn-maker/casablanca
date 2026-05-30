@@ -140,11 +140,14 @@ export async function assertZeroCreditCost(): Promise<void> {
   // CAP CHECK: se usage > 100%, Magnific bloqueia gerações silenciosamente
   // (devolve HTML paywall). Detectamos AQUI antes de começar o batch.
   if (status.usagePercent > 100) {
-    throw new Error(
-      `Conta Magnific atingiu CAP DO CICLO (usage ${status.usagePercent}% > 100%). ` +
-      `Magnific bloqueou gerações até o reset em ${status.cycleResetDate || '?'}. ` +
-      `Use outra conta Premium+ ou aguarde reset.`
-    );
+    // Formata data: 2026-06-13 → 13/06/2026
+    const resetBr = (() => {
+      const d = status.cycleResetDate;
+      if (!d) return '?';
+      const m = d.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      return m ? `${m[3]}/${m[2]}/${m[1]}` : d;
+    })();
+    throw new Error(`Seu limite interno mensal do Magnific acabou, renova em ${resetBr}`);
   }
   const [img, vid] = await Promise.all([
     simulateGeneration([
