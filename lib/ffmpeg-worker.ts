@@ -85,7 +85,7 @@ export function isCancellationError(err: unknown): boolean {
 }
 
 async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
-  onStage?.('Preparando o motor...');
+  onStage?.('Preparando...');
   const { FFmpeg } = await import('@ffmpeg/ffmpeg');
 
   const ff = new FFmpeg();
@@ -95,7 +95,7 @@ async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
   for (let i = 0; i < CDNS.length; i++) {
     const baseURL = CDNS[i];
     try {
-      onStage?.('Carregando o motor...');
+      onStage?.('Carregando...');
       const [coreURL, wasmURL] = await Promise.all([
         cachedBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
         cachedBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
@@ -111,8 +111,7 @@ async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
     }
   }
   throw new Error(
-    'Nao foi possivel carregar o motor. Verifique sua conexao. Detalhe: ' +
-      (lastErr instanceof Error ? lastErr.message : String(lastErr)),
+    'Erro ao carregar',
   );
 }
 
@@ -673,10 +672,10 @@ export async function extractAudioForTranscription(
   const progressHandler = wireProgress(ff, opts.onProgress);
 
   try {
-    opts.onStage?.('Carregando video...');
+    opts.onStage?.('Carregando...');
     await ff.writeFile(inputName, await fetchFile(file));
 
-    opts.onStage?.('Extraindo o áudio...');
+    opts.onStage?.('Extraindo...');
     await ff.exec([
       '-i', inputName,
       '-vn',
@@ -717,7 +716,7 @@ export async function extractStereoAudioForTranscription(
   const progressHandler = wireProgress(ff, opts.onProgress);
 
   try {
-    opts.onStage?.('Extraindo audio estereo (fiel ao arquivo real)...');
+    opts.onStage?.('Extraindo...');
     await ff.writeFile(inputName, await fetchFile(file));
     await ff.exec([
       '-i', inputName,
@@ -861,7 +860,7 @@ export async function splitVideoByScenes(
   ff.on('progress', progHandler);
 
   try {
-    opts.onStage?.('Carregando o vídeo...');
+    opts.onStage?.('Carregando...');
     await ff.writeFile(inputName, await fetchFile(file));
 
     opts.onStage?.('Escaneando cortes de cena (1 passada)...');
@@ -1033,10 +1032,10 @@ export async function removeRegions(
   const preserveAudio = opts.preserveAudio !== false;
 
   try {
-    opts.onStage?.('Carregando o vídeo...');
+    opts.onStage?.('Carregando...');
     await ff.writeFile(inputName, await fetchFile(file));
 
-    opts.onStage?.('Aplicando a remoção...');
+    opts.onStage?.('Aplicando...');
     await ff.exec([
       '-i', inputName,
       '-vf', vfilter,
