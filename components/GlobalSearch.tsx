@@ -339,7 +339,7 @@ export function GlobalSearchButton() {
             rgba(167, 139, 250, 0.28),
             transparent 70%
           );
-          opacity: 0.35;
+          opacity: var(--search-glow, 0.35);
           filter: blur(8px);
           transition: opacity 400ms ease;
           animation: search-ambient-pulse 3.4s ease-in-out infinite;
@@ -446,7 +446,7 @@ export function GlobalSearchButton() {
           font-size: 12px;
           font-weight: 700;
           letter-spacing: -0.005em;
-          color: #fff;
+          color: rgb(var(--text));
           line-height: 1;
           white-space: nowrap;
           text-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);

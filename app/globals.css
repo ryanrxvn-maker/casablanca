@@ -1021,16 +1021,17 @@ textarea,
 html[data-theme='light'] {
   color-scheme: light;
   /* Cinza claro FRACO — bem longe do branco estourado. */
-  --bg: 213 212 206;        /* base */
-  --bg-soft: 225 224 219;   /* card */
-  --bg-softer: 232 231 226; /* card elevado */
-  --bg-elev: 239 238 233;   /* topo */
-  --line: 205 204 196;      /* bordas discretas */
-  --line-strong: 191 190 182;
-  --line-glow: 177 176 168;
-  --text: 32 32 38;         /* texto escuro */
-  --text-muted: 92 92 100;
-  --text-dim: 150 150 157;
+  --bg: 205 204 198;        /* base (mais fraco ainda) */
+  --bg-soft: 218 217 211;   /* card */
+  --bg-softer: 227 226 220; /* card elevado */
+  --bg-elev: 235 234 229;   /* topo */
+  --line: 196 195 187;      /* bordas discretas */
+  --line-strong: 182 181 173;
+  --line-glow: 168 167 159;
+  --text: 26 26 32;         /* texto bem escuro */
+  --text-muted: 78 78 86;   /* escuro (legível) */
+  --text-dim: 112 112 120;  /* labels: cinza médio, NÃO some mais */
+  --search-glow: 0.1;       /* halo do botao Pesquisar quase off no claro */
   /* acentos ESCUROS — evidência forte no fundo claro (texto/ícones que
      usam acento ficam legíveis, sem aquele "verde claro que some"). */
   --lime: 72 90 24;
@@ -1086,8 +1087,36 @@ html[data-theme='light'] body::after {
 
 /* Texto branco utilitário (títulos) vira escuro no claro. Não atinge os
    botões (que definem a cor pela classe .btn-*). */
-html[data-theme='light'] .text-white {
-  color: rgb(var(--text));
+/* Rede de segurança: TODO texto em tom claro (branco + acentos claros do
+   Tailwind) vira escuro no modo claro, pra nunca sumir no fundo. */
+html[data-theme='light'] .text-white,
+html[data-theme='light'] .text-amber-200,
+html[data-theme='light'] .text-amber-300,
+html[data-theme='light'] .text-amber-400,
+html[data-theme='light'] .text-yellow-200,
+html[data-theme='light'] .text-yellow-300,
+html[data-theme='light'] .text-yellow-400,
+html[data-theme='light'] .text-lime-200,
+html[data-theme='light'] .text-lime-300,
+html[data-theme='light'] .text-green-300,
+html[data-theme='light'] .text-emerald-300,
+html[data-theme='light'] .text-teal-200,
+html[data-theme='light'] .text-teal-300,
+html[data-theme='light'] .text-cyan-200,
+html[data-theme='light'] .text-cyan-300,
+html[data-theme='light'] .text-sky-300,
+html[data-theme='light'] .text-blue-300,
+html[data-theme='light'] .text-indigo-300,
+html[data-theme='light'] .text-violet-200,
+html[data-theme='light'] .text-violet-300,
+html[data-theme='light'] .text-purple-200,
+html[data-theme='light'] .text-purple-300,
+html[data-theme='light'] .text-fuchsia-300,
+html[data-theme='light'] .text-pink-200,
+html[data-theme='light'] .text-pink-300,
+html[data-theme='light'] .text-rose-300,
+html[data-theme='light'] .text-red-300 {
+  color: rgb(var(--text)) !important;
 }
 /* Botões de acento mantêm texto claro legível no claro. */
 html[data-theme='light'] .btn-lime,
