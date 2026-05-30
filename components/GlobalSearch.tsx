@@ -142,7 +142,7 @@ const FEATURED: FeaturedDef[] = [
   {
     id: 'auto-broll',
     label: 'Auto B-roll',
-    hint: 'Cortes no ritmo',
+    hint: 'B-rolls em massa pelo JSON',
     href: '/tools/auto-broll',
     Icon: IconAutoBroll,
     primary: '#f0abfc',
