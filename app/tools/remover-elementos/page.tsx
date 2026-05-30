@@ -478,7 +478,7 @@ function RemoverElementosInner() {
                 className="btn-primary !py-2 text-xs"
                 download
               >
-                1. Baixar Instalador (.exe)
+                1. Baixar Instalador (.zip)
               </a>
               <button
                 type="button"
@@ -491,6 +491,11 @@ function RemoverElementosInner() {
                   : '2. Recheck motor'}
               </button>
             </div>
+            <p className="mono mt-2 text-[10px] text-text-muted">
+              ZIP oficial assinado. O Chrome bloqueia .exe novos por padrao;
+              por isso entregamos zipado — o arquivo dentro eh exatamente o
+              mesmo .exe assinado, sem mistura.
+            </p>
 
             <details className="mt-3">
               <summary className="cursor-pointer text-[11px] text-lime/80 hover:text-lime">
@@ -498,14 +503,18 @@ function RemoverElementosInner() {
               </summary>
               <ol className="mono mt-2 list-decimal space-y-1 pl-5 text-[11px] text-text-muted">
                 <li>
-                  Baixa o <b>Instalador</b> (botao 1) — eh um <code className="mono text-white">.exe</code> de ~230 KB.
+                  Baixa o <b>Instalador</b> (botao 1) — <code className="mono text-white">.zip</code> oficial assinado (~230 KB).
+                </li>
+                <li>
+                  Clica com o botao direito no zip → <b>Extrair tudo</b>. Dentro
+                  vai estar <code className="mono text-white">AutoEditSmartRemoverSetup.exe</code>.
                 </li>
                 <li>
                   Da <b>duplo-clique</b> no{' '}
-                  <code className="mono text-white">.exe</code> baixado (se
+                  <code className="mono text-white">.exe</code> extraido (se
                   o Windows avisar, &quot;Mais informacoes&quot; → &quot;Executar
-                  assim mesmo&quot;). Ele se extrai automaticamente, baixa tudo
-                  (o motor de IA, ~500 MB na 1a vez), instala, inicia
+                  assim mesmo&quot;). Ele se extrai automaticamente, baixa
+                  o motor de IA (~500 MB na 1a vez), instala, inicia
                   o motor e configura auto-start junto com o Windows.
                 </li>
                 <li>
