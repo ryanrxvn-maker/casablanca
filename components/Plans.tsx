@@ -47,7 +47,7 @@ const ALL_TOOLS: Tool[] = [
     key: 'clickup-pilot',
     label: 'ClickUp Pilot',
     featured: 'pilot',
-    featuredHint: 'Conecta no ClickUp e edita sozinho',
+    featuredHint: 'Mapeia as tasks e dispara o lipsync de todas',
     featuredHue: 'rgba(200,255,0,0.55)',
   },
   {
