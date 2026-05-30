@@ -43,11 +43,11 @@
   try {
     const tag = document.createElement('meta');
     tag.name = 'auto-edit-extension';
-    tag.content = '1.0.8';
+    tag.content = '1.0.10';
     (document.head || document.documentElement).appendChild(tag);
     window.dispatchEvent(
       new CustomEvent('auto-edit-extension-ready', {
-        detail: { version: '1.0.8' },
+        detail: { version: '1.0.10' },
       }),
     );
   } catch (e) {
@@ -63,7 +63,7 @@
     // PING — page detecta extensao
     if (msg.type === 'auto-edit-extension-ping') {
       window.postMessage(
-        { type: 'auto-edit-extension-pong', version: '1.0.8', reqId: msg.reqId },
+        { type: 'auto-edit-extension-pong', version: '1.0.10', reqId: msg.reqId },
         '*',
       );
       return;
