@@ -4971,33 +4971,52 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                 >
                                   {t.name}
                                 </span>
-                                {/* === BADGES estilo SaaS pro (Linear/Stripe/Vercel) ===
-                                    - bg tinted suave (10-15% opacity) — funciona em ambos os modos
-                                    - border solid mid-saturation (40-50% opacity) — define forma
-                                    - text colored (medium saturation) — alto contraste sem brigar
-                                    - tabular-nums pros numeros — alinhamento perfeito
-                                    - dot indicator solido — focal point sutil
-                                    - rounded-md (nao pill candy) — sobrio
+                                {/* === BADGES minimalistas — icon-first ===
+                                    User: "SE TA ATRASADO 1 DIA ENTAO SO UM ICONE COM NUMERO 1 /
+                                    URGENCIA ICONE DE AVISO VERMELHO / ALTA ICONE DE AVISO AMARELO".
+
+                                    Padrao visual:
+                                    - Quadradinho 24px com border + tinted bg + icone
+                                    - Numero ao lado quando aplicavel (atrasada/futuro)
+                                    - bg color/15 + border color/55 + text color-600 funciona
+                                      otimamente em LIGHT e DARK sem precisar de dark: prefix
+                                    - Icone SVG inline (warning triangle / clock)
+                                    - tabular-nums pra alinhamento perfeito
+                                    - title attribute pra contexto no hover
                                 */}
                                 {hasSiblings && gSuffix ? (
                                   <span
-                                    className="inline-flex items-center gap-1.5 rounded-md border border-violet-500/45 bg-violet-500/10 px-2 py-1 text-violet-600 dark:text-violet-300"
-                                    title={`Tasks irmas: ${siblingsAll.map(s => s.name.match(/G\d+\s*$/i)?.[0] || '?').filter(Boolean).join(' + ')}`}
+                                    className="inline-flex h-6 items-center gap-1 rounded-md border border-violet-500/55 bg-violet-500/12 px-1.5 text-violet-600 dark:text-violet-300"
+                                    title={`Grupo: ${siblingsAll.map(s => s.name.match(/G\d+\s*$/i)?.[0] || '?').filter(Boolean).join(' + ')}`}
                                   >
-                                    <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
-                                    <span className="text-[11px] font-bold leading-none tabular-nums">{siblingsAll.length}</span>
-                                    <span className="text-[9.5px] font-semibold uppercase leading-none tracking-[0.08em] opacity-80">grupo</span>
+                                    {/* Link icon (chain) */}
+                                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                                      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                                    </svg>
+                                    <span className="text-[11.5px] font-bold leading-none tabular-nums">{siblingsAll.length}</span>
                                   </span>
                                 ) : null}
                                 {t.priority?.priority === 'urgent' ? (
-                                  <span className="inline-flex items-center gap-1.5 rounded-md border border-red-500/45 bg-red-500/10 px-2 py-1 text-red-600 dark:text-red-300">
-                                    <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
-                                    <span className="text-[10.5px] font-bold uppercase leading-none tracking-[0.08em]">Urgente</span>
+                                  <span
+                                    title="Prioridade urgente"
+                                    className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-red-500/60 bg-red-500/15 text-red-600 dark:text-red-300"
+                                  >
+                                    {/* Warning triangle filled */}
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                                      <path d="M12 2.2c-.6 0-1.2.3-1.5.9L1 19.5c-.6 1 .2 2.3 1.4 2.3h19.2c1.2 0 2-1.3 1.4-2.3L13.5 3.1c-.3-.6-.9-.9-1.5-.9z" />
+                                      <path d="M11 9h2v6h-2zM11 16.5h2V19h-2z" fill="#fff" opacity="0.92" />
+                                    </svg>
                                   </span>
                                 ) : t.priority?.priority === 'high' ? (
-                                  <span className="inline-flex items-center gap-1.5 rounded-md border border-orange-500/45 bg-orange-500/10 px-2 py-1 text-orange-600 dark:text-orange-300">
-                                    <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />
-                                    <span className="text-[10.5px] font-bold uppercase leading-none tracking-[0.08em]">Alta</span>
+                                  <span
+                                    title="Prioridade alta"
+                                    className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-amber-500/60 bg-amber-500/15 text-amber-600 dark:text-amber-300"
+                                  >
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                                      <path d="M12 2.2c-.6 0-1.2.3-1.5.9L1 19.5c-.6 1 .2 2.3 1.4 2.3h19.2c1.2 0 2-1.3 1.4-2.3L13.5 3.1c-.3-.6-.9-.9-1.5-.9z" />
+                                      <path d="M11 9h2v6h-2zM11 16.5h2V19h-2z" fill="#fff" opacity="0.92" />
+                                    </svg>
                                   </span>
                                 ) : null}
                                 {(() => {
@@ -5009,55 +5028,76 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   today.setHours(0, 0, 0, 0);
                                   const tomorrow = today.getTime() + DAY;
                                   const dueDate = new Date(due);
-                                  // Decide content + estilo por estado
-                                  let bigText = '';
-                                  let smallText = '';
-                                  let palette = ''; // border/bg/text classes
-                                  let dotCls = '';
+
+                                  // ATRASADA — icon warning + numero (sem palavra)
                                   if (due < today.getTime()) {
-                                    const daysAgo = Math.floor((today.getTime() - due) / DAY);
-                                    if (daysAgo === 0) {
-                                      bigText = 'Hoje';
-                                      smallText = 'atrasada';
-                                    } else if (daysAgo < 30) {
-                                      bigText = `${daysAgo}d`;
-                                      smallText = 'atrasada';
-                                    } else {
-                                      const weeks = Math.floor(daysAgo / 7);
-                                      bigText = `${weeks}sem`;
-                                      smallText = 'atrasada';
-                                    }
-                                    palette = 'border-red-500/45 bg-red-500/10 text-red-600 dark:text-red-300';
-                                    dotCls = 'bg-red-500';
-                                  } else if (due < tomorrow) {
-                                    bigText = 'Hoje';
-                                    smallText = '';
-                                    palette = 'border-amber-500/55 bg-amber-500/12 text-amber-700 dark:text-amber-300';
-                                    dotCls = 'bg-amber-500 animate-pulse';
-                                  } else {
-                                    const daysAhead = Math.ceil((due - now) / DAY);
-                                    if (daysAhead <= 7) {
-                                      bigText = `${daysAhead}d`;
-                                      smallText = daysAhead <= 3 ? 'p/ vencer' : 'restantes';
-                                    } else {
-                                      bigText = dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-                                      smallText = '';
-                                    }
-                                    if (daysAhead <= 3) {
-                                      palette = 'border-amber-500/45 bg-amber-500/10 text-amber-700 dark:text-amber-300';
-                                      dotCls = 'bg-amber-500';
-                                    } else {
-                                      palette = 'border-line-strong bg-zinc-500/8 text-text-muted';
-                                      dotCls = 'bg-zinc-400';
-                                    }
+                                    const daysAgo = Math.max(1, Math.floor((today.getTime() - due) / DAY));
+                                    return (
+                                      <span
+                                        title={`Atrasada ${daysAgo} dia${daysAgo === 1 ? '' : 's'}`}
+                                        className="inline-flex h-6 items-center gap-1 rounded-md border border-red-500/60 bg-red-500/15 px-1.5 text-red-600 dark:text-red-300"
+                                      >
+                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                                          <path d="M12 2.2c-.6 0-1.2.3-1.5.9L1 19.5c-.6 1 .2 2.3 1.4 2.3h19.2c1.2 0 2-1.3 1.4-2.3L13.5 3.1c-.3-.6-.9-.9-1.5-.9z" />
+                                          <path d="M11 9h2v6h-2zM11 16.5h2V19h-2z" fill="#fff" opacity="0.92" />
+                                        </svg>
+                                        <span className="text-[12px] font-bold leading-none tabular-nums">{daysAgo}</span>
+                                      </span>
+                                    );
                                   }
+
+                                  // HOJE — icone clock + Hoje
+                                  if (due < tomorrow) {
+                                    return (
+                                      <span
+                                        title="Vence hoje"
+                                        className="inline-flex h-6 items-center gap-1 rounded-md border border-amber-500/60 bg-amber-500/15 px-1.5 text-amber-600 dark:text-amber-300"
+                                      >
+                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                          <circle cx="12" cy="12" r="9" />
+                                          <polyline points="12 7 12 12 16 14" />
+                                        </svg>
+                                        <span className="text-[10px] font-bold uppercase leading-none tracking-wider">Hoje</span>
+                                      </span>
+                                    );
+                                  }
+
+                                  // FUTURO — icone clock + numero de dias
+                                  const daysAhead = Math.ceil((due - now) / DAY);
+                                  if (daysAhead <= 7) {
+                                    const urgent = daysAhead <= 3;
+                                    const cls = urgent
+                                      ? 'border-amber-500/50 bg-amber-500/12 text-amber-600 dark:text-amber-300'
+                                      : 'border-zinc-400/40 bg-zinc-500/10 text-zinc-600 dark:text-zinc-300';
+                                    return (
+                                      <span
+                                        title={`Vence em ${daysAhead} dia${daysAhead === 1 ? '' : 's'}`}
+                                        className={`inline-flex h-6 items-center gap-1 rounded-md border px-1.5 ${cls}`}
+                                      >
+                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                          <circle cx="12" cy="12" r="9" />
+                                          <polyline points="12 7 12 12 16 14" />
+                                        </svg>
+                                        <span className="text-[12px] font-bold leading-none tabular-nums">{daysAhead}</span>
+                                        <span className="text-[10px] font-semibold leading-none opacity-70">d</span>
+                                      </span>
+                                    );
+                                  }
+                                  // > 7d futuro: data DD/MM
                                   return (
-                                    <span className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 ${palette}`}>
-                                      <span className={`h-1.5 w-1.5 rounded-full ${dotCls}`} />
-                                      <span className="text-[11px] font-bold leading-none tabular-nums">{bigText}</span>
-                                      {smallText ? (
-                                        <span className="text-[9.5px] font-semibold uppercase leading-none tracking-[0.08em] opacity-80">{smallText}</span>
-                                      ) : null}
+                                    <span
+                                      title={`Vence em ${dueDate.toLocaleDateString('pt-BR')}`}
+                                      className="inline-flex h-6 items-center gap-1 rounded-md border border-zinc-400/40 bg-zinc-500/10 px-1.5 text-zinc-600 dark:text-zinc-300"
+                                    >
+                                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <rect x="3" y="4" width="18" height="18" rx="2" />
+                                        <line x1="16" y1="2" x2="16" y2="6" />
+                                        <line x1="8" y1="2" x2="8" y2="6" />
+                                        <line x1="3" y1="10" x2="21" y2="10" />
+                                      </svg>
+                                      <span className="text-[11px] font-bold leading-none tabular-nums">
+                                        {dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                                      </span>
                                     </span>
                                   );
                                 })()}
