@@ -4498,10 +4498,10 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                               <>
                                 {' · '}
                                 <span className="mono text-lime">{tasks.length}</span> tasks
-                                {bulkMode && selectedTaskIds.size > 0 ? (
+                                {selectedTaskIds.size > 0 ? (
                                   <>
                                     {' · '}
-                                    <span className="mono text-fuchsia-300">{selectedTaskIds.size}</span> sel
+                                    <span className="mono text-lime">{selectedTaskIds.size}</span> sel
                                   </>
                                 ) : null}
                               </>
@@ -5468,10 +5468,10 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                   ) : null}
 
                   {/* Preview previsibilidade — antes de iniciar */}
-                  {bulkMode && Object.keys(taskAnalyses).length > 0 ? (
+                  {Object.keys(taskAnalyses).length > 0 ? (
                     <div className="mt-4">
                       <div className="mono mb-2 text-[10px] uppercase tracking-widest text-text-muted">
-                        Previsibilidade — o que vai ser disparado
+                        Análise — o que vai ser disparado
                       </div>
                       <ul className="grid gap-2">
                         {Object.values(taskAnalyses)
