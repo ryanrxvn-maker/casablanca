@@ -511,32 +511,33 @@ function IconTrophy() {
 
 type AvatarTier = 'free' | 'basic' | 'pro' | 'admin';
 
+// Cores de tier via CSS vars → tema-aware (no claro viram escuras e legíveis).
 function tierColorOf(t: AvatarTier): string {
   return t === 'admin'
-    ? '#c8ff00'
+    ? 'rgb(var(--lime))'
     : t === 'pro'
-      ? '#c084fc'
+      ? 'rgb(var(--violet))'
       : t === 'basic'
-        ? '#f472b6'
-        : '#8b8b96';
+        ? 'rgb(var(--pink))'
+        : 'rgb(var(--text-muted))';
 }
 function tierBgOf(t: AvatarTier): string {
   return t === 'admin'
-    ? 'rgba(200,255,0,0.10)'
+    ? 'rgb(var(--lime) / 0.12)'
     : t === 'pro'
-      ? 'rgba(192,132,252,0.12)'
+      ? 'rgb(var(--violet) / 0.14)'
       : t === 'basic'
-        ? 'rgba(244,114,182,0.10)'
-        : 'rgba(139,139,150,0.08)';
+        ? 'rgb(var(--pink) / 0.12)'
+        : 'rgb(var(--text-muted) / 0.10)';
 }
 function tierBorderOf(t: AvatarTier): string {
   return t === 'admin'
-    ? 'rgba(200,255,0,0.45)'
+    ? 'rgb(var(--lime) / 0.45)'
     : t === 'pro'
-      ? 'rgba(192,132,252,0.45)'
+      ? 'rgb(var(--violet) / 0.45)'
       : t === 'basic'
-        ? 'rgba(244,114,182,0.45)'
-        : 'rgba(139,139,150,0.35)';
+        ? 'rgb(var(--pink) / 0.45)'
+        : 'rgb(var(--text-muted) / 0.35)';
 }
 function tierLabelOf(t: AvatarTier): string {
   return t === 'admin' ? 'ADMIN' : t === 'pro' ? 'PRO' : t === 'basic' ? 'BASIC' : 'FREE';

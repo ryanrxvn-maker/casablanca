@@ -281,13 +281,13 @@ export function GlobalSearchButton() {
           padding: 0 16px 0 13px;
           border-radius: 9999px;
           border: 1px solid rgba(167, 139, 250, 0.32);
-          color: #f5f5f7;
+          color: rgb(var(--text));
           background:
             linear-gradient(
               135deg,
               rgba(167, 139, 250, 0.18) 0%,
               rgba(45, 212, 191, 0.06) 60%,
-              rgba(15, 15, 20, 0.85) 100%
+              rgb(var(--bg-soft) / 0.9) 100%
             );
           overflow: hidden;
           cursor: pointer;
