@@ -142,10 +142,8 @@ export function Btn3D({ icon, color, title, disabled, onClick, href, download, p
         <span className="pointer-events-none absolute inset-0 rounded-full ring-2 ring-current/40 animate-ping opacity-30" aria-hidden />
       ) : null}
       <span className="relative flex items-center justify-center">{icon}</span>
-      {/* Tooltip on hover */}
-      <span className="pointer-events-none absolute -bottom-7 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-md border border-white/10 bg-black/90 px-2 py-0.5 text-[9px] font-medium uppercase tracking-widest text-white opacity-0 transition-opacity duration-150 group-hover/btn3d:opacity-100">
-        {title}
-      </span>
+      {/* Sem tooltip custom — usamos native title (delay padrao do browser, sem
+       *  barra preta intrusiva embaixo do botao). aria-label cobre a11y. */}
     </>
   );
 
@@ -356,14 +354,35 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
-              {phase === 'done' && allOk && takesUrl ? (
-                <Btn3D icon={<IconReel size={16} />} color="lime" title="Baixar takes" href={takesUrl} download={takesFilename} />
+              {/* Downloads aparecem SEMPRE que a URL existe — mesmo em parcial
+               *  (user precisa baixar oque deu certo). allOk so muda visual
+               *  (tooltip avisa que tem item faltando). */}
+              {takesUrl ? (
+                <Btn3D
+                  icon={<IconReel size={16} />}
+                  color="lime"
+                  title={isPartialDone ? 'Baixar takes (parcial)' : 'Baixar takes'}
+                  href={takesUrl}
+                  download={takesFilename}
+                />
               ) : null}
-              {phase === 'done' && allOk && montadoUrl ? (
-                <Btn3D icon={<IconStack size={16} />} color="cyan" title="Baixar montados" href={montadoUrl} download={montadoFilename} />
+              {montadoUrl ? (
+                <Btn3D
+                  icon={<IconStack size={16} />}
+                  color="cyan"
+                  title={isPartialDone ? 'Baixar montados (parcial)' : 'Baixar montados'}
+                  href={montadoUrl}
+                  download={montadoFilename}
+                />
               ) : null}
-              {phase === 'done' && allOk && camufladoUrl ? (
-                <Btn3D icon={<IconShield size={16} />} color="fuchsia" title="Baixar camuflados" href={camufladoUrl} download={camufladoFilename} />
+              {camufladoUrl ? (
+                <Btn3D
+                  icon={<IconShield size={16} />}
+                  color="fuchsia"
+                  title={isPartialDone ? 'Baixar camuflados (parcial)' : 'Baixar camuflados'}
+                  href={camufladoUrl}
+                  download={camufladoFilename}
+                />
               ) : null}
               <Btn3D
                 icon={<IconRefresh size={16} />}
