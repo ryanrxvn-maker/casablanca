@@ -684,6 +684,10 @@ function BrollHistorySection() {
   const [loading, setLoading] = useState<string | null>(null);
   const [retrying, setRetrying] = useState<string | null>(null);
   const [retryMsg, setRetryMsg] = useState<string>('');
+  // zipKey do item que esta com o editor inline expandido (pra colar JSON
+  // de batches antigos que nao tem originalJson salvo).
+  const [pendingJsonFor, setPendingJsonFor] = useState<string | null>(null);
+  const [pendingJsonText, setPendingJsonText] = useState<string>('');
 
   function load() {
     try {
@@ -745,32 +749,65 @@ function BrollHistorySection() {
   }
 
   /**
+   * Click do botao RETOMAR — orquestra fluxo:
+   *  - Se ja tem originalJson → roda retry direto
+   *  - Se nao → abre editor inline pra user colar JSON, salva + retry
+   */
+  function onRetomarClick(item: HistEntry) {
+    if (item.originalJson) {
+      void retomar(item, item.originalJson);
+    } else {
+      // Pre-popula o editor com vazio. User cola, clica "Retomar com este JSON".
+      setPendingJsonFor(item.zipKey);
+      setPendingJsonText('');
+    }
+  }
+
+  function submitPendingJson(item: HistEntry) {
+    const raw = pendingJsonText.trim();
+    if (!raw) {
+      alert('Cola o JSON original primeiro.');
+      return;
+    }
+    // Salva o JSON no entry pra proximos RETOMAR serem instant
+    try {
+      const histRaw = localStorage.getItem('darkolab:auto-broll:history');
+      const histArr: HistEntry[] = histRaw ? JSON.parse(histRaw) : [];
+      const updated = histArr.map((h) => (h.zipKey === item.zipKey ? { ...h, originalJson: raw } : h));
+      localStorage.setItem('darkolab:auto-broll:history', JSON.stringify(updated));
+      window.dispatchEvent(new Event('darkolab:auto-broll:history-changed'));
+    } catch {}
+    setPendingJsonFor(null);
+    setPendingJsonText('');
+    // Dispara retomar com o JSON capturado
+    void retomar({ ...item, originalJson: raw }, raw);
+  }
+
+  /**
    * RETOMAR — re-dispara SO os takes que faltaram (status != ready ou sem URL)
    * e mergeia os novos MP4s no ZIP existente no IDB.
    *
+   * INTELIGENCIA: identifica precisamente onde parou cruzando o JSON original
+   * (todas as takes esperadas) com takeUrls (status de cada uma na entry).
+   * So re-dispara as que NAO tem videoUrl ou tem status diferente de 'ready'.
+   * Preserva 100% das que ja deram OK + mergeia novos MP4s no ZIP via JSZip.
+   *
    * Fluxo:
    *  1. Parseia originalJson → MagnificTakeInput[]
-   *  2. Filtra so os idxs faltantes (cruzando com takeUrls.status)
+   *  2. Filtra so os idxs faltantes (cruzando com takeUrls)
    *  3. Dispara runMagnificPipelineV2 com subset
    *  4. Mergeia ZIP novo no antigo via JSZip
    *  5. Atualiza entry no localStorage (successCount, takeUrls)
    */
-  async function retomar(item: HistEntry) {
-    if (!item.originalJson) {
-      alert(
-        'Esse batch foi salvo antes da feature RETOMAR existir.\n\n' +
-        'Pra esse caso, cola o JSON original de novo na area de cima e dispara.',
-      );
-      return;
-    }
+  async function retomar(item: HistEntry, originalJson: string) {
     setRetrying(item.zipKey);
     setRetryMsg('Preparando…');
     try {
       // 1. Identifica faltantes
       const { parseMagnificPrompts } = await import('@/lib/magnific-pipeline');
-      const allTakes = parseMagnificPrompts(item.originalJson);
+      const allTakes = parseMagnificPrompts(originalJson);
       if (allTakes.length === 0) {
-        throw new Error('JSON original parseou vazio. Re-rode do zero.');
+        throw new Error('JSON parseou vazio — verifica o formato e cola de novo.');
       }
       const readyIdxs = new Set(
         item.takeUrls
@@ -922,70 +959,115 @@ function BrollHistorySection() {
         {hist.map((item) => {
           const ts = new Date(item.createdAt);
           const dateStr = ts.toLocaleDateString('pt-BR') + ' ' + ts.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+          const isEditingJson = pendingJsonFor === item.zipKey;
+          const isRetrying = retrying === item.zipKey;
           return (
-            <div
-              key={item.zipKey}
-              className="flex items-center gap-3 rounded-[12px] border border-line/60 bg-bg-soft/40 px-4 py-3 backdrop-blur-sm hover:border-violet/40 transition"
-            >
-              <div className="flex-1 min-w-0">
-                <div className="mono text-[11px] uppercase tracking-widest text-violet truncate">{item.spaceName}</div>
-                <div className="mt-0.5 flex flex-wrap gap-2 text-[10px] text-text-muted">
-                  <span>{dateStr}</span>
-                  <span>·</span>
-                  <span className="text-lime">{item.successCount}/{item.totalTakes} ok</span>
-                  {item.failedCount > 0 && (<><span>·</span><span className="text-yellow-300">{item.failedCount} falhas</span></>)}
+            <div key={item.zipKey} className="grid gap-2">
+              <div className="flex items-center gap-3 rounded-[12px] border border-line/60 bg-bg-soft/40 px-4 py-3 backdrop-blur-sm hover:border-violet/40 transition">
+                <div className="flex-1 min-w-0">
+                  <div className="mono text-[11px] uppercase tracking-widest text-violet truncate">{item.spaceName}</div>
+                  <div className="mt-0.5 flex flex-wrap gap-2 text-[10px] text-text-muted">
+                    <span>{dateStr}</span>
+                    <span>·</span>
+                    <span className="text-lime">{item.successCount}/{item.totalTakes} ok</span>
+                    {item.failedCount > 0 && (<><span>·</span><span className="text-yellow-300">{item.failedCount} falhas</span></>)}
+                    {!item.originalJson && item.failedCount > 0 && (<><span>·</span><span className="text-cyan-300/70">⚠ batch antigo — RETOMAR pedira JSON</span></>)}
+                  </div>
                 </div>
-              </div>
-              {/* RETOMAR — re-dispara os takes que faltaram + mergeia no ZIP.
-               *  So aparece se ainda tem faltantes E temos originalJson salvo
-               *  (entries antigas pre-fix nao tem). */}
-              {item.failedCount > 0 && item.originalJson ? (
+                {/* RETOMAR — SEMPRE aparece quando ha falhas. Funciona com OU
+                 *  sem originalJson (se nao tiver, abre editor pra colar). */}
+                {item.failedCount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => onRetomarClick(item)}
+                    disabled={isRetrying || loading === item.zipKey}
+                    className="inline-flex items-center gap-1.5 rounded-[8px] border border-cyan-400/55 bg-cyan-400/15 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-cyan-300 hover:bg-cyan-400/25 hover:border-cyan-400/75 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                    title={
+                      isRetrying
+                        ? 'Retomando…'
+                        : item.originalJson
+                          ? `Retomar inteligente: re-dispara so as ${item.failedCount} faltantes + mergeia no ZIP`
+                          : `Retomar: vai pedir o JSON original (batch antigo sem ele salvo)`
+                    }
+                  >
+                    {isRetrying ? (
+                      <>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+                          <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+                          <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
+                        </svg>
+                        <span className="normal-case tracking-normal text-[10px]">{retryMsg || 'Retomando…'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+                          <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+                          <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
+                        </svg>
+                        Retomar ({item.failedCount})
+                      </>
+                    )}
+                  </button>
+                ) : null}
                 <button
                   type="button"
-                  onClick={() => retomar(item)}
-                  disabled={retrying === item.zipKey || loading === item.zipKey}
-                  className="inline-flex items-center gap-1.5 rounded-[8px] border border-cyan-400/55 bg-cyan-400/15 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-cyan-300 hover:bg-cyan-400/25 disabled:opacity-50 disabled:cursor-not-allowed"
-                  title={`Retomar — re-dispara so as ${item.failedCount} faltantes e atualiza o ZIP`}
+                  onClick={() => redownload(item)}
+                  disabled={loading === item.zipKey || isRetrying}
+                  className="rounded-[8px] border border-lime/40 bg-lime/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-lime hover:bg-lime/20 disabled:opacity-50"
+                  title="Baixar ZIP novamente"
                 >
-                  {retrying === item.zipKey ? (
-                    <>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
-                        <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
-                        <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
-                      </svg>
-                      <span className="normal-case tracking-normal text-[10px]">{retryMsg || 'Retomando…'}</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
-                        <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
-                        <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
-                      </svg>
-                      Retomar ({item.failedCount})
-                    </>
-                  )}
+                  {loading === item.zipKey ? '...' : '↓ Baixar'}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => remove(item)}
+                  disabled={isRetrying}
+                  className="rounded-[8px] border border-text-muted/30 bg-bg/40 px-2 py-1.5 text-[11px] text-text-muted hover:border-red-500/40 hover:text-red-300 disabled:opacity-30"
+                  title="Remover do histórico"
+                >
+                  ×
+                </button>
+              </div>
+              {/* Editor inline pra colar JSON original em batches antigos */}
+              {isEditingJson ? (
+                <div className="rounded-[12px] border border-cyan-400/50 bg-cyan-400/[0.04] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_18px_-8px_rgba(34,211,238,0.35)]">
+                  <div className="mono mb-2 flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-cyan-300">
+                    <span>Cola o JSON original aqui · RETOMAR vai re-disparar so as {item.failedCount} faltantes</span>
+                    <button
+                      type="button"
+                      onClick={() => { setPendingJsonFor(null); setPendingJsonText(''); }}
+                      className="rounded border border-text-muted/30 px-2 py-0.5 text-[9px] text-text-muted hover:border-red-500/50 hover:text-red-300"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                  <textarea
+                    value={pendingJsonText}
+                    onChange={(e) => setPendingJsonText(e.target.value)}
+                    rows={5}
+                    placeholder='[{"imagePrompt":"...","videoPrompt":"..."}, ...]'
+                    className="input-field w-full resize-y font-mono text-[11px]"
+                    autoFocus
+                  />
+                  <div className="mt-2 flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => submitPendingJson(item)}
+                      disabled={!pendingJsonText.trim()}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-cyan-400 bg-cyan-400/90 px-4 py-1.5 text-[11px] font-bold uppercase tracking-widest text-black shadow-[0_4px_14px_-4px_rgba(34,211,238,0.5)] hover:bg-cyan-400 hover:scale-[1.03] disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+                        <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+                        <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
+                      </svg>
+                      Retomar com este JSON
+                    </button>
+                  </div>
+                </div>
               ) : null}
-              <button
-                type="button"
-                onClick={() => redownload(item)}
-                disabled={loading === item.zipKey || retrying === item.zipKey}
-                className="rounded-[8px] border border-lime/40 bg-lime/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-lime hover:bg-lime/20 disabled:opacity-50"
-                title="Baixar ZIP novamente"
-              >
-                {loading === item.zipKey ? '...' : '↓ Baixar'}
-              </button>
-              <button
-                type="button"
-                onClick={() => remove(item)}
-                disabled={retrying === item.zipKey}
-                className="rounded-[8px] border border-text-muted/30 bg-bg/40 px-2 py-1.5 text-[11px] text-text-muted hover:border-red-500/40 hover:text-red-300 disabled:opacity-30"
-                title="Remover do histórico"
-              >
-                ×
-              </button>
             </div>
           );
         })}
