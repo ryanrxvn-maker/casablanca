@@ -199,19 +199,22 @@ export async function assertZeroCreditCost(): Promise<void> {
       `Continuamos: o Magnific ainda permite gerações nesse estado, só com prioridade menor.`,
     );
   }
+  // Shape NOVA (2026-05-30): só model/quantity/config{resolution[,duration]}.
+  // variant/tier foram dropados — servidor ignora se mandar, mas pra alinhar
+  // com o que a UI real do Magnific manda, deixamos só o essencial.
   const [img, vid] = await Promise.all([
     simulateGeneration([
       {
         model: 'imagen-nano-banana-2-flash',
         quantity: 1,
-        config: { resolution: '1k', variant: 'standard', tier: 'mid' },
+        config: { resolution: '1k' },
       },
     ]),
     simulateGeneration([
       {
         model: 'kling-25',
         quantity: 1,
-        config: { resolution: '720p', variant: 'standard', tier: 'mid', duration: 10 },
+        config: { resolution: '720p', duration: 10 },
       },
     ]),
   ]);
@@ -225,6 +228,26 @@ export async function assertZeroCreditCost(): Promise<void> {
 
 /* ────────── Image ────────── */
 
+/** Gera request_token estilo do site (12 chars alfanuméricos). */
+function genRequestToken(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const buf = crypto.getRandomValues(new Uint8Array(12));
+  let out = '';
+  for (let i = 0; i < 12; i++) out += chars[buf[i] % chars.length];
+  return out;
+}
+
+/** Gera UUID v4 client-side (pra family). */
+function genFamilyUUID(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  // Fallback paranóico
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 export async function generateImage(input: ImageGenInput): Promise<CreationResult> {
   const uid = await getUserId();
   const model = input.model || DEFAULT_IMAGE_MODEL;
@@ -233,37 +256,19 @@ export async function generateImage(input: ImageGenInput): Promise<CreationResul
   const smartPrompt = input.smartPrompt !== false;
   const seed = input.seed ?? Math.floor(Math.random() * 1_000_000);
 
-  // 1) Reserve tokens
-  const r1 = await magnificFetch(
-    `/app/api/start-tti-v2?lang=en_US&user_id=${uid}`,
-    {
-      method: 'POST',
-      body: {
-        mode: model,
-        prompt: input.prompt,
-        references: [],
-        num_images: 1,
-        aspect_ratio: aspectRatio,
-        color_palette: null,
-        color_palette_id: null,
-        variations: true,
-        force_credits: false,
-      },
-    },
-  );
-  if (!r1.ok) throw new Error(`start-tti-v2 falhou: ${r1.status} ${r1.text().slice(0, 200)}`);
-  const reserve = r1.json() as { family: string; request_tokens: string[] };
-  if (!reserve.family || !reserve.request_tokens?.[0]) {
-    throw new Error('start-tti-v2 sem family/tokens');
-  }
+  // ARQUITETURA NOVA (2026-05-30): /api/render/v4 aceita family+request_token
+  // gerados client-side. start-tti-v2 está obsoleto/quebrado (419 CSRF). Provado
+  // live no browser do user: render/v4 funciona stand-alone com 0 créditos no
+  // unlimited, mesmo com usage >100% (relaxed mode).
+  const family = genFamilyUUID();
+  const requestToken = genRequestToken();
 
-  // 2) Render
-  const r2 = await magnificFetch(`/app/api/render/v4?lang=en_US&user_id=${uid}`, {
+  const r = await magnificFetch(`/app/api/render/v4?lang=en_US&user_id=${uid}`, {
     method: 'POST',
     body: {
       tool: 'text-to-image',
       mode: model,
-      family: reserve.family,
+      family,
       prompt: input.prompt,
       negative_prompt: null,
       width: 0,
@@ -273,7 +278,7 @@ export async function generateImage(input: ImageGenInput): Promise<CreationResul
       resolution,
       thinking_level: 'minimal',
       use_google_search_tool: false,
-      request_token: reserve.request_tokens[0],
+      request_token: requestToken,
       force_credits: false,
       metadata: {
         inputPrompt: input.prompt,
@@ -287,8 +292,8 @@ export async function generateImage(input: ImageGenInput): Promise<CreationResul
       num_images: 1,
     },
   });
-  if (!r2.ok) throw new Error(`render/v4 image falhou: ${r2.status}`);
-  const rendered = r2.json() as { creation: { identifier: string } };
+  if (!r.ok) throw new Error(`render/v4 image falhou: ${r.status} ${r.text().slice(0, 200)}`);
+  const rendered = r.json() as { creation?: { identifier?: string } };
   if (!rendered.creation?.identifier) throw new Error('render/v4 sem identifier');
 
   return pollCreation(rendered.creation.identifier, POLL_TIMEOUT_IMG_MS);
