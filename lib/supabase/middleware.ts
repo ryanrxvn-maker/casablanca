@@ -1,6 +1,7 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { isPaidExpired } from '@/lib/plan-prices';
+import { isToolInMaintenance } from '@/lib/maintenance';
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -260,6 +261,17 @@ export async function updateSession(request: NextRequest) {
     if (phoneVerified && pathname.startsWith('/verify-phone')) {
       const url = request.nextUrl.clone();
       url.pathname = '/tools';
+      return redir(url);
+    }
+
+    // ─── MANUTENÇÃO ─────────────────────────────────────────────────
+    // Ferramentas em manutenção: bloqueio TOTAL pra todos menos admin.
+    // (Defesa real server-side — mesmo forçando a URL, não-admin cai fora.)
+    if (!isAdmin && isToolInMaintenance(pathname)) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/tools';
+      url.searchParams.set('maintenance', '1');
+      url.searchParams.set('from', pathname);
       return redir(url);
     }
 

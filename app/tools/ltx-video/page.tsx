@@ -208,7 +208,7 @@ export default function LtxVideoPage() {
     setBusy(true);
     setError(null);
     setResult(null);
-    setPhase('Conectando na H200 (ZeroGPU)...');
+    setPhase('Conectando ao servidor de geração...');
 
     try {
       const baseFields = {

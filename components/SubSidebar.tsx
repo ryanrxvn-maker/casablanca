@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { isToolInMaintenance } from '@/lib/maintenance';
 import {
   IconAcelerador,
   IconAudioSplit,
@@ -142,54 +143,80 @@ export function SubSidebar() {
           {items.map((it, i) => {
             const active =
               pathname === it.href || pathname.startsWith(it.href + '/');
+            const inMaint = isToolInMaintenance(it.href);
+            const blocked = inMaint && !isAdmin; // não-admin não acessa
+            const rowCls =
+              'group relative flex items-center gap-3 rounded-[12px] px-3 py-2.5 transition-all duration-300 ' +
+              (blocked
+                ? 'cursor-not-allowed text-text-dim'
+                : active
+                  ? 'bg-violet/12 text-white'
+                  : 'text-text-muted hover:bg-bg/60 hover:text-white');
+            const inner = (
+              <>
+                {/* Indicador vertical ativo */}
+                {active && !blocked ? (
+                  <span
+                    aria-hidden
+                    className="absolute left-0 top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-r-full"
+                    style={{
+                      background:
+                        'linear-gradient(180deg, #c084fc 0%, #6d4ee8 100%)',
+                      boxShadow: '0 0 10px rgba(167,139,250,0.75)',
+                    }}
+                  />
+                ) : null}
+
+                <span
+                  className={
+                    'flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border transition-all duration-300 ' +
+                    (active
+                      ? 'border-white/12 bg-black/35 scale-105'
+                      : 'border-white/5 bg-black/25 group-hover:border-white/12 group-hover:bg-black/35 group-hover:scale-105') +
+                    (blocked ? ' opacity-50' : '')
+                  }
+                  style={{
+                    boxShadow: `0 0 18px -6px ${it.hue}, inset 0 1px 0 rgba(255,255,255,0.06)`,
+                  }}
+                >
+                  {it.icon}
+                </span>
+                <span
+                  className={
+                    'truncate text-[13px] font-semibold tracking-tight ' +
+                    (blocked ? 'opacity-60' : '')
+                  }
+                  style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.01em' }}
+                >
+                  {it.label}
+                </span>
+                {inMaint ? (
+                  <span
+                    title="Em manutenção"
+                    className="ml-auto flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border border-amber-400/50 bg-amber-400/10 text-amber-300"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M14.5 5.5a3.6 3.6 0 0 0-4.7 4.7L3.3 16.7a1.8 1.8 0 0 0 0 2.5l1.5 1.5a1.8 1.8 0 0 0 2.5 0l6.5-6.5a3.6 3.6 0 0 0 4.7-4.7l-2.2 2.2-2.3-.6-.6-2.3 2.1-2z" />
+                    </svg>
+                  </span>
+                ) : null}
+              </>
+            );
             return (
               <li
                 key={it.href}
                 className="sub-sidebar-item"
                 style={{ animationDelay: `${i * 35}ms` }}
               >
-                <Link
-                  href={it.href}
-                  className={
-                    'group relative flex items-center gap-3 rounded-[12px] px-3 py-2.5 transition-all duration-300 ' +
-                    (active
-                      ? 'bg-violet/12 text-white'
-                      : 'text-text-muted hover:bg-bg/60 hover:text-white')
-                  }
-                >
-                  {/* Indicador vertical ativo */}
-                  {active ? (
-                    <span
-                      aria-hidden
-                      className="absolute left-0 top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-r-full"
-                      style={{
-                        background:
-                          'linear-gradient(180deg, #c084fc 0%, #6d4ee8 100%)',
-                        boxShadow: '0 0 10px rgba(167,139,250,0.75)',
-                      }}
-                    />
-                  ) : null}
-
-                  <span
-                    className={
-                      'flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border transition-all duration-300 ' +
-                      (active
-                        ? 'border-white/12 bg-black/35 scale-105'
-                        : 'border-white/5 bg-black/25 group-hover:border-white/12 group-hover:bg-black/35 group-hover:scale-105')
-                    }
-                    style={{
-                      boxShadow: `0 0 18px -6px ${it.hue}, inset 0 1px 0 rgba(255,255,255,0.06)`,
-                    }}
-                  >
-                    {it.icon}
-                  </span>
-                  <span
-                    className="truncate text-[13px] font-semibold tracking-tight"
-                    style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.01em' }}
-                  >
-                    {it.label}
-                  </span>
-                </Link>
+                {blocked ? (
+                  <div className={rowCls} aria-disabled title="Em manutenção">
+                    {inner}
+                  </div>
+                ) : (
+                  <Link href={it.href} className={rowCls}>
+                    {inner}
+                  </Link>
+                )}
               </li>
             );
           })}

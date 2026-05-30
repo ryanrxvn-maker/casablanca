@@ -5,6 +5,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useTier, tierAllowsTool, tierCanAutomate } from '@/lib/use-tier';
+import { isToolInMaintenance } from '@/lib/maintenance';
+import { MaintenanceBadge } from '@/components/MaintenanceBadge';
+
+/** 'blocked' = cliente sem acesso · 'admin' = admin acessa pra testar. */
+type MaintMode = 'blocked' | 'admin' | undefined;
 import {
   IconAcelerador,
   IconAudioSplit,
@@ -220,6 +225,10 @@ export function ToolsHub() {
   const ai = AI.filter((it) => !it.adminOnly || isAdmin);
   const featured = FEATURED.filter((it) => !it.adminOnly || isAdmin);
 
+  // Manutenção: admin acessa (modo 'admin'), o resto é bloqueado.
+  const maintOf = (href: string): MaintMode =>
+    isToolInMaintenance(href) ? (isAdmin ? 'admin' : 'blocked') : undefined;
+
   const greeting = greetingFor(new Date(), firstName);
 
   return (
@@ -272,6 +281,7 @@ export function ToolsHub() {
               entry={it}
               delay={140 + i * 60}
               locked={!tierAllowsTool(tier, it.href)}
+              maint={maintOf(it.href)}
             />
           ))}
         </div>
@@ -295,6 +305,7 @@ export function ToolsHub() {
               entry={it}
               delay={i * 35}
               locked={!tierAllowsTool(tier, it.href)}
+              maint={maintOf(it.href)}
             />
           ))}
         </div>
@@ -318,6 +329,7 @@ export function ToolsHub() {
               entry={it}
               delay={i * 35}
               locked={!tierAllowsTool(tier, it.href)}
+              maint={maintOf(it.href)}
             />
           ))}
         </div>
@@ -888,11 +900,15 @@ function FeaturedCard({
   entry,
   delay,
   locked = false,
+  maint,
 }: {
   entry: ToolEntry;
   delay: number;
   locked?: boolean;
+  maint?: MaintMode;
 }) {
+  const isBlocked = maint === 'blocked';
+  const nonClickable = locked || isBlocked;
   const handleMouseMove: React.MouseEventHandler<HTMLElement> = (e) => {
     const el = e.currentTarget;
     const rect = el.getBoundingClientRect();
@@ -910,7 +926,7 @@ function FeaturedCard({
 
   const cardClass =
     'featured-card group relative block overflow-hidden rounded-[20px] border border-line/70 p-5 md:p-6' +
-    (locked ? ' cursor-not-allowed' : '');
+    (nonClickable ? ' cursor-not-allowed' : '');
   const cardStyle: React.CSSProperties = {
     background:
       'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.22)), linear-gradient(180deg, #16161c, #0c0c10)',
@@ -968,7 +984,7 @@ function FeaturedCard({
         </div>
       ) : null}
 
-      <div className={'relative ' + (locked ? 'opacity-50' : '')}>
+      <div className={'relative ' + (nonClickable ? 'opacity-50' : '')}>
         <div className="mb-5 flex items-center justify-between">
           <span
             className="flex h-14 w-14 items-center justify-center rounded-[16px] border border-white/10 bg-black/40 backdrop-blur-md transition-all duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-hover:scale-110 group-hover:-rotate-[8deg]"
@@ -1015,7 +1031,7 @@ function FeaturedCard({
           className="mt-6 flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.18em] text-text-dim transition-all duration-300 group-hover:text-white"
           style={{ fontFamily: 'var(--font-tech)' }}
         >
-          <span>{locked ? 'Bloqueado' : 'Abrir'}</span>
+          <span>{isBlocked ? 'Em manutenção' : locked ? 'Bloqueado' : 'Abrir'}</span>
           <span
             className="flex h-6 w-6 items-center justify-center rounded-full border border-white/10 transition-all duration-300 group-hover:translate-x-1 group-hover:scale-110 group-hover:border-white/30"
             style={{ background: 'rgba(255,255,255,0.02)' }}
@@ -1029,17 +1045,15 @@ function FeaturedCard({
 
   return (
     <div
-      className="featured-card-wrap fade-in-up"
+      className="featured-card-wrap fade-in-up relative"
       style={{ animationDelay: `${delay}ms`, perspective: '1100px' }}
     >
-      {locked ? (
+      {nonClickable ? (
         <div
           className={cardClass}
           style={cardStyle}
           aria-disabled
-          title="Disponível só pra contas Beta"
-          onMouseMove={handleMouseMove}
-          onMouseLeave={handleMouseLeave}
+          title={isBlocked ? 'Em manutenção' : 'Disponível só pra contas Beta'}
         >
           {body}
         </div>
@@ -1054,6 +1068,8 @@ function FeaturedCard({
           {body}
         </Link>
       )}
+      {/* Selo de manutenção FORA do card (overflow-hidden cortaria o mini-card). */}
+      {maint ? <MaintenanceBadge mode={maint} className="right-4 top-4" /> : null}
     </div>
   );
 }
@@ -1062,14 +1078,18 @@ function ToolCard({
   entry,
   delay,
   locked = false,
+  maint,
 }: {
   entry: ToolEntry;
   delay: number;
   locked?: boolean;
+  maint?: MaintMode;
 }) {
+  const isBlocked = maint === 'blocked';
+  const nonClickable = locked || isBlocked;
   const cls =
     'tool-card group relative block overflow-hidden rounded-[16px] border border-line/70 p-4 transition-all duration-300 md:p-5 ' +
-    (locked
+    (nonClickable
       ? 'cursor-not-allowed'
       : 'hover:-translate-y-[2px] hover:border-violet/45');
   const style: React.CSSProperties = {
@@ -1100,7 +1120,7 @@ function ToolCard({
         </div>
       ) : null}
 
-      <div className={'relative flex items-start gap-3 ' + (locked ? 'opacity-45' : '')}>
+      <div className={'relative flex items-start gap-3 ' + (nonClickable ? 'opacity-45' : '')}>
         <span
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[12px] border border-white/6 bg-black/30 transition-transform duration-300 group-hover:scale-110"
           style={{
@@ -1134,12 +1154,12 @@ function ToolCard({
     </>
   );
 
-  return locked ? (
+  const card = nonClickable ? (
     <div
       className={cls}
       style={style}
       aria-disabled
-      title="Disponível só pra contas Beta"
+      title={isBlocked ? 'Em manutenção' : 'Disponível só pra contas Beta'}
     >
       {body}
     </div>
@@ -1147,6 +1167,16 @@ function ToolCard({
     <Link href={entry.href} className={cls} style={style}>
       {body}
     </Link>
+  );
+
+  if (!maint) return card;
+  // Card tem overflow-hidden → o mini-card seria cortado. Por isso o selo
+  // fica FORA do card, num wrapper relative.
+  return (
+    <div className="relative">
+      {card}
+      <MaintenanceBadge mode={maint} className="right-3 top-3" />
+    </div>
   );
 }
 

@@ -320,11 +320,6 @@ function AutoBrollInner() {
     URL.revokeObjectURL(url);
   }
 
-  function openSpace3D(job: Job) {
-    const u = job.progress?.spaceUrl;
-    if (u) window.open(u, '_blank', 'noopener,noreferrer');
-  }
-
   function addJob() {
     setJobs((prev) => [...prev, newJob()]);
   }
@@ -579,7 +574,6 @@ function AutoBrollInner() {
               }}
               onRemove={() => removeJob(job.id)}
               onDownload={() => downloadZip(job)}
-              onOpenSpace={() => openSpace3D(job)}
             />
           ))}
         </div>
@@ -773,7 +767,6 @@ function JobCard({
   onDebug,
   onRemove,
   onDownload,
-  onOpenSpace,
 }: {
   job: Job;
   index: number;
@@ -787,11 +780,9 @@ function JobCard({
   onDebug: () => void;
   onRemove: () => void;
   onDownload: () => void;
-  onOpenSpace: () => void;
 }) {
   const running = job.status === 'running';
   const p = job.progress;
-  const hasSpace = !!p?.spaceUrl;
 
   return (
     <div
@@ -841,25 +832,6 @@ function JobCard({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onOpenSpace}
-            disabled={!hasSpace}
-            title={
-              hasSpace
-                ? 'Abre o Space deste job no Magnific (nova aba)'
-                : 'O Space aparece aqui assim que o job começar'
-            }
-            className={
-              'group relative inline-flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 text-[11px] font-bold uppercase tracking-widest transition-all ' +
-              (hasSpace
-                ? 'border border-cyan-300/60 bg-gradient-to-b from-cyan-400/25 to-cyan-600/10 text-cyan-200 shadow-[0_3px_0_rgba(34,211,238,0.35),0_6px_14px_rgba(34,211,238,0.25)] hover:translate-y-[1px] hover:shadow-[0_2px_0_rgba(34,211,238,0.35)] active:translate-y-[3px] active:shadow-none'
-                : 'cursor-not-allowed border border-line bg-bg/40 text-text-muted opacity-40')
-            }
-            style={{ fontFamily: 'var(--font-tech)' }}
-          >
-            🧊 Ver Space
-          </button>
           {total > 1 && !running && (
             <button
               type="button"

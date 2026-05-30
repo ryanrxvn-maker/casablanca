@@ -367,7 +367,7 @@ export default function LipSyncTool() {
       // dentes. Adiciona ~20-40s mas zero custo. Mesma melhora do flow chunked.
       const { postprocessLipSyncOutput } = await import('@/lib/lipsync-postprocess');
       const rawRes = await fetch(data.output_video_url);
-      if (!rawRes.ok) throw new Error('Falha baixando output do Fal');
+      if (!rawRes.ok) throw new Error('Falha ao baixar o resultado do processamento');
       const rawBlob = await rawRes.blob();
       const polishedBlob = await postprocessLipSyncOutput(rawBlob);
       const polishedFile = new File([polishedBlob], 'lipsync_polished.mp4', { type: 'video/mp4' });
