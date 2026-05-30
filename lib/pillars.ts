@@ -532,6 +532,311 @@ export const PILLARS: Pillar[] = [
       { slug: 'remover-legenda-de-video', label: 'Remover legenda de vídeo' },
     ],
   },
+  {
+    slug: 'editar-videos-para-canais-dark',
+    keyword: 'editar vídeos para canais dark',
+    title: 'Editar vídeos para canais dark no automático e em lote',
+    description:
+      'Editar vídeos para canais dark em escala: decupagem, B-roll, lipsync e legendas no automático e em lote. Poste vários por dia sem travar. Comece grátis.',
+    kicker: 'Canais dark',
+    h1: 'Editar vídeos para canais dark',
+    intro: [
+      'Editar vídeos para canais dark em escala é um problema de volume: pra monetizar, você precisa postar muito, e a edição manual não acompanha. A saída é automatizar as etapas repetitivas — decupagem, B-roll, lipsync e legenda — e processar tudo em lote.',
+      'O Auto Edit foi feito pra esse ritmo: você empilha os vídeos do dia numa fila e o estúdio entrega, no navegador, sem você ficar na timeline.',
+    ],
+    blocks: [
+      {
+        h2: 'Por que automatizar a edição de canais dark?',
+        body: [
+          'Canal dark vive de frequência. Quanto mais vídeos no ar, mais visualização e mais receita — mas cada vídeo editado na mão custa horas. Automatizar a edição quebra esse teto: a mesma pessoa passa a entregar muito mais por dia.',
+        ],
+      },
+      {
+        h2: 'O fluxo de um canal dark no automático',
+        body: [
+          'Em vez de abrir um editor pesado pra cada vídeo, você usa cada automação na fila:',
+        ],
+        list: [
+          'Decupagem automática corta os silêncios da narração',
+          'B-roll automático cobre a fala a partir do roteiro',
+          'Lipsync em lote gera os avatares falando, se o canal usar avatar',
+          'Legenda automática fecha o vídeo',
+        ],
+      },
+      {
+        h2: 'Dá para editar vários vídeos por dia?',
+        body: [
+          'Esse é o ponto principal. O processamento em lote permite preparar o material do dia inteiro de uma vez e deixar a fila entregar, em vez de editar um por um. É o que torna viável manter a frequência alta de um canal dark.',
+        ],
+      },
+      {
+        h2: 'Precisa instalar programa pesado?',
+        body: [
+          'Não. Tudo roda no navegador, sem download nem máquina parruda. Você começa no plano grátis e libera mais volume nos planos Basic (R$ 57/mês) e Pro (R$ 116/mês).',
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: 'O Auto Edit serve para qualquer nicho de canal dark?',
+        a: 'Serve, porque automatiza etapas que todo canal de narração usa: corte de silêncio, cobertura de B-roll, legenda e, quando há avatar, o lipsync. O fluxo é o mesmo independentemente do tema.',
+      },
+      {
+        q: 'Consigo manter uma frequência alta de postagem?',
+        a: 'Sim. O processamento em lote é justamente pra volume: você prepara vários vídeos de uma vez e a fila entrega, sustentando a frequência que um canal dark precisa.',
+      },
+      {
+        q: 'Preciso de um PC potente?',
+        a: 'Não. Como roda no navegador, o processamento não depende da sua máquina. Funciona em qualquer computador.',
+      },
+    ],
+    related: [
+      { slug: 'automacao-de-edicao-de-video', label: 'Automação de edição de vídeo' },
+      { slug: 'b-roll-automatico', label: 'Gerar B-roll automático' },
+    ],
+  },
+  {
+    slug: 'automacao-de-ugc',
+    keyword: 'automação de UGC',
+    title: 'Automação de UGC: produza criativos em lote sem regravar',
+    description:
+      'Automação de UGC pra agências: lipsync em lote, troca de produto e remoção de legenda pra reaproveitar criativos em escala. Comece grátis no Auto Edit.',
+    kicker: 'UGC',
+    h1: 'Automação de UGC',
+    intro: [
+      'Automação de UGC é produzir e adaptar criativos de usuário (user-generated content) em escala, sem regravar e sem montar cada variação na mão. Pra agência, o gargalo nunca é gravar — é multiplicar o mesmo criativo em dezenas de versões.',
+      'O Auto Edit resolve isso com ferramentas em lote: lipsync de vários avatares de uma vez, troca de produto no áudio e limpeza de legenda gravada pra reaproveitar o que já existe.',
+    ],
+    blocks: [
+      {
+        h2: 'O que dá para automatizar na produção de UGC?',
+        body: [
+          'As tarefas que mais consomem tempo numa operação de UGC são justamente as repetitivas — e todas têm automação no Auto Edit:',
+        ],
+        list: [
+          'Lipsync em lote — dezenas de variações de avatar de uma vez',
+          'Troca de produto — adapta o mesmo criativo pra outra marca sem regravar',
+          'Remover legenda gravada e marca d’água pra reaproveitar criativos',
+          'Legenda automática pra cada variação',
+        ],
+      },
+      {
+        h2: 'Por que isso importa para uma agência?',
+        body: [
+          'Quem entrega UGC pra clientes precisa de volume e padronização. Automatizar a produção transforma um criativo aprovado em uma fila de variações prontas, libera o time pro trabalho criativo e aumenta quantos vídeos a agência consegue entregar por dia.',
+        ],
+      },
+      {
+        h2: 'Automação de UGC em lote, no navegador',
+        body: [
+          'Em vez de operar uma ferramenta por vez, você empilha o trabalho do dia numa fila única. Tudo roda no navegador, sem download — você prepara, dispara e colhe os criativos prontos.',
+        ],
+      },
+      {
+        h2: 'Dá para começar de graça?',
+        body: [
+          'Dá. O Auto Edit tem plano grátis sem cartão. Os planos Basic (R$ 57/mês) e Pro (R$ 116/mês) liberam mais volume e as ferramentas premium de automação.',
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: 'A automação de UGC substitui o criador?',
+        a: 'Não. Ela automatiza a multiplicação e adaptação dos criativos (lipsync, troca de produto, legenda), não a gravação original. O criador continua sendo a fonte do conteúdo.',
+      },
+      {
+        q: 'Dá para adaptar um criativo para vários clientes?',
+        a: 'Sim. Com a troca de produto no áudio e a remoção de legenda, dá pra reaproveitar o mesmo criativo aprovado em campanhas e marcas diferentes.',
+      },
+      {
+        q: 'Funciona para volume de agência?',
+        a: 'Sim. Todas as ferramentas rodam em lote, justamente pra suportar o volume de uma operação de UGC.',
+      },
+    ],
+    related: [
+      { slug: 'lipsync-em-lote', label: 'Lipsync em lote' },
+      { slug: 'trocar-produto-no-video', label: 'Trocar produto no vídeo' },
+    ],
+  },
+  {
+    slug: 'remover-marca-dagua-de-video',
+    keyword: 'remover marca d’água de vídeo',
+    title: 'Remover marca d’água de vídeo em lote com IA, sem regravar',
+    description:
+      'Remova marca d’água de vídeo com IA, em lote, reconstruindo a imagem por baixo. Ideal pra reaproveitar criativos próprios e de banco. Comece grátis.',
+    kicker: 'Marca d’água',
+    h1: 'Remover marca d’água de vídeo',
+    intro: [
+      'Remover marca d’água de vídeo é apagar o logo ou selo sobreposto na imagem sem deixar rastro. Como a marca faz parte do quadro, não dá pra simplesmente desligar — o Auto Edit usa IA pra detectar a região e reconstruir o fundo por baixo.',
+      'E faz isso em lote: você passa vários vídeos de uma vez e a IA limpa todos, deixando a imagem pronta pra reusar.',
+    ],
+    blocks: [
+      {
+        h2: 'Como remover marca d’água de um vídeo?',
+        body: [
+          'Você indica onde está a marca d’água e a IA reconstrói a área por baixo dela, devolvendo o vídeo sem o selo. O mesmo processo remove legenda gravada e outros elementos sobrepostos.',
+        ],
+      },
+      {
+        h2: 'Para que serve remover a marca d’água?',
+        body: [
+          'O uso principal é reaproveitar material que você tem direito de usar — criativos próprios, vídeos de banco licenciados ou criativos de UGC — deixando a imagem limpa pra colocar a sua identidade ou adaptar pra outra campanha.',
+        ],
+      },
+      {
+        h2: 'Remover marca d’água de vários vídeos de uma vez',
+        body: [
+          'Em vez de tratar um por um, você joga o lote inteiro na fila e a IA limpa todos. Sem download de programa, tudo no navegador.',
+        ],
+      },
+      {
+        h2: 'Precisa instalar algo?',
+        body: [
+          'Não. A remoção roda no navegador. Você começa no plano grátis e libera mais volume nos planos Basic (R$ 57/mês) e Pro (R$ 116/mês).',
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: 'Remover a marca d’água estraga a imagem?',
+        a: 'A IA reconstrói a área por baixo da marca pra manter a imagem natural. A qualidade é preservada na maioria dos casos; em fundos muito complexos pode haver pequena variação na região tratada.',
+      },
+      {
+        q: 'Dá para remover marca d’água e legenda juntas?',
+        a: 'Dá. A mesma ferramenta trata marca d’água, legenda gravada e outros elementos sobrepostos na imagem.',
+      },
+      {
+        q: 'Funciona em lote?',
+        a: 'Sim. Você sobe vários vídeos e a IA processa todos na fila, sem repetir o passo a passo.',
+      },
+    ],
+    related: [
+      { slug: 'remover-legenda-de-video', label: 'Remover legenda de vídeo' },
+      { slug: 'automacao-de-ugc', label: 'Automação de UGC' },
+    ],
+  },
+  {
+    slug: 'comprimir-video-online',
+    keyword: 'comprimir vídeo online',
+    title: 'Comprimir vídeo online: reduza o tamanho sem perder qualidade',
+    description:
+      'Comprima vídeo online e reduza o tamanho do arquivo mantendo a qualidade, direto no navegador e sem instalar nada. Comece grátis no Auto Edit.',
+    kicker: 'Compressor',
+    h1: 'Comprimir vídeo online',
+    intro: [
+      'Comprimir vídeo online é reduzir o tamanho do arquivo pra ele subir mais rápido, caber no limite de upload ou ocupar menos espaço — sem jogar a qualidade no lixo. O Auto Edit faz isso direto no navegador, sem você instalar programa.',
+      'A ideia é diminuir os megabytes mantendo a imagem aceitável pra publicar, enviar ou armazenar.',
+    ],
+    blocks: [
+      {
+        h2: 'Como comprimir um vídeo online?',
+        body: [
+          'Você sobe o vídeo e a ferramenta reprocessa o arquivo com uma compressão mais eficiente, reduzindo o tamanho final. Em poucos passos o vídeo fica mais leve, pronto pra baixar.',
+        ],
+      },
+      {
+        h2: 'Comprimir sem perder qualidade é possível?',
+        body: [
+          'Dá pra reduzir bastante o tamanho com perda mínima de qualidade visual, porque boa parte dos arquivos vem com bitrate maior do que precisa. O equilíbrio entre tamanho e qualidade depende do uso — publicar nas redes aceita mais compressão que um arquivo de arquivo-mestre.',
+        ],
+      },
+      {
+        h2: 'Para que serve comprimir vídeo?',
+        body: ['Os casos mais comuns:'],
+        list: [
+          'Subir mais rápido pra YouTube, Instagram ou WhatsApp',
+          'Caber no limite de tamanho de uma plataforma ou e-mail',
+          'Economizar espaço de armazenamento',
+          'Enviar para o cliente sem travar o upload',
+        ],
+      },
+      {
+        h2: 'Precisa instalar algo para comprimir?',
+        body: [
+          'Não. O compressor roda 100% no navegador, sem download. Você pode usar no plano grátis e ampliar o volume nos planos Basic (R$ 57/mês) e Pro (R$ 116/mês).',
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: 'Comprimir o vídeo diminui muito a qualidade?',
+        a: 'Não precisa. Dá pra reduzir o tamanho com perda mínima ajustando o nível de compressão ao uso — redes sociais aceitam mais compressão que um arquivo-mestre.',
+      },
+      {
+        q: 'Qual formato de vídeo posso comprimir?',
+        a: 'Os formatos de vídeo mais comuns são aceitos. Você sobe o arquivo e baixa a versão comprimida.',
+      },
+      {
+        q: 'Preciso instalar um programa?',
+        a: 'Não. A compressão é online, direto no navegador, sem download nem instalação.',
+      },
+    ],
+    related: [
+      { slug: 'separar-audio-do-video', label: 'Separar áudio do vídeo' },
+      { slug: 'editar-video-mais-rapido', label: 'Editar vídeo mais rápido' },
+    ],
+  },
+  {
+    slug: 'separar-audio-do-video',
+    keyword: 'separar áudio do vídeo',
+    title: 'Separar áudio do vídeo: extraia a trilha em segundos online',
+    description:
+      'Separe o áudio do vídeo e extraia a trilha em segundos, direto no navegador e sem instalar nada. Ideal pra transcrição, podcast e edição. Comece grátis.',
+    kicker: 'Separar áudio',
+    h1: 'Separar áudio do vídeo',
+    intro: [
+      'Separar o áudio do vídeo é extrair só a faixa sonora do arquivo, deixando de lado a imagem. Serve pra reaproveitar a fala num podcast, mandar pra transcrição, editar o som à parte ou guardar só o áudio. O Auto Edit faz isso online, em segundos.',
+      'Você sobe o vídeo e recebe o áudio separado, pronto pra baixar.',
+    ],
+    blocks: [
+      {
+        h2: 'Como separar o áudio de um vídeo?',
+        body: [
+          'Você envia o vídeo e a ferramenta extrai a faixa de áudio dele, gerando um arquivo de som independente. Em poucos passos o áudio fica disponível pra download, sem a imagem.',
+        ],
+      },
+      {
+        h2: 'Para que serve extrair o áudio do vídeo?',
+        body: ['Os usos mais comuns:'],
+        list: [
+          'Transformar um vídeo em episódio de podcast',
+          'Mandar só o áudio pra transcrição ou legenda',
+          'Editar a trilha sonora separadamente',
+          'Guardar apenas a fala sem ocupar espaço com vídeo',
+        ],
+      },
+      {
+        h2: 'Separar áudio de vários vídeos',
+        body: [
+          'Como o resto do Auto Edit, dá pra processar em lote: você sobe vários vídeos e extrai o áudio de todos na fila, em vez de um por um.',
+        ],
+      },
+      {
+        h2: 'Precisa instalar algo?',
+        body: [
+          'Não. A extração de áudio roda no navegador, sem download. Comece no plano grátis e amplie o volume nos planos Basic (R$ 57/mês) e Pro (R$ 116/mês).',
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: 'Em que formato o áudio é exportado?',
+        a: 'A ferramenta gera um arquivo de áudio independente a partir da trilha do vídeo, pronto pra baixar e usar em podcast, transcrição ou edição.',
+      },
+      {
+        q: 'A qualidade do áudio é mantida?',
+        a: 'Sim. A extração separa a faixa sonora existente do vídeo, preservando o áudio original.',
+      },
+      {
+        q: 'Dá para separar o áudio de vários vídeos de uma vez?',
+        a: 'Dá. O processamento em lote permite extrair o áudio de vários vídeos na mesma fila.',
+      },
+    ],
+    related: [
+      { slug: 'gerar-legenda-automatica', label: 'Gerar legenda automática' },
+      { slug: 'comprimir-video-online', label: 'Comprimir vídeo online' },
+    ],
+  },
 ];
 
 export const PILLAR_SLUGS = PILLARS.map((p) => p.slug);
