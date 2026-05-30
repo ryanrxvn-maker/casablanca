@@ -873,7 +873,7 @@ function JobCard({
             >
               Prompts do job
               <span className="mx-2 text-text-dim">·</span>
-              <span className="text-violet">JSON do Claude</span> ou texto numerado
+              <span className="text-violet">JSON</span>
             </span>
             {takesCount > 0 && (
               <span
