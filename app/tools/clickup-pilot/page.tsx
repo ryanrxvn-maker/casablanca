@@ -1466,6 +1466,7 @@ function ClickUpPilotInner() {
     if (Object.keys(persisted).length === 0) return;
     const restored: Record<string, BatchTaskState> = {};
     let interruptedCount = 0;
+    const doneTaskIds: string[] = [];
     for (const [taskId, state] of Object.entries(persisted)) {
       const wasInterrupted = state.phase !== 'done' && state.phase !== 'failed';
       if (wasInterrupted) {
@@ -1478,11 +1479,49 @@ function ClickUpPilotInner() {
         };
       } else {
         restored[taskId] = state;
+        if (state.phase === 'done') doneTaskIds.push(taskId);
       }
     }
     setBatchStates(restored);
     if (interruptedCount > 0) {
       console.info(`[batch restore] ${interruptedCount} batch(es) interrompidos — re-enfileirados pro promoter.`);
+    }
+
+    // HIDRATAÇÃO BLOB URLs (fix 2026-05-30):
+    // persistBatchStates DESCARTA zipBlobUrl/montadoZipUrl/camufladoZipUrl
+    // (Blob URLs nao sobrevivem reload). Apos restaurar, os ZIPs reais
+    // estao em IndexedDB sob as chaves batch:{taskId}:{takes,montado,camo}.
+    // Carrega esses blobs + cria novas URLs, patcha no state. Sem isso,
+    // batch 'done' apos reload nao mostra botoes de download.
+    if (doneTaskIds.length > 0) {
+      void (async () => {
+        try {
+          const { loadZip } = await import('@/lib/zip-store');
+          for (const taskId of doneTaskIds) {
+            const updates: Partial<BatchTaskState> = {};
+            try {
+              const t = await loadZip(`batch:${taskId}:takes`);
+              if (t) { updates.zipBlobUrl = t.blobUrl; updates.zipFilename = t.filename; }
+            } catch {}
+            try {
+              const m = await loadZip(`batch:${taskId}:montado`);
+              if (m) { updates.montadoZipUrl = m.blobUrl; updates.montadoZipName = m.filename; }
+            } catch {}
+            try {
+              const c = await loadZip(`batch:${taskId}:camo`);
+              if (c) { updates.camufladoZipUrl = c.blobUrl; updates.camufladoZipName = c.filename; }
+            } catch {}
+            if (Object.keys(updates).length === 0) continue;
+            setBatchStates((prev) => {
+              const cur = prev[taskId];
+              if (!cur) return prev;
+              return { ...prev, [taskId]: { ...cur, ...updates } as BatchTaskState };
+            });
+          }
+        } catch (e) {
+          console.warn('[batch restore] hidratacao blob URLs falhou:', e);
+        }
+      })();
     }
   }, []);
 
