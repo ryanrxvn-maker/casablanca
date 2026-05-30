@@ -10,6 +10,7 @@ import { MouseGlow } from '@/components/MouseGlow';
 import { RippleRoot } from '@/components/RippleRoot';
 import { FloatingOrbs } from '@/components/FloatingOrbs';
 import { WhatsAppFab } from '@/components/WhatsAppFab';
+import { ThemeManager } from '@/components/ThemeManager';
 import './globals.css';
 
 /**
@@ -205,12 +206,13 @@ export default function RootLayout({
       className={`${display.variable} ${mono.variable} ${tech.variable} ${serif.variable}`}
     >
       <body>
-        {/* Anti-flash: aplica o tema salvo ANTES da pintura. Default = dark
-            (sem atributo); só seta data-theme quando for claro. */}
+        {/* Anti-flash: aplica o tema salvo ANTES da pintura, mas SÓ dentro da
+            conta (app). Landing e páginas públicas ficam sempre dark. /planos
+            só fica claro se aberto via upgrade (?upgrade). Default = dark. */}
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "(function(){try{if(localStorage.getItem('theme')==='light'){document.documentElement.setAttribute('data-theme','light');}}catch(e){}})();",
+              "(function(){try{var p=location.pathname,s=location.search;var app=(p==='/tools'||p.indexOf('/tools/')===0||p.indexOf('/configuracoes')===0||p.indexOf('/admin')===0||((p==='/planos'||p.indexOf('/planos')===0)&&s.indexOf('upgrade')>-1));if(app&&localStorage.getItem('theme')==='light'){document.documentElement.setAttribute('data-theme','light');}}catch(e){}})();",
           }}
         />
         <script
@@ -218,6 +220,7 @@ export default function RootLayout({
           // JSON estático do app (sem input de usuário) — seguro.
           dangerouslySetInnerHTML={{ __html: JSON.stringify(JSON_LD) }}
         />
+        <ThemeManager />
         <FloatingOrbs />
         <MouseGlow />
         <RippleRoot />

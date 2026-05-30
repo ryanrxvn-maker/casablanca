@@ -145,7 +145,7 @@ export function TierGate({
 
           <div className="flex flex-wrap gap-2.5 pt-2">
             <a
-              href="/planos"
+              href="/planos?upgrade=1"
               className="group inline-flex items-center gap-2 rounded-full border px-4 py-2.5 text-[12.5px] font-bold uppercase tracking-[0.14em] text-white transition-all hover:-translate-y-[1px]"
               style={{
                 fontFamily: 'var(--font-tech)',

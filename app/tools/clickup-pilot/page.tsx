@@ -336,7 +336,7 @@ function ClickUpPilotLocked({ tier }: { tier: 'free' | 'basic' | 'pro' | 'admin'
           </div>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <Link
-              href="/planos"
+              href="/planos?upgrade=1"
               className="inline-flex items-center gap-2 rounded-full px-6 py-3 text-[13.5px] font-bold text-black"
               style={{
                 background: 'linear-gradient(135deg, #c8ff00 0%, #a3e635 100%)',

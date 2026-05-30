@@ -630,7 +630,7 @@ function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
               </Link>
             ) : (
               <Link
-                href="/planos"
+                href="/planos?upgrade=1"
                 title="Disponível só no plano Pro"
                 className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full border border-lime/35 bg-lime/5 px-6 py-3 text-[13.5px] font-bold text-lime/70 backdrop-blur-md transition-all duration-300 hover:border-lime/55 hover:text-lime"
               >
@@ -790,7 +790,7 @@ function AutoBrollSlide({ canStartAutomation }: { canStartAutomation: boolean })
               </Link>
             ) : (
               <Link
-                href="/planos"
+                href="/planos?upgrade=1"
                 title="Disponível só no plano Pro"
                 className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full border border-violet/35 bg-violet/5 px-6 py-3 text-[13.5px] font-bold text-violet/70 backdrop-blur-md transition-all duration-300 hover:border-violet/55 hover:text-violet"
               >
@@ -1292,7 +1292,7 @@ function LockedFlash({
         </p>
         <div className="mt-2.5 flex flex-wrap gap-2">
           <a
-            href="/planos"
+            href="/planos?upgrade=1"
             className="rounded-full border px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.14em] text-white transition-all hover:-translate-y-[1px]"
             style={{
               fontFamily: 'var(--font-tech)',

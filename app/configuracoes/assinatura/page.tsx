@@ -151,7 +151,7 @@ export default function AssinaturaPage() {
               ? 'Seu acesso foi liberado manualmente pela equipe — não há cobrança recorrente.'
               : 'Escolha um plano pra desbloquear as ferramentas premium.'}
           </p>
-          <Link href="/planos" className="btn-primary mt-5 inline-block">
+          <Link href="/planos?upgrade=1" className="btn-primary mt-5 inline-block">
             Ver planos
           </Link>
         </div>
@@ -285,7 +285,7 @@ export default function AssinaturaPage() {
                   </button>
                 </div>
               )}
-              <Link href="/planos" className="text-[13px] text-violet hover:text-white">
+              <Link href="/planos?upgrade=1" className="text-[13px] text-violet hover:text-white">
                 Trocar de plano
               </Link>
             </div>

@@ -336,7 +336,7 @@ export function Sidebar() {
               </div>
               <nav className="flex flex-col py-1 text-sm">
                 <Link
-                  href="/planos"
+                  href="/planos?upgrade=1"
                   onClick={() => setAccountOpen(false)}
                   className="group flex items-center gap-3 px-4 py-2.5 text-text-muted transition hover:bg-bg hover:text-text"
                 >
