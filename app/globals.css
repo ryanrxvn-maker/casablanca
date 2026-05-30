@@ -953,7 +953,7 @@ input[type='range']::-moz-range-thumb {
    Fica no fim do arquivo de propósito: vence empate de especificidade com
    os utilitários do Tailwind (ex.: disabled:cursor-not-allowed). */
 html {
-  cursor: url('/cursors/arrow.svg') 6 4, auto;
+  cursor: url('/cursors/arrow.svg?v=3') 6 4, auto;
 }
 a,
 button,
@@ -967,7 +967,7 @@ input[type='radio'],
 input[type='submit'],
 input[type='button'],
 input[type='range'] {
-  cursor: url('/cursors/pointer.svg') 10 3, pointer !important;
+  cursor: url('/cursors/pointer.svg?v=3') 10 3, pointer !important;
 }
 :disabled,
 [disabled],
@@ -975,7 +975,7 @@ input[type='range'] {
 .cursor-not-allowed,
 button:disabled,
 a[aria-disabled='true'] {
-  cursor: url('/cursors/blocked.svg') 16 16, not-allowed !important;
+  cursor: url('/cursors/blocked.svg?v=3') 16 16, not-allowed !important;
 }
 input[type='text'],
 input[type='email'],
