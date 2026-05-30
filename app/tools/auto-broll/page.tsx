@@ -176,8 +176,45 @@ function AutoBrollInner() {
   const imageModel = IMAGE_MODEL_FIXED;
   const [globalMotion, setGlobalMotion] = useToolState<string>('mgAuto:motion', '');
 
-  const [jobs, setJobs] = useState<Job[]>([newJob()]);
+  // PERSISTENCIA: jobs[] sobrevive reload (user perdia o JSON colado se
+  // recarregava a aba sem disparar). Salva so os campos editaveis (name + raw),
+  // descarta runtime stuff (progress/zip/status/error). Restaura como 'idle'
+  // pra user disparar de novo.
+  const JOBS_PERSIST_KEY = 'darkolab:auto-broll:jobs-draft';
+  function loadPersistedJobs(): Job[] {
+    if (typeof window === 'undefined') return [newJob()];
+    try {
+      const raw = localStorage.getItem(JOBS_PERSIST_KEY);
+      if (!raw) return [newJob()];
+      const parsed = JSON.parse(raw) as Array<{ id?: string; name?: string; raw?: string }>;
+      if (!Array.isArray(parsed) || parsed.length === 0) return [newJob()];
+      return parsed.map((p) => ({
+        ...newJob(p.name || ''),
+        id: p.id || 'job_' + Math.random().toString(36).slice(2, 9),
+        raw: p.raw || '',
+      }));
+    } catch {
+      return [newJob()];
+    }
+  }
+  const [jobs, setJobs] = useState<Job[]>(() => loadPersistedJobs());
   const abortRefs = useRef<Record<string, AbortController | null>>({});
+
+  // Persiste jobs[] (so name + raw + id) a cada mudanca. Throttled debounce
+  // de 400ms pra evitar localStorage spam enquanto user digita.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const t = setTimeout(() => {
+      try {
+        const minimal = jobs.map((j) => ({ id: j.id, name: j.name, raw: j.raw }));
+        localStorage.setItem(JOBS_PERSIST_KEY, JSON.stringify(minimal));
+      } catch (e) {
+        // localStorage cheio — tenta limpar o draft pra nao bloquear
+        console.warn('[auto-broll] persist jobs falhou:', e);
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [jobs]);
 
   // Detect extension on mount + handoff do clickup-pilot (preenche 1º job)
   useEffect(() => {
@@ -270,7 +307,7 @@ function AutoBrollInner() {
     patchJob(job.id, { status: 'running', error: null, zip: null, progress: null });
     try {
       // SEMPRE V2 — API direta Magnific server-side. Sem extension, sem aba aberta.
-      const r = await runMagnificPipelineV2(
+      let r = await runMagnificPipelineV2(
         {
           spaceName: job.name.trim() || `DARKO_BROLLS_${job.id}`,
           takes,
@@ -282,6 +319,97 @@ function AutoBrollInner() {
           onProgress: (p) => patchJob(job.id, { progress: p }),
         },
       );
+
+      // AUTO-RETRY de faltantes — user pediu: "A GERACAO NAO DEVE FALHAR NUNCA".
+      // Apos primeira rodada, se sobrou >= 1 take faltante E nao foi cancelado,
+      // tenta MAIS UMA RODADA automaticamente so com as faltantes. RETOMAR no
+      // historico vira fallback de ultimo caso (rede caiu / Magnific morreu).
+      const AUTO_RETRY_ROUNDS = 2;
+      for (let round = 1; round <= AUTO_RETRY_ROUNDS; round++) {
+        if (ac.signal.aborted) break;
+        const missing = (r.missingIdxs || []).length;
+        if (missing === 0) break;
+        const missingTakes = takes.filter((t) => (r.missingIdxs || []).includes(t.idx));
+        if (missingTakes.length === 0) break;
+        console.log(`[auto-broll] auto-retry round ${round}/${AUTO_RETRY_ROUNDS} — ${missingTakes.length} faltantes`);
+        patchJob(job.id, {
+          progress: {
+            ...(r as any),
+            message: `Auto-retry ${round}/${AUTO_RETRY_ROUNDS} — re-disparando ${missingTakes.length} take(s) que faltaram…`,
+            phase: 'auto-retry',
+          } as any,
+        });
+        // Pausa entre rodadas pra Magnific liberar concurrent cap
+        await new Promise((res) => setTimeout(res, 30_000));
+        if (ac.signal.aborted) break;
+        try {
+          const r2 = await runMagnificPipelineV2(
+            {
+              spaceName: (job.name.trim() || `DARKO_BROLLS_${job.id}`) + `_AUTORETRY${round}`,
+              takes: missingTakes,
+              imageModel,
+              videoModel: 'kling-25',
+            },
+            {
+              signal: ac.signal,
+              onProgress: (p) => patchJob(job.id, { progress: p }),
+            },
+          );
+          // Merge takes do retry com a rodada anterior (preserva os que ja eram
+          // ok + atualiza os que viraram ok agora). Cast pra any pra navegar
+          // o union de TakeState sem narrowing por cada variant.
+          const hasUrl = (t: any) => t && (t.status === 'ready' || !!t.videoUrl);
+          const mergedTakes: any[] = (r.takes as any[]).map((t: any) => {
+            const better = (r2.takes as any[]).find((nt: any) => nt.idx === t.idx);
+            if (better && hasUrl(better)) return better;
+            return t;
+          });
+          // Garante que takes 100% novos (caso edge) tambem entram
+          for (const nt of r2.takes as any[]) {
+            if (!mergedTakes.find((mt) => mt.idx === nt.idx)) mergedTakes.push(nt);
+          }
+          const successCount = mergedTakes.filter(hasUrl).length;
+          const missingIdxs = mergedTakes.filter((t) => !hasUrl(t)).map((t) => t.idx);
+          // Merge ZIPs — preserva videos ja prontos + adiciona novos
+          let mergedZip: Blob | undefined = r.zipBlob;
+          if (r2.zipBlob && r.zipBlob) {
+            try {
+              const JSZip = (await import('jszip')).default;
+              const merged = new JSZip();
+              const a = await JSZip.loadAsync(await r.zipBlob.arrayBuffer());
+              const b = await JSZip.loadAsync(await r2.zipBlob.arrayBuffer());
+              for (const name of Object.keys(a.files)) {
+                const f = a.files[name]; if (f.dir) continue;
+                merged.file(name, await f.async('arraybuffer'));
+              }
+              for (const name of Object.keys(b.files)) {
+                const f = b.files[name]; if (f.dir) continue;
+                merged.file(name, await f.async('arraybuffer'));
+              }
+              mergedZip = await merged.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+            } catch (e) {
+              console.warn('[auto-retry] merge ZIP falhou, usa o maior:', e);
+              mergedZip = r2.zipBlob || r.zipBlob;
+            }
+          } else if (r2.zipBlob) {
+            mergedZip = r2.zipBlob;
+          }
+          r = {
+            ...r,
+            takes: mergedTakes as any,
+            successCount,
+            failedCount: takes.length - successCount,
+            complete: successCount === takes.length,
+            missingIdxs,
+            zipBlob: mergedZip,
+            zipName: r.zipName || r2.zipName,
+          };
+          if (successCount === takes.length) break; // 100% pronto, sai
+        } catch (e) {
+          console.warn(`[auto-broll] auto-retry round ${round} crashou:`, e);
+          break; // se retry deu pau, deixa o user fazer RETOMAR manual
+        }
+      }
       // PERSISTE NO HISTÓRICO sempre que tiver pelo menos 1 sucesso —
       // mesmo batch parcial vale a pena salvar pra user re-baixar depois.
       // (Antes salvava só quando complete=true. Agora salva sempre que houver
@@ -769,17 +897,27 @@ function BrollHistorySection() {
       alert('Cola o JSON original primeiro.');
       return;
     }
-    // Salva o JSON no entry pra proximos RETOMAR serem instant
+    // PERSISTE O JSON na entry — esta linha deve rodar ANTES de qualquer
+    // outra coisa que possa errar. Garante que o JSON fica salvo mesmo se
+    // o retomar dar pau depois (proximo click vira instant).
     try {
       const histRaw = localStorage.getItem('darkolab:auto-broll:history');
       const histArr: HistEntry[] = histRaw ? JSON.parse(histRaw) : [];
       const updated = histArr.map((h) => (h.zipKey === item.zipKey ? { ...h, originalJson: raw } : h));
       localStorage.setItem('darkolab:auto-broll:history', JSON.stringify(updated));
+      // Atualiza state local imediatamente — UI ja mostra item com JSON salvo
+      setHist(updated);
+      // Notifica outras abas + listeners
       window.dispatchEvent(new Event('darkolab:auto-broll:history-changed'));
-    } catch {}
+      console.log(`[retomar] JSON persistido pra ${item.zipKey} (${raw.length} chars)`);
+    } catch (e) {
+      console.error('[retomar] FALHOU persistir JSON:', e);
+      alert('Falha salvando JSON localmente: ' + ((e as Error)?.message || String(e)));
+      return; // nem tenta o retomar se persistencia falhou
+    }
     setPendingJsonFor(null);
     setPendingJsonText('');
-    // Dispara retomar com o JSON capturado
+    // Dispara retomar com o JSON capturado (JA persistido acima)
     void retomar({ ...item, originalJson: raw }, raw);
   }
 

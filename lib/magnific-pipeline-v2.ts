@@ -46,17 +46,22 @@ type RunnerResultV2 = {
   missingIdxs?: number[];
 };
 
-const DEFAULT_IMAGE_CONC = 12;
-const DEFAULT_VIDEO_CONC = 6;
+// CONCORRENCIA CONSERVADORA (2026-05-30):
+// User reportou batch 3/13 ok + 10 falhas com mensagens "rate_limit_exceeded
+// f57009f has exceeded concurrent". Magnific impoe LIMITE HARD por conta:
+// ~4-6 concurrent renders no max. Antes IMAGE=12/VIDEO=6 estourava.
+//
+// Novo default: 4 img / 2 vid — bem dentro do cap server-side. Trade-off:
+// batch um pouco mais lento mas SEM falhas por paralelismo. User priorizou
+// confiabilidade: "A GERACAO NAO DEVE FALHAR NUNCA".
+const DEFAULT_IMAGE_CONC = 4;
+const DEFAULT_VIDEO_CONC = 2;
 
 // Throttle de DISPARO (não de concurrência): garante intervalo mínimo entre
-// dois acquire() consecutivos pra evitar burst de N requests simultâneas que
-// causa 429 "Too Many Attempts" no Magnific.
-//
-// Empírico: 12 imagens em <1s sempre vira 429. Espaçando ~800ms entre cada
-// disparo (12 * 800ms = ~10s pra mandar todas), Magnific aceita tranquilo.
-const IMAGE_DISPATCH_INTERVAL_MS = 800;
-const VIDEO_DISPATCH_INTERVAL_MS = 1500;
+// dois acquire() consecutivos pra evitar burst de N requests simultâneas.
+// Aumentado pra 1500ms/2500ms — combina com concorrencia menor.
+const IMAGE_DISPATCH_INTERVAL_MS = 1500;
+const VIDEO_DISPATCH_INTERVAL_MS = 2500;
 
 /** Semáforo com throttle de disparo: limita N simultâneas E espaça acquires
  *  por intervalMs mínimos. Também tem "global cooldown" que pausa TUDO
@@ -109,7 +114,7 @@ class ThrottledSemaphore {
 }
 
 /** Detecta se um erro é "retryable" — vale fazer backoff e tentar de novo:
- *   - 429 / rate limit
+ *   - 429 / rate limit / exceeded concurrent
  *   - Failed to fetch / network errors (Cloudflare drop, extension reconnect)
  *   - timeouts
  *   - 5xx server errors
@@ -133,12 +138,14 @@ function isRetryableError(e: unknown): boolean {
   if (msg.includes('magnific_cap_exceeded') || msg.includes('cap do ciclo') || msg.includes('paywall')) {
     return false;
   }
-  // Tudo que parece rede/server = retryable
+  // Tudo que parece rede/server/limit = retryable
   return (
     msg.includes('429') ||
     msg.includes('too many') ||
     msg.includes('rate limit') ||
     msg.includes('rate_limit') ||
+    msg.includes('exceeded concurrent') || // Magnific-specific: hard cap por conta
+    msg.includes('concurrent') ||
     msg.includes('failed to fetch') ||
     msg.includes('fetch failed') ||
     msg.includes('network') ||
@@ -155,12 +162,27 @@ function isRetryableError(e: unknown): boolean {
   );
 }
 
+/** True se o erro indica que Magnific rejeitou por excesso de paralelismo
+ *  ("rate_limit_exceeded f57009f has exceeded concurrent"). Diferente de
+ *  429 generico — esse pede backoff AGRESSIVO porque significa que ja
+ *  tem N renders rodando E o server rejeitou + 1. */
+function isConcurrentExceeded(e: unknown): boolean {
+  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  return msg.includes('exceeded concurrent') || msg.includes('rate_limit_exceeded');
+}
+
 /** Backoff escalonado pra erros transientes. Início suave (3s) pra não
- *  pausar o pipeline cedo demais; cresce até 3min. Empírico: Magnific
- *  responde bem com retries curtos no início, só pede pause longa em
- *  abuse real (429 sustentado).  */
+ *  pausar o pipeline cedo demais; cresce até 3min. */
 function backoffMs(attempt: number): number {
   const ladder = [3_000, 6_000, 10_000, 20_000, 30_000, 45_000, 60_000, 90_000, 120_000, 180_000];
+  return ladder[Math.min(attempt - 1, ladder.length - 1)];
+}
+
+/** Backoff AGRESSIVO pra "exceeded concurrent" — começa em 15s e cresce
+ *  rapido. Razao: esse erro indica que o cap server-side foi atingido,
+ *  preciso esperar OUTROS renders terminarem antes de tentar dispatch novo. */
+function backoffConcurrentMs(attempt: number): number {
+  const ladder = [15_000, 30_000, 60_000, 90_000, 120_000, 180_000, 240_000, 300_000];
   return ladder[Math.min(attempt - 1, ladder.length - 1)];
 }
 
@@ -329,15 +351,22 @@ export async function runMagnificPipelineV2(
         if (isRetryableError(e)) {
           netAttempt++;
           if (netAttempt > MAX_RETRIES_NETWORK) throw lastErr;
-          const waitMs = backoffMs(netAttempt);
+          // SE eh "exceeded concurrent" → backoff AGRESSIVO + propaga cooldown
+          // GLOBAL pros outros workers tambem pausarem (senao ficam empurrando
+          // mais requests e Magnific re-rejeita).
+          const isConcurrent = isConcurrentExceeded(e);
+          const waitMs = isConcurrent ? backoffConcurrentMs(netAttempt) : backoffMs(netAttempt);
           const errSnip = lastErr.message.slice(0, 60);
-          console.warn(`[img] retryable #${netAttempt}/${MAX_RETRIES_NETWORK} — wait ${waitMs/1000}s — ${errSnip}`);
-          // Telemetria visível no take card
-          onAttempt(total, `Rede falhou (${errSnip}) — wait ${Math.round(waitMs/1000)}s · retry ${netAttempt}/20`);
-          // Só propaga cooldown GLOBAL pra outros workers se backoff >= 60s
-          // (= é um problema sério, não só uma falha pontual). Pra falhas
-          // rápidas, esse worker espera sozinho.
-          if (waitMs >= 60_000) imgSem.setCooldown(Date.now() + Math.min(waitMs, 60_000));
+          console.warn(`[img] ${isConcurrent ? 'CONCURRENT-CAP' : 'retryable'} #${netAttempt}/${MAX_RETRIES_NETWORK} — wait ${waitMs/1000}s — ${errSnip}`);
+          onAttempt(total, isConcurrent
+            ? `Magnific cheio (${waitMs/1000}s aguardando vaga) · retry ${netAttempt}/20`
+            : `Rede falhou (${errSnip}) — wait ${Math.round(waitMs/1000)}s · retry ${netAttempt}/20`);
+          // Propaga cooldown GLOBAL pros outros workers se backoff longo OU
+          // concurrent-cap (pausa TODO mundo, evita storm).
+          if (isConcurrent || waitMs >= 60_000) {
+            imgSem.setCooldown(Date.now() + Math.min(waitMs, 90_000));
+            vidSem.setCooldown(Date.now() + Math.min(waitMs, 90_000));
+          }
           await new Promise((r) => setTimeout(r, waitMs));
         } else {
           statusAttempt++;
@@ -390,11 +419,18 @@ export async function runMagnificPipelineV2(
         if (isRetryableError(e)) {
           netAttempt++;
           if (netAttempt > MAX_RETRIES_NETWORK) throw lastErr;
-          const waitMs = backoffMs(netAttempt);
+          // Backoff agressivo pra concurrent-cap (mesma logica do image)
+          const isConcurrent = isConcurrentExceeded(e);
+          const waitMs = isConcurrent ? backoffConcurrentMs(netAttempt) : backoffMs(netAttempt);
           const errSnip = lastErr.message.slice(0, 60);
-          console.warn(`[vid] retryable #${netAttempt}/${MAX_RETRIES_NETWORK} — wait ${waitMs/1000}s — ${errSnip}`);
-          onAttempt(total, `Rede (${errSnip}) — wait ${Math.round(waitMs/1000)}s · retry ${netAttempt}/20`);
-          if (waitMs >= 60_000) vidSem.setCooldown(Date.now() + Math.min(waitMs, 60_000));
+          console.warn(`[vid] ${isConcurrent ? 'CONCURRENT-CAP' : 'retryable'} #${netAttempt}/${MAX_RETRIES_NETWORK} — wait ${waitMs/1000}s — ${errSnip}`);
+          onAttempt(total, isConcurrent
+            ? `Magnific cheio (${waitMs/1000}s aguardando vaga) · retry ${netAttempt}/20`
+            : `Rede (${errSnip}) — wait ${Math.round(waitMs/1000)}s · retry ${netAttempt}/20`);
+          if (isConcurrent || waitMs >= 60_000) {
+            imgSem.setCooldown(Date.now() + Math.min(waitMs, 90_000));
+            vidSem.setCooldown(Date.now() + Math.min(waitMs, 90_000));
+          }
           await new Promise((r) => setTimeout(r, waitMs));
         } else {
           statusAttempt++;
