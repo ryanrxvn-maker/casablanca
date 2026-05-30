@@ -305,6 +305,45 @@ function AutoBrollInner() {
     const ac = new AbortController();
     abortRefs.current[job.id] = ac;
     patchJob(job.id, { status: 'running', error: null, zip: null, progress: null });
+
+    // ════════════════════════════════════════════════════════════════════
+    // MEMORIA PERSISTENTE (fix 2026-05-30):
+    // CRIA entry no historico AGORA, antes do pipeline rodar — com
+    // originalJson, takes, imageModel salvos. Se pipeline crashar, browser
+    // fechar, energia cair, o que for — o JSON FICA SALVO e RETOMAR pode
+    // re-disparar do zero.
+    // Entry sera ATUALIZADA no final com takeUrls + ZIP. Ate la, fica como
+    // "em andamento".
+    // ════════════════════════════════════════════════════════════════════
+    const preEntryKey = `broll:${job.id}:${Date.now()}:zip`;
+    try {
+      const histKey = 'darkolab:auto-broll:history';
+      const hist = (() => { try { return JSON.parse(localStorage.getItem(histKey) || '[]'); } catch { return []; } })();
+      // Remove qualquer entry antiga deste mesmo jobId pra evitar duplicatas
+      const filtered = hist.filter((h: any) => h.jobId !== job.id);
+      filtered.unshift({
+        jobId: job.id,
+        spaceName: job.name || `BROLL_${job.id}`,
+        zipKey: preEntryKey,
+        zipName: `${(job.name || `BROLL_${job.id}`).replace(/[^\w\d-]+/g, '_').slice(0, 60)}_takes.zip`,
+        totalTakes: takes.length,
+        successCount: 0,
+        failedCount: takes.length,
+        takeUrls: takes.map((t) => ({ idx: t.idx, status: 'pending', videoUrl: null, imageUrl: null })),
+        createdAt: Date.now(),
+        // ESSENCIAL: salva JSON cru ANTES do pipeline rodar. Se algo dar pau,
+        // RETOMAR le isso e re-dispara sem precisar o user colar nada.
+        originalJson: job.raw,
+        imageModel,
+        inFlight: true,
+      });
+      localStorage.setItem(histKey, JSON.stringify(filtered.slice(0, 50)));
+      window.dispatchEvent(new Event('darkolab:auto-broll:history-changed'));
+      console.log(`[auto-broll] pre-salvou entry ${preEntryKey} com ${takes.length} takes + originalJson (${job.raw.length} chars)`);
+    } catch (e) {
+      console.warn('[auto-broll] pre-save falhou (continua mesmo assim):', e);
+    }
+
     try {
       // SEMPRE V2 — API direta Magnific server-side. Sem extension, sem aba aberta.
       let r = await runMagnificPipelineV2(
@@ -417,36 +456,46 @@ function AutoBrollInner() {
       if (r.zipBlob && r.zipName && r.successCount > 0) {
         try {
           const { saveZip } = await import('@/lib/zip-store');
-          const key = `broll:${job.id}:${Date.now()}:zip`;
-          await saveZip(key, r.zipBlob, r.zipName);
+          // Reusa a zipKey ja criada no pre-save (evita duplicata no historico)
+          await saveZip(preEntryKey, r.zipBlob, r.zipName);
           const histKey = 'darkolab:auto-broll:history';
           const hist = (() => { try { return JSON.parse(localStorage.getItem(histKey) || '[]'); } catch { return []; } })();
-          hist.unshift({
-            jobId: job.id,
-            spaceName: job.name || `BROLL_${job.id}`,
-            zipKey: key,
-            zipName: r.zipName,
-            totalTakes: takes.length,
-            successCount: r.successCount,
-            failedCount: r.failedCount,
-            takeUrls: r.takes.map((t: any) => ({
-              idx: t.idx,
-              status: t.status,
-              videoUrl: t.videoUrl || null,
-              imageUrl: t.imageUrl || null,
-            })),
-            createdAt: Date.now(),
-            // Persiste o JSON original pra que o botao RETOMAR no historico
-            // consiga re-disparar SO as faltantes sem precisar do user re-colar
-            // o JSON. Tamanho tipico ~5-20KB, cabe em localStorage tranquilo.
-            originalJson: job.raw,
-            imageModel,
+          // ATUALIZA a entry ja existente (criada no pre-save) com o resultado.
+          // Mantem originalJson + imageModel + jobId; sobrescreve takeUrls + counts.
+          const updated = hist.map((h: any) => {
+            if (h.zipKey !== preEntryKey) return h;
+            return {
+              ...h,
+              zipName: r.zipName,
+              successCount: r.successCount,
+              failedCount: r.failedCount,
+              takeUrls: r.takes.map((t: any) => ({
+                idx: t.idx,
+                status: t.status,
+                videoUrl: t.videoUrl || null,
+                imageUrl: t.imageUrl || null,
+              })),
+              inFlight: false,
+              // mantem originalJson + imageModel + jobId que ja estavam
+            };
           });
-          localStorage.setItem(histKey, JSON.stringify(hist.slice(0, 50)));
+          localStorage.setItem(histKey, JSON.stringify(updated.slice(0, 50)));
           window.dispatchEvent(new Event('darkolab:auto-broll:history-changed'));
         } catch (e) {
           console.warn('[auto-broll] persist history falhou:', e);
         }
+      } else {
+        // Sem zipBlob valido — marca entry como falha terminal mas preserva originalJson
+        try {
+          const histKey = 'darkolab:auto-broll:history';
+          const hist = (() => { try { return JSON.parse(localStorage.getItem(histKey) || '[]'); } catch { return []; } })();
+          const updated = hist.map((h: any) => {
+            if (h.zipKey !== preEntryKey) return h;
+            return { ...h, inFlight: false, failedCount: takes.length, successCount: 0 };
+          });
+          localStorage.setItem(histKey, JSON.stringify(updated.slice(0, 50)));
+          window.dispatchEvent(new Event('darkolab:auto-broll:history-changed'));
+        } catch {}
       }
       if (r.ok && r.complete && r.zipBlob && r.zipName) {
         patchJob(job.id, { status: 'done', zip: { blob: r.zipBlob, name: r.zipName } });
@@ -467,6 +516,15 @@ function AutoBrollInner() {
       }
     } catch (e) {
       patchJob(job.id, { status: 'error', error: (e as Error).message });
+      // Marca entry como nao-em-vôo (originalJson + takes ja estao salvos
+      // do pre-save) pra RETOMAR funcionar imediato.
+      try {
+        const histKey = 'darkolab:auto-broll:history';
+        const hist = (() => { try { return JSON.parse(localStorage.getItem(histKey) || '[]'); } catch { return []; } })();
+        const updated = hist.map((h: any) => h.zipKey === preEntryKey ? { ...h, inFlight: false } : h);
+        localStorage.setItem(histKey, JSON.stringify(updated.slice(0, 50)));
+        window.dispatchEvent(new Event('darkolab:auto-broll:history-changed'));
+      } catch {}
     } finally {
       abortRefs.current[job.id] = null;
     }
@@ -877,60 +935,87 @@ function BrollHistorySection() {
   }
 
   /**
-   * Click do botao RETOMAR — orquestra fluxo:
-   *  - Se ja tem originalJson → roda retry direto
-   *  - Se nao → busca em fontes alternativas (jobs-draft no localStorage)
-   *    antes de pedir pro user. Se achar → pre-popula o editor com o JSON
-   *    e user so confirma "Retomar com este JSON" — sem precisar colar.
+   * Click do botao RETOMAR — TOTALMENTE AUTOMATICO.
+   *
+   * User: "QUERO QUE AUTOMATICAMENTE SE FALHAR SABER QUAL PROMPTS DO JSON
+   * FALTOU E PARTIR DALI DE FORMA AUTOMATICA, INTELIGENCIA E MEMORIA NO
+   * SISTEMA / NAO QUERO TER QUE PROCURAR OU TER BOTAO DISSO".
+   *
+   * Cascata de recuperacao (todas automaticas, sem UI):
+   *  1. item.originalJson (saved no pre-save do dispatch — caso comum agora)
+   *  2. jobs-draft localStorage (rascunho do editor)
+   *  3. tryRecoverFromMagnific (busca prompts via /api/creations)
+   *
+   * Se TODAS falharem (raro pra batches novos), AI sim abre o editor manual
+   * como fallback final + ja tenta auto-recovery em background.
    */
-  function onRetomarClick(item: HistEntry) {
+  async function onRetomarClick(item: HistEntry) {
+    // 1. Tem originalJson direto na entry → dispara imediato
     if (item.originalJson) {
       void retomar(item, item.originalJson);
       return;
     }
-    // FALLBACK 1: procura no jobs-draft persistido (mesmo jobId = mesma origem)
-    let prefilled = '';
+    // 2. Procura no jobs-draft persistido
+    let recovered: string | null = null;
     try {
       const draftsRaw = localStorage.getItem('darkolab:auto-broll:jobs-draft');
       if (draftsRaw) {
-        const drafts = JSON.parse(draftsRaw) as Array<{ id?: string; name?: string; raw?: string }>;
-        // Match exato pelo jobId primeiro (mesmo job que originou esse historico)
-        const exactMatch = drafts.find((d) => d.id === item.jobId && d.raw && d.raw.trim().length > 0);
-        if (exactMatch?.raw) {
-          prefilled = exactMatch.raw;
-        } else {
-          // Fallback 2: pega o primeiro draft nao-vazio que parsea
-          // (usuario pode ter recriado o job com mesmo JSON em outra sessao)
+        const drafts = JSON.parse(draftsRaw) as Array<{ id?: string; raw?: string }>;
+        const exact = drafts.find((d) => d.id === item.jobId && d.raw?.trim());
+        if (exact?.raw) recovered = exact.raw;
+        else {
           for (const d of drafts) {
-            if (d.raw && d.raw.trim().length > 0) {
-              prefilled = d.raw;
-              break;
-            }
+            if (d.raw && d.raw.trim()) { recovered = d.raw; break; }
           }
         }
       }
-    } catch (e) {
-      console.warn('[retomar] busca jobs-draft falhou:', e);
+    } catch {}
+    if (recovered) {
+      console.log('[retomar] recuperou de jobs-draft, disparando direto');
+      // Persiste no entry pra proximos clicks serem instant
+      persistJsonToEntrySync(item.zipKey, recovered);
+      void retomar({ ...item, originalJson: recovered }, recovered);
+      return;
     }
+    // 3. Tenta Magnific API (background, mas BLOQUEIA aqui pra esperar)
+    setRetrying(item.zipKey);
+    setRetryMsg('Recuperando JSON automaticamente do Magnific…');
+    try {
+      const fromMagnific = await tryRecoverFromMagnific(item);
+      if (fromMagnific) {
+        console.log('[retomar] recuperou do Magnific, disparando direto');
+        persistJsonToEntrySync(item.zipKey, fromMagnific);
+        setRetrying(null);
+        setRetryMsg('');
+        void retomar({ ...item, originalJson: fromMagnific }, fromMagnific);
+        return;
+      }
+    } catch (e) {
+      console.warn('[retomar] magnific recovery falhou:', e);
+    }
+    setRetrying(null);
+    setRetryMsg('');
+    // 4. Last resort: abre editor pra paste manual (raro)
     setPendingJsonFor(item.zipKey);
-    setPendingJsonText(prefilled);
-    // AUTO-RECOVERY: se nada veio do localStorage, tenta buscar do Magnific
-    // automaticamente em background. Se achar, preenche a textarea pro user.
-    if (!prefilled) {
-      void (async () => {
-        try {
-          setRetryMsg('Buscando JSON original no Magnific…');
-          const json = await tryRecoverFromMagnific(item);
-          if (json) {
-            setPendingJsonText(json);
-            console.log('[auto-recover] JSON recuperado automaticamente do Magnific');
-          }
-        } catch (e) {
-          console.warn('[auto-recover] tentativa falhou silenciosamente:', e);
-        } finally {
-          setRetryMsg('');
-        }
-      })();
+    setPendingJsonText('');
+    alert(
+      'Nao consegui recuperar o JSON automaticamente desse batch antigo.\n\n' +
+      'Cola o JSON original — proximos batches vao ter recuperacao automatica.'
+    );
+  }
+
+  /** Helper sincrono pra salvar JSON na entry — usado quando recuperamos
+   *  automaticamente, pra nao perder o JSON pra futuras chamadas. */
+  function persistJsonToEntrySync(zipKey: string, json: string) {
+    try {
+      const histKey = 'darkolab:auto-broll:history';
+      const histArr: HistEntry[] = (() => { try { return JSON.parse(localStorage.getItem(histKey) || '[]'); } catch { return []; } })();
+      const updated = histArr.map((h) => (h.zipKey === zipKey ? { ...h, originalJson: json } : h));
+      localStorage.setItem(histKey, JSON.stringify(updated));
+      setHist(updated);
+      window.dispatchEvent(new Event('darkolab:auto-broll:history-changed'));
+    } catch (e) {
+      console.warn('[persistJson] falhou:', e);
     }
   }
 
