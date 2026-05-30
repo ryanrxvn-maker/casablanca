@@ -17,6 +17,6 @@ export const config = {
      *   o Googlebot pra /login e mata a indexação)
      * - arquivos estaticos (imagens + audio + video — public/ assets nao precisam de auth)
      */
-    '/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|opengraph-image|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp4|mov|webm|mp3|wav|m4a|ogg)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|llms.txt|opengraph-image|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp4|mov|webm|mp3|wav|m4a|ogg)$).*)',
   ],
 };

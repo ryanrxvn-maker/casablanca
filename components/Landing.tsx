@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import { FAQ } from '@/lib/faq';
 import { Brand } from './Brand';
 import { DarkoLogo } from './DarkoLogo';
 import { SmokeText } from './SmokeText';
@@ -43,6 +44,7 @@ export function Landing() {
       <AutoBrollHowItWorks />
       <CapabilitiesSection />
       <ShowcaseSection />
+      <FaqSection />
       <FinalCTA />
       <LandingFooter />
     </main>
@@ -1733,6 +1735,72 @@ function CapabilityCard({
         </p>
       </div>
     </div>
+  );
+}
+
+/* ────────────────────────── FAQ ────────────────────────── */
+
+/**
+ * FAQ — perguntas frequentes em <details> nativo.
+ *
+ * Usa <details>/<summary> de propósito: o conteúdo das respostas fica no HTML
+ * renderizado no servidor (SSR), então crawlers de IA (que não rodam JS) e o
+ * Googlebot leem tudo. As perguntas viram headings (h3) — casam com queries de
+ * busca e melhoram a citabilidade em AI Overviews / ChatGPT / Perplexity.
+ * O mesmo array (lib/faq.ts) alimenta o FAQPage JSON-LD em app/page.tsx.
+ */
+function FaqSection() {
+  return (
+    <section id="faq" className="mx-auto mt-32 max-w-[860px] px-5 md:px-8">
+      <div className="mb-10 max-w-[720px] fade-in-up">
+        <div
+          className="mb-3 text-[10.5px] font-semibold uppercase tracking-[0.22em] text-text-dim"
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          PERGUNTAS FREQUENTES
+        </div>
+        <h2 className="section-title text-[36px] md:text-[48px]" style={{ lineHeight: 1.05 }}>
+          <SmokeText text="Tira a dúvida." className="block" />
+          <span className="display-subtle block">
+            <SmokeText text="Depois liga a fila." />
+          </span>
+        </h2>
+      </div>
+
+      <div className="flex flex-col gap-3">
+        {FAQ.map((item, i) => (
+          <details
+            key={i}
+            className="faq-item group fade-in-up overflow-hidden rounded-[16px] border border-line/60 transition-colors duration-300 hover:border-violet/40"
+            style={{
+              animationDelay: `${i * 50}ms`,
+              background:
+                'linear-gradient(180deg, rgba(255,255,255,0.022), rgba(0,0,0,0.16)), linear-gradient(180deg, #15151a, #0e0e10)',
+            }}
+          >
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 md:px-6 md:py-5">
+              <h3
+                className="text-[15px] font-semibold tracking-tight text-white md:text-[16.5px]"
+                style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.01em' }}
+              >
+                {item.q}
+              </h3>
+              <span
+                aria-hidden
+                className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-white/10 bg-black/40 text-text-muted transition-transform duration-300 group-open:rotate-45"
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </span>
+            </summary>
+            <p className="px-5 pb-5 text-[14px] leading-relaxed text-text-muted md:px-6 md:pb-6">
+              {item.a}
+            </p>
+          </details>
+        ))}
+      </div>
+    </section>
   );
 }
 

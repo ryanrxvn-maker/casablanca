@@ -117,7 +117,7 @@ export const metadata: Metadata = {
   },
 };
 
-/** JSON-LD (structured data) pra rich results no Google. */
+/** JSON-LD (structured data) pra rich results no Google + citação em IA. */
 const JSON_LD = {
   '@context': 'https://schema.org',
   '@graph': [
@@ -125,22 +125,64 @@ const JSON_LD = {
       '@type': 'Organization',
       '@id': `${SITE_URL}/#org`,
       name: 'Auto Edit',
+      alternateName: 'Darko Auto Edit',
       url: SITE_URL,
-      logo: `${SITE_URL}/auto-edit-logo@256.png`,
+      logo: {
+        '@type': 'ImageObject',
+        url: `${SITE_URL}/auto-edit-logo@256.png`,
+        width: 256,
+        height: 256,
+      },
+      description: SITE_DESC,
+      contactPoint: {
+        '@type': 'ContactPoint',
+        contactType: 'customer support',
+        url: 'https://wa.me/5534991262437',
+        availableLanguage: ['Portuguese'],
+      },
+    },
+    {
+      '@type': 'WebSite',
+      '@id': `${SITE_URL}/#website`,
+      url: SITE_URL,
+      name: 'Auto Edit',
+      description: SITE_DESC,
+      inLanguage: 'pt-BR',
+      publisher: { '@id': `${SITE_URL}/#org` },
     },
     {
       '@type': 'SoftwareApplication',
+      '@id': `${SITE_URL}/#app`,
       name: 'Auto Edit',
       applicationCategory: 'MultimediaApplication',
+      applicationSubCategory: 'Video Editing Automation',
       operatingSystem: 'Web',
       url: SITE_URL,
+      image: `${SITE_URL}/opengraph-image`,
+      screenshot: `${SITE_URL}/opengraph-image`,
       description: SITE_DESC,
       inLanguage: 'pt-BR',
-      offers: [
-        { '@type': 'Offer', name: 'Free', price: '0', priceCurrency: 'BRL' },
-        { '@type': 'Offer', name: 'Basic', price: '57', priceCurrency: 'BRL' },
-        { '@type': 'Offer', name: 'Pro', price: '116', priceCurrency: 'BRL' },
+      publisher: { '@id': `${SITE_URL}/#org` },
+      featureList: [
+        'Decupagem automática de vídeo',
+        'Geração de B-roll com IA',
+        'Lipsync em lote',
+        'Remover legenda gravada e marca d’água',
+        'Legendas automáticas',
+        'Troca de produto no áudio sem regravar',
       ],
+      offers: {
+        '@type': 'AggregateOffer',
+        priceCurrency: 'BRL',
+        lowPrice: '0',
+        highPrice: '116',
+        offerCount: 3,
+        offers: [
+          { '@type': 'Offer', name: 'Free', price: '0', priceCurrency: 'BRL' },
+          { '@type': 'Offer', name: 'Basic', price: '57', priceCurrency: 'BRL' },
+          { '@type': 'Offer', name: 'Pro', price: '116', priceCurrency: 'BRL' },
+        ],
+      },
     },
   ],
 };

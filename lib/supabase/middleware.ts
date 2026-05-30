@@ -122,6 +122,7 @@ export async function updateSession(request: NextRequest) {
     // Arquivos de SEO — devem ser servidos pra crawlers anônimos.
     pathname === '/robots.txt' ||
     pathname === '/sitemap.xml' ||
+    pathname === '/llms.txt' ||
     pathname.startsWith('/opengraph-image') ||
     pathname.startsWith('/api/');
 
