@@ -27,6 +27,8 @@ export function LipsyncPreviewCard({
   total,
   percent = 0,
   fileBase = 'take',
+  onEdit,
+  isRegenerating = false,
 }: {
   take: LipsyncTake;
   position: number;
@@ -35,6 +37,10 @@ export function LipsyncPreviewCard({
   percent?: number;
   /** Prefixo do nome do arquivo no download. */
   fileBase?: string;
+  /** Se fornecido, mostra botao EDIT no card pronto. Usa pra re-gerar so essa parte com novo script/voz. */
+  onEdit?: () => void;
+  /** Marca esse card como "re-gerando agora" — overlay shimmer + bloqueia clicks. */
+  isRegenerating?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
@@ -160,6 +166,20 @@ export function LipsyncPreviewCard({
                   <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
                 </svg>
               </button>
+              {onEdit ? (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onEdit(); }}
+                  aria-label="Editar script/voz e re-gerar"
+                  title="Editar script/voz e re-gerar"
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-cyan-400/70 bg-cyan-500/90 text-white shadow-[0_4px_14px_rgba(34,211,238,0.45)] transition-all hover:scale-110 hover:bg-cyan-400 active:scale-95"
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" />
+                  </svg>
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); downloadOne(); }}
@@ -179,6 +199,17 @@ export function LipsyncPreviewCard({
                 )}
               </button>
             </div>
+            {/* Overlay quando essa parte esta sendo re-gerada — bloqueia clicks e mostra status */}
+            {isRegenerating ? (
+              <div className="pointer-events-auto absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-black/70 backdrop-blur-sm">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="animate-spin text-cyan-300" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+                  <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+                  <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
+                </svg>
+                <span className="mono text-[9px] uppercase tracking-widest text-cyan-200">Re-gerando…</span>
+              </div>
+            ) : null}
           </>
         ) : failed ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center">

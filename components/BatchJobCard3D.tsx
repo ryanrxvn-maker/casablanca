@@ -59,6 +59,13 @@ export type BatchJob3DProps = {
   isQueued: boolean;
   /** Children: preview grid abaixo do card (renderizado fora pra nao limitar layout) */
   children?: React.ReactNode;
+  /** Quando >0, mostra botao "Atualizar montagem" (parts foram re-geradas
+   *  via EditPartModal e o ZIP montado/camuflado ficou desatualizado). */
+  dirtyPartsCount?: number;
+  /** Click no botao "Atualizar montagem" — re-roda runPostPipeline. */
+  onRebuild?: () => void;
+  /** Spinner quando rebuild ta rodando. */
+  isRebuilding?: boolean;
 };
 
 // ───────────────────────── Botão 3D icon-only ─────────────────────────
@@ -209,6 +216,14 @@ const IconAlert = ({ size = 12 }: { size?: number }) => (
 const IconClock = ({ size = 12 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
 );
+const IconRebuild = ({ size = 16 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    {/* Hammer-like icon — re-montar */}
+    <path d="m15 12-8 8a2.83 2.83 0 1 1-4-4l8-8" />
+    <path d="m17.5 6.5 4 4-2 2-4-4z" />
+    <path d="m13.5 10.5 4 4" />
+  </svg>
+);
 
 // ───────────────────────── Phase mapping (human copy + cores) ─────────────────────────
 
@@ -282,6 +297,9 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     isRunning,
     isQueued,
     children,
+    dirtyPartsCount = 0,
+    onRebuild,
+    isRebuilding = false,
   } = props;
 
   const [tilt, setTilt] = useState<{ x: number; y: number } | null>(null);
@@ -358,6 +376,27 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                *  camuflados se houver) num clique so. Browser enfileira os
                *  downloads automaticamente. Pequeno delay entre cada disparo
                *  evita bloqueio do Chrome (multiple downloads warning). */}
+              {/* ATUALIZAR MONTAGEM — aparece quando algum take foi re-gerado
+               *  via EditPartModal e os ZIPs estao desatualizados. Click roda
+               *  runPostPipeline com os blobs novos. */}
+              {dirtyPartsCount > 0 && onRebuild && phase === 'done' ? (
+                <Btn3D
+                  icon={isRebuilding ? (
+                    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="animate-spin" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+                      <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+                      <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
+                    </svg>
+                  ) : <IconRebuild size={16} />}
+                  color="amber"
+                  title={isRebuilding
+                    ? 'Re-montando…'
+                    : `Atualizar montagem (${dirtyPartsCount} parte${dirtyPartsCount === 1 ? '' : 's'} mudou)`}
+                  onClick={onRebuild}
+                  disabled={isRebuilding}
+                  pulse={!isRebuilding}
+                />
+              ) : null}
               {(takesUrl || montadoUrl || camufladoUrl) ? (() => {
                 const downloads = [
                   takesUrl ? { url: takesUrl, name: takesFilename } : null,

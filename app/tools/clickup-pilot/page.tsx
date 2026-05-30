@@ -47,6 +47,7 @@ import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
 import { CompactVoiceSelector } from '@/components/CompactVoiceSelector';
 import { LipsyncPreviewCard, type LipsyncTake } from '@/components/LipsyncPreviewCard';
 import { BatchJobCard3D } from '@/components/BatchJobCard3D';
+import { EditPartModal } from '@/components/EditPartModal';
 import { MotorConfigPicker, MotorSlotPicker } from '@/components/MotorConfigPicker';
 import { defaultMotorConfig, resolveMotors, estimateSecondsFromText, type MotorConfig, type Motor } from '@/lib/motor-config';
 import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
@@ -243,6 +244,11 @@ type BatchTaskState = {
     baseAdId: string;
     parts: Array<{ label: string; text: string; avatarId: string | null; voiceId: string | null }>;
   };
+  /** Parts re-geradas via EditPartModal — labels que ficaram "dirty" depois
+   *  do montadoZipUrl ter sido gerado. Quando array > 0, UI mostra botao
+   *  "Atualizar montagem" que re-roda runPostPipeline. Persiste no
+   *  localStorage pra sobreviver reload. */
+  dirtyParts?: string[];
 };
 
 type RoleSlot = {
@@ -2953,6 +2959,263 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     void runHeyGenGated(taskId, kind);
   }
 
+  // ═══════════════════ EDIT PART (re-gerar 1 take) ═══════════════════
+  //
+  // User clica EDIT em 1 card de preview → abre modal → edita texto →
+  // REFRESH dispara so essa parte (mesmo label) via processJob → poll →
+  // download → salva blob no IDB. Marca a parte como "dirty" pra que o
+  // BatchJobCard3D mostre botao "Atualizar montagem" depois.
+
+  const [editingPart, setEditingPart] = useState<
+    | { taskId: string; partIdx: number; label: string; currentText: string; avatarName?: string; voiceId: string | null }
+    | null
+  >(null);
+  const [regeneratingPart, setRegeneratingPart] = useState<{ taskId: string; label: string } | null>(null);
+  const [regenError, setRegenError] = useState<string | null>(null);
+  const [rebuildingTaskId, setRebuildingTaskId] = useState<string | null>(null);
+
+  function openEditPart(taskId: string, partIdx: number) {
+    const b = batchStates[taskId];
+    if (!b) return;
+    const part = b.parts[partIdx];
+    if (!part) return;
+    const replanPart = b.replan?.parts[partIdx];
+    setRegenError(null);
+    setEditingPart({
+      taskId,
+      partIdx,
+      label: part.label,
+      currentText: replanPart?.text || '',
+      avatarName: undefined,
+      voiceId: replanPart?.voiceId ?? null,
+    });
+  }
+
+  async function regenerateSinglePart(newText: string) {
+    if (!editingPart) return;
+    const { taskId, partIdx, label, voiceId } = editingPart;
+    const b = batchStates[taskId];
+    const replanPart = b?.replan?.parts[partIdx];
+    if (!b || !replanPart || !replanPart.avatarId) {
+      setRegenError('Sem dados de replan/avatar — refaz a analise da task.');
+      return;
+    }
+    if (newText.trim().length === 0) {
+      setRegenError('Texto vazio — preenche o script.');
+      return;
+    }
+    setRegeneratingPart({ taskId, label });
+    setRegenError(null);
+
+    try {
+      // 1) Atualiza replan local com o novo texto (persiste no localStorage
+      //    automaticamente via useEffect persistBatchStates).
+      setBatchStates((prev) => {
+        const cur = prev[taskId];
+        if (!cur || !cur.replan) return prev;
+        const newParts = cur.replan.parts.map((p, i) => i === partIdx ? { ...p, text: newText, voiceId } : p);
+        return {
+          ...prev,
+          [taskId]: {
+            ...cur,
+            replan: { ...cur.replan, parts: newParts },
+            // Reseta status visual da parte pra 'processing' enquanto re-gera
+            parts: cur.parts.map((p, i) => i === partIdx
+              ? { ...p, videoStatus: 'pending' as const, videoUrl: null, error: null }
+              : p),
+          },
+        };
+      });
+
+      // 2) Dispara processJob com o novo texto + mesmo avatar/voz
+      const { processJob } = await import('@/lib/heygen-api-direct');
+      const adNameSafe = b.baseAdId.replace(/[^A-Z0-9]/gi, '_');
+      const job = await processJob({
+        text: newText,
+        voiceId: voiceId || undefined,
+        title: `${adNameSafe}_${label}_edit`,
+        avatarId: replanPart.avatarId,
+        engine: 'iii',
+        orientation: 'portrait',
+      });
+      if (!job.videoId) throw new Error('processJob nao retornou videoId.');
+
+      // 3) Atualiza state com novo videoId (overwrite o antigo)
+      setBatchStates((prev) => {
+        const cur = prev[taskId];
+        if (!cur) return prev;
+        const newParts = cur.parts.map((p, i) => i === partIdx
+          ? { ...p, videoId: job.videoId, videoStatus: 'pending' as const, videoUrl: null, error: null }
+          : p);
+        return { ...prev, [taskId]: { ...cur, parts: newParts } };
+      });
+
+      // 4) Poll ate completar (zombie kill 15min pra evitar hang)
+      const statuses = await pollVideosUntilReady([job.videoId], {
+        intervalMs: 8000,
+        timeoutMs: 25 * 60 * 1000,
+        maxPendingMsPerId: 15 * 60 * 1000,
+      });
+      const st = statuses[job.videoId];
+      if (!st || st.status !== 'completed' || !st.videoUrl) {
+        throw new Error(`Re-render falhou (status=${st?.status}): ${st?.error || 'sem detalhes'}`);
+      }
+
+      // 5) Baixa o MP4 + salva blob no IDB (substitui o antigo). RETOMAR
+      //    futuro vai hidratar essa parte do IDB sem re-baixar.
+      const bytes = await downloadVideoBytes(st.videoUrl);
+      const partBlob = new Blob([bytes as BlobPart], { type: 'video/mp4' });
+      try {
+        const { saveBlob } = await import('@/lib/zip-store');
+        await saveBlob(`pilot:${taskId}:part:${label}`, partBlob, 'video/mp4');
+      } catch (e) { console.warn('[edit-part] save blob IDB falhou:', e); }
+
+      // 6) Atualiza state final com URL pronta + marca como dirty (montagem
+      //    fica desatualizada ate user clicar "Atualizar montagem")
+      setBatchStates((prev) => {
+        const cur = prev[taskId];
+        if (!cur) return prev;
+        const newParts = cur.parts.map((p, i) => i === partIdx
+          ? { ...p, videoUrl: st.videoUrl, videoStatus: 'completed' as const }
+          : p);
+        const dirty = new Set(cur.dirtyParts || []);
+        dirty.add(label);
+        return { ...prev, [taskId]: { ...cur, parts: newParts, dirtyParts: Array.from(dirty) } };
+      });
+
+      // Fecha modal
+      setEditingPart(null);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setRegenError(msg);
+    } finally {
+      setRegeneratingPart(null);
+    }
+  }
+
+  // ═══════════════════ REBUILD MONTAGE (refazer ZIPs) ═══════════════════
+  //
+  // Apos editar 1+ takes, user clica "Atualizar montagem" — re-roda
+  // runPostPipeline com TODOS os blobs do IDB (fresh) e gera novos
+  // montadoZipUrl/camufladoZipUrl. dirtyParts limpa pra zerar o flag.
+
+  async function rebuildMontage(taskId: string) {
+    const b = batchStates[taskId];
+    if (!b) return;
+    setRebuildingTaskId(taskId);
+    try {
+      const { loadBlob, saveZip } = await import('@/lib/zip-store');
+      // Hidrata blobs do IDB (todos, fresh — incluindo os editados)
+      const partBlobs: Array<{ label: string; blob: Blob | null }> = await Promise.all(
+        b.parts.map(async (p) => {
+          if (!p.videoId) return { label: p.label, blob: null };
+          try {
+            const blob = await loadBlob(`pilot:${taskId}:part:${p.label}`, 'video/mp4');
+            return { label: p.label, blob: blob && blob.size > 1024 ? blob : null };
+          } catch { return { label: p.label, blob: null }; }
+        }),
+      );
+
+      setBatchStates((prev) => ({
+        ...prev,
+        [taskId]: { ...prev[taskId], phase: 'post', message: 'Re-montando com parts editadas...', finishedAt: undefined },
+      }));
+
+      const pipeRes = await runPostPipeline({
+        baseAdId: b.baseAdId,
+        parts: partBlobs,
+        decupagem: isDecupagemEnabled(taskId),
+        camuflagem: camuflagemMode,
+        whiteAudio: camuflagemMode ? camuflagemWhite : null,
+        camuflagemVolume,
+        onProgress: (p) => {
+          setBatchStates((prev) => ({
+            ...prev,
+            [taskId]: { ...prev[taskId], message: `${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}` },
+          }));
+        },
+      });
+
+      // Reconstroi os ZIPs (montado + camo) — mesmo pattern do resumeTaskBatch
+      const JSZip = (await import('jszip')).default;
+      const assembled = pipeRes.items;
+      const adNameClean = b.baseAdId.replace(/[^A-Z0-9]/gi, '_');
+
+      // ZIP montado
+      const zipMont = new JSZip();
+      for (const item of assembled) {
+        if (item.decupado) zipMont.file(item.filename, item.decupado);
+        else if (item.rawAssembled && item.rawAssembled.size > 0 && !item.errors?.assemble) {
+          const baseName = item.filename.replace('.mp4', '_sem_decupagem.mp4');
+          zipMont.file(baseName, item.rawAssembled);
+          zipMont.file(`${item.filename.replace('.mp4', '')}_DECUPAGEM_ERRO.txt`, item.errors?.decupagem || 'erro');
+        } else {
+          zipMont.file(`${item.filename.replace('.mp4', '')}_ERRO.txt`,
+            `Assemble: ${item.errors?.assemble || 'OK'}\nDecupagem: ${item.errors?.decupagem || 'OK'}`);
+        }
+      }
+      zipMont.file('_DIAGNOSTICO.txt', `Re-montagem apos edicao de parts\n${pipeRes.diagnostics.summary}\n`);
+      const montBlob = await zipMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+      const montadoName = `${adNameClean}_${isDecupagemEnabled(taskId) ? 'montado_decupado' : 'montado'}.zip`;
+      const montadoUrl = URL.createObjectURL(montBlob);
+      try { await saveZip(`batch:${taskId}:montado`, montBlob, montadoName); } catch {}
+
+      // ZIP camo (se modo ON)
+      let camuUrl: string | undefined;
+      let camuName: string | undefined;
+      if (camuflagemMode) {
+        const zipCamu = new JSZip();
+        for (const item of assembled) {
+          if (item.camuflado) zipCamu.file(item.filename.replace('.mp4', '_camuflado.mp4'), item.camuflado);
+          else zipCamu.file(`${item.filename.replace('.mp4', '')}_CAMUFLAGEM_ERRO.txt`, item.errors?.camuflagem || 'falha');
+        }
+        const camuBlob = await zipCamu.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+        camuName = `${adNameClean}_camuflado.zip`;
+        camuUrl = URL.createObjectURL(camuBlob);
+        try { await saveZip(`batch:${taskId}:camo`, camuBlob, camuName); } catch {}
+      }
+
+      const decupagemOn = isDecupagemEnabled(taskId);
+      const pipeStats = {
+        expectedMontagens: assembled.length,
+        okMontagens: assembled.filter((it) => !it.errors?.assemble && it.rawAssembled && it.rawAssembled.size > 0).length,
+        okDecupados: assembled.filter((it) => !!it.decupado).length,
+        okCamuflados: assembled.filter((it) => !!it.camuflado).length,
+        expectedDecupagem: decupagemOn,
+        expectedCamuflagem: camuflagemMode,
+      };
+
+      // Revoga URLs antigas antes de substituir (memoria)
+      for (const url of [b.montadoZipUrl, b.camufladoZipUrl]) {
+        if (url) { try { URL.revokeObjectURL(url); } catch {} }
+      }
+
+      setBatchStates((prev) => ({
+        ...prev,
+        [taskId]: {
+          ...prev[taskId],
+          phase: 'done',
+          message: `Re-montado · ${pipeRes.diagnostics.summary}`,
+          finishedAt: Date.now(),
+          montadoZipUrl: montadoUrl,
+          montadoZipName: montadoName,
+          camufladoZipUrl: camuUrl,
+          camufladoZipName: camuName,
+          pipeStats,
+          dirtyParts: [], // limpa flag — montagem ta fresh
+        },
+      }));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setBatchStates((prev) => ({
+        ...prev,
+        [taskId]: { ...prev[taskId], phase: 'done', message: `Re-montagem falhou: ${msg}`, finishedAt: Date.now() },
+      }));
+    } finally {
+      setRebuildingTaskId(null);
+    }
+  }
+
   /** PAUSAR (HeyGen lipsync) — aborta o processamento atual dessa task.
    *  O run em andamento detecta o cancel e encerra; depois o botao RETOMAR
    *  re-checa/baixa o que ja renderizou ou re-roda do zero. */
@@ -4820,32 +5083,45 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
 
                           // Preview slot — so renderiza se ja tem video disparado
                           const previewsNode = b.parts.some((p) => p.videoId) ? (() => {
+                            // Mapeia idx do filtered → idx no array original (pra EDIT funcionar)
+                            const validIdxsFiltered: number[] = [];
                             const previews: LipsyncTake[] = b.parts
-                              .filter((p) => p.videoId)
-                              .map((p) => ({
-                                label: p.label,
-                                status: p.videoStatus || 'processing',
-                                videoUrl: p.videoUrl ?? null,
-                                error: p.error ?? null,
-                              }));
+                              .map((p, originalIdx) => ({ p, originalIdx }))
+                              .filter(({ p }) => !!p.videoId)
+                              .map(({ p, originalIdx }) => {
+                                validIdxsFiltered.push(originalIdx);
+                                return {
+                                  label: p.label,
+                                  status: p.videoStatus || 'processing',
+                                  videoUrl: p.videoUrl ?? null,
+                                  error: p.error ?? null,
+                                };
+                              });
                             const donePv = previews.filter((p) => p.status === 'completed').length;
                             const pct = previews.length > 0 ? Math.round((100 * donePv) / previews.length) : 0;
+                            const canEdit = !!b.replan?.parts?.length; // so habilita se temos plan
                             return (
                               <>
                                 <div className="mono mb-1.5 flex items-center justify-between text-[9px] uppercase tracking-widest text-text-muted">
                                   <span>Takes ({donePv}/{previews.length} prontos)</span>
                                 </div>
                                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-                                  {previews.map((t, ti) => (
-                                    <LipsyncPreviewCard
-                                      key={ti}
-                                      take={t}
-                                      position={ti + 1}
-                                      total={previews.length}
-                                      percent={pct}
-                                      fileBase={b.baseAdId || b.taskName}
-                                    />
-                                  ))}
+                                  {previews.map((t, ti) => {
+                                    const originalIdx = validIdxsFiltered[ti];
+                                    const isRegenThis = regeneratingPart?.taskId === b.taskId && regeneratingPart?.label === t.label;
+                                    return (
+                                      <LipsyncPreviewCard
+                                        key={ti}
+                                        take={t}
+                                        position={ti + 1}
+                                        total={previews.length}
+                                        percent={pct}
+                                        fileBase={b.baseAdId || b.taskName}
+                                        isRegenerating={isRegenThis}
+                                        onEdit={canEdit && t.status === 'completed' ? () => openEditPart(b.taskId, originalIdx) : undefined}
+                                      />
+                                    );
+                                  })}
                                 </div>
                               </>
                             );
@@ -4885,6 +5161,9 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   return rest;
                                 });
                               }}
+                              dirtyPartsCount={(b.dirtyParts || []).length}
+                              onRebuild={() => void rebuildMontage(b.taskId)}
+                              isRebuilding={rebuildingTaskId === b.taskId}
                             >
                               {previewsNode}
                             </BatchJobCard3D>
@@ -6032,6 +6311,20 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
             </div>
           ) : null}
       </ToolShell>
+      {/* Modal pra editar 1 take e re-gerar so essa parte */}
+      {editingPart ? (
+        <EditPartModal
+          input={{
+            label: editingPart.label,
+            text: editingPart.currentText,
+            voiceId: editingPart.voiceId,
+          }}
+          busy={!!regeneratingPart}
+          errorMsg={regenError}
+          onClose={() => { if (!regeneratingPart) { setEditingPart(null); setRegenError(null); } }}
+          onRegenerate={(newText) => void regenerateSinglePart(newText)}
+        />
+      ) : null}
     </>
   );
 }
