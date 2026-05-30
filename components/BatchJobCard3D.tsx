@@ -229,6 +229,31 @@ const IconDoc = ({ size = 16 }: { size?: number }) => (
     <path d="M9 13h6M9 17h6M9 9h2" />
   </svg>
 );
+
+/** Icone ClickUp — monograma oficial (upward arrow estilizado). Renderizado
+ *  com gradient brand-aware (cyan→pink→yellow). currentColor nao aplica
+ *  porque eh multi-color por design. */
+const IconClickUp = ({ size = 18 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+    <defs>
+      <linearGradient id="cu-grad" x1="0%" y1="100%" x2="100%" y2="0%">
+        <stop offset="0%" stopColor="#8930FD" />
+        <stop offset="35%" stopColor="#49CCF9" />
+        <stop offset="70%" stopColor="#FF5688" />
+        <stop offset="100%" stopColor="#FFCC00" />
+      </linearGradient>
+    </defs>
+    {/* Forma "C de checkmark" upward — 2 chevrons concentricos sobrepostos */}
+    <path
+      d="M2.2 17.2 6.6 13.6c1.5 2 3.3 3 5.4 3 2.1 0 3.9-1 5.3-3l4.5 3.6c-2.3 3.1-5.5 4.8-9.8 4.8s-7.5-1.7-9.8-4.8Z"
+      fill="url(#cu-grad)"
+    />
+    <path
+      d="M12 7.6 4.2 14.2 1.5 11l10.5-8.7 10.5 8.7-2.7 3.2L12 7.6Z"
+      fill="url(#cu-grad)"
+    />
+  </svg>
+);
 const IconChevron = ({ size = 14, open }: { size?: number; open?: boolean }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
     style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 200ms ease-out' }}>
@@ -395,22 +420,32 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
-              {/* ABRIR DOC — vai direto pro Google Doc da copy sem ter que ir
-               *  no ClickUp manualmente puxar o link. Fallback pro task URL
-               *  do ClickUp se docUrl nao foi capturado. */}
-              {(docUrl || taskUrl) ? (
-                <a
-                  href={docUrl || taskUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-gradient-to-b from-white/10 via-white/[0.04] to-transparent text-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-white/30 hover:text-white hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_8px_20px_-6px_rgba(255,255,255,0.18)] active:translate-y-0 active:scale-95 transition-[transform,box-shadow]"
-                  title={docUrl ? 'Abrir doc da copy' : 'Abrir task no ClickUp'}
-                  aria-label={docUrl ? 'Abrir doc da copy' : 'Abrir task no ClickUp'}
-                >
-                  <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/15 to-transparent" aria-hidden />
-                  <span className="relative"><IconDoc size={16} /></span>
-                </a>
-              ) : null}
+              {/* BOTAO CLICKUP — vai direto pro doc da copy. Fallback chain:
+               *  1. docUrl (Google Docs, capturado na analise)
+               *  2. taskUrl (ClickUp task URL salvo na analise)
+               *  3. Construido on-the-fly: https://app.clickup.com/t/{taskId}
+               *     — pattern oficial do ClickUp, funciona pra qualquer taskId.
+               *  Sempre visivel (nunca esconde). Ícone = monograma ClickUp
+               *  com gradient brand (purple→cyan→pink→yellow). */}
+              {(() => {
+                const href = docUrl || taskUrl || `https://app.clickup.com/t/${props.taskId}`;
+                const tooltip = docUrl
+                  ? 'Abrir doc da copy (Google Docs)'
+                  : 'Abrir task no ClickUp';
+                return (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-fuchsia-400/40 bg-gradient-to-b from-fuchsia-400/15 via-cyan-400/8 to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(217,70,239,0.35)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-fuchsia-400/65 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_24px_-6px_rgba(217,70,239,0.6)] active:translate-y-0 active:scale-95 transition-[transform,box-shadow]"
+                    title={tooltip}
+                    aria-label={tooltip}
+                  >
+                    <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/25 to-transparent" aria-hidden />
+                    <span className="relative"><IconClickUp size={18} /></span>
+                  </a>
+                );
+              })()}
               {/* DOWNLOAD UNICO — baixa tudo o que existe (takes + montados +
                *  camuflados se houver) num clique so. Browser enfileira os
                *  downloads automaticamente. Pequeno delay entre cada disparo
