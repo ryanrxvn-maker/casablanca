@@ -4731,13 +4731,13 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                       </div>
                       <div className="flex flex-wrap gap-2">
                         {([
-                          { id: 'all' as const, label: 'Todos', sub: 'sem filtro' },
-                          { id: 'today' as const, label: 'Hoje', sub: 'due = hoje' },
-                          { id: 'yesterday' as const, label: 'Ontem', sub: 'due = ontem' },
-                          { id: 'overdue' as const, label: 'Atrasadas', sub: '⚠ passado' },
-                          { id: 'next7' as const, label: 'Próx 7d', sub: '+ 1 semana' },
-                          { id: 'next30' as const, label: 'Próx 30d', sub: '+ 1 mês' },
-                          { id: 'specific' as const, label: 'Data específica', sub: 'YYYY-MM-DD' },
+                          { id: 'all' as const, label: 'Todos' },
+                          { id: 'today' as const, label: 'Hoje' },
+                          { id: 'yesterday' as const, label: 'Ontem' },
+                          { id: 'overdue' as const, label: 'Atrasadas' },
+                          { id: 'next7' as const, label: 'Próx 7d' },
+                          { id: 'next30' as const, label: 'Próx 30d' },
+                          { id: 'specific' as const, label: 'Data específica' },
                         ]).map((f) => {
                           const active = dateFilter === f.id;
                           return (
@@ -4746,7 +4746,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                               type="button"
                               onClick={() => setDateFilter(f.id)}
                               className={
-                                'group relative overflow-hidden rounded-[12px] border px-3 py-2 text-left transition-all duration-200 ' +
+                                'group relative overflow-hidden rounded-[12px] border px-4 py-2.5 transition-all duration-200 ' +
                                 (active
                                   ? 'border-lime/65 bg-lime/12'
                                   : 'border-line-strong bg-bg/40 hover:border-lime/45 hover:-translate-y-[1px]')
@@ -4757,15 +4757,12 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   : undefined
                               }
                             >
-                              <div
-                                className="text-[11.5px] font-bold tracking-tight text-white"
+                              <span
+                                className="text-[12px] font-bold tracking-tight text-white"
                                 style={{ fontFamily: 'var(--font-tech)' }}
                               >
                                 {f.label}
-                              </div>
-                              <div className="mono mt-0.5 text-[9px] uppercase tracking-widest text-text-muted">
-                                {f.sub}
-                              </div>
+                              </span>
                               {active ? (
                                 <span
                                   aria-hidden

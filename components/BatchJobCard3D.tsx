@@ -495,17 +495,21 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
               {!isRunning ? (
                 <Btn3D icon={<IconX size={14} />} color="neutral" title="Remover" onClick={onRemove} />
               ) : null}
-              {/* TOGGLE EXPAND/COLLAPSE — chevron 3D neutro, ultimo da fila */}
+              {/* TOGGLE EXPAND/COLLAPSE — chevron com contraste forte (visivel
+               *  tanto em dark quanto light mode). Usa fuchsia como cor
+               *  primaria pra integrar com o tema do painel + garantir que
+               *  o icone fica sempre legivel. */}
               <button
                 type="button"
                 onClick={() => setExpanded((v) => !v)}
-                className="group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/12 bg-gradient-to-b from-white/8 via-white/[0.03] to-transparent text-text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-white/30 hover:text-white hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_8px_20px_-6px_rgba(255,255,255,0.18)] active:translate-y-0 active:scale-95 transition-[transform,box-shadow]"
+                className="group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-fuchsia-400/45 bg-gradient-to-b from-fuchsia-400/20 via-fuchsia-400/8 to-transparent text-fuchsia-200 dark:text-fuchsia-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_3px_10px_-3px_rgba(217,70,239,0.35)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-fuchsia-400/65 hover:text-white hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_24px_-6px_rgba(217,70,239,0.6)] active:translate-y-0 active:scale-95 transition-[transform,box-shadow]"
+                style={{ color: 'currentColor' }}
                 title={expanded ? 'Recolher' : 'Expandir takes'}
                 aria-label={expanded ? 'Recolher' : 'Expandir'}
                 aria-expanded={expanded}
               >
-                <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/15 to-transparent" aria-hidden />
-                <span className="relative"><IconChevron size={14} open={expanded} /></span>
+                <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/25 to-transparent" aria-hidden />
+                <span className="relative text-fuchsia-700 dark:text-fuchsia-100"><IconChevron size={14} open={expanded} /></span>
               </button>
             </div>
           </div>

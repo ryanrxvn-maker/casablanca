@@ -66,7 +66,10 @@ export function EditPartModal({
 
   const node = (
     <div
-      className="fixed inset-0 z-[220] flex items-center justify-center bg-black/85 p-4 backdrop-blur-md"
+      // z-[100] — abaixo do z-[120] dos CompactAvatar/Voice pickers pra que o
+      // dropdown da biblioteca apareça ACIMA do modal (era 220 antes,
+      // escondendo a biblioteca atras do modal).
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-4 backdrop-blur-md"
       onClick={() => { if (!busy) onClose(); }}
       style={{ animation: 'epmIn 0.2s ease-out' }}
     >
