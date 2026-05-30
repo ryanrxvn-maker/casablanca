@@ -1297,9 +1297,9 @@ export function AutoBrollHowItWorks() {
   const steps = [
     {
       n: '01',
-      title: 'Cola sua lista de prompts',
+      title: 'Cola seu JSON',
       desc:
-        'JSON do Claude ou texto numerado — qualquer formato funciona. O parser entende ambos e já mostra quantos takes vai gerar.',
+        'Cola o JSON e o app já mostra quantos takes vai gerar. Liga a fila e pronto.',
       tint: 'rgba(167,139,250,0.5)',
     },
     {
