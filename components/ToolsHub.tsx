@@ -94,14 +94,14 @@ const BASE: ToolEntry[] = [
   {
     href: '/tools/downloader',
     label: 'Downloader',
-    description: 'Baixa qualquer vídeo direto da internet.',
+    description: 'Baixa vídeo, áudio e imagem do YouTube, TikTok, Insta e Pinterest.',
     icon: <IconDownloader size={26} />,
     hue: 'rgba(96, 165, 250, 0.4)',
   },
   {
     href: '/tools/compressor',
     label: 'Compressor',
-    description: 'Reduz o peso do arquivo sem perder qualidade.',
+    description: 'Reduz o peso do vídeo sem perder qualidade visível.',
     icon: <IconCompressor size={26} />,
     hue: 'rgba(129, 140, 248, 0.4)',
   },

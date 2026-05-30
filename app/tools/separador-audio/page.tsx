@@ -181,7 +181,7 @@ export default function SeparadorAudioPage() {
     <ToolShell
       title="Separador de Áudio"
       eyebrow="ÁUDIO · IA"
-      description={`Separa voz, instrumental e SFX em 3 trilhas independentes. Modelo Demucs v4 — qualidade absurda. Até ${MAX_AUDIO_MB}MB ou ${MAX_AUDIO_MINUTES} min.`}
+      description={`Separa voz, instrumental e SFX em 3 trilhas independentes. Qualidade absurda. Até ${MAX_AUDIO_MB}MB ou ${MAX_AUDIO_MINUTES} min.`}
       hue={HUE}
       icon={<IconAudioSplit size={56} />}
     >
