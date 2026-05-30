@@ -4994,25 +4994,26 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                     <span className="text-[11.5px] font-bold leading-none tabular-nums">{siblingsAll.length}</span>
                                   </span>
                                 ) : null}
-                                {/* ICONE PRIORIDADE — sozinho, so o triangulo de aviso */}
+                                {/* ICONE PRIORIDADE — bg mais saturado + border + shadow pra
+                                 *  saltar em light/dark. Icone 15px (era 13). */}
                                 {t.priority?.priority === 'urgent' ? (
                                   <span
                                     title="Prioridade urgente"
-                                    className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-red-500/60 bg-red-500/15 text-red-600 dark:text-red-300"
+                                    className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-red-500/85 bg-red-500/25 text-red-700 shadow-[0_1px_3px_rgba(239,68,68,0.18)]"
                                   >
-                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                                       <path d="M12 2.2c-.6 0-1.2.3-1.5.9L1 19.5c-.6 1 .2 2.3 1.4 2.3h19.2c1.2 0 2-1.3 1.4-2.3L13.5 3.1c-.3-.6-.9-.9-1.5-.9z" />
-                                      <path d="M11 9h2v6h-2zM11 16.5h2V19h-2z" fill="#fff" opacity="0.92" />
+                                      <path d="M11 9h2v6h-2zM11 16.5h2V19h-2z" fill="#fff" />
                                     </svg>
                                   </span>
                                 ) : t.priority?.priority === 'high' ? (
                                   <span
                                     title="Prioridade alta"
-                                    className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-amber-500/60 bg-amber-500/15 text-amber-600 dark:text-amber-300"
+                                    className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-amber-500/90 bg-amber-500/28 text-amber-700 shadow-[0_1px_3px_rgba(245,158,11,0.2)]"
                                   >
-                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
                                       <path d="M12 2.2c-.6 0-1.2.3-1.5.9L1 19.5c-.6 1 .2 2.3 1.4 2.3h19.2c1.2 0 2-1.3 1.4-2.3L13.5 3.1c-.3-.6-.9-.9-1.5-.9z" />
-                                      <path d="M11 9h2v6h-2zM11 16.5h2V19h-2z" fill="#fff" opacity="0.92" />
+                                      <path d="M11 9h2v6h-2zM11 16.5h2V19h-2z" fill="#fff" />
                                     </svg>
                                   </span>
                                 ) : null}
@@ -5027,42 +5028,42 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   const tomorrow = today.getTime() + DAY;
                                   const dueDate = new Date(due);
 
-                                  // ATRASADA — so o numero, vermelho
+                                  // ATRASADA — bg + border MAIS evidentes, texto darker
                                   if (due < today.getTime()) {
                                     const daysAgo = Math.max(1, Math.floor((today.getTime() - due) / DAY));
                                     return (
                                       <span
                                         title={`Atrasada ${daysAgo} dia${daysAgo === 1 ? '' : 's'}`}
-                                        className="inline-flex h-6 min-w-[24px] items-center justify-center rounded-md border border-red-500/60 bg-red-500/15 px-2 text-[12.5px] font-bold tabular-nums text-red-600 dark:text-red-300"
+                                        className="inline-flex h-6 min-w-[26px] items-center justify-center rounded-md border border-red-500/85 bg-red-500/25 px-2 text-[13px] font-extrabold tabular-nums text-red-700 shadow-[0_1px_3px_rgba(239,68,68,0.18)]"
                                       >
                                         {daysAgo}
                                       </span>
                                     );
                                   }
 
-                                  // HOJE — texto "Hoje" ambar
+                                  // HOJE — texto "Hoje" ambar mais saturado
                                   if (due < tomorrow) {
                                     return (
                                       <span
                                         title="Vence hoje"
-                                        className="inline-flex h-6 items-center justify-center rounded-md border border-amber-500/60 bg-amber-500/15 px-2 text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300"
+                                        className="inline-flex h-6 items-center justify-center rounded-md border border-amber-500/90 bg-amber-500/28 px-2.5 text-[10.5px] font-extrabold uppercase tracking-wider text-amber-800 shadow-[0_1px_3px_rgba(245,158,11,0.2)]"
                                       >
                                         Hoje
                                       </span>
                                     );
                                   }
 
-                                  // FUTURO 1-7d — numero com "+" prefix
+                                  // FUTURO 1-7d — numero com "+" prefix, mais visivel
                                   const daysAhead = Math.ceil((due - now) / DAY);
                                   if (daysAhead <= 7) {
                                     const urgent = daysAhead <= 3;
                                     const cls = urgent
-                                      ? 'border-amber-500/50 bg-amber-500/12 text-amber-700 dark:text-amber-300'
-                                      : 'border-zinc-400/40 bg-zinc-500/10 text-zinc-600 dark:text-zinc-300';
+                                      ? 'border-amber-500/85 bg-amber-500/22 text-amber-800 shadow-[0_1px_3px_rgba(245,158,11,0.18)]'
+                                      : 'border-zinc-500/60 bg-zinc-500/18 text-zinc-700';
                                     return (
                                       <span
                                         title={`Vence em ${daysAhead} dia${daysAhead === 1 ? '' : 's'}`}
-                                        className={`inline-flex h-6 min-w-[24px] items-center justify-center rounded-md border px-2 text-[12px] font-bold tabular-nums ${cls}`}
+                                        className={`inline-flex h-6 min-w-[26px] items-center justify-center rounded-md border px-2 text-[12.5px] font-extrabold tabular-nums ${cls}`}
                                       >
                                         +{daysAhead}
                                       </span>
@@ -5072,7 +5073,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   return (
                                     <span
                                       title={`Vence em ${dueDate.toLocaleDateString('pt-BR')}`}
-                                      className="inline-flex h-6 items-center justify-center rounded-md border border-zinc-400/40 bg-zinc-500/10 px-2 text-[11px] font-bold tabular-nums text-zinc-600 dark:text-zinc-300"
+                                      className="inline-flex h-6 items-center justify-center rounded-md border border-zinc-500/60 bg-zinc-500/18 px-2 text-[11px] font-bold tabular-nums text-zinc-700"
                                     >
                                       {dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
                                     </span>
