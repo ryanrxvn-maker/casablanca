@@ -139,7 +139,7 @@ const AI: ToolEntry[] = [
   {
     href: '/tools/auto-broll',
     label: 'Auto B-roll',
-    description: 'Insere cortes no ritmo da fala.',
+    description: 'Gera B-rolls em massa pelo JSON.',
     icon: <IconAutoBroll size={26} />,
     hue: 'rgba(240, 171, 252, 0.42)',
     badge: 'IA',

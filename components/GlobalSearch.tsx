@@ -69,7 +69,7 @@ const ENTRIES: Entry[] = [
   { id: 'calculadora', group: 'Ferramentas', label: 'Calculadora', hint: 'Cálculo de preço por minuto', href: '/tools/calculadora', icon: <IconCalculadora size={20} />, keywords: ['valor', 'preço', 'orçamento'] },
 
   // IA
-  { id: 'auto-broll', group: 'IA', label: 'Auto B-roll', hint: 'Insere cortes no ritmo da fala', href: '/tools/auto-broll', icon: <IconAutoBroll size={20} />, keywords: ['broll', 'b-roll', 'magnific'] },
+  { id: 'auto-broll', group: 'IA', label: 'Auto B-roll', hint: 'Gera B-rolls em massa pelo JSON', href: '/tools/auto-broll', icon: <IconAutoBroll size={20} />, keywords: ['broll', 'b-roll', 'magnific'] },
   { id: 'troca-produto', group: 'IA', label: 'Troca de produto', hint: 'Substitui produto do áudio', href: '/tools/troca-produto', icon: <IconTrocaProduto size={20} />, keywords: ['voz', 'clone', 'eleven', 'voiceover'] },
   { id: 'remover', group: 'IA', label: 'Remover Legenda/Marca d’Água', hint: 'Apaga texto e watermark sem borrão', href: '/tools/remover-elementos', icon: <IconRemoverElementos size={20} />, keywords: ['smart remover', 'watermark', 'marca', 'logo', 'inpaint'] },
   { id: 'decupagem-copy', group: 'IA', label: 'Decupagem Inteligente', hint: 'Decupa seguindo sua copy', href: '/tools/decupagem-copy', icon: <IconDecupageCopy size={20} />, keywords: ['smart decup', 'script', 'roteiro'] },
