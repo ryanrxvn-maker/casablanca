@@ -158,7 +158,7 @@ function TrocaProdutoInner() {
     setError(null);
     setTranscript(null);
     setStage('transcribing');
-    setStageMsg('Transcrevendo com AssemblyAI (pode levar 1-3 min)...');
+    setStageMsg('Transcrevendo o áudio (pode levar 1-3 min)...');
     try {
       const fd = new FormData();
       fd.append('audio', file);
@@ -218,7 +218,7 @@ function TrocaProdutoInner() {
     try {
       // 1. Clonar voz
       setStage('cloning');
-      setStageMsg('Clonando voz do narrador (ElevenLabs)...');
+      setStageMsg('Clonando a voz do narrador...');
       const cloneFd = new FormData();
       cloneFd.append('audio', file);
       cloneFd.append('name', `darko-clone-${Date.now()}`);
@@ -268,7 +268,7 @@ function TrocaProdutoInner() {
 
       // 3. Splicing via FFmpeg WASM
       setStage('splicing');
-      setStageMsg('Remontando o áudio final (FFmpeg WASM)...');
+      setStageMsg('Remontando o áudio final...');
       const finalBlob = await spliceAudio(file, picked, ttsBlobs);
 
       const url = URL.createObjectURL(finalBlob);
@@ -321,8 +321,8 @@ function TrocaProdutoInner() {
         tint="pink"
         pipeline={[
           { icon: '🎤', label: 'Áudio', sub: 'Original', tone: 'text-text-muted' },
-          { icon: '🧠', label: 'Detecta', sub: 'AssemblyAI', tone: 'text-cyan-300' },
-          { icon: '🪞', label: 'Clona voz', sub: 'ElevenLabs IVC', tone: 'text-pink-300' },
+          { icon: '🧠', label: 'Detecta', sub: 'A menção', tone: 'text-cyan-300' },
+          { icon: '🪞', label: 'Clona voz', sub: 'Mesma voz', tone: 'text-pink-300' },
           { icon: '🎬', label: 'MP3 final', sub: 'Mesmo timing', tone: 'text-lime' },
         ]}
         stats={[
@@ -425,14 +425,14 @@ function TrocaProdutoInner() {
               </span>
               <span className="text-sm font-medium uppercase tracking-widest text-lime">
                 {stage === 'transcribing'
-                  ? 'AssemblyAI · transcrevendo'
+                  ? 'Transcrevendo'
                   : stage === 'cloning'
-                    ? 'ElevenLabs · clonando voz'
+                    ? 'Clonando a voz'
                     : stage === 'tts'
-                      ? 'ElevenLabs · gerando TTS'
+                      ? 'Gerando a voz nova'
                       : stage === 'splicing'
-                        ? 'FFmpeg · remontando audio'
-                        : 'processando'}
+                        ? 'Montando o áudio'
+                        : 'Processando'}
               </span>
             </div>
             <div className="mt-4 grid gap-2">

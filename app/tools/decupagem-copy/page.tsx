@@ -176,7 +176,7 @@ function DecupagemCopyInner() {
       }
 
       // Step 2: Send to server for transcription + matching
-      setStage('Transcrevendo (Groq Whisper, fallback AAI)...');
+      setStage('Transcrevendo o áudio...');
       setProgress(0.3);
 
       const fd = new FormData();
@@ -299,7 +299,7 @@ function DecupagemCopyInner() {
         pipeline={[
           { icon: '🎞', label: 'Vídeo bruto', sub: 'Todas as takes', tone: 'text-text-muted' },
           { icon: '📝', label: 'Copy final', sub: 'O texto certo', tone: 'text-fuchsia-300' },
-          { icon: '🧠', label: 'Whisper + IA', sub: 'Match por frase', tone: 'text-violet' },
+          { icon: '🧠', label: 'Transcrição + IA', sub: 'Match por frase', tone: 'text-violet' },
           { icon: '✂', label: 'Timeline', sub: 'Cortes prontos', tone: 'text-lime' },
         ]}
         stats={[

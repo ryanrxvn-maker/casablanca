@@ -63,7 +63,7 @@ export default function VoiceTestPage() {
         },
         onProgress: (p) => {
           if (abortRef.current) return;
-          setProgress(`FFmpeg ${Math.round(p.ratio * 100)}% (${p.time.toFixed(1)}s)`);
+          setProgress(`Processando ${Math.round(p.ratio * 100)}%`);
         },
       });
 

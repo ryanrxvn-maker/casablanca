@@ -86,7 +86,7 @@ const ENTRIES: Entry[] = [
 
   // Configurações
   { id: 'config', group: 'Configurações', label: 'Configurações', hint: 'Preferências da conta', href: '/configuracoes', icon: <IconStepGear size={20} />, keywords: ['settings', 'preferências'] },
-  { id: 'config-api', group: 'Configurações', label: 'Chaves de IA', hint: 'API keys (Groq, Eleven, OpenAI…)', href: '/configuracoes/api', icon: <IconStepGear size={20} />, keywords: ['groq', 'openai', 'eleven', 'anthropic', 'api', 'key'] },
+  { id: 'config-api', group: 'Configurações', label: 'Chaves de IA', hint: 'Suas chaves de integração', href: '/configuracoes/api', icon: <IconStepGear size={20} />, keywords: ['groq', 'openai', 'eleven', 'anthropic', 'api', 'key'] },
   { id: 'config-pilot', group: 'Configurações', label: 'ClickUp Pilot · ajustes', hint: 'Tokens e workspace', href: '/configuracoes/clickup-pilot', icon: <IconStepGear size={20} />, keywords: ['clickup', 'token'] },
 
   // Conta

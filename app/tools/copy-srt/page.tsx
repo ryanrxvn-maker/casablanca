@@ -123,7 +123,7 @@ export default function CopySrtPage() {
         );
       }
 
-      setStage('Transcrevendo (Groq Whisper, fallback AAI) + alinhando copy...');
+      setStage('Transcrevendo e alinhando a copy...');
       setProgress(0.4);
 
       const fd = new FormData();
@@ -202,7 +202,7 @@ export default function CopySrtPage() {
         pipeline={[
           { icon: '🎙', label: 'Áudio', sub: 'Voz da VSL', tone: 'text-text-muted' },
           { icon: '📝', label: 'Copy', sub: 'O texto exato', tone: 'text-amber-300' },
-          { icon: '🧠', label: 'Whisper align', sub: 'Palavra-a-palavra', tone: 'text-violet' },
+          { icon: '🧠', label: 'Alinhamento', sub: 'Palavra-a-palavra', tone: 'text-violet' },
           { icon: '📄', label: '.SRT / .VTT', sub: 'Pronto pro editor', tone: 'text-lime' },
         ]}
         stats={[

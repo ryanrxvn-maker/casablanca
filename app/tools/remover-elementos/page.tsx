@@ -505,7 +505,7 @@ function RemoverElementosInner() {
                   <code className="mono text-white">.exe</code> baixado (se
                   o Windows avisar, &quot;Mais informacoes&quot; → &quot;Executar
                   assim mesmo&quot;). Ele se extrai automaticamente, baixa tudo
-                  (Python + IA + ffmpeg, ~500 MB, 1a vez), instala, inicia
+                  (o motor de IA, ~500 MB na 1a vez), instala, inicia
                   o motor e configura auto-start junto com o Windows.
                 </li>
                 <li>
@@ -515,9 +515,8 @@ function RemoverElementosInner() {
               </ol>
               <p className="mono mt-2 text-[10px] text-text-muted">
                 Requer Windows 64-bit. O motor roda 100% no PC do usuario.
-                Instalador leve (~230 KB); ao executar baixa Python +
-                paddleocr + opencv + LaMa + ffmpeg (~500 MB, uma vez,
-                ~10-12 min) automaticamente.
+                Instalador leve (~230 KB); ao executar baixa o motor de IA
+                (~500 MB, uma vez, ~10-12 min) automaticamente.
               </p>
             </details>
 

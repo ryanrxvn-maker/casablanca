@@ -11,13 +11,15 @@ type Service =
   | 'replicate'
   | 'groq';
 
+// Rótulos por CAPACIDADE (nunca o fornecedor) — o cliente vê "Transcrição",
+// não "AssemblyAI". Exceção: HeyGen, que pode ser citado.
 const LABEL: Record<Service, string> = {
-  anthropic: 'Anthropic (Claude)',
-  assemblyai: 'AssemblyAI',
-  elevenlabs: 'ElevenLabs',
+  anthropic: 'IA de texto',
+  assemblyai: 'Transcrição',
+  elevenlabs: 'Clonagem de voz',
   heygen: 'HeyGen',
-  replicate: 'Replicate',
-  groq: 'Groq (Whisper)',
+  replicate: 'Geração de vídeo',
+  groq: 'Transcrição',
 };
 
 /**

@@ -919,11 +919,9 @@ export default function DownloaderPage() {
 
         <p className="mono text-[10px] leading-relaxed text-text-muted">
           <span className="text-white">TikTok</span>{' '}
-          <span className="text-lime">sem marca d&apos;água em HD</span>{' '}
-          (esquema savett) ·{' '}
-          <span className="text-white">Pinterest</span> mídia direta
-          (esquema klickpin) ·{' '}
-          <span className="text-white">YouTube/Instagram</span> yt-dlp.
+          <span className="text-lime">sem marca d&apos;água em HD</span> ·{' '}
+          <span className="text-white">Pinterest</span> mídia direta ·{' '}
+          <span className="text-white">YouTube/Instagram</span>.
           Downloads paralelos (3x) e acelerados (multi-conexão). Links
           privados exigem login. Use apenas para conteúdo que você tem
           direito de baixar.
