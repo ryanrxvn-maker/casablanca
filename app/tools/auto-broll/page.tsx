@@ -308,6 +308,11 @@ function AutoBrollInner() {
               imageUrl: t.imageUrl || null,
             })),
             createdAt: Date.now(),
+            // Persiste o JSON original pra que o botao RETOMAR no historico
+            // consiga re-disparar SO as faltantes sem precisar do user re-colar
+            // o JSON. Tamanho tipico ~5-20KB, cabe em localStorage tranquilo.
+            originalJson: job.raw,
+            imageModel,
           });
           localStorage.setItem(histKey, JSON.stringify(hist.slice(0, 50)));
           window.dispatchEvent(new Event('darkolab:auto-broll:history-changed'));
@@ -657,19 +662,28 @@ function AutoBrollInner() {
   );
 }
 
+type HistEntry = {
+  jobId: string;
+  spaceName: string;
+  zipKey: string;
+  zipName: string;
+  totalTakes: number;
+  successCount: number;
+  failedCount: number;
+  takeUrls: Array<{ idx: number; status: string; videoUrl: string | null; imageUrl: string | null }>;
+  createdAt: number;
+  /** JSON original colado pelo user. Pre-condicao pra RETOMAR — sem isso,
+   *  nao temos como reconstruir as prompts das takes que faltaram.
+   *  Adicionado em 2026-05-30; entries antigas nao tem. */
+  originalJson?: string;
+  imageModel?: string;
+};
+
 function BrollHistorySection() {
-  const [hist, setHist] = useState<Array<{
-    jobId: string;
-    spaceName: string;
-    zipKey: string;
-    zipName: string;
-    totalTakes: number;
-    successCount: number;
-    failedCount: number;
-    takeUrls: Array<{ idx: number; status: string; videoUrl: string | null; imageUrl: string | null }>;
-    createdAt: number;
-  }>>([]);
+  const [hist, setHist] = useState<HistEntry[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState<string | null>(null);
+  const [retryMsg, setRetryMsg] = useState<string>('');
 
   function load() {
     try {
@@ -730,6 +744,149 @@ function BrollHistorySection() {
     }
   }
 
+  /**
+   * RETOMAR — re-dispara SO os takes que faltaram (status != ready ou sem URL)
+   * e mergeia os novos MP4s no ZIP existente no IDB.
+   *
+   * Fluxo:
+   *  1. Parseia originalJson → MagnificTakeInput[]
+   *  2. Filtra so os idxs faltantes (cruzando com takeUrls.status)
+   *  3. Dispara runMagnificPipelineV2 com subset
+   *  4. Mergeia ZIP novo no antigo via JSZip
+   *  5. Atualiza entry no localStorage (successCount, takeUrls)
+   */
+  async function retomar(item: HistEntry) {
+    if (!item.originalJson) {
+      alert(
+        'Esse batch foi salvo antes da feature RETOMAR existir.\n\n' +
+        'Pra esse caso, cola o JSON original de novo na area de cima e dispara.',
+      );
+      return;
+    }
+    setRetrying(item.zipKey);
+    setRetryMsg('Preparando…');
+    try {
+      // 1. Identifica faltantes
+      const { parseMagnificPrompts } = await import('@/lib/magnific-pipeline');
+      const allTakes = parseMagnificPrompts(item.originalJson);
+      if (allTakes.length === 0) {
+        throw new Error('JSON original parseou vazio. Re-rode do zero.');
+      }
+      const readyIdxs = new Set(
+        item.takeUrls
+          .filter((t) => t.status === 'ready' || !!t.videoUrl)
+          .map((t) => t.idx),
+      );
+      const missingTakes = allTakes.filter((t) => !readyIdxs.has(t.idx));
+      if (missingTakes.length === 0) {
+        alert('Nenhum take faltante — todos ja estao prontos. Use BAIXAR pra obter o ZIP.');
+        return;
+      }
+      if (!confirm(
+        `Retomar: re-disparar ${missingTakes.length} take(s) faltante(s)?\n\n` +
+        `(idxs: ${missingTakes.map((t) => t.idx).join(', ')})\n\n` +
+        `Os ${item.successCount} ja prontos serao preservados. ZIP sera atualizado no final.`
+      )) return;
+
+      // 2. Dispara so as faltantes
+      setRetryMsg(`Re-disparando ${missingTakes.length} take(s)…`);
+      const { runMagnificPipelineV2 } = await import('@/lib/magnific-pipeline-v2');
+      const r = await runMagnificPipelineV2(
+        {
+          spaceName: item.spaceName + '_RETRY',
+          takes: missingTakes,
+          imageModel: (item.imageModel as any) || 'imagen-nano-banana-2-flash',
+          videoModel: 'kling-25',
+        },
+        {
+          onProgress: (p: any) => {
+            const ready = (p?.takes || []).filter((t: any) => t.status === 'ready').length;
+            setRetryMsg(`Renderizando ${ready}/${missingTakes.length}… (paciencia, Kling demora)`);
+          },
+        },
+      );
+
+      // 3. Merge ZIP antigo + novos MP4s
+      setRetryMsg('Mergeando MP4s no ZIP…');
+      const { loadZip, saveZip } = await import('@/lib/zip-store');
+      const JSZip = (await import('jszip')).default;
+      const merged = new JSZip();
+      // 3a. Copia arquivos do ZIP antigo (se existir)
+      try {
+        const oldZip = await loadZip(item.zipKey);
+        if (oldZip) {
+          const oldBytes = await fetch(oldZip.blobUrl).then((res) => res.arrayBuffer());
+          const oldZipObj = await JSZip.loadAsync(oldBytes);
+          for (const name of Object.keys(oldZipObj.files)) {
+            const f = oldZipObj.files[name];
+            if (f.dir) continue;
+            const ab = await f.async('arraybuffer');
+            merged.file(name, ab);
+          }
+          URL.revokeObjectURL(oldZip.blobUrl);
+        }
+      } catch (e) {
+        console.warn('[retomar] zip antigo nao acessivel — usando so os novos:', e);
+      }
+      // 3b. Adiciona os novos (vem como blob no resultado do pipeline)
+      if (r.zipBlob) {
+        const newBytes = await r.zipBlob.arrayBuffer();
+        const newZipObj = await JSZip.loadAsync(newBytes);
+        for (const name of Object.keys(newZipObj.files)) {
+          const f = newZipObj.files[name];
+          if (f.dir) continue;
+          const ab = await f.async('arraybuffer');
+          merged.file(name, ab); // overwrite se duplicado
+        }
+      }
+      const mergedBlob = await merged.generateAsync({
+        type: 'blob',
+        compression: 'DEFLATE',
+        compressionOptions: { level: 1 },
+      });
+      await saveZip(item.zipKey, mergedBlob, item.zipName);
+
+      // 4. Atualiza entry: merge takeUrls (novos sobrescrevem antigos do mesmo idx)
+      const newTakeUrls = [...item.takeUrls];
+      for (const newT of r.takes as any[]) {
+        const idx = newTakeUrls.findIndex((t) => t.idx === newT.idx);
+        const entry = {
+          idx: newT.idx,
+          status: newT.status,
+          videoUrl: newT.videoUrl || null,
+          imageUrl: newT.imageUrl || null,
+        };
+        if (idx >= 0) newTakeUrls[idx] = entry;
+        else newTakeUrls.push(entry);
+      }
+      const successCount = newTakeUrls.filter((t) => t.status === 'ready' || !!t.videoUrl).length;
+      const failedCount = newTakeUrls.length - successCount;
+      const updated: HistEntry = {
+        ...item,
+        takeUrls: newTakeUrls,
+        successCount,
+        failedCount,
+      };
+      const histRaw = localStorage.getItem('darkolab:auto-broll:history');
+      const histArr: HistEntry[] = histRaw ? JSON.parse(histRaw) : [];
+      const newHist = histArr.map((h) => (h.zipKey === item.zipKey ? updated : h));
+      localStorage.setItem('darkolab:auto-broll:history', JSON.stringify(newHist));
+      window.dispatchEvent(new Event('darkolab:auto-broll:history-changed'));
+
+      const stillMissing = item.totalTakes - successCount;
+      alert(
+        stillMissing === 0
+          ? `Retomar concluido: ${successCount}/${item.totalTakes} prontos! ZIP atualizado.`
+          : `Retomar parcial: ${successCount}/${item.totalTakes} prontos · ${stillMissing} ainda faltam. ZIP atualizado com o que deu certo. Pode clicar RETOMAR de novo.`
+      );
+    } catch (e) {
+      alert('RETOMAR falhou: ' + ((e as Error)?.message || String(e)));
+    } finally {
+      setRetrying(null);
+      setRetryMsg('');
+    }
+  }
+
   async function remove(item: typeof hist[number]) {
     if (!confirm(`Remover "${item.spaceName}" do histórico?`)) return;
     try {
@@ -779,10 +936,42 @@ function BrollHistorySection() {
                   {item.failedCount > 0 && (<><span>·</span><span className="text-yellow-300">{item.failedCount} falhas</span></>)}
                 </div>
               </div>
+              {/* RETOMAR — re-dispara os takes que faltaram + mergeia no ZIP.
+               *  So aparece se ainda tem faltantes E temos originalJson salvo
+               *  (entries antigas pre-fix nao tem). */}
+              {item.failedCount > 0 && item.originalJson ? (
+                <button
+                  type="button"
+                  onClick={() => retomar(item)}
+                  disabled={retrying === item.zipKey || loading === item.zipKey}
+                  className="inline-flex items-center gap-1.5 rounded-[8px] border border-cyan-400/55 bg-cyan-400/15 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-cyan-300 hover:bg-cyan-400/25 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={`Retomar — re-dispara so as ${item.failedCount} faltantes e atualiza o ZIP`}
+                >
+                  {retrying === item.zipKey ? (
+                    <>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+                        <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+                        <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
+                      </svg>
+                      <span className="normal-case tracking-normal text-[10px]">{retryMsg || 'Retomando…'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+                        <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+                        <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
+                      </svg>
+                      Retomar ({item.failedCount})
+                    </>
+                  )}
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => redownload(item)}
-                disabled={loading === item.zipKey}
+                disabled={loading === item.zipKey || retrying === item.zipKey}
                 className="rounded-[8px] border border-lime/40 bg-lime/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-lime hover:bg-lime/20 disabled:opacity-50"
                 title="Baixar ZIP novamente"
               >
@@ -791,7 +980,8 @@ function BrollHistorySection() {
               <button
                 type="button"
                 onClick={() => remove(item)}
-                className="rounded-[8px] border border-text-muted/30 bg-bg/40 px-2 py-1.5 text-[11px] text-text-muted hover:border-red-500/40 hover:text-red-300"
+                disabled={retrying === item.zipKey}
+                className="rounded-[8px] border border-text-muted/30 bg-bg/40 px-2 py-1.5 text-[11px] text-text-muted hover:border-red-500/40 hover:text-red-300 disabled:opacity-30"
                 title="Remover do histórico"
               >
                 ×
