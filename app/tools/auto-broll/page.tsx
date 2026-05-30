@@ -879,16 +879,41 @@ function BrollHistorySection() {
   /**
    * Click do botao RETOMAR — orquestra fluxo:
    *  - Se ja tem originalJson → roda retry direto
-   *  - Se nao → abre editor inline pra user colar JSON, salva + retry
+   *  - Se nao → busca em fontes alternativas (jobs-draft no localStorage)
+   *    antes de pedir pro user. Se achar → pre-popula o editor com o JSON
+   *    e user so confirma "Retomar com este JSON" — sem precisar colar.
    */
   function onRetomarClick(item: HistEntry) {
     if (item.originalJson) {
       void retomar(item, item.originalJson);
-    } else {
-      // Pre-popula o editor com vazio. User cola, clica "Retomar com este JSON".
-      setPendingJsonFor(item.zipKey);
-      setPendingJsonText('');
+      return;
     }
+    // FALLBACK 1: procura no jobs-draft persistido (mesmo jobId = mesma origem)
+    let prefilled = '';
+    try {
+      const draftsRaw = localStorage.getItem('darkolab:auto-broll:jobs-draft');
+      if (draftsRaw) {
+        const drafts = JSON.parse(draftsRaw) as Array<{ id?: string; name?: string; raw?: string }>;
+        // Match exato pelo jobId primeiro (mesmo job que originou esse historico)
+        const exactMatch = drafts.find((d) => d.id === item.jobId && d.raw && d.raw.trim().length > 0);
+        if (exactMatch?.raw) {
+          prefilled = exactMatch.raw;
+        } else {
+          // Fallback 2: pega o primeiro draft nao-vazio que parsea
+          // (usuario pode ter recriado o job com mesmo JSON em outra sessao)
+          for (const d of drafts) {
+            if (d.raw && d.raw.trim().length > 0) {
+              prefilled = d.raw;
+              break;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[retomar] busca jobs-draft falhou:', e);
+    }
+    setPendingJsonFor(item.zipKey);
+    setPendingJsonText(prefilled);
   }
 
   function submitPendingJson(item: HistEntry) {
@@ -1172,7 +1197,11 @@ function BrollHistorySection() {
               {isEditingJson ? (
                 <div className="rounded-[12px] border border-cyan-400/50 bg-cyan-400/[0.04] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_18px_-8px_rgba(34,211,238,0.35)]">
                   <div className="mono mb-2 flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-cyan-300">
-                    <span>Cola o JSON original aqui · RETOMAR vai re-disparar so as {item.failedCount} faltantes</span>
+                    <span>
+                      {pendingJsonText.trim()
+                        ? `JSON recuperado do draft · ${pendingJsonText.length} chars · RETOMAR vai re-disparar so as ${item.failedCount} faltantes`
+                        : `Cola o JSON original aqui · RETOMAR vai re-disparar so as ${item.failedCount} faltantes`}
+                    </span>
                     <button
                       type="button"
                       onClick={() => { setPendingJsonFor(null); setPendingJsonText(''); }}
@@ -1189,7 +1218,12 @@ function BrollHistorySection() {
                     className="input-field w-full resize-y font-mono text-[11px]"
                     autoFocus
                   />
-                  <div className="mt-2 flex items-center justify-end gap-2">
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    {pendingJsonText.trim() ? (
+                      <span className="mono text-[9px] uppercase tracking-widest text-lime/80">
+                        ✓ JSON ja preenchido — clica RETOMAR pra disparar
+                      </span>
+                    ) : <span />}
                     <button
                       type="button"
                       onClick={() => submitPendingJson(item)}
