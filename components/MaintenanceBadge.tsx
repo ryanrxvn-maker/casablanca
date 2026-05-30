@@ -42,8 +42,8 @@ export function MaintenanceBadge({
     <span className={'group/maint pointer-events-auto absolute z-30 ' + className}>
       {/* ── Ícone de aviso ── */}
       <span
-        className="relative flex h-[26px] w-[26px] cursor-help items-center justify-center rounded-full border border-amber-400/55 bg-[#1b1409] text-amber-300 transition-transform duration-300 group-hover/maint:scale-110"
-        style={{ boxShadow: '0 0 16px -3px rgba(251,191,36,0.65), inset 0 1px 0 rgba(255,255,255,0.08)' }}
+        className="relative flex h-[26px] w-[26px] cursor-help items-center justify-center rounded-full border border-amber-400/55 bg-[#1b1409] transition-transform duration-300 group-hover/maint:scale-110"
+        style={{ color: '#fbbf24', boxShadow: '0 0 16px -3px rgba(251,191,36,0.65), inset 0 1px 0 rgba(255,255,255,0.08)' }}
       >
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400/25" />
         <span className="relative">
@@ -75,17 +75,20 @@ export function MaintenanceBadge({
           />
           <span className="block px-4 py-3.5">
             <span className="flex items-center gap-2">
-              <span className="text-amber-300">
+              <span style={{ color: '#fbbf24' }}>
                 <WrenchIcon size={14} />
               </span>
               <span
-                className="text-[12.5px] font-bold tracking-tight text-amber-200"
-                style={{ fontFamily: 'var(--font-tech)' }}
+                className="text-[12.5px] font-bold tracking-tight"
+                style={{ fontFamily: 'var(--font-tech)', color: '#fcd34d' }}
               >
                 {mode === 'admin' ? 'Em manutenção · admin' : 'Em manutenção'}
               </span>
             </span>
-            <span className="mt-2 block text-[12px] leading-relaxed text-text-muted">
+            <span
+              className="mt-2 block text-[12px] leading-relaxed"
+              style={{ color: 'rgba(255,255,255,0.72)' }}
+            >
               {mode === 'admin'
                 ? 'Indisponível pros clientes agora. Você acessa porque é admin — use pra testar antes de liberar.'
                 : 'Estamos dando um ajuste rápido nesta ferramenta. Ela volta já. 🛠️'}
