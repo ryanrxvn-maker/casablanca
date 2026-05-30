@@ -108,7 +108,19 @@ export async function magnificFetch(
       // erro genérico (caller pode retry).
       const lower = body.trim().toLowerCase();
       const isHtmlResponse = lower.startsWith('<!doctype') || lower.startsWith('<html');
-      if (isHtmlResponse && /api\/v2\/ai\/(start-tti|simulate-generation)|api\/generate/.test(path)) {
+      // Paths "geradores" onde HTML = sinal de paywall/redirect. Atualizado
+      // 2026-05-30 pra cobrir nova arquitetura:
+      //   - /api/v2/ai/simulate-generation  (preflight)
+      //   - /api/render/v4                  (image generation, ARQUITETURA NOVA)
+      //   - /api/video/generate             (video generation)
+      //   - /api/generate                   (legacy — provavelmente já não é chamado)
+      //   - /api/v2/ai/start-tti*           (legacy — não chamamos mais, mas mantido)
+      if (
+        isHtmlResponse &&
+        /api\/(render\/v\d+|video\/generate|generate$|v\d+\/ai\/(start-tti|simulate-generation))/.test(
+          path,
+        )
+      ) {
         const paywallMarkers = [
           'upgrade your plan',
           'cap exceeded',
