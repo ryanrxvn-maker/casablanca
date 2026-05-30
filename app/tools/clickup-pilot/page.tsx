@@ -4973,21 +4973,19 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                 </span>
                                 {hasSiblings && gSuffix ? (
                                   <span
-                                    className="mono inline-flex items-center gap-1 rounded-full bg-cyan-500 px-2 py-[3px] text-[9px] font-extrabold uppercase tracking-[0.14em] text-white shadow-[0_2px_6px_rgba(34,211,238,0.55)] border border-cyan-300"
+                                    className="mono inline-flex items-center gap-1.5 rounded-full bg-cyan-500 px-2.5 py-[5px] text-white shadow-[0_2px_8px_rgba(34,211,238,0.55),inset_0_1px_0_rgba(255,255,255,0.25)] border border-cyan-300"
                                     title={`Tasks irmas: ${siblingsAll.map(s => s.name.match(/G\d+\s*$/i)?.[0] || '?').filter(Boolean).join(' + ')}`}
                                   >
-                                    <span className="opacity-90">⌥</span> {siblingsAll.length}Gs
+                                    <span className="text-[11.5px] font-black leading-none" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.35)' }}>{siblingsAll.length}Gs</span>
                                   </span>
                                 ) : null}
                                 {t.priority?.priority === 'urgent' ? (
-                                  <span className="mono inline-flex items-center gap-1 rounded-full bg-red-500 px-2 py-[3px] text-[9px] font-extrabold uppercase tracking-[0.14em] text-white shadow-[0_2px_6px_rgba(239,68,68,0.55)] border border-red-300">
-                                    <span className="h-1.5 w-1.5 rounded-full bg-white shadow-[0_0_6px_rgba(255,255,255,0.7)]" />
-                                    Urgente
+                                  <span className="mono inline-flex items-center gap-1.5 rounded-full bg-red-500 px-2.5 py-[5px] text-white shadow-[0_2px_8px_rgba(239,68,68,0.55),inset_0_1px_0_rgba(255,255,255,0.25)] border border-red-300">
+                                    <span className="text-[11.5px] font-black uppercase leading-none tracking-tight" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.4)' }}>Urgente</span>
                                   </span>
                                 ) : t.priority?.priority === 'high' ? (
-                                  <span className="mono inline-flex items-center gap-1 rounded-full bg-orange-500 px-2 py-[3px] text-[9px] font-extrabold uppercase tracking-[0.14em] text-white shadow-[0_2px_6px_rgba(249,115,22,0.55)] border border-orange-300">
-                                    <span className="h-1.5 w-1.5 rounded-full bg-white shadow-[0_0_6px_rgba(255,255,255,0.7)]" />
-                                    Alta
+                                  <span className="mono inline-flex items-center gap-1.5 rounded-full bg-orange-500 px-2.5 py-[5px] text-white shadow-[0_2px_8px_rgba(249,115,22,0.55),inset_0_1px_0_rgba(255,255,255,0.25)] border border-orange-300">
+                                    <span className="text-[11.5px] font-black uppercase leading-none tracking-tight" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.4)' }}>Alta</span>
                                   </span>
                                 ) : null}
                                 {(() => {
@@ -4999,33 +4997,63 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   today.setHours(0, 0, 0, 0);
                                   const tomorrow = today.getTime() + DAY;
                                   const dueDate = new Date(due);
-                                  let label = '';
+                                  // Pill humanizada: numero GRANDE + label menor pra escaneamento rapido
+                                  let bigText = '';
+                                  let smallText = '';
                                   let cls = '';
-                                  let dotCls = '';
                                   if (due < today.getTime()) {
                                     const daysAgo = Math.floor((today.getTime() - due) / DAY);
-                                    label = `${daysAgo}d atrasada`;
-                                    cls = 'bg-red-500 text-white shadow-[0_2px_6px_rgba(239,68,68,0.55)] border border-red-300';
-                                    dotCls = 'bg-white shadow-[0_0_6px_rgba(255,255,255,0.7)]';
+                                    if (daysAgo === 0) {
+                                      bigText = 'Hoje';
+                                      smallText = 'atrasada';
+                                    } else if (daysAgo === 1) {
+                                      bigText = '1d';
+                                      smallText = 'atrasada';
+                                    } else if (daysAgo < 30) {
+                                      bigText = `${daysAgo}d`;
+                                      smallText = 'atrasada';
+                                    } else {
+                                      const weeks = Math.floor(daysAgo / 7);
+                                      bigText = `${weeks}sem`;
+                                      smallText = 'atrasada';
+                                    }
+                                    cls = 'bg-red-500 text-white shadow-[0_2px_8px_rgba(239,68,68,0.6),inset_0_1px_0_rgba(255,255,255,0.25)] border border-red-300';
                                   } else if (due < tomorrow) {
-                                    label = 'Hoje';
-                                    cls = 'bg-amber-400 text-black shadow-[0_2px_6px_rgba(251,191,36,0.55)] border border-amber-200';
-                                    dotCls = 'bg-black/70';
+                                    bigText = 'Hoje';
+                                    smallText = '';
+                                    cls = 'bg-amber-400 text-black shadow-[0_2px_8px_rgba(251,191,36,0.6),inset_0_1px_0_rgba(255,255,255,0.4)] border border-amber-200';
                                   } else {
                                     const daysAhead = Math.ceil((due - now) / DAY);
-                                    label = daysAhead <= 7 ? `${daysAhead}d` : dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-                                    if (daysAhead <= 3) {
-                                      cls = 'bg-cyan-500 text-white shadow-[0_2px_6px_rgba(34,211,238,0.5)] border border-cyan-300';
-                                      dotCls = 'bg-white shadow-[0_0_6px_rgba(255,255,255,0.7)]';
+                                    if (daysAhead <= 7) {
+                                      bigText = `${daysAhead}d`;
+                                      smallText = daysAhead <= 3 ? 'urgente' : 'p/ vencer';
                                     } else {
-                                      cls = 'bg-zinc-500/70 dark:bg-white/12 text-white dark:text-white/90 border border-zinc-400/50 dark:border-white/20';
-                                      dotCls = 'bg-white/80';
+                                      bigText = dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+                                      smallText = '';
+                                    }
+                                    if (daysAhead <= 3) {
+                                      cls = 'bg-cyan-500 text-white shadow-[0_2px_8px_rgba(34,211,238,0.55),inset_0_1px_0_rgba(255,255,255,0.25)] border border-cyan-300';
+                                    } else {
+                                      cls = 'bg-zinc-600 dark:bg-zinc-500/80 text-white shadow-[0_2px_6px_rgba(0,0,0,0.25),inset_0_1px_0_rgba(255,255,255,0.15)] border border-zinc-400/60';
                                     }
                                   }
+                                  const isDark = cls.includes('text-white');
                                   return (
-                                    <span className={`mono inline-flex items-center gap-1 rounded-full px-2 py-[3px] text-[9px] font-extrabold uppercase tracking-[0.14em] ${cls}`}>
-                                      <span className={`h-1.5 w-1.5 rounded-full ${dotCls}`} />
-                                      {label}
+                                    <span className={`mono inline-flex items-center gap-1.5 rounded-full px-2.5 py-[5px] ${cls}`}>
+                                      <span
+                                        className="text-[11.5px] font-black leading-none tracking-tight"
+                                        style={{ textShadow: isDark ? '0 1px 2px rgba(0,0,0,0.4)' : 'none' }}
+                                      >
+                                        {bigText}
+                                      </span>
+                                      {smallText ? (
+                                        <span
+                                          className="text-[9.5px] font-bold uppercase leading-none tracking-[0.04em] opacity-95"
+                                          style={{ textShadow: isDark ? '0 1px 2px rgba(0,0,0,0.35)' : 'none' }}
+                                        >
+                                          {smallText}
+                                        </span>
+                                      ) : null}
                                     </span>
                                   );
                                 })()}
