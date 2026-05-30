@@ -290,6 +290,248 @@ export const PILLARS: Pillar[] = [
       { slug: 'decupagem-automatica', label: 'Decupagem automática' },
     ],
   },
+  {
+    slug: 'automacao-de-edicao-de-video',
+    keyword: 'automação de edição de vídeo',
+    title: 'Automação de edição de vídeo: edite no automático e em lote',
+    description:
+      'Automação de edição de vídeo: decupagem, B-roll, lipsync e legendas em lote, no navegador. Você liga a fila e o estúdio entrega. Comece grátis.',
+    kicker: 'Automação',
+    h1: 'Automação de edição de vídeo',
+    intro: [
+      'Automação de edição de vídeo é usar software pra fazer as tarefas repetitivas da edição — cortar silêncio, buscar B-roll, sincronizar avatar, gerar legenda — sem você executar cada passo na mão. Em vez de operar a timeline clipe por clipe, você liga uma fila e o resultado vem pronto.',
+      'O Auto Edit junta essas automações num só lugar, rodando em lote e no navegador: você empilha o trabalho do dia e o estúdio entrega enquanto você cuida do que é criativo.',
+    ],
+    blocks: [
+      {
+        h2: 'O que dá pra automatizar na edição de vídeo?',
+        body: [
+          'As partes mais lentas e repetitivas são exatamente as que mais ganham com automação. No Auto Edit, cada uma tem sua ferramenta dedicada:',
+        ],
+        list: [
+          'Decupagem automática — remove silêncios e cortes mortos',
+          'B-roll automático — gera cobertura congruente a partir do roteiro',
+          'Lipsync em lote — dispara vários avatares de uma vez',
+          'Remover legenda gravada e marca d’água em massa',
+          'Legendas automáticas a partir da fala',
+          'Troca de produto no áudio sem regravar a voz',
+        ],
+      },
+      {
+        h2: 'Por que automatizar a edição em vez de editar na mão?',
+        body: [
+          'Edição manual não escala: cada vídeo consome horas em tarefas mecânicas que não exigem criatividade. Automatizar essas etapas devolve tempo, padroniza a entrega e permite produzir muito mais vídeo por dia com a mesma equipe.',
+          'O ponto não é tirar o editor do processo — é tirar o trabalho braçal dele e deixar a parte criativa.',
+        ],
+      },
+      {
+        h2: 'Automação de edição para agências e canais dark',
+        body: [
+          'Quem produz em volume — agências de UGC e canais dark que postam vários vídeos por dia — vive ou morre pela velocidade da operação. A fila em lote do Auto Edit foi feita pra esse cenário: prepara o material, dispara e colhe tudo pronto.',
+        ],
+      },
+      {
+        h2: 'Precisa instalar algo para automatizar a edição?',
+        body: [
+          'Não. Toda a automação roda no navegador, sem download nem plugin. Você começa no plano grátis e libera mais volume nos planos Basic (R$ 57/mês) e Pro (R$ 116/mês).',
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: 'A automação substitui o editor de vídeo?',
+        a: 'Não. Ela automatiza o trabalho repetitivo (decupagem, B-roll, legenda, lipsync) pra o editor focar na parte criativa e produzir muito mais por dia.',
+      },
+      {
+        q: 'Automação de edição de vídeo funciona pra canais dark?',
+        a: 'Funciona. O processamento em lote é ideal pra quem posta vários vídeos por dia, padronizando a entrega e acelerando a operação.',
+      },
+      {
+        q: 'Dá pra testar de graça?',
+        a: 'Dá. O Auto Edit tem plano grátis sem cartão pra você experimentar a automação antes de assinar.',
+      },
+    ],
+    related: [
+      { slug: 'decupagem-automatica', label: 'Decupagem automática' },
+      { slug: 'editar-video-mais-rapido', label: 'Editar vídeo mais rápido' },
+    ],
+  },
+  {
+    slug: 'editar-video-mais-rapido',
+    keyword: 'editar vídeo mais rápido',
+    title: 'Como editar vídeo mais rápido: automatize o trabalho repetitivo',
+    description:
+      'O jeito de editar vídeo mais rápido é automatizar decupagem, B-roll e legendas e processar em lote. Menos timeline, mais entrega. Comece grátis.',
+    kicker: 'Velocidade',
+    h1: 'Como editar vídeo mais rápido',
+    intro: [
+      'A forma real de editar vídeo mais rápido não é apertar atalho na timeline — é tirar de você o trabalho repetitivo. Decupagem, busca de B-roll e legenda consomem a maior parte do tempo e não exigem criatividade. Quando essas etapas viram automáticas, o vídeo fica pronto em uma fração do tempo.',
+      'No Auto Edit você joga essas tarefas numa fila em lote e elas acontecem sozinhas, no navegador, enquanto você avança no resto.',
+    ],
+    blocks: [
+      {
+        h2: 'O que mais trava a velocidade da edição?',
+        body: [
+          'Três tarefas dominam o tempo de uma edição de fala: cortar os silêncios, achar o B-roll certo e legendar. Juntas, elas costumam ser mais da metade do trabalho — e são justamente as mais mecânicas.',
+        ],
+      },
+      {
+        h2: 'Automatize a decupagem para ganhar tempo',
+        body: [
+          'Cortar silêncio na mão leva de 40 minutos a mais de uma hora por vídeo. A decupagem automática faz isso em segundos, removendo as pausas e unindo os cortes sozinha. É o maior ganho de velocidade isolado.',
+        ],
+      },
+      {
+        h2: 'B-roll e legenda no automático',
+        body: [
+          'Em vez de pausar pra garimpar banco de imagem, o B-roll automático entrega a cobertura a partir do roteiro. E as legendas saem direto da fala. Duas etapas lentas resolvidas sem você no monitor.',
+        ],
+      },
+      {
+        h2: 'Edite em lote, não um por um',
+        body: [
+          'O ganho final vem do lote: empilhe os vídeos do dia numa fila e deixe processar. Em vez de uma tarde por vídeo, a fila entrega o dia inteiro. Tudo no navegador, começando no plano grátis.',
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: 'Qual a forma mais rápida de editar um vídeo de fala?',
+        a: 'Automatizar a decupagem (corte de silêncios), o B-roll e a legenda, e processar em lote. Essas três etapas são as mais lentas e as que mais ganham com automação.',
+      },
+      {
+        q: 'Editar mais rápido piora a qualidade?',
+        a: 'Não, porque a automação cuida do trabalho mecânico (cortar silêncio, achar cobertura, legendar). A parte criativa continua com você.',
+      },
+      {
+        q: 'Funciona pra muitos vídeos por dia?',
+        a: 'Sim. O processamento é em fila e em lote, feito justamente pra quem precisa entregar volume.',
+      },
+    ],
+    related: [
+      { slug: 'decupagem-automatica', label: 'Decupagem automática' },
+      { slug: 'automacao-de-edicao-de-video', label: 'Automação de edição de vídeo' },
+    ],
+  },
+  {
+    slug: 'gerar-legenda-automatica',
+    keyword: 'legenda automática',
+    title: 'Gerar legenda automática em vídeo (e exportar SRT) no automático',
+    description:
+      'Gere legenda automática a partir da fala do vídeo e exporte em SRT, sem digitar. Em lote e no navegador. Comece grátis no Auto Edit.',
+    kicker: 'Legendas',
+    h1: 'Gerar legenda automática',
+    intro: [
+      'Legenda automática é transformar a fala do vídeo em legendas sincronizadas sem digitar nada. A ferramenta transcreve o áudio, marca o tempo de cada trecho e gera a legenda pronta — você só revisa e exporta.',
+      'No Auto Edit isso roda no navegador e em lote, então dá pra legendar vários vídeos de uma vez em vez de um por um.',
+    ],
+    blocks: [
+      {
+        h2: 'Como funciona a legenda automática?',
+        body: [
+          'A ferramenta ouve o áudio do vídeo, converte a fala em texto e sincroniza cada linha com o momento certo. O resultado é uma legenda já encaixada no tempo, pronta pra ajustar estilo ou exportar.',
+        ],
+      },
+      {
+        h2: 'Dá para exportar a legenda em SRT?',
+        body: [
+          'Sim. Além de queimar a legenda no vídeo, dá pra exportar o arquivo de legenda em formato SRT pra usar no YouTube, em outro editor ou pra traduzir. O SRT é o padrão universal de legenda.',
+        ],
+      },
+      {
+        h2: 'Legendar vários vídeos de uma vez',
+        body: [
+          'Como o resto do Auto Edit, a legenda roda em lote: você sobe vários vídeos e a fila processa todos. Ideal pra quem precisa legendar uma série de cortes ou criativos no mesmo dia.',
+        ],
+      },
+      {
+        h2: 'Precisa instalar algo para legendar?',
+        body: [
+          'Não. A legenda automática funciona 100% no navegador, sem download. Você começa no plano grátis e amplia o volume nos planos Basic (R$ 57/mês) e Pro (R$ 116/mês).',
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: 'A legenda automática reconhece português?',
+        a: 'Sim. A transcrição funciona com fala em português e gera as legendas sincronizadas a partir do áudio do vídeo.',
+      },
+      {
+        q: 'Posso editar a legenda depois de gerada?',
+        a: 'Pode. A legenda automática é um ponto de partida: você revisa o texto e ajusta o que precisar antes de exportar ou queimar no vídeo.',
+      },
+      {
+        q: 'Consigo o arquivo SRT separado?',
+        a: 'Sim, dá pra exportar a legenda em SRT pra usar no YouTube, em outro editor ou pra traduzir.',
+      },
+    ],
+    related: [
+      { slug: 'decupagem-automatica', label: 'Decupagem automática' },
+      { slug: 'editar-video-mais-rapido', label: 'Editar vídeo mais rápido' },
+    ],
+  },
+  {
+    slug: 'trocar-produto-no-video',
+    keyword: 'trocar produto no vídeo',
+    title: 'Trocar produto no vídeo sem regravar a voz (no automático)',
+    description:
+      'Trocar o produto ou a marca no vídeo sem regravar: a IA substitui no áudio e a voz original continua intacta. Em segundos. Comece grátis.',
+    kicker: 'Troca de produto',
+    h1: 'Trocar produto no vídeo sem regravar',
+    intro: [
+      'Trocar produto no vídeo é substituir a marca ou o produto citado sem precisar gravar tudo de novo. Mudou o anunciante? A IA troca a menção no áudio e a voz original do criador continua intacta — mesmo timbre, mesma entonação.',
+      'É o que permite reaproveitar um mesmo criativo pra vários produtos sem chamar a pessoa pra regravar.',
+    ],
+    blocks: [
+      {
+        h2: 'Como trocar o produto no áudio sem regravar?',
+        body: [
+          'Você indica o que precisa ser substituído e a IA gera o novo trecho de fala com a mesma voz, encaixando no lugar da menção antiga. O resto do áudio permanece igual, então a transição fica natural.',
+        ],
+      },
+      {
+        h2: 'Por que isso economiza tanto tempo?',
+        body: [
+          'Regravar um vídeo só por causa do nome do produto significa reagendar o criador, regravar e reeditar tudo. Trocar só a menção no áudio resolve em segundos e mantém o criativo que já estava aprovado.',
+        ],
+      },
+      {
+        h2: 'Para quem serve trocar o produto no vídeo?',
+        body: [
+          'Serve pra quem revende criativos e pra agências que rodam o mesmo formato com anunciantes diferentes.',
+        ],
+        list: [
+          'Adaptar um criativo de UGC pra outra marca',
+          'Atualizar o nome do produto sem regravar',
+          'Reusar um vídeo aprovado em outra campanha',
+        ],
+      },
+      {
+        h2: 'Precisa instalar algo?',
+        body: [
+          'Não. A troca de produto roda no navegador. Você começa no plano grátis e libera mais volume nos planos Basic (R$ 57/mês) e Pro (R$ 116/mês).',
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: 'A voz fica diferente depois da troca?',
+        a: 'O objetivo é manter a voz original do criador — mesmo timbre e entonação — substituindo apenas a menção do produto, pra a transição soar natural.',
+      },
+      {
+        q: 'Dá pra trocar o produto em vários vídeos?',
+        a: 'Sim. Como o resto do Auto Edit, dá pra processar em lote em vez de tratar um vídeo por vez.',
+      },
+      {
+        q: 'Preciso do criador para regravar?',
+        a: 'Não. A ideia é justamente não precisar regravar: a IA substitui a menção no áudio existente.',
+      },
+    ],
+    related: [
+      { slug: 'lipsync-em-lote', label: 'Lipsync em lote' },
+      { slug: 'remover-legenda-de-video', label: 'Remover legenda de vídeo' },
+    ],
+  },
 ];
 
 export const PILLAR_SLUGS = PILLARS.map((p) => p.slug);
