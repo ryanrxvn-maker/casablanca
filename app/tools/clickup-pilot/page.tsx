@@ -5028,7 +5028,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   const tomorrow = today.getTime() + DAY;
                                   const dueDate = new Date(due);
 
-                                  // ATRASADA — bg + border MAIS evidentes, texto darker
+                                  // ATRASADA — sempre mostra, eh critico
                                   if (due < today.getTime()) {
                                     const daysAgo = Math.max(1, Math.floor((today.getTime() - due) / DAY));
                                     return (
@@ -5040,8 +5040,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       </span>
                                     );
                                   }
-
-                                  // HOJE — texto "Hoje" ambar mais saturado
+                                  // HOJE — sempre mostra, eh critico
                                   if (due < tomorrow) {
                                     return (
                                       <span
@@ -5052,32 +5051,10 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       </span>
                                     );
                                   }
-
-                                  // FUTURO 1-7d — numero com "+" prefix, mais visivel
-                                  const daysAhead = Math.ceil((due - now) / DAY);
-                                  if (daysAhead <= 7) {
-                                    const urgent = daysAhead <= 3;
-                                    const cls = urgent
-                                      ? 'border-amber-500/85 bg-amber-500/22 text-amber-800 shadow-[0_1px_3px_rgba(245,158,11,0.18)]'
-                                      : 'border-zinc-500/60 bg-zinc-500/18 text-zinc-700';
-                                    return (
-                                      <span
-                                        title={`Vence em ${daysAhead} dia${daysAhead === 1 ? '' : 's'}`}
-                                        className={`inline-flex h-6 min-w-[26px] items-center justify-center rounded-md border px-2 text-[12.5px] font-extrabold tabular-nums ${cls}`}
-                                      >
-                                        +{daysAhead}
-                                      </span>
-                                    );
-                                  }
-                                  // > 7d futuro: data DD/MM
-                                  return (
-                                    <span
-                                      title={`Vence em ${dueDate.toLocaleDateString('pt-BR')}`}
-                                      className="inline-flex h-6 items-center justify-center rounded-md border border-zinc-500/60 bg-zinc-500/18 px-2 text-[11px] font-bold tabular-nums text-zinc-700"
-                                    >
-                                      {dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
-                                    </span>
-                                  );
+                                  // FUTURO — NAO mostra nada (user pediu: so atrasadas/hoje
+                                  // entram nas pills. Prioridade urgente/alta sao mostradas
+                                  // pelo icone separado, independente do prazo).
+                                  return null;
                                 })()}
                               </div>
                               {/* LADO DIREITO: status pill maior + chevron */}
