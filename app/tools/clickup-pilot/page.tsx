@@ -4917,8 +4917,8 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                         return true;
                       })
                       .map((t) => {
-                      const isOpen = !bulkMode && selectedTask?.id === t.id;
-                      const isChecked = bulkMode && selectedTaskIds.has(t.id);
+                      const isChecked = selectedTaskIds.has(t.id);
+                      const isOpen = isChecked; // visual highlight = selecionado
                       const baseKey = extractBaseTaskKey(t.name);
                       const siblingsAll = taskSiblingGroups.get(baseKey) || [t];
                       const hasSiblings = siblingsAll.length > 1;
@@ -4940,39 +4940,53 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                           ) : null}
                           <button
                             type="button"
-                            onClick={() => openTask(t)}
+                            onClick={() => toggleTaskSelected(t.id)}
                             className={
                               'group/task flex-1 rounded-[12px] border bg-gradient-to-br px-3.5 py-2.5 text-left transition-all duration-200 ' +
-                              (isOpen
-                                ? 'border-lime/65 from-lime/10 via-lime/[0.04] to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_18px_-8px_rgba(200,255,0,0.45)]'
+                              (isChecked
+                                ? 'border-lime/75 from-lime/15 via-lime/[0.06] to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_4px_22px_-8px_rgba(200,255,0,0.55)]'
                                 : 'border-white/8 from-white/[0.04] via-white/[0.015] to-transparent hover:border-lime/45 hover:-translate-y-[1px] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_8px_20px_-10px_rgba(200,255,0,0.35)]')
                             }
                           >
                             <div className="flex items-center justify-between gap-3">
-                              {/* LADO ESQUERDO: nome + pills de meta */}
+                              {/* LADO ESQUERDO: checkmark + nome + pills de meta */}
                               <div className="flex min-w-0 flex-1 items-center gap-2 flex-wrap">
+                                {/* CHECKMARK animado — feedback visual de selecao */}
                                 <span
-                                  className="mono text-[13px] font-semibold text-white truncate"
+                                  className={
+                                    'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all ' +
+                                    (isChecked
+                                      ? 'border-lime bg-lime text-black shadow-[0_0_10px_rgba(200,255,0,0.6)]'
+                                      : 'border-white/25 bg-transparent text-transparent group-hover/task:border-lime/60')
+                                  }
+                                  aria-hidden
+                                >
+                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="m5 13 4 4L19 7" />
+                                  </svg>
+                                </span>
+                                <span
+                                  className="mono text-[13px] font-semibold text-white dark:text-white text-foreground truncate"
                                   style={{ fontFamily: 'var(--font-tech)' }}
                                 >
                                   {t.name}
                                 </span>
                                 {hasSiblings && gSuffix ? (
                                   <span
-                                    className="mono inline-flex items-center gap-1 rounded-full border border-cyan-400/45 bg-cyan-400/12 px-2 py-[3px] text-[9px] font-bold uppercase tracking-[0.14em] text-cyan-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]"
+                                    className="mono inline-flex items-center gap-1 rounded-full bg-cyan-500 px-2 py-[3px] text-[9px] font-extrabold uppercase tracking-[0.14em] text-white shadow-[0_2px_6px_rgba(34,211,238,0.55)] border border-cyan-300"
                                     title={`Tasks irmas: ${siblingsAll.map(s => s.name.match(/G\d+\s*$/i)?.[0] || '?').filter(Boolean).join(' + ')}`}
                                   >
-                                    <span className="opacity-80">⌥</span> {siblingsAll.length}Gs
+                                    <span className="opacity-90">⌥</span> {siblingsAll.length}Gs
                                   </span>
                                 ) : null}
                                 {t.priority?.priority === 'urgent' ? (
-                                  <span className="mono inline-flex items-center gap-1 rounded-full border border-red-400/55 bg-red-500/18 px-2 py-[3px] text-[9px] font-bold uppercase tracking-[0.14em] text-red-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-                                    <span className="h-1.5 w-1.5 rounded-full bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.7)]" />
+                                  <span className="mono inline-flex items-center gap-1 rounded-full bg-red-500 px-2 py-[3px] text-[9px] font-extrabold uppercase tracking-[0.14em] text-white shadow-[0_2px_6px_rgba(239,68,68,0.55)] border border-red-300">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-white shadow-[0_0_6px_rgba(255,255,255,0.7)]" />
                                     Urgente
                                   </span>
                                 ) : t.priority?.priority === 'high' ? (
-                                  <span className="mono inline-flex items-center gap-1 rounded-full border border-orange-400/55 bg-orange-500/18 px-2 py-[3px] text-[9px] font-bold uppercase tracking-[0.14em] text-orange-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-                                    <span className="h-1.5 w-1.5 rounded-full bg-orange-400 shadow-[0_0_6px_rgba(251,146,60,0.7)]" />
+                                  <span className="mono inline-flex items-center gap-1 rounded-full bg-orange-500 px-2 py-[3px] text-[9px] font-extrabold uppercase tracking-[0.14em] text-white shadow-[0_2px_6px_rgba(249,115,22,0.55)] border border-orange-300">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-white shadow-[0_0_6px_rgba(255,255,255,0.7)]" />
                                     Alta
                                   </span>
                                 ) : null}
@@ -4991,20 +5005,25 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   if (due < today.getTime()) {
                                     const daysAgo = Math.floor((today.getTime() - due) / DAY);
                                     label = `${daysAgo}d atrasada`;
-                                    cls = 'border-red-400/55 bg-red-500/18 text-red-200';
-                                    dotCls = 'bg-red-400 shadow-[0_0_6px_rgba(248,113,113,0.7)]';
+                                    cls = 'bg-red-500 text-white shadow-[0_2px_6px_rgba(239,68,68,0.55)] border border-red-300';
+                                    dotCls = 'bg-white shadow-[0_0_6px_rgba(255,255,255,0.7)]';
                                   } else if (due < tomorrow) {
                                     label = 'Hoje';
-                                    cls = 'border-amber-400/60 bg-amber-400/18 text-amber-100';
-                                    dotCls = 'bg-amber-300 shadow-[0_0_6px_rgba(252,211,77,0.7)]';
+                                    cls = 'bg-amber-400 text-black shadow-[0_2px_6px_rgba(251,191,36,0.55)] border border-amber-200';
+                                    dotCls = 'bg-black/70';
                                   } else {
                                     const daysAhead = Math.ceil((due - now) / DAY);
                                     label = daysAhead <= 7 ? `${daysAhead}d` : dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-                                    cls = daysAhead <= 3 ? 'border-cyan-400/45 bg-cyan-400/15 text-cyan-100' : 'border-white/12 bg-white/[0.04] text-text-muted';
-                                    dotCls = daysAhead <= 3 ? 'bg-cyan-300' : 'bg-white/40';
+                                    if (daysAhead <= 3) {
+                                      cls = 'bg-cyan-500 text-white shadow-[0_2px_6px_rgba(34,211,238,0.5)] border border-cyan-300';
+                                      dotCls = 'bg-white shadow-[0_0_6px_rgba(255,255,255,0.7)]';
+                                    } else {
+                                      cls = 'bg-zinc-500/70 dark:bg-white/12 text-white dark:text-white/90 border border-zinc-400/50 dark:border-white/20';
+                                      dotCls = 'bg-white/80';
+                                    }
                                   }
                                   return (
-                                    <span className={`mono inline-flex items-center gap-1 rounded-full border px-2 py-[3px] text-[9px] font-bold uppercase tracking-[0.14em] shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] ${cls}`}>
+                                    <span className={`mono inline-flex items-center gap-1 rounded-full px-2 py-[3px] text-[9px] font-extrabold uppercase tracking-[0.14em] ${cls}`}>
                                       <span className={`h-1.5 w-1.5 rounded-full ${dotCls}`} />
                                       {label}
                                     </span>
@@ -5023,7 +5042,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                 >
                                   {t.status?.status}
                                 </span>
-                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-white/30 transition-transform group-hover/task:translate-x-0.5 group-hover/task:text-lime">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-foreground/30 transition-transform group-hover/task:translate-x-0.5 group-hover/task:text-lime">
                                   <path d="m9 18 6-6-6-6" />
                                 </svg>
                               </div>
@@ -5035,8 +5054,67 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                     })}
                   </ul>
 
-                  {/* Bottom bulk-action bar removido — modo BATCH descontinuado.
-                   *  Click na task ja vai direto pro openTask(t). */}
+                  {/* Bottom action bar — aparece quando ha pelo menos 1 selecionada.
+                   *  START = analyzeSelected (puxa doc, parseia copy, prepara
+                   *  dispatch view com avatares). User trabalha em batch sempre. */}
+                  {selectedTaskIds.size > 0 ? (
+                    <div
+                      className="sticky bottom-4 z-30 mt-4 flex flex-wrap items-center gap-3 rounded-[14px] border border-lime/55 bg-gradient-to-br from-lime/15 via-lime/[0.06] to-transparent p-3.5 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_18px_42px_-12px_rgba(200,255,0,0.45)]"
+                    >
+                      <span
+                        className="mono inline-flex items-center gap-2 text-[12px] font-bold tracking-tight text-foreground"
+                        style={{ fontFamily: 'var(--font-tech)' }}
+                      >
+                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-lime text-black shadow-[0_0_12px_rgba(200,255,0,0.7)]">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="m5 13 4 4L19 7" />
+                          </svg>
+                        </span>
+                        {selectedTaskIds.size} task{selectedTaskIds.size === 1 ? '' : 's'} selecionada{selectedTaskIds.size === 1 ? '' : 's'}
+                        {(() => {
+                          const ready = Array.from(selectedTaskIds).filter(id => taskAnalyses[id]?.status === 'ready').length;
+                          return ready > 0 ? (
+                            <span className="mono ml-1 rounded-full bg-lime/25 px-2 py-[2px] text-[10px] text-lime border border-lime/45">
+                              {ready} pronta{ready === 1 ? '' : 's'}
+                            </span>
+                          ) : null;
+                        })()}
+                      </span>
+                      <div className="ml-auto flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={clearSelected}
+                          className="mono rounded-full border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-red-500/60 hover:text-red-300"
+                        >
+                          Limpar
+                        </button>
+                        <button
+                          type="button"
+                          onClick={analyzeSelected}
+                          disabled={analyzing}
+                          className="mono group relative inline-flex items-center gap-2 rounded-full border border-lime bg-lime px-5 py-2 text-[12px] font-extrabold uppercase tracking-[0.16em] text-black shadow-[0_6px_22px_-4px_rgba(200,255,0,0.65),inset_0_1px_0_rgba(255,255,255,0.4)] transition-all hover:scale-[1.03] hover:shadow-[0_10px_30px_-4px_rgba(200,255,0,0.85),inset_0_1px_0_rgba(255,255,255,0.55)] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                          style={{ fontFamily: 'var(--font-tech)' }}
+                        >
+                          {analyzing ? (
+                            <>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin">
+                                <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" /><path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+                                <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
+                              </svg>
+                              Analisando…
+                            </>
+                          ) : (
+                            <>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                                <path d="M8 5v14l11-7z" />
+                              </svg>
+                              Start ({selectedTaskIds.size})
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
 
                   {/* Painel batch — tasks rodando ou completas */}
                   {Object.keys(batchStates).length > 0 ? (
