@@ -338,10 +338,16 @@ export function ToolsHub() {
       {/* Rodapé editorial */}
       <section className="mt-20 mb-6 text-center">
         <p className="display-subtle text-lg md:text-xl">
-          Feito por quem edita.
+          Ligue a fila e vá dormir.
         </p>
         <p className="mt-1 text-[13px] text-text-muted">
           Auto Edit · {new Date().getFullYear()}
+        </p>
+        <p
+          className="mt-1.5 text-[10px] font-semibold uppercase tracking-[0.24em] text-text-dim"
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          DarkoCorporation
         </p>
       </section>
     </div>
