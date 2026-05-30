@@ -602,32 +602,69 @@ export type VideoStatus = {
 /**
  * Pega status de N videos em UMA chamada (mais eficiente que 1 GET por video).
  * Lista os ultimos N projects do user e cruza com os videoIds que queremos.
+ *
+ * FALLBACK PAGINADO (fix 2026-05-30): se algum videoId ficar 'unknown' depois
+ * da primeira chamada, pagina /v1/project/items ate 5 paginas pra cair em
+ * videos antigos que saíram da janela recente. Sem isso, qualquer batch
+ * grande ou conta movimentada perde IDs antigos → polling fica esperando
+ * status que NUNCA volta = "NA FILA eterno".
  */
 export async function getVideosStatus(
   videoIds: string[],
 ): Promise<Record<string, VideoStatus>> {
-  // Limit: pega o suficiente pra cobrir requisicao (50 = ate 50 videos recentes)
-  const limit = Math.max(50, videoIds.length * 2);
-  const r = await jsonCall('GET', `/v1/project/items?limit=${limit}`);
+  // Limit GENEROSO — pega 4x o numero de IDs pedidos, com piso de 200.
+  // Conta com muitas dispatches consegue ter os 200 mais recentes cobertos.
+  const limit = Math.max(200, videoIds.length * 4);
   const out: Record<string, VideoStatus> = {};
   for (const id of videoIds) out[id] = { videoId: id, status: 'unknown', videoUrl: null };
-  if (!r.ok) return out;
-  const items: any[] = r.body?.data?.items || [];
-  for (const it of items) {
-    const id = it.video_id;
-    if (!id || !(id in out)) continue;
-    const st = String(it.status || '').toLowerCase();
-    let mapped: VideoStatus['status'] = 'unknown';
-    if (st === 'completed' || st === 'done' || st === 'success') mapped = 'completed';
-    else if (st === 'failed' || st === 'error') mapped = 'failed';
-    else if (st === '' || st === 'pending' || st === 'processing' || st === 'rendering' || it.status == null) mapped = 'pending';
-    out[id] = {
-      videoId: id,
-      status: mapped,
-      videoUrl: it.video_url || null,
-      error: it.error || it.failed_reason || undefined,
-    };
+
+  function applyItems(items: any[]) {
+    for (const it of items) {
+      const id = it.video_id;
+      if (!id || !(id in out)) continue;
+      // Se ja temos status definitivo (completed/failed), nao sobrescreve.
+      if (out[id].status === 'completed' || out[id].status === 'failed') continue;
+      const st = String(it.status || '').toLowerCase();
+      let mapped: VideoStatus['status'] = 'unknown';
+      if (st === 'completed' || st === 'done' || st === 'success') mapped = 'completed';
+      else if (st === 'failed' || st === 'error') mapped = 'failed';
+      else if (st === '' || st === 'pending' || st === 'processing' || st === 'rendering' || it.status == null) mapped = 'pending';
+      out[id] = {
+        videoId: id,
+        status: mapped,
+        videoUrl: it.video_url || null,
+        error: it.error || it.failed_reason || undefined,
+      };
+    }
   }
+
+  // 1a tentativa: ultimo lote (mais recente). Cobre 95%+ dos casos normais.
+  const r0 = await jsonCall('GET', `/v1/project/items?limit=${limit}`);
+  if (r0.ok) applyItems(r0.body?.data?.items || []);
+
+  // FALLBACK: se sobrou algum 'unknown', pagina ate achar (max 5 paginas).
+  // Cada pagina = 200 items, total 1000 — cobre semanas de historico.
+  const stillUnknown = () => videoIds.filter((id) => out[id].status === 'unknown');
+  if (stillUnknown().length > 0) {
+    for (let page = 2; page <= 5; page++) {
+      const missing = stillUnknown();
+      if (missing.length === 0) break;
+      try {
+        const r = await jsonCall(
+          'GET',
+          `/v1/project/items?limit=${limit}&page=${page}`,
+        );
+        if (!r.ok) break;
+        const items = r.body?.data?.items || [];
+        if (items.length === 0) break; // fim da paginacao
+        applyItems(items);
+      } catch (e) {
+        console.warn(`[getVideosStatus] paginacao page=${page} falhou:`, e);
+        break;
+      }
+    }
+  }
+
   return out;
 }
 
@@ -689,34 +726,103 @@ export async function listMyVideos(opts: {
 }
 
 /**
- * Polla repetidamente ate todos os videoIds estarem 'completed' ou 'failed',
+ * Polla repetidamente ate todos os videoIds estarem 'completed' ou 'failed'
  * ou ate timeout. Chama onStatus a cada poll.
+ *
+ * ZOMBIE DETECTION (fix 2026-05-30): cada videoId tem seu proprio relogio
+ * de "quanto tempo ja estou pending". Se passar de maxPendingMsPerId
+ * (default 15min — HeyGen normal leva 2-8min), promove status pra 'failed'
+ * com erro descritivo. Isso DESTRAVA batches onde 1-2 videos zumbis prendem
+ * o pipeline inteiro.
+ *
+ * TIMEOUT GRACEFUL (fix 2026-05-30): se atingir o deadline global, em vez
+ * de jogar throw (que abortava todo o pipeline), retorna o que tem e marca
+ * os que sobraram como 'failed'. Pipeline pos-producao roda com partial
+ * result, gera _NAO_RENDERIZOU.txt nas vagas.
  */
 export async function pollVideosUntilReady(
   videoIds: string[],
   opts: {
     onStatus?: (statuses: Record<string, VideoStatus>) => void;
     intervalMs?: number;
+    /** Timeout TOTAL — depois disso, retorna marcando o que sobrou como failed. Default 30min. */
     timeoutMs?: number;
+    /**
+     * Max tempo POR ID em 'pending'/'unknown' antes de virar zombie.
+     * Default 15min: HeyGen video normal leva 2-8min; 15min eh folga 2x
+     * pra cobrir picos de carga. Stuck >15min eh fatal pra esse render.
+     */
+    maxPendingMsPerId?: number;
     isCancelled?: () => boolean;
   } = {},
 ): Promise<Record<string, VideoStatus>> {
   const interval = opts.intervalMs ?? 8000;
-  const deadline = Date.now() + (opts.timeoutMs ?? 30 * 60 * 1000); // 30min default
+  const deadline = Date.now() + (opts.timeoutMs ?? 30 * 60 * 1000);
+  const maxPendingPerId = opts.maxPendingMsPerId ?? 15 * 60 * 1000;
+
+  // Relogio por ID — quando vi este ID em pending/unknown pela 1a vez?
+  const firstPendingAt: Record<string, number> = {};
+  let lastStatuses: Record<string, VideoStatus> = {};
+
   while (true) {
     if (opts.isCancelled?.()) {
       throw new Error('Polling cancelado pelo user.');
     }
+
     const statuses = await getVideosStatus(videoIds);
+    const now = Date.now();
+
+    // ZOMBIE PASS: pra cada ID ainda pending/unknown, conta o tempo.
+    // Se ja passou do limit, promove pra 'failed' com erro descritivo.
+    for (const id of videoIds) {
+      const s = statuses[id];
+      if (!s) continue;
+      if (s.status === 'pending' || s.status === 'unknown') {
+        if (!firstPendingAt[id]) firstPendingAt[id] = now;
+        const stuckFor = now - firstPendingAt[id];
+        if (stuckFor > maxPendingPerId) {
+          const min = Math.round(stuckFor / 60000);
+          statuses[id] = {
+            ...s,
+            status: 'failed',
+            error: s.status === 'unknown'
+              ? `Video sumiu do historico HeyGen apos ${min}min — render perdido. Re-dispare essa parte.`
+              : `Render travado ${min}min sem progresso (zombie HeyGen). Pulando essa parte — re-dispare se precisar.`,
+          };
+          console.warn(`[poll] zombie killed: ${id} (stuck ${min}min)`);
+        }
+      } else {
+        // Saiu de pending — limpa o relogio
+        delete firstPendingAt[id];
+      }
+    }
+
+    lastStatuses = statuses;
     opts.onStatus?.(statuses);
+
     const allDone = videoIds.every((id) => {
       const s = statuses[id]?.status;
       return s === 'completed' || s === 'failed';
     });
     if (allDone) return statuses;
+
     if (Date.now() > deadline) {
-      throw new Error('Timeout aguardando renderizacao. Alguns videos podem ainda estar processando — tenta de novo daqui uns minutos.');
+      // GRACEFUL TIMEOUT: marca todos os que ainda nao terminaram como failed
+      // e retorna. Pipeline pos-producao roda com partial result.
+      console.warn(`[poll] global timeout — marcando ${videoIds.length} restantes como failed`);
+      for (const id of videoIds) {
+        const s = lastStatuses[id];
+        if (s && s.status !== 'completed' && s.status !== 'failed') {
+          lastStatuses[id] = {
+            ...s,
+            status: 'failed',
+            error: 'Timeout global do polling (30min). Render ainda pode terminar no HeyGen — re-dispare se quiser tentar de novo.',
+          };
+        }
+      }
+      return lastStatuses;
     }
+
     await new Promise((r) => setTimeout(r, interval));
   }
 }

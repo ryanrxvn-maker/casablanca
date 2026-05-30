@@ -1708,6 +1708,10 @@ function ClickUpPilotInner() {
       const finalStatuses = await pollVideosUntilReady(validIds, {
         intervalMs: 8000,
         timeoutMs: 30 * 60 * 1000,
+        // Zombie killer: HeyGen video normal leva 2-8min. Travado >15min sem
+        // progresso = falha definitiva pra esse render. Pipeline finaliza com
+        // partial result; user pode RETOMAR pra re-disparar so as zumbis.
+        maxPendingMsPerId: 15 * 60 * 1000,
         isCancelled: () => !!batchCancelRef.current[taskId],
         onStatus: (st) => {
           const done = Object.values(st).filter((s) => s.status === 'completed').length;
@@ -1980,6 +1984,20 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       // Só polla HeyGen se NÃO temos tudo em cache. Se já temos, finalStatuses
       // fica vazio (download loop vai pular tudo e usar só o cache).
       let finalStatuses: Awaited<ReturnType<typeof pollVideosUntilReady>> = {};
+      // Set de indices que JA TÊM BLOB no IDB — usado pra excluir do re-dispatch
+      // de zombie (se ja tem cache, parte ja terminou antes; status 'failed'
+      // novo eh ruido, nao precisa re-disparar).
+      const cachedIdxs = new Set<number>();
+      for (let i = 0; i < state.parts.length; i++) {
+        const p = state.parts[i];
+        if (!p.videoId) continue;
+        try {
+          const { loadBlob } = await import('@/lib/zip-store');
+          const b = await loadBlob(`pilot:${taskId}:part:${p.label}`, 'video/mp4');
+          if (b && b.size > 1024) cachedIdxs.add(i);
+        } catch {}
+      }
+
       if (!allCached) {
         setBatchStates((prev) => ({
           ...prev,
@@ -1988,6 +2006,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         finalStatuses = await pollVideosUntilReady(validIds, {
           intervalMs: 8000,
           timeoutMs: 30 * 60 * 1000,
+          // Zombie detection: video stuck >15min vira 'failed' automatico
+          maxPendingMsPerId: 15 * 60 * 1000,
           isCancelled: () => !!batchCancelRef.current[taskId],
           onStatus: (st) => {
             const done = Object.values(st).filter((s) => s.status === 'completed').length;
@@ -2002,6 +2022,115 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             });
           },
         });
+
+        // ═══ AUTO RE-DISPATCH DE ZOMBIES (fix 2026-05-30) ═══
+        // Se algumas parts vieram 'failed' do polling (zombie killed ou timeout)
+        // E nao temos blob cacheado dela E temos replan → re-dispara via
+        // runHeyGenJobs em uma rodada. Maximo 2 rodadas pra cap loop infinito.
+        const MAX_REDISPATCH_ROUNDS = 2;
+        for (let round = 1; round <= MAX_REDISPATCH_ROUNDS; round++) {
+          if (batchCancelRef.current[taskId]) break;
+          if (!state.replan?.parts?.length) break;
+
+          // Coleta parts q ainda nao tem video bom (failed + sem cache)
+          const zombieIdxs: number[] = [];
+          for (let i = 0; i < state.parts.length; i++) {
+            if (cachedIdxs.has(i)) continue;
+            const p = state.parts[i];
+            const st = p.videoId ? finalStatuses[p.videoId] : null;
+            if (st?.status === 'failed' && state.replan.parts[i]) {
+              zombieIdxs.push(i);
+            }
+          }
+          if (zombieIdxs.length === 0) break;
+
+          console.warn(`[pilot resume] round ${round}: re-disparando ${zombieIdxs.length} zombies:`, zombieIdxs.map((i) => state.parts[i].label));
+          setBatchStates((prev) => ({
+            ...prev,
+            [taskId]: {
+              ...prev[taskId],
+              phase: 'dispatching',
+              message: `Re-disparando ${zombieIdxs.length} parts travadas (rodada ${round}/${MAX_REDISPATCH_ROUNDS})...`,
+            },
+          }));
+
+          const jobsToRedispatch = zombieIdxs.map((i) => {
+            const rp = state.replan!.parts[i];
+            return {
+              label: rp.label,
+              copy: rp.text,
+              avatarId: rp.avatarId || '',
+              voiceId: rp.voiceId || undefined,
+              motor: 'III' as const,
+            };
+          }).filter((j) => j.avatarId); // sanity: descarta sem avatar
+
+          if (jobsToRedispatch.length === 0) break;
+
+          let newResults: Awaited<ReturnType<typeof runHeyGenJobs>>;
+          try {
+            newResults = await runHeyGenJobs(jobsToRedispatch, {
+              parallel: 3,
+              mode: 'copy',
+              avatarId: jobsToRedispatch[0].avatarId,
+              voiceId: undefined,
+              motor: 'III',
+              adNameSafe: adNameClean,
+              isCancelled: () => !!batchCancelRef.current[taskId],
+              onProgress: () => {},
+              onResult: (r) => {
+                // r.index eh 1-based dentro do array de jobs; mapeia pro state idx
+                const stateIdx = zombieIdxs[r.index - 1];
+                setBatchStates((prev) => {
+                  const s = prev[taskId];
+                  if (!s) return prev;
+                  const newParts = s.parts.map((p, i) => i === stateIdx ? { ...p, videoId: r.videoId, error: r.error || undefined } : p);
+                  return { ...prev, [taskId]: { ...s, parts: newParts } };
+                });
+              },
+            });
+          } catch (e) {
+            console.error(`[pilot resume] re-dispatch round ${round} crashou:`, e);
+            break;
+          }
+
+          // Atualiza state.parts referencia local (pra proxima iteracao do loop)
+          for (let k = 0; k < newResults.length; k++) {
+            const r = newResults[k];
+            const stateIdx = zombieIdxs[k];
+            if (r.videoId) state.parts[stateIdx] = { ...state.parts[stateIdx], videoId: r.videoId };
+          }
+
+          // Polla as NOVAS videoIds (zombie detection 15min, timeout 20min — mais
+          // curto que o original pq RETOMAR ja consumiu paciencia do user)
+          const newIds = newResults.filter((r) => r.videoId).map((r) => r.videoId!);
+          if (newIds.length === 0) break;
+
+          setBatchStates((prev) => ({
+            ...prev,
+            [taskId]: { ...prev[taskId], phase: 'rendering', message: `Renderizando ${newIds.length} re-disparadas (rodada ${round})...` },
+          }));
+          const newStatuses = await pollVideosUntilReady(newIds, {
+            intervalMs: 8000,
+            timeoutMs: 20 * 60 * 1000,
+            maxPendingMsPerId: 12 * 60 * 1000, // menor: ja eh 2a tentativa
+            isCancelled: () => !!batchCancelRef.current[taskId],
+            onStatus: (st) => {
+              const done = Object.values(st).filter((s) => s.status === 'completed').length;
+              setBatchStates((prev) => {
+                const s = prev[taskId];
+                if (!s) return prev;
+                const newParts = s.parts.map((p) => {
+                  const ps = p.videoId ? st[p.videoId] : null;
+                  return ps ? { ...p, videoStatus: ps.status, videoUrl: ps.status === 'completed' ? ps.videoUrl || null : p.videoUrl ?? null } : p;
+                });
+                return { ...prev, [taskId]: { ...s, parts: newParts, message: `Re-render: ${done}/${newIds.length} prontos (rodada ${round})` } };
+              });
+            },
+          });
+          // Merge no finalStatuses — proxima iteracao vai ver os NOVOS videoIds
+          Object.assign(finalStatuses, newStatuses);
+        }
       } else {
         console.log('[pilot resume] tudo em cache — pulando poll do HeyGen, indo direto pra montagem');
       }
