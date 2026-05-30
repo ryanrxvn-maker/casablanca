@@ -12,7 +12,7 @@ export function SpaceMockup() {
       style={{
         height: 280,
         background:
-          'radial-gradient(60% 70% at 80% 20%, rgba(103,232,249,0.18), transparent 65%), linear-gradient(180deg, rgb(var(--bg-softer)), #0a0a0c)',
+          'radial-gradient(60% 70% at 80% 20%, rgba(103,232,249,0.18), transparent 65%), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep))',
       }}
     >
       {/* Janela mockup */}

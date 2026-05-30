@@ -12,7 +12,7 @@ export function SleepingRabbit() {
       style={{
         height: 280,
         background:
-          'radial-gradient(60% 80% at 50% 50%, rgba(167,139,250,0.20), transparent 70%), linear-gradient(180deg, rgb(var(--bg-softer)), #0a0a0c)',
+          'radial-gradient(60% 80% at 50% 50%, rgba(167,139,250,0.20), transparent 70%), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep))',
       }}
     >
       {/* Halo respirando */}

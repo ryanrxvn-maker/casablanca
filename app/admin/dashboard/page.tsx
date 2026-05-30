@@ -446,7 +446,7 @@ function StatCard({
       style={{
         borderColor: hue.replace('0.6', '0.4'),
         background:
-          'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.25)), linear-gradient(180deg, rgb(var(--bg-softer)), #0b0b0e)',
+          'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.25)), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep))',
         boxShadow: `0 0 30px -16px ${hue}`,
       }}
     >
@@ -477,7 +477,7 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
       className="rounded-[18px] border border-line/70 p-5 md:p-6"
       style={{
         background:
-          'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.18)), linear-gradient(180deg, #131318, #0b0b0e)',
+          'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.18)), linear-gradient(180deg, #131318, var(--card-deep))',
         backdropFilter: 'blur(6px)',
       }}
     >

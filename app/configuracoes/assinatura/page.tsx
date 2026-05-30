@@ -139,7 +139,7 @@ export default function AssinaturaPage() {
       ) : !sub ? (
         <div
           className="rounded-[18px] border border-line/70 p-8 text-center"
-          style={{ background: 'linear-gradient(180deg,rgb(var(--bg-softer)),#0b0b0e)' }}
+          style={{ background: 'linear-gradient(180deg,rgb(var(--bg-softer)),var(--card-deep))' }}
         >
           <div className="text-[16px] font-bold text-white" style={{ fontFamily: 'var(--font-tech)' }}>
             {data?.tier && data.tier !== 'free'
@@ -162,7 +162,7 @@ export default function AssinaturaPage() {
             className="relative overflow-hidden rounded-[20px] border p-6 md:p-7"
             style={{
               borderColor: hue + '66',
-              background: 'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.2)), linear-gradient(180deg,rgb(var(--bg-softer)),#0b0b0e)',
+              background: 'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.2)), linear-gradient(180deg,rgb(var(--bg-softer)),var(--card-deep))',
               boxShadow: `0 0 40px -22px ${hue}`,
             }}
           >
@@ -300,7 +300,7 @@ export default function AssinaturaPage() {
           {/* Histórico de faturas */}
           <div
             className="rounded-[18px] border border-line/70 p-5 md:p-6"
-            style={{ background: 'linear-gradient(180deg,#131318,#0b0b0e)' }}
+            style={{ background: 'linear-gradient(180deg,#131318,var(--card-deep))' }}
           >
             <h2
               className="mb-4 text-[12px] font-bold uppercase tracking-[0.18em] text-text-muted"

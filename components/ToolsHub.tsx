@@ -502,7 +502,7 @@ function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
       className="promo-banner group relative overflow-hidden rounded-[26px] border border-line/60"
       style={{
         background:
-          'linear-gradient(120deg, rgba(200,255,0,0.16) 0%, rgba(167,139,250,0.18) 50%, rgba(34,211,238,0.12) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #0a0a0c)',
+          'linear-gradient(120deg, rgba(200,255,0,0.16) 0%, rgba(167,139,250,0.18) 50%, rgba(34,211,238,0.12) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep))',
       }}
     >
       {/* Mesh gradient animado — duas manchas que pulsam fora de fase */}
@@ -670,7 +670,7 @@ function AutoBrollSlide({ canStartAutomation }: { canStartAutomation: boolean })
       className="group relative overflow-hidden rounded-[26px] border border-violet/30"
       style={{
         background:
-          'linear-gradient(120deg, rgba(167,139,250,0.20) 0%, rgba(240,171,252,0.16) 50%, rgba(200,255,0,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #0a0a0c)',
+          'linear-gradient(120deg, rgba(167,139,250,0.20) 0%, rgba(240,171,252,0.16) 50%, rgba(200,255,0,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep))',
       }}
     >
       {/* Mesh pulses */}
@@ -934,8 +934,7 @@ function FeaturedCard({
     'featured-card group relative block overflow-hidden rounded-[20px] border border-line/70 p-5 md:p-6' +
     (nonClickable ? ' cursor-not-allowed' : '');
   const cardStyle: React.CSSProperties = {
-    background:
-      'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.22)), linear-gradient(180deg, #16161c, #0c0c10)',
+    background: 'var(--card-face)',
     transformStyle: 'preserve-3d',
     transition:
       'transform 0.35s cubic-bezier(.2,.8,.2,1), box-shadow 0.5s ease, border-color 0.4s ease',
@@ -1255,8 +1254,7 @@ function LockedFlash({
       className="fade-in-up mb-6 flex items-start gap-3 rounded-[14px] border px-5 py-4"
       style={{
         borderColor: accent,
-        background:
-          'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
+        background: 'var(--card-face)',
       }}
     >
       <span

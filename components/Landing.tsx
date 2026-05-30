@@ -575,12 +575,12 @@ function BrollShowcaseGrid() {
     'rendering',
   ];
   const scenePalettes = [
-    ['#c8ff00', '#a78bfa', '#0a0a0c'],  // 01 lime → violet
-    ['#67e8f9', '#a78bfa', '#0a0a0c'],  // 02 cyan → violet
-    ['#f0abfc', '#c8ff00', '#0a0a0c'],  // 03 pink → lime
-    ['#a78bfa', '#6d4ee8', '#0a0a0c'],  // 04 violet
-    ['#fbbf24', '#a78bfa', '#0a0a0c'],  // 05 amber → violet
-    ['#a3e635', '#67e8f9', '#0a0a0c'],  // 06 lime → cyan
+    ['#c8ff00', '#a78bfa', 'var(--card-deep)'],  // 01 lime → violet
+    ['#67e8f9', '#a78bfa', 'var(--card-deep)'],  // 02 cyan → violet
+    ['#f0abfc', '#c8ff00', 'var(--card-deep)'],  // 03 pink → lime
+    ['#a78bfa', '#6d4ee8', 'var(--card-deep)'],  // 04 violet
+    ['#fbbf24', '#a78bfa', 'var(--card-deep)'],  // 05 amber → violet
+    ['#a3e635', '#67e8f9', 'var(--card-deep)'],  // 06 lime → cyan
   ];
 
   return (
@@ -1124,7 +1124,7 @@ export function PilotHowItWorks() {
             style={{
               animationDelay: `${i * 90}ms`,
               background:
-                'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.20)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
+                'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.20)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
             }}
           >
             <div
@@ -1166,7 +1166,7 @@ export function PilotHowItWorks() {
         style={{
           animationDelay: '380ms',
           background:
-            'linear-gradient(135deg, rgba(167,139,250,0.16) 0%, rgba(103,232,249,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
+            'linear-gradient(135deg, rgba(167,139,250,0.16) 0%, rgba(103,232,249,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
         }}
       >
         <div className="grid grid-cols-1 gap-8 px-7 py-8 md:grid-cols-[auto_1fr] md:px-10 md:py-10">
@@ -1220,7 +1220,7 @@ export function PilotHowItWorks() {
           style={{
             animationDelay: '480ms',
             background:
-              'linear-gradient(135deg, rgba(200,255,0,0.10), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
+              'linear-gradient(135deg, rgba(200,255,0,0.10), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
           }}
         >
           <div
@@ -1256,7 +1256,7 @@ export function PilotHowItWorks() {
           style={{
             animationDelay: '560ms',
             background:
-              'linear-gradient(135deg, rgba(167,139,250,0.14), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
+              'linear-gradient(135deg, rgba(167,139,250,0.14), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
           }}
         >
           <div
@@ -1365,7 +1365,7 @@ export function AutoBrollHowItWorks() {
             style={{
               animationDelay: `${i * 90}ms`,
               background:
-                'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.20)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
+                'linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.20)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
             }}
           >
             <div
@@ -1407,7 +1407,7 @@ export function AutoBrollHowItWorks() {
         style={{
           animationDelay: '380ms',
           background:
-            'linear-gradient(135deg, rgba(251,191,36,0.10) 0%, rgba(167,139,250,0.08) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
+            'linear-gradient(135deg, rgba(251,191,36,0.10) 0%, rgba(167,139,250,0.08) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
         }}
       >
         <div className="grid grid-cols-1 gap-8 px-7 py-8 md:grid-cols-[auto_1fr] md:px-10 md:py-10">
@@ -1475,7 +1475,7 @@ export function AutoBrollHowItWorks() {
         style={{
           animationDelay: '440ms',
           background:
-            'linear-gradient(135deg, rgba(200,255,0,0.10) 0%, rgba(167,139,250,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
+            'linear-gradient(135deg, rgba(200,255,0,0.10) 0%, rgba(167,139,250,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
         }}
       >
         <div className="grid grid-cols-1 gap-8 px-7 py-8 md:grid-cols-[auto_1fr] md:px-10 md:py-10">
@@ -1528,7 +1528,7 @@ export function AutoBrollHowItWorks() {
           style={{
             animationDelay: '480ms',
             background:
-              'linear-gradient(135deg, rgba(167,139,250,0.14), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
+              'linear-gradient(135deg, rgba(167,139,250,0.14), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
           }}
         >
           <div
@@ -1565,7 +1565,7 @@ export function AutoBrollHowItWorks() {
           style={{
             animationDelay: '560ms',
             background:
-              'linear-gradient(135deg, rgba(200,255,0,0.10), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
+              'linear-gradient(135deg, rgba(200,255,0,0.10), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
           }}
         >
           <div
@@ -1882,7 +1882,7 @@ function ShowcaseVisual() {
       style={{
         animationDelay: '150ms',
         background:
-          'linear-gradient(150deg, rgba(167,139,250,0.16), rgba(0,0,0,0)) , linear-gradient(180deg, rgb(var(--bg-softer)), #0a0a0c)',
+          'linear-gradient(150deg, rgba(167,139,250,0.16), rgba(0,0,0,0)) , linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep))',
       }}
     >
       <div
@@ -1951,7 +1951,7 @@ function FinalCTA() {
         className="relative overflow-hidden rounded-[28px] border border-line/60 px-6 py-14 text-center md:px-12 md:py-20"
         style={{
           background:
-            'linear-gradient(135deg, rgba(167,139,250,0.18) 0%, rgba(244,114,182,0.10) 50%, rgba(103,232,249,0.08) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #0a0a0c)',
+            'linear-gradient(135deg, rgba(167,139,250,0.18) 0%, rgba(244,114,182,0.10) 50%, rgba(103,232,249,0.08) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep))',
         }}
       >
         <div

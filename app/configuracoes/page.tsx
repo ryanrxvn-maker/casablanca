@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { ClickUpPilotStatusSection } from '@/components/ClickUpPilotStatusSection';
+import { ThemeToggle } from '@/components/ThemeToggle';
 
 /**
  * /configuracoes — Conta.
@@ -255,6 +256,22 @@ export default function ConfiguracoesPage() {
                 `}</style>
               </section>
             ) : null}
+
+            {/* Aparência — tema claro/escuro */}
+            <SectionCard id="aparencia" label="Aparência" delay={25}>
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="text-[14px] font-semibold text-white">
+                    Tema do app
+                  </p>
+                  <p className="mt-0.5 text-[12.5px] text-text-muted">
+                    Alterna entre claro e escuro. Só muda o visual — nada do
+                    funcionamento.
+                  </p>
+                </div>
+                <ThemeToggle />
+              </div>
+            </SectionCard>
 
             {/* Assinatura */}
             <section id="assinatura" className="fade-in-up" style={{ animationDelay: '30ms' }}>

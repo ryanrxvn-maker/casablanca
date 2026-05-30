@@ -330,7 +330,7 @@ function StemCard({
       className="stem-card group relative overflow-hidden rounded-[16px] border border-line/70 p-4 transition-all duration-300 hover:-translate-y-[2px]"
       style={{
         background:
-          'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.18)), linear-gradient(180deg, #16161c, #0c0c10)',
+          'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
         boxShadow: `0 0 28px -14px ${hue}, inset 0 1px 0 rgba(255,255,255,0.04)`,
       }}
     >

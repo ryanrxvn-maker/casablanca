@@ -467,7 +467,7 @@ function PlanCard({
           className="relative flex h-full flex-col rounded-[28px] px-6 py-8 md:px-7 md:py-10"
           style={{
             background:
-              'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.20)), linear-gradient(180deg, rgb(var(--bg-softer)), #0a0a0c)',
+              'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.20)), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep))',
           }}
         >
           {/* Badges no topo — pode ter "MAIS POPULAR" + "OFERTA" */}
@@ -666,7 +666,7 @@ function PlanCard({
                       <svg width="9" height="9" viewBox="0 0 12 12" fill="none">
                         <path
                           d="M2.5 6.5l2.5 2.5 5-5.5"
-                          stroke="#0a0a0c"
+                          stroke="var(--card-deep)"
                           strokeWidth="2"
                           strokeLinecap="round"
                           strokeLinejoin="round"
@@ -908,7 +908,7 @@ function FeaturedToolMini({
             ? 'rgba(90,90,100,0.55)'
             : hue.replace('0.55', '0.45'),
           background:
-            'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.25)), linear-gradient(180deg, #16161c, #0c0c10)',
+            'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.25)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
           cursor: 'pointer',
         }}
       >
@@ -1058,7 +1058,7 @@ function FeaturedToolMini({
 /** Ícone do mini-card por categoria featured. Cada um remete à
  * ferramenta — ClickUp = pilot pin, HeyGen = avatar, B-roll = clapper. */
 function FeaturedIcon({ kind, muted }: { kind: Featured; muted: boolean }) {
-  const stroke = muted ? '#9c9ca6' : '#0a0a0c';
+  const stroke = muted ? '#9c9ca6' : 'var(--card-deep)';
   const fill = muted ? 'transparent' : '#fff';
   if (kind === 'pilot') {
     return (
@@ -1582,8 +1582,8 @@ function ToolInfoCard({ tool, delay }: { tool: ToolInfo; delay: number }) {
       style={{
         animationDelay: `${delay}ms`,
         background: tool.featured
-          ? `linear-gradient(180deg, rgba(255,255,255,0.045), rgba(0,0,0,0.25)), linear-gradient(180deg, #181820, #0c0c10)`
-          : 'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.20)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
+          ? `linear-gradient(180deg, rgba(255,255,255,0.045), rgba(0,0,0,0.25)), linear-gradient(180deg, #181820, rgb(var(--bg-soft)))`
+          : 'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.20)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
         boxShadow: tool.featured
           ? `0 0 32px -16px ${tool.hue}, inset 0 1px 0 rgba(255,255,255,0.05)`
           : undefined,

@@ -431,7 +431,7 @@ export function GlobalSearchButton() {
           height: 22px;
           border-radius: 9999px;
           background: linear-gradient(135deg, #c084fc, #6d4ee8);
-          color: #0a0a0c;
+          color: var(--card-deep);
           box-shadow:
             inset 0 1px 0 rgba(255, 255, 255, 0.4),
             0 4px 10px -2px rgba(167, 139, 250, 0.6);
@@ -1096,7 +1096,7 @@ function FeaturedCard({
             var(--fc-primary, #a78bfa),
             var(--fc-secondary, #c084fc)
           );
-          color: #0a0a0c;
+          color: var(--card-deep);
           box-shadow:
             inset 0 1px 0 rgba(255, 255, 255, 0.45),
             inset 0 -1px 0 rgba(0, 0, 0, 0.3),

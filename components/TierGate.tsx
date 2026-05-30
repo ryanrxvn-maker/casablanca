@@ -95,7 +95,7 @@ export function TierGate({
         style={{
           borderColor: hue,
           background:
-            'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), #0c0c10)',
+            'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
         }}
       >
         {/* glow ambient */}

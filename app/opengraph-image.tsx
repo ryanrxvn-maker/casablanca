@@ -22,7 +22,7 @@ export default function OpengraphImage() {
           justifyContent: 'center',
           padding: 90,
           background:
-            'linear-gradient(135deg, #0a0a0f 0%, #16161d 60%, #0a0a0f 100%)',
+            'linear-gradient(135deg, var(--card-deep) 0%, rgb(var(--bg-softer)) 60%, var(--card-deep) 100%)',
         }}
       >
         <div
