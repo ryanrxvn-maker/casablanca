@@ -136,6 +136,7 @@ os.makedirs(JOBS_DIR, exist_ok=True)
 
 ALLOWED_ORIGIN_REGEX = (
     r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+    r"|^https://([a-z0-9-]+\.)*darkoautoedit\.com$"
     r"|^https://([a-z0-9-]+\.)*darkolab\.com$"
     r"|^https://.*\.vercel\.app$"
 )
@@ -176,7 +177,7 @@ def _auth_or_403(
         return
     raise HTTPException(
         status_code=403,
-        detail="origin not allowed (browser must come from darkolab.com or localhost)",
+        detail="origin not allowed (browser must come from darkoautoedit.com or localhost)",
     )
 
 

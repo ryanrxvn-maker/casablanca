@@ -33,7 +33,7 @@ New-Item -ItemType Directory -Force -Path $dst | Out-Null
 # AUTO_EDIT_ORIGIN.
 $siteOrigin = $env:AUTO_EDIT_ORIGIN
 if (-not $siteOrigin) {
-  $siteOrigin = 'https://casablanca-ashen.vercel.app'  # ajuste se mudar
+  $siteOrigin = 'https://www.darkoautoedit.com'  # ajuste se mudar
 }
 
 function Log { param([string]$msg)
