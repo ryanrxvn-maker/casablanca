@@ -75,9 +75,22 @@ const POLL_TIMEOUT_VID_MS = 5_400_000; // 90min — Kling 2.5 sob carga MUITO pe
 /* ────────── User id ────────── */
 
 let cachedUserId: number | null = null;
+let cachedUserIdAt = 0;
+// TTL curto (60s): a cada minuto re-checa o /auth/verify pra detectar
+// troca de conta Freepik SEM precisar reload. User só precisa logar
+// em outra conta no magnific.com — em até 60s o app reflete sozinho.
+const USER_ID_TTL_MS = 60_000;
+
+/** Invalida o cache do fpId. Use quando souber que o user trocou de conta. */
+export function invalidateUserIdCache(): void {
+  cachedUserId = null;
+  cachedUserIdAt = 0;
+}
 
 async function getUserId(): Promise<number> {
-  if (cachedUserId) return cachedUserId;
+  const now = Date.now();
+  // Cache fresco (<60s) → reusa. Senão re-busca pra detectar troca de conta.
+  if (cachedUserId && now - cachedUserIdAt < USER_ID_TTL_MS) return cachedUserId;
   const r = await magnificFetch('/app/api/auth/verify?lang=en_US');
   if (!r.ok) throw new Error(`auth/verify falhou: ${r.status}`);
   const j = r.json() as { userData?: { fpId?: string | number; id?: number } };
@@ -86,7 +99,12 @@ async function getUserId(): Promise<number> {
   const fpId = typeof u.fpId === 'string' ? parseInt(u.fpId, 10) : u.fpId;
   const uid = fpId || u.id || 0;
   if (!uid) throw new Error('Sem fpId/id em auth/verify');
+  // Log se mudou (debug + visibilidade pra user no console)
+  if (cachedUserId && cachedUserId !== uid) {
+    console.log(`[magnific] conta trocada: ${cachedUserId} → ${uid} (cookies da aba magnific.com)`);
+  }
   cachedUserId = uid;
+  cachedUserIdAt = now;
   return uid;
 }
 
