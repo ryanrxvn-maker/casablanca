@@ -290,7 +290,7 @@ function AutoBrollInner() {
         patchJob(job.id, {
           status: 'error',
           zip: r.zipBlob && r.zipName ? { blob: r.zipBlob, name: r.zipName } : null,
-          error: `${r.successCount}/${takes.length} ok. Faltaram: ${miss || '?'}. ZIP parcial disponível abaixo + entrada criada no Histórico. Rode de novo no mesmo space pra completar os faltantes.`,
+          error: `${r.successCount}/${takes.length} ok. Faltaram: ${miss || '?'}. ZIP parcial disponível abaixo + entrada criada no Histórico. Rode de novo pra completar os faltantes.`,
         });
       } else {
         patchJob(job.id, {
@@ -552,7 +552,7 @@ function AutoBrollInner() {
           </label>
         </ToolStep>
 
-        <ToolStep n={3} icon={<IconStepPipeline size={18} />} title="Jobs" hint="Cada lista de prompts dispara em seu próprio Space — rodam em série" hue={HUE}>
+        <ToolStep n={3} icon={<IconStepPipeline size={18} />} title="Jobs" hint="Cada lista de prompts roda em série" hue={HUE}>
         {/* JOBS — cada lista JSON dispara separada, com seu próprio Space */}
         <div className="grid gap-4">
           {jobs.map((job, idx) => (
@@ -568,7 +568,7 @@ function AutoBrollInner() {
               onRun={() => runJob(job)}
               onCancel={() => cancelJob(job.id)}
               onDebug={() => {
-                if (!confirm(`DEBUG: reiniciar "${job.name || 'job ' + (idx + 1)}" do ZERO?\n\nAborta o atual e recria num space novo.`)) return;
+                if (!confirm(`DEBUG: reiniciar "${job.name || 'job ' + (idx + 1)}" do ZERO?\n\nAborta o atual e recria do ZERO.`)) return;
                 abortRefs.current[job.id]?.abort();
                 setTimeout(() => runJob(job), 300);
               }}
@@ -585,7 +585,7 @@ function AutoBrollInner() {
               disabled={anyRunning}
               className="rounded-[8px] border border-line-strong bg-bg-soft px-4 py-2 text-sm font-semibold text-text-muted transition hover:border-violet hover:text-violet disabled:opacity-50"
             >
-              + Adicionar outro JSON (novo job/space)
+              + Adicionar outro JSON
             </button>
             {jobs.length > 1 && (
               <button
@@ -852,13 +852,13 @@ function JobCard({
             className="mono mb-1.5 block text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
             style={{ fontFamily: 'var(--font-tech)' }}
           >
-            Código do AD / Nome do Space
+            Código do AD / Nome do Pack
           </span>
           <input
             type="text"
             value={job.name}
             onChange={(e) => onName(e.target.value)}
-            placeholder={`Ex: AD15VN-PRPB06 (job ${index + 1})`}
+            placeholder="Ex: AD15VN / PACK DE CÉREBRO 3D"
             className="w-full rounded-[12px] border border-line bg-bg/60 px-4 py-3 text-sm font-medium text-white placeholder:text-text-dim focus:border-violet/60 focus:outline-none focus:ring-2 focus:ring-violet/20 disabled:opacity-50"
             disabled={running}
           />
@@ -958,7 +958,7 @@ function JobCard({
           onClick={onDebug}
           disabled={!extConnected || takesCount === 0}
           className="mono inline-flex items-center gap-1.5 rounded-[10px] border border-fuchsia-500/50 bg-fuchsia-500/10 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-fuchsia-200 transition-all hover:bg-fuchsia-500/20 active:translate-y-px disabled:opacity-40"
-          title="Aborta o atual e recria do ZERO num space novo"
+          title="Aborta o atual e recria do ZERO"
           style={{ fontFamily: 'var(--font-tech)' }}
         >
           🐞 Debug
