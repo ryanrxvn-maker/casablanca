@@ -119,6 +119,7 @@ export async function updateSession(request: NextRequest) {
     pathname.startsWith('/planos') ||
     pathname.startsWith('/termos') ||
     pathname.startsWith('/politica') ||
+    pathname.startsWith('/recursos') ||
     // Arquivos de SEO — devem ser servidos pra crawlers anônimos.
     pathname === '/robots.txt' ||
     pathname === '/sitemap.xml' ||

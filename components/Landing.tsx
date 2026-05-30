@@ -2005,6 +2005,20 @@ function LandingFooter() {
             AUTO EDIT
           </span>
         </div>
+        <nav className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] text-text-muted">
+          <Link href="/recursos" className="transition-colors hover:text-white">
+            Recursos
+          </Link>
+          <Link href="/planos" className="transition-colors hover:text-white">
+            Planos
+          </Link>
+          <Link href="/termos" className="transition-colors hover:text-white">
+            Termos
+          </Link>
+          <Link href="/politica" className="transition-colors hover:text-white">
+            Política
+          </Link>
+        </nav>
         <p className="text-[12.5px] text-text-muted">
           Auto Edit · © {new Date().getFullYear()}
         </p>
