@@ -914,6 +914,122 @@ function BrollHistorySection() {
     }
     setPendingJsonFor(item.zipKey);
     setPendingJsonText(prefilled);
+    // AUTO-RECOVERY: se nada veio do localStorage, tenta buscar do Magnific
+    // automaticamente em background. Se achar, preenche a textarea pro user.
+    if (!prefilled) {
+      void (async () => {
+        try {
+          setRetryMsg('Buscando JSON original no Magnific…');
+          const json = await tryRecoverFromMagnific(item);
+          if (json) {
+            setPendingJsonText(json);
+            console.log('[auto-recover] JSON recuperado automaticamente do Magnific');
+          }
+        } catch (e) {
+          console.warn('[auto-recover] tentativa falhou silenciosamente:', e);
+        } finally {
+          setRetryMsg('');
+        }
+      })();
+    }
+  }
+
+  /**
+   * RECOVERY MAGICA — tenta recuperar o JSON original da entry buscando
+   * direto na API do Magnific via /app/api/creations.
+   *
+   * Estrategia:
+   *  1. Extrai family UUID de qualquer videoUrl/imageUrl da entry
+   *  2. Lista creations recentes do Magnific (passa pelo bridge da extensao)
+   *  3. Filtra por family
+   *  4. Lê metadata.inputPrompt (image) + metadata.prompt (video)
+   *  5. Reconstroi JSON ordenado por idx
+   *
+   * Funciona se: extensao Freepik Sync conectada + creations ainda
+   * existem no historico Magnific (~ultimos meses).
+   */
+  async function tryRecoverFromMagnific(item: HistEntry): Promise<string | null> {
+    // 1. Procura family UUID em qualquer URL da entry
+    let family: string | null = null;
+    for (const t of item.takeUrls) {
+      const url = t.videoUrl || t.imageUrl;
+      if (!url) continue;
+      const m = url.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/);
+      if (m) { family = m[1]; break; }
+    }
+    if (!family) return null;
+    // 2. Fetch creations via bridge
+    const { magnificFetch } = await import('@/lib/magnific-bridge');
+    const r = await magnificFetch(`/app/api/creations?limit=200`);
+    if (!r.ok) throw new Error('Magnific API status ' + r.status);
+    const body = r.json() as { data?: Array<{ family?: string; tool?: string; metadata?: any }> };
+    if (!body.data || body.data.length === 0) return null;
+    // 3. Filtra por family
+    const matching = body.data.filter((c) => c.family === family);
+    if (matching.length === 0) return null;
+    // 4. Extrai prompts por idx
+    const imageMap = new Map<number, string>();
+    const videoMap = new Map<number, string>();
+    for (const c of matching) {
+      const idx = Number(c.metadata?.index ?? c.metadata?.image_index ?? c.metadata?.position ?? 0);
+      const tool = String(c.tool || '').toLowerCase();
+      const prompt = c.metadata?.inputPrompt || c.metadata?.prompt || c.metadata?.name;
+      if (!prompt) continue;
+      if (tool.includes('image') || tool === 'text-to-image') {
+        if (!imageMap.has(idx)) imageMap.set(idx, prompt);
+      } else if (tool.includes('video') || tool === 'video-generator') {
+        if (!videoMap.has(idx)) videoMap.set(idx, prompt);
+      }
+    }
+    if (imageMap.size === 0) return null;
+    // 5. Reconstroi takes ordenados
+    const takes: Array<{ imagePrompt: string; videoPrompt?: string }> = [];
+    const idxs = Array.from(new Set([...imageMap.keys(), ...videoMap.keys()])).sort((a, b) => a - b);
+    for (const i of idxs) {
+      const img = imageMap.get(i);
+      if (!img) continue;
+      const obj: { imagePrompt: string; videoPrompt?: string } = { imagePrompt: img };
+      const vid = videoMap.get(i);
+      if (vid) obj.videoPrompt = vid;
+      takes.push(obj);
+    }
+    return takes.length > 0 ? JSON.stringify(takes, null, 2) : null;
+  }
+
+  async function handleRecoverFromMagnific(item: HistEntry) {
+    setRetryMsg('Buscando no Magnific…');
+    setRetrying(item.zipKey);
+    try {
+      const json = await tryRecoverFromMagnific(item);
+      if (json) {
+        setPendingJsonText(json);
+        const count = (JSON.parse(json) as any[]).length;
+        alert(`Recuperado do Magnific: ${count} takes encontrados! Confere o JSON e clica RETOMAR.`);
+      } else {
+        alert(
+          'Nao consegui recuperar do Magnific (creations sumiram ou extensao desconectada). ' +
+          'Cola o JSON original manualmente.'
+        );
+      }
+    } catch (e) {
+      alert('Falha buscando no Magnific: ' + ((e as Error)?.message || String(e)) + '\nCola o JSON manualmente.');
+    } finally {
+      setRetrying(null);
+      setRetryMsg('');
+    }
+  }
+
+  async function handlePasteFromClipboard() {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text && text.trim()) {
+        setPendingJsonText(text.trim());
+      } else {
+        alert('Area de transferencia vazia. Copia o JSON primeiro.');
+      }
+    } catch (e) {
+      alert('Browser bloqueou leitura da area de transferencia. Cola manualmente com Ctrl+V.');
+    }
   }
 
   function submitPendingJson(item: HistEntry) {
@@ -1218,6 +1334,35 @@ function BrollHistorySection() {
                     className="input-field w-full resize-y font-mono text-[11px]"
                     autoFocus
                   />
+                  {/* HELPERS pra preencher rapido */}
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handlePasteFromClipboard}
+                      disabled={retrying === item.zipKey}
+                      className="mono inline-flex items-center gap-1 rounded-md border border-violet/45 bg-violet/10 px-2.5 py-1 text-[10px] uppercase tracking-widest text-violet hover:bg-violet/20 hover:border-violet/65 disabled:opacity-40 transition"
+                      title="Colar JSON da area de transferencia (Ctrl+C antes)"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+                        <rect x="8" y="2" width="8" height="4" rx="1" />
+                      </svg>
+                      Colar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleRecoverFromMagnific(item)}
+                      disabled={retrying === item.zipKey}
+                      className="mono inline-flex items-center gap-1 rounded-md border border-amber-500/55 bg-amber-500/15 px-2.5 py-1 text-[10px] uppercase tracking-widest text-amber-700 hover:bg-amber-500/25 hover:border-amber-500/75 disabled:opacity-40 transition"
+                      title="Tenta buscar o JSON direto do Magnific (precisa da extensao Freepik Sync conectada)"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="m21 21-4.3-4.3" />
+                        <circle cx="11" cy="11" r="8" />
+                      </svg>
+                      Buscar no Magnific
+                    </button>
+                  </div>
                   <div className="mt-2 flex items-center justify-between gap-2">
                     {pendingJsonText.trim() ? (
                       <span className="mono text-[9px] uppercase tracking-widest text-lime/80">
