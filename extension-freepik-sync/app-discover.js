@@ -1,7 +1,7 @@
 /**
  * app-discover.js — content script
  *
- * Roda em qualquer URL onde o app Auto Edit pode estar (vercel.app, dominios
+ * Roda em qualquer URL onde o app Auto Edit pode estar (dominios
  * proprios, localhost). Dois jobs:
  *
  * 1) DISCOVERY: verifica se a pagina é o app via meta tag

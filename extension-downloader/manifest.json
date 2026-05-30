@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Auto Edit · Downloader",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "Baixa vídeos e áudios do YouTube, Instagram, TikTok e Pinterest direto pra você.",
   "action": {
     "default_title": "Auto Edit · Downloader",
@@ -26,8 +26,7 @@
     "http://localhost/*",
     "https://www.darkoautoedit.com/*",
     "https://darkoautoedit.com/*",
-    "https://*.darkoautoedit.com/*",
-    "https://*.vercel.app/*"
+    "https://*.darkoautoedit.com/*"
   ],
   "content_scripts": [
     {
@@ -35,7 +34,6 @@
         "https://www.darkoautoedit.com/*",
         "https://darkoautoedit.com/*",
         "https://*.darkoautoedit.com/*",
-        "https://*.vercel.app/*",
         "http://localhost/*",
         "http://localhost:*/*"
       ],

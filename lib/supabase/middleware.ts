@@ -359,7 +359,6 @@ function checkOrigin(request: NextRequest): NextResponse | null {
   const isAllowed =
     candidate === selfOrigin ||
     (allowedOrigin && candidate === allowedOrigin) ||
-    candidate.endsWith('.vercel.app') ||
     isBrowserExtension;
 
   if (!isAllowed) {

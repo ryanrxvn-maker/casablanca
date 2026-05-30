@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Auto Edit · Magnific",
-  "version": "3.7.7",
+  "version": "3.7.8",
   "description": "Roda o Magnific em segundo plano pra gerar seu B-roll automaticamente. Você só revisa.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -24,7 +24,6 @@
     "https://www.darkoautoedit.com/*",
     "https://darkoautoedit.com/*",
     "https://*.darkoautoedit.com/*",
-    "https://*.vercel.app/*",
     "http://localhost/*",
     "http://localhost:*/*"
   ],
@@ -37,7 +36,6 @@
         "https://www.darkoautoedit.com/*",
         "https://darkoautoedit.com/*",
         "https://*.darkoautoedit.com/*",
-        "https://*.vercel.app/*",
         "http://localhost/*",
         "http://localhost:*/*"
       ],

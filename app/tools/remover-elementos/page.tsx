@@ -25,7 +25,7 @@ import { IconRemoverElementos } from '@/components/ToolIcons';
  *      ja pode processar. Sem codigo, sem cola, sem nada manual.
  *
  * Seguranca: o motor (127.0.0.1:8765) so aceita requests com header
- * Origin de uma whitelist (darkoautoedit.com, *.vercel.app, localhost). O
+ * Origin de uma whitelist (darkoautoedit.com, localhost). O
  * browser SEMPRE seta Origin em cross-origin fetch e NAO pode ser
  * forjado por JS de outro site (spec do fetch garante). Logo, basta
  * a pagina estar carregada do darkoautoedit.com pra autorizar — qualquer

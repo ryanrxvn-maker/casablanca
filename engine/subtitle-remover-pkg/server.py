@@ -9,7 +9,7 @@ Seguranca / pareamento — ZERO-CONFIG (sem codigo de pareamento):
   - bind so em 127.0.0.1 (nao acessivel da rede local)
   - guard de Origin: TODA request (exceto /health) precisa vir com
     header Origin de uma whitelist hardcoded (darkolab.com,
-    *.vercel.app, localhost, 127.0.0.1). Origin eh setado pelo
+    localhost, 127.0.0.1). Origin eh setado pelo
     browser e NAO pode ser forjado por JavaScript em outro site
     (a spec do fetch / XHR garante isso). Logo, basta o motor
     estar rodando — quando o usuario abre o DarkoLab, o browser
@@ -138,7 +138,6 @@ ALLOWED_ORIGIN_REGEX = (
     r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
     r"|^https://([a-z0-9-]+\.)*darkoautoedit\.com$"
     r"|^https://([a-z0-9-]+\.)*darkolab\.com$"
-    r"|^https://.*\.vercel\.app$"
 )
 
 import re as _re

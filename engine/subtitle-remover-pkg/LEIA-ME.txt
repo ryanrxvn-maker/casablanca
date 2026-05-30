@@ -12,7 +12,7 @@ DarkoLab Subtitle Remover — Motor (Windows)
 
 Conexao: o motor escuta so em 127.0.0.1 (nao acessivel da rede) e
 so aceita requests com header Origin do DarkoLab (darkolab.com,
-*.vercel.app, ou localhost em dev). O browser seta esse header
+dominio do app, ou localhost em dev). O browser seta esse header
 automaticamente e nao pode ser forjado por outros sites — logo
 qualquer site malicioso aberto no seu navegador NAO consegue bater
 no motor.

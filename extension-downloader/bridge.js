@@ -1,6 +1,6 @@
 /**
  * DarkoLab Downloader — Bridge content script.
- * Roda no site do DARKO (vercel/localhost). Ponte pagina <-> extensao:
+ * Roda no site do DARKO (darkoautoedit.com/localhost). Ponte pagina <-> extensao:
  * a pagina manda DL_PING, respondemos DL_PONG { version, engine }
  * (engine = se o motor local esta vivo). Mesmo padrao do Magnific.
  */

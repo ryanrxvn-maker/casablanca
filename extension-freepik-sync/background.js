@@ -7,7 +7,7 @@
  * Discovery do endpoint:
  *   1) Origin registrado por content-script app-discover.js (preferido)
  *   2) Endpoint salvo manualmente pelo user no popup
- *   3) Lista hardcoded de fallback (Vercel default + localhost)
+ *   3) Lista hardcoded de fallback (dominio do app + localhost)
  *
  * Triggers de sync:
  *   - Install / update
