@@ -48,6 +48,15 @@ import { CompactVoiceSelector } from '@/components/CompactVoiceSelector';
 import { LipsyncPreviewCard, type LipsyncTake } from '@/components/LipsyncPreviewCard';
 import { BatchJobCard3D } from '@/components/BatchJobCard3D';
 import { EditPartModal } from '@/components/EditPartModal';
+import {
+  PilotBtn3D,
+  IconScissors as PilotIconScissors,
+  IconCamuflagem,
+  IconDoc as PilotIconDoc,
+  IconPlay as PilotIconPlay,
+  IconX as PilotIconX,
+  IconUpload as PilotIconUpload,
+} from '@/components/PilotCardActions';
 import { MotorConfigPicker, MotorSlotPicker } from '@/components/MotorConfigPicker';
 import { defaultMotorConfig, resolveMotors, estimateSecondsFromText, type MotorConfig, type Motor } from '@/lib/motor-config';
 import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
@@ -410,6 +419,36 @@ function ClickUpPilotInner() {
   const [iaSearchMode, setIaSearchMode] = useToolState<boolean>('clickup-pilot:iaSearchMode', false);
   /** Camuflagem ON: gera 3a pasta zip com versoes montadas+camufladas no audio */
   const [camuflagemMode, setCamuflagemMode] = useToolState<boolean>('clickup-pilot:camuflagemMode', false);
+  // PER-TASK camuflagem — sobrescreve o global por task quando setado.
+  // Se a task nao tem entry aqui, fallback pro global. Permite ligar
+  // camuflagem so em algumas tasks + upload de white audio especifico.
+  type TaskCamuflagem = { enabled: boolean; white: File | null; volume: number };
+  const [taskCamuflagem, setTaskCamuflagem] = useState<Record<string, TaskCamuflagem>>({});
+  function getTaskCamuflagem(taskId: string): { camuflagem: boolean; whiteAudio: File | null; camuflagemVolume: number } {
+    const t = taskCamuflagem[taskId];
+    if (t && t.enabled !== undefined) {
+      return { camuflagem: t.enabled, whiteAudio: t.enabled ? (t.white || null) : null, camuflagemVolume: t.volume };
+    }
+    return { camuflagem: camuflagemMode, whiteAudio: camuflagemMode ? camuflagemWhite : null, camuflagemVolume };
+  }
+  function toggleTaskCamuflagem(taskId: string) {
+    setTaskCamuflagem((prev) => {
+      const cur = prev[taskId] || { enabled: false, white: null, volume: camuflagemVolume };
+      return { ...prev, [taskId]: { ...cur, enabled: !cur.enabled } };
+    });
+  }
+  function setTaskCamuflagemWhite(taskId: string, file: File | null) {
+    setTaskCamuflagem((prev) => {
+      const cur = prev[taskId] || { enabled: true, white: null, volume: camuflagemVolume };
+      return { ...prev, [taskId]: { ...cur, white: file } };
+    });
+  }
+  function setTaskCamuflagemVolume(taskId: string, vol: number) {
+    setTaskCamuflagem((prev) => {
+      const cur = prev[taskId] || { enabled: true, white: null, volume: vol };
+      return { ...prev, [taskId]: { ...cur, volume: vol } };
+    });
+  }
   /** Audio WHITE pra camuflagem (file blob nao persiste — volta toda sessao) */
   const [camuflagemWhite, setCamuflagemWhite] = useState<File | null>(null);
   const [camuflagemVolume, setCamuflagemVolume] = useToolState<number>('clickup-pilot:camuflagemVolume', 30);
@@ -1870,13 +1909,14 @@ function ClickUpPilotInner() {
 
       let pipeRes: Awaited<ReturnType<typeof runPostPipeline>>;
       try {
+        const _tc = getTaskCamuflagem(taskId);
         pipeRes = await runPostPipeline({
           baseAdId: rBaseAdId,
           parts: partBlobs,
           decupagem: isDecupagemEnabled(taskId),
-          camuflagem: camuflagemMode,
-          whiteAudio: camuflagemMode ? camuflagemWhite : null,
-          camuflagemVolume,
+          camuflagem: _tc.camuflagem,
+          whiteAudio: _tc.whiteAudio,
+          camuflagemVolume: _tc.camuflagemVolume,
           onProgress: (p) => {
             setBatchStates((prev) => ({
               ...prev,
@@ -2314,13 +2354,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
 
       let pipeRes: Awaited<ReturnType<typeof runPostPipeline>>;
       try {
+        const _tc = getTaskCamuflagem(taskId);
         pipeRes = await runPostPipeline({
           baseAdId: state.baseAdId,
           parts: partBlobs,
           decupagem: isDecupagemEnabled(taskId),
-          camuflagem: camuflagemMode,
-          whiteAudio: camuflagemMode ? camuflagemWhite : null,
-          camuflagemVolume,
+          camuflagem: _tc.camuflagem,
+          whiteAudio: _tc.whiteAudio,
+          camuflagemVolume: _tc.camuflagemVolume,
           onProgress: (p) => {
             setBatchStates((prev) => ({
               ...prev,
@@ -3182,13 +3223,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         [taskId]: { ...prev[taskId], phase: 'post', message: 'Re-montando com parts editadas...', finishedAt: undefined },
       }));
 
+      const _tc = getTaskCamuflagem(taskId);
       const pipeRes = await runPostPipeline({
         baseAdId: b.baseAdId,
         parts: partBlobs,
         decupagem: isDecupagemEnabled(taskId),
-        camuflagem: camuflagemMode,
-        whiteAudio: camuflagemMode ? camuflagemWhite : null,
-        camuflagemVolume,
+        camuflagem: _tc.camuflagem,
+        whiteAudio: _tc.whiteAudio,
+        camuflagemVolume: _tc.camuflagemVolume,
         onProgress: (p) => {
           setBatchStates((prev) => ({
             ...prev,
@@ -5545,22 +5587,29 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                     📹 VA · {a.vaBriefing.avatares.length} avatar{a.vaBriefing.avatares.length === 1 ? '' : 'es'}
                                   </span>
                                 ) : (a.status === 'ready' || a.status === 'partial') ? (
+                                  // ═══ ACTION BAR 3D — botoes icon-only ═══
                                   <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                                    {/* Decupagem toggle (pos-analise) — mesmo state global da pre-analise.
-                                     *  Permite ligar/desligar a decupagem mesmo apos a task ja ter sido
-                                     *  analisada, sem voltar pra lista de tasks. */}
+                                    {/* Tesoura (decupagem) toggle */}
                                     {!onlyMagnificMode ? (
-                                      <ToggleRound3D
-                                        on={isDecupagemEnabled(a.taskId)}
-                                        onChange={(v) => setDecupagemFor(a.taskId, v)}
-                                        size="sm"
-                                        variant="lime"
-                                        title={isDecupagemEnabled(a.taskId)
-                                          ? 'Decupagem ON — vai cortar silencios desse AD'
-                                          : 'Decupagem OFF — AD vem montado, sem cortes'}
-                                        icon={<ScissorsIcon className="h-3.5 w-3.5" />}
+                                      <PilotBtn3D
+                                        icon={<PilotIconScissors size={16} />}
+                                        color={isDecupagemEnabled(a.taskId) ? 'lime' : 'neutral'}
+                                        active={isDecupagemEnabled(a.taskId)}
+                                        title={isDecupagemEnabled(a.taskId) ? 'Decupagem ON' : 'Decupagem OFF'}
+                                        onClick={() => setDecupagemFor(a.taskId, !isDecupagemEnabled(a.taskId))}
                                       />
                                     ) : null}
+                                    {/* Camuflagem toggle (per-task) */}
+                                    {!onlyMagnificMode ? (
+                                      <PilotBtn3D
+                                        icon={<IconCamuflagem size={16} />}
+                                        color={(taskCamuflagem[a.taskId]?.enabled ?? camuflagemMode) ? 'fuchsia' : 'neutral'}
+                                        active={taskCamuflagem[a.taskId]?.enabled ?? camuflagemMode}
+                                        title={(taskCamuflagem[a.taskId]?.enabled ?? camuflagemMode) ? 'Camuflagem ON' : 'Camuflagem OFF — clica pra ativar'}
+                                        onClick={() => toggleTaskCamuflagem(a.taskId)}
+                                      />
+                                    ) : null}
+                                    {/* Magnific JSON quick-buttons (so se mode Magnific) */}
                                     {(onlyMagnificMode || moreMagnificMode) ? (
                                       <>
                                         <button
@@ -5569,7 +5618,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                           className="mono rounded border border-fuchsia-500/50 bg-fuchsia-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20"
                                           title="Copia SO o body da copy (sem hooks) — pra gerar os prompts de B-roll"
                                         >
-                                          {copiedBodyTask === a.taskId ? '✓ copiado' : '⧉ Body'}
+                                          {copiedBodyTask === a.taskId ? '✓' : '⧉'}
                                         </button>
                                         <button
                                           type="button"
@@ -5579,49 +5628,93 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                               ? 'border-lime/60 bg-lime/15 text-lime hover:bg-lime/25'
                                               : 'border-cyan-500/50 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20'
                                           }`}
-                                          title="Cola aqui o JSON de B-rolls dessa task (caixa inline — nao troca de tela)"
+                                          title="Cola aqui o JSON de B-rolls dessa task (caixa inline)"
                                         >
-                                          {(taskMagnificJson[a.taskId] || '').trim() ? '＋ JSON ✓' : '＋ JSON'}
+                                          {(taskMagnificJson[a.taskId] || '').trim() ? '+ JSON ✓' : '+ JSON'}
                                         </button>
                                       </>
                                     ) : null}
-                                    {/* Botao "abrir doc da copy" — atalho direto pro Google Doc
-                                     *  sem ter que ir manualmente no ClickUp puxar o link.
-                                     *  Aparece se a analise capturou docUrl. Fallback pro task URL. */}
+                                    {/* Doc button */}
                                     {(a.docUrl || a.taskUrl) ? (
-                                      <a
+                                      <PilotBtn3D
+                                        icon={<PilotIconDoc size={16} />}
+                                        color="cyan"
+                                        title={a.docUrl ? 'Abrir doc da copy (Google Docs)' : 'Abrir task no ClickUp'}
                                         href={a.docUrl || a.taskUrl}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="mono inline-flex items-center gap-1 rounded border border-cyan-500/55 bg-cyan-500/15 px-2.5 py-1 text-[10px] uppercase tracking-widest text-cyan-100 transition hover:scale-[1.04] hover:bg-cyan-500/25 hover:shadow-[0_4px_14px_-4px_rgba(34,211,238,0.5)]"
-                                        title={a.docUrl ? 'Abrir doc da copy no Google Docs' : 'Abrir task no ClickUp'}
-                                      >
-                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                          <path d="M14 2v6h6" /><path d="M9 13h6M9 17h6" />
-                                        </svg>
-                                        Doc
-                                      </a>
+                                      />
                                     ) : null}
-                                    {/* Disparo individual.
-                                     *  ONLY MAGNIFIC: SEM botão individual — só o botão grande
-                                     *  "Iniciar X tasks em background" dispara tudo de uma vez.
-                                     *  Evita duplo-fluxo e mantém a operação batch limpa.
-                                     *  MORE / Clássico: mantém botão individual. */}
+                                    {/* Disparar */}
                                     {!onlyMagnificMode ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => moreMagnificMode ? dispatchTaskToMagnific(a.taskId) : dispatchTaskToHeyGen(a.taskId)}
+                                      <PilotBtn3D
+                                        icon={<PilotIconPlay size={18} />}
+                                        color="lime"
+                                        title={a.status === 'partial' ? 'Tem avatar pendente abaixo' : 'Disparar — gerar videos'}
                                         disabled={a.status === 'partial'}
-                                        className="mono rounded border border-lime bg-lime/20 px-3 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30 disabled:opacity-40"
-                                        title={a.status === 'partial' ? 'Tem avatar pendente — escolhe um abaixo' : 'Disparar'}
-                                      >
-                                        ▶ Disparar
-                                      </button>
+                                        onClick={() => moreMagnificMode ? dispatchTaskToMagnific(a.taskId) : dispatchTaskToHeyGen(a.taskId)}
+                                        pulse={a.status === 'ready'}
+                                      />
                                     ) : null}
                                   </div>
                                 ) : null}
                               </div>
+
+                              {/* CAMUFLAGEM PANEL INLINE — so aparece quando toggle ON */}
+                              {!onlyMagnificMode && (taskCamuflagem[a.taskId]?.enabled ?? camuflagemMode) ? (
+                                <div className="mt-2 rounded-[12px] border border-fuchsia-500/40 bg-gradient-to-br from-fuchsia-500/[0.08] via-fuchsia-500/[0.03] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+                                  <div className="mono mb-2 flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-fuchsia-200">
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <span className="h-1.5 w-1.5 rounded-full bg-fuchsia-400 animate-pulse" />
+                                      Camuflagem · esta task
+                                    </span>
+                                    <span className="text-fuchsia-300/70">
+                                      {(taskCamuflagem[a.taskId]?.volume ?? camuflagemVolume)}%
+                                    </span>
+                                  </div>
+                                  <div className="grid gap-2 sm:grid-cols-[1fr_auto] items-center">
+                                    {/* Upload white audio */}
+                                    <label className="mono group/upload inline-flex cursor-pointer items-center gap-2 rounded-[10px] border border-fuchsia-500/40 bg-fuchsia-500/10 px-3 py-2 text-[11px] text-fuchsia-100 transition hover:bg-fuchsia-500/20 hover:border-fuchsia-500/60">
+                                      <PilotIconUpload size={14} />
+                                      <span className="truncate flex-1">
+                                        {taskCamuflagem[a.taskId]?.white?.name || camuflagemWhite?.name || 'Clica pra upar audio WHITE'}
+                                      </span>
+                                      <input
+                                        type="file"
+                                        accept="audio/*,video/*"
+                                        className="hidden"
+                                        onChange={(e) => {
+                                          const f = e.target.files?.[0] || null;
+                                          if (f) setTaskCamuflagemWhite(a.taskId, f);
+                                        }}
+                                      />
+                                    </label>
+                                    {(taskCamuflagem[a.taskId]?.white) ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => setTaskCamuflagemWhite(a.taskId, null)}
+                                        className="mono rounded-md border border-text-muted/30 px-2 py-1 text-[10px] text-text-muted hover:border-red-500/50 hover:text-red-300"
+                                        title="Remover white audio (volta pro global)"
+                                      >
+                                        ×
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                  {/* Volume slider */}
+                                  <div className="mt-2 flex items-center gap-2">
+                                    <span className="mono text-[9px] uppercase tracking-widest text-fuchsia-300/80 shrink-0">Volume</span>
+                                    <input
+                                      type="range"
+                                      min={5}
+                                      max={100}
+                                      value={taskCamuflagem[a.taskId]?.volume ?? camuflagemVolume}
+                                      onChange={(e) => setTaskCamuflagemVolume(a.taskId, Number(e.target.value))}
+                                      className="flex-1 accent-fuchsia-400 cursor-pointer"
+                                    />
+                                    <span className="mono text-[10px] font-bold tabular-nums text-fuchsia-200 w-10 text-right">
+                                      {taskCamuflagem[a.taskId]?.volume ?? camuflagemVolume}%
+                                    </span>
+                                  </div>
+                                </div>
+                              ) : null}
                               {/* CAIXA INLINE de JSON Magnific por task normal (sem trocar de tela) */}
                               {!a.vaBriefing && (onlyMagnificMode || moreMagnificMode) && magnificEditorOpen[a.taskId] ? (
                                 <div className="mt-2 rounded-[10px] border border-lime/40 bg-lime/5 p-3">
