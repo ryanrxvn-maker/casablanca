@@ -945,3 +945,55 @@ input[type='range']::-moz-range-thumb {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ───────────────────────── Cursor DARKO ─────────────────────────
+   Cursores próprios pra dar identidade ao app — nativos via CSS (zero JS,
+   zero lag). Os números após url() são o HOTSPOT (ponto ativo da imagem).
+   Cada regra tem fallback nativo (auto/pointer/not-allowed) se o SVG falhar.
+   Fica no fim do arquivo de propósito: vence empate de especificidade com
+   os utilitários do Tailwind (ex.: disabled:cursor-not-allowed). */
+html {
+  cursor: url('/cursors/arrow.svg') 4 3, auto;
+}
+a,
+button,
+[role='button'],
+summary,
+label[for],
+select,
+.cursor-pointer,
+input[type='checkbox'],
+input[type='radio'],
+input[type='submit'],
+input[type='button'],
+input[type='range'] {
+  cursor: url('/cursors/pointer.svg') 4 3, pointer !important;
+}
+:disabled,
+[disabled],
+[aria-disabled='true'],
+.cursor-not-allowed,
+button:disabled,
+a[aria-disabled='true'] {
+  cursor: url('/cursors/blocked.svg') 14 14, not-allowed !important;
+}
+input[type='text'],
+input[type='email'],
+input[type='password'],
+input[type='search'],
+input[type='number'],
+input[type='tel'],
+input[type='url'],
+input:not([type]),
+textarea,
+[contenteditable='true'] {
+  cursor: text !important;
+}
+/* Touch: sem cursor custom */
+@media (hover: none) {
+  html,
+  a,
+  button {
+    cursor: auto;
+  }
+}
