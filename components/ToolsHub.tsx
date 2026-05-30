@@ -577,7 +577,7 @@ function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
             Sua equipe edita<br />
             <span
               style={{
-                background: 'linear-gradient(135deg, #c8ff00 0%, #a78bfa 100%)',
+                background: 'var(--hero-grad)',
                 WebkitBackgroundClip: 'text',
                 WebkitTextFillColor: 'transparent',
               }}
@@ -612,8 +612,7 @@ function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
                 href="/tools/clickup-pilot"
                 className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full px-6 py-3 text-[13.5px] font-bold text-black"
                 style={{
-                  background:
-                    'linear-gradient(135deg, #c8ff00 0%, #a3e635 100%)',
+                  background: 'var(--cta-lime)',
                   boxShadow:
                     'inset 0 1px 0 rgba(255,255,255,0.5), 0 12px 32px -8px rgba(200,255,0,0.55), 0 2px 6px rgba(0,0,0,0.4)',
                 }}

@@ -37,6 +37,9 @@
   /* Banners do hub (theme-aware) — no claro ficam neutros (menos cor). */
   --banner-bg: linear-gradient(120deg, rgba(200,255,0,0.16) 0%, rgba(167,139,250,0.18) 50%, rgba(34,211,238,0.12) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep));
   --banner-bg-2: linear-gradient(120deg, rgba(167,139,250,0.20) 0%, rgba(240,171,252,0.16) 50%, rgba(200,255,0,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep));
+  /* Gradiente do título do hero + botão lime (theme-aware). */
+  --hero-grad: linear-gradient(135deg, #c8ff00 0%, #a78bfa 100%);
+  --cta-lime: linear-gradient(135deg, #c8ff00 0%, #a3e635 100%);
 
   /* Mouse-tracked spotlight (atualizado por components/MouseGlow.tsx). */
   --mx: 50vw;
@@ -1016,36 +1019,46 @@ textarea,
    colorido, mesmas animações. */
 html[data-theme='light'] {
   color-scheme: light;
-  /* Off-white FRACO/acinzentado — nada de branco estourado. */
-  --bg: 221 220 215;        /* base (cinza claro, não branco) */
-  --bg-soft: 233 232 228;   /* card */
-  --bg-softer: 240 239 235; /* card elevado */
-  --bg-elev: 246 245 242;   /* topo */
-  --line: 213 212 205;      /* bordas bem discretas */
-  --line-strong: 199 198 190;
-  --line-glow: 184 183 175;
-  --text: 34 34 40;
-  --text-muted: 100 100 108;
-  --text-dim: 158 158 164;
-  /* acentos PUXADOS PRO CINZA — menos cor (mantém só um leve tom). */
+  /* Cinza claro FRACO — bem longe do branco estourado. */
+  --bg: 213 212 206;        /* base */
+  --bg-soft: 225 224 219;   /* card */
+  --bg-softer: 232 231 226; /* card elevado */
+  --bg-elev: 239 238 233;   /* topo */
+  --line: 205 204 196;      /* bordas discretas */
+  --line-strong: 191 190 182;
+  --line-glow: 177 176 168;
+  --text: 32 32 38;         /* texto escuro */
+  --text-muted: 92 92 100;
+  --text-dim: 150 150 157;
+  /* acentos PUXADOS PRO CINZA — menos cor. */
   --lime: 108 122 70;
   --violet: 116 104 158;
   --violet-deep: 104 92 142;
   --amber: 152 124 64;
   --cyan: 78 112 126;
-  /* Cards no claro: off-white suave, SEM camada preta. */
-  --card-face: linear-gradient(180deg, #f1f1ee, #e8e8e3);
-  --card-deep: #e6e6e2;
-  /* Banners neutros no claro (sem o degradê colorido). */
-  --banner-bg: linear-gradient(180deg, #efefeb, #e6e6e1);
-  --banner-bg-2: linear-gradient(180deg, #edede9, #e4e4df);
+  /* Cards/banner no claro: cinza claro suave, SEM camada preta nem cor. */
+  --card-face: linear-gradient(180deg, #e7e7e2, #ddddd7);
+  --card-deep: #dcdcd6;
+  --banner-bg: linear-gradient(180deg, #e4e4df, #dadad4);
+  --banner-bg-2: linear-gradient(180deg, #e2e2dd, #d8d8d2);
+  /* Hero/CTA no claro: cinza escuro (sem o lime/violet). */
+  --hero-grad: linear-gradient(135deg, #3a3a42 0%, #6a6a74 100%);
+  --cta-lime: linear-gradient(135deg, #cdd2b2 0%, #c1c89c 100%);
 }
 
 /* Glows decorativos coloridos dos cards/banner: quase apagados + sem
    saturação no claro (era o que "sobrepunha" tons rosa/roxo). */
 html[data-theme='light'] .hub-glow {
-  opacity: 0.1 !important;
-  filter: saturate(0.35);
+  opacity: 0.08 !important;
+  filter: saturate(0.3);
+}
+
+/* NENHUM texto branco escondido: todo text-white (inclusive com opacidade,
+   ex.: text-white/80) vira escuro no claro. Exceção: pílulas/botões com
+   fundo escuro (bg-black*) e o btn-primary, que mantêm texto claro. */
+html[data-theme='light']
+  :where(.text-white, [class*='text-white/']):not([class*='bg-black']):not(.btn-primary):not(.btn-primary *) {
+  color: rgb(var(--text)) !important;
 }
 
 /* Fundo do body no claro: só um glow bem sutil. SEM grade (no claro a grade
