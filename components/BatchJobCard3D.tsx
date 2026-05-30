@@ -354,36 +354,44 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
-              {/* Downloads aparecem SEMPRE que a URL existe — mesmo em parcial
-               *  (user precisa baixar oque deu certo). allOk so muda visual
-               *  (tooltip avisa que tem item faltando). */}
-              {takesUrl ? (
-                <Btn3D
-                  icon={<IconReel size={16} />}
-                  color="lime"
-                  title={isPartialDone ? 'Baixar takes (parcial)' : 'Baixar takes'}
-                  href={takesUrl}
-                  download={takesFilename}
-                />
-              ) : null}
-              {montadoUrl ? (
-                <Btn3D
-                  icon={<IconStack size={16} />}
-                  color="cyan"
-                  title={isPartialDone ? 'Baixar montados (parcial)' : 'Baixar montados'}
-                  href={montadoUrl}
-                  download={montadoFilename}
-                />
-              ) : null}
-              {camufladoUrl ? (
-                <Btn3D
-                  icon={<IconShield size={16} />}
-                  color="fuchsia"
-                  title={isPartialDone ? 'Baixar camuflados (parcial)' : 'Baixar camuflados'}
-                  href={camufladoUrl}
-                  download={camufladoFilename}
-                />
-              ) : null}
+              {/* DOWNLOAD UNICO — baixa tudo o que existe (takes + montados +
+               *  camuflados se houver) num clique so. Browser enfileira os
+               *  downloads automaticamente. Pequeno delay entre cada disparo
+               *  evita bloqueio do Chrome (multiple downloads warning). */}
+              {(takesUrl || montadoUrl || camufladoUrl) ? (() => {
+                const downloads = [
+                  takesUrl ? { url: takesUrl, name: takesFilename } : null,
+                  montadoUrl ? { url: montadoUrl, name: montadoFilename } : null,
+                  camufladoUrl ? { url: camufladoUrl, name: camufladoFilename } : null,
+                ].filter(Boolean) as Array<{ url: string; name?: string }>;
+                const total = downloads.length;
+                const handleDownloadAll = () => {
+                  downloads.forEach((d, i) => {
+                    setTimeout(() => {
+                      const a = document.createElement('a');
+                      a.href = d.url;
+                      if (d.name) a.download = d.name;
+                      a.rel = 'noopener';
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                    }, i * 220); // 220ms entre disparos = Chrome aceita sem prompt
+                  });
+                };
+                const tooltip = isPartialDone
+                  ? `Baixar tudo (parcial · ${total} arquivo${total === 1 ? '' : 's'})`
+                  : total === 1
+                    ? 'Baixar'
+                    : `Baixar tudo (${total} arquivos)`;
+                return (
+                  <Btn3D
+                    icon={<IconDownload size={16} />}
+                    color="lime"
+                    title={tooltip}
+                    onClick={handleDownloadAll}
+                  />
+                );
+              })() : null}
               <Btn3D
                 icon={<IconRefresh size={16} />}
                 color="cyan"
