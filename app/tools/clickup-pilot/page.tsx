@@ -5280,6 +5280,30 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                               isRebuilding={rebuildingTaskId === b.taskId}
                               docUrl={b.docUrl || taskAnalyses[b.taskId]?.docUrl}
                               taskUrl={b.taskUrl || taskAnalyses[b.taskId]?.taskUrl}
+                              resolveDocUrl={async () => {
+                                // Lazy fetch: pega o docUrl ao vivo do ClickUp.
+                                // Usado quando o batch antigo nao tem docUrl em cache.
+                                // Apos resolver, persiste no state pra futuras chamadas.
+                                try {
+                                  const det = await getTask(b.taskId);
+                                  const docField = (det.custom_fields || ([] as any[])).find((f: any) => /DOC DA COPY/i.test(f.name || ''));
+                                  const found: string | undefined =
+                                    docField?.value || extractDocLinks(det.description || det.text_content)[0];
+                                  if (found) {
+                                    // Persiste pra proximas chamadas (sobrevive reload via persistBatchStates)
+                                    setBatchStates((prev) => {
+                                      const cur = prev[b.taskId];
+                                      if (!cur) return prev;
+                                      return { ...prev, [b.taskId]: { ...cur, docUrl: found, taskUrl: cur.taskUrl || (det as any).url } };
+                                    });
+                                    return found;
+                                  }
+                                  return null;
+                                } catch (e) {
+                                  console.warn('[resolveDocUrl] getTask falhou:', e);
+                                  return null;
+                                }
+                              }}
                             >
                               {previewsNode}
                             </BatchJobCard3D>

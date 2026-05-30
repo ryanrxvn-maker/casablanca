@@ -70,6 +70,10 @@ export type BatchJob3DProps = {
   docUrl?: string;
   /** Fallback: ClickUp task URL — mostrado se docUrl ausente. */
   taskUrl?: string;
+  /** Lazy fetch: chamado quando user clica no botao Docs E docUrl nao existe.
+   *  Parent vai no ClickUp, pega custom field "DOC DA COPY", retorna a URL.
+   *  Se retornar null = nao tem doc. */
+  resolveDocUrl?: () => Promise<string | null>;
   /** Default minimizado (so header + buttons + progress). Default true. */
   defaultMinimized?: boolean;
 };
@@ -230,27 +234,23 @@ const IconDoc = ({ size = 16 }: { size?: number }) => (
   </svg>
 );
 
-/** Icone ClickUp — monograma oficial (upward arrow estilizado). Renderizado
- *  com gradient brand-aware (cyan→pink→yellow). currentColor nao aplica
- *  porque eh multi-color por design. */
-const IconClickUp = ({ size = 18 }: { size?: number }) => (
+/** Icone Google Docs — folha de papel azul com text lines.
+ *  Estilo recognizable do Google Docs (azul Google + branco). */
+const IconGDocs = ({ size = 18 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-    <defs>
-      <linearGradient id="cu-grad" x1="0%" y1="100%" x2="100%" y2="0%">
-        <stop offset="0%" stopColor="#8930FD" />
-        <stop offset="35%" stopColor="#49CCF9" />
-        <stop offset="70%" stopColor="#FF5688" />
-        <stop offset="100%" stopColor="#FFCC00" />
-      </linearGradient>
-    </defs>
-    {/* Forma "C de checkmark" upward — 2 chevrons concentricos sobrepostos */}
+    {/* Corpo do doc (azul Google #1a73e8) */}
     <path
-      d="M2.2 17.2 6.6 13.6c1.5 2 3.3 3 5.4 3 2.1 0 3.9-1 5.3-3l4.5 3.6c-2.3 3.1-5.5 4.8-9.8 4.8s-7.5-1.7-9.8-4.8Z"
-      fill="url(#cu-grad)"
+      d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+      fill="#1a73e8"
     />
+    {/* Dobra do canto (azul mais claro) */}
+    <path d="M14 2v6h6L14 2z" fill="#a1c2fa" />
+    {/* Linhas de texto (branco) */}
     <path
-      d="M12 7.6 4.2 14.2 1.5 11l10.5-8.7 10.5 8.7-2.7 3.2L12 7.6Z"
-      fill="url(#cu-grad)"
+      d="M8 12h8M8 15h8M8 18h5"
+      stroke="white"
+      strokeWidth="1.6"
+      strokeLinecap="round"
     />
   </svg>
 );
@@ -346,11 +346,13 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     isRebuilding = false,
     docUrl,
     taskUrl,
+    resolveDocUrl,
     defaultMinimized = true,
   } = props;
 
   const [tilt, setTilt] = useState<{ x: number; y: number } | null>(null);
   const [expanded, setExpanded] = useState(!defaultMinimized);
+  const [resolvingDoc, setResolvingDoc] = useState(false);
 
   const phaseInfo = PHASE_MAP[phase];
   // Override pra parcial
@@ -420,30 +422,83 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
-              {/* BOTAO CLICKUP — vai direto pro doc da copy. Fallback chain:
-               *  1. docUrl (Google Docs, capturado na analise)
-               *  2. taskUrl (ClickUp task URL salvo na analise)
-               *  3. Construido on-the-fly: https://app.clickup.com/t/{taskId}
-               *     — pattern oficial do ClickUp, funciona pra qualquer taskId.
-               *  Sempre visivel (nunca esconde). Ícone = monograma ClickUp
-               *  com gradient brand (purple→cyan→pink→yellow). */}
+              {/* BOTAO GOOGLE DOCS — vai direto pro Google Doc da copy.
+               *  Fluxo:
+               *  1. Se docUrl ja conhecido → anchor abre nova aba (instant).
+               *  2. Se nao → button onClick chama resolveDocUrl (lazy fetch
+               *     pelo parent: getTask → custom field "DOC DA COPY") +
+               *     window.open. Spinner durante fetch.
+               *  3. Se resolveDocUrl ausente E sem docUrl → desabilita
+               *     (impossivel resolver sem fetcher).
+               *  Sempre visivel. Icone = Google Docs (azul + branco). */}
               {(() => {
-                const href = docUrl || taskUrl || `https://app.clickup.com/t/${props.taskId}`;
                 const tooltip = docUrl
                   ? 'Abrir doc da copy (Google Docs)'
-                  : 'Abrir task no ClickUp';
+                  : resolvingDoc
+                  ? 'Buscando link do doc…'
+                  : 'Buscar e abrir doc da copy';
+                const canResolve = !!docUrl || !!resolveDocUrl;
+                if (!canResolve) return null;
+                const baseClass = 'group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-cyan-400/45 bg-gradient-to-b from-cyan-400/18 via-cyan-400/8 to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(34,211,238,0.4)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-cyan-400/70 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_24px_-6px_rgba(34,211,238,0.6)] active:translate-y-0 active:scale-95 transition-[transform,box-shadow] disabled:opacity-50 disabled:cursor-wait disabled:hover:translate-y-0 disabled:hover:scale-100';
+                if (docUrl) {
+                  // Caso comum: docUrl conhecido → anchor (zero delay).
+                  return (
+                    <a
+                      href={docUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={baseClass}
+                      title={tooltip}
+                      aria-label={tooltip}
+                    >
+                      <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/25 to-transparent" aria-hidden />
+                      <span className="relative"><IconGDocs size={18} /></span>
+                    </a>
+                  );
+                }
+                // Caso fallback: docUrl missing → lazy fetch on click.
+                const handleClick = async () => {
+                  if (resolvingDoc || !resolveDocUrl) return;
+                  setResolvingDoc(true);
+                  try {
+                    const url = await resolveDocUrl();
+                    if (url) {
+                      window.open(url, '_blank', 'noopener,noreferrer');
+                    } else {
+                      // Sem doc capturavel — fallback final pro ClickUp
+                      const fallback = taskUrl || `https://app.clickup.com/t/${props.taskId}`;
+                      window.open(fallback, '_blank', 'noopener,noreferrer');
+                    }
+                  } catch (e) {
+                    console.warn('[batch card] resolveDocUrl falhou:', e);
+                    const fallback = taskUrl || `https://app.clickup.com/t/${props.taskId}`;
+                    window.open(fallback, '_blank', 'noopener,noreferrer');
+                  } finally {
+                    setResolvingDoc(false);
+                  }
+                };
                 return (
-                  <a
-                    href={href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-fuchsia-400/40 bg-gradient-to-b from-fuchsia-400/15 via-cyan-400/8 to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(217,70,239,0.35)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-fuchsia-400/65 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_24px_-6px_rgba(217,70,239,0.6)] active:translate-y-0 active:scale-95 transition-[transform,box-shadow]"
+                  <button
+                    type="button"
+                    onClick={handleClick}
+                    disabled={resolvingDoc}
+                    className={baseClass}
                     title={tooltip}
                     aria-label={tooltip}
                   >
                     <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/25 to-transparent" aria-hidden />
-                    <span className="relative"><IconClickUp size={18} /></span>
-                  </a>
+                    <span className="relative">
+                      {resolvingDoc ? (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" className="animate-spin text-cyan-200" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+                          <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+                          <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
+                        </svg>
+                      ) : (
+                        <IconGDocs size={18} />
+                      )}
+                    </span>
+                  </button>
                 );
               })()}
               {/* DOWNLOAD UNICO — baixa tudo o que existe (takes + montados +
