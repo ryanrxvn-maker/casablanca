@@ -46,6 +46,7 @@ import Link from 'next/link';
 import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
 import { CompactVoiceSelector } from '@/components/CompactVoiceSelector';
 import { LipsyncPreviewCard, type LipsyncTake } from '@/components/LipsyncPreviewCard';
+import { BatchJobCard3D } from '@/components/BatchJobCard3D';
 import { MotorConfigPicker, MotorSlotPicker } from '@/components/MotorConfigPicker';
 import { defaultMotorConfig, resolveMotors, estimateSecondsFromText, type MotorConfig, type Motor } from '@/lib/motor-config';
 import type { AvatarOption } from '@/components/HeyGenAvatarPicker';
@@ -4729,11 +4730,17 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
 
                   {/* Painel batch — tasks rodando ou completas */}
                   {Object.keys(batchStates).length > 0 ? (
-                    <div className="mt-4 rounded-[12px] border border-fuchsia-500/40 bg-fuchsia-500/5 p-3">
-                      <div className="mono mb-2 text-[10px] uppercase tracking-widest text-fuchsia-200">
-                        Batch em andamento ({Object.keys(batchStates).length})
+                    <div className="mt-4 rounded-[18px] border border-fuchsia-500/25 bg-gradient-to-br from-fuchsia-500/[0.06] via-fuchsia-500/[0.02] to-transparent p-4 backdrop-blur-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_12px_36px_-18px_rgba(217,70,239,0.35)]">
+                      <div className="mono mb-3 flex items-center justify-between text-[10px] uppercase tracking-widest text-fuchsia-200">
+                        <span className="inline-flex items-center gap-2">
+                          <span className="relative flex h-2 w-2">
+                            <span className="absolute inline-flex h-full w-full rounded-full bg-fuchsia-400 opacity-60 animate-ping" />
+                            <span className="relative inline-flex h-2 w-2 rounded-full bg-fuchsia-300" />
+                          </span>
+                          Tasks em produção · {Object.keys(batchStates).length}
+                        </span>
                       </div>
-                      <ul className="grid gap-2">
+                      <ul className="grid gap-3">
                         {Object.values(batchStates).sort((a, b) => b.startedAt - a.startedAt).map((b) => {
                           const partsDispatched = b.parts.filter(p => p.videoId).length;
                           const partsRendered = b.parts.filter(p => p.videoStatus === 'completed').length;
@@ -4768,188 +4775,80 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                             : (b.phase === 'done' && !!b.montadoZipUrl);
                           const allOk = dispatchOk && renderOk && pipeOk;
                           const isPartialDone = b.phase === 'done' && !allOk;
-                          const phaseLabel = isPartialDone
-                            ? '⚠ parcial — Retomar'
-                            : ({ queued: '⏳ na fila', dispatching: '🚀 disparando', rendering: '⚙ renderizando', downloading: '⬇ baixando', post: '✂ pos-producao', done: '✅ pronto', failed: '✗ falhou' })[b.phase];
-                          const phaseColor = isPartialDone
-                            ? 'text-yellow-200 border-yellow-500/40 bg-yellow-500/10'
-                            : b.phase === 'done' ? 'text-lime border-lime/40 bg-lime/10' : b.phase === 'failed' ? 'text-red-300 border-red-500/40 bg-red-500/10' : 'text-fuchsia-200 border-fuchsia-500/30 bg-fuchsia-500/5';
                           const elapsedMs = (b.finishedAt || nowTick) - b.startedAt;
-                          const elapsedMin = Math.floor(elapsedMs / 60000);
-                          const elapsedSec = Math.floor((elapsedMs % 60000) / 1000);
-                          const elapsedLabel = elapsedMin > 0 ? `${elapsedMin}m${String(elapsedSec).padStart(2, '0')}s` : `${elapsedSec}s`;
-                          return (
-                            <li key={b.taskId} className={`rounded-[10px] border ${phaseColor} p-2`}>
-                              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                                <span className="mono">
-                                  <strong className="text-white">{b.taskName}</strong>
-                                  <span className="ml-2">{phaseLabel}</span>
-                                  <span className="ml-2 text-text-muted">· {elapsedLabel}</span>
-                                </span>
-                                <div className="flex flex-wrap items-center gap-1.5">
-                                  {/* Downloads SO aparecem se tudo deu certo (allOk).
-                                   *  Em estado 'parcial' (faltou disparar/renderizar/montar),
-                                   *  forçamos user a Retomar — evita publicar criativo
-                                   *  incompleto. Bug fixado: phase ia pra 'done' mesmo
-                                   *  com 12 de 16 partes dispatched + so 1 montagem. */}
-                                  {b.phase === 'done' && allOk && b.zipBlobUrl ? (
-                                    <a
-                                      href={b.zipBlobUrl}
-                                      download={b.zipFilename}
-                                      className="mono rounded border border-lime bg-lime/20 px-2 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30"
-                                      title="Pasta com os takes individuais (HOOK1.mp4, BODY1.mp4, etc)"
-                                    >
-                                      ⬇ takes
-                                    </a>
-                                  ) : null}
-                                  {b.phase === 'done' && allOk && b.montadoZipUrl ? (
-                                    <a
-                                      href={b.montadoZipUrl}
-                                      download={b.montadoZipName}
-                                      className="mono rounded border border-cyan-500/60 bg-cyan-500/20 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/30"
-                                      title="Versoes ja montadas (HOOK[N]+BODY) e decupadas — prontas pra publicacao"
-                                    >
-                                      ⬇ montados
-                                    </a>
-                                  ) : null}
-                                  {b.phase === 'done' && allOk && b.camufladoZipUrl ? (
-                                    <a
-                                      href={b.camufladoZipUrl}
-                                      download={b.camufladoZipName}
-                                      className="mono rounded border border-fuchsia-500/60 bg-fuchsia-500/20 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/30"
-                                      title="Versoes montadas + audio camuflado (inversao de fase)"
-                                    >
-                                      ⬇ camuflados
-                                    </a>
-                                  ) : null}
-                                  {/* RETOMAR / PAUSAR / DEBUG — sempre presentes,
-                                   *  funcionam independente da situacao da task.
-                                   *  Quando phase='queued' (aguardando vaga no
-                                   *  semafaro de MAX_HEYGEN_PARALLEL=2), TODOS os
-                                   *  botoes ficam disabled — promoter dispara
-                                   *  automatico quando liberar vaga. ✕ continua
-                                   *  ativo pra user remover do batch se quiser. */}
-                                  {(() => {
-                                    const running = ['dispatching', 'rendering', 'downloading', 'post'].includes(b.phase);
-                                    const queued = b.phase === 'queued';
-                                    return (
-                                      <>
-                                        <button
-                                          type="button"
-                                          onClick={() => retomarTaskBatch(b.taskId)}
-                                          disabled={running || queued}
-                                          className="mono rounded border border-cyan-500/60 bg-cyan-500/15 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-40 disabled:cursor-not-allowed"
-                                          title={
-                                            queued
-                                              ? `Na fila — aguardando vaga (max ${MAX_HEYGEN_PARALLEL} simultaneos). O dispatch e' automatico assim que liberar.`
-                                              : (b.parts.some(p => p.videoId)
-                                                ? 'Re-checa status no HeyGen (videos podem estar prontos) + re-baixa'
-                                                : 'Re-roda a task do zero (TTS+upload+submit+poll+zip) — util quando 0 foram disparados')
-                                          }
-                                        >
-                                          🔄 Retomar
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => pausarTaskBatch(b.taskId)}
-                                          disabled={!running}
-                                          className="mono rounded border border-yellow-500/50 bg-yellow-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-yellow-200 hover:bg-yellow-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
-                                          title={queued ? 'Tirar da fila — use ✕ pra remover.' : 'Aborta o processamento atual dessa task. Depois use Retomar.'}
-                                        >
-                                          ⏸ Pausar
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => debugTaskBatch(b.taskId)}
-                                          disabled={queued}
-                                          className="mono rounded border border-fuchsia-500/50 bg-fuchsia-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
-                                          title={queued ? 'Aguarde sair da fila pra usar Debug.' : 'DEBUG (reserva p/ bugs): reinicia a geracao de LIPS dessa task do ZERO'}
-                                        >
-                                          🐞 Debug
-                                        </button>
-                                        {!running ? (
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              // Se task estava 'queued', cancela pendencia antes
-                                              // de remover (senao runHeyGenGated continua tentando).
-                                              if (queued) batchCancelRef.current[b.taskId] = true;
-                                              for (const url of [b.zipBlobUrl, b.montadoZipUrl, b.camufladoZipUrl]) {
-                                                if (url) { try { URL.revokeObjectURL(url); } catch {} }
-                                              }
-                                              setBatchStates((prev) => {
-                                                const { [b.taskId]: _, ...rest } = prev;
-                                                return rest;
-                                              });
-                                            }}
-                                            className="mono rounded border border-line-strong px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
-                                            title={queued ? 'Cancela e remove da fila' : 'Remove esta entrada do painel'}
-                                          >
-                                            ✕
-                                          </button>
-                                        ) : null}
-                                      </>
-                                    );
-                                  })()}
-                                </div>
-                              </div>
-                              <div className="mono mt-1 text-[10px] text-text-muted">
-                                {b.parts.length} partes · disparadas: {partsDispatched}/{b.parts.length}{b.phase !== 'dispatching' ? ` · renderizadas: ${partsRendered}/${partsDispatched}` : ''}
-                              </div>
-                              {/* Progress bar visual — peso por fase: 30% dispatch, 60% render, 10% download */}
-                              {b.phase !== 'failed' ? (() => {
-                                const dispatchProgress = b.parts.length > 0 ? partsDispatched / b.parts.length : 0;
-                                const renderProgress = partsDispatched > 0 ? partsRendered / partsDispatched : 0;
-                                const downloadProgress = b.phase === 'done' ? 1 : (b.phase === 'downloading' ? 0.5 : 0);
-                                const totalPct = b.phase === 'done' ? 100 :
-                                  Math.round((dispatchProgress * 30 + renderProgress * 60 + downloadProgress * 10));
-                                const barColor = isPartialDone ? 'bg-yellow-400' : (b.phase === 'done' ? 'bg-lime' : 'bg-fuchsia-400');
-                                return (
-                                  <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-bg-soft/60">
-                                    <div
-                                      className={`h-full ${barColor} transition-all duration-300`}
-                                      style={{ width: `${Math.min(100, Math.max(2, totalPct))}%` }}
-                                    />
-                                  </div>
-                                );
-                              })() : null}
-                              {b.message ? (
-                                <div className="mono mt-0.5 text-[10px] text-text-muted">{b.message}</div>
-                              ) : null}
+                          const running = ['dispatching', 'rendering', 'downloading', 'post'].includes(b.phase);
+                          const queued = b.phase === 'queued';
 
-                              {/* Preview dos takes (loading → vídeo jogável), igual Auto B-roll */}
-                              {b.parts.some((p) => p.videoId) ? (() => {
-                                const previews: LipsyncTake[] = b.parts
-                                  .filter((p) => p.videoId)
-                                  .map((p) => ({
-                                    label: p.label,
-                                    status: p.videoStatus || 'processing',
-                                    videoUrl: p.videoUrl ?? null,
-                                    error: p.error ?? null,
-                                  }));
-                                const donePv = previews.filter((p) => p.status === 'completed').length;
-                                const pct = previews.length > 0 ? Math.round((100 * donePv) / previews.length) : 0;
-                                return (
-                                  <div className="mt-2">
-                                    <div className="mono mb-1.5 text-[9px] uppercase tracking-widest text-text-muted">
-                                      Preview dos takes ({donePv}/{previews.length} prontos)
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-                                      {previews.map((t, ti) => (
-                                        <LipsyncPreviewCard
-                                          key={ti}
-                                          take={t}
-                                          position={ti + 1}
-                                          total={previews.length}
-                                          percent={pct}
-                                          fileBase={b.baseAdId || b.taskName}
-                                        />
-                                      ))}
-                                    </div>
-                                  </div>
-                                );
-                              })() : null}
-                            </li>
+                          // Preview slot — so renderiza se ja tem video disparado
+                          const previewsNode = b.parts.some((p) => p.videoId) ? (() => {
+                            const previews: LipsyncTake[] = b.parts
+                              .filter((p) => p.videoId)
+                              .map((p) => ({
+                                label: p.label,
+                                status: p.videoStatus || 'processing',
+                                videoUrl: p.videoUrl ?? null,
+                                error: p.error ?? null,
+                              }));
+                            const donePv = previews.filter((p) => p.status === 'completed').length;
+                            const pct = previews.length > 0 ? Math.round((100 * donePv) / previews.length) : 0;
+                            return (
+                              <>
+                                <div className="mono mb-1.5 flex items-center justify-between text-[9px] uppercase tracking-widest text-text-muted">
+                                  <span>Takes ({donePv}/{previews.length} prontos)</span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+                                  {previews.map((t, ti) => (
+                                    <LipsyncPreviewCard
+                                      key={ti}
+                                      take={t}
+                                      position={ti + 1}
+                                      total={previews.length}
+                                      percent={pct}
+                                      fileBase={b.baseAdId || b.taskName}
+                                    />
+                                  ))}
+                                </div>
+                              </>
+                            );
+                          })() : null;
+
+                          return (
+                            <BatchJobCard3D
+                              key={b.taskId}
+                              taskId={b.taskId}
+                              taskName={b.taskName}
+                              phase={b.phase as any}
+                              partsTotal={b.parts.length}
+                              partsDispatched={partsDispatched}
+                              partsRendered={partsRendered}
+                              message={b.message}
+                              elapsedMs={elapsedMs}
+                              allOk={allOk}
+                              isPartialDone={isPartialDone}
+                              takesUrl={b.zipBlobUrl}
+                              takesFilename={b.zipFilename}
+                              montadoUrl={b.montadoZipUrl}
+                              montadoFilename={b.montadoZipName}
+                              camufladoUrl={b.camufladoZipUrl}
+                              camufladoFilename={b.camufladoZipName}
+                              isRunning={running}
+                              isQueued={queued}
+                              onRetomar={() => retomarTaskBatch(b.taskId)}
+                              onPausar={() => pausarTaskBatch(b.taskId)}
+                              onDebug={() => debugTaskBatch(b.taskId)}
+                              onRemove={() => {
+                                if (queued) batchCancelRef.current[b.taskId] = true;
+                                for (const url of [b.zipBlobUrl, b.montadoZipUrl, b.camufladoZipUrl]) {
+                                  if (url) { try { URL.revokeObjectURL(url); } catch {} }
+                                }
+                                setBatchStates((prev) => {
+                                  const { [b.taskId]: _, ...rest } = prev;
+                                  return rest;
+                                });
+                              }}
+                            >
+                              {previewsNode}
+                            </BatchJobCard3D>
                           );
                         })}
                       </ul>
