@@ -103,11 +103,7 @@ export async function magnificFetch(
       // Detectamos isso e transformamos em erro permanente claro.
       const isHtmlResponse = body.trim().toLowerCase().startsWith('<!doctype');
       if (isHtmlResponse && /api\/v2\/ai\/(start-tti|simulate-generation)|api\/generate/.test(path)) {
-        reject(new Error(
-          'MAGNIFIC_CAP_EXCEEDED: conta atingiu cap do ciclo (usage > 100%). ' +
-          'Magnific bloqueou a geração e devolveu HTML do paywall. ' +
-          'Verifique seu usage em magnific.com/account ou aguarde reset do ciclo.'
-        ));
+        reject(new Error('MAGNIFIC_CAP_EXCEEDED: seu limite interno mensal do Magnific acabou'));
         return;
       }
       resolve({
