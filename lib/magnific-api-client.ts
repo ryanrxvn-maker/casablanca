@@ -183,17 +183,21 @@ export async function assertZeroCreditCost(): Promise<void> {
   const status = await getUnlimitedStatus();
   if (status.isBanned) throw new Error('Conta Magnific BANIDA.');
   if (!status.isEnabled) throw new Error('Unlimited mode DESLIGADO no Magnific.');
-  // CAP CHECK: se usage > 100%, Magnific bloqueia gerações silenciosamente
-  // (devolve HTML paywall). Detectamos AQUI antes de começar o batch.
+  // ❌ REMOVIDO: bloqueio preventivo se percent > 100.
+  //
+  // Descoberta 2026-05-30: o cap percentual NÃO é bloqueio rígido. Quando
+  // ultrapassa, o Magnific apenas ativa is_relaxed_mode: true (throttle de
+  // prioridade na fila), mas CONTINUA gerando. User comprovou: gerou Kling
+  // 2.5 manualmente na MESMA conta que mostrava percent 133%.
+  //
+  // Só logamos pra visibilidade — não bloqueamos. Se o Magnific de fato
+  // bloquear depois, a request real vai falhar e o pipeline trata.
   if (status.usagePercent > 100) {
-    // Formata data: 2026-06-13 → 13/06/2026
-    const resetBr = (() => {
-      const d = status.cycleResetDate;
-      if (!d) return '?';
-      const m = d.match(/^(\d{4})-(\d{2})-(\d{2})/);
-      return m ? `${m[3]}/${m[2]}/${m[1]}` : d;
-    })();
-    throw new Error(`Seu limite interno mensal do Magnific acabou, renova em ${resetBr}`);
+    console.warn(
+      `[magnific] usage ${status.usagePercent}% (cap soft excedido) — ` +
+      `Magnific está em ${status.isEnabled ? 'Unlimited' : 'paid'}/relaxed mode. ` +
+      `Continuamos: o Magnific ainda permite gerações nesse estado, só com prioridade menor.`,
+    );
   }
   const [img, vid] = await Promise.all([
     simulateGeneration([
