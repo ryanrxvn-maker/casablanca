@@ -155,7 +155,7 @@ const AI: ToolEntry[] = [
   {
     href: '/tools/remover-elementos',
     label: 'Remover Legenda/Marca d’Água',
-    description: 'Remove legenda e marca d’água sem deixar borrão.',
+    description: 'Remove legenda e marca d’água.',
     icon: <IconRemoverElementos size={26} />,
     hue: 'rgba(244, 114, 182, 0.42)',
     badge: 'IA',

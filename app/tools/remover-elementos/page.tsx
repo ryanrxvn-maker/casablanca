@@ -417,7 +417,7 @@ function RemoverElementosInner() {
         subtitle={
           <>
             Limpa legenda queimada e marca d&apos;água.{' '}
-            <span className="font-semibold text-white">A IA reconstrói o fundo</span> — sem borrão, sem mancha, sem censura barata.
+            <span className="font-semibold text-white">A IA reconstrói o fundo.</span>
           </>
         }
         tint="fuchsia"

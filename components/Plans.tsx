@@ -1446,7 +1446,7 @@ const TOOL_DETAILS: ToolInfo[] = [
     name: 'Removedor de Legenda/Marca d’Água',
     cat: 'IA',
     hue: 'rgba(244,114,182,0.55)',
-    desc: 'Apaga legenda gravada e marca d’água de vídeos, sem deixar borrão.',
+    desc: 'Apaga legenda gravada e marca d’água de vídeos.',
     win: 'A IA reconstrói o fundo. Resultado limpo, profissional.',
   },
   {
