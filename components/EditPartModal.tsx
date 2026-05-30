@@ -29,7 +29,9 @@ export function EditPartModal({
   input,
   onClose,
   onRegenerate,
-  /** Componente externo pra trocar a voz (ex: CompactVoiceSelector do projeto). */
+  /** Picker de avatar — page.tsx renderiza CompactAvatarPicker controlado por state externo. */
+  avatarPicker,
+  /** Picker de voz — page.tsx renderiza CompactVoiceSelector controlado por state externo. */
   voicePicker,
   /** Se true, mostra spinner no botao refresh + bloqueia interacoes. */
   busy = false,
@@ -39,6 +41,7 @@ export function EditPartModal({
   input: EditPartInput;
   onClose: () => void;
   onRegenerate: (newText: string) => void;
+  avatarPicker?: React.ReactNode;
   voicePicker?: React.ReactNode;
   busy?: boolean;
   errorMsg?: string | null;
@@ -79,7 +82,7 @@ export function EditPartModal({
             <h3 className="mono mt-0.5 text-[14px] font-bold text-white" style={{ fontFamily: 'var(--font-tech)' }}>
               <span className="text-lime">{input.label}</span>
             </h3>
-            {input.avatarName ? (
+            {input.avatarName && !avatarPicker ? (
               <div className="mono mt-0.5 text-[10px] text-text-muted">avatar: <span className="text-white/80">{input.avatarName}</span></div>
             ) : null}
           </div>
@@ -97,11 +100,21 @@ export function EditPartModal({
           </button>
         </div>
 
-        {/* Voice picker (opcional) */}
-        {voicePicker ? (
-          <div className="mb-4">
-            <div className="mono mb-1.5 text-[9px] uppercase tracking-widest text-text-muted">Voz</div>
-            {voicePicker}
+        {/* Avatar + Voice pickers — lado a lado em wide, empilhado em narrow */}
+        {(avatarPicker || voicePicker) ? (
+          <div className="mb-4 grid gap-3 sm:grid-cols-2">
+            {avatarPicker ? (
+              <div>
+                <div className="mono mb-1.5 text-[9px] uppercase tracking-widest text-text-muted">Avatar</div>
+                {avatarPicker}
+              </div>
+            ) : null}
+            {voicePicker ? (
+              <div>
+                <div className="mono mb-1.5 text-[9px] uppercase tracking-widest text-text-muted">Voz</div>
+                {voicePicker}
+              </div>
+            ) : null}
           </div>
         ) : null}
 

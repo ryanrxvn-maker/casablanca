@@ -2967,12 +2967,40 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   // BatchJobCard3D mostre botao "Atualizar montagem" depois.
 
   const [editingPart, setEditingPart] = useState<
-    | { taskId: string; partIdx: number; label: string; currentText: string; avatarName?: string; voiceId: string | null }
+    | { taskId: string; partIdx: number; label: string; currentText: string }
     | null
   >(null);
+  // Avatar/voice escolhidos no modal (controlados — pickers leem desses states).
+  // Resetados ao abrir; lidos no regenerateSinglePart.
+  const [editAvatar, setEditAvatar] = useState<AvatarOption | null>(null);
+  const [editVoice, setEditVoice] = useState<{ id: string; name: string } | null>(null);
   const [regeneratingPart, setRegeneratingPart] = useState<{ taskId: string; label: string } | null>(null);
   const [regenError, setRegenError] = useState<string | null>(null);
   const [rebuildingTaskId, setRebuildingTaskId] = useState<string | null>(null);
+
+  /** Procura AvatarOption completo na library cache pelo avatarId.
+   *  Retorna null se nao achar (library nao carregada ou avatar deletado). */
+  function findAvatarOptionById(avatarId: string | null | undefined): AvatarOption | null {
+    if (!avatarId) return null;
+    const snap = getLibrarySnapshot();
+    for (const g of snap.groups) {
+      for (const look of g.looks) {
+        if (look.id === avatarId) {
+          return {
+            id: look.id,
+            name: look.name || g.name,
+            thumb: look.thumb || g.thumb || null,
+            videoPreview: (look as any).videoPreview || null,
+            type: g.type,
+            version: g.version,
+            groupId: g.id,
+            groupName: g.name,
+          } as AvatarOption;
+        }
+      }
+    }
+    return null;
+  }
 
   function openEditPart(taskId: string, partIdx: number) {
     const b = batchStates[taskId];
@@ -2981,25 +3009,37 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     if (!part) return;
     const replanPart = b.replan?.parts[partIdx];
     setRegenError(null);
+    // Pre-popula avatar + voice com o que ja esta usando
+    const currentAvatar = findAvatarOptionById(replanPart?.avatarId);
+    setEditAvatar(currentAvatar);
+    setEditVoice(replanPart?.voiceId ? { id: replanPart.voiceId, name: '' } : null);
     setEditingPart({
       taskId,
       partIdx,
       label: part.label,
       currentText: replanPart?.text || '',
-      avatarName: undefined,
-      voiceId: replanPart?.voiceId ?? null,
     });
+    // Garante library carregada (no-op se ja em cache)
+    void reloadLibrary(false);
   }
 
   async function regenerateSinglePart(newText: string) {
     if (!editingPart) return;
-    const { taskId, partIdx, label, voiceId } = editingPart;
+    const { taskId, partIdx, label } = editingPart;
     const b = batchStates[taskId];
     const replanPart = b?.replan?.parts[partIdx];
-    if (!b || !replanPart || !replanPart.avatarId) {
-      setRegenError('Sem dados de replan/avatar — refaz a analise da task.');
+    if (!b || !replanPart) {
+      setRegenError('Sem dados de replan — refaz a analise da task.');
       return;
     }
+    // Avatar pode vir do picker (editAvatar) OU do replan antigo. Se NENHUM, erro.
+    const effectiveAvatarId = editAvatar?.id || replanPart.avatarId;
+    if (!effectiveAvatarId) {
+      setRegenError('Escolha um avatar — sem avatar nao da pra disparar.');
+      return;
+    }
+    // Voz pode vir do picker (editVoice) OU do replan antigo. Null = voz padrao do avatar.
+    const effectiveVoiceId = editVoice?.id || replanPart.voiceId || null;
     if (newText.trim().length === 0) {
       setRegenError('Texto vazio — preenche o script.');
       return;
@@ -3008,18 +3048,20 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     setRegenError(null);
 
     try {
-      // 1) Atualiza replan local com o novo texto (persiste no localStorage
-      //    automaticamente via useEffect persistBatchStates).
+      // 1) Atualiza replan local com novo texto + novo avatar + nova voz
+      //    (persiste no localStorage automaticamente via useEffect persistBatchStates).
       setBatchStates((prev) => {
         const cur = prev[taskId];
         if (!cur || !cur.replan) return prev;
-        const newParts = cur.replan.parts.map((p, i) => i === partIdx ? { ...p, text: newText, voiceId } : p);
+        const newReplanParts = cur.replan.parts.map((p, i) => i === partIdx
+          ? { ...p, text: newText, avatarId: effectiveAvatarId, voiceId: effectiveVoiceId }
+          : p);
         return {
           ...prev,
           [taskId]: {
             ...cur,
-            replan: { ...cur.replan, parts: newParts },
-            // Reseta status visual da parte pra 'processing' enquanto re-gera
+            replan: { ...cur.replan, parts: newReplanParts },
+            // Reseta status visual da parte pra pending enquanto re-gera
             parts: cur.parts.map((p, i) => i === partIdx
               ? { ...p, videoStatus: 'pending' as const, videoUrl: null, error: null }
               : p),
@@ -3027,14 +3069,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         };
       });
 
-      // 2) Dispara processJob com o novo texto + mesmo avatar/voz
+      // 2) Dispara processJob com novo texto + (talvez) novo avatar + (talvez) nova voz
       const { processJob } = await import('@/lib/heygen-api-direct');
       const adNameSafe = b.baseAdId.replace(/[^A-Z0-9]/gi, '_');
       const job = await processJob({
         text: newText,
-        voiceId: voiceId || undefined,
+        voiceId: effectiveVoiceId || undefined,
         title: `${adNameSafe}_${label}_edit`,
-        avatarId: replanPart.avatarId,
+        avatarId: effectiveAvatarId,
         engine: 'iii',
         orientation: 'portrait',
       });
@@ -6317,12 +6359,35 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
           input={{
             label: editingPart.label,
             text: editingPart.currentText,
-            voiceId: editingPart.voiceId,
+            avatarName: editAvatar?.name,
+            voiceId: editVoice?.id ?? null,
+            voiceName: editVoice?.name ?? null,
           }}
           busy={!!regeneratingPart}
           errorMsg={regenError}
-          onClose={() => { if (!regeneratingPart) { setEditingPart(null); setRegenError(null); } }}
+          onClose={() => {
+            if (!regeneratingPart) {
+              setEditingPart(null);
+              setEditAvatar(null);
+              setEditVoice(null);
+              setRegenError(null);
+            }
+          }}
           onRegenerate={(newText) => void regenerateSinglePart(newText)}
+          avatarPicker={
+            <CompactAvatarPicker
+              selected={editAvatar}
+              setSelected={(a) => setEditAvatar(a)}
+              disabled={!!regeneratingPart}
+              label={`Avatar pra ${editingPart.label}`}
+            />
+          }
+          voicePicker={
+            <CompactVoiceSelector
+              selected={editVoice}
+              setSelected={(v) => setEditVoice(v)}
+            />
+          }
         />
       ) : null}
     </>
