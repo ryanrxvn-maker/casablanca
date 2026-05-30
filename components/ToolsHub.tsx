@@ -501,8 +501,7 @@ function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
     <div
       className="promo-banner group relative overflow-hidden rounded-[26px] border border-line/60"
       style={{
-        background:
-          'linear-gradient(120deg, rgba(200,255,0,0.16) 0%, rgba(167,139,250,0.18) 50%, rgba(34,211,238,0.12) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep))',
+        background: 'var(--banner-bg)',
       }}
     >
       {/* Mesh gradient animado — duas manchas que pulsam fora de fase */}
@@ -669,8 +668,7 @@ function AutoBrollSlide({ canStartAutomation }: { canStartAutomation: boolean })
     <div
       className="group relative overflow-hidden rounded-[26px] border border-violet/30"
       style={{
-        background:
-          'linear-gradient(120deg, rgba(167,139,250,0.20) 0%, rgba(240,171,252,0.16) 50%, rgba(200,255,0,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep))',
+        background: 'var(--banner-bg-2)',
       }}
     >
       {/* Mesh pulses */}
@@ -952,7 +950,7 @@ function FeaturedCard({
       />
       <div
         aria-hidden
-        className="pointer-events-none absolute -right-14 -top-14 h-44 w-44 rounded-full opacity-70 blur-3xl transition-all duration-500 group-hover:opacity-100"
+        className="hub-glow pointer-events-none absolute -right-14 -top-14 h-44 w-44 rounded-full opacity-70 blur-3xl transition-all duration-500 group-hover:opacity-100"
         style={{ background: entry.hue }}
       />
       <div
@@ -1106,7 +1104,7 @@ function ToolCard({
     <>
       <div
         aria-hidden
-        className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full opacity-0 blur-2xl transition-opacity duration-500 group-hover:opacity-80"
+        className="hub-glow pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full opacity-0 blur-2xl transition-opacity duration-500 group-hover:opacity-80"
         style={{ background: entry.hue }}
       />
 

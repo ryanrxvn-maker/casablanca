@@ -8,7 +8,6 @@ import { ClickUpPilotButton } from './ClickUpPilotButton';
 import { GlobalSearchButton } from './GlobalSearch';
 import { LipsyncHistoryButton } from './LipsyncHistoryButton';
 import { PointsButton } from './PointsButton';
-import { ThemeToggle } from './ThemeToggle';
 
 /**
  * TopBar v4 — barra fina com título contextual + cluster de ações.
@@ -98,7 +97,6 @@ export function TopBar() {
 
         {/* Direita: pílula de busca (3D) + cluster de ícones */}
         <div className="flex items-center gap-3">
-          <ThemeToggle />
           <GlobalSearchButton />
           <div className="topbar-cluster">
             <CalculadoraButton />

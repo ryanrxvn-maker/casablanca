@@ -34,6 +34,9 @@
      sem ficar com camada preta por cima. */
   --card-face: linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)));
   --card-deep: #0a0a0c;
+  /* Banners do hub (theme-aware) — no claro ficam neutros (menos cor). */
+  --banner-bg: linear-gradient(120deg, rgba(200,255,0,0.16) 0%, rgba(167,139,250,0.18) 50%, rgba(34,211,238,0.12) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep));
+  --banner-bg-2: linear-gradient(120deg, rgba(167,139,250,0.20) 0%, rgba(240,171,252,0.16) 50%, rgba(200,255,0,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep));
 
   /* Mouse-tracked spotlight (atualizado por components/MouseGlow.tsx). */
   --mx: 50vw;
@@ -1013,26 +1016,36 @@ textarea,
    colorido, mesmas animações. */
 html[data-theme='light'] {
   color-scheme: light;
-  /* Off-white suave e levemente quente — nada de branco estourado. */
-  --bg: 231 230 226;        /* base */
-  --bg-soft: 243 243 240;   /* card */
-  --bg-softer: 250 250 248; /* card elevado */
-  --bg-elev: 255 255 255;   /* topo */
-  --line: 224 223 217;      /* bordas bem discretas */
-  --line-strong: 209 208 201;
-  --line-glow: 194 193 186;
-  --text: 30 30 36;
-  --text-muted: 96 96 105;
+  /* Off-white FRACO/acinzentado — nada de branco estourado. */
+  --bg: 221 220 215;        /* base (cinza claro, não branco) */
+  --bg-soft: 233 232 228;   /* card */
+  --bg-softer: 240 239 235; /* card elevado */
+  --bg-elev: 246 245 242;   /* topo */
+  --line: 213 212 205;      /* bordas bem discretas */
+  --line-strong: 199 198 190;
+  --line-glow: 184 183 175;
+  --text: 34 34 40;
+  --text-muted: 100 100 108;
   --text-dim: 158 158 164;
-  /* acentos puxados pra tons que leem no branco (lime neon some) */
-  --lime: 95 140 0;
-  --violet: 109 78 232;
-  --violet-deep: 90 62 208;
-  --amber: 176 125 10;
-  --cyan: 14 116 144;
-  /* Cards no claro: brancos limpos, SEM camada preta. */
-  --card-face: linear-gradient(180deg, #ffffff, #f4f4f1);
-  --card-deep: #edeeec;
+  /* acentos PUXADOS PRO CINZA — menos cor (mantém só um leve tom). */
+  --lime: 108 122 70;
+  --violet: 116 104 158;
+  --violet-deep: 104 92 142;
+  --amber: 152 124 64;
+  --cyan: 78 112 126;
+  /* Cards no claro: off-white suave, SEM camada preta. */
+  --card-face: linear-gradient(180deg, #f1f1ee, #e8e8e3);
+  --card-deep: #e6e6e2;
+  /* Banners neutros no claro (sem o degradê colorido). */
+  --banner-bg: linear-gradient(180deg, #efefeb, #e6e6e1);
+  --banner-bg-2: linear-gradient(180deg, #edede9, #e4e4df);
+}
+
+/* Glows decorativos coloridos dos cards/banner: quase apagados + sem
+   saturação no claro (era o que "sobrepunha" tons rosa/roxo). */
+html[data-theme='light'] .hub-glow {
+  opacity: 0.1 !important;
+  filter: saturate(0.35);
 }
 
 /* Fundo do body no claro: só um glow bem sutil. SEM grade (no claro a grade
