@@ -111,6 +111,13 @@ export const metadata: Metadata = {
     ],
     apple: [{ url: '/auto-edit-logo@256.png', sizes: '256x256' }],
   },
+  // Verificação do Google Search Console — método "tag HTML".
+  // Cole o código em GOOGLE_SITE_VERIFICATION na Vercel e redeploy; se vazio,
+  // o Next simplesmente omite a meta tag. (O método por DNS no Cloudflare é
+  // ainda mais rápido e não precisa de código.)
+  verification: process.env.GOOGLE_SITE_VERIFICATION
+    ? { google: process.env.GOOGLE_SITE_VERIFICATION }
+    : undefined,
   // Marker pra extensão Freepik Sync auto-detectar este domínio.
   other: {
     'auto-edit-app': 'true',
