@@ -97,13 +97,40 @@ export async function magnificFetch(
         return;
       }
       const body: string = m.body ?? '';
-      // DETECÇÃO DE PAYWALL/CAP EXCEEDED: Magnific retorna 200 + HTML quando
-      // a conta estoura o cap do ciclo (usage > 100%). Em vez de devolver
-      // 429 ou JSON com erro, ele silenciosamente serve a página HTML.
-      // Detectamos isso e transformamos em erro permanente claro.
-      const isHtmlResponse = body.trim().toLowerCase().startsWith('<!doctype');
+      // DETECÇÃO DE PAYWALL — REFINADA (2026-05-30):
+      // Antes marcávamos QUALQUER HTML como cap exceeded. Mas o Magnific às
+      // vezes devolve HTML por outras razões (redirect transitório, página
+      // de promo, request fora de hora), sem ser bloqueio real. User
+      // comprovou: gerou manual ok mesmo com a gente "detectando paywall".
+      //
+      // Agora só marca como CAP_EXCEEDED se o HTML tiver MARCADORES
+      // CONCRETOS de paywall/upgrade. Caso contrário, deixa passar com
+      // erro genérico (caller pode retry).
+      const lower = body.trim().toLowerCase();
+      const isHtmlResponse = lower.startsWith('<!doctype') || lower.startsWith('<html');
       if (isHtmlResponse && /api\/v2\/ai\/(start-tti|simulate-generation)|api\/generate/.test(path)) {
-        reject(new Error('MAGNIFIC_CAP_EXCEEDED: seu limite interno mensal do Magnific acabou'));
+        const paywallMarkers = [
+          'upgrade your plan',
+          'cap exceeded',
+          'usage limit',
+          'limit reached',
+          'unlimited cap',
+          'you have reached',
+          'limite atingido',
+          'plano premium',
+        ];
+        const isRealPaywall = paywallMarkers.some((mk) => lower.includes(mk));
+        if (isRealPaywall) {
+          reject(new Error('MAGNIFIC_CAP_EXCEEDED: seu limite interno mensal do Magnific acabou'));
+          return;
+        }
+        // HTML genérico (promo, redirect, página normal) — devolve como
+        // erro retryable. O pipeline vai tentar de novo (com backoff).
+        reject(new Error(
+          `Magnific devolveu HTML inesperado em ${path.slice(0, 60)} — ` +
+          `provavelmente cache/redirect. Vou tentar de novo. Se persistir, ` +
+          `recarregue a aba magnific.com.`,
+        ));
         return;
       }
       resolve({
