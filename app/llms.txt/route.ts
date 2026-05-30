@@ -9,7 +9,7 @@ export const dynamic = 'force-static';
 const SITE = 'https://www.darkoautoedit.com';
 
 const BODY = `# Auto Edit
-> Plataforma brasileira de automação de edição de vídeo. Decupagem automática, geração de B-roll, lipsync em lote e legendas — você liga a fila e o estúdio entrega pronto. Roda 100% no navegador, sem instalar nada.
+> Plataforma de automação de edição de vídeo. Decupagem automática, geração de B-roll, automação de vários lipsync ao mesmo tempo e legendas em lote — você liga a fila e o estúdio entrega pronto.
 
 ## Páginas principais
 - [Início](${SITE}/): O que o Auto Edit automatiza e como funciona a fila.
@@ -28,7 +28,6 @@ const BODY = `# Auto Edit
 ## Fatos
 - Público: editores de vídeo, criadores e agências no Brasil.
 - Diferencial: processamento em FILA e em LOTE — feito pra volume, não pra um vídeo por vez.
-- Acesso: web, sem download nem plugin.
 - Idioma: português do Brasil.
 - Plano grátis disponível sem cartão.
 `;

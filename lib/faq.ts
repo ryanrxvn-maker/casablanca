@@ -17,7 +17,7 @@ export type FaqItem = { q: string; a: string };
 export const FAQ: FaqItem[] = [
   {
     q: 'O que é o Auto Edit?',
-    a: 'O Auto Edit é uma plataforma brasileira de automação de edição de vídeo. Ele faz decupagem, gera B-roll, aplica lipsync e cria legendas em lote — você liga a fila e o estúdio entrega pronto, sem ficar no monitor. Roda direto no navegador, sem instalar nada.',
+    a: 'O Auto Edit é uma plataforma de automação de edição de vídeo. Ele faz decupagem, gera B-roll, dispara vários lipsync ao mesmo tempo e cria legendas em lote — você liga a fila e o estúdio entrega pronto, sem ficar no monitor.',
   },
   {
     q: 'Como funciona a decupagem automática?',
@@ -25,7 +25,7 @@ export const FAQ: FaqItem[] = [
   },
   {
     q: 'Dá pra remover legenda gravada ("queimada") do vídeo?',
-    a: 'Sim. O Auto Edit remove legenda gravada e marca d’água em massa: você passa o lote e a IA limpa todos os vídeos de uma vez. Serve pra reaproveitar criativos de UGC e anúncios sem precisar regravar.',
+    a: 'Sim. O Auto Edit remove legenda gravada e marca d’água em massa, sem custo. Essa ferramenta roda no seu próprio PC: você instala o motor local (precisa de uma GPU) e a IA limpa o lote de uma vez. Serve pra reaproveitar criativos de UGC e anúncios sem precisar regravar.',
   },
   {
     q: 'Consigo fazer lipsync de vários avatares de uma vez (HeyGen em lote)?',
@@ -33,15 +33,11 @@ export const FAQ: FaqItem[] = [
   },
   {
     q: 'Dá pra gerar B-roll automaticamente?',
-    a: 'Sim. Cola o JSON, liga a fila e o Auto Edit gera o B-roll do dia inteiro. Você volta com a pasta cheia de cortes congruentes, sem garimpar banco de imagens manualmente.',
+    a: 'Sim. Cola o JSON, liga a fila e o Auto Edit gera o B-roll do dia inteiro. Você volta com a pasta cheia de takes e B-rolls personalizados, sem garimpar banco de imagens manualmente.',
   },
   {
     q: 'Tem plano grátis? Quanto custa?',
     a: 'Tem plano grátis pra começar sem cartão. Os planos pagos são Basic (R$ 57/mês) e Pro (R$ 116/mês), com mais ferramentas e volume. A assinatura mensal é recorrente no cartão e o plano anual pode ser parcelado em até 12×.',
-  },
-  {
-    q: 'Precisa instalar algum programa?',
-    a: 'Não. O Auto Edit roda 100% no navegador. Você faz login, sobe os vídeos e usa as ferramentas direto pela web — sem download, sem plugin, funciona em qualquer computador.',
   },
   {
     q: 'Serve pra agência e produção em escala?',

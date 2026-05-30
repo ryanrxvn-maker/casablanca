@@ -139,7 +139,7 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Remover legenda de vários vídeos de uma vez',
         body: [
-          'Em vez de tratar um vídeo por vez, você joga o lote inteiro na fila e a IA limpa todos. É o jeito mais rápido de processar volume — sem download de programa, tudo no navegador.',
+          'Em vez de tratar um vídeo por vez, você joga o lote inteiro na fila e a IA limpa todos. É o jeito mais rápido de processar volume.',
         ],
       },
     ],
@@ -686,13 +686,13 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Remover marca d’água de vários vídeos de uma vez',
         body: [
-          'Em vez de tratar um por um, você joga o lote inteiro na fila e a IA limpa todos. Sem download de programa, tudo no navegador.',
+          'Em vez de tratar um por um, você joga o lote inteiro na fila e a IA limpa todos de uma vez.',
         ],
       },
       {
-        h2: 'Precisa instalar algo?',
+        h2: 'Como funciona o acesso?',
         body: [
-          'Não. A remoção roda no navegador. Você começa no plano grátis e libera mais volume nos planos Basic (R$ 57/mês) e Pro (R$ 116/mês).',
+          'A remoção roda no seu próprio PC e é sem custo: você instala o motor local (precisa de uma GPU) e processa o lote. As outras ferramentas de automação ficam nos planos Basic (R$ 57/mês) e Pro (R$ 116/mês).',
         ],
       },
     ],
