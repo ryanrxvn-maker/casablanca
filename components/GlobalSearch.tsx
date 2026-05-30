@@ -302,7 +302,7 @@ export function GlobalSearchButton() {
           box-shadow:
             inset 0 1px 0 rgba(255, 255, 255, 0.08),
             inset 0 -1px 0 rgba(0, 0, 0, 0.4),
-            0 6px 18px -8px rgba(167, 139, 250, 0.35),
+            0 6px 18px -8px rgba(167, 139, 250, var(--search-shadow, 0.35)),
             0 1px 0 rgba(0, 0, 0, 0.45);
         }
 
@@ -346,7 +346,7 @@ export function GlobalSearchButton() {
           pointer-events: none;
         }
         .search-btn:hover .search-ambient {
-          opacity: 0.85;
+          opacity: var(--search-glow-hover, 0.85);
         }
         @keyframes search-ambient-pulse {
           0%, 100% { transform: scale(1); }

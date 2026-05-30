@@ -1031,7 +1031,9 @@ html[data-theme='light'] {
   --text: 26 26 32;         /* texto bem escuro */
   --text-muted: 78 78 86;   /* escuro (legível) */
   --text-dim: 112 112 120;  /* labels: cinza médio, NÃO some mais */
-  --search-glow: 0.1;       /* halo do botao Pesquisar quase off no claro */
+  --search-glow: 0;         /* halo do botao Pesquisar OFF no claro (fim do "2 botoes") */
+  --search-glow-hover: 0.12;
+  --search-shadow: 0.05;    /* sombra violeta do botao quase neutra no claro */
   /* acentos ESCUROS — evidência forte no fundo claro (texto/ícones que
      usam acento ficam legíveis, sem aquele "verde claro que some"). */
   --lime: 72 90 24;
