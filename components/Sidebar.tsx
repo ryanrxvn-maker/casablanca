@@ -216,7 +216,7 @@ export function Sidebar() {
         </Link>
 
         {/* Navegação principal por categorias */}
-        <nav className="flex-1 overflow-y-auto py-3">
+        <nav className="flex-1 overflow-y-auto py-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {sections.map((section, sIdx) => (
             <div key={section.label} className={sIdx === 0 ? '' : 'mt-4'}>
               {/* Label de categoria */}

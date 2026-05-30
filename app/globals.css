@@ -1126,6 +1126,28 @@ html[data-theme='light'] .btn-primary {
   color: #ffffff;
 }
 
+/* ILHA ESCURA — elementos marcados com .dark-island continuam DARK mesmo no
+   modo claro (cards pretos por design, ex.: o "cérebro" Dashboard). As vars
+   voltam pros valores escuros, então texto/acentos ficam legíveis. */
+html[data-theme='light'] .dark-island {
+  --bg: 7 7 8;
+  --bg-soft: 14 14 16;
+  --bg-softer: 21 21 26;
+  --bg-elev: 26 26 32;
+  --line: 28 28 34;
+  --line-strong: 36 36 44;
+  --line-glow: 46 46 56;
+  --text: 255 255 255;
+  --text-muted: 139 139 150;
+  --text-dim: 77 77 87;
+  --lime: 200 255 0;
+  --violet: 167 139 250;
+  --violet-deep: 109 78 232;
+  --amber: 245 200 66;
+  --cyan: 103 232 249;
+  --pink: 244 114 182;
+}
+
 /* Botão Pesquisar no claro: pílula ÚNICA e limpa. Esconde as camadas
    decorativas (halo/borda cônica/spotlight/sheen) que criavam o efeito
    de "2 botões". */

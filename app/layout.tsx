@@ -212,7 +212,7 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html:
-              "(function(){try{var p=location.pathname,s=location.search;var app=(p==='/tools'||p.indexOf('/tools/')===0||p.indexOf('/configuracoes')===0||p.indexOf('/admin')===0||((p==='/planos'||p.indexOf('/planos')===0)&&s.indexOf('upgrade')>-1));if(app&&localStorage.getItem('theme')==='light'){document.documentElement.setAttribute('data-theme','light');}}catch(e){}})();",
+              "(function(){try{var p=location.pathname,s=location.search;var forceDark=p.indexOf('/admin/dashboard')===0;var app=(p==='/tools'||p.indexOf('/tools/')===0||p.indexOf('/configuracoes')===0||p.indexOf('/admin')===0||((p==='/planos'||p.indexOf('/planos')===0)&&s.indexOf('upgrade')>-1));if(app&&!forceDark&&localStorage.getItem('theme')==='light'){document.documentElement.setAttribute('data-theme','light');}}catch(e){}})();",
           }}
         />
         <script

@@ -199,7 +199,7 @@ export default function ConfiguracoesPage() {
               <section className="fade-in-up" style={{ animationDelay: '20ms' }}>
                 <a href="/admin/dashboard" className="brain-btn group relative block overflow-hidden rounded-[20px] p-[1.5px]">
                   <span aria-hidden className="brain-btn-border" />
-                  <span className="relative flex items-center justify-between gap-4 rounded-[19px] bg-[#0c0c11] px-6 py-6">
+                  <span className="dark-island relative flex items-center justify-between gap-4 rounded-[19px] bg-[#0c0c11] px-6 py-6">
                     <span className="flex items-center gap-4">
                       <span className="brain-btn-icon relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl">
                         <svg width="30" height="30" viewBox="0 0 120 120" fill="none">
