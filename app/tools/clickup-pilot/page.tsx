@@ -4971,21 +4971,33 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                 >
                                   {t.name}
                                 </span>
+                                {/* === BADGES estilo SaaS pro (Linear/Stripe/Vercel) ===
+                                    - bg tinted suave (10-15% opacity) — funciona em ambos os modos
+                                    - border solid mid-saturation (40-50% opacity) — define forma
+                                    - text colored (medium saturation) — alto contraste sem brigar
+                                    - tabular-nums pros numeros — alinhamento perfeito
+                                    - dot indicator solido — focal point sutil
+                                    - rounded-md (nao pill candy) — sobrio
+                                */}
                                 {hasSiblings && gSuffix ? (
                                   <span
-                                    className="mono inline-flex items-center gap-1.5 rounded-full bg-cyan-500 px-2.5 py-[5px] text-white shadow-[0_2px_8px_rgba(34,211,238,0.55),inset_0_1px_0_rgba(255,255,255,0.25)] border border-cyan-300"
+                                    className="inline-flex items-center gap-1.5 rounded-md border border-violet-500/45 bg-violet-500/10 px-2 py-1 text-violet-600 dark:text-violet-300"
                                     title={`Tasks irmas: ${siblingsAll.map(s => s.name.match(/G\d+\s*$/i)?.[0] || '?').filter(Boolean).join(' + ')}`}
                                   >
-                                    <span className="text-[11.5px] font-black leading-none" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.35)' }}>{siblingsAll.length}Gs</span>
+                                    <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
+                                    <span className="text-[11px] font-bold leading-none tabular-nums">{siblingsAll.length}</span>
+                                    <span className="text-[9.5px] font-semibold uppercase leading-none tracking-[0.08em] opacity-80">grupo</span>
                                   </span>
                                 ) : null}
                                 {t.priority?.priority === 'urgent' ? (
-                                  <span className="mono inline-flex items-center gap-1.5 rounded-full bg-red-500 px-2.5 py-[5px] text-white shadow-[0_2px_8px_rgba(239,68,68,0.55),inset_0_1px_0_rgba(255,255,255,0.25)] border border-red-300">
-                                    <span className="text-[11.5px] font-black uppercase leading-none tracking-tight" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.4)' }}>Urgente</span>
+                                  <span className="inline-flex items-center gap-1.5 rounded-md border border-red-500/45 bg-red-500/10 px-2 py-1 text-red-600 dark:text-red-300">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                                    <span className="text-[10.5px] font-bold uppercase leading-none tracking-[0.08em]">Urgente</span>
                                   </span>
                                 ) : t.priority?.priority === 'high' ? (
-                                  <span className="mono inline-flex items-center gap-1.5 rounded-full bg-orange-500 px-2.5 py-[5px] text-white shadow-[0_2px_8px_rgba(249,115,22,0.55),inset_0_1px_0_rgba(255,255,255,0.25)] border border-orange-300">
-                                    <span className="text-[11.5px] font-black uppercase leading-none tracking-tight" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.4)' }}>Alta</span>
+                                  <span className="inline-flex items-center gap-1.5 rounded-md border border-orange-500/45 bg-orange-500/10 px-2 py-1 text-orange-600 dark:text-orange-300">
+                                    <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />
+                                    <span className="text-[10.5px] font-bold uppercase leading-none tracking-[0.08em]">Alta</span>
                                   </span>
                                 ) : null}
                                 {(() => {
@@ -4997,17 +5009,15 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   today.setHours(0, 0, 0, 0);
                                   const tomorrow = today.getTime() + DAY;
                                   const dueDate = new Date(due);
-                                  // Pill humanizada: numero GRANDE + label menor pra escaneamento rapido
+                                  // Decide content + estilo por estado
                                   let bigText = '';
                                   let smallText = '';
-                                  let cls = '';
+                                  let palette = ''; // border/bg/text classes
+                                  let dotCls = '';
                                   if (due < today.getTime()) {
                                     const daysAgo = Math.floor((today.getTime() - due) / DAY);
                                     if (daysAgo === 0) {
                                       bigText = 'Hoje';
-                                      smallText = 'atrasada';
-                                    } else if (daysAgo === 1) {
-                                      bigText = '1d';
                                       smallText = 'atrasada';
                                     } else if (daysAgo < 30) {
                                       bigText = `${daysAgo}d`;
@@ -5017,42 +5027,36 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       bigText = `${weeks}sem`;
                                       smallText = 'atrasada';
                                     }
-                                    cls = 'bg-red-500 text-white shadow-[0_2px_8px_rgba(239,68,68,0.6),inset_0_1px_0_rgba(255,255,255,0.25)] border border-red-300';
+                                    palette = 'border-red-500/45 bg-red-500/10 text-red-600 dark:text-red-300';
+                                    dotCls = 'bg-red-500';
                                   } else if (due < tomorrow) {
                                     bigText = 'Hoje';
                                     smallText = '';
-                                    cls = 'bg-amber-400 text-black shadow-[0_2px_8px_rgba(251,191,36,0.6),inset_0_1px_0_rgba(255,255,255,0.4)] border border-amber-200';
+                                    palette = 'border-amber-500/55 bg-amber-500/12 text-amber-700 dark:text-amber-300';
+                                    dotCls = 'bg-amber-500 animate-pulse';
                                   } else {
                                     const daysAhead = Math.ceil((due - now) / DAY);
                                     if (daysAhead <= 7) {
                                       bigText = `${daysAhead}d`;
-                                      smallText = daysAhead <= 3 ? 'urgente' : 'p/ vencer';
+                                      smallText = daysAhead <= 3 ? 'p/ vencer' : 'restantes';
                                     } else {
                                       bigText = dueDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
                                       smallText = '';
                                     }
                                     if (daysAhead <= 3) {
-                                      cls = 'bg-cyan-500 text-white shadow-[0_2px_8px_rgba(34,211,238,0.55),inset_0_1px_0_rgba(255,255,255,0.25)] border border-cyan-300';
+                                      palette = 'border-amber-500/45 bg-amber-500/10 text-amber-700 dark:text-amber-300';
+                                      dotCls = 'bg-amber-500';
                                     } else {
-                                      cls = 'bg-zinc-600 dark:bg-zinc-500/80 text-white shadow-[0_2px_6px_rgba(0,0,0,0.25),inset_0_1px_0_rgba(255,255,255,0.15)] border border-zinc-400/60';
+                                      palette = 'border-line-strong bg-zinc-500/8 text-text-muted';
+                                      dotCls = 'bg-zinc-400';
                                     }
                                   }
-                                  const isDark = cls.includes('text-white');
                                   return (
-                                    <span className={`mono inline-flex items-center gap-1.5 rounded-full px-2.5 py-[5px] ${cls}`}>
-                                      <span
-                                        className="text-[11.5px] font-black leading-none tracking-tight"
-                                        style={{ textShadow: isDark ? '0 1px 2px rgba(0,0,0,0.4)' : 'none' }}
-                                      >
-                                        {bigText}
-                                      </span>
+                                    <span className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 ${palette}`}>
+                                      <span className={`h-1.5 w-1.5 rounded-full ${dotCls}`} />
+                                      <span className="text-[11px] font-bold leading-none tabular-nums">{bigText}</span>
                                       {smallText ? (
-                                        <span
-                                          className="text-[9.5px] font-bold uppercase leading-none tracking-[0.04em] opacity-95"
-                                          style={{ textShadow: isDark ? '0 1px 2px rgba(0,0,0,0.35)' : 'none' }}
-                                        >
-                                          {smallText}
-                                        </span>
+                                        <span className="text-[9.5px] font-semibold uppercase leading-none tracking-[0.08em] opacity-80">{smallText}</span>
                                       ) : null}
                                     </span>
                                   );
