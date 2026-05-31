@@ -1208,6 +1208,51 @@ async function injectInterceptorIntoMainWorld(tabId) {
  * READ-ONLY: abre tab em /mobilebasic do Google Doc, espera carregar,
  * le innerText e retorna. Nunca escreve, edita ou comenta no doc.
  */
+// Tabela de entidades HTML — PT-BR + ASCII basicas + tipografia. Google
+// Docs HTML export usa entities (&ccedil;, &atilde;, &aacute;, etc) em vez
+// de UTF-8 direto, principalmente em headers de paragrafo e em links
+// (anchor text "Viva Saud&aacute;vel..." em chips Drive). Por isso a
+// decode tem que rodar TANTO no body text QUANTO no linkText — senao o
+// matching pra resolver fileId pelo nome falha (user reportou 29/05/2026
+// AD30 com "Saudável" → driveLink text "Saud&aacute;vel" nao casava).
+const HTML_ENTITIES_MAP = {
+  'nbsp': ' ', 'amp': '&', 'lt': '<', 'gt': '>', 'quot': '"', 'apos': "'",
+  // Latim acentuado minusculas
+  'aacute': 'á', 'eacute': 'é', 'iacute': 'í', 'oacute': 'ó', 'uacute': 'ú',
+  'agrave': 'à', 'egrave': 'è', 'igrave': 'ì', 'ograve': 'ò', 'ugrave': 'ù',
+  'acirc':  'â', 'ecirc':  'ê', 'icirc':  'î', 'ocirc':  'ô', 'ucirc':  'û',
+  'atilde': 'ã', 'ntilde': 'ñ', 'otilde': 'õ',
+  'auml':   'ä', 'euml':   'ë', 'iuml':   'ï', 'ouml':   'ö', 'uuml':   'ü',
+  'aring':  'å', 'aelig':  'æ', 'ccedil': 'ç', 'oslash': 'ø', 'szlig':  'ß',
+  'yacute': 'ý', 'yuml':   'ÿ',
+  // Latim acentuado maiusculas
+  'Aacute': 'Á', 'Eacute': 'É', 'Iacute': 'Í', 'Oacute': 'Ó', 'Uacute': 'Ú',
+  'Agrave': 'À', 'Egrave': 'È', 'Igrave': 'Ì', 'Ograve': 'Ò', 'Ugrave': 'Ù',
+  'Acirc':  'Â', 'Ecirc':  'Ê', 'Icirc':  'Î', 'Ocirc':  'Ô', 'Ucirc':  'Û',
+  'Atilde': 'Ã', 'Ntilde': 'Ñ', 'Otilde': 'Õ',
+  'Auml':   'Ä', 'Euml':   'Ë', 'Iuml':   'Ï', 'Ouml':   'Ö', 'Uuml':   'Ü',
+  'Aring':  'Å', 'AElig':  'Æ', 'Ccedil': 'Ç', 'Oslash': 'Ø',
+  'Yacute': 'Ý',
+  // Pontuacao tipografica comum (pode aparecer em filenames com en-dash)
+  'lsquo': '‘', 'rsquo': '’', 'ldquo': '“', 'rdquo': '”',
+  'sbquo': '‚', 'bdquo': '„',
+  'ndash': '–', 'mdash': '—',
+  'hellip': '…', 'middot': '·',
+  'laquo': '«', 'raquo': '»',
+  'copy': '©', 'reg': '®', 'trade': '™',
+  'deg':  '°', 'plusmn': '±',
+  // Espacos especiais
+  'ensp': ' ', 'emsp': ' ', 'thinsp': ' ',
+};
+
+function decodeHtmlEntities(s) {
+  if (!s) return s;
+  return s
+    .replace(/&([a-zA-Z]+);/g, (raw, name) => (HTML_ENTITIES_MAP[name] !== undefined ? HTML_ENTITIES_MAP[name] : raw))
+    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+}
+
 /** Parse HTML exportado do Google Docs em background SW.
  *  SW nao tem DOMParser, entao fazemos regex puro:
  *   - Strip tags pra texto
@@ -1258,8 +1303,18 @@ function parseGoogleDocsHtml(html) {
       }
     }
     if (!fileId) continue;
-    // Strip HTML do texto do link
-    const linkText = m[2].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').trim();
+    // Strip HTML do texto do link + DECODE entities (PT-BR full).
+    // CRITICAL: tem que decodar entities aqui senao linkText fica
+    // "Viva Saud&aacute;vel..." e o normalizeForMatch (page.tsx) nao
+    // bate com username "Viva Saudável" do briefing → "sem link Drive".
+    let linkText = decodeHtmlEntities(m[2].replace(/<[^>]+>/g, '')).trim();
+    // FALLBACK pra chips com inner-text vazio (so <img alt="filename"/>):
+    // tenta o alt do primeiro <img> dentro do <a>. Cobre smart-chips do
+    // Google que renderizam o file embed so como thumbnail clicavel.
+    if (!linkText) {
+      const altMatch = m[2].match(/<img[^>]+alt=["']([^"']+)["']/i);
+      if (altMatch) linkText = decodeHtmlEntities(altMatch[1]).trim();
+    }
     const key = `${fileId}::${linkText}`;
     if (seen.has(key)) continue;
     seen.add(key);
