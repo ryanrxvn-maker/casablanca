@@ -304,12 +304,16 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
     console.warn('[va-pipeline] Demucs neural throw inesperado:', e);
   }
 
-  // === TENTATIVA 2 (fallback): FFmpeg local aggressive ===
+  // === TENTATIVA 2 (fallback): FFmpeg local 'bandpass' (natural) ===
+  // FIX 2026-05-30: era 'aggressive' que cortava acima de 6.5kHz + 2x FFT
+  // denoise super agressivo + compansor pesado = voz "de radio AM antigo".
+  // User reclamou: "voz horrivel como se tivesse saido de um radio".
+  // Trocado pra 'bandpass' (so voice-band 80-8000Hz, sem destruir timbre).
   if (!audioBlob) {
-    const isolatorMode = input.voiceIsolatorMode ?? 'aggressive';
+    const isolatorMode = input.voiceIsolatorMode ?? 'bandpass';
     progress({
       stage: 'isolate_voice',
-      message: `Demucs indisponível — fallback FFmpeg ${isolatorMode}...`,
+      message: `⚠ Demucs neural indisponivel — usando fallback FFmpeg ${isolatorMode} (qualidade menor; recomenda verificar REPLICATE_API_TOKEN no Vercel pra ativar Demucs).`,
       percent: 11,
     });
 

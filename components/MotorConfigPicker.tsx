@@ -37,27 +37,63 @@ export function MotorConfigPicker({
   // Previa de creditos / saldo HeyGen REMOVIDOS a pedido — picker so
   // escolhe o motor. Sem fetch de saldo, sem calculo de custo.
 
+  // Label compacto pro botao 3D
+  const motorLabel =
+    config.kind === 'global' ? `Avatar ${config.motor}` :
+    config.kind === 'percent' ? `Mix %` : 'Por avatar';
+  const motorColor =
+    config.kind === 'global'
+      ? (config.motor === 'III' ? 'lime' : config.motor === 'IV' ? 'amber' : 'fuchsia')
+      : 'cyan';
+  const colorClasses: Record<string, string> = {
+    lime: 'border-lime/55 bg-gradient-to-b from-lime/22 via-lime/10 to-transparent text-lime shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_3px_10px_-3px_rgba(190,242,100,0.4)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.26),0_10px_22px_-5px_rgba(190,242,100,0.6)]',
+    amber: 'border-amber-400/60 bg-gradient-to-b from-amber-400/22 via-amber-400/10 to-transparent text-amber-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(251,191,36,0.4)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_10px_22px_-5px_rgba(251,191,36,0.6)]',
+    fuchsia: 'border-fuchsia-400/55 bg-gradient-to-b from-fuchsia-400/22 via-fuchsia-400/10 to-transparent text-fuchsia-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_3px_10px_-3px_rgba(217,70,239,0.4)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_10px_22px_-5px_rgba(217,70,239,0.6)]',
+    cyan: 'border-cyan-400/55 bg-gradient-to-b from-cyan-400/22 via-cyan-400/10 to-transparent text-cyan-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_3px_10px_-3px_rgba(34,211,238,0.4)] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_10px_22px_-5px_rgba(34,211,238,0.6)]',
+  };
+
   return (
-    <div className="rounded-[12px] border border-cyan-500/30 bg-cyan-500/5 p-3">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="mono text-[10px] uppercase tracking-widest text-cyan-300">{'// MOTOR'}</span>
-          <span className="mono text-[10px] uppercase tracking-widest text-text-muted">
-            {config.kind === 'global' && `global · ${config.motor}`}
-            {config.kind === 'percent' && `% ${config.percent.III}/${config.percent.IV}/${config.percent.V}`}
-            {config.kind === 'individual' && 'individual'}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
+    <div className={collapsed ? '' : 'rounded-[12px] border border-cyan-500/30 bg-cyan-500/5 p-3'}>
+      {collapsed ? (
+        // ═══ MODO COLAPSADO — botao 3D icon-only com label do motor atual ═══
+        <button
+          type="button"
+          onClick={() => setCollapsed(false)}
+          className={`group/motor relative inline-flex h-9 items-center gap-2 rounded-full border px-3 transition-all duration-200 hover:-translate-y-0.5 hover:scale-[1.03] active:translate-y-0 active:scale-[0.98] ${colorClasses[motorColor]}`}
+          title="Escolher motor de avatar (III / IV / V)"
+        >
+          <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/20 to-transparent" aria-hidden />
+          {/* Chip icon */}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="relative">
+            <rect x="4" y="4" width="16" height="16" rx="2" />
+            <path d="M9 4v-2M15 4v-2M9 22v-2M15 22v-2M4 9h-2M4 15h-2M22 9h-2M22 15h-2" />
+            <rect x="9" y="9" width="6" height="6" rx="1" />
+          </svg>
+          <span className="mono relative text-[10px] font-bold uppercase tracking-[0.14em]">{motorLabel}</span>
+        </button>
+      ) : (
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="mono text-[10px] uppercase tracking-widest text-cyan-300">Motor</span>
+            <span className="mono text-[10px] uppercase tracking-widest text-text-muted">
+              {config.kind === 'global' && `global · ${config.motor}`}
+              {config.kind === 'percent' && `% ${config.percent.III}/${config.percent.IV}/${config.percent.V}`}
+              {config.kind === 'individual' && 'individual'}
+            </span>
+          </div>
           <button
             type="button"
-            onClick={() => setCollapsed((c) => !c)}
-            className="mono rounded border border-line-strong px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted hover:border-cyan-500/60 hover:text-cyan-300"
+            onClick={() => setCollapsed(true)}
+            title="Fechar"
+            aria-label="Fechar"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 transition-all hover:scale-110 hover:border-cyan-500/70 hover:bg-cyan-500/20"
           >
-            {collapsed ? '▶ Escolher motor' : '▼ Esconder'}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="18 15 12 9 6 15" />
+            </svg>
           </button>
         </div>
-      </div>
+      )}
 
       {!collapsed ? (
         <div className="mt-3 space-y-3">
