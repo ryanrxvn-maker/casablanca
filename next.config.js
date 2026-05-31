@@ -9,7 +9,10 @@ const nextConfig = {
   // @gradio/client é ESM com deps (ws/etc) que não devem ser empacotadas
   // pelo bundler do server — roda como módulo Node externo.
   experimental: {
-    serverComponentsExternalPackages: ['@gradio/client'],
+    // @gradio/client e undici rodam como módulos Node externos (não
+    // empacotados pelo bundler do server). undici só é carregado quando
+    // DREAMFACE_PROXY_URL está setado (proxy de IP fixo do DreamFace).
+    serverComponentsExternalPackages: ['@gradio/client', 'undici'],
   },
 
   async headers() {

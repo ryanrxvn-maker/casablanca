@@ -2,8 +2,31 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { LipSyncHero3D } from '@/app/tools/lipsync/LipSyncHero3D';
-import { runChunkedLipSync, type ChunkProgress } from '@/lib/lipsync-chunker';
-import { preprocessForLipSync } from '@/lib/lipsync-preprocess';
+import type { ChunkProgress } from '@/lib/lipsync-chunker';
+import { fal } from '@/lib/fal';
+
+/** Mede a duração (s) de um arquivo de mídia via elemento HTML. */
+async function measureMediaDuration(file: File): Promise<number> {
+  return new Promise((resolve) => {
+    try {
+      const url = URL.createObjectURL(file);
+      const el = document.createElement(file.type.startsWith('video') ? 'video' : 'audio');
+      el.preload = 'metadata';
+      el.src = url;
+      el.onloadedmetadata = () => {
+        const d = el.duration || 0;
+        URL.revokeObjectURL(url);
+        resolve(Number.isFinite(d) ? d : 0);
+      };
+      el.onerror = () => {
+        URL.revokeObjectURL(url);
+        resolve(0);
+      };
+    } catch {
+      resolve(0);
+    }
+  });
+}
 
 /**
  * LipSyncTool — UI estilo DreamFace com 2 motores (V1 / V2).
@@ -108,16 +131,10 @@ export default function LipSyncTool() {
     else if (maxDim > 1920) issues.push({ severity: 'block', text: `Resolução ${w}×${h} acima de 1080p. Reduz pra max 1920px no lado maior.` });
     else if (minDim < 720) issues.push({ severity: 'info', text: `${w}×${h} — OK. 720p+ dá boca mais nítida (mas funciona).` });
 
-    // Duracao
-    if (dur < 2) issues.push({ severity: 'block', text: `Vídeo de ${dur.toFixed(1)}s é muito curto — a IA precisa de pelo menos 2s.` });
-    else if (dur > 600) issues.push({ severity: 'block', text: `Vídeo de ${Math.round(dur)}s acima de 10 min. Limite máximo pra qualidade garantida.` });
-    else if (dur > 30) {
-      const numChunks = Math.ceil(dur / 25);
-      issues.push({
-        severity: 'info',
-        text: `Vídeo de ${Math.round(dur)}s — vai ser dividido em ${numChunks} trechos de ~25s, processados em paralelo. Qualidade max em cada trecho.`,
-      });
-    }
+    // Duracao do vídeo-fonte (o rosto). A duração final do resultado
+    // segue o ÁUDIO (o DreamFace usa o vídeo como fonte do rosto).
+    if (dur < 2) issues.push({ severity: 'block', text: `Vídeo de ${dur.toFixed(1)}s é muito curto — use pelo menos 2s de rosto.` });
+    else issues.push({ severity: 'info', text: `O resultado terá a duração do ÁUDIO (até ~180s). O vídeo é só a fonte do rosto.` });
 
     if (selected.file.size > 200 * 1024 * 1024) issues.push({ severity: 'warn', text: `Arquivo ${(selected.file.size / 1024 / 1024).toFixed(0)}MB grande — upload pode demorar.` });
 
@@ -229,54 +246,30 @@ export default function LipSyncTool() {
     }
   }
 
-  /* ─── Pre-processing UNIFICADO (sincronia perfeita) ────────────
-     Gera UM SO arquivo mp4 com video otimizado (720p@25fps) + audio
-     limpo embutido (highpass+normalize+mono). Usa esse arquivo
-     como video_url E audio_url no Sync.so → sincronia garantida
-     matematicamente. Sem drift, sem chunks dessincronizados.
+  /* ─── Upload helper ─────────────────────────────────────────────
+     Sobe o arquivo pro fal.storage (via /api/fal/proxy, admin-only) e
+     retorna uma URL PÚBLICA (fal.media) que o servidor baixa pra mandar
+     pro DreamFace. Progresso estimado por tempo (o SDK não expõe o XHR).
   */
-  async function preprocessSync(): Promise<File> {
-    if (!selected || !audioFile) throw new Error('Arquivos faltando');
-    // Se audio for o mesmo video (user subiu mp4 nos dois campos),
-    // nao precisa passar audioOverride. Senao, mixa os dois.
-    const sameSource = audioFile === selected.file;
-    return preprocessForLipSync(
-      selected.file,
-      sameSource ? null : audioFile,
-    );
-  }
-
-  /* ─── Upload helpers ────────────────────────────────────────── */
-
-  /**
-   * Upload pro Replicate Files API via nosso /api/replicate/upload.
-   * Mostra progresso estimado por tempo (como o SDK do Replicate
-   * tambem nao expoe progress real do XHR).
-   */
-  async function uploadToFal(file: File, onProgress?: (pct: number) => void): Promise<string> {
-    const estimatedMs = Math.max(2000, (file.size / 1024 / 1024 / 3) * 1000);
+  async function uploadPublic(file: File, onProgress?: (pct: number) => void): Promise<string> {
+    const estimatedMs = Math.max(1500, (file.size / 1024 / 1024 / 4) * 1000);
     let stop = false;
     const start = Date.now();
     if (onProgress) {
       const tick = () => {
         if (stop) return;
-        const elapsed = Date.now() - start;
-        const pct = Math.min(95, Math.round((elapsed / estimatedMs) * 100));
+        const pct = Math.min(95, Math.round(((Date.now() - start) / estimatedMs) * 100));
         onProgress(pct);
         if (pct < 95) setTimeout(tick, 200);
       };
       tick();
     }
-
     try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await fetch('/api/replicate/upload', { method: 'POST', body: fd });
-      const data = await res.json();
-      if (!res.ok || !data.url) throw new Error(data?.error || `Upload falhou: ${res.status}`);
+      const url = await fal.storage.upload(file);
       stop = true;
       onProgress?.(100);
-      return data.url as string;
+      if (!url || typeof url !== 'string') throw new Error('Upload não retornou URL.');
+      return url;
     } catch (e) {
       stop = true;
       throw e;
@@ -296,84 +289,58 @@ export default function LipSyncTool() {
       setStatus('error');
       return;
     }
+    // DreamFace precisa da duração do áudio (audio_end_time). Mede se faltar.
+    let audioMs = Math.round((audioDur || 0) * 1000);
+    if (!audioMs) {
+      audioMs = Math.round((await measureMediaDuration(audioFile)) * 1000);
+    }
+    if (!audioMs || audioMs <= 0) {
+      setErrorMsg('Não consegui ler a duração do áudio. Tenta outro arquivo (mp3/wav/mp4).');
+      setStatus('error');
+      return;
+    }
+    if (audioMs > 180_000) {
+      setErrorMsg('Áudio acima de 180s. O DreamFace gera até ~180s por vez — corta o áudio.');
+      setStatus('error');
+      return;
+    }
+
     setErrorMsg('');
     setOutputUrl('');
+    setChunkProgress(null);
     startTicker();
 
     try {
-      const dur = selected.meta?.dur ?? 0;
-      const shouldChunk = dur > 30;
-
-      // PRE-PROCESSING UNIFICADO: 1 arquivo mp4 com video + audio
-      // otimizado embutido. Sync.so vai usar ele pra ambos os campos
-      // → sincronia perfeita garantida.
+      // Upload do VÍDEO (rosto) + ÁUDIO em PARALELO pro fal.storage →
+      // URLs públicas. O servidor baixa e manda pro DreamFace. Sem
+      // pre-processing/chunk/post pesado: o DreamFace cuida de tudo.
       setStatus('uploading-video');
       setUploadProgress(0);
-      const optFile = await preprocessSync();
+      const [video_url, audio_url] = await Promise.all([
+        uploadPublic(selected.file, (pct) => setUploadProgress(pct)),
+        uploadPublic(audioFile),
+      ]);
 
-      if (shouldChunk) {
-        // CHUNKED FLOW — passa o MESMO arquivo pros 2 inputs do chunker.
-        // smartBoostRatio: 0.05 = top 5% chunks (max 2 por video) usam Pro.
-        // Custo medio ~$0.034/min, cabe em R$54/mes pra 300min.
-        setStatus('generating');
-        setChunkProgress(null);
-        const finalUrl = await runChunkedLipSync({
-          videoFile: optFile,
-          audioFile: optFile, // MESMO arquivo — Sync.so extrai audio
-          durationSec: dur,
-          pro: false,
-          syncMode,
-          chunkDurationSec: 25,
-          concurrency: 3,
-          smartBoostRatio: 0.05, // Smart Boost: 5% chunks no Pro
-          onProgress: (p) => setChunkProgress(p),
-        });
-        setOutputUrl(finalUrl);
-        setStatus('done');
-        stopTicker();
-        return;
-      }
-
-      // SINGLE FLOW — sobe 1 vez, usa pra video E audio
-      const url = await uploadToFal(optFile, (pct) => setUploadProgress(pct));
-      const video_url = url;
-      const audio_url = url;
-
-      setStatus('queueing');
-      setUploadProgress(0);
-      await new Promise((r) => setTimeout(r, 500));
-
+      // O DreamFace faz upload interno + registra avatar + gera. Pode
+      // levar de alguns segundos a ~2min dependendo da duração.
       setStatus('generating');
-      const body: Record<string, unknown> = {
-        video_url,
-        audio_url,
-        sync_mode: syncMode,
-      };
+      setUploadProgress(0);
 
       const res = await fetch('/api/tools/lipsync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ video_url, audio_url, audio_ms: audioMs }),
       });
 
-      setStatus('polishing');
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data?.error || `HTTP ${res.status}`);
       }
+      if (!data.output_video_url) {
+        throw new Error('O servidor não devolveu o vídeo gerado.');
+      }
 
-      // POS-PROCESSING gratuito: aplica filtros visuais (unsharp+denoise+
-      // grading) pra esconder "mascara" do queixo e devolver nitidez aos
-      // dentes. Adiciona ~20-40s mas zero custo. Mesma melhora do flow chunked.
-      const { postprocessLipSyncOutput } = await import('@/lib/lipsync-postprocess');
-      const rawRes = await fetch(data.output_video_url);
-      if (!rawRes.ok) throw new Error('Falha ao baixar o resultado do processamento');
-      const rawBlob = await rawRes.blob();
-      const polishedBlob = await postprocessLipSyncOutput(rawBlob);
-      const polishedFile = new File([polishedBlob], 'lipsync_polished.mp4', { type: 'video/mp4' });
-      const polishedUrl = await uploadToFal(polishedFile);
-
-      setOutputUrl(polishedUrl);
+      setOutputUrl(data.output_video_url);
       setStatus('done');
       stopTicker();
     } catch (err) {
@@ -725,14 +692,12 @@ export default function LipSyncTool() {
                     >
                       Gerar lip sync
                     </span>
-                    {estimatedCostUSD !== null && estimatedCostBRL !== null && (
-                      <span
-                        className="mono text-[9.5px] uppercase tracking-[0.15em] text-white/70 leading-none"
-                        style={{ fontFamily: 'var(--font-tech)' }}
-                      >
-                        ~ ${estimatedCostUSD.toFixed(2)} · R$ {estimatedCostBRL.toFixed(2)}
-                      </span>
-                    )}
+                    <span
+                      className="mono text-[9.5px] uppercase tracking-[0.15em] text-lime/80 leading-none"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      ∞ Ilimitado · DreamFace
+                    </span>
                   </div>
                   <span className="text-[16px] transition-transform group-hover:translate-x-1.5 ml-auto">→</span>
                 </>
