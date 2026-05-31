@@ -24,12 +24,14 @@
   --text: 255 255 255;
   --text-muted: 139 139 150;
   --text-dim: 77 77 87;
-  --lime: 200 255 0;
-  --violet: 167 139 250;
-  --violet-deep: 109 78 232;
-  --amber: 245 200 66;
-  --cyan: 103 232 249;
-  --pink: 244 114 182;
+  /* Acentos um pouco DESSATURADOS — site menos colorido/mais calmo, sem
+     perder a identidade (só baixa a intensidade). */
+  --lime: 198 240 70;
+  --violet: 162 145 224;
+  --violet-deep: 110 88 206;
+  --amber: 235 200 96;
+  --cyan: 126 213 226;
+  --pink: 224 132 176;
 
   /* Face de card (theme-aware) — hub/banners usam isso pra trocar no claro
      sem ficar com camada preta por cima. */
@@ -78,9 +80,9 @@ body {
   position: relative;
   background-color: rgb(var(--bg));
   background-image:
-    radial-gradient(50% 35% at 12% 0%, rgba(167, 139, 250, 0.08), transparent 70%),
-    radial-gradient(35% 28% at 88% 8%, rgba(103, 232, 249, 0.05), transparent 70%),
-    radial-gradient(60% 45% at 50% 100%, rgba(200, 255, 0, 0.035), transparent 75%),
+    radial-gradient(50% 35% at 12% 0%, rgba(167, 139, 250, 0.045), transparent 70%),
+    radial-gradient(35% 28% at 88% 8%, rgba(103, 232, 249, 0.026), transparent 70%),
+    radial-gradient(60% 45% at 50% 100%, rgba(200, 255, 0, 0.018), transparent 75%),
     linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
   background-size: auto, auto, auto, 52px 52px, 52px 52px;
@@ -94,8 +96,8 @@ body::before {
   pointer-events: none;
   z-index: 1;
   background: radial-gradient(
-    480px circle at var(--mx) var(--my),
-    rgba(167, 139, 250, 0.07),
+    420px circle at var(--mx) var(--my),
+    rgba(167, 139, 250, 0.04),
     transparent 65%
   );
   transition: background 0.2s ease-out;
@@ -776,8 +778,8 @@ input[type='range']::-moz-range-thumb {
 .orb {
   position: absolute;
   border-radius: 9999px;
-  filter: blur(70px);
-  opacity: 0.5;
+  filter: blur(70px) saturate(0.85);
+  opacity: 0.3;
   mix-blend-mode: screen;
   will-change: transform;
 }
@@ -1174,12 +1176,14 @@ html[data-theme='light'] .dark-island {
   --text: 255 255 255;
   --text-muted: 139 139 150;
   --text-dim: 77 77 87;
-  --lime: 200 255 0;
-  --violet: 167 139 250;
-  --violet-deep: 109 78 232;
-  --amber: 245 200 66;
-  --cyan: 103 232 249;
-  --pink: 244 114 182;
+  /* Acentos um pouco DESSATURADOS — site menos colorido/mais calmo, sem
+     perder a identidade (só baixa a intensidade). */
+  --lime: 198 240 70;
+  --violet: 162 145 224;
+  --violet-deep: 110 88 206;
+  --amber: 235 200 96;
+  --cyan: 126 213 226;
+  --pink: 224 132 176;
 }
 
 /* Botão Pesquisar no claro: pílula ÚNICA e limpa. Esconde as camadas

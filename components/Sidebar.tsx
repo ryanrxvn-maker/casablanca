@@ -258,9 +258,11 @@ export function Sidebar() {
                         <span
                           className={
                             'flex h-9 w-9 items-center justify-center rounded-[10px] transition-all duration-300 ' +
+                            // HeyGen-style: ícone CINZA por padrão (dessaturado +
+                            // apagado), acende a cor só no hover/ativo.
                             (active
-                              ? 'scale-105'
-                              : 'group-hover:scale-105 group-hover:-translate-y-[1px]')
+                              ? 'scale-105 grayscale-0 opacity-100'
+                              : 'grayscale opacity-45 group-hover:scale-105 group-hover:-translate-y-[1px] group-hover:grayscale-0 group-hover:opacity-100')
                           }
                         >
                           {it.icon}
