@@ -3,7 +3,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { LipSyncHero3D } from '@/app/tools/lipsync/LipSyncHero3D';
 import type { ChunkProgress } from '@/lib/lipsync-chunker';
-import { fal } from '@/lib/fal';
+import { createClient } from '@/lib/supabase/client';
+
+const UPLOAD_BUCKET = 'lipsync-uploads';
 
 /** Mede a duração (s) de um arquivo de mídia via elemento HTML. */
 async function measureMediaDuration(file: File): Promise<number> {
@@ -247,12 +249,20 @@ export default function LipSyncTool() {
   }
 
   /* ─── Upload helper ─────────────────────────────────────────────
-     Sobe o arquivo pro fal.storage (via /api/fal/proxy, admin-only) e
-     retorna uma URL PÚBLICA (fal.media) que o servidor baixa pra mandar
-     pro DreamFace. Progresso estimado por tempo (o SDK não expõe o XHR).
+     Sobe o arquivo DIRETO pro Supabase Storage via signed URL
+     (browser → Supabase, SEM passar pela Vercel) e retorna a URL
+     pública que o servidor baixa pra mandar pro DreamFace.
+
+     POR QUÊ signed URL: a Vercel corta corpos > ~4,5MB
+     (FUNCTION_PAYLOAD_TOO_LARGE). Subindo direto pro Supabase o
+     arquivo nunca toca a Vercel — sem limite de tamanho.
   */
-  async function uploadPublic(file: File, onProgress?: (pct: number) => void): Promise<string> {
-    const estimatedMs = Math.max(1500, (file.size / 1024 / 1024 / 4) * 1000);
+  async function uploadPublic(
+    file: File,
+    kind: 'video' | 'audio',
+    onProgress?: (pct: number) => void,
+  ): Promise<string> {
+    const estimatedMs = Math.max(1500, (file.size / 1024 / 1024 / 6) * 1000);
     let stop = false;
     const start = Date.now();
     if (onProgress) {
@@ -265,11 +275,25 @@ export default function LipSyncTool() {
       tick();
     }
     try {
-      const url = await fal.storage.upload(file);
+      const ext = (file.name.split('.').pop() || (kind === 'audio' ? 'mp3' : 'mp4')).toLowerCase();
+      // 1. URL assinada (corpo minúsculo — não bate no limite da Vercel)
+      const r = await fetch('/api/tools/lipsync/upload-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind, ext }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || `Falha ao iniciar upload (HTTP ${r.status})`);
+      // 2. sobe DIRETO pro Supabase (sem limite da Vercel)
+      const supabase = createClient();
+      const { error } = await supabase.storage
+        .from(UPLOAD_BUCKET)
+        .uploadToSignedUrl(d.path, d.token, file);
+      if (error) throw new Error('Falha no upload pro storage: ' + error.message);
       stop = true;
       onProgress?.(100);
-      if (!url || typeof url !== 'string') throw new Error('Upload não retornou URL.');
-      return url;
+      if (!d.publicUrl || typeof d.publicUrl !== 'string') throw new Error('Upload não retornou URL.');
+      return d.publicUrl as string;
     } catch (e) {
       stop = true;
       throw e;
@@ -317,8 +341,8 @@ export default function LipSyncTool() {
       setStatus('uploading-video');
       setUploadProgress(0);
       const [video_url, audio_url] = await Promise.all([
-        uploadPublic(selected.file, (pct) => setUploadProgress(pct)),
-        uploadPublic(audioFile),
+        uploadPublic(selected.file, 'video', (pct) => setUploadProgress(pct)),
+        uploadPublic(audioFile, 'audio'),
       ]);
 
       // O DreamFace faz upload interno + registra avatar + gera. Pode
