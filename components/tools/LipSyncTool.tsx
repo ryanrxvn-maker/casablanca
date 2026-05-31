@@ -83,7 +83,9 @@ type Job = {
   num: number; // nº sequencial do disparo (rótulo)
   label: string; // "LipSync 01"
   status: JobStatus;
-  percent: number; // 0-100 (estimativa visual)
+  percent: number; // 0-100 (barra visível, monotônica)
+  floor: number; // piso real (marcos de etapa) — a barra nunca fica abaixo
+  estMs: number; // estimativa de tempo total → barra previsível
   videoUrl: string | null; // object URL do MP4 final
   error: string | null;
   createdAt: number;
@@ -100,16 +102,27 @@ function isActive(s: JobStatus): boolean {
   return s !== 'done' && s !== 'error';
 }
 
-/** Teto "suave" da barra por etapa — a barra se aproxima dele com easing. */
-function softCap(s: JobStatus): number {
-  switch (s) {
-    case 'queued': return 8;
-    case 'pre': return 18;
-    case 'uploading': return 26;
-    case 'generating': return 92;
-    case 'concat': return 97;
-    default: return 100;
-  }
+/** Corre uma promise contra um timeout (ms). Usado pra etapas de ffmpeg
+ *  não pendurarem o disparo — se estourar, o chamador faz fallback. */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('timeout')), ms);
+    p.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); },
+    );
+  });
+}
+
+/** Estimativa grosseira do tempo total de um disparo (ms) — calibra a barra
+ *  de progresso pra ela preencher de acordo com o processo inteiro. */
+function estimateJobMs(audioSec: number, faceNeedsCompress: boolean): number {
+  const compress = faceNeedsCompress ? 45_000 : 0; // compressão rápida (ultrafast 720p)
+  const clean = 5_000 + audioSec * 180; // limpar áudio
+  const upload = 8_000; // subir o rosto
+  const gen = Math.max(26_000, audioSec * 1_800); // render no motor (trechos em série)
+  const concat = audioSec > 108 ? 6_000 : 0; // costura (só áudio longo)
+  return compress + clean + upload + gen + concat;
 }
 
 /** Mapeia a etapa interna pro estado visual do card. */
@@ -134,10 +147,6 @@ export default function LipSyncTool() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [formError, setFormError] = useState<string>('');
   const [flash, setFlash] = useState<boolean>(false); // toast "enviado ↓"
-
-  // Realce do lip (pós-produção). Ligado por padrão (qualidade); desligar
-  // deixa bem mais rápido (não roda o filtro de ~1× a duração do vídeo).
-  const [enhanceLip, setEnhanceLip] = useState<boolean>(true);
 
   const videoInputRef = useRef<HTMLInputElement | null>(null);
   const audioInputRef = useRef<HTMLInputElement | null>(null);
@@ -253,19 +262,10 @@ export default function LipSyncTool() {
     return d.publicUrl as string;
   }
 
-  /** Pós-produção do lip; se falhar, devolve o resultado cru (resiliente). */
-  async function enhanceLipVideoSafe(raw: Blob): Promise<Blob> {
-    try {
-      const { enhanceLipVideo } = await import('@/lib/lipsync-pipeline');
-      return await enhanceLipVideo(raw);
-    } catch {
-      return raw;
-    }
-  }
-
-  /** Uma geração (rosto + 1 trecho de áudio): sobe → gera → baixa → pós. */
+  /** Uma geração (rosto + 1 trecho de áudio): sobe → gera → baixa. SEM
+   *  pós-produção: o que sai do motor já é o resultado final. */
   async function generateOne(
-    faceUrl: string, audioChunk: File, chunkMs: number, enhance: boolean, label?: string,
+    faceUrl: string, audioChunk: File, chunkMs: number, label?: string,
   ): Promise<Blob> {
     const aUrl = await uploadPublic(audioChunk, 'audio');
     const res = await fetch('/api/tools/lipsync', {
@@ -282,10 +282,7 @@ export default function LipSyncTool() {
     }
     const r = await fetch(data.output_video_url);
     if (!r.ok) throw new Error(`Falha ao baixar o resultado${label ? ` (${label})` : ''}.`);
-    const raw = await r.blob();
-    // Realce do lip (pós-produção) — só quando ligado no toggle. Custa
-    // ~1× a duração do vídeo, então desligado = bem mais rápido.
-    return enhance ? enhanceLipVideoSafe(raw) : raw;
+    return r.blob();
   }
 
   /* ─── Jobs ───────────────────────────────────────────────────── */
@@ -294,27 +291,43 @@ export default function LipSyncTool() {
     setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)));
   }
 
+  /** Sobe o "piso" real da barra (marco de etapa concluída). Monotônico. */
+  function bumpFloor(id: string, floor: number) {
+    setJobs((prev) =>
+      prev.map((j) =>
+        j.id === id ? { ...j, floor: Math.max(j.floor, floor), percent: Math.max(j.percent, floor) } : j,
+      ),
+    );
+  }
+
   /**
    * Pipeline de UM disparo. Roda em background (não bloqueia a UI). Toda
-   * etapa de ffmpeg passa pela fila interna (withFFLock) — vários disparos
-   * ao mesmo tempo NÃO se atropelam. A geração no motor é serial no servidor
-   * (fila anti-bloqueio), então o cliente pode disparar à vontade.
+   * etapa de ffmpeg passa pela fila interna (withFFLock). SEM pós-produção:
+   * o que sai do motor já é o resultado final (mais rápido + nada pra travar).
    */
-  async function runJob(id: string, faceFile: File, audioSrc: File, audioMs: number, enhance: boolean) {
+  async function runJob(id: string, faceFile: File, audioSrc: File, audioMs: number) {
     try {
       const {
         prepareFaceVideo, cleanAudioMp3, splitAudioChunks, concatLipVideos,
         CHUNK_THRESHOLD_SEC, MAX_CHUNK_SEC,
       } = await import('@/lib/lipsync-pipeline');
 
-      // 1. PRÉ-PRODUÇÃO: otimiza o rosto (só comprime se grande) + limpa áudio.
+      // 1. PRÉ-PRODUÇÃO: rosto (native se ≤44MB; senão comprime RÁPIDO) +
+      //    áudio limpo, em paralelo. RESILIENTE: se limpar o áudio
+      //    falhar/demorar demais, usa o áudio ORIGINAL → o disparo NUNCA
+      //    fica preso na pré-produção.
       patchJob(id, { status: 'pre' });
-      const [face, cleanAudio] = await Promise.all([
-        prepareFaceVideo(faceFile),
-        cleanAudioMp3(audioSrc),
-      ]);
+      const cleanAudioSafe = (async (): Promise<File> => {
+        try {
+          return await withTimeout(cleanAudioMp3(audioSrc), 90_000);
+        } catch {
+          return audioSrc; // fallback: áudio cru (garante o disparo)
+        }
+      })();
+      const [face, cleanAudio] = await Promise.all([prepareFaceVideo(faceFile), cleanAudioSafe]);
+      bumpFloor(id, 14);
 
-      // 2. CHUNKING (invisível pro cliente): áudio longo vira trechos ≤170s.
+      // 2. CHUNKING (invisível pro cliente): áudio longo vira trechos ≤100s.
       const needChunk = audioMs / 1000 > CHUNK_THRESHOLD_SEC;
       const audioChunks = needChunk ? await splitAudioChunks(cleanAudio, MAX_CHUNK_SEC) : [cleanAudio];
       const n = audioChunks.length;
@@ -322,26 +335,24 @@ export default function LipSyncTool() {
       // 3. Sobe o ROSTO uma vez só (reusado em todos os trechos).
       patchJob(id, { status: 'uploading' });
       const faceUrl = await uploadPublic(face, 'video');
+      bumpFloor(id, 24);
 
-      // 4+5. Gera + pós-produção trecho a trecho, em SÉRIE (1 por vez).
-      //   - anti-throttle: 2 submits simultâneos no motor disparam o
-      //     risk-control (erro THS…0003). Serial = ritmo humano, sem bloqueio.
-      //   - 1 render longo por vez no motor → cada um termina dentro do
-      //     orçamento de tempo (sem timeout por concorrência).
-      patchJob(id, { status: 'generating', percent: 26 });
+      // 4. Gera trecho a trecho, em SÉRIE (anti-throttle + 1 render por vez).
+      patchJob(id, { status: 'generating' });
       const outBlobs: Blob[] = new Array(n);
       for (let i = 0; i < n; i++) {
         const chunkMs = n > 1
           ? Math.round((await measureMediaDuration(audioChunks[i])) * 1000) || Math.min(MAX_CHUNK_SEC * 1000, audioMs)
           : audioMs;
-        outBlobs[i] = await generateOne(faceUrl, audioChunks[i], chunkMs, enhance, n > 1 ? `trecho ${i + 1}/${n}` : undefined);
-        patchJob(id, { percent: 26 + Math.round(((i + 1) / n) * 64) }); // 26 → 90
+        outBlobs[i] = await generateOne(faceUrl, audioChunks[i], chunkMs, n > 1 ? `trecho ${i + 1}/${n}` : undefined);
+        bumpFloor(id, 26 + Math.round(((i + 1) / n) * 62)); // marco REAL por trecho → até ~88
       }
 
-      // 6. COSTURA os trechos num só (stream-copy = leve). 1 trecho = direto.
+      // 5. COSTURA os trechos num só (1 trecho = direto, sem custo).
       let finalBlob: Blob;
       if (n > 1) {
-        patchJob(id, { status: 'concat', percent: 93 });
+        patchJob(id, { status: 'concat' });
+        bumpFloor(id, 92);
         finalBlob = await concatLipVideos(outBlobs);
       } else {
         finalBlob = outBlobs[0];
@@ -384,14 +395,17 @@ export default function LipSyncTool() {
     const faceFile = selected.file;
     const audioSrc = audioFile;
     const ms = audioMs;
-    const doEnhance = enhanceLip; // snapshot — toggle pode mudar depois
     const num = (jobSeqRef.current += 1);
     const id = `job-${Date.now()}-${num}`;
     const label = `LipSync ${String(num).padStart(2, '0')}`;
+    // Estimativa de tempo total → barra de progresso previsível (preenche
+    // de acordo com o processo inteiro, sem saltos nem congelamento).
+    const faceCompress = faceFile.size > 44 * 1024 * 1024;
+    const estMs = estimateJobMs(ms / 1000, faceCompress);
 
     // Card aparece embaixo JÁ carregando; o form continua livre na mesma tela.
     setJobs((prev) => [
-      { id, num, label, status: 'queued', percent: 6, videoUrl: null, error: null, createdAt: Date.now() },
+      { id, num, label, status: 'queued', percent: 4, floor: 4, estMs, videoUrl: null, error: null, createdAt: Date.now() },
       ...prev,
     ]);
 
@@ -401,7 +415,7 @@ export default function LipSyncTool() {
     flashTimer.current = setTimeout(() => setFlash(false), 2600);
 
     // Roda em background — sem await: a UI segue livre.
-    void runJob(id, faceFile, audioSrc, ms, doEnhance);
+    void runJob(id, faceFile, audioSrc, ms);
   }
 
   /** Limpa os disparos PRONTOS/falhos (mantém os que ainda estão rodando). */
@@ -426,24 +440,33 @@ export default function LipSyncTool() {
     setFormError('');
   }
 
-  /* ─── Ticker da barra: aproxima cada job ativo do seu teto (easing) ─── */
+  /* ─── Ticker da barra: progresso por TEMPO do processo inteiro ─────────
+     Previsível e suave: a barra avança conforme o tempo decorrido vs. a
+     estimativa total (curva que desacelera mas NUNCA para — assintótica a
+     96%). Os marcos REAIS (bumpFloor) puxam a barra pra cima quando uma
+     etapa termina antes do previsto. Monotônica = nunca volta atrás. */
   const hasActiveJob = jobs.some((j) => isActive(j.status));
   useEffect(() => {
     if (!hasActiveJob) return;
     const t = setInterval(() => {
+      const now = Date.now();
       setJobs((prev) => {
         let changed = false;
         const next = prev.map((j) => {
           if (!isActive(j.status)) return j;
-          const cap = softCap(j.status);
-          if (j.percent >= cap - 0.3) return j;
+          const elapsed = now - j.createdAt;
+          // 0 → 96 assintótico; ~80% no tempo estimado, segue subindo devagar.
+          const timeBased = 96 * (1 - Math.exp(-1.7 * elapsed / Math.max(8000, j.estMs)));
+          const target = Math.min(96, Math.max(j.floor, timeBased));
+          if (target <= j.percent + 0.05) return j;
           changed = true;
-          const step = Math.max(0.15, (cap - j.percent) * 0.04);
-          return { ...j, percent: Math.min(cap, j.percent + step) };
+          // ease até o alvo, com passo mínimo → sempre se move (não “trava”).
+          const step = Math.max(0.25, (target - j.percent) * 0.3);
+          return { ...j, percent: Math.min(target, j.percent + step) };
         });
         return changed ? next : prev;
       });
-    }, 700);
+    }, 350);
     return () => clearInterval(t);
   }, [hasActiveJob]);
 
@@ -603,9 +626,6 @@ export default function LipSyncTool() {
               />
             )}
           </div>
-
-          {/* Realce do lip — toggle 3D animado (sem texto NO botão) */}
-          <LipEnhanceToggle on={enhanceLip} onToggle={() => setEnhanceLip((v) => !v)} />
 
           {/* WARNINGS - só block/warn (info é ruído, removido) */}
           {selected && videoIssues.some((iss) => iss.severity !== 'info') && (
@@ -901,97 +921,6 @@ function PreviewStage({ selected, flash }: { selected: VideoItem | null; flash: 
           `}</style>
         </div>
       )}
-    </div>
-  );
-}
-
-/* ═══════════════════════ LipEnhanceToggle ═══════════════════════ */
-/**
- * Toggle 3D animado pro realce do lip (pós-produção). O BOTÃO em si não tem
- * texto — é só o switch 3D (trilho recuado + knob elevado com brilho/spin
- * quando ligado). O rótulo fica FORA do botão. Ligado = qualidade máxima;
- * desligado = bem mais rápido (pula o filtro de ~1× a duração do vídeo).
- */
-function LipEnhanceToggle({ on, onToggle }: { on: boolean; onToggle: () => void }) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-[14px] border border-line/60 bg-bg/30 px-3.5 py-2.5">
-      <div className="min-w-0">
-        <div
-          className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
-          style={{ fontFamily: 'var(--font-tech)' }}
-        >
-          Realce do lip
-        </div>
-        <div className="mono text-[9px] text-text-dim mt-0.5">
-          {on ? 'ligado · boca mais nítida' : 'desligado · mais rápido'}
-        </div>
-      </div>
-
-      <button
-        type="button"
-        role="switch"
-        aria-checked={on}
-        aria-label="Realce do lip"
-        onClick={onToggle}
-        className={'lip3d ' + (on ? 'is-on' : 'is-off')}
-      >
-        <span className="lip3d-track" aria-hidden>
-          <span className="lip3d-glow" />
-          <span className="lip3d-knob">
-            <span className="lip3d-spark">✦</span>
-          </span>
-        </span>
-        <style jsx>{`
-          .lip3d {
-            --w: 60px; --h: 30px; --pad: 3px; --knob: 24px;
-            position: relative; width: var(--w); height: var(--h);
-            border-radius: 999px; border: none; padding: 0; cursor: pointer;
-            background: transparent; flex: none;
-            transform: perspective(220px) rotateX(9deg);
-            transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
-          }
-          .lip3d:hover { transform: perspective(220px) rotateX(9deg) translateY(-1px); }
-          .lip3d:active { transform: perspective(220px) rotateX(9deg) translateY(1px) scale(0.96); }
-          .lip3d-track {
-            position: absolute; inset: 0; border-radius: 999px;
-            transition: background 0.35s ease, box-shadow 0.35s ease;
-            box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.6), inset 0 -1px 0 rgba(255, 255, 255, 0.06);
-          }
-          .is-off .lip3d-track { background: linear-gradient(180deg, #1a1a22, #0d0d13); }
-          .is-on .lip3d-track {
-            background: linear-gradient(110deg, rgba(232, 121, 249, 0.95), rgba(167, 139, 250, 0.95) 50%, rgba(103, 232, 249, 0.9));
-            box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.35), 0 0 18px -2px rgba(232, 121, 249, 0.7), 0 0 30px -6px rgba(103, 232, 249, 0.5);
-          }
-          .lip3d-glow {
-            position: absolute; inset: -2px; border-radius: 999px; opacity: 0;
-            transition: opacity 0.35s ease; pointer-events: none;
-          }
-          .is-on .lip3d-glow {
-            opacity: 1;
-            background: radial-gradient(circle at 72% 50%, rgba(255, 255, 255, 0.28), transparent 60%);
-            animation: lip3dPulse 2.4s ease-in-out infinite;
-          }
-          .lip3d-knob {
-            position: absolute; top: var(--pad); left: var(--pad);
-            width: var(--knob); height: var(--knob); border-radius: 50%;
-            display: flex; align-items: center; justify-content: center;
-            background: radial-gradient(circle at 35% 28%, #ffffff, #d8d8e2 45%, #9aa0b5 100%);
-            box-shadow: 0 3px 6px rgba(0, 0, 0, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.9), inset 0 -2px 3px rgba(0, 0, 0, 0.25);
-            transition: transform 0.32s cubic-bezier(0.4, 1.5, 0.5, 1), background 0.32s ease;
-          }
-          .is-on .lip3d-knob {
-            transform: translateX(calc(var(--w) - var(--knob) - var(--pad) * 2));
-            background: radial-gradient(circle at 35% 28%, #ffffff, #ffe9ff 45%, #f0abfc 100%);
-          }
-          .lip3d-spark {
-            font-size: 12px; line-height: 1; color: #a21caf; opacity: 0; transform: rotate(0deg);
-            transition: opacity 0.3s ease;
-          }
-          .is-on .lip3d-spark { opacity: 1; animation: lip3dSpin 3s linear infinite; }
-          @keyframes lip3dPulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
-          @keyframes lip3dSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        `}</style>
-      </button>
     </div>
   );
 }

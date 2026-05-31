@@ -117,28 +117,26 @@ export async function cleanAudioMp3(file: File, onStage?: FFLoadStage): Promise<
 }
 
 /**
- * PRÉ-PRODUÇÃO (vídeo): comprime o rosto pra ≤720p só quando precisa
- * (arquivo grande ou alta resolução). Vídeo pequeno passa direto (rápido).
- * Garante que cabe nos limites de upload sem perder qualidade de lip (o
- * motor entrega 720p de qualquer jeito).
+ * PRÉ-PRODUÇÃO (vídeo): só comprime o rosto quando o arquivo é grande
+ * (> limite do storage). Vídeo pequeno passa NATIVO (instantâneo) — é o
+ * caso comum. Quando precisa comprimir, faz RÁPIDO (ultrafast 720p), já
+ * que o motor entrega 720p de qualquer jeito — então a qualidade final é
+ * idêntica e a pré-produção não trava em vídeo pesado.
  */
 export async function prepareFaceVideo(file: File, onStage?: FFLoadStage): Promise<File> {
-  // ≤ limite do storage → usa o VÍDEO NATIVO (qualidade máxima; o motor
-  // processa o original muito melhor que qualquer re-encode). É o caso
-  // comum: vídeo de rosto pra lipsync costuma ser curto/leve.
+  // ≤ limite do storage → VÍDEO NATIVO (qualidade máxima, zero espera).
   if (file.size <= STORAGE_SAFE_BYTES) return file;
-  // Só quando NÃO cabe é que comprime — e com ALTA qualidade (CRF baixo +
-  // preset bom + mantém resolução até 1080p), pra perder o mínimo possível.
-  // Passa pela fila do ffmpeg (não colide com outras gerações em paralelo).
+  // > limite → comprime RÁPIDO só pra caber no upload. Passa pela fila do
+  // ffmpeg (não colide com outras gerações).
   return track('pre_compressFace', async () => withFFLock(() => compressFaceHQ(file, onStage)));
 }
 
 /**
- * Compressão INTELIGENTE pra caber no storage perdendo o mínimo de
- * qualidade: H.264 CRF 19 (quase sem perda visível) + preset "fast"
- * (muito melhor que ultrafast no mesmo CRF) + mantém a resolução (só
- * desce pra 1080p se for maior) com scaler lanczos. Se mesmo assim não
- * couber (vídeo longo/enorme), faz um 2º passe um pouco mais agressivo.
+ * Compressão RÁPIDA do rosto pra caber no storage. Como o motor SEMPRE
+ * entrega 720p, comprimir o rosto pra 720p não muda a qualidade final —
+ * então priorizamos VELOCIDADE: H.264 preset ultrafast + 720p + SEM áudio
+ * (o motor usa o áudio separado). Vídeo de 1min sai em ~30-50s em vez de
+ * minutos. Fallback raro pra 540p se ainda não couber.
  */
 async function compressFaceHQ(file: File, onStage?: FFLoadStage): Promise<File> {
   const ff = await getFFmpeg(onStage);
@@ -152,18 +150,19 @@ async function compressFaceHQ(file: File, onStage?: FFLoadStage): Promise<File> 
 
   const encode = async (crf: number, maxH: number): Promise<Uint8Array> => {
     const args = ['-i', inName];
-    if (h > maxH) args.push('-vf', `scale=-2:${maxH}:flags=lanczos`);
+    if (!h || h > maxH) args.push('-vf', `scale=-2:${maxH}:flags=bicubic`);
     args.push(
-      '-c:v', 'libx264', '-preset', 'fast', '-crf', String(crf), '-pix_fmt', 'yuv420p',
-      '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', '-y', outName,
+      '-an', // sem áudio: o motor usa o áudio separado → menor + mais rápido
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', String(crf), '-pix_fmt', 'yuv420p',
+      '-movflags', '+faststart', '-y', outName,
     );
     await ff.exec(args);
     const d = await ff.readFile(outName);
     return d instanceof Uint8Array ? d : new Uint8Array();
   };
 
-  let data = await encode(19, 1080); // alta qualidade, mantém até 1080p
-  if (data.length > STORAGE_SAFE_BYTES) data = await encode(22, 720); // fallback raro
+  let data = await encode(23, 720); // rápido: 720p ultrafast, sem áudio
+  if (data.length > STORAGE_SAFE_BYTES) data = await encode(26, 540); // raríssimo
 
   try { await ff.deleteFile(inName); } catch { /* ignore */ }
   try { await ff.deleteFile(outName); } catch { /* ignore */ }
