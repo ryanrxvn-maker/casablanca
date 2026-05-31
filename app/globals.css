@@ -137,9 +137,12 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
   opacity: 0.9;
   filter: grayscale(1) brightness(0.55);
 }
-/* Item ATIVO acende em qualquer tema (ícone colorido com glow). */
+/* Item ATIVO: o ÍCONE acende de verdade (cor vívida + glow forte), sem
+   quadrado de fundo. Vale em dark e light. */
 .sb-icon-active {
-  filter: drop-shadow(0 0 7px rgba(167, 139, 250, 0.85)) !important;
+  filter: saturate(1.4) brightness(1.2)
+    drop-shadow(0 0 9px rgba(167, 139, 250, 0.95))
+    drop-shadow(0 0 3px rgba(167, 139, 250, 0.8)) !important;
 }
 
 ::selection {

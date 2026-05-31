@@ -239,7 +239,7 @@ export function Sidebar() {
                         className={
                           'group relative flex flex-col items-center justify-center gap-1 rounded-[14px] py-2.5 transition-all duration-300 ' +
                           (active
-                            ? 'bg-violet/[0.16] text-violet ring-1 ring-violet/25'
+                            ? 'text-violet'
                             : 'text-text-muted hover:bg-bg/50 hover:text-white')
                         }
                       >
