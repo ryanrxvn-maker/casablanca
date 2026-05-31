@@ -18,7 +18,8 @@ import { requireAdmin, serviceClient } from '@/app/api/admin/_helpers';
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 
-export const BUCKET = 'lipsync-uploads';
+// Next.js NÃO permite export arbitrário em route.ts (só GET/POST/config).
+const BUCKET = 'lipsync-uploads';
 
 export async function POST(req: Request) {
   const guard = await requireAdmin();
