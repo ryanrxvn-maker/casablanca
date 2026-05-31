@@ -9,8 +9,10 @@ import { useEffect, useRef, useState } from 'react';
  *   - Grid + corner cuts + particulas voadoras
  *   - LADO ESQUERDO: eyebrow ULTRA ADMIN, titulo gradient enorme com
  *     shine, pipeline de etapas, 3 metricas premium
- *   - LADO DIREITO: CARROSSEL dos 3 vídeos do avatar virando cyborg
- *     (auto-avança no fim de cada um + troca no hover, mostrados INTEIROS).
+ *   - LADO DIREITO: CARROSSEL dos 3 vídeos do avatar virando cyborg, dentro
+ *     do mesmo enquadramento CIRCULAR premium (anel arco-íris rotativo +
+ *     rings + HUD). Cada vídeo aparece INTEIRO; auto-avança no fim de cada
+ *     um (transição profissional) e troca na hora no hover.
  */
 export function LipSyncHero3D() {
   const heroRef = useRef<HTMLDivElement | null>(null);
@@ -179,7 +181,7 @@ export function LipSyncHero3D() {
           </div>
         </div>
 
-        {/* LADO DIREITO — carrossel dos 3 vídeos cyborg */}
+        {/* LADO DIREITO — carrossel dos 3 vídeos cyborg (enquadramento circular) */}
         <CyborgCarousel tiltX={tiltX} tiltY={tiltY} />
       </div>
 
@@ -201,21 +203,23 @@ export function LipSyncHero3D() {
   );
 }
 
-/* ---- CyborgCarousel — carrossel dos 3 vídeos do avatar virando cyborg.
+/* ---- CyborgCarousel — os 3 vídeos cyborg no enquadramento CIRCULAR premium.
  *
- * - Mostra cada vídeo INTEIRO (object-contain + a caixa segue a PROPORÇÃO
- *   real detectada no load → nunca corta nem distorce).
- * - AUTO-AVANÇA quando o vídeo termina (transição glitch/scan + flash) e
- *   emenda no próximo (1 → 2 → 3 → 1...).
- * - HOVER troca NA HORA (com a mesma animação).
- * - Sem robozinho: os próprios vídeos já viram cyborg.
+ * - Halo CIRCULAR (anel arco-íris conic rotativo + rings orbitando + HUD +
+ *   aura) — a estética de antes.
+ * - No centro, a MOLDURA do vídeo segue a PROPORÇÃO real do vídeo
+ *   (object-contain) → cada vídeo aparece INTEIRO, sem cortar nem distorcer.
+ * - AUTO-AVANÇA quando o vídeo termina (transição: flash + sweep + glitch) e
+ *   emenda no próximo (1 → 2 → 3 → 1...). HOVER troca na hora.
+ * - Autoplay BLINDADO: além do atributo, chama play() a cada troca (2x) —
+ *   nunca fica parado/branco.
  */
 const HERO_VIDEOS = ['/lipsync-hero/1.mp4', '/lipsync-hero/2.mp4', '/lipsync-hero/3.mp4'];
 
 function CyborgCarousel({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
   const [index, setIndex] = useState(0);
-  const [ratio, setRatio] = useState(0.5625); // w/h — default portrait até detectar
-  const [pulse, setPulse] = useState(0); // +1 a cada troca → replay do overlay de transição
+  const [ratio, setRatio] = useState(1080 / 1890); // proporção conhecida desses vídeos (w/h)
+  const [pulse, setPulse] = useState(0); // +1 a cada troca → replay da transição
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const lastSwitch = useRef(0);
 
@@ -224,131 +228,173 @@ function CyborgCarousel({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
     setPulse((p) => p + 1);
   }
 
-  // Hover → troca na hora (com anti-spam leve pra não pular vários de uma vez).
   function onEnter() {
     const now = Date.now();
-    if (now - lastSwitch.current < 380) return;
+    if (now - lastSwitch.current < 380) return; // anti-spam de hover
     lastSwitch.current = now;
     advance();
   }
 
-  // Pega a proporção REAL do vídeo → mostra inteiro, sem cortar.
   function onMeta() {
     const v = videoRef.current;
     if (v && v.videoWidth && v.videoHeight) setRatio(v.videoWidth / v.videoHeight);
   }
 
-  // Caixa máxima — o vídeo cabe INTEIRO dentro dela preservando a proporção.
-  const BOX_W = 380;
-  const BOX_H = 440;
-  const fitByWidth = ratio >= BOX_W / BOX_H;
-  const w = fitByWidth ? BOX_W : BOX_H * ratio;
-  const h = fitByWidth ? BOX_W / ratio : BOX_H;
+  // Autoplay blindado: toca ao montar e a cada troca de vídeo (2 tentativas).
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const tryPlay = () => {
+      const p = v.play();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    };
+    tryPlay();
+    const t = setTimeout(tryPlay, 140);
+    return () => clearTimeout(t);
+  }, [index]);
+
+  // Moldura segue a proporção do vídeo (inteiro). Halo circular um tico maior.
+  const FRAME_H = 366;
+  const FRAME_W = Math.round(FRAME_H * ratio);
+  const DIAM = Math.round(FRAME_H * 1.14);
 
   return (
     <div
       className="relative mx-auto flex items-center justify-center"
-      style={{ width: BOX_W, height: BOX_H }}
+      style={{ width: DIAM, height: DIAM, maxWidth: '100%' }}
       onMouseEnter={onEnter}
     >
       {/* AURA */}
       <div
         aria-hidden
-        className="absolute inset-[-6%] rounded-full blur-3xl"
+        className="absolute rounded-full blur-3xl"
         style={{
+          width: '120%',
+          height: '120%',
           background:
-            'radial-gradient(circle, rgba(103,232,249,0.4), rgba(232,121,249,0.22) 50%, transparent 78%)',
+            'radial-gradient(circle, rgba(232,121,249,0.42), rgba(167,139,250,0.2) 50%, transparent 76%)',
           animation: 'ccAura 5s ease-in-out infinite',
         }}
       />
 
-      {/* RINGS orbitando atrás */}
+      {/* RINGS orbitando */}
+      <div aria-hidden className="absolute rounded-full border border-fuchsia-400/30" style={{ width: '100%', height: '100%', animation: 'ccSpin 26s linear infinite' }} />
+      <div aria-hidden className="absolute rounded-full border border-violet/25" style={{ width: '112%', height: '112%', animation: 'ccSpin 40s linear infinite reverse' }} />
+      <div aria-hidden className="absolute rounded-full border border-cyan-400/20 border-dashed" style={{ width: '126%', height: '126%', animation: 'ccSpin 64s linear infinite' }} />
+
+      {/* ANEL ARCO-ÍRIS conic rotativo (annulus via mask) */}
       <div
         aria-hidden
-        className="absolute rounded-full border border-fuchsia-400/25"
-        style={{ width: BOX_W * 0.96, height: BOX_W * 0.96, animation: 'ccRing 26s linear infinite' }}
-      />
-      <div
-        aria-hidden
-        className="absolute rounded-full border border-cyan-400/20 border-dashed"
-        style={{ width: BOX_W * 1.14, height: BOX_W * 1.14, animation: 'ccRing 46s linear infinite reverse' }}
+        className="absolute rounded-full"
+        style={{
+          width: '101%',
+          height: '101%',
+          background: 'conic-gradient(from 0deg, #e879f9, #a78bfa, #67e8f9, #c8ff00, #e879f9)',
+          animation: 'ccSpin 9s linear infinite',
+          filter: 'blur(2px)',
+          opacity: 0.75,
+          WebkitMask: 'radial-gradient(circle, transparent 48%, #000 49%, #000 50.5%, transparent 51.5%)',
+          mask: 'radial-gradient(circle, transparent 48%, #000 49%, #000 50.5%, transparent 51.5%)',
+        }}
       />
 
-      {/* FRAME 3D parallax — segue a proporção do vídeo */}
+      {/* HUD halo dashes + ticks cardeais */}
+      <svg aria-hidden className="absolute" style={{ width: '100%', height: '100%', overflow: 'visible' }} viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="48.5" fill="none" stroke="rgba(103,232,249,0.4)" strokeWidth="0.4" strokeDasharray="0.6 5" style={{ animation: 'ccSpin 30s linear infinite', transformOrigin: '50px 50px' }} />
+        {[0, 90, 180, 270].map((d) => (
+          <line key={d} x1="50" y1="1.6" x2="50" y2="4.2" stroke="rgba(103,232,249,0.85)" strokeWidth="0.6" transform={`rotate(${d} 50 50)`} />
+        ))}
+      </svg>
+
+      {/* BADGE CYBORG — vão esquerdo */}
+      <div className="pointer-events-none absolute z-20" style={{ left: '1%', top: '33%' }}>
+        <span
+          className="mono inline-flex items-center gap-1.5 rounded-full border border-cyan-400/55 bg-black/65 px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.18em] text-cyan-300 backdrop-blur-md"
+          style={{ fontFamily: 'var(--font-tech)', boxShadow: '0 0 18px -4px rgba(103,232,249,0.7)', animation: 'ccBadge 1.6s ease-in-out infinite' }}
+        >
+          <span className="relative flex h-1.5 w-1.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-300 opacity-70" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-cyan-300" />
+          </span>
+          CYBORG
+        </span>
+      </div>
+
+      {/* AUDIO bars — vão direito */}
+      <div className="pointer-events-none absolute z-20 flex items-end gap-[3px]" style={{ right: '3%', top: '44%', height: 30 }}>
+        {Array.from({ length: 5 }).map((_, i) => (
+          <span
+            key={i}
+            className="block w-[3px] rounded-full bg-gradient-to-t from-fuchsia-500 to-cyan-200"
+            style={{ height: '100%', transformOrigin: 'bottom', filter: 'drop-shadow(0 0 4px rgba(232,121,249,0.7))', animation: `ccBars 0.5s ease-in-out ${i * 0.08}s infinite alternate` }}
+          />
+        ))}
+      </div>
+
+      {/* MOLDURA com parallax 3D + float — o vídeo INTEIRO */}
       <div
-        className="relative"
+        className="relative z-10"
         style={{
-          width: w,
-          height: h,
+          width: FRAME_W,
+          height: FRAME_H,
           transformStyle: 'preserve-3d',
           transform: `perspective(1200px) rotateX(${tiltX}deg) rotateY(${tiltY}deg)`,
-          transition: 'transform 0.6s cubic-bezier(.2,.8,.2,1), width 0.5s ease, height 0.5s ease',
+          transition: 'transform 0.6s cubic-bezier(.2,.8,.2,1), width 0.45s ease',
         }}
       >
-        <div
-          className="relative h-full w-full overflow-hidden rounded-[20px] border border-fuchsia-400/40"
-          style={{
-            background: '#05050a',
-            boxShadow:
-              '0 0 0 1px rgba(0,0,0,0.4), 0 30px 70px -10px rgba(232,121,249,0.45), inset 0 0 30px rgba(103,232,249,0.12)',
-          }}
-        >
-          {/* VÍDEO — inteiro (object-contain), key força a animação de entrada */}
-          <video
-            key={index}
-            ref={videoRef}
-            src={HERO_VIDEOS[index]}
-            autoPlay
-            muted
-            playsInline
-            preload="auto"
-            onEnded={advance}
-            onLoadedMetadata={onMeta}
-            className="absolute inset-0 h-full w-full object-contain"
-            style={{ animation: 'ccVideoIn 0.6s cubic-bezier(.2,.8,.2,1)', filter: 'saturate(1.06)' }}
-          />
-
-          {/* scanline sutil constante */}
+        <div className="relative h-full w-full" style={{ animation: 'ccFloat 6s ease-in-out infinite' }}>
+          {/* gradient ring fininho colado na moldura (premium) */}
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-0 opacity-[0.06] mix-blend-overlay"
-            style={{ backgroundImage: 'repeating-linear-gradient(0deg, transparent 0 2px, rgba(103,232,249,0.6) 2px 3px)' }}
+            className="absolute inset-[-3px] rounded-[28px]"
+            style={{ background: 'conic-gradient(from 0deg, #e879f9, #a78bfa, #67e8f9, #c8ff00, #e879f9)', animation: 'ccSpin 8s linear infinite', filter: 'blur(2px)', opacity: 0.85 }}
           />
-
-          {/* TRANSIÇÃO — sweep + flash (key=pulse força o replay a cada troca) */}
-          <div key={pulse} aria-hidden className="pointer-events-none absolute inset-0">
-            <div
-              className="absolute inset-x-0 top-0 h-[16%]"
-              style={{
-                background: 'linear-gradient(180deg, transparent, rgba(103,232,249,0.75), transparent)',
-                filter: 'blur(2px)',
-                animation: 'ccSweep 0.6s ease-out',
-              }}
+          <div
+            className="absolute inset-0 overflow-hidden rounded-[26px] border border-black/40"
+            style={{ background: '#05050a', boxShadow: '0 30px 70px -10px rgba(232,121,249,0.5), inset 0 0 26px rgba(103,232,249,0.14)' }}
+          >
+            {/* VÍDEO inteiro (object-contain) */}
+            <video
+              ref={videoRef}
+              src={HERO_VIDEOS[index]}
+              autoPlay
+              muted
+              playsInline
+              preload="auto"
+              onEnded={advance}
+              onLoadedMetadata={onMeta}
+              className="absolute inset-0 h-full w-full object-contain"
+              style={{ filter: 'saturate(1.06)' }}
             />
-            <div className="absolute inset-0 bg-white" style={{ animation: 'ccFlash 0.6s ease-out' }} />
+            {/* scanline */}
+            <div aria-hidden className="pointer-events-none absolute inset-0 opacity-[0.06] mix-blend-overlay" style={{ backgroundImage: 'repeating-linear-gradient(0deg, transparent 0 2px, rgba(103,232,249,0.6) 2px 3px)' }} />
+            {/* top rim light */}
+            <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-1/4" style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.16), transparent)', mixBlendMode: 'soft-light' }} />
+            {/* TRANSIÇÃO (key=pulse) — sweep + flash + glitch */}
+            <div key={pulse} aria-hidden className="pointer-events-none absolute inset-0">
+              <div className="absolute inset-x-0 top-0 h-[14%]" style={{ background: 'linear-gradient(180deg, transparent, rgba(103,232,249,0.8), transparent)', filter: 'blur(2px)', animation: 'ccSweep 0.62s ease-out' }} />
+              <div className="absolute inset-0 bg-white" style={{ animation: 'ccFlash 0.62s ease-out' }} />
+              <div className="absolute inset-0" style={{ background: 'rgba(103,232,249,0.5)', mixBlendMode: 'screen', animation: 'ccGlitch 0.42s steps(2)' }} />
+            </div>
+            {/* corner brackets */}
+            <span className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 border-l-2 border-t-2 border-cyan-300/70" />
+            <span className="pointer-events-none absolute right-2.5 top-2.5 h-4 w-4 border-r-2 border-t-2 border-cyan-300/70" />
+            <span className="pointer-events-none absolute left-2.5 bottom-2.5 h-4 w-4 border-l-2 border-b-2 border-fuchsia-400/70" />
+            <span className="pointer-events-none absolute right-2.5 bottom-2.5 h-4 w-4 border-r-2 border-b-2 border-fuchsia-400/70" />
           </div>
 
-          {/* CORNER HUD brackets */}
-          <span className="pointer-events-none absolute left-2 top-2 h-4 w-4 border-l-2 border-t-2 border-cyan-300/70" />
-          <span className="pointer-events-none absolute right-2 top-2 h-4 w-4 border-r-2 border-t-2 border-cyan-300/70" />
-          <span className="pointer-events-none absolute left-2 bottom-2 h-4 w-4 border-l-2 border-b-2 border-fuchsia-400/70" />
-          <span className="pointer-events-none absolute right-2 bottom-2 h-4 w-4 border-r-2 border-b-2 border-fuchsia-400/70" />
-        </div>
-
-        {/* BADGE topo */}
-        <div className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 z-20">
-          <span
-            className="mono inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-black/55 px-3 py-1 text-[9.5px] font-bold uppercase tracking-[0.18em] text-white/85 backdrop-blur"
-            style={{ fontFamily: 'var(--font-tech)' }}
-          >
-            <span className="h-1.5 w-1.5 rounded-full bg-cyan-300" style={{ animation: 'ccBlink 1.4s ease-in-out infinite' }} />
-            cyborg · ao vivo
-          </span>
+          {/* badge topo na moldura */}
+          <div className="pointer-events-none absolute left-1/2 top-2.5 -translate-x-1/2 z-20">
+            <span className="mono inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-black/55 px-3 py-1 text-[9px] font-bold uppercase tracking-[0.18em] text-white/85 backdrop-blur" style={{ fontFamily: 'var(--font-tech)' }}>
+              <span className="h-1.5 w-1.5 rounded-full bg-lime" style={{ animation: 'ccBlink 1.3s ease-in-out infinite' }} />
+              ao vivo
+            </span>
+          </div>
         </div>
       </div>
 
       {/* ÍNDICE 1·2·3 + hint */}
-      <div className="pointer-events-none absolute bottom-0 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1.5">
+      <div className="pointer-events-none absolute bottom-[2%] left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1.5">
         <div className="flex items-center gap-1.5">
           {HERO_VIDEOS.map((_, i) => (
             <span
@@ -362,10 +408,7 @@ function CyborgCarousel({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
             />
           ))}
         </div>
-        <span
-          className="mono text-[8.5px] uppercase tracking-[0.18em] text-text-dim"
-          style={{ fontFamily: 'var(--font-tech)' }}
-        >
+        <span className="mono text-[8.5px] uppercase tracking-[0.18em] text-text-dim" style={{ fontFamily: 'var(--font-tech)' }}>
           passe o mouse pra trocar
         </span>
       </div>
@@ -373,26 +416,38 @@ function CyborgCarousel({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
       <style jsx>{`
         @keyframes ccAura {
           0%, 100% { transform: scale(1); opacity: 0.6; }
-          50% { transform: scale(1.14); opacity: 1; }
+          50% { transform: scale(1.12); opacity: 1; }
         }
-        @keyframes ccRing {
+        @keyframes ccSpin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
-        @keyframes ccVideoIn {
-          0% { opacity: 0; transform: scale(1.05); filter: brightness(1.5) saturate(1.5); }
-          45% { opacity: 1; }
-          100% { opacity: 1; transform: scale(1); filter: brightness(1) saturate(1.06); }
+        @keyframes ccFloat {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-9px); }
         }
         @keyframes ccSweep {
-          0% { transform: translateY(-120%); opacity: 0; }
-          20% { opacity: 1; }
-          100% { transform: translateY(620%); opacity: 0; }
+          0% { transform: translateY(-130%); opacity: 0; }
+          18% { opacity: 1; }
+          100% { transform: translateY(700%); opacity: 0; }
         }
         @keyframes ccFlash {
           0% { opacity: 0; }
-          22% { opacity: 0.42; }
+          20% { opacity: 0.5; }
           100% { opacity: 0; }
+        }
+        @keyframes ccGlitch {
+          0% { opacity: 0.4; transform: translateX(-3px); }
+          50% { opacity: 0.2; transform: translateX(3px); }
+          100% { opacity: 0; transform: translateX(0); }
+        }
+        @keyframes ccBadge {
+          0%, 100% { transform: translateY(0); opacity: 0.95; }
+          50% { transform: translateY(-3px); opacity: 1; }
+        }
+        @keyframes ccBars {
+          from { transform: scaleY(0.2); }
+          to { transform: scaleY(1); }
         }
         @keyframes ccBlink {
           0%, 100% { opacity: 0.45; }
