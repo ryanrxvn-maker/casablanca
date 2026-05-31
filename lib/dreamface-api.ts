@@ -398,10 +398,26 @@ export async function submitLipsync(
     create_work_session: false,
     asset_info: { asset_id: '', original_video_url: avatar.path, file_name: args.videoName || 'face.mp4' },
   };
-  const j = await dfPostJson<{ animate_image_id?: string }>(c, '/dw-server/task/v2/submit', body);
-  const animateId = j.data?.animate_image_id;
-  if (!animateId) throw new DreamFaceError('submit_failed', 'DreamFace não retornou animate_image_id no submit.');
-  return animateId;
+  // RETRY no submit: erros transitórios do motor (risk-control/throttle —
+  // ex.: THS12150000003, que aparece quando vários submits chegam juntos) NÃO
+  // são falha definitiva. Re-tenta 3× com backoff + jitter (ritmo humano).
+  // Erros definitivos (auth, etc) propagam na hora.
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const j = await dfPostJson<{ animate_image_id?: string }>(c, '/dw-server/task/v2/submit', body);
+      const animateId = j.data?.animate_image_id;
+      if (!animateId) throw new DreamFaceError('submit_failed', 'DreamFace não retornou animate_image_id no submit.');
+      return animateId;
+    } catch (e) {
+      lastErr = e;
+      const transient =
+        e instanceof DreamFaceError && (e.code === 'api_error' || e.code === 'submit_failed' || e.code === 'bad_response');
+      if (!transient || attempt === 2) throw e;
+      await sleep(2500 * (attempt + 1) + Math.floor(Math.random() * 1200)); // ~2.5s, ~5s
+    }
+  }
+  throw lastErr;
 }
 
 type RawWorkItem = { id: string; animate_id?: string; web_work_status?: number; work_name?: string };
@@ -415,7 +431,7 @@ export async function pollUntilDone(
   animateId: string,
   opts: { timeoutMs?: number; intervalMs?: number; onStage?: (s: LipsyncStage) => void } = {},
 ): Promise<{ workId: string }> {
-  const timeoutMs = opts.timeoutMs ?? 240_000; // 4 min
+  const timeoutMs = opts.timeoutMs ?? 250_000; // ~4,2 min (margem sob o teto 300s da função)
   const baseInterval = opts.intervalMs ?? 2500;
   const started = Date.now();
   opts.onStage?.('generating');
@@ -553,26 +569,60 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Mapeia erro → mensagem amigável + HTTP status pra rota. */
-export function dreamFaceErrorToHttp(e: unknown): { status: number; message: string; code: string } {
+/**
+ * Mensagem que vai pro CLIENTE — NUNCA cita o motor (DreamFace) nem
+ * endpoints/códigos internos. (Requisito: o cliente não pode saber qual
+ * motor de lipsync está por trás.) O detalhe cru fica só no log do servidor.
+ */
+const CLIENT_MSG: Record<string, string> = {
+  config_missing: 'A geração está indisponível no momento. Tente mais tarde.',
+  auth: 'A geração está temporariamente indisponível. Tenta de novo em instantes.',
+  no_face: 'Nenhum rosto detectado no vídeo. Use um rosto frontal, nítido e bem iluminado.',
+  generation_failed: 'A geração falhou. Use um vídeo com rosto frontal nítido e um áudio limpo, e tenta de novo.',
+  timeout: 'A geração demorou demais. Tenta de novo em instantes.',
+  upload_failed: 'Falha ao enviar o arquivo. Tenta de novo.',
+  upload_init_failed: 'Falha ao iniciar o envio. Tenta de novo.',
+  audio_upload_failed: 'Falha ao enviar o áudio. Tenta de novo.',
+  avatar_register_failed: 'Não consegui preparar o rosto. Use um vídeo com rosto frontal nítido.',
+  submit_failed: 'Não consegui iniciar a geração agora. Tenta de novo em instantes.',
+  no_output_url: 'A geração concluiu mas não retornou o vídeo. Tenta de novo.',
+  api_error: 'O serviço de geração recusou a solicitação agora. Tenta de novo em instantes.',
+  bad_response: 'A geração instabilizou. Tenta de novo.',
+  internal: 'Algo deu errado na geração. Tenta de novo.',
+};
+
+const HTTP_STATUS: Record<string, number> = {
+  config_missing: 500,
+  auth: 502,
+  no_face: 422,
+  generation_failed: 422,
+  timeout: 504,
+  upload_failed: 502,
+  upload_init_failed: 502,
+  audio_upload_failed: 502,
+  avatar_register_failed: 502,
+  submit_failed: 502,
+  no_output_url: 502,
+  api_error: 502,
+  bad_response: 502,
+};
+
+/**
+ * Mapeia erro → { status, message (CLIENTE, sem marca), code, detail (LOG) }.
+ * `message` é sempre genérica/sem marca; `detail` carrega o texto cru
+ * (que pode citar DreamFace/endpoint) APENAS pra log server-side.
+ */
+export function dreamFaceErrorToHttp(
+  e: unknown,
+): { status: number; message: string; code: string; detail: string } {
   if (e instanceof DreamFaceError) {
-    const map: Record<string, number> = {
-      config_missing: 500,
-      auth: 502,
-      no_face: 422,
-      generation_failed: 422,
-      timeout: 504,
-      upload_failed: 502,
-      upload_init_failed: 502,
-      audio_upload_failed: 502,
-      avatar_register_failed: 502,
-      submit_failed: 502,
-      no_output_url: 502,
-      api_error: 502,
-      bad_response: 502,
+    return {
+      status: HTTP_STATUS[e.code] ?? 500,
+      message: CLIENT_MSG[e.code] ?? CLIENT_MSG.internal,
+      code: e.code,
+      detail: e.message,
     };
-    return { status: map[e.code] ?? 500, message: e.message, code: e.code };
   }
-  const message = e instanceof Error ? e.message : String(e);
-  return { status: 500, message, code: 'internal' };
+  const detail = e instanceof Error ? e.message : String(e);
+  return { status: 500, message: CLIENT_MSG.internal, code: 'internal', detail };
 }

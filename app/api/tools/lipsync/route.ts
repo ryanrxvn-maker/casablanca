@@ -99,10 +99,10 @@ export async function POST(req: Request) {
   if (!guard.ok) return guard.response;
 
   if (!isDreamFaceConfigured()) {
+    // Erro de setup (só admin vê) — mantém sem marca do motor por segurança.
     return NextResponse.json(
       {
-        error:
-          'DreamFace não configurado no servidor. Defina DREAMFACE_ACCOUNT_ID e DREAMFACE_USER_ID (ver .env.local.example).',
+        error: 'Geração não configurada no servidor (variáveis de ambiente do provedor ausentes).',
         code: 'config_missing',
       },
       { status: 500 },
@@ -174,8 +174,10 @@ export async function POST(req: Request) {
       work_id: result.workId,
     });
   } catch (err) {
-    const { status, message, code } = dreamFaceErrorToHttp(err);
-    console.error('[lipsync API · DreamFace]', code, message);
+    // `detail` (cru, pode citar o motor) vai SÓ pro log. `message` (sem
+    // marca) é o que volta pro cliente.
+    const { status, message, code, detail } = dreamFaceErrorToHttp(err);
+    console.error('[lipsync API]', code, detail);
     return NextResponse.json({ error: message, code }, { status });
   }
 }

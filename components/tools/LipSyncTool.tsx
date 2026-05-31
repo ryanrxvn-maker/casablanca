@@ -315,23 +315,20 @@ export default function LipSyncTool() {
       patchJob(id, { status: 'uploading' });
       const faceUrl = await uploadPublic(face, 'video');
 
-      // 4+5. Gera + pós-produção por trecho (concorrência 2 por disparo).
+      // 4+5. Gera + pós-produção trecho a trecho, em SÉRIE (1 por vez).
+      //   - anti-throttle: 2 submits simultâneos no motor disparam o
+      //     risk-control (erro THS…0003). Serial = ritmo humano, sem bloqueio.
+      //   - 1 render longo por vez no motor → cada um termina dentro do
+      //     orçamento de tempo (sem timeout por concorrência).
       patchJob(id, { status: 'generating', percent: 26 });
       const outBlobs: Blob[] = new Array(n);
-      let next = 0;
-      let done = 0;
-      const worker = async () => {
-        while (next < n) {
-          const i = next++;
-          const chunkMs = n > 1
-            ? Math.round((await measureMediaDuration(audioChunks[i])) * 1000) || Math.min(MAX_CHUNK_SEC * 1000, audioMs)
-            : audioMs;
-          outBlobs[i] = await generateOne(faceUrl, audioChunks[i], chunkMs, n > 1 ? `trecho ${i + 1}/${n}` : undefined);
-          done++;
-          patchJob(id, { percent: 26 + Math.round((done / n) * 64) }); // 26 → 90
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(2, n) }, () => worker()));
+      for (let i = 0; i < n; i++) {
+        const chunkMs = n > 1
+          ? Math.round((await measureMediaDuration(audioChunks[i])) * 1000) || Math.min(MAX_CHUNK_SEC * 1000, audioMs)
+          : audioMs;
+        outBlobs[i] = await generateOne(faceUrl, audioChunks[i], chunkMs, n > 1 ? `trecho ${i + 1}/${n}` : undefined);
+        patchJob(id, { percent: 26 + Math.round(((i + 1) / n) * 64) }); // 26 → 90
+      }
 
       // 6. COSTURA os trechos num só (stream-copy = leve). 1 trecho = direto.
       let finalBlob: Blob;

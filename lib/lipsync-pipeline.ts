@@ -27,10 +27,16 @@ import {
 } from './ffmpeg-worker';
 import { postprocessLipSyncOutput } from './lipsync-postprocess';
 
-/** Máx por trecho — margem sob o limite do motor (~180s). */
-export const MAX_CHUNK_SEC = 170;
+/**
+ * Máx por trecho. NÃO é o limite do motor (que aceita ~180s) — é o limite
+ * de TEMPO DE RENDER: cada trecho roda numa função serverless (Vercel, teto
+ * 300s) que espera o motor renderizar. Render de áudio longo demora — um
+ * trecho de ~175s estourou o timeout. Trechos de ~100s renderizam com folga
+ * dentro do orçamento. Áudio de 10min → ~6 trechos costurados.
+ */
+export const MAX_CHUNK_SEC = 100;
 /** Acima disso, o áudio é dividido em trechos. */
-export const CHUNK_THRESHOLD_SEC = 178;
+export const CHUNK_THRESHOLD_SEC = 108;
 
 /** Limite seguro do Supabase Storage (cap ~50MB) — abaixo disso vai nativo. */
 const STORAGE_SAFE_BYTES = 44 * 1024 * 1024;
