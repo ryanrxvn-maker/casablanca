@@ -56,6 +56,7 @@ import {
   IconPlay as PilotIconPlay,
   IconX as PilotIconX,
   IconUpload as PilotIconUpload,
+  IconBroll as PilotIconBroll,
 } from '@/components/PilotCardActions';
 import { MotorConfigPicker, MotorSlotPicker } from '@/components/MotorConfigPicker';
 import { defaultMotorConfig, resolveMotors, estimateSecondsFromText, type MotorConfig, type Motor } from '@/lib/motor-config';
@@ -3800,53 +3801,25 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     router.push('/tools/heygen-auto?from=clickup-pilot');
   }
 
-  /** Dispara Magnific Auto-B-Rolls DESTA task — invisivel, igual ao HeyGen
-   *  Auto (roda via extensao/bridge, nao abre ferramenta nem navega). Usa o
-   *  JSON colado na caixa "+" da task. ONLY: enfileira ungated (roda direto).
-   *  MORE: dispara o HeyGen Auto dessa task em background + enfileira o
-   *  Magnific gated (so roda apos o HeyGen dela concluir). Fila Magnific e
-   *  serial — 1 por vez sempre. */
+  /** Dispara SO o Auto B-roll (Magnific) dessa task — standalone, ungated.
+   *  Acionado pelo botão 3D ✨ (IconBroll) no card. Roda invisivel via
+   *  extensao/bridge (fila serial 1 por vez). Não roda HeyGen junto: pra
+   *  disparar HeyGen, usa o ▶ play. Os dois são independentes — user pode
+   *  rodar só B-rolls, só HeyGen, ou ambos (clica os dois). */
   function dispatchTaskToMagnific(taskId: string) {
     const a = taskAnalyses[taskId];
     if (!a || a.vaBriefing) return;
     if (!(taskMagnificJson[taskId] || '').trim()) {
       setMagnificEditorOpen((p) => ({ ...p, [taskId]: true }));
-      setError('Cole o JSON de B-rolls dessa task na caixa abaixo (botao "+") antes de disparar.');
+      setError('Cole o JSON de B-rolls dessa task na caixa abaixo antes de disparar.');
       return;
     }
-    if (onlyMagnificMode) {
-      if (!enqueueMagnificForTask(taskId, false)) {
-        setError('JSON de B-rolls invalido — nenhum take detectado.');
-        return;
-      }
-      setError(null);
-      for (const sid of getSiblingTaskIds(taskId)) markDispatched(sid);
-      return;
-    }
-    // MORE: HeyGen Auto desta task em background + Magnific gated. O gate
-    // so destrava quando o HeyGen DESTA task concluir — entao a task precisa
-    // estar 'ready' (sem avatar pendente). 'partial' geraria job preso.
-    if (a.status !== 'ready') {
-      setError('MORE Magnific precisa da task ready (resolva o avatar pendente) ou use Only Magnific.');
-      return;
-    }
-    if (!enqueueMagnificForTask(taskId, true)) {
+    if (!enqueueMagnificForTask(taskId, false)) {
       setError('JSON de B-rolls invalido — nenhum take detectado.');
       return;
     }
     setError(null);
     for (const sid of getSiblingTaskIds(taskId)) markDispatched(sid);
-    // Marca queued pra UI consistente; promoter dispara direto se ha vaga.
-    setBatchStates((prev) => ({
-      ...prev,
-      [taskId]: {
-        ...(prev[taskId] || { taskId, taskName: a.taskName, baseAdId: a.baseAdId || a.taskName, parts: [], startedAt: Date.now(), phase: 'queued' as const }),
-        phase: 'queued',
-        message: 'Na fila — aguardando vaga...',
-        finishedAt: undefined,
-      } as BatchTaskState,
-    }));
-    void runHeyGenGated(taskId, 'run');
   }
 
   /** Copia SO o body falado dessa task pro clipboard — sem hooks, sem a
@@ -4632,74 +4605,14 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                   className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full opacity-35 blur-3xl"
                   style={{ background: 'rgba(167,139,250,0.45)' }}
                 />
-                <div className="relative mb-3 flex items-center gap-2">
-                  <span
-                    className="text-[10.5px] font-bold uppercase tracking-[0.22em] text-violet"
-                    style={{ fontFamily: 'var(--font-tech)' }}
-                  >
-                    Modos de geração
-                  </span>
-                  <span className="h-px flex-1 bg-gradient-to-r from-violet/30 via-line to-transparent" />
-                </div>
-                <div className="relative grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  <Toggle3D
-                    on={camuflagemMode}
-                    onChange={setCamuflagemMode}
-                    label="Camuflagem"
-                    hint="Gera 3a pasta com audio camuflado"
-                    variant="fuchsia"
-                    icon={<span className="text-base">🎭</span>}
-                  />
-                  <Toggle3D
-                    on={onlyMagnificMode}
-                    onChange={(v) => { setOnlyMagnificMode(v); if (v) setMoreMagnificMode(false); }}
-                    label="Only Magnific"
-                    hint="Pula HeyGen — so B-Rolls (Nano + Kling)"
-                    variant="lime"
-                    icon={<span className="text-base">🍌</span>}
-                  />
-                  <Toggle3D
-                    on={moreMagnificMode}
-                    onChange={(v) => { setMoreMagnificMode(v); if (v) setOnlyMagnificMode(false); }}
-                    label="More Magnific"
-                    hint="HeyGen + B-Rolls extras Magnific"
-                    variant="cyan"
-                    icon={<span className="text-base">➕</span>}
-                  />
-                </div>
-
-                {/* Camuflagem inputs — so quando ON */}
-                {camuflagemMode ? (
-                  <div className="mt-3 rounded-[12px] border border-fuchsia-500/30 bg-fuchsia-500/5 p-3">
-                    <div className="mono mb-2 text-[10px] uppercase tracking-widest text-fuchsia-200">
-                      Audio WHITE pra camuflagem
-                    </div>
-                    <div className="grid gap-2 sm:grid-cols-[1fr_140px] items-center">
-                      <input
-                        type="file"
-                        accept="audio/*,video/*"
-                        onChange={(e) => setCamuflagemWhite(e.target.files?.[0] || null)}
-                        className="input-field text-xs"
-                      />
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="range"
-                          min={5}
-                          max={100}
-                          value={camuflagemVolume}
-                          onChange={(e) => setCamuflagemVolume(Number(e.target.value))}
-                          className="flex-1 accent-fuchsia-400"
-                        />
-                        <span className="mono w-10 text-right text-[11px] text-fuchsia-200">{camuflagemVolume}%</span>
-                      </div>
-                    </div>
-                    <p className="mono mt-2 text-[9px] uppercase tracking-widest text-text-muted">
-                      Aceita audio (mp3/wav) OU video (extrai audio). Volume = % do nivel padrao.
-                    </p>
-                  </div>
-                ) : null}
-
-                <div className="mt-5 flex flex-wrap items-center gap-3">
+                {/* PAINEL "Modos de Geração" REMOVIDO (user pediu):
+                 *  - Camuflagem agora eh PER-TASK (botao 3D na action bar do card)
+                 *  - Only Magnific / More Magnific descontinuados (auto-broll
+                 *    tem ferramenta propria + botao JSON inline em cada task)
+                 *  Estados onlyMagnificMode/moreMagnificMode permanecem em
+                 *  useToolState (sempre false agora) por compat com handlers
+                 *  que checavam — sem UI exposta. */}
+                <div className="flex flex-wrap items-center gap-3">
                   <button
                     type="button"
                     onClick={loadTasks}
@@ -5609,50 +5522,33 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   // ═══ ACTION BAR 3D — botoes icon-only ═══
                                   <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                                     {/* Tesoura (decupagem) toggle */}
-                                    {!onlyMagnificMode ? (
-                                      <PilotBtn3D
-                                        icon={<PilotIconScissors size={16} />}
-                                        color={isDecupagemEnabled(a.taskId) ? 'lime' : 'neutral'}
-                                        active={isDecupagemEnabled(a.taskId)}
-                                        title={isDecupagemEnabled(a.taskId) ? 'Decupagem ON' : 'Decupagem OFF'}
-                                        onClick={() => setDecupagemFor(a.taskId, !isDecupagemEnabled(a.taskId))}
-                                      />
-                                    ) : null}
+                                    <PilotBtn3D
+                                      icon={<PilotIconScissors size={16} />}
+                                      color={isDecupagemEnabled(a.taskId) ? 'lime' : 'neutral'}
+                                      active={isDecupagemEnabled(a.taskId)}
+                                      title={isDecupagemEnabled(a.taskId) ? 'Decupagem ON' : 'Decupagem OFF'}
+                                      onClick={() => setDecupagemFor(a.taskId, !isDecupagemEnabled(a.taskId))}
+                                    />
                                     {/* Camuflagem toggle (per-task) */}
-                                    {!onlyMagnificMode ? (
-                                      <PilotBtn3D
-                                        icon={<IconCamuflagem size={16} />}
-                                        color={(taskCamuflagem[a.taskId]?.enabled ?? camuflagemMode) ? 'fuchsia' : 'neutral'}
-                                        active={taskCamuflagem[a.taskId]?.enabled ?? camuflagemMode}
-                                        title={(taskCamuflagem[a.taskId]?.enabled ?? camuflagemMode) ? 'Camuflagem ON' : 'Camuflagem OFF — clica pra ativar'}
-                                        onClick={() => toggleTaskCamuflagem(a.taskId)}
-                                      />
-                                    ) : null}
-                                    {/* Magnific JSON quick-buttons (so se mode Magnific) */}
-                                    {(onlyMagnificMode || moreMagnificMode) ? (
-                                      <>
-                                        <button
-                                          type="button"
-                                          onClick={() => copyTaskBody(a.taskId)}
-                                          className="mono rounded border border-fuchsia-500/50 bg-fuchsia-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20"
-                                          title="Copia SO o body da copy (sem hooks) — pra gerar os prompts de B-roll"
-                                        >
-                                          {copiedBodyTask === a.taskId ? '✓' : '⧉'}
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => setMagnificEditorOpen((p) => ({ ...p, [a.taskId]: !p[a.taskId] }))}
-                                          className={`mono rounded border px-2 py-1 text-[10px] uppercase tracking-widest ${
-                                            (taskMagnificJson[a.taskId] || '').trim()
-                                              ? 'border-lime/60 bg-lime/15 text-lime hover:bg-lime/25'
-                                              : 'border-cyan-500/50 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/20'
-                                          }`}
-                                          title="Cola aqui o JSON de B-rolls dessa task (caixa inline)"
-                                        >
-                                          {(taskMagnificJson[a.taskId] || '').trim() ? '+ JSON ✓' : '+ JSON'}
-                                        </button>
-                                      </>
-                                    ) : null}
+                                    <PilotBtn3D
+                                      icon={<IconCamuflagem size={16} />}
+                                      color={(taskCamuflagem[a.taskId]?.enabled ?? camuflagemMode) ? 'fuchsia' : 'neutral'}
+                                      active={taskCamuflagem[a.taskId]?.enabled ?? camuflagemMode}
+                                      title={(taskCamuflagem[a.taskId]?.enabled ?? camuflagemMode) ? 'Camuflagem ON' : 'Camuflagem OFF — clica pra ativar'}
+                                      onClick={() => toggleTaskCamuflagem(a.taskId)}
+                                    />
+                                    {/* Auto B-roll JSON — abre caixa pra colar JSON e disparar Magnific dessa task */}
+                                    <PilotBtn3D
+                                      icon={<PilotIconBroll size={16} />}
+                                      color={(taskMagnificJson[a.taskId] || '').trim() ? 'violet' : 'neutral'}
+                                      active={!!magnificEditorOpen[a.taskId]}
+                                      title={
+                                        (taskMagnificJson[a.taskId] || '').trim()
+                                          ? 'Auto B-roll · JSON colado (clica pra editar/disparar)'
+                                          : 'Auto B-roll · clica pra colar o JSON dos prompts dessa task'
+                                      }
+                                      onClick={() => setMagnificEditorOpen((p) => ({ ...p, [a.taskId]: !p[a.taskId] }))}
+                                    />
                                     {/* Doc button */}
                                     {(a.docUrl || a.taskUrl) ? (
                                       <PilotBtn3D
@@ -5662,17 +5558,15 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                         href={a.docUrl || a.taskUrl}
                                       />
                                     ) : null}
-                                    {/* Disparar */}
-                                    {!onlyMagnificMode ? (
-                                      <PilotBtn3D
-                                        icon={<PilotIconPlay size={18} />}
-                                        color="lime"
-                                        title={a.status === 'partial' ? 'Tem avatar pendente abaixo' : 'Disparar — gerar videos'}
-                                        disabled={a.status === 'partial'}
-                                        onClick={() => moreMagnificMode ? dispatchTaskToMagnific(a.taskId) : dispatchTaskToHeyGen(a.taskId)}
-                                        pulse={a.status === 'ready'}
-                                      />
-                                    ) : null}
+                                    {/* Disparar HeyGen */}
+                                    <PilotBtn3D
+                                      icon={<PilotIconPlay size={18} />}
+                                      color="lime"
+                                      title={a.status === 'partial' ? 'Tem avatar pendente abaixo' : 'Disparar — gerar videos HeyGen'}
+                                      disabled={a.status === 'partial'}
+                                      onClick={() => dispatchTaskToHeyGen(a.taskId)}
+                                      pulse={a.status === 'ready'}
+                                    />
                                   </div>
                                 ) : null}
                               </div>
@@ -5734,11 +5628,14 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   </div>
                                 </div>
                               ) : null}
-                              {/* CAIXA INLINE de JSON Magnific por task normal (sem trocar de tela) */}
-                              {!a.vaBriefing && (onlyMagnificMode || moreMagnificMode) && magnificEditorOpen[a.taskId] ? (
-                                <div className="mt-2 rounded-[10px] border border-lime/40 bg-lime/5 p-3">
-                                  <div className="mono mb-1.5 flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-lime">
-                                    <span>JSON de B-rolls dessa task ({onlyMagnificMode ? 'Only Magnific' : 'More Magnific'})</span>
+                              {/* CAIXA INLINE de JSON Auto B-roll (Magnific) por task — abre/fecha pelo botão 3D ✨ */}
+                              {!a.vaBriefing && magnificEditorOpen[a.taskId] ? (
+                                <div className="mt-2 rounded-[12px] border border-violet-400/45 bg-gradient-to-br from-violet-500/[0.08] via-violet-500/[0.03] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+                                  <div className="mono mb-1.5 flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-violet-200">
+                                    <span className="inline-flex items-center gap-1.5">
+                                      <span className="h-1.5 w-1.5 rounded-full bg-violet-400 animate-pulse" />
+                                      Auto B-roll · esta task
+                                    </span>
                                     {(() => {
                                       const raw = (taskMagnificJson[a.taskId] || '').trim();
                                       const n = raw ? parseMagnificPrompts(raw).length : 0;
@@ -5758,17 +5655,39 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                     placeholder='Cole aqui o JSON de B-rolls (ex: [{ "imagePrompt": "...", "videoPrompt": "..." }, ...])'
                                     className="input-field resize-y font-mono text-[11px]"
                                   />
-                                  <div className="mono mt-1.5 flex flex-wrap items-center gap-2 text-[9px] uppercase tracking-widest text-text-muted">
-                                    <span>Fica salvo nessa task (sobrevive reload). O Magnific roda invisivel via extensao, fila serial 1 por vez.</span>
-                                    {taskMagnificJson[a.taskId] ? (
+                                  <div className="mono mt-2 flex flex-wrap items-center justify-between gap-2">
+                                    <span className="text-[9px] uppercase tracking-widest text-text-muted">
+                                      Fica salvo nessa task · Magnific roda invisivel (extensao, serial 1 por vez)
+                                    </span>
+                                    <div className="flex flex-wrap items-center gap-1.5">
                                       <button
                                         type="button"
-                                        onClick={() => setTaskMagnificJson(a.taskId, '')}
-                                        className="rounded border border-line-strong px-2 py-0.5 text-text-muted hover:border-red-500/60 hover:text-red-300"
+                                        onClick={() => copyTaskBody(a.taskId)}
+                                        className="mono rounded-md border border-fuchsia-500/40 bg-fuchsia-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20"
+                                        title="Copia o body falado dessa task (sem hooks/links) — útil pra gerar os prompts no GPT"
                                       >
-                                        limpar
+                                        {copiedBodyTask === a.taskId ? '✓ copiado' : '⧉ body'}
                                       </button>
-                                    ) : null}
+                                      {taskMagnificJson[a.taskId] ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => setTaskMagnificJson(a.taskId, '')}
+                                          className="mono rounded-md border border-line-strong px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
+                                          title="Limpa o JSON dessa task"
+                                        >
+                                          × limpar
+                                        </button>
+                                      ) : null}
+                                      <button
+                                        type="button"
+                                        onClick={() => dispatchTaskToMagnific(a.taskId)}
+                                        disabled={!(taskMagnificJson[a.taskId] || '').trim() || parseMagnificPrompts((taskMagnificJson[a.taskId] || '').trim()).length === 0}
+                                        className="mono rounded-md border border-violet-400/60 bg-gradient-to-b from-violet-500/25 via-violet-500/15 to-violet-500/[0.04] px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-violet-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.15),0_4px_12px_-4px_rgba(167,139,250,0.4)] transition hover:bg-violet-500/30 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_8px_20px_-6px_rgba(167,139,250,0.6)] disabled:cursor-not-allowed disabled:border-white/10 disabled:bg-white/5 disabled:text-white/30 disabled:shadow-none"
+                                        title="Dispara só Auto B-roll (Magnific) dessa task — independente do HeyGen"
+                                      >
+                                        ✨ Disparar B-rolls
+                                      </button>
+                                    </div>
                                   </div>
                                 </div>
                               ) : null}

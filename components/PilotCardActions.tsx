@@ -182,3 +182,11 @@ export const IconUpload = ({ size = 14 }: { size?: number }) => (
     <line x1="12" y1="3" x2="12" y2="15" />
   </svg>
 );
+
+/** Icone Auto B-roll — sparkle/wand stylized: 4 estrelas e linhas */
+export const IconBroll = ({ size = 16 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="m12 3-1.5 4-4 1.5 4 1.5L12 14l1.5-4 4-1.5-4-1.5z" />
+    <path d="M20 16v4M18 18h4M5 18v3M3.5 19.5h3" />
+  </svg>
+);

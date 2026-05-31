@@ -72,15 +72,7 @@ export function MotorConfigPicker({
           <span className="mono relative text-[10px] font-bold uppercase tracking-[0.14em]">{motorLabel}</span>
         </button>
       ) : (
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="mono text-[10px] uppercase tracking-widest text-cyan-300">Motor</span>
-            <span className="mono text-[10px] uppercase tracking-widest text-text-muted">
-              {config.kind === 'global' && `global · ${config.motor}`}
-              {config.kind === 'percent' && `% ${config.percent.III}/${config.percent.IV}/${config.percent.V}`}
-              {config.kind === 'individual' && 'individual'}
-            </span>
-          </div>
+        <div className="flex items-center justify-end gap-2">
           <button
             type="button"
             onClick={() => setCollapsed(true)}
@@ -127,13 +119,9 @@ export function MotorConfigPicker({
           {/* CARDS DE MOTOR — pro design */}
           {config.kind === 'global' ? (
             <div>
-              <div className="mono mb-2 text-[9px] font-bold uppercase tracking-[0.18em] text-text-muted">
-                Qual avatar usar
-              </div>
               <div className="grid grid-cols-3 gap-2">
                 {MOTORS.map((m) => {
                   const active = config.motor === m;
-                  const isFree = CREDIT_COST_PER_MIN[m] === 0;
                   const palettes = {
                     III: {
                       active: 'border-lime/65 bg-gradient-to-br from-lime/22 via-lime/8 to-transparent text-lime shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_14px_-4px_rgba(190,242,100,0.45)]',
@@ -158,7 +146,7 @@ export function MotorConfigPicker({
                         'group relative rounded-[12px] border px-3 py-3 transition-all duration-200 will-change-transform hover:-translate-y-0.5 hover:scale-[1.02] active:translate-y-0 active:scale-[0.98] ' +
                         (active ? palette.active : palette.idle)
                       }
-                      title={isFree ? `Avatar ${m} — gratuito` : `Avatar ${m} — ${CREDIT_COST_PER_MIN[m]} créditos/min`}
+                      title={`Usar Avatar ${m}`}
                     >
                       {active ? (
                         <span className="absolute -top-1 -right-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-current shadow-[0_2px_6px_rgba(0,0,0,0.3)]">
@@ -167,11 +155,8 @@ export function MotorConfigPicker({
                           </svg>
                         </span>
                       ) : null}
-                      <div className="text-[15px] font-extrabold tabular-nums leading-none" style={{ fontFamily: 'var(--font-tech)' }}>
+                      <div className="text-[20px] font-extrabold tabular-nums leading-none" style={{ fontFamily: 'var(--font-tech)' }}>
                         {m}
-                      </div>
-                      <div className="mono mt-1 text-[9px] font-bold uppercase tracking-[0.14em] opacity-80">
-                        {isFree ? 'Grátis' : `${CREDIT_COST_PER_MIN[m]}c / min`}
                       </div>
                     </button>
                   );
@@ -192,15 +177,15 @@ export function MotorConfigPicker({
                     <div key={m} className="flex items-center gap-2">
                       <span
                         className={
-                          'mono w-20 shrink-0 rounded px-2 py-1 text-center text-[10px] uppercase tracking-widest ' +
+                          'mono w-14 shrink-0 rounded-md px-2 py-1 text-center text-[11px] font-bold uppercase tracking-widest ' +
                           (m === 'III'
-                            ? 'bg-lime/10 text-lime'
+                            ? 'bg-lime/15 text-lime border border-lime/30'
                             : m === 'IV'
-                            ? 'bg-yellow-500/10 text-yellow-200'
-                            : 'bg-fuchsia-500/10 text-fuchsia-200')
+                            ? 'bg-amber-400/15 text-amber-700 border border-amber-400/30'
+                            : 'bg-fuchsia-400/15 text-fuchsia-200 border border-fuchsia-400/30')
                         }
                       >
-                        {m} ({CREDIT_COST_PER_MIN[m]}c/min)
+                        {m}
                       </span>
                       <input
                         type="range"
