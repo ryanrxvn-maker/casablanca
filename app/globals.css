@@ -131,10 +131,15 @@ html:not([data-theme='light']) main {
 }
 
 /* No CLARO os ícones cinza da sidebar somem (gray claro em fundo claro) →
-   mais visíveis (sem mexer no dark, e o hover continua acendendo). */
-html[data-theme='light'] aside a:not(:hover) .sb-nav-icon {
+   mais visíveis. NUNCA aplica no item ATIVO (.sb-icon-active) — esse fica
+   ACESO com a cor. O hover também acende (por isso :not(:hover)). */
+html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
   opacity: 0.9;
   filter: grayscale(1) brightness(0.55);
+}
+/* Item ATIVO acende em qualquer tema (ícone colorido com glow). */
+.sb-icon-active {
+  filter: drop-shadow(0 0 7px rgba(167, 139, 250, 0.85)) !important;
 }
 
 ::selection {

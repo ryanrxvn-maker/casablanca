@@ -239,7 +239,7 @@ export function Sidebar() {
                         className={
                           'group relative flex flex-col items-center justify-center gap-1 rounded-[14px] py-2.5 transition-all duration-300 ' +
                           (active
-                            ? 'bg-violet/12 text-violet'
+                            ? 'bg-violet/[0.16] text-violet ring-1 ring-violet/25'
                             : 'text-text-muted hover:bg-bg/50 hover:text-white')
                         }
                       >
@@ -261,7 +261,7 @@ export function Sidebar() {
                             // HeyGen-style: ícone CINZA por padrão (dessaturado +
                             // apagado), acende a cor só no hover/ativo.
                             (active
-                              ? 'scale-105 grayscale-0 opacity-100'
+                              ? 'sb-icon-active scale-105 grayscale-0 opacity-100'
                               : 'grayscale opacity-45 group-hover:scale-105 group-hover:-translate-y-[1px] group-hover:grayscale-0 group-hover:opacity-100')
                           }
                         >
