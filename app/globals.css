@@ -120,6 +120,22 @@ body > * {
   z-index: 2;
 }
 
+/* ─── MENOS COR (site inteiro) — dessatura ~28% TODO o conteúdo da área
+   principal de uma vez (pega até cores hardcoded fuchsia/cyan/gradients que
+   os tokens não alcançam). SÓ no dark (no claro deixaria sumido). `main` é
+   fluxo normal (não fixed), então não quebra layout. backdrop-blur dos cards
+   continua funcionando (saturate no ancestral não impede o blur). */
+html:not([data-theme='light']) main {
+  filter: saturate(0.72);
+}
+
+/* No CLARO os ícones cinza da sidebar somem (gray claro em fundo claro) →
+   mais visíveis (sem mexer no dark, e o hover continua acendendo). */
+html[data-theme='light'] aside a:not(:hover) .sb-nav-icon {
+  opacity: 0.9;
+  filter: grayscale(1) brightness(0.55);
+}
+
 ::selection {
   background: rgb(var(--violet));
   color: #0a0a0c;

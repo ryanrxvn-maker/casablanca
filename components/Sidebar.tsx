@@ -257,7 +257,7 @@ export function Sidebar() {
                         ) : null}
                         <span
                           className={
-                            'flex h-9 w-9 items-center justify-center rounded-[10px] transition-all duration-300 ' +
+                            'sb-nav-icon flex h-9 w-9 items-center justify-center rounded-[10px] transition-all duration-300 ' +
                             // HeyGen-style: ícone CINZA por padrão (dessaturado +
                             // apagado), acende a cor só no hover/ativo.
                             (active
