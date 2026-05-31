@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { LipSyncHero3D } from '@/app/tools/lipsync/LipSyncHero3D';
-import type { ChunkProgress, ChunkInfo, ChunkStatus } from '@/lib/lipsync-chunker';
 import { createClient } from '@/lib/supabase/client';
+import { LipsyncPreviewCard, type LipsyncTake } from '@/components/LipsyncPreviewCard';
 
 const UPLOAD_BUCKET = 'lipsync-uploads';
 
@@ -52,33 +52,42 @@ function errMsg(e: unknown): string {
 }
 
 /**
- * LipSyncTool — UI estilo DreamFace com 2 motores (V1 / V2).
+ * LipSyncTool — UI de geração de lipsync.
  *
- * Layout:
- *   - Hero 3D no topo (cinematografico com morph robot ↔ human)
- *   - 3 colunas:
- *      LEFT  (200-220px): biblioteca de videos uploadados (thumbnails clicaveis)
- *      CENTER (flex):    preview gigante do video selecionado, com loading
- *                        cinematografico (coelho rotativo) quando processando
- *      RIGHT (340-380px): painel "Sua boca vai falar"
- *                        - Tabs V1 / V2 (com badge identificando cada um)
- *                        - Upload audio + player visual
- *                        - Ajustes pro (collapsible)
- *                        - Botao gerar gigante
+ * Fluxo NÃO-BLOQUEANTE (estilo "fila de criações"):
+ *   - O usuário escolhe um vídeo (rosto) + sobe um áudio e clica GERAR.
+ *   - Na hora abre um CARD embaixo ("Meus LipSyncs") já carregando, e o
+ *     formulário fica LIVRE pra disparar outro — sem trocar de tela.
+ *   - O preview central continua mostrando a FONTE (o vídeo enviado), nunca
+ *     o resultado. Os resultados aparecem só nos cards de baixo.
+ *   - Cada CARD = 1 disparo do usuário. Se internamente o áudio for longo e
+ *     a gente dividir em trechos, isso é INVISÍVEL pro cliente (pra ele é
+ *     uma geração só, costurada no final).
  *
- * Pode subir multiplos videos pra ter "biblioteca" e trocar entre eles.
- * O selecionado vira o "fonte" da geracao.
+ * Layout (3 colunas): biblioteca de vídeos · preview da fonte · painel de
+ * configuração. Abaixo: grade "Meus LipSyncs".
  */
 
-type Status =
-  | 'idle'
-  | 'uploading-video'
-  | 'uploading-audio'
-  | 'queueing'
+/** Etapas internas de UM disparo. */
+type JobStatus =
+  | 'queued'
+  | 'pre'
+  | 'uploading'
   | 'generating'
-  | 'polishing'
+  | 'concat'
   | 'done'
   | 'error';
+
+type Job = {
+  id: string;
+  num: number; // nº sequencial do disparo (rótulo)
+  label: string; // "LipSync 01"
+  status: JobStatus;
+  percent: number; // 0-100 (estimativa visual)
+  videoUrl: string | null; // object URL do MP4 final
+  error: string | null;
+  createdAt: number;
+};
 
 type VideoItem = {
   id: string;
@@ -87,16 +96,29 @@ type VideoItem = {
   meta?: { w: number; h: number; dur: number };
 };
 
-const STAGE_COPY: Record<Status, string> = {
-  idle: '',
-  'uploading-video': 'Otimizando e enviando o vídeo…',
-  'uploading-audio': 'Enviando o áudio…',
-  queueing: 'Reservando a vez na fila…',
-  generating: 'A IA tá encaixando a boca no áudio…',
-  polishing: 'Finalizando os detalhes…',
-  done: 'Pronto.',
-  error: '',
-};
+function isActive(s: JobStatus): boolean {
+  return s !== 'done' && s !== 'error';
+}
+
+/** Teto "suave" da barra por etapa — a barra se aproxima dele com easing. */
+function softCap(s: JobStatus): number {
+  switch (s) {
+    case 'queued': return 8;
+    case 'pre': return 18;
+    case 'uploading': return 26;
+    case 'generating': return 92;
+    case 'concat': return 97;
+    default: return 100;
+  }
+}
+
+/** Mapeia a etapa interna pro estado visual do card. */
+function jobTakeStatus(s: JobStatus): LipsyncTake['status'] {
+  if (s === 'done') return 'completed';
+  if (s === 'error') return 'failed';
+  if (s === 'queued') return 'pending';
+  return 'processing';
+}
 
 export default function LipSyncTool() {
   // Library de videos uploadados
@@ -108,100 +130,33 @@ export default function LipSyncTool() {
   const [audioPreview, setAudioPreview] = useState<string>('');
   const [audioDur, setAudioDur] = useState<number>(0);
 
-  // Generation state
-  const [outputUrl, setOutputUrl] = useState<string>('');
-  const [status, setStatus] = useState<Status>('idle');
-  const [errorMsg, setErrorMsg] = useState<string>('');
-  const [elapsedSec, setElapsedSec] = useState<number>(0);
-
-  // Sync.so v2 — UM motor unico (lipsync-2). PRO removido.
-  // Qualidade absurda vem do PRE-PROCESSING (720p@25fps + audio limpo),
-  // nao do modelo. Custo: $0.05/min, 6x mais barato que Pro.
-  const [syncMode, setSyncMode] = useState<'cut_off' | 'loop' | 'bounce' | 'silence' | 'remap'>('cut_off');
-
-  // Upload progress (real, em %)
-  const [uploadProgress, setUploadProgress] = useState<number>(0);
-
-  // Chunk progress (so quando video > 30s e usa chunking)
-  const [chunkProgress, setChunkProgress] = useState<ChunkProgress | null>(null);
-
-  const [advanced, setAdvanced] = useState(false);
+  // Fila de disparos (cada um vira um card embaixo)
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [formError, setFormError] = useState<string>('');
+  const [flash, setFlash] = useState<boolean>(false); // toast "enviado ↓"
 
   const videoInputRef = useRef<HTMLInputElement | null>(null);
   const audioInputRef = useRef<HTMLInputElement | null>(null);
-  const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startRef = useRef<number>(0);
+  const jobSeqRef = useRef<number>(0);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const isLoading = status !== 'idle' && status !== 'done' && status !== 'error';
   const selected = videos.find((v) => v.id === selectedId) ?? null;
 
   /* ─── Validacao do video ─────────────────────────────────────
-     Detecta problemas conhecidos que causam glitches no lipsync:
-     - Resolucao baixa: dentes ficam borrados
-     - Vídeo muito longo: mais frames pra modelo errar
-     - Vertical com cabeca cortada: bordas geram artefato
-     - Arquivo muito grande: upload lento e pode dar timeout
-  */
+     Detecta problemas conhecidos que causam glitches no lipsync. */
   const videoIssues: Array<{ severity: 'block' | 'warn' | 'info'; text: string }> = (() => {
     if (!selected || !selected.meta) return [];
     const issues: Array<{ severity: 'block' | 'warn' | 'info'; text: string }> = [];
     const { w, h, dur } = selected.meta;
     const minDim = Math.min(w, h);
-    const maxDim = Math.max(w, h);
 
-    // Resolucao
     if (minDim < 480) issues.push({ severity: 'warn', text: `Resolução ${w}×${h} baixa — os dentes podem sair menos nítidos.` });
-    else if (maxDim > 1920) issues.push({ severity: 'info', text: `${w}×${h} — otimizamos pra 720p automático antes de gerar.` });
-    else if (minDim < 720) issues.push({ severity: 'info', text: `${w}×${h} — OK. 720p+ dá boca mais nítida (mas funciona).` });
-
-    // Duracao do vídeo-fonte (o rosto). A duração final do resultado
-    // segue o ÁUDIO (o DreamFace usa o vídeo como fonte do rosto).
     if (dur < 2) issues.push({ severity: 'block', text: `Vídeo de ${dur.toFixed(1)}s é muito curto — use pelo menos 2s de rosto.` });
-    else issues.push({ severity: 'info', text: `O resultado terá a duração do ÁUDIO (até 10min). O vídeo é só a fonte do rosto.` });
-
     if (selected.file.size > 200 * 1024 * 1024) issues.push({ severity: 'warn', text: `Arquivo ${(selected.file.size / 1024 / 1024).toFixed(0)}MB grande — upload pode demorar.` });
 
     return issues;
   })();
   const hasBlockingIssue = videoIssues.some((i) => i.severity === 'block');
-  const willChunk = selected?.meta ? selected.meta.dur > 30 : false;
-
-  /* ─── Estimativa de custo (com Smart Boost 95/5) ──────────────
-     Vídeo curto (1 chunk): 100% padrao = $0.0275/min
-     Vídeo com chunks: 95% padrao + 5% pro (cap 2 chunks) ≈ $0.034/min médio
-  */
-  const estimatedCostUSD = (() => {
-    if (!selected?.meta) return null;
-    const minutes = selected.meta.dur / 60;
-    const dur = selected.meta.dur;
-    if (dur <= 30) return minutes * 0.05 * 0.55; // single, sem boost
-    // chunked: estima # chunks e # pro
-    const numChunks = Math.ceil(dur / 25);
-    const numPro = Math.min(2, Math.ceil(numChunks * 0.05));
-    const proRatio = numPro / numChunks;
-    const padraoRatio = 1 - proRatio;
-    const blendedPerMin = (padraoRatio * 0.05 + proRatio * 0.30) * 0.55;
-    return minutes * blendedPerMin;
-  })();
-  const estimatedCostBRL = estimatedCostUSD !== null ? estimatedCostUSD * 5.3 : null;
-
-  /* ─── Tickers ───────────────────────────────────────────────── */
-
-  function startTicker() {
-    setElapsedSec(0);
-    if (tickRef.current) clearInterval(tickRef.current);
-    startRef.current = Date.now();
-    tickRef.current = setInterval(() => {
-      setElapsedSec(Math.floor((Date.now() - startRef.current) / 1000));
-    }, 1000);
-  }
-
-  function stopTicker() {
-    if (tickRef.current) {
-      clearInterval(tickRef.current);
-      tickRef.current = null;
-    }
-  }
 
   /* ─── Video library ─────────────────────────────────────────── */
 
@@ -224,9 +179,7 @@ export default function LipSyncTool() {
     const item: VideoItem = { id, file, url, meta };
     setVideos((prev) => [...prev, item]);
     setSelectedId(id);
-    setOutputUrl('');
-    setStatus('idle');
-    setErrorMsg('');
+    setFormError('');
   }
 
   function removeVideo(id: string) {
@@ -234,10 +187,7 @@ export default function LipSyncTool() {
       const target = prev.find((v) => v.id === id);
       if (target) URL.revokeObjectURL(target.url);
       const next = prev.filter((v) => v.id !== id);
-      if (selectedId === id) {
-        setSelectedId(next[0]?.id ?? '');
-        setOutputUrl('');
-      }
+      if (selectedId === id) setSelectedId(next[0]?.id ?? '');
       return next;
     });
   }
@@ -253,6 +203,7 @@ export default function LipSyncTool() {
       return;
     }
     setAudioFile(file);
+    setFormError('');
     const url = URL.createObjectURL(file);
     setAudioPreview(url);
     try {
@@ -272,202 +223,30 @@ export default function LipSyncTool() {
   /* ─── Upload helper ─────────────────────────────────────────────
      Sobe o arquivo DIRETO pro Supabase Storage via signed URL
      (browser → Supabase, SEM passar pela Vercel) e retorna a URL
-     pública que o servidor baixa pra mandar pro DreamFace.
-
-     POR QUÊ signed URL: a Vercel corta corpos > ~4,5MB
-     (FUNCTION_PAYLOAD_TOO_LARGE). Subindo direto pro Supabase o
-     arquivo nunca toca a Vercel — sem limite de tamanho.
-  */
-  async function uploadPublic(
-    file: File,
-    kind: 'video' | 'audio',
-    onProgress?: (pct: number) => void,
-  ): Promise<string> {
-    const estimatedMs = Math.max(1500, (file.size / 1024 / 1024 / 6) * 1000);
-    let stop = false;
-    const start = Date.now();
-    if (onProgress) {
-      const tick = () => {
-        if (stop) return;
-        const pct = Math.min(95, Math.round(((Date.now() - start) / estimatedMs) * 100));
-        onProgress(pct);
-        if (pct < 95) setTimeout(tick, 200);
-      };
-      tick();
-    }
+     pública que o servidor baixa pra gerar. A Vercel corta corpos
+     > ~4,5MB; subindo direto o arquivo nunca toca a Vercel. */
+  async function uploadPublic(file: File, kind: 'video' | 'audio'): Promise<string> {
+    const ext = (file.name.split('.').pop() || (kind === 'audio' ? 'mp3' : 'mp4')).toLowerCase();
+    const r = await fetch('/api/tools/lipsync/upload-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kind, ext }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error || `Falha ao iniciar upload (HTTP ${r.status})`);
+    const supabase = createClient();
+    let upErr: unknown = null;
     try {
-      const ext = (file.name.split('.').pop() || (kind === 'audio' ? 'mp3' : 'mp4')).toLowerCase();
-      // 1. URL assinada (corpo minúsculo — não bate no limite da Vercel)
-      const r = await fetch('/api/tools/lipsync/upload-url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind, ext }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d?.error || `Falha ao iniciar upload (HTTP ${r.status})`);
-      // 2. sobe DIRETO pro Supabase (sem limite da Vercel)
-      const supabase = createClient();
-      let upErr: unknown = null;
-      try {
-        const { error } = await supabase.storage
-          .from(UPLOAD_BUCKET)
-          .uploadToSignedUrl(d.path, d.token, file);
-        upErr = error;
-      } catch (e) {
-        upErr = e;
-      }
-      if (upErr) throw new Error('Falha no upload pro storage: ' + errMsg(upErr));
-      stop = true;
-      onProgress?.(100);
-      if (!d.publicUrl || typeof d.publicUrl !== 'string') throw new Error('Upload não retornou URL.');
-      return d.publicUrl as string;
+      const { error } = await supabase.storage
+        .from(UPLOAD_BUCKET)
+        .uploadToSignedUrl(d.path, d.token, file);
+      upErr = error;
     } catch (e) {
-      stop = true;
-      throw e;
+      upErr = e;
     }
-  }
-
-  /* ─── Generate ──────────────────────────────────────────────── */
-
-  async function handleGenerate() {
-    if (!selected) {
-      setErrorMsg('Seleciona um vídeo na esquerda.');
-      setStatus('error');
-      return;
-    }
-    if (!audioFile) {
-      setErrorMsg('Sobe o áudio que a boca vai falar.');
-      setStatus('error');
-      return;
-    }
-    // Duração do áudio (necessária pra costurar trechos e pro motor).
-    let audioMs = Math.round((audioDur || 0) * 1000);
-    if (!audioMs) {
-      audioMs = Math.round((await measureMediaDuration(audioFile)) * 1000);
-    }
-    if (!audioMs || audioMs <= 0) {
-      setErrorMsg('Não consegui ler a duração do áudio. Tenta outro arquivo (mp3/wav/mp4).');
-      setStatus('error');
-      return;
-    }
-    // Limites do AutoEdit — bem acima do motor (a gente comprime + costura).
-    if (selected.file.size > 300 * 1024 * 1024) {
-      setErrorMsg('Vídeo acima de 300MB. Usa um arquivo até 300MB.');
-      setStatus('error');
-      return;
-    }
-    if (audioMs > 600_000) {
-      setErrorMsg('Áudio acima de 10 minutos. Usa um áudio até 10min.');
-      setStatus('error');
-      return;
-    }
-
-    setErrorMsg('');
-    setOutputUrl('');
-    setChunkProgress(null);
-    startTicker();
-
-    // Roda UMA geração (rosto fixo + 1 trecho de áudio): sobe → gera →
-    // baixa → pós-produção (realça o lip). Devolve o blob pronto.
-    async function generateOne(faceUrl: string, audioChunk: File, chunkMs: number, label?: string): Promise<Blob> {
-      const aUrl = await uploadPublic(audioChunk, 'audio');
-      const res = await fetch('/api/tools/lipsync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ video_url: faceUrl, audio_url: aUrl, audio_ms: chunkMs }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.output_video_url) {
-        throw new Error(
-          (data && (typeof data.error === 'string' ? data.error : data.error ? errMsg(data.error) : null)) ||
-            (label ? `Falha ao gerar ${label}.` : `O servidor respondeu erro ${res.status}.`),
-        );
-      }
-      const r = await fetch(data.output_video_url);
-      if (!r.ok) throw new Error(`Falha ao baixar o resultado${label ? ` (${label})` : ''}.`);
-      const raw = await r.blob();
-      // PÓS-PRODUÇÃO: realça o lip. Se falhar, usa o resultado cru.
-      return enhanceLipVideoSafe(raw);
-    }
-
-    try {
-      const {
-        prepareFaceVideo, cleanAudioMp3, splitAudioChunks, concatLipVideos,
-        CHUNK_THRESHOLD_SEC, MAX_CHUNK_SEC,
-      } = await import('@/lib/lipsync-pipeline');
-
-      // ── 1. PRÉ-PRODUÇÃO (em worker, não trava a UI): otimiza o rosto
-      //       (≤720p se grande) + limpa/normaliza o áudio. Em paralelo.
-      setStatus('uploading-video'); // "Otimizando e enviando o vídeo…"
-      setUploadProgress(0);
-      const [faceFile, cleanAudio] = await Promise.all([
-        prepareFaceVideo(selected.file),
-        cleanAudioMp3(audioFile),
-      ]);
-
-      // ── 2. CHUNKING: áudio longo (>~178s) vira trechos ≤170s.
-      const needChunk = audioMs / 1000 > CHUNK_THRESHOLD_SEC;
-      const audioChunks = needChunk ? await splitAudioChunks(cleanAudio, MAX_CHUNK_SEC) : [cleanAudio];
-      const n = audioChunks.length;
-
-      const infos: ChunkInfo[] = audioChunks.map((_, i) => ({
-        index: i, startSec: i * MAX_CHUNK_SEC, endSec: (i + 1) * MAX_CHUNK_SEC, status: 'pending' as ChunkStatus,
-      }));
-      const emit = (phase: ChunkProgress['phase']) => {
-        if (n <= 1) return;
-        setChunkProgress({
-          totalChunks: n,
-          doneChunks: infos.filter((c) => c.status === 'done').length,
-          chunks: infos.map((c) => ({ ...c })),
-          phase,
-        });
-      };
-
-      // ── 3. Sobe o ROSTO uma única vez (reusado em todos os trechos).
-      const faceUrl = await uploadPublic(faceFile, 'video', (pct) => setUploadProgress(pct));
-
-      // ── 4+5. Gera + pós-produção por trecho (concorrência limitada = 2).
-      setStatus('generating');
-      setUploadProgress(0);
-      emit('generating');
-      const outBlobs: Blob[] = new Array(n);
-      let next = 0;
-      const worker = async () => {
-        while (next < n) {
-          const i = next++;
-          infos[i].status = 'uploading';
-          emit('uploading');
-          const chunkMs = n > 1
-            ? Math.round((await measureMediaDuration(audioChunks[i])) * 1000) || Math.min(MAX_CHUNK_SEC * 1000, audioMs)
-            : audioMs;
-          infos[i].status = 'generating';
-          emit('generating');
-          outBlobs[i] = await generateOne(faceUrl, audioChunks[i], chunkMs, n > 1 ? `trecho ${i + 1}/${n}` : undefined);
-          infos[i].status = 'done';
-          emit('generating');
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(2, n) }, () => worker()));
-
-      // ── 6. COSTURA os trechos num só (stream-copy = leve).
-      let finalBlob: Blob;
-      if (n > 1) {
-        emit('concat');
-        finalBlob = await concatLipVideos(outBlobs);
-        emit('done');
-      } else {
-        finalBlob = outBlobs[0];
-      }
-
-      // ── 7. Mostra (object URL local — sem limite de storage no resultado).
-      setOutputUrl(URL.createObjectURL(finalBlob));
-      setStatus('done');
-      stopTicker();
-    } catch (err) {
-      setStatus('error');
-      setErrorMsg(errMsg(err) || 'Algo deu errado.');
-      stopTicker();
-    }
+    if (upErr) throw new Error('Falha no upload pro storage: ' + errMsg(upErr));
+    if (!d.publicUrl || typeof d.publicUrl !== 'string') throw new Error('Upload não retornou URL.');
+    return d.publicUrl as string;
   }
 
   /** Pós-produção do lip; se falhar, devolve o resultado cru (resiliente). */
@@ -480,6 +259,156 @@ export default function LipSyncTool() {
     }
   }
 
+  /** Uma geração (rosto + 1 trecho de áudio): sobe → gera → baixa → pós. */
+  async function generateOne(faceUrl: string, audioChunk: File, chunkMs: number, label?: string): Promise<Blob> {
+    const aUrl = await uploadPublic(audioChunk, 'audio');
+    const res = await fetch('/api/tools/lipsync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ video_url: faceUrl, audio_url: aUrl, audio_ms: chunkMs }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data?.output_video_url) {
+      throw new Error(
+        (data && (typeof data.error === 'string' ? data.error : data.error ? errMsg(data.error) : null)) ||
+          (label ? `Falha ao gerar ${label}.` : `O servidor respondeu erro ${res.status}.`),
+      );
+    }
+    const r = await fetch(data.output_video_url);
+    if (!r.ok) throw new Error(`Falha ao baixar o resultado${label ? ` (${label})` : ''}.`);
+    const raw = await r.blob();
+    return enhanceLipVideoSafe(raw);
+  }
+
+  /* ─── Jobs ───────────────────────────────────────────────────── */
+
+  function patchJob(id: string, patch: Partial<Job>) {
+    setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)));
+  }
+
+  /**
+   * Pipeline de UM disparo. Roda em background (não bloqueia a UI). Toda
+   * etapa de ffmpeg passa pela fila interna (withFFLock) — vários disparos
+   * ao mesmo tempo NÃO se atropelam. A geração no motor é serial no servidor
+   * (fila anti-bloqueio), então o cliente pode disparar à vontade.
+   */
+  async function runJob(id: string, faceFile: File, audioSrc: File, audioMs: number) {
+    try {
+      const {
+        prepareFaceVideo, cleanAudioMp3, splitAudioChunks, concatLipVideos,
+        CHUNK_THRESHOLD_SEC, MAX_CHUNK_SEC,
+      } = await import('@/lib/lipsync-pipeline');
+
+      // 1. PRÉ-PRODUÇÃO: otimiza o rosto (só comprime se grande) + limpa áudio.
+      patchJob(id, { status: 'pre' });
+      const [face, cleanAudio] = await Promise.all([
+        prepareFaceVideo(faceFile),
+        cleanAudioMp3(audioSrc),
+      ]);
+
+      // 2. CHUNKING (invisível pro cliente): áudio longo vira trechos ≤170s.
+      const needChunk = audioMs / 1000 > CHUNK_THRESHOLD_SEC;
+      const audioChunks = needChunk ? await splitAudioChunks(cleanAudio, MAX_CHUNK_SEC) : [cleanAudio];
+      const n = audioChunks.length;
+
+      // 3. Sobe o ROSTO uma vez só (reusado em todos os trechos).
+      patchJob(id, { status: 'uploading' });
+      const faceUrl = await uploadPublic(face, 'video');
+
+      // 4+5. Gera + pós-produção por trecho (concorrência 2 por disparo).
+      patchJob(id, { status: 'generating', percent: 26 });
+      const outBlobs: Blob[] = new Array(n);
+      let next = 0;
+      let done = 0;
+      const worker = async () => {
+        while (next < n) {
+          const i = next++;
+          const chunkMs = n > 1
+            ? Math.round((await measureMediaDuration(audioChunks[i])) * 1000) || Math.min(MAX_CHUNK_SEC * 1000, audioMs)
+            : audioMs;
+          outBlobs[i] = await generateOne(faceUrl, audioChunks[i], chunkMs, n > 1 ? `trecho ${i + 1}/${n}` : undefined);
+          done++;
+          patchJob(id, { percent: 26 + Math.round((done / n) * 64) }); // 26 → 90
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(2, n) }, () => worker()));
+
+      // 6. COSTURA os trechos num só (stream-copy = leve). 1 trecho = direto.
+      let finalBlob: Blob;
+      if (n > 1) {
+        patchJob(id, { status: 'concat', percent: 93 });
+        finalBlob = await concatLipVideos(outBlobs);
+      } else {
+        finalBlob = outBlobs[0];
+      }
+
+      patchJob(id, { status: 'done', percent: 100, videoUrl: URL.createObjectURL(finalBlob) });
+    } catch (err) {
+      patchJob(id, { status: 'error', error: errMsg(err) || 'Algo deu errado.' });
+    }
+  }
+
+  /** Dispara — NÃO bloqueia: cria o card, libera o form, roda em background. */
+  async function handleGenerate() {
+    setFormError('');
+    if (!selected) {
+      setFormError('Seleciona um vídeo na esquerda.');
+      return;
+    }
+    if (!audioFile) {
+      setFormError('Sobe o áudio que a boca vai falar.');
+      return;
+    }
+    let audioMs = Math.round((audioDur || 0) * 1000);
+    if (!audioMs) audioMs = Math.round((await measureMediaDuration(audioFile)) * 1000);
+    if (!audioMs || audioMs <= 0) {
+      setFormError('Não consegui ler a duração do áudio. Tenta outro arquivo (mp3/wav/mp4).');
+      return;
+    }
+    if (selected.file.size > 300 * 1024 * 1024) {
+      setFormError('Vídeo acima de 300MB. Usa um arquivo até 300MB.');
+      return;
+    }
+    if (audioMs > 600_000) {
+      setFormError('Áudio acima de 10 minutos. Usa um áudio até 10min.');
+      return;
+    }
+
+    // Snapshot dos inputs — o form fica LIVRE e o usuário pode trocar tudo
+    // sem afetar este disparo (o pipeline usa as cópias capturadas aqui).
+    const faceFile = selected.file;
+    const audioSrc = audioFile;
+    const ms = audioMs;
+    const num = (jobSeqRef.current += 1);
+    const id = `job-${Date.now()}-${num}`;
+    const label = `LipSync ${String(num).padStart(2, '0')}`;
+
+    // Card aparece embaixo JÁ carregando; o form continua livre na mesma tela.
+    setJobs((prev) => [
+      { id, num, label, status: 'queued', percent: 6, videoUrl: null, error: null, createdAt: Date.now() },
+      ...prev,
+    ]);
+
+    // Toast "enviado ↓" no preview pra guiar o olho pra fila de baixo.
+    setFlash(true);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlash(false), 2600);
+
+    // Roda em background — sem await: a UI segue livre.
+    void runJob(id, faceFile, audioSrc, ms);
+  }
+
+  /** Limpa os disparos PRONTOS/falhos (mantém os que ainda estão rodando). */
+  function clearJobs() {
+    setJobs((prev) => {
+      prev.forEach((j) => {
+        if (!isActive(j.status) && j.videoUrl) URL.revokeObjectURL(j.videoUrl);
+      });
+      return prev.filter((j) => isActive(j.status));
+    });
+  }
+
+  /** Limpa só o FORMULÁRIO (biblioteca + áudio). Os cards de baixo ficam. */
   function handleReset() {
     if (audioPreview) URL.revokeObjectURL(audioPreview);
     videos.forEach((v) => URL.revokeObjectURL(v.url));
@@ -488,22 +417,42 @@ export default function LipSyncTool() {
     setAudioFile(null);
     setAudioPreview('');
     setAudioDur(0);
-    setOutputUrl('');
-    setStatus('idle');
-    setErrorMsg('');
-    setChunkProgress(null);
-    stopTicker();
-    setElapsedSec(0);
+    setFormError('');
   }
 
+  /* ─── Ticker da barra: aproxima cada job ativo do seu teto (easing) ─── */
+  const hasActiveJob = jobs.some((j) => isActive(j.status));
+  useEffect(() => {
+    if (!hasActiveJob) return;
+    const t = setInterval(() => {
+      setJobs((prev) => {
+        let changed = false;
+        const next = prev.map((j) => {
+          if (!isActive(j.status)) return j;
+          const cap = softCap(j.status);
+          if (j.percent >= cap - 0.3) return j;
+          changed = true;
+          const step = Math.max(0.15, (cap - j.percent) * 0.04);
+          return { ...j, percent: Math.min(cap, j.percent + step) };
+        });
+        return changed ? next : prev;
+      });
+    }, 700);
+    return () => clearInterval(t);
+  }, [hasActiveJob]);
+
+  /* ─── Cleanup ─── */
   useEffect(() => {
     return () => {
       videos.forEach((v) => URL.revokeObjectURL(v.url));
       if (audioPreview) URL.revokeObjectURL(audioPreview);
-      stopTicker();
+      jobs.forEach((j) => j.videoUrl && URL.revokeObjectURL(j.videoUrl));
+      if (flashTimer.current) clearTimeout(flashTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const totalNum = jobs.length ? Math.max(...jobs.map((j) => j.num)) : 0;
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 md:px-8 space-y-7">
@@ -528,15 +477,12 @@ export default function LipSyncTool() {
           {/* Upload tile (sempre primeiro) */}
           <button
             type="button"
-            onClick={() => !isLoading && videoInputRef.current?.click()}
-            disabled={isLoading}
-            className="group relative w-full overflow-hidden rounded-[14px] border-2 border-dashed border-line-strong bg-bg/40 aspect-[3/4] flex flex-col items-center justify-center gap-2 hover:border-fuchsia-400/55 hover:bg-fuchsia-400/[0.04] transition disabled:opacity-40 disabled:cursor-not-allowed"
+            onClick={() => videoInputRef.current?.click()}
+            className="group relative w-full overflow-hidden rounded-[14px] border-2 border-dashed border-line-strong bg-bg/40 aspect-[3/4] flex flex-col items-center justify-center gap-2 hover:border-fuchsia-400/55 hover:bg-fuchsia-400/[0.04] transition"
           >
             <span
               className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-black/40 text-[22px] transition-transform duration-500 group-hover:scale-110 group-hover:-rotate-6"
-              style={{
-                boxShadow: '0 0 22px -4px rgba(232,121,249,0.5)',
-              }}
+              style={{ boxShadow: '0 0 22px -4px rgba(232,121,249,0.5)' }}
             >
               ＋
             </span>
@@ -568,29 +514,14 @@ export default function LipSyncTool() {
               key={v.id}
               item={v}
               selected={v.id === selectedId}
-              onSelect={() => !isLoading && setSelectedId(v.id)}
-              onRemove={() => !isLoading && removeVideo(v.id)}
-              disabled={isLoading}
+              onSelect={() => setSelectedId(v.id)}
+              onRemove={() => removeVideo(v.id)}
             />
           ))}
         </div>
 
-        {/* ─── COLUNA 2: PREVIEW CENTRAL ─── */}
-        <PreviewStage
-          selected={selected}
-          isLoading={isLoading}
-          status={status}
-          elapsedSec={elapsedSec}
-          uploadProgress={uploadProgress}
-          chunkProgress={chunkProgress}
-          outputUrl={outputUrl}
-          errorMsg={errorMsg}
-          onReset={() => {
-            setOutputUrl('');
-            setStatus('idle');
-            setChunkProgress(null);
-          }}
-        />
+        {/* ─── COLUNA 2: PREVIEW CENTRAL (sempre a FONTE) ─── */}
+        <PreviewStage selected={selected} flash={flash} />
 
         {/* ─── COLUNA 3: SIDE PANEL ─── */}
         <aside className="rounded-[18px] border border-line/60 bg-bg-soft/30 p-4 md:p-5 space-y-5">
@@ -635,9 +566,8 @@ export default function LipSyncTool() {
             {!audioFile ? (
               <button
                 type="button"
-                onClick={() => !isLoading && audioInputRef.current?.click()}
-                disabled={isLoading}
-                className="w-full rounded-[14px] border-2 border-dashed border-line-strong bg-bg/40 px-4 py-5 hover:border-violet/55 hover:bg-violet/[0.04] transition disabled:opacity-40 group"
+                onClick={() => audioInputRef.current?.click()}
+                className="w-full rounded-[14px] border-2 border-dashed border-line-strong bg-bg/40 px-4 py-5 hover:border-violet/55 hover:bg-violet/[0.04] transition group"
               >
                 <div className="flex items-center gap-3">
                   <span
@@ -662,9 +592,8 @@ export default function LipSyncTool() {
                 file={audioFile}
                 src={audioPreview}
                 durationSec={audioDur}
-                onChange={() => !isLoading && audioInputRef.current?.click()}
-                onClear={() => !isLoading && setAudio(null)}
-                disabled={isLoading}
+                onChange={() => audioInputRef.current?.click()}
+                onClear={() => setAudio(null)}
               />
             )}
           </div>
@@ -676,13 +605,8 @@ export default function LipSyncTool() {
                 const styles =
                   issue.severity === 'block'
                     ? 'border-red-500/55 bg-red-500/10 text-red-200'
-                    : issue.severity === 'warn'
-                      ? 'border-amber-400/45 bg-amber-400/10 text-amber-200'
-                      : 'border-cyan-400/40 bg-cyan-400/10 text-cyan-200';
-                const prefix =
-                  issue.severity === 'block' ? '✕ Bloqueado: ' :
-                  issue.severity === 'warn' ? '⚠ ' :
-                  'ℹ ';
+                    : 'border-amber-400/45 bg-amber-400/10 text-amber-200';
+                const prefix = issue.severity === 'block' ? '✕ Bloqueado: ' : '⚠ ';
                 return (
                   <div
                     key={i}
@@ -696,11 +620,18 @@ export default function LipSyncTool() {
             </div>
           )}
 
+          {/* Erro de formulário (validação) */}
+          {formError && (
+            <div className="rounded-[10px] border border-red-500/55 bg-red-500/10 px-3 py-2 text-[11px] leading-snug text-red-200">
+              {formError}
+            </div>
+          )}
+
           {/* GENERATE button */}
           <button
             type="button"
             onClick={handleGenerate}
-            disabled={!selected || !audioFile || isLoading || hasBlockingIssue}
+            disabled={!selected || !audioFile || hasBlockingIssue}
             className="ultra-btn group relative w-full overflow-hidden rounded-[16px] border border-fuchsia-400/55 px-5 py-4 transition disabled:opacity-40 disabled:cursor-not-allowed"
             style={{
               background:
@@ -718,28 +649,14 @@ export default function LipSyncTool() {
               }}
             />
             <span className="relative flex items-center justify-center gap-3">
-              {isLoading ? (
-                <>
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-fuchsia-200 border-t-transparent" />
-                  <span
-                    className="text-[13px] font-bold uppercase tracking-[0.18em] text-white"
-                    style={{ fontFamily: 'var(--font-tech)' }}
-                  >
-                    Processando…
-                  </span>
-                </>
-              ) : (
-                <>
-                  <span className="text-[18px]">▶</span>
-                  <span
-                    className="text-[14px] font-bold uppercase tracking-[0.22em] text-white leading-none"
-                    style={{ fontFamily: 'var(--font-tech)' }}
-                  >
-                    Gerar
-                  </span>
-                  <span className="text-[16px] transition-transform group-hover:translate-x-1.5 ml-auto">→</span>
-                </>
-              )}
+              <span className="text-[18px]">▶</span>
+              <span
+                className="text-[14px] font-bold uppercase tracking-[0.22em] text-white leading-none"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                Gerar
+              </span>
+              <span className="text-[16px] transition-transform group-hover:translate-x-1.5 ml-auto">→</span>
             </span>
             <style jsx>{`
               .ultra-btn-sheen {
@@ -753,20 +670,63 @@ export default function LipSyncTool() {
             `}</style>
           </button>
 
-          {/* Reset all */}
+          {/* Reset form */}
           {(videos.length > 0 || audioFile) && (
             <button
               type="button"
               onClick={handleReset}
-              disabled={isLoading}
-              className="mono w-full text-[10px] uppercase tracking-[0.18em] text-text-muted hover:text-red-300 transition disabled:opacity-40"
+              className="mono w-full text-[10px] uppercase tracking-[0.18em] text-text-muted hover:text-red-300 transition"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
-              ↺ Limpar tudo
+              ↺ Limpar formulário
             </button>
           )}
         </aside>
       </div>
+
+      {/* ─── MEUS LIPSYNCS (cards dos disparos) ─── */}
+      {jobs.length > 0 && (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2">
+              <span
+                className="mono text-[11px] font-bold uppercase tracking-[0.2em] text-white"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                MEUS LIPSYNCS
+              </span>
+              <span className="mono text-[10px] text-text-dim">{jobs.length}</span>
+            </div>
+            {jobs.some((j) => !isActive(j.status)) && (
+              <button
+                type="button"
+                onClick={clearJobs}
+                className="mono text-[10px] uppercase tracking-[0.16em] text-text-muted hover:text-red-300 transition"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                Limpar prontos
+              </button>
+            )}
+          </div>
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {jobs.map((job) => (
+              <LipsyncPreviewCard
+                key={job.id}
+                take={{
+                  label: job.label,
+                  status: jobTakeStatus(job.status),
+                  videoUrl: job.videoUrl,
+                  error: job.error,
+                }}
+                position={job.num}
+                total={totalNum}
+                percent={job.percent}
+                fileBase="lipsync"
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* TIPS rodape */}
       <div className="rounded-[12px] border border-dashed border-line-strong bg-bg-soft/15 px-4 py-3">
@@ -782,7 +742,7 @@ export default function LipSyncTool() {
           <li>· Áudio limpo, sem música por trás.</li>
           <li>· 720p ou mais pra boca ficar nítida.</li>
           <li>· Mesma pessoa, mesma língua do áudio.</li>
-          <li>· V1 pra rosto humano natural · V2 pra closeup preciso.</li>
+          <li>· Pode disparar vários — vão aparecendo prontos embaixo.</li>
         </ul>
       </div>
     </div>
@@ -796,13 +756,11 @@ function VideoThumb({
   selected,
   onSelect,
   onRemove,
-  disabled,
 }: {
   item: VideoItem;
   selected: boolean;
   onSelect: () => void;
   onRemove: () => void;
-  disabled?: boolean;
 }) {
   return (
     <div
@@ -822,35 +780,29 @@ function VideoThumb({
         playsInline
         className="h-full w-full object-cover"
       />
-      {/* dim overlay when not selected */}
       {!selected && (
         <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 transition" />
       )}
-      {/* Selected indicator */}
       {selected && (
         <span className="absolute top-1.5 left-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-fuchsia-400 text-[10px] font-bold text-bg shadow-[0_0_10px_rgba(232,121,249,0.9)]">
           ✓
         </span>
       )}
-      {/* Remove */}
       <button
         type="button"
         onClick={(e) => {
           e.stopPropagation();
           onRemove();
         }}
-        disabled={disabled}
         className="absolute top-1.5 right-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-white/20 bg-black/70 text-[10px] text-white opacity-0 group-hover:opacity-100 hover:bg-red-500 transition"
       >
         ✕
       </button>
-      {/* Duration badge */}
       {item.meta && (
         <span className="absolute bottom-1.5 left-1.5 mono rounded bg-black/70 px-1.5 py-0.5 text-[9px] text-white">
           {item.meta.dur.toFixed(1)}s
         </span>
       )}
-      {/* Resolution badge */}
       {item.meta && (
         <span className="absolute bottom-1.5 right-1.5 mono rounded bg-black/70 px-1.5 py-0.5 text-[9px] text-white">
           {item.meta.w}×{item.meta.h}
@@ -861,34 +813,12 @@ function VideoThumb({
 }
 
 /* ═══════════════════════ PreviewStage ═══════════════════════ */
-
-function PreviewStage({
-  selected,
-  isLoading,
-  status,
-  elapsedSec,
-  uploadProgress,
-  chunkProgress,
-  outputUrl,
-  errorMsg,
-  onReset,
-}: {
-  selected: VideoItem | null;
-  isLoading: boolean;
-  status: Status;
-  elapsedSec: number;
-  uploadProgress: number;
-  chunkProgress: ChunkProgress | null;
-  outputUrl: string;
-  errorMsg: string;
-  onReset: () => void;
-}) {
-  const showResult = status === 'done' && outputUrl;
-
+/** Mostra SEMPRE a fonte (o vídeo enviado). Os resultados vão pros cards. */
+function PreviewStage({ selected, flash }: { selected: VideoItem | null; flash: boolean }) {
   return (
     <div className="relative overflow-hidden rounded-[18px] border border-line/60 bg-bg-soft/30">
-      {/* Header label (estilo "Background" do DreamFace) */}
-      {selected && !showResult && !isLoading && (
+      {/* Badge FONTE */}
+      {selected && (
         <div className="absolute top-3 right-3 z-20">
           <span
             className="mono inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-black/50 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white/85 backdrop-blur-md"
@@ -900,7 +830,7 @@ function PreviewStage({
       )}
 
       {/* Empty state */}
-      {!selected && !showResult && !isLoading && (
+      {!selected ? (
         <div className="aspect-[3/4] md:aspect-[4/5] flex flex-col items-center justify-center gap-4 px-6 text-center">
           <div
             className="flex h-24 w-24 items-center justify-center rounded-3xl border border-white/8 bg-black/40 text-[42px]"
@@ -929,10 +859,7 @@ function PreviewStage({
             }
           `}</style>
         </div>
-      )}
-
-      {/* Video preview (idle) */}
-      {selected && !showResult && (
+      ) : (
         <div className="relative aspect-[3/4] md:aspect-[4/5] bg-black overflow-hidden">
           <video
             src={selected.url}
@@ -943,257 +870,31 @@ function PreviewStage({
             className="absolute inset-0 h-full w-full object-contain"
           />
 
-          {/* Loading overlay com coelho */}
-          {isLoading && (
-            <LoadingOverlay
-              status={status}
-              elapsedSec={elapsedSec}
-              uploadProgress={uploadProgress}
-              chunkProgress={chunkProgress}
-            />
+          {/* Toast "enviado ↓" — guia o olho pra fila de baixo */}
+          {flash && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-4 z-30 flex justify-center">
+              <span
+                className="mono inline-flex items-center gap-2 rounded-full border border-lime/55 bg-black/70 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-lime backdrop-blur-md"
+                style={{ fontFamily: 'var(--font-tech)', animation: 'flashUp 2.6s ease-out forwards' }}
+              >
+                <span className="h-2 w-2 rounded-full bg-lime animate-pulse" />
+                Enviado · aparece em Meus LipSyncs ↓
+              </span>
+            </div>
           )}
-        </div>
-      )}
-
-      {/* Result reveal */}
-      {showResult && (
-        <ResultReveal
-          outputUrl={outputUrl}
-          elapsedSec={elapsedSec}
-          onReset={onReset}
-        />
-      )}
-
-      {/* Error */}
-      {status === 'error' && errorMsg && (
-        <div className="absolute inset-x-3 bottom-3 z-30 rounded-[12px] border border-red-500/50 bg-red-500/10 px-4 py-3 backdrop-blur-md">
-          <div className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-red-300 mb-1">
-            ✕ Erro
-          </div>
-          <div className="text-[12px] text-red-100">{errorMsg}</div>
+          <style jsx>{`
+            @keyframes flashUp {
+              0% { opacity: 0; transform: translateY(10px); }
+              12% { opacity: 1; transform: translateY(0); }
+              80% { opacity: 1; }
+              100% { opacity: 0; transform: translateY(-6px); }
+            }
+          `}</style>
         </div>
       )}
     </div>
   );
 }
-
-/* ═══════════════════════ LoadingOverlay ═══════════════════════ */
-/**
- * Overlay foda com coelho rotativo no centro — inspirado no gerador
- * de B-Rolls. Glassmorph blur + dark mask + coelho com glow + Z's
- * subindo + texto contextual da fase atual + barra de progresso lenta.
- */
-function LoadingOverlay({
-  status,
-  elapsedSec,
-  uploadProgress,
-  chunkProgress,
-}: {
-  status: Status;
-  elapsedSec: number;
-  uploadProgress: number;
-  chunkProgress: ChunkProgress | null;
-}) {
-  // Durante upload: usa o progresso real. Durante geracao: estima por tempo.
-  const isUploading = status === 'uploading-video' || status === 'uploading-audio';
-  const isChunked = !!chunkProgress;
-
-  const progress = isChunked
-    ? Math.round((chunkProgress.doneChunks / Math.max(1, chunkProgress.totalChunks)) * 100)
-    : isUploading
-      ? uploadProgress
-      : Math.min(95, Math.round((elapsedSec / 300) * 100));
-
-  const chunkPhaseLabel = chunkProgress
-    ? chunkProgress.phase === 'splitting'
-      ? 'Dividindo o vídeo em trechos…'
-      : chunkProgress.phase === 'uploading'
-        ? 'Enviando trechos pro motor…'
-        : chunkProgress.phase === 'generating'
-          ? `Gerando ${chunkProgress.doneChunks} de ${chunkProgress.totalChunks} trechos…`
-          : chunkProgress.phase === 'concat'
-            ? 'Juntando os trechos…'
-            : 'Pronto.'
-    : null;
-
-  return (
-    <div
-      className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-5"
-      style={{
-        background:
-          'radial-gradient(60% 70% at 50% 50%, rgba(232,121,249,0.18), transparent 70%), rgba(0,0,0,0.72)',
-        backdropFilter: 'blur(8px)',
-      }}
-    >
-      {/* Coelho central com glow + spin */}
-      <div className="relative">
-        {/* Halo */}
-        <div
-          aria-hidden
-          className="absolute inset-[-25%] rounded-full blur-2xl"
-          style={{
-            background:
-              'radial-gradient(circle, rgba(232,121,249,0.55), rgba(167,139,250,0.3) 50%, transparent 80%)',
-            animation: 'loadAura 2.2s ease-in-out infinite',
-          }}
-        />
-        {/* Rings rotativos */}
-        <div
-          aria-hidden
-          className="absolute inset-[-18px] rounded-full border-2 border-fuchsia-400/40 border-dashed"
-          style={{ animation: 'loadRing 6s linear infinite' }}
-        />
-        <div
-          aria-hidden
-          className="absolute inset-[-34px] rounded-full border border-violet/30"
-          style={{ animation: 'loadRing 10s linear infinite reverse' }}
-        />
-        {/* Coelho */}
-        <div
-          className="relative"
-          style={{
-            animation: 'loadBunny 2.4s ease-in-out infinite',
-            filter: 'drop-shadow(0 0 24px rgba(232,121,249,0.85))',
-          }}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/auto-edit-logo@256.png"
-            alt=""
-            aria-hidden
-            width={140}
-            height={140}
-          />
-        </div>
-        {/* Z's */}
-        <Zfloat delay={0} />
-        <Zfloat delay={1.2} />
-        <Zfloat delay={2.4} />
-      </div>
-
-      {/* Status text */}
-      <div className="text-center px-6">
-        <div
-          className="mono text-[10px] font-bold uppercase tracking-[0.22em] text-fuchsia-300 mb-1"
-          style={{ fontFamily: 'var(--font-tech)' }}
-        >
-          GERANDO · {elapsedSec}s
-        </div>
-        <div
-          className="text-[18px] md:text-[22px] font-extrabold tracking-tight text-white max-w-[420px]"
-          style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
-        >
-          {chunkPhaseLabel ?? STAGE_COPY[status]}
-        </div>
-        <div className="mt-2 text-[12px] text-text-muted max-w-[360px] mx-auto">
-          {isChunked
-            ? 'Dividindo em trechos paralelos pra qualidade máxima do começo ao fim.'
-            : 'Costuma levar entre 3 e 8 minutos. Mantém a aba aberta.'}
-        </div>
-      </div>
-
-      {/* Chunk grid — so quando esta chunkando */}
-      {isChunked && chunkProgress && (
-        <div className="grid grid-flow-col auto-cols-fr gap-1 max-w-[420px] w-full px-4">
-          {chunkProgress.chunks.map((c) => {
-            const tone =
-              c.status === 'done' ? 'bg-lime/80 border-lime' :
-              c.status === 'generating' ? 'bg-fuchsia-400/40 border-fuchsia-400 animate-pulse' :
-              c.status === 'uploading' ? 'bg-violet/40 border-violet animate-pulse' :
-              c.status === 'concat' ? 'bg-cyan-400/50 border-cyan-400 animate-pulse' :
-              c.status === 'error' ? 'bg-red-500/40 border-red-500' :
-              'bg-white/5 border-white/15';
-            return (
-              <div
-                key={c.index}
-                className={`h-1.5 rounded-full border ${tone} transition-colors`}
-                title={`Trecho ${c.index + 1} · ${c.status}`}
-              />
-            );
-          })}
-        </div>
-      )}
-
-      {/* Progress bar */}
-      <div className="w-[260px] max-w-[80%]">
-        <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-white/10">
-          <div
-            className="absolute inset-y-0 left-0 rounded-full"
-            style={{
-              width: `${progress}%`,
-              background:
-                'linear-gradient(90deg, rgba(232,121,249,0.9), rgba(167,139,250,0.9), rgba(103,232,249,0.9))',
-              boxShadow: '0 0 12px rgba(232,121,249,0.7)',
-              transition: 'width 1s ease-out',
-            }}
-          />
-          {/* Shimmer */}
-          <div
-            aria-hidden
-            className="absolute inset-y-0 w-1/3 -translate-x-full"
-            style={{
-              background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)',
-              animation: 'loadShimmer 1.8s ease-in-out infinite',
-            }}
-          />
-        </div>
-        <div className="mt-1 flex justify-between text-[10px] mono text-text-dim">
-          <span>{progress}%</span>
-          <span>~ 90s estimado</span>
-        </div>
-      </div>
-
-      <style jsx>{`
-        @keyframes loadAura {
-          0%, 100% { opacity: 0.7; transform: scale(1); }
-          50% { opacity: 1; transform: scale(1.12); }
-        }
-        @keyframes loadRing {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        @keyframes loadBunny {
-          0%, 100% { transform: translateY(0) scale(1) rotate(-3deg); }
-          50% { transform: translateY(-8px) scale(1.04) rotate(-3deg); }
-        }
-        @keyframes loadShimmer {
-          0% { transform: translateX(-100%); }
-          100% { transform: translateX(400%); }
-        }
-      `}</style>
-    </div>
-  );
-}
-
-function Zfloat({ delay }: { delay: number }) {
-  return (
-    <span
-      aria-hidden
-      className="absolute top-1/2 left-[58%] pointer-events-none"
-      style={{
-        fontFamily: 'var(--font-tech)',
-        fontWeight: 800,
-        fontSize: 28,
-        color: 'rgba(232,121,249,0.85)',
-        textShadow: '0 0 12px rgba(232,121,249,0.9)',
-        animation: 'zRise 3.6s cubic-bezier(0.22,1,0.36,1) infinite',
-        animationDelay: `${delay}s`,
-      }}
-    >
-      Z
-      <style jsx>{`
-        @keyframes zRise {
-          0% { opacity: 0; transform: translate(0, 0) rotate(-10deg) scale(0.6); }
-          15% { opacity: 1; }
-          70% { opacity: 0.6; }
-          100% { opacity: 0; transform: translate(28px, -90px) rotate(18deg) scale(1.5); }
-        }
-      `}</style>
-    </span>
-  );
-}
-
-/* EngineCard removido — agora usamos botoes Pro/Padrao inline */
 
 /* ═══════════════════════ AudioMiniPlayer ═══════════════════════ */
 
@@ -1203,14 +904,12 @@ function AudioMiniPlayer({
   durationSec,
   onChange,
   onClear,
-  disabled,
 }: {
   file: File;
   src: string;
   durationSec: number;
   onChange: () => void;
   onClear: () => void;
-  disabled?: boolean;
 }) {
   return (
     <div className="rounded-[14px] border border-violet/35 bg-violet/[0.04] p-3 space-y-2">
@@ -1229,8 +928,7 @@ function AudioMiniPlayer({
           <button
             type="button"
             onClick={onChange}
-            disabled={disabled}
-            className="mono rounded-md border border-line-strong px-2 py-1 text-[9px] uppercase tracking-widest text-text-muted hover:text-fuchsia-300 hover:border-fuchsia-400/40 disabled:opacity-40"
+            className="mono rounded-md border border-line-strong px-2 py-1 text-[9px] uppercase tracking-widest text-text-muted hover:text-fuchsia-300 hover:border-fuchsia-400/40"
             style={{ fontFamily: 'var(--font-tech)' }}
           >
             Trocar
@@ -1238,8 +936,7 @@ function AudioMiniPlayer({
           <button
             type="button"
             onClick={onClear}
-            disabled={disabled}
-            className="mono rounded-md border border-line-strong px-2 py-1 text-[9px] uppercase tracking-widest text-text-muted hover:text-red-300 hover:border-red-500/40 disabled:opacity-40"
+            className="mono rounded-md border border-line-strong px-2 py-1 text-[9px] uppercase tracking-widest text-text-muted hover:text-red-300 hover:border-red-500/40"
             style={{ fontFamily: 'var(--font-tech)' }}
           >
             ✕
@@ -1270,108 +967,6 @@ function AudioMiniPlayer({
         @keyframes miniBar {
           from { transform: scaleY(0.3); }
           to { transform: scaleY(1.3); }
-        }
-      `}</style>
-    </div>
-  );
-}
-
-/* ═══════════════════════ ResultReveal ═══════════════════════ */
-
-function ResultReveal({
-  outputUrl,
-  elapsedSec,
-  onReset,
-}: {
-  outputUrl: string;
-  elapsedSec: number;
-  onReset: () => void;
-}) {
-  const [revealed, setRevealed] = useState(false);
-
-  useEffect(() => {
-    const t = setTimeout(() => setRevealed(true), 50);
-    return () => clearTimeout(t);
-  }, []);
-
-  return (
-    <div
-      className="relative aspect-[3/4] md:aspect-[4/5] bg-black overflow-hidden"
-      style={{
-        boxShadow:
-          'inset 0 0 80px rgba(200,255,0,0.18), 0 0 50px -10px rgba(200,255,0,0.35)',
-      }}
-    >
-      {/* glow corners */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -right-12 -top-12 h-44 w-44 rounded-full opacity-60 blur-3xl"
-        style={{ background: 'rgba(200,255,0,0.5)' }}
-      />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -left-12 -bottom-12 h-44 w-44 rounded-full opacity-50 blur-3xl"
-        style={{ background: 'rgba(232,121,249,0.5)' }}
-      />
-
-      {/* Top badge */}
-      <div className="absolute top-3 left-3 right-3 z-30 flex flex-wrap items-center justify-between gap-2">
-        <span
-          className="mono inline-flex items-center gap-1.5 rounded-full border border-lime/55 bg-lime/15 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.22em] text-lime backdrop-blur-md"
-          style={{ fontFamily: 'var(--font-tech)' }}
-        >
-          <span className="h-2 w-2 rounded-full bg-lime animate-pulse shadow-[0_0_10px_rgba(200,255,0,0.9)]" />
-          PRONTO · {elapsedSec}s
-        </span>
-        <div className="flex gap-1.5">
-          <a
-            href={outputUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            download
-            className="mono inline-flex items-center gap-1.5 rounded-full border border-lime/55 bg-lime/15 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-lime hover:bg-lime/25 transition backdrop-blur-md"
-            style={{ fontFamily: 'var(--font-tech)' }}
-          >
-            ⬇ Baixar
-          </a>
-          <button
-            type="button"
-            onClick={onReset}
-            className="mono rounded-full border border-white/15 bg-black/45 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-white/85 hover:border-fuchsia-400/55 hover:text-fuchsia-300 transition backdrop-blur-md"
-            style={{ fontFamily: 'var(--font-tech)' }}
-          >
-            ↻ Outro
-          </button>
-        </div>
-      </div>
-
-      {/* Scanline reveal */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-lime/80 z-20"
-        style={{
-          boxShadow: '0 0 22px rgba(200,255,0,0.9)',
-          animation: 'resultScan 1.2s ease-out',
-        }}
-      />
-
-      <video
-        src={outputUrl}
-        controls
-        autoPlay
-        className="absolute inset-0 h-full w-full object-contain"
-        style={{
-          opacity: revealed ? 1 : 0,
-          transform: revealed ? 'scale(1)' : 'scale(0.96)',
-          transition: 'opacity 0.8s cubic-bezier(.2,.8,.2,1), transform 0.8s cubic-bezier(.2,.8,.2,1)',
-        }}
-      />
-
-      <style jsx>{`
-        @keyframes resultScan {
-          0% { top: 0; opacity: 0; }
-          10% { opacity: 1; }
-          100% { top: 100%; opacity: 0; }
         }
       `}</style>
     </div>

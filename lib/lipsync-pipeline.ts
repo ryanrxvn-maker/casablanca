@@ -42,6 +42,22 @@ function ffToFile(data: Uint8Array | string, name: string, type: string): File {
   return new File([copy.buffer], name, { type });
 }
 
+/**
+ * SERIALIZA ffmpeg.wasm. O core é single-thread e a instância é um
+ * SINGLETON (getFFmpeg) — dois `exec()` concorrentes corrompem o FS
+ * virtual / quebram. Como agora o usuário pode disparar VÁRIAS gerações
+ * ao mesmo tempo (cards não-bloqueantes), toda etapa de ffmpeg passa por
+ * esta fila: roda uma de cada vez, na ordem em que chegou. A geração no
+ * motor (rede) continua paralela — só o ffmpeg é serial.
+ */
+let ffChain: Promise<unknown> = Promise.resolve();
+export function withFFLock<T>(fn: () => Promise<T>): Promise<T> {
+  const result = ffChain.then(() => fn());
+  // A corrente segue mesmo se um job falhar (não trava a fila).
+  ffChain = result.then(() => undefined, () => undefined);
+  return result;
+}
+
 /** Cronometra uma etapa e empilha em window.__lipTimings (debug/medição). */
 function track<T>(label: string, fn: () => Promise<T>): Promise<T> {
   const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -86,10 +102,12 @@ export function probeDurationSec(file: File): Promise<number> {
  * (usa só o áudio). Sempre roda — o áudio é leve.
  */
 export async function cleanAudioMp3(file: File, onStage?: FFLoadStage): Promise<File> {
-  return track('pre_cleanAudio', async () => {
-    const blob = await normalizeVolume(file, { output: 'mp3' }, { onStage });
-    return new File([blob], 'voz_limpa.mp3', { type: 'audio/mpeg' });
-  });
+  return track('pre_cleanAudio', async () =>
+    withFFLock(async () => {
+      const blob = await normalizeVolume(file, { output: 'mp3' }, { onStage });
+      return new File([blob], 'voz_limpa.mp3', { type: 'audio/mpeg' });
+    }),
+  );
 }
 
 /**
@@ -105,7 +123,8 @@ export async function prepareFaceVideo(file: File, onStage?: FFLoadStage): Promi
   if (file.size <= STORAGE_SAFE_BYTES) return file;
   // Só quando NÃO cabe é que comprime — e com ALTA qualidade (CRF baixo +
   // preset bom + mantém resolução até 1080p), pra perder o mínimo possível.
-  return track('pre_compressFace', async () => compressFaceHQ(file, onStage));
+  // Passa pela fila do ffmpeg (não colide com outras gerações em paralelo).
+  return track('pre_compressFace', async () => withFFLock(() => compressFaceHQ(file, onStage)));
 }
 
 /**
@@ -154,6 +173,7 @@ export async function splitAudioChunks(
   maxChunkSec = MAX_CHUNK_SEC,
   onStage?: FFLoadStage,
 ): Promise<File[]> {
+  return withFFLock(async () => {
   const ff = await getFFmpeg(onStage);
   const { fetchFile } = await import('@ffmpeg/util');
   const uniq = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -224,6 +244,7 @@ export async function splitAudioChunks(
   }
   try { await ff.deleteFile(inName); } catch { /* ignore */ }
   return chunks.length > 0 ? chunks : [file];
+  });
 }
 
 /**
@@ -231,7 +252,7 @@ export async function splitAudioChunks(
  * devolve nitidez aos dentes, grading sutil). Roda por trecho (curto).
  */
 export async function enhanceLipVideo(blob: Blob, onStage?: FFLoadStage): Promise<Blob> {
-  return track('post_enhance', async () => postprocessLipSyncOutput(blob, { onStage }));
+  return track('post_enhance', async () => withFFLock(() => postprocessLipSyncOutput(blob, { onStage })));
 }
 
 /**
@@ -241,5 +262,5 @@ export async function enhanceLipVideo(blob: Blob, onStage?: FFLoadStage): Promis
  */
 export async function concatLipVideos(blobs: Blob[], onStage?: FFLoadStage): Promise<Blob> {
   if (blobs.length === 1) return blobs[0];
-  return track('post_concat', async () => concatVideosFast(blobs, { onStage }));
+  return track('post_concat', async () => withFFLock(() => concatVideosFast(blobs, { onStage })));
 }
