@@ -606,26 +606,42 @@ function AutoBrollInner() {
                   >
                     Magnific · Conectado
                   </span>
-                  <span className="text-[13px] font-semibold text-white">
-                    {extStatus.version}
-                  </span>
-                  {activeAccount ? (
-                    <span className="mono mt-0.5 inline-flex w-fit items-center gap-1.5 text-[10px] text-text-muted" style={{ fontFamily: 'var(--font-tech)' }}>
-                      <span className="text-cyan-300">↳</span>
-                      <span className="text-white/85" title={`fpId ${activeAccount.fpId}`}>
-                        {activeAccount.email || activeAccount.name || `fpId ${activeAccount.fpId}`}
-                      </span>
+                  {/* Linha PRINCIPAL — so o email da conta (sem "Premium+", sem "user N",
+                   *  sem versao da extensao — sao info tecnicas sem valor pro user) */}
+                  {activeAccount?.email ? (
+                    <span className="inline-flex items-center gap-2 text-[13px] font-semibold text-white" style={{ fontFamily: 'var(--font-tech)' }}>
+                      {activeAccount.email}
                       <button
                         type="button"
                         onClick={handleRefreshAccount}
                         disabled={refreshingAccount}
-                        className="ml-1 rounded-full border border-cyan-500/30 bg-cyan-500/[0.08] px-2 py-0.5 text-[8.5px] font-bold uppercase tracking-[0.14em] text-cyan-200 hover:bg-cyan-500/15 disabled:opacity-50"
-                        title="Re-checa a conta (após trocar no magnific.com)"
+                        title="Trocar conta — re-checa apos logar com outro usuario no magnific.com"
+                        aria-label="Trocar conta"
+                        className="group/sw relative inline-flex h-6 w-6 items-center justify-center rounded-full border border-cyan-400/45 bg-gradient-to-b from-cyan-400/18 via-cyan-400/8 to-transparent text-cyan-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_2px_8px_-3px_rgba(34,211,238,0.4)] transition-all hover:-translate-y-0.5 hover:scale-110 hover:border-cyan-400/70 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.26),0_8px_18px_-4px_rgba(34,211,238,0.6)] active:scale-95 disabled:opacity-50 disabled:cursor-wait"
                       >
-                        {refreshingAccount ? '…' : '↻ trocar'}
+                        <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/25 to-transparent" aria-hidden />
+                        {refreshingAccount ? (
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" className="relative animate-spin" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+                            <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+                            <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
+                          </svg>
+                        ) : (
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" className="relative" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+                            <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+                            <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
+                          </svg>
+                        )}
                       </button>
                     </span>
-                  ) : null}
+                  ) : (
+                    // Fallback: se nao conseguimos puxar o email ainda, mostra ao menos
+                    // que a extensao esta conectada (sem versao tecnica)
+                    <span className="text-[12px] text-text-muted" style={{ fontFamily: 'var(--font-tech)' }}>
+                      Detectando conta…
+                    </span>
+                  )}
                   {sessionOk?.ok ? (
                     <span
                       className="mono mt-0.5 inline-flex w-fit items-center gap-1 rounded-full bg-lime/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-lime"
