@@ -20,7 +20,6 @@
 
 import {
   getFFmpeg,
-  compressVideo,
   normalizeVolume,
   probeVideoMetadata,
   concatVideosFast,
@@ -33,8 +32,8 @@ export const MAX_CHUNK_SEC = 170;
 /** Acima disso, o áudio é dividido em trechos. */
 export const CHUNK_THRESHOLD_SEC = 178;
 
-const FACE_COMPRESS_BYTES = 35 * 1024 * 1024; // comprime se vídeo > 35MB
-const FACE_MAX_HEIGHT = 720;
+/** Limite seguro do Supabase Storage (cap ~50MB) — abaixo disso vai nativo. */
+const STORAGE_SAFE_BYTES = 44 * 1024 * 1024;
 
 function ffToFile(data: Uint8Array | string, name: string, type: string): File {
   if (typeof data === 'string') return new File([data], name, { type });
@@ -100,19 +99,50 @@ export async function cleanAudioMp3(file: File, onStage?: FFLoadStage): Promise<
  * motor entrega 720p de qualquer jeito).
  */
 export async function prepareFaceVideo(file: File, onStage?: FFLoadStage): Promise<File> {
-  let height = 0;
-  try {
-    const meta = await probeVideoMetadata(file);
-    height = meta?.height || 0;
-  } catch {
-    /* ignore */
-  }
-  const needCompress = file.size > FACE_COMPRESS_BYTES || (height > 0 && height > FACE_MAX_HEIGHT);
-  if (!needCompress) return file;
-  return track('pre_compressFace', async () => {
-    const blob = await compressVideo(file, { crf: 23, resolution: '720' }, { onStage });
-    return new File([blob], 'rosto_opt.mp4', { type: 'video/mp4' });
-  });
+  // ≤ limite do storage → usa o VÍDEO NATIVO (qualidade máxima; o motor
+  // processa o original muito melhor que qualquer re-encode). É o caso
+  // comum: vídeo de rosto pra lipsync costuma ser curto/leve.
+  if (file.size <= STORAGE_SAFE_BYTES) return file;
+  // Só quando NÃO cabe é que comprime — e com ALTA qualidade (CRF baixo +
+  // preset bom + mantém resolução até 1080p), pra perder o mínimo possível.
+  return track('pre_compressFace', async () => compressFaceHQ(file, onStage));
+}
+
+/**
+ * Compressão INTELIGENTE pra caber no storage perdendo o mínimo de
+ * qualidade: H.264 CRF 19 (quase sem perda visível) + preset "fast"
+ * (muito melhor que ultrafast no mesmo CRF) + mantém a resolução (só
+ * desce pra 1080p se for maior) com scaler lanczos. Se mesmo assim não
+ * couber (vídeo longo/enorme), faz um 2º passe um pouco mais agressivo.
+ */
+async function compressFaceHQ(file: File, onStage?: FFLoadStage): Promise<File> {
+  const ff = await getFFmpeg(onStage);
+  const { fetchFile } = await import('@ffmpeg/util');
+  const meta = await probeVideoMetadata(file).catch(() => null);
+  const h = meta?.height || 0;
+  const uniq = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  const inName = `fhq_${uniq}.mp4`;
+  const outName = `fhqo_${uniq}.mp4`;
+  await ff.writeFile(inName, await fetchFile(file));
+
+  const encode = async (crf: number, maxH: number): Promise<Uint8Array> => {
+    const args = ['-i', inName];
+    if (h > maxH) args.push('-vf', `scale=-2:${maxH}:flags=lanczos`);
+    args.push(
+      '-c:v', 'libx264', '-preset', 'fast', '-crf', String(crf), '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-b:a', '160k', '-movflags', '+faststart', '-y', outName,
+    );
+    await ff.exec(args);
+    const d = await ff.readFile(outName);
+    return d instanceof Uint8Array ? d : new Uint8Array();
+  };
+
+  let data = await encode(19, 1080); // alta qualidade, mantém até 1080p
+  if (data.length > STORAGE_SAFE_BYTES) data = await encode(22, 720); // fallback raro
+
+  try { await ff.deleteFile(inName); } catch { /* ignore */ }
+  try { await ff.deleteFile(outName); } catch { /* ignore */ }
+  return ffToFile(data, 'rosto_hq.mp4', 'video/mp4');
 }
 
 /**
@@ -121,7 +151,7 @@ export async function prepareFaceVideo(file: File, onStage?: FFLoadStage): Promi
  */
 export async function splitAudioChunks(
   file: File,
-  chunkSec = MAX_CHUNK_SEC,
+  maxChunkSec = MAX_CHUNK_SEC,
   onStage?: FFLoadStage,
 ): Promise<File[]> {
   const ff = await getFFmpeg(onStage);
@@ -129,36 +159,70 @@ export async function splitAudioChunks(
   const uniq = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   const inName = `csplit_${uniq}.mp3`;
   await ff.writeFile(inName, await fetchFile(file));
-  const pattern = `cseg_${uniq}_%03d.mp3`;
-  await ff.exec([
-    '-i', inName,
-    '-f', 'segment',
-    '-segment_time', String(chunkSec),
-    '-c', 'copy',
-    '-reset_timestamps', '1',
-    pattern,
-  ]);
+
+  // 1. Detecta silêncios — pra cortar SEM partir fala no meio.
+  const silences: { start: number; end: number }[] = [];
+  let duration = 0;
+  const onLog = ({ message }: { message: string }) => {
+    const ss = /silence_start:\s*(-?[\d.]+)/.exec(message);
+    if (ss) silences.push({ start: parseFloat(ss[1]), end: -1 });
+    const se = /silence_end:\s*(-?[\d.]+)/.exec(message);
+    if (se && silences.length) silences[silences.length - 1].end = parseFloat(se[1]);
+    const dm = /Duration:\s*(\d+):(\d+):([\d.]+)/.exec(message);
+    if (dm) duration = +dm[1] * 3600 + +dm[2] * 60 + parseFloat(dm[3]);
+  };
+  ff.on('log', onLog);
+  try {
+    await ff.exec(['-i', inName, '-af', 'silencedetect=noise=-32dB:d=0.35', '-f', 'null', '-']);
+  } finally {
+    ff.off('log', onLog);
+  }
+  if (!duration) duration = await probeDurationSec(file);
+
+  // 2. Pontos de corte no MEIO de um silêncio perto de cada limite (≤170s),
+  //    pra nunca cortar no meio da fala. Sem silêncio na janela → corta no limite.
+  const mids = silences.filter((s) => s.end > s.start).map((s) => (s.start + s.end) / 2);
+  const points: number[] = [0];
+  let target = maxChunkSec;
+  while (target < duration - 4) {
+    const lo = target - 25;
+    const hi = Math.min(target + 8, duration - 1);
+    const last = points[points.length - 1];
+    const cands = mids.filter((m) => m >= lo && m <= hi && m > last + 5);
+    const cut = cands.length
+      ? cands.reduce((a, b) => (Math.abs(b - target) < Math.abs(a - target) ? b : a))
+      : Math.min(target, duration);
+    if (cut > last + 5 && cut < duration - 1) points.push(cut);
+    target = cut + maxChunkSec;
+  }
+  points.push(duration);
+
+  if (points.length <= 2) {
+    try { await ff.deleteFile(inName); } catch { /* ignore */ }
+    return [file];
+  }
+
+  // 3. Corta cada trecho exato (re-encode mp3 → duração precisa).
   const chunks: File[] = [];
-  for (let i = 0; i < 300; i++) {
-    const name = `cseg_${uniq}_${String(i).padStart(3, '0')}.mp3`;
+  for (let i = 0; i < points.length - 1; i++) {
+    const out = `cseg_${uniq}_${i}.mp3`;
+    await ff.exec([
+      '-i', inName,
+      '-ss', points[i].toFixed(2),
+      '-to', points[i + 1].toFixed(2),
+      '-c:a', 'libmp3lame', '-q:a', '3',
+      '-y', out,
+    ]);
     let data: Uint8Array | string;
     try {
-      data = await ff.readFile(name);
+      data = await ff.readFile(out);
     } catch {
-      break;
+      continue;
     }
     chunks.push(ffToFile(data, `chunk_${i}.mp3`, 'audio/mpeg'));
-    try {
-      await ff.deleteFile(name);
-    } catch {
-      /* ignore */
-    }
+    try { await ff.deleteFile(out); } catch { /* ignore */ }
   }
-  try {
-    await ff.deleteFile(inName);
-  } catch {
-    /* ignore */
-  }
+  try { await ff.deleteFile(inName); } catch { /* ignore */ }
   return chunks.length > 0 ? chunks : [file];
 }
 

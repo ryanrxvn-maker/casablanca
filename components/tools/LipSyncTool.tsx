@@ -610,24 +610,6 @@ export default function LipSyncTool() {
             </h2>
           </div>
 
-          {/* BADGE OTIMIZACAO — substitui o toggle PRO/PADRAO */}
-          <div className="rounded-[14px] border border-lime/40 bg-lime/[0.04] px-4 py-3">
-            <div className="flex items-start gap-2.5">
-              <span className="text-[18px] mt-0.5">⚡</span>
-              <div className="flex-1">
-                <div
-                  className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-lime mb-1"
-                  style={{ fontFamily: 'var(--font-tech)' }}
-                >
-                  Otimização automática ligada
-                </div>
-                <p className="text-[11.5px] text-text-muted leading-snug">
-                  Vídeo vira <span className="text-white">720p@25fps</span> e áudio é <span className="text-white">limpo + normalizado</span> antes de subir. Resultado mais nítido + custo mínimo.
-                </p>
-              </div>
-            </div>
-          </div>
-
           {/* Audio upload */}
           <div>
             <div className="mb-2 flex items-baseline justify-between gap-2">
@@ -635,7 +617,7 @@ export default function LipSyncTool() {
                 className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
                 style={{ fontFamily: 'var(--font-tech)' }}
               >
-                Áudio (o que vai sair da boca)
+                Áudio
               </label>
               <span className="mono text-[9px] text-text-dim">aceita mp4 — usa só o áudio</span>
             </div>
@@ -687,75 +669,10 @@ export default function LipSyncTool() {
             )}
           </div>
 
-          {/* Advanced settings */}
-          <div className="rounded-[14px] border border-line/40 overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setAdvanced(!advanced)}
-              disabled={isLoading}
-              className="flex w-full items-center justify-between px-3.5 py-2.5 hover:bg-bg-soft/40 transition"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-[15px]">⚙</span>
-                <span
-                  className="text-[11.5px] font-bold tracking-tight text-white"
-                  style={{ fontFamily: 'var(--font-tech)' }}
-                >
-                  Ajustes pro
-                </span>
-              </div>
-              <span className="text-text-muted text-[12px]">{advanced ? '▲' : '▼'}</span>
-            </button>
-            {advanced && (
-              <div className="border-t border-line/30 p-4 bg-bg/30 space-y-4">
-                {/* sync_mode — comportamento quando audio > video */}
-                <div>
-                  <label
-                    className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted mb-2 block"
-                    style={{ fontFamily: 'var(--font-tech)' }}
-                  >
-                    Quando o áudio é maior que o vídeo
-                  </label>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {(
-                      [
-                        { v: 'cut_off', label: 'Cortar', sub: 'corta no fim do vídeo' },
-                        { v: 'loop', label: 'Loop', sub: 'reinicia do começo' },
-                        { v: 'bounce', label: 'Bounce', sub: 'vai e volta' },
-                        { v: 'silence', label: 'Silêncio', sub: 'segura último frame' },
-                      ] as const
-                    ).map((opt) => (
-                      <button
-                        key={opt.v}
-                        type="button"
-                        onClick={() => setSyncMode(opt.v)}
-                        disabled={isLoading}
-                        className={
-                          'rounded-[10px] border px-2.5 py-2 text-left transition ' +
-                          (syncMode === opt.v
-                            ? 'border-fuchsia-400/60 bg-fuchsia-400/10'
-                            : 'border-line-strong bg-bg-soft/40 hover:border-fuchsia-400/40')
-                        }
-                      >
-                        <div
-                          className="text-[11px] font-bold tracking-tight text-white"
-                          style={{ fontFamily: 'var(--font-tech)' }}
-                        >
-                          {opt.label}
-                        </div>
-                        <div className="mono text-[9px] text-text-muted">{opt.sub}</div>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* WARNINGS - issues do video */}
-          {selected && videoIssues.length > 0 && (
+          {/* WARNINGS - só block/warn (info é ruído, removido) */}
+          {selected && videoIssues.some((iss) => iss.severity !== 'info') && (
             <div className="space-y-1.5">
-              {videoIssues.map((issue, i) => {
+              {videoIssues.filter((iss) => iss.severity !== 'info').map((issue, i) => {
                 const styles =
                   issue.severity === 'block'
                     ? 'border-red-500/55 bg-red-500/10 text-red-200'
@@ -814,20 +731,12 @@ export default function LipSyncTool() {
               ) : (
                 <>
                   <span className="text-[18px]">▶</span>
-                  <div className="flex flex-col items-start gap-0.5">
-                    <span
-                      className="text-[13.5px] font-bold uppercase tracking-[0.2em] text-white leading-none"
-                      style={{ fontFamily: 'var(--font-tech)' }}
-                    >
-                      Gerar lip sync
-                    </span>
-                    <span
-                      className="mono text-[9.5px] uppercase tracking-[0.15em] text-lime/80 leading-none"
-                      style={{ fontFamily: 'var(--font-tech)' }}
-                    >
-                      ∞ Ilimitado · HD
-                    </span>
-                  </div>
+                  <span
+                    className="text-[14px] font-bold uppercase tracking-[0.22em] text-white leading-none"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    Gerar
+                  </span>
                   <span className="text-[16px] transition-transform group-hover:translate-x-1.5 ml-auto">→</span>
                 </>
               )}
