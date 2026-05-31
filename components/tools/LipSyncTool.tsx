@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { LipSyncHero3D } from '@/app/tools/lipsync/LipSyncHero3D';
-import type { ChunkProgress } from '@/lib/lipsync-chunker';
+import type { ChunkProgress, ChunkInfo, ChunkStatus } from '@/lib/lipsync-chunker';
 import { createClient } from '@/lib/supabase/client';
 
 const UPLOAD_BUCKET = 'lipsync-uploads';
@@ -150,14 +150,14 @@ export default function LipSyncTool() {
     const maxDim = Math.max(w, h);
 
     // Resolucao
-    if (minDim < 480) issues.push({ severity: 'block', text: `Resolução ${w}×${h} muito baixa (mín 480p). Dentes vão sair borrados.` });
-    else if (maxDim > 1920) issues.push({ severity: 'block', text: `Resolução ${w}×${h} acima de 1080p. Reduz pra max 1920px no lado maior.` });
+    if (minDim < 480) issues.push({ severity: 'warn', text: `Resolução ${w}×${h} baixa — os dentes podem sair menos nítidos.` });
+    else if (maxDim > 1920) issues.push({ severity: 'info', text: `${w}×${h} — otimizamos pra 720p automático antes de gerar.` });
     else if (minDim < 720) issues.push({ severity: 'info', text: `${w}×${h} — OK. 720p+ dá boca mais nítida (mas funciona).` });
 
     // Duracao do vídeo-fonte (o rosto). A duração final do resultado
     // segue o ÁUDIO (o DreamFace usa o vídeo como fonte do rosto).
     if (dur < 2) issues.push({ severity: 'block', text: `Vídeo de ${dur.toFixed(1)}s é muito curto — use pelo menos 2s de rosto.` });
-    else issues.push({ severity: 'info', text: `O resultado terá a duração do ÁUDIO (até ~180s). O vídeo é só a fonte do rosto.` });
+    else issues.push({ severity: 'info', text: `O resultado terá a duração do ÁUDIO (até 10min). O vídeo é só a fonte do rosto.` });
 
     if (selected.file.size > 200 * 1024 * 1024) issues.push({ severity: 'warn', text: `Arquivo ${(selected.file.size / 1024 / 1024).toFixed(0)}MB grande — upload pode demorar.` });
 
@@ -340,7 +340,7 @@ export default function LipSyncTool() {
       setStatus('error');
       return;
     }
-    // DreamFace precisa da duração do áudio (audio_end_time). Mede se faltar.
+    // Duração do áudio (necessária pra costurar trechos e pro motor).
     let audioMs = Math.round((audioDur || 0) * 1000);
     if (!audioMs) {
       audioMs = Math.round((await measureMediaDuration(audioFile)) * 1000);
@@ -350,8 +350,14 @@ export default function LipSyncTool() {
       setStatus('error');
       return;
     }
-    if (audioMs > 180_000) {
-      setErrorMsg('Áudio muito longo (máx ~180s por enquanto). Corta um pouco.');
+    // Limites do AutoEdit — bem acima do motor (a gente comprime + costura).
+    if (selected.file.size > 300 * 1024 * 1024) {
+      setErrorMsg('Vídeo acima de 300MB. Usa um arquivo até 300MB.');
+      setStatus('error');
+      return;
+    }
+    if (audioMs > 600_000) {
+      setErrorMsg('Áudio acima de 10 minutos. Usa um áudio até 10min.');
       setStatus('error');
       return;
     }
@@ -361,46 +367,116 @@ export default function LipSyncTool() {
     setChunkProgress(null);
     startTicker();
 
-    try {
-      // Upload do VÍDEO (rosto) + ÁUDIO em PARALELO pro fal.storage →
-      // URLs públicas. O servidor baixa e manda pro DreamFace. Sem
-      // pre-processing/chunk/post pesado: o DreamFace cuida de tudo.
-      setStatus('uploading-video');
-      setUploadProgress(0);
-      const [video_url, audio_url] = await Promise.all([
-        uploadPublic(selected.file, 'video', (pct) => setUploadProgress(pct)),
-        uploadPublic(audioFile, 'audio'),
-      ]);
-
-      // O DreamFace faz upload interno + registra avatar + gera. Pode
-      // levar de alguns segundos a ~2min dependendo da duração.
-      setStatus('generating');
-      setUploadProgress(0);
-
+    // Roda UMA geração (rosto fixo + 1 trecho de áudio): sobe → gera →
+    // baixa → pós-produção (realça o lip). Devolve o blob pronto.
+    async function generateOne(faceUrl: string, audioChunk: File, chunkMs: number, label?: string): Promise<Blob> {
+      const aUrl = await uploadPublic(audioChunk, 'audio');
       const res = await fetch('/api/tools/lipsync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ video_url, audio_url, audio_ms: audioMs }),
+        body: JSON.stringify({ video_url: faceUrl, audio_url: aUrl, audio_ms: chunkMs }),
       });
-
       const data = await res.json().catch(() => null);
-      if (!res.ok) {
+      if (!res.ok || !data?.output_video_url) {
         throw new Error(
           (data && (typeof data.error === 'string' ? data.error : data.error ? errMsg(data.error) : null)) ||
-            `O servidor respondeu erro ${res.status}. Tenta de novo; se o vídeo/áudio for muito longo, corta um pouco.`,
+            (label ? `Falha ao gerar ${label}.` : `O servidor respondeu erro ${res.status}.`),
         );
       }
-      if (!data?.output_video_url) {
-        throw new Error('O servidor não devolveu o vídeo gerado.');
+      const r = await fetch(data.output_video_url);
+      if (!r.ok) throw new Error(`Falha ao baixar o resultado${label ? ` (${label})` : ''}.`);
+      const raw = await r.blob();
+      // PÓS-PRODUÇÃO: realça o lip. Se falhar, usa o resultado cru.
+      return enhanceLipVideoSafe(raw);
+    }
+
+    try {
+      const {
+        prepareFaceVideo, cleanAudioMp3, splitAudioChunks, concatLipVideos,
+        CHUNK_THRESHOLD_SEC, MAX_CHUNK_SEC,
+      } = await import('@/lib/lipsync-pipeline');
+
+      // ── 1. PRÉ-PRODUÇÃO (em worker, não trava a UI): otimiza o rosto
+      //       (≤720p se grande) + limpa/normaliza o áudio. Em paralelo.
+      setStatus('uploading-video'); // "Otimizando e enviando o vídeo…"
+      setUploadProgress(0);
+      const [faceFile, cleanAudio] = await Promise.all([
+        prepareFaceVideo(selected.file),
+        cleanAudioMp3(audioFile),
+      ]);
+
+      // ── 2. CHUNKING: áudio longo (>~178s) vira trechos ≤170s.
+      const needChunk = audioMs / 1000 > CHUNK_THRESHOLD_SEC;
+      const audioChunks = needChunk ? await splitAudioChunks(cleanAudio, MAX_CHUNK_SEC) : [cleanAudio];
+      const n = audioChunks.length;
+
+      const infos: ChunkInfo[] = audioChunks.map((_, i) => ({
+        index: i, startSec: i * MAX_CHUNK_SEC, endSec: (i + 1) * MAX_CHUNK_SEC, status: 'pending' as ChunkStatus,
+      }));
+      const emit = (phase: ChunkProgress['phase']) => {
+        if (n <= 1) return;
+        setChunkProgress({
+          totalChunks: n,
+          doneChunks: infos.filter((c) => c.status === 'done').length,
+          chunks: infos.map((c) => ({ ...c })),
+          phase,
+        });
+      };
+
+      // ── 3. Sobe o ROSTO uma única vez (reusado em todos os trechos).
+      const faceUrl = await uploadPublic(faceFile, 'video', (pct) => setUploadProgress(pct));
+
+      // ── 4+5. Gera + pós-produção por trecho (concorrência limitada = 2).
+      setStatus('generating');
+      setUploadProgress(0);
+      emit('generating');
+      const outBlobs: Blob[] = new Array(n);
+      let next = 0;
+      const worker = async () => {
+        while (next < n) {
+          const i = next++;
+          infos[i].status = 'uploading';
+          emit('uploading');
+          const chunkMs = n > 1
+            ? Math.round((await measureMediaDuration(audioChunks[i])) * 1000) || Math.min(MAX_CHUNK_SEC * 1000, audioMs)
+            : audioMs;
+          infos[i].status = 'generating';
+          emit('generating');
+          outBlobs[i] = await generateOne(faceUrl, audioChunks[i], chunkMs, n > 1 ? `trecho ${i + 1}/${n}` : undefined);
+          infos[i].status = 'done';
+          emit('generating');
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(2, n) }, () => worker()));
+
+      // ── 6. COSTURA os trechos num só (stream-copy = leve).
+      let finalBlob: Blob;
+      if (n > 1) {
+        emit('concat');
+        finalBlob = await concatLipVideos(outBlobs);
+        emit('done');
+      } else {
+        finalBlob = outBlobs[0];
       }
 
-      setOutputUrl(data.output_video_url);
+      // ── 7. Mostra (object URL local — sem limite de storage no resultado).
+      setOutputUrl(URL.createObjectURL(finalBlob));
       setStatus('done');
       stopTicker();
     } catch (err) {
       setStatus('error');
       setErrorMsg(errMsg(err) || 'Algo deu errado.');
       stopTicker();
+    }
+  }
+
+  /** Pós-produção do lip; se falhar, devolve o resultado cru (resiliente). */
+  async function enhanceLipVideoSafe(raw: Blob): Promise<Blob> {
+    try {
+      const { enhanceLipVideo } = await import('@/lib/lipsync-pipeline');
+      return await enhanceLipVideo(raw);
+    } catch {
+      return raw;
     }
   }
 
