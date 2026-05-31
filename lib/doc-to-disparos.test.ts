@@ -342,6 +342,56 @@ console.log('\nregressao: metadados de producao nao viram avatar:');
   assert(roles.includes('doutor'), 'Doutor (avatar real) preservado');
 }
 
+/* ----------------- regressao: ClickUp attachment chip format ----------------- */
+// User reportou (29/05/2026): docs reais do ClickUp tem o link como CHIP
+// (atachment), nao como @username puro. Formatos comuns:
+//   "Doutor: 📎 Viva Saudável_1330239768979913 (32 ativos).mp4"
+//   "Doutor: 📎 Dicas Saude_1454126032545043 (17 dias - lateral)..."
+// Antes do fix, reFullLine nao casava (parens dentro do filename) -> 0 avatares.
+console.log('\nregressao: ClickUp attachment chip (📎) format:');
+{
+  const docChip = [
+    'AD30GL - PRPB06',
+    'INSTRUÇÕES PARA EDIÇÃO:',
+    'Avatar e Vozes:',
+    'Doutor: 📎 Viva Saudável_1330239768979913 (32 ativos).mp4',
+  ].join('\n');
+  const av = parseAvatars(docChip);
+  console.log('  avatars =', av.map((a) => `${a.role}/${a.username}`));
+  assert(av.length === 1, `1 avatar detectado (got ${av.length})`);
+  assert(av[0]?.role.toLowerCase() === 'doutor', 'role = Doutor');
+  assert(/viva\s*saud[áa]vel/i.test(av[0]?.username || ''), `username inclui "Viva Saudável" (got ${av[0]?.username})`);
+  // Filename NAO deve carregar "(32 ativos)" nem ".mp4"
+  assert(!/\(/.test(av[0]?.username || ''), 'username sem parens trailing');
+  assert(!/\.mp4/i.test(av[0]?.username || ''), 'username sem .mp4');
+}
+{
+  const docTrunc = [
+    'AD34GL - PRPB06',
+    'INSTRUÇÕES PARA EDIÇÃO:',
+    'Avatar e Vozes:',
+    'Doutor: 📎 Dicas Saude_1454126032545043 (17 dias ativos - escala lateral)...',
+  ].join('\n');
+  const av = parseAvatars(docTrunc);
+  console.log('  avatars =', av.map((a) => `${a.role}/${a.username}`));
+  assert(av.length === 1, `1 avatar detectado (chip truncado por ...) (got ${av.length})`);
+  assert(av[0]?.role.toLowerCase() === 'doutor', 'role = Doutor');
+  assert(/dicas\s*saude/i.test(av[0]?.username || ''), `username inclui "Dicas Saude" (got ${av[0]?.username})`);
+  assert(!/\.{2,}/.test(av[0]?.username || ''), 'username sem "..." trailing');
+  assert(!/\(/.test(av[0]?.username || ''), 'username sem parens trailing');
+}
+// Sanity: gatilho 📎 NAO deve criar avatar fantasma quando role e metadado
+{
+  const docBg = [
+    'AD30GL - PRPB06',
+    'Música de fundo: 📎 Scary Piano.mp4',
+    'Cenário: 📎 sala-medica.mp4',
+  ].join('\n');
+  const av = parseAvatars(docBg);
+  console.log('  bg-only avatars =', av.length);
+  assert(av.length === 0, 'metadados com 📎 continuam bloqueados');
+}
+
 /* ----------------- doc vazio ----------------- */
 console.log('\nedge cases:');
 const empty = buildDisparosFromDoc('', CANDIDATES);

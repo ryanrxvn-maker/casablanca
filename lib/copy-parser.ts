@@ -273,6 +273,19 @@ export function parseAvatars(section: string): ParsedAvatar[] {
   // Cauda: parens, traco ou comentario opcional apos o filename.
   const reFullLine = /^[\s•\-*\d.)\]]*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s()0-9\-]{0,58}?):\s*[^@a-zA-ZÀ-ÿ0-9_]*(?:@([A-Za-zÀ-ÿ0-9_][\w.À-ÿ_-]{2,})(?:\.(?:mp4|mov))?|([A-Za-zÀ-ÿ][\wÀ-ÿ.\s_-]{2,}?)\.(?:mp4|mov))\s*(?:[\s\-(.,].*)?$/i;
 
+  // Regex 1b: linha "Role: <attachment chip do ClickUp>" — formato menos
+  // estruturado onde o filename tem parens, espacos, acentos OU vem TRUNCADO
+  // por "..." (ClickUp renderiza link como chip e nao mostra .mp4).
+  //
+  // User reportou (29/05/2026): docs reais tem
+  //   "Doutor: 📎 Viva Saudável_1330239768979913 (32 ativos).mp4"
+  //   "Doutor: 📎 Dicas Saude_1454126032545043 (17 dias - lateral)..."
+  // reFullLine nao casava por causa dos parens no nome + ".mp4" depois.
+  //
+  // Estrategia: gatilho = 📎 OU .mp4/.mov OU "..." no final.
+  // Pega o que vier depois do ":" como nome bruto, normaliza depois.
+  const reAttachmentChip = /^[\s•\-*\d.)\]]*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s()0-9\-]{0,58}?):\s*(.+?)\s*$/;
+
   // Regex 2: linha com SO @username (sem role), tipo "@manualdohomemsolo.mp4"
   const reOnlyMention = /^[\s•\-*\d.)\]]*@([A-Za-z0-9][\w._-]+?)(?:\.(?:mp4|mov))?\s*$/i;
 
@@ -313,6 +326,52 @@ export function parseAvatars(section: string): ParsedAvatar[] {
         pendingRole = null;
         pendingRoleLine = -1;
         continue;
+      }
+    }
+
+    // Tentativa 1b: ClickUp attachment chip — "Role: 📎 <filename com parens>.mp4"
+    // ou truncado "Role: 📎 <filename>..." (sem extensao visivel). Gatilho:
+    // presenca de 📎 OU .mp4/.mov OU "..." no final. NON_AVATAR_PREFIXES ja
+    // bloqueia "Música de fundo", "Referência", etc — sem risco de matar
+    // narrativa "Mulher: voce..." (sem gatilho).
+    const hasAttachmentTrigger =
+      /📎/.test(trimmed) ||
+      /\.(mp4|mov)\b/i.test(trimmed) ||
+      /\.{3,}\s*$/.test(trimmed);
+    if (hasAttachmentTrigger) {
+      const m1b = trimmed.match(reAttachmentChip);
+      if (m1b) {
+        const role = m1b[1].trim();
+        // Normaliza filename:
+        //   - strip 📎 lead + espacos
+        //   - strip @ inicial
+        //   - strip .mp4/.mov
+        //   - strip trailing "..." ou unico "."
+        //   - strip trailing "(...)" (ex "(32 ativos)" / "(17 dias - lateral)")
+        let raw = m1b[2].trim();
+        // CRITICAL: ordem importa. Remove "..." ANTES de "(...)" porque
+        // ClickUp truncated chips ficam "(17 dias...)..." — sem o strip do
+        // "..." primeiro, a regex de parens nao detecta o trailing block.
+        const username = raw
+          .replace(/^📎\s*/, '')
+          .replace(/^@/, '')
+          .replace(/\.(mp4|mov)\b.*$/i, '')   // tudo depois de .mp4 vai junto
+          .replace(/\s*\.{2,}\s*$/g, '')      // "..." trailing primeiro
+          .replace(/\s*\(.*?\)\s*$/g, '')     // " (32 ativos)" trailing
+          .replace(/\s*\.{2,}\s*$/g, '')      // "..." que possa ter sobrado
+          .replace(/[,\s]+$/, '')             // virgula/espaco trailing
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (isPlausibleAvatarRole(role) &&
+            username.length >= 3 &&
+            !/^(http|https|www|exemplo|ex)$/i.test(username) &&
+            !/^\d+$/.test(username) &&
+            !/^AD\d+VN/i.test(username)) {
+          out.push({ role, username, raw: trimmed });
+          pendingRole = null;
+          pendingRoleLine = -1;
+          continue;
+        }
       }
     }
 
@@ -384,6 +443,10 @@ export function parseParts(section: string): ParsedPart[] {
     if (inAvatarBlock) {
       // linha tipo "Doutor: @x.mp4" — skip
       if (/^[\wÀ-ÿ ]+?:\s*[^@\w]*@[\w._-]+/.test(trimmed)) continue;
+      // linha attachment chip "Doutor: 📎 Viva Saudável.mp4" ou truncada
+      // "Doutor: 📎 Dicas Saude_123 (17 dias)..." — tambem skip pra nao vazar
+      // pro body text.
+      if (/^[\wÀ-ÿ ()0-9\-]+?:\s*(?:📎|.*?\.(?:mp4|mov)\b|.*?\.{3,}\s*$)/.test(trimmed)) continue;
       // linha em branco apos avatar = fim do bloco
       if (!trimmed) { inAvatarBlock = false; continue; }
     }
