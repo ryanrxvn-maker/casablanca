@@ -48,10 +48,27 @@ export async function POST(req: Request) {
     );
   }
 
-  // Garante o bucket (idempotente — ignora erro se já existe).
-  await sb.storage
-    .createBucket(BUCKET, { public: true, fileSizeLimit: 500 * 1024 * 1024 })
-    .catch(() => {});
+  // Garante o bucket (público) de forma robusta. SEM fileSizeLimit
+  // explícito — usar o limite global do projeto (passar um valor acima
+  // do limite global faz o createBucket falhar).
+  try {
+    const { data: buckets } = await sb.storage.listBuckets();
+    const exists = Array.isArray(buckets) && buckets.some((b) => b.name === BUCKET);
+    if (!exists) {
+      const { error: cbErr } = await sb.storage.createBucket(BUCKET, { public: true });
+      if (cbErr && !/exist/i.test(cbErr.message || '')) {
+        return NextResponse.json(
+          { error: 'Falha ao criar bucket de upload.', detail: cbErr.message },
+          { status: 502 },
+        );
+      }
+    }
+  } catch (e) {
+    return NextResponse.json(
+      { error: 'Falha ao preparar o storage.', detail: e instanceof Error ? e.message : String(e) },
+      { status: 502 },
+    );
+  }
 
   const path = `${guard.userId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${kind}.${ext}`;
 
