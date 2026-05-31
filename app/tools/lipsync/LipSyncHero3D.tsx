@@ -217,6 +217,11 @@ export function LipSyncHero3D() {
  */
 const HERO_VIDEOS = ['/lipsync-hero/1.mp4', '/lipsync-hero/2.mp4', '/lipsync-hero/3.mp4'];
 
+// Enquadramento do rosto por vídeo (object-position Y). Calibrado vendo o
+// recorte circular real de cada um: rosto na parte superior-central do
+// círculo (mais pra cima), cabeça inteira, sem cortar.
+const OBJECT_POS = ['center 30%', 'center 30%', 'center 28%'];
+
 function CyborgCarousel({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
   const [index, setIndex] = useState(0);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -322,7 +327,15 @@ function CyborgCarousel({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
                 preload="auto"
                 onEnded={advance}
                 className="absolute inset-0 h-full w-full object-cover"
-                style={{ filter: 'saturate(1.08) contrast(1.04)', animation: 'ccFadeIn 0.6s cubic-bezier(.2,.8,.2,1)' }}
+                style={{ filter: 'saturate(1.08) contrast(1.04)', objectPosition: OBJECT_POS[index], animation: 'ccReveal 0.72s cubic-bezier(.2,.8,.2,1)' }}
+              />
+              {/* TRANSIÇÃO: scanline cyan varre na troca (key força o replay).
+                  opacity base 0 inline → some depois (NUNCA cobre o vídeo). */}
+              <div
+                key={`sw${index}`}
+                aria-hidden
+                className="pointer-events-none absolute inset-x-0 top-0 h-[22%]"
+                style={{ opacity: 0, background: 'linear-gradient(180deg, transparent, rgba(103,232,249,0.85), transparent)', filter: 'blur(3px)', mixBlendMode: 'screen', animation: 'ccSweep 0.72s ease-out' }}
               />
               {/* color overlay sutil */}
               <div
@@ -350,7 +363,7 @@ function CyborgCarousel({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-300 opacity-75" />
                   <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-cyan-300" />
                 </span>
-                CYBORG
+                FALANDO
               </div>
             </div>
 
@@ -430,7 +443,7 @@ function CyborgCarousel({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
 
             {/* HUD txt */}
             <g fontFamily="monospace" fontSize="8" fill="rgba(232,121,249,0.75)">
-              <text x="52" y="386">[ CYBORG · MODE ]</text>
+              <text x="52" y="386">[ LIP · SYNC ]</text>
               <text x="52" y="396">READY TO TALK</text>
             </g>
             <g fontFamily="monospace" fontSize="8" fill="rgba(103,232,249,0.75)">
@@ -448,7 +461,7 @@ function CyborgCarousel({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
           style={{ fontFamily: 'var(--font-tech)' }}
         >
           <span className="h-1.5 w-1.5 rounded-full bg-lime" style={{ animation: 'ccBlink 1.3s ease-in-out infinite' }} />
-          CYBORG · AO VIVO
+          AO VIVO
         </span>
       </div>
 
@@ -489,11 +502,18 @@ function CyborgCarousel({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
           0%, 100% { transform: translate(-50%, -50%) scale(1); }
           50% { transform: translate(-50%, -50%) scale(1.025); }
         }
-        /* fade do vídeo na troca — TERMINA visível (opacity 1) = sem bug de branco */
-        @keyframes ccFadeIn {
-          0% { opacity: 0; transform: scale(1.05); filter: brightness(1.5) saturate(1.4); }
-          45% { opacity: 1; }
-          100% { opacity: 1; transform: scale(1); filter: brightness(1) saturate(1.08); }
+        /* TRANSIÇÃO do vídeo na troca — wipe (cima→baixo) + zoom + glow +
+           de-blur. TERMINA visível (opacity 1, sem clip) = sem bug de branco. */
+        @keyframes ccReveal {
+          0% { opacity: 0; transform: scale(1.12); filter: brightness(1.9) saturate(1.6) blur(7px); clip-path: inset(0 0 100% 0); }
+          30% { opacity: 1; clip-path: inset(0 0 0 0); }
+          100% { opacity: 1; transform: scale(1); filter: brightness(1) saturate(1.08) blur(0); clip-path: inset(0 0 0 0); }
+        }
+        /* scanline da troca — base opacity 0 (inline), some no fim */
+        @keyframes ccSweep {
+          0% { opacity: 0; transform: translateY(-120%); }
+          15% { opacity: 1; }
+          100% { opacity: 0; transform: translateY(380%); }
         }
         @keyframes ccBadge {
           0%, 100% { transform: translateY(0); opacity: 0.95; }
