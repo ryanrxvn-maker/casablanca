@@ -291,12 +291,11 @@ export default function LipSyncTool() {
     setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)));
   }
 
-  /** Sobe o "piso" real da barra (marco de etapa concluída). Monotônico. */
+  /** Sobe o "piso" real da barra (marco de etapa concluída). Só mexe no
+   *  FLOOR — o ticker faz a barra subir SUAVE até ele (sem salto). */
   function bumpFloor(id: string, floor: number) {
     setJobs((prev) =>
-      prev.map((j) =>
-        j.id === id ? { ...j, floor: Math.max(j.floor, floor), percent: Math.max(j.percent, floor) } : j,
-      ),
+      prev.map((j) => (j.id === id ? { ...j, floor: Math.max(j.floor, floor) } : j)),
     );
   }
 
