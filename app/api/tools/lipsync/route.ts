@@ -20,7 +20,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/app/api/admin/_helpers';
+import { requireAdmin, serviceClient } from '@/app/api/admin/_helpers';
 import {
   generateLipsync,
   isDreamFaceConfigured,
@@ -30,6 +30,28 @@ import { runOnDreamFaceQueue } from '@/lib/dreamface-queue';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
+
+const OUTPUT_BUCKET = 'lipsync-uploads';
+
+/**
+ * Re-hospeda o MP4 do motor no Supabase: o cliente NUNCA vê a URL de
+ * origem (privacidade do motor), libera CORS pro pós-processamento
+ * client-side, e dá uma URL estável (sem expiração de assinatura).
+ */
+async function rehostOutput(srcUrl: string, userId: string, workId: string): Promise<string> {
+  const r = await fetch(srcUrl, { cache: 'no-store' });
+  if (!r.ok) throw new Error(`download do MP4 falhou (${r.status})`);
+  const buf = Buffer.from(await r.arrayBuffer());
+  const sb = serviceClient();
+  await sb.storage.createBucket(OUTPUT_BUCKET, { public: true }).catch(() => {});
+  const path = `outputs/${userId}/${Date.now()}-${workId}.mp4`;
+  const { error } = await sb.storage
+    .from(OUTPUT_BUCKET)
+    .upload(path, buf, { contentType: 'video/mp4', upsert: true });
+  if (error) throw new Error('re-host Supabase: ' + error.message);
+  const { data } = sb.storage.from(OUTPUT_BUCKET).getPublicUrl(path);
+  return data.publicUrl;
+}
 
 interface LipSyncBody {
   video_url?: string;
@@ -136,10 +158,19 @@ export async function POST(req: Request) {
       }),
     );
 
+    // Esconde a origem: re-hospeda o MP4 no Supabase. Se falhar, cai pra
+    // URL direta (gerar é melhor que falhar), mas o normal é re-hospedar.
+    let outputUrl = result.url;
+    try {
+      outputUrl = await rehostOutput(result.url, guard.userId, result.workId);
+    } catch (e) {
+      console.error('[lipsync] re-host falhou, usando URL direta:', e instanceof Error ? e.message : e);
+    }
+
     return NextResponse.json({
       success: true,
-      engine: 'dreamface',
-      output_video_url: result.url,
+      engine: 'autoedit',
+      output_video_url: outputUrl,
       work_id: result.workId,
     });
   } catch (err) {

@@ -351,7 +351,7 @@ export default function LipSyncTool() {
       return;
     }
     if (audioMs > 180_000) {
-      setErrorMsg('Áudio acima de 180s. O DreamFace gera até ~180s por vez — corta o áudio.');
+      setErrorMsg('Áudio muito longo (máx ~180s por enquanto). Corta um pouco.');
       setStatus('error');
       return;
     }
@@ -749,7 +749,7 @@ export default function LipSyncTool() {
                       className="mono text-[9.5px] uppercase tracking-[0.15em] text-lime/80 leading-none"
                       style={{ fontFamily: 'var(--font-tech)' }}
                     >
-                      ∞ Ilimitado · DreamFace
+                      ∞ Ilimitado · HD
                     </span>
                   </div>
                   <span className="text-[16px] transition-transform group-hover:translate-x-1.5 ml-auto">→</span>
