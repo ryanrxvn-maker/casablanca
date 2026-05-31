@@ -240,17 +240,25 @@ function CyborgCarousel({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
     if (v && v.videoWidth && v.videoHeight) setRatio(v.videoWidth / v.videoHeight);
   }
 
-  // Autoplay blindado: toca ao montar e a cada troca de vídeo (2 tentativas).
+  // Autoplay BLINDADO. O navegador pausa vídeo quando a aba está em segundo
+  // plano (visibilityState 'hidden') — então tocamos sempre que a aba está
+  // visível: ao montar, a cada troca, E quando a aba volta a ficar visível.
+  // Isso garante que o vídeo NUNCA fica parado/branco com a aba em foco.
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
     const tryPlay = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       const p = v.play();
       if (p && typeof p.catch === 'function') p.catch(() => {});
     };
     tryPlay();
     const t = setTimeout(tryPlay, 140);
-    return () => clearTimeout(t);
+    document.addEventListener('visibilitychange', tryPlay);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener('visibilitychange', tryPlay);
+    };
   }, [index]);
 
   // Moldura segue a proporção do vídeo (inteiro). Halo circular um tico maior.
