@@ -43,6 +43,21 @@ function ffToFile(data: Uint8Array | string, name: string, type: string): File {
   return new File([copy.buffer], name, { type });
 }
 
+/** Cronometra uma etapa e empilha em window.__lipTimings (debug/medição). */
+function track<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  const t0 = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  return fn().finally(() => {
+    const ms = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0);
+    try {
+      const w = window as unknown as { __lipTimings?: { label: string; ms: number }[] };
+      w.__lipTimings = w.__lipTimings || [];
+      w.__lipTimings.push({ label, ms });
+    } catch {
+      /* ignore */
+    }
+  });
+}
+
 /** Mede duração (s) de mídia via elemento HTML, sem ffmpeg. */
 export function probeDurationSec(file: File): Promise<number> {
   return new Promise((resolve) => {
@@ -72,8 +87,10 @@ export function probeDurationSec(file: File): Promise<number> {
  * (usa só o áudio). Sempre roda — o áudio é leve.
  */
 export async function cleanAudioMp3(file: File, onStage?: FFLoadStage): Promise<File> {
-  const blob = await normalizeVolume(file, { output: 'mp3' }, { onStage });
-  return new File([blob], 'voz_limpa.mp3', { type: 'audio/mpeg' });
+  return track('pre_cleanAudio', async () => {
+    const blob = await normalizeVolume(file, { output: 'mp3' }, { onStage });
+    return new File([blob], 'voz_limpa.mp3', { type: 'audio/mpeg' });
+  });
 }
 
 /**
@@ -92,8 +109,10 @@ export async function prepareFaceVideo(file: File, onStage?: FFLoadStage): Promi
   }
   const needCompress = file.size > FACE_COMPRESS_BYTES || (height > 0 && height > FACE_MAX_HEIGHT);
   if (!needCompress) return file;
-  const blob = await compressVideo(file, { crf: 23, resolution: '720' }, { onStage });
-  return new File([blob], 'rosto_opt.mp4', { type: 'video/mp4' });
+  return track('pre_compressFace', async () => {
+    const blob = await compressVideo(file, { crf: 23, resolution: '720' }, { onStage });
+    return new File([blob], 'rosto_opt.mp4', { type: 'video/mp4' });
+  });
 }
 
 /**
@@ -148,7 +167,7 @@ export async function splitAudioChunks(
  * devolve nitidez aos dentes, grading sutil). Roda por trecho (curto).
  */
 export async function enhanceLipVideo(blob: Blob, onStage?: FFLoadStage): Promise<Blob> {
-  return postprocessLipSyncOutput(blob, { onStage });
+  return track('post_enhance', async () => postprocessLipSyncOutput(blob, { onStage }));
 }
 
 /**
@@ -158,5 +177,5 @@ export async function enhanceLipVideo(blob: Blob, onStage?: FFLoadStage): Promis
  */
 export async function concatLipVideos(blobs: Blob[], onStage?: FFLoadStage): Promise<Blob> {
   if (blobs.length === 1) return blobs[0];
-  return concatVideosFast(blobs, { onStage });
+  return track('post_concat', async () => concatVideosFast(blobs, { onStage }));
 }
