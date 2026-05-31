@@ -96,11 +96,12 @@ export function MotorConfigPicker({
       )}
 
       {!collapsed ? (
-        <div className="mt-3 space-y-3">
-          {/* Mode selector */}
-          <div className="flex gap-1.5">
+        <div className="mt-3 space-y-3.5">
+          {/* MODE SELECTOR — segmented control pro estilo */}
+          <div className="inline-flex rounded-full border border-white/10 bg-white/[0.04] p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
             {(['global', 'percent', 'individual'] as const).map((kind) => {
               const active = config.kind === kind;
+              const label = kind === 'global' ? 'Todos iguais' : kind === 'percent' ? 'Misturar %' : 'Por avatar';
               return (
                 <button
                   key={kind}
@@ -111,47 +112,66 @@ export function MotorConfigPicker({
                     else setConfig({ kind: 'individual', perSlot: {} });
                   }}
                   className={
-                    'mono flex-1 rounded border px-2 py-1.5 text-[10px] uppercase tracking-widest transition ' +
+                    'mono rounded-full px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] transition-all ' +
                     (active
-                      ? 'border-cyan-500/60 bg-cyan-500/20 text-cyan-100'
-                      : 'border-line-strong bg-bg/40 text-text-muted hover:border-cyan-500/40')
+                      ? 'bg-gradient-to-b from-cyan-400/30 to-cyan-400/10 text-cyan-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_2px_8px_-2px_rgba(34,211,238,0.4)]'
+                      : 'text-text-muted hover:text-white')
                   }
                 >
-                  {kind === 'global' ? 'Global' : kind === 'percent' ? '% Mix' : 'Por avatar'}
+                  {label}
                 </button>
               );
             })}
           </div>
 
-          {/* Mode-specific UI */}
+          {/* CARDS DE MOTOR — pro design */}
           {config.kind === 'global' ? (
             <div>
-              <div className="mono mb-1.5 text-[9px] uppercase tracking-widest text-text-muted">
-                Motor pra TODOS os takes:
+              <div className="mono mb-2 text-[9px] font-bold uppercase tracking-[0.18em] text-text-muted">
+                Qual avatar usar
               </div>
-              <div className="flex gap-1.5">
+              <div className="grid grid-cols-3 gap-2">
                 {MOTORS.map((m) => {
                   const active = config.motor === m;
+                  const isFree = CREDIT_COST_PER_MIN[m] === 0;
+                  const palettes = {
+                    III: {
+                      active: 'border-lime/65 bg-gradient-to-br from-lime/22 via-lime/8 to-transparent text-lime shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_14px_-4px_rgba(190,242,100,0.45)]',
+                      idle: 'border-white/8 bg-gradient-to-br from-white/[0.03] to-transparent text-text-muted hover:border-lime/40 hover:text-lime hover:bg-lime/[0.06]',
+                    },
+                    IV: {
+                      active: 'border-amber-400/65 bg-gradient-to-br from-amber-400/22 via-amber-400/8 to-transparent text-amber-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_14px_-4px_rgba(251,191,36,0.45)]',
+                      idle: 'border-white/8 bg-gradient-to-br from-white/[0.03] to-transparent text-text-muted hover:border-amber-400/40 hover:text-amber-700 hover:bg-amber-400/[0.06]',
+                    },
+                    V: {
+                      active: 'border-fuchsia-400/65 bg-gradient-to-br from-fuchsia-400/22 via-fuchsia-400/8 to-transparent text-fuchsia-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_4px_14px_-4px_rgba(217,70,239,0.45)]',
+                      idle: 'border-white/8 bg-gradient-to-br from-white/[0.03] to-transparent text-text-muted hover:border-fuchsia-400/40 hover:text-fuchsia-200 hover:bg-fuchsia-400/[0.06]',
+                    },
+                  };
+                  const palette = palettes[m as 'III' | 'IV' | 'V'];
                   return (
                     <button
                       key={m}
                       type="button"
                       onClick={() => setConfig({ kind: 'global', motor: m })}
                       className={
-                        'mono flex-1 rounded border px-3 py-2 text-[11px] uppercase tracking-widest transition ' +
-                        (active
-                          ? m === 'III'
-                            ? 'border-lime/60 bg-lime/20 text-lime'
-                            : m === 'IV'
-                            ? 'border-yellow-500/60 bg-yellow-500/20 text-yellow-200'
-                            : 'border-fuchsia-500/60 bg-fuchsia-500/20 text-fuchsia-200'
-                          : 'border-line-strong bg-bg/40 text-text-muted hover:border-cyan-500/40')
+                        'group relative rounded-[12px] border px-3 py-3 transition-all duration-200 will-change-transform hover:-translate-y-0.5 hover:scale-[1.02] active:translate-y-0 active:scale-[0.98] ' +
+                        (active ? palette.active : palette.idle)
                       }
-                      title={CREDIT_COST_PER_MIN[m] === 0 ? 'Gratuito (unlimited_regular)' : `Avatar ${m}: ${CREDIT_COST_PER_MIN[m]} créditos por minuto`}
+                      title={isFree ? `Avatar ${m} — gratuito` : `Avatar ${m} — ${CREDIT_COST_PER_MIN[m]} créditos/min`}
                     >
-                      Avatar {m}
-                      <div className="mono text-[8px] opacity-70 mt-0.5">
-                        {CREDIT_COST_PER_MIN[m] === 0 ? 'free' : `${CREDIT_COST_PER_MIN[m]}c/min`}
+                      {active ? (
+                        <span className="absolute -top-1 -right-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-current shadow-[0_2px_6px_rgba(0,0,0,0.3)]">
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#000" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="m5 13 4 4L19 7" />
+                          </svg>
+                        </span>
+                      ) : null}
+                      <div className="text-[15px] font-extrabold tabular-nums leading-none" style={{ fontFamily: 'var(--font-tech)' }}>
+                        {m}
+                      </div>
+                      <div className="mono mt-1 text-[9px] font-bold uppercase tracking-[0.14em] opacity-80">
+                        {isFree ? 'Grátis' : `${CREDIT_COST_PER_MIN[m]}c / min`}
                       </div>
                     </button>
                   );
@@ -224,12 +244,12 @@ export function MotorConfigPicker({
           ) : null}
 
           {config.kind === 'individual' ? (
-            <div>
-              <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">
-                Modo INDIVIDUAL — escolha o motor em cada slot abaixo (na propria task).
+            <div className="rounded-[12px] border border-amber-400/45 bg-gradient-to-br from-amber-400/12 to-transparent p-3">
+              <div className="mono text-[10px] font-bold uppercase tracking-[0.16em] text-amber-700">
+                Por avatar
               </div>
-              <div className="rounded border border-yellow-500/30 bg-yellow-500/5 px-2 py-1 text-[10px] text-yellow-200">
-                ⚠ Defina o motor em cada avatar listado. Default = III (gratuito).
+              <div className="mt-1 text-[11.5px] text-foreground/85" style={{ fontFamily: 'var(--font-tech)' }}>
+                Escolha o motor de cada avatar embaixo, no card dele. Padrão = III.
               </div>
             </div>
           ) : null}

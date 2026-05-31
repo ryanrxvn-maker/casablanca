@@ -347,8 +347,8 @@ export function HeyGenAvatarPicker({
                     className="absolute inset-0 h-full w-full object-cover"
                     eager
                   />
-                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-1.5">
-                    <div className="truncate text-[11px] font-semibold text-white">{l.name}</div>
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/65 to-transparent p-1.5">
+                    <div className="truncate text-[11px] font-semibold text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>{l.name}</div>
                   </div>
                   {isSelected ? (
                     <div className="absolute right-1 top-1 rounded bg-lime px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-black">
@@ -388,15 +388,15 @@ export function HeyGenAvatarPicker({
                   fallbacks={fallbacks}
                   alt={g.name}
                   className="absolute inset-0 h-full w-full object-cover"
-                  eager={i < 12}
+                  eager={i < 6}
                   onAllFailed={reportThumbFailed}
                 />
                 {/* Overlay dark */}
-                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/40 to-transparent p-2">
-                  <div className="truncate text-[12px] font-semibold text-white">
+                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/65 to-transparent p-2">
+                  <div className="truncate text-[12px] font-semibold text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>
                     {g.name}
                   </div>
-                  <div className="mono text-[9px] uppercase text-text-muted">
+                  <div className="mono text-[9px] uppercase text-white/75" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
                     {g.looksCount} look{g.looksCount > 1 ? 's' : ''}
                   </div>
                 </div>
@@ -475,8 +475,8 @@ export function HeyGenAvatarPicker({
                       className="absolute inset-0 h-full w-full object-cover"
                       eager
                     />
-                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-2">
-                      <div className="truncate text-[12px] font-semibold text-white">
+                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/65 to-transparent p-2">
+                      <div className="truncate text-[12px] font-semibold text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>
                         {l.name}
                       </div>
                     </div>

@@ -6089,44 +6089,17 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                         ? `https://drive.google.com/thumbnail?id=${slot.briefingFileId}&sz=w200`
                                         : null;
                                       return (
-                                        <div key={sIdx} className="rounded-[10px] border border-line-strong bg-bg/50 p-2">
-                                          <div className="mono flex flex-wrap items-center gap-2 text-[9px] uppercase tracking-widest">
-                                            <span className="rounded-full bg-lime/15 px-2 py-0.5 text-lime">{slot.role}</span>
-                                            <span className="text-text-muted">briefing: @{slot.username}</span>
+                                        <div key={sIdx} className="rounded-[12px] border border-white/8 bg-gradient-to-br from-white/[0.04] via-white/[0.015] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_2px_8px_-4px_rgba(0,0,0,0.3)]">
+                                          <div className="mono flex flex-wrap items-center gap-2 text-[10px]">
+                                            <span className="rounded-full bg-lime/18 border border-lime/40 px-2 py-[3px] text-lime uppercase tracking-widest font-bold">{slot.role}</span>
+                                            <span className="text-white/70">@{slot.username}</span>
                                             <span className="text-text-muted">· {partsCount} parte{partsCount === 1 ? '' : 's'}</span>
-                                            {slot.matchedBy ? (
-                                              (() => {
-                                                // Visual match: extrai confianca pra colorir o pill
-                                                const isVisual = slot.matchedBy.startsWith('visual');
-                                                const conf = isVisual ? (slot.matchedBy.match(/\((alta|media|baixa)\)/i)?.[1]?.toLowerCase() || '') : '';
-                                                const baseColor = slot.matchedBy === 'manual'
-                                                  ? 'text-lime'
-                                                  : isVisual ? 'text-cyan-300' : 'text-fuchsia-300';
-                                                const confPill = conf === 'alta'
-                                                  ? 'border-lime/60 bg-lime/15 text-lime'
-                                                  : conf === 'media'
-                                                  ? 'border-yellow-500/60 bg-yellow-500/15 text-yellow-200'
-                                                  : conf === 'baixa'
-                                                  ? 'border-red-500/60 bg-red-500/15 text-red-300'
-                                                  : '';
-                                                const label = isVisual ? 'matched: visual' : `matched: ${slot.matchedBy}`;
-                                                return (
-                                                  <span className={`flex items-center gap-1 ${baseColor}`}>
-                                                    <span>· {label}</span>
-                                                    {conf ? (
-                                                      <span
-                                                        className={`rounded-full border px-1.5 py-0 ${confPill}`}
-                                                        title={conf === 'alta' ? 'Alta confianca — match visual confiavel' : conf === 'media' ? 'Media confianca — confira manualmente' : 'Baixa confianca — provavelmente errado, troque manualmente'}
-                                                      >
-                                                        {conf === 'alta' ? '✓ alta' : conf === 'media' ? '⚠ media' : '✗ baixa'}
-                                                      </span>
-                                                    ) : null}
-                                                  </span>
-                                                );
-                                              })()
-                                            ) : (
-                                              <span className="text-red-300">· PENDENTE — escolha o avatar abaixo</span>
-                                            )}
+                                            {!slot.matchedBy ? (
+                                              <span className="ml-1 inline-flex items-center gap-1 rounded-full border border-red-400/50 bg-red-500/15 px-2 py-[2px] text-[9px] font-bold uppercase tracking-widest text-red-300">
+                                                <span className="h-1.5 w-1.5 rounded-full bg-red-400 animate-pulse" />
+                                                Pendente
+                                              </span>
+                                            ) : null}
                                             {/* BOTAO 3D: preview da copy que vai pro HeyGen deste avatar.
                                               * Icone-only — abre/fecha painel com textarea editavel das parts
                                               * onde matchByRole === slot.role.toLowerCase(). Permite confirmar
@@ -6200,49 +6173,66 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                               </div>
                                             </div>
                                           ) : null}
-                                          {/* Preview avatar SEMPRE visivel (thumb se Drive ID detectado, placeholder caso contrario) */}
-                                          <div className="mt-2 flex items-center gap-3 rounded-[8px] border border-blue-500/30 bg-blue-500/5 p-2">
-                                            {briefingThumbUrl ? (
-                                              /* eslint-disable-next-line @next/next/no-img-element */
-                                              <img
-                                                src={briefingThumbUrl}
-                                                alt={slot.username}
-                                                className="h-16 w-16 shrink-0 rounded-full object-cover bg-bg/40"
-                                                referrerPolicy="no-referrer"
-                                              />
-                                            ) : (
-                                              <div className="h-16 w-16 shrink-0 rounded-full bg-blue-500/15 border border-blue-500/30 flex items-center justify-center text-blue-200 mono text-[8px] uppercase tracking-widest text-center px-1">
-                                                sem<br/>thumb
-                                              </div>
-                                            )}
+                                          {/* ═══ PREVIEW AVATAR (thumb maior + info clean) ═══ */}
+                                          <div className="mt-3 flex items-center gap-3 rounded-[14px] border border-white/8 bg-gradient-to-br from-white/[0.06] via-white/[0.02] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                                            <div className="relative shrink-0">
+                                              {briefingThumbUrl ? (
+                                                /* eslint-disable-next-line @next/next/no-img-element */
+                                                <img
+                                                  src={briefingThumbUrl}
+                                                  alt={slot.username}
+                                                  className="h-20 w-20 rounded-[12px] object-cover ring-2 ring-white/10 shadow-[0_4px_14px_rgba(0,0,0,0.35)]"
+                                                  referrerPolicy="no-referrer"
+                                                  loading="lazy"
+                                                  decoding="async"
+                                                />
+                                              ) : (
+                                                <div className="flex h-20 w-20 items-center justify-center rounded-[12px] border border-white/12 bg-white/[0.05] text-white/40">
+                                                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                                    <circle cx="12" cy="8" r="4" />
+                                                    <path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2" />
+                                                  </svg>
+                                                </div>
+                                              )}
+                                            </div>
                                             <div className="flex-1 min-w-0">
-                                              <div className="mono text-[9px] uppercase tracking-widest text-blue-200">
-                                                preview avatar
+                                              <div className="mono text-[9px] font-semibold uppercase tracking-[0.18em] text-cyan-300/85">
+                                                Briefing
                                               </div>
-                                              <div className="text-[11px] text-text-muted">@{slot.username}.mp4</div>
-                                              <div className="mt-1 flex flex-wrap gap-1">
-                                                {slot.briefingFileId ? (
-                                                  <a
-                                                    href={`https://drive.google.com/uc?export=download&id=${slot.briefingFileId}`}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    className="mono rounded border border-lime/40 bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime hover:bg-lime/20"
-                                                    title="Baixa o arquivo do Drive deixado pelo copywriter pra esse avatar"
-                                                  >
-                                                    ↓ Baixar
-                                                  </a>
-                                                ) : (
-                                                  <span className="mono rounded border border-text-muted/40 bg-bg/40 px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted" title="Sem link Drive detectado no doc — copywriter pode nao ter deixado">
-                                                    sem link drive
-                                                  </span>
-                                                )}
+                                              <div className="mt-0.5 text-[13px] font-semibold text-foreground truncate" style={{ fontFamily: 'var(--font-tech)' }}>
+                                                @{slot.username}.mp4
                                               </div>
+                                              {slot.briefingFileId ? (
+                                                <a
+                                                  href={`https://drive.google.com/uc?export=download&id=${slot.briefingFileId}`}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="mono mt-1.5 inline-flex items-center gap-1 rounded-md border border-lime/45 bg-lime/12 px-2 py-1 text-[9.5px] font-bold uppercase tracking-widest text-lime hover:bg-lime/22 hover:border-lime/65 transition"
+                                                  title="Baixar arquivo do copywriter no Drive"
+                                                >
+                                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                    <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
+                                                  </svg>
+                                                  Baixar
+                                                </a>
+                                              ) : (
+                                                <span className="mono mt-1.5 inline-flex items-center gap-1 rounded-md border border-white/12 bg-white/[0.04] px-2 py-1 text-[9.5px] uppercase tracking-widest text-text-muted">
+                                                  sem link
+                                                </span>
+                                              )}
                                             </div>
                                           </div>
-                                          <div className="mt-2 grid gap-2">
-                                            <div className="grid gap-0.5">
-                                              <div className="mono text-[9px] uppercase tracking-widest text-text-muted">avatar HeyGen escolhido</div>
-                                              <div className="max-w-[400px]">
+                                          {/* ═══ SELETORES (Avatar + Voz) — grid limpo ═══ */}
+                                          <div className="mt-2.5 grid gap-2">
+                                            <div>
+                                              <div className="mono mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
+                                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                  <circle cx="12" cy="8" r="4" />
+                                                  <path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2" />
+                                                </svg>
+                                                Avatar HeyGen
+                                              </div>
+                                              <div className="max-w-[420px]">
                                                 <CompactAvatarPicker
                                                   selected={selected}
                                                   setSelected={(newAv) => updateRoleSlot(a.taskId, sIdx, {
@@ -6258,14 +6248,20 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                               </div>
                                             </div>
                                             {slot.avatarId ? (
-                                              <div className="grid gap-0.5">
-                                                <div className="mono text-[9px] uppercase tracking-widest text-text-muted flex items-center gap-2">
-                                                  <span>voz</span>
-                                                  <span className={slot.voiceOverride ? 'text-lime' : noVoice ? 'text-red-300' : 'text-text-muted'}>
-                                                    · {effectiveVoiceLabel}
+                                              <div>
+                                                <div className="mono mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
+                                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                                                    <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4" />
+                                                  </svg>
+                                                  Voz
+                                                  <span className={`ml-auto normal-case tracking-normal ${slot.voiceOverride ? 'text-lime' : noVoice ? 'text-red-300' : 'text-text-muted/70'}`}>
+                                                    {effectiveVoiceLabel}
                                                   </span>
                                                   {noVoice && !slot.voiceOverride ? (
-                                                    <span className="text-red-300">⚠ avatar sem voz padrao — escolha uma voz custom</span>
+                                                    <span className="rounded-full border border-red-400/50 bg-red-500/15 px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-widest text-red-300">
+                                                      ⚠ escolha
+                                                    </span>
                                                   ) : null}
                                                 </div>
                                                 <CompactVoiceSelector
@@ -6278,15 +6274,9 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                         </div>
                                       );
                                     })}
-                                    {/* SEMPRE permite adicionar avatar manual — quando parser
-                                     *  falha OU quando user quer adicionar mais um speaker */}
-                                    <button
-                                      type="button"
-                                      onClick={() => addManualRoleSlot(a.taskId)}
-                                      className="mono rounded-[10px] border border-dashed border-line-strong bg-bg/30 py-2 px-3 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime/40 hover:bg-lime/5 hover:text-lime transition"
-                                    >
-                                      + adicionar avatar manualmente
-                                    </button>
+                                    {/* Botao "adicionar avatar manualmente" REMOVIDO — user pediu:
+                                     *  "ELE NUNCA VAI BATER COM TEXTO NENHUM" (avatares manuais nao
+                                     *  tem briefing pra parsear matchByRole, ficavam orfaos). */}
                                   </div>
                                   )}
                                 </div>
