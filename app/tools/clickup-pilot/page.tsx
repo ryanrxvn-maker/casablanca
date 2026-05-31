@@ -2632,11 +2632,17 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       return;
     }
     setError(null);
-    // Dispara TODAS pela gate; semafaro global limita a MAX_HEYGEN_PARALLEL.
-    // Tasks alem do limite ficam phase='queued' visivel ate o promoter pegar.
+
+    // SEPARA: VA usa pipeline proprio (lipsync), normais usam HeyGen Auto.
+    // User pediu: "VA NAO DEVE RODAR PIPELINE SEPARADO, DEVE IR PRA MESMA
+    // FILA E DISPARAR NO START TAMBEM". Resolvido: START agora dispara AMBOS.
+    const vaTasks = ready.filter((id) => !!taskAnalyses[id]?.vaBriefing);
+    const normalTasks = ready.filter((id) => !taskAnalyses[id]?.vaBriefing);
+
+    // 1. Normais via HeyGen Auto gated
     setBatchStates((prev) => {
       const next = { ...prev };
-      for (const id of ready) {
+      for (const id of normalTasks) {
         const a = taskAnalyses[id];
         if (!a) continue;
         const baseAdId = a.baseAdId || a.taskName;
@@ -2649,8 +2655,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       }
       return next;
     });
-    for (const taskId of ready) {
+    for (const taskId of normalTasks) {
       void runHeyGenGated(taskId, 'run');
+    }
+
+    // 2. VA: pipeline proprio em paralelo (Demucs + split + N lipsyncs por avatar)
+    //    Cada um roda seu setVaPipelineState — UI ja renderiza progress.
+    for (const taskId of vaTasks) {
+      void runVAPipelineForTask(taskId);
     }
   }
 
@@ -3751,6 +3763,13 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   function dispatchTaskToHeyGen(taskId: string) {
     const a = taskAnalyses[taskId];
     if (!a) return;
+    // ROUTER VA — se task eh VA briefing, roteia pro pipeline correto
+    // automaticamente. User pediu: "VA NAO DEVE RODAR PIPELINE SEPARADO,
+    // DEVE IR PRA MESMA FILA E DISPARAR NO START TAMBEM".
+    if (a.vaBriefing) {
+      void runVAPipelineForTask(taskId);
+      return;
+    }
     const plan = buildPlan(a);
     if (!plan || plan.parts.some((p: any) => !p.avatarId)) {
       setError(`Tem avatar sem selecionar. Click no slot e escolhe.`);

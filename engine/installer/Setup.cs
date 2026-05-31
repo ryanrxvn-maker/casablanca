@@ -579,6 +579,28 @@ namespace AutoEdit
                     _statusLbl.Text = _lastBaseStatus + suffix;
             }
 
+            // WATCHDOG: detecta PowerShell que crashou sem completar.
+            // User reportou "modal trava em Preparando 2% pra sempre".
+            // Causa raiz: PS pode falhar silencioso (EDR/AV bloqueia, ps1
+            // throw cedo, exec policy). Sem watchdog, status file fica em
+            // "2|Preparando" eterno e modal nunca mostra erro.
+            if (!_finished && _psProc != null && _psProc.HasExited)
+            {
+                int code = -1;
+                try { code = _psProc.ExitCode; } catch { }
+                _finished = true;
+                _tmr.Stop();
+                Label pct2 = (Label)Controls["progressPct"];
+                if (pct2 != null) { pct2.Text = "Erro"; pct2.ForeColor = Theme.Danger; }
+                _statusLbl.Text = "Instalação interrompida";
+                _statusLbl.ForeColor = Theme.Danger;
+                _hintLbl.Text = "PowerShell encerrou inesperadamente (exit code " + code +
+                    "). Possíveis causas: antivirus bloqueando, ExecutionPolicy restrita, " +
+                    "ou Instalar.ps1 com erro. Tente rodar como administrador.";
+                _btnFinalize.Visible = true;
+                return;
+            }
+
             string line = null;
             try
             {
