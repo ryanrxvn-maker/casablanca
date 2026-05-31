@@ -73,7 +73,7 @@ export default function OpengraphImage() {
               display: 'flex',
               height: 10,
               width: 130,
-              background: '#c8ff00',
+              background: '#c2cf86',
               borderRadius: 5,
             }}
           />

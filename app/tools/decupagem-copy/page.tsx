@@ -446,7 +446,7 @@ function DecupagemCopyInner() {
               {processing ? (
                 <span className="relative flex h-2 w-2 shrink-0">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,232,124,0.9)]" />
                 </span>
               ) : null}
               <span className="mono uppercase tracking-widest">{stage}</span>
@@ -468,7 +468,7 @@ function DecupagemCopyInner() {
               <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-widest text-lime">
                 <span className="relative flex h-2 w-2">
                   <span className="absolute inline-flex h-full w-full animate-pulse-soft rounded-full bg-lime opacity-60" />
-                  <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_10px_rgba(200,255,0,0.9)]" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_10px_rgba(200,232,124,0.9)]" />
                 </span>
                 Decupagem pronta · {cuts.length} cortes na ordem da copy
               </h3>
@@ -480,7 +480,7 @@ function DecupagemCopyInner() {
             <video
               src={resultUrl}
               controls
-              className="w-full rounded-[12px] border border-lime/30 bg-bg shadow-[0_0_28px_-12px_rgba(200,255,0,0.4)]"
+              className="w-full rounded-[12px] border border-lime/30 bg-bg shadow-[0_0_28px_-12px_rgba(200,232,124,0.4)]"
             />
 
             <div className="mt-4">

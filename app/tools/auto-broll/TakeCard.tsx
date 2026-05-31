@@ -277,7 +277,7 @@ export function TakeCard({ take, position, total }: Props) {
                 className="absolute h-24 w-24 rounded-full"
                 style={{
                   background:
-                    'radial-gradient(circle, rgba(167,139,250,0.45), rgba(200,255,0,0.10) 50%, transparent 75%)',
+                    'radial-gradient(circle, rgba(167,139,250,0.45), rgba(200,232,124,0.10) 50%, transparent 75%)',
                   filter: 'blur(14px)',
                   animation: 'bunnyAuraSoft 3s ease-in-out infinite',
                 }}
@@ -408,7 +408,7 @@ function ExpandedVideoModal({
             type="button"
             onClick={onDownload}
             disabled={downloading}
-            className="mono inline-flex items-center gap-2 rounded-full border border-lime/60 bg-lime/95 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-black shadow-[0_8px_24px_-8px_rgba(200,255,0,0.5)] transition-all hover:scale-105 disabled:opacity-60"
+            className="mono inline-flex items-center gap-2 rounded-full border border-lime/60 bg-lime/95 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-black shadow-[0_8px_24px_-8px_rgba(200,232,124,0.5)] transition-all hover:scale-105 disabled:opacity-60"
             style={{ fontFamily: 'var(--font-tech)' }}
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">

@@ -25,7 +25,7 @@ export function Toggle3DIcon({
   variant?: 'lime' | 'cyan' | 'fuchsia';
 }) {
   const c = {
-    lime: { bg: 'bg-lime', text: 'text-lime', ring: 'rgba(200,255,0,0.7)', glow: '0 0 12px rgba(200,255,0,0.55)' },
+    lime: { bg: 'bg-lime', text: 'text-lime', ring: 'rgba(200,232,124,0.7)', glow: '0 0 12px rgba(200,232,124,0.55)' },
     cyan: { bg: 'bg-cyan-400', text: 'text-cyan-300', ring: 'rgba(34,211,238,0.7)', glow: '0 0 12px rgba(34,211,238,0.55)' },
     fuchsia: { bg: 'bg-fuchsia-400', text: 'text-fuchsia-300', ring: 'rgba(232,121,249,0.7)', glow: '0 0 12px rgba(232,121,249,0.55)' },
   }[variant];

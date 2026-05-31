@@ -136,7 +136,7 @@ export function SpaceMockup() {
         <Thumb hue="rgba(167,139,250,0.5)" />
         <Thumb hue="rgba(103,232,249,0.5)" />
         <Thumb hue="rgba(244,114,182,0.5)" />
-        <Thumb hue="rgba(200,255,0,0.5)" />
+        <Thumb hue="rgba(200,232,124,0.5)" />
         <Thumb hue="rgba(167,139,250,0.5)" />
         <span
           className="ml-auto text-[8.5px] font-bold uppercase tracking-[0.18em] text-text-muted"

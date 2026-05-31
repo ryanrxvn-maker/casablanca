@@ -578,7 +578,7 @@ export function ToolResultCard({
   title,
   meta,
   children,
-  hue = 'rgba(200,255,0,0.5)',
+  hue = 'rgba(200,232,124,0.5)',
 }: {
   title: string;
   meta?: string;
@@ -591,7 +591,7 @@ export function ToolResultCard({
       style={{
         background:
           'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
-        borderColor: 'rgba(200,255,0,0.32)',
+        borderColor: 'rgba(200,232,124,0.32)',
       }}
     >
       <div
@@ -640,7 +640,7 @@ export function ToolMetric({
   accent?: 'violet' | 'lime' | 'rose';
 }) {
   const color =
-    accent === 'lime' ? '#c8ff00' : accent === 'rose' ? '#f472b6' : '#c084fc';
+    accent === 'lime' ? '#c2cf86' : accent === 'rose' ? '#f472b6' : '#c084fc';
   return (
     <div className="rounded-[14px] border border-line bg-bg-soft/50 px-4 py-3.5">
       <div

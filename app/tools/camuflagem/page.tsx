@@ -447,7 +447,7 @@ export default function CamuflagemPage() {
                     <video
                       src={pair.resultUrl}
                       controls
-                      className="w-full rounded-[12px] border border-lime/30 bg-black shadow-[0_0_28px_-12px_rgba(200,255,0,0.4)]"
+                      className="w-full rounded-[12px] border border-lime/30 bg-black shadow-[0_0_28px_-12px_rgba(200,232,124,0.4)]"
                     />
                   ) : (
                     <AudioPlayer src={pair.resultUrl} label="Resultado camuflado" />
@@ -476,7 +476,7 @@ export default function CamuflagemPage() {
                           className={
                             'rounded-[10px] border px-3 py-2 text-xs ' +
                             (ok
-                              ? 'border-lime/50 bg-lime/10 text-lime shadow-[0_0_22px_-8px_rgba(200,255,0,0.6)]'
+                              ? 'border-lime/50 bg-lime/10 text-lime shadow-[0_0_22px_-8px_rgba(200,232,124,0.6)]'
                               : 'error-shake border-red-500/50 bg-red-500/10 text-red-300 shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)]')
                           }
                         >

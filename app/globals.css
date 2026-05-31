@@ -26,7 +26,7 @@
   --text-dim: 77 77 87;
   /* Acentos um pouco DESSATURADOS — site menos colorido/mais calmo, sem
      perder a identidade (só baixa a intensidade). */
-  --lime: 198 240 70;
+  --lime: 200 214 132;
   --violet: 162 145 224;
   --violet-deep: 110 88 206;
   --amber: 235 200 96;
@@ -38,11 +38,12 @@
   --card-face: linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)));
   --card-deep: #0a0a0c;
   /* Banners do hub (theme-aware) — no claro ficam neutros (menos cor). */
-  --banner-bg: linear-gradient(120deg, rgba(200,255,0,0.16) 0%, rgba(167,139,250,0.18) 50%, rgba(34,211,238,0.12) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep));
-  --banner-bg-2: linear-gradient(120deg, rgba(167,139,250,0.20) 0%, rgba(240,171,252,0.16) 50%, rgba(200,255,0,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep));
-  /* Gradiente do título do hero + botão lime (theme-aware). */
-  --hero-grad: linear-gradient(135deg, #c8ff00 0%, #a78bfa 100%);
-  --cta-lime: linear-gradient(135deg, #c8ff00 0%, #a3e635 100%);
+  /* Verde BEM reduzido — o lime quase some dos banners (vira violet/cyan). */
+  --banner-bg: linear-gradient(120deg, rgba(200,255,0,0.035) 0%, rgba(167,139,250,0.16) 50%, rgba(34,211,238,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep));
+  --banner-bg-2: linear-gradient(120deg, rgba(167,139,250,0.18) 0%, rgba(240,171,252,0.14) 50%, rgba(200,255,0,0.025) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep));
+  /* Título do hero + botão: lime MUITO mais suave (menos verde neon). */
+  --hero-grad: linear-gradient(135deg, #bcc98c 0%, #a78bfa 100%);
+  --cta-lime: linear-gradient(135deg, #c6d48a 0%, #b1be74 100%);
 
   /* Mouse-tracked spotlight (atualizado por components/MouseGlow.tsx). */
   --mx: 50vw;
@@ -820,7 +821,7 @@ input[type='range']::-moz-range-thumb {
   height: 300px;
   top: 50%;
   left: 60%;
-  background: radial-gradient(circle, rgba(200, 255, 0, 0.07), transparent 65%);
+  background: radial-gradient(circle, rgba(200, 240, 120, 0.02), transparent 65%);
   animation: orb-float-c 36s ease-in-out infinite;
 }
 
@@ -1194,7 +1195,7 @@ html[data-theme='light'] .dark-island {
   --text-dim: 77 77 87;
   /* Acentos um pouco DESSATURADOS — site menos colorido/mais calmo, sem
      perder a identidade (só baixa a intensidade). */
-  --lime: 198 240 70;
+  --lime: 200 214 132;
   --violet: 162 145 224;
   --violet-deep: 110 88 206;
   --amber: 235 200 96;

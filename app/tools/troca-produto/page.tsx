@@ -421,7 +421,7 @@ function TrocaProdutoInner() {
             <div className="flex items-center gap-3">
               <span className="relative flex h-3 w-3">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
-                <span className="relative inline-flex h-3 w-3 rounded-full bg-lime shadow-[0_0_12px_rgba(200,255,0,0.9)]" />
+                <span className="relative inline-flex h-3 w-3 rounded-full bg-lime shadow-[0_0_12px_rgba(200,232,124,0.9)]" />
               </span>
               <span className="text-sm font-medium uppercase tracking-widest text-lime">
                 {stage === 'transcribing'
@@ -560,11 +560,11 @@ function TrocaProdutoInner() {
         )}
 
         {resultUrl && (
-          <section className="fade-in-up rounded-xl border border-lime/40 bg-bg-soft/40 p-4 shadow-[0_0_28px_-12px_rgba(200,255,0,0.5)]">
+          <section className="fade-in-up rounded-xl border border-lime/40 bg-bg-soft/40 p-4 shadow-[0_0_28px_-12px_rgba(200,232,124,0.5)]">
             <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-lime">
               <span className="relative flex h-2 w-2">
                 <span className="absolute inline-flex h-full w-full animate-pulse-soft rounded-full bg-lime opacity-60" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_10px_rgba(200,255,0,0.9)]" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_10px_rgba(200,232,124,0.9)]" />
               </span>
               Resultado pronto
             </h2>

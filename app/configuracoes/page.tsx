@@ -231,7 +231,7 @@ export default function ConfiguracoesPage() {
                     position: absolute;
                     inset: 0;
                     border-radius: 20px;
-                    background: conic-gradient(from var(--a, 0deg), rgba(168,85,247,0.9), rgba(103,232,249,0.6), rgba(200,255,0,0.6), rgba(168,85,247,0.9));
+                    background: conic-gradient(from var(--a, 0deg), rgba(168,85,247,0.9), rgba(103,232,249,0.6), rgba(200,232,124,0.6), rgba(168,85,247,0.9));
                     animation: brain-btn-spin 5s linear infinite;
                   }
                   .brain-btn {

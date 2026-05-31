@@ -140,9 +140,9 @@ const config: Config = {
         'radial-violet':
           'radial-gradient(60% 50% at 50% 0%, rgba(167,139,250,0.10) 0%, rgba(167,139,250,0) 70%)',
         'radial-lime':
-          'radial-gradient(60% 50% at 50% 0%, rgba(200,255,0,0.06) 0%, rgba(200,255,0,0) 70%)',
+          'radial-gradient(60% 50% at 50% 0%, rgba(200,255,0,0.02) 0%, rgba(200,255,0,0) 70%)',
         'mesh':
-          'radial-gradient(40% 30% at 12% 0%, rgba(167,139,250,0.08), transparent 70%),radial-gradient(35% 28% at 88% 12%, rgba(103,232,249,0.05), transparent 70%),radial-gradient(50% 40% at 50% 100%, rgba(200,255,0,0.04), transparent 70%)',
+          'radial-gradient(40% 30% at 12% 0%, rgba(167,139,250,0.07), transparent 70%),radial-gradient(35% 28% at 88% 12%, rgba(103,232,249,0.045), transparent 70%),radial-gradient(50% 40% at 50% 100%, rgba(200,255,0,0.012), transparent 70%)',
       },
       backgroundSize: {
         'grid-fine': '52px 52px',
@@ -155,7 +155,7 @@ const config: Config = {
         'depth-3':
           '0 1px 0 rgba(255,255,255,0.08) inset, 0 44px 88px -32px rgba(0,0,0,0.95), 0 18px 36px rgba(0,0,0,0.55)',
         'lime-glow':
-          '0 0 0 1px rgba(200,255,0,0.32), 0 0 36px -4px rgba(200,255,0,0.4)',
+          '0 0 0 1px rgba(200,255,0,0.16), 0 0 30px -6px rgba(200,255,0,0.2)',
         'violet-glow':
           '0 0 0 1px rgba(167,139,250,0.32), 0 0 36px -4px rgba(167,139,250,0.4)',
       },

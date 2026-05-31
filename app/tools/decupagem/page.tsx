@@ -479,7 +479,7 @@ export default function DecupagemPage() {
                         src={r.url}
                         controls
                         preload="metadata"
-                        className="w-full rounded-[14px] border border-lime/30 bg-bg shadow-[0_0_28px_-12px_rgba(200,255,0,0.4)]"
+                        className="w-full rounded-[14px] border border-lime/30 bg-bg shadow-[0_0_28px_-12px_rgba(200,232,124,0.4)]"
                       />
                     ) : (
                       <AudioPlayer src={r.url} label="Preview" />

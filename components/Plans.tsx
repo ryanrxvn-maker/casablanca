@@ -48,7 +48,7 @@ const ALL_TOOLS: Tool[] = [
     label: 'ClickUp Pilot',
     featured: 'pilot',
     featuredHint: 'Mapeia as tasks e dispara o lipsync de todas',
-    featuredHue: 'rgba(200,255,0,0.55)',
+    featuredHue: 'rgba(200,232,124,0.55)',
   },
   {
     key: 'heygen-auto',
@@ -318,11 +318,11 @@ function BillingToggle({
             width: 'calc(50% - 6px)',
             background:
               annual
-                ? 'linear-gradient(135deg, rgba(200,255,0,0.85) 0%, rgba(94,234,212,0.55) 100%)'
+                ? 'linear-gradient(135deg, rgba(200,232,124,0.85) 0%, rgba(94,234,212,0.55) 100%)'
                 : 'linear-gradient(135deg, rgba(167,139,250,0.65) 0%, rgba(192,132,252,0.45) 100%)',
             boxShadow:
               annual
-                ? '0 0 24px -4px rgba(200,255,0,0.75), inset 0 1px 0 rgba(255,255,255,0.35)'
+                ? '0 0 24px -4px rgba(200,232,124,0.75), inset 0 1px 0 rgba(255,255,255,0.35)'
                 : '0 0 22px -4px rgba(167,139,250,0.7), inset 0 1px 0 rgba(255,255,255,0.30)',
             transition: 'all 450ms cubic-bezier(0.34, 1.56, 0.64, 1)',
           }}
@@ -360,11 +360,11 @@ function BillingToggle({
         }
         style={{
           fontFamily: 'var(--font-tech)',
-          boxShadow: '0 0 18px -2px rgba(200,255,0,0.85)',
+          boxShadow: '0 0 18px -2px rgba(200,232,124,0.85)',
           transform: 'rotate(8deg)',
         }}
       >
-        <span className="inline-block h-1.5 w-1.5 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.95)]" />
+        <span className="inline-block h-1.5 w-1.5 rounded-full bg-lime shadow-[0_0_8px_rgba(200,232,124,0.95)]" />
         −{ANNUAL_DISCOUNT_PCT}%
       </span>
 
@@ -581,7 +581,7 @@ function PlanCard({
                   <div
                     className="inline-flex items-center gap-2 rounded-[10px] border border-lime/35 bg-lime/[0.06] px-3 py-1.5"
                     style={{
-                      boxShadow: '0 0 18px -6px rgba(200,255,0,0.45), inset 0 1px 0 rgba(255,255,255,0.05)',
+                      boxShadow: '0 0 18px -6px rgba(200,232,124,0.45), inset 0 1px 0 rgba(255,255,255,0.05)',
                     }}
                   >
                     <span
@@ -1324,7 +1324,7 @@ const TOOL_DETAILS: ToolInfo[] = [
     key: 'clickup-pilot',
     name: 'ClickUp Pilot',
     cat: 'Automação',
-    hue: 'rgba(200,255,0,0.55)',
+    hue: 'rgba(200,232,124,0.55)',
     desc: 'Conecta no seu ClickUp, lê os briefings e dispara os avatares sozinho.',
     win: 'Saia do escritório. O Pilot continua editando. Você só revisa.',
     featured: true,
@@ -1710,7 +1710,7 @@ function ToolInfoCard({ tool, delay }: { tool: ToolInfo; delay: number }) {
                   className="mb-3 inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.22em] text-lime"
                   style={{ fontFamily: 'var(--font-tech)' }}
                 >
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-lime shadow-[0_0_8px_rgba(200,232,124,0.9)]" />
                   Por que vale
                 </div>
                 <ul className="flex flex-col gap-2">
@@ -1728,7 +1728,7 @@ function ToolInfoCard({ tool, delay }: { tool: ToolInfo; delay: number }) {
                       >
                         <path
                           d="M2.5 6.5l2.5 2.5 5-5.5"
-                          stroke="#c8ff00"
+                          stroke="#c2cf86"
                           strokeWidth="2"
                           strokeLinecap="round"
                           strokeLinejoin="round"

@@ -366,8 +366,8 @@ function ClickUpPilotLocked({ tier }: { tier: 'free' | 'basic' | 'pro' | 'admin'
               href="/planos?upgrade=1"
               className="inline-flex items-center gap-2 rounded-full px-6 py-3 text-[13.5px] font-bold text-black"
               style={{
-                background: 'linear-gradient(135deg, #c8ff00 0%, #a3e635 100%)',
-                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.5), 0 14px 36px -8px rgba(200,255,0,0.55)',
+                background: 'linear-gradient(135deg, #c2cf86 0%, #aebd72 100%)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.5), 0 14px 36px -8px rgba(200,232,124,0.55)',
               }}
             >
               Ver planos
@@ -4445,7 +4445,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
         title="ClickUp Pilot"
         eyebrow="AUTOMAÇÃO · ORQUESTRADOR"
         description="O cérebro do estúdio. Conecta no ClickUp, lê cada task e dispara avatares, B-rolls, decupagem e camuflagem — tudo em fila, sem você abrir uma aba sequer."
-        hue="rgba(200,255,0,0.45)"
+        hue="rgba(200,232,124,0.45)"
         icon={<IconClickUpPilot size={56} />}
       >
           {/* Command Center — chip de status + métricas ao vivo */}
@@ -4456,7 +4456,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
               <div
                 className="cp-command-center mb-5 relative overflow-hidden rounded-[18px] border p-4 md:p-5"
                 style={{
-                  borderColor: setupOK ? 'rgba(200,255,0,0.35)' : 'rgba(232,121,249,0.35)',
+                  borderColor: setupOK ? 'rgba(200,232,124,0.35)' : 'rgba(232,121,249,0.35)',
                   background:
                     'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
                 }}
@@ -4465,7 +4465,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                   aria-hidden
                   className="pointer-events-none absolute -right-16 -top-16 h-44 w-44 rounded-full opacity-50 blur-3xl"
                   style={{
-                    background: setupOK ? 'rgba(200,255,0,0.45)' : 'rgba(232,121,249,0.45)',
+                    background: setupOK ? 'rgba(200,232,124,0.45)' : 'rgba(232,121,249,0.45)',
                   }}
                 />
                 <div
@@ -4486,7 +4486,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                       }
                       style={{
                         boxShadow: setupOK
-                          ? '0 0 22px -6px rgba(200,255,0,0.55), inset 0 1px 0 rgba(255,255,255,0.1)'
+                          ? '0 0 22px -6px rgba(200,232,124,0.55), inset 0 1px 0 rgba(255,255,255,0.1)'
                           : '0 0 22px -6px rgba(232,121,249,0.55), inset 0 1px 0 rgba(255,255,255,0.1)',
                       }}
                     >
@@ -4504,7 +4504,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                           }
                           style={{
                             boxShadow: setupOK
-                              ? '0 0 10px rgba(200,255,0,0.9)'
+                              ? '0 0 10px rgba(200,232,124,0.9)'
                               : '0 0 10px rgba(232,121,249,0.9)',
                           }}
                         />
@@ -4621,9 +4621,9 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                     style={{
                       fontFamily: 'var(--font-tech)',
                       background:
-                        'linear-gradient(135deg, #c8ff00 0%, #a3e635 100%)',
+                        'linear-gradient(135deg, #c2cf86 0%, #aebd72 100%)',
                       boxShadow:
-                        '0 0 28px -6px rgba(200,255,0,0.55), inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.2)',
+                        '0 0 28px -6px rgba(200,232,124,0.55), inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.2)',
                     }}
                   >
                     <span className="relative z-10 flex items-center gap-2">
@@ -4671,7 +4671,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                       </h2>
                       <span
                         className="mono rounded-full border border-lime/45 bg-lime/10 px-2.5 py-0.5 text-[11px] font-bold text-lime"
-                        style={{ boxShadow: '0 0 12px -4px rgba(200,255,0,0.45)' }}
+                        style={{ boxShadow: '0 0 12px -4px rgba(200,232,124,0.45)' }}
                       >
                         {tasks.length}
                       </span>
@@ -4691,7 +4691,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                     <div
                       aria-hidden
                       className="pointer-events-none absolute -left-12 -top-12 h-40 w-40 rounded-full opacity-40 blur-3xl"
-                      style={{ background: 'rgba(200,255,0,0.35)' }}
+                      style={{ background: 'rgba(200,232,124,0.35)' }}
                     />
                     <div className="relative">
                       <div className="mb-3 flex items-center gap-2">
@@ -4727,7 +4727,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                               }
                               style={
                                 active
-                                  ? { boxShadow: '0 0 22px -6px rgba(200,255,0,0.55)' }
+                                  ? { boxShadow: '0 0 22px -6px rgba(200,232,124,0.55)' }
                                   : undefined
                               }
                             >
@@ -4741,7 +4741,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                 <span
                                   aria-hidden
                                   className="absolute right-2 top-2 inline-block h-1.5 w-1.5 rounded-full bg-lime"
-                                  style={{ boxShadow: '0 0 8px rgba(200,255,0,0.9)' }}
+                                  style={{ boxShadow: '0 0 8px rgba(200,232,124,0.9)' }}
                                 />
                               ) : null}
                             </button>
@@ -4918,8 +4918,8 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                             className={
                               'group/task flex-1 rounded-[12px] border bg-gradient-to-br px-3.5 py-2.5 text-left transition-all duration-200 ' +
                               (isChecked
-                                ? 'border-lime/75 from-lime/15 via-lime/[0.06] to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_4px_22px_-8px_rgba(200,255,0,0.55)]'
-                                : 'border-white/8 from-white/[0.04] via-white/[0.015] to-transparent hover:border-lime/45 hover:-translate-y-[1px] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_8px_20px_-10px_rgba(200,255,0,0.35)]')
+                                ? 'border-lime/75 from-lime/15 via-lime/[0.06] to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_4px_22px_-8px_rgba(200,232,124,0.55)]'
+                                : 'border-white/8 from-white/[0.04] via-white/[0.015] to-transparent hover:border-lime/45 hover:-translate-y-[1px] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_8px_20px_-10px_rgba(200,232,124,0.35)]')
                             }
                           >
                             <div className="flex items-center justify-between gap-3">
@@ -4930,7 +4930,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   className={
                                     'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-all ' +
                                     (isChecked
-                                      ? 'border-lime bg-lime text-black shadow-[0_0_10px_rgba(200,255,0,0.6)]'
+                                      ? 'border-lime bg-lime text-black shadow-[0_0_10px_rgba(200,232,124,0.6)]'
                                       : 'border-white/25 bg-transparent text-transparent group-hover/task:border-lime/60')
                                   }
                                   aria-hidden
@@ -5060,13 +5060,13 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                    *  dispatch view com avatares). User trabalha em batch sempre. */}
                   {selectedTaskIds.size > 0 ? (
                     <div
-                      className="sticky bottom-4 z-30 mt-4 flex flex-wrap items-center gap-3 rounded-[14px] border border-lime/55 bg-gradient-to-br from-lime/15 via-lime/[0.06] to-transparent p-3.5 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_18px_42px_-12px_rgba(200,255,0,0.45)]"
+                      className="sticky bottom-4 z-30 mt-4 flex flex-wrap items-center gap-3 rounded-[14px] border border-lime/55 bg-gradient-to-br from-lime/15 via-lime/[0.06] to-transparent p-3.5 backdrop-blur-md shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_18px_42px_-12px_rgba(200,232,124,0.45)]"
                     >
                       <span
                         className="mono inline-flex items-center gap-2 text-[12px] font-bold tracking-tight text-foreground"
                         style={{ fontFamily: 'var(--font-tech)' }}
                       >
-                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-lime text-black shadow-[0_0_12px_rgba(200,255,0,0.7)]">
+                        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-lime text-black shadow-[0_0_12px_rgba(200,232,124,0.7)]">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                             <path d="m5 13 4 4L19 7" />
                           </svg>
@@ -5093,7 +5093,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                           type="button"
                           onClick={analyzeSelected}
                           disabled={analyzing}
-                          className="mono group relative inline-flex items-center gap-2 rounded-full border border-lime bg-lime px-5 py-2 text-[12px] font-extrabold uppercase tracking-[0.16em] text-black shadow-[0_6px_22px_-4px_rgba(200,255,0,0.65),inset_0_1px_0_rgba(255,255,255,0.4)] transition-all hover:scale-[1.03] hover:shadow-[0_10px_30px_-4px_rgba(200,255,0,0.85),inset_0_1px_0_rgba(255,255,255,0.55)] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                          className="mono group relative inline-flex items-center gap-2 rounded-full border border-lime bg-lime px-5 py-2 text-[12px] font-extrabold uppercase tracking-[0.16em] text-black shadow-[0_6px_22px_-4px_rgba(200,232,124,0.65),inset_0_1px_0_rgba(255,255,255,0.4)] transition-all hover:scale-[1.03] hover:shadow-[0_10px_30px_-4px_rgba(200,232,124,0.85),inset_0_1px_0_rgba(255,255,255,0.55)] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                           style={{ fontFamily: 'var(--font-tech)' }}
                         >
                           {analyzing ? (
@@ -6218,7 +6218,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                         const partialIds = selected.filter((id) => taskAnalyses[id]?.status === 'partial');
                         if (readyIds.length === 0 && partialIds.length === 0) return null;
                         return (
-                          <div className="sticky bottom-2 z-10 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-lime/40 bg-bg/95 p-3 shadow-[0_0_30px_-10px_rgba(200,255,0,0.4)] backdrop-blur">
+                          <div className="sticky bottom-2 z-10 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-lime/40 bg-bg/95 p-3 shadow-[0_0_30px_-10px_rgba(200,232,124,0.4)] backdrop-blur">
                             <span className="mono text-[11px] text-text-muted">
                               {readyIds.length > 0 ? (
                                 <span className="text-lime">✓ {readyIds.length} ready</span>

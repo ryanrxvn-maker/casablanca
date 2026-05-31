@@ -28,8 +28,8 @@ export function ToggleRound3D({
     lime: {
       border: 'border-lime',
       text: 'text-lime',
-      glow: 'shadow-[0_0_24px_-2px_rgba(200,255,0,0.7),0_0_50px_-12px_rgba(200,255,0,0.5)]',
-      hover: 'hover:shadow-[0_0_32px_0px_rgba(200,255,0,0.9),0_0_70px_-12px_rgba(200,255,0,0.6)]',
+      glow: 'shadow-[0_0_24px_-2px_rgba(200,232,124,0.7),0_0_50px_-12px_rgba(200,232,124,0.5)]',
+      hover: 'hover:shadow-[0_0_32px_0px_rgba(200,232,124,0.9),0_0_70px_-12px_rgba(200,232,124,0.6)]',
       bg: 'bg-lime/10',
     },
     cyan: {

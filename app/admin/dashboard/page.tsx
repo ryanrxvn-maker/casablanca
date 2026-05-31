@@ -63,7 +63,7 @@ const TIER_COLOR: Record<string, string> = {
   free: '#8b8b96',
   basic: '#f472b6',
   pro: '#c084fc',
-  admin: '#c8ff00',
+  admin: '#c2cf86',
 };
 
 const TOOL_LABEL: Record<string, string> = {
@@ -154,7 +154,7 @@ export default function DashboardPage() {
         <StatCard
           label="Online agora"
           value={data?.totals.online ?? '—'}
-          hue="rgba(200,255,0,0.6)"
+          hue="rgba(200,232,124,0.6)"
           live
         />
         <StatCard
@@ -457,7 +457,7 @@ function StatCard({
       />
       <div className="flex items-center gap-2 text-[10.5px] font-bold uppercase tracking-[0.16em] text-text-muted" style={{ fontFamily: 'var(--font-tech)' }}>
         {live ? (
-          <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.95)]" />
+          <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-lime shadow-[0_0_8px_rgba(200,232,124,0.95)]" />
         ) : null}
         {label}
       </div>
@@ -563,7 +563,7 @@ const ACCESS_META: Record<
   SearchUser['access'],
   { label: string; color: string; bg: string }
 > = {
-  paid: { label: 'PAGO', color: '#c8ff00', bg: 'rgba(200,255,0,0.12)' },
+  paid: { label: 'PAGO', color: '#c2cf86', bg: 'rgba(200,232,124,0.12)' },
   comp: { label: 'ADMIN', color: '#67e8f9', bg: 'rgba(103,232,249,0.12)' },
   anomaly: { label: '⚠ ANOMALIA', color: '#fca5a5', bg: 'rgba(244,63,94,0.15)' },
   free: { label: 'FREE', color: '#9c9ca6', bg: 'rgba(255,255,255,0.04)' },
@@ -856,7 +856,7 @@ function CodeRain() {
         const x = i * FONT;
         const y = drops[i] * FONT;
         const dist = Math.abs(x - mouseX.current);
-        if (dist < 90) ctx.fillStyle = 'rgba(200,255,0,0.9)';
+        if (dist < 90) ctx.fillStyle = 'rgba(200,232,124,0.9)';
         else if (dist < 180) ctx.fillStyle = 'rgba(103,232,249,0.7)';
         else ctx.fillStyle = 'rgba(167,139,250,0.22)';
         const g = GLYPHS[Math.floor(Math.random() * GLYPHS.length)];

@@ -232,7 +232,7 @@ function FloatIcon({
 }
 
 function AvatarStack() {
-  const seeds = ['#a78bfa', '#67e8f9', '#f0abfc', '#c8ff00', '#fbbf24'];
+  const seeds = ['#a78bfa', '#67e8f9', '#f0abfc', '#c2cf86', '#fbbf24'];
   return (
     <div className="flex -space-x-2">
       {seeds.map((c, i) => (
@@ -294,7 +294,7 @@ function PilotShowcase() {
         className="relative overflow-hidden rounded-[32px] border border-line/70 fade-in-up"
         style={{
           background:
-            'linear-gradient(120deg, rgba(200,255,0,0.18) 0%, rgba(167,139,250,0.22) 50%, rgba(34,211,238,0.14) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #08080a)',
+            'linear-gradient(120deg, rgba(200,232,124,0.18) 0%, rgba(167,139,250,0.22) 50%, rgba(34,211,238,0.14) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #08080a)',
         }}
       >
         {/* Pulsos animados — fundo ambient */}
@@ -303,7 +303,7 @@ function PilotShowcase() {
           className="pointer-events-none absolute inset-0"
           style={{
             background:
-              'radial-gradient(55% 90% at 0% 50%, rgba(200,255,0,0.32), transparent 58%)',
+              'radial-gradient(55% 90% at 0% 50%, rgba(200,232,124,0.32), transparent 58%)',
             animation: 'promo-pulse-a 6s ease-in-out infinite',
           }}
         />
@@ -368,7 +368,7 @@ function PilotShowcase() {
               className="block"
               style={{
                 background:
-                  'linear-gradient(135deg, #c8ff00 0%, #a78bfa 60%, #67e8f9 100%)',
+                  'linear-gradient(135deg, #c2cf86 0%, #a78bfa 60%, #67e8f9 100%)',
                 WebkitBackgroundClip: 'text',
                 WebkitTextFillColor: 'transparent',
               }}
@@ -393,9 +393,9 @@ function PilotShowcase() {
               className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full px-7 py-3.5 text-[14px] font-bold text-black"
               style={{
                 background:
-                  'linear-gradient(135deg, #c8ff00 0%, #a3e635 100%)',
+                  'linear-gradient(135deg, #c2cf86 0%, #aebd72 100%)',
                 boxShadow:
-                  'inset 0 1px 0 rgba(255,255,255,0.5), 0 14px 36px -8px rgba(200,255,0,0.6)',
+                  'inset 0 1px 0 rgba(255,255,255,0.5), 0 14px 36px -8px rgba(200,232,124,0.6)',
               }}
             >
               <span className="relative z-10">Ver o Pilot em ação</span>
@@ -440,7 +440,7 @@ function AutoBrollShowcase() {
         className="relative overflow-hidden rounded-[32px] border border-violet/35 fade-in-up"
         style={{
           background:
-            'linear-gradient(120deg, rgba(167,139,250,0.22) 0%, rgba(240,171,252,0.18) 50%, rgba(200,255,0,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #08080a)',
+            'linear-gradient(120deg, rgba(167,139,250,0.22) 0%, rgba(240,171,252,0.18) 50%, rgba(200,232,124,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #08080a)',
         }}
       >
         {/* Pulsos */}
@@ -458,7 +458,7 @@ function AutoBrollShowcase() {
           className="pointer-events-none absolute inset-0"
           style={{
             background:
-              'radial-gradient(55% 90% at 0% 50%, rgba(200,255,0,0.22), transparent 58%)',
+              'radial-gradient(55% 90% at 0% 50%, rgba(200,232,124,0.22), transparent 58%)',
             animation: 'promo-pulse-b 7.5s ease-in-out infinite',
           }}
         />
@@ -510,7 +510,7 @@ function AutoBrollShowcase() {
               className="block"
               style={{
                 background:
-                  'linear-gradient(135deg, #a78bfa 0%, #f0abfc 50%, #c8ff00 100%)',
+                  'linear-gradient(135deg, #a78bfa 0%, #f0abfc 50%, #c2cf86 100%)',
                 WebkitBackgroundClip: 'text',
                 WebkitTextFillColor: 'transparent',
               }}
@@ -575,12 +575,12 @@ function BrollShowcaseGrid() {
     'rendering',
   ];
   const scenePalettes = [
-    ['#c8ff00', '#a78bfa', 'var(--card-deep)'],  // 01 lime → violet
+    ['#c2cf86', '#a78bfa', 'var(--card-deep)'],  // 01 lime → violet
     ['#67e8f9', '#a78bfa', 'var(--card-deep)'],  // 02 cyan → violet
-    ['#f0abfc', '#c8ff00', 'var(--card-deep)'],  // 03 pink → lime
+    ['#f0abfc', '#c2cf86', 'var(--card-deep)'],  // 03 pink → lime
     ['#a78bfa', '#6d4ee8', 'var(--card-deep)'],  // 04 violet
     ['#fbbf24', '#a78bfa', 'var(--card-deep)'],  // 05 amber → violet
-    ['#a3e635', '#67e8f9', 'var(--card-deep)'],  // 06 lime → cyan
+    ['#aebd72', '#67e8f9', 'var(--card-deep)'],  // 06 lime → cyan
   ];
 
   return (
@@ -605,7 +605,7 @@ function BrollShowcaseGrid() {
               transform: tilt,
               transformStyle: 'preserve-3d',
               borderColor: isReady
-                ? 'rgba(200,255,0,0.55)'
+                ? 'rgba(200,232,124,0.55)'
                 : 'rgba(167,139,250,0.5)',
               background: `linear-gradient(135deg, ${c1}20 0%, ${c2}25 50%, ${c3} 100%)`,
               boxShadow: isReady
@@ -697,7 +697,7 @@ function BrollShowcaseGrid() {
             >
               <span
                 className="text-[8px] font-bold uppercase tracking-widest"
-                style={{ color: isReady ? '#c8ff00' : '#a78bfa' }}
+                style={{ color: isReady ? '#c2cf86' : '#a78bfa' }}
               >
                 TAKE
               </span>
@@ -817,8 +817,8 @@ function BrollShowcaseGrid() {
           style={{
             left: `${10 + (i * 23) % 80}%`,
             top: `${(i * 17) % 100}%`,
-            background: i % 2 ? '#c8ff00' : '#a78bfa',
-            boxShadow: `0 0 8px ${i % 2 ? '#c8ff00' : '#a78bfa'}cc`,
+            background: i % 2 ? '#c2cf86' : '#a78bfa',
+            boxShadow: `0 0 8px ${i % 2 ? '#c2cf86' : '#a78bfa'}cc`,
             animation: `floatParticle ${4 + (i % 3)}s ease-in-out ${i * 0.4}s infinite`,
             opacity: 0.6,
           }}
@@ -938,8 +938,8 @@ function PilotMockup() {
               className="h-full rounded-full"
               style={{
                 width: '66%',
-                background: 'linear-gradient(90deg, #c8ff00, #a78bfa, #67e8f9)',
-                boxShadow: '0 0 12px rgba(200,255,0,0.6)',
+                background: 'linear-gradient(90deg, #c2cf86, #a78bfa, #67e8f9)',
+                boxShadow: '0 0 12px rgba(200,232,124,0.6)',
                 animation: 'pilot-bar-glow 2.4s ease-in-out infinite',
               }}
             />
@@ -965,13 +965,13 @@ function PilotMockup() {
                   style={{
                     background:
                       t.state === 'done'
-                        ? '#c8ff00'
+                        ? '#c2cf86'
                         : t.state === 'running'
                           ? '#a78bfa'
                           : '#3a3a44',
                     boxShadow:
                       t.state !== 'queued'
-                        ? `0 0 8px ${t.state === 'done' ? '#c8ff00' : '#a78bfa'}`
+                        ? `0 0 8px ${t.state === 'done' ? '#c2cf86' : '#a78bfa'}`
                         : 'none',
                     animation:
                       t.state === 'running'
@@ -989,7 +989,7 @@ function PilotMockup() {
                   fontFamily: 'var(--font-tech)',
                   color:
                     t.state === 'done'
-                      ? '#c8ff00'
+                      ? '#c2cf86'
                       : t.state === 'running'
                         ? '#c084fc'
                         : '#5a5a64',
@@ -1038,7 +1038,7 @@ function PilotMockup() {
           50% { transform: translate(-4px, 8px); }
         }
         @keyframes pilot-bar-glow {
-          0%, 100% { box-shadow: 0 0 12px rgba(200,255,0,0.5); }
+          0%, 100% { box-shadow: 0 0 12px rgba(200,232,124,0.5); }
           50% { box-shadow: 0 0 22px rgba(167,139,250,0.7); }
         }
         @keyframes pilot-pulse {
@@ -1059,7 +1059,7 @@ export function PilotHowItWorks() {
       title: 'Conecta seu ClickUp',
       desc:
         'Em meio minuto você vincula sua workspace ao Auto Edit. Tudo continua na sua conta — o Pilot só lê o que precisa.',
-      tint: 'rgba(200,255,0,0.45)',
+      tint: 'rgba(200,232,124,0.45)',
     },
     {
       n: '02',
@@ -1220,13 +1220,13 @@ export function PilotHowItWorks() {
           style={{
             animationDelay: '480ms',
             background:
-              'linear-gradient(135deg, rgba(200,255,0,0.10), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
+              'linear-gradient(135deg, rgba(200,232,124,0.10), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
           }}
         >
           <div
             aria-hidden
             className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full opacity-50 blur-3xl transition-opacity duration-500 group-hover:opacity-90"
-            style={{ background: 'rgba(200,255,0,0.45)' }}
+            style={{ background: 'rgba(200,232,124,0.45)' }}
           />
           <div className="relative">
             <div
@@ -1307,7 +1307,7 @@ export function AutoBrollHowItWorks() {
       title: 'Aperta o play',
       desc:
         '12 imagens e 6 vídeos em paralelo. Nano Banana compõe o frame inicial, Kling 2.5 renderiza o movimento. Tudo na sua conta Magnific Unlimited.',
-      tint: 'rgba(200,255,0,0.45)',
+      tint: 'rgba(200,232,124,0.45)',
     },
     {
       n: '03',
@@ -1475,7 +1475,7 @@ export function AutoBrollHowItWorks() {
         style={{
           animationDelay: '440ms',
           background:
-            'linear-gradient(135deg, rgba(200,255,0,0.10) 0%, rgba(167,139,250,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
+            'linear-gradient(135deg, rgba(200,232,124,0.10) 0%, rgba(167,139,250,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
         }}
       >
         <div className="grid grid-cols-1 gap-8 px-7 py-8 md:grid-cols-[auto_1fr] md:px-10 md:py-10">
@@ -1485,7 +1485,7 @@ export function AutoBrollHowItWorks() {
               height="32"
               viewBox="0 0 24 24"
               fill="none"
-              stroke="#c8ff00"
+              stroke="#c2cf86"
               strokeWidth="1.8"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -1498,7 +1498,7 @@ export function AutoBrollHowItWorks() {
               className="mb-2 inline-flex items-center gap-2 rounded-full border border-lime/50 bg-black/40 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-lime backdrop-blur-md"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
-              <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.85)]" />
+              <span className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-lime shadow-[0_0_8px_rgba(200,232,124,0.85)]" />
               FLUXO RÁPIDO · ZERO CRÉDITO
             </div>
             <h3
@@ -1565,13 +1565,13 @@ export function AutoBrollHowItWorks() {
           style={{
             animationDelay: '560ms',
             background:
-              'linear-gradient(135deg, rgba(200,255,0,0.10), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
+              'linear-gradient(135deg, rgba(200,232,124,0.10), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
           }}
         >
           <div
             aria-hidden
             className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full opacity-50 blur-3xl transition-opacity duration-500 group-hover:opacity-90"
-            style={{ background: 'rgba(200,255,0,0.45)' }}
+            style={{ background: 'rgba(200,232,124,0.45)' }}
           />
           <div className="relative">
             <div
@@ -1658,7 +1658,7 @@ function CapabilitiesSection() {
     },
     {
       icon: <IconClickUpPilot size={32} />,
-      hue: 'rgba(200,255,0,0.5)',
+      hue: 'rgba(200,232,124,0.5)',
       title: 'Pipeline ClickUp → entrega',
       desc: 'O Pilot puxa o briefing, identifica o avatar, dispara o lipsync. Sem clique manual.',
     },
@@ -1919,7 +1919,7 @@ function ShowcaseVisual() {
           Em execução
         </div>
         <div className="mt-3 h-1.5 w-full rounded-full bg-white/8 overflow-hidden">
-          <div className="h-full w-2/3 rounded-full" style={{ background: 'linear-gradient(90deg, #c8ff00, #a78bfa)' }} />
+          <div className="h-full w-2/3 rounded-full" style={{ background: 'linear-gradient(90deg, #c2cf86, #a78bfa)' }} />
         </div>
         <div className="mt-3 text-[12.5px] text-white/80">
           Fila do Pilot · 12 de 18 prontos

@@ -299,7 +299,7 @@ function CyborgCarousel({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
               aria-hidden
               className="absolute inset-[-6px] rounded-full"
               style={{
-                background: 'conic-gradient(from 0deg, #e879f9, #a78bfa, #67e8f9, #c8ff00, #e879f9)',
+                background: 'conic-gradient(from 0deg, #e879f9, #a78bfa, #67e8f9, #c2cf86, #e879f9)',
                 animation: 'ccSpin 9s linear infinite',
                 filter: 'blur(2px)',
                 opacity: 0.9,
@@ -610,7 +610,7 @@ function Metric({
   const glows = {
     fuchsia: 'hover:shadow-[0_8px_22px_-10px_rgba(232,121,249,0.5)]',
     violet: 'hover:shadow-[0_8px_22px_-10px_rgba(167,139,250,0.5)]',
-    lime: 'hover:shadow-[0_8px_22px_-10px_rgba(200,255,0,0.5)]',
+    lime: 'hover:shadow-[0_8px_22px_-10px_rgba(200,232,124,0.5)]',
   };
   return (
     <div

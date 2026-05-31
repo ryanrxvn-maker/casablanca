@@ -22,7 +22,7 @@ export default function PilotPage() {
         style={{
           background:
             'radial-gradient(45% 35% at 18% 12%, rgba(167,139,250,0.18), transparent 65%),' +
-            'radial-gradient(50% 35% at 84% 90%, rgba(200,255,0,0.12), transparent 65%)',
+            'radial-gradient(50% 35% at 84% 90%, rgba(200,232,124,0.12), transparent 65%)',
         }}
       />
 
@@ -47,12 +47,12 @@ export default function PilotPage() {
               style={{
                 fontFamily: 'var(--font-tech)',
                 boxShadow:
-                  '0 0 22px -6px rgba(200,255,0,0.55), inset 0 1px 0 rgba(255,255,255,0.08)',
+                  '0 0 22px -6px rgba(200,232,124,0.55), inset 0 1px 0 rgba(255,255,255,0.08)',
               }}
             >
               <span
                 className="inline-block h-2 w-2 animate-pulse-soft rounded-full bg-lime"
-                style={{ boxShadow: '0 0 10px rgba(200,255,0,0.95)' }}
+                style={{ boxShadow: '0 0 10px rgba(200,232,124,0.95)' }}
               />
               ClickUp Pilot
             </div>
@@ -68,7 +68,7 @@ export default function PilotPage() {
                 className="block"
                 style={{
                   background:
-                    'linear-gradient(135deg, #c8ff00 0%, #a78bfa 60%, #67e8f9 100%)',
+                    'linear-gradient(135deg, #c2cf86 0%, #a78bfa 60%, #67e8f9 100%)',
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
                 }}
@@ -92,7 +92,7 @@ export default function PilotPage() {
             <div
               style={{
                 filter:
-                  'drop-shadow(0 0 36px rgba(200,255,0,0.42)) drop-shadow(0 0 18px rgba(167,139,250,0.38))',
+                  'drop-shadow(0 0 36px rgba(200,232,124,0.42)) drop-shadow(0 0 18px rgba(167,139,250,0.38))',
                 animation: 'pilot-hero-float 5s ease-in-out infinite',
               }}
             >

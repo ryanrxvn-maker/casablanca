@@ -56,8 +56,8 @@ export function ClickUpPilotButton() {
       title={active ? `ClickUp Pilot · ${activeBatches} ativo${activeBatches === 1 ? '' : 's'}` : 'ClickUp Pilot'}
       className="topbar-icon group"
       style={{
-        ['--ti-color' as string]: active ? '#c8ff00' : '#9c9ca6',
-        ['--ti-glow' as string]: active ? 'rgba(200,255,0,0.55)' : 'transparent',
+        ['--ti-color' as string]: active ? '#c2cf86' : '#9c9ca6',
+        ['--ti-glow' as string]: active ? 'rgba(200,232,124,0.55)' : 'transparent',
       }}
     >
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" width="17" height="17">
@@ -66,7 +66,7 @@ export function ClickUpPilotButton() {
         <circle cx="14" cy="10" r="1.5" fill="currentColor" />
       </svg>
       {active ? (
-        <span className="topbar-icon-badge" style={{ background: '#c8ff00', color: '#0a0a0a' }}>
+        <span className="topbar-icon-badge" style={{ background: '#c2cf86', color: '#0a0a0a' }}>
           {activeBatches > 9 ? '9+' : activeBatches}
         </span>
       ) : null}

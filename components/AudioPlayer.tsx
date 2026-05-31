@@ -69,8 +69,8 @@ export function AudioPlayer({
         className={
           'group/play relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-lime text-black transition-all duration-200 hover:brightness-95 hover:scale-[1.06] active:scale-[0.94] ' +
           (playing
-            ? 'shadow-[0_0_20px_-2px_rgba(200,255,0,0.7)]'
-            : 'shadow-[0_0_0_0_rgba(200,255,0,0)]')
+            ? 'shadow-[0_0_20px_-2px_rgba(200,232,124,0.7)]'
+            : 'shadow-[0_0_0_0_rgba(200,232,124,0)]')
         }
       >
         {playing ? (

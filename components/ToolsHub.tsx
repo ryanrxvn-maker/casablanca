@@ -480,7 +480,7 @@ function PromoCarousel({ slides }: { slides: React.ReactNode[] }) {
             aria-label={`Ir pro card ${i + 1}`}
             className={
               'h-1.5 rounded-full transition-all duration-300 ' +
-              (i === idx ? 'w-8 bg-lime shadow-[0_0_8px_rgba(200,255,0,0.6)]' : 'w-1.5 bg-white/30 hover:bg-white/60')
+              (i === idx ? 'w-8 bg-lime shadow-[0_0_8px_rgba(200,232,124,0.6)]' : 'w-1.5 bg-white/30 hover:bg-white/60')
             }
           />
         ))}
@@ -510,7 +510,7 @@ function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
         className="pointer-events-none absolute inset-0"
         style={{
           background:
-            'radial-gradient(60% 90% at 0% 50%, rgba(200,255,0,0.28), transparent 60%)',
+            'radial-gradient(60% 90% at 0% 50%, rgba(200,232,124,0.28), transparent 60%)',
           animation: 'promo-pulse-1 6s ease-in-out infinite',
         }}
       />
@@ -546,7 +546,7 @@ function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
         className="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 md:block"
         style={{
           filter:
-            'drop-shadow(0 0 36px rgba(200,255,0,0.42)) drop-shadow(0 0 18px rgba(167,139,250,0.38))',
+            'drop-shadow(0 0 36px rgba(200,232,124,0.42)) drop-shadow(0 0 18px rgba(167,139,250,0.38))',
           animation: 'promo-icon-float 5.5s ease-in-out infinite',
         }}
       >
@@ -561,12 +561,12 @@ function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
             className="mb-4 inline-flex items-center gap-2 rounded-full border border-lime/50 bg-black/50 px-3.5 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.22em] text-lime backdrop-blur-md"
             style={{
               fontFamily: 'var(--font-tech)',
-              boxShadow: '0 0 22px -6px rgba(200,255,0,0.55), inset 0 1px 0 rgba(255,255,255,0.08)',
+              boxShadow: '0 0 22px -6px rgba(200,232,124,0.55), inset 0 1px 0 rgba(255,255,255,0.08)',
             }}
           >
             <span
               className="inline-block h-2 w-2 animate-pulse-soft rounded-full bg-lime"
-              style={{ boxShadow: '0 0 10px rgba(200,255,0,0.95), 0 0 20px rgba(200,255,0,0.5)' }}
+              style={{ boxShadow: '0 0 10px rgba(200,232,124,0.95), 0 0 20px rgba(200,232,124,0.5)' }}
             />
             ClickUp Pilot · novo
           </div>
@@ -614,7 +614,7 @@ function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
                 style={{
                   background: 'var(--cta-lime)',
                   boxShadow:
-                    'inset 0 1px 0 rgba(255,255,255,0.5), 0 12px 32px -8px rgba(200,255,0,0.55), 0 2px 6px rgba(0,0,0,0.4)',
+                    'inset 0 1px 0 rgba(255,255,255,0.5), 0 12px 32px -8px rgba(200,232,124,0.55), 0 2px 6px rgba(0,0,0,0.4)',
                 }}
               >
                 <span className="relative z-10">Iniciar automação</span>
@@ -685,7 +685,7 @@ function AutoBrollSlide({ canStartAutomation }: { canStartAutomation: boolean })
         className="pointer-events-none absolute inset-0"
         style={{
           background:
-            'radial-gradient(60% 90% at 100% 50%, rgba(200,255,0,0.22), transparent 60%)',
+            'radial-gradient(60% 90% at 100% 50%, rgba(200,232,124,0.22), transparent 60%)',
           animation: 'promo-pulse-2 7s ease-in-out infinite',
         }}
       />
@@ -737,7 +737,7 @@ function AutoBrollSlide({ canStartAutomation }: { canStartAutomation: boolean })
             B-rolls saem prontos<br />
             <span
               style={{
-                background: 'linear-gradient(135deg, #a78bfa 0%, #c8ff00 100%)',
+                background: 'linear-gradient(135deg, #a78bfa 0%, #c2cf86 100%)',
                 WebkitBackgroundClip: 'text',
                 WebkitTextFillColor: 'transparent',
               }}
@@ -820,12 +820,12 @@ function BrollMiniGrid() {
             className="relative overflow-hidden rounded-[8px] border"
             style={{
               aspectRatio: '9/16',
-              borderColor: ready ? 'rgba(200,255,0,0.45)' : 'rgba(167,139,250,0.35)',
+              borderColor: ready ? 'rgba(200,232,124,0.45)' : 'rgba(167,139,250,0.35)',
               background: ready
-                ? 'linear-gradient(135deg, rgba(200,255,0,0.15), rgba(0,0,0,0.6))'
+                ? 'linear-gradient(135deg, rgba(200,232,124,0.15), rgba(0,0,0,0.6))'
                 : 'linear-gradient(135deg, rgba(167,139,250,0.12), rgba(0,0,0,0.7))',
               boxShadow: ready
-                ? '0 4px 16px -6px rgba(200,255,0,0.4)'
+                ? '0 4px 16px -6px rgba(200,232,124,0.4)'
                 : '0 4px 16px -6px rgba(167,139,250,0.35)',
               animation: `brollPop 0.6s ease-out ${i * 0.15}s backwards`,
             }}
@@ -833,7 +833,7 @@ function BrollMiniGrid() {
             {/* Bunny mini (loading state) ou check (ready) */}
             <div className="absolute inset-0 flex items-center justify-center">
               {ready ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c8ff00" strokeWidth="3">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c2cf86" strokeWidth="3">
                   <path d="M5 13l4 4L19 7" />
                 </svg>
               ) : (
@@ -1240,7 +1240,7 @@ function LockedFlash({
 
   const accent =
     need === 'admin'
-      ? 'rgba(200,255,0,0.45)'
+      ? 'rgba(200,232,124,0.45)'
       : need === 'pro'
         ? 'rgba(217,70,239,0.45)'
         : 'rgba(192,132,252,0.45)';

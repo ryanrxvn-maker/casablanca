@@ -31,8 +31,8 @@ export function Toggle3D({
     lime: {
       border: 'border-lime',
       bg: 'bg-lime',
-      glow: 'shadow-[0_0_24px_-4px_rgba(200,255,0,0.6),0_0_60px_-12px_rgba(200,255,0,0.4)]',
-      glowHover: 'hover:shadow-[0_0_32px_-2px_rgba(200,255,0,0.8),0_0_80px_-12px_rgba(200,255,0,0.5)]',
+      glow: 'shadow-[0_0_24px_-4px_rgba(200,232,124,0.6),0_0_60px_-12px_rgba(200,232,124,0.4)]',
+      glowHover: 'hover:shadow-[0_0_32px_-2px_rgba(200,232,124,0.8),0_0_80px_-12px_rgba(200,232,124,0.5)]',
       text: 'text-lime',
       ring: 'ring-lime/40',
     },
@@ -108,7 +108,7 @@ export function Toggle3D({
         }
         style={{
           boxShadow: on
-            ? `inset 0 1px 2px rgba(0,0,0,0.3), 0 0 12px rgba(200,255,0,0.4)`
+            ? `inset 0 1px 2px rgba(0,0,0,0.3), 0 0 12px rgba(200,232,124,0.4)`
             : 'inset 0 2px 4px rgba(0,0,0,0.5), inset 0 -1px 0 rgba(255,255,255,0.04)',
         }}
       >

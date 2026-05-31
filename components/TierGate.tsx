@@ -46,7 +46,7 @@ const TIER_LABEL: Record<Exclude<Tier, 'free'>, string> = {
 const TIER_HUE: Record<Exclude<Tier, 'free'>, string> = {
   basic: 'rgba(192,132,252,0.45)',
   pro: 'rgba(217,70,239,0.45)',
-  admin: 'rgba(200,255,0,0.45)',
+  admin: 'rgba(200,232,124,0.45)',
 };
 
 export function TierGate({

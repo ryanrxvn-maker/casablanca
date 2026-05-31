@@ -140,7 +140,7 @@ export function CompactVoiceSelector({
       {open && pos && typeof document !== 'undefined' ? createPortal(
         <div
           ref={popRef}
-          className="fixed z-[120] overflow-hidden rounded-[14px] border border-lime/40 bg-bg shadow-[0_12px_40px_-6px_rgba(0,0,0,0.6),0_0_28px_-12px_rgba(200,255,0,0.4)]"
+          className="fixed z-[120] overflow-hidden rounded-[14px] border border-lime/40 bg-bg shadow-[0_12px_40px_-6px_rgba(0,0,0,0.6),0_0_28px_-12px_rgba(200,232,124,0.4)]"
           style={{ top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxH }}
         >
           <div className="flex items-center justify-between border-b border-line/40 bg-bg-soft/40 px-3 py-2">

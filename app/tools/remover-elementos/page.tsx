@@ -441,7 +441,7 @@ function RemoverElementosInner() {
             <div className="flex items-center gap-2">
               <span className="relative flex h-2 w-2 shrink-0">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,255,0,0.9)]" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,232,124,0.9)]" />
               </span>
               <span className="text-lime">
                 Motor online
@@ -784,7 +784,7 @@ function SideBySidePreview({
           ref={rightRef}
           src={resultUrl}
           controls
-          className="w-full rounded-[12px] border border-lime/30 bg-bg shadow-[0_0_28px_-12px_rgba(200,255,0,0.4)]"
+          className="w-full rounded-[12px] border border-lime/30 bg-bg shadow-[0_0_28px_-12px_rgba(200,232,124,0.4)]"
         />
       </div>
     </div>

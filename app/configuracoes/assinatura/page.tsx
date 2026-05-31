@@ -387,7 +387,7 @@ function PoweredByStripe() {
 function StatusBadge({ sub, hue }: { sub: Sub; hue: string }) {
   const canceling = sub.cancel_at_period_end;
   const label = canceling ? 'Cancela em breve' : STATUS_LABEL[sub.status] ?? sub.status;
-  const color = canceling ? '#fbbf24' : sub.status === 'active' ? '#c8ff00' : hue;
+  const color = canceling ? '#fbbf24' : sub.status === 'active' ? '#c2cf86' : hue;
   return (
     <span
       className="rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-wide"

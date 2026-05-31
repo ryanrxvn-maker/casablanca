@@ -40,7 +40,7 @@ export function AutoBrollHero() {
       className="relative isolate overflow-hidden rounded-[24px] border border-line/60 bg-bg-soft/30 px-6 py-12 md:px-10 md:py-16"
       style={{
         backgroundImage:
-          'radial-gradient(40% 60% at 20% 30%, rgba(167,139,250,0.18), transparent 60%), radial-gradient(50% 50% at 80% 70%, rgba(200,255,0,0.10), transparent 60%), radial-gradient(30% 40% at 50% 90%, rgba(34,211,238,0.10), transparent 60%)',
+          'radial-gradient(40% 60% at 20% 30%, rgba(167,139,250,0.18), transparent 60%), radial-gradient(50% 50% at 80% 70%, rgba(200,232,124,0.10), transparent 60%), radial-gradient(30% 40% at 50% 90%, rgba(34,211,238,0.10), transparent 60%)',
       }}
     >
       {/* Animated mesh gradient layer */}
@@ -49,7 +49,7 @@ export function AutoBrollHero() {
         className="pointer-events-none absolute inset-0 opacity-60"
         style={{
           background:
-            'radial-gradient(circle at 30% 20%, rgba(167,139,250,0.25), transparent 40%), radial-gradient(circle at 70% 80%, rgba(200,255,0,0.10), transparent 40%)',
+            'radial-gradient(circle at 30% 20%, rgba(167,139,250,0.25), transparent 40%), radial-gradient(circle at 70% 80%, rgba(200,232,124,0.10), transparent 40%)',
           animation: 'meshBreathe 8s ease-in-out infinite alternate',
         }}
       />
@@ -116,7 +116,7 @@ export function AutoBrollHero() {
             style={{
               fontFamily: 'var(--font-display)',
               backgroundImage:
-                'linear-gradient(135deg, #ffffff 0%, #fafafa 30%, #c8ff00 60%, #a78bfa 100%)',
+                'linear-gradient(135deg, #ffffff 0%, #fafafa 30%, #c2cf86 60%, #a78bfa 100%)',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
               backgroundClip: 'text',
@@ -185,7 +185,7 @@ export function AutoBrollHero() {
             className="absolute inset-0 rounded-full blur-3xl"
             style={{
               background:
-                'radial-gradient(circle, rgba(167,139,250,0.35), rgba(200,255,0,0.15) 50%, transparent 70%)',
+                'radial-gradient(circle, rgba(167,139,250,0.35), rgba(200,232,124,0.15) 50%, transparent 70%)',
               animation: 'auraPulse 4s ease-in-out infinite',
             }}
           />
@@ -204,7 +204,7 @@ export function AutoBrollHero() {
               height={220}
               className="drop-shadow-[0_30px_60px_rgba(167,139,250,0.5)]"
               style={{
-                filter: 'drop-shadow(0 0 30px rgba(200,255,0,0.4))',
+                filter: 'drop-shadow(0 0 30px rgba(200,232,124,0.4))',
               }}
             />
           </div>
@@ -321,7 +321,7 @@ function PipelineArrow() {
 function StatPill({ value, label }: { value: string; label: string }) {
   return (
     <div
-      className="group flex flex-col gap-0.5 rounded-[10px] border border-line bg-bg/40 px-3 py-2 transition-all duration-300 hover:border-lime/40 hover:bg-bg/60 hover:shadow-[0_8px_22px_-10px_rgba(200,255,0,0.4)]"
+      className="group flex flex-col gap-0.5 rounded-[10px] border border-line bg-bg/40 px-3 py-2 transition-all duration-300 hover:border-lime/40 hover:bg-bg/60 hover:shadow-[0_8px_22px_-10px_rgba(200,232,124,0.4)]"
     >
       <span
         className="text-[20px] font-extrabold leading-none text-white transition-colors group-hover:text-lime"

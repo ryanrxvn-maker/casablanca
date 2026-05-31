@@ -107,7 +107,7 @@ export function SubSidebar() {
     (it) => !it.adminOnly || isAdmin,
   );
   const meta = inBase
-    ? { eyebrow: 'TRABALHO RÁPIDO', dot: '#c8ff00' }
+    ? { eyebrow: 'TRABALHO RÁPIDO', dot: '#c2cf86' }
     : { eyebrow: 'INTELIGÊNCIA', dot: '#a78bfa' };
 
   return (

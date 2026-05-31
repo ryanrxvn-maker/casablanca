@@ -443,7 +443,7 @@ function IconBase() {
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
       <defs>
         <linearGradient id="sb-base" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#c8ff00" />
+          <stop offset="0%" stopColor="#c2cf86" />
           <stop offset="100%" stopColor="#67e8f9" />
         </linearGradient>
       </defs>
@@ -593,7 +593,7 @@ function TierAvatar({
     // admin
     return {
       background:
-        'conic-gradient(from 0deg, #c8ff00, #a3e635, #c8ff00, #d9f99d, #c8ff00)',
+        'conic-gradient(from 0deg, #c2cf86, #aebd72, #c2cf86, #d9f99d, #c2cf86)',
       animation: 'tier-ring-spin 4s linear infinite',
     };
   })();
@@ -646,14 +646,14 @@ function TierAvatar({
           aria-hidden
           className="absolute -top-1.5 left-1/2 -translate-x-1/2"
           style={{
-            filter: 'drop-shadow(0 0 6px rgba(200,255,0,0.85))',
+            filter: 'drop-shadow(0 0 6px rgba(200,232,124,0.85))',
           }}
         >
           <svg width="20" height="14" viewBox="0 0 24 16" fill="none">
             <path
               d="M2 14L4 4l5 6 3-10 3 10 5-6 2 10z"
-              fill="#c8ff00"
-              stroke="#a3e635"
+              fill="#c2cf86"
+              stroke="#aebd72"
               strokeWidth="0.8"
               strokeLinejoin="round"
             />
@@ -726,7 +726,7 @@ function DotGear() {
 
 function DotShield() {
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#c8ff00" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#c2cf86" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 2l9 4v6c0 5-3.5 9-9 10-5.5-1-9-5-9-10V6l9-4z" />
       <path d="M9 12l2 2 4-4" />
     </svg>

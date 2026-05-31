@@ -42,7 +42,7 @@ export function FileUpload({
       className={cn(
         'group relative flex cursor-pointer flex-col items-center justify-center gap-2 overflow-hidden rounded-[12px] border border-dashed px-5 py-8 text-center transition-all duration-300',
         dragging
-          ? 'scale-[1.02] border-lime bg-lime/10 shadow-[0_0_40px_-8px_rgba(200,255,0,0.6)]'
+          ? 'scale-[1.02] border-lime bg-lime/10 shadow-[0_0_40px_-8px_rgba(200,232,124,0.6)]'
           : 'border-line-strong bg-bg hover:-translate-y-[1px] hover:border-lime/60 hover:bg-bg-soft/40'
       )}
     >

@@ -44,26 +44,26 @@ export type ToolHero3DProps = {
 const TINT_MAP = {
   violet: {
     primary: 'rgba(167,139,250,0.55)',
-    secondary: 'rgba(200,255,0,0.12)',
+    secondary: 'rgba(200,232,124,0.12)',
     border: 'border-violet/40',
     pillBg: 'bg-violet/10',
     pillText: 'text-violet',
     pillBorder: 'border-violet/40',
     pingBg: 'bg-violet',
-    gradient: ['#ffffff', '#fafafa', '#c8ff00', '#a78bfa'],
-    aura: 'rgba(167,139,250,0.35), rgba(200,255,0,0.15) 50%',
-    glow: 'rgba(200,255,0,0.4)',
+    gradient: ['#ffffff', '#fafafa', '#c2cf86', '#a78bfa'],
+    aura: 'rgba(167,139,250,0.35), rgba(200,232,124,0.15) 50%',
+    glow: 'rgba(200,232,124,0.4)',
   },
   lime: {
-    primary: 'rgba(200,255,0,0.40)',
+    primary: 'rgba(200,232,124,0.40)',
     secondary: 'rgba(163,230,53,0.18)',
     border: 'border-lime/40',
     pillBg: 'bg-lime/10',
     pillText: 'text-lime',
     pillBorder: 'border-lime/40',
     pingBg: 'bg-lime',
-    gradient: ['#ffffff', '#fafafa', '#a78bfa', '#c8ff00'],
-    aura: 'rgba(200,255,0,0.40), rgba(167,139,250,0.15) 50%',
+    gradient: ['#ffffff', '#fafafa', '#a78bfa', '#c2cf86'],
+    aura: 'rgba(200,232,124,0.40), rgba(167,139,250,0.15) 50%',
     glow: 'rgba(167,139,250,0.4)',
   },
   cyan: {
@@ -80,14 +80,14 @@ const TINT_MAP = {
   },
   pink: {
     primary: 'rgba(244,114,182,0.45)',
-    secondary: 'rgba(200,255,0,0.12)',
+    secondary: 'rgba(200,232,124,0.12)',
     border: 'border-pink-400/40',
     pillBg: 'bg-pink-400/10',
     pillText: 'text-pink-300',
     pillBorder: 'border-pink-400/40',
     pingBg: 'bg-pink-300',
-    gradient: ['#ffffff', '#fafafa', '#c8ff00', '#f472b6'],
-    aura: 'rgba(244,114,182,0.40), rgba(200,255,0,0.15) 50%',
+    gradient: ['#ffffff', '#fafafa', '#c2cf86', '#f472b6'],
+    aura: 'rgba(244,114,182,0.40), rgba(200,232,124,0.15) 50%',
     glow: 'rgba(244,114,182,0.4)',
   },
   amber: {
@@ -104,14 +104,14 @@ const TINT_MAP = {
   },
   fuchsia: {
     primary: 'rgba(232,121,249,0.50)',
-    secondary: 'rgba(200,255,0,0.12)',
+    secondary: 'rgba(200,232,124,0.12)',
     border: 'border-fuchsia-400/40',
     pillBg: 'bg-fuchsia-400/10',
     pillText: 'text-fuchsia-300',
     pillBorder: 'border-fuchsia-400/40',
     pingBg: 'bg-fuchsia-300',
-    gradient: ['#ffffff', '#fafafa', '#c8ff00', '#e879f9'],
-    aura: 'rgba(232,121,249,0.40), rgba(200,255,0,0.15) 50%',
+    gradient: ['#ffffff', '#fafafa', '#c2cf86', '#e879f9'],
+    aura: 'rgba(232,121,249,0.40), rgba(200,232,124,0.15) 50%',
     glow: 'rgba(232,121,249,0.4)',
   },
 };
@@ -434,7 +434,7 @@ function PipelineArrow() {
 
 function StatPill({ value, label }: { value: string; label: string }) {
   return (
-    <div className="group flex flex-col gap-0.5 rounded-[10px] border border-line bg-bg/40 px-3 py-2 transition-all duration-300 hover:border-lime/40 hover:bg-bg/60 hover:shadow-[0_8px_22px_-10px_rgba(200,255,0,0.4)]">
+    <div className="group flex flex-col gap-0.5 rounded-[10px] border border-line bg-bg/40 px-3 py-2 transition-all duration-300 hover:border-lime/40 hover:bg-bg/60 hover:shadow-[0_8px_22px_-10px_rgba(200,232,124,0.4)]">
       <span
         className="text-[20px] font-extrabold leading-none text-white transition-colors group-hover:text-lime"
         style={{ fontFamily: 'var(--font-tech)' }}

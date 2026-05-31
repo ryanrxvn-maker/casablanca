@@ -41,7 +41,7 @@ export function IconDecupagem(p: IconProps) {
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
         <linearGradient id={id} x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#a3e635" />
+          <stop offset="0%" stopColor="#aebd72" />
           <stop offset="100%" stopColor="#22c55e" />
         </linearGradient>
       </defs>
@@ -435,7 +435,7 @@ export function IconWrench(p: IconProps) {
     <svg {...baseProps(p, `url(#${id})`)}>
       <defs>
         <linearGradient id={id} x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#c8ff00" />
+          <stop offset="0%" stopColor="#c2cf86" />
           <stop offset="100%" stopColor="#67e8f9" />
         </linearGradient>
       </defs>

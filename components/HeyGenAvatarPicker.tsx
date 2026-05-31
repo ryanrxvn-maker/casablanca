@@ -336,7 +336,7 @@ export function HeyGenAvatarPicker({
                   className={
                     'group relative aspect-[3/4] overflow-hidden rounded-[10px] border text-left transition-all duration-200 hover:scale-[1.02] active:scale-[0.99] ' +
                     (isSelected
-                      ? 'border-lime shadow-[0_0_14px_-4px_rgba(200,255,0,0.6)]'
+                      ? 'border-lime shadow-[0_0_14px_-4px_rgba(200,232,124,0.6)]'
                       : 'border-line-strong hover:border-lime/60')
                   }
                 >
@@ -378,7 +378,7 @@ export function HeyGenAvatarPicker({
                 className={
                   'group relative aspect-square overflow-hidden rounded-[12px] border text-left transition-all duration-200 hover:scale-[1.02] active:scale-[0.99] ' +
                   (isSelectedGroup
-                    ? 'border-lime shadow-[0_0_18px_-4px_rgba(200,255,0,0.6)]'
+                    ? 'border-lime shadow-[0_0_18px_-4px_rgba(200,232,124,0.6)]'
                     : 'border-line-strong hover:border-lime/60')
                 }
                 title={`${g.name} - ${g.looksCount} look${g.looksCount > 1 ? 's' : ''}`}
@@ -464,7 +464,7 @@ export function HeyGenAvatarPicker({
                     className={
                       'group relative aspect-[3/4] overflow-hidden rounded-[12px] border text-left transition-all duration-200 hover:scale-[1.02] active:scale-[0.99] ' +
                       (isSelected
-                        ? 'border-lime shadow-[0_0_18px_-4px_rgba(200,255,0,0.6)]'
+                        ? 'border-lime shadow-[0_0_18px_-4px_rgba(200,232,124,0.6)]'
                         : 'border-line-strong hover:border-lime/60')
                     }
                   >

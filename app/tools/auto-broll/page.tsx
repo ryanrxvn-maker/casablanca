@@ -582,21 +582,21 @@ function AutoBrollInner() {
             className="relative overflow-hidden rounded-[16px] border border-lime/35 bg-gradient-to-br from-lime/[0.08] via-bg-soft/40 to-bg/30 p-4 backdrop-blur-md"
             style={{
               boxShadow:
-                'inset 0 1px 0 rgba(200,255,0,0.10), 0 12px 30px -14px rgba(200,255,0,0.30), 0 0 50px -22px rgba(200,255,0,0.45)',
+                'inset 0 1px 0 rgba(200,232,124,0.10), 0 12px 30px -14px rgba(200,232,124,0.30), 0 0 50px -22px rgba(200,232,124,0.45)',
             }}
           >
             {/* Glow decorativo no canto */}
             <div
               aria-hidden
               className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full opacity-40 blur-3xl"
-              style={{ background: 'radial-gradient(circle, rgba(200,255,0,0.5), transparent 70%)' }}
+              style={{ background: 'radial-gradient(circle, rgba(200,232,124,0.5), transparent 70%)' }}
             />
             <div className="relative flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-3">
                 <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-lime/40 bg-lime/10">
                   <span className="relative flex h-2 w-2">
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_10px_rgba(200,255,0,0.95)]" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_10px_rgba(200,232,124,0.95)]" />
                   </span>
                 </div>
                 <div className="flex flex-col gap-0.5">
@@ -1753,7 +1753,7 @@ function JobCard({
                   <button
                     type="button"
                     onClick={onDownload}
-                    className="group relative inline-flex items-center gap-2 overflow-hidden rounded-full border border-lime/60 bg-lime/95 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-black shadow-[0_8px_22px_-8px_rgba(200,255,0,0.55)] transition-all hover:scale-[1.03]"
+                    className="group relative inline-flex items-center gap-2 overflow-hidden rounded-full border border-lime/60 bg-lime/95 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-black shadow-[0_8px_22px_-8px_rgba(200,232,124,0.55)] transition-all hover:scale-[1.03]"
                     style={{ fontFamily: 'var(--font-tech)' }}
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
