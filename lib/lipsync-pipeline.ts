@@ -118,10 +118,10 @@ export async function cleanAudioMp3(file: File, onStage?: FFLoadStage): Promise<
 
 /**
  * PRÉ-PRODUÇÃO (vídeo): só comprime o rosto quando o arquivo é grande
- * (> limite do storage). Vídeo pequeno passa NATIVO (instantâneo) — é o
- * caso comum. Quando precisa comprimir, faz RÁPIDO (ultrafast 720p), já
- * que o motor entrega 720p de qualquer jeito — então a qualidade final é
- * idêntica e a pré-produção não trava em vídeo pesado.
+ * (> limite do storage). Vídeo pequeno passa NATIVO (instantâneo, ZERO
+ * perda) — é o caso comum. Quando precisa comprimir, PRESERVA a qualidade:
+ * mantém a resolução (até 1080p) no melhor bitrate que cabe no upload, em
+ * preset veryfast (rápido). Nunca baixa pra 720p à toa.
  */
 export async function prepareFaceVideo(file: File, onStage?: FFLoadStage): Promise<File> {
   // ≤ limite do storage → VÍDEO NATIVO (qualidade máxima, zero espera).
@@ -134,35 +134,47 @@ export async function prepareFaceVideo(file: File, onStage?: FFLoadStage): Promi
 /**
  * Compressão RÁPIDA do rosto pra caber no storage. Como o motor SEMPRE
  * entrega 720p, comprimir o rosto pra 720p não muda a qualidade final —
- * então priorizamos VELOCIDADE: H.264 preset ultrafast + 720p + SEM áudio
- * (o motor usa o áudio separado). Vídeo de 1min sai em ~30-50s em vez de
- * minutos. Fallback raro pra 540p se ainda não couber.
+ * então só comprimimos quando NÃO cabe no upload, e do jeito que PRESERVA
+ * o máximo de qualidade: MANTÉM a resolução (até 1080p) com um BITRATE-ALVO
+ * calculado pra caber no limite na duração real do vídeo (máxima qualidade
+ * possível pro tamanho — sem chutar CRF nem baixar resolução à toa) +
+ * preset veryfast (rápido e bem melhor que ultrafast no mesmo bitrate) +
+ * SEM áudio (o motor usa o áudio separado). Fallback raro pra 720p só se o
+ * vídeo for tão longo que nem 1080p caiba.
  */
 async function compressFaceHQ(file: File, onStage?: FFLoadStage): Promise<File> {
   const ff = await getFFmpeg(onStage);
   const { fetchFile } = await import('@ffmpeg/util');
   const meta = await probeVideoMetadata(file).catch(() => null);
   const h = meta?.height || 0;
+  const durSec = meta?.durationSec || 0;
   const uniq = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   const inName = `fhq_${uniq}.mp4`;
   const outName = `fhqo_${uniq}.mp4`;
   await ff.writeFile(inName, await fetchFile(file));
 
-  const encode = async (crf: number, maxH: number): Promise<Uint8Array> => {
+  const encode = async (maxH: number): Promise<Uint8Array> => {
+    // bitrate-alvo: cabe em ~42MB (margem sob o limite) na duração real do
+    // vídeo, entre 2 e 9 Mbps. Vídeo curto (caso comum do rosto) → 9Mbps =
+    // 1080p praticamente sem perda visível.
+    const budgetBits = 42 * 1024 * 1024 * 8;
+    let vbps = durSec > 1 ? Math.floor((budgetBits / durSec) * 0.92) : 6_000_000;
+    vbps = Math.max(2_000_000, Math.min(9_000_000, vbps));
     const args = ['-i', inName];
-    if (!h || h > maxH) args.push('-vf', `scale=-2:${maxH}:flags=bicubic`);
+    if (!h || h > maxH) args.push('-vf', `scale=-2:${maxH}:flags=bicubic`); // só desce se >1080p
     args.push(
       '-an', // sem áudio: o motor usa o áudio separado → menor + mais rápido
-      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', String(crf), '-pix_fmt', 'yuv420p',
-      '-movflags', '+faststart', '-y', outName,
+      '-c:v', 'libx264', '-preset', 'veryfast',
+      '-b:v', String(vbps), '-maxrate', String(Math.floor(vbps * 1.3)), '-bufsize', String(vbps * 2),
+      '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-y', outName,
     );
     await ff.exec(args);
     const d = await ff.readFile(outName);
     return d instanceof Uint8Array ? d : new Uint8Array();
   };
 
-  let data = await encode(23, 720); // rápido: 720p ultrafast, sem áudio
-  if (data.length > STORAGE_SAFE_BYTES) data = await encode(26, 540); // raríssimo
+  let data = await encode(1080); // mantém resolução (≤1080p), qualidade máxima pro tamanho
+  if (data.length > STORAGE_SAFE_BYTES) data = await encode(720); // raríssimo (vídeo muito longo)
 
   try { await ff.deleteFile(inName); } catch { /* ignore */ }
   try { await ff.deleteFile(outName); } catch { /* ignore */ }

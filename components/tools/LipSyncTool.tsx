@@ -116,13 +116,13 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 
 /** Estimativa grosseira do tempo total de um disparo (ms) — calibra a barra
  *  de progresso pra ela preencher de acordo com o processo inteiro. */
-function estimateJobMs(audioSec: number, faceNeedsCompress: boolean): number {
-  const compress = faceNeedsCompress ? 45_000 : 0; // compressão rápida (ultrafast 720p)
-  const clean = 5_000 + audioSec * 180; // limpar áudio
+function estimateJobMs(audioSec: number, faceNeedsCompress: boolean, clean: boolean): number {
+  const compress = faceNeedsCompress ? 60_000 : 0; // compressão (veryfast 1080p)
+  const cleanMs = clean ? 5_000 + audioSec * 180 : 0; // limpar áudio (se ligado)
   const upload = 8_000; // subir o rosto
   const gen = Math.max(26_000, audioSec * 1_800); // render no motor (trechos em série)
   const concat = audioSec > 108 ? 6_000 : 0; // costura (só áudio longo)
-  return compress + clean + upload + gen + concat;
+  return compress + cleanMs + upload + gen + concat;
 }
 
 /** Mapeia a etapa interna pro estado visual do card. */
@@ -147,6 +147,11 @@ export default function LipSyncTool() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [formError, setFormError] = useState<string>('');
   const [flash, setFlash] = useState<boolean>(false); // toast "enviado ↓"
+
+  // Limpar áudio (pré-produção do áudio: highpass + normalização de volume).
+  // Ligado por padrão, mas OPCIONAL: às vezes o ruído faz parte do natural
+  // do áudio e o usuário quer mandar o áudio ORIGINAL, sem mexer.
+  const [cleanAudioOn, setCleanAudioOn] = useState<boolean>(true);
 
   const videoInputRef = useRef<HTMLInputElement | null>(null);
   const audioInputRef = useRef<HTMLInputElement | null>(null);
@@ -304,26 +309,28 @@ export default function LipSyncTool() {
    * etapa de ffmpeg passa pela fila interna (withFFLock). SEM pós-produção:
    * o que sai do motor já é o resultado final (mais rápido + nada pra travar).
    */
-  async function runJob(id: string, faceFile: File, audioSrc: File, audioMs: number) {
+  async function runJob(id: string, faceFile: File, audioSrc: File, audioMs: number, cleanOn: boolean) {
     try {
       const {
         prepareFaceVideo, cleanAudioMp3, splitAudioChunks, concatLipVideos,
         CHUNK_THRESHOLD_SEC, MAX_CHUNK_SEC,
       } = await import('@/lib/lipsync-pipeline');
 
-      // 1. PRÉ-PRODUÇÃO: rosto (native se ≤44MB; senão comprime RÁPIDO) +
-      //    áudio limpo, em paralelo. RESILIENTE: se limpar o áudio
-      //    falhar/demorar demais, usa o áudio ORIGINAL → o disparo NUNCA
-      //    fica preso na pré-produção.
+      // 1. PRÉ-PRODUÇÃO: rosto (native se ≤44MB; senão comprime preservando
+      //    qualidade) + áudio. O "limpar áudio" é OPCIONAL (toggle): se
+      //    ligado, normaliza (com timeout→fallback pro cru, nunca prende);
+      //    se desligado, manda o áudio ORIGINAL intacto.
       patchJob(id, { status: 'pre' });
-      const cleanAudioSafe = (async (): Promise<File> => {
-        try {
-          return await withTimeout(cleanAudioMp3(audioSrc), 90_000);
-        } catch {
-          return audioSrc; // fallback: áudio cru (garante o disparo)
-        }
-      })();
-      const [face, cleanAudio] = await Promise.all([prepareFaceVideo(faceFile), cleanAudioSafe]);
+      const audioPrep: Promise<File> = cleanOn
+        ? (async (): Promise<File> => {
+            try {
+              return await withTimeout(cleanAudioMp3(audioSrc), 90_000);
+            } catch {
+              return audioSrc; // fallback: áudio cru (garante o disparo)
+            }
+          })()
+        : Promise.resolve(audioSrc); // toggle off → áudio original, sem mexer
+      const [face, cleanAudio] = await Promise.all([prepareFaceVideo(faceFile), audioPrep]);
       bumpFloor(id, 14);
 
       // 2. CHUNKING (invisível pro cliente): áudio longo vira trechos ≤100s.
@@ -394,13 +401,14 @@ export default function LipSyncTool() {
     const faceFile = selected.file;
     const audioSrc = audioFile;
     const ms = audioMs;
+    const doClean = cleanAudioOn; // snapshot — toggle pode mudar depois
     const num = (jobSeqRef.current += 1);
     const id = `job-${Date.now()}-${num}`;
     const label = `LipSync ${String(num).padStart(2, '0')}`;
     // Estimativa de tempo total → barra de progresso previsível (preenche
     // de acordo com o processo inteiro, sem saltos nem congelamento).
     const faceCompress = faceFile.size > 44 * 1024 * 1024;
-    const estMs = estimateJobMs(ms / 1000, faceCompress);
+    const estMs = estimateJobMs(ms / 1000, faceCompress, doClean);
 
     // Card aparece embaixo JÁ carregando; o form continua livre na mesma tela.
     setJobs((prev) => [
@@ -414,7 +422,7 @@ export default function LipSyncTool() {
     flashTimer.current = setTimeout(() => setFlash(false), 2600);
 
     // Roda em background — sem await: a UI segue livre.
-    void runJob(id, faceFile, audioSrc, ms);
+    void runJob(id, faceFile, audioSrc, ms, doClean);
   }
 
   /** Limpa os disparos PRONTOS/falhos (mantém os que ainda estão rodando). */
@@ -625,6 +633,15 @@ export default function LipSyncTool() {
               />
             )}
           </div>
+
+          {/* Limpar áudio — toggle 3D animado (sem texto NO botão) */}
+          <Toggle3D
+            on={cleanAudioOn}
+            onToggle={() => setCleanAudioOn((v) => !v)}
+            label="Limpar áudio"
+            hintOn="ligado · voz nivelada"
+            hintOff="desligado · áudio original"
+          />
 
           {/* WARNINGS - só block/warn (info é ruído, removido) */}
           {selected && videoIssues.some((iss) => iss.severity !== 'info') && (
@@ -920,6 +937,106 @@ function PreviewStage({ selected, flash }: { selected: VideoItem | null; flash: 
           `}</style>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ═══════════════════════ Toggle3D ═══════════════════════ */
+/**
+ * Switch 3D animado, SEM texto no botão (só o trilho recuado + knob elevado
+ * com brilho/spin quando ligado). O rótulo + dica ficam FORA do botão.
+ * Reutilizável (recebe label/hints).
+ */
+function Toggle3D({
+  on,
+  onToggle,
+  label,
+  hintOn,
+  hintOff,
+}: {
+  on: boolean;
+  onToggle: () => void;
+  label: string;
+  hintOn: string;
+  hintOff: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-[14px] border border-line/60 bg-bg/30 px-3.5 py-2.5">
+      <div className="min-w-0">
+        <div
+          className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          {label}
+        </div>
+        <div className="mono text-[9px] text-text-dim mt-0.5">{on ? hintOn : hintOff}</div>
+      </div>
+
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label={label}
+        onClick={onToggle}
+        className={'tg3d ' + (on ? 'is-on' : 'is-off')}
+      >
+        <span className="tg3d-track" aria-hidden>
+          <span className="tg3d-glow" />
+          <span className="tg3d-knob">
+            <span className="tg3d-spark">✦</span>
+          </span>
+        </span>
+        <style jsx>{`
+          .tg3d {
+            --w: 60px; --h: 30px; --pad: 3px; --knob: 24px;
+            position: relative; width: var(--w); height: var(--h);
+            border-radius: 999px; border: none; padding: 0; cursor: pointer;
+            background: transparent; flex: none;
+            transform: perspective(220px) rotateX(9deg);
+            transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+          }
+          .tg3d:hover { transform: perspective(220px) rotateX(9deg) translateY(-1px); }
+          .tg3d:active { transform: perspective(220px) rotateX(9deg) translateY(1px) scale(0.96); }
+          .tg3d-track {
+            position: absolute; inset: 0; border-radius: 999px;
+            transition: background 0.35s ease, box-shadow 0.35s ease;
+            box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.6), inset 0 -1px 0 rgba(255, 255, 255, 0.06);
+          }
+          .is-off .tg3d-track { background: linear-gradient(180deg, #1a1a22, #0d0d13); }
+          .is-on .tg3d-track {
+            background: linear-gradient(110deg, rgba(232, 121, 249, 0.95), rgba(167, 139, 250, 0.95) 50%, rgba(103, 232, 249, 0.9));
+            box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.35), 0 0 18px -2px rgba(232, 121, 249, 0.7), 0 0 30px -6px rgba(103, 232, 249, 0.5);
+          }
+          .tg3d-glow {
+            position: absolute; inset: -2px; border-radius: 999px; opacity: 0;
+            transition: opacity 0.35s ease; pointer-events: none;
+          }
+          .is-on .tg3d-glow {
+            opacity: 1;
+            background: radial-gradient(circle at 72% 50%, rgba(255, 255, 255, 0.28), transparent 60%);
+            animation: tg3dPulse 2.4s ease-in-out infinite;
+          }
+          .tg3d-knob {
+            position: absolute; top: var(--pad); left: var(--pad);
+            width: var(--knob); height: var(--knob); border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            background: radial-gradient(circle at 35% 28%, #ffffff, #d8d8e2 45%, #9aa0b5 100%);
+            box-shadow: 0 3px 6px rgba(0, 0, 0, 0.55), inset 0 1px 1px rgba(255, 255, 255, 0.9), inset 0 -2px 3px rgba(0, 0, 0, 0.25);
+            transition: transform 0.32s cubic-bezier(0.4, 1.5, 0.5, 1), background 0.32s ease;
+          }
+          .is-on .tg3d-knob {
+            transform: translateX(calc(var(--w) - var(--knob) - var(--pad) * 2));
+            background: radial-gradient(circle at 35% 28%, #ffffff, #ffe9ff 45%, #f0abfc 100%);
+          }
+          .tg3d-spark {
+            font-size: 12px; line-height: 1; color: #a21caf; opacity: 0; transform: rotate(0deg);
+            transition: opacity 0.3s ease;
+          }
+          .is-on .tg3d-spark { opacity: 1; animation: tg3dSpin 3s linear infinite; }
+          @keyframes tg3dPulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+          @keyframes tg3dSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        `}</style>
+      </button>
     </div>
   );
 }
