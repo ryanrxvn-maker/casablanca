@@ -188,7 +188,7 @@ const NON_AVATAR_PREFIXES = [
   /^caixinha\b/i,                         // "Caixinha de perguntas:"
   /^avatar fala\b/i,                      // "Avatar fala:"
   /^instru[cç][oõ]es?\b/i,                // "Instruções para edição:"
-  /^observa[cç][aã]o\b/i,                 // "Observação:"
+  /^observa[cç][oõ]es?\b/i,               // "Observação:" / "Observações:"
   /^nota\b/i,                             // "Nota:"
   /^obs\b/i,                              // "OBS:"
   /^link\s+do\s+avatar\b/i,               // "Link do avatar:" → parseGlobalAvatarLinks
@@ -198,6 +198,27 @@ const NON_AVATAR_PREFIXES = [
   /^link\s+avatar\b/i,                    // "Link avatar:"
   /^link\s+do\s+ad\b/i,                   // "Link do ad:" (VA briefing)
   /^depoimento\b/i,                       // "Depoimento com avatar:"
+  // — Metadados de PRODUCAO/EDICAO que apontam pra mp4 mas NAO sao avatares.
+  // User reportou bug: "Música de fundo: 📎 Scary Piano.mp4" virava avatar
+  // "@Scary Piano" porque o regex aceitava a linha como Role:Username. Aqui:
+  /^m[uú]sica(\s+|$)/i,                   // "Música de fundo:", "Música:", "Música ambiente:"
+  /^[aá]udio\b/i,                         // "Áudio:", "Áudio referência:"
+  /^cen[aá]rio\b/i,                       // "Cenário:"
+  /^edi[cç][aã]o\b/i,                     // "Edição:" (sem confundir com "Editor")
+  /^tipo\s+de\s+legenda\b/i,              // "Tipo de Legenda:"
+  /^legenda\b/i,                          // "Legenda:" (estilo de legenda, nao avatar)
+  /^trilha\b/i,                           // "Trilha sonora:", "Trilha:"
+  /^sfx\b/i,                              // "SFX:"
+  /^bgm\b/i,                              // "BGM:"
+  /^sound(\s+|$)/i,                       // "Sound effect:", "Sound:"
+  /^background(\s+|$)/i,                  // "Background music:"
+  /^thumb\b/i,                            // "Thumb:", "Thumbnail:"
+  /^cor(es)?\b/i,                         // "Cor:", "Cores:"
+  /^estilo\b/i,                           // "Estilo:"
+  /^formato\b/i,                          // "Formato:"
+  /^dura[cç][aã]o\b/i,                    // "Duração:"
+  /^arquivo\b/i,                          // "Arquivo:"
+  /^v[ií]deo\s+(de\s+)?refer[eê]ncia\b/i, // "Video de Referência:"
 ];
 
 /** Heuristica: o que parece role label valido pra avatar?

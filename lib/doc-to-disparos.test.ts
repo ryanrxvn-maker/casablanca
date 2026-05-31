@@ -16,7 +16,7 @@ import {
   toBaseAdId,
   type AvatarCandidate,
 } from './doc-to-disparos';
-import { matchAvatar } from './copy-parser';
+import { matchAvatar, parseAvatars } from './copy-parser';
 
 let failures = 0;
 function assert(cond: boolean, msg: string) {
@@ -301,6 +301,45 @@ console.log('\nslots de avatar/voz (troca por speaker propaga pras partes):');
   assert(h1.avatarId === 'av_outro' && h1.voiceId === 'voice_custom', 'HOOK 1 (Doutor) pegou avatar+voz trocados');
   assert(body.every((b) => b.avatarId === 'av_outro' && b.voiceId === 'voice_custom'), 'BODY (Doutor) também trocou junto');
   assert(h2.avatarId === 'av_marcella' && h2.voiceId === 'voice_mulher_custom', 'HOOK 2 (Mulher) manteve avatar e trocou só a voz');
+}
+
+/* ----------------- regressao: metadados nao viram avatar ----------------- */
+// Bug reportado pelo user (screenshot AD30GL/PRPB06): linha
+//   "Música de fundo: 📎 Scary Piano.mp4"
+// virava avatar "Música de fundo" / "@Scary Piano" no card de análise.
+// Causa: NON_AVATAR_PREFIXES nao cobria "Música de fundo" (nem outros
+// metadados de producao tipo Cenário/Edição/Tipo de Legenda/Trilha).
+console.log('\nregressao: metadados de producao nao viram avatar:');
+{
+  const docMeta = [
+    'AD30GL - PRPB06',
+    'Avatar e Vozes:',
+    'Doutor: @vivasaudavel1.mp4',
+    'Cenário:',
+    'Manter a mesma voz dos avatares.',
+    'Edição: Cinemáticas somente nas partes mencionadas no texto.',
+    'Referência: 📎 VivaSaudavel.mp4',
+    'Música de fundo: 📎 Scary Piano.mp4',
+    'Referência:',
+    'Tipo de Legenda: Sem legenda.',
+    'Observações:',
+    'Trilha: 📎 EpicCinematic.mp4',
+    'Áudio referência: 📎 VoiceSample.mp4',
+  ].join('\n');
+  const av = parseAvatars(docMeta);
+  console.log('  avatars =', av.map((a) => `${a.role}/${a.username}`));
+  const usernames = av.map((a) => a.username.toLowerCase());
+  const roles = av.map((a) => a.role.toLowerCase());
+  assert(!usernames.some((u) => u.includes('scary')), 'Música de fundo NAO virou avatar (Scary Piano)');
+  assert(!roles.some((r) => r.startsWith('música')), 'role "Música ..." rejeitado');
+  assert(!roles.some((r) => r.startsWith('cenário')), 'role "Cenário" rejeitado');
+  assert(!roles.some((r) => r.startsWith('edição')), 'role "Edição" rejeitado');
+  assert(!roles.some((r) => r.startsWith('tipo de legenda')), 'role "Tipo de Legenda" rejeitado');
+  assert(!roles.some((r) => r.startsWith('trilha')), 'role "Trilha" rejeitado');
+  assert(!roles.some((r) => r.startsWith('áudio')), 'role "Áudio referência" rejeitado');
+  assert(!roles.some((r) => r.startsWith('observa')), 'role "Observações" rejeitado');
+  // Doutor real precisa CONTINUAR sendo detectado
+  assert(roles.includes('doutor'), 'Doutor (avatar real) preservado');
 }
 
 /* ----------------- doc vazio ----------------- */
