@@ -30,6 +30,27 @@ async function measureMediaDuration(file: File): Promise<number> {
   });
 }
 
+/** Extrai mensagem legível de QUALQUER erro — nunca devolve "[object Object]". */
+function errMsg(e: unknown): string {
+  if (e == null) return 'Erro desconhecido';
+  if (typeof e === 'string') return e;
+  if (e instanceof Error) return e.message || e.name || 'Erro';
+  if (typeof e === 'object') {
+    const o = e as Record<string, unknown>;
+    if (typeof o.message === 'string' && o.message) return o.message;
+    if (typeof o.error === 'string' && o.error) return o.error;
+    const inner = o.error as Record<string, unknown> | undefined;
+    if (inner && typeof inner === 'object' && typeof inner.message === 'string') return inner.message;
+    try {
+      const s = JSON.stringify(e);
+      if (s && s !== '{}' && s !== 'null') return s.slice(0, 300);
+    } catch {
+      /* ignore */
+    }
+  }
+  return String(e);
+}
+
 /**
  * LipSyncTool — UI estilo DreamFace com 2 motores (V1 / V2).
  *
@@ -286,10 +307,16 @@ export default function LipSyncTool() {
       if (!r.ok) throw new Error(d?.error || `Falha ao iniciar upload (HTTP ${r.status})`);
       // 2. sobe DIRETO pro Supabase (sem limite da Vercel)
       const supabase = createClient();
-      const { error } = await supabase.storage
-        .from(UPLOAD_BUCKET)
-        .uploadToSignedUrl(d.path, d.token, file);
-      if (error) throw new Error('Falha no upload pro storage: ' + error.message);
+      let upErr: unknown = null;
+      try {
+        const { error } = await supabase.storage
+          .from(UPLOAD_BUCKET)
+          .uploadToSignedUrl(d.path, d.token, file);
+        upErr = error;
+      } catch (e) {
+        upErr = e;
+      }
+      if (upErr) throw new Error('Falha no upload pro storage: ' + errMsg(upErr));
       stop = true;
       onProgress?.(100);
       if (!d.publicUrl || typeof d.publicUrl !== 'string') throw new Error('Upload não retornou URL.');
@@ -356,11 +383,14 @@ export default function LipSyncTool() {
         body: JSON.stringify({ video_url, audio_url, audio_ms: audioMs }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
       if (!res.ok) {
-        throw new Error(data?.error || `HTTP ${res.status}`);
+        throw new Error(
+          (data && (typeof data.error === 'string' ? data.error : data.error ? errMsg(data.error) : null)) ||
+            `O servidor respondeu erro ${res.status}. Tenta de novo; se o vídeo/áudio for muito longo, corta um pouco.`,
+        );
       }
-      if (!data.output_video_url) {
+      if (!data?.output_video_url) {
         throw new Error('O servidor não devolveu o vídeo gerado.');
       }
 
@@ -368,9 +398,8 @@ export default function LipSyncTool() {
       setStatus('done');
       stopTicker();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
       setStatus('error');
-      setErrorMsg(msg || 'Algo deu errado.');
+      setErrorMsg(errMsg(err) || 'Algo deu errado.');
       stopTicker();
     }
   }
