@@ -388,6 +388,27 @@ export function IconHeyGenAuto(p: IconProps) {
   );
 }
 
+/** LipSync — rosto + ondas de fala (avatar falando). */
+export function IconLipsync(p: IconProps) {
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
+  return (
+    <svg {...baseProps(p, `url(#${id})`)}>
+      <defs>
+        <linearGradient id={id} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#e879f9" />
+          <stop offset="100%" stopColor="#a855f7" />
+        </linearGradient>
+      </defs>
+      <path d="M4 4h9a3 3 0 013 3v6a3 3 0 01-3 3H8l-4 3v-3.2A2.8 2.8 0 014 4z" opacity="0.55" />
+      <path d="M7 8.5c1.2 1.2 4.8 1.2 6 0" />
+      <path d="M7 12c1.2 1.2 4.8 1.2 6 0" opacity="0.7" />
+      <path d="M18 7c1.6 1.4 1.6 4.6 0 6" opacity="0.6" />
+      <path d="M20.5 5c2.4 2.2 2.4 6.8 0 9" opacity="0.4" />
+    </svg>
+  );
+}
+
 /** LTX-Video — mantido pro caso de admin querer acessar direto. */
 export function IconLtxVideo(p: IconProps) {
   const raw = useId();

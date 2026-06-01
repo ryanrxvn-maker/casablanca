@@ -1,7 +1,7 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { isPaidExpired } from '@/lib/plan-prices';
-import { isToolInMaintenance } from '@/lib/maintenance';
+import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -55,6 +55,7 @@ const PRO_ONLY_TOOLS = [
   '/tools/decupagem-copy',     // Smart Decup
   '/tools/clickup-pilot',
   '/tools/remover-elementos',  // Smart Remover (legenda + marca d'água)
+  '/tools/lipsync',            // Criar um avatar (lipsync) — Pro-only
 ];
 
 // Rotas exclusivamente do admin (mesmo beta não acessa)
@@ -265,9 +266,10 @@ export async function updateSession(request: NextRequest) {
     }
 
     // ─── MANUTENÇÃO ─────────────────────────────────────────────────
-    // Ferramentas em manutenção: bloqueio TOTAL pra todos menos admin.
-    // (Defesa real server-side — mesmo forçando a URL, não-admin cai fora.)
-    if (!isAdmin && isToolInMaintenance(pathname)) {
+    // Ferramentas em manutenção: bloqueio TOTAL pra todos menos admin
+    // e emails do allowlist (clientes de confiança, ex.: Elder).
+    // (Defesa real server-side — mesmo forçando a URL, não-liberado cai fora.)
+    if (!isAdmin && !canBypassMaintenance(user.email) && isToolInMaintenance(pathname)) {
       const url = request.nextUrl.clone();
       url.pathname = '/tools';
       url.searchParams.set('maintenance', '1');

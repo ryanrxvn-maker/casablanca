@@ -65,6 +65,7 @@ const ALL_TOOLS: Tool[] = [
     featuredHue: 'rgba(240,171,252,0.55)',
   },
   // ─── Lista comum ───
+  { key: 'lipsync', label: 'Criar um Avatar (LipSync)' },
   { key: 'downloader', label: 'Downloader' },
   { key: 'decupagem-audio', label: 'Decupagem de áudio' },
   { key: 'decupagem-video', label: 'Decupagem de vídeo' },

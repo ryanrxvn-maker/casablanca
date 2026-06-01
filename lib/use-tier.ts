@@ -38,6 +38,7 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/decupagem-copy',
     '/tools/clickup-pilot',
     '/tools/separador-audio',
+    '/tools/lipsync',
   ]),
   admin: new Set([]), // admin é tratado por bypass (allow tudo)
 };

@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useTier, tierAllowsTool, tierCanAutomate } from '@/lib/use-tier';
-import { isToolInMaintenance } from '@/lib/maintenance';
+import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
 import { MaintenanceBadge } from '@/components/MaintenanceBadge';
 
 /** 'blocked' = cliente sem acesso · 'admin' = admin acessa pra testar. */
@@ -22,6 +22,7 @@ import {
   IconDecupagem,
   IconDownloader,
   IconHeyGenAuto,
+  IconLipsync,
   IconNormalizador,
   IconRemoverElementos,
   IconSeparadorAudio,
@@ -149,6 +150,14 @@ const BASE: ToolEntry[] = [
 
 const AI: ToolEntry[] = [
   {
+    href: '/tools/lipsync',
+    label: 'Criar um Avatar',
+    description: 'Sobe o rosto, sobe o áudio e a boca fala o que você quiser. Lipsync realista.',
+    icon: <IconLipsync size={26} />,
+    hue: 'rgba(232, 121, 249, 0.42)',
+    badge: 'IA',
+  },
+  {
     href: '/tools/auto-broll',
     label: 'Auto B-roll',
     description: 'Gera B-rolls em massa pelo JSON.',
@@ -206,6 +215,7 @@ export function ToolsHub() {
   const lockedNeed = (params.get('need') as 'basic' | 'pro' | 'admin' | null) || null;
   const [isAdmin, setIsAdmin] = useState(false);
   const [firstName, setFirstName] = useState<string>('');
+  const [maintBypass, setMaintBypass] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -215,6 +225,7 @@ export function ToolsHub() {
         const { data: u } = await supabase.auth.getUser();
         const uid = u.user?.id;
         if (!uid) return;
+        if (!cancelled) setMaintBypass(canBypassMaintenance(u.user?.email));
         const { data } = await supabase
           .from('profiles')
           .select('is_admin, name')
@@ -237,9 +248,14 @@ export function ToolsHub() {
   const ai = AI.filter((it) => !it.adminOnly || isAdmin);
   const featured = FEATURED.filter((it) => !it.adminOnly || isAdmin);
 
-  // Manutenção: admin acessa (modo 'admin'), o resto é bloqueado.
-  const maintOf = (href: string): MaintMode =>
-    isToolInMaintenance(href) ? (isAdmin ? 'admin' : 'blocked') : undefined;
+  // Manutenção: admin acessa (modo 'admin'); emails liberados (ex.: Elder)
+  // acessam normal (undefined); o resto é bloqueado.
+  const maintOf = (href: string): MaintMode => {
+    if (!isToolInMaintenance(href)) return undefined;
+    if (isAdmin) return 'admin';
+    if (maintBypass) return undefined;
+    return 'blocked';
+  };
 
   const greeting = greetingFor(new Date(), firstName);
 
@@ -1076,7 +1092,7 @@ function FeaturedVideoCard({
 
   return (
     <div
-      className="featured-card-wrap fade-in-up relative z-0 hover:z-20"
+      className="dark-island featured-card-wrap fade-in-up relative z-0 hover:z-20"
       style={{ animationDelay: `${delay}ms` }}
       onMouseEnter={nonClickable ? undefined : play}
       onMouseLeave={stop}

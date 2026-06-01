@@ -16,6 +16,7 @@ import {
   IconDecupagem,
   IconDownloader,
   IconHeyGenAuto,
+  IconLipsync,
   IconNormalizador,
   IconRemoverElementos,
   IconSeparadorAudio,
@@ -42,6 +43,7 @@ const BASE_ITEMS: Item[] = [
 ];
 
 const AI_ITEMS: Item[] = [
+  { href: '/tools/lipsync', label: 'Criar um Avatar', icon: <IconLipsync size={20} />, hue: 'rgba(232,121,249,0.45)' },
   { href: '/tools/auto-broll', label: 'Auto B-roll', icon: <IconAutoBroll size={20} />, hue: 'rgba(240,171,252,0.45)' },
   { href: '/tools/troca-produto', label: 'Troca de produto', icon: <IconTrocaProduto size={20} />, hue: 'rgba(244,114,182,0.45)' },
   { href: '/tools/remover-elementos', label: 'Remover Legenda', icon: <IconRemoverElementos size={20} />, hue: 'rgba(244,114,182,0.45)' },
