@@ -1037,10 +1037,12 @@ function FeaturedVideoCard({
         ) : null}
       </div>
 
-      {/* PAINEL — abre ABAIXO do vídeo no hover (copy + botão animado) */}
+      {/* PAINEL — abre ABAIXO do vídeo no hover (copy + botão animado).
+          Fundo SEMPRE escuro (igual HeyGen) pra o texto branco ser legível
+          nos dois temas — no light o texto preto sumia. */}
       <div
         className="max-h-0 overflow-hidden opacity-0 transition-all duration-500 ease-out group-hover:max-h-[260px] group-hover:opacity-100"
-        style={{ background: 'rgb(var(--bg-softer))' }}
+        style={{ background: '#0b0b0f' }}
       >
         <div className="px-4 pb-4 pt-3.5">
           <p className="text-[12.5px] leading-relaxed text-white/80">
