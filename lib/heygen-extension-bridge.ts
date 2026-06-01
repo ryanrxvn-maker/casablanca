@@ -300,7 +300,7 @@ export function listMyHeyGenAvatars(): Promise<{
         avatars: [],
         groups: [],
         error:
-          'Extensao nao respondeu em 90s. Abre F12 na aba do DARKO LAB e cola os logs (procura "[DARKO LAB page]"). Tambem cola os logs da aba app.heygen.com.',
+          'A extensão Hey Auto não respondeu. Confirme que está logado no HeyGen (app.heygen.com), atualize a página e tente de novo.',
       });
     }, 90000);
   });

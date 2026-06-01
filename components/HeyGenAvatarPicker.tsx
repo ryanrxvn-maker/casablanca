@@ -281,13 +281,30 @@ export function HeyGenAvatarPicker({
           Lendo sua biblioteca via extensao...
         </div>
       ) : error ? (
-        <div className="mt-2 rounded-[10px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-[11px] text-red-300">
-          <div>⚠ {error}</div>
-          <div className="mt-2 text-[10px] text-red-300/70">
-            <strong>Pra debug:</strong> abre app.heygen.com numa aba, F12 →
-            Console, procura linhas{' '}
-            <code className="mono">[DARKO LAB]</code> e me cola.
-          </div>
+        <div className="mt-2 rounded-[10px] border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-[11px] text-amber-200">
+          {(() => {
+            const raw = String(error || '');
+            const looksAuth = /401|403|login|sign[\s-]?in|unauthor|session|logad|entrar/i.test(raw);
+            return looksAuth ? (
+              <div>
+                Você não está logado no HeyGen. Abra{' '}
+                <a
+                  href="https://app.heygen.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:text-amber-100"
+                >
+                  app.heygen.com
+                </a>
+                , entre na sua conta e clique em <strong>Recarregar biblioteca</strong>.
+              </div>
+            ) : (
+              <div>
+                Não consegui carregar sua biblioteca de avatares agora. Confirme que
+                está logado no HeyGen e clique em <strong>Recarregar biblioteca</strong>.
+              </div>
+            );
+          })()}
         </div>
       ) : (
         <div className="mt-2 text-[11px] text-text-muted">

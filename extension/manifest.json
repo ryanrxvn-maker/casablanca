@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Auto Edit · HeyGen",
+  "name": "Hey Auto",
   "version": "4.15.3",
   "description": "Gera seus avatares no HeyGen em segundo plano, sem você ficar no monitor.",
   "icons": {
@@ -61,7 +61,7 @@
     }
   ],
   "action": {
-    "default_title": "DARKO LAB HeyGen Auto",
+    "default_title": "Hey Auto",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",

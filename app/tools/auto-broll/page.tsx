@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { JobControlPanel } from '@/components/JobControlPanel';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { CancelButton } from '@/components/CancelButton';
 /**
@@ -572,9 +571,6 @@ function AutoBrollInner() {
       <AutoBrollHero />
       <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
       <div className="grid gap-5">
-        {/* Controle da fila Magnific (Retomar/Pausar/Debug) — funciona
-            mesmo sem ter vindo do ClickUp Pilot */}
-        <JobControlPanel scopes={['magnific']} />
         <ToolStep n={1} icon={<IconStepPlug size={18} />} title="Extensão Magnific" hint="Conecta à sua conta Premium+ — gera sem gastar crédito" hue={HUE}>
         {/* Extension status */}
         {extStatus.connected ? (

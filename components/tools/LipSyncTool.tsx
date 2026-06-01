@@ -7,6 +7,30 @@ import { LipsyncPreviewCard, type LipsyncTake } from '@/components/LipsyncPrevie
 
 const UPLOAD_BUCKET = 'lipsync-uploads';
 
+/** Limite rígido de upload do vídeo: 300MB (exatos 300MB passam). */
+const MAX_VIDEO_BYTES = 300 * 1024 * 1024;
+
+/** Ícone de import profissional (sem cor chamativa — herda currentColor cinza). */
+function ImportIcon({ size = 22 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M12 3v11" />
+      <path d="M8 10l4 4 4-4" />
+      <path d="M4 15v3a2 2 0 002 2h12a2 2 0 002-2v-3" />
+    </svg>
+  );
+}
+
 /** Mede a duração (s) de um arquivo de mídia via elemento HTML. */
 async function measureMediaDuration(file: File): Promise<number> {
   return new Promise((resolve) => {
@@ -179,6 +203,13 @@ export default function LipSyncTool() {
   /* ─── Video library ─────────────────────────────────────────── */
 
   async function addVideo(file: File) {
+    // Limite RÍGIDO de 300MB no upload (não deixa nem adicionar acima disso).
+    if (file.size > MAX_VIDEO_BYTES) {
+      setFormError(
+        `Vídeo de ${(file.size / 1024 / 1024).toFixed(0)}MB — o limite é 300MB. Usa um arquivo até 300MB.`,
+      );
+      return;
+    }
     const id = `v-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const url = URL.createObjectURL(file);
     let meta: VideoItem['meta'] | undefined;
@@ -387,7 +418,7 @@ export default function LipSyncTool() {
       setFormError('Não consegui ler a duração do áudio. Tenta outro arquivo (mp3/wav/mp4).');
       return;
     }
-    if (selected.file.size > 300 * 1024 * 1024) {
+    if (selected.file.size > MAX_VIDEO_BYTES) {
       setFormError('Vídeo acima de 300MB. Usa um arquivo até 300MB.');
       return;
     }
@@ -516,11 +547,8 @@ export default function LipSyncTool() {
             onClick={() => videoInputRef.current?.click()}
             className="group relative w-full overflow-hidden rounded-[14px] border-2 border-dashed border-line-strong bg-bg/40 aspect-[3/4] flex flex-col items-center justify-center gap-2 hover:border-fuchsia-400/55 hover:bg-fuchsia-400/[0.04] transition"
           >
-            <span
-              className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-black/40 text-[22px] transition-transform duration-500 group-hover:scale-110 group-hover:-rotate-6"
-              style={{ boxShadow: '0 0 22px -4px rgba(232,121,249,0.5)' }}
-            >
-              ＋
+            <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-black/40 text-text-muted transition-transform duration-500 group-hover:scale-110">
+              <ImportIcon />
             </span>
             <div className="text-center px-2">
               <div
@@ -530,6 +558,7 @@ export default function LipSyncTool() {
                 Subir vídeo
               </div>
               <div className="mono text-[9px] text-text-muted mt-0.5">arraste ou clique</div>
+              <div className="mono text-[9px] text-text-dim mt-0.5">até 300MB</div>
             </div>
             <input
               ref={videoInputRef}
@@ -586,7 +615,6 @@ export default function LipSyncTool() {
               >
                 Áudio
               </label>
-              <span className="mono text-[9px] text-text-dim">aceita mp4 — usa só o áudio</span>
             </div>
             <input
               ref={audioInputRef}
@@ -639,8 +667,6 @@ export default function LipSyncTool() {
             on={cleanAudioOn}
             onToggle={() => setCleanAudioOn((v) => !v)}
             label="Limpar áudio"
-            hintOn="ligado · voz nivelada"
-            hintOff="desligado · áudio original"
           />
 
           {/* WARNINGS - só block/warn (info é ruído, removido) */}
@@ -878,13 +904,13 @@ function PreviewStage({ selected, flash }: { selected: VideoItem | null; flash: 
       {!selected ? (
         <div className="aspect-[3/4] md:aspect-[4/5] flex flex-col items-center justify-center gap-4 px-6 text-center">
           <div
-            className="flex h-24 w-24 items-center justify-center rounded-3xl border border-white/8 bg-black/40 text-[42px]"
+            className="flex h-24 w-24 items-center justify-center rounded-3xl border border-white/8 bg-black/40 text-text-muted"
             style={{
               boxShadow: '0 0 36px -6px rgba(232,121,249,0.5), inset 0 1px 0 rgba(255,255,255,0.08)',
               animation: 'emptyPulse 3.5s ease-in-out infinite',
             }}
           >
-            🎬
+            <ImportIcon size={40} />
           </div>
           <div>
             <h3
@@ -957,9 +983,10 @@ function Toggle3D({
   on: boolean;
   onToggle: () => void;
   label: string;
-  hintOn: string;
-  hintOff: string;
+  hintOn?: string;
+  hintOff?: string;
 }) {
+  const hint = on ? hintOn : hintOff;
   return (
     <div className="flex items-center justify-between gap-3 rounded-[14px] border border-line/60 bg-bg/30 px-3.5 py-2.5">
       <div className="min-w-0">
@@ -969,7 +996,7 @@ function Toggle3D({
         >
           {label}
         </div>
-        <div className="mono text-[9px] text-text-dim mt-0.5">{on ? hintOn : hintOff}</div>
+        {hint ? <div className="mono text-[9px] text-text-dim mt-0.5">{hint}</div> : null}
       </div>
 
       <button

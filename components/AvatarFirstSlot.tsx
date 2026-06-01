@@ -208,9 +208,7 @@ export function AvatarFirstSlot({
           )}
 
           <div className="mono text-[9px] uppercase tracking-widest text-text-muted">
-            ⚠ BETA — consome 1 slot Photo Avatar (5 total). Endpoints HeyGen
-            ainda nao 100% verificados. Se falhar, F12 console + me cola
-            logs [DARKO LAB photo avatar].
+            ⚠ BETA — consome 1 slot Photo Avatar (5 total).
           </div>
         </div>
       ) : null}

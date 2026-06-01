@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ToolHero3D } from '@/components/ToolHero3D';
 import { DocImport3DButton } from '@/components/DocImport3DButton';
 import { Toggle3DIcon } from '@/components/Toggle3DIcon';
-import { JobControlPanel } from '@/components/JobControlPanel';
 import { CancelButton } from '@/components/CancelButton';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { useToolState } from '@/components/ToolsStateProvider';
@@ -737,7 +736,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
   async function run() {
     if (!extStatus.connected) {
       setError(
-        'Extensao DARKO LAB nao detectada. Instale primeiro (instrucoes abaixo).',
+        'Extensão Hey Auto não detectada. Instale primeiro (instrucoes abaixo).',
       );
       return;
     }
@@ -755,7 +754,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     const detected = ping.body?._extVersion as string | undefined;
     if (!detected) {
       setError(
-        `Extensao com proxy desatualizado (sem _extVersion). RECARREGUE a extensao em chrome://extensions (botao reload no card DARKO LAB) e de refresh na aba do HeyGen. Versao requerida: ${REQUIRED_EXT_VERSION}.`,
+        `Extensao com proxy desatualizado (sem _extVersion). RECARREGUE a extensao em chrome://extensions (botão reload no card Hey Auto) e de refresh na aba do HeyGen. Versao requerida: ${REQUIRED_EXT_VERSION}.`,
       );
       setStage(null);
       return;
@@ -1583,7 +1582,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     const item = queue.find((q) => q.id === id);
     if (!item) return;
     if (!extStatus.connected) {
-      setError('Extensao DARKO LAB nao detectada.');
+      setError('Extensão Hey Auto não detectada.');
       return;
     }
     queueCancelRef.current = false;
@@ -1610,7 +1609,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
   /** Processa a fila inteira em sequencia (1 disparo por vez). */
   async function processQueue() {
     if (!extStatus.connected) {
-      setError('Extensao DARKO LAB nao detectada. Instale primeiro.');
+      setError('Extensão Hey Auto não detectada. Instale primeiro.');
       return;
     }
     const snapshot = queue.filter((q) => q.status !== 'done');
@@ -1674,11 +1673,6 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
           ]}
         />
         <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
-          {/* Controle de jobs HeyGen (Retomar/Pausar/Debug) — funciona
-              mesmo sem ter vindo do ClickUp Pilot */}
-          <div className="mb-5">
-            <JobControlPanel scopes={['heygen']} />
-          </div>
           {/* Status da extensao */}
           {!extLoading ? (
             extStatus.connected ? (
@@ -1689,7 +1683,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                     <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,232,124,0.9)]" />
                   </span>
                   <span className="text-lime">
-                    Extensao DARKO LAB v{extStatus.version}
+                    Extensão Hey Auto v1.0
                   </span>
                   {sessionTest.state === 'ok' ? (
                     <span className="mono ml-2 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
@@ -1717,7 +1711,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                   <span className="text-yellow-300">⚠</span>
                   <div className="flex-1 text-xs text-yellow-300">
                     <strong className="text-yellow-300">
-                      Extensao DARKO LAB nao instalada
+                      Extensão Hey Auto não instalada
                     </strong>
                     . Voce precisa dela pra gerar avatares (a automacao usa sua
                     conta HeyGen logada, sem consumir API).
@@ -1894,18 +1888,20 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                         ) : null}
                       </div>
                       {mode === 'copy' ? (
-                        <textarea
-                          value={h.text}
-                          onChange={(e) =>
-                            setStructuredHooks((prev) =>
-                              prev.map((p, i) => (i === hi ? { ...p, text: e.target.value } : p)),
-                            )
-                          }
-                          placeholder={`Texto do HOOK ${hi + 1} (uma frase tipica de chamariz, ~15-25s)`}
-                          rows={3}
-                          className="input-field resize-y font-mono text-sm"
-                          disabled={processing}
-                        />
+                        <div className="dark-island overflow-hidden rounded-[12px] border border-line bg-black/60 transition-colors focus-within:border-fuchsia-400/50">
+                          <textarea
+                            value={h.text}
+                            onChange={(e) =>
+                              setStructuredHooks((prev) =>
+                                prev.map((p, i) => (i === hi ? { ...p, text: e.target.value } : p)),
+                              )
+                            }
+                            placeholder={`Texto do HOOK ${hi + 1} (uma frase tipica de chamariz, ~15-25s)`}
+                            rows={3}
+                            className="block w-full resize-y bg-transparent px-3.5 py-2.5 font-mono text-[12px] leading-relaxed text-white placeholder:text-text-dim focus:outline-none disabled:opacity-50"
+                            disabled={processing}
+                          />
+                        </div>
                       ) : (
                         <div className="grid gap-2">
                           <input
@@ -1965,14 +1961,16 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                     <div className="rounded-[10px] border border-fuchsia-500/30 bg-fuchsia-500/5 p-3">
                       <div className="mono mb-2 text-[10px] uppercase tracking-widest text-fuchsia-200">BODY</div>
                       {mode === 'copy' ? (
-                        <textarea
-                          value={structuredBody.text}
-                          onChange={(e) => setStructuredBody((p) => ({ ...p, text: e.target.value }))}
-                          placeholder="Texto do BODY completo. Sera splitado em takes de ~20s sem cortar frase."
-                          rows={6}
-                          className="input-field resize-y font-mono text-sm"
-                          disabled={processing}
-                        />
+                        <div className="dark-island overflow-hidden rounded-[12px] border border-line bg-black/60 transition-colors focus-within:border-fuchsia-400/50">
+                          <textarea
+                            value={structuredBody.text}
+                            onChange={(e) => setStructuredBody((p) => ({ ...p, text: e.target.value }))}
+                            placeholder="Texto do BODY completo. Sera splitado em takes de ~20s sem cortar frase."
+                            rows={6}
+                            className="block w-full resize-y bg-transparent px-3.5 py-2.5 font-mono text-[12px] leading-relaxed text-white placeholder:text-text-dim focus:outline-none disabled:opacity-50"
+                            disabled={processing}
+                          />
+                        </div>
                       ) : (
                         <div className="grid gap-2">
                           <input
@@ -2097,10 +2095,6 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                     </div>
                   ) : null}
 
-                  <div className="mono rounded-[10px] border border-lime/30 bg-lime/5 px-3 py-2 text-[11px] text-lime">
-                    📦 Output: 3 ZIPs (takes individuais + montados HOOK[N]+BODY decupados{camuflagemMode ? ' + camuflados' : ''}).
-                    Cada hook vira 1 video final {structuredBody.enabled ? '(com o body anexado)' : '(sem body)'}.
-                  </div>
                 </div>
                 {forcedParts && forcedParts.length > 0 ? (
                   <div className="mt-3 flex items-center justify-between rounded-[10px] border border-fuchsia-500/40 bg-fuchsia-500/10 px-3 py-2 text-[11px]">
@@ -2132,11 +2126,6 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                   icon={<span className="text-base">✂️</span>}
                 />
               </div>
-              <p className="mb-3 text-[11px] text-text-muted">
-                {decupagemEnabled
-                  ? '✂️ Decupagem LIGADA: o ZIP montado sai com os cortes (silêncios removidos).'
-                  : '✂️ Decupagem DESLIGADA: o ZIP montado sai com HOOK+BODY colados crus, sem cortar nada.'}
-              </p>
               <Toggle3D
                 on={camuflagemMode}
                 onChange={setCamuflagemMode}
@@ -2340,9 +2329,9 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                 <div>
                   <h2 className="label-field !mb-1">Fila de disparos</h2>
                   <p className="text-[11px] text-text-muted">
-                    Empilhe vários ADs e dispare tudo em sequência — igual ao ClickUp Pilot,
-                    mas sem precisar do ClickUp. Importe a copy de um Google Docs (link ou
-                    arquivo) e ele identifica HOOK / BODY / avatar sozinho.
+                    Importe sua copy de um Google Docs (link ou arquivo) e dispare
+                    todos os lipsyncs no HeyGen de uma vez — ele identifica HOOK /
+                    BODY / avatar sozinho.
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">

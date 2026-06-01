@@ -60,7 +60,7 @@ const FEATURED: ToolEntry[] = [
   {
     href: '/tools/lipsync',
     label: 'Criar um avatar',
-    description: 'Sobe o rosto, sobe o áudio — e a boca fala exatamente o que você quiser. Avatar realista, lipsync perfeito, em minutos. Ilimitado.',
+    description: 'Sobe o rosto, sobe o áudio e o lipsync sai perfeito — avatar realista falando exatamente o que você quiser, em minutos. Ilimitado.',
     icon: <IconHeyGenAuto size={28} />,
     hue: 'rgba(232, 121, 249, 0.45)',
     badge: 'IA',
@@ -152,7 +152,7 @@ const AI: ToolEntry[] = [
   {
     href: '/tools/lipsync',
     label: 'Criar um Avatar',
-    description: 'Sobe o rosto, sobe o áudio e a boca fala o que você quiser. Lipsync realista.',
+    description: 'Sobe o rosto e o áudio: lipsync realista do avatar falando o que você quiser.',
     icon: <IconLipsync size={26} />,
     hue: 'rgba(232, 121, 249, 0.42)',
     badge: 'IA',

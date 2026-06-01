@@ -110,33 +110,7 @@ export function LipSyncHero3D() {
       <div className="relative z-10 grid items-center gap-10 md:grid-cols-[1fr_360px] lg:grid-cols-[1fr_420px]">
         {/* LADO ESQUERDO — Copy */}
         <div className="flex flex-col gap-5">
-          {/* EYEBROWS */}
-          <div className="flex flex-wrap items-center gap-2">
-            <span
-              className="mono inline-flex items-center gap-1.5 rounded-full border border-fuchsia-400/45 bg-fuchsia-400/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.22em] text-fuchsia-300 shadow-[0_0_22px_-4px_rgba(232,121,249,0.6)]"
-              style={{ fontFamily: 'var(--font-tech)' }}
-            >
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-fuchsia-300 opacity-60" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-fuchsia-300" />
-              </span>
-              ULTRA · ADMIN LAB
-            </span>
-            <span
-              className="mono inline-flex items-center gap-1 rounded-full border border-violet/40 bg-violet/10 px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.22em] text-violet"
-              style={{ fontFamily: 'var(--font-tech)' }}
-            >
-              ◆ DUAL ENGINE · V1 / V2
-            </span>
-            <span
-              className="mono inline-flex items-center gap-1 rounded-full border border-cyan-400/35 bg-cyan-400/10 px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.22em] text-cyan-300"
-              style={{ fontFamily: 'var(--font-tech)' }}
-            >
-              ALTA DEFINIÇÃO · ZERO TRAVA
-            </span>
-          </div>
-
-          {/* TITULO GIGANTE */}
+          {/* TITULO GIGANTE — nome da ferramenta */}
           <div>
             <h1
               className="text-[44px] font-black leading-[0.92] tracking-tight md:text-[68px] lg:text-[78px]"
@@ -152,7 +126,7 @@ export function LipSyncHero3D() {
                 letterSpacing: '-0.035em',
               }}
             >
-              A boca fala
+              Lipsync
               <br />
               <span style={{ opacity: 0.9 }}>o que você quiser.</span>
             </h1>
@@ -353,20 +327,6 @@ function CyborgCarousel({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
               <div aria-hidden className="absolute inset-0 rounded-full" style={{ boxShadow: 'inset 0 -40px 60px -20px rgba(0,0,0,0.55)' }} />
             </div>
 
-            {/* badge CYBORG — ao lado do círculo (igual o FALANDO de antes) */}
-            <div className="absolute z-30 pointer-events-none" style={{ left: '-8%', top: '38%' }}>
-              <div
-                className="mono inline-flex items-center gap-1.5 rounded-full border border-cyan-400/55 bg-black/65 px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.18em] text-cyan-300 backdrop-blur-md"
-                style={{ fontFamily: 'var(--font-tech)', animation: 'ccBadge 1.4s ease-in-out infinite', boxShadow: '0 0 18px -4px rgba(103,232,249,0.7)' }}
-              >
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-cyan-300 opacity-75" />
-                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-cyan-300" />
-                </span>
-                FALANDO
-              </div>
-            </div>
-
             {/* audio bars — à direita */}
             <div className="absolute z-30 pointer-events-none flex items-end gap-[2px]" style={{ right: '-14%', top: '60%', height: 28 }}>
               {Array.from({ length: 5 }).map((_, i) => (
@@ -452,17 +412,6 @@ function CyborgCarousel({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
             </g>
           </svg>
         </div>
-      </div>
-
-      {/* Badge topo */}
-      <div className="pointer-events-none absolute left-1/2 top-1 -translate-x-1/2 z-30">
-        <span
-          className="mono inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-black/50 px-3 py-1 text-[9.5px] font-bold uppercase tracking-[0.18em] text-white/85 backdrop-blur"
-          style={{ fontFamily: 'var(--font-tech)' }}
-        >
-          <span className="h-1.5 w-1.5 rounded-full bg-lime" style={{ animation: 'ccBlink 1.3s ease-in-out infinite' }} />
-          AO VIVO
-        </span>
       </div>
 
       {/* Índice 1·2·3 + hint */}
