@@ -265,18 +265,6 @@ export async function updateSession(request: NextRequest) {
       return redir(url);
     }
 
-    // ─── MANUTENÇÃO ─────────────────────────────────────────────────
-    // Ferramentas em manutenção: bloqueio TOTAL pra todos menos admin
-    // e emails do allowlist (clientes de confiança, ex.: Elder).
-    // (Defesa real server-side — mesmo forçando a URL, não-liberado cai fora.)
-    if (!isAdmin && !canBypassMaintenance(user.email) && isToolInMaintenance(pathname)) {
-      const url = request.nextUrl.clone();
-      url.pathname = '/tools';
-      url.searchParams.set('maintenance', '1');
-      url.searchParams.set('from', pathname);
-      return redir(url);
-    }
-
     // Helper local: monta o redirect pra /tools com info de qual rota
     // foi bloqueada + qual tier era necessário (UX no LockedFlash).
     function lockedRedirect(needTier: 'basic' | 'pro' | 'admin') {
@@ -285,6 +273,16 @@ export async function updateSession(request: NextRequest) {
       url.searchParams.set('locked', '1');
       url.searchParams.set('from', pathname);
       url.searchParams.set('need', needTier);
+      return redir(url);
+    }
+
+    // Tentou abrir ferramenta Pro sem ser Pro → manda DIRETO pra /planos
+    // pra fazer upgrade (sem furo: o gating é server-side, aqui).
+    function planosRedirect() {
+      const url = request.nextUrl.clone();
+      url.pathname = '/planos';
+      url.searchParams.set('upgrade', 'pro');
+      url.searchParams.set('from', pathname);
       return redir(url);
     }
 
@@ -313,9 +311,9 @@ export async function updateSession(request: NextRequest) {
       );
 
       if (isTool && !isAllowedTool) {
-        // Free tentando acessar tool → se é Pro-only mostra "Pro",
-        // senão "Basic" (basic libera quase tudo)
-        return lockedRedirect(isProOnly ? 'pro' : 'basic');
+        // Free tentando acessar tool Pro-only → vai DIRETO pra /planos.
+        // Tool de outro tier → flash de upgrade pra Basic.
+        return isProOnly ? planosRedirect() : lockedRedirect('basic');
       }
       if (!isHubExact && !isAllowedPrefix && !isExtraOk) {
         return lockedRedirect('basic');
@@ -328,8 +326,20 @@ export async function updateSession(request: NextRequest) {
         (p) => pathname === p || pathname.startsWith(p + '/'),
       );
       if (isProOnly) {
-        return lockedRedirect('pro');
+        return planosRedirect();
       }
+    }
+
+    // ─── MANUTENÇÃO (depois do gate de tier) ─────────────────────────
+    // Quem chega aqui numa ferramenta em manutenção é Pro/Admin. Bloqueia
+    // TODOS menos admin e emails do allowlist (clientes de confiança, ex.:
+    // Elder). Free/Basic já foram pra /planos acima. Defesa real server-side.
+    if (!isAdmin && !canBypassMaintenance(user.email) && isToolInMaintenance(pathname)) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/tools';
+      url.searchParams.set('maintenance', '1');
+      url.searchParams.set('from', pathname);
+      return redir(url);
     }
   }
 

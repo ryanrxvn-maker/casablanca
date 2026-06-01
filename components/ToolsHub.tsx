@@ -309,8 +309,6 @@ export function ToolsHub() {
                 key={it.href}
                 entry={it}
                 delay={140 + i * 60}
-                locked={!tierAllowsTool(tier, it.href)}
-                maint={maintOf(it.href)}
               />
             ) : (
               <FeaturedCard
@@ -945,17 +943,11 @@ function Sparkle({ className, delay = 0 }: { className?: string; delay?: number 
 function FeaturedVideoCard({
   entry,
   delay,
-  locked = false,
-  maint,
 }: {
   entry: ToolEntry;
   delay: number;
-  locked?: boolean;
-  maint?: MaintMode;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const isBlocked = maint === 'blocked';
-  const nonClickable = locked || isBlocked;
 
   function play() {
     const v = videoRef.current;
@@ -982,7 +974,8 @@ function FeaturedVideoCard({
           className="absolute inset-0 -z-10"
           style={{ background: `radial-gradient(130% 80% at 50% 8%, ${entry.hue}, transparent 60%), linear-gradient(180deg, rgb(var(--bg-softer)), #050507)` }}
         />
-        {/* VÍDEO — roda no hover. Ken Burns sutil. */}
+        {/* VÍDEO — roda no hover. SEM zoom/scale (era o que tremia); fica
+            firme e em qualidade cheia. GPU layer pra não bruxulear. */}
         <video
           ref={videoRef}
           src={entry.video}
@@ -991,16 +984,19 @@ function FeaturedVideoCard({
           loop
           playsInline
           preload="auto"
-          className="absolute inset-0 h-full w-full object-cover transition-transform duration-[1400ms] ease-out group-hover:scale-[1.05]"
+          className="absolute inset-0 h-full w-full object-cover"
+          style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden', willChange: 'opacity' }}
         />
-        {/* THUMB 4K — imagem fica como capa o tempo todo; some no hover (revela o vídeo) */}
+        {/* THUMB 4K — imagem fica como capa o tempo todo; some no hover (revela
+            o vídeo). Só fade de opacidade (sem scale) → zero tremor. */}
         {entry.poster ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={entry.poster}
             alt=""
             aria-hidden
-            className="absolute inset-0 h-full w-full object-cover transition-all duration-500 ease-out group-hover:scale-[1.05] group-hover:opacity-0"
+            className="absolute inset-0 h-full w-full object-cover opacity-100 transition-opacity duration-500 ease-out group-hover:opacity-0"
+            style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden', willChange: 'opacity' }}
           />
         ) : null}
         {/* Máscara escura embaixo (legibilidade do título sobre o vídeo) */}
@@ -1036,21 +1032,9 @@ function FeaturedVideoCard({
           {entry.label}
         </h3>
 
-        {/* Cadeado se bloqueado */}
-        {locked ? (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center backdrop-blur-[2px]"
-            style={{ background: 'rgba(7,7,8,0.5)' }}
-          >
-            <span
-              className="flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-black/60 backdrop-blur-md"
-              style={{ boxShadow: '0 0 24px -6px rgba(167,139,250,0.55)' }}
-            >
-              <LockIcon />
-            </span>
-          </div>
-        ) : null}
+        {/* SEM cadeado/bloqueio visual nos destaques: o card é sempre bonito e
+            clicável pra TODOS. O gating real é server-side (middleware):
+            Pro abre a ferramenta; Free/Basic caem direto em /planos. */}
       </div>
 
       {/* PAINEL — abre ABAIXO do vídeo no hover (copy + botão animado).
@@ -1068,7 +1052,7 @@ function FeaturedVideoCard({
             className="mt-3.5 inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2.5 text-[11px] font-bold uppercase tracking-[0.18em] text-white transition-all duration-300 group-hover:border-violet/45 group-hover:bg-white/[0.12] group-hover:shadow-[0_0_24px_-6px_rgba(167,139,250,0.7)]"
             style={{ fontFamily: 'var(--font-tech)' }}
           >
-            {isBlocked ? 'Em manutenção' : locked ? 'Bloqueado' : 'Abrir ferramenta'}
+            Abrir ferramenta
             <span className="transition-transform duration-300 group-hover:translate-x-1.5">→</span>
           </span>
         </div>
@@ -1094,26 +1078,17 @@ function FeaturedVideoCard({
     <div
       className="dark-island featured-card-wrap fade-in-up relative z-0 hover:z-20"
       style={{ animationDelay: `${delay}ms` }}
-      onMouseEnter={nonClickable ? undefined : play}
+      onMouseEnter={play}
       onMouseLeave={stop}
     >
-      {nonClickable ? (
-        <div
-          className="group relative block cursor-not-allowed overflow-hidden rounded-[20px] border border-line/70"
-          aria-disabled
-          title={isBlocked ? 'Em manutenção' : 'Disponível só pra contas Beta'}
-        >
-          {inner}
-        </div>
-      ) : (
-        <Link
-          href={entry.href}
-          className="group relative block overflow-hidden rounded-[20px] border border-line/70 transition-all duration-300 hover:border-violet/45 hover:shadow-[0_30px_70px_-26px_rgba(0,0,0,0.95)]"
-        >
-          {inner}
-        </Link>
-      )}
-      {maint ? <MaintenanceBadge mode={maint} className="right-4 top-4" /> : null}
+      {/* Sempre clicável pra TODOS — sem estado visual de bloqueio. O acesso
+          real é decidido server-side no clique (Pro abre; Free/Basic → /planos). */}
+      <Link
+        href={entry.href}
+        className="group relative block overflow-hidden rounded-[20px] border border-line/70 transition-all duration-300 hover:border-violet/45 hover:shadow-[0_30px_70px_-26px_rgba(0,0,0,0.95)]"
+      >
+        {inner}
+      </Link>
     </div>
   );
 }

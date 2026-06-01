@@ -20,7 +20,8 @@
  */
 
 import { NextResponse } from 'next/server';
-import { requireAdmin, serviceClient } from '@/app/api/admin/_helpers';
+import { serviceClient } from '@/app/api/admin/_helpers';
+import { requireToolAccess } from '@/lib/require-tier';
 import {
   generateLipsync,
   isDreamFaceConfigured,
@@ -95,7 +96,7 @@ async function download(
 }
 
 export async function POST(req: Request) {
-  const guard = await requireAdmin();
+  const guard = await requireToolAccess('/tools/lipsync', 'pro');
   if (!guard.ok) return guard.response;
 
   if (!isDreamFaceConfigured()) {

@@ -37,7 +37,13 @@ function parseEmails(v?: string | null): string[] {
     .filter(Boolean);
 }
 
+// Clientes de confiança fixos (sempre liberados). Pode somar mais via env.
+const MAINTENANCE_BYPASS_BASE = [
+  'elderemanoel.13@gmail.com', // Elder Manoel — cliente PRO de confiança
+];
+
 const MAINTENANCE_BYPASS_EMAILS: ReadonlySet<string> = new Set<string>([
+  ...parseEmails(MAINTENANCE_BYPASS_BASE.join(',')),
   ...parseEmails(process.env.NEXT_PUBLIC_MAINTENANCE_BYPASS_EMAILS),
   ...parseEmails(process.env.MAINTENANCE_BYPASS_EMAILS),
 ]);

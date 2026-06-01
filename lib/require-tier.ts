@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { isPaidExpired } from '@/lib/plan-prices';
+import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
 
 /**
  * Guard de tier server-side pra route handlers (/api/*).
@@ -28,7 +29,7 @@ const NEED_LABEL: Record<Tier, string> = {
 };
 
 export type TierGate =
-  | { ok: true; userId: string; tier: Tier; isAdmin: boolean }
+  | { ok: true; userId: string; email: string | null; tier: Tier; isAdmin: boolean }
   | { ok: false; response: NextResponse };
 
 export async function requireTier(min: Tier): Promise<TierGate> {
@@ -99,7 +100,7 @@ export async function requireTier(min: Tier): Promise<TierGate> {
       };
     }
 
-    return { ok: true, userId: user.id, tier, isAdmin };
+    return { ok: true, userId: user.id, email: user.email ?? null, tier, isAdmin };
   } catch (e) {
     return {
       ok: false,
@@ -112,4 +113,39 @@ export async function requireTier(min: Tier): Promise<TierGate> {
       ),
     };
   }
+}
+
+/**
+ * Gate de acesso a uma ferramenta gated POR TIER + MANUTENÇÃO, server-side
+ * (sem furo: vale pra páginas E pra rotas /api). Use no início dos handlers.
+ *
+ *   const gate = await requireToolAccess('/tools/lipsync', 'pro');
+ *   if (!gate.ok) return gate.response;
+ *   // gate.userId, gate.email, gate.tier, gate.isAdmin disponíveis
+ *
+ * Regras:
+ *   1. Exige o tier mínimo (Free/Basic em tool Pro → 403 "faça upgrade").
+ *   2. Se a tool está em manutenção: só admin + allowlist (ex.: Elder) passam;
+ *      o resto recebe 503.
+ */
+export async function requireToolAccess(
+  toolPath: string,
+  min: Tier,
+): Promise<TierGate> {
+  const gate = await requireTier(min);
+  if (!gate.ok) return gate;
+  if (
+    isToolInMaintenance(toolPath) &&
+    !gate.isAdmin &&
+    !canBypassMaintenance(gate.email)
+  ) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: 'Ferramenta em manutenção. Acesso liberado em breve.', code: 'maintenance' },
+        { status: 503 },
+      ),
+    };
+  }
+  return gate;
 }
