@@ -950,7 +950,7 @@ function FeaturedVideoCard({
   }
 
   const inner = (
-    <div className="relative aspect-[4/5] w-full overflow-hidden rounded-[20px]">
+    <div className="relative aspect-video w-full overflow-hidden rounded-[20px]">
       {/* Fallback/poster — aparece antes do vídeo (ou se não houver) */}
       <div
         aria-hidden
@@ -1006,18 +1006,18 @@ function FeaturedVideoCard({
       </div>
 
       {/* Embaixo: título sempre; copy + CTA aparecem no hover */}
-      <div className="absolute inset-x-0 bottom-0 z-10 p-5">
+      <div className="absolute inset-x-0 bottom-0 z-10 p-4 sm:p-5">
         <h3
-          className="text-[20px] font-bold leading-tight tracking-tight text-white transition-transform duration-300 group-hover:-translate-y-0.5"
+          className="text-[18px] font-bold leading-tight tracking-tight text-white transition-transform duration-300 group-hover:-translate-y-0.5"
           style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.015em' }}
         >
           {entry.label}
         </h3>
-        <p className="mt-2 max-h-0 overflow-hidden text-[13px] leading-relaxed text-white/85 opacity-0 transition-all duration-500 group-hover:max-h-[160px] group-hover:opacity-100">
+        <p className="mt-1.5 max-h-0 overflow-hidden text-[12.5px] leading-relaxed text-white/85 opacity-0 transition-all duration-500 group-hover:max-h-[160px] group-hover:opacity-100">
           {entry.description}
         </p>
         <div
-          className="mt-3 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.16em] text-white backdrop-blur-md transition-all duration-300 group-hover:border-white/30 group-hover:bg-white/[0.18]"
+          className="mt-2.5 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.16em] text-white backdrop-blur-md transition-all duration-300 group-hover:border-white/30 group-hover:bg-white/[0.18]"
           style={{ fontFamily: 'var(--font-tech)' }}
         >
           {isBlocked ? 'Em manutenção' : locked ? 'Bloqueado' : 'Abrir'}
