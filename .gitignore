@@ -46,3 +46,4 @@ engine/subtitle-remover-local/propainter/weights/*.pth
 # STTN model — baixado em runtime
 engine/subtitle-remover-pkg/sttn/infer_model.pth
 engine/subtitle-remover-local/sttn/infer_model.pth
+df_test_audio.mp3
