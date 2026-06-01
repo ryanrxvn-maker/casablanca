@@ -49,6 +49,8 @@ type ToolEntry = {
   adminOnly?: boolean;
   /** Vídeo do card (roda só no hover). Em /public/cards/. */
   video?: string;
+  /** Imagem 4K que fica como THUMB até o hover. Em /public/cards/. */
+  poster?: string;
 };
 
 // DESTAQUES — 3 carros-chefe em cards de VÍDEO (estilo HeyGen): o vídeo só
@@ -62,6 +64,7 @@ const FEATURED: ToolEntry[] = [
     hue: 'rgba(232, 121, 249, 0.45)',
     badge: 'IA',
     video: '/cards/criar-avatar.mp4',
+    poster: '/cards/criar-avatar.jpg',
   },
   {
     href: '/tools/clickup-pilot',
@@ -71,6 +74,7 @@ const FEATURED: ToolEntry[] = [
     hue: 'rgba(167, 139, 250, 0.45)',
     badge: 'IA',
     video: '/cards/fluxo-automatico.mp4',
+    poster: '/cards/fluxo-automatico.jpg',
   },
   {
     href: '/tools/auto-broll',
@@ -80,6 +84,7 @@ const FEATURED: ToolEntry[] = [
     hue: 'rgba(103, 232, 249, 0.45)',
     badge: 'IA',
     video: '/cards/b-rolls.mp4',
+    poster: '/cards/b-rolls.jpg',
   },
 ];
 
@@ -281,7 +286,7 @@ export function ToolsHub() {
             </p>
           </div>
         </div>
-        <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:gap-5 xl:-mx-6 2xl:-mx-10">
           {featured.map((it, i) =>
             it.video ? (
               <FeaturedVideoCard
@@ -961,16 +966,27 @@ function FeaturedVideoCard({
           className="absolute inset-0 -z-10"
           style={{ background: `radial-gradient(130% 80% at 50% 8%, ${entry.hue}, transparent 60%), linear-gradient(180deg, rgb(var(--bg-softer)), #050507)` }}
         />
-        {/* VÍDEO — sempre visível (frame 0 = thumb). Ken Burns sutil no hover. */}
+        {/* VÍDEO — roda no hover. Ken Burns sutil. */}
         <video
           ref={videoRef}
           src={entry.video}
+          poster={entry.poster}
           muted
           loop
           playsInline
           preload="auto"
           className="absolute inset-0 h-full w-full object-cover transition-transform duration-[1400ms] ease-out group-hover:scale-[1.05]"
         />
+        {/* THUMB 4K — imagem fica como capa o tempo todo; some no hover (revela o vídeo) */}
+        {entry.poster ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={entry.poster}
+            alt=""
+            aria-hidden
+            className="absolute inset-0 h-full w-full object-cover transition-all duration-500 ease-out group-hover:scale-[1.05] group-hover:opacity-0"
+          />
+        ) : null}
         {/* Máscara escura embaixo (legibilidade do título sobre o vídeo) */}
         <div
           aria-hidden
