@@ -281,7 +281,7 @@ export function ToolsHub() {
             </p>
           </div>
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {featured.map((it, i) =>
             it.video ? (
               <FeaturedVideoCard
@@ -946,34 +946,101 @@ function FeaturedVideoCard({
   }
   function stop() {
     const v = videoRef.current;
-    if (v) { try { v.pause(); } catch { /* ignore */ } }
+    if (v) {
+      try { v.pause(); v.currentTime = 0; } catch { /* ignore */ }
+    }
   }
 
   const inner = (
-    <div className="relative aspect-video w-full overflow-hidden rounded-[20px]">
-      {/* Fallback/poster — aparece antes do vídeo (ou se não houver) */}
+    <>
+      {/* ÁREA DO VÍDEO — primeiro frame fica como THUMB o tempo todo; dá play no hover */}
+      <div className="relative aspect-video w-full overflow-hidden">
+        {/* Fallback (só aparece se o vídeo não carregar) */}
+        <div
+          aria-hidden
+          className="absolute inset-0 -z-10"
+          style={{ background: `radial-gradient(130% 80% at 50% 8%, ${entry.hue}, transparent 60%), linear-gradient(180deg, rgb(var(--bg-softer)), #050507)` }}
+        />
+        {/* VÍDEO — sempre visível (frame 0 = thumb). Ken Burns sutil no hover. */}
+        <video
+          ref={videoRef}
+          src={entry.video}
+          muted
+          loop
+          playsInline
+          preload="auto"
+          className="absolute inset-0 h-full w-full object-cover transition-transform duration-[1400ms] ease-out group-hover:scale-[1.05]"
+        />
+        {/* Máscara escura embaixo (legibilidade do título sobre o vídeo) */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{ background: 'linear-gradient(to top, rgba(4,4,6,0.88) 2%, rgba(4,4,6,0.18) 38%, transparent 62%)' }}
+        />
+
+        {/* Ícone + badge no topo */}
+        <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between p-3.5">
+          <span
+            className="flex h-10 w-10 items-center justify-center rounded-[12px] border border-white/12 bg-black/45 backdrop-blur-md transition-transform duration-500 group-hover:scale-110"
+            style={{ boxShadow: `0 0 26px -4px ${entry.hue}` }}
+          >
+            {entry.icon}
+          </span>
+          {entry.badge ? (
+            <span
+              className="rounded-full border border-violet/35 bg-black/45 px-2.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.20em] text-violet backdrop-blur-md"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              {entry.badge}
+            </span>
+          ) : null}
+        </div>
+
+        {/* Título — sempre sobre o vídeo, estilo HeyGen */}
+        <h3
+          className="absolute bottom-0 left-0 z-10 p-4 text-[19px] font-bold leading-tight tracking-tight text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.7)] transition-transform duration-300 group-hover:-translate-y-0.5"
+          style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.015em' }}
+        >
+          {entry.label}
+        </h3>
+
+        {/* Cadeado se bloqueado */}
+        {locked ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center backdrop-blur-[2px]"
+            style={{ background: 'rgba(7,7,8,0.5)' }}
+          >
+            <span
+              className="flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-black/60 backdrop-blur-md"
+              style={{ boxShadow: '0 0 24px -6px rgba(167,139,250,0.55)' }}
+            >
+              <LockIcon />
+            </span>
+          </div>
+        ) : null}
+      </div>
+
+      {/* PAINEL — abre ABAIXO do vídeo no hover (copy + botão animado) */}
       <div
-        aria-hidden
-        className="absolute inset-0"
-        style={{ background: `radial-gradient(130% 80% at 50% 8%, ${entry.hue}, transparent 60%), linear-gradient(180deg, rgb(var(--bg-softer)), #050507)` }}
-      />
-      {/* VÍDEO — roda só no hover (fade-in) */}
-      <video
-        ref={videoRef}
-        src={entry.video}
-        muted
-        loop
-        playsInline
-        preload="metadata"
-        className="absolute inset-0 h-full w-full object-cover opacity-0 transition-opacity duration-500 group-hover:opacity-100"
-      />
-      {/* Máscara escura embaixo (legibilidade do texto) */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0"
-        style={{ background: 'linear-gradient(to top, rgba(4,4,6,0.94) 6%, rgba(4,4,6,0.4) 44%, transparent 72%)' }}
-      />
-      {/* Borda conic acende no hover */}
+        className="max-h-0 overflow-hidden opacity-0 transition-all duration-500 ease-out group-hover:max-h-[260px] group-hover:opacity-100"
+        style={{ background: 'rgb(var(--bg-softer))' }}
+      >
+        <div className="px-4 pb-4 pt-3.5">
+          <p className="text-[12.5px] leading-relaxed text-white/80">
+            {entry.description}
+          </p>
+          <span
+            className="mt-3.5 inline-flex w-full items-center justify-center gap-2 rounded-full border border-white/15 bg-white/[0.06] px-4 py-2.5 text-[11px] font-bold uppercase tracking-[0.18em] text-white transition-all duration-300 group-hover:border-violet/45 group-hover:bg-white/[0.12] group-hover:shadow-[0_0_24px_-6px_rgba(167,139,250,0.7)]"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            {isBlocked ? 'Em manutenção' : locked ? 'Bloqueado' : 'Abrir ferramenta'}
+            <span className="transition-transform duration-300 group-hover:translate-x-1.5">→</span>
+          </span>
+        </div>
+      </div>
+
+      {/* Borda conic acende no hover (cobre o card todo, já expandido) */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0 rounded-[20px] opacity-0 transition-opacity duration-500 group-hover:opacity-100"
@@ -986,66 +1053,12 @@ function FeaturedVideoCard({
           animation: 'card-border-spin 6s linear infinite',
         }}
       />
-
-      {/* Ícone + badge no topo */}
-      <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between p-4">
-        <span
-          className="flex h-11 w-11 items-center justify-center rounded-[13px] border border-white/12 bg-black/45 backdrop-blur-md transition-transform duration-500 group-hover:scale-105"
-          style={{ boxShadow: `0 0 26px -4px ${entry.hue}` }}
-        >
-          {entry.icon}
-        </span>
-        {entry.badge ? (
-          <span
-            className="rounded-full border border-violet/35 bg-black/45 px-2.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.20em] text-violet backdrop-blur-md"
-            style={{ fontFamily: 'var(--font-tech)' }}
-          >
-            {entry.badge}
-          </span>
-        ) : null}
-      </div>
-
-      {/* Embaixo: título sempre; copy + CTA aparecem no hover */}
-      <div className="absolute inset-x-0 bottom-0 z-10 p-4 sm:p-5">
-        <h3
-          className="text-[18px] font-bold leading-tight tracking-tight text-white transition-transform duration-300 group-hover:-translate-y-0.5"
-          style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.015em' }}
-        >
-          {entry.label}
-        </h3>
-        <p className="mt-1.5 max-h-0 overflow-hidden text-[12.5px] leading-relaxed text-white/85 opacity-0 transition-all duration-500 group-hover:max-h-[160px] group-hover:opacity-100">
-          {entry.description}
-        </p>
-        <div
-          className="mt-2.5 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.16em] text-white backdrop-blur-md transition-all duration-300 group-hover:border-white/30 group-hover:bg-white/[0.18]"
-          style={{ fontFamily: 'var(--font-tech)' }}
-        >
-          {isBlocked ? 'Em manutenção' : locked ? 'Bloqueado' : 'Abrir'}
-          <span className="transition-transform duration-300 group-hover:translate-x-1">→</span>
-        </div>
-      </div>
-
-      {/* Cadeado se bloqueado */}
-      {locked ? (
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center backdrop-blur-[2px]"
-          style={{ background: 'rgba(7,7,8,0.5)' }}
-        >
-          <span
-            className="flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-black/60 backdrop-blur-md"
-            style={{ boxShadow: '0 0 24px -6px rgba(167,139,250,0.55)' }}
-          >
-            <LockIcon />
-          </span>
-        </div>
-      ) : null}
-    </div>
+    </>
   );
 
   return (
     <div
-      className="featured-card-wrap fade-in-up relative"
+      className="featured-card-wrap fade-in-up relative z-0 hover:z-20"
       style={{ animationDelay: `${delay}ms` }}
       onMouseEnter={nonClickable ? undefined : play}
       onMouseLeave={stop}
@@ -1061,7 +1074,7 @@ function FeaturedVideoCard({
       ) : (
         <Link
           href={entry.href}
-          className="group relative block overflow-hidden rounded-[20px] border border-line/70 transition-all duration-300 hover:border-violet/45 hover:shadow-[0_26px_64px_-26px_rgba(0,0,0,0.92)]"
+          className="group relative block overflow-hidden rounded-[20px] border border-line/70 transition-all duration-300 hover:border-violet/45 hover:shadow-[0_30px_70px_-26px_rgba(0,0,0,0.95)]"
         >
           {inner}
         </Link>
