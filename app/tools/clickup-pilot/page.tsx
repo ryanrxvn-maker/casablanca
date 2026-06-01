@@ -4107,7 +4107,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     }
     if (dispatchPlan.unmatchedAvatars.length > 0 && dispatchPlan.parts.some((p) => !p.avatarId)) {
       setError(
-        `Alguns avatares nao foram encontrados no HeyGen: ${dispatchPlan.unmatchedAvatars.join(', ')}. Cria eles primeiro OU edita manualmente no HeyGen Auto.`,
+        `Alguns avatares nao foram encontrados no HeyGen: ${dispatchPlan.unmatchedAvatars.join(', ')}. Cria eles primeiro OU edita manualmente no Hey Auto.`,
       );
       return;
     }
@@ -6475,9 +6475,9 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                               className="btn-primary mt-3"
                               title={dispatchPlan.parts.some((p) => !p.avatarId)
                                 ? 'Resolva os avatares pendentes primeiro'
-                                : 'Abre HeyGen Auto Dynamic com tudo pre-preenchido'}
+                                : 'Abre Hey Auto Dynamic com tudo pre-preenchido'}
                             >
-                              ▶ Disparar via HeyGen Auto Dynamic (motor III)
+                              ▶ Disparar via Hey Auto Dynamic (motor III)
                             </button>
                           </div>
                         ) : null}

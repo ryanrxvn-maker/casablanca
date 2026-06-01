@@ -34,7 +34,7 @@ const TITLES: Record<string, string> = {
   '/tools/remover-elementos': 'Remover Legenda/Marca d’Água',
   '/tools/decupagem-copy': 'Decupagem Inteligente',
   '/tools/copy-srt': 'Gerador de SRT',
-  '/tools/heygen-auto': 'HeyGen Auto',
+  '/tools/heygen-auto': 'Hey Auto',
   '/tools/points': 'Pontos',
   '/tools/background': 'Tarefas em segundo plano',
   '/tools/lipsync-history': 'Histórico de avatares',

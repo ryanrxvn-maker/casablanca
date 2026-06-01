@@ -16,7 +16,7 @@ import { SmokeText } from './SmokeText';
  *  • Toggle MENSAL/ANUAL com -20% no anual
  *  • Pro com OFERTA -15% (sale neon aceso, preço riscado + novo)
  *  • Lista de features em duas camadas:
- *      ▼ FEATURED 3D — ClickUp Pilot, HeyGen Auto, Auto B-roll
+ *      ▼ FEATURED 3D — ClickUp Pilot, Hey Auto, Auto B-roll
  *        (mini-cards com tilt no mouse + glow + sparkle)
  *      ▼ Resto — linhas simples como antes
  *  • Coelho com aura progressiva (Free → Basic → Pro)
@@ -52,7 +52,7 @@ const ALL_TOOLS: Tool[] = [
   },
   {
     key: 'heygen-auto',
-    label: 'HeyGen Auto',
+    label: 'Hey Auto',
     featured: 'heygen',
     featuredHint: 'Dispara todos os lipsyncs em lote',
     featuredHue: 'rgba(103,232,249,0.55)',
@@ -1354,7 +1354,7 @@ const TOOL_DETAILS: ToolInfo[] = [
   },
   {
     key: 'heygen-auto',
-    name: 'HeyGen Auto',
+    name: 'Hey Auto',
     cat: 'IA',
     hue: 'rgba(103,232,249,0.55)',
     desc: 'Dispara todos os lipsyncs do dia no HeyGen com um clique.',

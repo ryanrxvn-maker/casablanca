@@ -74,7 +74,7 @@ const ENTRIES: Entry[] = [
   { id: 'remover', group: 'IA', label: 'Remover Legenda/Marca d’Água', hint: 'Remove legenda e marca d’água', href: '/tools/remover-elementos', icon: <IconRemoverElementos size={20} />, keywords: ['smart remover', 'watermark', 'marca', 'logo', 'inpaint'] },
   { id: 'decupagem-copy', group: 'IA', label: 'Decupagem Inteligente', hint: 'Decupa seguindo sua copy', href: '/tools/decupagem-copy', icon: <IconDecupageCopy size={20} />, keywords: ['smart decup', 'script', 'roteiro'] },
   { id: 'copy-srt', group: 'IA', label: 'Gerador de SRT', hint: 'Legendas no tempo do seu áudio', href: '/tools/copy-srt', icon: <IconCopySRT size={20} />, keywords: ['srt generator', 'legenda', 'subtitle'] },
-  { id: 'heygen-auto', group: 'IA', label: 'HeyGen Auto', hint: 'Lipsync automático em lote', href: '/tools/heygen-auto', icon: <IconHeyGenAuto size={20} />, keywords: ['avatar', 'lipsync', 'falar'] },
+  { id: 'heygen-auto', group: 'IA', label: 'Hey Auto', hint: 'Lipsync automático em lote', href: '/tools/heygen-auto', icon: <IconHeyGenAuto size={20} />, keywords: ['avatar', 'lipsync', 'falar'] },
 
   // Atalhos
   { id: 'home', group: 'Atalhos', label: 'Início', hint: 'Hub principal', href: '/tools', icon: <IconSearch size={20} />, keywords: ['hub', 'home'] },
@@ -96,7 +96,7 @@ const ENTRIES: Entry[] = [
 /**
  * Destaques — sempre no topo da pesquisa em cards 3D premium.
  *
- *  ▸ ClickUp Pilot · HeyGen Auto · Auto B-roll são os 3 carros-chefe
+ *  ▸ ClickUp Pilot · Hey Auto · Auto B-roll são os 3 carros-chefe
  *    do app. Quando o modal abre, eles aparecem em uma grid premium
  *    acima da lista normal.
  *  ▸ Cada um tem paleta própria (violeta, teal, ambar) — coerente
@@ -131,7 +131,7 @@ const FEATURED: FeaturedDef[] = [
   },
   {
     id: 'heygen-auto',
-    label: 'HeyGen Auto',
+    label: 'Hey Auto',
     hint: 'Lipsync em lote',
     href: '/tools/heygen-auto',
     Icon: IconHeyGenAuto,

@@ -47,32 +47,39 @@ type ToolEntry = {
   hue: string;
   badge?: 'IA' | 'ADMIN';
   adminOnly?: boolean;
+  /** Vídeo do card (roda só no hover). Em /public/cards/. */
+  video?: string;
 };
 
+// DESTAQUES — 3 carros-chefe em cards de VÍDEO (estilo HeyGen): o vídeo só
+// roda quando o mouse passa em cima, e aí revela a copy da ferramenta.
 const FEATURED: ToolEntry[] = [
   {
-    href: '/tools/auto-broll',
-    label: 'B-roll automático no JSON',
-    description: 'Cola o arquivo JSON, liga a automação e faz outra coisa. Os cortes saem prontos enquanto você dorme.',
-    icon: <IconAutoBroll size={28} />,
-    hue: 'rgba(240, 171, 252, 0.45)',
-    badge: 'IA',
-  },
-  {
-    href: '/tools/troca-produto',
-    label: 'Troca o produto do áudio',
-    description: 'Substitui o produto sem regravar. A voz original continua exatamente igual.',
-    icon: <IconTrocaProduto size={28} />,
-    hue: 'rgba(244, 114, 182, 0.45)',
-    badge: 'IA',
-  },
-  {
-    href: '/tools/heygen-auto',
-    label: 'HeyGen Auto',
-    description: 'Dispara todos os lipsyncs do dia com 1 clique. Vá dormir e acorde com tudo pronto.',
+    href: '/tools/lipsync',
+    label: 'Criar um avatar',
+    description: 'Sobe o rosto, sobe o áudio — e a boca fala exatamente o que você quiser. Avatar realista, lipsync perfeito, em minutos. Ilimitado.',
     icon: <IconHeyGenAuto size={28} />,
+    hue: 'rgba(232, 121, 249, 0.45)',
+    badge: 'IA',
+    video: '/cards/criar-avatar.mp4',
+  },
+  {
+    href: '/tools/clickup-pilot',
+    label: 'Seu fluxo automático',
+    description: 'Conecta no seu ClickUp, lê os briefings e dispara os vídeos sozinho. Você só revisa — o estúdio entrega no automático.',
+    icon: <IconAutoBroll size={28} />,
+    hue: 'rgba(167, 139, 250, 0.45)',
+    badge: 'IA',
+    video: '/cards/fluxo-automatico.mp4',
+  },
+  {
+    href: '/tools/auto-broll',
+    label: 'Tenha b-rolls infinitos',
+    description: 'Cola o roteiro e a IA gera b-roll cinematográfico pra cada frase. Cortes prontos, no clima certo, enquanto você dorme.',
+    icon: <IconAutoBroll size={28} />,
     hue: 'rgba(103, 232, 249, 0.45)',
     badge: 'IA',
+    video: '/cards/b-rolls.mp4',
   },
 ];
 
@@ -178,7 +185,7 @@ const AI: ToolEntry[] = [
   },
   {
     href: '/tools/heygen-auto',
-    label: 'HeyGen Auto',
+    label: 'Hey Auto',
     description: 'Gera o vídeo do seu avatar falando o roteiro.',
     icon: <IconHeyGenAuto size={26} />,
     hue: 'rgba(103, 232, 249, 0.42)',
@@ -275,15 +282,25 @@ export function ToolsHub() {
           </div>
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {featured.map((it, i) => (
-            <FeaturedCard
-              key={it.href}
-              entry={it}
-              delay={140 + i * 60}
-              locked={!tierAllowsTool(tier, it.href)}
-              maint={maintOf(it.href)}
-            />
-          ))}
+          {featured.map((it, i) =>
+            it.video ? (
+              <FeaturedVideoCard
+                key={it.href}
+                entry={it}
+                delay={140 + i * 60}
+                locked={!tierAllowsTool(tier, it.href)}
+                maint={maintOf(it.href)}
+              />
+            ) : (
+              <FeaturedCard
+                key={it.href}
+                entry={it}
+                delay={140 + i * 60}
+                locked={!tierAllowsTool(tier, it.href)}
+                maint={maintOf(it.href)}
+              />
+            ),
+          )}
         </div>
       </section>
 
@@ -899,6 +916,161 @@ function Sparkle({ className, delay = 0 }: { className?: string; delay?: number 
  * FeaturedCard — card 3D rico com tilt, spotlight, conic border.
  * Quando `locked=true`, vira <div> não-clicável + overlay de cadeado.
  */
+/* ───────────────────── FeaturedVideoCard ─────────────────────
+ * Card estilo HeyGen: o VÍDEO só roda quando o mouse passa em cima, e aí
+ * revela a copy da ferramenta + o CTA. O vídeo fica em /public/cards/.
+ * Antes do vídeo existir, mostra um gradiente bonito (fallback).
+ */
+function FeaturedVideoCard({
+  entry,
+  delay,
+  locked = false,
+  maint,
+}: {
+  entry: ToolEntry;
+  delay: number;
+  locked?: boolean;
+  maint?: MaintMode;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const isBlocked = maint === 'blocked';
+  const nonClickable = locked || isBlocked;
+
+  function play() {
+    const v = videoRef.current;
+    if (!v) return;
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+    try { v.currentTime = 0; } catch { /* ignore */ }
+    const p = v.play();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  }
+  function stop() {
+    const v = videoRef.current;
+    if (v) { try { v.pause(); } catch { /* ignore */ } }
+  }
+
+  const inner = (
+    <div className="relative aspect-[4/5] w-full overflow-hidden rounded-[20px]">
+      {/* Fallback/poster — aparece antes do vídeo (ou se não houver) */}
+      <div
+        aria-hidden
+        className="absolute inset-0"
+        style={{ background: `radial-gradient(130% 80% at 50% 8%, ${entry.hue}, transparent 60%), linear-gradient(180deg, rgb(var(--bg-softer)), #050507)` }}
+      />
+      {/* VÍDEO — roda só no hover (fade-in) */}
+      <video
+        ref={videoRef}
+        src={entry.video}
+        muted
+        loop
+        playsInline
+        preload="metadata"
+        className="absolute inset-0 h-full w-full object-cover opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+      />
+      {/* Máscara escura embaixo (legibilidade do texto) */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{ background: 'linear-gradient(to top, rgba(4,4,6,0.94) 6%, rgba(4,4,6,0.4) 44%, transparent 72%)' }}
+      />
+      {/* Borda conic acende no hover */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 rounded-[20px] opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+        style={{
+          padding: '1px',
+          background: 'conic-gradient(from var(--angle, 0deg), transparent 0%, ' + entry.hue + ' 22%, transparent 50%, ' + entry.hue + ' 78%, transparent 100%)',
+          WebkitMask: 'linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)',
+          WebkitMaskComposite: 'xor',
+          maskComposite: 'exclude',
+          animation: 'card-border-spin 6s linear infinite',
+        }}
+      />
+
+      {/* Ícone + badge no topo */}
+      <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between p-4">
+        <span
+          className="flex h-11 w-11 items-center justify-center rounded-[13px] border border-white/12 bg-black/45 backdrop-blur-md transition-transform duration-500 group-hover:scale-105"
+          style={{ boxShadow: `0 0 26px -4px ${entry.hue}` }}
+        >
+          {entry.icon}
+        </span>
+        {entry.badge ? (
+          <span
+            className="rounded-full border border-violet/35 bg-black/45 px-2.5 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.20em] text-violet backdrop-blur-md"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            {entry.badge}
+          </span>
+        ) : null}
+      </div>
+
+      {/* Embaixo: título sempre; copy + CTA aparecem no hover */}
+      <div className="absolute inset-x-0 bottom-0 z-10 p-5">
+        <h3
+          className="text-[20px] font-bold leading-tight tracking-tight text-white transition-transform duration-300 group-hover:-translate-y-0.5"
+          style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.015em' }}
+        >
+          {entry.label}
+        </h3>
+        <p className="mt-2 max-h-0 overflow-hidden text-[13px] leading-relaxed text-white/85 opacity-0 transition-all duration-500 group-hover:max-h-[160px] group-hover:opacity-100">
+          {entry.description}
+        </p>
+        <div
+          className="mt-3 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.16em] text-white backdrop-blur-md transition-all duration-300 group-hover:border-white/30 group-hover:bg-white/[0.18]"
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          {isBlocked ? 'Em manutenção' : locked ? 'Bloqueado' : 'Abrir'}
+          <span className="transition-transform duration-300 group-hover:translate-x-1">→</span>
+        </div>
+      </div>
+
+      {/* Cadeado se bloqueado */}
+      {locked ? (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center backdrop-blur-[2px]"
+          style={{ background: 'rgba(7,7,8,0.5)' }}
+        >
+          <span
+            className="flex h-12 w-12 items-center justify-center rounded-full border border-white/15 bg-black/60 backdrop-blur-md"
+            style={{ boxShadow: '0 0 24px -6px rgba(167,139,250,0.55)' }}
+          >
+            <LockIcon />
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <div
+      className="featured-card-wrap fade-in-up relative"
+      style={{ animationDelay: `${delay}ms` }}
+      onMouseEnter={nonClickable ? undefined : play}
+      onMouseLeave={stop}
+    >
+      {nonClickable ? (
+        <div
+          className="group relative block cursor-not-allowed overflow-hidden rounded-[20px] border border-line/70"
+          aria-disabled
+          title={isBlocked ? 'Em manutenção' : 'Disponível só pra contas Beta'}
+        >
+          {inner}
+        </div>
+      ) : (
+        <Link
+          href={entry.href}
+          className="group relative block overflow-hidden rounded-[20px] border border-line/70 transition-all duration-300 hover:border-violet/45 hover:shadow-[0_26px_64px_-26px_rgba(0,0,0,0.92)]"
+        >
+          {inner}
+        </Link>
+      )}
+      {maint ? <MaintenanceBadge mode={maint} className="right-4 top-4" /> : null}
+    </div>
+  );
+}
+
 function FeaturedCard({
   entry,
   delay,
@@ -1201,11 +1373,11 @@ function LockIcon({ size = 18 }: { size?: number }) {
 }
 
 // Mapa de path → label legível (espelha TopBar). Usado pra mostrar
-// "HeyGen Auto requer Pro" em vez de "/tools/heygen-auto requer Pro".
+// "Hey Auto requer Pro" em vez de "/tools/heygen-auto requer Pro".
 const TOOL_LABELS: Record<string, string> = {
   '/tools/auto-broll': 'Auto B-roll',
   '/tools/troca-produto': 'Troca de produto',
-  '/tools/heygen-auto': 'HeyGen Auto',
+  '/tools/heygen-auto': 'Hey Auto',
   '/tools/decupagem-copy': 'Decupagem Inteligente',
   '/tools/clickup-pilot': 'ClickUp Pilot',
   '/tools/remover-elementos': 'Remover Legenda/Marca d’Água',

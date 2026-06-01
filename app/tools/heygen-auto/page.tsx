@@ -50,7 +50,7 @@ import {
 import { TierGate } from '@/components/TierGate';
 
 /**
- * HeyGen Auto Avatar — automacao do HeyGen sem API.
+ * Hey Auto Avatar — automacao do HeyGen sem API.
  *
  * Como funciona:
  *  1. User instala a extensao DARKO LAB (Chrome)
@@ -76,7 +76,7 @@ type PartResult = RunnerResult;
 
 export default function HeyGenAutoPage() {
   return (
-    <TierGate require="pro" toolName="HeyGen Auto">
+    <TierGate require="pro" toolName="Hey Auto">
       <HeyGenAutoInner />
     </TierGate>
   );
@@ -389,7 +389,7 @@ function HeyGenAutoInner() {
         partLabels?: string[];
         partTexts?: string[];
         /** ClickUp Pilot pode enviar voiceId por parte (override). Se any
-         *  parte tem voiceId !== null, usa override mode no HeyGen Auto. */
+         *  parte tem voiceId !== null, usa override mode no Hey Auto. */
         partVoiceIds?: (string | null)[];
       };
       if (h.adName) setAdName(h.adName);
@@ -619,7 +619,7 @@ function HeyGenAutoInner() {
             }
           }
           zipMont.file('_DIAGNOSTICO.txt',
-`Pipeline pos-producao - HeyGen Auto
+`Pipeline pos-producao - Hey Auto
 ====================================
 ${pipeRes.diagnostics.summary}
 
@@ -1653,7 +1653,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
         <ToolHero3D
           eyebrow="HEYGEN · LIPSYNC EM SÉRIE"
           eyebrow2="DISPARA · DORME · ACORDA PRONTO"
-          title="HeyGen Auto"
+          title="Hey Auto"
           subtitle={
             <>
               Cola roteiro ou áudios.{' '}
@@ -2184,7 +2184,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
               ) : null}
             </section>
 
-            {/* HeyGen Auto Dynamic — multi-avatar por parte */}
+            {/* Hey Auto Dynamic — multi-avatar por parte */}
             <section className="border-t border-line pt-6">
               <label className="flex cursor-pointer items-start gap-3">
                 <input
@@ -2196,7 +2196,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                 />
                 <div>
                   <div className="text-sm font-semibold text-white">
-                    HeyGen Auto Dynamic{' '}
+                    Hey Auto Dynamic{' '}
                     <span className="mono ml-2 rounded-full border border-fuchsia-500/40 bg-fuchsia-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-fuchsia-300">
                       multi-avatar
                     </span>

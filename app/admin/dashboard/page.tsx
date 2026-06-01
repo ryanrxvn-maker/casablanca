@@ -79,7 +79,7 @@ const TOOL_LABEL: Record<string, string> = {
   'copy-srt': 'Copy SRT',
   'auto-broll': 'Auto B-roll',
   'troca-produto': 'Troca de Produto',
-  'heygen-auto': 'HeyGen Auto',
+  'heygen-auto': 'Hey Auto',
   'clickup-pilot': 'ClickUp Pilot',
   'remover-elementos': 'Remover Legenda',
   'separador-audio': 'Separador de Áudio',

@@ -182,7 +182,7 @@ export function JobControlPanel({
           {showHeygen && batchList.length > 0 ? (
             <div>
               <div className="mono mb-1.5 text-[9px] uppercase tracking-widest text-cyan-200">
-                HeyGen Auto (lipsync) — {batchList.length}
+                Hey Auto (lipsync) — {batchList.length}
               </div>
               <ul className="grid gap-1.5">
                 {batchList.map((b) => {

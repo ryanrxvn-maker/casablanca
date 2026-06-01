@@ -47,7 +47,7 @@ const AI_ITEMS: Item[] = [
   { href: '/tools/remover-elementos', label: 'Remover Legenda', icon: <IconRemoverElementos size={20} />, hue: 'rgba(244,114,182,0.45)' },
   { href: '/tools/decupagem-copy', label: 'Decupagem Inteligente', icon: <IconDecupageCopy size={20} />, hue: 'rgba(232,121,249,0.45)' },
   { href: '/tools/copy-srt', label: 'Gerador de SRT', icon: <IconCopySRT size={20} />, hue: 'rgba(196,181,253,0.45)' },
-  { href: '/tools/heygen-auto', label: 'HeyGen Auto', icon: <IconHeyGenAuto size={20} />, hue: 'rgba(103,232,249,0.45)' },
+  { href: '/tools/heygen-auto', label: 'Hey Auto', icon: <IconHeyGenAuto size={20} />, hue: 'rgba(103,232,249,0.45)' },
 ];
 
 const BASE_PATHS = BASE_ITEMS.map((i) => i.href);
