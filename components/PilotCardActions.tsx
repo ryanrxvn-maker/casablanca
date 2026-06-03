@@ -190,3 +190,18 @@ export const IconBroll = ({ size = 16 }: { size?: number }) => (
     <path d="M20 16v4M18 18h4M5 18v3M3.5 19.5h3" />
   </svg>
 );
+
+/** Download (seta pra baixo + base) */
+export const IconDownload = ({ size = 16 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" />
+  </svg>
+);
+
+/** Nuvem com seta pra baixo — download via extensao (arquivo grande) */
+export const IconCloudDown = ({ size = 16 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17.5 19a4.5 4.5 0 0 0 .5-9 6 6 0 0 0-11.6-1.5A4 4 0 0 0 6 19" />
+    <path d="M12 12v6" /><path d="m9 15 3 3 3-3" />
+  </svg>
+);

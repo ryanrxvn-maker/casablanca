@@ -60,6 +60,8 @@ import {
   IconX as PilotIconX,
   IconUpload as PilotIconUpload,
   IconBroll as PilotIconBroll,
+  IconDownload as PilotIconDownload,
+  IconCloudDown as PilotIconCloudDown,
 } from '@/components/PilotCardActions';
 import { MotorConfigPicker, MotorSlotPicker } from '@/components/MotorConfigPicker';
 import { defaultMotorConfig, resolveMotors, estimateSecondsFromText, type MotorConfig, type Motor } from '@/lib/motor-config';
@@ -5952,12 +5954,63 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                               <div className="mt-1 flex items-center justify-between gap-2">
                                 <span></span>
                                 {a.vaBriefing ? (
-                                  <span
-                                    className="mono shrink-0 rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200"
-                                    title="Variacao de Avatar: pipeline diferente (lipsync por audio do AD original)"
-                                  >
-                                    📹 VA · {a.vaBriefing.avatares.length} avatar{a.vaBriefing.avatares.length === 1 ? '' : 'es'}
-                                  </span>
+                                  // ═══ VA ACTION BAR 3D — espelha o design das tasks normais.
+                                  //  Sem botao de disparo aqui de proposito: VA roda na MESMA
+                                  //  fila e dispara pelo START global. Aqui so atalhos (Doc + AD). ═══
+                                  (() => {
+                                    const adFileId = a.vaBriefing!.linkAdFileId;
+                                    return (
+                                      <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                                        <span
+                                          className="mono rounded-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200"
+                                          title="Variação de Avatar — cada avatar fala com o áudio do AD original"
+                                        >
+                                          VA · {a.vaBriefing!.avatares.length} avatar{a.vaBriefing!.avatares.length === 1 ? '' : 'es'}
+                                        </span>
+                                        {(a.docUrl || a.taskUrl) ? (
+                                          <PilotBtn3D
+                                            icon={<PilotIconDoc size={16} />}
+                                            color="cyan"
+                                            title={a.docUrl ? 'Abrir doc da copy' : 'Abrir task no ClickUp'}
+                                            href={a.docUrl || a.taskUrl}
+                                          />
+                                        ) : null}
+                                        {adFileId ? (
+                                          <PilotBtn3D
+                                            icon={<PilotIconDownload size={16} />}
+                                            color="cyan"
+                                            title="Baixar AD original (Drive)"
+                                            href={`https://drive.google.com/uc?export=download&id=${adFileId}`}
+                                          />
+                                        ) : null}
+                                        {adFileId ? (
+                                          <PilotBtn3D
+                                            icon={<PilotIconCloudDown size={16} />}
+                                            color="violet"
+                                            title="Baixar AD via extensão (vídeos grandes)"
+                                            onClick={async () => {
+                                              try {
+                                                const { downloadDriveFileViaExtension } = await import('@/lib/heygen-extension-bridge');
+                                                const dl = await downloadDriveFileViaExtension(adFileId);
+                                                if (!dl.ok) { alert('Falha download via extensão: ' + dl.error); return; }
+                                                const blob = new Blob([dl.bytes as BlobPart], { type: 'video/mp4' });
+                                                const url = URL.createObjectURL(blob);
+                                                const aEl = document.createElement('a');
+                                                aEl.href = url;
+                                                aEl.download = a.vaBriefing!.linkAdFilename || `${a.vaBriefing!.baseAdId.replace(/\s+/g, '')}.mp4`;
+                                                document.body.appendChild(aEl);
+                                                aEl.click();
+                                                document.body.removeChild(aEl);
+                                                setTimeout(() => URL.revokeObjectURL(url), 5000);
+                                              } catch (e) {
+                                                alert('Erro: ' + ((e as Error)?.message || String(e)));
+                                              }
+                                            }}
+                                          />
+                                        ) : null}
+                                      </div>
+                                    );
+                                  })()
                                 ) : !a.trocaBriefing && (a.status === 'ready' || a.status === 'partial') ? (
                                   // ═══ ACTION BAR 3D — botoes icon-only ═══
                                   <div className="flex flex-wrap items-center gap-1.5 shrink-0">
@@ -6214,127 +6267,81 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                 </div>
                                 );
                               })() : a.vaBriefing ? (
-                                <div className="mt-1 grid gap-2">
-                                  <div className="rounded-[10px] border border-cyan-500/40 bg-cyan-500/5 p-3">
-                                    <div className="mono mb-2 text-[10px] uppercase tracking-widest text-cyan-200">
-                                      📹 Variação de Avatar · {a.vaBriefing.baseAdId}
-                                    </div>
-                                    <div className="text-[11px] text-text-muted">
-                                      Pipeline VA: HeyGen Studio cena-por-cena · 1 parte do split = 1 cena · cada avatar fala com a voz que você escolher (Mirror voice / Use avatar voice) · timing 1:1 do AD original (sem decupagem).
-                                      Gera <strong className="text-cyan-300">{a.vaBriefing.avatares.length} vídeo{a.vaBriefing.avatares.length === 1 ? '' : 's'} final{a.vaBriefing.avatares.length === 1 ? '' : 'is'}</strong>
-                                      {a.vaBriefing.depoimentoText ? ' + 1 depoimento' : ''}.
-                                    </div>
+                                <div className="mt-2 grid gap-2.5">
+                                  {/* Resumo enxuto — contagem + AD original, sem ruído técnico.
+                                      Download do AD (+ via extensão) vive na action bar 3D do header. */}
+                                  <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                                    <span className="text-text-muted">
+                                      <strong className="text-cyan-200">{a.vaBriefing.avatares.length}</strong> avatar{a.vaBriefing.avatares.length === 1 ? '' : 'es'} · <strong className="text-cyan-200">{a.vaBriefing.avatares.length + (a.vaBriefing.depoimentoText ? 1 : 0)}</strong> vídeo{(a.vaBriefing.avatares.length + (a.vaBriefing.depoimentoText ? 1 : 0)) === 1 ? '' : 's'}
+                                    </span>
                                     {a.vaBriefing.linkAdFilename ? (
-                                      <div className="mt-2 mono text-[10px] flex flex-wrap items-center gap-2">
-                                        <span className="text-text-muted">AD original:</span>
-                                        <span className="rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-cyan-200">📎 {a.vaBriefing.linkAdFilename}</span>
-                                        {a.vaBriefing.linkAdFileId ? (
-                                          <>
-                                            <span className="mono text-[9px] uppercase tracking-widest text-lime">✓ Drive ID detectado</span>
-                                            <a
-                                              href={`https://drive.google.com/uc?export=download&id=${a.vaBriefing.linkAdFileId}`}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              className="mono rounded border border-lime/40 bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime hover:bg-lime/20"
-                                              title="Baixa o AD original do Drive (mesmo arquivo que vai pro pipeline VA)"
-                                            >
-                                              ↓ Baixar AD
-                                            </a>
-                                            {/* Fallback pra arquivos grandes (>50MB Drive bloqueia link direto):
-                                                força download via extension usando os cookies autenticados */}
-                                            <button
-                                              type="button"
-                                              onClick={async () => {
-                                                try {
-                                                  const { downloadDriveFileViaExtension } = await import('@/lib/heygen-extension-bridge');
-                                                  const dl = await downloadDriveFileViaExtension(a.vaBriefing!.linkAdFileId!);
-                                                  if (!dl.ok) {
-                                                    alert('Falha download via extension: ' + dl.error);
-                                                    return;
-                                                  }
-                                                  const blob = new Blob([dl.bytes as BlobPart], { type: 'video/mp4' });
-                                                  const url = URL.createObjectURL(blob);
-                                                  const aEl = document.createElement('a');
-                                                  aEl.href = url;
-                                                  aEl.download = a.vaBriefing!.linkAdFilename || `${a.vaBriefing!.baseAdId.replace(/\s+/g, '')}.mp4`;
-                                                  document.body.appendChild(aEl);
-                                                  aEl.click();
-                                                  document.body.removeChild(aEl);
-                                                  setTimeout(() => URL.revokeObjectURL(url), 5000);
-                                                } catch (e) {
-                                                  alert('Erro: ' + ((e as Error)?.message || String(e)));
-                                                }
-                                              }}
-                                              className="mono rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/20"
-                                              title="Baixa via extension Chrome (pra videos grandes que Drive bloqueia link direto)"
-                                            >
-                                              ↓ Via extensão
-                                            </button>
-                                          </>
-                                        ) : (
-                                          <span className="mono text-[9px] uppercase tracking-widest text-yellow-300">⚠ Sem Drive ID — link não detectado</span>
-                                        )}
-                                      </div>
+                                      <span
+                                        className="mono inline-flex max-w-[260px] items-center gap-1 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[10px] text-cyan-200"
+                                        title={a.vaBriefing.linkAdFilename}
+                                      >
+                                        <span className="truncate">{a.vaBriefing.linkAdFilename}</span>
+                                      </span>
+                                    ) : null}
+                                    {!a.vaBriefing.linkAdFileId ? (
+                                      <span className="mono rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] text-amber-200">AD não detectado</span>
                                     ) : null}
                                   </div>
-                                  {/* Avatares de variacao */}
+                                  {/* Avatares */}
                                   <div className="mono text-[9px] uppercase tracking-widest text-text-muted">
-                                    Avatares de variação ({a.vaBriefing.avatares.length}) — cada um gera 1 vídeo final
+                                    Avatares
                                   </div>
                                   {a.vaBriefing.avatares.map((av) => {
                                     const thumbUrl = av.fileId ? `https://drive.google.com/thumbnail?id=${av.fileId}&sz=w200` : null;
                                     const choiceKey = `${a.taskId}:${av.avaCode}`;
                                     const chosen = vaAvatarChoice[choiceKey] || null;
+                                    const voiceChosen = vaVoiceChoice[choiceKey] || null;
+                                    const pickersLocked = ACTIVE_BATCH_PHASES.includes(batchStates[a.taskId]?.phase as BatchTaskState['phase']) || batchStates[a.taskId]?.phase === 'queued';
                                     return (
-                                      <div key={av.avaCode} className="rounded-[10px] border border-line-strong bg-bg/50 p-2">
-                                        <div className="flex items-center gap-3">
+                                      <div key={av.avaCode} className="rounded-[12px] border border-white/8 bg-white/[0.02] p-2.5 transition-colors hover:border-cyan-400/30">
+                                        <div className="flex items-center gap-2.5">
                                           {thumbUrl ? (
                                             /* eslint-disable-next-line @next/next/no-img-element */
-                                            <img src={thumbUrl} alt={av.username} className="h-12 w-12 shrink-0 rounded-full object-cover" referrerPolicy="no-referrer" />
+                                            <img src={thumbUrl} alt={av.username} className="h-11 w-11 shrink-0 rounded-full object-cover ring-1 ring-white/10" referrerPolicy="no-referrer" />
                                           ) : (
-                                            <div className="h-12 w-12 shrink-0 rounded-full bg-cyan-500/10 flex items-center justify-center mono text-[10px] text-cyan-300">{av.avaCode}</div>
+                                            <div className="h-11 w-11 shrink-0 rounded-full bg-cyan-500/10 flex items-center justify-center mono text-[10px] font-bold text-cyan-300 ring-1 ring-cyan-400/20">{av.avaCode.replace(/^AVA/i, '')}</div>
                                           )}
                                           <div className="flex-1 min-w-0">
-                                            <div className="mono text-[10px] uppercase tracking-widest text-cyan-200">{av.avaCode}</div>
-                                            <div className="text-[11px] text-text-muted">@{av.username}.mp4</div>
-                                            <div className="mono text-[9px] uppercase tracking-widest text-yellow-300 mt-0.5">→ saída: {a.vaBriefing!.baseAdId.replace(/\s+/g, '')}-{av.avaCode}.mp4</div>
-                                            <div className="mt-1 flex flex-wrap gap-1">
-                                              {av.fileId ? (
-                                                <a
-                                                  href={`https://drive.google.com/uc?export=download&id=${av.fileId}`}
-                                                  target="_blank"
-                                                  rel="noopener noreferrer"
-                                                  className="mono rounded border border-lime/40 bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime hover:bg-lime/20"
-                                                  title="Baixa o arquivo do Drive deixado pelo copywriter pra esse avatar"
-                                                >
-                                                  ↓ Baixar
-                                                </a>
+                                            <div className="flex items-center gap-2">
+                                              <span className="mono text-[11px] font-bold tracking-wide text-cyan-200">{av.avaCode}</span>
+                                              {chosen && voiceChosen ? (
+                                                <span className="mono rounded-full border border-lime/40 bg-lime/10 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest text-lime">✓ pronto</span>
                                               ) : (
-                                                <span className="mono rounded border border-text-muted/40 bg-bg/40 px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted" title="Sem link Drive detectado no doc — copywriter pode nao ter deixado">
-                                                  sem link drive
-                                                </span>
+                                                <span className="mono rounded-full border border-amber-400/40 bg-amber-400/10 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest text-amber-200">{!chosen ? 'falta avatar' : 'falta voz'}</span>
                                               )}
                                             </div>
+                                            <div className="truncate text-[11px] text-text-muted">@{av.username}</div>
                                           </div>
+                                          {av.fileId ? (
+                                            <PilotBtn3D
+                                              icon={<PilotIconDownload size={14} />}
+                                              color="cyan"
+                                              size={30}
+                                              title="Baixar o clipe de referência desse avatar"
+                                              href={`https://drive.google.com/uc?export=download&id=${av.fileId}`}
+                                            />
+                                          ) : null}
                                         </div>
-                                        <div className="mt-2 max-w-[400px]">
-                                          <CompactAvatarPicker
-                                            selected={chosen}
-                                            setSelected={(newAv) => setVaAvatarChoice((prev) => ({ ...prev, [choiceKey]: newAv }))}
-                                            disabled={ACTIVE_BATCH_PHASES.includes(batchStates[a.taskId]?.phase as BatchTaskState['phase']) || batchStates[a.taskId]?.phase === 'queued'}
-                                            label={`Avatar HeyGen pra ${av.avaCode}`}
-                                          />
-                                        </div>
-                                        <div className="mt-2 max-w-[400px]">
-                                          <div className="mono mb-1 text-[10px] uppercase tracking-widest text-cyan-200">
-                                            🎤 Voz pra {av.avaCode} → Mirror voice / Use avatar voice
+                                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                                          <div>
+                                            <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">Avatar HeyGen</div>
+                                            <CompactAvatarPicker
+                                              selected={chosen}
+                                              setSelected={(newAv) => setVaAvatarChoice((prev) => ({ ...prev, [choiceKey]: newAv }))}
+                                              disabled={pickersLocked}
+                                              label={`Avatar · ${av.avaCode}`}
+                                            />
                                           </div>
-                                          <CompactVoiceSelector
-                                            selected={vaVoiceChoice[choiceKey] || null}
-                                            setSelected={(v) => setVaVoiceChoice((prev) => ({ ...prev, [choiceKey]: v }))}
-                                          />
-                                          <div className="mono mt-1 text-[9px] uppercase tracking-widest text-text-muted">
-                                            HeyGen Studio aplica essa voz como Mirror voice no avatar. Padrão = voz do próprio avatar.
+                                          <div>
+                                            <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">Voz</div>
+                                            <CompactVoiceSelector
+                                              selected={voiceChosen}
+                                              setSelected={(v) => setVaVoiceChoice((prev) => ({ ...prev, [choiceKey]: v }))}
+                                            />
                                           </div>
                                         </div>
                                       </div>
@@ -6344,7 +6351,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   {!a.vaBriefing.linkAdFileId ? (
                                     <div className="rounded-[10px] border border-yellow-500/40 bg-yellow-500/5 p-3">
                                       <div className="mono mb-2 text-[10px] uppercase tracking-widest text-yellow-200">
-                                        ⚠ AD original — parser não achou Drive ID auto
+                                        Escolhe o AD original
                                       </div>
                                       {(a.vaBriefing as any).candidateLinks && (a.vaBriefing as any).candidateLinks.length > 0 ? (
                                         <div className="mb-2">
@@ -6428,13 +6435,13 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   {/* Hook + body preview */}
                                   {a.vaBriefing.hookText ? (
                                     <details className="rounded-[10px] border border-line bg-bg/40 p-2">
-                                      <summary className="mono cursor-pointer text-[10px] uppercase tracking-widest text-lime">Gancho ({a.vaBriefing.hookText.length} chars)</summary>
+                                      <summary className="mono cursor-pointer text-[10px] uppercase tracking-widest text-lime">Gancho</summary>
                                       <div className="mt-1.5 text-[11px] text-text-muted whitespace-pre-wrap">{a.vaBriefing.hookText.slice(0, 400)}{a.vaBriefing.hookText.length > 400 ? '…' : ''}</div>
                                     </details>
                                   ) : null}
                                   {a.vaBriefing.bodyText ? (
                                     <details className="rounded-[10px] border border-line bg-bg/40 p-2">
-                                      <summary className="mono cursor-pointer text-[10px] uppercase tracking-widest text-fuchsia-300">Body ({a.vaBriefing.bodyText.length} chars)</summary>
+                                      <summary className="mono cursor-pointer text-[10px] uppercase tracking-widest text-fuchsia-300">Roteiro</summary>
                                       <div className="mt-1.5 text-[11px] text-text-muted whitespace-pre-wrap">{a.vaBriefing.bodyText.slice(0, 600)}{a.vaBriefing.bodyText.length > 600 ? '…' : ''}</div>
                                     </details>
                                   ) : null}
@@ -6448,10 +6455,6 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       <div className="text-[11px] text-text-muted line-clamp-3">{a.vaBriefing.depoimentoText.slice(0, 280)}{a.vaBriefing.depoimentoText.length > 280 ? '…' : ''}</div>
                                     </div>
                                   ) : null}
-                                  <div className="rounded-[10px] border border-lime/40 bg-lime/5 p-3 text-[11px] text-lime">
-                                    ✓ Pipeline VA ativo: baixa AD original, extrai voz, splita sem cortar fala,
-                                    dispara HeyGen audio mode por avatar, monta + ZIP final automatico.
-                                  </div>
                                 </div>
                               ) : a.status === 'ready' || a.status === 'partial' ? (
                                 <div className="mt-1 grid gap-1 text-text-muted">
