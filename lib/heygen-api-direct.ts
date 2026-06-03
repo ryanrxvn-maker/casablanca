@@ -451,6 +451,52 @@ export async function createVideo(params: CreateVideoParams): Promise<{ video_id
   const eng = ENGINES[engine];
   if (!eng) throw new Error(`Motor desconhecido: ${engine}`);
 
+  // ============================================================
+  // VOICE MIRRORING / ESPELHAMENTO DE VOZ (VA de Avatar)
+  // ============================================================
+  // Shape descoberto por engenharia-reversa do submit NATIVO do HeyGen
+  // (payload capturado 2026-06-03 pelo interceptor MAIN-world). O SEGREDO
+  // do Espelhamento NAO sao campos "voice_mirroring" (nao existem) — e o
+  // audio_type "sts_pending" (speech-to-speech, pending): o HeyGen pega o
+  // source_audio_url (timing/cadencia do audio original) e RE-SINTETIZA na
+  // voz alvo voice_id. Por isso "uploaded" dava voz errada: usava o audio
+  // como trilha final = voz original do AD. Payload nativo de referencia:
+  //   audio_data: { audio_type:"sts_pending", source_audio_url, voice_id, duration }
+  //   source_type:"avatar_video_shortcut_modal"
+  //   avatar_settings: { use_avatar_iv_model:false, use_unlimited_mode:true }
+  if (voiceMirroring) {
+    if (!voiceId) {
+      // Sem voz alvo o STS nao tem pra onde converter -> HeyGen cairia na
+      // voz original. Falha CLARA em vez de entregar voz errada de novo.
+      throw new Error('Espelhamento de Voz exige uma voz alvo (voiceId). Escolha a voz no seletor antes de disparar o VA.');
+    }
+    const mirrorBody: Record<string, any> = {
+      video_title: title || 'Vídeo de Avatar',
+      video_orientation: orientation,
+      resolution: resolution || '720p',
+      avatar_id: avatarId,
+      source_type: 'avatar_video_shortcut_modal',
+      fit: 'cover',
+      audio_data: {
+        audio_type: 'sts_pending',
+        source_audio_url: audio.audio_url,
+        voice_id: voiceId,
+        duration: audio.duration,
+      },
+      avatar_settings: { use_avatar_iv_model: false, use_unlimited_mode: true },
+      enable_caption: false,
+      create_new_avatar: false,
+    };
+    const rm = await jsonCall('POST', '/v2/avatar/shortcut/submit', mirrorBody);
+    if (!rm.ok) {
+      throw new Error(rm.body?.message || `Falha ao criar video (Espelhamento de Voz, status ${rm.status})`);
+    }
+    return rm.body.data;
+  }
+
+  // ============================================================
+  // MODO NORMAL (audio uploaded vira trilha) — task comum
+  // ============================================================
   const settings = eng.settings(avatarId);
   if (motionPrompt && eng.supports_motion_prompt) {
     settings.motion_prompt = motionPrompt;
@@ -464,22 +510,6 @@ export async function createVideo(params: CreateVideoParams): Promise<{ video_id
     words: audio.words,
     text: audio.text || '',
   };
-  // Voice Mirroring: avatar fala com voz especifica espelhando o audio
-  // uploaded (timing/cadencia). HeyGen UI mostra checkbox "Voice
-  // Mirroring" no Quick Create. Mandamos as variantes mais provaveis de
-  // param name (server ignora as que nao conhece).
-  if (voiceMirroring) {
-    audio_data.voice_mirroring = true;
-    audio_data.enable_voice_mirroring = true;
-    audio_data.mirror_voice = true;
-  }
-  // Voice ID override (user escolheu uma voz especifica pra mirror).
-  // HeyGen aceita varias keys — mandamos todas as conhecidas pra robustez.
-  if (voiceId) {
-    audio_data.voice_id = voiceId;
-    audio_data.mirror_voice_id = voiceId;
-    audio_data.target_voice_id = voiceId;
-  }
 
   const body: Record<string, any> = {
     video_title: title || 'Avatar Video',
@@ -493,15 +523,6 @@ export async function createVideo(params: CreateVideoParams): Promise<{ video_id
     enable_caption: false,
     create_new_avatar: false,
   };
-  if (voiceMirroring) {
-    // Tambem no body root, caso HeyGen leia de la
-    body.voice_mirroring = true;
-    body.enable_voice_mirroring = true;
-  }
-  if (voiceId) {
-    body.voice_id = voiceId;
-    body.mirror_voice_id = voiceId;
-  }
   const r = await jsonCall('POST', '/v2/avatar/shortcut/submit', body);
   if (!r.ok) {
     throw new Error(r.body?.message || `Falha ao criar video (status ${r.status})`);
