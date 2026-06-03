@@ -54,17 +54,31 @@ if (window.__darkolab_heygen_loaded__) {
 
 // Buffer dos video_ids interceptados pelo inject.js (ordem cronologica)
 const interceptedVideoIds = [];
+// Ultimo submit body NATIVO do HeyGen capturado (Espelhamento de Voz etc).
+// Em memoria + persistido em chrome.storage pra o web app auto-aprender o
+// shape real do voice mirror via HG_GET_LAST_SUBMIT.
+let lastNativeSubmit = null;
 window.addEventListener('message', (ev) => {
   const d = ev.data;
-  if (
-    d &&
-    typeof d === 'object' &&
-    d.source === 'darkolab-injected' &&
-    d.type === 'VIDEO_GENERATED' &&
-    d.video_id
-  ) {
+  if (!d || typeof d !== 'object' || d.source !== 'darkolab-injected') return;
+  if (d.type === 'VIDEO_GENERATED' && d.video_id) {
     console.log('[DARKO LAB] video_id interceptado:', d.video_id, 'via', d.source_method, '->', d.url);
     interceptedVideoIds.push({ id: d.video_id, ts: d.ts, url: d.url });
+    return;
+  }
+  if (d.type === 'SUBMIT_BODY_CAPTURED' && d.submitBody) {
+    const rec = { url: d.submitUrl, body: d.submitBody, via: d.via, hasMirror: !!d.hasMirror, ts: d.ts || Date.now() };
+    lastNativeSubmit = rec;
+    // Prioriza guardar o que TEM mirror — nao deixa um submit sem mirror
+    // sobrescrever o payload-ouro ja capturado.
+    try {
+      chrome.storage?.local?.get(['darkolab_lastSubmit'], (cur) => {
+        const prev = cur?.darkolab_lastSubmit;
+        if (prev?.hasMirror && !rec.hasMirror) return; // nao degrada
+        chrome.storage.local.set({ darkolab_lastSubmit: rec });
+      });
+    } catch (e) {}
+    console.log(`[DARKO LAB] 🎯 submit nativo capturado${rec.hasMirror ? ' (TEM voice mirror)' : ''} — disponivel via HG_GET_LAST_SUBMIT`);
   }
 });
 
@@ -115,6 +129,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'HG_VERSION') {
     sendResponse({ ok: true, version: DARKO_EXT_VERSION });
     return true;
+  }
+  if (msg && msg.type === 'HG_GET_LAST_SUBMIT') {
+    // Retorna o ultimo submit NATIVO do HeyGen capturado pelo inject.js
+    // (payload-ouro do Espelhamento de Voz). Le da memoria; fallback storage.
+    if (lastNativeSubmit) {
+      sendResponse({ ok: true, submit: lastNativeSubmit });
+      return false;
+    }
+    try {
+      chrome.storage?.local?.get(['darkolab_lastSubmit'], (cur) => {
+        sendResponse({ ok: !!cur?.darkolab_lastSubmit, submit: cur?.darkolab_lastSubmit || null });
+      });
+      return true; // async
+    } catch (e) {
+      sendResponse({ ok: false, submit: null });
+      return false;
+    }
   }
   if (msg && msg.type === 'HG_LIST_AVATARS') {
     console.log('[DARKO LAB] >>> HG_LIST_AVATARS message received reqId=', msg.requestId);

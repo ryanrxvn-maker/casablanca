@@ -48,6 +48,50 @@
     );
   }
 
+  // É um submit de criação de video? (Quick Create / VA / Espelhamento de Voz)
+  const SUBMIT_RE = /shortcut\/submit|\/submit\b|generate|\/create/i;
+
+  // Captura o REQUEST BODY do submit NATIVO do HeyGen (a request 200/xhr do
+  // vendor-*.js que dispara quando o user marca "Espelhamento de Voz"). Esse
+  // é o payload-ouro: o shape EXATO que o HeyGen aceita pra voice mirror.
+  // Guardado COMPLETO (sem truncar) em window pra reverse-eng confiavel —
+  // acaba a adivinhacao de nome de campo no nosso createVideo().
+  function captureSubmitBody(url, method, bodyStr, via) {
+    try {
+      if (!bodyStr) return;
+      // Detecta sinais de voice mirror pra destacar no log
+      const hasMirror = /mirror|voice_id|voice_setting|espelh/i.test(bodyStr);
+      const rec = { url: String(url).slice(0, 200), method, via, body: bodyStr, ts: Date.now(), hasMirror };
+      window.__darkolab_lastSubmitBody = rec;
+      window.__darkolab_submitBodies = (window.__darkolab_submitBodies || []).slice(-9);
+      window.__darkolab_submitBodies.push(rec);
+      console.log(
+        `%c[DARKO LAB inject] 🎯 SUBMIT BODY capturado (${via})${hasMirror ? ' — TEM voice mirror!' : ''}`,
+        'color:#00e5ff;font-weight:bold',
+        '\nurl:', rec.url,
+        '\nbody:', bodyStr,
+      );
+      // Pretty: facilita copiar so o JSON
+      try { console.log('[DARKO LAB inject] 🎯 SUBMIT BODY (pretty):\n' + JSON.stringify(JSON.parse(bodyStr), null, 2)); } catch {}
+      // Repassa pro content script persistir/expor pro web app (auto-aprende o shape)
+      emit({ type: 'SUBMIT_BODY_CAPTURED', submitUrl: rec.url, submitBody: bodyStr, via, hasMirror });
+    } catch (e) {}
+  }
+
+  function bodyToString(b) {
+    try {
+      if (b == null) return '';
+      if (typeof b === 'string') return b;
+      if (b instanceof URLSearchParams) return b.toString();
+      if (typeof FormData !== 'undefined' && b instanceof FormData) {
+        const o = {}; b.forEach((v, k) => { o[k] = typeof v === 'string' ? v : '[blob]'; });
+        return JSON.stringify(o);
+      }
+      if (typeof b === 'object') { try { return JSON.stringify(b); } catch { return ''; } }
+      return '';
+    } catch { return ''; }
+  }
+
   // --- Patch window.fetch ---
   const origFetch = window.fetch;
   window.fetch = function (input, init) {
@@ -58,22 +102,10 @@
       'GET'
     ).toUpperCase();
     const isInteresting = method === 'POST' && URL_RE.test(url);
-    // Log REQUEST BODY de /submit (Quick Create / VA) pra reverse-eng
-    // de param names tipo voice_mirroring. Logado no console + window.
-    if (isInteresting && /shortcut|submit|generate|create/.test(url) && init && init.body) {
-      try {
-        const b = init.body;
-        let bodyStr = '';
-        if (typeof b === 'string') bodyStr = b;
-        else if (b instanceof FormData) {
-          const o = {}; b.forEach((v, k) => { o[k] = String(v).slice(0, 200); });
-          bodyStr = JSON.stringify(o);
-        }
-        if (bodyStr) {
-          console.log('[DARKO LAB inject] REQ BODY', url.slice(0, 80), bodyStr.slice(0, 2000));
-          window.__darkolab_lastReqBody = { url, body: bodyStr.slice(0, 5000), ts: Date.now() };
-        }
-      } catch (e) {}
+    // Captura REQUEST BODY de /submit (Quick Create / VA / Espelhamento de
+    // Voz) pra reverse-eng do shape real. Body COMPLETO via captureSubmitBody.
+    if (method === 'POST' && SUBMIT_RE.test(url) && init && init.body != null) {
+      captureSubmitBody(url, method, bodyToString(init.body), 'fetch');
     }
     const p = origFetch.apply(this, arguments);
     if (isInteresting) {
@@ -104,6 +136,18 @@
       _method = String(method || '').toUpperCase();
       _url = String(url || '');
       return origOpen.apply(this, arguments);
+    };
+    // Patch send pra capturar o REQUEST BODY do submit NATIVO do HeyGen.
+    // A request 200/xhr do "Espelhamento de Voz" vem por aqui (vendor-*.js) —
+    // antes so pegavamos a RESPONSE (video_id); agora pegamos o body-ouro.
+    const origSend = xhr.send;
+    xhr.send = function (body) {
+      try {
+        if (_method === 'POST' && SUBMIT_RE.test(_url) && body != null) {
+          captureSubmitBody(_url, _method, bodyToString(body), 'xhr');
+        }
+      } catch (e) {}
+      return origSend.apply(this, arguments);
     };
     xhr.addEventListener('load', function () {
       try {
