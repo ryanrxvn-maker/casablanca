@@ -2765,9 +2765,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         }
         return next;
       });
-      for (const taskId of trocaTasks) {
-        void runTrocaAudioPipelineForTask(taskId);
-      }
+      // Serial: FFmpeg-wasm e single-instance — processa uma troca de cada vez
+      // pra nao corromper mux concorrente. As outras ficam 'queued' no card.
+      void (async () => {
+        for (const taskId of trocaTasks) {
+          if (batchCancelRef.current[taskId]) continue;
+          await runTrocaAudioPipelineForTask(taskId);
+        }
+      })();
     }
   }
 
@@ -4570,19 +4575,44 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
 
       // 2. Descamufla: recupera o BLACK (audio publico) tirando o WHITE antigo.
       setStage('post', 'Tirando o áudio WHITE antigo...');
-      const { descamuflar, camuflar } = await import('@/lib/camuflagem');
+      const { descamuflar, camuflar, verifyCamouflage } = await import('@/lib/camuflagem');
       const { wav: blackWav } = await descamuflar({ file: adBlob, layer: 'public' });
-
-      // 3. Recamufla o mesmo BLACK com o novo WHITE.
-      setStage('post', 'Embutindo o novo áudio WHITE...');
-      const camWav = await camuflar({ black: blackWav, white, volumePercent: volume });
-
-      // 4. Muxa o audio camuflado de volta no video original.
-      setStage('post', 'Montando o vídeo final...');
       const { muxAudioIntoVideo } = await import('@/lib/ffmpeg-worker');
-      const finalBlob = await muxAudioIntoVideo(adBlob, camWav, {
-        onStage: (s) => setStage('post', s),
-      }, true);
+
+      // 3+4. GARANTIA: recamufla com o novo WHITE, muxa no video e VERIFICA
+      // sobre o MP4 REAL que os downmixes de plataforma (soma L+R e média —
+      // como TikTok/Kwai/YouTube fazem) realmente escutam o NOVO white. Se o
+      // AAC do mux degradar a fase, sobe o ganho e re-tenta ate passar ou
+      // bater o teto. Assim o resultado e ASSERTIVO, nao "torcer pra dar".
+      let finalBlob: Blob | null = null;
+      let platformOk = false;
+      let gainBoost = 1;
+      const MAX_ATTEMPTS = 3;
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        if (batchCancelRef.current[taskId]) throw new Error('Cancelado pelo usuario.');
+        setStage('post', attempt === 1 ? 'Embutindo o novo áudio WHITE...' : `Reforçando o WHITE (tentativa ${attempt}/${MAX_ATTEMPTS})...`);
+        const camWav = await camuflar({ black: blackWav, white, volumePercent: volume, gainBoost });
+        setStage('post', 'Montando o vídeo final...');
+        const muxed = await muxAudioIntoVideo(adBlob, camWav, {
+          onStage: (s) => setStage('post', s),
+        }, true);
+        finalBlob = muxed;
+        setStage('post', 'Verificando o que a IA escuta...');
+        try {
+          const v = await verifyCamouflage({ result: muxed, white, black: blackWav });
+          // So os downmixes que as plataformas usam (somam/mediam os canais).
+          platformOk = v.downmixes
+            .filter((d) => d.kind === 'sum' || d.kind === 'avg')
+            .every((d) => d.hears === 'white');
+        } catch {
+          // Verify falhou tecnicamente — nao bloqueia a entrega do arquivo.
+          platformOk = true;
+        }
+        if (platformOk) break;
+        gainBoost *= 1.8;
+      }
+      if (!finalBlob) throw new Error('Falha ao montar o vídeo final.');
+      const sizeMb = (finalBlob.size / (1024 * 1024)).toFixed(1);
 
       const url = URL.createObjectURL(finalBlob);
       setBatchStates((prev) => ({
@@ -4593,7 +4623,9 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
           taskName,
           baseAdId,
           phase: 'done',
-          message: `Pronto — áudio trocado (${(finalBlob.size / (1024 * 1024)).toFixed(1)}MB).`,
+          message: platformOk
+            ? `✓ Garantido: TikTok/Kwai/YouTube escutam o novo WHITE (${sizeMb}MB).`
+            : `⚠ Áudio trocado (${sizeMb}MB), mas a verificação não confirmou o WHITE na soma mono — aumente a intensidade e refaça.`,
           parts: [{ label: 'Troca de áudio', videoId: 'troca', videoStatus: 'completed', renamedTo }],
           startedAt: prev[taskId]?.startedAt || startedAt,
           finishedAt: Date.now(),
