@@ -1291,6 +1291,20 @@ export function isVATask(taskName: string): boolean {
   return false;
 }
 
+/**
+ * Detecta tasks de TROCA DE ÁUDIO (variação do áudio WHITE).
+ *
+ * Nomenclatura tipica: "TROCA DE ÁUDIO - AD138G2GL - VFPB04 - VRWA02".
+ * Essas tasks NAO tem doc de copy — so o link do criativo original no Drive
+ * (em comentario/descricao/custom field) e um novo audio WHITE upado pelo
+ * user. Pipeline: baixa o AD, descamufla (tira o WHITE antigo), recamufla
+ * com o novo WHITE.
+ */
+export function isTrocaAudioTask(taskName: string): boolean {
+  if (!taskName) return false;
+  return /\btroca\s+de\s+[áa]udio\b/i.test(taskName.trim());
+}
+
 /** Extrai os codigos AVA mencionados na NOMENCLATURA da task.
  *
  * Ex: 'VA - AD03G1VN - PRPB06 - AVA05 e 06 - Silas' → [5, 6]
