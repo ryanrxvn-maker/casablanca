@@ -4642,22 +4642,50 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
     setStage('downloading', driveId ? 'Baixando o criativo original do Drive...' : 'Procurando o vídeo na pasta do Drive...');
 
     try {
-      // 0. Se so temos a PASTA, lista e escolhe o video (auto-resolucao).
+      // 0. Se so temos a PASTA, lista (recursivo) e escolhe o video. As pastas
+      // de criativo costumam ter SUBPASTAS (ex: "COM EDIÇÃO" tem o video,
+      // "ÁUDIO TROCADO" e o destino do output). Entao recorremos preferindo a
+      // subpasta editada e evitando as de saida/compliance, casando pelo AD.
       if (!driveId && folderId) {
+        setStage('downloading', 'Procurando o vídeo na pasta do Drive...');
         const { listDriveFolderViaExtension } = await import('@/lib/heygen-extension-bridge');
-        const lf = await listDriveFolderViaExtension(folderId);
-        if (!lf.ok) throw new Error('Listar pasta do Drive: ' + lf.error);
-        const vids = lf.files.filter(
-          (f) => !f.isFolder && /\.(mp4|mov|webm|mkv|m4v)$/i.test(f.name),
-        );
-        // Prefere o arquivo cujo nome casa com o AD; senao o 1o video; senao
-        // qualquer arquivo (alguns videos vem sem extensao no nome).
-        const pick =
-          vids.find((f) => f.name.toUpperCase().includes(baseAdId.toUpperCase())) ||
-          vids[0] ||
-          lf.files.find((f) => !f.isFolder) ||
-          null;
-        if (!pick) throw new Error('Nenhum vídeo encontrado na pasta do Drive.');
+        const adKey = baseAdId.toUpperCase();
+        const isVideo = (n: string) => /\.(mp4|mov|webm|mkv|m4v)$/i.test(n) || /\bAD\d/i.test(n);
+        let listCalls = 0;
+        const findVideo = async (
+          fid: string,
+          depth: number,
+        ): Promise<{ fileId: string; name: string } | null> => {
+          if (listCalls >= 12 || batchCancelRef.current[taskId]) return null;
+          listCalls++;
+          const lf = await listDriveFolderViaExtension(fid);
+          if (!lf.ok) return null;
+          const vids = lf.files.filter((f) => !f.isFolder && isVideo(f.name));
+          const byName = vids.find((f) => f.name.toUpperCase().includes(adKey));
+          if (byName) return byName;
+          if (vids[0]) return vids[0];
+          if (depth <= 0) return null;
+          // Recorre nas subpastas: prioriza "edição/final", pula saída/compliance.
+          const score = (n: string) => {
+            const u = n.toUpperCase();
+            if (/TROCAD|COMPLI|OUTPUT|SA[IÍ]DA|RAW|BRUTO|ANTIG/.test(u)) return -1;
+            if (/EDI[ÇC]|FINAL|PRONTO|COM\s*EDI/.test(u)) return 2;
+            return 1;
+          };
+          const subs = lf.files
+            .filter((f) => f.isFolder)
+            .map((f) => ({ f, s: score(f.name) }))
+            .filter((x) => x.s >= 0)
+            .sort((a, b) => b.s - a.s)
+            .map((x) => x.f);
+          for (const sub of subs) {
+            const found = await findVideo(sub.fileId, depth - 1);
+            if (found) return found;
+          }
+          return null;
+        };
+        const pick = await findVideo(folderId, 2);
+        if (!pick) throw new Error('Não achei o vídeo na pasta nem nas subpastas. Cola o link do arquivo manualmente no painel.');
         driveId = pick.fileId;
         setStage('downloading', `Vídeo encontrado (${pick.name}). Baixando...`);
       }
