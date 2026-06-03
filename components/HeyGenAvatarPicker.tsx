@@ -70,7 +70,12 @@ function ThumbWithFallback({
   eager?: boolean;
   onAllFailed?: () => void;
 }) {
-  // Lista ordenada de URLs candidatas (sem nulls/duplicatas)
+  // Lista ordenada de URLs candidatas (sem nulls/duplicatas).
+  // Memoiza pela CHAVE estavel (string) e nao pela referencia do array
+  // `fallbacks` — que vem novo a cada render do pai (ex.: g.looks.map(...)
+  // inline). Sem isso, candidates mudava toda render → o effect abaixo
+  // resetava TODAS as thumbs (setIdx/setAllFailed) a cada tecla no filtro.
+  const fallbackKey = fallbacks.filter(Boolean).join('|');
   const candidates = useMemo(() => {
     const out: string[] = [];
     if (primary) out.push(primary);
@@ -78,7 +83,8 @@ function ThumbWithFallback({
       if (f && !out.includes(f)) out.push(f);
     }
     return out;
-  }, [primary, fallbacks]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [primary, fallbackKey]);
 
   const [idx, setIdx] = useState(0);
   const [allFailed, setAllFailed] = useState(candidates.length === 0);
@@ -137,16 +143,46 @@ function ThumbWithFallback({
 function usePreWarmImages(urls: (string | null)[]) {
   const warmedRef = useRef(new Set<string>());
   useEffect(() => {
-    for (const u of urls) {
-      if (!u) continue;
-      if (warmedRef.current.has(u)) continue;
-      warmedRef.current.add(u);
-      // Cria um Image fora do DOM apenas pra disparar o GET
-      const img = new Image();
-      img.decoding = 'async';
-      img.referrerPolicy = 'no-referrer';
-      img.src = u;
-    }
+    const todo = urls.filter((u): u is string => !!u && !warmedRef.current.has(u));
+    if (todo.length === 0) return;
+
+    // Dispara em LOTES dentro do idle do browser — evita firar centenas de
+    // GETs de uma vez no instante do open (era o que travava a abertura) e
+    // deixa o paint/animacao do modal acontecer primeiro.
+    const CHUNK = 8;
+    const ric: (cb: () => void) => number =
+      typeof window !== 'undefined' && 'requestIdleCallback' in window
+        ? (cb) => (window as any).requestIdleCallback(cb, { timeout: 500 })
+        : (cb) => window.setTimeout(cb, 16);
+    const cancelRic: (id: number) => void =
+      typeof window !== 'undefined' && 'cancelIdleCallback' in window
+        ? (id) => (window as any).cancelIdleCallback(id)
+        : (id) => window.clearTimeout(id);
+
+    let cancelled = false;
+    let i = 0;
+    let handle = 0;
+    const pump = () => {
+      if (cancelled) return;
+      const end = Math.min(i + CHUNK, todo.length);
+      for (; i < end; i++) {
+        const u = todo[i];
+        if (warmedRef.current.has(u)) continue;
+        warmedRef.current.add(u);
+        // Cria um Image fora do DOM apenas pra disparar o GET
+        const img = new Image();
+        img.decoding = 'async';
+        img.referrerPolicy = 'no-referrer';
+        img.src = u;
+      }
+      if (i < todo.length) handle = ric(pump);
+    };
+    handle = ric(pump);
+
+    return () => {
+      cancelled = true;
+      cancelRic(handle);
+    };
   }, [urls]);
 }
 
@@ -212,18 +248,11 @@ export function HeyGenAvatarPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Pre-warm: TODAS as URLs (groups + looks) em paralelo assim que a lista chega
-  const allUrls = useMemo(() => {
-    const out: (string | null)[] = [];
-    for (const g of groups) {
-      if (g.thumb) out.push(g.thumb);
-      for (const l of g.looks) {
-        if (l.thumb) out.push(l.thumb);
-      }
-    }
-    return out;
-  }, [groups]);
-  usePreWarmImages(allUrls);
+  // Pre-warm so as thumbs dos GRUPOS (o grid que aparece no open). Os looks
+  // (213+) NAO sao pre-aquecidos aqui — eram a causa do storm de ~300 GETs no
+  // open. Cada grupo aquece seus looks sob demanda quando abre (abaixo).
+  const groupThumbUrls = useMemo(() => groups.map((g) => g.thumb), [groups]);
+  usePreWarmImages(groupThumbUrls);
 
   // Filtro: busca em nome do AVATAR ou nome do LOOK
   const q = query.trim().toLowerCase();
@@ -244,6 +273,14 @@ export function HeyGenAvatarPicker({
     () => groups.find((g) => g.id === openGroupId) ?? null,
     [groups, openGroupId],
   );
+
+  // Pre-warm sob demanda: ao abrir um grupo, aquece SO os looks dele (em vez
+  // de aquecer os 213 looks no open inicial). Mantem o drawer instantaneo.
+  const openGroupLookUrls = useMemo(
+    () => (openGroup ? openGroup.looks.map((l) => l.thumb) : []),
+    [openGroup],
+  );
+  usePreWarmImages(openGroupLookUrls);
 
   return (
     <div>
