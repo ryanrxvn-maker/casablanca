@@ -221,6 +221,12 @@ type BatchTaskState = {
   baseAdId: string;
   /** 'troca' = pipeline de TROCA DE ÁUDIO (sem HeyGen). Ausente = fluxo normal. */
   kind?: 'troca';
+  /** TROCA: dados serializaveis pra RETOMAR sobreviver reload. O novo WHITE
+   *  fica no IndexedDB (chave `troca:white:<taskId>`); aqui guardamos o que
+   *  e serializavel pra reconstruir tudo sem a analise em memoria. */
+  trocaDriveId?: string;
+  trocaVolume?: number;
+  trocaWhiteMime?: string;
   /** queued | dispatching | rendering | downloading | post (concat+decupagem+camo) | done | failed */
   phase: 'queued' | 'dispatching' | 'rendering' | 'downloading' | 'post' | 'done' | 'failed';
   /** Per-part status durante dispatch (parteN: error|null) */
@@ -1597,11 +1603,12 @@ function ClickUpPilotInner() {
     for (const [taskId, state] of Object.entries(persisted)) {
       const wasInterrupted = state.phase !== 'done' && state.phase !== 'failed';
       if (wasInterrupted && state.kind === 'troca') {
-        // TROCA: o WHITE upado nao sobrevive reload — nao da pra auto-retomar.
+        // TROCA: o WHITE foi salvo no IndexedDB + driveId no proprio state —
+        // retomar reconstroi tudo. So nao auto-roda (evita FFmpeg a cada F5).
         restored[taskId] = {
           ...state,
           phase: 'failed',
-          message: 'Recarregou a página — re-suba o novo WHITE e clique em Retomar.',
+          message: 'Recarregou a página — áudio preservado. Clique em Retomar pra concluir.',
           finishedAt: Date.now(),
         };
       } else if (wasInterrupted) {
@@ -4282,6 +4289,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   const [trocaVolume, setTrocaVolume] = useState<Record<string, number>>({});
   /** TROCA DE ÁUDIO: URL/Drive ID do AD original (input manual fallback). */
   const [trocaAdUrl, setTrocaAdUrl] = useState<Record<string, string>>({});
+  /** TROCA DE ÁUDIO: prova por transcricao do resultado (o que a IA le).
+   *  Key: taskId → { loading?, text?, err? } */
+  const [trocaProof, setTrocaProof] = useState<Record<string, { loading?: boolean; text?: string; err?: string }>>({});
 
   /** Extrai Drive file ID de uma URL Drive (varios formatos suportados) */
   function extractDriveFileId(input: string): string | null {
@@ -4512,11 +4522,6 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
     const baseAdId = troca?.baseAdId || a?.baseAdId || batchStates[taskId]?.baseAdId || taskName;
     const adNameClean = baseAdId.replace(/[^A-Z0-9]/gi, '_');
 
-    // Resolve Drive ID: briefing parseado > input manual do painel.
-    const driveId = troca?.driveId || extractDriveFileId(trocaAdUrl[taskId] || '');
-    const white = trocaWhite[taskId] || null;
-    const volume = Math.max(5, Math.min(100, trocaVolume[taskId] ?? 30));
-
     const fail = (message: string) => {
       setBatchStates((prev) => ({
         ...prev,
@@ -4530,6 +4535,23 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
       }));
     };
 
+    // Resolve Drive ID: briefing parseado > input manual > estado persistido
+    // (sobrevive reload, pois batchState e serializado).
+    const persisted = batchStates[taskId];
+    const driveId =
+      troca?.driveId || extractDriveFileId(trocaAdUrl[taskId] || '') || persisted?.trocaDriveId || null;
+    const volume = Math.max(5, Math.min(100, trocaVolume[taskId] ?? persisted?.trocaVolume ?? 30));
+
+    // Resolve o novo WHITE: estado em memoria OU IndexedDB (retomar pos-reload).
+    let white: Blob | null = trocaWhite[taskId] || null;
+    const whiteMime = (white as File | null)?.type || persisted?.trocaWhiteMime || 'audio/wav';
+    if (!white) {
+      try {
+        const { loadBlob } = await import('@/lib/zip-store');
+        white = await loadBlob('troca:white:' + taskId, whiteMime);
+      } catch {}
+    }
+
     if (!driveId) {
       fail('Sem link do criativo original. Cola a URL do Drive no painel da task.');
       return;
@@ -4537,6 +4559,14 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
     if (!white) {
       fail('Suba o novo áudio WHITE dessa task antes de disparar.');
       return;
+    }
+
+    // Persiste o WHITE + dados serializaveis pra RETOMAR sobreviver reload.
+    try {
+      const { saveBlob } = await import('@/lib/zip-store');
+      await saveBlob('troca:white:' + taskId, white, whiteMime);
+    } catch (e) {
+      console.warn('[troca-audio] persist white IDB:', e);
     }
 
     batchCancelRef.current[taskId] = false;
@@ -4560,6 +4590,9 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
           }],
           startedAt: prev[taskId]?.startedAt || startedAt,
           taskUrl: prev[taskId]?.taskUrl || a?.taskUrl,
+          trocaDriveId: driveId,
+          trocaVolume: volume,
+          trocaWhiteMime: whiteMime,
         } as BatchTaskState,
       }));
     };
@@ -4632,6 +4665,9 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
           camufladoZipUrl: url,
           camufladoZipName: renamedTo,
           taskUrl: prev[taskId]?.taskUrl || a?.taskUrl,
+          trocaDriveId: driveId,
+          trocaVolume: volume,
+          trocaWhiteMime: whiteMime,
           // Satisfaz o allOk do card (mostra "Pronto" + botao Baixar unico).
           pipeStats: {
             expectedMontagens: 1,
@@ -4647,6 +4683,29 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
     } catch (e) {
       console.error('[troca-audio]', e);
       fail((e as Error)?.message || String(e));
+    }
+  }
+
+  /** PROVA da troca: transcreve o que TikTok/Kwai/YouTube escutariam (soma
+   *  mono L+R do MP4 real) via AssemblyAI. Tem que vir o roteiro do NOVO
+   *  WHITE — prova empirica de que a troca segurou. */
+  async function transcribeTrocaResult(taskId: string, blobUrl: string) {
+    if (!blobUrl || trocaProof[taskId]?.loading) return;
+    setTrocaProof((prev) => ({ ...prev, [taskId]: { loading: true } }));
+    try {
+      const resp = await fetch(blobUrl);
+      const blob = await resp.blob();
+      const { buildPlatformMonoWav } = await import('@/lib/camuflagem');
+      const { wav } = await buildPlatformMonoWav(blob);
+      const fd = new FormData();
+      fd.append('audio', wav, 'platform-mono.wav');
+      fd.append('languageCode', 'pt');
+      const r = await fetch('/api/camuflagem/transcribe', { method: 'POST', body: fd });
+      const data = await r.json().catch(() => null);
+      if (!r.ok || !data) throw new Error((data && data.error) || `Falha na transcricao (HTTP ${r.status}).`);
+      setTrocaProof((prev) => ({ ...prev, [taskId]: { text: (data.text as string) || '(silêncio / nada reconhecido)' } }));
+    } catch (e) {
+      setTrocaProof((prev) => ({ ...prev, [taskId]: { err: (e as Error)?.message || 'Falha na transcricao.' } }));
     }
   }
 
@@ -5446,8 +5505,54 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                           const running = ['dispatching', 'rendering', 'downloading', 'post'].includes(b.phase);
                           const queued = b.phase === 'queued';
 
+                          // TROCA DE ÁUDIO: card sem grid de takes — mostra a
+                          // PROVA por transcricao (o que a IA le no MP4 real).
+                          const trocaProofNode = b.kind === 'troca' ? (
+                            <div className="rounded-[10px] border border-teal-500/40 bg-teal-500/5 p-3">
+                              <div className="mono mb-2 flex items-center gap-2 text-[10px] uppercase tracking-widest text-teal-200">
+                                🎧 Prova — o que a IA escuta (soma mono do MP4 real)
+                              </div>
+                              {b.phase === 'done' && b.camufladoZipUrl ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => transcribeTrocaResult(b.taskId, b.camufladoZipUrl!)}
+                                    disabled={trocaProof[b.taskId]?.loading}
+                                    className="mono inline-flex items-center gap-2 rounded-[8px] border border-teal-400/50 bg-teal-500/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-teal-100 transition hover:bg-teal-500/20 disabled:cursor-wait disabled:opacity-60"
+                                  >
+                                    {trocaProof[b.taskId]?.loading ? (
+                                      <>
+                                        <span className="h-3 w-3 animate-spin rounded-full border-2 border-teal-300 border-t-transparent" />
+                                        Ouvindo como a IA...
+                                      </>
+                                    ) : (
+                                      <>🎧 Transcrever o que a IA lê</>
+                                    )}
+                                  </button>
+                                  {trocaProof[b.taskId]?.err ? (
+                                    <div className="mt-2 rounded-[8px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-[11px] text-red-300">
+                                      {trocaProof[b.taskId]?.err}
+                                    </div>
+                                  ) : null}
+                                  {trocaProof[b.taskId]?.text ? (
+                                    <div className="mt-2 rounded-[8px] border border-teal-500/30 bg-bg-soft/50 px-3 py-2">
+                                      <p className="whitespace-pre-wrap text-[11px] leading-relaxed text-white">
+                                        {trocaProof[b.taskId]?.text}
+                                      </p>
+                                      <p className="mt-2 text-[10px] text-text-muted">
+                                        Tem que bater com o roteiro do <strong className="text-teal-200">novo WHITE</strong>. Se vier o áudio antigo, aumente a intensidade e refaça.
+                                      </p>
+                                    </div>
+                                  ) : null}
+                                </>
+                              ) : (
+                                <div className="text-[11px] text-text-muted">A prova fica disponível quando a troca terminar.</div>
+                              )}
+                            </div>
+                          ) : null;
+
                           // Preview slot — so renderiza se ja tem video disparado
-                          const previewsNode = b.parts.some((p) => p.videoId) ? (() => {
+                          const previewsNode = b.kind === 'troca' ? trocaProofNode : b.parts.some((p) => p.videoId) ? (() => {
                             // Mapeia idx do filtered → idx no array original (pra EDIT funcionar)
                             const validIdxsFiltered: number[] = [];
                             const previews: LipsyncTake[] = b.parts
@@ -5520,6 +5625,12 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                 if (queued) batchCancelRef.current[b.taskId] = true;
                                 for (const url of [b.zipBlobUrl, b.montadoZipUrl, b.camufladoZipUrl]) {
                                   if (url) { try { URL.revokeObjectURL(url); } catch {} }
+                                }
+                                // TROCA: limpa o WHITE persistido no IndexedDB.
+                                if (b.kind === 'troca') {
+                                  void import('@/lib/zip-store')
+                                    .then((m) => m.deletePrefix('troca:white:' + b.taskId))
+                                    .catch(() => {});
                                 }
                                 setBatchStates((prev) => {
                                   const { [b.taskId]: _, ...rest } = prev;
