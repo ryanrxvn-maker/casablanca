@@ -227,6 +227,10 @@ type BatchTaskState = {
   trocaDriveId?: string;
   trocaVolume?: number;
   trocaWhiteMime?: string;
+  /** TROCA: confianca da verificacao (correlacao na soma mono de plataforma).
+   *  whiteScore alto + blackScore baixo = a IA escuta o novo WHITE. */
+  trocaWhiteScore?: number;
+  trocaBlackScore?: number;
   /** queued | dispatching | rendering | downloading | post (concat+decupagem+camo) | done | failed */
   phase: 'queued' | 'dispatching' | 'rendering' | 'downloading' | 'post' | 'done' | 'failed';
   /** Per-part status durante dispatch (parteN: error|null) */
@@ -4619,6 +4623,8 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
       // bater o teto. Assim o resultado e ASSERTIVO, nao "torcer pra dar".
       let finalBlob: Blob | null = null;
       let platformOk = false;
+      let platformWhite: number | undefined;
+      let platformBlack: number | undefined;
       let gainBoost = 1;
       const MAX_ATTEMPTS = 3;
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -4634,9 +4640,10 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
         try {
           const v = await verifyCamouflage({ result: muxed, white, black: blackWav });
           // So os downmixes que as plataformas usam (somam/mediam os canais).
-          platformOk = v.downmixes
-            .filter((d) => d.kind === 'sum' || d.kind === 'avg')
-            .every((d) => d.hears === 'white');
+          const rel = v.downmixes.filter((d) => d.kind === 'sum' || d.kind === 'avg');
+          platformOk = rel.length > 0 && rel.every((d) => d.hears === 'white');
+          platformWhite = rel.length ? Math.min(...rel.map((d) => d.whiteScore)) : undefined;
+          platformBlack = rel.length ? Math.max(...rel.map((d) => d.blackScore)) : undefined;
         } catch {
           // Verify falhou tecnicamente — nao bloqueia a entrega do arquivo.
           platformOk = true;
@@ -4668,6 +4675,8 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
           trocaDriveId: driveId,
           trocaVolume: volume,
           trocaWhiteMime: whiteMime,
+          trocaWhiteScore: platformWhite,
+          trocaBlackScore: platformBlack,
           // Satisfaz o allOk do card (mostra "Pronto" + botao Baixar unico).
           pipeStats: {
             expectedMontagens: 1,
@@ -5514,6 +5523,21 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                               </div>
                               {b.phase === 'done' && b.camufladoZipUrl ? (
                                 <>
+                                  {/* Player inline — assiste/ouve o resultado antes de baixar */}
+                                  <video
+                                    src={b.camufladoZipUrl}
+                                    controls
+                                    className="mb-2 w-full rounded-[10px] border border-teal-500/30 bg-black"
+                                  />
+                                  {/* Confianca da verificacao (correlacao na soma mono) */}
+                                  {typeof b.trocaWhiteScore === 'number' && typeof b.trocaBlackScore === 'number' ? (
+                                    <div className="mono mb-2 flex flex-wrap items-center gap-2 text-[10px]">
+                                      <span className="text-text-muted">Confiança:</span>
+                                      <span className="rounded border border-lime/40 bg-lime/10 px-1.5 py-0.5 text-lime">WHITE {b.trocaWhiteScore.toFixed(2)}</span>
+                                      <span className="rounded border border-red-500/30 bg-red-500/10 px-1.5 py-0.5 text-red-300">BLACK {b.trocaBlackScore.toFixed(2)}</span>
+                                      <span className="text-text-muted/70">(WHITE alto + BLACK baixo = a IA lê o novo áudio)</span>
+                                    </div>
+                                  ) : null}
                                   <button
                                     type="button"
                                     onClick={() => transcribeTrocaResult(b.taskId, b.camufladoZipUrl!)}
