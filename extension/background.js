@@ -566,32 +566,42 @@ async function handleDriveListFolder(requestId, folderId, bridgeTabId) {
       return;
     }
     const html = await r.text();
-    // Parser HTML simples via regex. Cada item tem padrao:
-    //   <a href="https://drive.google.com/file/d/<ID>/view"...>
-    //   ... <div class="flip-entry-title">NOME</div> ...
-    // Estrategia: extrai todos pares (fileId, title) em ordem de aparicao.
+    // Parser robusto. No embeddedfolderview cada item e:
+    //   <div class="flip-entry ..." id="entry-<RESOURCE_ID>"> ...
+    //     <div class="flip-entry-title">NOME</div> ...
+    // O `id="entry-<ID>"` e a ANCORA confiavel (independe da ordem do <a>
+    // do link vs o titulo, que variava e quebrava o parser antigo).
+    const decode = (s) => s
+      .replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ')
+      .replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
     const files = [];
     const seen = new Set();
-    // Captura fileId + title-like text proximo
-    // Padrao 1: pares <a><div>...</div></a> ao redor de cada arquivo
-    const itemRe = /<a[^>]*href="[^"]*\/file\/d\/([a-zA-Z0-9_-]{15,})[^"]*"[^>]*>[\s\S]{0,400}?<div[^>]*class="flip-entry-title"[^>]*>([^<]+)<\/div>/gi;
+    // Quais ids sao PASTA (aparecem como /folders/<id> no HTML).
+    const folderIds = new Set();
+    let fm;
+    const fre = /\/folders\/([a-zA-Z0-9_-]{15,})/g;
+    while ((fm = fre.exec(html)) !== null) folderIds.add(fm[1]);
+    // Ancora no id do entry + o titulo logo a seguir.
     let m;
-    while ((m = itemRe.exec(html)) !== null) {
-      const fileId = m[1];
-      const name = m[2].replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').replace(/&#39;/g, "'").trim();
-      if (!seen.has(fileId) && name) {
-        seen.add(fileId);
-        files.push({ fileId, name, isFolder: false });
-      }
-    }
-    // Tambem pega pastas dentro
-    const folderRe = /<a[^>]*href="[^"]*\/folders\/([a-zA-Z0-9_-]{15,})[^"]*"[^>]*>[\s\S]{0,400}?<div[^>]*class="flip-entry-title"[^>]*>([^<]+)<\/div>/gi;
-    while ((m = folderRe.exec(html)) !== null) {
+    const entryRe = /id="entry-([a-zA-Z0-9_-]{15,})"[\s\S]{0,2000}?class="flip-entry-title"[^>]*>([^<]+)</gi;
+    while ((m = entryRe.exec(html)) !== null) {
       const id = m[1];
-      const name = m[2].replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').trim();
+      const name = decode(m[2]);
       if (!seen.has(id) && name) {
         seen.add(id);
-        files.push({ fileId: id, name, isFolder: true });
+        files.push({ fileId: id, name, isFolder: folderIds.has(id) });
+      }
+    }
+    // FALLBACK (parser antigo) caso a estrutura mude e o entry-id suma.
+    if (files.length === 0) {
+      const itemRe = /<a[^>]*href="[^"]*\/file\/d\/([a-zA-Z0-9_-]{15,})[^"]*"[^>]*>[\s\S]{0,600}?<div[^>]*class="flip-entry-title"[^>]*>([^<]+)<\/div>/gi;
+      while ((m = itemRe.exec(html)) !== null) {
+        if (!seen.has(m[1])) { seen.add(m[1]); files.push({ fileId: m[1], name: decode(m[2]), isFolder: false }); }
+      }
+      const folderRe = /<a[^>]*href="[^"]*\/folders\/([a-zA-Z0-9_-]{15,})[^"]*"[^>]*>[\s\S]{0,600}?<div[^>]*class="flip-entry-title"[^>]*>([^<]+)<\/div>/gi;
+      while ((m = folderRe.exec(html)) !== null) {
+        if (!seen.has(m[1])) { seen.add(m[1]); files.push({ fileId: m[1], name: decode(m[2]), isFolder: true }); }
       }
     }
     console.log(`[DARKO LAB BG] HG_DRIVE_LIST_FOLDER ${folderId}: ${files.length} items`);
