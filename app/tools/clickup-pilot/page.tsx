@@ -1161,7 +1161,16 @@ function ClickUpPilotInner() {
             }
             // 3) Descricao
             if (!driveId) grab(det.description || det.text_content);
-            console.info(`[troca] ${task.name}: ${commentCount} comentario(s), driveId=${driveId || 'NAO DETECTADO'}`);
+            // 4) CATCH-ALL: serializa a task inteira e varre. Pega link em
+            //    anexo, custom field aninhado, markdown, etc — onde quer que o
+            //    ClickUp tenha escondido. Garante deteccao se a URL existe.
+            if (!driveId) {
+              try { grab(JSON.stringify(det)); } catch {}
+            }
+            console.info(
+              `[troca] "${task.name}": ${commentCount} comentario(s), driveId=${driveId || 'NAO DETECTADO'}`,
+              driveId ? '' : { customFields: (det.custom_fields || []).map((f: any) => ({ name: f.name, value: f.value })) },
+            );
 
             const baseAdIdM = task.name.match(/AD\d+[A-Z0-9]*/i);
             const baseAdId = baseAdIdM ? baseAdIdM[0].toUpperCase() : task.name;

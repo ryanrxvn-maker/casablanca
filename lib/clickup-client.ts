@@ -201,6 +201,10 @@ export async function getTaskComments(
           if (typeof link === 'string') parts.push(link);
         }
       }
+      // A PROVA DE BALA: serializa o comentario inteiro. Se a URL existir em
+      // QUALQUER campo (texto, atributo de hyperlink, etc), o regex de Drive
+      // acha. JSON.stringify nao escapa "/", entao as URLs ficam intactas.
+      try { parts.push(JSON.stringify(c)); } catch {}
       return { id: String(c.id ?? ''), comment_text: parts.join(' ') };
     });
   } catch {
