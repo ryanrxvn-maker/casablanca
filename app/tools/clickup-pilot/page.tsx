@@ -1159,8 +1159,22 @@ function ClickUpPilotInner() {
             }
             // 2) Descricao (fallback) — tambem so pega link de ARQUIVO.
             if (!driveId) grab(det.description || det.text_content);
+
+            // PASTA (LINK PASTA DRIVE) — APENAS atalho "abrir pasta" pra quando
+            // a task nao tem comentario com o link. NUNCA e fonte de download.
+            let driveFolderUrl: string | null = null;
+            const grabFolder = (t: string | undefined | null) => {
+              if (driveFolderUrl) return;
+              const m = (t || '').match(/https?:\/\/\S*\/drive\/folders\/[a-zA-Z0-9_-]+\S*/);
+              if (m) driveFolderUrl = m[0];
+            };
+            for (const f of det.custom_fields || []) {
+              if (typeof f.value === 'string') grabFolder(f.value);
+            }
+            grabFolder(det.description || det.text_content);
+
             console.info(
-              `[troca] "${task.name}": ${commentCount} comentario(s), arquivo=${driveId || 'NAO DETECTADO (link fica no comentario)'}`,
+              `[troca] "${task.name}": ${commentCount} comentario(s), arquivo=${driveId || 'NAO DETECTADO (link fica no comentario)'}, pasta=${driveFolderUrl || 'nao'}`,
             );
 
             const baseAdIdM = task.name.match(/AD\d+[A-Z0-9]*/i);
@@ -1172,7 +1186,7 @@ function ClickUpPilotInner() {
                 status: 'ready',
                 baseAdId,
                 taskUrl: (det as any).url || (task as any).url || undefined,
-                trocaBriefing: { baseAdId, driveId, driveUrl, driveFolderId: null, driveFolderUrl: null },
+                trocaBriefing: { baseAdId, driveId, driveUrl, driveFolderId: null, driveFolderUrl },
                 roleSlots: [],
                 partTemplates: [],
               },
@@ -6118,6 +6132,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                               {/* RENDER TROCA DE ÁUDIO — pipeline proprio (sem HeyGen) */}
                               {a.trocaBriefing ? (() => {
                                 const detectedDriveId = a.trocaBriefing!.driveId || extractDriveFileId(trocaAdUrl[a.taskId] || '');
+                                const folderUrl = a.trocaBriefing!.driveFolderUrl;
                                 const hasSource = !!detectedDriveId;
                                 const whiteFile = trocaWhite[a.taskId] || null;
                                 const vol = trocaVolume[a.taskId] ?? 30;
@@ -6138,7 +6153,20 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                           <span className="rounded border border-lime/40 bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime">✓ Vídeo detectado (do comentário): {detectedDriveId}</span>
                                         </div>
                                       ) : (
-                                        <span className="mono text-[9px] uppercase tracking-widest text-yellow-300">⚠ Link não detectado — o link fica no COMENTÁRIO da task. Cola a URL do vídeo abaixo se faltar.</span>
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <span className="mono text-[9px] uppercase tracking-widest text-yellow-300">⚠ Sem comentário com o link — abra a pasta, copie o link do vídeo e cole abaixo</span>
+                                          {folderUrl ? (
+                                            <a
+                                              href={folderUrl}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="mono rounded border border-cyan-400/50 bg-cyan-400/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-400/20"
+                                              title="Abre a pasta do criativo no Drive (LINK PASTA DRIVE)"
+                                            >
+                                              📁 Abrir pasta do Drive ↗
+                                            </a>
+                                          ) : null}
+                                        </div>
                                       )}
                                       <input
                                         type="text"
