@@ -1282,6 +1282,29 @@ export type ParsedVABriefing = {
   depoimentoFileId: string | null;
 };
 
+/** Marcadores que indicam o FIM do texto falado (copy) dentro de uma
+ *  section VA. Dali pra frente eh rodape de PRODUCAO/EDICAO ou a proxima
+ *  LEVA — nada disso eh fala do avatar e NAO deve entrar no hook/body.
+ *  Bug reportado: body puxava "LEVA 02 - META", "Instruções gerais para
+ *  edição", "Segue o link da pasta dos criativos: CRIATIVOS". */
+const COPY_END_BOUNDARIES: RegExp[] = [
+  // "LEVA 02 - META" — ancora em LEVA + numero pra NAO cortar fala tipo
+  // "Leva só dois minutos".
+  /^leva\s+\d/i,
+  // "Instruções gerais para edição:" / "Instruções para edição:" — ancora em
+  // gerais|para pra evitar falso positivo improvavel.
+  /^instru[cç][oõ]es?\s+(gerais|para)\b/i,
+  /^segue\s+o\s+link\s+da\s+pasta\b/i,   // "Segue o link da pasta dos criativos:"
+  /pasta\s+dos\s+criativos/i,            // "...pasta dos criativos: CRIATIVOS"
+  /^observa[cç][oõ]es?\s+gerais\b/i,     // "Observações gerais:"
+];
+/** True se a linha marca o inicio do rodape de producao (fim da copy). */
+function isCopyEndBoundary(line: string): boolean {
+  const t = line.trim();
+  if (!t) return false;
+  return COPY_END_BOUNDARIES.some((re) => re.test(t));
+}
+
 /** Detecta se uma task ou doc e do tipo Variacao de Avatar.
  *  Check: nome contem 'Variação de avatar' OU comeca com 'VA -'/'VA-' */
 export function isVATask(taskName: string): boolean {
@@ -1517,7 +1540,7 @@ export function parseVABriefing(
     let end = vaSectionEnd;
     for (let i = gIdx + 1; i < vaSectionEnd; i++) {
       const t = lines[i].trim();
-      if (/^body\s*$/i.test(t) || /^depoimento\b/i.test(t)) { end = i; break; }
+      if (/^body\s*$/i.test(t) || /^depoimento\b/i.test(t) || isCopyEndBoundary(t)) { end = i; break; }
     }
     hookText = lines.slice(gIdx + 1, end).join('\n').trim().replace(/\s*\[[a-z]{1,3}\]/gi, '');
   }
@@ -1529,7 +1552,7 @@ export function parseVABriefing(
     let end = vaSectionEnd;
     for (let i = bIdx + 1; i < vaSectionEnd; i++) {
       const t = lines[i].trim();
-      if (/^depoimento\b/i.test(t)) { end = i; break; }
+      if (/^depoimento\b/i.test(t) || isCopyEndBoundary(t)) { end = i; break; }
     }
     bodyText = lines.slice(bIdx + 1, end).join('\n').trim().replace(/\s*\[[a-z]{1,3}\]/gi, '');
   }
@@ -1547,7 +1570,11 @@ export function parseVABriefing(
       const dl = driveLinks.find((d) => d.text.includes(depoimentoUsername!));
       if (dl) depoimentoFileId = dl.fileId;
     }
-    depoimentoText = lines.slice(dIdx + 1).join('\n').trim().replace(/\s*\[[a-z]{1,3}\]/gi, '');
+    let depEnd = lines.length;
+    for (let i = dIdx + 1; i < lines.length; i++) {
+      if (isCopyEndBoundary(lines[i])) { depEnd = i; break; }
+    }
+    depoimentoText = lines.slice(dIdx + 1, depEnd).join('\n').trim().replace(/\s*\[[a-z]{1,3}\]/gi, '');
   }
 
   // Validacao minima: precisa ter pelo menos 1 avatar + hook OU body
