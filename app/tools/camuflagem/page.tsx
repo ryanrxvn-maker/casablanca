@@ -89,12 +89,17 @@ type Mode = 'camuflar' | 'descamuflar';
 type DecloakItem = {
   id: string;
   file: File | null;
+  // Modo "trocar WHITE": novo áudio que substitui a trilha escondida antiga.
+  whiteSwap?: File | null;
   status: 'idle' | 'processing' | 'done' | 'error';
   errorMsg?: string;
   resultBlob?: Blob;
   resultUrl?: string;
   stage?: string;
   wasStereo?: boolean;
+  // Verificação do re-camuflado (só no modo trocar WHITE).
+  guard?: 'checking' | VerifyVerdict;
+  downmixes?: DownmixResult[];
 };
 
 function newDecloak(): DecloakItem {
@@ -139,6 +144,11 @@ export default function CamuflagemPage() {
   const [decloakFormat, setDecloakFormat] = useToolState<OutFormat>(
     'camuflagem:decloakFormat',
     'wav',
+  );
+  // Modo "trocar WHITE": liga o upload de um novo WHITE e re-camufla.
+  const [decloakSwapWhite, setDecloakSwapWhite] = useToolState<boolean>(
+    'camuflagem:decloakSwapWhite',
+    false,
   );
   const [decloaking, setDecloaking] = useToolState<boolean>(
     'camuflagem:decloaking',
@@ -353,7 +363,9 @@ export default function CamuflagemPage() {
   }
 
   async function processDecloak() {
-    const ready = decloakItems.filter((it) => it.file);
+    const ready = decloakItems.filter(
+      (it) => it.file && (!decloakSwapWhite || it.whiteSwap),
+    );
     if (ready.length === 0) return;
     setDecloaking(true);
     for (const it of ready) {
@@ -362,11 +374,73 @@ export default function CamuflagemPage() {
           status: 'processing',
           errorMsg: undefined,
           stage: 'Desfazendo camuflagem...',
+          guard: undefined,
+          downmixes: undefined,
         });
         if (decloakFormat === 'mp4' && !isVideoFile(it.file)) {
           throw new Error(
             'Para sair em MP4, o arquivo camuflado precisa ser um video.',
           );
+        }
+
+        // MODO TROCAR WHITE: recupera o BLACK por baixo, remove o WHITE antigo
+        // e re-camufla o BLACK com o novo WHITE enviado.
+        if (decloakSwapWhite) {
+          updateDecloak(it.id, { stage: 'Recuperando o BLACK original...' });
+          const { wav: blackWav } = await descamuflar({
+            file: it.file!,
+            layer: 'public',
+          });
+
+          updateDecloak(it.id, { stage: 'Embutindo o novo WHITE...' });
+          const camWav = await camuflar({
+            black: blackWav,
+            white: it.whiteSwap!,
+            volumePercent: volume,
+          });
+
+          let out: Blob;
+          if (decloakFormat === 'wav') {
+            out = camWav;
+          } else if (decloakFormat === 'mp3') {
+            updateDecloak(it.id, { stage: 'Convertendo para MP3 320k...' });
+            out = await extractAudioAs(
+              camWav,
+              'mp3',
+              { onStage: (s) => updateDecloak(it.id, { stage: s }) },
+              true,
+            );
+          } else {
+            updateDecloak(it.id, { stage: 'Muxando no video (AAC 320k)...' });
+            out = await muxAudioIntoVideo(
+              it.file!,
+              camWav,
+              { onStage: (s) => updateDecloak(it.id, { stage: s }) },
+              true,
+            );
+          }
+
+          updateDecloak(it.id, {
+            stage: 'Verificando o novo WHITE...',
+            guard: 'checking',
+          });
+          const v = await verifyCamouflage({
+            result: out,
+            white: it.whiteSwap!,
+            black: blackWav,
+          });
+
+          const url = URL.createObjectURL(out);
+          updateDecloak(it.id, {
+            status: 'done',
+            resultBlob: out,
+            resultUrl: url,
+            stage: undefined,
+            wasStereo: true,
+            guard: v.verdict,
+            downmixes: v.downmixes,
+          });
+          continue;
         }
 
         const { wav, wasStereo } = await descamuflar({
@@ -424,7 +498,11 @@ export default function CamuflagemPage() {
   async function downloadDecloak(it: DecloakItem) {
     if (!it.resultBlob) return;
     const base = baseName(it.file?.name ?? 'arquivo');
-    const suffix = decloakLayer === 'public' ? 'publico' : 'escondido';
+    const suffix = decloakSwapWhite
+      ? 'white-trocado'
+      : decloakLayer === 'public'
+        ? 'publico'
+        : 'escondido';
     await downloadBlob(it.resultBlob, `${base}_${suffix}.${decloakFormat}`);
   }
 
@@ -824,23 +902,99 @@ export default function CamuflagemPage() {
         </>
         ) : (
         <>
-        <ToolStep n={1} icon={<IconStepTarget size={18} />} title="O que recuperar" hint="Qual camada extrair do arquivo camuflado" hue={HUE}>
-          <ToolChoice
-            value={decloakLayer}
-            onChange={(v) => !decloaking && setDecloakLayer(v as DescamuflarLayer)}
-            options={[
-              { value: 'public', label: 'Áudio público', sub: 'o que o humano ouve' },
-              { value: 'hidden', label: 'Trilha escondida', sub: 'o que a IA lê' },
-            ]}
-            disabled={decloaking}
-            hue={HUE}
-          />
-          <p className="mt-3 text-[11px] leading-relaxed text-text-muted">
-            {decloakLayer === 'public'
-              ? 'Remove a camada escondida (inversão de fase) e devolve só o áudio que toca pra quem assiste — o BLACK limpo.'
-              : 'Extrai a trilha que estava embutida pra IA ler — o WHITE — pra você conferir o que tinha dentro do arquivo.'}
-          </p>
-        </ToolStep>
+        {/* Botão 3D (só ícone): liga o modo "trocar WHITE". */}
+        <div className="flex items-center gap-4 rounded-[12px] border border-line bg-bg p-4">
+          <div style={{ perspective: '650px' }}>
+            <button
+              type="button"
+              onClick={() => !decloaking && setDecloakSwapWhite((v) => !v)}
+              aria-pressed={decloakSwapWhite}
+              aria-label="Trocar audio WHITE"
+              title="Trocar o WHITE: remove o escondido antigo e embute um novo"
+              disabled={decloaking}
+              className={
+                'transform-gpu flex h-12 w-12 items-center justify-center rounded-2xl border-2 transition-all duration-300 ease-[cubic-bezier(.4,1.4,.6,1)] hover:[transform:translateY(-3px)_rotateX(20deg)] active:[transform:translateY(0)_rotateX(0deg)_scale(.93)] active:duration-75 disabled:cursor-not-allowed disabled:opacity-50 ' +
+                (decloakSwapWhite
+                  ? 'border-lime bg-lime/15 text-lime'
+                  : 'border-line bg-bg-soft/80 text-text-muted hover:border-lime hover:text-lime')
+              }
+              style={{
+                transformStyle: 'preserve-3d',
+                boxShadow: decloakSwapWhite
+                  ? 'inset 0 1px 0 rgba(255,255,255,0.14), inset 0 -3px 0 rgba(0,0,0,0.55), 0 0 24px -4px rgba(200,232,124,0.7), 0 6px 14px -6px rgba(0,0,0,0.8)'
+                  : 'inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -3px 0 rgba(0,0,0,0.5), 0 4px 10px -4px rgba(0,0,0,0.7)',
+              }}
+            >
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                className={
+                  'transition-transform duration-500 ' +
+                  (decloakSwapWhite ? 'rotate-180' : '')
+                }
+              >
+                <polyline points="17 1 21 5 17 9" />
+                <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+                <polyline points="7 23 3 19 7 15" />
+                <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+              </svg>
+            </button>
+          </div>
+          <div className="text-xs leading-relaxed text-text-muted">
+            <span
+              className={
+                'font-semibold ' +
+                (decloakSwapWhite ? 'text-lime' : 'text-white')
+              }
+            >
+              Trocar áudio WHITE {decloakSwapWhite ? '· LIGADO' : '· desligado'}
+            </span>
+            <br />
+            {decloakSwapWhite
+              ? 'Suba um novo WHITE em cada arquivo: removo o escondido antigo e embuto o novo sobre o MESMO áudio público (BLACK).'
+              : 'Ligue pra substituir a trilha escondida por uma nova, mantendo o áudio público original.'}
+          </div>
+        </div>
+
+        {decloakSwapWhite ? (
+          <ToolStep n={1} icon={<IconStepSliders size={18} />} title="Intensidade do novo WHITE" hint="Quanto maior, mais difícil de detectar" hue={HUE}>
+            <ToolSlider
+              label="Volume da camuflagem"
+              min={5}
+              max={100}
+              step={1}
+              value={volume}
+              onChange={(v) => setVolume(Math.round(v))}
+              display={(v) => v + '%'}
+              disabled={decloaking}
+            />
+          </ToolStep>
+        ) : (
+          <ToolStep n={1} icon={<IconStepTarget size={18} />} title="O que recuperar" hint="Qual camada extrair do arquivo camuflado" hue={HUE}>
+            <ToolChoice
+              value={decloakLayer}
+              onChange={(v) => !decloaking && setDecloakLayer(v as DescamuflarLayer)}
+              options={[
+                { value: 'public', label: 'Áudio público', sub: 'o que o humano ouve' },
+                { value: 'hidden', label: 'Trilha escondida', sub: 'o que a IA lê' },
+              ]}
+              disabled={decloaking}
+              hue={HUE}
+            />
+            <p className="mt-3 text-[11px] leading-relaxed text-text-muted">
+              {decloakLayer === 'public'
+                ? 'Remove a camada escondida (inversão de fase) e devolve só o áudio que toca pra quem assiste — o BLACK limpo.'
+                : 'Extrai a trilha que estava embutida pra IA ler — o WHITE — pra você conferir o que tinha dentro do arquivo.'}
+            </p>
+          </ToolStep>
+        )}
 
         <ToolStep n={2} icon={<IconStepFormat size={18} />} title="Formato de saída" hue={HUE}>
           <ToolChoice
@@ -859,13 +1013,15 @@ export default function CamuflagemPage() {
           />
           {decloakFormat === 'mp4' ? (
             <p className="mt-2 text-[11px] text-text-muted">
-              O vídeo é mantido; só a trilha de áudio é substituída pela camada
-              recuperada.
+              O vídeo é mantido; só a trilha de áudio é substituída
+              {decloakSwapWhite
+                ? ' pela versão re-camuflada com o novo WHITE.'
+                : ' pela camada recuperada.'}
             </p>
           ) : null}
         </ToolStep>
 
-        <ToolStep n={3} icon={<IconStepFiles size={18} />} title="Arquivos camuflados" hint="Áudio ou vídeo estéreo já camuflado" hue={HUE}>
+        <ToolStep n={3} icon={<IconStepFiles size={18} />} title={decloakSwapWhite ? 'Arquivo + novo WHITE' : 'Arquivos camuflados'} hint="Áudio ou vídeo estéreo já camuflado" hue={HUE}>
         <div className="flex flex-col gap-4">
           {decloakItems.map((it, i) => (
             <div
@@ -907,12 +1063,32 @@ export default function CamuflagemPage() {
                 ) : null}
               </div>
 
-              <label className="label-field">Arquivo camuflado</label>
-              <FileUpload
-                accept="audio/*,video/mp4,video/webm,video/quicktime"
-                value={it.file}
-                onChange={(f) => updateDecloak(it.id, { file: f, status: 'idle' })}
-              />
+              <div className={decloakSwapWhite ? 'grid gap-3 md:grid-cols-2' : ''}>
+                <div>
+                  <label className="label-field">Arquivo camuflado</label>
+                  <FileUpload
+                    accept="audio/*,video/mp4,video/webm,video/quicktime"
+                    value={it.file}
+                    onChange={(f) => updateDecloak(it.id, { file: f, status: 'idle' })}
+                  />
+                </div>
+                {decloakSwapWhite ? (
+                  <div>
+                    <label className="label-field">Novo WHITE (IA)</label>
+                    <FileUpload
+                      accept="audio/*,video/mp4,video/webm,video/quicktime"
+                      value={it.whiteSwap ?? null}
+                      onChange={(f) =>
+                        updateDecloak(it.id, { whiteSwap: f, status: 'idle' })
+                      }
+                    />
+                    <p className="mt-1 text-[11px] text-text-muted">
+                      O WHITE antigo é descartado; este entra no lugar sobre o
+                      mesmo BLACK.
+                    </p>
+                  </div>
+                ) : null}
+              </div>
 
               {it.errorMsg ? (
                 <div
@@ -936,18 +1112,50 @@ export default function CamuflagemPage() {
                     <AudioPlayer
                       src={it.resultUrl}
                       label={
-                        decloakLayer === 'public'
-                          ? 'Áudio público recuperado'
-                          : 'Trilha escondida extraída'
+                        decloakSwapWhite
+                          ? 'Re-camuflado com o novo WHITE'
+                          : decloakLayer === 'public'
+                            ? 'Áudio público recuperado'
+                            : 'Trilha escondida extraída'
                       }
                     />
                   )}
-                  {it.wasStereo === false ? (
+                  {!decloakSwapWhite && it.wasStereo === false ? (
                     <div className="rounded-[8px] border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-[11px] text-yellow-300">
                       Arquivo era mono (sem inversão de fase) — não havia camada
                       pra separar; devolvido o próprio áudio.
                     </div>
                   ) : null}
+
+                  {/* Veredito do re-camuflado (modo trocar WHITE). */}
+                  {decloakSwapWhite && it.guard === 'checking' ? (
+                    <div className="flex items-center gap-2 rounded-[10px] border border-line bg-bg-soft/40 px-3 py-2 text-xs text-text-muted">
+                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-lime border-t-transparent" />
+                      Verificando o novo WHITE no arquivo real...
+                    </div>
+                  ) : decloakSwapWhite &&
+                    (it.guard === 'ok' || it.guard === 'fail') ? (
+                    (() => {
+                      const ev = effectiveVerdict(it.downmixes, 'platforms');
+                      const ok = ev === 'ok';
+                      return (
+                        <div
+                          role={ok ? undefined : 'alert'}
+                          className={
+                            'rounded-[10px] border px-3 py-2 text-xs ' +
+                            (ok
+                              ? 'border-lime/50 bg-lime/10 text-lime shadow-[0_0_22px_-8px_rgba(200,232,124,0.6)]'
+                              : 'error-shake border-red-500/50 bg-red-500/10 text-red-300 shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)]')
+                          }
+                        >
+                          {ok
+                            ? 'NOVO WHITE EMBUTIDO — TikTok/Kwai/YouTube escutam o WHITE novo; o antigo foi removido.'
+                            : 'O novo WHITE não segurou na soma mono — confira intensidade/arquivo e tente de novo.'}
+                        </div>
+                      );
+                    })()
+                  ) : null}
+
                   <div className="flex items-center justify-end gap-2">
                     <button
                       onClick={() => downloadDecloak(it)}
@@ -975,9 +1183,13 @@ export default function CamuflagemPage() {
             ) : (
               <ToolAction
                 onClick={processDecloak}
-                disabled={!decloakItems.some((it) => it.file)}
+                disabled={
+                  !decloakItems.some(
+                    (it) => it.file && (!decloakSwapWhite || it.whiteSwap),
+                  )
+                }
               >
-                Descamuflar tudo
+                {decloakSwapWhite ? 'Trocar WHITE e camuflar' : 'Descamuflar tudo'}
               </ToolAction>
             )}
           </div>
