@@ -303,6 +303,7 @@ type BatchTaskState = {
    *  fica no IndexedDB (chave `troca:white:<taskId>`); aqui guardamos o que
    *  e serializavel pra reconstruir tudo sem a analise em memoria. */
   trocaDriveId?: string;
+  trocaFolderId?: string;
   trocaVolume?: number;
   trocaWhiteMime?: string;
   /** TROCA: confianca da verificacao (correlacao na soma mono de plataforma).
@@ -415,6 +416,10 @@ type TaskAnalysis = {
     baseAdId: string;
     driveId: string | null;
     driveUrl: string | null;
+    /** Pasta do Drive (quando a task so referencia a PASTA do criativo, sem
+     *  o link do arquivo). No disparo, listamos a pasta e pegamos o video. */
+    driveFolderId: string | null;
+    driveFolderUrl: string | null;
   };
   /** Google Docs URL extraido do custom field "DOC DA COPY" ou da descricao
    *  da task. Persistido pra mostrar botao "abrir doc" sem ter que ir
@@ -1213,11 +1218,22 @@ function ClickUpPilotInner() {
           if (isTrocaAudioTask(task.name)) {
             let driveId: string | null = null;
             let driveUrl: string | null = null;
+            let driveFolderId: string | null = null;
+            let driveFolderUrl: string | null = null;
             const grab = (text: string | undefined | null) => {
-              const id = extractDriveFileIdFromText(text);
+              const t = text || '';
+              const id = extractDriveFileIdFromText(t);
               if (id && !driveId) {
                 driveId = id;
-                driveUrl = (text || '').match(/https?:\/\/\S+/)?.[0] || null;
+                driveUrl = t.match(/https?:\/\/\S+/)?.[0] || null;
+              }
+              // Tambem captura link de PASTA (resolvido no disparo).
+              if (!driveFolderId) {
+                const fm = t.match(/\/drive\/folders\/([a-zA-Z0-9_-]{20,60})/);
+                if (fm) {
+                  driveFolderId = fm[1];
+                  driveFolderUrl = t.match(/https?:\/\/\S*\/folders\/[a-zA-Z0-9_-]+\S*/)?.[0] || `https://drive.google.com/drive/folders/${fm[1]}`;
+                }
               }
             };
             let commentCount = 0;
@@ -1253,8 +1269,8 @@ function ClickUpPilotInner() {
               try { grab(JSON.stringify(det)); } catch {}
             }
             console.info(
-              `[troca] "${task.name}": ${commentCount} comentario(s), driveId=${driveId || 'NAO DETECTADO'}`,
-              driveId ? '' : { customFields: (det.custom_fields || []).map((f: any) => ({ name: f.name, value: f.value })) },
+              `[troca] "${task.name}": ${commentCount} comentario(s), arquivo=${driveId || 'nao'}, pasta=${driveFolderId || 'nao'}`,
+              driveId || driveFolderId ? '' : { customFields: (det.custom_fields || []).map((f: any) => ({ name: f.name, value: f.value })) },
             );
 
             const baseAdIdM = task.name.match(/AD\d+[A-Z0-9]*/i);
@@ -1266,7 +1282,7 @@ function ClickUpPilotInner() {
                 status: 'ready',
                 baseAdId,
                 taskUrl: (det as any).url || (task as any).url || undefined,
-                trocaBriefing: { baseAdId, driveId, driveUrl },
+                trocaBriefing: { baseAdId, driveId, driveUrl, driveFolderId, driveFolderUrl },
                 roleSlots: [],
                 partTemplates: [],
               },
@@ -4724,10 +4740,12 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
     };
 
     // Resolve Drive ID: briefing parseado > input manual > estado persistido
-    // (sobrevive reload, pois batchState e serializado).
+    // (sobrevive reload, pois batchState e serializado). Se nao houver link de
+    // ARQUIVO, mas houver link de PASTA, resolvemos o video listando a pasta.
     const persisted = batchStates[taskId];
-    const driveId =
+    let driveId =
       troca?.driveId || extractDriveFileId(trocaAdUrl[taskId] || '') || persisted?.trocaDriveId || null;
+    const folderId = troca?.driveFolderId || persisted?.trocaFolderId || null;
     const volume = Math.max(5, Math.min(100, trocaVolume[taskId] ?? persisted?.trocaVolume ?? 30));
 
     // Resolve o novo WHITE: estado em memoria OU IndexedDB (retomar pos-reload).
@@ -4740,8 +4758,8 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
       } catch {}
     }
 
-    if (!driveId) {
-      fail('Sem link do criativo original. Cola a URL do Drive no painel da task.');
+    if (!driveId && !folderId) {
+      fail('Sem link do criativo. Cola a URL do vídeo (ou da pasta) do Drive no painel da task.');
       return;
     }
     if (!white) {
@@ -4778,16 +4796,38 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
           }],
           startedAt: prev[taskId]?.startedAt || startedAt,
           taskUrl: prev[taskId]?.taskUrl || a?.taskUrl,
-          trocaDriveId: driveId,
+          trocaDriveId: driveId || undefined,
+          trocaFolderId: folderId || undefined,
           trocaVolume: volume,
           trocaWhiteMime: whiteMime,
         } as BatchTaskState,
       }));
     };
 
-    setStage('downloading', 'Baixando o criativo original do Drive...');
+    setStage('downloading', driveId ? 'Baixando o criativo original do Drive...' : 'Procurando o vídeo na pasta do Drive...');
 
     try {
+      // 0. Se so temos a PASTA, lista e escolhe o video (auto-resolucao).
+      if (!driveId && folderId) {
+        const { listDriveFolderViaExtension } = await import('@/lib/heygen-extension-bridge');
+        const lf = await listDriveFolderViaExtension(folderId);
+        if (!lf.ok) throw new Error('Listar pasta do Drive: ' + lf.error);
+        const vids = lf.files.filter(
+          (f) => !f.isFolder && /\.(mp4|mov|webm|mkv|m4v)$/i.test(f.name),
+        );
+        // Prefere o arquivo cujo nome casa com o AD; senao o 1o video; senao
+        // qualquer arquivo (alguns videos vem sem extensao no nome).
+        const pick =
+          vids.find((f) => f.name.toUpperCase().includes(baseAdId.toUpperCase())) ||
+          vids[0] ||
+          lf.files.find((f) => !f.isFolder) ||
+          null;
+        if (!pick) throw new Error('Nenhum vídeo encontrado na pasta do Drive.');
+        driveId = pick.fileId;
+        setStage('downloading', `Vídeo encontrado (${pick.name}). Baixando...`);
+      }
+      if (!driveId) throw new Error('Não foi possível resolver o vídeo do criativo.');
+
       // 1. Download do AD original (via extension — cookies autenticados).
       const { downloadDriveFileViaExtension } = await import('@/lib/heygen-extension-bridge');
       const dl = await downloadDriveFileViaExtension(driveId);
@@ -4856,7 +4896,8 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
           camufladoZipUrl: url,
           camufladoZipName: renamedTo,
           taskUrl: prev[taskId]?.taskUrl || a?.taskUrl,
-          trocaDriveId: driveId,
+          trocaDriveId: driveId || undefined,
+          trocaFolderId: folderId || undefined,
           trocaVolume: volume,
           trocaWhiteMime: whiteMime,
           trocaWhiteScore: platformWhite,
@@ -6347,6 +6388,8 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                               {/* RENDER TROCA DE ÁUDIO — pipeline proprio (sem HeyGen) */}
                               {a.trocaBriefing ? (() => {
                                 const detectedDriveId = a.trocaBriefing!.driveId || extractDriveFileId(trocaAdUrl[a.taskId] || '');
+                                const detectedFolderUrl = a.trocaBriefing!.driveFolderUrl;
+                                const hasSource = !!detectedDriveId || !!a.trocaBriefing!.driveFolderId;
                                 const whiteFile = trocaWhite[a.taskId] || null;
                                 const vol = trocaVolume[a.taskId] ?? 30;
                                 return (
@@ -6363,10 +6406,22 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">Criativo original (Drive)</div>
                                       {detectedDriveId ? (
                                         <div className="mono text-[10px] flex flex-wrap items-center gap-2">
-                                          <span className="rounded border border-lime/40 bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime">✓ Drive ID: {detectedDriveId}</span>
+                                          <span className="rounded border border-lime/40 bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime">✓ Vídeo detectado: {detectedDriveId}</span>
+                                        </div>
+                                      ) : detectedFolderUrl ? (
+                                        <div className="mono text-[10px] flex flex-wrap items-center gap-2">
+                                          <span className="rounded border border-cyan-400/40 bg-cyan-400/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200">📁 Pasta detectada — pego o vídeo automaticamente</span>
+                                          <a
+                                            href={detectedFolderUrl}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="rounded border border-cyan-400/40 bg-cyan-400/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-400/20"
+                                          >
+                                            abrir pasta ↗
+                                          </a>
                                         </div>
                                       ) : (
-                                        <span className="mono text-[9px] uppercase tracking-widest text-yellow-300">⚠ Link não detectado — cola a URL do vídeo abaixo</span>
+                                        <span className="mono text-[9px] uppercase tracking-widest text-yellow-300">⚠ Link não detectado — cola a URL do vídeo (ou da pasta) abaixo</span>
                                       )}
                                       <input
                                         type="text"
@@ -6419,10 +6474,12 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       />
                                     </div>
                                   </div>
-                                  <div className={'rounded-[10px] border p-3 text-[11px] ' + (whiteFile && detectedDriveId ? 'border-lime/40 bg-lime/5 text-lime' : 'border-yellow-500/40 bg-yellow-500/5 text-yellow-200')}>
-                                    {whiteFile && detectedDriveId
-                                      ? '✓ Pronto pra disparar — marque junto das outras e clique em Iniciar. O resultado aparece com botão de download no card.'
-                                      : '⚠ Suba o novo WHITE' + (detectedDriveId ? '' : ' e confirme o link do criativo') + ' pra essa task entrar no disparo.'}
+                                  <div className={'rounded-[10px] border p-3 text-[11px] ' + (whiteFile && hasSource ? 'border-lime/40 bg-lime/5 text-lime' : 'border-yellow-500/40 bg-yellow-500/5 text-yellow-200')}>
+                                    {whiteFile && hasSource
+                                      ? (detectedDriveId
+                                          ? '✓ Pronto pra disparar — marque junto das outras e clique em Iniciar. O resultado aparece com botão de download no card.'
+                                          : '✓ Pronto pra disparar — vou achar o vídeo na pasta automaticamente. Marque junto das outras e clique em Iniciar.')
+                                      : '⚠ Suba o novo WHITE' + (hasSource ? '' : ' e confirme o link do criativo (vídeo ou pasta)') + ' pra essa task entrar no disparo.'}
                                   </div>
                                 </div>
                                 );
