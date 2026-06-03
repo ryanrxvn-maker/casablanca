@@ -199,6 +199,83 @@ function loadPersistedReplan(taskId: string): {
   }
 }
 
+/** ============= CANAL (plataforma/distribuicao) =============
+ *  Le o custom field "CANAL" da task do ClickUp (dropdown) e resolve
+ *  label + cor. Cor primaria = a propria cor da opcao no ClickUp (match
+ *  EXATO com o board). Fallback = cor de marca por nome conhecido (KWAI
+ *  laranja, META azul, YOUTUBE/TIKTOK vermelho, etc).
+ *  100% READ-ONLY: so leitura do que ja vem na listagem, nao escreve nada
+ *  no ClickUp (respeita o GET-only do proxy). */
+const CHANNEL_BRAND_COLORS: Record<string, string> = {
+  kwai: '#FF6E00',
+  meta: '#0866FF',
+  facebook: '#0866FF',
+  fb: '#0866FF',
+  instagram: '#E1306C',
+  insta: '#E1306C',
+  ig: '#E1306C',
+  youtube: '#FF0000',
+  yt: '#FF0000',
+  tiktok: '#FF2D55',
+  tt: '#FF2D55',
+  google: '#4285F4',
+  ads: '#4285F4',
+  taboola: '#0A66C2',
+};
+
+/** Cor de texto legivel sobre um fundo solido (preto em cores claras,
+ *  branco em cores escuras/saturadas). */
+function channelTextColor(hex: string): string {
+  const h = (hex || '').replace('#', '');
+  if (h.length < 6) return '#ffffff';
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.62 ? '#1a1a1a' : '#ffffff';
+}
+
+/** Resolve o(s) canal(is) de uma task. Retorna [] se nao houver campo CANAL
+ *  preenchido. Suporta drop_down (value = orderindex/id) e labels (multi). */
+function resolveChannels(task: ClickUpTask): Array<{ label: string; color: string }> {
+  const fields = task.custom_fields || [];
+  const f = fields.find((x) => /\b(canal|channel|plataforma|platform)\b/i.test(x.name || '')) as any;
+  if (!f) return [];
+  const val = f.value;
+  if (val == null || val === '' || (Array.isArray(val) && val.length === 0)) return [];
+  const options: any[] = (f.type_config && (f.type_config.options || f.type_config.labels)) || [];
+
+  const labelFor = (raw: any): { label: string; color: string } | null => {
+    let name: string | null = null;
+    let optColor: string | null = null;
+    // raw pode ser orderindex (num), id (string), ou ja o nome
+    if (options.length) {
+      const opt = options.find(
+        (o) =>
+          String(o.orderindex) === String(raw) ||
+          String(o.id) === String(raw) ||
+          o.name === raw ||
+          o.label === raw,
+      );
+      if (opt) {
+        name = opt.name || opt.label || null;
+        optColor = opt.color || null;
+      }
+    }
+    if (!name) {
+      if (typeof raw === 'string') name = raw;
+      else if (raw && typeof raw === 'object') name = raw.name || raw.label || null;
+    }
+    if (!name) return null;
+    const key = name.trim().toLowerCase();
+    const color = optColor || CHANNEL_BRAND_COLORS[key] || '#8a8a8a';
+    return { label: name.trim().toUpperCase(), color };
+  };
+
+  const raws = Array.isArray(val) ? val : [val];
+  return raws.map(labelFor).filter((x): x is { label: string; color: string } => !!x);
+}
+
 type DispatchPlan = {
   adName: string;
   parts: Array<{
@@ -5030,6 +5107,23 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   // pelo icone separado, independente do prazo).
                                   return null;
                                 })()}
+                                {/* CANAL — plataforma de distribuicao (KWAI/META/YT/TIKTOK...).
+                                    Chip solido com a cor da opcao do ClickUp (match exato com
+                                    o board). Read-only: vem do custom field CANAL da task. */}
+                                {resolveChannels(t).map((ch, i) => (
+                                  <span
+                                    key={`${ch.label}-${i}`}
+                                    title={`Canal: ${ch.label}`}
+                                    className="inline-flex h-6 items-center rounded-md px-2 text-[10.5px] font-extrabold uppercase leading-none tracking-wider shadow-[0_1px_3px_rgba(0,0,0,0.18)]"
+                                    style={{
+                                      backgroundColor: ch.color,
+                                      color: channelTextColor(ch.color),
+                                      border: `1px solid ${ch.color}`,
+                                    }}
+                                  >
+                                    {ch.label}
+                                  </span>
+                                ))}
                               </div>
                               {/* LADO DIREITO: status pill maior + chevron */}
                               <div className="flex shrink-0 items-center gap-2">
