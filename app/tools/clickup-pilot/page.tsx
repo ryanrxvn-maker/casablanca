@@ -4009,6 +4009,25 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     });
   }
 
+  /** Remove uma PART inteira (card) do que vai pro HeyGen. Usado pra tirar
+   *  cards que sao lixo de producao que escapou do parser (ex "CRIATIVOS",
+   *  "Os criativos sao para META..."). Recalcula as contagens de hook/body
+   *  pro header ("N takes (X hook + Y body)") ficar correto. O disparo le de
+   *  partTemplates, entao remover aqui = nao gera esse take. */
+  function removePartTemplate(taskId: string, partIdx: number) {
+    setTaskAnalyses((prev) => {
+      const a = prev[taskId];
+      if (!a?.partTemplates) return prev;
+      const newParts = a.partTemplates.filter((_, i) => i !== partIdx);
+      const hookCount = newParts.filter((p) => /^(hook|gancho)/i.test(p.label)).length;
+      const bodyPartsCount = newParts.length - hookCount;
+      return {
+        ...prev,
+        [taskId]: { ...a, partTemplates: newParts, totalParts: newParts.length, hookCount, bodyPartsCount },
+      };
+    });
+  }
+
   /** Map { "taskId:roleIdx" → boolean } pra controlar qual slot esta com
    *  preview aberto. UI efemera, nao persiste. */
   const [previewOpen, setPreviewOpen] = useState<Record<string, boolean>>({});
@@ -6778,11 +6797,35 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                                   <div className="grid gap-2">
                                                     {matched.map(({ pt, idx }) => (
                                                       <div key={idx} className="rounded-[8px] border border-line bg-bg/60 p-2">
-                                                        <div className="mono mb-1 flex items-center justify-between text-[9px] uppercase tracking-widest text-cyan-300">
-                                                          <span>{pt.label}</span>
-                                                          <span className="text-text-muted">
-                                                            {pt.text.length} chars · {pt.text.split(/\s+/).filter(Boolean).length} palavras
-                                                          </span>
+                                                        <div className="mono mb-1.5 flex items-center justify-between gap-2 text-[9px] uppercase tracking-widest">
+                                                          <div className="flex min-w-0 items-center gap-2">
+                                                            <span className="shrink-0 font-bold text-cyan-300">{pt.label}</span>
+                                                            {/* QUEM FALA esse trecho — chip com thumb + avatar/role */}
+                                                            <span
+                                                              className="inline-flex max-w-[200px] items-center gap-1 rounded-full border border-lime/35 bg-lime/10 px-1.5 py-0.5 normal-case tracking-normal text-lime"
+                                                              title={`Quem fala: ${slot.role}${selected ? ' → ' + selected.name : ' (avatar ainda não escolhido)'}`}
+                                                            >
+                                                              {(selected?.thumb || briefingThumbUrl) ? (
+                                                                /* eslint-disable-next-line @next/next/no-img-element */
+                                                                <img src={(selected?.thumb || briefingThumbUrl)!} alt={slot.role} className="h-4 w-4 rounded-full object-cover" referrerPolicy="no-referrer" />
+                                                              ) : (
+                                                                <span aria-hidden>🎤</span>
+                                                              )}
+                                                              <span className="truncate text-[9px] font-semibold">{selected ? selected.name : `@${slot.username}`}</span>
+                                                            </span>
+                                                          </div>
+                                                          <div className="flex shrink-0 items-center gap-1.5">
+                                                            <span className="text-text-muted">{pt.text.length}c · {pt.text.split(/\s+/).filter(Boolean).length}p</span>
+                                                            {/* EXCLUIR esse card/trecho — nao vai gerar take */}
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => removePartTemplate(a.taskId, idx)}
+                                                              title="Excluir esse trecho — não vira take no HeyGen (use pra tirar lixo de produção que sobrou)"
+                                                              className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-red-400/40 bg-red-500/10 text-red-300 transition hover:border-red-400/70 hover:bg-red-500/25"
+                                                            >
+                                                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="m6 6 12 12M18 6 6 18" /></svg>
+                                                            </button>
+                                                          </div>
                                                         </div>
                                                         <textarea
                                                           value={pt.text}
@@ -6798,8 +6841,8 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                                 );
                                               })()}
                                               <div className="mono mt-2 text-[9px] uppercase tracking-widest text-text-muted">
-                                                ↑ se ver indicativo vermelho/filename/marker aqui dentro, edita pra remover.
-                                                este e o texto EXATO que vai pro avatar.
+                                                este é o texto EXATO que vai pro avatar — o que você editar aqui é o que dispara.
+                                                edita pra corrigir leak, ou × pra remover o trecho inteiro.
                                               </div>
                                             </div>
                                           ) : null}

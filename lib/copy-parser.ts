@@ -870,6 +870,15 @@ export function sanitizeSpokenCopy(raw: string, knownRoles: string[] = []): stri
   while ((bm = bodyMarkerRe.exec(s)) !== null) lastBodyEnd = bm.index + bm[0].length;
   if (lastBodyEnd >= 0) s = s.slice(lastBodyEnd);
 
+  // (1.5) Corta o RODAPE de producao/edicao: tudo a partir do 1o marcador que
+  // nunca e fala. Bug real (AD31 PRPB06): viravam BODY extras — "AD32 à 34",
+  // "Os criativos são para META...", "Fazer camuflagem...", "CRIATIVOS".
+  // Marcadores ancorados no inicio da linha pra NAO cortar fala legitima.
+  const footerCut = s.search(
+    /(?:^|\n)[ \t]*(?:os\s+criativos\s+s[aã]o\b|criativos\s*:?\s*$|instru[cç][oõ]es?\s+(?:gerais|para)\b|segue\s+o\s+link\s+da\s+pasta\b|AD\s*\d+\s*[àáaÀÁ]\s*\d+\b|fazer\s+camuflagem\b)/im,
+  );
+  if (footerCut >= 0) s = s.slice(0, footerCut);
+
   // Set lowercased dos roles conhecidos pra detectar label solto ("Doutor"
   // sozinho na linha). Tambem inclui um conjunto core mesmo se knownRoles
   // vazio — cobre briefings sem avatares mapeados.
@@ -930,6 +939,10 @@ export function sanitizeSpokenCopy(raw: string, knownRoles: string[] = []): stri
       if (/^@[\w._\-À-ÿ]+(?:\.(?:mp4|mov))?\s*$/i.test(t)) return null;
       // filename solto sem @ (ex "thethaetresmyarena.mp4" ou "kiko.urso3.mp4")
       if (/^[\w._\-À-ÿ]+\.(?:mp4|mov)\s*$/i.test(t)) return null;
+      // filename COM espacos/parens no fim da linha (indicativo de avatar):
+      // ex "Viva Saudável_1330239768979913 (32 ativos).mp4". Fala NUNCA
+      // termina em .mp4/.mov, entao qualquer linha assim e indicativo, nao copy.
+      if (/\.(?:mp4|mov)\s*$/i.test(t)) return null;
       // METADATA MULTI-LABEL: linha que tem ":" + (.mp4|.mov|nomenclatura ADxxx).
       // Cobre o caso "Doutor: radyrahbanmd.mp4 - Voz do Doutor: AD600VN[T]-VFPB02-AVA01.mp4"
       // — multiplos labels + filenames combinados em UMA linha. NUNCA e fala.
