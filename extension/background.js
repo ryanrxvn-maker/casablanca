@@ -1124,12 +1124,52 @@ async function injectInterceptorIntoMainWorld(tabId) {
             null
           );
         }
+        // === CAPTURA DO PAYLOAD NATIVO (Espelhamento de Voz) ===
+        // O submit nativo do HeyGen (request 200/xhr do vendor-*.js) carrega
+        // o shape EXATO do voice mirror. Capturamos o REQUEST BODY completo
+        // pra parar de chutar nome de campo no createVideo (causa do 400 ->
+        // voz original errada no VA). Disponivel em window.__darkolab_lastSubmitBody
+        // + emitido como SUBMIT_BODY_CAPTURED pro content script persistir.
+        const SUBMIT_RE = /shortcut\/submit|\/submit\b|generate|\/create/i;
+        function bodyToString(b) {
+          try {
+            if (b == null) return '';
+            if (typeof b === 'string') return b;
+            if (b instanceof URLSearchParams) return b.toString();
+            if (typeof FormData !== 'undefined' && b instanceof FormData) {
+              const o = {}; b.forEach((v, k) => { o[k] = typeof v === 'string' ? v : '[blob]'; });
+              return JSON.stringify(o);
+            }
+            if (typeof b === 'object') { try { return JSON.stringify(b); } catch (e) { return ''; } }
+            return '';
+          } catch (e) { return ''; }
+        }
+        function captureSubmitBody(url, method, bodyStr, via) {
+          try {
+            if (!bodyStr) return;
+            const hasMirror = /mirror|voice_id|voice_setting|espelh/i.test(bodyStr);
+            const rec = { url: String(url).slice(0, 200), method, via, body: bodyStr, ts: Date.now(), hasMirror };
+            window.__darkolab_lastSubmitBody = rec;
+            window.__darkolab_submitBodies = (window.__darkolab_submitBodies || []).slice(-9);
+            window.__darkolab_submitBodies.push(rec);
+            console.log(
+              '%c[DARKO LAB inject] 🎯 SUBMIT BODY capturado (' + via + ')' + (hasMirror ? ' — TEM voice mirror!' : ''),
+              'color:#00e5ff;font-weight:bold', '\nurl:', rec.url, '\nbody:', bodyStr,
+            );
+            try { console.log('[DARKO LAB inject] 🎯 SUBMIT BODY (pretty):\n' + JSON.stringify(JSON.parse(bodyStr), null, 2)); } catch (e) {}
+            emit({ type: 'SUBMIT_BODY_CAPTURED', submitUrl: rec.url, submitBody: bodyStr, via: via, hasMirror: hasMirror });
+          } catch (e) {}
+        }
         const origFetch = window.fetch;
         window.fetch = function (input, init) {
           const url = typeof input === 'string' ? input : input?.url || '';
           const method = ((init && init.method) || (typeof input === 'object' && input?.method) || 'GET').toUpperCase();
           const isHG = HG_RE.test(url) && !SKIP_RE.test(url);
           const isInteresting = method === 'POST' && isHG;
+          // Captura body do submit nativo (Espelhamento de Voz) ANTES do envio
+          if (method === 'POST' && SUBMIT_RE.test(url) && init && init.body != null) {
+            captureSubmitBody(url, method, bodyToString(init.body), 'fetch');
+          }
           const p = origFetch.apply(this, arguments);
           if (isInteresting) {
             // Loga inicio pra debug (mostra TODAS POSTs HeyGen relevantes)
@@ -1168,9 +1208,20 @@ async function injectInterceptorIntoMainWorld(tabId) {
             _url = String(url || '');
             return origOpen.apply(this, arguments);
           };
+          // Captura body do submit nativo via XHR (a request 200/xhr do
+          // Espelhamento de Voz vem por aqui — vendor-*.js).
+          const origSend = xhr.send;
+          xhr.send = function (body) {
+            try {
+              if (_method === 'POST' && SUBMIT_RE.test(_url) && body != null) {
+                captureSubmitBody(_url, _method, bodyToString(body), 'xhr');
+              }
+            } catch (e) {}
+            return origSend.apply(this, arguments);
+          };
           xhr.addEventListener('load', function () {
             try {
-              if (_method !== 'POST' || !URL_RE.test(_url)) return;
+              if (_method !== 'POST' || !HG_RE.test(_url) || SKIP_RE.test(_url)) return;
               if (this.status >= 400) return;
               const text = this.responseText;
               if (!text) return;
