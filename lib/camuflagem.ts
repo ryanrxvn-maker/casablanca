@@ -119,6 +119,80 @@ function clamp(v: number) {
   return Math.max(-1, Math.min(1, v));
 }
 
+// ---------------------------------------------------------------------------
+// DESCAMUFLAGEM — desfaz a inversão de fase de um arquivo já camuflado.
+//
+// O camuflado é estéreo com:
+//   L =  bScale*black + gain*white
+//   R = -bScale*black + gain*white
+// Logo, sem conhecer os ganhos originais, recuperamos cada camada por
+// álgebra exata dos canais:
+//   (L - R) / 2 =  bScale * black   -> o áudio PÚBLICO (o que o humano ouve)
+//   (L + R) / 2 =  gain   * white   -> a trilha ESCONDIDA (o que a IA lê)
+// Cada camada sai num nível baixo (escalada pelos ganhos), então
+// normalizamos pra ~0 dBFS — sem alterar o conteúdo, só dá volume audível.
+//
+// "Tirar a camuflagem" = extrair o PÚBLICO (black): remove a trilha escondida
+// e devolve só o áudio limpo que toca pra quem assiste. Também dá pra extrair
+// o ESCONDIDO (white) pra conferir o que estava embutido.
+// ---------------------------------------------------------------------------
+
+export type DescamuflarLayer = 'public' | 'hidden';
+
+export type DescamuflarInput = {
+  /** Arquivo camuflado (áudio ou vídeo estéreo). */
+  file: Blob;
+  /**
+   * Qual camada recuperar:
+   *  - 'public': o áudio que o humano ouve (BLACK), via L - R. Default.
+   *  - 'hidden': a trilha embutida que a IA lê (WHITE), via L + R.
+   */
+  layer: DescamuflarLayer;
+};
+
+/**
+ * Desfaz a camuflagem de um arquivo estéreo e devolve um WAV mono com a
+ * camada pedida, normalizado pra nível audível.
+ *
+ * Se o arquivo for mono (sem inversão de fase), não há o que separar:
+ *  - 'hidden' devolve o próprio áudio (é tudo que existe);
+ *  - 'public' devolveria silêncio — então também caímos no próprio áudio,
+ *    deixando claro via flag que nada foi separado.
+ */
+export async function descamuflar({
+  file,
+  layer,
+}: DescamuflarInput): Promise<{ wav: Blob; wasStereo: boolean }> {
+  const buf = await decodeAudioRobust(file);
+  const len = buf.length;
+  const sampleRate = buf.sampleRate;
+  const wasStereo = buf.numberOfChannels >= 2;
+
+  const out = new Float32Array(len);
+  if (!wasStereo) {
+    // Sem par de fase pra cancelar: o público é o próprio mono.
+    out.set(buf.getChannelData(0));
+  } else {
+    const L = buf.getChannelData(0);
+    const R = buf.getChannelData(1);
+    if (layer === 'public') {
+      for (let i = 0; i < len; i++) out[i] = (L[i] - R[i]) / 2;
+    } else {
+      for (let i = 0; i < len; i++) out[i] = (L[i] + R[i]) / 2;
+    }
+  }
+
+  // Normaliza pra ~0 dBFS (a camada extraída vem escalada pelo ganho original).
+  const pk = Math.max(1e-6, peakAbs(out));
+  const gainUp = Math.min(0.97 / pk, 500);
+
+  const mock = new ChannelMock(sampleRate, len, 1);
+  const ch = mock.getChannelData(0);
+  for (let i = 0; i < len; i++) ch[i] = clamp(out[i] * gainUp);
+
+  return { wav: encodeWAV(mock as unknown as AudioBuffer), wasStereo };
+}
+
 function toMono(buffer: AudioBuffer): Float32Array {
   if (buffer.numberOfChannels === 1) return buffer.getChannelData(0);
   const len = buffer.length;

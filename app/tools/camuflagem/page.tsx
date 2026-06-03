@@ -8,10 +8,12 @@ import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { useToolState } from '@/components/ToolsStateProvider';
 import {
   camuflar,
+  descamuflar,
   verifyCamouflage,
   buildPlatformMonoWav,
   type VerifyVerdict,
   type DownmixResult,
+  type DescamuflarLayer,
 } from '@/lib/camuflagem';
 import { downloadBlob } from '@/lib/audio-engine';
 import { buildZip } from '@/lib/zip-builder';
@@ -79,6 +81,26 @@ function newPair(): Pair {
   return { id: crypto.randomUUID(), black: null, white: null, status: 'idle' };
 }
 
+// Modo da ferramenta: camuflar (esconder WHITE no BLACK) ou descamuflar
+// (desfazer a inversão de fase e recuperar uma das camadas de um arquivo já
+// camuflado).
+type Mode = 'camuflar' | 'descamuflar';
+
+type DecloakItem = {
+  id: string;
+  file: File | null;
+  status: 'idle' | 'processing' | 'done' | 'error';
+  errorMsg?: string;
+  resultBlob?: Blob;
+  resultUrl?: string;
+  stage?: string;
+  wasStereo?: boolean;
+};
+
+function newDecloak(): DecloakItem {
+  return { id: crypto.randomUUID(), file: null, status: 'idle' };
+}
+
 function isVideoFile(f: File | null) {
   if (!f) return false;
   return f.type.startsWith('video/') || /\.(mp4|webm|mov|mkv)$/i.test(f.name);
@@ -103,6 +125,23 @@ export default function CamuflagemPage() {
   );
   const [processingAll, setProcessingAll] = useToolState<boolean>(
     'camuflagem:processingAll',
+    false,
+  );
+  const [mode, setMode] = useToolState<Mode>('camuflagem:mode', 'camuflar');
+  const [decloakItems, setDecloakItems] = useToolState<DecloakItem[]>(
+    'camuflagem:decloak',
+    [newDecloak()],
+  );
+  const [decloakLayer, setDecloakLayer] = useToolState<DescamuflarLayer>(
+    'camuflagem:decloakLayer',
+    'public',
+  );
+  const [decloakFormat, setDecloakFormat] = useToolState<'wav' | 'mp3'>(
+    'camuflagem:decloakFormat',
+    'wav',
+  );
+  const [decloaking, setDecloaking] = useToolState<boolean>(
+    'camuflagem:decloaking',
     false,
   );
 
@@ -292,6 +331,89 @@ export default function CamuflagemPage() {
     await downloadBlob(zip, 'camuflagem.zip');
   }
 
+  // ----- DESCAMUFLAR --------------------------------------------------------
+  function updateDecloak(id: string, patch: Partial<DecloakItem>) {
+    setDecloakItems((prev) =>
+      prev.map((it) => (it.id === id ? { ...it, ...patch } : it)),
+    );
+  }
+
+  function addDecloak() {
+    if (decloakItems.length >= 10) return;
+    setDecloakItems((prev) => [...prev, newDecloak()]);
+  }
+
+  function removeDecloak(id: string) {
+    if (decloakItems.length <= 1) return;
+    setDecloakItems((prev) => {
+      const t = prev.find((it) => it.id === id);
+      if (t?.resultUrl) URL.revokeObjectURL(t.resultUrl);
+      return prev.filter((it) => it.id !== id);
+    });
+  }
+
+  async function processDecloak() {
+    const ready = decloakItems.filter((it) => it.file);
+    if (ready.length === 0) return;
+    setDecloaking(true);
+    for (const it of ready) {
+      try {
+        updateDecloak(it.id, {
+          status: 'processing',
+          errorMsg: undefined,
+          stage: 'Desfazendo camuflagem...',
+        });
+        const { wav, wasStereo } = await descamuflar({
+          file: it.file!,
+          layer: decloakLayer,
+        });
+
+        let out: Blob = wav;
+        if (decloakFormat === 'mp3') {
+          updateDecloak(it.id, { stage: 'Convertendo para MP3 320k...' });
+          out = await extractAudioAs(
+            wav,
+            'mp3',
+            { onStage: (s) => updateDecloak(it.id, { stage: s }) },
+            true,
+          );
+        }
+
+        const url = URL.createObjectURL(out);
+        updateDecloak(it.id, {
+          status: 'done',
+          resultBlob: out,
+          resultUrl: url,
+          stage: undefined,
+          wasStereo,
+        });
+      } catch (e) {
+        console.error(e);
+        if (isCancellationError(e)) {
+          updateDecloak(it.id, {
+            status: 'error',
+            errorMsg: 'Cancelado pelo usuario.',
+            stage: undefined,
+          });
+          break;
+        }
+        updateDecloak(it.id, {
+          status: 'error',
+          errorMsg: (e as Error).message ?? 'Falha',
+          stage: undefined,
+        });
+      }
+    }
+    setDecloaking(false);
+  }
+
+  async function downloadDecloak(it: DecloakItem) {
+    if (!it.resultBlob) return;
+    const base = baseName(it.file?.name ?? 'arquivo');
+    const suffix = decloakLayer === 'public' ? 'publico' : 'escondido';
+    await downloadBlob(it.resultBlob, `${base}_${suffix}.${decloakFormat}`);
+  }
+
   const doneCount = pairs.filter((p) => p.status === 'done').length;
   const anyBlackNotVideo = pairs.some((p) => p.black && !isVideoFile(p.black));
   const mp4Disabled = anyBlackNotVideo;
@@ -307,6 +429,24 @@ export default function CamuflagemPage() {
       <div className="flex flex-col gap-5">
         <MissingKeyBanner services={['assemblyai']} />
 
+        {/* Modo: camuflar (esconder) ou descamuflar (recuperar de um arquivo
+            já camuflado). */}
+        <ToolChoice
+          value={mode}
+          onChange={(v) => {
+            if (processingAll || decloaking) return;
+            setMode(v as Mode);
+          }}
+          options={[
+            { value: 'camuflar', label: 'Camuflar', sub: 'esconder áudio' },
+            { value: 'descamuflar', label: 'Descamuflar', sub: 'recuperar áudio' },
+          ]}
+          disabled={processingAll || decloaking}
+          hue={HUE}
+        />
+
+        {mode === 'camuflar' ? (
+        <>
         <ToolStep n={1} icon={<IconStepTarget size={18} />} title="Alvo" hint="Quem você quer enganar define o que conta como sucesso" hue={HUE}>
           <ToolChoice
             value={target}
@@ -664,6 +804,151 @@ export default function CamuflagemPage() {
             ) : null}
           </div>
         </ToolStep>
+        </>
+        ) : (
+        <>
+        <ToolStep n={1} icon={<IconStepTarget size={18} />} title="O que recuperar" hint="Qual camada extrair do arquivo camuflado" hue={HUE}>
+          <ToolChoice
+            value={decloakLayer}
+            onChange={(v) => !decloaking && setDecloakLayer(v as DescamuflarLayer)}
+            options={[
+              { value: 'public', label: 'Áudio público', sub: 'o que o humano ouve' },
+              { value: 'hidden', label: 'Trilha escondida', sub: 'o que a IA lê' },
+            ]}
+            disabled={decloaking}
+            hue={HUE}
+          />
+          <p className="mt-3 text-[11px] leading-relaxed text-text-muted">
+            {decloakLayer === 'public'
+              ? 'Remove a camada escondida (inversão de fase) e devolve só o áudio que toca pra quem assiste — o BLACK limpo.'
+              : 'Extrai a trilha que estava embutida pra IA ler — o WHITE — pra você conferir o que tinha dentro do arquivo.'}
+          </p>
+        </ToolStep>
+
+        <ToolStep n={2} icon={<IconStepFormat size={18} />} title="Formato de saída" hue={HUE}>
+          <ToolChoice
+            value={decloakFormat}
+            onChange={(v) => !decloaking && setDecloakFormat(v as 'wav' | 'mp3')}
+            options={[
+              { value: 'mp3', label: 'MP3', sub: 'áudio' },
+              { value: 'wav', label: 'WAV', sub: 'áudio' },
+            ]}
+            disabled={decloaking}
+            hue={HUE}
+          />
+        </ToolStep>
+
+        <ToolStep n={3} icon={<IconStepFiles size={18} />} title="Arquivos camuflados" hint="Áudio ou vídeo estéreo já camuflado" hue={HUE}>
+        <div className="flex flex-col gap-4">
+          {decloakItems.map((it, i) => (
+            <div
+              key={it.id}
+              className={
+                'rounded-[12px] border bg-bg p-4 transition-colors ' +
+                (it.status === 'processing'
+                  ? 'scan-line border-lime/40'
+                  : it.status === 'done'
+                    ? 'border-lime/30'
+                    : it.status === 'error'
+                      ? 'border-red-500/40'
+                      : 'border-line')
+              }
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-xs font-semibold uppercase tracking-widest text-text-muted">
+                  Arquivo {i + 1}
+                  {it.status === 'processing' ? (
+                    <span className="ml-2 text-lime">
+                      {it.stage ?? 'processando...'}
+                    </span>
+                  ) : null}
+                  {it.status === 'done' ? (
+                    <span className="ml-2 text-lime">OK</span>
+                  ) : null}
+                  {it.status === 'error' ? (
+                    <span className="ml-2 text-red-400">erro</span>
+                  ) : null}
+                </span>
+                {decloakItems.length > 1 ? (
+                  <button
+                    onClick={() => removeDecloak(it.id)}
+                    className="btn-ghost !py-1 text-xs"
+                    disabled={decloaking}
+                  >
+                    Remover
+                  </button>
+                ) : null}
+              </div>
+
+              <label className="label-field">Arquivo camuflado</label>
+              <FileUpload
+                accept="audio/*,video/mp4,video/webm,video/quicktime"
+                value={it.file}
+                onChange={(f) => updateDecloak(it.id, { file: f, status: 'idle' })}
+              />
+
+              {it.errorMsg ? (
+                <div
+                  key={it.errorMsg}
+                  role="alert"
+                  className="error-shake mt-3 rounded-[8px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300 shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)]"
+                >
+                  {it.errorMsg}
+                </div>
+              ) : null}
+
+              {it.status === 'done' && it.resultUrl ? (
+                <div className="mt-3 flex flex-col gap-2">
+                  <AudioPlayer
+                    src={it.resultUrl}
+                    label={
+                      decloakLayer === 'public'
+                        ? 'Áudio público recuperado'
+                        : 'Trilha escondida extraída'
+                    }
+                  />
+                  {it.wasStereo === false ? (
+                    <div className="rounded-[8px] border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-[11px] text-yellow-300">
+                      Arquivo era mono (sem inversão de fase) — não havia camada
+                      pra separar; devolvido o próprio áudio.
+                    </div>
+                  ) : null}
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      onClick={() => downloadDecloak(it)}
+                      className="btn-ghost !py-1 text-xs"
+                    >
+                      Baixar {decloakFormat.toUpperCase()}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              onClick={addDecloak}
+              className="btn-secondary"
+              disabled={decloakItems.length >= 10 || decloaking}
+            >
+              + Adicionar arquivo ({decloakItems.length}/10)
+            </button>
+            {decloaking ? (
+              <CancelButton onClick={() => cancelFFmpeg()} label="Cancelar processamento" />
+            ) : (
+              <ToolAction
+                onClick={processDecloak}
+                disabled={!decloakItems.some((it) => it.file)}
+              >
+                Descamuflar tudo
+              </ToolAction>
+            )}
+          </div>
+        </ToolStep>
+        </>
+        )}
       </div>
     </ToolShell>
   );
