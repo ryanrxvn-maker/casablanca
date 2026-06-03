@@ -136,7 +136,7 @@ export default function CamuflagemPage() {
     'camuflagem:decloakLayer',
     'public',
   );
-  const [decloakFormat, setDecloakFormat] = useToolState<'wav' | 'mp3'>(
+  const [decloakFormat, setDecloakFormat] = useToolState<OutFormat>(
     'camuflagem:decloakFormat',
     'wav',
   );
@@ -363,6 +363,12 @@ export default function CamuflagemPage() {
           errorMsg: undefined,
           stage: 'Desfazendo camuflagem...',
         });
+        if (decloakFormat === 'mp4' && !isVideoFile(it.file)) {
+          throw new Error(
+            'Para sair em MP4, o arquivo camuflado precisa ser um video.',
+          );
+        }
+
         const { wav, wasStereo } = await descamuflar({
           file: it.file!,
           layer: decloakLayer,
@@ -374,6 +380,14 @@ export default function CamuflagemPage() {
           out = await extractAudioAs(
             wav,
             'mp3',
+            { onStage: (s) => updateDecloak(it.id, { stage: s }) },
+            true,
+          );
+        } else if (decloakFormat === 'mp4') {
+          updateDecloak(it.id, { stage: 'Muxando no video (AAC 320k)...' });
+          out = await muxAudioIntoVideo(
+            it.file!,
+            wav,
             { onStage: (s) => updateDecloak(it.id, { stage: s }) },
             true,
           );
@@ -417,6 +431,9 @@ export default function CamuflagemPage() {
   const doneCount = pairs.filter((p) => p.status === 'done').length;
   const anyBlackNotVideo = pairs.some((p) => p.black && !isVideoFile(p.black));
   const mp4Disabled = anyBlackNotVideo;
+  const decloakMp4Disabled = decloakItems.some(
+    (it) => it.file && !isVideoFile(it.file),
+  );
 
   return (
     <ToolShell
@@ -828,14 +845,24 @@ export default function CamuflagemPage() {
         <ToolStep n={2} icon={<IconStepFormat size={18} />} title="Formato de saída" hue={HUE}>
           <ToolChoice
             value={decloakFormat}
-            onChange={(v) => !decloaking && setDecloakFormat(v as 'wav' | 'mp3')}
+            onChange={(v) => {
+              const disabled = v === 'mp4' && decloakMp4Disabled;
+              if (!disabled && !decloaking) setDecloakFormat(v as OutFormat);
+            }}
             options={[
+              { value: 'mp4', label: 'MP4', sub: 'vídeo + áudio' },
               { value: 'mp3', label: 'MP3', sub: 'áudio' },
               { value: 'wav', label: 'WAV', sub: 'áudio' },
             ]}
             disabled={decloaking}
             hue={HUE}
           />
+          {decloakFormat === 'mp4' ? (
+            <p className="mt-2 text-[11px] text-text-muted">
+              O vídeo é mantido; só a trilha de áudio é substituída pela camada
+              recuperada.
+            </p>
+          ) : null}
         </ToolStep>
 
         <ToolStep n={3} icon={<IconStepFiles size={18} />} title="Arquivos camuflados" hint="Áudio ou vídeo estéreo já camuflado" hue={HUE}>
@@ -899,14 +926,22 @@ export default function CamuflagemPage() {
 
               {it.status === 'done' && it.resultUrl ? (
                 <div className="mt-3 flex flex-col gap-2">
-                  <AudioPlayer
-                    src={it.resultUrl}
-                    label={
-                      decloakLayer === 'public'
-                        ? 'Áudio público recuperado'
-                        : 'Trilha escondida extraída'
-                    }
-                  />
+                  {decloakFormat === 'mp4' ? (
+                    <video
+                      src={it.resultUrl}
+                      controls
+                      className="w-full rounded-[12px] border border-lime/30 bg-black shadow-[0_0_28px_-12px_rgba(200,232,124,0.4)]"
+                    />
+                  ) : (
+                    <AudioPlayer
+                      src={it.resultUrl}
+                      label={
+                        decloakLayer === 'public'
+                          ? 'Áudio público recuperado'
+                          : 'Trilha escondida extraída'
+                      }
+                    />
+                  )}
                   {it.wasStereo === false ? (
                     <div className="rounded-[8px] border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-[11px] text-yellow-300">
                       Arquivo era mono (sem inversão de fase) — não havia camada
