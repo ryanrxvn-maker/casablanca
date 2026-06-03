@@ -179,7 +179,30 @@ export function planAudioSplitBoundaries(
     segments.push({ start: cursor, end: boundary });
     cursor = boundary;
   }
-  return segments;
+
+  // POS-PROCESSO CRITICO: o ULTIMO segmento (ou qualquer um) pode sair < 1s
+  // quando o corte anterior cai perto do fim. O HeyGen RECUSA clipes < 1s
+  // ("Video duration must be at least 1 second"), o que deixava a VA
+  // incompleta. Fundimos qualquer segmento minusculo no vizinho — garante
+  // que NENHUM segmento fique abaixo de MIN_HARD.
+  const MIN_HARD = 1.2; // margem de seguranca acima do limite de 1s do HeyGen
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const seg of segments) {
+    const dur = seg.end - seg.start;
+    if (dur < MIN_HARD && merged.length > 0) {
+      // Funde no segmento anterior (estende o fim).
+      merged[merged.length - 1].end = seg.end;
+    } else {
+      merged.push({ ...seg });
+    }
+  }
+  // Se o PRIMEIRO segmento ficou minusculo (sem anterior pra fundir), funde
+  // no proximo.
+  if (merged.length > 1 && merged[0].end - merged[0].start < MIN_HARD) {
+    merged[1].start = merged[0].start;
+    merged.shift();
+  }
+  return merged;
 }
 
 /** Encode AudioBuffer em WAV PCM 16-bit. */
