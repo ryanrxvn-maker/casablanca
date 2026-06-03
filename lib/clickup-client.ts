@@ -182,16 +182,27 @@ export async function getTaskComments(
   taskId: string,
 ): Promise<Array<{ id: string; comment_text: string }>> {
   try {
-    const r = await callGet<{ comments: Array<{ id: string; comment_text?: string }> }>(
-      `/task/${taskId}/comment`,
-    );
+    const r = await callGet<{ comments: any[] }>(`/task/${taskId}/comment`);
     if (!r.ok) return [];
     const comments = (r.body as any)?.comments;
     if (!Array.isArray(comments)) return [];
-    return comments.map((c: any) => ({
-      id: String(c.id ?? ''),
-      comment_text: String(c.comment_text ?? ''),
-    }));
+    return comments.map((c: any) => {
+      // ClickUp guarda o texto em `comment_text` (plano) E em `comment` (blocos
+      // rich-text). Quando o user cola uma URL que vira hyperlink, a URL some
+      // do comment_text e fica SO no atributo `attributes.link` do bloco. Por
+      // isso concatenamos texto plano + texto dos blocos + links dos atributos.
+      const parts: string[] = [];
+      if (typeof c.comment_text === 'string') parts.push(c.comment_text);
+      if (Array.isArray(c.comment)) {
+        for (const blk of c.comment) {
+          if (typeof blk?.text === 'string') parts.push(blk.text);
+          const attrs = blk?.attributes || {};
+          const link = attrs.link || attrs.url || attrs['link-url'];
+          if (typeof link === 'string') parts.push(link);
+        }
+      }
+      return { id: String(c.id ?? ''), comment_text: parts.join(' ') };
+    });
   } catch {
     return [];
   }

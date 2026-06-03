@@ -1135,23 +1135,33 @@ function ClickUpPilotInner() {
                 driveUrl = (text || '').match(/https?:\/\/\S+/)?.[0] || null;
               }
             };
+            let commentCount = 0;
             // 1) Comentarios (onde o pedido "Fazer a troca do audio..." costuma vir)
             try {
               const comments = await getTaskComments(task.id);
+              commentCount = comments.length;
               for (const c of comments) {
                 grab(c.comment_text);
                 if (driveId) break;
               }
-            } catch {}
-            // 2) Custom fields (pode ter link direto do arquivo)
+            } catch (e) {
+              console.warn('[troca] getTaskComments falhou:', e);
+            }
+            // 2) Custom fields (pode ter link direto do arquivo). Valor pode vir
+            //    como string OU objeto (campos url/attachment) — varre tudo.
             if (!driveId) {
               for (const f of det.custom_fields || []) {
-                if (typeof f.value === 'string') grab(f.value);
+                const v = f.value;
+                if (typeof v === 'string') grab(v);
+                else if (v != null) {
+                  try { grab(JSON.stringify(v)); } catch {}
+                }
                 if (driveId) break;
               }
             }
             // 3) Descricao
             if (!driveId) grab(det.description || det.text_content);
+            console.info(`[troca] ${task.name}: ${commentCount} comentario(s), driveId=${driveId || 'NAO DETECTADO'}`);
 
             const baseAdIdM = task.name.match(/AD\d+[A-Z0-9]*/i);
             const baseAdId = baseAdIdM ? baseAdIdM[0].toUpperCase() : task.name;
