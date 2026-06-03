@@ -304,6 +304,9 @@ type BatchTaskState = {
    *  e serializavel pra reconstruir tudo sem a analise em memoria. */
   trocaDriveId?: string;
   trocaFolderId?: string;
+  /** URL da pasta de OUTPUT no Drive (LINK PASTA DRIVE) — botao "abrir pasta"
+   *  no card da troca, no lugar do botao de Docs (troca nao tem doc). */
+  trocaOutputFolderUrl?: string;
   trocaVolume?: number;
   trocaWhiteMime?: string;
   /** TROCA: confianca da verificacao (correlacao na soma mono de plataforma).
@@ -2939,6 +2942,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             message: 'Na fila — troca de áudio...',
             finishedAt: undefined,
             taskUrl: next[id]?.taskUrl || aa.taskUrl,
+            trocaOutputFolderUrl: aa.trocaBriefing?.driveFolderUrl || next[id]?.trocaOutputFolderUrl,
           } as BatchTaskState;
         }
         return next;
@@ -3288,39 +3292,56 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const s = batchStates[taskId];
     const persisted = !s ? (loadPersistedBatchStates() as Record<string, BatchTaskState>)[taskId] : null;
     const eff = s || persisted;
-    if (!eff) {
-      // Sem estado nenhum: ultima tentativa via replan persistido.
-      const replan = loadPersistedReplan(taskId);
-      if (replan) {
-        // Cria stub 'queued' pra UI ter feedback enquanto espera vaga.
-        setBatchStates((prev) => ({
-          ...prev,
-          [taskId]: {
-            taskId,
-            taskName: replan.taskName,
-            baseAdId: replan.baseAdId,
-            phase: 'queued',
-            parts: [],
-            startedAt: Date.now(),
-            message: 'Na fila — aguardando vaga...',
-            replan,
-          },
-        }));
-        void runHeyGenGated(taskId, 'run');
-      }
+    const replan = eff?.replan || loadPersistedReplan(taskId);
+    const hasResumableParts = !!eff?.parts?.some((p) => p.videoId);
+
+    // GARANTIA: Retomar NUNCA fica mudo. Se nao da pra reconstruir (sem plano
+    // salvo E sem partes ja disparadas), mostra um erro claro e acionavel em
+    // vez de "nao acontecer nada". (Caso tipico: plano nao sobreviveu reload.)
+    if (!replan && !hasResumableParts) {
+      setBatchStates((prev) => ({
+        ...prev,
+        [taskId]: {
+          ...(eff || { taskId, taskName: taskId, baseAdId: taskId, parts: [], startedAt: Date.now() }),
+          phase: 'failed',
+          message:
+            'Não dá pra retomar automaticamente (o plano não sobreviveu). Reabra a task na lista acima, clique em Start pra analisar e dispare de novo.',
+          finishedAt: Date.now(),
+        } as BatchTaskState,
+      }));
       return;
     }
+
+    // Sem entrada no state, mas com replan salvo: cria stub 'queued'.
+    if (!eff && replan) {
+      setBatchStates((prev) => ({
+        ...prev,
+        [taskId]: {
+          taskId,
+          taskName: replan.taskName,
+          baseAdId: replan.baseAdId,
+          phase: 'queued',
+          parts: [],
+          startedAt: Date.now(),
+          message: 'Na fila — aguardando vaga...',
+          replan,
+        },
+      }));
+      void runHeyGenGated(taskId, 'run');
+      return;
+    }
+
     batchCancelRef.current[taskId] = false;
-    const kind: 'run' | 'resume' = eff.parts?.some((p) => p.videoId) ? 'resume' : 'run';
+    const kind: 'run' | 'resume' = hasResumableParts ? 'resume' : 'run';
     // Marca 'queued' imediato pra UI esconder botoes — runHeyGenGated
     // ajusta a mensagem assim que o loop de espera comeca, ou pula direto
-    // pro run/resume se ha vaga livre.
+    // pro run/resume se ha vaga livre. Garante replan no state pra runTaskInBackground.
     setBatchStates((prev) => {
-      const cur = prev[taskId];
+      const cur = prev[taskId] || eff;
       if (!cur) return prev;
       // Nao sobrescreve um state que ja esta rodando.
       if (ACTIVE_BATCH_PHASES.includes(cur.phase as BatchTaskState['phase'])) return prev;
-      return { ...prev, [taskId]: { ...cur, phase: 'queued', message: 'Na fila — aguardando vaga...', finishedAt: undefined } };
+      return { ...prev, [taskId]: { ...cur, replan: cur.replan || replan || undefined, phase: 'queued', message: 'Na fila — aguardando vaga...', finishedAt: undefined } };
     });
     void runHeyGenGated(taskId, kind);
   }
@@ -4496,6 +4517,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   /** TROCA DE ÁUDIO: prova por transcricao do resultado (o que a IA le).
    *  Key: taskId → { loading?, text?, err? } */
   const [trocaProof, setTrocaProof] = useState<Record<string, { loading?: boolean; text?: string; err?: string }>>({});
+  /** TROCA DE ÁUDIO: feedback visual de drag-and-drop no upload do WHITE. */
+  const [trocaDragOver, setTrocaDragOver] = useState<Record<string, boolean>>({});
 
   /** Extrai Drive file ID de uma URL Drive (varios formatos suportados) */
   function extractDriveFileId(input: string): string | null {
@@ -4808,6 +4831,8 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
       troca?.driveId || extractDriveFileId(trocaAdUrl[taskId] || '') || persisted?.trocaDriveId || null;
     // Link de PASTA colado manualmente (ou persistido): resolvido no disparo.
     const folderId = extractDriveFolderId(trocaAdUrl[taskId] || '') || persisted?.trocaFolderId || null;
+    // Pasta de OUTPUT (LINK PASTA DRIVE) — pro botao "abrir pasta" do card.
+    const outputFolderUrl = troca?.driveFolderUrl || persisted?.trocaOutputFolderUrl || undefined;
     const volume = Math.max(5, Math.min(100, trocaVolume[taskId] ?? persisted?.trocaVolume ?? 30));
 
     // Resolve o novo WHITE: estado em memoria OU IndexedDB (retomar pos-reload).
@@ -4860,6 +4885,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
           taskUrl: prev[taskId]?.taskUrl || a?.taskUrl,
           trocaDriveId: driveId || undefined,
           trocaFolderId: folderId || undefined,
+          trocaOutputFolderUrl: outputFolderUrl,
           trocaVolume: volume,
           trocaWhiteMime: whiteMime,
         } as BatchTaskState,
@@ -4985,6 +5011,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
           taskUrl: prev[taskId]?.taskUrl || a?.taskUrl,
           trocaDriveId: driveId || undefined,
           trocaFolderId: folderId || undefined,
+          trocaOutputFolderUrl: outputFolderUrl,
           trocaVolume: volume,
           trocaWhiteMime: whiteMime,
           trocaWhiteScore: platformWhite,
@@ -5557,19 +5584,8 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                       const gSuffix = t.name.match(/\s*[-–—]\s*(G\d+)\s*$/i)?.[1] || null;
                       return (
                         <li key={t.id} className="flex items-center gap-2">
-                          {/* Toggle de decupagem — escondido em ONLY MAGNIFIC */}
-                          {!onlyMagnificMode ? (
-                            <ToggleRound3D
-                              on={isDecupagemEnabled(t.id)}
-                              onChange={(v) => setDecupagemFor(t.id, v)}
-                              size="sm"
-                              variant="lime"
-                              title={isDecupagemEnabled(t.id)
-                                ? 'Decupagem ON — vai cortar silencios desse AD'
-                                : 'Decupagem OFF — AD vem montado, sem cortes'}
-                              icon={<ScissorsIcon className="h-3.5 w-3.5" />}
-                            />
-                          ) : null}
+                          {/* Tesoura (decupagem) NAO aparece aqui na lista pre-analise —
+                              so no painel de analise pra disparo. */}
                           <button
                             type="button"
                             onClick={() => toggleTaskSelected(t.id)}
@@ -5993,9 +6009,10 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                               dirtyPartsCount={(b.dirtyParts || []).length}
                               onRebuild={() => void rebuildMontage(b.taskId)}
                               isRebuilding={rebuildingTaskId === b.taskId}
-                              docUrl={b.docUrl || taskAnalyses[b.taskId]?.docUrl}
+                              docUrl={b.kind === 'troca' ? undefined : (b.docUrl || taskAnalyses[b.taskId]?.docUrl)}
                               taskUrl={b.taskUrl || taskAnalyses[b.taskId]?.taskUrl}
-                              resolveDocUrl={async () => {
+                              folderUrl={b.kind === 'troca' ? (b.trocaOutputFolderUrl || taskAnalyses[b.taskId]?.trocaBriefing?.driveFolderUrl || undefined) : undefined}
+                              resolveDocUrl={b.kind === 'troca' ? undefined : async () => {
                                 // Lazy fetch: pega o docUrl ao vivo do ClickUp.
                                 // Usado quando o batch antigo nao tem docUrl em cache.
                                 // Apos resolver, persiste no state pra futuras chamadas.
@@ -6527,8 +6544,17 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                     {/* Upload do novo WHITE */}
                                     <div className="mt-3">
                                       <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">Novo áudio WHITE (IA)</div>
-                                      <label className={'mono flex cursor-pointer items-center justify-between gap-2 rounded-[8px] border px-3 py-2 text-[11px] transition ' + (whiteFile ? 'border-teal-400/60 bg-teal-500/10 text-teal-100' : 'border-line bg-bg/60 text-text-muted hover:border-teal-400/40')}>
-                                        <span className="truncate">{whiteFile ? `🎵 ${whiteFile.name}` : 'Selecionar áudio WHITE (.mp3/.wav/vídeo)'}</span>
+                                      <label
+                                        onDragOver={(e) => { e.preventDefault(); if (!trocaDragOver[a.taskId]) setTrocaDragOver((p) => ({ ...p, [a.taskId]: true })); }}
+                                        onDragLeave={(e) => { e.preventDefault(); setTrocaDragOver((p) => ({ ...p, [a.taskId]: false })); }}
+                                        onDrop={(e) => {
+                                          e.preventDefault();
+                                          setTrocaDragOver((p) => ({ ...p, [a.taskId]: false }));
+                                          const f = e.dataTransfer?.files?.[0] || null;
+                                          if (f) setTrocaWhite((prev) => ({ ...prev, [a.taskId]: f }));
+                                        }}
+                                        className={'mono flex cursor-pointer items-center justify-between gap-2 rounded-[8px] border px-3 py-2 text-[11px] transition ' + (trocaDragOver[a.taskId] ? 'border-teal-300 bg-teal-500/20 text-teal-100 ring-2 ring-teal-400/50' : whiteFile ? 'border-teal-400/60 bg-teal-500/10 text-teal-100' : 'border-line border-dashed bg-bg/60 text-text-muted hover:border-teal-400/40')}>
+                                        <span className="truncate">{trocaDragOver[a.taskId] ? '⬇ Solte o áudio aqui' : whiteFile ? `🎵 ${whiteFile.name}` : 'Clica ou ARRASTA o áudio WHITE (.mp3/.wav/vídeo)'}</span>
                                         <span className="shrink-0 rounded border border-teal-400/40 bg-teal-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-teal-200">{whiteFile ? 'trocar' : 'upar'}</span>
                                         <input
                                           type="file"

@@ -74,6 +74,9 @@ export type BatchJob3DProps = {
    *  Parent vai no ClickUp, pega custom field "DOC DA COPY", retorna a URL.
    *  Se retornar null = nao tem doc. */
   resolveDocUrl?: () => Promise<string | null>;
+  /** Pasta do Drive (output). Quando presente, mostra um botao "abrir pasta"
+   *  no lugar do botao de Docs (usado pela TROCA DE ÁUDIO, que nao tem doc). */
+  folderUrl?: string;
   /** Default minimizado (so header + buttons + progress). Default true. */
   defaultMinimized?: boolean;
   /** Acoes extras renderizadas na barra de botoes do header (ex: VA mostra
@@ -257,6 +260,11 @@ const IconGDocs = ({ size = 18 }: { size?: number }) => (
     />
   </svg>
 );
+const IconFolder = ({ size = 18 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+  </svg>
+);
 const IconChevron = ({ size = 14, open }: { size?: number; open?: boolean }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
     style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 200ms ease-out' }}>
@@ -350,6 +358,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     docUrl,
     taskUrl,
     resolveDocUrl,
+    folderUrl,
     defaultMinimized = true,
     extraActions,
   } = props;
@@ -436,6 +445,23 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                *     (impossivel resolver sem fetcher).
                *  Sempre visivel. Icone = Google Docs (azul + branco). */}
               {(() => {
+                // TROCA DE ÁUDIO: sem doc — botao leva pra PASTA de output no Drive.
+                if (folderUrl) {
+                  const fClass = 'group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-cyan-400/45 bg-gradient-to-b from-cyan-400/18 via-cyan-400/8 to-transparent text-cyan-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(34,211,238,0.4)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-cyan-400/70 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.28),0_12px_24px_-6px_rgba(34,211,238,0.6)] active:translate-y-0 active:scale-95 transition-[transform,box-shadow]';
+                  return (
+                    <a
+                      href={folderUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={fClass}
+                      title="Abrir a pasta do criativo no Drive (onde fica o AD original e o output)"
+                      aria-label="Abrir pasta no Drive"
+                    >
+                      <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/25 to-transparent" aria-hidden />
+                      <span className="relative"><IconFolder size={18} /></span>
+                    </a>
+                  );
+                }
                 const tooltip = docUrl
                   ? 'Abrir doc da copy (Google Docs)'
                   : resolvingDoc
