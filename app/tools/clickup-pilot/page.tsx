@@ -2743,26 +2743,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     //  - TROCA: precisa do WHITE upado + uma fonte (arquivo OU pasta colada).
     //  - Normais: status 'ready' (avatares + voz OK).
     const selected = Array.from(selectedTaskIds);
-    const vaIsReady = (id: string) => {
-      const a = taskAnalyses[id];
-      if (!a?.vaBriefing) return false;
-      return (
-        a.vaBriefing.avatares.length > 0 &&
-        a.vaBriefing.avatares.every((av) => vaAvatarChoice[`${id}:${av.avaCode}`]?.id)
-      );
-    };
-    const trocaIsReady = (id: string) => {
-      const a = taskAnalyses[id];
-      if (!a?.trocaBriefing) return false;
-      const hasWhite = !!trocaWhite[id];
-      const src =
-        a.trocaBriefing.driveId ||
-        extractDriveFileId(trocaAdUrl[id] || '') ||
-        extractDriveFolderId(trocaAdUrl[id] || '');
-      return hasWhite && !!src;
-    };
-    const vaTasks = selected.filter(vaIsReady);
-    const trocaTasks = selected.filter(trocaIsReady);
+    const vaTasks = selected.filter(isVaDispatchable);
+    const trocaTasks = selected.filter(isTrocaDispatchable);
     const normalTasks = selected.filter(
       (id) =>
         taskAnalyses[id]?.status === 'ready' &&
@@ -4381,6 +4363,36 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     return m ? m[1] : null;
   }
 
+  // ===== CRITERIO UNICO DE "PRONTO PRA DISPARAR" =====
+  // Usado no START, no botao "Iniciar N" e nos contadores — pra UI e dispatch
+  // SEMPRE baterem. VA: status nasce 'partial' por design; o que vale e ter
+  // todos os avatares escolhidos. TROCA: WHITE upado + fonte (arquivo/pasta).
+  function isVaDispatchable(id: string): boolean {
+    const a = taskAnalyses[id];
+    if (!a?.vaBriefing) return false;
+    return (
+      a.vaBriefing.avatares.length > 0 &&
+      a.vaBriefing.avatares.every((av) => vaAvatarChoice[`${id}:${av.avaCode}`]?.id)
+    );
+  }
+  function isTrocaDispatchable(id: string): boolean {
+    const a = taskAnalyses[id];
+    if (!a?.trocaBriefing) return false;
+    const hasWhite = !!trocaWhite[id];
+    const src =
+      a.trocaBriefing.driveId ||
+      extractDriveFileId(trocaAdUrl[id] || '') ||
+      extractDriveFolderId(trocaAdUrl[id] || '');
+    return hasWhite && !!src;
+  }
+  function isTaskDispatchable(id: string): boolean {
+    const a = taskAnalyses[id];
+    if (!a) return false;
+    if (a.vaBriefing) return isVaDispatchable(id);
+    if (a.trocaBriefing) return isTrocaDispatchable(id);
+    return a.status === 'ready';
+  }
+
   /** Roda o pipeline VA pra uma task — orquestra download AD → split audio
    *  → dispatch HeyGen audio mode por avatar → mount → ZIP final. */
   async function runVAPipelineForTask(taskId: string) {
@@ -5535,7 +5547,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                         </span>
                         {selectedTaskIds.size} task{selectedTaskIds.size === 1 ? '' : 's'} selecionada{selectedTaskIds.size === 1 ? '' : 's'}
                         {(() => {
-                          const ready = Array.from(selectedTaskIds).filter(id => taskAnalyses[id]?.status === 'ready').length;
+                          const ready = Array.from(selectedTaskIds).filter(isTaskDispatchable).length;
                           return ready > 0 ? (
                             <span className="mono ml-1 rounded-full bg-lime/25 px-2 py-[2px] text-[10px] text-lime border border-lime/45">
                               {ready} pronta{ready === 1 ? '' : 's'}
@@ -6844,8 +6856,12 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                        *  Usa selectedTaskIds porque startBatch filtra por isso — UI tem que bater. */}
                       {(() => {
                         const selected = Array.from(selectedTaskIds);
-                        const readyIds = selected.filter((id) => taskAnalyses[id]?.status === 'ready');
-                        const partialIds = selected.filter((id) => taskAnalyses[id]?.status === 'partial');
+                        // Criterio UNICO: bate com o startBatch (VA por avatares,
+                        // troca por WHITE+fonte, normais por status).
+                        const readyIds = selected.filter(isTaskDispatchable);
+                        const partialIds = selected.filter(
+                          (id) => !isTaskDispatchable(id) && (taskAnalyses[id]?.status === 'ready' || taskAnalyses[id]?.status === 'partial'),
+                        );
                         if (readyIds.length === 0 && partialIds.length === 0) return null;
                         return (
                           <div className="sticky bottom-2 z-10 mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[12px] border border-lime/40 bg-bg/95 p-3 shadow-[0_0_30px_-10px_rgba(200,232,124,0.4)] backdrop-blur">
