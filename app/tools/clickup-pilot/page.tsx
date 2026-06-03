@@ -10,8 +10,10 @@ import {
   listTeams,
   listTasks,
   getTask,
+  getTaskComments,
   getCurrentUser,
   extractDocLinks,
+  extractDriveFileIdFromText,
   type ClickUpTeam,
   type ClickUpTask,
   type ClickUpUser,
@@ -21,6 +23,7 @@ import {
   parseDarkoBriefing,
   matchAvatar,
   isVATask,
+  isTrocaAudioTask,
   parseVABriefing,
   sanitizeSpokenCopy,
   extractAvaNumsFromTaskName,
@@ -216,6 +219,8 @@ type BatchTaskState = {
   taskId: string;
   taskName: string;
   baseAdId: string;
+  /** 'troca' = pipeline de TROCA DE ÁUDIO (sem HeyGen). Ausente = fluxo normal. */
+  kind?: 'troca';
   /** queued | dispatching | rendering | downloading | post (concat+decupagem+camo) | done | failed */
   phase: 'queued' | 'dispatching' | 'rendering' | 'downloading' | 'post' | 'done' | 'failed';
   /** Per-part status durante dispatch (parteN: error|null) */
@@ -308,6 +313,14 @@ type TaskAnalysis = {
    *  AD original, N avatares de variacao). Quando presente, UI renderiza
    *  alternativa em vez do fluxo normal. */
   vaBriefing?: ParsedVABriefing;
+  /** Tasks TROCA DE ÁUDIO: variacao do audio WHITE. Sem doc de copy — so o
+   *  link do criativo original no Drive + um novo WHITE upado. Quando
+   *  presente, UI renderiza o painel de troca de audio. */
+  trocaBriefing?: {
+    baseAdId: string;
+    driveId: string | null;
+    driveUrl: string | null;
+  };
   /** Google Docs URL extraido do custom field "DOC DA COPY" ou da descricao
    *  da task. Persistido pra mostrar botao "abrir doc" sem ter que ir
    *  manualmente no ClickUp puxar o link. */
@@ -1097,6 +1110,59 @@ function ClickUpPilotInner() {
         try {
           // 1. Pega detalhes da task → encontra doc URL no custom field "DOC DA COPY"
           const det = await getTask(task.id);
+
+          // === TROCA DE ÁUDIO: pipeline proprio, SEM doc de copy ===
+          // Essas tasks so tem o link do criativo original no Drive (em
+          // comentario / custom field / descricao) + um novo WHITE que o user
+          // upa antes de disparar. Detectado ANTES da exigencia de doc.
+          if (isTrocaAudioTask(task.name)) {
+            let driveId: string | null = null;
+            let driveUrl: string | null = null;
+            const grab = (text: string | undefined | null) => {
+              const id = extractDriveFileIdFromText(text);
+              if (id && !driveId) {
+                driveId = id;
+                driveUrl = (text || '').match(/https?:\/\/\S+/)?.[0] || null;
+              }
+            };
+            // 1) Comentarios (onde o pedido "Fazer a troca do audio..." costuma vir)
+            try {
+              const comments = await getTaskComments(task.id);
+              for (const c of comments) {
+                grab(c.comment_text);
+                if (driveId) break;
+              }
+            } catch {}
+            // 2) Custom fields (pode ter link direto do arquivo)
+            if (!driveId) {
+              for (const f of det.custom_fields || []) {
+                if (typeof f.value === 'string') grab(f.value);
+                if (driveId) break;
+              }
+            }
+            // 3) Descricao
+            if (!driveId) grab(det.description || det.text_content);
+
+            const baseAdIdM = task.name.match(/AD\d+[A-Z0-9]*/i);
+            const baseAdId = baseAdIdM ? baseAdIdM[0].toUpperCase() : task.name;
+            setTaskAnalyses((prev) => ({
+              ...prev,
+              [task.id]: {
+                ...prev[task.id],
+                status: 'ready',
+                baseAdId,
+                taskUrl: (det as any).url || (task as any).url || undefined,
+                trocaBriefing: { baseAdId, driveId, driveUrl },
+                roleSlots: [],
+                partTemplates: [],
+              },
+            }));
+            if (driveUrl) {
+              setTrocaAdUrl((prev) => ({ ...prev, [task.id]: prev[task.id] || driveUrl! }));
+            }
+            continue;
+          }
+
           const docField = (det.custom_fields || ([] as any[])).find((f: any) => /DOC DA COPY/i.test(f.name || ''));
           const docUrl = docField?.value || extractDocLinks(det.description || det.text_content)[0];
           // Persiste docUrl + taskUrl pra UI poder abrir direto sem ter q ir no ClickUp.
@@ -1530,7 +1596,15 @@ function ClickUpPilotInner() {
     const doneTaskIds: string[] = [];
     for (const [taskId, state] of Object.entries(persisted)) {
       const wasInterrupted = state.phase !== 'done' && state.phase !== 'failed';
-      if (wasInterrupted) {
+      if (wasInterrupted && state.kind === 'troca') {
+        // TROCA: o WHITE upado nao sobrevive reload — nao da pra auto-retomar.
+        restored[taskId] = {
+          ...state,
+          phase: 'failed',
+          message: 'Recarregou a página — re-suba o novo WHITE e clique em Retomar.',
+          finishedAt: Date.now(),
+        };
+      } else if (wasInterrupted) {
         interruptedCount++;
         restored[taskId] = {
           ...state,
@@ -2638,7 +2712,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     // User pediu: "VA NAO DEVE RODAR PIPELINE SEPARADO, DEVE IR PRA MESMA
     // FILA E DISPARAR NO START TAMBEM". Resolvido: START agora dispara AMBOS.
     const vaTasks = ready.filter((id) => !!taskAnalyses[id]?.vaBriefing);
-    const normalTasks = ready.filter((id) => !taskAnalyses[id]?.vaBriefing);
+    const trocaTasks = ready.filter((id) => !!taskAnalyses[id]?.trocaBriefing);
+    const normalTasks = ready.filter(
+      (id) => !taskAnalyses[id]?.vaBriefing && !taskAnalyses[id]?.trocaBriefing,
+    );
 
     // 1. Normais via HeyGen Auto gated
     setBatchStates((prev) => {
@@ -2664,6 +2741,33 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     //    Cada um roda seu setVaPipelineState — UI ja renderiza progress.
     for (const taskId of vaTasks) {
       void runVAPipelineForTask(taskId);
+    }
+
+    // 3. TROCA DE ÁUDIO: pipeline proprio (download + descamufla + recamufla).
+    //    Roda na mesma fila (batchStates) com card + download iguais.
+    if (trocaTasks.length > 0) {
+      setBatchStates((prev) => {
+        const next = { ...prev };
+        for (const id of trocaTasks) {
+          const aa = taskAnalyses[id];
+          if (!aa) continue;
+          const baseAdId = aa.trocaBriefing?.baseAdId || aa.baseAdId || aa.taskName;
+          next[id] = {
+            ...(next[id] || { taskId: id, taskName: aa.taskName, baseAdId, parts: [], startedAt: Date.now() }),
+            kind: 'troca',
+            taskName: aa.taskName,
+            baseAdId,
+            phase: 'queued',
+            message: 'Na fila — troca de áudio...',
+            finishedAt: undefined,
+            taskUrl: next[id]?.taskUrl || aa.taskUrl,
+          } as BatchTaskState;
+        }
+        return next;
+      });
+      for (const taskId of trocaTasks) {
+        void runTrocaAudioPipelineForTask(taskId);
+      }
     }
   }
 
@@ -2970,7 +3074,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   useEffect(() => {
     if (heygenSlotsRef.current >= MAX_HEYGEN_PARALLEL) return;
     const queued = Object.values(batchStates)
-      .filter((b) => b.phase === 'queued' && !heygenPendingRef.current[b.taskId])
+      // TROCA DE ÁUDIO roda fora do HeyGen — promoter NUNCA toca nelas.
+      .filter((b) => b.phase === 'queued' && b.kind !== 'troca' && !heygenPendingRef.current[b.taskId])
       .sort((a, b) => a.startedAt - b.startedAt);
     if (queued.length === 0) return;
     const freeSlots = MAX_HEYGEN_PARALLEL - heygenSlotsRef.current;
@@ -2990,6 +3095,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *    zero (TTS+upload+submit+poll+zip). Garante botao util sempre.
    *  Gated por MAX_HEYGEN_PARALLEL — se 2 ja rodando, vira 'queued'. */
   function retomarTaskBatch(taskId: string) {
+    // TROCA DE ÁUDIO: re-roda o pipeline proprio (nao tem HeyGen pra retomar).
+    if (batchStates[taskId]?.kind === 'troca' || taskAnalyses[taskId]?.trocaBriefing) {
+      void runTrocaAudioPipelineForTask(taskId);
+      return;
+    }
     // s pode estar ausente no estado React logo apos navegar pro motor
     // (restore ainda nao reidratou) — caimos no localStorage autoritativo.
     const s = batchStates[taskId];
@@ -3348,6 +3458,12 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  de gerar os lips DESSA task do ZERO (re-dispatch completo). Aborta o
    *  run atual e recomeca limpo. Gated por MAX_HEYGEN_PARALLEL. */
   function debugTaskBatch(taskId: string, skipConfirm = false) {
+    // TROCA DE ÁUDIO: re-roda o pipeline proprio do zero (sem HeyGen).
+    if (batchStates[taskId]?.kind === 'troca' || taskAnalyses[taskId]?.trocaBriefing) {
+      if (!skipConfirm && !confirm('Refazer a troca de áudio dessa task do zero?')) return;
+      void runTrocaAudioPipelineForTask(taskId);
+      return;
+    }
     if (!skipConfirm && !confirm('DEBUG: reiniciar a geracao de LIPS dessa task do zero?\n\nVai re-disparar TODAS as partes no HeyGen (cria videos novos).')) return;
     batchCancelRef.current[taskId] = true;
     // Pequeno delay deixa o run atual (se houver) abortar antes do restart.
@@ -4155,6 +4271,13 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  {id,name} ou null = usar a voz do proprio avatar (Mirror voice). */
   const [vaVoiceChoice, setVaVoiceChoice] = useState<Record<string, { id: string; name: string } | null>>({});
 
+  /** TROCA DE ÁUDIO: novo WHITE upado pelo user por task. Key: taskId → File */
+  const [trocaWhite, setTrocaWhite] = useState<Record<string, File | null>>({});
+  /** TROCA DE ÁUDIO: intensidade da camuflagem do novo WHITE (5-100). */
+  const [trocaVolume, setTrocaVolume] = useState<Record<string, number>>({});
+  /** TROCA DE ÁUDIO: URL/Drive ID do AD original (input manual fallback). */
+  const [trocaAdUrl, setTrocaAdUrl] = useState<Record<string, string>>({});
+
   /** Extrai Drive file ID de uma URL Drive (varios formatos suportados) */
   function extractDriveFileId(input: string): string | null {
     if (!input) return null;
@@ -4369,6 +4492,129 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
           localStorage.setItem(VA_KEY, JSON.stringify(hist.slice(-200)));
         }
       } catch {}
+    }
+  }
+
+  // ═══════════════════ TROCA DE ÁUDIO (variacao do WHITE) ═══════════════════
+  // Baixa o criativo original do Drive → descamufla (tira o WHITE antigo via
+  // L-R) → recamufla o mesmo BLACK com o novo WHITE upado → muxa no video.
+  // Roda na MESMA fila (batchStates + BatchJobCard3D) das outras tasks, com o
+  // mesmo botao de download no fim. Sem HeyGen.
+  async function runTrocaAudioPipelineForTask(taskId: string) {
+    const a = taskAnalyses[taskId];
+    const troca = a?.trocaBriefing;
+    const taskName = a?.taskName || batchStates[taskId]?.taskName || taskId;
+    const baseAdId = troca?.baseAdId || a?.baseAdId || batchStates[taskId]?.baseAdId || taskName;
+    const adNameClean = baseAdId.replace(/[^A-Z0-9]/gi, '_');
+
+    // Resolve Drive ID: briefing parseado > input manual do painel.
+    const driveId = troca?.driveId || extractDriveFileId(trocaAdUrl[taskId] || '');
+    const white = trocaWhite[taskId] || null;
+    const volume = Math.max(5, Math.min(100, trocaVolume[taskId] ?? 30));
+
+    const fail = (message: string) => {
+      setBatchStates((prev) => ({
+        ...prev,
+        [taskId]: {
+          ...(prev[taskId] || { taskId, taskName, baseAdId, parts: [], startedAt: Date.now() }),
+          kind: 'troca',
+          phase: 'failed',
+          message,
+          finishedAt: Date.now(),
+        } as BatchTaskState,
+      }));
+    };
+
+    if (!driveId) {
+      fail('Sem link do criativo original. Cola a URL do Drive no painel da task.');
+      return;
+    }
+    if (!white) {
+      fail('Suba o novo áudio WHITE dessa task antes de disparar.');
+      return;
+    }
+
+    batchCancelRef.current[taskId] = false;
+    const startedAt = Date.now();
+    const renamedTo = `${adNameClean}_TROCA.mp4`;
+    const setStage = (phase: BatchTaskState['phase'], message: string, done = false) => {
+      setBatchStates((prev) => ({
+        ...prev,
+        [taskId]: {
+          ...(prev[taskId] || { taskId, taskName, baseAdId, startedAt }),
+          kind: 'troca',
+          taskName,
+          baseAdId,
+          phase,
+          message,
+          parts: [{
+            label: 'Troca de áudio',
+            videoId: 'troca',
+            videoStatus: done ? 'completed' : 'processing',
+            renamedTo,
+          }],
+          startedAt: prev[taskId]?.startedAt || startedAt,
+          taskUrl: prev[taskId]?.taskUrl || a?.taskUrl,
+        } as BatchTaskState,
+      }));
+    };
+
+    setStage('downloading', 'Baixando o criativo original do Drive...');
+
+    try {
+      // 1. Download do AD original (via extension — cookies autenticados).
+      const { downloadDriveFileViaExtension } = await import('@/lib/heygen-extension-bridge');
+      const dl = await downloadDriveFileViaExtension(driveId);
+      if (!dl.ok) throw new Error('Drive download: ' + dl.error);
+      const adBlob = new Blob([dl.bytes as BlobPart], { type: 'video/mp4' });
+
+      // 2. Descamufla: recupera o BLACK (audio publico) tirando o WHITE antigo.
+      setStage('post', 'Tirando o áudio WHITE antigo...');
+      const { descamuflar, camuflar } = await import('@/lib/camuflagem');
+      const { wav: blackWav } = await descamuflar({ file: adBlob, layer: 'public' });
+
+      // 3. Recamufla o mesmo BLACK com o novo WHITE.
+      setStage('post', 'Embutindo o novo áudio WHITE...');
+      const camWav = await camuflar({ black: blackWav, white, volumePercent: volume });
+
+      // 4. Muxa o audio camuflado de volta no video original.
+      setStage('post', 'Montando o vídeo final...');
+      const { muxAudioIntoVideo } = await import('@/lib/ffmpeg-worker');
+      const finalBlob = await muxAudioIntoVideo(adBlob, camWav, {
+        onStage: (s) => setStage('post', s),
+      }, true);
+
+      const url = URL.createObjectURL(finalBlob);
+      setBatchStates((prev) => ({
+        ...prev,
+        [taskId]: {
+          ...(prev[taskId] || { taskId, taskName, baseAdId, startedAt }),
+          kind: 'troca',
+          taskName,
+          baseAdId,
+          phase: 'done',
+          message: `Pronto — áudio trocado (${(finalBlob.size / (1024 * 1024)).toFixed(1)}MB).`,
+          parts: [{ label: 'Troca de áudio', videoId: 'troca', videoStatus: 'completed', renamedTo }],
+          startedAt: prev[taskId]?.startedAt || startedAt,
+          finishedAt: Date.now(),
+          camufladoZipUrl: url,
+          camufladoZipName: renamedTo,
+          taskUrl: prev[taskId]?.taskUrl || a?.taskUrl,
+          // Satisfaz o allOk do card (mostra "Pronto" + botao Baixar unico).
+          pipeStats: {
+            expectedMontagens: 1,
+            okMontagens: 1,
+            okDecupados: 0,
+            okCamuflados: 1,
+            expectedDecupagem: false,
+            expectedCamuflagem: true,
+          },
+        } as BatchTaskState,
+      }));
+      markDispatched(taskId);
+    } catch (e) {
+      console.error('[troca-audio]', e);
+      fail((e as Error)?.message || String(e));
     }
   }
 
@@ -5496,7 +5742,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   esse modo pula HeyGen totalmente (só dispara
                                   Auto B-rolls), então não há avatar pra
                                   escolher. Limpa a UI e elimina dúvida. */}
-                              {!onlyMagnificMode && (a.status === 'ready' || a.status === 'partial') ? (
+                              {!onlyMagnificMode && !a.trocaBriefing && (a.status === 'ready' || a.status === 'partial') ? (
                                 <div className="mt-2">
                                   <MotorConfigPicker
                                     config={getMotorConfig(a.taskId)}
@@ -5518,7 +5764,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   >
                                     📹 VA · {a.vaBriefing.avatares.length} avatar{a.vaBriefing.avatares.length === 1 ? '' : 'es'}
                                   </span>
-                                ) : (a.status === 'ready' || a.status === 'partial') ? (
+                                ) : !a.trocaBriefing && (a.status === 'ready' || a.status === 'partial') ? (
                                   // ═══ ACTION BAR 3D — botoes icon-only ═══
                                   <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                                     {/* Tesoura (decupagem) toggle */}
@@ -5572,7 +5818,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                               </div>
 
                               {/* CAMUFLAGEM PANEL INLINE — so aparece quando toggle ON */}
-                              {!onlyMagnificMode && (taskCamuflagem[a.taskId]?.enabled ?? camuflagemMode) ? (
+                              {!onlyMagnificMode && !a.trocaBriefing && (taskCamuflagem[a.taskId]?.enabled ?? camuflagemMode) ? (
                                 <div className="mt-2 rounded-[12px] border border-fuchsia-500/40 bg-gradient-to-br from-fuchsia-500/[0.08] via-fuchsia-500/[0.03] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
                                   <div className="mono mb-2 flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-fuchsia-200">
                                     <span className="inline-flex items-center gap-1.5">
@@ -5629,7 +5875,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                 </div>
                               ) : null}
                               {/* CAIXA INLINE de JSON Auto B-roll (Magnific) por task — abre/fecha pelo botão 3D ✨ */}
-                              {!a.vaBriefing && magnificEditorOpen[a.taskId] ? (
+                              {!a.vaBriefing && !a.trocaBriefing && magnificEditorOpen[a.taskId] ? (
                                 <div className="mt-2 rounded-[12px] border border-violet-400/45 bg-gradient-to-br from-violet-500/[0.08] via-violet-500/[0.03] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
                                   <div className="mono mb-1.5 flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-violet-200">
                                     <span className="inline-flex items-center gap-1.5">
@@ -5691,8 +5937,89 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   </div>
                                 </div>
                               ) : null}
-                              {/* RENDER VARIACAO DE AVATAR — pipeline diferente */}
-                              {a.vaBriefing ? (
+                              {/* RENDER TROCA DE ÁUDIO — pipeline proprio (sem HeyGen) */}
+                              {a.trocaBriefing ? (() => {
+                                const detectedDriveId = a.trocaBriefing!.driveId || extractDriveFileId(trocaAdUrl[a.taskId] || '');
+                                const whiteFile = trocaWhite[a.taskId] || null;
+                                const vol = trocaVolume[a.taskId] ?? 30;
+                                return (
+                                <div className="mt-1 grid gap-2">
+                                  <div className="rounded-[10px] border border-teal-500/40 bg-teal-500/5 p-3">
+                                    <div className="mono mb-2 text-[10px] uppercase tracking-widest text-teal-200">
+                                      🔄 Troca de Áudio · {a.trocaBriefing!.baseAdId}
+                                    </div>
+                                    <div className="text-[11px] text-text-muted">
+                                      Baixa o criativo original do Drive, tira o áudio WHITE antigo (descamuflagem) e embute o novo WHITE que você subir. O áudio público continua igual.
+                                    </div>
+                                    {/* Link do criativo original */}
+                                    <div className="mt-2">
+                                      <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">Criativo original (Drive)</div>
+                                      {detectedDriveId ? (
+                                        <div className="mono text-[10px] flex flex-wrap items-center gap-2">
+                                          <span className="rounded border border-lime/40 bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime">✓ Drive ID: {detectedDriveId}</span>
+                                        </div>
+                                      ) : (
+                                        <span className="mono text-[9px] uppercase tracking-widest text-yellow-300">⚠ Link não detectado — cola a URL do vídeo abaixo</span>
+                                      )}
+                                      <input
+                                        type="text"
+                                        value={trocaAdUrl[a.taskId] || ''}
+                                        onChange={(e) => setTrocaAdUrl((prev) => ({ ...prev, [a.taskId]: e.target.value }))}
+                                        placeholder="https://drive.google.com/file/d/.../view"
+                                        className="mono mt-1.5 w-full rounded-[8px] border border-line bg-bg/60 px-2.5 py-1.5 text-[11px] text-white placeholder:text-text-muted/60 focus:border-teal-400/60 focus:outline-none"
+                                      />
+                                    </div>
+                                    {/* Upload do novo WHITE */}
+                                    <div className="mt-3">
+                                      <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">Novo áudio WHITE (IA)</div>
+                                      <label className={'mono flex cursor-pointer items-center justify-between gap-2 rounded-[8px] border px-3 py-2 text-[11px] transition ' + (whiteFile ? 'border-teal-400/60 bg-teal-500/10 text-teal-100' : 'border-line bg-bg/60 text-text-muted hover:border-teal-400/40')}>
+                                        <span className="truncate">{whiteFile ? `🎵 ${whiteFile.name}` : 'Selecionar áudio WHITE (.mp3/.wav/vídeo)'}</span>
+                                        <span className="shrink-0 rounded border border-teal-400/40 bg-teal-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-teal-200">{whiteFile ? 'trocar' : 'upar'}</span>
+                                        <input
+                                          type="file"
+                                          accept="audio/*,video/mp4,video/webm,video/quicktime"
+                                          className="hidden"
+                                          onChange={(e) => {
+                                            const f = e.target.files?.[0] || null;
+                                            setTrocaWhite((prev) => ({ ...prev, [a.taskId]: f }));
+                                          }}
+                                        />
+                                      </label>
+                                      {whiteFile ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => setTrocaWhite((prev) => ({ ...prev, [a.taskId]: null }))}
+                                          className="mono mt-1 text-[9px] uppercase tracking-widest text-text-muted hover:text-red-300"
+                                        >
+                                          remover
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                    {/* Intensidade */}
+                                    <div className="mt-3">
+                                      <div className="mono mb-1 flex items-center justify-between text-[9px] uppercase tracking-widest text-text-muted">
+                                        <span>Intensidade do WHITE</span>
+                                        <span className="text-teal-200">{vol}%</span>
+                                      </div>
+                                      <input
+                                        type="range"
+                                        min={5}
+                                        max={100}
+                                        step={1}
+                                        value={vol}
+                                        onChange={(e) => setTrocaVolume((prev) => ({ ...prev, [a.taskId]: Math.round(Number(e.target.value)) }))}
+                                        className="w-full accent-teal-400"
+                                      />
+                                    </div>
+                                  </div>
+                                  <div className={'rounded-[10px] border p-3 text-[11px] ' + (whiteFile && detectedDriveId ? 'border-lime/40 bg-lime/5 text-lime' : 'border-yellow-500/40 bg-yellow-500/5 text-yellow-200')}>
+                                    {whiteFile && detectedDriveId
+                                      ? '✓ Pronto pra disparar — marque junto das outras e clique em Iniciar. O resultado aparece com botão de download no card.'
+                                      : '⚠ Suba o novo WHITE' + (detectedDriveId ? '' : ' e confirme o link do criativo') + ' pra essa task entrar no disparo.'}
+                                  </div>
+                                </div>
+                                );
+                              })() : a.vaBriefing ? (
                                 <div className="mt-1 grid gap-2">
                                   <div className="rounded-[10px] border border-cyan-500/40 bg-cyan-500/5 p-3">
                                     <div className="mono mb-2 text-[10px] uppercase tracking-widest text-cyan-200">

@@ -174,6 +174,46 @@ export async function getTask(taskId: string): Promise<ClickUpTask> {
   return r.body as ClickUpTask;
 }
 
+/** GET /task/{task_id}/comment — comentarios da task (READ-ONLY).
+ *  Usado pela TROCA DE ÁUDIO: o link do criativo original costuma vir num
+ *  comentario ("Fazer a troca do audio do criativo: https://drive...").
+ *  Retorna [] em qualquer falha — chamador trata como "sem comentario". */
+export async function getTaskComments(
+  taskId: string,
+): Promise<Array<{ id: string; comment_text: string }>> {
+  try {
+    const r = await callGet<{ comments: Array<{ id: string; comment_text?: string }> }>(
+      `/task/${taskId}/comment`,
+    );
+    if (!r.ok) return [];
+    const comments = (r.body as any)?.comments;
+    if (!Array.isArray(comments)) return [];
+    return comments.map((c: any) => ({
+      id: String(c.id ?? ''),
+      comment_text: String(c.comment_text ?? ''),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/** Extrai o PRIMEIRO ID de arquivo do Google Drive de um texto livre.
+ *  Suporta /file/d/<id>/, open?id=<id>, uc?id=<id>. Ignora links de PASTA
+ *  (/folders/) — esses nao sao arquivos baixaveis. */
+export function extractDriveFileIdFromText(text: string | undefined | null): string | null {
+  if (!text) return null;
+  const patterns = [
+    /\/file\/d\/([a-zA-Z0-9_-]{20,60})/,
+    /[?&]id=([a-zA-Z0-9_-]{20,60})/,
+    /\/d\/([a-zA-Z0-9_-]{20,60})/,
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m) return m[1];
+  }
+  return null;
+}
+
 /* ============= Helpers ============= */
 
 /** Extrai links de Google Docs / outros docs da description */
