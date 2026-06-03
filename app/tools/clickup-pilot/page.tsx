@@ -61,7 +61,6 @@ import {
   IconUpload as PilotIconUpload,
   IconBroll as PilotIconBroll,
   IconDownload as PilotIconDownload,
-  IconCloudDown as PilotIconCloudDown,
 } from '@/components/PilotCardActions';
 import { MotorConfigPicker, MotorSlotPicker } from '@/components/MotorConfigPicker';
 import { defaultMotorConfig, resolveMotors, estimateSecondsFromText, type MotorConfig, type Motor } from '@/lib/motor-config';
@@ -6015,31 +6014,6 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                             href={`https://drive.google.com/uc?export=download&id=${adFileId}`}
                                           />
                                         ) : null}
-                                        {adFileId ? (
-                                          <PilotBtn3D
-                                            icon={<PilotIconCloudDown size={16} />}
-                                            color="violet"
-                                            title="Baixar AD via extensão (vídeos grandes)"
-                                            onClick={async () => {
-                                              try {
-                                                const { downloadDriveFileViaExtension } = await import('@/lib/heygen-extension-bridge');
-                                                const dl = await downloadDriveFileViaExtension(adFileId);
-                                                if (!dl.ok) { alert('Falha download via extensão: ' + dl.error); return; }
-                                                const blob = new Blob([dl.bytes as BlobPart], { type: 'video/mp4' });
-                                                const url = URL.createObjectURL(blob);
-                                                const aEl = document.createElement('a');
-                                                aEl.href = url;
-                                                aEl.download = a.vaBriefing!.linkAdFilename || `${a.vaBriefing!.baseAdId.replace(/\s+/g, '')}.mp4`;
-                                                document.body.appendChild(aEl);
-                                                aEl.click();
-                                                document.body.removeChild(aEl);
-                                                setTimeout(() => URL.revokeObjectURL(url), 5000);
-                                              } catch (e) {
-                                                alert('Erro: ' + ((e as Error)?.message || String(e)));
-                                              }
-                                            }}
-                                          />
-                                        ) : null}
                                       </div>
                                     );
                                   })()
@@ -6451,13 +6425,10 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                         </div>
                                       );
                                     }
-                                    if (issues.length > 0) {
-                                      return (
-                                        <div className="rounded-[10px] border border-yellow-500/40 bg-yellow-500/5 p-2.5 mono text-[10px] uppercase tracking-widest text-yellow-200">
-                                          ⚠ Pra entrar na fila do START, falta: {issues.join(', ')}
-                                        </div>
-                                      );
-                                    }
+                                    // Falta avatar/voz/AD: NAO mostra banner — cada linha de
+                                    // avatar ja sinaliza (badge 'falta avatar'/'falta voz') e o
+                                    // chip 'AD não detectado' cobre o AD. Banner era ruido.
+                                    if (issues.length > 0) return null;
                                     return (
                                       <div className="rounded-[10px] border border-lime/40 bg-lime/5 p-2.5 mono text-[10px] uppercase tracking-widest text-lime">
                                         ✓ Pronto — clica START (embaixo) pra disparar junto das outras · {a.vaBriefing.avatares.length} avatar{a.vaBriefing.avatares.length === 1 ? '' : 'es'}
@@ -6473,8 +6444,8 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   ) : null}
                                   {a.vaBriefing.bodyText ? (
                                     <details className="rounded-[10px] border border-line bg-bg/40 p-2">
-                                      <summary className="mono cursor-pointer text-[10px] uppercase tracking-widest text-fuchsia-300">Roteiro</summary>
-                                      <div className="mt-1.5 text-[11px] text-text-muted whitespace-pre-wrap">{a.vaBriefing.bodyText.slice(0, 600)}{a.vaBriefing.bodyText.length > 600 ? '…' : ''}</div>
+                                      <summary className="mono cursor-pointer text-[10px] uppercase tracking-widest text-fuchsia-300">Corpo</summary>
+                                      <div className="mt-1.5 text-[11px] text-text-muted whitespace-pre-wrap">{a.vaBriefing.bodyText}</div>
                                     </details>
                                   ) : null}
                                   {/* Depoimento opcional */}
