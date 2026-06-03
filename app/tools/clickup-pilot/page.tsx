@@ -340,6 +340,13 @@ type BatchTaskState = {
   docUrl?: string;
   /** ClickUp task URL — fallback se docUrl nao foi capturado. */
   taskUrl?: string;
+  /** VARIACAO DE AVATAR: marca que essa task roda o pipeline VA (Demucs +
+   *  split + lipsync por avatar) em vez do HeyGen Auto normal. Sobrevive
+   *  reload (persistido) — usado pra rotear o disparo/resume pro runner VA
+   *  e pra mostrar o botao extra "baixar AD original" no card. */
+  isVA?: boolean;
+  /** VA: URL de download do AD original (Drive). Mostra botao extra no card. */
+  adOriginalUrl?: string;
 };
 
 type RoleSlot = {
@@ -1742,6 +1749,14 @@ function ClickUpPilotInner() {
    *  4. Salva blob URL no state pra download manual depois */
   async function runTaskInBackground(taskId: string) {
     const a = taskAnalyses[taskId];
+    // VARIACAO DE AVATAR: roteia pro runner VA (pipeline proprio que tambem
+    // escreve batchStates). Detecta por taskAnalyses OU pela flag isVA no
+    // batchStates (sobrevive reload). Sem essa guarda, runTaskInBackground
+    // tentaria buildPlan(VA) e falharia.
+    if (a?.vaBriefing || batchStates[taskId]?.isVA) {
+      await runVAPipelineForTask(taskId);
+      return;
+    }
     // Resolve o plano: 1o de taskAnalyses (sessao com a task analisada);
     // senao do `replan` persistido (sobrevive reload/navegacao) — e isso
     // que faz Retomar/Debug funcionarem em task que falhou com 0 videoIds.
@@ -2130,6 +2145,12 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   async function resumeTaskBatch(taskId: string) {
     const state = batchStates[taskId];
     if (!state) return;
+    // VA: resume = re-rodar o pipeline VA (nao tem resume parcial de
+    // videoIds como a task normal). Roteia pro runner VA.
+    if (state.isVA || taskAnalyses[taskId]?.vaBriefing) {
+      await runVAPipelineForTask(taskId);
+      return;
+    }
     const validParts = state.parts.filter((p) => p.videoId);
     if (validParts.length === 0) {
       setError('Sem videoIds salvos pra retomar — task tem que ser disparada do zero.');
@@ -2737,10 +2758,39 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       void runHeyGenGated(taskId, 'run');
     }
 
-    // 2. VA: pipeline proprio em paralelo (Demucs + split + N lipsyncs por avatar)
-    //    Cada um roda seu setVaPipelineState — UI ja renderiza progress.
-    for (const taskId of vaTasks) {
-      void runVAPipelineForTask(taskId);
+    // 2. VA: AGORA entra na MESMA fila (gated por MAX_HEYGEN_PARALLEL), com
+    //    card + previews iguais aos normais. Sem disparo separado, sem botao
+    //    "Iniciar Pipeline VA". START dispara tudo junto.
+    const vaReady: string[] = [];
+    const vaBlocked: string[] = [];
+    for (const id of vaTasks) {
+      if (vaReadinessIssues(id).length === 0) vaReady.push(id);
+      else vaBlocked.push(`${taskAnalyses[id]?.taskName || id} (${vaReadinessIssues(id).join(', ')})`);
+    }
+    if (vaBlocked.length > 0) {
+      setError(`VA pulado por falta de config: ${vaBlocked.join(' · ')}. Escolha avatar + voz + AD original e dispare de novo.`);
+    }
+    if (vaReady.length > 0) {
+      setBatchStates((prev) => {
+        const next = { ...prev };
+        for (const id of vaReady) {
+          const a = taskAnalyses[id];
+          if (!a?.vaBriefing) continue;
+          const driveId = a.vaBriefing.linkAdFileId || extractDriveFileId(vaAdUrl[id] || '');
+          next[id] = {
+            ...(next[id] || { taskId: id, taskName: a.taskName, baseAdId: a.vaBriefing.baseAdId, parts: [], startedAt: Date.now() }),
+            phase: 'queued',
+            isVA: true,
+            adOriginalUrl: driveId ? `https://drive.google.com/uc?export=download&id=${driveId}` : undefined,
+            message: 'Na fila — aguardando vaga...',
+            finishedAt: undefined,
+          } as BatchTaskState;
+        }
+        return next;
+      });
+      for (const taskId of vaReady) {
+        void runHeyGenGated(taskId, 'run');
+      }
     }
   }
 
@@ -3845,7 +3895,22 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     // automaticamente. User pediu: "VA NAO DEVE RODAR PIPELINE SEPARADO,
     // DEVE IR PRA MESMA FILA E DISPARAR NO START TAMBEM".
     if (a.vaBriefing) {
-      void runVAPipelineForTask(taskId);
+      const issues = vaReadinessIssues(taskId);
+      if (issues.length > 0) {
+        setError(`VA incompleto — falta: ${issues.join(', ')}.`);
+        return;
+      }
+      const driveId = a.vaBriefing.linkAdFileId || extractDriveFileId(vaAdUrl[taskId] || '');
+      setBatchStates((prev) => ({
+        ...prev,
+        [taskId]: {
+          ...(prev[taskId] || { taskId, taskName: a.taskName, baseAdId: a.vaBriefing!.baseAdId, parts: [], startedAt: Date.now() }),
+          phase: 'queued', isVA: true,
+          adOriginalUrl: driveId ? `https://drive.google.com/uc?export=download&id=${driveId}` : undefined,
+          message: 'Na fila — aguardando vaga...', finishedAt: undefined,
+        } as BatchTaskState,
+      }));
+      void runHeyGenGated(taskId, 'run');
       return;
     }
     const plan = buildPlan(a);
@@ -4223,9 +4288,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   /** VA: URL/Drive ID do AD original (input manual quando parser nao detecta).
    *  Key: taskId → string */
   const [vaAdUrl, setVaAdUrl] = useState<Record<string, string>>({});
-  /** VA: estado do pipeline em execucao.
-   *  Key: taskId → { stage, percent, message, result? } */
-  const [vaPipelineState, setVaPipelineState] = useState<Record<string, { stage: string; percent: number; message: string; zipUrl?: string; zipName?: string; error?: string }>>({});
+  // VA: estado do pipeline AGORA vive em batchStates (mesma fila/card das
+  // tasks normais). Removido o vaPipelineState separado.
   /** VA: SMART MODE per task — detecta face no AD original e troca apenas
    *  segmentos com avatar visivel (b-rolls intactos). Key: taskId → boolean */
   /** VA (Studio): voz custom por avatar. Key: `${taskId}:${avaCode}` →
@@ -4253,129 +4317,168 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
 
   /** Roda o pipeline VA pra uma task — orquestra download AD → split audio
    *  → dispatch HeyGen audio mode por avatar → mount → ZIP final. */
+  /** Pré-cheque de prontidão do VA (avatar+voz+Drive). Retorna lista de
+   *  pendências pra UI listar antes de enfileirar. Vazio = pronto. */
+  function vaReadinessIssues(taskId: string): string[] {
+    const a = taskAnalyses[taskId];
+    const va = a?.vaBriefing;
+    if (!va) return ['não é VA'];
+    const issues: string[] = [];
+    const driveId = va.linkAdFileId || extractDriveFileId(vaAdUrl[taskId] || '');
+    if (!driveId) issues.push('AD original (Drive)');
+    for (const av of va.avatares) {
+      if (!vaAvatarChoice[`${taskId}:${av.avaCode}`]?.id) issues.push(`avatar ${av.avaCode}`);
+      // Voz é OBRIGATÓRIA agora — sem voiceId o Espelhamento cai na voz
+      // original do AD (o bug que o user reclamava). Força escolha.
+      if (!vaVoiceChoice[`${taskId}:${av.avaCode}`]?.id) issues.push(`voz ${av.avaCode}`);
+    }
+    return issues;
+  }
+
+  /** Runner VA — AGORA escreve em batchStates (igual task normal): mesma
+   *  fila (runHeyGenGated/PROMOTER), mesmo card (BatchJobCard3D) e mesmos
+   *  previews de lipsync ao vivo. Disparado pelo START / promoter, nunca
+   *  mais por botao "Iniciar Pipeline VA" por task. */
   async function runVAPipelineForTask(taskId: string) {
     const a = taskAnalyses[taskId];
     if (!a?.vaBriefing) {
-      setError('Task nao e VA.');
+      // Reload sem taskAnalyses: nao da pra reconstruir o briefing VA.
+      setBatchStates((prev) => {
+        const cur = prev[taskId];
+        if (!cur) return prev;
+        return { ...prev, [taskId]: { ...cur, phase: 'failed', message: 'VA: reabra a task no ClickUp Pilot e analise de novo (briefing nao sobrevive reload).', finishedAt: Date.now() } };
+      });
       return;
     }
     const va = a.vaBriefing;
-    // Resolve Drive ID: prefere parsed do briefing, fallback pra input manual
-    const adUrlInput = vaAdUrl[taskId] || '';
-    const driveId = va.linkAdFileId || extractDriveFileId(adUrlInput);
-    if (!driveId) {
-      setError('Sem Drive ID do AD original. Cola a URL do video no campo abaixo.');
-      return;
-    }
-    // Verifica que TODOS avatares tem AvatarOption escolhido
-    const missingAvas: string[] = [];
-    for (const av of va.avatares) {
-      if (!vaAvatarChoice[`${taskId}:${av.avaCode}`]?.id) {
-        missingAvas.push(av.avaCode);
-      }
-    }
-    if (missingAvas.length > 0) {
-      setError(`Escolha o avatar HeyGen pra: ${missingAvas.join(', ')}`);
-      return;
-    }
+    const baseAdId = va.baseAdId;
+    const adNameClean = baseAdId.replace(/\s+/g, '');
 
-    setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: 'download', percent: 0, message: 'Baixando AD original do Drive...' } }));
-    const vaStartedAt = Date.now();
+    // Validacao — marca failed no card (em vez de so setError, que o user
+    // nao associa ao card rodando).
+    const issues = vaReadinessIssues(taskId);
+    if (issues.length > 0) {
+      const msg = `VA incompleto — falta: ${issues.join(', ')}. Configure na task e dispare de novo.`;
+      setError(msg);
+      setBatchStates((prev) => ({
+        ...prev,
+        [taskId]: {
+          ...(prev[taskId] || { taskId, taskName: a.taskName, baseAdId, parts: [], startedAt: Date.now() }),
+          phase: 'failed', isVA: true, message: msg, finishedAt: Date.now(),
+        } as BatchTaskState,
+      }));
+      return;
+    }
+    const driveId = va.linkAdFileId || extractDriveFileId(vaAdUrl[taskId] || '')!;
+    const adOriginalUrl = `https://drive.google.com/uc?export=download&id=${driveId}`;
+    const vaStartedAt = batchStates[taskId]?.startedAt || Date.now();
+
+    // Helpers de escrita no batchStates
+    const patchVA = (patch: Partial<BatchTaskState>) => setBatchStates((prev) => {
+      const base: BatchTaskState = prev[taskId] || { taskId, taskName: a.taskName, baseAdId, parts: [], startedAt: vaStartedAt, phase: 'dispatching' };
+      return { ...prev, [taskId]: { ...base, ...patch } };
+    });
+    // Cria/atualiza um "take" (parte) por label — alimenta os previews.
+    const upsertPart = (label: string, patch: Partial<BatchTaskState['parts'][number]>) => setBatchStates((prev) => {
+      const cur = prev[taskId];
+      if (!cur) return prev;
+      const idx = cur.parts.findIndex((p) => p.label === label);
+      const parts = idx === -1
+        ? [...cur.parts, { label, videoId: null, renamedTo: `${label}.mp4`, ...patch }]
+        : cur.parts.map((p, i) => (i === idx ? { ...p, ...patch } : p));
+      return { ...prev, [taskId]: { ...cur, parts } };
+    });
+    const vaPhaseFromStage = (stage: string): BatchTaskState['phase'] =>
+      /mount|assemble|zip/i.test(stage) ? 'post'
+      : /dispatch/i.test(stage) ? 'rendering'
+      : 'dispatching';
+
+    batchCancelRef.current[taskId] = false;
+    patchVA({
+      phase: 'dispatching', isVA: true, adOriginalUrl,
+      docUrl: batchStates[taskId]?.docUrl || a.docUrl,
+      taskUrl: batchStates[taskId]?.taskUrl || a.taskUrl,
+      message: 'Baixando AD original do Drive...', finishedAt: undefined,
+    });
 
     try {
       // 1. Download AD via extension
       const { downloadDriveFileViaExtension } = await import('@/lib/heygen-extension-bridge');
       const dl = await downloadDriveFileViaExtension(driveId);
       if (!dl.ok) throw new Error('Drive download: ' + dl.error);
-      setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: 'download', percent: 10, message: `Baixado ${(dl.size / (1024 * 1024)).toFixed(1)}MB. Iniciando pipeline...` } }));
+      patchVA({ phase: 'dispatching', message: `Baixado ${(dl.size / (1024 * 1024)).toFixed(1)}MB. Extraindo voz + split...` });
 
       // 2. Pipeline (extract audio + split + dispatch + mount)
       const { runVAPipeline } = await import('@/lib/va-pipeline');
-      const { generateAvatarPart } = await import('@/lib/heygen-extension-bridge');
       const { downloadVideoBytes } = await import('@/lib/heygen-api-direct');
 
       const avatares = va.avatares.map((av) => {
         const choice = vaAvatarChoice[`${taskId}:${av.avaCode}`]!;
         return { avaCode: av.avaCode, avatarId: choice.id, avatarName: choice.name };
       });
-
-      // Map de avaCode → voiceId (Mirror Voice escolhido pelo user).
-      // CRITICAL: ate 2026-05-25, vaVoiceChoice era salvo mas IGNORADO no
-      // dispatch → HeyGen usava voz default do avatar (= voz original do AD).
-      // Fix: ler aqui + passar no closure pra dispatchAudioTake usar.
       const voiceByAva: Record<string, string | null> = {};
       for (const av of va.avatares) {
-        const choice = vaVoiceChoice[`${taskId}:${av.avaCode}`];
-        voiceByAva[av.avaCode] = choice?.id || null;
+        voiceByAva[av.avaCode] = vaVoiceChoice[`${taskId}:${av.avaCode}`]?.id || null;
       }
 
       const pipeRes = await runVAPipeline({
-        baseAdId: va.baseAdId.replace(/\s+/g, ''),
+        baseAdId: adNameClean,
         adVideoBytes: dl.bytes,
         avatares,
-        smartMode: false, // VA = full swap, smart mode nao se aplica
+        smartMode: false,
+        isCancelled: () => !!batchCancelRef.current[taskId],
         onProgress: (p) => {
-          setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: p.stage, percent: p.percent, message: p.message } }));
+          patchVA({ phase: vaPhaseFromStage(p.stage), message: p.message });
         },
-        // === VA DE AVATAR: API processJob (Quick Create) + Voice Mirroring ===
-        // Mesmo fluxo de task normal (que JA FUNCIONA), com 3 diferencas:
-        //   1. voiceMirroring: true → avatar fala com voz selecionada
-        //      (equivalente ao checkbox "Voice Mirroring" do Quick Create)
-        //   2. voiceId: id da voz escolhida em CompactVoiceSelector — sem
-        //      isso, HeyGen usa voz default do avatar (= voz do AD original
-        //      via audio uploaded). COM voiceId, HeyGen sintetiza com a voz.
-        //   3. Output mantem timing exato do audio original — NUNCA
-        //      decupa. Concat na ordem = video final 1:1 com o AD.
+        // === Espelhamento de Voz REAL (sts_pending) — fix 2026-06-03 ===
+        // processJob({voiceMirroring:true, voiceId}) agora monta o body
+        // nativo (audio_type sts_pending + source_audio_url + voice_id):
+        // avatar fala com a VOZ ESCOLHIDA mantendo o timing do AD original.
         dispatchAudioTake: async ({ avatarId, audioBytes, audioFilename, label }) => {
+          if (batchCancelRef.current[taskId]) throw new Error('cancelado');
+          upsertPart(label, { videoId: null, videoStatus: 'pending', error: null });
           const { processJob } = await import('@/lib/heygen-api-direct');
           const file = new File([audioBytes as BlobPart], audioFilename || `${label}.wav`, { type: 'audio/wav' });
-          // Descobre o avaCode pelo avatarId pra puxar a voz certa
-          const avFromId = va.avatares.find((a) => {
-            const c = vaAvatarChoice[`${taskId}:${a.avaCode}`];
-            return c?.id === avatarId;
-          });
+          const avFromId = va.avatares.find((x) => vaAvatarChoice[`${taskId}:${x.avaCode}`]?.id === avatarId);
           const voiceId = avFromId ? voiceByAva[avFromId.avaCode] : null;
           console.log(`[VA dispatch ${label}] avatarId=${avatarId} voiceId=${voiceId || '(default)'}`);
-          const job = await processJob({
-            file,
-            avatarId,
-            title: `${va.baseAdId.replace(/\s+/g, '')}_${label}`,
-            engine: 'iii',
-            orientation: 'portrait',
-            voiceMirroring: true, // ← KEY: VA usa Voice Mirroring sempre
-            voiceId: voiceId || undefined, // ← FIX 2026-05-25: passa voz selecionada
-          }, {
-            onProgress: (stage: string) => {
-              console.log(`[VA dispatch ${label}] ${stage}`);
-            },
-          });
+          let job;
+          try {
+            job = await processJob({
+              file, avatarId,
+              title: `${adNameClean}_${label}`,
+              engine: 'iii', orientation: 'portrait',
+              voiceMirroring: true,
+              voiceId: voiceId || undefined,
+            }, { onProgress: (stage: string) => console.log(`[VA dispatch ${label}] ${stage}`) });
+          } catch (e) {
+            upsertPart(label, { error: (e as Error)?.message || 'falha no dispatch' });
+            throw e;
+          }
           if (!job.videoId) {
+            upsertPart(label, { error: 'processJob nao retornou videoId' });
             throw new Error('processJob nao retornou videoId.');
           }
-          // Poll ate completed
-          const statuses = await pollVideosUntilReady([job.videoId], {
-            intervalMs: 8000,
-            timeoutMs: 30 * 60 * 1000,
-          });
+          upsertPart(label, { videoId: job.videoId, videoStatus: 'pending' });
+          const statuses = await pollVideosUntilReady([job.videoId], { intervalMs: 8000, timeoutMs: 30 * 60 * 1000 });
           const st = statuses[job.videoId];
           if (!st || st.status !== 'completed' || !st.videoUrl) {
+            upsertPart(label, { videoStatus: st?.status, error: st?.error || 'nao renderizou' });
             throw new Error(`Video ${label} nao renderizou (status=${st?.status}): ${st?.error || 'sem detalhes'}`);
           }
+          upsertPart(label, { videoStatus: 'completed', videoUrl: st.videoUrl });
           const bytes = await downloadVideoBytes(st.videoUrl);
           return new Blob([bytes as BlobPart], { type: 'video/mp4' });
         },
       });
 
       // 3. Monta ZIP final
-      setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: 'zip', percent: 95, message: 'Zipando vídeos finais...' } }));
+      patchVA({ phase: 'post', message: 'Zipando vídeos finais...' });
       const JSZip = (await import('jszip')).default;
       const zip = new JSZip();
       for (const item of pipeRes.items) {
-        if (item.blob) {
-          zip.file(item.filename, item.blob);
-        } else {
-          zip.file(`${item.filename.replace('.mp4', '')}_ERRO.txt`, item.error || 'falha sem detalhes');
-        }
+        if (item.blob) zip.file(item.filename, item.blob);
+        else zip.file(`${item.filename.replace('.mp4', '')}_ERRO.txt`, item.error || 'falha sem detalhes');
       }
       zip.file('_DIAGNOSTICO.txt',
 `Pipeline VA - relatorio
@@ -4387,64 +4490,48 @@ Items:
 ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error || 'sem detalhes')+')'}`).join('\n')}
 `);
       const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
-      const adName = va.baseAdId.replace(/\s+/g, '');
-      const zipName = `${adName}_VA.zip`;
+      const zipName = `${adNameClean}_VA.zip`;
       const zipUrl = URL.createObjectURL(zipBlob);
-      // Persist em IndexedDB pra sobreviver reload
       try {
         const { saveZip } = await import('@/lib/zip-store');
         await saveZip(`va:${taskId}:zip`, zipBlob, zipName);
       } catch (e) { console.warn('[va] save zip IDB:', e); }
 
-      setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: 'done', percent: 100, message: `Pronto: ${pipeRes.summary}`, zipUrl, zipName } }));
-      // Marca como disparada
+      // ZIP do VA entra no slot "montado" → botao de download unico do card
+      // funciona igual task normal.
+      patchVA({
+        phase: 'done',
+        message: `Pronto: ${pipeRes.summary}`,
+        montadoZipUrl: zipUrl, montadoZipName: zipName,
+        finishedAt: Date.now(),
+      });
       const siblings = getSiblingTaskIds(taskId);
       for (const sid of siblings) markDispatched(sid);
-      // Persist no historico DARKO LAB Lipsync History
       try {
         const VA_KEY = 'darkolab:va-pipeline:history';
-        const hist = (() => {
-          try { return JSON.parse(localStorage.getItem(VA_KEY) || '[]'); } catch { return []; }
-        })();
+        const hist = (() => { try { return JSON.parse(localStorage.getItem(VA_KEY) || '[]'); } catch { return []; } })();
         hist.push({
-          taskId,
-          taskName: a.taskName,
-          baseAdId: va.baseAdId,
+          taskId, taskName: a.taskName, baseAdId: va.baseAdId,
           avatares: pipeRes.items.map((it: any, i: number) => ({
             avaCode: va.avatares[i]?.avaCode || `AVA${i+1}`,
             username: va.avatares[i]?.username || '?',
             status: it.blob ? 'done' : 'failed',
           })),
-          startedAt: vaStartedAt,
-          finishedAt: Date.now(),
-          zipName,
+          startedAt: vaStartedAt, finishedAt: Date.now(), zipName,
         });
         localStorage.setItem(VA_KEY, JSON.stringify(hist.slice(-200)));
       } catch {}
     } catch (e) {
-      setVaPipelineState((prev) => ({ ...prev, [taskId]: { stage: 'error', percent: 0, message: 'Erro', error: (e as Error)?.message || String(e) } }));
+      patchVA({ phase: 'failed', message: (e as Error)?.message || String(e), finishedAt: Date.now() });
       try {
         const VA_KEY = 'darkolab:va-pipeline:history';
-        const hist = (() => {
-          try { return JSON.parse(localStorage.getItem(VA_KEY) || '[]'); } catch { return []; }
-        })();
-        const a = taskAnalyses[taskId];
-        const va = a?.vaBriefing;
-        if (va) {
-          hist.push({
-            taskId,
-            taskName: a.taskName,
-            baseAdId: va.baseAdId,
-            avatares: va.avatares.map((av: any) => ({
-              avaCode: av.avaCode,
-              username: av.username,
-              status: 'failed',
-            })),
-            startedAt: vaStartedAt,
-            finishedAt: Date.now(),
-          });
-          localStorage.setItem(VA_KEY, JSON.stringify(hist.slice(-200)));
-        }
+        const hist = (() => { try { return JSON.parse(localStorage.getItem(VA_KEY) || '[]'); } catch { return []; } })();
+        hist.push({
+          taskId, taskName: a.taskName, baseAdId: va.baseAdId,
+          avatares: va.avatares.map((av: any) => ({ avaCode: av.avaCode, username: av.username, status: 'failed' })),
+          startedAt: vaStartedAt, finishedAt: Date.now(),
+        });
+        localStorage.setItem(VA_KEY, JSON.stringify(hist.slice(-200)));
       } catch {}
     }
   }
@@ -5371,6 +5458,19 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   return null;
                                 }
                               }}
+                              extraActions={b.isVA && b.adOriginalUrl ? (
+                                <a
+                                  href={b.adOriginalUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title="Baixar AD original (Drive)"
+                                  aria-label="Baixar AD original"
+                                  className="group/btn3d relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-cyan-400/55 bg-gradient-to-b from-cyan-400/25 via-cyan-400/10 to-cyan-400/[0.02] text-cyan-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_3px_10px_-3px_rgba(34,211,238,0.45)] hover:-translate-y-0.5 hover:scale-[1.08] hover:border-cyan-400/80 active:translate-y-0 active:scale-95 transition-[transform,box-shadow]"
+                                >
+                                  <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-full bg-gradient-to-b from-white/25 to-transparent" aria-hidden />
+                                  <span className="relative text-[13px]">🎬</span>
+                                </a>
+                              ) : undefined}
                             >
                               {previewsNode}
                             </BatchJobCard3D>
@@ -5894,7 +5994,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                           <CompactAvatarPicker
                                             selected={chosen}
                                             setSelected={(newAv) => setVaAvatarChoice((prev) => ({ ...prev, [choiceKey]: newAv }))}
-                                            disabled={!!vaPipelineState[a.taskId] && vaPipelineState[a.taskId].stage !== 'error' && vaPipelineState[a.taskId].stage !== 'done'}
+                                            disabled={ACTIVE_BATCH_PHASES.includes(batchStates[a.taskId]?.phase as BatchTaskState['phase']) || batchStates[a.taskId]?.phase === 'queued'}
                                             label={`Avatar HeyGen pra ${av.avaCode}`}
                                           />
                                         </div>
@@ -5960,7 +6060,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                         value={vaAdUrl[a.taskId] || ''}
                                         onChange={(e) => setVaAdUrl((prev) => ({ ...prev, [a.taskId]: e.target.value }))}
                                         className="input-field font-mono text-xs"
-                                        disabled={!!vaPipelineState[a.taskId] && vaPipelineState[a.taskId].stage !== 'error' && vaPipelineState[a.taskId].stage !== 'done'}
+                                        disabled={ACTIVE_BATCH_PHASES.includes(batchStates[a.taskId]?.phase as BatchTaskState['phase']) || batchStates[a.taskId]?.phase === 'queued'}
                                       />
                                       {vaAdUrl[a.taskId] && extractDriveFileId(vaAdUrl[a.taskId]) ? (
                                         <div className="mono mt-1 text-[9px] uppercase tracking-widest text-lime">✓ Drive ID extraido: {extractDriveFileId(vaAdUrl[a.taskId])}</div>
@@ -5969,62 +6069,35 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       ) : null}
                                     </div>
                                   ) : null}
-                                  {/* Pipeline state OU botao iniciar/re-run */}
-                                  {vaPipelineState[a.taskId] && vaPipelineState[a.taskId].stage !== 'done' && !vaPipelineState[a.taskId].error ? (
-                                    // EM ANDAMENTO — so progress, sem botao
-                                    <div className="rounded-[10px] border border-cyan-500/40 bg-cyan-500/5 p-3">
-                                      <div className="mono text-[9px] uppercase tracking-widest text-cyan-200 flex items-center gap-2">
-                                        <span>📹 Pipeline VA · {vaPipelineState[a.taskId].stage} · {Math.round(vaPipelineState[a.taskId].percent)}%</span>
-                                      </div>
-                                      <div className="text-[11px] text-text-muted mt-1">{vaPipelineState[a.taskId].message}</div>
-                                      <div className="mt-1 h-1 rounded bg-bg/60 overflow-hidden">
-                                        <div className="h-full bg-cyan-400 transition-all" style={{ width: `${vaPipelineState[a.taskId].percent}%` }} />
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <>
-                                      {/* DONE / ERROR / NUNCA RODOU — mostra botao */}
-                                      {vaPipelineState[a.taskId] ? (
-                                        <div className={
-                                          'rounded-[10px] border p-3 ' +
-                                          (vaPipelineState[a.taskId].error ? 'border-red-500/40 bg-red-500/5' : 'border-lime/40 bg-lime/5')
-                                        }>
-                                          <div className={'mono text-[9px] uppercase tracking-widest flex items-center gap-2 ' + (vaPipelineState[a.taskId].error ? 'text-red-200' : 'text-lime')}>
-                                            <span>📹 Pipeline VA · {vaPipelineState[a.taskId].stage} · {Math.round(vaPipelineState[a.taskId].percent)}%</span>
-                                          </div>
-                                          <div className="text-[11px] text-text-muted mt-1">{vaPipelineState[a.taskId].message}</div>
-                                          {vaPipelineState[a.taskId].error ? (
-                                            <div className="mt-2 text-[11px] text-red-300">✗ {vaPipelineState[a.taskId].error}</div>
-                                          ) : null}
-                                          {vaPipelineState[a.taskId].zipUrl ? (
-                                            <a
-                                              href={vaPipelineState[a.taskId].zipUrl}
-                                              download={vaPipelineState[a.taskId].zipName}
-                                              className="mono mt-2 inline-block rounded border border-lime bg-lime/20 px-3 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/30"
-                                            >
-                                              📦 Baixar ZIP ({vaPipelineState[a.taskId].zipName})
-                                            </a>
-                                          ) : null}
+                                  {/* SEM BOTAO "Iniciar Pipeline VA" — VA agora dispara
+                                   *  pelo START global e roda na MESMA fila das tasks
+                                   *  normais. O progresso + previews de lipsync + download
+                                   *  aparecem no card do painel "Tasks em produção" (igual
+                                   *  task normal). Aqui so fica a config (avatar/voz/AD). */}
+                                  {(() => {
+                                    const issues = vaReadinessIssues(a.taskId);
+                                    const st = batchStates[a.taskId];
+                                    const inQueueOrRunning = !!st && (st.phase === 'queued' || ACTIVE_BATCH_PHASES.includes(st.phase as BatchTaskState['phase']));
+                                    if (inQueueOrRunning) {
+                                      return (
+                                        <div className="rounded-[10px] border border-cyan-500/40 bg-cyan-500/5 p-2.5 mono text-[10px] uppercase tracking-widest text-cyan-200">
+                                          📹 Na fila / rodando — acompanhe o card em "Tasks em produção" ↓
                                         </div>
-                                      ) : null}
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          // Limpa state anterior pra permitir re-run
-                                          setVaPipelineState((prev) => {
-                                            const n = { ...prev };
-                                            delete n[a.taskId];
-                                            return n;
-                                          });
-                                          runVAPipelineForTask(a.taskId);
-                                        }}
-                                        className="mono w-full rounded-[10px] border border-cyan-500 bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30 py-2 px-3 text-[11px] uppercase tracking-widest transition"
-                                      >
-                                        {vaPipelineState[a.taskId]?.zipUrl ? '🔁 Re-rodar Pipeline VA' : '▶ Iniciar Pipeline VA'}
-                                        {' '}({a.vaBriefing.avatares.length} avatares)
-                                      </button>
-                                    </>
-                                  )}
+                                      );
+                                    }
+                                    if (issues.length > 0) {
+                                      return (
+                                        <div className="rounded-[10px] border border-yellow-500/40 bg-yellow-500/5 p-2.5 mono text-[10px] uppercase tracking-widest text-yellow-200">
+                                          ⚠ Pra entrar na fila do START, falta: {issues.join(', ')}
+                                        </div>
+                                      );
+                                    }
+                                    return (
+                                      <div className="rounded-[10px] border border-lime/40 bg-lime/5 p-2.5 mono text-[10px] uppercase tracking-widest text-lime">
+                                        ✓ Pronto — clica START (embaixo) pra disparar junto das outras · {a.vaBriefing.avatares.length} avatar{a.vaBriefing.avatares.length === 1 ? '' : 'es'}
+                                      </div>
+                                    );
+                                  })()}
                                   {/* Hook + body preview */}
                                   {a.vaBriefing.hookText ? (
                                     <details className="rounded-[10px] border border-line bg-bg/40 p-2">

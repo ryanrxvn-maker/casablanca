@@ -76,6 +76,9 @@ export type BatchJob3DProps = {
   resolveDocUrl?: () => Promise<string | null>;
   /** Default minimizado (so header + buttons + progress). Default true. */
   defaultMinimized?: boolean;
+  /** Acoes extras renderizadas na barra de botoes do header (ex: VA mostra
+   *  "baixar AD original"). Drop-in — fica antes do toggle expand. */
+  extraActions?: React.ReactNode;
 };
 
 // ───────────────────────── Botão 3D icon-only ─────────────────────────
@@ -348,6 +351,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     taskUrl,
     resolveDocUrl,
     defaultMinimized = true,
+    extraActions,
   } = props;
 
   const [tilt, setTilt] = useState<{ x: number; y: number } | null>(null);
@@ -585,6 +589,8 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
               {!isRunning ? (
                 <Btn3D icon={<IconX size={14} />} color="neutral" title="Remover" onClick={onRemove} />
               ) : null}
+              {/* Acoes extras (ex: VA "baixar AD original") */}
+              {extraActions}
               {/* TOGGLE EXPAND/COLLAPSE — chevron com contraste forte (visivel
                *  tanto em dark quanto light mode). Usa fuchsia como cor
                *  primaria pra integrar com o tema do painel + garantir que
