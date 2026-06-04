@@ -6872,7 +6872,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     Avatares
                                   </div>
                                   {a.vaBriefing.avatares.map((av) => {
-                                    const thumbUrl = av.fileId ? `https://drive.google.com/thumbnail?id=${av.fileId}&sz=w200` : null;
+                                    // Thumb: Drive (fileId) OU YouTube (avatar por link, criativo "sem edição").
+                                    const thumbUrl = av.fileId
+                                      ? `https://drive.google.com/thumbnail?id=${av.fileId}&sz=w200`
+                                      : (av.thumbUrl || null);
                                     const choiceKey = `${a.taskId}:${av.avaCode}`;
                                     const chosen = vaAvatarChoice[choiceKey] || null;
                                     const voiceChosen = vaVoiceChoice[choiceKey] || null;
@@ -6908,6 +6911,16 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               title="Baixar o clipe de referência desse avatar"
                                               href={`https://drive.google.com/uc?export=download&id=${av.fileId}`}
                                             />
+                                          ) : av.youtubeUrl ? (
+                                            <a
+                                              href={av.youtubeUrl}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              title="Abrir o vídeo do YouTube (referência pra clonar a voz)"
+                                              className="mono inline-flex h-[30px] shrink-0 items-center gap-1 rounded-full border border-red-500/40 bg-red-500/10 px-2.5 text-[10px] font-bold uppercase tracking-widest text-red-300 hover:bg-red-500/20"
+                                            >
+                                              ▶ YouTube
+                                            </a>
                                           ) : null}
                                         </div>
                                         <div className="mt-2 grid gap-2 sm:grid-cols-2">

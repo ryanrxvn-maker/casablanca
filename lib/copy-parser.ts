@@ -1273,6 +1273,13 @@ export type VAAvatar = {
   username: string;
   /** Drive file ID se houver link na linha */
   fileId: string | null;
+  /** URL do YouTube quando o avatar e referenciado por link (ex briefing
+   *  "Avatar: https://youtube.com/...  (clonar a voz)") em vez de @file.mp4.
+   *  Tipico em criativos YouTube "sem edicao" + clone de voz. */
+  youtubeUrl?: string | null;
+  /** Thumbnail pra UI. Derivado: YouTube → img.youtube.com/vi/<id>/hqdefault.jpg.
+   *  (Avatar de Drive segue usando fileId pra montar a thumb na UI.) */
+  thumbUrl?: string | null;
 };
 
 export type ParsedVABriefing = {
@@ -1370,6 +1377,27 @@ export function extractAvaNumsFromTaskName(taskName: string): number[] {
   }
   // Dedup + sort
   return Array.from(new Set(nums)).sort((a, b) => a - b);
+}
+
+/** Extrai o video ID de uma URL do YouTube. Tolerante a:
+ *   - youtube.com/watch?v=ID  (e o typo "wath?v=ID" visto em briefing real)
+ *   - youtu.be/ID
+ *   - youtube.com/shorts/ID  /  /embed/ID  /  /live/ID
+ *  Retorna o ID (11 chars padrao, mas aceita 6+) ou null. */
+export function extractYouTubeId(url: string): string | null {
+  if (!url) return null;
+  // youtu.be/<id> ou /shorts|embed|live/<id>
+  let m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:shorts|embed|live|v)\/)([A-Za-z0-9_-]{6,})/i);
+  if (m) return m[1];
+  // ...?v=<id> (cobre "watch?v=" e o typo "wath?v=")
+  m = url.match(/[?&]v=([A-Za-z0-9_-]{6,})/i);
+  if (m) return m[1];
+  return null;
+}
+
+/** Thumb padrao do YouTube pra um video ID. */
+export function youTubeThumb(videoId: string): string {
+  return `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
 }
 
 /** Parse VA briefing. Retorna null se nao for VA detectavel.
@@ -1522,9 +1550,23 @@ export function parseVABriefing(
     // Procura linha seguinte (1-3 linhas abaixo) com "Avatar <filename>" ou "@<file>"
     let username: string | null = null;
     let fileId: string | null = null;
+    let youtubeUrl: string | null = null;
+    let thumbUrl: string | null = null;
     for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
       const nl = lines[j].trim();
       if (!nl) continue;
+      // Avatar referenciado por LINK do YouTube (ex "Avatar: https://youtube.com/
+      // wath?v=GPtBiYPmwSo (clonar a voz...)"). Tipico em criativos YouTube "sem
+      // edicao" + clone de voz, onde nao ha @file.mp4. Extrai o id pra thumb.
+      if (/youtu\.?be/i.test(nl)) {
+        const ytId = extractYouTubeId(nl);
+        if (ytId) {
+          username = ytId;
+          youtubeUrl = `https://www.youtube.com/watch?v=${ytId}`;
+          thumbUrl = youTubeThumb(ytId);
+          break;
+        }
+      }
       // "Avatar lara.mp4" ou "Avatar @x.mp4" ou "@x.mp4"
       const m = nl.match(/^(?:Avatar\s*)?[^@a-z0-9]*@?([a-zA-Z0-9_][a-zA-Z0-9._-]+?)(?:\.(?:mp4|mov))?\s*$/i);
       if (m && m[1].length >= 3 && !/^AD\d+/i.test(m[1])) {
@@ -1536,7 +1578,7 @@ export function parseVABriefing(
     }
     if (!username) continue;
     seenAvaCodes.add(avaCode);
-    allAvatares.push({ avaNum, avaCode, username, fileId });
+    allAvatares.push({ avaNum, avaCode, username, fileId, youtubeUrl, thumbUrl });
   }
 
   // FILTRO: se task name diz quais AVAs gerar (ex 'AVA05 e 06'), restringe.
@@ -1590,8 +1632,14 @@ export function parseVABriefing(
     depoimentoText = lines.slice(dIdx + 1, depEnd).join('\n').trim().replace(/\s*\[[a-z]{1,3}\]/gi, '');
   }
 
-  // Validacao minima: precisa ter pelo menos 1 avatar + hook OU body
-  if (avatares.length === 0 || (!hookText && !bodyText)) return null;
+  // Validacao minima: precisa ter pelo menos 1 avatar.
+  if (avatares.length === 0) return null;
+  // Hook OU body e EXIGIDO no fluxo normal (avatar .mp4) — sua ausencia indica
+  // parse quebrado. EXCECAO: criativos YouTube "sem edicao" + clone de voz, onde
+  // o avatar e um link do YouTube e nao ha copy falada no doc. Nesse caso o
+  // briefing e valido mesmo sem hook/body (so nao bloqueia o card com erro).
+  const hasYouTubeAvatar = avatares.some((a) => !!a.youtubeUrl);
+  if (!hasYouTubeAvatar && !hookText && !bodyText) return null;
 
   return {
     baseAdId,
