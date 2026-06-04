@@ -21,12 +21,10 @@ import {
   ToolStep,
   ToolDropzone,
   ToolAction,
-  ToolChoice,
   ToolResultCard,
   ToolMetric,
 } from '@/components/tool-kit';
 import { IconCopySRT, IconStepMic, IconStepPlay, IconStepText } from '@/components/ToolIcons';
-import type { SubtitleStyle } from '@/lib/srt-builder';
 
 /**
  * Copy → SRT — gera legendas SRT pulando a revisao manual.
@@ -43,10 +41,6 @@ const HUE = 'rgba(167,139,250,0.45)';
 export default function CopySrtPage() {
   const [file, setFile] = useToolState<File | null>('copysrt:file', null);
   const [copyText, setCopyText] = useToolState<string>('copysrt:copy', '');
-  const [style, setStyle] = useToolState<SubtitleStyle>(
-    'copysrt:style',
-    'single',
-  );
   const [processing, setProcessing] = useToolState<boolean>(
     'copysrt:processing',
     false,
@@ -136,7 +130,9 @@ export default function CopySrtPage() {
       fd.append('audio', audio, 'audio.opus');
       fd.append('copy', copyText);
       fd.append('provider', 'groq');
-      fd.append('style', style);
+      // Legenda sempre em 1 linha (sem quebra) — melhor pros Modelos/Animações
+      // do CapCut. Sem opção de estilo: é fixo.
+      fd.append('style', 'single');
 
       abortRef.current = new AbortController();
       const res = await fetch('/api/mind-ads/transcribe-srt', {
@@ -292,29 +288,6 @@ export default function CopySrtPage() {
         </ToolStep>
 
         <ToolStep n={3} icon={<IconStepPlay size={18} />} title="Gerar SRT" hue={HUE}>
-          <div className="mb-4">
-            <div
-              className="mb-2 text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
-              style={{ fontFamily: 'var(--font-tech)' }}
-            >
-              Estilo de quebra
-            </div>
-            <ToolChoice<SubtitleStyle>
-              value={style}
-              onChange={setStyle}
-              disabled={processing}
-              options={[
-                { value: 'single', label: '1 linha', sub: 'curta · sem quebra' },
-                { value: 'balanced', label: 'Equilibrada', sub: 'blocos médios' },
-                { value: 'cinema', label: '2 linhas', sub: 'cinema · broadcast' },
-              ]}
-            />
-            <p className="mt-2 text-[11.5px] leading-relaxed text-text-muted">
-              <span className="font-semibold text-white">1 linha</span> evita a quebra de
-              linha e cai melhor nos Modelos/Animações do CapCut. Tempos e texto continuam
-              idênticos — muda só o tamanho dos blocos.
-            </p>
-          </div>
           <div className="flex flex-wrap gap-3">
             {processing ? (
               <CancelButton onClick={handleCancel} label="Cancelar" />
