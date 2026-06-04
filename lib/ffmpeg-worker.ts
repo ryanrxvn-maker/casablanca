@@ -633,21 +633,9 @@ export async function cutVideoSegments(
 
 // ---------- Normalizador de Volume --------------------------------------
 //
-// Estrategia: compressor ESTATICO (acompressor) em vez de normalizacao
-// dinamica (dynaudnorm). Compressor estatico age sobre o nivel instantaneo
-// — quando entra uma voz baixa, ela JA aparece no nivel certo, sem drift
-// gradual. Quando entra uma voz alta, ela e atenuada na hora.
-//
-// Cadeia de filtros aplicada em todos os presets:
-//  1. highpass=f=80      → remove rumble (vento, fan, mesa)
-//  2. acompressor (1×)   → comprime dinamica (threshold + ratio)
-//  3. acompressor (2×)   → segundo estagio mais leve em "padrao"/"forte"
-//                          pra capturar transientes que escaparam do 1°
-//  4. alimiter           → ceiling final pra impedir clip
-//  5. loudnorm I=-16     → alvo de loudness fixo (single-pass, leve)
-//
-// IMPORTANTE: o `dynaudnorm` que era usado antes causava drift gradual
-// (voz baixa subia ao longo de varios segundos). Removido por completo.
+// A implementacao real (motor de duas passadas) esta mais abaixo, junto de
+// `normalizeVolume`. Veja o bloco de doc do LEVEL_PREFILTER / normalizeVolume
+// para a estrategia completa (EBU R128 two-pass + leveling dinamico).
 
 // ---------- Decupagem com Copy (audio extraction p/ transcricao) --------
 //
@@ -1097,43 +1085,107 @@ export async function extractFrameAt(
 }
 
 /**
- * Pipeline ÚNICO de normalização — calibrado pra "equalizar vozes" entre
- * múltiplos avatares no mesmo clip. Faz exatamente o que o usuário pede:
- * voz baixa sobe, voz alta desce, ambas ficam confortáveis de ouvir.
+ * Pré-filtros de leveling — aplicados IDÊNTICOS na passada de análise e na
+ * de aplicação, pra que os valores medidos pelo loudnorm batam com o que o
+ * loudnorm realmente recebe na hora de aplicar (requisito do two-pass).
  *
- * Por que essa cadeia:
- *  1. `highpass=80`     — corta rumble (ar-condicionado, mesa, etc)
- *  2. `dynaudnorm`      — gain dinâmico per-frame com janela gaussiana de
- *                          15 frames de 150ms = ~2.25s de smoothing. Cada
- *                          fala é trazida pro mesmo nível percebido sem
- *                          "bombear" entre as transições. **Esse é o
- *                          filtro principal pra equalizar vozes**.
- *  3. `acompressor`     — polimento: 2.5:1 a -18dB pra controlar picos
- *                          que sobraram do dynaudnorm
- *  4. `alimiter`        — teto -0.3dB pra garantir 0 clipping
- *  5. `loudnorm=I=-16`  — LUFS final padrão broadcast (Spotify/podcast)
+ *  1. `highpass=f=75`   — corta rumble (ar-condicionado, mesa, plosivas
+ *                          graves) abaixo da fundamental da voz. Não toca
+ *                          na inteligibilidade.
+ *  2. `dynaudnorm`      — leveling dinâmico per-frame. É o filtro que
+ *                          EQUALIZA as vozes: traz cada trecho pro mesmo
+ *                          nível percebido. Calibrado pra ser NATURAL e
+ *                          NÃO LEVANTAR RUÍDO:
+ *                          · g=17 (janela gaussiana ~3.4s) → o ganho de uma
+ *                            pausa é interpolado das falas vizinhas em vez de
+ *                            ser maximizado sozinho → não "bombeia" o ruído
+ *                            de fundo nos silêncios.
+ *                          · m=7 (ganho máx ~+17dB) → teto pra impedir que o
+ *                            chão de ruído seja inflado sem limite.
+ *                          · r=0.6 (alvo por RMS) → leveling perceptual,
+ *                            mais natural que só por pico.
+ *                          · s=6 → soft-knee leve pra colar as transições.
  *
- * Output: MP4 mantém vídeo + re-encode rápido do áudio; MP3/WAV descarta
- * vídeo. Sem opções de intensidade — uma resposta pra um problema.
+ * Depois disso, o `loudnorm` two-pass (ver normalizeVolume) crava a loudness
+ * final em -16 LUFS com true-peak -1.5dB, aplicando ganho LINEAR quando dá —
+ * ou seja, sem reintroduzir compressão/artefato. Sem alimiter extra: o
+ * próprio loudnorm já faz o true-peak limiting do estágio final.
  */
-const NORMALIZE_FILTER = [
-  'highpass=f=80',
-  'dynaudnorm=f=150:g=15:n=1:p=0.85:r=0.7:m=8',
-  'acompressor=threshold=-18dB:ratio=2.5:attack=5:release=80:makeup=2',
-  'alimiter=limit=0.97',
-  'loudnorm=I=-16:LRA=7:TP=-1.5',
-].join(',');
+const LEVEL_PREFILTER =
+  'highpass=f=75,dynaudnorm=f=200:g=17:p=0.9:m=7:r=0.6:s=6';
+
+// Alvo de loudness final (padrão broadcast/streaming pra voz).
+const LOUDNORM_TARGET = 'I=-16:TP=-1.5:LRA=11';
 
 export type NormalizeOutFormat = 'mp4' | 'mp3' | 'wav';
 
+type LoudnormStats = {
+  input_i: string;
+  input_tp: string;
+  input_lra: string;
+  input_thresh: string;
+  target_offset: string;
+};
+
 /**
- * Equaliza o volume de vozes diferentes num mesmo arquivo.
+ * Extrai o bloco JSON impresso pelo `loudnorm=print_format=json` das linhas
+ * de log do FFmpeg. O JSON do loudnorm é plano (sem chaves aninhadas), então
+ * varremos do fim pro começo pegando o último `{...}` que contém input_i.
+ */
+function parseLoudnormStats(logText: string): LoudnormStats | null {
+  const blocks = logText.match(/\{[^{}]*\}/g);
+  if (!blocks) return null;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    if (!blocks[i].includes('input_i')) continue;
+    try {
+      const j = JSON.parse(blocks[i]);
+      if (
+        j &&
+        typeof j.input_i === 'string' &&
+        typeof j.target_offset === 'string'
+      ) {
+        return j as LoudnormStats;
+      }
+    } catch {
+      /* tenta o proximo bloco */
+    }
+  }
+  return null;
+}
+
+/** Monta a string do loudnorm de aplicação com os valores já medidos. */
+function loudnormApplyFilter(s: LoudnormStats): string {
+  return (
+    `loudnorm=${LOUDNORM_TARGET}` +
+    `:measured_I=${s.input_i}` +
+    `:measured_TP=${s.input_tp}` +
+    `:measured_LRA=${s.input_lra}` +
+    `:measured_thresh=${s.input_thresh}` +
+    `:offset=${s.target_offset}` +
+    `:linear=true:print_format=summary`
+  );
+}
+
+/**
+ * Equaliza o volume de vozes diferentes num mesmo arquivo, em qualidade
+ * máxima. Motor de DUAS PASSADAS (EBU R128):
  *
- * Caso típico: vídeo com 2 avatares — um foi gravado alto, outro baixo.
- * Sai daqui com ambos no mesmo nível confortável.
+ *   Passada 1 — análise: roda os pré-filtros de leveling + loudnorm em modo
+ *     `print_format=json` jogando a saída no muxer null. Lê a loudness real.
+ *   Passada 2 — aplicação: mesmos pré-filtros + loudnorm com os valores
+ *     medidos e `linear=true` → crava -16 LUFS com ganho linear (sem
+ *     artefato) e true-peak -1.5dB garantido.
  *
- * - Se output for MP4: mantem o vídeo, re-encoda áudio com pipeline aplicado
- * - Se output for MP3/WAV: descarta vídeo (se houver) e gera só áudio
+ * Se a análise falhar por qualquer motivo, cai pra loudnorm single-pass
+ * dinâmico (ainda funcional, só um tico menos preciso) — nunca devolve erro
+ * só por causa da medição.
+ *
+ * Caso típico: vídeo com 2 avatares — um gravado alto, outro baixo. Sai
+ * daqui com ambos no mesmo nível confortável, natural, sem ruído inflado.
+ *
+ * - MP4: mantém o vídeo SEM perda (`-c:v copy`, com fallback de re-encode
+ *   só se o stream for incompatível com o container mp4, ex.: webm/vp9).
+ * - MP3/WAV: descarta o vídeo e gera só o áudio normalizado.
  */
 export async function normalizeVolume(
   file: Blob,
@@ -1145,43 +1197,97 @@ export async function normalizeVolume(
 
   const inputName = 'in.' + guessExt(file, 'mp4');
   const outputName = 'out.' + params.output;
-  const filter = NORMALIZE_FILTER;
-  const progressHandler = wireProgress(ff, opts.onProgress);
 
   try {
     opts.onStage?.('Carregando arquivo...');
     await ff.writeFile(inputName, await fetchFile(file));
 
-    const args: string[] = ['-i', inputName, '-af', filter];
-
-    if (params.output === 'mp4') {
-      // Mantem video, re-encoda so audio com filtro de normalizacao.
-      // -c:v copy nem sempre funciona bem com -af (FFmpeg pode reclamar
-      // de mismatch de timestamps), entao fazemos re-encode rapido com
-      // ultrafast + bframes=0 — o video so precisa "passar reto" enquanto
-      // o trabalho real e o filtro de audio (acompressor + loudnorm).
-      args.push(
-        '-c:v', 'libx264',
-        '-preset', 'ultrafast',
-        '-tune', 'fastdecode',
-        '-crf', '22',
-        '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
-        '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac',
-        '-b:a', '192k',
-        '-movflags', '+faststart',
-      );
-      opts.onStage?.('Normalizando audio + remontando video...');
-    } else if (params.output === 'mp3') {
-      args.push('-vn', '-c:a', 'libmp3lame', '-q:a', '2');
-      opts.onStage?.('Normalizando e exportando MP3...');
-    } else {
-      args.push('-vn', '-c:a', 'pcm_s16le', '-ar', '44100');
-      opts.onStage?.('Normalizando e exportando WAV...');
+    // -------- Passada 1: análise de loudness (two-pass) ------------------
+    opts.onStage?.('Analisando volume (1/2)...');
+    let measured: LoudnormStats | null = null;
+    const logLines: string[] = [];
+    const logHandler = ({ message }: { message: string }) => {
+      logLines.push(message);
+    };
+    try {
+      ff.on('log', logHandler);
+      try {
+        await ff.exec([
+          '-i', inputName,
+          '-af', `${LEVEL_PREFILTER},loudnorm=${LOUDNORM_TARGET}:print_format=json`,
+          '-f', 'null', '-',
+        ]);
+      } finally {
+        ff.off('log', logHandler);
+      }
+      measured = parseLoudnormStats(logLines.join('\n'));
+    } catch (e) {
+      if (isCancellationError(e)) throw e;
+      // Análise falhou — segue pro fallback single-pass.
+      measured = null;
     }
 
-    args.push(outputName);
-    await ff.exec(args);
+    // -------- Passada 2: aplicação --------------------------------------
+    const loudnorm = measured
+      ? loudnormApplyFilter(measured)
+      : `loudnorm=${LOUDNORM_TARGET}`;
+    const filter = `${LEVEL_PREFILTER},${loudnorm}`;
+
+    const progressHandler = wireProgress(ff, opts.onProgress);
+    try {
+      if (params.output === 'mp4') {
+        opts.onStage?.('Normalizando + remontando vídeo (2/2)...');
+        // 1ª tentativa: copia o vídeo SEM reencode (lossless, rápido).
+        const copyArgs = [
+          '-i', inputName,
+          '-af', filter,
+          '-c:v', 'copy',
+          '-c:a', 'aac',
+          '-b:a', '256k',
+          '-movflags', '+faststart',
+          outputName,
+        ];
+        try {
+          await ff.exec(copyArgs);
+        } catch (e) {
+          if (isCancellationError(e)) throw e;
+          // Stream de vídeo incompatível com mp4 (ex.: webm/vp9). Reencoda.
+          opts.onStage?.('Stream incompatível — remontando vídeo (2/2)...');
+          await safeDelete(ff, outputName);
+          await ff.exec([
+            '-i', inputName,
+            '-af', filter,
+            '-c:v', 'libx264',
+            '-preset', 'veryfast',
+            '-crf', '18',
+            '-pix_fmt', 'yuv420p',
+            '-c:a', 'aac',
+            '-b:a', '256k',
+            '-movflags', '+faststart',
+            outputName,
+          ]);
+        }
+      } else if (params.output === 'mp3') {
+        opts.onStage?.('Normalizando e exportando MP3 (2/2)...');
+        await ff.exec([
+          '-i', inputName, '-af', filter,
+          '-vn', '-c:a', 'libmp3lame', '-q:a', '0',
+          outputName,
+        ]);
+      } else {
+        opts.onStage?.('Normalizando e exportando WAV (2/2)...');
+        // pcm 24-bit, sem forçar sample-rate (preserva o do source → sem
+        // resample desnecessário).
+        await ff.exec([
+          '-i', inputName, '-af', filter,
+          '-vn', '-c:a', 'pcm_s24le',
+          outputName,
+        ]);
+      }
+    } finally {
+      if (progressHandler) ff.off('progress', progressHandler);
+    }
+
     const data = await ff.readFile(outputName);
     const mime =
       params.output === 'mp4'
@@ -1191,7 +1297,6 @@ export async function normalizeVolume(
           : 'audio/wav';
     return toBlob(data, mime);
   } finally {
-    if (progressHandler) ff.off('progress', progressHandler);
     await safeDelete(ff, inputName);
     await safeDelete(ff, outputName);
   }
