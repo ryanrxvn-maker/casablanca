@@ -90,11 +90,9 @@ function cfg(): VmakeConfig {
   }
   return {
     accessToken,
-    // X-Gid é um device id global (Meitu). Pega do localStorage track-store.gid
-    // do browser logado. Tem um default só pra não quebrar, mas configure.
-    gid:
-      process.env.VMAKE_GID?.trim() ||
-      '19df96c67cd53d3-08abe7d93c6dd38-26061e51-2073600-19df96c67ce584a',
+    // X-Gid é só tracking/analytics do Meitu — NÃO é validado (testado: gid
+    // vazio/aleatório passa code:0). Default genérico; VMAKE_GID é opcional.
+    gid: process.env.VMAKE_GID?.trim() || 'autoedit-0000000000000-0000000000000',
     timezone: process.env.VMAKE_TIMEZONE?.trim() || 'GMT+00:00',
   };
 }
