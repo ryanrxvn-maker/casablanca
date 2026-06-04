@@ -285,79 +285,157 @@ function hmac(key: Buffer | string, data: string): Buffer {
   return createHmac('sha256', key).update(data, 'utf8').digest();
 }
 
-/** 3. Sobe os bytes pro OSS via PUT assinado (SigV4 + session token). */
-async function uploadToOss(oss: OssPolicy, body: Buffer, contentType: string): Promise<string> {
-  const endpoint = new URL(oss.url); // ex.: https://upload.stariidata.com
-  // virtual-host: {bucket}.{host}
-  const host = `${oss.bucket}.${endpoint.host}`;
-  const canonicalUri =
-    '/' + oss.key.split('/').map((s) => encodeURIComponent(s)).join('/');
-  const region = oss.region || 'ap-southeast-1';
-  const service = 's3';
+/** Encode no padrão AWS (deixa A-Za-z0-9-_.~ e %-encoda o resto). */
+function uriEncode(s: string): string {
+  return encodeURIComponent(s).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+}
 
-  const now = new Date();
-  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, ''); // YYYYMMDDTHHMMSSZ
+type S3Creds = { ak: string; sk: string; st: string };
+
+/**
+ * Assina uma request S3 (SigV4) — genérico: serve pra PutObject E pra
+ * multipart (InitiateMultipartUpload, UploadPart, CompleteMultipartUpload).
+ * Headers assinados: host, x-amz-content-sha256, x-amz-date, x-amz-security-token.
+ */
+function signS3(
+  method: string,
+  baseUrl: string,
+  query: Record<string, string>,
+  payloadHash: string,
+  region: string,
+  creds: S3Creds,
+): { url: string; headers: Record<string, string> } {
+  const u = new URL(baseUrl);
+  const host = u.host;
+  const canonicalUri = u.pathname; // já vem encodado
+  const canonicalQuery = Object.keys(query)
+    .sort()
+    .map((k) => uriEncode(k) + '=' + uriEncode(query[k]))
+    .join('&');
+  const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, '');
   const dateStamp = amzDate.slice(0, 8);
-  const payloadHash = sha256Hex(body);
-
-  const headersToSign: Record<string, string> = {
-    'content-type': contentType,
+  const hdrs: Record<string, string> = {
     host,
     'x-amz-content-sha256': payloadHash,
     'x-amz-date': amzDate,
-    'x-amz-security-token': oss.credentials.session_token,
+    'x-amz-security-token': creds.st,
   };
-  const signedHeaders = Object.keys(headersToSign).sort().join(';');
-  const canonicalHeaders =
-    Object.keys(headersToSign)
-      .sort()
-      .map((k) => `${k}:${headersToSign[k]}\n`)
-      .join('');
-
-  const canonicalRequest = [
-    'PUT',
-    canonicalUri,
-    '', // query string vazia
-    canonicalHeaders,
-    signedHeaders,
-    payloadHash,
-  ].join('\n');
-
-  const scope = `${dateStamp}/${region}/${service}/aws4_request`;
-  const stringToSign = [
-    'AWS4-HMAC-SHA256',
-    amzDate,
-    scope,
-    sha256Hex(canonicalRequest),
-  ].join('\n');
-
-  const kDate = hmac('AWS4' + oss.credentials.secret_key, dateStamp);
-  const kRegion = hmac(kDate, region);
-  const kService = hmac(kRegion, service);
-  const kSigning = hmac(kService, 'aws4_request');
-  const signature = createHmac('sha256', kSigning).update(stringToSign, 'utf8').digest('hex');
-
+  const signedHeaders = Object.keys(hdrs).sort().join(';');
+  const canonicalHeaders = Object.keys(hdrs).sort().map((k) => `${k}:${hdrs[k]}\n`).join('');
+  const canonicalRequest = [method, canonicalUri, canonicalQuery, canonicalHeaders, signedHeaders, payloadHash].join('\n');
+  const scope = `${dateStamp}/${region}/s3/aws4_request`;
+  const stringToSign = ['AWS4-HMAC-SHA256', amzDate, scope, sha256Hex(canonicalRequest)].join('\n');
+  let k = hmac('AWS4' + creds.sk, dateStamp);
+  k = hmac(k, region);
+  k = hmac(k, 's3');
+  k = hmac(k, 'aws4_request');
+  const signature = createHmac('sha256', k).update(stringToSign, 'utf8').digest('hex');
   const authorization =
-    `AWS4-HMAC-SHA256 Credential=${oss.credentials.access_key}/${scope}, ` +
-    `SignedHeaders=${signedHeaders}, Signature=${signature}`;
-
-  const putUrl = `${endpoint.protocol}//${host}${canonicalUri}`;
-  const res = await rawFetch(putUrl, {
-    method: 'PUT',
+    `AWS4-HMAC-SHA256 Credential=${creds.ak}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+  return {
+    url: baseUrl + (canonicalQuery ? '?' + canonicalQuery : ''),
     headers: {
-      'content-type': contentType,
       'x-amz-content-sha256': payloadHash,
-      'x-amz-date': amzDate,
-      'x-amz-security-token': oss.credentials.session_token,
+      'x-amz-date': hdrs['x-amz-date'],
+      'x-amz-security-token': creds.st,
       authorization,
     },
-    body: body as unknown as BodyInit,
+  };
+}
+
+/**
+ * Sessão de upload multipart — o que o cliente guarda (CIFRADO) entre o
+ * init, as partes e o complete. Contém credenciais STS temporárias (~1h,
+ * escopo de 1 único key) — por isso vai cifrada (lib/secrets).
+ */
+export type MultipartSession = {
+  baseUrl: string;
+  region: string;
+  sourceUrl: string; // URL pública final
+  uploadId: string;
+  ak: string;
+  sk: string;
+  st: string;
+};
+
+/** 3a. Inicia o multipart upload no OSS. Retorna a sessão. */
+export async function initMultipart(suffix: string): Promise<MultipartSession> {
+  const c = cfg();
+  const { accessToken: signToken, params } = await signUpload(c, suffix);
+  const oss = await getPolicy(c, signToken, params);
+  const endpoint = new URL(oss.url);
+  const host = `${oss.bucket}.${endpoint.host}`;
+  const canonicalUri = '/' + oss.key.split('/').map((s) => encodeURIComponent(s)).join('/');
+  const baseUrl = `${endpoint.protocol}//${host}${canonicalUri}`;
+  const region = oss.region || 'ap-southeast-1';
+  const creds: S3Creds = {
+    ak: oss.credentials.access_key,
+    sk: oss.credentials.secret_key,
+    st: oss.credentials.session_token,
+  };
+  const signed = signS3('POST', baseUrl, { uploads: '' }, sha256Hex(''), region, creds);
+  const res = await rawFetch(signed.url, { method: 'POST', headers: signed.headers });
+  const xml = await res.text();
+  if (!res.ok) {
+    throw new VmakeError('upload_init_failed', `Falha ao iniciar upload (HTTP ${res.status}). ${xml.slice(0, 120)}`);
+  }
+  const uploadId = (xml.match(/<UploadId>([^<]+)<\/UploadId>/) || [])[1];
+  if (!uploadId) throw new VmakeError('upload_init_failed', 'OSS não retornou UploadId.');
+  return { baseUrl, region, sourceUrl: oss.data, uploadId, ...creds };
+}
+
+/** 3b. Sobe UMA parte (chunk ≥ 100KB, exceto a última). Retorna o ETag. */
+export async function uploadPart(
+  session: MultipartSession,
+  partNumber: number,
+  chunk: Buffer,
+): Promise<string> {
+  const creds: S3Creds = { ak: session.ak, sk: session.sk, st: session.st };
+  const signed = signS3(
+    'PUT',
+    session.baseUrl,
+    { partNumber: String(partNumber), uploadId: session.uploadId },
+    sha256Hex(chunk),
+    session.region,
+    creds,
+  );
+  const res = await rawFetch(signed.url, {
+    method: 'PUT',
+    headers: signed.headers,
+    body: chunk as unknown as BodyInit,
   });
   if (!res.ok) {
     const t = await res.text().catch(() => '');
-    throw new VmakeError('upload_failed', `Falha ao subir o vídeo pro vmake (HTTP ${res.status}). ${t.slice(0, 160)}`);
+    throw new VmakeError('upload_failed', `Falha na parte ${partNumber} (HTTP ${res.status}). ${t.slice(0, 120)}`);
   }
-  return oss.data;
+  const etag = res.headers.get('etag');
+  if (!etag) throw new VmakeError('upload_failed', `OSS não retornou ETag da parte ${partNumber}.`);
+  return etag;
+}
+
+/** 3c. Finaliza o multipart upload. Retorna a sourceUrl pública. */
+export async function completeMultipart(
+  session: MultipartSession,
+  parts: Array<{ partNumber: number; etag: string }>,
+): Promise<string> {
+  const creds: S3Creds = { ak: session.ak, sk: session.sk, st: session.st };
+  const sorted = [...parts].sort((a, b) => a.partNumber - b.partNumber);
+  const xml =
+    '<CompleteMultipartUpload>' +
+    sorted.map((p) => `<Part><PartNumber>${p.partNumber}</PartNumber><ETag>${p.etag}</ETag></Part>`).join('') +
+    '</CompleteMultipartUpload>';
+  const body = Buffer.from(xml, 'utf8');
+  const signed = signS3('POST', session.baseUrl, { uploadId: session.uploadId }, sha256Hex(body), session.region, creds);
+  const res = await rawFetch(signed.url, {
+    method: 'POST',
+    headers: signed.headers,
+    body: body as unknown as BodyInit,
+  });
+  const txt = await res.text();
+  if (!res.ok || /<Error>/.test(txt)) {
+    throw new VmakeError('upload_failed', `Falha ao finalizar upload (HTTP ${res.status}). ${txt.slice(0, 140)}`);
+  }
+  return session.sourceUrl;
 }
 
 /** 4. Submete a remoção. O SERVIDOR gera o record_id (NÃO mandar!). */
@@ -395,86 +473,50 @@ type QueryRecord = {
   purchased_list?: QueryTask[];
 };
 
-/** 5. Poll até concluir. Retorna a URL do MP4 final (legenda removida). */
-async function pollUntilDone(
-  c: VmakeConfig,
-  recordId: string,
-  effectModel: string,
-  opts: { timeoutMs?: number; intervalMs?: number } = {},
-): Promise<string> {
-  const timeoutMs = opts.timeoutMs ?? 280_000;
-  const baseInterval = opts.intervalMs ?? 4000;
-  const started = Date.now();
-
-  while (Date.now() - started < timeoutMs) {
-    const r = await postJson<{ list?: QueryRecord[] }>(c, '/vm/tool/query.json', {
-      record_id: [recordId],
-      client_os: CLIENT_OS,
-    });
-    const rec = r?.list?.find((x) => x.record_id === recordId) ?? r?.list?.[0];
-    const tasks = [...(rec?.purchased_list ?? []), ...(rec?.trial_list ?? [])];
-    const task =
-      tasks.find((t) => t.effect_model === effectModel) ?? tasks[0];
-    if (task) {
-      if (task.status === 2) {
-        const url = task.download_url || task.result;
-        if (url) return url;
-      } else if (typeof task.status === 'number' && task.status < 0) {
-        throw new VmakeError(
-          'generation_failed',
-          'O vmake falhou ao processar (vídeo inválido ou sem legenda detectável).',
-        );
-      }
-    }
-    await sleep(baseInterval + Math.floor(Math.random() * 600));
-  }
-  throw new VmakeError('timeout', 'O vmake demorou demais pra processar (timeout).');
-}
-
-// ───────────────────── Orquestrador de alto nível ─────────────────────
-
-export type RemoveSubtitleInput = {
-  videoBuffer: Buffer | Uint8Array;
-  videoName?: string;
-  videoType?: string;
-  mode?: VmakeMode; // default: 'smart'
-};
-
-export type RemoveSubtitleResult = {
-  url: string; // MP4 final (legenda removida), no CDN do vmake
-  recordId: string;
-  taskId: string;
-};
+// ───────────────────── Submeter + poll (assíncrono) ─────────────────────
 
 /**
- * Roda o pipeline completo: assina → política → upload → submete →
- * poll → resolve o MP4 final. Tudo server-side, por 1 token (proxy opcional).
+ * Submete o processamento de uma URL que já está no OSS do vmake.
+ * Retorna {recordId, taskId} imediatamente — NÃO espera o processamento.
+ * O cliente faz o poll via pollRecord().
  */
-export async function removeSubtitle(input: RemoveSubtitleInput): Promise<RemoveSubtitleResult> {
+export async function processFromSourceUrl(
+  sourceUrl: string,
+  mode: VmakeMode = 'smart',
+  title = 'video.mp4',
+): Promise<{ recordId: string; taskId: string }> {
   const c = cfg();
-  const name = input.videoName || 'video.mp4';
-  const suffix = (name.split('.').pop() || 'mp4').toLowerCase().replace(/[^a-z0-9]/g, '') || 'mp4';
-  const effectModel = VMAKE_EFFECT[input.mode || 'smart'];
-
-  // 1+2: assinatura + política OSS
-  const { accessToken: signToken, params } = await signUpload(c, suffix);
-  const oss = await getPolicy(c, signToken, params);
-
-  // 3: upload do vídeo pro OSS
-  const buf = Buffer.isBuffer(input.videoBuffer)
-    ? input.videoBuffer
-    : Buffer.from(input.videoBuffer);
-  const sourceUrl = await uploadToOss(oss, buf, input.videoType || 'video/mp4');
-
-  // 4: submete a remoção (server gera record_id)
-  const { recordId, taskId } = await submitRemoval(c, sourceUrl, effectModel, name);
-
-  // 5: poll até o MP4 final
-  const url = await pollUntilDone(c, recordId, effectModel);
-  return { url, recordId, taskId };
+  return submitRemoval(c, sourceUrl, VMAKE_EFFECT[mode], title);
 }
 
-// ───────────────────────────── Health ─────────────────────────────
+/**
+ * Faz UM poll da fila do vmake. Retorna o estado atual do record.
+ * O cliente chama isso a cada N segundos até status === 2.
+ */
+export async function pollRecord(
+  recordId: string,
+  effectModel: string,
+): Promise<{ status: number; process: number; downloadUrl: string | null }> {
+  const c = cfg();
+  const r = await postJson<{ list?: QueryRecord[] }>(c, '/vm/tool/query.json', {
+    record_id: [recordId],
+    client_os: CLIENT_OS,
+  });
+  const rec = r?.list?.find((x) => x.record_id === recordId) ?? r?.list?.[0];
+  const tasks = [...(rec?.purchased_list ?? []), ...(rec?.trial_list ?? [])];
+  const task = tasks.find((t) => t.effect_model === effectModel) ?? tasks[0];
+  if (task && typeof task.status === 'number' && task.status < 0) {
+    throw new VmakeError(
+      'generation_failed',
+      'O vmake falhou ao processar (vídeo inválido ou sem legenda detectável).',
+    );
+  }
+  return {
+    status: task?.status ?? 1,
+    process: task?.process ?? 0,
+    downloadUrl: task?.status === 2 ? (task.download_url || task.result || null) : null,
+  };
+}
 
 /** Checa se o Access-Token está válido (chama task_list — read-only). */
 export async function checkHealth(): Promise<{ ok: boolean; reason?: string }> {
