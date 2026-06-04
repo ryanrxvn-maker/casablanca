@@ -28,19 +28,53 @@ export type Word = {
   end: number;   // millis
 };
 
-/* ───────────────────────── tunables ───────────────────────── */
+/* ───────────────────────── tunables (fixos) ───────────────────────── */
 
-const MAX_CHARS_PER_LINE = 42;
-const MAX_LINES = 2;
-const MAX_CHARS_TOTAL = MAX_CHARS_PER_LINE * MAX_LINES; // 84
 const MIN_DURATION_MS = 800;     // mínimo confortável pra leitura
-const MAX_DURATION_MS = 7000;    // legenda longa demais cansa
 const TARGET_CPS = 17;           // chars/sec - limite recomendado
 const MIN_GAP_MS = 80;           // gap mínimo entre legendas (anti-flash)
 
+/* ───────────────────────── estilo de quebra ───────────────────────── */
+
+/**
+ * Controla o quão "picada" sai a legenda:
+ *  - 'single'   → 1 linha curta por bloco. NUNCA quebra em 2 linhas.
+ *                 Ideal pra CapCut com Modelos/Animações e caption de reels.
+ *  - 'balanced' → blocos médios; usa a 2ª linha só quando o texto passa.
+ *  - 'cinema'   → até 2 linhas / 84 chars (padrão broadcast EBU/CEA).
+ */
+export type SubtitleStyle = 'single' | 'balanced' | 'cinema';
+
+type StyleConfig = {
+  maxCharsPerLine: number;     // largura de uma linha
+  maxLines: number;            // 1 = nunca quebra linha; 2 = permite duas
+  maxCharsTotal: number;       // teto de chars do bloco inteiro
+  maxDurationMs: number;       // teto de duração do bloco
+  commaBreakMinChars: number;  // tamanho mínimo p/ vírgula virar quebra
+};
+
+const STYLE_PRESETS: Record<SubtitleStyle, StyleConfig> = {
+  single:   { maxCharsPerLine: 38, maxLines: 1, maxCharsTotal: 38, maxDurationMs: 4000, commaBreakMinChars: 14 },
+  balanced: { maxCharsPerLine: 42, maxLines: 2, maxCharsTotal: 52, maxDurationMs: 5000, commaBreakMinChars: 18 },
+  cinema:   { maxCharsPerLine: 42, maxLines: 2, maxCharsTotal: 84, maxDurationMs: 7000, commaBreakMinChars: 20 },
+};
+
+// Default da FUNÇÃO = cinema (mantém o comportamento de quem chama sem
+// estilo). A ferramenta Gerador de SRT passa o estilo escolhido na UI.
+const DEFAULT_STYLE: SubtitleStyle = 'cinema';
+
+export function isSubtitleStyle(v: unknown): v is SubtitleStyle {
+  return v === 'single' || v === 'balanced' || v === 'cinema';
+}
+
 /* ───────────────────────── public API ───────────────────────── */
 
-export function buildSrtFromCopyAndWords(copy: string, words: Word[]): string {
+export function buildSrtFromCopyAndWords(
+  copy: string,
+  words: Word[],
+  style: SubtitleStyle = DEFAULT_STYLE,
+): string {
+  const cfg = STYLE_PRESETS[style] ?? STYLE_PRESETS[DEFAULT_STYLE];
   const tokens = tokenize(copy);
   if (tokens.length === 0 || words.length === 0) return '';
 
@@ -51,8 +85,8 @@ export function buildSrtFromCopyAndWords(copy: string, words: Word[]): string {
   // 2) Tempo por token (start/end) — interpolando entre âncoras.
   const timed = interpolateTimes(tokens, words, anchors);
 
-  // 3) Quebra em subtitles inteligentes
-  const subs = groupIntoSubtitles(timed);
+  // 3) Quebra em subtitles inteligentes (depende do estilo)
+  const subs = groupIntoSubtitles(timed, cfg);
 
   // 4) Suaviza durations + impede overlap
   const polished = polishTimings(subs);
@@ -219,7 +253,7 @@ function interpolateTimes(
 
 type Subtitle = { start: number; end: number; text: string };
 
-function groupIntoSubtitles(timed: TimedToken[]): Subtitle[] {
+function groupIntoSubtitles(timed: TimedToken[], cfg: StyleConfig): Subtitle[] {
   if (timed.length === 0) return [];
   const subs: Subtitle[] = [];
   let group: TimedToken[] = [];
@@ -229,7 +263,7 @@ function groupIntoSubtitles(timed: TimedToken[]): Subtitle[] {
     const start = group[0].start;
     const end = group[group.length - 1].end;
     const rawText = group.map((t) => t.raw).join(' ');
-    const text = wrapTwoLines(rawText);
+    const text = wrapLines(rawText, cfg);
     subs.push({ start, end, text });
     group = [];
   }
@@ -239,8 +273,8 @@ function groupIntoSubtitles(timed: TimedToken[]): Subtitle[] {
     const tentativeText = tentative.map((t) => t.raw).join(' ');
     const tentativeDur = tok.end - (tentative[0]?.start ?? tok.start);
 
-    const exceedsChars = tentativeText.length > MAX_CHARS_TOTAL;
-    const exceedsDur = tentativeDur > MAX_DURATION_MS;
+    const exceedsChars = tentativeText.length > cfg.maxCharsTotal;
+    const exceedsDur = tentativeDur > cfg.maxDurationMs;
 
     if ((exceedsChars || exceedsDur) && group.length > 0) {
       commitGroup();
@@ -252,10 +286,10 @@ function groupIntoSubtitles(timed: TimedToken[]): Subtitle[] {
       commitGroup();
       continue;
     }
-    // Vírgula só quebra se grupo ficou substancial (>20 chars)
+    // Vírgula só quebra se grupo ficou substancial (limiar por estilo)
     if (tok.hasComma) {
       const grpText = group.map((t) => t.raw).join(' ');
-      if (grpText.length > 20) commitGroup();
+      if (grpText.length > cfg.commaBreakMinChars) commitGroup();
     }
   }
   commitGroup();
@@ -263,11 +297,15 @@ function groupIntoSubtitles(timed: TimedToken[]): Subtitle[] {
 }
 
 /**
- * Quebra texto em até 2 linhas equilibradas, respeitando MAX_CHARS_PER_LINE.
- * Tenta cortar no meio "natural" (próximo à metade).
+ * Quebra texto respeitando o estilo:
+ *  - maxLines === 1 → retorna UMA linha (o agrupamento já limitou o
+ *    tamanho do bloco); nunca insere '\n'. É isso que zera a quebra de linha.
+ *  - maxLines >= 2 → até 2 linhas equilibradas, respeitando maxCharsPerLine.
+ *    Tenta cortar no meio "natural" (próximo à metade).
  */
-function wrapTwoLines(text: string): string {
-  if (text.length <= MAX_CHARS_PER_LINE) return text;
+function wrapLines(text: string, cfg: StyleConfig): string {
+  if (cfg.maxLines <= 1) return text;
+  if (text.length <= cfg.maxCharsPerLine) return text;
   const words = text.split(' ');
   // Acha índice ótimo de quebra: mais próximo da metade que ainda cabe
   const totalLen = text.length;
@@ -277,9 +315,9 @@ function wrapTwoLines(text: string): string {
   let runningLen = 0;
   for (let i = 0; i < words.length - 1; i++) {
     runningLen += words[i].length + 1; // +1 espaço
-    if (runningLen > MAX_CHARS_PER_LINE) break;
+    if (runningLen > cfg.maxCharsPerLine) break;
     const remaining = totalLen - runningLen;
-    if (remaining > MAX_CHARS_PER_LINE) continue;
+    if (remaining > cfg.maxCharsPerLine) continue;
     const diff = Math.abs(runningLen - midTarget);
     if (diff < bestDiff) {
       bestDiff = diff;
@@ -288,7 +326,7 @@ function wrapTwoLines(text: string): string {
   }
   if (bestI < 0) {
     // Fallback: quebra forçada caractere por caractere
-    return text.slice(0, MAX_CHARS_PER_LINE) + '\n' + text.slice(MAX_CHARS_PER_LINE);
+    return text.slice(0, cfg.maxCharsPerLine) + '\n' + text.slice(cfg.maxCharsPerLine);
   }
   const line1 = words.slice(0, bestI + 1).join(' ');
   const line2 = words.slice(bestI + 1).join(' ');

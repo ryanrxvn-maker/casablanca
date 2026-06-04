@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server';
 import { getUserKey } from '@/lib/user-keys';
 import { requireTier } from '@/lib/require-tier';
-import { buildSrtFromCopyAndWords, type Word } from '@/lib/srt-builder';
+import {
+  buildSrtFromCopyAndWords,
+  isSubtitleStyle,
+  type Word,
+  type SubtitleStyle,
+} from '@/lib/srt-builder';
 
 /**
  * POST /api/mind-ads/transcribe-srt
@@ -52,6 +57,10 @@ export async function POST(req: Request) {
     const provider = String(form.get('provider') ?? 'groq') as
       | 'groq'
       | 'assemblyai';
+    // Estilo de quebra da legenda (single = 1 linha, sem quebra). Default
+    // 'single' pra ferramenta — blocos curtos caem melhor no CapCut.
+    const styleRaw = form.get('style');
+    const style: SubtitleStyle = isSubtitleStyle(styleRaw) ? styleRaw : 'single';
 
     if (!(audio instanceof File)) return jsonError('Audio ausente.', 400);
     if (!copyText) return jsonError('Copy ausente.', 400);
@@ -60,7 +69,7 @@ export async function POST(req: Request) {
     if (provider === 'groq') {
       try {
         const result = await transcribeViaGroq(audio);
-        const srt = buildSrtFromCopyAndWords(copyText, result);
+        const srt = buildSrtFromCopyAndWords(copyText, result, style);
         return NextResponse.json({
           srt,
           wordCount: result.length,
@@ -74,7 +83,7 @@ export async function POST(req: Request) {
 
     // AssemblyAI (premium ou fallback)
     const result = await transcribeViaAssemblyAI(audio);
-    const srt = buildSrtFromCopyAndWords(copyText, result);
+    const srt = buildSrtFromCopyAndWords(copyText, result, style);
     return NextResponse.json({
       srt,
       wordCount: result.length,
