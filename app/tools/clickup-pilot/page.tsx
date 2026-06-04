@@ -280,6 +280,19 @@ function resolveChannels(task: ClickUpTask): Array<{ label: string; color: strin
   return raws.map(labelFor).filter((x): x is { label: string; color: string } => !!x);
 }
 
+/** Canais ORGANICOS (KWAI/YouTube/TikTok). VA com esses canais NAO usa o
+ *  pipeline de lipsync no AD original — gera cada parte (hook+body) por
+ *  TEXTO via HeyGen text-to-avatar (igual task normal), 1 video por AVA.
+ *  META (e VA sem canal) continuam no lipsync. Retorna os labels organicos
+ *  achados na task (vazio = nenhum → mantem o motor lipsync de sempre). */
+const ORGANIC_CHANNEL_RE = /\b(kwai|you\s?tube|tik\s?tok)\b/i;
+function organicChannelLabels(task: ClickUpTask | undefined | null): string[] {
+  if (!task) return [];
+  return resolveChannels(task)
+    .map((c) => c.label)
+    .filter((l) => ORGANIC_CHANNEL_RE.test(l));
+}
+
 type DispatchPlan = {
   adName: string;
   parts: Array<{
@@ -4586,13 +4599,19 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const va = a?.vaBriefing;
     if (!va) return ['não é VA'];
     const issues: string[] = [];
-    const driveId = va.linkAdFileId || extractDriveFileId(vaAdUrl[taskId] || '');
-    if (!driveId) issues.push('AD original (Drive)');
+    // Canal organico (KWAI/YT/TikTok): motor TEXTO — nao baixa o AD original
+    // e usa a voz default do avatar (igual task normal). So precisa do avatar.
+    const textEngine = organicChannelLabels(tasks.find((t) => t.id === taskId)).length > 0;
+    if (!textEngine) {
+      const driveId = va.linkAdFileId || extractDriveFileId(vaAdUrl[taskId] || '');
+      if (!driveId) issues.push('AD original (Drive)');
+    }
     for (const av of va.avatares) {
       if (!vaAvatarChoice[`${taskId}:${av.avaCode}`]?.id) issues.push(`avatar ${av.avaCode}`);
-      // Voz é OBRIGATÓRIA agora — sem voiceId o Espelhamento cai na voz
-      // original do AD (o bug que o user reclamava). Força escolha.
-      if (!vaVoiceChoice[`${taskId}:${av.avaCode}`]?.id) issues.push(`voz ${av.avaCode}`);
+      // Voz é OBRIGATÓRIA no lipsync — sem voiceId o Espelhamento cai na voz
+      // original do AD (o bug que o user reclamava). No motor TEXTO a voz é
+      // opcional (cai na voz default do avatar, igual task normal).
+      if (!textEngine && !vaVoiceChoice[`${taskId}:${av.avaCode}`]?.id) issues.push(`voz ${av.avaCode}`);
     }
     return issues;
   }
@@ -4615,6 +4634,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const va = a.vaBriefing;
     const baseAdId = va.baseAdId;
     const adNameClean = baseAdId.replace(/\s+/g, '');
+
+    // ROUTER MOTOR — VA com canal organico (KWAI/YT/TikTok) NAO faz lipsync
+    // no AD original. Gera cada parte (hook+body) por TEXTO (text-to-avatar),
+    // 1 video por AVA, na MESMA fila/cards/ZIP. META e VA sem canal seguem no
+    // pipeline de lipsync abaixo — intocado.
+    if (organicChannelLabels(tasks.find((t) => t.id === taskId)).length > 0) {
+      await runVATextEngineForTask(taskId);
+      return;
+    }
 
     // Validacao — marca failed no card (em vez de so setError, que o user
     // nao associa ao card rodando).
@@ -4790,6 +4818,206 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
         const hist = (() => { try { return JSON.parse(localStorage.getItem(VA_KEY) || '[]'); } catch { return []; } })();
         hist.push({
           taskId, taskName: a.taskName, baseAdId: va.baseAdId,
+          avatares: va.avatares.map((av: any) => ({ avaCode: av.avaCode, username: av.username, status: 'failed' })),
+          startedAt: vaStartedAt, finishedAt: Date.now(),
+        });
+        localStorage.setItem(VA_KEY, JSON.stringify(hist.slice(-200)));
+      } catch {}
+    }
+  }
+
+  /** Motor TEXTO do VA — usado quando a task tem canal organico (KWAI/YT/
+   *  TikTok). Em vez de baixar o AD original e fazer lipsync, gera cada
+   *  parte falada (HOOK + BODY split ~20s) por TEXTO via HeyGen text-to-
+   *  avatar (mesma primitiva processJob{text} da task normal), concatena as
+   *  partes e produz 1 video por AVA. Roda na MESMA fila gated, escreve nos
+   *  mesmos batchStates/cards e gera o mesmo ZIP final ({adId}-AVAxx.mp4). */
+  async function runVATextEngineForTask(taskId: string) {
+    const a = taskAnalyses[taskId];
+    if (!a?.vaBriefing) {
+      setBatchStates((prev) => {
+        const cur = prev[taskId];
+        if (!cur) return prev;
+        return { ...prev, [taskId]: { ...cur, phase: 'failed', message: 'VA: reabra a task no ClickUp Pilot e analise de novo (briefing nao sobrevive reload).', finishedAt: Date.now() } };
+      });
+      return;
+    }
+    const va = a.vaBriefing;
+    const baseAdId = va.baseAdId;
+    const adNameClean = baseAdId.replace(/\s+/g, '');
+    const channelLabels = organicChannelLabels(tasks.find((t) => t.id === taskId));
+    const vaStartedAt = batchStates[taskId]?.startedAt || Date.now();
+
+    const patchVA = (patch: Partial<BatchTaskState>) => setBatchStates((prev) => {
+      const base: BatchTaskState = prev[taskId] || { taskId, taskName: a.taskName, baseAdId, parts: [], startedAt: vaStartedAt, phase: 'dispatching' };
+      return { ...prev, [taskId]: { ...base, ...patch } };
+    });
+    const upsertPart = (label: string, patch: Partial<BatchTaskState['parts'][number]>) => setBatchStates((prev) => {
+      const cur = prev[taskId];
+      if (!cur) return prev;
+      const idx = cur.parts.findIndex((p) => p.label === label);
+      const parts = idx === -1
+        ? [...cur.parts, { label, videoId: null, renamedTo: `${label}.mp4`, ...patch }]
+        : cur.parts.map((p, i) => (i === idx ? { ...p, ...patch } : p));
+      return { ...prev, [taskId]: { ...cur, parts } };
+    });
+
+    // Readiness — motor texto so precisa do avatar por AVA (voz opcional,
+    // cai na default do avatar). Sem AD original.
+    const missing: string[] = [];
+    for (const av of va.avatares) {
+      if (!vaAvatarChoice[`${taskId}:${av.avaCode}`]?.id) missing.push(`avatar ${av.avaCode}`);
+    }
+    if (missing.length > 0) {
+      const msg = `VA (texto) incompleto — falta: ${missing.join(', ')}. Configure na task e dispare de novo.`;
+      setError(msg);
+      patchVA({ phase: 'failed', isVA: true, message: msg, finishedAt: Date.now() });
+      return;
+    }
+
+    // Partes faladas: HOOK (se houver) + BODY split ~20s (igual task normal).
+    const hookText = extractSpokenBody(va.hookText || '').trim();
+    const bodyText = extractSpokenBody(va.bodyText || '').trim();
+    const partPlan: Array<{ label: string; text: string }> = [];
+    if (hookText) partPlan.push({ label: 'HOOK', text: hookText });
+    if (bodyText) {
+      const bodyParts = splitCopyIntoParts(bodyText, { targetSec: 20, minSec: 10, maxSec: 35 });
+      bodyParts.forEach((t, i) => partPlan.push({ label: bodyParts.length === 1 ? 'BODY' : `BODY ${i + 1}`, text: t }));
+    }
+    if (partPlan.length === 0) {
+      patchVA({ phase: 'failed', isVA: true, message: 'VA (texto): briefing sem hook nem body falado.', finishedAt: Date.now() });
+      return;
+    }
+
+    batchCancelRef.current[taskId] = false;
+    patchVA({
+      phase: 'dispatching', isVA: true,
+      docUrl: batchStates[taskId]?.docUrl || a.docUrl,
+      taskUrl: batchStates[taskId]?.taskUrl || a.taskUrl,
+      message: `Gerando por texto (canal ${channelLabels.join('/') || 'organico'})...`,
+      finishedAt: undefined,
+    });
+
+    try {
+      const { processJob, downloadVideoBytes } = await import('@/lib/heygen-api-direct');
+      const { concatAvatarParts } = await import('@/lib/ffmpeg-worker');
+      const items: Array<{ avaCode: string; filename: string; blob: Blob | null; error?: string }> = [];
+
+      for (const av of va.avatares) {
+        if (batchCancelRef.current[taskId]) throw new Error('cancelado');
+        const choice = vaAvatarChoice[`${taskId}:${av.avaCode}`]!;
+        const voiceId = vaVoiceChoice[`${taskId}:${av.avaCode}`]?.id || undefined;
+        const filename = `${adNameClean}-${av.avaCode}.mp4`;
+        const partBlobs: Blob[] = [];
+        let avError: string | null = null;
+        try {
+          for (const part of partPlan) {
+            if (batchCancelRef.current[taskId]) throw new Error('cancelado');
+            const label = `${av.avaCode}·${part.label}`;
+            upsertPart(label, { videoId: null, videoStatus: 'pending', error: null });
+            patchVA({ phase: 'rendering', message: `${av.avaCode}: gerando ${part.label} por texto...` });
+            let job;
+            try {
+              job = await processJob({
+                text: part.text,
+                avatarId: choice.id,
+                voiceId,
+                title: `${adNameClean}_${av.avaCode}_${part.label}`,
+                engine: 'iii', orientation: 'portrait',
+              }, { onProgress: (stage: string) => console.log(`[VA-texto ${label}] ${stage}`) });
+            } catch (e) {
+              upsertPart(label, { error: (e as Error)?.message || 'falha no dispatch' });
+              throw e;
+            }
+            if (!job.videoId) {
+              upsertPart(label, { error: 'processJob nao retornou videoId' });
+              throw new Error(`${label}: processJob nao retornou videoId.`);
+            }
+            upsertPart(label, { videoId: job.videoId, videoStatus: 'pending' });
+            const statuses = await pollVideosUntilReady([job.videoId], { intervalMs: 8000, timeoutMs: 30 * 60 * 1000 });
+            const st = statuses[job.videoId];
+            if (!st || st.status !== 'completed' || !st.videoUrl) {
+              upsertPart(label, { videoStatus: st?.status, error: st?.error || 'nao renderizou' });
+              throw new Error(`Video ${label} nao renderizou (status=${st?.status}): ${st?.error || 'sem detalhes'}`);
+            }
+            upsertPart(label, { videoStatus: 'completed', videoUrl: st.videoUrl });
+            const bytes = await downloadVideoBytes(st.videoUrl);
+            partBlobs.push(new Blob([bytes as BlobPart], { type: 'video/mp4' }));
+          }
+        } catch (e) {
+          if ((e as Error)?.message === 'cancelado') throw e;
+          avError = (e as Error)?.message || 'falha';
+        }
+
+        if (avError || partBlobs.length === 0) {
+          items.push({ avaCode: av.avaCode, filename, blob: null, error: avError || 'sem partes geradas' });
+          continue;
+        }
+        // Concatena as partes (HOOK+BODY...) → 1 video por AVA.
+        patchVA({ phase: 'post', message: `${av.avaCode}: montando vídeo final...` });
+        try {
+          const mounted = partBlobs.length === 1 ? partBlobs[0] : await concatAvatarParts(partBlobs);
+          items.push({ avaCode: av.avaCode, filename, blob: mounted });
+        } catch (e) {
+          items.push({ avaCode: av.avaCode, filename, blob: null, error: 'mount: ' + ((e as Error)?.message || '?') });
+        }
+      }
+
+      // ZIP final — mesma estrutura do VA lipsync (download unico do card).
+      patchVA({ phase: 'post', message: 'Zipando vídeos finais...' });
+      const JSZip = (await import('jszip')).default;
+      const zip = new JSZip();
+      for (const item of items) {
+        if (item.blob) zip.file(item.filename, item.blob);
+        else zip.file(`${item.filename.replace('.mp4', '')}_ERRO.txt`, item.error || 'falha sem detalhes');
+      }
+      const okCount = items.filter((i) => i.blob).length;
+      zip.file('_DIAGNOSTICO.txt',
+`Pipeline VA (motor TEXTO — canal ${channelLabels.join('/') || 'organico'}) - relatorio
+============================================================
+AVAs: ${items.length} · OK: ${okCount} · Falhas: ${items.length - okCount}
+Partes por AVA (geradas por texto): ${partPlan.map((p) => p.label).join(', ')}
+
+Items:
+${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 'sem detalhes') + ')'}`).join('\n')}
+`);
+      const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+      const zipName = `${adNameClean}_VA.zip`;
+      const zipUrl = URL.createObjectURL(zipBlob);
+      try {
+        const { saveZip } = await import('@/lib/zip-store');
+        await saveZip(`va:${taskId}:zip`, zipBlob, zipName);
+      } catch (e) { console.warn('[va-texto] save zip IDB:', e); }
+
+      patchVA({
+        phase: 'done',
+        message: `Pronto (texto): ${okCount}/${items.length} AVA${items.length === 1 ? '' : 's'}`,
+        montadoZipUrl: zipUrl, montadoZipName: zipName,
+        finishedAt: Date.now(),
+      });
+      const siblings = getSiblingTaskIds(taskId);
+      for (const sid of siblings) markDispatched(sid);
+      try {
+        const VA_KEY = 'darkolab:va-pipeline:history';
+        const hist = (() => { try { return JSON.parse(localStorage.getItem(VA_KEY) || '[]'); } catch { return []; } })();
+        hist.push({
+          taskId, taskName: a.taskName, baseAdId: va.baseAdId, engine: 'texto', channels: channelLabels,
+          avatares: items.map((it, i) => ({ avaCode: it.avaCode, username: va.avatares[i]?.username || '?', status: it.blob ? 'done' : 'failed' })),
+          startedAt: vaStartedAt, finishedAt: Date.now(), zipName,
+        });
+        localStorage.setItem(VA_KEY, JSON.stringify(hist.slice(-200)));
+      } catch {}
+    } catch (e) {
+      if ((e as Error)?.message === 'cancelado') {
+        patchVA({ phase: 'failed', message: 'Cancelado.', finishedAt: Date.now() });
+        return;
+      }
+      patchVA({ phase: 'failed', message: (e as Error)?.message || String(e), finishedAt: Date.now() });
+      try {
+        const VA_KEY = 'darkolab:va-pipeline:history';
+        const hist = (() => { try { return JSON.parse(localStorage.getItem(VA_KEY) || '[]'); } catch { return []; } })();
+        hist.push({
+          taskId, taskName: a.taskName, baseAdId: va.baseAdId, engine: 'texto',
           avatares: va.avatares.map((av: any) => ({ avaCode: av.avaCode, username: av.username, status: 'failed' })),
           startedAt: vaStartedAt, finishedAt: Date.now(),
         });
@@ -6289,13 +6517,21 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                   //  fila e dispara pelo START global. Aqui so atalhos (Doc + AD). ═══
                                   (() => {
                                     const adFileId = a.vaBriefing!.linkAdFileId;
+                                    const isTextEngine = organicChannelLabels(tasks.find((x) => x.id === a.taskId)).length > 0;
                                     return (
                                       <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                                         <span
-                                          className="mono rounded-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-200"
-                                          title="Variação de Avatar — cada avatar fala com o áudio do AD original"
+                                          className={
+                                            'mono rounded-full border px-2 py-0.5 text-[9px] uppercase tracking-widest ' +
+                                            (isTextEngine
+                                              ? 'border-fuchsia-500/40 bg-fuchsia-500/10 text-fuchsia-200'
+                                              : 'border-cyan-500/40 bg-cyan-500/10 text-cyan-200')
+                                          }
+                                          title={isTextEngine
+                                            ? `Variação de Avatar (motor TEXTO — canal ${organicChannelLabels(tasks.find((x) => x.id === a.taskId)).join('/')}): cada avatar gera o hook+body por texto`
+                                            : 'Variação de Avatar — cada avatar fala com o áudio do AD original'}
                                         >
-                                          VA · {a.vaBriefing!.avatares.length} avatar{a.vaBriefing!.avatares.length === 1 ? '' : 'es'}
+                                          {isTextEngine ? 'VA·TEXTO' : 'VA'} · {a.vaBriefing!.avatares.length} avatar{a.vaBriefing!.avatares.length === 1 ? '' : 'es'}
                                         </span>
                                         {(a.docUrl || a.taskUrl) ? (
                                           <PilotBtn3D
@@ -6608,17 +6844,28 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                     <span className="text-text-muted">
                                       <strong className="text-cyan-200">{a.vaBriefing.avatares.length}</strong> avatar{a.vaBriefing.avatares.length === 1 ? '' : 'es'} · <strong className="text-cyan-200">{a.vaBriefing.avatares.length + (a.vaBriefing.depoimentoText ? 1 : 0)}</strong> vídeo{(a.vaBriefing.avatares.length + (a.vaBriefing.depoimentoText ? 1 : 0)) === 1 ? '' : 's'}
                                     </span>
-                                    {a.vaBriefing.linkAdFilename ? (
+                                    {organicChannelLabels(tasks.find((x) => x.id === a.taskId)).length > 0 ? (
                                       <span
-                                        className="mono inline-flex max-w-[260px] items-center gap-1 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[10px] text-cyan-200"
-                                        title={a.vaBriefing.linkAdFilename}
+                                        className="mono inline-flex items-center gap-1 rounded-full border border-fuchsia-500/40 bg-fuchsia-500/10 px-2 py-0.5 text-[10px] text-fuchsia-200"
+                                        title="Canal orgânico — gera cada parte (hook+body) por texto, sem AD original"
                                       >
-                                        <span className="truncate">{a.vaBriefing.linkAdFilename}</span>
+                                        Motor TEXTO · {organicChannelLabels(tasks.find((x) => x.id === a.taskId)).join('/')}
                                       </span>
-                                    ) : null}
-                                    {!a.vaBriefing.linkAdFileId ? (
-                                      <span className="mono rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] text-amber-200">AD não detectado</span>
-                                    ) : null}
+                                    ) : (
+                                      <>
+                                        {a.vaBriefing.linkAdFilename ? (
+                                          <span
+                                            className="mono inline-flex max-w-[260px] items-center gap-1 rounded-full border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 text-[10px] text-cyan-200"
+                                            title={a.vaBriefing.linkAdFilename}
+                                          >
+                                            <span className="truncate">{a.vaBriefing.linkAdFilename}</span>
+                                          </span>
+                                        ) : null}
+                                        {!a.vaBriefing.linkAdFileId ? (
+                                          <span className="mono rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] text-amber-200">AD não detectado</span>
+                                        ) : null}
+                                      </>
+                                    )}
                                   </div>
                                   {/* Avatares */}
                                   <div className="mono text-[9px] uppercase tracking-widest text-text-muted">
@@ -6629,6 +6876,9 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                     const choiceKey = `${a.taskId}:${av.avaCode}`;
                                     const chosen = vaAvatarChoice[choiceKey] || null;
                                     const voiceChosen = vaVoiceChoice[choiceKey] || null;
+                                    // Motor texto (canal organico): voz opcional (cai na default do avatar).
+                                    const avaTextEngine = organicChannelLabels(tasks.find((x) => x.id === a.taskId)).length > 0;
+                                    const avaReady = !!chosen && (!!voiceChosen || avaTextEngine);
                                     const pickersLocked = ACTIVE_BATCH_PHASES.includes(batchStates[a.taskId]?.phase as BatchTaskState['phase']) || batchStates[a.taskId]?.phase === 'queued';
                                     return (
                                       <div key={av.avaCode} className="rounded-[12px] border border-white/8 bg-white/[0.02] p-2.5 transition-colors hover:border-cyan-400/30">
@@ -6642,7 +6892,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                           <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2">
                                               <span className="mono text-[11px] font-bold tracking-wide text-cyan-200">{av.avaCode}</span>
-                                              {chosen && voiceChosen ? (
+                                              {avaReady ? (
                                                 <span className="mono rounded-full border border-lime/40 bg-lime/10 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest text-lime">✓ pronto</span>
                                               ) : (
                                                 <span className="mono rounded-full border border-amber-400/40 bg-amber-400/10 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest text-amber-200">{!chosen ? 'falta avatar' : 'falta voz'}</span>
@@ -6671,7 +6921,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                             />
                                           </div>
                                           <div>
-                                            <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">Voz</div>
+                                            <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">Voz{avaTextEngine ? ' (opcional)' : ''}</div>
                                             <CompactVoiceSelector
                                               selected={voiceChosen}
                                               setSelected={(v) => setVaVoiceChoice((prev) => ({ ...prev, [choiceKey]: v }))}
@@ -6681,8 +6931,9 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                                       </div>
                                     );
                                   })}
-                                  {/* AD original nao detectado: lista candidatos (1-click) + input manual */}
-                                  {!a.vaBriefing.linkAdFileId ? (
+                                  {/* AD original nao detectado: lista candidatos (1-click) + input
+                                      manual. NAO aparece no motor texto (canal organico nao usa AD). */}
+                                  {!a.vaBriefing.linkAdFileId && organicChannelLabels(tasks.find((x) => x.id === a.taskId)).length === 0 ? (
                                     <div className="rounded-[10px] border border-yellow-500/40 bg-yellow-500/5 p-3">
                                       <div className="mono mb-2 text-[10px] uppercase tracking-widest text-yellow-200">
                                         Escolhe o AD original
