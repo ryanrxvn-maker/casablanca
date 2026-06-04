@@ -65,22 +65,34 @@ function classify(msg: string): 'quota' | 'runtime' | 'config' | 'network' {
   return 'runtime';
 }
 
-/** Extrai uma URL http de FileData / string / objeto com .url(). */
+/** Normaliza qualquer coisa (string, URL, objeto URL) numa URL http. */
+function asHttp(u: unknown): string | null {
+  if (!u) return null;
+  // objeto URL nativo (FileOutput.url() devolve isso) → .href
+  const s =
+    typeof u === 'string'
+      ? u
+      : typeof (u as { href?: unknown }).href === 'string'
+        ? (u as { href: string }).href
+        : String(u);
+  return s.startsWith('http') ? s : null;
+}
+
+/** Extrai uma URL http de FileData / string / FileOutput / objeto com .url(). */
 function extractUrl(v: unknown): string | null {
   if (!v) return null;
-  if (typeof v === 'string') return v.startsWith('http') ? v : null;
+  if (typeof v === 'string') return asHttp(v);
   if (typeof v === 'object') {
     const o = v as Record<string, unknown>;
     if (typeof (o as { url?: unknown }).url === 'function') {
       try {
-        const u = (o as { url: () => string }).url();
-        return typeof u === 'string' && u.startsWith('http') ? u : null;
+        return asHttp((o as { url: () => unknown }).url());
       } catch {
         return null;
       }
     }
-    if (typeof o.url === 'string' && o.url.startsWith('http')) return o.url;
-    if (typeof o.path === 'string' && o.path.startsWith('http')) return o.path;
+    if (o.url) return asHttp(o.url);
+    if (o.path) return asHttp(o.path);
   }
   return null;
 }
@@ -161,7 +173,9 @@ export async function separateStems(
     };
   }
 
-  const replicate = new Replicate({ auth: token });
+  // useFileOutput:false → o SDK devolve URLs como STRING (e não objetos
+  // FileOutput, cujo .url() retorna um objeto URL e quebrava o parsing).
+  const replicate = new Replicate({ auth: token, useFileOutput: false });
   const [owner, name] = DEMUCS_MODEL.split('/');
 
   // Resolve a version hash atual.
