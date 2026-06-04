@@ -379,6 +379,57 @@ export default function CopySrtPage() {
               <div className="mt-4 flex flex-wrap gap-3">
                 <ToolAction onClick={download}>Baixar .SRT</ToolAction>
               </div>
+
+              {/* Guia de importação — o SRT só vira legenda "de verdade"
+                  (que aceita Modelos/Animações) quando importado pelo menu
+                  de Legendas. Arrastar pra timeline vira texto solto e
+                  bloqueia os modelos. É o erro nº1 de quem usa SRT no CapCut. */}
+              <div className="mt-5 rounded-[14px] border border-amber-400/30 bg-amber-400/[0.04] p-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-[15px]" aria-hidden>🎬</span>
+                  <h4
+                    className="text-[12px] font-bold uppercase tracking-[0.16em] text-amber-200"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    Importar no CapCut pra aceitar modelos e animações
+                  </h4>
+                </div>
+                <p className="mt-2 text-[12.5px] leading-relaxed text-text-muted">
+                  O arquivo já está no formato certo. O segredo é o{' '}
+                  <span className="font-semibold text-white">caminho de importação</span> —
+                  pelo menu de Legendas, nunca arrastando pra timeline.
+                </p>
+                <ol className="mt-3 space-y-1.5 text-[12.5px] leading-relaxed text-white/85">
+                  <li>
+                    <span className="mono text-amber-300">1.</span> Abra o projeto com o vídeo na
+                    timeline — CapCut <span className="font-semibold">Desktop</span> ou{' '}
+                    <span className="font-semibold">Web</span> (capcut.com).
+                  </li>
+                  <li>
+                    <span className="mono text-amber-300">2.</span> Vá em{' '}
+                    <span className="font-semibold text-white">Texto → Legendas</span> e clique em{' '}
+                    <span className="font-semibold text-white">Importar arquivo</span>.
+                  </li>
+                  <li>
+                    <span className="mono text-amber-300">3.</span> Selecione o{' '}
+                    <span className="mono">.srt</span> que você baixou aqui.
+                  </li>
+                  <li>
+                    <span className="mono text-amber-300">4.</span> Vira faixa de legenda nativa —
+                    agora <span className="font-semibold text-white">Modelos</span>,{' '}
+                    <span className="font-semibold text-white">Estilos</span> e{' '}
+                    <span className="font-semibold text-white">Animações</span> aplicam, inclusive o{' '}
+                    <span className="font-semibold text-white">&quot;Aplicar a todas&quot;</span>.
+                  </li>
+                </ol>
+                <div className="mt-3 rounded-[10px] border border-red-500/30 bg-red-500/[0.06] px-3 py-2 text-[12px] leading-relaxed text-red-200">
+                  <span className="font-bold">Não</span> arraste o{' '}
+                  <span className="mono">.srt</span> pra timeline nem importe como mídia — assim ele
+                  vira texto solto e os modelos/animações ficam bloqueados. No{' '}
+                  <span className="font-semibold">celular</span> o CapCut não importa legenda; use
+                  Desktop ou Web.
+                </div>
+              </div>
             </ToolResultCard>
           </div>
         ) : null}
