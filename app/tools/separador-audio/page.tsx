@@ -33,14 +33,18 @@ import {
   MAX_AUDIO_MB,
   MAX_AUDIO_MINUTES,
   OUTPUT_META,
-  OUTPUT_ORDER,
-  DEFAULT_OUTPUTS,
   type OutputTarget,
   type RawStem,
 } from '@/lib/audio-separator';
 
 const HUE = 'rgba(167,139,250,0.45)';
 const UPLOAD_BUCKET = 'separador-uploads';
+
+/**
+ * A ferramenta SEMPRE separa as 3 faixas. O usuário escolhe no resultado o
+ * que tocar e o que baixar — um player + um botão de download por faixa.
+ */
+const OUTPUTS: OutputTarget[] = ['vocals', 'instrumental', 'sfx'];
 
 type Stage =
   | 'idle'
@@ -108,7 +112,6 @@ function mixBuffers(buffers: AudioBuffer[]): AudioBuffer {
 
 export default function SeparadorAudioPage() {
   const [file, setFile] = useState<File | null>(null);
-  const [outputs, setOutputs] = useState<OutputTarget[]>(DEFAULT_OUTPUTS);
   const [stage, setStage] = useState<Stage>('idle');
   const [stageMsg, setStageMsg] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -131,13 +134,6 @@ export default function SeparadorAudioPage() {
     if (stage !== 'idle' && stage !== 'done' && stage !== 'error') return;
     reset();
     setFile(f);
-  }
-
-  function toggleOutput(t: OutputTarget) {
-    if (isWorking) return;
-    setOutputs((prev) =>
-      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t],
-    );
   }
 
   async function handleCancel() {
@@ -167,7 +163,7 @@ export default function SeparadorAudioPage() {
   }
 
   async function handleSeparate() {
-    if (!file || outputs.length === 0) return;
+    if (!file) return;
 
     if (file.size > MAX_AUDIO_MB * 1024 * 1024) {
       setErrorMsg(`Arquivo grande demais. Máximo ${MAX_AUDIO_MB}MB.`);
@@ -207,12 +203,12 @@ export default function SeparadorAudioPage() {
         Record<RawStem, { url: string; size: number }>
       >;
 
-      // 4) Baixa só as trilhas brutas que os alvos escolhidos precisam.
+      // 4) Baixa as trilhas brutas necessárias pras 3 faixas.
       setStage('building');
-      setStageMsg('Montando as trilhas escolhidas…');
+      setStageMsg('Montando voz, trilha sonora e SFX…');
 
       const needed = new Set<RawStem>();
-      for (const t of outputs) OUTPUT_META[t].recipe.forEach((s) => needed.add(s));
+      for (const t of OUTPUTS) OUTPUT_META[t].recipe.forEach((s) => needed.add(s));
 
       const rawBlob: Partial<Record<RawStem, Blob>> = {};
       const rawBuf: Partial<Record<RawStem, AudioBuffer>> = {};
@@ -228,7 +224,7 @@ export default function SeparadorAudioPage() {
 
       // 5) Monta cada alvo escolhido.
       const built: Partial<Record<OutputTarget, TargetResult>> = {};
-      for (const t of outputs) {
+      for (const t of OUTPUTS) {
         const recipe = OUTPUT_META[t].recipe.filter((s) => rawBlob[s]);
         if (recipe.length === 0) continue;
 
@@ -260,7 +256,7 @@ export default function SeparadorAudioPage() {
       }
 
       if (Object.keys(built).length === 0) {
-        throw new Error('Nenhuma das trilhas escolhidas pôde ser montada.');
+        throw new Error('Nenhuma faixa pôde ser montada.');
       }
 
       setResults(built);
@@ -283,7 +279,7 @@ export default function SeparadorAudioPage() {
 
   async function downloadAll() {
     if (!file) return;
-    for (const t of OUTPUT_ORDER) {
+    for (const t of OUTPUTS) {
       const r = results[t];
       if (!r) continue;
       await downloadBlob(r.blob, `${baseName(file.name)}_${t}.${r.ext}`);
@@ -302,7 +298,7 @@ export default function SeparadorAudioPage() {
     <ToolShell
       title="Separador de Áudio"
       eyebrow="ÁUDIO · IA"
-      description={`Separa voz, trilha sonora e SFX em trilhas independentes — escolha exatamente o que extrair. Qualidade Demucs v4. Até ${MAX_AUDIO_MB}MB ou ${MAX_AUDIO_MINUTES} min.`}
+      description={`Separa voz, trilha sonora e SFX em 3 faixas independentes. Ouça o preview e baixe cada uma. Qualidade Demucs v4. Até ${MAX_AUDIO_MB}MB ou ${MAX_AUDIO_MINUTES} min.`}
       hue={HUE}
       icon={<IconAudioSplit size={56} />}
     >
@@ -342,72 +338,17 @@ export default function SeparadorAudioPage() {
 
         <ToolStep
           n={2}
-          icon={<IconStepMic size={18} />}
-          title="O que extrair"
-          hint="Escolha uma ou mais trilhas — sem custo extra por escolher mais."
-          hue={HUE}
-        >
-          <div className="flex flex-wrap gap-2.5">
-            {OUTPUT_ORDER.map((t) => {
-              const meta = OUTPUT_META[t];
-              const on = outputs.includes(t);
-              return (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => toggleOutput(t)}
-                  disabled={isWorking}
-                  title={meta.description}
-                  className="group flex min-w-[150px] flex-1 flex-col items-start gap-0.5 rounded-[12px] border px-3.5 py-2.5 text-left transition-all disabled:opacity-50"
-                  style={{
-                    borderColor: on ? meta.hue.replace('0.5', '0.9') : 'rgba(255,255,255,0.10)',
-                    background: on
-                      ? `linear-gradient(180deg, ${meta.hue.replace('0.5', '0.14')}, rgba(0,0,0,0.2))`
-                      : 'rgba(255,255,255,0.02)',
-                    boxShadow: on ? `0 0 22px -12px ${meta.hue}` : 'none',
-                  }}
-                >
-                  <span className="flex w-full items-center justify-between gap-2">
-                    <span
-                      className="text-[13.5px] font-bold text-white"
-                      style={{ fontFamily: 'var(--font-tech)' }}
-                    >
-                      {meta.label}
-                    </span>
-                    <span
-                      className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[5px] border text-[10px]"
-                      style={{
-                        borderColor: on ? meta.hue.replace('0.5', '1') : 'rgba(255,255,255,0.2)',
-                        background: on ? meta.hue.replace('0.5', '1') : 'transparent',
-                        color: on ? '#0a0a0a' : 'transparent',
-                      }}
-                    >
-                      ✓
-                    </span>
-                  </span>
-                  <span className="text-[11px] leading-snug text-text-muted">
-                    {meta.description}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </ToolStep>
-
-        <ToolStep
-          n={3}
           icon={<IconStepPlay size={18} />}
           title={isWorking ? 'Separando…' : 'Separar'}
+          hint="Separa as 3 faixas de uma vez. No resultado você ouve e baixa cada uma."
           hue={HUE}
         >
           <div className="flex flex-wrap gap-3">
             {isWorking ? (
               <CancelButton onClick={handleCancel} label="Cancelar" />
             ) : (
-              <ToolAction onClick={handleSeparate} disabled={!file || outputs.length === 0}>
-                {outputs.length === 1
-                  ? `Extrair ${OUTPUT_META[outputs[0]].label}`
-                  : `Separar ${outputs.length} trilhas`}
+              <ToolAction onClick={handleSeparate} disabled={!file}>
+                Separar voz, trilha sonora e SFX
               </ToolAction>
             )}
             {stage === 'done' && doneCount > 1 ? (
@@ -455,7 +396,7 @@ export default function SeparadorAudioPage() {
         {/* Resultados */}
         {stage === 'done' && doneCount > 0 ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {OUTPUT_ORDER.map((t) => {
+            {OUTPUTS.map((t) => {
               const r = results[t];
               if (!r) return null;
               const meta = OUTPUT_META[t];
