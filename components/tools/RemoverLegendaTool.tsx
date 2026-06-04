@@ -616,13 +616,22 @@ function BeforeAfter({ beforeUrl, afterUrl }: { beforeUrl: string; afterUrl: str
   const bRef = useRef<HTMLVideoElement | null>(null);
   const dragging = useRef(false);
 
-  // mantém o LIMPO (proxy) seguindo o tempo do ANTES (local, suave) — sync leve
+  // sync dos dois vídeos: ANTES (local, suave) é o relógio-mestre; o LIMPO
+  // (proxy, streaming) acompanha ajustando o playbackRate — assim NÃO fica
+  // dando seek (que trava/buffer) e os frames ficam alinhados. Só dá seek
+  // duro quando a defasagem é grande (alinhamento inicial / pós-loop).
   useEffect(() => {
     let raf = 0;
     const loop = () => {
       const a = aRef.current, b = bRef.current;
-      if (a && b && !b.seeking && b.readyState >= 2 && Math.abs(b.currentTime - a.currentTime) > 0.3) {
-        try { b.currentTime = a.currentTime; } catch { /* */ }
+      if (a && b) {
+        if (a.paused) a.play().catch(() => {});
+        if (b.readyState >= 2 && b.paused) b.play().catch(() => {});
+        if (b.readyState >= 2 && !b.seeking) {
+          const d = b.currentTime - a.currentTime; // >0: LIMPO adiantado
+          if (Math.abs(d) > 1.2) { try { b.currentTime = a.currentTime; } catch { /* */ } b.playbackRate = 1; }
+          else { b.playbackRate = d > 0.06 ? 0.9 : d < -0.06 ? 1.1 : 1; }
+        }
       }
       raf = requestAnimationFrame(loop);
     };
