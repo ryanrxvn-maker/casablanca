@@ -1,220 +1,235 @@
 /**
- * SERVER-ONLY. Separação de áudio via @gradio/client em Space HF.
+ * SERVER-ONLY. Separação de áudio via Replicate Demucs v4 (Meta).
  *
- * Modelo: Demucs v4 (hybrid transformer) — gold standard pra music source
- * separation. Suporta 4 stems (vocals, drums, bass, other) que agrupamos em
- * 3 entregas mais legíveis pro usuário:
- *   - vocals       → voz isolada
- *   - instrumental → drums + bass + other mixados de volta
- *   - sfx          → "other" puro (efeitos, foley, ambiente)
+ * Por que Replicate e NÃO HuggingFace Space:
+ *   A Space gratuita gradio/audio-separation-mdx está FORA DO AR ("Space
+ *   metadata could not be loaded"). Spaces grátis caem direto. O Replicate
+ *   é pago mas tem confiabilidade industrial — é o mesmo motor que o
+ *   /api/voice-isolate-pro já usa em produção nesta conta.
  *
- * A Space é configurável via env `AUDIO_SEPARATOR_SPACE`. Default usa uma
- * Space pública conhecida de Demucs — se cair, troque pelo env sem deploy.
+ * Modelo: Demucs htdemucs (hybrid transformer) — gold standard de music
+ * source separation. Devolve 4 trilhas: vocals, drums, bass, other.
+ * Os "alvos" que o usuário vê (voz / trilha / SFX) são montados no client
+ * a partir dessas 4 (ver lib/audio-separator.ts).
  *
- * Auth: usa o mesmo pool de tokens HF do LTX-Video (ZeroGPU é gratuito
- * pra contas autenticadas).
+ * Input: uma URL pública do áudio (o client subiu direto pro Supabase). O
+ * Replicate baixa dessa URL — nada de arquivo grande passando pela Vercel.
+ *
+ * Output: { vocals, drums, bass, other } com URLs replicate.delivery.
  */
 
-import { Client, handle_file } from '@gradio/client';
-import {
-  jitter,
-  markOk,
-  markQuota,
-  markRuntime,
-  markUsed,
-  nextToken,
-  parseRetrySeconds,
-  poolSize,
-} from './ltx-token-pool';
-import type { SeparatorStem } from './audio-separator';
+import Replicate from 'replicate';
+import type { RawStem } from './audio-separator';
 
-const DEFAULT_SPACE = process.env.AUDIO_SEPARATOR_SPACE || 'gradio/audio-separation-mdx';
-const DEFAULT_FN = process.env.AUDIO_SEPARATOR_FN || '/predict';
+// Modelo Demucs no Replicate. Mesmo default e env do voice-isolate-pro pra
+// compartilhar a configuração que já funciona nesta conta. cjwbw/demucs é o
+// mais estabelecido (~30k+ runs).
+const DEMUCS_MODEL = (process.env.REPLICATE_DEMUCS_MODEL ||
+  'cjwbw/demucs') as `${string}/${string}`;
 
 export type SeparateInput = {
-  audio: Uint8Array;
-  /** Nome original do arquivo (pra MIME inference) */
-  filename: string;
+  /** URL pública do áudio (Supabase) que o Replicate vai baixar. */
+  audioUrl: string;
 };
 
 export type SeparateResult =
-  | {
-      ok: true;
-      stems: Record<SeparatorStem, { url: string }>;
-    }
+  | { ok: true; stems: Record<RawStem, string> }
   | {
       ok: false;
       error: string;
       kind: 'quota' | 'runtime' | 'config' | 'network';
-      retrySec?: number;
     };
 
 function errText(e: unknown): string {
   if (e instanceof Error) return e.message;
   if (typeof e === 'string') return e;
-  if (e && typeof e === 'object') {
-    const o = e as Record<string, unknown>;
-    const parts = [o.title, o.message, o.error, o.detail]
-      .filter((x) => typeof x === 'string' && x)
-      .join(' — ');
-    if (parts) return parts;
-    try {
-      return JSON.stringify(o).slice(0, 400);
-    } catch {
-      return '[erro não serializável]';
-    }
+  try {
+    return JSON.stringify(e).slice(0, 400);
+  } catch {
+    return String(e);
   }
-  return String(e);
 }
 
 function classify(msg: string): 'quota' | 'runtime' | 'config' | 'network' {
   const m = msg.toLowerCase();
-  if (m.includes('quota') || m.includes('exceeded') || m.includes('rate limit'))
+  if (
+    m.includes('quota') ||
+    m.includes('exceeded') ||
+    m.includes('rate limit') ||
+    m.includes('insufficient credit') ||
+    m.includes('billing')
+  )
     return 'quota';
-  if (m.includes('runtimeerror') || m.includes('worker error')) return 'runtime';
   if (m.includes('fetch') || m.includes('network') || m.includes('timeout'))
     return 'network';
   return 'runtime';
 }
 
-/**
- * Extrai URLs dos stems da resposta. O formato exato varia por Space —
- * tentamos os mais comuns:
- *   - Array de FileData {url, path}: [vocals, instrumental, sfx]
- *   - Objeto {vocals: FileData, instrumental: FileData, sfx: FileData}
- *
- * Se a Space retornar apenas vocals + instrumental (sem SFX), reusamos
- * o `instrumental` como `sfx` (não ideal — usuário troca de Space pra
- * uma com 4 stems se quiser SFX puro).
- */
-function pickStems(
-  data: unknown,
-  spaceUrl: string,
-): Partial<Record<SeparatorStem, string>> | null {
-  const toUrl = (v: unknown): string | null => {
-    if (!v) return null;
-    if (typeof v === 'string') return v.startsWith('http') ? v : null;
-    if (typeof v === 'object') {
-      const o = v as { url?: string; path?: string };
-      if (o.url) return o.url;
-      if (o.path) return `${spaceUrl}/gradio_api/file=${o.path}`;
+/** Extrai uma URL http de FileData / string / objeto com .url(). */
+function extractUrl(v: unknown): string | null {
+  if (!v) return null;
+  if (typeof v === 'string') return v.startsWith('http') ? v : null;
+  if (typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    if (typeof (o as { url?: unknown }).url === 'function') {
+      try {
+        const u = (o as { url: () => string }).url();
+        return typeof u === 'string' && u.startsWith('http') ? u : null;
+      } catch {
+        return null;
+      }
     }
-    return null;
-  };
-
-  if (Array.isArray(data)) {
-    const out: Partial<Record<SeparatorStem, string>> = {};
-    if (data[0]) out.vocals = toUrl(data[0]) || undefined;
-    if (data[1]) out.instrumental = toUrl(data[1]) || undefined;
-    if (data[2]) out.sfx = toUrl(data[2]) || undefined;
-    return Object.keys(out).length > 0 ? out : null;
-  }
-  if (data && typeof data === 'object') {
-    const o = data as Record<string, unknown>;
-    const out: Partial<Record<SeparatorStem, string>> = {};
-    if (o.vocals) out.vocals = toUrl(o.vocals) || undefined;
-    if (o.instrumental || o.accompaniment)
-      out.instrumental = toUrl(o.instrumental || o.accompaniment) || undefined;
-    if (o.sfx || o.other) out.sfx = toUrl(o.sfx || o.other) || undefined;
-    return Object.keys(out).length > 0 ? out : null;
+    if (typeof o.url === 'string' && o.url.startsWith('http')) return o.url;
+    if (typeof o.path === 'string' && o.path.startsWith('http')) return o.path;
   }
   return null;
 }
 
 /**
- * Roda uma separação. Percorre o pool de tokens, tenta em cada conta
- * livre; quota → marca cooldown e pula; runtime → marca e continua.
+ * Casa o output do Demucs nas 4 trilhas. O formato varia por fork do modelo:
+ *   - dict  { vocals, drums, bass, other }            (ryan5453, lucataco)
+ *   - array [drums, bass, other, vocals]              (cjwbw — ordem fixa)
+ *   - array de FileData com nome do stem no path/url
  */
-export async function separateAudio(input: SeparateInput): Promise<SeparateResult> {
-  const size = poolSize();
-  if (size === 0) {
+function pickStems(data: unknown): Partial<Record<RawStem, string>> {
+  const out: Partial<Record<RawStem, string>> = {};
+
+  // 1) Dict nomeado — o caso mais limpo.
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    const o = data as Record<string, unknown>;
+    for (const stem of ['vocals', 'drums', 'bass', 'other'] as RawStem[]) {
+      const u = extractUrl(o[stem]);
+      if (u) out[stem] = u;
+    }
+    // Aliases comuns: "accompaniment"/"no_vocals" ~ other quando 2-stem.
+    if (!out.other) {
+      const alt = extractUrl(o.accompaniment ?? o.no_vocals ?? o.instrumental);
+      if (alt) out.other = alt;
+    }
+    if (Object.keys(out).length) return out;
+  }
+
+  // 2) Array — tenta casar pelo nome no URL primeiro; senão cai na ordem
+  //    convencional do cjwbw/demucs: [drums, bass, other, vocals].
+  if (Array.isArray(data)) {
+    const urls = data.map(extractUrl).filter(Boolean) as string[];
+    let matchedByName = false;
+    for (const u of urls) {
+      const low = u.toLowerCase();
+      if (/vocal/.test(low)) {
+        out.vocals = u;
+        matchedByName = true;
+      } else if (/drum/.test(low)) {
+        out.drums = u;
+        matchedByName = true;
+      } else if (/bass/.test(low)) {
+        out.bass = u;
+        matchedByName = true;
+      } else if (/other|no_?vocal|accompan|instrument/.test(low)) {
+        out.other = u;
+        matchedByName = true;
+      }
+    }
+    if (!matchedByName && urls.length >= 4) {
+      // ordem fixa cjwbw: drums, bass, other, vocals
+      out.drums = urls[0];
+      out.bass = urls[1];
+      out.other = urls[2];
+      out.vocals = urls[3];
+    }
+    return out;
+  }
+
+  // 3) String única — não dá pra mapear 4 trilhas, devolve vazio.
+  return out;
+}
+
+/**
+ * Roda a separação. Resolve a version hash atual do modelo (Replicate exige
+ * version explícita pra modelos user-contributed) e chama o Demucs.
+ */
+export async function separateStems(
+  input: SeparateInput,
+): Promise<SeparateResult> {
+  const token = process.env.REPLICATE_API_TOKEN;
+  if (!token) {
     return {
       ok: false,
       kind: 'config',
       error:
-        'Nenhum token HF configurado. Configure HF_TOKENS pra usar o Separador de Áudio.',
+        'REPLICATE_API_TOKEN não configurada no servidor. Configure pra usar o Separador.',
     };
   }
 
-  const space = DEFAULT_SPACE;
-  const fn = DEFAULT_FN;
-  const spaceUrl = `https://${space.replace('/', '-')}.hf.space`;
+  const replicate = new Replicate({ auth: token });
+  const [owner, name] = DEMUCS_MODEL.split('/');
 
-  let lastErr = 'falha desconhecida';
-  let lastKind: 'quota' | 'runtime' | 'config' | 'network' = 'config';
-
-  for (let attempt = 0; attempt < size; attempt++) {
-    const pick = nextToken();
-    if (pick.token === null) {
-      const secs = Math.ceil(pick.soonestMs / 1000);
-      return {
-        ok: false,
-        kind: 'quota',
-        retrySec: secs,
-        error:
-          `Todas as ${size} contas estão sem quota HF agora. ` +
-          `Libera em ~${Math.ceil(secs / 60)} min.`,
-      };
-    }
-
-    const { token, state } = pick;
-    markUsed(state);
-    if (attempt > 0) await jitter();
-
-    let app: Awaited<ReturnType<typeof Client.connect>>;
-    try {
-      app = await Client.connect(space, { token: token as `hf_${string}` });
-    } catch (e) {
-      lastErr = errText(e);
-      lastKind = classify(lastErr);
-      if (lastKind === 'quota') markQuota(state, parseRetrySeconds(lastErr));
-      else markRuntime(state);
-      continue;
-    }
-
-    // Empacota o áudio como FileData via handle_file
-    const mime = input.filename.toLowerCase().endsWith('.wav')
-      ? 'audio/wav'
-      : input.filename.toLowerCase().endsWith('.m4a')
-        ? 'audio/mp4'
-        : input.filename.toLowerCase().endsWith('.ogg')
-          ? 'audio/ogg'
-          : 'audio/mpeg';
-    const audioBlob = new Blob([input.audio as BlobPart], { type: mime });
-    const audioFile = await handle_file(audioBlob);
-
-    try {
-      const r = (await app.predict(fn, [audioFile])) as { data?: unknown };
-      const stems = pickStems(r?.data, spaceUrl);
-      if (!stems || Object.keys(stems).length === 0) {
-        lastErr = 'Space não retornou stems válidos.';
-        lastKind = 'runtime';
-        markRuntime(state);
-        continue;
-      }
-      // Garante 3 stems — fallback do sfx pro instrumental se Space só retornou 2
-      const safeStems: Record<SeparatorStem, { url: string }> = {
-        vocals: { url: stems.vocals || '' },
-        instrumental: { url: stems.instrumental || '' },
-        sfx: { url: stems.sfx || stems.instrumental || '' },
-      };
-      // Valida que vocals e instrumental existem (mínimo aceitável)
-      if (!safeStems.vocals.url || !safeStems.instrumental.url) {
-        lastErr = 'Space não retornou voz + instrumental.';
-        lastKind = 'runtime';
-        markRuntime(state);
-        continue;
-      }
-      markOk(state);
-      return { ok: true, stems: safeStems };
-    } catch (e) {
-      lastErr = errText(e);
-      lastKind = classify(lastErr);
-      if (lastKind === 'quota') markQuota(state, parseRetrySeconds(lastErr));
-      else markRuntime(state);
-      continue;
-    }
+  // Resolve a version hash atual.
+  let versionId: string | null = null;
+  try {
+    const info = await replicate.models.get(owner, name);
+    versionId =
+      (info as { latest_version?: { id?: string } })?.latest_version?.id ||
+      null;
+  } catch (e) {
+    const msg = errText(e);
+    return {
+      ok: false,
+      kind: classify(msg),
+      error: `Modelo ${DEMUCS_MODEL} não encontrado no Replicate: ${msg}`,
+    };
+  }
+  if (!versionId) {
+    return {
+      ok: false,
+      kind: 'config',
+      error: `${DEMUCS_MODEL} sem versão publicada no Replicate.`,
+    };
   }
 
-  return { ok: false, error: lastErr, kind: lastKind };
+  try {
+    const versioned =
+      `${DEMUCS_MODEL}:${versionId}` as `${string}/${string}:${string}`;
+    const output = (await replicate.run(versioned, {
+      input: {
+        // nomes de campo variam por fork — manda os mais comuns
+        audio: input.audioUrl,
+        audio_file: input.audioUrl,
+        // separação COMPLETA (4 trilhas) — sem isolar um stem só
+        model: 'htdemucs',
+        model_name: 'htdemucs',
+        stem: 'none',
+        output_format: 'mp3',
+        mp3: true,
+        wav: false,
+        mp3_bitrate: 320,
+        shifts: 1,
+        overlap: 0.25,
+        clip_mode: 'rescale',
+      },
+    })) as unknown;
+
+    const picked = pickStems(output);
+    // Mínimo aceitável: voz + pelo menos uma trilha instrumental.
+    if (!picked.vocals || (!picked.other && !picked.drums && !picked.bass)) {
+      return {
+        ok: false,
+        kind: 'runtime',
+        error: `Demucs rodou mas não consegui mapear as trilhas. Saída: ${JSON.stringify(
+          output,
+        ).slice(0, 500)}`,
+      };
+    }
+
+    const stems: Record<RawStem, string> = {
+      vocals: picked.vocals,
+      drums: picked.drums || '',
+      bass: picked.bass || '',
+      other: picked.other || '',
+    };
+    return { ok: true, stems };
+  } catch (e) {
+    const msg = errText(e);
+    return { ok: false, kind: classify(msg), error: `Demucs falhou: ${msg}` };
+  }
 }

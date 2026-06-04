@@ -1,17 +1,19 @@
 'use client';
 
 /**
- * Separador de Áudio — separa voz, instrumental e SFX de qualquer áudio.
+ * Separador de Áudio — separa voz, trilha sonora e SFX de qualquer áudio/vídeo.
  *
- * Pipeline:
- *  1. Usuário sobe arquivo (até 200MB / 25min)
- *  2. POST /api/separador-audio (multipart)
- *  3. API roda Demucs/MDX-Net via HuggingFace Space
- *  4. Recebe 3 URLs (vocals/instrumental/sfx)
- *  5. Baixa cada stem como blob local — usuário toca + baixa
+ * Pipeline (sem o HTTP 413 antigo — o arquivo NUNCA passa pela Vercel):
+ *  1. Usuário sobe arquivo (áudio ou vídeo) e ESCOLHE o que quer extrair.
+ *  2. Client decodifica a faixa de áudio (Web Audio, lida até com MP4) e a
+ *     re-codifica em WAV.
+ *  3. Sobe o WAV DIRETO pro Supabase via signed URL (browser → Supabase).
+ *  4. POST /api/separador-audio { audioUrl } → Demucs (Replicate) separa em
+ *     4 trilhas brutas (vocals/drums/bass/other), re-hospedadas no Supabase.
+ *  5. Client monta os ALVOS escolhidos a partir das 4 trilhas (uma trilha =
+ *     download direto; combinação como "trilha sonora" = mix via Web Audio).
  *
- * UI: 3 cards de stem com player + size + botão baixar. Estados claros:
- * upload → processando (com mensagens de stage) → pronto.
+ * Escolher mais ou menos alvos NÃO custa GPU extra — a separação é uma só.
  */
 
 import { useState } from 'react';
@@ -24,41 +26,102 @@ import {
 } from '@/components/ToolIcons';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import { CancelButton } from '@/components/CancelButton';
-import { downloadBlob } from '@/lib/audio-engine';
+import { createClient } from '@/lib/supabase/client';
+import { decodeAudio, decodeAudioRobust, encodeWAV, downloadBlob } from '@/lib/audio-engine';
 import { formatBytes } from '@/lib/utils';
 import {
   MAX_AUDIO_MB,
   MAX_AUDIO_MINUTES,
-  STEM_META,
-  STEM_ORDER,
-  type SeparatorStem,
+  OUTPUT_META,
+  OUTPUT_ORDER,
+  DEFAULT_OUTPUTS,
+  type OutputTarget,
+  type RawStem,
 } from '@/lib/audio-separator';
 
 const HUE = 'rgba(167,139,250,0.45)';
+const UPLOAD_BUCKET = 'separador-uploads';
 
-type Stage = 'idle' | 'uploading' | 'processing' | 'downloading' | 'done' | 'error';
+type Stage =
+  | 'idle'
+  | 'preparing'
+  | 'uploading'
+  | 'processing'
+  | 'building'
+  | 'done'
+  | 'error';
 
-type StemResult = {
+type TargetResult = {
   url: string;
   blob: Blob;
   size: number;
+  ext: 'mp3' | 'wav';
 };
 
 function baseName(name: string) {
   return name.replace(/\.[^.]+$/, '').replace(/\s+/g, '_');
 }
 
+function errMsg(e: unknown): string {
+  if (e == null) return 'Erro desconhecido';
+  if (typeof e === 'string') return e;
+  if (e instanceof Error) return e.message || e.name || 'Erro';
+  if (typeof e === 'object') {
+    const o = e as Record<string, unknown>;
+    if (typeof o.error === 'string' && o.error) return o.error;
+    if (typeof o.message === 'string' && o.message) return o.message;
+    try {
+      const s = JSON.stringify(e);
+      if (s && s !== '{}') return s.slice(0, 300);
+    } catch {
+      /* ignore */
+    }
+  }
+  return String(e);
+}
+
+/** Soma N AudioBuffers (mesmo sample rate) num só, com clamp pra não clipar. */
+function mixBuffers(buffers: AudioBuffer[]): AudioBuffer {
+  const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
+  const ctx: AudioContext = new AC();
+  const length = Math.max(...buffers.map((b) => b.length));
+  const channels = Math.min(
+    2,
+    Math.max(...buffers.map((b) => b.numberOfChannels)),
+  );
+  const sr = buffers[0].sampleRate;
+  const out = ctx.createBuffer(channels, length, sr);
+  for (let c = 0; c < channels; c++) {
+    const od = out.getChannelData(c);
+    for (const b of buffers) {
+      const src = b.getChannelData(Math.min(c, b.numberOfChannels - 1));
+      for (let i = 0; i < src.length; i++) od[i] += src[i];
+    }
+    for (let i = 0; i < od.length; i++) {
+      if (od[i] > 1) od[i] = 1;
+      else if (od[i] < -1) od[i] = -1;
+    }
+  }
+  ctx.close();
+  return out;
+}
+
 export default function SeparadorAudioPage() {
   const [file, setFile] = useState<File | null>(null);
+  const [outputs, setOutputs] = useState<OutputTarget[]>(DEFAULT_OUTPUTS);
   const [stage, setStage] = useState<Stage>('idle');
   const [stageMsg, setStageMsg] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [stems, setStems] = useState<Partial<Record<SeparatorStem, StemResult>>>({});
+  const [results, setResults] = useState<
+    Partial<Record<OutputTarget, TargetResult>>
+  >({});
   const [abortCtl, setAbortCtl] = useState<AbortController | null>(null);
 
   function reset() {
-    Object.values(stems).forEach((s) => s && URL.revokeObjectURL(s.url));
-    setStems({});
+    setResults((prev) => {
+      Object.values(prev).forEach((r) => r && URL.revokeObjectURL(r.url));
+      return {};
+    });
     setStage('idle');
     setStageMsg('');
     setErrorMsg(null);
@@ -70,16 +133,42 @@ export default function SeparadorAudioPage() {
     setFile(f);
   }
 
+  function toggleOutput(t: OutputTarget) {
+    if (isWorking) return;
+    setOutputs((prev) =>
+      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t],
+    );
+  }
+
   async function handleCancel() {
     if (abortCtl) abortCtl.abort();
     setStage('error');
     setErrorMsg('Cancelado.');
   }
 
-  async function handleSeparate() {
-    if (!file) return;
+  /** Sobe um blob DIRETO pro Supabase via signed URL e devolve a URL pública. */
+  async function uploadPublic(blob: Blob, ext: string): Promise<string> {
+    const r = await fetch('/api/separador-audio/upload-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ext }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || `Falha ao preparar upload (HTTP ${r.status})`);
+    if (!d.path || !d.token) throw new Error('Upload não retornou credenciais.');
 
-    // Validação de tamanho
+    const supabase = createClient();
+    const { error } = await supabase.storage
+      .from(UPLOAD_BUCKET)
+      .uploadToSignedUrl(d.path, d.token, blob);
+    if (error) throw new Error('Falha no upload pro storage: ' + errMsg(error));
+    if (!d.publicUrl) throw new Error('Upload não retornou URL pública.');
+    return d.publicUrl as string;
+  }
+
+  async function handleSeparate() {
+    if (!file || outputs.length === 0) return;
+
     if (file.size > MAX_AUDIO_MB * 1024 * 1024) {
       setErrorMsg(`Arquivo grande demais. Máximo ${MAX_AUDIO_MB}MB.`);
       setStage('error');
@@ -87,101 +176,133 @@ export default function SeparadorAudioPage() {
     }
 
     reset();
-    setStage('uploading');
-    setStageMsg('Enviando áudio para o servidor…');
-
     const ctl = new AbortController();
     setAbortCtl(ctl);
 
     try {
-      const form = new FormData();
-      form.append('audio', file);
+      // 1) Extrai a faixa de áudio (mesmo de vídeo MP4) e re-codifica em WAV.
+      setStage('preparing');
+      setStageMsg('Preparando o áudio…');
+      const srcBuffer = await decodeAudioRobust(file, (s) => setStageMsg(s));
+      const wav = encodeWAV(srcBuffer);
 
+      // 2) Sobe direto pro Supabase (sem tocar na Vercel → sem HTTP 413).
+      setStage('uploading');
+      setStageMsg('Enviando o áudio…');
+      const audioUrl = await uploadPublic(wav, 'wav');
+
+      // 3) Separa via Demucs (Replicate).
+      setStage('processing');
+      setStageMsg('IA separando as trilhas (pode levar 1-3 min)…');
       const res = await fetch('/api/separador-audio', {
         method: 'POST',
-        body: form,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audioUrl, filename: file.name }),
         signal: ctl.signal,
       });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
 
-      if (!res.ok) {
-        let msg = `HTTP ${res.status}`;
-        try {
-          const j = await res.json();
-          msg = j.error || msg;
-        } catch {
-          /* sem JSON */
-        }
-        throw new Error(msg);
-      }
+      const rawStems = json.stems as Partial<
+        Record<RawStem, { url: string; size: number }>
+      >;
 
-      setStage('processing');
-      setStageMsg('IA separando os stems (pode levar 1-3 min)…');
+      // 4) Baixa só as trilhas brutas que os alvos escolhidos precisam.
+      setStage('building');
+      setStageMsg('Montando as trilhas escolhidas…');
 
-      const json = (await res.json()) as {
-        stems: Record<SeparatorStem, { url: string }>;
-      };
+      const needed = new Set<RawStem>();
+      for (const t of outputs) OUTPUT_META[t].recipe.forEach((s) => needed.add(s));
 
-      setStage('downloading');
-      setStageMsg('Baixando os 3 stems…');
-
-      const downloadedStems: Partial<Record<SeparatorStem, StemResult>> = {};
+      const rawBlob: Partial<Record<RawStem, Blob>> = {};
+      const rawBuf: Partial<Record<RawStem, AudioBuffer>> = {};
       await Promise.all(
-        STEM_ORDER.map(async (stem) => {
-          const entry = json.stems[stem];
+        Array.from(needed).map(async (stem) => {
+          const entry = rawStems?.[stem];
           if (!entry?.url) return;
           const r = await fetch(entry.url, { signal: ctl.signal });
-          if (!r.ok) {
-            throw new Error(`Falha ao baixar ${stem}: HTTP ${r.status}`);
-          }
-          const blob = await r.blob();
-          const url = URL.createObjectURL(blob);
-          downloadedStems[stem] = { url, blob, size: blob.size };
+          if (!r.ok) throw new Error(`Falha ao baixar trilha ${stem} (HTTP ${r.status})`);
+          rawBlob[stem] = await r.blob();
         }),
       );
 
-      setStems(downloadedStems);
+      // 5) Monta cada alvo escolhido.
+      const built: Partial<Record<OutputTarget, TargetResult>> = {};
+      for (const t of outputs) {
+        const recipe = OUTPUT_META[t].recipe.filter((s) => rawBlob[s]);
+        if (recipe.length === 0) continue;
+
+        if (recipe.length === 1) {
+          // Trilha única → usa o MP3 do Demucs direto (menor, sem re-encode).
+          const blob = rawBlob[recipe[0]]!;
+          built[t] = {
+            blob,
+            url: URL.createObjectURL(blob),
+            size: blob.size,
+            ext: 'mp3',
+          };
+        } else {
+          // Combinação (ex: trilha sonora = drums+bass+other) → mix no browser.
+          const bufs: AudioBuffer[] = [];
+          for (const s of recipe) {
+            if (!rawBuf[s]) rawBuf[s] = await decodeAudio(rawBlob[s]!);
+            bufs.push(rawBuf[s]!);
+          }
+          const mixed = mixBuffers(bufs);
+          const blob = encodeWAV(mixed);
+          built[t] = {
+            blob,
+            url: URL.createObjectURL(blob),
+            size: blob.size,
+            ext: 'wav',
+          };
+        }
+      }
+
+      if (Object.keys(built).length === 0) {
+        throw new Error('Nenhuma das trilhas escolhidas pôde ser montada.');
+      }
+
+      setResults(built);
       setStage('done');
       setStageMsg('Pronto.');
     } catch (e) {
-      if ((e as { name?: string })?.name === 'AbortError') {
-        // já tratado em handleCancel
-        return;
-      }
-      const msg = e instanceof Error ? e.message : String(e);
-      setErrorMsg(msg);
+      if ((e as { name?: string })?.name === 'AbortError') return;
+      setErrorMsg(errMsg(e));
       setStage('error');
     } finally {
       setAbortCtl(null);
     }
   }
 
-  async function downloadStem(stem: SeparatorStem) {
-    const r = stems[stem];
+  async function downloadTarget(t: OutputTarget) {
+    const r = results[t];
     if (!r || !file) return;
-    const ext = r.blob.type.includes('wav') ? 'wav' : 'mp3';
-    await downloadBlob(r.blob, `${baseName(file.name)}_${stem}.${ext}`);
+    await downloadBlob(r.blob, `${baseName(file.name)}_${t}.${r.ext}`);
   }
 
   async function downloadAll() {
     if (!file) return;
-    // Cada um separado — não tem ffmpeg disponível aqui pra zipar.
-    // Buildzip já existe, mas dependência mais leve: baixar 1 por 1.
-    for (const stem of STEM_ORDER) {
-      const r = stems[stem];
+    for (const t of OUTPUT_ORDER) {
+      const r = results[t];
       if (!r) continue;
-      const ext = r.blob.type.includes('wav') ? 'wav' : 'mp3';
-      await downloadBlob(r.blob, `${baseName(file.name)}_${stem}.${ext}`);
+      await downloadBlob(r.blob, `${baseName(file.name)}_${t}.${r.ext}`);
     }
   }
 
   const isWorking =
-    stage === 'uploading' || stage === 'processing' || stage === 'downloading';
+    stage === 'preparing' ||
+    stage === 'uploading' ||
+    stage === 'processing' ||
+    stage === 'building';
+
+  const doneCount = Object.keys(results).length;
 
   return (
     <ToolShell
       title="Separador de Áudio"
       eyebrow="ÁUDIO · IA"
-      description={`Separa voz, instrumental e SFX em 3 trilhas independentes. Qualidade absurda. Até ${MAX_AUDIO_MB}MB ou ${MAX_AUDIO_MINUTES} min.`}
+      description={`Separa voz, trilha sonora e SFX em trilhas independentes — escolha exatamente o que extrair. Qualidade Demucs v4. Até ${MAX_AUDIO_MB}MB ou ${MAX_AUDIO_MINUTES} min.`}
       hue={HUE}
       icon={<IconAudioSplit size={56} />}
     >
@@ -221,6 +342,60 @@ export default function SeparadorAudioPage() {
 
         <ToolStep
           n={2}
+          icon={<IconStepMic size={18} />}
+          title="O que extrair"
+          hint="Escolha uma ou mais trilhas — sem custo extra por escolher mais."
+          hue={HUE}
+        >
+          <div className="flex flex-wrap gap-2.5">
+            {OUTPUT_ORDER.map((t) => {
+              const meta = OUTPUT_META[t];
+              const on = outputs.includes(t);
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => toggleOutput(t)}
+                  disabled={isWorking}
+                  title={meta.description}
+                  className="group flex min-w-[150px] flex-1 flex-col items-start gap-0.5 rounded-[12px] border px-3.5 py-2.5 text-left transition-all disabled:opacity-50"
+                  style={{
+                    borderColor: on ? meta.hue.replace('0.5', '0.9') : 'rgba(255,255,255,0.10)',
+                    background: on
+                      ? `linear-gradient(180deg, ${meta.hue.replace('0.5', '0.14')}, rgba(0,0,0,0.2))`
+                      : 'rgba(255,255,255,0.02)',
+                    boxShadow: on ? `0 0 22px -12px ${meta.hue}` : 'none',
+                  }}
+                >
+                  <span className="flex w-full items-center justify-between gap-2">
+                    <span
+                      className="text-[13.5px] font-bold text-white"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      {meta.label}
+                    </span>
+                    <span
+                      className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[5px] border text-[10px]"
+                      style={{
+                        borderColor: on ? meta.hue.replace('0.5', '1') : 'rgba(255,255,255,0.2)',
+                        background: on ? meta.hue.replace('0.5', '1') : 'transparent',
+                        color: on ? '#0a0a0a' : 'transparent',
+                      }}
+                    >
+                      ✓
+                    </span>
+                  </span>
+                  <span className="text-[11px] leading-snug text-text-muted">
+                    {meta.description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </ToolStep>
+
+        <ToolStep
+          n={3}
           icon={<IconStepPlay size={18} />}
           title={isWorking ? 'Separando…' : 'Separar'}
           hue={HUE}
@@ -229,24 +404,22 @@ export default function SeparadorAudioPage() {
             {isWorking ? (
               <CancelButton onClick={handleCancel} label="Cancelar" />
             ) : (
-              <ToolAction onClick={handleSeparate} disabled={!file}>
-                Separar voz, instrumental e SFX
+              <ToolAction onClick={handleSeparate} disabled={!file || outputs.length === 0}>
+                {outputs.length === 1
+                  ? `Extrair ${OUTPUT_META[outputs[0]].label}`
+                  : `Separar ${outputs.length} trilhas`}
               </ToolAction>
             )}
-            {stage === 'done' && Object.keys(stems).length > 1 ? (
-              <button
-                onClick={downloadAll}
-                className="btn-secondary"
-                type="button"
-              >
-                Baixar todos
+            {stage === 'done' && doneCount > 1 ? (
+              <button onClick={downloadAll} className="btn-secondary" type="button">
+                Baixar todas
               </button>
             ) : null}
           </div>
         </ToolStep>
 
         {/* Status banner */}
-        {stage !== 'idle' && stage !== 'done' && stage !== 'error' ? (
+        {isWorking ? (
           <div className="scan-line flex items-center gap-3 rounded-[12px] border border-violet/40 bg-violet/[0.06] px-4 py-3 text-sm text-violet">
             <span className="relative flex h-2 w-2 shrink-0">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet opacity-60" />
@@ -279,23 +452,23 @@ export default function SeparadorAudioPage() {
           </div>
         ) : null}
 
-        {/* Resultados — 3 cards de stem */}
-        {stage === 'done' && Object.keys(stems).length > 0 ? (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            {STEM_ORDER.map((stem) => {
-              const r = stems[stem];
+        {/* Resultados */}
+        {stage === 'done' && doneCount > 0 ? (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {OUTPUT_ORDER.map((t) => {
+              const r = results[t];
               if (!r) return null;
-              const meta = STEM_META[stem];
+              const meta = OUTPUT_META[t];
               return (
                 <StemCard
-                  key={stem}
-                  stem={stem}
+                  key={t}
+                  tag={t}
                   label={meta.label}
                   description={meta.description}
                   hue={meta.hue}
                   url={r.url}
                   size={r.size}
-                  onDownload={() => downloadStem(stem)}
+                  onDownload={() => downloadTarget(t)}
                 />
               );
             })}
@@ -309,7 +482,7 @@ export default function SeparadorAudioPage() {
 /* ───────────────── StemCard ───────────────── */
 
 function StemCard({
-  stem,
+  tag,
   label,
   description,
   hue,
@@ -317,7 +490,7 @@ function StemCard({
   size,
   onDownload,
 }: {
-  stem: SeparatorStem;
+  tag: string;
   label: string;
   description: string;
   hue: string;
@@ -356,7 +529,7 @@ function StemCard({
               background: 'rgba(0,0,0,0.4)',
             }}
           >
-            {stem.toUpperCase()}
+            {tag.toUpperCase()}
           </span>
         </div>
         <p className="mt-1 text-[12.5px] leading-snug text-text-muted">
