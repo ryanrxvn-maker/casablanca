@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from 'react';
  */
 
 const CHUNK_SIZE = 4 * 1024 * 1024;     // 4MB por parte (abaixo do limite da Vercel)
-const UPLOAD_CONCURRENCY = 3;           // chunks simultâneos
+const UPLOAD_CONCURRENCY = 4;           // chunks simultâneos (upload mais rápido)
 const MAX_VIDEO_BYTES = 5 * 1024 * 1024 * 1024; // 5GB
 
 // ─── tipos ───────────────────────────────────────────────────────────────────
@@ -94,17 +94,20 @@ export default function RemoverLegendaTool() {
     }
     const id = `v-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const url = URL.createObjectURL(file);
-    let meta: VideoItem['meta'] | undefined;
-    try {
-      const v = document.createElement('video');
-      v.preload = 'metadata';
-      v.src = url;
-      await new Promise<void>((resolve, reject) => {
-        v.onloadedmetadata = () => resolve();
-        v.onerror = () => reject();
-      });
-      meta = { w: v.videoWidth, h: v.videoHeight, dur: v.duration };
-    } catch { /* ignore */ }
+    // Lê metadata com TIMEOUT — nunca trava (vídeo que o browser demora pra
+    // decodificar ainda é adicionado; o processamento é server-side mesmo).
+    const meta = await new Promise<VideoItem['meta'] | undefined>((resolve) => {
+      let settled = false;
+      const done = (m: VideoItem['meta'] | undefined) => { if (!settled) { settled = true; resolve(m); } };
+      try {
+        const v = document.createElement('video');
+        v.preload = 'metadata';
+        v.onloadedmetadata = () => done({ w: v.videoWidth, h: v.videoHeight, dur: v.duration });
+        v.onerror = () => done(undefined);
+        v.src = url;
+      } catch { done(undefined); }
+      setTimeout(() => done(undefined), 4000);
+    });
     setVideos((prev) => [...prev, { id, file, url, meta }]);
     setSelectedId(id);
     setFormError('');
@@ -447,6 +450,31 @@ function JobCard({ job, total }: { job: Job; total: number }) {
   const isDone = job.stage === 'done';
   const isErr = job.stage === 'error';
   const proc = isActive(job.stage);
+  const [downloading, setDownloading] = useState(false);
+
+  // Download que FUNCIONA cross-origin: baixa o MP4 (CDN com CORS) e salva
+  // via blob (o atributo `download` é ignorado em URL cross-origin sem isso).
+  async function handleDownload() {
+    if (!job.resultUrl) return;
+    setDownloading(true);
+    try {
+      const r = await fetch(job.resultUrl);
+      if (!r.ok) throw new Error('http ' + r.status);
+      const blob = await r.blob();
+      const u = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = u;
+      a.download = `${job.label.replace(/\s+/g, '_')}_limpo.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(u), 20000);
+    } catch {
+      window.open(job.resultUrl, '_blank'); // fallback: abre em nova aba
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   let barPct = 0;
   if (job.stage === 'uploading') barPct = 2 + (job.uploadPct / 100) * 40;
@@ -493,9 +521,9 @@ function JobCard({ job, total }: { job: Job; total: number }) {
               <video src={job.resultUrl} controls className="aspect-video w-full rounded-[8px] border border-lime/40 object-cover shadow-[0_0_20px_-8px_rgba(200,232,124,0.5)]" />
             </div>
           </div>
-          <a href={job.resultUrl} download={`${job.label.replace(/\s+/g, '_')}_limpo.mp4`} className="mono block w-full rounded-[10px] border border-lime/40 bg-lime/10 px-3 py-2 text-center text-[11px] font-bold uppercase tracking-widest text-lime hover:bg-lime/20 transition" style={{ fontFamily: 'var(--font-tech)' }}>
-            ↓ Baixar MP4 limpo
-          </a>
+          <button type="button" onClick={handleDownload} disabled={downloading} className="mono block w-full rounded-[10px] border border-lime/40 bg-lime/10 px-3 py-2 text-center text-[11px] font-bold uppercase tracking-widest text-lime hover:bg-lime/20 transition disabled:opacity-60" style={{ fontFamily: 'var(--font-tech)' }}>
+            {downloading ? 'Baixando…' : '↓ Baixar MP4 limpo'}
+          </button>
         </div>
       )}
     </div>
