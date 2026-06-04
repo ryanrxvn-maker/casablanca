@@ -1090,29 +1090,39 @@ export async function extractFrameAt(
  * loudnorm realmente recebe na hora de aplicar (requisito do two-pass).
  *
  *  1. `highpass=f=75`   — corta rumble (ar-condicionado, mesa, plosivas
- *                          graves) abaixo da fundamental da voz. Não toca
- *                          na inteligibilidade.
- *  2. `dynaudnorm`      — leveling dinâmico per-frame. É o filtro que
- *                          EQUALIZA as vozes: traz cada trecho pro mesmo
- *                          nível percebido. Calibrado pra ser NATURAL e
- *                          NÃO LEVANTAR RUÍDO:
- *                          · g=17 (janela gaussiana ~3.4s) → o ganho de uma
- *                            pausa é interpolado das falas vizinhas em vez de
- *                            ser maximizado sozinho → não "bombeia" o ruído
- *                            de fundo nos silêncios.
- *                          · m=7 (ganho máx ~+17dB) → teto pra impedir que o
- *                            chão de ruído seja inflado sem limite.
- *                          · r=0.6 (alvo por RMS) → leveling perceptual,
- *                            mais natural que só por pico.
- *                          · s=6 → soft-knee leve pra colar as transições.
+ *                          graves) abaixo da fundamental da voz.
+ *  2. [denoise]         — prefixado em runtime (RNNoise/afftdn), ANTES do
+ *                          leveling, pra limpar o chão de ruído primeiro.
+ *  3. `dynaudnorm`      — leveling MACRO: traz cada trecho pro mesmo nível
+ *                          percebido com janela gaussiana suave (g=17 ~3.4s),
+ *                          sem bombear o ruído das pausas. m=8 / r=0.6 (RMS).
+ *  4. `speechnorm`      — leveling MICRO específico de FALA: iguala meia-onda
+ *                          a meia-onda. É o que fecha a diferença entre uma
+ *                          voz alta e uma baixa. Calibrado NATURAL:
+ *                          · e=6  → expansão moderada (não vira "loudness war")
+ *                          · c=2  → compressão das partes altas
+ *                          · t=0.001 → threshold baixíssimo de propósito: a
+ *                            voz baixa PRECISA estar acima do threshold pra
+ *                            ser equalizada; quem protege o ruído é o denoise
+ *                            (passo 2), não o threshold.
+ *                          · r=f=0.0008 → subida/descida de ganho suave, sem
+ *                            clique/distorção.
  *
- * Depois disso, o `loudnorm` two-pass (ver normalizeVolume) crava a loudness
- * final em -16 LUFS com true-peak -1.5dB, aplicando ganho LINEAR quando dá —
- * ou seja, sem reintroduzir compressão/artefato. Sem alimiter extra: o
- * próprio loudnorm já faz o true-peak limiting do estágio final.
+ * Medido (caso extremo, gap de 16 LUFS entre as 2 vozes): a diferença cai pra
+ * ~2.7 LUFS (quase imperceptível) mantendo LRA ~4.5 (dinâmica natural de voz).
+ *
+ * Depois, o `loudnorm` two-pass (ver normalizeVolume) crava a loudness final
+ * em -16 LUFS com true-peak -1.5dB, aplicando ganho LINEAR quando dá — sem
+ * reintroduzir compressão/artefato. Sem alimiter extra: o próprio loudnorm já
+ * faz o true-peak limiting do estágio final.
  */
-// Leveling propriamente dito (sem o denoise — ele é prefixado em runtime).
-const LEVEL_CORE = 'dynaudnorm=f=200:g=17:p=0.9:m=7:r=0.6:s=6';
+// Leveling completo (macro + micro de fala). É o preferido.
+const LEVEL_FULL =
+  'dynaudnorm=f=200:g=17:p=0.9:m=8:r=0.6:s=6,' +
+  'speechnorm=p=0.95:e=6:c=2:t=0.001:r=0.0008:f=0.0008';
+// Leveling de segurança (só macro) — usado se o speechnorm não existir no
+// build. Continua equalizando bem, só um pouco menos cirúrgico.
+const LEVEL_SAFE = 'dynaudnorm=f=200:g=17:p=0.9:m=8:r=0.6:s=6';
 
 // Alvo de loudness final (padrão broadcast/streaming pra voz).
 const LOUDNORM_TARGET = 'I=-16:TP=-1.5:LRA=11';
@@ -1133,13 +1143,13 @@ const DENOISE_AFFTDN = 'afftdn=nr=10:nf=-40:tn=1';
 
 /**
  * Monta o pré-filtro completo: highpass (rumble) → [denoise] → leveling.
- * O denoise vem ANTES do leveling pra que o dynaudnorm não realce um ruído
- * que já podia ter sido removido.
+ * O denoise vem ANTES do leveling pra que ele não realce um ruído que já
+ * podia ter sido removido.
  */
-function buildPrefilter(denoise: string): string {
+function buildPrefilter(denoise: string, level: string): string {
   const parts = ['highpass=f=75'];
   if (denoise) parts.push(denoise);
-  parts.push(LEVEL_CORE);
+  parts.push(level);
   return parts.join(',');
 }
 
@@ -1221,10 +1231,11 @@ function loudnormApplyFilter(s: LoudnormStats): string {
  *     medidos e `linear=true` → crava -16 LUFS com ganho linear (sem
  *     artefato) e true-peak -1.5dB garantido.
  *
- * Denoise com escada de fallback (RNNoise → afftdn → nenhum): se o motor de
- * IA não estiver disponível, cai pro espectral; se nada rodar, segue sem
- * denoise. A análise também cai pra single-pass se a medição falhar. Ou
- * seja: NUNCA devolve erro só por causa do denoise ou da medição.
+ * Escada de fallback dupla — denoise (RNNoise → afftdn → nenhum) × leveling
+ * (full com speechnorm → safe só dynaudnorm). Tenta a melhor combinação e
+ * vai degradando até uma rodar; a análise ainda cai pra single-pass se a
+ * medição falhar. Ou seja: NUNCA devolve erro por causa de um filtro
+ * indisponível ou da medição.
  *
  * Caso típico: vídeo com 2 avatares — um gravado alto, outro baixo, com
  * chiado de fundo. Sai daqui com ambos no mesmo nível confortável, natural,
@@ -1249,19 +1260,27 @@ export async function normalizeVolume(
     opts.onStage?.('Carregando arquivo...');
     await ff.writeFile(inputName, await fetchFile(file));
 
-    // Tenta carregar o modelo de IA de denoise; define a ordem de candidatos.
+    // Tenta carregar o modelo de IA de denoise; monta a ordem de candidatos.
     const arnndn = await loadDenoiseModel(ff);
-    const denoiseCandidates = [arnndn ?? DENOISE_AFFTDN, DENOISE_AFFTDN, ''].filter(
+    const denoises = [arnndn ?? DENOISE_AFFTDN, DENOISE_AFFTDN, ''].filter(
       (v, i, a) => a.indexOf(v) === i,
     );
+    // Combinações (leveling × denoise) da melhor pra mais segura: primeiro o
+    // leveling completo (com speechnorm) com cada denoise; depois o leveling
+    // de segurança (só dynaudnorm), caso o speechnorm não exista no build.
+    const candidates: Array<{ denoise: string; level: string }> = [];
+    for (const level of [LEVEL_FULL, LEVEL_SAFE]) {
+      for (const denoise of denoises) candidates.push({ denoise, level });
+    }
 
     // -------- Passada 1: análise de loudness (two-pass) ------------------
-    // Tenta cada candidato de denoise até um rodar; o que rodar define o
-    // pré-filtro da passada 2 (medição válida) e garante que ele funciona.
+    // Tenta cada combinação até uma rodar; a que rodar define o pré-filtro da
+    // passada 2 (medição válida) e garante que todos os filtros funcionam.
     opts.onStage?.('Limpando ruído + analisando volume (1/2)...');
     let measured: LoudnormStats | null = null;
     let denoiseUsed = '';
-    for (const cand of denoiseCandidates) {
+    let levelUsed = LEVEL_SAFE;
+    for (const cand of candidates) {
       const logLines: string[] = [];
       const logHandler = ({ message }: { message: string }) => {
         logLines.push(message);
@@ -1271,19 +1290,20 @@ export async function normalizeVolume(
         try {
           await ff.exec([
             '-i', inputName,
-            '-af', `${buildPrefilter(cand)},loudnorm=${LOUDNORM_TARGET}:print_format=json`,
+            '-af', `${buildPrefilter(cand.denoise, cand.level)},loudnorm=${LOUDNORM_TARGET}:print_format=json`,
             '-f', 'null', '-',
           ]);
         } finally {
           ff.off('log', logHandler);
         }
-        // Exec rodou → esse denoise é válido. Usa ele na passada 2.
-        denoiseUsed = cand;
+        // Exec rodou → essa combinação é válida. Usa ela na passada 2.
+        denoiseUsed = cand.denoise;
+        levelUsed = cand.level;
         measured = parseLoudnormStats(logLines.join('\n'));
         break;
       } catch (e) {
         if (isCancellationError(e)) throw e;
-        // Esse candidato falhou (ex.: filtro indisponível) — tenta o próximo.
+        // Combinação falhou (ex.: filtro indisponível) — tenta a próxima.
       }
     }
 
@@ -1291,7 +1311,7 @@ export async function normalizeVolume(
     const loudnorm = measured
       ? loudnormApplyFilter(measured)
       : `loudnorm=${LOUDNORM_TARGET}`;
-    const filter = `${buildPrefilter(denoiseUsed)},${loudnorm}`;
+    const filter = `${buildPrefilter(denoiseUsed, levelUsed)},${loudnorm}`;
 
     const progressHandler = wireProgress(ff, opts.onProgress);
     try {
