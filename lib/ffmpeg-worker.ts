@@ -1111,11 +1111,55 @@ export async function extractFrameAt(
  * ou seja, sem reintroduzir compressão/artefato. Sem alimiter extra: o
  * próprio loudnorm já faz o true-peak limiting do estágio final.
  */
-const LEVEL_PREFILTER =
-  'highpass=f=75,dynaudnorm=f=200:g=17:p=0.9:m=7:r=0.6:s=6';
+// Leveling propriamente dito (sem o denoise — ele é prefixado em runtime).
+const LEVEL_CORE = 'dynaudnorm=f=200:g=17:p=0.9:m=7:r=0.6:s=6';
 
 // Alvo de loudness final (padrão broadcast/streaming pra voz).
 const LOUDNORM_TARGET = 'I=-16:TP=-1.5:LRA=11';
+
+// Candidatos de DENOISE (limpeza de ruído de fundo), em ordem de qualidade.
+// Tudo roda LOCAL (no navegador), sem custo e sem subir áudio pra nuvem.
+//
+//  1. RNNoise (`arnndn`) — denoiser por REDE NEURAL treinada em voz. É o
+//     melhor pra fala. Precisa do modelo .rnnn carregado no FS (ver
+//     loadDenoiseModel). `mix=0.85` mistura 85% limpo + 15% original → tira
+//     o chiado sem deixar a voz "fechada"/artificial. `aresample=48000`
+//     porque o RNNoise é treinado a 48kHz.
+//  2. `afftdn` — denoise espectral adaptativo (rastreia o ruído sozinho com
+//     tn=1). Não precisa de modelo, roda em qualquer build. Fallback.
+//  3. '' — sem denoise (último recurso; nunca deixa o tool falhar).
+const DENOISE_ARNNDN = 'aresample=48000,arnndn=m=denoise.rnnn:mix=0.85';
+const DENOISE_AFFTDN = 'afftdn=nr=10:nf=-40:tn=1';
+
+/**
+ * Monta o pré-filtro completo: highpass (rumble) → [denoise] → leveling.
+ * O denoise vem ANTES do leveling pra que o dynaudnorm não realce um ruído
+ * que já podia ter sido removido.
+ */
+function buildPrefilter(denoise: string): string {
+  const parts = ['highpass=f=75'];
+  if (denoise) parts.push(denoise);
+  parts.push(LEVEL_CORE);
+  return parts.join(',');
+}
+
+/**
+ * Tenta carregar o modelo RNNoise (public/models/denoise.rnnn) no FS do
+ * FFmpeg. Retorna a string do filtro `arnndn` se conseguir, senão null —
+ * nesse caso o pipeline cai pro `afftdn`, que não precisa de modelo.
+ */
+async function loadDenoiseModel(ff: FFmpeg): Promise<string | null> {
+  try {
+    const res = await fetch('/models/denoise.rnnn');
+    if (!res.ok) return null;
+    const buf = new Uint8Array(await res.arrayBuffer());
+    if (buf.length < 1024) return null; // arquivo vazio/erro de rota
+    await ff.writeFile('denoise.rnnn', buf);
+    return DENOISE_ARNNDN;
+  } catch {
+    return null;
+  }
+}
 
 export type NormalizeOutFormat = 'mp4' | 'mp3' | 'wav';
 
@@ -1167,21 +1211,24 @@ function loudnormApplyFilter(s: LoudnormStats): string {
 }
 
 /**
- * Equaliza o volume de vozes diferentes num mesmo arquivo, em qualidade
- * máxima. Motor de DUAS PASSADAS (EBU R128):
+ * Equaliza o volume de vozes diferentes num mesmo arquivo E limpa o ruído
+ * de fundo, em qualidade máxima. Motor de DUAS PASSADAS (EBU R128):
  *
- *   Passada 1 — análise: roda os pré-filtros de leveling + loudnorm em modo
- *     `print_format=json` jogando a saída no muxer null. Lê a loudness real.
- *   Passada 2 — aplicação: mesmos pré-filtros + loudnorm com os valores
+ *   Passada 1 — análise: roda denoise + leveling + loudnorm em modo
+ *     `print_format=json` jogando a saída no muxer null. Lê a loudness real
+ *     JÁ com o denoise aplicado (pra os valores baterem na passada 2).
+ *   Passada 2 — aplicação: mesmo pré-filtro + loudnorm com os valores
  *     medidos e `linear=true` → crava -16 LUFS com ganho linear (sem
  *     artefato) e true-peak -1.5dB garantido.
  *
- * Se a análise falhar por qualquer motivo, cai pra loudnorm single-pass
- * dinâmico (ainda funcional, só um tico menos preciso) — nunca devolve erro
- * só por causa da medição.
+ * Denoise com escada de fallback (RNNoise → afftdn → nenhum): se o motor de
+ * IA não estiver disponível, cai pro espectral; se nada rodar, segue sem
+ * denoise. A análise também cai pra single-pass se a medição falhar. Ou
+ * seja: NUNCA devolve erro só por causa do denoise ou da medição.
  *
- * Caso típico: vídeo com 2 avatares — um gravado alto, outro baixo. Sai
- * daqui com ambos no mesmo nível confortável, natural, sem ruído inflado.
+ * Caso típico: vídeo com 2 avatares — um gravado alto, outro baixo, com
+ * chiado de fundo. Sai daqui com ambos no mesmo nível confortável, natural,
+ * limpo, sem ruído inflado.
  *
  * - MP4: mantém o vídeo SEM perda (`-c:v copy`, com fallback de re-encode
  *   só se o stream for incompatível com o container mp4, ex.: webm/vp9).
@@ -1202,36 +1249,49 @@ export async function normalizeVolume(
     opts.onStage?.('Carregando arquivo...');
     await ff.writeFile(inputName, await fetchFile(file));
 
+    // Tenta carregar o modelo de IA de denoise; define a ordem de candidatos.
+    const arnndn = await loadDenoiseModel(ff);
+    const denoiseCandidates = [arnndn ?? DENOISE_AFFTDN, DENOISE_AFFTDN, ''].filter(
+      (v, i, a) => a.indexOf(v) === i,
+    );
+
     // -------- Passada 1: análise de loudness (two-pass) ------------------
-    opts.onStage?.('Analisando volume (1/2)...');
+    // Tenta cada candidato de denoise até um rodar; o que rodar define o
+    // pré-filtro da passada 2 (medição válida) e garante que ele funciona.
+    opts.onStage?.('Limpando ruído + analisando volume (1/2)...');
     let measured: LoudnormStats | null = null;
-    const logLines: string[] = [];
-    const logHandler = ({ message }: { message: string }) => {
-      logLines.push(message);
-    };
-    try {
-      ff.on('log', logHandler);
+    let denoiseUsed = '';
+    for (const cand of denoiseCandidates) {
+      const logLines: string[] = [];
+      const logHandler = ({ message }: { message: string }) => {
+        logLines.push(message);
+      };
       try {
-        await ff.exec([
-          '-i', inputName,
-          '-af', `${LEVEL_PREFILTER},loudnorm=${LOUDNORM_TARGET}:print_format=json`,
-          '-f', 'null', '-',
-        ]);
-      } finally {
-        ff.off('log', logHandler);
+        ff.on('log', logHandler);
+        try {
+          await ff.exec([
+            '-i', inputName,
+            '-af', `${buildPrefilter(cand)},loudnorm=${LOUDNORM_TARGET}:print_format=json`,
+            '-f', 'null', '-',
+          ]);
+        } finally {
+          ff.off('log', logHandler);
+        }
+        // Exec rodou → esse denoise é válido. Usa ele na passada 2.
+        denoiseUsed = cand;
+        measured = parseLoudnormStats(logLines.join('\n'));
+        break;
+      } catch (e) {
+        if (isCancellationError(e)) throw e;
+        // Esse candidato falhou (ex.: filtro indisponível) — tenta o próximo.
       }
-      measured = parseLoudnormStats(logLines.join('\n'));
-    } catch (e) {
-      if (isCancellationError(e)) throw e;
-      // Análise falhou — segue pro fallback single-pass.
-      measured = null;
     }
 
     // -------- Passada 2: aplicação --------------------------------------
     const loudnorm = measured
       ? loudnormApplyFilter(measured)
       : `loudnorm=${LOUDNORM_TARGET}`;
-    const filter = `${LEVEL_PREFILTER},${loudnorm}`;
+    const filter = `${buildPrefilter(denoiseUsed)},${loudnorm}`;
 
     const progressHandler = wireProgress(ff, opts.onProgress);
     try {
