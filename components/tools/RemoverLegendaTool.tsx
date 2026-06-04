@@ -84,6 +84,8 @@ export default function RemoverLegendaTool() {
   const videoInputRef = useRef<HTMLInputElement | null>(null);
   const jobSeqRef = useRef(0);
   const pollingRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const [dragOver, setDragOver] = useState(false);
+  const [compareJob, setCompareJob] = useState<Job | null>(null);
 
   const selected = videos.find((v) => v.id === selectedId) ?? null;
 
@@ -111,6 +113,14 @@ export default function RemoverLegendaTool() {
     setVideos((prev) => [...prev, { id, file, url, meta }]);
     setSelectedId(id);
     setFormError('');
+  }
+
+  // aceita arquivo vindo do input OU do drag-and-drop (valida que é vídeo)
+  function acceptFile(f: File | null | undefined) {
+    if (!f) return;
+    const okType = f.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|mkv|avi|mpe?g)$/i.test(f.name);
+    if (!okType) { setFormError('Solta um arquivo de vídeo (MP4, MOV, WEBM…).'); return; }
+    void addVideo(f);
   }
 
   function removeVideo(id: string) {
@@ -289,6 +299,34 @@ export default function RemoverLegendaTool() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // arrastar-e-soltar: aceita um vídeo solto em QUALQUER lugar da página
+  useEffect(() => {
+    let hideTimer: ReturnType<typeof setTimeout> | undefined;
+    const hasFiles = (e: DragEvent) => !!e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+    const onOver = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      setDragOver(true);
+      if (hideTimer) clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => setDragOver(false), 140);
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      if (hideTimer) clearTimeout(hideTimer);
+      setDragOver(false);
+      acceptFile(e.dataTransfer?.files?.[0]);
+    };
+    window.addEventListener('dragover', onOver);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragover', onOver);
+      window.removeEventListener('drop', onDrop);
+      if (hideTimer) clearTimeout(hideTimer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const totalNum = jobs.length ? Math.max(...jobs.map((j) => j.num)) : 0;
 
   return (
@@ -324,7 +362,7 @@ export default function RemoverLegendaTool() {
               <div className="mono text-[9px] text-text-muted mt-0.5">arraste ou clique</div>
               <div className="mono text-[9px] text-text-dim mt-0.5">qualquer tamanho</div>
             </div>
-            <input ref={videoInputRef} type="file" accept="video/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) addVideo(f); e.target.value = ''; }} />
+            <input ref={videoInputRef} type="file" accept="video/*" className="hidden" onChange={(e) => { acceptFile(e.target.files?.[0]); e.target.value = ''; }} />
           </button>
           {videos.map((v) => (
             <VideoThumb key={v.id} item={v} selected={v.id === selectedId} onSelect={() => setSelectedId(v.id)} onRemove={() => removeVideo(v.id)} />
@@ -412,7 +450,7 @@ export default function RemoverLegendaTool() {
             )}
           </div>
           <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-            {jobs.map((job) => <JobCard key={job.id} job={job} total={totalNum} />)}
+            {jobs.map((job) => <JobCard key={job.id} job={job} total={totalNum} onCompare={() => setCompareJob(job)} />)}
           </div>
         </section>
       )}
@@ -425,9 +463,48 @@ export default function RemoverLegendaTool() {
           <li>· Pode disparar vários — aparecem prontos conforme terminam.</li>
           <li>· Resultado em MP4, sem marca, pronto pra usar.</li>
           <li>· Não fecha a aba enquanto processa — o poll continua.</li>
-          <li>· Arquivos grandes sobem em pedaços, sem limite.</li>
+          <li>· Sobe em pedaços, em paralelo — até 300MB por vídeo.</li>
         </ul>
       </div>
+
+      {/* drag-and-drop: overlay enquanto arrasta um arquivo */}
+      {dragOver && (
+        <div className="pointer-events-none fixed inset-0 z-[110] flex items-center justify-center bg-fuchsia-500/10 backdrop-blur-[2px]">
+          <div className="rounded-[20px] border-2 border-dashed border-fuchsia-400/70 bg-black/65 px-10 py-7 text-center">
+            <div className="text-[44px] leading-none">⬇</div>
+            <div className="mono mt-2 text-[13px] font-bold uppercase tracking-[0.2em] text-white" style={{ fontFamily: 'var(--font-tech)' }}>Solta o vídeo pra subir</div>
+            <div className="mono mt-1 text-[10px] text-white/60">MP4, MOV, WEBM… até 300MB</div>
+          </div>
+        </div>
+      )}
+
+      {/* comparação antes/depois em tela grande (slider estilo vmake) */}
+      {compareJob && compareJob.recordId && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
+          onClick={() => setCompareJob(null)}
+        >
+          <div onClick={(e) => e.stopPropagation()} className="flex flex-col items-center gap-2.5">
+            <div className="flex items-center justify-between gap-4" style={{ width: 'min(92vw, 41vh)' }}>
+              <span className="mono text-[12px] font-bold uppercase tracking-[0.18em] text-white" style={{ fontFamily: 'var(--font-tech)' }}>
+                {compareJob.label} · antes / depois
+              </span>
+              <button type="button" onClick={() => setCompareJob(null)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/20 bg-black/60 text-white transition hover:bg-white/10">✕</button>
+            </div>
+            <BeforeAfter
+              beforeUrl={compareJob.sourceUrl}
+              afterUrl={`/api/tools/remove-subtitle/download?record_id=${encodeURIComponent(compareJob.recordId)}&mode=smart`}
+            />
+            <a
+              href={`/api/tools/remove-subtitle/download?record_id=${encodeURIComponent(compareJob.recordId)}&mode=smart&dl=1`}
+              download="video_limpo.mp4"
+              className="mono rounded-[12px] border border-lime/50 bg-lime/15 px-4 py-3 text-center text-[12px] font-bold uppercase tracking-widest text-lime transition hover:bg-lime/25"
+              style={{ width: 'min(92vw, 41vh)', fontFamily: 'var(--font-tech)' }}
+            >↓ Baixar MP4 limpo</a>
+            <p className="mono text-center text-[10px] text-white/55">Arraste o divisor ⇆ pra comparar · preview sem áudio</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -448,7 +525,7 @@ function VideoThumb({ item, selected, onSelect, onRemove }: { item: VideoItem; s
 
 // ─── JobCard ──────────────────────────────────────────────────────────────────
 
-function JobCard({ job, total }: { job: Job; total: number }) {
+function JobCard({ job, total, onCompare }: { job: Job; total: number; onCompare: () => void }) {
   const isDone = job.stage === 'done';
   const isErr = job.stage === 'error';
   const proc = isActive(job.stage);
@@ -497,21 +574,97 @@ function JobCard({ job, total }: { job: Job; total: number }) {
 
       {isDone && job.recordId && (
         <div className="space-y-2">
+          <button
+            type="button"
+            onClick={onCompare}
+            className="group relative block w-full overflow-hidden rounded-[10px] border border-lime/40 bg-black shadow-[0_0_22px_-8px_rgba(200,232,124,0.55)]"
+            title="Ver comparação antes/depois em tela grande"
+          >
+            <video src={previewUrl} muted loop playsInline preload="metadata" className="aspect-[3/4] w-full object-contain" />
+            <span className="mono absolute left-1.5 top-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[8px] uppercase tracking-widest text-lime">Limpo ✓</span>
+            <span className="absolute inset-0 flex items-center justify-center bg-black/35 opacity-0 transition group-hover:opacity-100">
+              <span className="mono inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-[11px] font-bold text-black">⤢ Comparar antes/depois</span>
+            </span>
+          </button>
           <div className="grid grid-cols-2 gap-1.5">
-            <div className="space-y-0.5">
-              <div className="mono text-[8px] uppercase tracking-widest text-text-muted">Antes</div>
-              <video src={job.sourceUrl} muted loop className="aspect-video w-full rounded-[8px] border border-line object-cover" />
-            </div>
-            <div className="space-y-0.5">
-              <div className="mono text-[8px] uppercase tracking-widest text-lime">Limpo ✓</div>
-              <video src={previewUrl} controls preload="metadata" className="aspect-video w-full rounded-[8px] border border-lime/40 object-cover shadow-[0_0_20px_-8px_rgba(200,232,124,0.5)]" />
-            </div>
+            <button
+              type="button"
+              onClick={onCompare}
+              className="mono rounded-[10px] border border-white/15 bg-white/5 px-3 py-2 text-center text-[11px] font-bold uppercase tracking-widest text-white/85 transition hover:bg-white/10"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >⤢ Comparar</button>
+            <a
+              href={dlUrl}
+              download="video_limpo.mp4"
+              className="mono rounded-[10px] border border-lime/40 bg-lime/10 px-3 py-2 text-center text-[11px] font-bold uppercase tracking-widest text-lime transition hover:bg-lime/20"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >↓ Baixar</a>
           </div>
-          <a href={dlUrl} download="video_limpo.mp4" className="mono block w-full rounded-[10px] border border-lime/40 bg-lime/10 px-3 py-2 text-center text-[11px] font-bold uppercase tracking-widest text-lime hover:bg-lime/20 transition" style={{ fontFamily: 'var(--font-tech)' }}>
-            ↓ Baixar MP4 limpo
-          </a>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── BeforeAfter — slider antes/depois (estilo vmake) ──────────────────────────
+
+function BeforeAfter({ beforeUrl, afterUrl }: { beforeUrl: string; afterUrl: string }) {
+  const [pos, setPos] = useState(50);
+  const [ar, setAr] = useState('9 / 16');
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const aRef = useRef<HTMLVideoElement | null>(null);
+  const bRef = useRef<HTMLVideoElement | null>(null);
+  const dragging = useRef(false);
+
+  // mantém o LIMPO (proxy) seguindo o tempo do ANTES (local, suave) — sync leve
+  useEffect(() => {
+    let raf = 0;
+    const loop = () => {
+      const a = aRef.current, b = bRef.current;
+      if (a && b && !b.seeking && b.readyState >= 2 && Math.abs(b.currentTime - a.currentTime) > 0.3) {
+        try { b.currentTime = a.currentTime; } catch { /* */ }
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  function setFromClientX(clientX: number) {
+    const el = wrapRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setPos(Math.max(0, Math.min(100, ((clientX - r.left) / r.width) * 100)));
+  }
+
+  return (
+    <div
+      ref={wrapRef}
+      className="relative touch-none cursor-ew-resize select-none overflow-hidden rounded-[14px] border border-white/15 bg-black"
+      style={{ height: '72vh', aspectRatio: ar, maxWidth: '92vw' }}
+      onPointerDown={(e) => { dragging.current = true; (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); setFromClientX(e.clientX); }}
+      onPointerMove={(e) => { if (dragging.current) setFromClientX(e.clientX); }}
+      onPointerUp={() => { dragging.current = false; }}
+      onPointerCancel={() => { dragging.current = false; }}
+    >
+      {/* DEPOIS (camada de baixo, inteira) */}
+      <video ref={bRef} src={afterUrl} muted loop autoPlay playsInline preload="auto" className="pointer-events-none absolute inset-0 h-full w-full object-contain" />
+      {/* ANTES (camada de cima, recortada até pos%) */}
+      <video
+        ref={aRef}
+        src={beforeUrl}
+        muted loop autoPlay playsInline
+        onLoadedMetadata={(e) => { const v = e.currentTarget; if (v.videoWidth && v.videoHeight) setAr(`${v.videoWidth} / ${v.videoHeight}`); }}
+        className="pointer-events-none absolute inset-0 h-full w-full object-contain"
+        style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }}
+      />
+      <span className="mono pointer-events-none absolute left-2 top-2 rounded-full border border-white/15 bg-black/55 px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest text-white/85 backdrop-blur-md">Antes</span>
+      <span className="mono pointer-events-none absolute right-2 top-2 rounded-full border border-lime/30 bg-black/55 px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest text-lime backdrop-blur-md">Depois ✓</span>
+      {/* divisor */}
+      <div className="pointer-events-none absolute inset-y-0 z-20" style={{ left: `${pos}%` }}>
+        <div className="absolute inset-y-0 left-0 w-[2px] -translate-x-1/2 bg-white/90 shadow-[0_0_10px_rgba(0,0,0,0.6)]" />
+        <div className="absolute left-0 top-1/2 flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-black/10 bg-white text-[14px] font-bold text-black shadow-lg">⇆</div>
+      </div>
     </div>
   );
 }
