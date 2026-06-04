@@ -195,10 +195,11 @@ export async function separateStems(
         // nomes de campo variam por fork — manda os mais comuns
         audio: input.audioUrl,
         audio_file: input.audioUrl,
-        // separação COMPLETA (4 trilhas) — sem isolar um stem só
+        // separação COMPLETA (4 trilhas): OMITIMOS `stem`. Passar `stem`
+        // ISOLA uma trilha só, e o enum não aceita "none" (422). Sem o
+        // campo, o Demucs separa em vocals/drums/bass/other (default).
         model: 'htdemucs',
         model_name: 'htdemucs',
-        stem: 'none',
         output_format: 'mp3',
         mp3: true,
         wav: false,
