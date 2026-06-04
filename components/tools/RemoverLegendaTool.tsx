@@ -139,7 +139,9 @@ export default function RemoverLegendaTool() {
         }
         const { status, process, downloadUrl } = d;
         if (status === 2 && downloadUrl) {
-          patchJob(jobId, { stage: 'done', vmakePct: 100, resultUrl: downloadUrl });
+          // NÃO guarda a downloadUrl (CDN assinada, expira ~1-2min).
+          // O preview/download usam o proxy /download por record_id (sempre fresco).
+          patchJob(jobId, { stage: 'done', vmakePct: 100 });
           return;
         }
         if (typeof status === 'number' && status < 0) {
@@ -450,31 +452,15 @@ function JobCard({ job, total }: { job: Job; total: number }) {
   const isDone = job.stage === 'done';
   const isErr = job.stage === 'error';
   const proc = isActive(job.stage);
-  const [downloading, setDownloading] = useState(false);
 
-  // Download que FUNCIONA cross-origin: baixa o MP4 (CDN com CORS) e salva
-  // via blob (o atributo `download` é ignorado em URL cross-origin sem isso).
-  async function handleDownload() {
-    if (!job.resultUrl) return;
-    setDownloading(true);
-    try {
-      const r = await fetch(job.resultUrl);
-      if (!r.ok) throw new Error('http ' + r.status);
-      const blob = await r.blob();
-      const u = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = u;
-      a.download = `${job.label.replace(/\s+/g, '_')}_limpo.mp4`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(u), 20000);
-    } catch {
-      window.open(job.resultUrl, '_blank'); // fallback: abre em nova aba
-    } finally {
-      setDownloading(false);
-    }
-  }
+  // Preview + download via proxy do servidor: resolve uma URL FRESCA a cada
+  // request (a do CDN é assinada e expira ~1-2min), faz streaming (arquivos
+  // grandes, sem estourar memória) e força o download (Content-Disposition).
+  const base = job.recordId
+    ? `/api/tools/remove-subtitle/download?record_id=${encodeURIComponent(job.recordId)}&mode=smart`
+    : '';
+  const previewUrl = base;
+  const dlUrl = base ? base + '&dl=1' : '';
 
   let barPct = 0;
   if (job.stage === 'uploading') barPct = 2 + (job.uploadPct / 100) * 40;
@@ -509,7 +495,7 @@ function JobCard({ job, total }: { job: Job; total: number }) {
         <div className="rounded-[8px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-[11px] text-red-300">{job.error}</div>
       )}
 
-      {isDone && job.resultUrl && (
+      {isDone && job.recordId && (
         <div className="space-y-2">
           <div className="grid grid-cols-2 gap-1.5">
             <div className="space-y-0.5">
@@ -518,12 +504,12 @@ function JobCard({ job, total }: { job: Job; total: number }) {
             </div>
             <div className="space-y-0.5">
               <div className="mono text-[8px] uppercase tracking-widest text-lime">Limpo ✓</div>
-              <video src={job.resultUrl} controls className="aspect-video w-full rounded-[8px] border border-lime/40 object-cover shadow-[0_0_20px_-8px_rgba(200,232,124,0.5)]" />
+              <video src={previewUrl} controls preload="metadata" className="aspect-video w-full rounded-[8px] border border-lime/40 object-cover shadow-[0_0_20px_-8px_rgba(200,232,124,0.5)]" />
             </div>
           </div>
-          <button type="button" onClick={handleDownload} disabled={downloading} className="mono block w-full rounded-[10px] border border-lime/40 bg-lime/10 px-3 py-2 text-center text-[11px] font-bold uppercase tracking-widest text-lime hover:bg-lime/20 transition disabled:opacity-60" style={{ fontFamily: 'var(--font-tech)' }}>
-            {downloading ? 'Baixando…' : '↓ Baixar MP4 limpo'}
-          </button>
+          <a href={dlUrl} download="video_limpo.mp4" className="mono block w-full rounded-[10px] border border-lime/40 bg-lime/10 px-3 py-2 text-center text-[11px] font-bold uppercase tracking-widest text-lime hover:bg-lime/20 transition" style={{ fontFamily: 'var(--font-tech)' }}>
+            ↓ Baixar MP4 limpo
+          </a>
         </div>
       )}
     </div>
