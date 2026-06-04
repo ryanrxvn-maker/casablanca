@@ -28,7 +28,7 @@
 // Versao do content-script. Page pode checar via {type:'HG_VERSION'} ou
 // no campo _extVersion de qualquer resposta de proxy. Bumpar a cada mudanca
 // de proxy/protocolo pra forcar usuario a recarregar extensao.
-const DARKO_EXT_VERSION = '4.15.4';
+const DARKO_EXT_VERSION = '4.16.1';
 if (window.__darkolab_heygen_loaded__) {
   console.log('[DARKO LAB] content script JA carregado — skip duplicate inject (v=' + DARKO_EXT_VERSION + ')');
 } else {
@@ -841,45 +841,99 @@ async function listMyAvatars() {
     };
   }
 
-  // 2) Pra cada grupo, busca os looks EM PARALELO via v1 direto
-  // (v2 sempre da 404, descobrimos via debug — economiza ~50% do tempo)
+  // 2) Pra cada grupo, busca os looks via v1 direto.
+  //
+  // ANTES: Promise.all sobre TODOS os grupos de uma vez (ex 81 reqs simultaneas)
+  // saturava o api2.heygen.com → rate-limit (429) / timeout em grupos isolados.
+  // O grupo afetado voltava com looks:[] e caia no fallback "1 look = capa do
+  // grupo" (abaixo). Pior: o cache de 5min congelava esse estado degradado ate
+  // o user dar refresh. Sintoma real: avatar aparecia com 1 look so em vez de
+  // todos, e voltava ao normal sozinho depois do reload.
+  //
+  // FIX (aditivo, nao muda a saida pra quem ja funcionava):
+  //   (a) POOL de concorrencia limitado (12 em voo) em vez de N de uma vez;
+  //   (b) RETRY com backoff SO nos grupos cuja requisicao FALHOU (timeout/!ok/
+  //       exception) — distinto de grupo que respondeu OK mas vazio, que mantem
+  //       o comportamento antigo.
   console.log(
-    `[DARKO LAB] STEP 3: buscando looks de ${groups.length} grupos em PARALELO...`,
+    `[DARKO LAB] STEP 3: buscando looks de ${groups.length} grupos (pool=12 + retry)...`,
   );
   const t0 = performance.now();
-  const looksByGroup = await Promise.all(
-    groups.map(async (g) => {
-      const url = `https://api2.heygen.com/v1/avatar_look.private.list?group_id=${g.id}&limit=50`;
-      try {
-        const r = await fetchWithTimeout(
-          url,
-          { method: 'GET', credentials: 'include' },
-          5000,
-        );
-        if (!r.ok) {
-          console.warn(`[DARKO LAB] grupo ${g.name}: HTTP ${r.status}`);
-          return { group: g, looks: [] };
-        }
-        const j = await r.json();
-        const looks =
-          j?.data?.avatar_looks ??
-          j?.data?.avatar_look_list ??
-          j?.data?.list ??
-          (Array.isArray(j?.data) ? j.data : null) ??
-          [];
-        if (Array.isArray(looks)) {
-          return { group: g, looks };
-        }
-        return { group: g, looks: [] };
-      } catch (e) {
-        console.warn(`[DARKO LAB] grupo ${g.name} ERR:`, e.message);
-        return { group: g, looks: [] };
+
+  // Busca os looks de UM grupo. failed=true => a fetch quebrou (candidato a
+  // retry); failed=false => respondeu (looks pode estar vazio legitimamente).
+  const fetchGroupLooks = async (g) => {
+    const url = `https://api2.heygen.com/v1/avatar_look.private.list?group_id=${g.id}&limit=50`;
+    try {
+      const r = await fetchWithTimeout(
+        url,
+        { method: 'GET', credentials: 'include' },
+        6000,
+      );
+      if (!r.ok) {
+        console.warn(`[DARKO LAB] grupo ${g.name}: HTTP ${r.status}`);
+        return { group: g, looks: [], failed: true };
       }
-    }),
-  );
+      const j = await r.json();
+      const looks =
+        j?.data?.avatar_looks ??
+        j?.data?.avatar_look_list ??
+        j?.data?.list ??
+        (Array.isArray(j?.data) ? j.data : null) ??
+        [];
+      return { group: g, looks: Array.isArray(looks) ? looks : [], failed: false };
+    } catch (e) {
+      console.warn(`[DARKO LAB] grupo ${g.name} ERR:`, e.message);
+      return { group: g, looks: [], failed: true };
+    }
+  };
+
+  // Roda `worker` sobre `collection` com no maximo `limit` tarefas em voo.
+  const runPooled = async (collection, limit, worker) => {
+    const results = new Array(collection.length);
+    let cursor = 0;
+    const runnerCount = Math.max(1, Math.min(limit, collection.length));
+    const runners = new Array(runnerCount).fill(0).map(async () => {
+      while (cursor < collection.length) {
+        const idx = cursor++;
+        results[idx] = await worker(collection[idx], idx);
+      }
+    });
+    await Promise.all(runners);
+    return results;
+  };
+
+  // 1a passada: pool de 12 (em vez de todos de uma vez).
+  let looksByGroup = await runPooled(groups, 12, fetchGroupLooks);
+
+  // Retry SO nos que falharam, ate 2 vezes, com backoff curto e pool menor (6)
+  // pra nao re-saturar. Se um grupo ainda falhar apos os retries, fica com
+  // looks:[] e o fallback de "1 look" cobre — nada quebra.
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const failedIdx = [];
+    for (let i = 0; i < looksByGroup.length; i++) {
+      if (looksByGroup[i] && looksByGroup[i].failed) failedIdx.push(i);
+    }
+    if (failedIdx.length === 0) break;
+    console.warn(
+      `[DARKO LAB] retry ${attempt}/2: ${failedIdx.length} grupo(s) falharam, re-buscando...`,
+    );
+    await new Promise((res) => setTimeout(res, 400 * attempt)); // 400ms, 800ms
+    const retried = await runPooled(
+      failedIdx.map((i) => groups[i]),
+      6,
+      fetchGroupLooks,
+    );
+    for (let k = 0; k < failedIdx.length; k++) {
+      if (retried[k]) looksByGroup[failedIdx[k]] = retried[k];
+    }
+  }
+
+  const stillFailed = looksByGroup.filter((x) => x && x.failed).length;
   const t1 = performance.now();
   console.log(
-    `[DARKO LAB] STEP 4: looks coletados em ${Math.round(t1 - t0)}ms`,
+    `[DARKO LAB] STEP 4: looks coletados em ${Math.round(t1 - t0)}ms` +
+      (stillFailed ? ` (${stillFailed} grupo(s) ainda falharam apos retry)` : ''),
   );
   // Log de quantos looks por grupo
   for (const { group, looks } of looksByGroup) {
