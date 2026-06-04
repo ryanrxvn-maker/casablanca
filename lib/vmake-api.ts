@@ -166,6 +166,10 @@ function checkOk<T>(json: Envelope<T>, path: string): T {
   if (code === 10022 || /login|token|expire|unauthor/i.test(msg)) {
     throw new VmakeError('auth', `Sessão vmake expirada/sem permissão (${path}): ${msg}`);
   }
+  // Limite de tamanho do motor (ex.: "Please upload a video file within 300M.")
+  if (/within\s*\d+\s*M|too\s*large|exceed|file\s*size|size\s*limit|大于|过大/i.test(msg)) {
+    throw new VmakeError('too_large', `vmake recusou por tamanho em ${path}: code=${code} ${msg}`);
+  }
   throw new VmakeError('api_error', `vmake erro em ${path}: code=${code} ${msg}`);
 }
 
@@ -559,6 +563,7 @@ const CLIENT_MSG: Record<string, string> = {
   upload_failed: 'Falha ao enviar o vídeo. Tenta de novo.',
   upload_init_failed: 'Falha ao iniciar o envio. Tenta de novo.',
   submit_failed: 'Não consegui iniciar a remoção agora. Tenta de novo em instantes.',
+  too_large: 'Esse vídeo passa de 300MB, o limite do removedor. Comprime ou corta o vídeo e tenta de novo.',
   api_error: 'O serviço recusou a solicitação agora. Tenta de novo em instantes.',
   bad_response: 'A remoção instabilizou. Tenta de novo.',
   internal: 'Algo deu errado na remoção. Tenta de novo.',
@@ -572,6 +577,7 @@ const HTTP_STATUS: Record<string, number> = {
   upload_failed: 502,
   upload_init_failed: 502,
   submit_failed: 502,
+  too_large: 413,
   api_error: 502,
   bad_response: 502,
 };

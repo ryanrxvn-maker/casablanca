@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from 'react';
 
 const CHUNK_SIZE = 4 * 1024 * 1024;     // 4MB por parte (abaixo do limite da Vercel)
 const UPLOAD_CONCURRENCY = 4;           // chunks simultâneos (upload mais rápido)
-const MAX_VIDEO_BYTES = 5 * 1024 * 1024 * 1024; // 5GB
+const MAX_VIDEO_BYTES = 300 * 1024 * 1024; // 300MB — limite do motor de remoção (rejeita acima disso)
 
 // ─── tipos ───────────────────────────────────────────────────────────────────
 
@@ -89,7 +89,7 @@ export default function RemoverLegendaTool() {
 
   async function addVideo(file: File) {
     if (file.size > MAX_VIDEO_BYTES) {
-      setFormError(`Vídeo de ${(file.size / 1024 / 1024 / 1024).toFixed(1)}GB — o limite é 5GB.`);
+      setFormError(`Vídeo de ${(file.size / 1024 / 1024).toFixed(0)}MB — o limite é 300MB. Comprime ou corta o vídeo e tenta de novo.`);
       return;
     }
     const id = `v-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
