@@ -131,6 +131,57 @@ console.log('\nGARANTIA — auto-descoberta (toggle pegar todos) acha AD01 + AD0
 const auto = buildDisparosFromDoc(DOC, CANDS);
 ok(auto.detectedAdIds.includes('AD01PV') && auto.detectedAdIds.includes('AD02PV'), `bases = ${auto.detectedAdIds.join(', ')}`);
 
+// ───────────────────────────────────────────────────────────────────────────
+// GARANTIA — AD24G1VN - VRWA02 (2 locutores Doutor/Mulher alternando).
+// REGRESSAO real: nomenclatura com infixo de sibling COLADO no numero
+// ("AD24G1VN") fazia extractAdIds devolver base "AD24G" (pegava o "G" do
+// "G1" como sufixo). Base errada → findGSiblings("AD24G") nao casava o
+// heading "AD24G1VN" → parser DARKO devolvia 0 hooks/body → CAIA no parser
+// legado, que NAO segmenta por speaker → body inteiro num bloco roteado pro
+// 1o role do texto (a "Mulher"). Resultado em prod: video INTEIRO com a
+// mulher falando. Fix: tirar o infixo G<N> antes de extrair o sufixo.
+// ───────────────────────────────────────────────────────────────────────────
+const DOC_AD24 = `AD24G1VN - VRWA02
+Avatar:
+Doutor: @renatomartins1.mp4
+Mulher: @marcella.malvar2.mp4
+Doutor
+Tenha cuidado quando for fazer o viagra de pobre.
+BODY
+Mulher
+É óbvio que sempre vamos preferir os maiores e mais grossos.
+Doutor
+Por isso que a receita do viagra de pobre que passei pro meus pacientes está fazendo sucesso.
+Mulher
+Doutor, já tinha muito tempo que eu não sabia como era ter um orgasmo.
+Doutor
+As pessoas acreditam que a receita se faz de qualquer jeito. Clique aqui abaixo.`;
+
+const CANDS24: AvatarCandidate[] = [
+  { id: 'look_doc', name: 'Renato Doutor', groupName: 'g', voiceName: '@renatomartins1', voiceId: 'v_doc' },
+  { id: 'look_mul', name: 'Marcella Mulher', groupName: 'g', voiceName: '@marcella.malvar2', voiceId: 'v_mul' },
+];
+
+console.log('\nGARANTIA — AD24G1VN - VRWA02 (Doutor/Mulher NAO podem colapsar num só):');
+const r24 = buildDisparosFromNomenclatures(DOC_AD24, ['AD24G1VN - VRWA02'], CANDS24);
+ok(r24.disparos.length === 1, 'achou 1 disparo pro AD24G1VN - VRWA02');
+const d24 = r24.disparos[0];
+if (d24) {
+  ok(d24.fromDarkoBriefing, 'parseado pelo DARKO (NAO caiu no legado)');
+  const body24 = d24.parts.filter((p) => /^BODY/i.test(p.label));
+  ok(body24.length >= 4, `body segmentado por speaker (got ${body24.length} takes, esperado >=4)`);
+  // Nenhum take pode ter o label de speaker vazado como LINHA SOLTA. (Cuidado:
+  // "Doutor, já tinha muito tempo..." é fala legitima — vocativo, NAO label.)
+  ok(body24.every((p) => !/^[ \t]*(Doutor|Mulher)[ \t]*$/im.test(p.text)), 'nenhum take vaza label "Doutor"/"Mulher" como linha solta');
+  // Tem que ter os DOIS avatares no body — nao pode ser tudo a mulher.
+  const usaDoutor = body24.some((p) => p.avatarId === 'look_doc');
+  const usaMulher = body24.some((p) => p.avatarId === 'look_mul');
+  ok(usaDoutor && usaMulher, `body usa OS DOIS avatares (Doutor=${usaDoutor}, Mulher=${usaMulher}) — NAO so a mulher`);
+  // 1o segmento do body é da Mulher, o seguinte do Doutor (alternancia real).
+  ok(body24[0]?.avatarId === 'look_mul', '1o take do body = Mulher');
+  ok(body24.some((p, i) => i > 0 && p.avatarId === 'look_doc'), 'algum take seguinte = Doutor');
+}
+
 console.log('');
 if (fails > 0) {
   console.error(`✗ ${fails} assert(s) FALHARAM`);

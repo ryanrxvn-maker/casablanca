@@ -307,13 +307,23 @@ export function buildDisparoForAd(
  * do nome da task.
  *   "AD139GL - VFPB04"        → base "AD139GL", full "AD139GL - VFPB04"
  *   "AD15VN - PRPB06 - G1"    → base "AD15VN",  full "AD15VN - PRPB06"
+ *   "AD24G1VN - VRWA02"       → base "AD24VN",  full "AD24G1VN - VRWA02"
  */
 export function extractAdIds(nomenclature: string): { baseAdId: string; fullAdId: string } {
   const raw = nomenclature.trim();
   // Base = AD<num> + 1o bloco de letras (colado OU separado por espaco/traco).
   //   "AD139GL - VFPB04" → "AD139" + "GL"  (letras coladas vencem; ignora " - VFPB04")
   //   "AD01 - PV"        → "AD01"  + "PV"  (sem letra colada → pega "PV" após o traco)
-  const m = raw.match(/AD(\d+)\s*[-–—]?\s*([A-Za-z]+)/i);
+  //
+  // CRITICAL: tira o infixo de sibling G<N> ANTES de extrair o sufixo. Sem
+  // isso, "AD24G1VN" pegava "G" (do "G1") como sufixo → base "AD24G" errado,
+  // findGSiblings nunca casava (procura ...G<N>...G), o parser DARKO devolvia
+  // zero hooks/body e CAÍA no parser legado — que NAO segmenta por speaker.
+  // Resultado: body inteiro num bloco só, roteado pro 1o role do texto (a
+  // "Mulher") → video inteiro com a mulher falando. (G\d+ só casa o infixo
+  // de sibling — "GL" de "AD139GL" tem G+letra, nao G+digito, fica intacto.)
+  const norm = raw.replace(/G\d+/i, '');
+  const m = norm.match(/AD(\d+)\s*[-–—]?\s*([A-Za-z]+)/i);
   let baseAdId: string;
   if (m) {
     baseAdId = `AD${m[1]}${m[2].toUpperCase()}`;
