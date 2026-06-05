@@ -7,9 +7,11 @@ import RemoverLegendaTool from '@/components/tools/RemoverLegendaTool';
  * /tools/remover-elementos — Removedor de Legenda / Marca d'Água.
  *
  * AGORA: vmake Smart (server-side, conta do admin). SEM instalador, SEM
- * motor local. Mesmo modelo do lipsync — admin-only (profiles.is_admin).
+ * motor local. Mesmo modelo do lipsync — liberado pra Pro + Admin
+ * (profiles.tier = 'pro'/'beta' OU profiles.is_admin = true).
  *
- * "por enquanto isso só vai tá liberado pra admin".
+ * O bloqueio real é em camadas: middleware (PRO_ONLY_TOOLS) + requirePro()
+ * nas rotas /api/tools/remove-subtitle/*. Esta checagem é defesa extra.
  */
 
 export const dynamic = 'force-dynamic';
@@ -20,6 +22,7 @@ type Diag = {
   userId: string | null;
   profileFound: boolean;
   isAdmin: boolean;
+  isPro: boolean;
   isActive: boolean;
   profileError: string | null;
 };
@@ -33,20 +36,23 @@ async function checkAccess(): Promise<{ ok: true } | { ok: false; diag: Diag }> 
   if (!user) {
     return {
       ok: false,
-      diag: { authed: false, email: null, userId: null, profileFound: false, isAdmin: false, isActive: false, profileError: null },
+      diag: { authed: false, email: null, userId: null, profileFound: false, isAdmin: false, isPro: false, isActive: false, profileError: null },
     };
   }
 
   const { data: profile, error } = await supabase
     .from('profiles')
-    .select('is_admin, is_active')
+    .select('is_admin, is_active, tier')
     .eq('id', user.id)
     .maybeSingle();
 
   const isAdmin = Boolean(profile?.is_admin);
   const isActive = Boolean(profile?.is_active);
+  const rawTier = (profile as { tier?: string | null } | null)?.tier ?? '';
+  const isPro = rawTier === 'pro' || rawTier === 'beta';
 
-  if (isAdmin && isActive) return { ok: true };
+  // Liberado pra Pro + Admin (conta ativa).
+  if ((isAdmin || isPro) && isActive) return { ok: true };
 
   return {
     ok: false,
@@ -56,6 +62,7 @@ async function checkAccess(): Promise<{ ok: true } | { ok: false; diag: Diag }> 
       userId: user.id,
       profileFound: Boolean(profile),
       isAdmin,
+      isPro,
       isActive,
       profileError: error?.message ?? null,
     },
@@ -79,10 +86,12 @@ export default async function RemoverLegendaPage() {
               <div className="mono text-[10px] uppercase tracking-widest text-red-300">
                 Acesso negado · /tools/remover-elementos
               </div>
-              <h1 className="mt-1 text-2xl font-bold text-white">Esta ferramenta é admin-only</h1>
+              <h1 className="mt-1 text-2xl font-bold text-white">Esta ferramenta é Pro</h1>
               <p className="mt-1 text-[13px] text-text-muted">
-                Você está logado, mas sua conta não tem{' '}
-                <span className="mono text-white">profiles.is_admin = true</span> no Supabase.
+                Você está logado, mas sua conta não é{' '}
+                <span className="mono text-white">Pro</span> nem{' '}
+                <span className="mono text-white">Admin</span>. Faça upgrade em{' '}
+                <span className="mono text-white">/planos</span>.
               </p>
             </div>
 
@@ -95,6 +104,8 @@ export default async function RemoverLegendaPage() {
                 <span className="mono text-white break-all text-[11px]">{d.userId ?? '—'}</span>
                 <span className="text-text-muted">is_admin</span>
                 <span className={`mono ${d.isAdmin ? 'text-lime' : 'text-red-300'}`}>{String(d.isAdmin)}</span>
+                <span className="text-text-muted">is_pro</span>
+                <span className={`mono ${d.isPro ? 'text-lime' : 'text-red-300'}`}>{String(d.isPro)}</span>
                 <span className="text-text-muted">is_active</span>
                 <span className={`mono ${d.isActive ? 'text-lime' : 'text-red-300'}`}>{String(d.isActive)}</span>
               </div>

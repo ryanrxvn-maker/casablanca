@@ -13,7 +13,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/app/api/admin/_helpers';
+import { requirePro } from '@/app/api/admin/_helpers';
 import { uploadPart, vmakeErrorToHttp, type MultipartSession } from '@/lib/vmake-api';
 import { decryptSecret } from '@/lib/secrets';
 
@@ -24,7 +24,7 @@ export const maxDuration = 60;
 const MAX_CHUNK = 4.4 * 1024 * 1024;
 
 export async function POST(req: Request) {
-  const guard = await requireAdmin();
+  const guard = await requirePro();
   if (!guard.ok) return guard.response;
 
   const sessionToken = req.headers.get('x-vmk-session');
