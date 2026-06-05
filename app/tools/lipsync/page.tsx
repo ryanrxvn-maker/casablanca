@@ -4,12 +4,13 @@ import { createClient } from '@/lib/supabase/server';
 import LipSyncTool from '@/components/tools/LipSyncTool';
 
 /**
- * /tools/lipsync — Ferramenta admin-only.
+ * /tools/lipsync — Ferramenta Pro (Criar um avatar / lipsync).
  *
- * Usa o mesmo check que o resto do projeto: profiles.is_admin = true.
- * Em vez de redirect silencioso pra /tools, mostra uma pagina de
- * diagnostico explicito pra facilitar setup (sabe se o problema eh
- * login expirado, falta is_admin no DB, ou conta inativa).
+ * Liberada pra Pro + Admin (profiles.tier = 'pro'/'beta' OU is_admin).
+ * O bloqueio real é em camadas: middleware (PRO_ONLY_TOOLS) +
+ * requireToolAccess('/tools/lipsync','pro') nas rotas /api/tools/lipsync/*.
+ * Esta checagem é defesa extra; em vez de redirect silencioso pra /tools,
+ * mostra diagnostico explicito (login expirado, tier insuficiente, inativa).
  */
 
 export const dynamic = 'force-dynamic';
@@ -20,6 +21,7 @@ type Diag = {
   userId: string | null;
   profileFound: boolean;
   isAdmin: boolean;
+  isPro: boolean;
   isActive: boolean;
   profileError: string | null;
 };
@@ -39,6 +41,7 @@ async function checkAccess(): Promise<{ ok: true } | { ok: false; diag: Diag }> 
         userId: null,
         profileFound: false,
         isAdmin: false,
+        isPro: false,
         isActive: false,
         profileError: null,
       },
@@ -47,14 +50,17 @@ async function checkAccess(): Promise<{ ok: true } | { ok: false; diag: Diag }> 
 
   const { data: profile, error } = await supabase
     .from('profiles')
-    .select('is_admin, is_active')
+    .select('is_admin, is_active, tier')
     .eq('id', user.id)
     .maybeSingle();
 
   const isAdmin = Boolean(profile?.is_admin);
   const isActive = Boolean(profile?.is_active);
+  const rawTier = (profile as { tier?: string | null } | null)?.tier ?? '';
+  const isPro = rawTier === 'pro' || rawTier === 'beta';
 
-  if (isAdmin && isActive) {
+  // Liberado pra Pro + Admin (conta ativa).
+  if ((isAdmin || isPro) && isActive) {
     return { ok: true };
   }
 
@@ -66,6 +72,7 @@ async function checkAccess(): Promise<{ ok: true } | { ok: false; diag: Diag }> 
       userId: user.id,
       profileFound: Boolean(profile),
       isAdmin,
+      isPro,
       isActive,
       profileError: error?.message ?? null,
     },
@@ -91,11 +98,13 @@ export default async function LipSyncPage() {
                 Acesso negado · /tools/lipsync
               </div>
               <h1 className="mt-1 text-2xl font-bold text-white">
-                Esta ferramenta eh admin-only
+                Esta ferramenta eh Pro
               </h1>
               <p className="mt-1 text-[13px] text-text-muted">
-                Voce esta logado, mas sua conta nao tem{' '}
-                <span className="mono text-white">profiles.is_admin = true</span> no Supabase.
+                Voce esta logado, mas sua conta nao eh{' '}
+                <span className="mono text-white">Pro</span> nem{' '}
+                <span className="mono text-white">Admin</span>. Faca upgrade em{' '}
+                <span className="mono text-white">/planos</span>.
               </p>
             </div>
 
@@ -116,6 +125,10 @@ export default async function LipSyncPage() {
                 <span className={`mono ${d.isAdmin ? 'text-lime' : 'text-red-300'}`}>
                   {String(d.isAdmin)}
                 </span>
+                <span className="text-text-muted">is_pro</span>
+                <span className={`mono ${d.isPro ? 'text-lime' : 'text-red-300'}`}>
+                  {String(d.isPro)}
+                </span>
                 <span className="text-text-muted">is_active</span>
                 <span className={`mono ${d.isActive ? 'text-lime' : 'text-red-300'}`}>
                   {String(d.isActive)}
@@ -131,39 +144,23 @@ export default async function LipSyncPage() {
 
             <div className="rounded-[10px] border border-cyan-500/40 bg-cyan-500/5 p-4 space-y-2 text-[12px] text-cyan-100">
               <div className="mono text-[10px] uppercase tracking-widest text-cyan-300">
-                Como liberar (Supabase dashboard)
+                Como liberar
               </div>
-              <ol className="list-decimal pl-5 space-y-1">
-                <li>Abra o Supabase do projeto CASABLANCA.</li>
-                <li>
-                  Table editor →{' '}
-                  <span className="mono rounded bg-bg/50 px-1.5 py-0.5">profiles</span>
-                </li>
-                <li>
-                  Procure a linha onde{' '}
-                  <span className="mono rounded bg-bg/50 px-1.5 py-0.5 break-all">
-                    id = {d.userId ?? '<seu user id acima>'}
-                  </span>
-                </li>
-                <li>
-                  Marque{' '}
-                  <span className="mono rounded bg-bg/50 px-1.5 py-0.5">is_admin = true</span>{' '}
-                  e{' '}
-                  <span className="mono rounded bg-bg/50 px-1.5 py-0.5">is_active = true</span>
-                </li>
-                <li>Salve, atualize esta pagina.</li>
-              </ol>
-              <div className="mt-2 text-[11px] text-cyan-200/80">
-                Atalho via SQL editor:
-                <pre className="mt-1 rounded bg-bg/60 p-2 mono text-[11px] text-white overflow-x-auto">
-{`update profiles
-set is_admin = true, is_active = true
-where id = '${d.userId ?? '<seu-user-id>'}';`}
-                </pre>
-              </div>
+              <p>
+                A ferramenta de criar avatar (lipsync) faz parte do plano{' '}
+                <span className="mono text-white">Pro</span>. Assine ou faca
+                upgrade em <span className="mono text-white">/planos</span> pra
+                liberar o acesso na hora.
+              </p>
             </div>
 
             <div className="flex gap-2">
+              <Link
+                href="/planos"
+                className="mono rounded-lg border border-lime/60 px-4 py-2 text-[11px] uppercase tracking-widest text-lime hover:bg-lime/10"
+              >
+                Fazer upgrade pra Pro →
+              </Link>
               <Link
                 href="/tools"
                 className="mono rounded-lg border border-line-strong px-4 py-2 text-[11px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"

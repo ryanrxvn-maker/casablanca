@@ -16,7 +16,7 @@
  * ANTI-BLOQUEIO: ver lib/dreamface-api.ts e lib/dreamface-queue.ts.
  *   O IP do usuário final nunca chega no DreamFace — é tudo server-side.
  *
- * Admin-only (requireAdmin).
+ * Pro + Admin (requireToolAccess('/tools/lipsync','pro')).
  */
 
 import { NextResponse } from 'next/server';

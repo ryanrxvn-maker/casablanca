@@ -13,7 +13,7 @@ export const MAINTENANCE_TOOLS: readonly string[] = [
   '/tools/separador-audio',
   '/tools/troca-produto',
   // '/tools/remover-elementos', — FORA de manutenção: liberado pra Pro + Admin
-  '/tools/lipsync', // PRO-only; liberada só pro admin + emails do allowlist
+  // '/tools/lipsync', — FORA de manutenção: liberado pra Pro + Admin
 ];
 
 /** True se o path (ou um sub-path dele) está em manutenção. */
