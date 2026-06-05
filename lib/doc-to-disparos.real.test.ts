@@ -141,12 +141,20 @@ ok(auto.detectedAdIds.includes('AD01PV') && auto.detectedAdIds.includes('AD02PV'
 // 1o role do texto (a "Mulher"). Resultado em prod: video INTEIRO com a
 // mulher falando. Fix: tirar o infixo G<N> antes de extrair o sufixo.
 // ───────────────────────────────────────────────────────────────────────────
-const DOC_AD24 = `AD24G1VN - VRWA02
-Avatar:
-Doutor: @renatomartins1.mp4
-Mulher: @marcella.malvar2.mp4
+// Formato REAL do doc (AD24 à 31): "Link do avatar:" como header vazio +
+// 2 linhas "Role: filename.mp4". CRITICAL: o avatar do Doutor tem ID 100%
+// NUMERICO (talking-photo do HeyGen) — parseAvatars barrava all-digit e
+// DROPAVA o Doutor, sobrando so a Mulher. Por isso o video saia todo dela.
+const DOC_AD24 = `AD24VN - VRWA02
+Link do avatar:
+Doutor: 7558713641210531102.mp4 - Clonar voz
+Mulher: gihribeiroo20.mp4 - clonar voz
+
+Instruções para edição:
+O criativo vai rodar só pra youtube, faz a edição básica.
+	AD24G1VN - VRWA02
 Doutor
-Tenha cuidado quando for fazer o viagra de pobre.
+Tenha cuidado quando for fazer o viagra de pobre, ele pode aumentar demais o seu pinto.
 BODY
 Mulher
 É óbvio que sempre vamos preferir os maiores e mais grossos.
@@ -158,8 +166,9 @@ Doutor
 As pessoas acreditam que a receita se faz de qualquer jeito. Clique aqui abaixo.`;
 
 const CANDS24: AvatarCandidate[] = [
-  { id: 'look_doc', name: 'Renato Doutor', groupName: 'g', voiceName: '@renatomartins1', voiceId: 'v_doc' },
-  { id: 'look_mul', name: 'Marcella Mulher', groupName: 'g', voiceName: '@marcella.malvar2', voiceId: 'v_mul' },
+  // Doutor = talking-photo (ID numerico casado pelo id cru). Mulher por voice_name.
+  { id: '7558713641210531102', name: 'Photo Avatar Doutor', groupName: 'g', voiceName: '@doutorvoz', voiceId: 'v_doc' },
+  { id: 'look_mul', name: 'Gih Mulher', groupName: 'g', voiceName: '@gihribeiroo20', voiceId: 'v_mul' },
 ];
 
 console.log('\nGARANTIA — AD24G1VN - VRWA02 (Doutor/Mulher NAO podem colapsar num só):');
@@ -173,13 +182,15 @@ if (d24) {
   // Nenhum take pode ter o label de speaker vazado como LINHA SOLTA. (Cuidado:
   // "Doutor, já tinha muito tempo..." é fala legitima — vocativo, NAO label.)
   ok(body24.every((p) => !/^[ \t]*(Doutor|Mulher)[ \t]*$/im.test(p.text)), 'nenhum take vaza label "Doutor"/"Mulher" como linha solta');
+  // O avatar do Doutor (talking-photo numerico) NAO pode ser dropado.
+  ok(d24.parts.some((p) => p.role?.toLowerCase() === 'doutor'), 'existe take com role Doutor (avatar numerico nao foi dropado)');
   // Tem que ter os DOIS avatares no body — nao pode ser tudo a mulher.
-  const usaDoutor = body24.some((p) => p.avatarId === 'look_doc');
+  const usaDoutor = body24.some((p) => p.avatarId === '7558713641210531102');
   const usaMulher = body24.some((p) => p.avatarId === 'look_mul');
   ok(usaDoutor && usaMulher, `body usa OS DOIS avatares (Doutor=${usaDoutor}, Mulher=${usaMulher}) — NAO so a mulher`);
   // 1o segmento do body é da Mulher, o seguinte do Doutor (alternancia real).
   ok(body24[0]?.avatarId === 'look_mul', '1o take do body = Mulher');
-  ok(body24.some((p, i) => i > 0 && p.avatarId === 'look_doc'), 'algum take seguinte = Doutor');
+  ok(body24.some((p, i) => i > 0 && p.avatarId === '7558713641210531102'), 'algum take seguinte = Doutor (talking-photo)');
 }
 
 console.log('');

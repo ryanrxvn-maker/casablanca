@@ -317,10 +317,14 @@ export function parseAvatars(section: string): ParsedAvatar[] {
       const role = m1[1].trim();
       // Strip extensao .mp4/.mov caso o regex greedy tenha incluido
       let username = (m1[2] || m1[3] || '').trim().replace(/\.(mp4|mov)$/i, '');
+      // Talking-photo do HeyGen tem ID 100% numerico (ex "7558713641210531102").
+      // O guard !/^\d+$/ existe pra barrar numero solto ("Doutor: 10" = duracao),
+      // mas quando a linha tem .mp4/.mov o numero E o filename do avatar — aceita.
+      const hadVideoExt = /\.(mp4|mov)\b/i.test(trimmed);
       if (isPlausibleAvatarRole(role) &&
           username.length >= 3 &&
           !/^(http|https|www|exemplo|ex)$/i.test(username) &&
-          !/^\d+$/.test(username) &&
+          (!/^\d+$/.test(username) || hadVideoExt) &&
           !/^AD\d+VN/i.test(username)) {
         out.push({ role, username, raw: trimmed });
         pendingRole = null;
@@ -362,10 +366,13 @@ export function parseAvatars(section: string): ParsedAvatar[] {
           .replace(/[,\s]+$/, '')             // virgula/espaco trailing
           .replace(/\s+/g, ' ')
           .trim();
+        // Talking-photo numerico ("Doutor: 7558713641210531102.mp4") e avatar
+        // valido — so relaxa o guard de all-digit quando ha extensao de video.
+        const hadVideoExt = /\.(mp4|mov)\b/i.test(raw);
         if (isPlausibleAvatarRole(role) &&
             username.length >= 3 &&
             !/^(http|https|www|exemplo|ex)$/i.test(username) &&
-            !/^\d+$/.test(username) &&
+            (!/^\d+$/.test(username) || hadVideoExt) &&
             !/^AD\d+VN/i.test(username)) {
           out.push({ role, username, raw: trimmed });
           pendingRole = null;
