@@ -556,37 +556,78 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                   pulse={!isRebuilding}
                 />
               ) : null}
-              {(takesUrl || montadoUrl || camufladoUrl) ? (() => {
-                const downloads = [
-                  takesUrl ? { url: takesUrl, name: takesFilename } : null,
+              {(montadoUrl || camufladoUrl) ? (() => {
+                // DOWNLOAD = so o(s) MP4 final(is). Entrega o montado/decupado e,
+                // se houver, o camuflado — SEMPRE como .mp4 solto. Nunca o
+                // takes.zip, nunca .zip. Fontes que ja sao .mp4 (TROCA) baixam
+                // direto; fontes .zip (lipsync/VA) tem os .mp4 extraidos de dentro.
+                const sources = [
                   montadoUrl ? { url: montadoUrl, name: montadoFilename } : null,
                   camufladoUrl ? { url: camufladoUrl, name: camufladoFilename } : null,
                 ].filter(Boolean) as Array<{ url: string; name?: string }>;
-                const total = downloads.length;
-                const handleDownloadAll = () => {
-                  downloads.forEach((d, i) => {
+
+                const triggerDownload = (url: string, name: string) => {
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = name;
+                  a.rel = 'noopener';
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                };
+
+                const handleDownloadAll = async () => {
+                  const out: Array<{ url: string; name: string; revoke?: boolean }> = [];
+                  for (const src of sources) {
+                    const fname = src.name || 'video.mp4';
+                    if (/\.mp4$/i.test(fname)) {
+                      // Ja e MP4 direto (ex: TROCA) — baixa como esta.
+                      out.push({ url: src.url, name: fname });
+                      continue;
+                    }
+                    // .zip (lipsync/VA): extrai os .mp4 de dentro.
+                    try {
+                      const blob = await fetch(src.url).then((r) => r.blob());
+                      const JSZip = (await import('jszip')).default;
+                      const zip = await JSZip.loadAsync(blob);
+                      const entries = Object.values(zip.files).filter(
+                        (f: any) => !f.dir && /\.mp4$/i.test(f.name),
+                      );
+                      if (entries.length === 0) {
+                        // Sem MP4 dentro (pipeline falhou / so diagnostico) —
+                        // cai pro zip mesmo pra nao deixar o botao mudo.
+                        out.push({ url: src.url, name: fname });
+                        continue;
+                      }
+                      for (const e of entries as any[]) {
+                        const b = await e.async('blob');
+                        const mp4 = new Blob([b], { type: 'video/mp4' });
+                        const u = URL.createObjectURL(mp4);
+                        const base = (e.name.split('/').pop() || e.name) as string;
+                        out.push({ url: u, name: base, revoke: true });
+                      }
+                    } catch {
+                      // Nao era zip valido (ou fetch falhou) — baixa o que tem.
+                      out.push({ url: src.url, name: fname });
+                    }
+                  }
+                  out.forEach((m, i) => {
                     setTimeout(() => {
-                      const a = document.createElement('a');
-                      a.href = d.url;
-                      if (d.name) a.download = d.name;
-                      a.rel = 'noopener';
-                      document.body.appendChild(a);
-                      a.click();
-                      document.body.removeChild(a);
-                    }, i * 220); // 220ms entre disparos = Chrome aceita sem prompt
+                      triggerDownload(m.url, m.name);
+                      if (m.revoke) {
+                        setTimeout(() => { try { URL.revokeObjectURL(m.url); } catch {} }, 60_000);
+                      }
+                    }, i * 250); // 250ms entre disparos = Chrome aceita sem prompt
                   });
                 };
-                const tooltip = isPartialDone
-                  ? `Baixar tudo (parcial · ${total} arquivo${total === 1 ? '' : 's'})`
-                  : total === 1
-                    ? 'Baixar'
-                    : `Baixar tudo (${total} arquivos)`;
+
+                const tooltip = isPartialDone ? 'Baixar MP4 (parcial)' : 'Baixar MP4';
                 return (
                   <Btn3D
                     icon={<IconDownload size={16} />}
                     color="lime"
                     title={tooltip}
-                    onClick={handleDownloadAll}
+                    onClick={() => void handleDownloadAll()}
                   />
                 );
               })() : null}
