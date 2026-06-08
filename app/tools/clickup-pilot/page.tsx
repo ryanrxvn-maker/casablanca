@@ -2328,32 +2328,54 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         } catch {}
       }
 
-      if (!allCached) {
-        setBatchStates((prev) => ({
-          ...prev,
-          [taskId]: { ...prev[taskId], phase: 'rendering', message: `Re-checando ${validIds.length} videos no HeyGen (${cachedCount} já em cache)...` },
-        }));
-        finalStatuses = await pollVideosUntilReady(validIds, {
-          intervalMs: 8000,
-          timeoutMs: 30 * 60 * 1000,
-          // Zombie detection: video stuck >15min vira 'failed' automatico
-          maxPendingMsPerId: 15 * 60 * 1000,
-          isCancelled: () => !!batchCancelRef.current[taskId],
-          onStatus: (st) => {
-            const done = Object.values(st).filter((s) => s.status === 'completed').length;
-            setBatchStates((prev) => {
-              const s = prev[taskId];
-              if (!s) return prev;
-              const newParts = s.parts.map((p) => {
-                const ps = p.videoId ? st[p.videoId] : null;
-                return ps ? { ...p, videoStatus: ps.status, videoUrl: ps.status === 'completed' ? ps.videoUrl || null : p.videoUrl ?? null } : p;
-              });
-              return { ...prev, [taskId]: { ...s, parts: newParts, message: `Renderizando: ${done}/${validIds.length} prontos` } };
-            });
-          },
-        });
+      // ── PARTES NUNCA DISPARADAS (fix 2026-06-08 — AD31GL ficou 8/9) ──
+      // Parte com replan dispatchavel (texto + avatar) mas SEM videoId: o
+      // dispatch falhou de vez (cota/limite HeyGen, erro antes do submit), entao
+      // ela nunca entrou no poll nem no cache. Diferente de "zombie" (TEM videoId
+      // mas o render travou). Antes, o RETOMAR so re-checava os videoIds salvos
+      // e remontava sem essa parte → "Incompleto — clica Retomar" eterno, sem
+      // jeito de fechar. Agora detectamos e re-disparamos no mesmo loop abaixo.
+      // Parte VAZIA legitima ("(vazio)") tem text vazio → NUNCA entra aqui.
+      const hasUndispatched = !!state.replan?.parts?.length && state.parts.some((p, i) => {
+        if (cachedIdxs.has(i) || p.videoId) return false;
+        const rp = state.replan!.parts[i];
+        return !!rp && (rp.text || '').trim().length > 0 && !!rp.avatarId;
+      });
 
-        // ═══ AUTO RE-DISPATCH DE ZOMBIES (fix 2026-05-30) ═══
+      // Entra no bloco se faltam renders (nao-cacheados) OU ha partes nunca
+      // disparadas. So `!allCached` nao basta: a parte que nunca disparou nao
+      // conta em validParts, entao allCached pode ser `true` faltando 1 corte.
+      if (!allCached || hasUndispatched) {
+        // So re-polla os videoIds salvos se realmente faltam renders. Se ja
+        // esta tudo em cache (allCached) e o unico pendente e' re-dispatch,
+        // pula o poll e vai direto pro loop de re-dispatch abaixo.
+        if (!allCached && validIds.length > 0) {
+          setBatchStates((prev) => ({
+            ...prev,
+            [taskId]: { ...prev[taskId], phase: 'rendering', message: `Re-checando ${validIds.length} videos no HeyGen (${cachedCount} já em cache)...` },
+          }));
+          finalStatuses = await pollVideosUntilReady(validIds, {
+            intervalMs: 8000,
+            timeoutMs: 30 * 60 * 1000,
+            // Zombie detection: video stuck >15min vira 'failed' automatico
+            maxPendingMsPerId: 15 * 60 * 1000,
+            isCancelled: () => !!batchCancelRef.current[taskId],
+            onStatus: (st) => {
+              const done = Object.values(st).filter((s) => s.status === 'completed').length;
+              setBatchStates((prev) => {
+                const s = prev[taskId];
+                if (!s) return prev;
+                const newParts = s.parts.map((p) => {
+                  const ps = p.videoId ? st[p.videoId] : null;
+                  return ps ? { ...p, videoStatus: ps.status, videoUrl: ps.status === 'completed' ? ps.videoUrl || null : p.videoUrl ?? null } : p;
+                });
+                return { ...prev, [taskId]: { ...s, parts: newParts, message: `Renderizando: ${done}/${validIds.length} prontos` } };
+              });
+            },
+          });
+        }
+
+        // ═══ AUTO RE-DISPATCH DE ZOMBIES + NUNCA-DISPARADAS (fix 2026-05-30 / 2026-06-08) ═══
         // Se algumas parts vieram 'failed' do polling (zombie killed ou timeout)
         // E nao temos blob cacheado dela E temos replan → re-dispara via
         // runHeyGenJobs em uma rodada. Maximo 2 rodadas pra cap loop infinito.
@@ -2362,15 +2384,20 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           if (batchCancelRef.current[taskId]) break;
           if (!state.replan?.parts?.length) break;
 
-          // Coleta parts q ainda nao tem video bom (failed + sem cache)
+          // Coleta parts q ainda nao tem video bom: (a) zombie = TEM videoId mas
+          // render veio 'failed'; (b) nunca-disparada = SEM videoId mas o replan
+          // diz que deveria gerar (texto + avatar). Ambas precisam re-disparar.
+          // Parte VAZIA legitima ("(vazio)") tem text vazio → fica de fora.
           const zombieIdxs: number[] = [];
           for (let i = 0; i < state.parts.length; i++) {
             if (cachedIdxs.has(i)) continue;
+            const rp = state.replan.parts[i];
+            if (!rp || !(rp.text || '').trim() || !rp.avatarId) continue;
             const p = state.parts[i];
             const st = p.videoId ? finalStatuses[p.videoId] : null;
-            if (st?.status === 'failed' && state.replan.parts[i]) {
-              zombieIdxs.push(i);
-            }
+            const neverDispatched = !p.videoId;        // dispatch falhou de vez
+            const renderFailed = st?.status === 'failed'; // zombie classico
+            if (neverDispatched || renderFailed) zombieIdxs.push(i);
           }
           if (zombieIdxs.length === 0) break;
 
