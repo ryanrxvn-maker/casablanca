@@ -248,7 +248,10 @@ function genFamilyUUID(): string {
   });
 }
 
-export async function generateImage(input: ImageGenInput): Promise<CreationResult> {
+export async function generateImage(
+  input: ImageGenInput,
+  sharedPoller?: BatchPoller,
+): Promise<CreationResult> {
   const uid = await getUserId();
   const model = input.model || DEFAULT_IMAGE_MODEL;
   const aspectRatio = input.aspectRatio || '9:16';
@@ -296,12 +299,20 @@ export async function generateImage(input: ImageGenInput): Promise<CreationResul
   const rendered = r.json() as { creation?: { identifier?: string } };
   if (!rendered.creation?.identifier) throw new Error('render/v4 sem identifier');
 
+  // Poll — usa poller compartilhado se fornecido (1 request batched p/ TODOS
+  // os takes em voo, em vez de N loops competindo pela ponte da extensão).
+  if (sharedPoller) {
+    return sharedPoller.poll(rendered.creation.identifier, POLL_TIMEOUT_IMG_MS);
+  }
   return pollCreation(rendered.creation.identifier, POLL_TIMEOUT_IMG_MS);
 }
 
 /* ────────── Video ────────── */
 
-export async function generateVideoFromImage(input: VideoGenInput): Promise<CreationResult> {
+export async function generateVideoFromImage(
+  input: VideoGenInput,
+  sharedPoller?: BatchPoller,
+): Promise<CreationResult> {
   const uid = await getUserId();
   const model = input.model || DEFAULT_VIDEO_MODEL;
   const aspectRatio = input.aspectRatio || '9:16';
@@ -363,6 +374,9 @@ export async function generateVideoFromImage(input: VideoGenInput): Promise<Crea
   const j = r.json() as { data?: { creations?: Array<{ identifier: string }> } };
   const id = j.data?.creations?.[0]?.identifier;
   if (!id) throw new Error('generate video sem identifier');
+  if (sharedPoller) {
+    return sharedPoller.poll(id, POLL_TIMEOUT_VID_MS);
+  }
   return pollCreation(id, POLL_TIMEOUT_VID_MS);
 }
 

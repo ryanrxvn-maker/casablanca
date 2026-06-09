@@ -339,7 +339,7 @@ export async function runMagnificPipelineV2(
           resolution: '1k',
           smartPrompt: true,
           seed: Math.floor(Math.random() * 1_000_000),
-        });
+        }, poller);
         noteProgress();
         if (img.status === 'completed' && img.url) return { url: img.url };
         lastErr = new Error(`Magnific status:${img.status}`);
@@ -407,7 +407,7 @@ export async function runMagnificPipelineV2(
           aspectRatio: '9:16',
           resolution: '720p',
           duration: 10,
-        });
+        }, poller);
         noteProgress();
         if (vid.status === 'completed' && vid.url) return { url: vid.url };
         lastErr = new Error(`Magnific status:${vid.status}`);
