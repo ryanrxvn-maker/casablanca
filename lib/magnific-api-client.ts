@@ -72,6 +72,18 @@ const POLL_TIMEOUT_IMG_MS = 600_000; // 10min — Nano Banana raramente passa de
 const POLL_TIMEOUT_VID_MS = 5_400_000; // 90min — Kling 2.5 sob carga MUITO pesada chega 30-60min;
                                        // damos folga generosa. User pediu "esperar em paz".
 
+// "Render fantasma": o client pula start-tti-v2 (reserva) e chama render/v4
+// direto. Sob carga (40 takes), parte das gerações é ACEITA (devolve
+// identifier) mas a Magnific nunca enfileira o job — o id NUNCA aparece em
+// /creations. Antes isso só era detectado ao bater o timeout cheio (10min)
+// -> "Polling timeout". Agora: se um id nunca foi visto em /creations dentro
+// desse prazo curto, declaramos fantasma e o caller RE-DISPARA na hora (novo
+// render/v4 = novo id, quase sempre enfileira). Custo zero no Unlimited.
+// Um render REAL aparece como 'pending' em poucos segundos, então 90s é folga
+// enorme: só pega fantasma de verdade, nunca mata render vivo-porém-lento.
+const NOT_SEEN_TIMEOUT_IMG_MS = 90_000;  // 90s sem aparecer = fantasma -> re-dispara
+const NOT_SEEN_TIMEOUT_VID_MS = 180_000; // 180s (vídeo demora mais p/ registrar)
+
 /* ────────── User id / conta ativa ────────── */
 
 export type MagnificAccount = {
@@ -301,10 +313,12 @@ export async function generateImage(
 
   // Poll — usa poller compartilhado se fornecido (1 request batched p/ TODOS
   // os takes em voo, em vez de N loops competindo pela ponte da extensão).
+  // notSeenTimeout: se o id nunca aparecer em /creations em 90s = fantasma,
+  // rejeita rápido p/ o caller re-disparar (em vez de esperar 10min à toa).
   if (sharedPoller) {
-    return sharedPoller.poll(rendered.creation.identifier, POLL_TIMEOUT_IMG_MS);
+    return sharedPoller.poll(rendered.creation.identifier, POLL_TIMEOUT_IMG_MS, NOT_SEEN_TIMEOUT_IMG_MS);
   }
-  return pollCreation(rendered.creation.identifier, POLL_TIMEOUT_IMG_MS);
+  return pollCreation(rendered.creation.identifier, POLL_TIMEOUT_IMG_MS, NOT_SEEN_TIMEOUT_IMG_MS);
 }
 
 /* ────────── Video ────────── */
@@ -375,9 +389,9 @@ export async function generateVideoFromImage(
   const id = j.data?.creations?.[0]?.identifier;
   if (!id) throw new Error('generate video sem identifier');
   if (sharedPoller) {
-    return sharedPoller.poll(id, POLL_TIMEOUT_VID_MS);
+    return sharedPoller.poll(id, POLL_TIMEOUT_VID_MS, NOT_SEEN_TIMEOUT_VID_MS);
   }
-  return pollCreation(id, POLL_TIMEOUT_VID_MS);
+  return pollCreation(id, POLL_TIMEOUT_VID_MS, NOT_SEEN_TIMEOUT_VID_MS);
 }
 
 /* ────────── Batch polling ────────── */
@@ -422,8 +436,20 @@ export async function pollCreationsBatch(
   return map;
 }
 
+/** Erro de "render fantasma": id aceito pelo render/v4 mas que nunca apareceu
+ *  em /creations dentro do prazo curto. O caller deve RE-DISPARAR (gera id
+ *  novo). É distinto de um timeout normal (job real que demorou). */
+export class GhostRenderError extends Error {
+  constructor(id: string, secs: number) {
+    super(`Render fantasma: ${id} nunca apareceu em /creations após ${secs}s — re-disparando`);
+    this.name = 'GhostRenderError';
+  }
+}
+
 export type BatchPoller = {
-  poll(identifier: string, timeoutMs: number): Promise<CreationResult>;
+  /** notSeenTimeoutMs: se o id nunca aparecer em /creations nesse prazo,
+   *  rejeita com GhostRenderError (caller re-dispara). Default: sem detecção. */
+  poll(identifier: string, timeoutMs: number, notSeenTimeoutMs?: number): Promise<CreationResult>;
   stop(): void;
   activeCount(): number;
 };
@@ -433,6 +459,8 @@ export function createBatchPoller(): BatchPoller {
     identifier: string;
     deadline: number;       // absolute timestamp ms (extended on outages)
     startedAt: number;
+    everSeen: boolean;      // já apareceu (qualquer status) em /creations?
+    notSeenDeadline: number; // se !everSeen e passar disso = fantasma. Infinity = desabilitado
     resolve: (r: CreationResult) => void;
     reject: (e: Error) => void;
   };
@@ -444,6 +472,12 @@ export function createBatchPoller(): BatchPoller {
     if (stopped) return;
     const now = Date.now();
     for (const [id, sub] of subs) {
+      // Fantasma: nunca foi visto E estourou o prazo curto de "não-visto".
+      if (!sub.everSeen && now > sub.notSeenDeadline) {
+        subs.delete(id);
+        sub.reject(new GhostRenderError(id, Math.round((now - sub.startedAt) / 1000)));
+        continue;
+      }
       if (now > sub.deadline) {
         subs.delete(id);
         sub.reject(new Error(`Polling timeout pra ${id} após ${Math.round((now - sub.startedAt)/60000)}min`));
@@ -458,16 +492,19 @@ export function createBatchPoller(): BatchPoller {
       // FETCH FALHOU — extension/rede problema. Estende o deadline de TODAS
       // as subs em uso pelo tempo que ficamos sem conseguir polar (= 1 tick).
       // Assim "esperar em paz" mesmo durante outages de rede: deadline não
-      // consome quando a gente nem consegue checar status.
+      // consome quando a gente nem consegue checar status. Também adia o
+      // prazo de fantasma: não dá pra acusar fantasma se nem conseguimos ler.
       console.warn(`[magnific-batch] tick falhou (estendendo deadlines):`, (e as Error)?.message);
       for (const sub of subs.values()) {
         sub.deadline += POLL_INTERVAL_MS + 1000; // estende +tick + buffer
+        if (!sub.everSeen) sub.notSeenDeadline += POLL_INTERVAL_MS + 1000;
       }
       return;
     }
     for (const [id, sub] of subs) {
       const r = m.get(id);
-      if (!r) continue;
+      if (!r) continue;          // ainda não apareceu (race após render OU fantasma)
+      sub.everSeen = true;       // apareceu (pending/completed/failed) → não é fantasma
       if (r.status === 'completed' && r.url) {
         subs.delete(id);
         sub.resolve(r);
@@ -486,11 +523,19 @@ export function createBatchPoller(): BatchPoller {
   }
 
   return {
-    poll(identifier, timeoutMs) {
+    poll(identifier, timeoutMs, notSeenTimeoutMs) {
       if (stopped) return Promise.reject(new Error('Poller parado.'));
       return new Promise((resolve, reject) => {
         const now = Date.now();
-        subs.set(identifier, { identifier, deadline: now + timeoutMs, startedAt: now, resolve, reject });
+        subs.set(identifier, {
+          identifier,
+          deadline: now + timeoutMs,
+          startedAt: now,
+          everSeen: false,
+          notSeenDeadline: notSeenTimeoutMs ? now + notSeenTimeoutMs : Infinity,
+          resolve,
+          reject,
+        });
         ensure();
       });
     },
@@ -509,10 +554,14 @@ export function createBatchPoller(): BatchPoller {
   };
 }
 
-async function pollCreation(identifier: string, timeoutMs: number): Promise<CreationResult> {
+async function pollCreation(
+  identifier: string,
+  timeoutMs: number,
+  notSeenTimeoutMs?: number,
+): Promise<CreationResult> {
   const p = createBatchPoller();
   try {
-    return await p.poll(identifier, timeoutMs);
+    return await p.poll(identifier, timeoutMs, notSeenTimeoutMs);
   } finally {
     p.stop();
   }

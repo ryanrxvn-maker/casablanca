@@ -140,6 +140,7 @@ function isRetryableError(e: unknown): boolean {
   }
   // Tudo que parece rede/server/limit = retryable
   return (
+    msg.includes('fantasma') ||           // render fantasma → re-disparar (id novo)
     msg.includes('429') ||
     msg.includes('too many') ||
     msg.includes('rate limit') ||
@@ -169,6 +170,14 @@ function isRetryableError(e: unknown): boolean {
 function isConcurrentExceeded(e: unknown): boolean {
   const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
   return msg.includes('exceeded concurrent') || msg.includes('rate_limit_exceeded');
+}
+
+/** True se é "render fantasma" (aceito mas nunca enfileirado pela Magnific).
+ *  Cura = re-disparar JÁ (id novo quase sempre enfileira). NÃO é 429, então
+ *  não merece backoff longo nem cooldown global. */
+function isGhostRender(e: unknown): boolean {
+  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  return msg.includes('fantasma');
 }
 
 /** Backoff escalonado pra erros transientes. Início suave (3s) pra não
@@ -351,19 +360,24 @@ export async function runMagnificPipelineV2(
         if (isRetryableError(e)) {
           netAttempt++;
           if (netAttempt > MAX_RETRIES_NETWORK) throw lastErr;
+          // FANTASMA: render aceito mas nunca enfileirado. Re-dispara JÁ (id
+          // novo cola). Backoff curtinho, SEM cooldown global (não é 429).
+          const isGhost = isGhostRender(e);
           // SE eh "exceeded concurrent" → backoff AGRESSIVO + propaga cooldown
           // GLOBAL pros outros workers tambem pausarem (senao ficam empurrando
           // mais requests e Magnific re-rejeita).
           const isConcurrent = isConcurrentExceeded(e);
-          const waitMs = isConcurrent ? backoffConcurrentMs(netAttempt) : backoffMs(netAttempt);
+          const waitMs = isGhost ? 1500 : isConcurrent ? backoffConcurrentMs(netAttempt) : backoffMs(netAttempt);
           const errSnip = lastErr.message.slice(0, 60);
-          console.warn(`[img] ${isConcurrent ? 'CONCURRENT-CAP' : 'retryable'} #${netAttempt}/${MAX_RETRIES_NETWORK} — wait ${waitMs/1000}s — ${errSnip}`);
-          onAttempt(total, isConcurrent
+          console.warn(`[img] ${isGhost ? 'GHOST' : isConcurrent ? 'CONCURRENT-CAP' : 'retryable'} #${netAttempt}/${MAX_RETRIES_NETWORK} — wait ${waitMs/1000}s — ${errSnip}`);
+          onAttempt(total, isGhost
+            ? `Render fantasma — re-disparando (id novo) · ${netAttempt}ª`
+            : isConcurrent
             ? `Magnific cheio (${waitMs/1000}s aguardando vaga) · retry ${netAttempt}/20`
             : `Rede falhou (${errSnip}) — wait ${Math.round(waitMs/1000)}s · retry ${netAttempt}/20`);
           // Propaga cooldown GLOBAL pros outros workers se backoff longo OU
-          // concurrent-cap (pausa TODO mundo, evita storm).
-          if (isConcurrent || waitMs >= 60_000) {
+          // concurrent-cap (pausa TODO mundo, evita storm). Fantasma NÃO pausa.
+          if (!isGhost && (isConcurrent || waitMs >= 60_000)) {
             imgSem.setCooldown(Date.now() + Math.min(waitMs, 90_000));
             vidSem.setCooldown(Date.now() + Math.min(waitMs, 90_000));
           }
@@ -419,15 +433,18 @@ export async function runMagnificPipelineV2(
         if (isRetryableError(e)) {
           netAttempt++;
           if (netAttempt > MAX_RETRIES_NETWORK) throw lastErr;
-          // Backoff agressivo pra concurrent-cap (mesma logica do image)
+          // Fantasma re-dispara já (id novo); concurrent-cap = backoff agressivo
+          const isGhost = isGhostRender(e);
           const isConcurrent = isConcurrentExceeded(e);
-          const waitMs = isConcurrent ? backoffConcurrentMs(netAttempt) : backoffMs(netAttempt);
+          const waitMs = isGhost ? 1500 : isConcurrent ? backoffConcurrentMs(netAttempt) : backoffMs(netAttempt);
           const errSnip = lastErr.message.slice(0, 60);
-          console.warn(`[vid] ${isConcurrent ? 'CONCURRENT-CAP' : 'retryable'} #${netAttempt}/${MAX_RETRIES_NETWORK} — wait ${waitMs/1000}s — ${errSnip}`);
-          onAttempt(total, isConcurrent
+          console.warn(`[vid] ${isGhost ? 'GHOST' : isConcurrent ? 'CONCURRENT-CAP' : 'retryable'} #${netAttempt}/${MAX_RETRIES_NETWORK} — wait ${waitMs/1000}s — ${errSnip}`);
+          onAttempt(total, isGhost
+            ? `Render fantasma — re-disparando (id novo) · ${netAttempt}ª`
+            : isConcurrent
             ? `Magnific cheio (${waitMs/1000}s aguardando vaga) · retry ${netAttempt}/20`
             : `Rede (${errSnip}) — wait ${Math.round(waitMs/1000)}s · retry ${netAttempt}/20`);
-          if (isConcurrent || waitMs >= 60_000) {
+          if (!isGhost && (isConcurrent || waitMs >= 60_000)) {
             imgSem.setCooldown(Date.now() + Math.min(waitMs, 90_000));
             vidSem.setCooldown(Date.now() + Math.min(waitMs, 90_000));
           }
