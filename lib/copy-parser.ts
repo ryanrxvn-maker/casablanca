@@ -1333,10 +1333,23 @@ function isCopyEndBoundary(line: string): boolean {
 }
 
 /** Detecta se uma task ou doc e do tipo Variacao de Avatar.
- *  Check: nome contem 'Variação de avatar' OU comeca com 'VA -'/'VA-' */
+ *  Check: nome contem 'Variação de avatar' OU comeca com 'VA -'/'VA-'
+ *  OU com 'VA<nums>' (numeros dos avatares embutidos no prefixo).
+ *
+ *  Formatos reais vistos (user reportou 2026-06-10):
+ *    'VA - AD03G1VN - PRPB06 - AVA05 e 06 - Silas'  → prefixo 'VA -'
+ *    'VA01 e 02 - AD19G1GL - PRPB06'                → prefixo 'VA01 e 02 -'
+ *    'VA01 e 02 - AD126G1GL - VFPB04'
+ *    'VA 01, 02 e 03 - AD10G1VN - ...'              → com espaco/virgula
+ */
 export function isVATask(taskName: string): boolean {
   if (!taskName) return false;
-  if (/^VA\s*[-–—]/i.test(taskName.trim())) return true;
+  const t = taskName.trim();
+  if (/^VA\s*[-–—]/i.test(t)) return true;
+  // 'VA01 e 02 - ...' / 'VA 01, 02 - ...' — VA seguido DIRETO de numeros.
+  // Exige o dash depois do bloco de numeros pra nao pegar palavra começando
+  // com VA (ex 'VAGA 2 - ...' nao casa: 'GA' quebra o \d apos VA).
+  if (/^VA\s*\d+(?:\s*(?:e|,|\/)\s*\d+)*\s*[-–—]/i.test(t)) return true;
   if (/varia[cç][aã]o\s+de\s+avatar/i.test(taskName)) return true;
   return false;
 }
@@ -1360,6 +1373,7 @@ export function isTrocaAudioTask(taskName: string): boolean {
  * Ex: 'VA - AD03G1VN - PRPB06 - AVA05 e 06 - Silas' → [5, 6]
  *     'VA - AD02G1VN - PRPB06 - AVA03 e 04 - Silas' → [3, 4]
  *     'VA - AD10G1VN - AVA01, 02 e 03 - SILAS'      → [1, 2, 3]
+ *     'VA01 e 02 - AD19G1GL - PRPB06'               → [1, 2] (nums no prefixo VA)
  *     'AD138GL - VFPB04'                            → [] (nao tem AVAs)
  *
  * User esclareceu (12/05/2026): nome da task DELIMITA quais AVAs gerar,
@@ -1371,7 +1385,10 @@ export function extractAvaNumsFromTaskName(taskName: string): number[] {
   // 'e', ',' ou '/'. Ex: "AVA05 e 06" → captura 5 e depois 06.
   // Strategy: encontra TODOS numeros que seguem AVA ou seguem o anterior via 'e'/'/' /','.
   // Simples: extrai segmento entre "AVA" e o proximo elemento da task name (delimitado por dash).
-  const m = taskName.match(/AVA\s*([\d\s,e/]+?)(?:\s*[-–—]|$)/i);
+  // Fallback: prefixo 'VA01 e 02 - ...' — numeros embutidos direto no 'VA'
+  // do inicio do nome (sem a palavra AVA). Mesmo significado: AVA01 e AVA02.
+  const m = taskName.match(/AVA\s*([\d\s,e/]+?)(?:\s*[-–—]|$)/i)
+    || taskName.trim().match(/^VA\s*([\d\s,e/]+?)(?:\s*[-–—]|$)/i);
   if (!m) return [];
   const segment = m[1];
   // Acha todos numeros no segmento

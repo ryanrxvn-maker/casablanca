@@ -1366,7 +1366,11 @@ function ClickUpPilotInner() {
           // ADs (alguns VA, outros nao) marcavam o AD errado como VA falso.
           // Ex: AD05VN-VRWA01 nao e VA, mas o doc tinha AD09 (VA) que vazava
           // o trigger pro AD05.
-          const baseAdIdMatch = task.name.match(/^(AD\d+[A-Z]+)\b/i);
+          // AD ID em QUALQUER posicao (tasks VA tem prefixo: 'VA01 e 02 -
+          // AD19G1GL - PRPB06') e com digitos no sufixo ([A-Z0-9]*): a regex
+          // antiga ^(AD\d+[A-Z]+)\b exigia AD no inicio E nem casava
+          // 'AD19G1GL' (o '1' depois do 'G' quebrava [A-Z]+\b).
+          const baseAdIdMatch = task.name.match(/\b(AD\d+[A-Z0-9]*)/i);
           const baseAdIdForVaCheck = baseAdIdMatch ? baseAdIdMatch[1].toUpperCase() : null;
           const sectionForVaCheck = baseAdIdForVaCheck
             ? (findAdSection(docR.text, baseAdIdForVaCheck) || '')
@@ -1546,7 +1550,11 @@ function ClickUpPilotInner() {
             continue;
           }
           // 3. Parse: encontra base AD ID + briefing (fluxo normal nao-VA)
-          const baseMatch = task.name.match(/^(AD\d+[A-Z]+)\b/i);
+          // AD ID em qualquer posicao + sufixo alfanumerico completo: a regex
+          // antiga ^(AD\d+[A-Z]+)\b exigia AD no inicio do nome E falhava em
+          // codigos com digito no sufixo (ex 'AD19G1GL': o '1' apos o 'G'
+          // quebrava [A-Z]+\b e a task caia em 'Nome da task nao tem AD ID').
+          const baseMatch = task.name.match(/\b(AD\d+[A-Z0-9]*)/i);
           const baseAdId = baseMatch ? baseMatch[1].toUpperCase() : null;
           if (!baseAdId) {
             setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: 'Nome da task nao tem AD ID (ex AD139GL)' } }));
