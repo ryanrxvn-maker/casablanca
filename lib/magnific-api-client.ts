@@ -68,7 +68,12 @@ export type SimulateResult = {
 const DEFAULT_IMAGE_MODEL: ImageModel = 'imagen-nano-banana-2-flash';
 const DEFAULT_VIDEO_MODEL: VideoModel = 'kling-25';
 const POLL_INTERVAL_MS = 2500;
-const POLL_TIMEOUT_IMG_MS = 600_000; // 10min — Nano Banana raramente passa de 1min, folga 10x
+// 30min (era 10min): com ghost detection, id morto é detectado em 90s e
+// re-disparado — então esse timeout só se aplica a render VIVO (pending no
+// /creations). Render vivo sob relaxed mode (usage >100%) pode demorar MUITO;
+// matar com 10min causava as FALHAs "Polling timeout" em batch de 40. Vivo =
+// espera em paz.
+const POLL_TIMEOUT_IMG_MS = 1_800_000;
 const POLL_TIMEOUT_VID_MS = 5_400_000; // 90min — Kling 2.5 sob carga MUITO pesada chega 30-60min;
                                        // damos folga generosa. User pediu "esperar em paz".
 
@@ -79,10 +84,12 @@ const POLL_TIMEOUT_VID_MS = 5_400_000; // 90min — Kling 2.5 sob carga MUITO pe
 // -> "Polling timeout". Agora: se um id nunca foi visto em /creations dentro
 // desse prazo curto, declaramos fantasma e o caller RE-DISPARA na hora (novo
 // render/v4 = novo id, quase sempre enfileira). Custo zero no Unlimited.
-// Um render REAL aparece como 'pending' em poucos segundos, então 90s é folga
-// enorme: só pega fantasma de verdade, nunca mata render vivo-porém-lento.
-const NOT_SEEN_TIMEOUT_IMG_MS = 90_000;  // 90s sem aparecer = fantasma -> re-dispara
-const NOT_SEEN_TIMEOUT_VID_MS = 180_000; // 180s (vídeo demora mais p/ registrar)
+// Um render REAL aparece como 'pending' em poucos segundos. A folga grande
+// (120s/240s) cobre lag de listagem do /creations sob relaxed mode — falso
+// fantasma re-dispararia deixando um render órfão comendo o cap concurrent
+// (~4-6/conta) e causando storm de "exceeded concurrent".
+const NOT_SEEN_TIMEOUT_IMG_MS = 120_000; // 2min sem aparecer = fantasma -> re-dispara
+const NOT_SEEN_TIMEOUT_VID_MS = 240_000; // 4min (vídeo demora mais p/ registrar)
 
 /* ────────── User id / conta ativa ────────── */
 
@@ -454,7 +461,7 @@ export type BatchPoller = {
   activeCount(): number;
 };
 
-export function createBatchPoller(): BatchPoller {
+export function createBatchPoller(onActivity?: () => void): BatchPoller {
   type Sub = {
     identifier: string;
     deadline: number;       // absolute timestamp ms (extended on outages)
@@ -467,10 +474,25 @@ export function createBatchPoller(): BatchPoller {
   const subs = new Map<string, Sub>();
   let timer: ReturnType<typeof setInterval> | null = null;
   let stopped = false;
+  // Guard anti-overlap: setInterval dispara a cada 2.5s independente do fetch
+  // anterior ter terminado. Sob carga (bridge lenta), ticks sobrepostos
+  // multiplicavam requests /creations e dobravam extensões de deadline.
+  let ticking = false;
 
   async function tick() {
+    if (stopped || ticking) return;
+    ticking = true;
+    try {
+      await tickInner();
+    } finally {
+      ticking = false;
+    }
+  }
+
+  async function tickInner() {
     if (stopped) return;
-    const now = Date.now();
+    const tickStart = Date.now();
+    const now = tickStart;
     for (const [id, sub] of subs) {
       // Fantasma: nunca foi visto E estourou o prazo curto de "não-visto".
       if (!sub.everSeen && now > sub.notSeenDeadline) {
@@ -490,17 +512,23 @@ export function createBatchPoller(): BatchPoller {
       m = await pollCreationsBatch(ids);
     } catch (e) {
       // FETCH FALHOU — extension/rede problema. Estende o deadline de TODAS
-      // as subs em uso pelo tempo que ficamos sem conseguir polar (= 1 tick).
-      // Assim "esperar em paz" mesmo durante outages de rede: deadline não
-      // consome quando a gente nem consegue checar status. Também adia o
-      // prazo de fantasma: não dá pra acusar fantasma se nem conseguimos ler.
-      console.warn(`[magnific-batch] tick falhou (estendendo deadlines):`, (e as Error)?.message);
+      // as subs pelo TEMPO REAL que esse tick consumiu às cegas (um timeout
+      // da bridge leva 60s — extensão fixa de +3.5s deixava o deadline
+      // consumir 56.5s "cego" por ciclo e expirava ghost/poll injustamente).
+      // Assim "esperar em paz" mesmo durante outages: deadline não consome
+      // quando a gente nem consegue checar status. Também adia o prazo de
+      // fantasma: não dá pra acusar fantasma se nem conseguimos ler.
+      const blindMs = Date.now() - tickStart + POLL_INTERVAL_MS;
+      console.warn(`[magnific-batch] tick falhou (estendendo deadlines +${Math.round(blindMs / 1000)}s):`, (e as Error)?.message);
       for (const sub of subs.values()) {
-        sub.deadline += POLL_INTERVAL_MS + 1000; // estende +tick + buffer
-        if (!sub.everSeen) sub.notSeenDeadline += POLL_INTERVAL_MS + 1000;
+        sub.deadline += blindMs;
+        if (!sub.everSeen) sub.notSeenDeadline += blindMs;
       }
       return;
     }
+    // Tick com fetch OK = extensão + Magnific vivos (sinal pro watchdog do
+    // pipeline: não é stall global, é render demorando — esperar em paz).
+    onActivity?.();
     for (const [id, sub] of subs) {
       const r = m.get(id);
       if (!r) continue;          // ainda não apareceu (race após render OU fantasma)

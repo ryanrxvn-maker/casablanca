@@ -335,6 +335,7 @@ function AutoBrollInner() {
         originalJson: job.raw,
         imageModel,
         inFlight: true,
+        lastBeatAt: Date.now(),
       });
       localStorage.setItem(histKey, JSON.stringify(filtered.slice(0, 50)));
       window.dispatchEvent(new Event('darkolab:auto-broll:history-changed'));
@@ -342,6 +343,16 @@ function AutoBrollInner() {
     } catch (e) {
       console.warn('[auto-broll] pre-save falhou (continua mesmo assim):', e);
     }
+
+    // Heartbeat throttled (10s): prova pro RETOMAR (mesma aba ou outra) que
+    // este run esta VIVO — bloqueia double-dispatch enquanto roda.
+    let lastBeatWrite = 0;
+    const beat = () => {
+      const now = Date.now();
+      if (now - lastBeatWrite < 10_000) return;
+      lastBeatWrite = now;
+      patchHistEntry(preEntryKey, { lastBeatAt: now });
+    };
 
     try {
       // SEMPRE V2 — API direta Magnific server-side. Sem extension, sem aba aberta.
@@ -354,7 +365,7 @@ function AutoBrollInner() {
         },
         {
           signal: ac.signal,
-          onProgress: (p) => patchJob(job.id, { progress: p }),
+          onProgress: (p) => { patchJob(job.id, { progress: p }); beat(); },
         },
       );
 
@@ -390,7 +401,7 @@ function AutoBrollInner() {
             },
             {
               signal: ac.signal,
-              onProgress: (p) => patchJob(job.id, { progress: p }),
+              onProgress: (p) => { patchJob(job.id, { progress: p }); beat(); },
             },
           );
           // Merge takes do retry com a rodada anterior (preserva os que ja eram
@@ -473,6 +484,10 @@ function AutoBrollInner() {
                 status: t.status,
                 videoUrl: t.videoUrl || null,
                 imageUrl: t.imageUrl || null,
+                // diagnóstico: sem isso o histórico só tinha status, impossível
+                // saber DEPOIS por que um take falhou
+                error: t.error ? String(t.error).slice(0, 250) : null,
+                phase: t.phase || null,
               })),
               inFlight: false,
               // mantem originalJson + imageModel + jobId que ja estavam
@@ -526,6 +541,8 @@ function AutoBrollInner() {
       } catch {}
     } finally {
       abortRefs.current[job.id] = null;
+      // Libera o RETOMAR: run terminou (qualquer que seja o caminho de saida)
+      patchHistEntry(preEntryKey, { inFlight: false });
     }
   }
 
@@ -868,14 +885,38 @@ type HistEntry = {
   totalTakes: number;
   successCount: number;
   failedCount: number;
-  takeUrls: Array<{ idx: number; status: string; videoUrl: string | null; imageUrl: string | null }>;
+  takeUrls: Array<{ idx: number; status: string; videoUrl: string | null; imageUrl: string | null; error?: string | null; phase?: string | null }>;
   createdAt: number;
   /** JSON original colado pelo user. Pre-condicao pra RETOMAR — sem isso,
    *  nao temos como reconstruir as prompts das takes que faltaram.
    *  Adicionado em 2026-05-30; entries antigas nao tem. */
   originalJson?: string;
   imageModel?: string;
+  /** true enquanto um pipeline (disparo OU retomar) esta rodando pra esta
+   *  entry. Junto com lastBeatAt bloqueia RETOMAR de double-dispatch. */
+  inFlight?: boolean;
+  /** heartbeat: atualizado ~10s pelo onProgress. Se inFlight mas o beat
+   *  parou ha >90s, o run morreu (crash/reload) e RETOMAR libera. */
+  lastBeatAt?: number;
 };
+
+/** True se a entry tem um pipeline VIVO rodando agora (qualquer aba).
+ *  inFlight sozinho nao basta: crash/reload deixa true pra sempre —
+ *  o heartbeat diferencia run vivo de run morto. */
+function isEntryLive(item: HistEntry): boolean {
+  return !!item.inFlight && !!item.lastBeatAt && Date.now() - item.lastBeatAt < 90_000;
+}
+
+/** Atualiza campos de uma entry do historico por zipKey (helper compartilhado). */
+function patchHistEntry(zipKey: string, patch: Record<string, unknown>): void {
+  try {
+    const histKey = 'darkolab:auto-broll:history';
+    const hist = JSON.parse(localStorage.getItem(histKey) || '[]');
+    const updated = hist.map((h: any) => (h.zipKey === zipKey ? { ...h, ...patch } : h));
+    localStorage.setItem(histKey, JSON.stringify(updated));
+    window.dispatchEvent(new Event('darkolab:auto-broll:history-changed'));
+  } catch {}
+}
 
 function BrollHistorySection() {
   const [hist, setHist] = useState<HistEntry[]>([]);
@@ -973,13 +1014,12 @@ function BrollHistorySection() {
       const draftsRaw = localStorage.getItem('darkolab:auto-broll:jobs-draft');
       if (draftsRaw) {
         const drafts = JSON.parse(draftsRaw) as Array<{ id?: string; raw?: string }>;
+        // SOMENTE match exato por jobId. O fallback antigo ("primeiro draft
+        // não-vazio") retomava com o JSON de OUTRO job/nicho e envenenava o
+        // originalJson da entry pra sempre. Sem match → cai pro recovery via
+        // Magnific API / paste manual.
         const exact = drafts.find((d) => d.id === item.jobId && d.raw?.trim());
         if (exact?.raw) recovered = exact.raw;
-        else {
-          for (const d of drafts) {
-            if (d.raw && d.raw.trim()) { recovered = d.raw; break; }
-          }
-        }
       }
     } catch {}
     if (recovered) {
@@ -1203,6 +1243,16 @@ function BrollHistorySection() {
 
       // 2. Dispara so as faltantes
       setRetryMsg(`Re-disparando ${missingTakes.length} take(s)…`);
+      // Marca a entry como em-voo + heartbeat: RETOMAR em outra aba (ou um
+      // segundo clique pos-reload) fica bloqueado enquanto este run vive.
+      patchHistEntry(item.zipKey, { inFlight: true, lastBeatAt: Date.now() });
+      let lastBeatWrite = 0;
+      const beat = () => {
+        const now = Date.now();
+        if (now - lastBeatWrite < 10_000) return;
+        lastBeatWrite = now;
+        patchHistEntry(item.zipKey, { lastBeatAt: now });
+      };
       const { runMagnificPipelineV2 } = await import('@/lib/magnific-pipeline-v2');
       const r = await runMagnificPipelineV2(
         {
@@ -1213,6 +1263,7 @@ function BrollHistorySection() {
         },
         {
           onProgress: (p: any) => {
+            beat();
             const ready = (p?.takes || []).filter((t: any) => t.status === 'ready').length;
             setRetryMsg(`Renderizando ${ready}/${missingTakes.length}… (paciencia, Kling demora)`);
           },
@@ -1297,6 +1348,7 @@ function BrollHistorySection() {
     } finally {
       setRetrying(null);
       setRetryMsg('');
+      patchHistEntry(item.zipKey, { inFlight: false });
     }
   }
 
@@ -1351,15 +1403,20 @@ function BrollHistorySection() {
                   </div>
                 </div>
                 {/* RETOMAR — SEMPRE aparece quando ha falhas. Funciona com OU
-                 *  sem originalJson (se nao tiver, abre editor pra colar). */}
+                 *  sem originalJson (se nao tiver, abre editor pra colar).
+                 *  BLOQUEADO enquanto o run original esta VIVO (heartbeat):
+                 *  double-dispatch dobrava a carga na conta Magnific →
+                 *  "exceeded concurrent" → cascata de falhas. */}
                 {item.failedCount > 0 ? (
                   <button
                     type="button"
                     onClick={() => onRetomarClick(item)}
-                    disabled={isRetrying || loading === item.zipKey}
+                    disabled={isRetrying || loading === item.zipKey || isEntryLive(item)}
                     className="inline-flex items-center gap-1.5 rounded-[8px] border border-cyan-400/55 bg-cyan-400/15 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-cyan-300 hover:bg-cyan-400/25 hover:border-cyan-400/75 disabled:opacity-50 disabled:cursor-not-allowed transition"
                     title={
-                      isRetrying
+                      isEntryLive(item)
+                        ? 'Job AINDA RODANDO — aguarde terminar (retomar agora dobraria a carga e causaria falhas)'
+                        : isRetrying
                         ? 'Retomando…'
                         : item.originalJson
                           ? `Retomar inteligente: re-dispara so as ${item.failedCount} faltantes + mergeia no ZIP`

@@ -265,7 +265,22 @@ export async function runMagnificPipelineV2(
 
   emit('Validando Unlimited + custo zero...', 'preflight', 4);
   try {
-    await assertZeroCreditCost();
+    // 3 tentativas: o preflight faz ~5 round-trips pela bridge e UMA falha
+    // transiente (timeout 60s, blip de rede) matava o batch INTEIRO na hora.
+    // Erros permanentes (banida/unlimited off/custo>0) falham direto.
+    const PREFLIGHT_DELAYS = [3_000, 8_000, 20_000];
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await assertZeroCreditCost();
+        break;
+      } catch (e) {
+        if (attempt >= PREFLIGHT_DELAYS.length || !isRetryableError(e)) throw e;
+        const wait = PREFLIGHT_DELAYS[attempt];
+        console.warn(`[pipeline] preflight falhou (retry ${attempt + 1}/3 em ${wait / 1000}s):`, (e as Error)?.message);
+        emit(`Preflight instável — tentando de novo em ${wait / 1000}s (${attempt + 1}/3)...`, 'preflight', 4);
+        await new Promise((r) => setTimeout(r, wait));
+      }
+    }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     takeStates.forEach((s, i) => {
@@ -285,10 +300,25 @@ export async function runMagnificPipelineV2(
   // ───────── Semáforos com throttle + cooldown ─────────
   const imgSem = new ThrottledSemaphore(imageConcurrency, IMAGE_DISPATCH_INTERVAL_MS, 'img');
   const vidSem = new ThrottledSemaphore(videoConcurrency, VIDEO_DISPATCH_INTERVAL_MS, 'vid');
-  const poller = createBatchPoller();
+  // Poller compartilhado alimenta o watchdog: tick com fetch OK = sistema
+  // vivo (render demorando ≠ stall). noteProgress é function declaration
+  // (hoisted) — referenciar aqui é seguro.
+  const poller = createBatchPoller(() => noteProgress());
+  // CANCELAR de verdade: antes o signal só era usado nos downloads — a
+  // geração continuava rodando invisível e o user re-disparava por cima
+  // (double-dispatch). Agora o abort derruba o poller (rejeita polls em voo)
+  // e os retry loops checam o signal antes de cada tentativa.
+  if (cb.signal) {
+    if (cb.signal.aborted) poller.stop();
+    else cb.signal.addEventListener('abort', () => poller.stop(), { once: true });
+  }
 
+  // Stamp visível na UI: confirma qual versão do pipeline o bundle carregado
+  // está rodando (diagnóstico de "user não recarregou a aba").
+  const PIPELINE_BUILD = 'r3';
+  console.log(`[pipeline] build ${PIPELINE_BUILD} — ghost-detect + pending 30min + watchdog poll-aware`);
   emit(
-    `Disparando ${total} takes (${imageConcurrency} img · ${videoConcurrency} vid · disparo escalonado anti-429)...`,
+    `Disparando ${total} takes (${imageConcurrency} img · ${videoConcurrency} vid · anti-429 · ${PIPELINE_BUILD})...`,
     'dispatch',
     6,
   );
@@ -307,7 +337,11 @@ export async function runMagnificPipelineV2(
   const MAX_RETRIES_STATUS_FAILED = 5;
   const RETRY_DELAY_STATUS_MS = 3000;
   const PER_TAKE_RETRY_BUDGET_MS = 15 * 60_000; // 15min total em retries
-  const GLOBAL_WATCHDOG_MS = 5 * 60_000;        // 5min sem progresso → abort
+  // 7min (era 5): backoff máximo de concurrent-cap é 5min — com 1 take
+  // restante em backoff longo, 5min de watchdog abortava EXATAMENTE no
+  // limite. Agora o poller também reporta atividade (tick OK), então o
+  // watchdog só dispara em stall real (bridge/extensão morta).
+  const GLOBAL_WATCHDOG_MS = 7 * 60_000;
 
   // Watchdog: marca o timestamp do último progresso de QUALQUER take.
   // Se passar GLOBAL_WATCHDOG_MS sem update, signal aborta tudo.
@@ -319,6 +353,10 @@ export async function runMagnificPipelineV2(
       console.error(`[pipeline] WATCHDOG: ${GLOBAL_WATCHDOG_MS/60000}min sem progresso. Abortando.`);
       watchdogAbort.abort();
       clearInterval(watchdogTimer);
+      // Derruba o poller: rejeita TODAS as subs em voo na hora. Sem isso,
+      // polls pendurados (deadline estendido a cada tick falho) seguravam o
+      // Promise.all pra sempre → job RUNNING eterno com bridge morta.
+      poller.stop();
     }
   }, 30_000);
 
@@ -337,7 +375,10 @@ export async function runMagnificPipelineV2(
         throw lastErr || new Error(`Budget esgotado (${PER_TAKE_RETRY_BUDGET_MS/60000}min em retries)`);
       }
       if (watchdogAbort.signal.aborted) {
-        throw new Error('Pipeline abortado por watchdog (5min sem progresso geral)');
+        throw new Error('Pipeline abortado por watchdog (sem progresso geral)');
+      }
+      if (cb.signal?.aborted) {
+        throw new Error('Cancelado pelo usuário');
       }
       onAttempt(total);
       try {
@@ -412,6 +453,9 @@ export async function runMagnificPipelineV2(
       if (watchdogAbort.signal.aborted) {
         throw new Error('Pipeline abortado por watchdog');
       }
+      if (cb.signal?.aborted) {
+        throw new Error('Cancelado pelo usuário');
+      }
       onAttempt(total);
       try {
         noteProgress();
@@ -476,6 +520,7 @@ export async function runMagnificPipelineV2(
           });
           emit(`Take ${take.idx}: imagem...`, 'running', undefined as unknown as number);
           const img = await generateImageWithRetry(take.imagePrompt, (n, customMsg) => {
+            noteProgress(); // decisão de retry/backoff = sistema vivo
             if (n > 1 || customMsg) {
               patchTake(take.idx, {
                 status: 'running',
@@ -524,6 +569,7 @@ export async function runMagnificPipelineV2(
             take.videoPrompt || take.imagePrompt,
             imageUrl,
             (n, customMsg) => {
+              noteProgress(); // decisão de retry/backoff = sistema vivo
               if (n > 1 || customMsg) {
                 patchTake(take.idx, {
                   status: 'running',
@@ -557,10 +603,24 @@ export async function runMagnificPipelineV2(
   for (const s of takeStates) {
     if (s.status !== 'video-done') continue;
     try {
-      // pikaso.cdnpk.net não passa por Cloudflare; fetch direto do browser ok
-      const r = await fetch(s.videoUrl, { signal: cb.signal });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const ab = await r.arrayBuffer();
+      // pikaso.cdnpk.net não passa por Cloudflare; fetch direto do browser ok.
+      // 3 tentativas: blip de rede num download de 10-50MB marcava como FAILED
+      // um render que JÁ ESTAVA PRONTO (e o auto-retry re-renderizava à toa).
+      const DL_DELAYS = [2_000, 5_000, 15_000];
+      let ab: ArrayBuffer | null = null;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const r = await fetch(s.videoUrl, { signal: cb.signal });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          ab = await r.arrayBuffer();
+          break;
+        } catch (e) {
+          if (attempt >= DL_DELAYS.length || cb.signal?.aborted) throw e;
+          console.warn(`[download] take ${s.idx} falhou (retry ${attempt + 1}/3):`, (e as Error)?.message);
+          await new Promise((r2) => setTimeout(r2, DL_DELAYS[attempt]));
+        }
+      }
+      if (!ab) throw new Error('download vazio');
       entries.push({
         name: `take_${String(s.idx).padStart(2, '0')}.mp4`,
         data: ab,
