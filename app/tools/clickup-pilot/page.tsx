@@ -4598,6 +4598,23 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   /** VA (Studio): voz custom por avatar. Key: `${taskId}:${avaCode}` →
    *  {id,name} ou null = usar a voz do proprio avatar (Mirror voice). */
   const [vaVoiceChoice, setVaVoiceChoice] = useState<Record<string, { id: string; name: string } | null>>({});
+  /** VA MULTI-LOCUTOR: inverte o mapeamento locutor↔papel de uma variacao
+   *  (caso a heuristica 'quem fala mais = principal' erre).
+   *  Key: `${taskId}:${avaCode}` → true = invertido. */
+  const [vaSwapSpeakers, setVaSwapSpeakers] = useState<Record<string, boolean>>({});
+
+  /** Papeis de uma variacao VA: doc novo traz roles[] (Doutor + Depoimento
+   *  Mulher etc); legado/1 papel vira papel unico sintetico. */
+  function vaRolesOf(av: { username: string; fileId: string | null; roles?: Array<{ role: string; username: string; fileId: string | null; isDepoimento: boolean }> }) {
+    if (av.roles && av.roles.length > 0) return av.roles;
+    return [{ role: 'Avatar', username: av.username, fileId: av.fileId, isDepoimento: false }];
+  }
+  /** Key de escolha por papel. Papel 0 (principal) usa a key legada
+   *  `${taskId}:${avaCode}` — preserva escolhas ja feitas; papeis extras
+   *  ganham sufixo `#<idx>`. */
+  function vaRoleKey(taskId: string, avaCode: string, roleIdx: number) {
+    return roleIdx === 0 ? `${taskId}:${avaCode}` : `${taskId}:${avaCode}#${roleIdx}`;
+  }
 
   /** TROCA DE ÁUDIO: novo WHITE upado pelo user por task. Key: taskId → File */
   const [trocaWhite, setTrocaWhite] = useState<Record<string, File | null>>({});
@@ -4664,7 +4681,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     if (!a?.vaBriefing) return false;
     return (
       a.vaBriefing.avatares.length > 0 &&
-      a.vaBriefing.avatares.every((av) => vaAvatarChoice[`${id}:${av.avaCode}`]?.id)
+      // TODOS os papeis de TODAS as variacoes precisam de avatar escolhido
+      // (multi-locutor: Doutor E Depoimento, cada um com seu avatar HeyGen)
+      a.vaBriefing.avatares.every((av) =>
+        vaRolesOf(av).every((_, ri) => vaAvatarChoice[vaRoleKey(id, av.avaCode, ri)]?.id),
+      )
     );
   }
   function isTrocaDispatchable(id: string): boolean {
@@ -4703,11 +4724,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       if (!driveId) issues.push('AD original (Drive)');
     }
     for (const av of va.avatares) {
-      if (!vaAvatarChoice[`${taskId}:${av.avaCode}`]?.id) issues.push(`avatar ${av.avaCode}`);
-      // Voz é OBRIGATÓRIA no lipsync — sem voiceId o Espelhamento cai na voz
-      // original do AD (o bug que o user reclamava). No motor TEXTO a voz é
-      // opcional (cai na voz default do avatar, igual task normal).
-      if (!textEngine && !vaVoiceChoice[`${taskId}:${av.avaCode}`]?.id) issues.push(`voz ${av.avaCode}`);
+      const roles = vaRolesOf(av);
+      for (let ri = 0; ri < roles.length; ri++) {
+        const label = roles.length > 1 ? `${av.avaCode}·${roles[ri].role}` : av.avaCode;
+        if (!vaAvatarChoice[vaRoleKey(taskId, av.avaCode, ri)]?.id) issues.push(`avatar ${label}`);
+        // Voz é OBRIGATÓRIA no lipsync — sem voiceId o Espelhamento cai na voz
+        // original do AD (o bug que o user reclamava). No motor TEXTO a voz é
+        // opcional (cai na voz default do avatar, igual task normal).
+        if (!textEngine && !vaVoiceChoice[vaRoleKey(taskId, av.avaCode, ri)]?.id) issues.push(`voz ${label}`);
+      }
     }
     return issues;
   }
@@ -4805,14 +4830,34 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const { runVAPipeline } = await import('@/lib/va-pipeline');
       const { downloadVideoBytes } = await import('@/lib/heygen-api-direct');
 
+      // MULTI-LOCUTOR: cada variacao leva os avatares de TODOS os papeis
+      // (roleAvatars[0] = principal). 2+ papeis + diarize → pipeline corta
+      // nos turnos de fala e roteia cada trecho pro avatar/voz do papel.
       const avatares = va.avatares.map((av) => {
-        const choice = vaAvatarChoice[`${taskId}:${av.avaCode}`]!;
-        return { avaCode: av.avaCode, avatarId: choice.id, avatarName: choice.name };
+        const roles = vaRolesOf(av);
+        const roleAvatars = roles.map((r, ri) => {
+          const c = vaAvatarChoice[vaRoleKey(taskId, av.avaCode, ri)]!;
+          return {
+            roleLabel: r.role,
+            isDepoimento: r.isDepoimento,
+            avatarId: c.id,
+            avatarName: c.name,
+            voiceId: vaVoiceChoice[vaRoleKey(taskId, av.avaCode, ri)]?.id || null,
+          };
+        });
+        return {
+          avaCode: av.avaCode,
+          avatarId: roleAvatars[0].avatarId,
+          avatarName: roleAvatars[0].avatarName,
+          roleAvatars,
+          swapSpeakers: !!vaSwapSpeakers[`${taskId}:${av.avaCode}`],
+        };
       });
       const voiceByAva: Record<string, string | null> = {};
       for (const av of va.avatares) {
         voiceByAva[av.avaCode] = vaVoiceChoice[`${taskId}:${av.avaCode}`]?.id || null;
       }
+      const maxRoles = Math.max(...va.avatares.map((av) => vaRolesOf(av).length));
 
       const pipeRes = await runVAPipeline({
         baseAdId: adNameClean,
@@ -4823,17 +4868,40 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         onProgress: (p) => {
           patchVA({ phase: vaPhaseFromStage(p.stage), message: p.message });
         },
+        // MULTI-LOCUTOR: diarizacao via AssemblyAI (so chamada pelo pipeline
+        // quando alguma variacao tem 2+ papeis). Comprime a voz isolada em
+        // opus 12k mono (~90KB/min — folga no limite 4.5MB do Vercel).
+        diarize: maxRoles >= 2 ? async (audioBlob: Blob) => {
+          const { extractAudioForTranscription } = await import('@/lib/ffmpeg-worker');
+          const compressed = await extractAudioForTranscription(audioBlob);
+          const fd = new FormData();
+          fd.append('audio', new File([compressed], 'voz.ogg', { type: 'audio/ogg' }));
+          fd.append('languageCode', 'pt');
+          fd.append('speakersExpected', String(maxRoles));
+          const r = await fetch('/api/va/diarize', { method: 'POST', body: fd });
+          const j = await r.json().catch(() => null);
+          if (!r.ok || !j?.ok) throw new Error(j?.error || `diarize HTTP ${r.status}`);
+          return (j.utterances || []).map((u: { speaker: string; startMs: number; endMs: number }) => ({
+            speaker: String(u.speaker),
+            start: u.startMs / 1000,
+            end: u.endMs / 1000,
+          }));
+        } : undefined,
         // === Espelhamento de Voz REAL (sts_pending) — fix 2026-06-03 ===
         // processJob({voiceMirroring:true, voiceId}) agora monta o body
         // nativo (audio_type sts_pending + source_audio_url + voice_id):
         // avatar fala com a VOZ ESCOLHIDA mantendo o timing do AD original.
-        dispatchAudioTake: async ({ avatarId, audioBytes, audioFilename, label }) => {
+        dispatchAudioTake: async ({ avatarId, audioBytes, audioFilename, label, voiceId: roleVoiceId }) => {
           if (batchCancelRef.current[taskId]) throw new Error('cancelado');
           upsertPart(label, { videoId: null, videoStatus: 'pending', error: null });
           const { processJob } = await import('@/lib/heygen-api-direct');
           const file = new File([audioBytes as BlobPart], audioFilename || `${label}.wav`, { type: 'audio/wav' });
+          // MULTI-LOCUTOR: voz vem do papel resolvido pelo pipeline; fallback
+          // legado = lookup por avatarId (extensoes do fluxo classico)
           const avFromId = va.avatares.find((x) => vaAvatarChoice[`${taskId}:${x.avaCode}`]?.id === avatarId);
-          const voiceId = avFromId ? voiceByAva[avFromId.avaCode] : null;
+          const voiceId = roleVoiceId !== undefined && roleVoiceId !== null
+            ? roleVoiceId
+            : (avFromId ? voiceByAva[avFromId.avaCode] : null);
           console.log(`[VA dispatch ${label}] avatarId=${avatarId} voiceId=${voiceId || '(default)'}`);
           let job;
           try {
@@ -6977,74 +7045,116 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     Avatares
                                   </div>
                                   {a.vaBriefing.avatares.map((av) => {
-                                    // Thumb: Drive (fileId) OU YouTube (avatar por link, criativo "sem edição").
-                                    const thumbUrl = av.fileId
-                                      ? `https://drive.google.com/thumbnail?id=${av.fileId}&sz=w200`
-                                      : (av.thumbUrl || null);
-                                    const choiceKey = `${a.taskId}:${av.avaCode}`;
-                                    const chosen = vaAvatarChoice[choiceKey] || null;
-                                    const voiceChosen = vaVoiceChoice[choiceKey] || null;
+                                    const roles = vaRolesOf(av);
+                                    const multiRole = roles.length >= 2;
                                     // Motor texto (canal organico + copy no doc): voz opcional (default do avatar).
                                     const avaTextEngine = vaUsesTextEngine(a.taskId);
-                                    const avaReady = !!chosen && (!!voiceChosen || avaTextEngine);
+                                    const avaReady = roles.every((_, ri) => {
+                                      const k = vaRoleKey(a.taskId, av.avaCode, ri);
+                                      return !!vaAvatarChoice[k] && (!!vaVoiceChoice[k] || avaTextEngine);
+                                    });
+                                    const anyAvatarMissing = roles.some((_, ri) => !vaAvatarChoice[vaRoleKey(a.taskId, av.avaCode, ri)]);
                                     const pickersLocked = ACTIVE_BATCH_PHASES.includes(batchStates[a.taskId]?.phase as BatchTaskState['phase']) || batchStates[a.taskId]?.phase === 'queued';
+                                    const swapKey = `${a.taskId}:${av.avaCode}`;
                                     return (
                                       <div key={av.avaCode} className="rounded-[12px] border border-white/8 bg-white/[0.02] p-2.5 transition-colors hover:border-cyan-400/30">
-                                        <div className="flex items-center gap-2.5">
-                                          {thumbUrl ? (
-                                            /* eslint-disable-next-line @next/next/no-img-element */
-                                            <img src={thumbUrl} alt={av.username} className="h-11 w-11 shrink-0 rounded-full object-cover ring-1 ring-white/10" referrerPolicy="no-referrer" />
+                                        <div className="flex items-center gap-2">
+                                          <span className="mono text-[11px] font-bold tracking-wide text-cyan-200">{av.avaCode}</span>
+                                          {avaReady ? (
+                                            <span className="mono rounded-full border border-lime/40 bg-lime/10 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest text-lime">✓ pronto</span>
                                           ) : (
-                                            <div className="h-11 w-11 shrink-0 rounded-full bg-cyan-500/10 flex items-center justify-center mono text-[10px] font-bold text-cyan-300 ring-1 ring-cyan-400/20">{av.avaCode.replace(/^AVA/i, '')}</div>
+                                            <span className="mono rounded-full border border-amber-400/40 bg-amber-400/10 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest text-amber-200">{anyAvatarMissing ? 'falta avatar' : 'falta voz'}</span>
                                           )}
-                                          <div className="flex-1 min-w-0">
-                                            <div className="flex items-center gap-2">
-                                              <span className="mono text-[11px] font-bold tracking-wide text-cyan-200">{av.avaCode}</span>
-                                              {avaReady ? (
-                                                <span className="mono rounded-full border border-lime/40 bg-lime/10 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest text-lime">✓ pronto</span>
-                                              ) : (
-                                                <span className="mono rounded-full border border-amber-400/40 bg-amber-400/10 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest text-amber-200">{!chosen ? 'falta avatar' : 'falta voz'}</span>
-                                              )}
-                                            </div>
-                                            <div className="truncate text-[11px] text-text-muted">@{av.username}</div>
-                                          </div>
-                                          {av.fileId ? (
-                                            <PilotBtn3D
-                                              icon={<PilotIconDownload size={14} />}
-                                              color="cyan"
-                                              size={30}
-                                              title="Baixar o clipe de referência desse avatar"
-                                              href={`https://drive.google.com/uc?export=download&id=${av.fileId}`}
-                                            />
-                                          ) : av.youtubeUrl ? (
-                                            <a
-                                              href={av.youtubeUrl}
-                                              target="_blank"
-                                              rel="noreferrer"
-                                              title="Abrir o vídeo do YouTube (referência pra clonar a voz)"
-                                              className="mono inline-flex h-[30px] shrink-0 items-center gap-1 rounded-full border border-red-500/40 bg-red-500/10 px-2.5 text-[10px] font-bold uppercase tracking-widest text-red-300 hover:bg-red-500/20"
+                                          {multiRole ? (
+                                            <span
+                                              className="mono rounded-full border border-fuchsia-500/40 bg-fuchsia-500/10 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest text-fuchsia-200"
+                                              title="AD original tem 2+ avatares: a diarização detecta quem fala em cada trecho e manda cada um pro lipsync com o avatar do papel certo"
                                             >
-                                              ▶ YouTube
-                                            </a>
+                                              {roles.length} locutores · diarização auto
+                                            </span>
+                                          ) : null}
+                                          {multiRole ? (
+                                            <button
+                                              type="button"
+                                              onClick={() => setVaSwapSpeakers((prev) => ({ ...prev, [swapKey]: !prev[swapKey] }))}
+                                              className={
+                                                'mono ml-auto rounded-full border px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest transition ' +
+                                                (vaSwapSpeakers[swapKey]
+                                                  ? 'border-amber-400/60 bg-amber-400/15 text-amber-200'
+                                                  : 'border-line-strong text-text-muted hover:border-fuchsia-400/60 hover:text-fuchsia-200')
+                                              }
+                                              title="Heurística: quem fala MAIS tempo = papel principal. Se o resultado sair com os avatares trocados, inverte aqui e re-dispara."
+                                            >
+                                              {vaSwapSpeakers[swapKey] ? '⇄ locutores invertidos' : '⇄ inverter locutores'}
+                                            </button>
                                           ) : null}
                                         </div>
-                                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                                          <div>
-                                            <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">Avatar HeyGen</div>
-                                            <CompactAvatarPicker
-                                              selected={chosen}
-                                              setSelected={(newAv) => setVaAvatarChoice((prev) => ({ ...prev, [choiceKey]: newAv }))}
-                                              disabled={pickersLocked}
-                                              label={`Avatar · ${av.avaCode}`}
-                                            />
-                                          </div>
-                                          <div>
-                                            <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">Voz{avaTextEngine ? ' (opcional)' : ''}</div>
-                                            <CompactVoiceSelector
-                                              selected={voiceChosen}
-                                              setSelected={(v) => setVaVoiceChoice((prev) => ({ ...prev, [choiceKey]: v }))}
-                                            />
-                                          </div>
+                                        <div className="mt-2 grid gap-2">
+                                          {roles.map((role, ri) => {
+                                            const choiceKey = vaRoleKey(a.taskId, av.avaCode, ri);
+                                            const chosen = vaAvatarChoice[choiceKey] || null;
+                                            const voiceChosen = vaVoiceChoice[choiceKey] || null;
+                                            const thumbUrl = role.fileId
+                                              ? `https://drive.google.com/thumbnail?id=${role.fileId}&sz=w200`
+                                              : (ri === 0 ? av.thumbUrl || null : null);
+                                            return (
+                                              <div key={ri} className={multiRole ? 'rounded-[10px] border border-white/6 bg-white/[0.015] p-2' : ''}>
+                                                <div className="flex items-center gap-2.5">
+                                                  {thumbUrl ? (
+                                                    /* eslint-disable-next-line @next/next/no-img-element */
+                                                    <img src={thumbUrl} alt={role.username} className="h-11 w-11 shrink-0 rounded-full object-cover ring-1 ring-white/10" referrerPolicy="no-referrer" />
+                                                  ) : (
+                                                    <div className="h-11 w-11 shrink-0 rounded-full bg-cyan-500/10 flex items-center justify-center mono text-[10px] font-bold text-cyan-300 ring-1 ring-cyan-400/20">{av.avaCode.replace(/^AVA/i, '')}</div>
+                                                  )}
+                                                  <div className="flex-1 min-w-0">
+                                                    {multiRole ? (
+                                                      <div className="mono text-[9px] font-bold uppercase tracking-widest text-fuchsia-200">
+                                                        {role.role}{role.isDepoimento ? ' · trecho menor' : ' · fala principal'}
+                                                      </div>
+                                                    ) : null}
+                                                    <div className="truncate text-[11px] text-text-muted">@{role.username}</div>
+                                                  </div>
+                                                  {role.fileId ? (
+                                                    <PilotBtn3D
+                                                      icon={<PilotIconDownload size={14} />}
+                                                      color="cyan"
+                                                      size={30}
+                                                      title="Baixar o clipe de referência desse avatar"
+                                                      href={`https://drive.google.com/uc?export=download&id=${role.fileId}`}
+                                                    />
+                                                  ) : (ri === 0 && av.youtubeUrl) ? (
+                                                    <a
+                                                      href={av.youtubeUrl}
+                                                      target="_blank"
+                                                      rel="noreferrer"
+                                                      title="Abrir o vídeo do YouTube (referência pra clonar a voz)"
+                                                      className="mono inline-flex h-[30px] shrink-0 items-center gap-1 rounded-full border border-red-500/40 bg-red-500/10 px-2.5 text-[10px] font-bold uppercase tracking-widest text-red-300 hover:bg-red-500/20"
+                                                    >
+                                                      ▶ YouTube
+                                                    </a>
+                                                  ) : null}
+                                                </div>
+                                                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                                                  <div>
+                                                    <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">Avatar HeyGen{multiRole ? ` · ${role.role}` : ''}</div>
+                                                    <CompactAvatarPicker
+                                                      selected={chosen}
+                                                      setSelected={(newAv) => setVaAvatarChoice((prev) => ({ ...prev, [choiceKey]: newAv }))}
+                                                      disabled={pickersLocked}
+                                                      label={`Avatar · ${av.avaCode}${multiRole ? `·${role.role}` : ''}`}
+                                                    />
+                                                  </div>
+                                                  <div>
+                                                    <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">Voz{avaTextEngine ? ' (opcional)' : ''}</div>
+                                                    <CompactVoiceSelector
+                                                      selected={voiceChosen}
+                                                      setSelected={(v) => setVaVoiceChoice((prev) => ({ ...prev, [choiceKey]: v }))}
+                                                    />
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            );
+                                          })}
                                         </div>
                                       </div>
                                     );

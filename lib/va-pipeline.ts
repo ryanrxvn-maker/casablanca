@@ -24,13 +24,38 @@ import { isolateVoice, type VoiceIsolatorMode } from './voice-isolator';
 import { isolateVoiceNeural } from './voice-isolator-neural';
 import { detectFacePresence, type SegmentFaceResult } from './face-detector';
 
+/** Avatar HeyGen de UM papel dentro de uma variacao (multi-locutor).
+ *  Ex AVA01 do AD126: papel 0 = Doutor (radyrahbanmd), papel 1 =
+ *  Depoimento Mulher (gihribeiroo20). O rank do locutor (0 = quem mais
+ *  fala) mapeia no indice do papel: principal fala mais, depoimento menos. */
+export type VAPipelineRoleAvatar = {
+  /** Label do papel ('Doutor', 'Depoimento Mulher', 'UGC') — so pra logs */
+  roleLabel: string;
+  isDepoimento: boolean;
+  avatarId: string;
+  avatarName: string;
+  /** Voz escolhida pro papel (Espelhamento de Voz usa ela no sts_pending) */
+  voiceId?: string | null;
+};
+
 export type VAPipelineAvatar = {
   /** AVA01, AVA02, ... — usado no filename de output */
   avaCode: string;
   /** Avatar HeyGen escolhido (já matched no slot da UI) */
   avatarId: string;
   avatarName: string;
+  /** MULTI-LOCUTOR: papeis da variacao (roleAvatars[0] = principal —
+   *  mesmo avatarId acima). 2+ papeis + input.diarize → cada segmento de
+   *  fala vai pro avatar do papel correspondente ao locutor. Ausente/1
+   *  papel = comportamento classico (1 avatar pro AD inteiro). */
+  roleAvatars?: VAPipelineRoleAvatar[];
+  /** Inverte o mapeamento locutor↔papel (UI: botao 'inverter locutores'
+   *  caso a heuristica de tempo-de-fala erre). So com 2 papeis. */
+  swapSpeakers?: boolean;
 };
+
+/** Turno de fala vindo da diarizacao (segundos). */
+export type VASpeakerUtterance = { speaker: string; start: number; end: number };
 
 export type VAPipelineInput = {
   /** Base AD ID (ex 'AD10G1VN-PRPB06') — vira prefixo dos arquivos */
@@ -56,7 +81,15 @@ export type VAPipelineInput = {
     audioBytes: Uint8Array;
     audioFilename: string;
     label: string;
+    /** Voz do papel (multi-locutor). Presente quando o segmento foi
+     *  roteado por diarizacao; caller usa em vez do lookup por avatarId. */
+    voiceId?: string | null;
   }) => Promise<Blob>;
+  /** MULTI-LOCUTOR: diarizacao do audio (voz isolada) — retorna turnos de
+   *  fala em SEGUNDOS. Caller injeta (comprime + chama /api/va/diarize).
+   *  So roda quando algum avatar tem roleAvatars com 2+ papeis. Se falhar
+   *  ou detectar 1 locutor so, pipeline cai no fluxo classico (1 avatar). */
+  diarize?: (audioBlob: Blob) => Promise<VASpeakerUtterance[]>;
   /** VA DE AVATAR — modo HeyGen Studio cena-por-cena (Mirror voice).
    *  Quando presente, SUBSTITUI o dispatchAudioTake+mount: pra cada
    *  avatar dispara UMA sessao Studio com TODAS as partes (1 parte =
@@ -105,6 +138,7 @@ export type VAPipelineProgress = {
   stage:
     | 'extract_audio'
     | 'isolate_voice'   // voice isolation pre-split pra lipsync limpo
+    | 'diarize'         // MULTI-LOCUTOR: turnos de fala via AssemblyAI
     | 'split_audio'
     | 'detect_faces'    // SMART MODE: face detection nos segmentos
     | 'dispatch'
@@ -203,6 +237,73 @@ export function planAudioSplitBoundaries(
     merged.shift();
   }
   return merged;
+}
+
+/** MULTI-LOCUTOR: monta os cortes a partir dos TURNOS DE FALA.
+ *  1. Funde utterances consecutivas do mesmo locutor em BLOCOS
+ *  2. Boundary entre blocos = MEIO do gap (gap entre turnos = silencio)
+ *  3. Cobre [0, totalDur] (estende primeiro/ultimo bloco)
+ *  4. Funde micro-turnos (<1.2s — diarizacao solta espurios tipo 'né?')
+ *  5. Bloco > maxSec → sub-divide com o planner por silencio (offset local)
+ *  Retorna segmentos COM o locutor dono de cada um. */
+export function planSpeakerBoundaries(
+  utts: VASpeakerUtterance[],
+  totalDur: number,
+  silences: Array<{ start: number; end: number }>,
+  targetSec: number,
+  minSec: number,
+  maxSec: number,
+): Array<{ start: number; end: number; speaker: string }> {
+  type Block = { start: number; end: number; speaker: string };
+  const sorted = [...utts]
+    .filter((u) => u.end > u.start)
+    .sort((a, b) => a.start - b.start);
+  if (sorted.length === 0) return [{ start: 0, end: totalDur, speaker: 'A' }];
+
+  // 1. funde turnos consecutivos do mesmo locutor
+  const blocks: Block[] = [];
+  for (const u of sorted) {
+    const last = blocks[blocks.length - 1];
+    if (last && last.speaker === u.speaker) last.end = Math.max(last.end, u.end);
+    else blocks.push({ start: u.start, end: u.end, speaker: u.speaker });
+  }
+  // 2+3. boundaries no meio dos gaps + cobertura total
+  for (let i = 0; i < blocks.length; i++) {
+    if (i === 0) blocks[i].start = 0;
+    if (i === blocks.length - 1) blocks[i].end = totalDur;
+    if (i > 0) {
+      const mid = Math.min(Math.max((blocks[i - 1].end + blocks[i].start) / 2, blocks[i - 1].start), blocks[i].start);
+      blocks[i - 1].end = mid;
+      blocks[i].start = mid;
+    }
+  }
+  // 4. micro-turnos fundem no vizinho anterior (HeyGen recusa clip < 1s)
+  const MIN_HARD = 1.2;
+  const merged: Block[] = [];
+  for (const b of blocks) {
+    const last = merged[merged.length - 1];
+    if (last && (b.end - b.start < MIN_HARD || last.speaker === b.speaker)) {
+      last.end = b.end;
+    } else {
+      merged.push({ ...b });
+    }
+  }
+  if (merged.length > 1 && merged[0].end - merged[0].start < MIN_HARD) {
+    merged[1].start = merged[0].start;
+    merged.shift();
+  }
+  // 5. sub-divide blocos longos respeitando silencios DENTRO do bloco
+  const out: Block[] = [];
+  for (const b of merged) {
+    const dur = b.end - b.start;
+    if (dur <= maxSec) { out.push(b); continue; }
+    const localSilences = silences
+      .filter((s) => s.start >= b.start && s.end <= b.end)
+      .map((s) => ({ start: s.start - b.start, end: s.end - b.start }));
+    const subs = planAudioSplitBoundaries(dur, localSilences, targetSec, minSec, maxSec);
+    for (const s of subs) out.push({ start: b.start + s.start, end: b.start + s.end, speaker: b.speaker });
+  }
+  return out;
 }
 
 /** Encode AudioBuffer em WAV PCM 16-bit. */
@@ -392,8 +493,70 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
   progress({ stage: 'split_audio', message: 'Analisando silencios pra split sem cortar fala...', percent: 15 });
   const audioBuffer = await decodeAudioRobust(audioBlob);
   const silences = detectSilences(audioBuffer);
-  const boundaries = planAudioSplitBoundaries(audioBuffer.duration, silences, targetSec, minSec, maxSec);
+  let boundaries = planAudioSplitBoundaries(audioBuffer.duration, silences, targetSec, minSec, maxSec);
   progress({ stage: 'split_audio', message: `Split planejado: ${boundaries.length} segmentos`, percent: 20 });
+
+  // 2.5 === MULTI-LOCUTOR (diarizacao) ===
+  // AD com 2+ avatares no doc (ex Doutor + Depoimento Mulher): diariza a
+  // voz isolada, RE-PLANEJA os cortes nos turnos de fala e mapeia cada
+  // segmento pro papel certo. Rank por tempo de fala: locutor que mais
+  // fala = papel principal (roleAvatars[0]), segundo = depoimento.
+  // Falhou/1 locutor so → fluxo classico (1 avatar pro AD inteiro).
+  const wantsMultiSpeaker = !!input.diarize
+    && input.avatares.some((a) => (a.roleAvatars?.length || 0) >= 2);
+  let segRoleRank: number[] | null = null; // por segmento: 0 = principal, 1 = depoimento...
+  if (wantsMultiSpeaker) {
+    progress({ stage: 'diarize', message: 'Detectando locutores (diarizacao AssemblyAI)...', percent: 16 });
+    try {
+      const utts = await input.diarize!(audioBlob);
+      const speakers = Array.from(new Set((utts || []).map((u) => u.speaker)));
+      if (utts && speakers.length >= 2) {
+        const planned = planSpeakerBoundaries(utts, audioBuffer.duration, silences, targetSec, minSec, maxSec);
+        boundaries = planned.map((p) => ({ start: p.start, end: p.end }));
+        // Rank por tempo de fala TOTAL (das utterances cruas)
+        const talk = new Map<string, number>();
+        for (const u of utts) talk.set(u.speaker, (talk.get(u.speaker) || 0) + (u.end - u.start));
+        const ranked = Array.from(talk.entries()).sort((a, b) => b[1] - a[1]).map(([s]) => s);
+        segRoleRank = planned.map((p) => Math.max(0, ranked.indexOf(p.speaker)));
+        const turnCount = segRoleRank.reduce((acc, r, i) => acc + (i > 0 && segRoleRank![i - 1] !== r ? 1 : 0), 0) + 1;
+        progress({
+          stage: 'diarize',
+          message: `${speakers.length} locutores detectados · ${turnCount} turnos de fala · ${boundaries.length} segmentos roteados por papel`,
+          percent: 19,
+        });
+      } else {
+        progress({
+          stage: 'diarize',
+          message: `Diarizacao detectou ${speakers.length || 0} locutor(es) — seguindo com avatar principal pro AD inteiro.`,
+          percent: 19,
+        });
+      }
+    } catch (e) {
+      console.warn('[va-pipeline] diarizacao falhou — fallback avatar principal:', e);
+      progress({
+        stage: 'diarize',
+        message: `⚠ Diarizacao falhou (${(e as Error)?.message || 'erro'}) — seguindo com avatar principal pro AD inteiro.`,
+        percent: 19,
+      });
+    }
+  }
+
+  /** Resolve avatar+voz de UM segmento pro avatar/variacao dado.
+   *  Sem diarizacao ou sem roles: principal (comportamento classico). */
+  const resolveSegRole = (
+    av: VAPipelineAvatar,
+    rankList: number[] | null,
+    si: number,
+  ): { avatarId: string; avatarName: string; voiceId: string | null | undefined } => {
+    const roles = av.roleAvatars && av.roleAvatars.length > 0 ? av.roleAvatars : null;
+    if (!roles || !rankList) {
+      return { avatarId: av.avatarId, avatarName: av.avatarName, voiceId: roles?.[0]?.voiceId };
+    }
+    let rank = rankList[si] ?? 0;
+    if (av.swapSpeakers && roles.length >= 2) rank = rank === 0 ? 1 : rank === 1 ? 0 : rank;
+    const r = roles[Math.min(rank, roles.length - 1)];
+    return { avatarId: r.avatarId, avatarName: r.avatarName, voiceId: r.voiceId };
+  };
 
   // ============== MODO STUDIO (VA DE AVATAR) ==============
   // 1 parte = 1 cena. Pra cada avatar, dispara UMA sessao Studio com
@@ -513,6 +676,9 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
   const segmentWavs: Uint8Array[] = activeSwapBoundaries.map((b) =>
     sliceAudioBufferToWAV(audioBuffer, b.start, b.end),
   );
+  // MULTI-LOCUTOR: re-indexa o rank por segmento pros indices ativos
+  // (smart mode filtra segmentos; classico usa todos)
+  const activeRankList = segRoleRank ? swapIndices.map((i) => segRoleRank![i] ?? 0) : null;
 
   // 4. Pra cada avatar, dispatcha cada segmento + monta
   const items: VAPipelineResult['items'] = [];
@@ -536,11 +702,15 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
     for (let si = 0; si < segmentWavs.length; si++) {
       if (input.isCancelled?.()) break;
       try {
+        // MULTI-LOCUTOR: cada segmento vai pro avatar do PAPEL do locutor
+        // (Doutor fala → avatar do Doutor; depoimento → avatar do depoimento)
+        const segRole = resolveSegRole(av, activeRankList, si);
         const videoBlob = await input.dispatchAudioTake({
-          avatarId: av.avatarId,
+          avatarId: segRole.avatarId,
           audioBytes: segmentWavs[si],
           audioFilename: `parte${si + 1}.wav`,
           label: `${av.avaCode}_parte${si + 1}`,
+          voiceId: segRole.voiceId,
         });
         videoBlobs.push(videoBlob);
       } catch (e) {

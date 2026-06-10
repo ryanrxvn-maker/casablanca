@@ -1271,6 +1271,23 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string): Parse
  *   (opcional) AD31G1VN-ME-DEPOIMENTO-AVA<X>.mp4 (depoimento)
  */
 
+/** Um PAPEL dentro de uma variacao VA (formato novo de doc, 2026-06).
+ *  Ex secao VA01 com 2 papeis:
+ *    'Doutor: radyrahbanmd.mp4'           → papel principal (fala mais)
+ *    'Depoimento Mulher: gihribeiroo20.mp4' → depoimento (trecho menor)
+ *  O pipeline diariza o audio do AD original e manda cada trecho de fala
+ *  pro lipsync com o avatar do papel correspondente. */
+export type VAAvatarRole = {
+  /** Label do papel como esta no doc ('Doutor', 'UGC', 'Depoimento Mulher') */
+  role: string;
+  /** Username/filename sem extensao */
+  username: string;
+  /** Drive file ID (se resolvido nos driveLinks) */
+  fileId: string | null;
+  /** True se o papel e depoimento (fala menos — mapeia pro locutor secundario) */
+  isDepoimento: boolean;
+};
+
 export type VAAvatar = {
   /** Numero da variacao (3 → AVA03) */
   avaNum: number;
@@ -1287,6 +1304,10 @@ export type VAAvatar = {
   /** Thumbnail pra UI. Derivado: YouTube → img.youtube.com/vi/<id>/hqdefault.jpg.
    *  (Avatar de Drive segue usando fileId pra montar a thumb na UI.) */
   thumbUrl?: string | null;
+  /** TODOS os papeis da variacao (formato novo). roles[0] = principal
+   *  (mesmo username/fileId acima). 2+ papeis → pipeline multi-locutor
+   *  (diarizacao). Ausente/1 papel = comportamento classico. */
+  roles?: VAAvatarRole[];
 };
 
 export type ParsedVABriefing = {
@@ -1532,8 +1553,9 @@ export function parseVABriefing(
       for (let i = sec.idx + 1; i < lines.length; i++) {
         if (isAnyBoundary(lines[i])) { end = i; break; }
       }
-      let username: string | null = null;
-      let fileId: string | null = null;
+      // Coleta TODOS os papeis da secao ('Doutor: x.mp4', 'Depoimento
+      // Mulher: y.mp4', 'UGC: z.mp4'). Principal = primeiro nao-depoimento.
+      const secRoles: VAAvatarRole[] = [];
       for (let i = sec.idx + 1; i < end; i++) {
         const t = lines[i].trim();
         // 'Link do AD: AD126G1GL-VFPB04.mp4' — fonte do audio do lipsync.
@@ -1547,7 +1569,6 @@ export function parseVABriefing(
           }
           continue;
         }
-        if (username) continue;
         // Papel: 'Doutor: arquivo.mp4[a]' / 'UGC: @kiko.urso1.mp4' /
         // 'UGC: 7554583824735194398.mp4'. Footnote [a] colado ou com espaco
         // depois do .mp4 e ignorado pelo \b. 'Link da Copy: <doc>' nao casa
@@ -1555,22 +1576,32 @@ export function parseVABriefing(
         const roleM = t.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ ]{1,40}):\s*@?([^\s<>"|]+?)\.(?:mp4|mov)\b/i);
         if (roleM) {
           const role = roleM[1].trim();
-          if (/^depoimento/i.test(role)) continue; // depoimento nao e o avatar principal
           if (/^link\b/i.test(role)) continue;
-          username = roleM[2];
-          const dl = findDl(roleM[2]);
-          if (dl) fileId = dl.fileId;
+          const uname = roleM[2];
+          if (secRoles.some((r) => r.username === uname)) continue;
+          const dl = findDl(uname);
+          secRoles.push({
+            role,
+            username: uname,
+            fileId: dl ? dl.fileId : null,
+            isDepoimento: /^depoimento/i.test(role),
+          });
         }
       }
-      if (!username) continue;
+      // Principal primeiro (primeiro nao-depoimento; se so tem depoimento,
+      // usa ele mesmo como principal)
+      secRoles.sort((a, b) => Number(a.isDepoimento) - Number(b.isDepoimento));
+      const primary = secRoles[0];
+      if (!primary) continue;
       if (avatares.some((a) => a.avaNum === sec.avaNum)) continue;
       avatares.push({
         avaNum: sec.avaNum,
         avaCode: `AVA${String(sec.avaNum).padStart(2, '0')}`,
-        username,
-        fileId,
+        username: primary.username,
+        fileId: primary.fileId,
         youtubeUrl: null,
         thumbUrl: null,
+        roles: secRoles,
       });
     }
     const filteredNew = filterAvaNums.length > 0
