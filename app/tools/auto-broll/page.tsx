@@ -344,15 +344,14 @@ function AutoBrollInner() {
       console.warn('[auto-broll] pre-save falhou (continua mesmo assim):', e);
     }
 
-    // Heartbeat throttled (10s): prova pro RETOMAR (mesma aba ou outra) que
-    // este run esta VIVO — bloqueia double-dispatch enquanto roda.
-    let lastBeatWrite = 0;
-    const beat = () => {
-      const now = Date.now();
-      if (now - lastBeatWrite < 10_000) return;
-      lastBeatWrite = now;
-      patchHistEntry(preEntryKey, { lastBeatAt: now });
-    };
+    // Heartbeat por TIMER (20s): prova pro RETOMAR (mesma aba ou outra) que
+    // este run esta VIVO — bloqueia double-dispatch enquanto roda. Timer em
+    // vez de onProgress: fases longas de poll (relaxed mode) ficam minutos
+    // sem progress e o gate enfraquecia.
+    const beatTimer = setInterval(
+      () => patchHistEntry(preEntryKey, { lastBeatAt: Date.now() }),
+      20_000,
+    );
 
     try {
       // SEMPRE V2 — API direta Magnific server-side. Sem extension, sem aba aberta.
@@ -365,7 +364,7 @@ function AutoBrollInner() {
         },
         {
           signal: ac.signal,
-          onProgress: (p) => { patchJob(job.id, { progress: p }); beat(); },
+          onProgress: (p) => patchJob(job.id, { progress: p }),
         },
       );
 
@@ -401,7 +400,7 @@ function AutoBrollInner() {
             },
             {
               signal: ac.signal,
-              onProgress: (p) => { patchJob(job.id, { progress: p }); beat(); },
+              onProgress: (p) => patchJob(job.id, { progress: p }),
             },
           );
           // Merge takes do retry com a rodada anterior (preserva os que ja eram
@@ -541,6 +540,7 @@ function AutoBrollInner() {
       } catch {}
     } finally {
       abortRefs.current[job.id] = null;
+      clearInterval(beatTimer);
       // Libera o RETOMAR: run terminou (qualquer que seja o caminho de saida)
       patchHistEntry(preEntryKey, { inFlight: false });
     }
@@ -1218,6 +1218,7 @@ function BrollHistorySection() {
   async function retomar(item: HistEntry, originalJson: string) {
     setRetrying(item.zipKey);
     setRetryMsg('Preparando…');
+    let retomarBeat: ReturnType<typeof setInterval> | null = null;
     try {
       // 1. Identifica faltantes
       const { parseMagnificPrompts } = await import('@/lib/magnific-pipeline');
@@ -1243,16 +1244,13 @@ function BrollHistorySection() {
 
       // 2. Dispara so as faltantes
       setRetryMsg(`Re-disparando ${missingTakes.length} take(s)…`);
-      // Marca a entry como em-voo + heartbeat: RETOMAR em outra aba (ou um
-      // segundo clique pos-reload) fica bloqueado enquanto este run vive.
+      // Marca a entry como em-voo + heartbeat por timer: RETOMAR em outra
+      // aba (ou um segundo clique pos-reload) fica bloqueado enquanto vive.
       patchHistEntry(item.zipKey, { inFlight: true, lastBeatAt: Date.now() });
-      let lastBeatWrite = 0;
-      const beat = () => {
-        const now = Date.now();
-        if (now - lastBeatWrite < 10_000) return;
-        lastBeatWrite = now;
-        patchHistEntry(item.zipKey, { lastBeatAt: now });
-      };
+      retomarBeat = setInterval(
+        () => patchHistEntry(item.zipKey, { lastBeatAt: Date.now() }),
+        20_000,
+      );
       const { runMagnificPipelineV2 } = await import('@/lib/magnific-pipeline-v2');
       const r = await runMagnificPipelineV2(
         {
@@ -1346,6 +1344,7 @@ function BrollHistorySection() {
     } catch (e) {
       alert('RETOMAR falhou: ' + ((e as Error)?.message || String(e)));
     } finally {
+      if (retomarBeat) clearInterval(retomarBeat);
       setRetrying(null);
       setRetryMsg('');
       patchHistEntry(item.zipKey, { inFlight: false });
