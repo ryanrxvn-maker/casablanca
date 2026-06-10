@@ -190,6 +190,7 @@ function isGhostRender(e: unknown): boolean {
 function isImageDeniedError(e: unknown): boolean {
   const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
   return (
+    msg.includes('img_denied') ||
     msg.includes('nsfw') ||
     msg.includes('blocked by') ||
     msg.includes('content policy') ||
@@ -352,6 +353,11 @@ export async function runMagnificPipelineV2(
   //   - Telemetria visível: cada wait/retry vira mensagem no take card.
   const MAX_RETRIES_NETWORK = 20;
   const MAX_RETRIES_STATUS_FAILED = 5;
+  // Regra do user (2026-06-10): prioridade SEMPRE é imagem (Nano Banana) →
+  // animar com Kling. Se a IMAGEM for NEGADA por política (status failed /
+  // nsfw), re-tenta UMA vez (re-seed); negou DE NOVO (2ª) → desiste da
+  // imagem e gera aquele take direto no Kling text-to-video.
+  const MAX_IMG_DENIED_BEFORE_T2V = 2;
   const RETRY_DELAY_STATUS_MS = 3000;
   const PER_TAKE_RETRY_BUDGET_MS = 15 * 60_000; // 15min total em retries
   // 7min (era 5): backoff máximo de concurrent-cap é 5min — com 1 take
@@ -411,10 +417,19 @@ export async function runMagnificPipelineV2(
         if (img.status === 'completed' && img.url) return { url: img.url };
         lastErr = new Error(`Magnific status:${img.status}`);
         statusAttempt++;
+        // NEGAÇÃO POR POLÍTICA (status failed do render): 1ª vez re-tenta
+        // com seed novo; 2ª negação → desiste da IMAGEM e o take cai pro
+        // fallback Kling text-to-video (catch do take loop).
+        if (img.status === 'failed' && statusAttempt >= MAX_IMG_DENIED_BEFORE_T2V) {
+          throw new Error(`IMG_DENIED: imagem negada ${statusAttempt}x (Magnific status:failed) — fallback Kling`);
+        }
         if (statusAttempt >= MAX_RETRIES_STATUS_FAILED) throw lastErr;
+        onAttempt(total, `Imagem negada (${statusAttempt}ª) — re-tentando com seed novo`);
         await new Promise((r) => setTimeout(r, RETRY_DELAY_STATUS_MS * statusAttempt));
       } catch (e) {
         lastErr = e instanceof Error ? e : new Error(String(e));
+        // Negação 2x já decidida acima — propaga direto pro fallback t2v
+        if (lastErr.message.startsWith('IMG_DENIED:')) throw lastErr;
         if (isRetryableError(e)) {
           netAttempt++;
           if (netAttempt > MAX_RETRIES_NETWORK) throw lastErr;
@@ -442,6 +457,11 @@ export async function runMagnificPipelineV2(
           await new Promise((r) => setTimeout(r, waitMs));
         } else {
           statusAttempt++;
+          // nsfw/content-policy explícito = negação por política → mesma
+          // regra: 2 strikes e cai pro fallback Kling text-to-video
+          if (isImageDeniedError(e) && statusAttempt >= MAX_IMG_DENIED_BEFORE_T2V) {
+            throw new Error(`IMG_DENIED: ${lastErr.message.slice(0, 80)}`);
+          }
           if (statusAttempt >= MAX_RETRIES_STATUS_FAILED) throw lastErr;
           console.warn(`[img] non-net err attempt#${statusAttempt}`);
           onAttempt(total, `Falha (${lastErr.message.slice(0,40)}) — re-seed`);
@@ -635,6 +655,17 @@ export async function runMagnificPipelineV2(
 
   // ───────── Download MP4s ─────────
   emit('Baixando vídeos finais...', 'downloading', 90);
+  // Nome do arquivo = O QUE A CENA ILUSTRA (label/section do JSON), pra dar
+  // match perfeito no CutFeeling por nicho. Ex: "03 - PROSTATA INCHANDO.mp4".
+  // Prefixo NN mantém ordenação + unicidade; sem label cai no take_NN antigo.
+  const fileSafe = (s2: string) =>
+    s2.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 70);
+  function takeFileName(idx: number): string {
+    const t = takes.find((tk) => tk.idx === idx);
+    const label = t?.label ? fileSafe(t.label) : '';
+    const nn = String(idx).padStart(2, '0');
+    return label ? `${nn} - ${label}.mp4` : `take_${nn}.mp4`;
+  }
   const entries: ZipEntry[] = [];
   let downloaded = 0;
   for (const s of takeStates) {
@@ -659,7 +690,7 @@ export async function runMagnificPipelineV2(
       }
       if (!ab) throw new Error('download vazio');
       entries.push({
-        name: `take_${String(s.idx).padStart(2, '0')}.mp4`,
+        name: takeFileName(s.idx),
         data: ab,
       });
       patchTake(s.idx, {

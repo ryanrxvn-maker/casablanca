@@ -28,6 +28,10 @@ export type MagnificTakeInput = {
   idx: number;
   imagePrompt: string;
   videoPrompt?: string;
+  /** Rótulo descritivo do que a cena ilustra (ex: "PROSTATA INCHANDO").
+   *  Vira o NOME DO ARQUIVO no ZIP — o CutFeeling casa b-roll com trecho
+   *  da copy pelo nome, então isso dá o match perfeito por nicho. */
+  label?: string;
 };
 
 export type MagnificPipelineConfig = {
@@ -544,8 +548,12 @@ export function parseMagnificPrompts(raw: string): MagnificTakeInput[] {
         const videoPrompt = String(
           item.videoPrompt || item.video_prompt || item.kling_prompt || item.motion || item.video || '',
         ).trim();
+        // Rótulo da cena (section/label/name/title) → nome do arquivo no ZIP
+        const label = String(
+          item.section || item.label || item.name || item.title || item.scene || '',
+        ).trim();
         // Regra do user: take = par image+video. Conta só objetos com imagePrompt.
-        if (imagePrompt) out.push({ idx: out.length + 1, imagePrompt, videoPrompt });
+        if (imagePrompt) out.push({ idx: out.length + 1, imagePrompt, videoPrompt, label });
       });
       return out;
     }
