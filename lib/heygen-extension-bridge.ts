@@ -744,66 +744,137 @@ export async function listDriveFolderViaExtension(folderId: string): Promise<{
   });
 }
 
-export async function downloadDriveFileViaExtension(fileId: string): Promise<{
+/** Fila global: serializa downloads do Drive. 2-3 VAs disparando em
+ *  paralelo saturavam o service worker da extensao (3 MP4s de ate 100MB
+ *  simultaneos) — nenhum terminava em 10min e todos falhavam por timeout
+ *  (user 2026-06-10). Um por vez = cada um termina em ~1-2min. */
+let driveDlQueue: Promise<unknown> = Promise.resolve();
+
+export type DriveDownloadOptions = {
+  /** Progresso real (bytes recebidos / total quando o Drive informa). */
+  onProgress?: (receivedBytes: number, totalBytes: number | null) => void;
+};
+
+export async function downloadDriveFileViaExtension(fileId: string, opts: DriveDownloadOptions = {}): Promise<{
   ok: true;
   bytes: Uint8Array;
   size: number;
 } | { ok: false; error: string }> {
   installListener();
   if (typeof window === 'undefined') return { ok: false, error: 'sem window' };
+  const job = driveDlQueue.then(async () => {
+    // 2 tentativas: erro transient (inatividade/conexao caiu) ganha retry
+    // com requestId novo. Erro definitivo (sem permissao/login) falha direto.
+    let last: { ok: false; error: string } = { ok: false, error: 'sem tentativa' };
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const r = await downloadDriveOnce(fileId, opts);
+      if (r.ok) return r;
+      last = r;
+      const transient = /inatividade|caiu no meio|timeout|estagnou|fetch_exception|faltou/i.test(r.error);
+      if (!transient) return r;
+      console.warn(`[drive-dl] tentativa ${attempt}/2 falhou (${r.error}) — retry em 2s`);
+      await new Promise((res) => setTimeout(res, 2000));
+    }
+    return last;
+  });
+  // Encadeia na fila SEM propagar rejeicao pros proximos da fila
+  driveDlQueue = job.catch(() => undefined);
+  return job as Promise<{ ok: true; bytes: Uint8Array; size: number } | { ok: false; error: string }>;
+}
+
+function downloadDriveOnce(fileId: string, opts: DriveDownloadOptions): Promise<{
+  ok: true;
+  bytes: Uint8Array;
+  size: number;
+} | { ok: false; error: string }> {
   return new Promise((resolve) => {
     const requestId = `dl_drive_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    // Acumulador de chunks (extension v4.12.3+: arquivos > ~48MB chegam
-    // em chunks de 24MB base64 chars cada — chrome.tabs.sendMessage tem
-    // limite 64MiB por mensagem).
-    const chunks: string[] = [];
-    const finish = (ok: boolean, base64: string | null, error?: string) => {
+    // Chunks chegam em STREAM (extension v4.16.3+) e sao DECODIFICADOS NA
+    // HORA (base64 -> bytes por chunk de ~24MB chars). Antes a page juntava
+    // tudo numa string de ~130MB e fazia atob+loop dela inteira — main
+    // thread travada por minutos = aba congelada.
+    const parts: Uint8Array[] = [];
+    let receivedBytes = 0;
+    let done = false;
+    // Timeout por INATIVIDADE (2min sem chunk/progresso = morto), nao por
+    // tempo total — download grande legitimo nao estoura mais o limite.
+    let inactivity: ReturnType<typeof setTimeout> | null = null;
+    const armInactivity = () => {
+      if (inactivity) clearTimeout(inactivity);
+      inactivity = setTimeout(() => {
+        finish({ ok: false, error: 'inatividade 2min — extensao parou de mandar chunks (recarregue extensao + F5 se persistir)' });
+      }, 120000);
+    };
+    const absolute = setTimeout(() => {
+      finish({ ok: false, error: 'timeout absoluto 30min download Drive' });
+    }, 1800000);
+    const finish = (r: { ok: true; bytes: Uint8Array; size: number } | { ok: false; error: string }) => {
+      if (done) return;
+      done = true;
       window.removeEventListener('message', handler);
-      if (!ok) { resolve({ ok: false, error: error || 'download falhou' }); return; }
-      try {
-        const binary = atob(base64 || '');
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        resolve({ ok: true, bytes, size: bytes.length });
-      } catch (e) {
-        resolve({ ok: false, error: 'decode base64: ' + (e as Error)?.message });
+      if (inactivity) clearTimeout(inactivity);
+      clearTimeout(absolute);
+      resolve(r);
+    };
+    const b64ToBytes = (b64: string): Uint8Array => {
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes;
+    };
+    const assemble = (count: number) => {
+      for (let i = 0; i < count; i++) {
+        if (parts[i] === undefined) {
+          finish({ ok: false, error: `chunk ${i}/${count} faltou (chrome.tabs.sendMessage perdeu mensagem)` });
+          return;
+        }
       }
+      let total = 0;
+      for (let i = 0; i < count; i++) total += parts[i].length;
+      const bytes = new Uint8Array(total);
+      let off = 0;
+      for (let i = 0; i < count; i++) { bytes.set(parts[i], off); off += parts[i].length; }
+      finish({ ok: true, bytes, size: bytes.length });
     };
     const handler = (ev: MessageEvent) => {
       if (ev.data?.source !== 'darkolab-ext') return;
       if (ev.data?.requestId !== requestId) return;
+      if (ev.data?.type === 'HG_DRIVE_DOWNLOAD_PROGRESS') {
+        armInactivity();
+        opts.onProgress?.(Number(ev.data.received) || 0, ev.data.total ? Number(ev.data.total) : null);
+        return;
+      }
       if (ev.data?.type === 'HG_DRIVE_DOWNLOAD_CHUNK') {
+        armInactivity();
         const idx = Number(ev.data.chunkIdx);
-        const piece = String(ev.data.piece || '');
-        chunks[idx] = piece;
-        return; // espera proximos chunks + RESULT final
+        try {
+          parts[idx] = b64ToBytes(String(ev.data.piece || ''));
+        } catch (e) {
+          finish({ ok: false, error: 'decode base64 chunk ' + idx + ': ' + (e as Error)?.message });
+          return;
+        }
+        receivedBytes += parts[idx].length;
+        opts.onProgress?.(receivedBytes, null);
+        return;
       }
       if (ev.data?.type === 'HG_DRIVE_DOWNLOAD_RESULT') {
-        if (!ev.data.ok) { finish(false, null, String(ev.data.error || 'download falhou')); return; }
-        // Modo chunked: ev.data.chunks=N -> assembla. Modo legacy: ev.data.base64 inteiro.
+        if (!ev.data.ok) { finish({ ok: false, error: String(ev.data.error || 'download falhou') }); return; }
         if (typeof ev.data.chunks === 'number' && ev.data.chunks > 0) {
-          // Verifica que todos os chunks chegaram
-          let missing = -1;
-          for (let i = 0; i < ev.data.chunks; i++) {
-            if (chunks[i] === undefined) { missing = i; break; }
-          }
-          if (missing >= 0) {
-            finish(false, null, `chunk ${missing}/${ev.data.chunks} faltou (chrome.tabs.sendMessage perdeu mensagem)`);
-            return;
-          }
-          finish(true, chunks.join(''));
+          assemble(ev.data.chunks);
         } else {
-          finish(true, String(ev.data.base64 || ''));
+          // legado (extensao antiga): base64 inteiro numa mensagem so
+          try {
+            const bytes = b64ToBytes(String(ev.data.base64 || ''));
+            finish({ ok: true, bytes, size: bytes.length });
+          } catch (e) {
+            finish({ ok: false, error: 'decode base64: ' + (e as Error)?.message });
+          }
         }
       }
     };
     window.addEventListener('message', handler);
+    armInactivity();
     window.postMessage({ source: 'darkolab', type: 'HG_DOWNLOAD_DRIVE', requestId, fileId }, '*');
-    // Timeout 10min — video grande pode demorar
-    setTimeout(() => {
-      window.removeEventListener('message', handler);
-      resolve({ ok: false, error: 'timeout 10min download Drive' });
-    }, 600000);
   });
 }
 

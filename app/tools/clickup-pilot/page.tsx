@@ -4789,9 +4789,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     });
 
     try {
-      // 1. Download AD via extension
+      // 1. Download AD via extension — progresso real no card (chunks em
+      // stream, extension v4.16.3+; fila global serializa VAs concorrentes)
       const { downloadDriveFileViaExtension } = await import('@/lib/heygen-extension-bridge');
-      const dl = await downloadDriveFileViaExtension(driveId);
+      const fmtMB = (n: number) => (n / 1048576).toFixed(1);
+      const dl = await downloadDriveFileViaExtension(driveId, {
+        onProgress: (rec, tot) => patchVA({
+          message: `Baixando AD original do Drive... ${fmtMB(rec)}MB${tot ? ` / ${fmtMB(tot)}MB` : ''}`,
+        }),
+      });
       if (!dl.ok) throw new Error('Drive download: ' + dl.error);
       patchVA({ phase: 'dispatching', message: `Baixado ${(dl.size / (1024 * 1024)).toFixed(1)}MB. Extraindo voz + split...` });
 
@@ -5268,7 +5274,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
 
       // 1. Download do AD original (link do COMENTARIO/manual) via extension.
       const { downloadDriveFileViaExtension } = await import('@/lib/heygen-extension-bridge');
-      const dl = await downloadDriveFileViaExtension(driveId);
+      const dl = await downloadDriveFileViaExtension(driveId, {
+        onProgress: (rec, tot) => setStage('downloading', `Baixando o criativo... ${(rec / 1048576).toFixed(1)}MB${tot ? ` / ${(tot / 1048576).toFixed(1)}MB` : ''}`),
+      });
       if (!dl.ok) throw new Error('Drive download: ' + dl.error);
       const adBlob = new Blob([dl.bytes as BlobPart], { type: 'video/mp4' });
 

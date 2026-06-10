@@ -627,158 +627,205 @@ async function handleDownloadDrive(requestId, fileId, bridgeTabId) {
     reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_RESULT', { ok: false, error: 'fileId invalido' });
     return;
   }
-  console.log('[DARKO LAB BG v4.6] HG_DOWNLOAD_DRIVE start fileId=', fileId);
+  console.log('[DARKO LAB BG v4.16.3] HG_DOWNLOAD_DRIVE start fileId=', fileId);
   const errors = [];
 
-  // Helper que tenta fetch + parseia HTML de confirmacao se vier
-  const tryFetch = async (url) => {
-    console.log('[DARKO LAB BG v4.6] fetch tentando', url.slice(0, 120));
+  // ===== STREAMING (v4.16.3) =====
+  // ANTES: r.arrayBuffer() do MP4 inteiro -> binary string gigante via
+  // String.fromCharCode em loop -> btoa de ~130MB -> chunks. Com 2-3 VAs
+  // baixando EM PARALELO o service worker saturava por minutos, a page nao
+  // recebia NADA (nem progresso) e estourava 'timeout 10min download Drive'
+  // com o card parado em 'Baixando AD original...' (user 2026-06-10).
+  // AGORA: le o body em STREAM, sniffa os primeiros bytes (HTML de confirm
+  // vs MP4), e emite chunks base64 de 18MB CONFORME CHEGAM + progresso real
+  // (HG_DRIVE_DOWNLOAD_PROGRESS). Memoria O(chunk), nao O(arquivo); o
+  // timeout vira INATIVIDADE (90s sem bytes), nao tempo total.
+  const RAW_CHUNK = 18 * 1024 * 1024; // -> 24MB base64 chars (limite msg 64MiB)
+  let sentChunks = 0;
+
+  const encodeB64 = (bytes) => {
+    let binary = '';
+    const STEP = 0x8000;
+    for (let i = 0; i < bytes.length; i += STEP) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + STEP));
+    }
+    return btoa(binary);
+  };
+
+  // Tenta UMA url em modo stream.
+  // Retorna { done: true, size }            -> chunks ja emitidos pra page
+  //         { err, confirm?, uuid? }        -> nao era MP4 (HTML/erro/login)
+  const tryStream = async (url) => {
+    console.log('[DARKO LAB BG v4.16.3] fetch tentando', url.slice(0, 120));
+    const controller = new AbortController();
+    let inactivity = null;
+    const armInactivity = () => {
+      clearTimeout(inactivity);
+      inactivity = setTimeout(() => controller.abort(), 90000);
+    };
     try {
-      const r = await fetchWithTimeout(url, {
+      armInactivity();
+      const r = await fetch(url, {
         method: 'GET',
         credentials: 'include',
         redirect: 'follow',
-      }, 600000);
-      if (!r.ok) return { err: `HTTP ${r.status}`, finalUrl: r.url };
-      const buf = await r.arrayBuffer();
-      // HTML de confirmacao costuma ser <100KB; MP4 e bem maior
-      if (buf.byteLength < 100000) {
-        const head = new Uint8Array(buf.slice(0, 3000));
-        const headText = new TextDecoder().decode(head);
-        if (/<html|<!DOCTYPE/i.test(headText)) {
-          const allText = new TextDecoder().decode(new Uint8Array(buf));
-          const confirmMatch = allText.match(/confirm=([0-9A-Za-z_-]+)/);
-          const uuidMatch = allText.match(/uuid=([0-9a-f-]+)/);
-          // Form action url pode estar la
-          const formAction = allText.match(/action="([^"]+download[^"]*)"/);
-          if (confirmMatch || uuidMatch || formAction) {
-            return {
-              err: 'needs_confirm',
-              confirm: confirmMatch?.[1],
-              uuid: uuidMatch?.[1],
-              formAction: formAction?.[1],
-              finalUrl: r.url,
-            };
+        signal: controller.signal,
+      });
+      if (!r.ok) { clearTimeout(inactivity); return { err: `HTTP ${r.status}` }; }
+      const total = parseInt(r.headers.get('content-length') || '0', 10) || null;
+      const reader = r.body.getReader();
+      let pending = [];        // Uint8Arrays aguardando virar chunk
+      let pendingLen = 0;
+      let sniffed = false;
+      let htmlMode = false;
+      const htmlParts = [];
+      let received = 0;
+      let lastProgressAt = 0;
+
+      const flush = (force) => {
+        while (pendingLen >= RAW_CHUNK || (force && pendingLen > 0)) {
+          const take = Math.min(RAW_CHUNK, pendingLen);
+          const out = new Uint8Array(take);
+          let off = 0;
+          while (off < take) {
+            const head = pending[0];
+            const need = take - off;
+            if (head.length <= need) { out.set(head, off); off += head.length; pending.shift(); }
+            else { out.set(head.subarray(0, need), off); pending[0] = head.subarray(need); off += need; }
           }
-          if (/sign in|signin|accounts\.google/i.test(headText)) {
-            return { err: 'redirect_login (file privado OU user nao logado)', finalUrl: r.url };
+          pendingLen -= take;
+          reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_CHUNK', {
+            chunkIdx: sentChunks, piece: encodeB64(out),
+          });
+          sentChunks++;
+        }
+      };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        armInactivity();
+        received += value.length;
+        pending.push(value);
+        pendingLen += value.length;
+
+        if (!sniffed) {
+          if (pendingLen < 3000) continue;
+          const headBytes = new Uint8Array(3000);
+          let o = 0;
+          for (const p of pending) {
+            const n = Math.min(p.length, 3000 - o);
+            headBytes.set(p.subarray(0, n), o);
+            o += n;
+            if (o >= 3000) break;
           }
-          return { err: 'HTML response (file deletado OU sem permissao)', finalUrl: r.url };
+          sniffed = true;
+          htmlMode = /<html|<!DOCTYPE/i.test(new TextDecoder().decode(headBytes));
+        }
+        if (htmlMode) {
+          // pagina de confirm/erro e pequena — guarda inteira pra parsear
+          htmlParts.push(...pending);
+          pending = []; pendingLen = 0;
+          continue;
+        }
+        flush(false);
+        const now = Date.now();
+        if (now - lastProgressAt > 700) {
+          lastProgressAt = now;
+          reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_PROGRESS', { received, total });
         }
       }
-      return { bytes: new Uint8Array(buf), finalUrl: r.url };
+      clearTimeout(inactivity);
+
+      if (!sniffed) {
+        // arquivo menor que 3000 bytes — sniffa o que tem
+        const all = new Uint8Array(pendingLen);
+        let o = 0; for (const p of pending) { all.set(p, o); o += p.length; }
+        if (/<html|<!DOCTYPE/i.test(new TextDecoder().decode(all))) {
+          htmlMode = true; htmlParts.push(all); pending = []; pendingLen = 0;
+        }
+      }
+
+      if (htmlMode) {
+        let len = 0; for (const p of htmlParts) len += p.length;
+        const htmlAll = new Uint8Array(len);
+        let o = 0; for (const p of htmlParts) { htmlAll.set(p, o); o += p.length; }
+        const allText = new TextDecoder().decode(htmlAll);
+        const confirmMatch = allText.match(/confirm=([0-9A-Za-z_-]+)/);
+        const uuidMatch = allText.match(/uuid=([0-9a-f-]+)/);
+        const formAction = allText.match(/action="([^"]+download[^"]*)"/);
+        if (confirmMatch || uuidMatch || formAction) {
+          return { err: 'needs_confirm', confirm: confirmMatch?.[1], uuid: uuidMatch?.[1] };
+        }
+        if (/sign in|signin|accounts\.google/i.test(allText.slice(0, 3000))) {
+          return { err: 'redirect_login (file privado OU user nao logado)' };
+        }
+        return { err: 'HTML response (file deletado OU sem permissao)' };
+      }
+
+      flush(true);
+      reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_PROGRESS', { received, total });
+      return { done: true, size: received };
     } catch (e) {
-      return { err: 'fetch_exception: ' + (e?.message || e), finalUrl: url };
+      clearTimeout(inactivity);
+      const aborted = e?.name === 'AbortError';
+      return { err: aborted ? 'inatividade 90s (conexao Drive estagnou)' : ('fetch_exception: ' + (e?.message || e)) };
     }
   };
 
-  // Estrategia 1: drive.google.com/uc — funciona pra files pequenos
-  let bytes = null;
-  let res = await tryFetch(`https://drive.google.com/uc?export=download&id=${fileId}`);
-  if (res.bytes) {
-    bytes = res.bytes;
-    console.log('[DARKO LAB BG v4.6] OK via uc, bytes=', bytes.length);
-  } else if (res.err === 'needs_confirm') {
-    errors.push(`uc: needs confirm (${res.confirm || res.uuid || 'no token'})`);
-    console.log('[DARKO LAB BG v4.6] uc needs confirm', { confirm: res.confirm, uuid: res.uuid });
-    // Estrategia 2: retry com confirm + uuid (arquivos > ~100MB)
-    if (res.confirm || res.uuid) {
-      const params = new URLSearchParams({ id: fileId, export: 'download' });
-      if (res.confirm) params.set('confirm', res.confirm);
-      if (res.uuid) params.set('uuid', res.uuid);
-      res = await tryFetch(`https://drive.google.com/uc?${params}`);
-      if (res.bytes) { bytes = res.bytes; console.log('[DARKO LAB BG v4.6] OK via uc+confirm'); }
-      else errors.push(`uc+confirm: ${res.err}`);
-    }
-  } else {
-    errors.push(`uc: ${res.err}`);
+  // Cadeia de estrategias (mesmas urls de antes). IMPORTANTE: se uma
+  // estrategia ja EMITIU chunks e caiu no meio, NAO tenta a proxima —
+  // a page tem chunks parciais dessa requestId e mistura corromperia o
+  // arquivo. Falha limpo; a page faz retry com requestId novo.
+  let final = await tryStream(`https://drive.google.com/uc?export=download&id=${fileId}`);
+  if (!final.done && final.err === 'needs_confirm' && sentChunks === 0 && (final.confirm || final.uuid)) {
+    errors.push('uc: needs confirm');
+    const params = new URLSearchParams({ id: fileId, export: 'download' });
+    if (final.confirm) params.set('confirm', final.confirm);
+    if (final.uuid) params.set('uuid', final.uuid);
+    final = await tryStream(`https://drive.google.com/uc?${params}`);
+    if (!final.done) errors.push(`uc+confirm: ${final.err}`);
+  } else if (!final.done) {
+    errors.push(`uc: ${final.err}`);
   }
-
-  // Estrategia 3: drive.usercontent.google.com — endpoint moderno do Drive (Q4 2023+)
-  if (!bytes) {
-    res = await tryFetch(`https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=t`);
-    if (res.bytes) { bytes = res.bytes; console.log('[DARKO LAB BG v4.6] OK via usercontent'); }
-    else if (res.err === 'needs_confirm' && (res.confirm || res.uuid)) {
+  if (!final.done && sentChunks === 0) {
+    final = await tryStream(`https://drive.usercontent.google.com/download?id=${fileId}&export=download&authuser=0&confirm=t`);
+    if (!final.done && final.err === 'needs_confirm' && sentChunks === 0 && (final.confirm || final.uuid)) {
       const params = new URLSearchParams({ id: fileId, export: 'download', authuser: '0' });
-      if (res.confirm) params.set('confirm', res.confirm);
-      if (res.uuid) params.set('uuid', res.uuid);
-      res = await tryFetch(`https://drive.usercontent.google.com/download?${params}`);
-      if (res.bytes) { bytes = res.bytes; console.log('[DARKO LAB BG v4.6] OK via usercontent+confirm'); }
-      else errors.push(`usercontent+confirm: ${res.err}`);
-    } else {
-      errors.push(`usercontent: ${res.err}`);
+      if (final.confirm) params.set('confirm', final.confirm);
+      if (final.uuid) params.set('uuid', final.uuid);
+      final = await tryStream(`https://drive.usercontent.google.com/download?${params}`);
+      if (!final.done) errors.push(`usercontent+confirm: ${final.err}`);
+    } else if (!final.done) {
+      errors.push(`usercontent: ${final.err}`);
     }
   }
-
-  // Estrategia 4: retry uc + confirm=t (forca confirm sem token)
-  if (!bytes) {
-    res = await tryFetch(`https://drive.google.com/uc?export=download&id=${fileId}&confirm=t`);
-    if (res.bytes) { bytes = res.bytes; console.log('[DARKO LAB BG v4.6] OK via uc+confirm=t'); }
-    else errors.push(`uc+confirm=t: ${res.err}`);
+  if (!final.done && sentChunks === 0) {
+    final = await tryStream(`https://drive.google.com/uc?export=download&id=${fileId}&confirm=t`);
+    if (!final.done) errors.push(`uc+confirm=t: ${final.err}`);
+  }
+  if (!final.done && sentChunks === 0) {
+    final = await tryStream(`https://drive.google.com/u/0/uc?id=${fileId}&export=download&confirm=t`);
+    if (!final.done) errors.push(`u/0/uc: ${final.err}`);
   }
 
-  // Estrategia 5: open=share format
-  if (!bytes) {
-    res = await tryFetch(`https://drive.google.com/u/0/uc?id=${fileId}&export=download&confirm=t`);
-    if (res.bytes) { bytes = res.bytes; console.log('[DARKO LAB BG v4.6] OK via /u/0/uc'); }
-    else errors.push(`u/0/uc: ${res.err}`);
-  }
-
-  if (!bytes) {
+  if (!final.done) {
     reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_RESULT', {
       ok: false,
-      error: 'Drive download falhou em todas estrategias. ' +
-        'Verifique: (1) extension reloaded em chrome://extensions, ' +
-        '(2) file existe + voce tem acesso, ' +
-        '(3) voce esta logado no Google. Detalhes: ' + errors.join(' | '),
+      error: (sentChunks > 0
+        ? `Conexao com o Drive caiu no meio do download (${sentChunks} chunks recebidos). Tente de novo. `
+        : 'Drive download falhou em todas estrategias. Verifique: (1) extension reloaded em chrome://extensions, (2) file existe + voce tem acesso, (3) voce esta logado no Google. ')
+        + 'Detalhes: ' + errors.join(' | '),
     });
     return;
   }
 
-  console.log(`[DARKO LAB BG v4.6] HG_DOWNLOAD_DRIVE OK fileId=${fileId} bytes=${bytes.length}`);
-  try {
-    let binary = '';
-    const CHUNK = 0x8000;
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-      binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)));
-    }
-    const base64 = btoa(binary);
-    // chrome.tabs.sendMessage tem limite ~64MiB por mensagem; base64 incha
-    // 33%, entao um MP4 de ~48MB ja estoura. SOLUCAO: chunked transfer com
-    // chunks de 24MB base64 chars (= ~18MB raw bytes — folga grande).
-    const CHUNK_SIZE = 24 * 1024 * 1024;
-    if (base64.length <= CHUNK_SIZE) {
-      // legado: single message pra files pequenos
-      reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_RESULT', {
-        ok: true,
-        base64,
-        size: bytes.length,
-      });
-    } else {
-      const total = Math.ceil(base64.length / CHUNK_SIZE);
-      console.log(`[DARKO LAB BG] Drive download chunked: ${total} chunks de ${CHUNK_SIZE} chars`);
-      for (let i = 0; i < total; i++) {
-        const piece = base64.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-        reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_CHUNK', {
-          chunkIdx: i,
-          total,
-          piece,
-        });
-        // pequeno yield pro service worker nao engasgar
-        await new Promise((r) => setTimeout(r, 5));
-      }
-      reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_RESULT', {
-        ok: true,
-        chunks: total,
-        size: bytes.length,
-      });
-    }
-  } catch (e) {
-    reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_RESULT', {
-      ok: false,
-      error: 'Falha ao codificar bytes em base64: ' + (e?.message || e),
-    });
-  }
+  console.log(`[DARKO LAB BG v4.16.3] HG_DOWNLOAD_DRIVE OK fileId=${fileId} bytes=${final.size} chunks=${sentChunks}`);
+  reportToPage(bridgeTabId, requestId, 'HG_DRIVE_DOWNLOAD_RESULT', {
+    ok: true,
+    chunks: sentChunks,
+    size: final.size,
+  });
 }
 
 async function handleCloneVoice(requestId, payload, bridgeTabId) {
