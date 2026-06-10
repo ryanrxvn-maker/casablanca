@@ -1028,27 +1028,65 @@ function ClickUpPilotInner() {
    * Retorna tambem driveLinks: links pra videos em Drive citados no doc
    * (necessarios pra visual match de avatares).
    */
-  function fetchDocViaExtension(url: string): Promise<{ ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string }> }> {
+  function fetchDocViaExtensionOnce(url: string): Promise<{ ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string }>; transient?: boolean }> {
     return new Promise((resolve) => {
       const requestId = `doc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      // Timeout em DOIS estagios (extensao v4.16.2+ manda HG_DOC_ACK assim
+      // que o background aceita o job):
+      //  - sem ACK e sem resultado em 30s → extensao morta/surda → erro
+      //    transient (retry + instrucao de F5). Bridge v4.16.2+ com contexto
+      //    invalidado responde erro INSTANTANEO, nem chega aqui.
+      //  - com ACK → background esta lendo (export 2x12s + fallback tab
+      //    ~21s ≈ 45s no pior caso) → janela total de 90s. Antes a page
+      //    desistia em 30s enquanto o doc chegava logo depois.
+      let acked = false;
+      let done = false;
+      const timers: ReturnType<typeof setTimeout>[] = [];
+      const finish = (r: { ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string }>; transient?: boolean }) => {
+        if (done) return;
+        done = true;
+        window.removeEventListener('message', handler);
+        timers.forEach(clearTimeout);
+        resolve(r);
+      };
       const handler = (ev: MessageEvent) => {
-        if (
-          ev.data?.source === 'darkolab-ext' &&
-          ev.data?.type === 'HG_DOC_RESULT' &&
-          ev.data?.requestId === requestId
-        ) {
-          window.removeEventListener('message', handler);
-          clearTimeout(timeout);
-          resolve({ ok: !!ev.data.ok, text: ev.data.text, error: ev.data.error, driveLinks: ev.data.driveLinks });
+        if (ev.data?.source !== 'darkolab-ext' || ev.data?.requestId !== requestId) return;
+        if (ev.data?.type === 'HG_DOC_ACK') { acked = true; return; }
+        if (ev.data?.type === 'HG_DOC_RESULT') {
+          const error = ev.data.error ? String(ev.data.error) : undefined;
+          finish({
+            ok: !!ev.data.ok,
+            text: ev.data.text,
+            error,
+            driveLinks: ev.data.driveLinks,
+            // permissao/inexistente nao melhora com retry; resto sim
+            transient: !ev.data.ok && !!error && !/permiss|nao existe|não existe|privado/i.test(error),
+          });
         }
       };
       window.addEventListener('message', handler);
       window.postMessage({ source: 'darkolab', type: 'HG_FETCH_DOC', requestId, url }, '*');
-      const timeout = setTimeout(() => {
-        window.removeEventListener('message', handler);
-        resolve({ ok: false, error: 'Timeout 30s — extensao nao respondeu (atualize pra v4.0.15+ e recarregue).' });
-      }, 30000);
+      timers.push(setTimeout(() => {
+        if (!acked) finish({ ok: false, transient: true, error: 'Extensao nao respondeu em 30s — recarregue esta pagina (F5). Se persistir, baixe a extensao atual em /api/extension/download e recarregue em chrome://extensions.' });
+      }, 30000));
+      timers.push(setTimeout(() => {
+        finish({ ok: false, transient: true, error: 'Timeout 90s lendo o doc (Google lento ou doc gigante) — tente analisar de novo.' });
+      }, 90000));
     });
+  }
+
+  /** Doc fetch com retry automatico: ate 3 tentativas pra erro transient
+   *  (timeout, glitch de rede, service worker dormindo). Erro definitivo
+   *  (sem permissao / doc nao existe) falha direto sem retry. */
+  async function fetchDocViaExtension(url: string): Promise<{ ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string }> }> {
+    let last: { ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string }>; transient?: boolean } = { ok: false, error: 'sem tentativa' };
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      last = await fetchDocViaExtensionOnce(url);
+      if (last.ok || !last.transient) return last;
+      console.warn(`[doc-fetch] tentativa ${attempt}/3 falhou (${last.error}) — retry em 1.5s`);
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    return last;
   }
 
   /** Normaliza string pra match flexivel: remove acentos, espacos, pontuacao,
@@ -1145,7 +1183,12 @@ function ClickUpPilotInner() {
     // entao em darkoautoedit.com o bridge nao carrega e o HG_FETCH_DOC cai no
     // vazio ate o timeout de 30s — hang silencioso por task. Detecta antes
     // (700ms) e falha rapido com instrucao de reinstalar.
-    const MIN_EXT_VERSION = '4.15.2';
+    // v4.16.2+: bridge manda HG_DOC_ACK (page espera ate 90s com ACK) e
+    // responde erro instantaneo se o contexto da extensao foi invalidado
+    // (extensao atualizada com a page aberta — antes era hang de 30s,
+    // porque o HG_PING do preflight e respondido pelo bridge SEM tocar o
+    // background, entao o preflight passava mesmo com a extensao quebrada).
+    const MIN_EXT_VERSION = '4.16.2';
     const ext = await detectExtension();
     const cmpVer = (a: string, b: string) => {
       const pa = a.split('.').map((n) => parseInt(n, 10) || 0);

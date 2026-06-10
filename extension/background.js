@@ -1451,35 +1451,49 @@ async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
     const docId = m[1];
 
     // === ESTRATEGIA 1: export?format=html (sem abrir tab) ===
+    // 2 tentativas de 12s cada (em vez de 1 de 30s): timeout curto + retry
+    // resolve glitch transitorio de rede/Google MUITO mais rapido, e mantem
+    // o pior caso total (12+12+20+1.5 ≈ 45s) DENTRO da janela pos-ACK da
+    // page (90s) — antes o pior caso (30+30+1.5 ≈ 61s) estourava o timeout
+    // de 30s da page e virava "Timeout 30s — extensao nao respondeu" mesmo
+    // com o doc sendo lido com sucesso logo depois.
     const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=html`;
     console.log('[DARKO LAB BG] HG_FETCH_DOC docId=', docId, 'via export (invisible)');
     let html = null;
     let exportErr = null;
-    try {
-      const r = await fetchWithTimeout(exportUrl, {
-        method: 'GET',
-        credentials: 'include',
-        redirect: 'follow',
-      }, 30000);
-      if (r.ok) {
-        html = await r.text();
-        const head = html.slice(0, 5000);
-        // Detecta paginas de erro do Google (200 OK mas conteudo invalido)
-        if (/<title>Sign in|accounts\.google\.com|google-account-redirect/i.test(head)) {
-          html = null;
-          exportErr = 'doc_privado_login_necessario';
-        } else if (/o arquivo que voc[eê] solicitou n[aã]o existe|the file you requested does not exist|<title>Erro/i.test(head)) {
-          html = null;
-          exportErr = 'doc_nao_existe_ou_sem_permissao';
-        } else if (/voc[eê] precisa de permiss[aã]o|you need (permission|access)|request access/i.test(head)) {
-          html = null;
-          exportErr = 'doc_sem_permissao_de_acesso';
+    for (let attempt = 1; attempt <= 2 && !html; attempt++) {
+      try {
+        const r = await fetchWithTimeout(exportUrl, {
+          method: 'GET',
+          credentials: 'include',
+          redirect: 'follow',
+        }, 12000);
+        if (r.ok) {
+          html = await r.text();
+          const head = html.slice(0, 5000);
+          // Detecta paginas de erro do Google (200 OK mas conteudo invalido)
+          if (/<title>Sign in|accounts\.google\.com|google-account-redirect/i.test(head)) {
+            html = null;
+            exportErr = 'doc_privado_login_necessario';
+          } else if (/o arquivo que voc[eê] solicitou n[aã]o existe|the file you requested does not exist|<title>Erro/i.test(head)) {
+            html = null;
+            exportErr = 'doc_nao_existe_ou_sem_permissao';
+          } else if (/voc[eê] precisa de permiss[aã]o|you need (permission|access)|request access/i.test(head)) {
+            html = null;
+            exportErr = 'doc_sem_permissao_de_acesso';
+          }
+        } else {
+          exportErr = `HTTP ${r.status}`;
         }
-      } else {
-        exportErr = `HTTP ${r.status}`;
+      } catch (e) {
+        exportErr = (e?.message || String(e));
       }
-    } catch (e) {
-      exportErr = (e?.message || String(e));
+      // Erros definitivos (permissao/inexistente) nao melhoram com retry
+      if (!html && /^doc_/.test(exportErr || '') && exportErr !== 'doc_privado_login_necessario') break;
+      if (!html && attempt < 2) {
+        console.warn('[DARKO LAB BG] export tentativa', attempt, 'falhou (', exportErr, ') — retry');
+        await new Promise((r) => setTimeout(r, 800));
+      }
     }
 
     if (html) {
@@ -1514,40 +1528,46 @@ async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
     const tab = await chrome.tabs.create({ url: mobileUrl, active: false });
     const newTabId = tab.id;
 
-    await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Timeout 30s carregando doc (fallback)')), 30000);
-      const listener = (changedTabId, changeInfo) => {
-        if (changedTabId === newTabId && changeInfo.status === 'complete') {
-          clearTimeout(timeout);
-          chrome.tabs.onUpdated.removeListener(listener);
-          resolve();
-        }
-      };
-      chrome.tabs.onUpdated.addListener(listener);
-    });
-    await new Promise(r => setTimeout(r, 1500));
-
-    const [{ result }] = await chrome.scripting.executeScript({
-      target: { tabId: newTabId },
-      func: () => {
-        const links = Array.from(document.querySelectorAll('a'))
-          .map((a) => {
-            const text = (a.textContent || '').trim();
-            const href = a.href || '';
-            const m = href.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-            if (!m) return null;
-            return { text, fileId: m[1] };
-          })
-          .filter(Boolean);
-        return {
-          text: document.body.innerText,
-          isLogin: /accounts\.google\.com/.test(location.href),
-          driveLinks: links,
+    // try/finally: se o load timeoutar ou o executeScript falhar, a aba
+    // era LEAKED (ficava aberta pra sempre) e o listener onUpdated tambem.
+    let result;
+    let loadListener = null;
+    try {
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Timeout 20s carregando doc (fallback)')), 20000);
+        loadListener = (changedTabId, changeInfo) => {
+          if (changedTabId === newTabId && changeInfo.status === 'complete') {
+            clearTimeout(timeout);
+            resolve();
+          }
         };
-      },
-    });
+        chrome.tabs.onUpdated.addListener(loadListener);
+      });
+      await new Promise(r => setTimeout(r, 1500));
 
-    try { await chrome.tabs.remove(newTabId); } catch {}
+      [{ result }] = await chrome.scripting.executeScript({
+        target: { tabId: newTabId },
+        func: () => {
+          const links = Array.from(document.querySelectorAll('a'))
+            .map((a) => {
+              const text = (a.textContent || '').trim();
+              const href = a.href || '';
+              const m = href.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+              if (!m) return null;
+              return { text, fileId: m[1] };
+            })
+            .filter(Boolean);
+          return {
+            text: document.body.innerText,
+            isLogin: /accounts\.google\.com/.test(location.href),
+            driveLinks: links,
+          };
+        },
+      });
+    } finally {
+      if (loadListener) { try { chrome.tabs.onUpdated.removeListener(loadListener); } catch {} }
+      try { await chrome.tabs.remove(newTabId); } catch {}
+    }
 
     if (result?.isLogin) {
       reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', { ok: false, error: 'Doc privado e nao logado no Google.' });

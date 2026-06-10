@@ -950,36 +950,68 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
    * tem acesso. Postamos HG_FETCH_DOC e esperamos HG_DOC_RESULT. Fallback
    * (server /api/docs/fetch) so le docs publicos. Requer extensao v4.0.15+.
    */
-  function fetchDocViaExtension(
+  function fetchDocViaExtensionOnce(
     url: string,
-  ): Promise<{ ok: boolean; text?: string; error?: string }> {
+  ): Promise<{ ok: boolean; text?: string; error?: string; transient?: boolean }> {
     return new Promise((resolve) => {
       if (typeof window === 'undefined') {
         resolve({ ok: false, error: 'Sem window.' });
         return;
       }
       const requestId = `doc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      // Timeout em DOIS estagios (extensao v4.16.2+ manda HG_DOC_ACK assim
+      // que o background aceita o job): sem ACK em 30s → extensao morta →
+      // erro transient; com ACK → background lendo (export+fallback ~45s
+      // pior caso) → janela total 90s. Antes a page desistia em 30s
+      // enquanto o doc ainda chegava.
+      let acked = false;
+      let done = false;
+      const timers: ReturnType<typeof setTimeout>[] = [];
+      const finish = (r: { ok: boolean; text?: string; error?: string; transient?: boolean }) => {
+        if (done) return;
+        done = true;
+        window.removeEventListener('message', handler);
+        timers.forEach(clearTimeout);
+        resolve(r);
+      };
       const handler = (ev: MessageEvent) => {
-        if (
-          ev.data?.source === 'darkolab-ext' &&
-          ev.data?.type === 'HG_DOC_RESULT' &&
-          ev.data?.requestId === requestId
-        ) {
-          window.removeEventListener('message', handler);
-          clearTimeout(timeout);
-          resolve({ ok: !!ev.data.ok, text: ev.data.text, error: ev.data.error });
+        if (ev.data?.source !== 'darkolab-ext' || ev.data?.requestId !== requestId) return;
+        if (ev.data?.type === 'HG_DOC_ACK') { acked = true; return; }
+        if (ev.data?.type === 'HG_DOC_RESULT') {
+          const error = ev.data.error ? String(ev.data.error) : undefined;
+          finish({
+            ok: !!ev.data.ok,
+            text: ev.data.text,
+            error,
+            transient: !ev.data.ok && !!error && !/permiss|nao existe|não existe|privado/i.test(error),
+          });
         }
       };
       window.addEventListener('message', handler);
       window.postMessage({ source: 'darkolab', type: 'HG_FETCH_DOC', requestId, url }, '*');
-      const timeout = setTimeout(() => {
-        window.removeEventListener('message', handler);
-        resolve({
-          ok: false,
-          error: 'Timeout 30s — extensao nao respondeu (atualize pra v4.0.15+ e recarregue).',
-        });
-      }, 30000);
+      timers.push(setTimeout(() => {
+        if (!acked) finish({ ok: false, transient: true, error: 'Extensao nao respondeu em 30s — recarregue esta pagina (F5). Se persistir, baixe a extensao atual em /api/extension/download e recarregue em chrome://extensions.' });
+      }, 30000));
+      timers.push(setTimeout(() => {
+        finish({ ok: false, transient: true, error: 'Timeout 90s lendo o doc (Google lento ou doc gigante) — tente de novo.' });
+      }, 90000));
     });
+  }
+
+  /** Doc fetch com retry automatico: ate 3 tentativas pra erro transient
+   *  (timeout, glitch de rede, service worker dormindo). Erro definitivo
+   *  (sem permissao / doc nao existe) falha direto sem retry. */
+  async function fetchDocViaExtension(
+    url: string,
+  ): Promise<{ ok: boolean; text?: string; error?: string }> {
+    let last: { ok: boolean; text?: string; error?: string; transient?: boolean } = { ok: false, error: 'sem tentativa' };
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      last = await fetchDocViaExtensionOnce(url);
+      if (last.ok || !last.transient) return last;
+      console.warn(`[doc-fetch] tentativa ${attempt}/3 falhou (${last.error}) — retry em 1.5s`);
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    return last;
   }
 
   /** Extrai texto puro de um arquivo. Suporta .txt (texto direto) e .docx
