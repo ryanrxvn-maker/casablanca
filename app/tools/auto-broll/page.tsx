@@ -303,6 +303,8 @@ function AutoBrollInner() {
     }
     const ac = new AbortController();
     abortRefs.current[job.id] = ac;
+    // Anti-freeze: aba em background com job rodando NÃO pode congelar
+    const stopKeepAlive = startTabKeepAlive();
     patchJob(job.id, { status: 'running', error: null, zip: null, progress: null });
 
     // ════════════════════════════════════════════════════════════════════
@@ -541,6 +543,7 @@ function AutoBrollInner() {
     } finally {
       abortRefs.current[job.id] = null;
       clearInterval(beatTimer);
+      stopKeepAlive();
       // Libera o RETOMAR: run terminou (qualquer que seja o caminho de saida)
       patchHistEntry(preEntryKey, { inFlight: false });
     }
@@ -907,6 +910,34 @@ function isEntryLive(item: HistEntry): boolean {
   return !!item.inFlight && !!item.lastBeatAt && Date.now() - item.lastBeatAt < 90_000;
 }
 
+/** Keep-alive anti-freeze: enquanto um job roda, toca um tom INAUDÍVEL
+ *  (gain 0.0001). Aba "tocando áudio" é isenta do tab-freezing/intensive
+ *  throttling do Chrome — sem isso, a aba em segundo plano CONGELA os
+ *  timers e o pipeline PAUSA até o user focar a aba de novo (visto em
+ *  produção: heartbeat parado 7min, polls suspensos).
+ *  Precisa ser chamado dentro do handler de clique (user gesture) pra o
+ *  AudioContext poder iniciar. Retorna stop(). */
+function startTabKeepAlive(): () => void {
+  try {
+    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return () => {};
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    gain.gain.value = 0.0001; // inaudível mas conta como "audible tab"
+    osc.frequency.value = 40;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    void ctx.resume().catch(() => {});
+    return () => {
+      try { osc.stop(); void ctx.close(); } catch {}
+    };
+  } catch {
+    return () => {};
+  }
+}
+
 /** Atualiza campos de uma entry do historico por zipKey (helper compartilhado). */
 function patchHistEntry(zipKey: string, patch: Record<string, unknown>): void {
   try {
@@ -1219,6 +1250,8 @@ function BrollHistorySection() {
     setRetrying(item.zipKey);
     setRetryMsg('Preparando…');
     let retomarBeat: ReturnType<typeof setInterval> | null = null;
+    // Anti-freeze: gesture do clique permite iniciar o áudio keep-alive
+    const stopKeepAlive = startTabKeepAlive();
     try {
       // 1. Identifica faltantes
       const { parseMagnificPrompts } = await import('@/lib/magnific-pipeline');
@@ -1344,6 +1377,7 @@ function BrollHistorySection() {
       alert('RETOMAR falhou: ' + ((e as Error)?.message || String(e)));
     } finally {
       if (retomarBeat) clearInterval(retomarBeat);
+      stopKeepAlive();
       setRetrying(null);
       setRetryMsg('');
       patchHistEntry(item.zipKey, { inFlight: false });
