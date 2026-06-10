@@ -1261,7 +1261,6 @@ function BrollHistorySection() {
         },
         {
           onProgress: (p: any) => {
-            beat();
             const ready = (p?.takes || []).filter((t: any) => t.status === 'ready').length;
             setRetryMsg(`Renderizando ${ready}/${missingTakes.length}… (paciencia, Kling demora)`);
           },
