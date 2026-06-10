@@ -1469,6 +1469,131 @@ export function parseVABriefing(
     if (variantMatch) variant = variantMatch[1].toUpperCase();
   }
 
+  // ===== FORMATO NOVO (visto live 2026-06-10) =====
+  // Doc real (task 'VA01 e 02 - AD126G1GL - VFPB04'):
+  //
+  //   VA01 - AD126G1GL - VFPB04 (Variação de Avatar)
+  //   Fonte de Tráfego: Meta Ads
+  //   INSTRUÇÕES PARA EDIÇÃO:
+  //   Link do AD: AD126G1GL-VFPB04.mp4
+  //   Link da Copy: ADGL - VFPB04 - 2026
+  //   Avatar e Vozes:
+  //   Doutor: radyrahbanmd.mp4[a]
+  //   Depoimento Mulher: gihribeiroo20.mp4
+  //   Manter o mesmo áudio do criativo validado, ...
+  //   Edição: A mesma coisa do original.
+  //   VA02 - AD126G1GL - VFPB04 (Variação de Avatar)
+  //   ...
+  //
+  // Diferencas do formato legado:
+  //  - Cada "VA0N - <AD> (Variação de Avatar)" e UMA variacao (1 video de
+  //    saida) com bloco "Avatar e Vozes:" proprio — nao existem linhas AVA0N.
+  //  - SEM Gancho/Body no doc: o audio espelha o AD original ("Link do AD" +
+  //    "Manter o mesmo áudio do criativo validado") → lipsync pipeline.
+  //  - Papel do avatar prefixa o filename ("Doutor:", "UGC:"); papel
+  //    "Depoimento ..." NAO e o avatar principal da variacao.
+  //  - Doc pode ter VARIOS ADs, cada um com suas VA01/VA02 → escopo por
+  //    adCode (+variant quando presente no header).
+  const newSecRe = /^VA\s*(\d+)\s*[-–—]/i;
+  const isNewSectionHeader = (line: string) =>
+    newSecRe.test(line) && /varia[cç][aã]o\s+de\s+avatar/i.test(line);
+  const newSecs: Array<{ idx: number; avaNum: number }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (!isNewSectionHeader(t)) continue;
+    const up = t.toUpperCase();
+    if (adCode && !up.includes(adCode)) continue;
+    if (adCode && variant && !up.includes(variant)) continue;
+    const sm = t.match(newSecRe);
+    if (sm) newSecs.push({ idx: i, avaNum: parseInt(sm[1], 10) });
+  }
+  if (newSecs.length > 0) {
+    // Boundary de section: proximo header VA0N OU header doc-level 'VA - AD...'
+    const isAnyBoundary = (line: string) => {
+      const t = line.trim();
+      return isNewSectionHeader(t) || /^VA\s*[-–—]\s*AD\d/i.test(t);
+    };
+    const normDl = (s: string) => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    const findDl = (name: string) => {
+      const target = normDl(name);
+      if (!target) return null;
+      return (
+        driveLinks.find((d) => {
+          const dt = normDl(d.text);
+          return dt === target || dt.includes(target) || target.includes(dt);
+        }) || null
+      );
+    };
+    const avatares: VAAvatar[] = [];
+    let linkAdFilename: string | null = null;
+    let linkAdFileId: string | null = null;
+    for (const sec of newSecs) {
+      let end = lines.length;
+      for (let i = sec.idx + 1; i < lines.length; i++) {
+        if (isAnyBoundary(lines[i])) { end = i; break; }
+      }
+      let username: string | null = null;
+      let fileId: string | null = null;
+      for (let i = sec.idx + 1; i < end; i++) {
+        const t = lines[i].trim();
+        // 'Link do AD: AD126G1GL-VFPB04.mp4' — fonte do audio do lipsync.
+        // Primeiro encontrado (escopado nas sections da task) vale.
+        const linkM = t.match(/^link\s+do\s+ad\s*[:\-]\s*([^\s<>"|]+?\.(?:mp4|mov))\b/i);
+        if (linkM) {
+          if (!linkAdFilename) {
+            linkAdFilename = linkM[1];
+            const dl = findDl(linkM[1]);
+            if (dl) linkAdFileId = dl.fileId;
+          }
+          continue;
+        }
+        if (username) continue;
+        // Papel: 'Doutor: arquivo.mp4[a]' / 'UGC: @kiko.urso1.mp4' /
+        // 'UGC: 7554583824735194398.mp4'. Footnote [a] colado ou com espaco
+        // depois do .mp4 e ignorado pelo \b. 'Link da Copy: <doc>' nao casa
+        // (valor nao termina em .mp4/.mov).
+        const roleM = t.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ ]{1,40}):\s*@?([^\s<>"|]+?)\.(?:mp4|mov)\b/i);
+        if (roleM) {
+          const role = roleM[1].trim();
+          if (/^depoimento/i.test(role)) continue; // depoimento nao e o avatar principal
+          if (/^link\b/i.test(role)) continue;
+          username = roleM[2];
+          const dl = findDl(roleM[2]);
+          if (dl) fileId = dl.fileId;
+        }
+      }
+      if (!username) continue;
+      if (avatares.some((a) => a.avaNum === sec.avaNum)) continue;
+      avatares.push({
+        avaNum: sec.avaNum,
+        avaCode: `AVA${String(sec.avaNum).padStart(2, '0')}`,
+        username,
+        fileId,
+        youtubeUrl: null,
+        thumbUrl: null,
+      });
+    }
+    const filteredNew = filterAvaNums.length > 0
+      ? avatares.filter((a) => filterAvaNums.includes(a.avaNum))
+      : avatares;
+    if (filteredNew.length > 0) {
+      return {
+        baseAdId: adCode && variant ? `${adCode}-${variant}` : (adCode || baseAdIdOrTaskName),
+        linkAdFilename,
+        linkAdFileId,
+        avatares: filteredNew,
+        // Formato novo nao tem copy no doc — audio vem do AD original
+        // (lipsync). hookText/bodyText vazios sao VALIDOS aqui.
+        hookText: '',
+        bodyText: '',
+        depoimentoText: null,
+        depoimentoUsername: null,
+        depoimentoFileId: null,
+      };
+    }
+    // Sections novas existiam mas nenhum avatar extraido → tenta o legado.
+  }
+
   // 1. Detecta header VA: PRIORIZA linha que contenha AD code + variant +
   // "Variação de avatar". Fallback: só AD code. Fallback: primeira VA do doc.
   //
