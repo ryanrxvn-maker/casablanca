@@ -334,6 +334,24 @@ export async function generateVideoFromImage(
   input: VideoGenInput,
   sharedPoller?: BatchPoller,
 ): Promise<CreationResult> {
+  return generateVideoInternal(input, input.startImageUrl, sharedPoller);
+}
+
+/** Text-to-video PURO no Kling (sem keyframe de imagem). Fallback pra quando
+ *  a geração da IMAGEM é negada (política de conteúdo / failed persistente):
+ *  o take ainda sai — animado direto do prompt. */
+export async function generateVideoFromText(
+  input: Omit<VideoGenInput, 'startImageUrl'>,
+  sharedPoller?: BatchPoller,
+): Promise<CreationResult> {
+  return generateVideoInternal(input as VideoGenInput, null, sharedPoller);
+}
+
+async function generateVideoInternal(
+  input: VideoGenInput,
+  startImageUrl: string | null,
+  sharedPoller?: BatchPoller,
+): Promise<CreationResult> {
   const uid = await getUserId();
   const model = input.model || DEFAULT_VIDEO_MODEL;
   const aspectRatio = input.aspectRatio || '9:16';
@@ -380,7 +398,8 @@ export async function generateVideoFromImage(
               withSoundEffects: false,
               promptType: 'basic',
               resolution,
-              keyframes: { start: { type: 'image', url: input.startImageUrl } },
+              // text-to-video puro (fallback de imagem negada) manda keyframes vazio
+              keyframes: startImageUrl ? { start: { type: 'image', url: startImageUrl } } : {},
               audioUrl: '',
               voices: [],
               boardUuid: null,

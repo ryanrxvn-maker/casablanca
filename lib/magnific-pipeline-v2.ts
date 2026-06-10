@@ -30,6 +30,7 @@ import {
   assertZeroCreditCost,
   generateImage,
   generateVideoFromImage,
+  generateVideoFromText,
   createBatchPoller,
 } from './magnific-api-client';
 
@@ -178,6 +179,22 @@ function isConcurrentExceeded(e: unknown): boolean {
 function isGhostRender(e: unknown): boolean {
   const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
   return msg.includes('fantasma');
+}
+
+/** True se a IMAGEM foi NEGADA (política de conteúdo OU status:failed
+ *  persistente pós re-seeds — o Magnific não declara motivo, mas failed
+ *  repetido em prompt médico = filtro de conteúdo na prática). Nesses casos
+ *  o take NÃO morre: cai pro fallback text-to-video direto no Kling 2.5
+ *  (sem keyframe). Pedido do user: "se a geração da imagem for negada,
+ *  roda só o prompt no Kling". */
+function isImageDeniedError(e: unknown): boolean {
+  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  return (
+    msg.includes('nsfw') ||
+    msg.includes('blocked by') ||
+    msg.includes('content policy') ||
+    msg.includes('magnific status:failed')
+  );
 }
 
 /** Backoff escalonado pra erros transientes. Início suave (3s) pra não
@@ -437,7 +454,7 @@ export async function runMagnificPipelineV2(
 
   async function generateVideoWithRetry(
     prompt: string,
-    startImageUrl: string,
+    startImageUrl: string | null, // null = text-to-video puro (imagem negada)
     onAttempt: (n: number, msg?: string) => void,
   ): Promise<{ url: string }> {
     const budgetStart = Date.now();
@@ -459,13 +476,20 @@ export async function runMagnificPipelineV2(
       onAttempt(total);
       try {
         noteProgress();
-        const vid = await generateVideoFromImage({
-          prompt,
-          startImageUrl,
-          aspectRatio: '9:16',
-          resolution: '720p',
-          duration: 10,
-        }, poller);
+        const vid = startImageUrl
+          ? await generateVideoFromImage({
+              prompt,
+              startImageUrl,
+              aspectRatio: '9:16',
+              resolution: '720p',
+              duration: 10,
+            }, poller)
+          : await generateVideoFromText({
+              prompt,
+              aspectRatio: '9:16',
+              resolution: '720p',
+              duration: 10,
+            }, poller);
         noteProgress();
         if (vid.status === 'completed' && vid.url) return { url: vid.url };
         lastErr = new Error(`Magnific status:${vid.status}`);
@@ -510,7 +534,8 @@ export async function runMagnificPipelineV2(
       try {
         // === IMAGE ===
         await imgSem.acquire();
-        let imageUrl: string;
+        // null = imagem negada pelo filtro → fallback text-to-video no Kling
+        let imageUrl: string | null = null;
         try {
           patchTake(take.idx, {
             status: 'running',
@@ -532,6 +557,18 @@ export async function runMagnificPipelineV2(
           });
           imageUrl = img.url;
           patchTake(take.idx, { status: 'image-done', imageUrl });
+        } catch (e) {
+          // IMAGEM NEGADA (filtro de conteúdo / failed persistente) → NÃO
+          // mata o take: anima o prompt DIRETO no Kling 2.5 (text-to-video).
+          // O ideal segue sendo animar a imagem — isso é rede de segurança.
+          if (!isImageDeniedError(e)) throw e;
+          console.warn(`[take ${take.idx}] imagem NEGADA (${(e as Error).message.slice(0, 60)}) — fallback text-to-video Kling`);
+          patchTake(take.idx, {
+            status: 'running',
+            phase: 'image-gen',
+            percent: 25,
+            message: 'Imagem negada pelo filtro — gerando vídeo DIRETO no Kling 2.5',
+          });
         } finally {
           imgSem.release();
         }
@@ -582,7 +619,7 @@ export async function runMagnificPipelineV2(
               }
             },
           );
-          patchTake(take.idx, { status: 'video-done', imageUrl, videoUrl: vid.url });
+          patchTake(take.idx, { status: 'video-done', imageUrl: imageUrl || undefined, videoUrl: vid.url });
         } finally {
           clearInterval(tickTimer);
           vidSem.release();
