@@ -4642,6 +4642,23 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   // Usado no START, no botao "Iniciar N" e nos contadores — pra UI e dispatch
   // SEMPRE baterem. VA: status nasce 'partial' por design; o que vale e ter
   // todos os avatares escolhidos. TROCA: WHITE upado + fonte (arquivo/pasta).
+  /** True se o briefing VA tem copy FALADA (hook/body) no doc. Formato novo
+   *  de doc VA (2026-06) costuma vir SEM copy — so 'Link do AD' + avatares,
+   *  porque o audio espelha o AD original. */
+  function vaHasSpokenCopy(va: ParsedVABriefing | undefined | null): boolean {
+    if (!va) return false;
+    return !!(extractSpokenBody(va.hookText || '').trim() || extractSpokenBody(va.bodyText || '').trim());
+  }
+  /** Motor TEXTO so quando canal organico (KWAI/YT/TikTok) E o doc tem copy
+   *  falada. Sem copy no doc, o disparo e SEMPRE lipsync no AD original
+   *  (igual VA normal) — mesmo com label de canal organico na task. Antes,
+   *  canal organico + doc sem copy caia no motor texto e morria em
+   *  'briefing sem hook nem body falado' (user reportou 2026-06-10). */
+  function vaUsesTextEngine(taskId: string): boolean {
+    const a = taskAnalyses[taskId];
+    if (!vaHasSpokenCopy(a?.vaBriefing)) return false;
+    return organicChannelLabels(tasks.find((t) => t.id === taskId)).length > 0;
+  }
   function isVaDispatchable(id: string): boolean {
     const a = taskAnalyses[id];
     if (!a?.vaBriefing) return false;
@@ -4677,9 +4694,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const va = a?.vaBriefing;
     if (!va) return ['não é VA'];
     const issues: string[] = [];
-    // Canal organico (KWAI/YT/TikTok): motor TEXTO — nao baixa o AD original
-    // e usa a voz default do avatar (igual task normal). So precisa do avatar.
-    const textEngine = organicChannelLabels(tasks.find((t) => t.id === taskId)).length > 0;
+    // Canal organico (KWAI/YT/TikTok) COM copy no doc: motor TEXTO — nao
+    // baixa o AD original e usa a voz default do avatar. Doc sem copy
+    // (formato novo) = lipsync sempre, entao exige AD + voz normalmente.
+    const textEngine = vaUsesTextEngine(taskId);
     if (!textEngine) {
       const driveId = va.linkAdFileId || extractDriveFileId(vaAdUrl[taskId] || '');
       if (!driveId) issues.push('AD original (Drive)');
@@ -4713,11 +4731,12 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const baseAdId = va.baseAdId;
     const adNameClean = baseAdId.replace(/\s+/g, '');
 
-    // ROUTER MOTOR — VA com canal organico (KWAI/YT/TikTok) NAO faz lipsync
-    // no AD original. Gera cada parte (hook+body) por TEXTO (text-to-avatar),
-    // 1 video por AVA, na MESMA fila/cards/ZIP. META e VA sem canal seguem no
-    // pipeline de lipsync abaixo — intocado.
-    if (organicChannelLabels(tasks.find((t) => t.id === taskId)).length > 0) {
+    // ROUTER MOTOR — VA com canal organico (KWAI/YT/TikTok) E copy no doc
+    // NAO faz lipsync no AD original: gera cada parte (hook+body) por TEXTO
+    // (text-to-avatar), 1 video por AVA, na MESMA fila/cards/ZIP. META, VA
+    // sem canal E doc SEM copy (formato novo: so 'Link do AD' + avatares)
+    // seguem no pipeline de lipsync abaixo — intocado.
+    if (vaUsesTextEngine(taskId)) {
       await runVATextEngineForTask(taskId);
       return;
     }
@@ -6595,7 +6614,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   //  fila e dispara pelo START global. Aqui so atalhos (Doc + AD). ═══
                                   (() => {
                                     const adFileId = a.vaBriefing!.linkAdFileId;
-                                    const isTextEngine = organicChannelLabels(tasks.find((x) => x.id === a.taskId)).length > 0;
+                                    const isTextEngine = vaUsesTextEngine(a.taskId);
                                     return (
                                       <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                                         <span
@@ -6922,7 +6941,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     <span className="text-text-muted">
                                       <strong className="text-cyan-200">{a.vaBriefing.avatares.length}</strong> avatar{a.vaBriefing.avatares.length === 1 ? '' : 'es'} · <strong className="text-cyan-200">{a.vaBriefing.avatares.length + (a.vaBriefing.depoimentoText ? 1 : 0)}</strong> vídeo{(a.vaBriefing.avatares.length + (a.vaBriefing.depoimentoText ? 1 : 0)) === 1 ? '' : 's'}
                                     </span>
-                                    {organicChannelLabels(tasks.find((x) => x.id === a.taskId)).length > 0 ? (
+                                    {vaUsesTextEngine(a.taskId) ? (
                                       <span
                                         className="mono inline-flex items-center gap-1 rounded-full border border-fuchsia-500/40 bg-fuchsia-500/10 px-2 py-0.5 text-[10px] text-fuchsia-200"
                                         title="Canal orgânico — gera cada parte (hook+body) por texto, sem AD original"
@@ -6957,8 +6976,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     const choiceKey = `${a.taskId}:${av.avaCode}`;
                                     const chosen = vaAvatarChoice[choiceKey] || null;
                                     const voiceChosen = vaVoiceChoice[choiceKey] || null;
-                                    // Motor texto (canal organico): voz opcional (cai na default do avatar).
-                                    const avaTextEngine = organicChannelLabels(tasks.find((x) => x.id === a.taskId)).length > 0;
+                                    // Motor texto (canal organico + copy no doc): voz opcional (default do avatar).
+                                    const avaTextEngine = vaUsesTextEngine(a.taskId);
                                     const avaReady = !!chosen && (!!voiceChosen || avaTextEngine);
                                     const pickersLocked = ACTIVE_BATCH_PHASES.includes(batchStates[a.taskId]?.phase as BatchTaskState['phase']) || batchStates[a.taskId]?.phase === 'queued';
                                     return (
@@ -7024,7 +7043,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   })}
                                   {/* AD original nao detectado: lista candidatos (1-click) + input
                                       manual. NAO aparece no motor texto (canal organico nao usa AD). */}
-                                  {!a.vaBriefing.linkAdFileId && organicChannelLabels(tasks.find((x) => x.id === a.taskId)).length === 0 ? (
+                                  {!a.vaBriefing.linkAdFileId && !vaUsesTextEngine(a.taskId) ? (
                                     <div className="rounded-[10px] border border-yellow-500/40 bg-yellow-500/5 p-3">
                                       <div className="mono mb-2 text-[10px] uppercase tracking-widest text-yellow-200">
                                         Escolhe o AD original
