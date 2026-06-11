@@ -930,8 +930,15 @@ function startTabKeepAlive(): () => void {
     gain.connect(ctx.destination);
     osc.start();
     void ctx.resume().catch(() => {});
+    // SAFETY NET: se o disparo foi programático (sem gesture), o AudioContext
+    // nasce 'suspended' e não segura a aba. Resume no PRIMEIRO toque do user
+    // em qualquer lugar da página → 1 clique e a proteção anti-freeze trava.
+    const resumeOnGesture = () => { if (ctx.state === 'suspended') void ctx.resume().catch(() => {}); };
+    const evs = ['click', 'keydown', 'pointerdown', 'touchstart'] as const;
+    for (const e of evs) window.addEventListener(e, resumeOnGesture, { passive: true });
     return () => {
       try { osc.stop(); void ctx.close(); } catch {}
+      for (const e of evs) window.removeEventListener(e, resumeOnGesture);
     };
   } catch {
     return () => {};
