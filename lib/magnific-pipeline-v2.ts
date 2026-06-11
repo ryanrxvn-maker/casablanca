@@ -47,22 +47,26 @@ type RunnerResultV2 = {
   missingIdxs?: number[];
 };
 
-// CONCORRENCIA CONSERVADORA (2026-05-30):
-// User reportou batch 3/13 ok + 10 falhas com mensagens "rate_limit_exceeded
-// f57009f has exceeded concurrent". Magnific impoe LIMITE HARD por conta:
-// ~4-6 concurrent renders no max. Antes IMAGE=12/VIDEO=6 estourava.
-//
-// Novo default: 4 img / 2 vid — bem dentro do cap server-side. Trade-off:
-// batch um pouco mais lento mas SEM falhas por paralelismo. User priorizou
-// confiabilidade: "A GERACAO NAO DEVE FALHAR NUNCA".
-const DEFAULT_IMAGE_CONC = 4;
-const DEFAULT_VIDEO_CONC = 2;
+// CONCORRENCIA OTIMIZADA (2026-06-10):
+// IMAGE e VIDEO tem SEMAFOROS SEPARADOS — o cap "exceeded concurrent" do
+// Magnific (~4-6/conta) é aferido no SUBMIT; quando bate, o backoff
+// agressivo + cooldown global JÁ regula sozinho (auto-tuning). Então
+// podemos empurrar mais forte sem risco de falha: se o cap server-side for
+// menor, alguns takes só esperam vaga e re-submetem — nunca falham.
+//   - Imagem (Nano Banana, rápida): 6 simultâneas
+//   - Vídeo (Kling, lento): 3 simultâneos
+// Ganho real sob relaxed mode: TODOS os takes entram na fila do Magnific
+// muito mais rápido (intervalo de disparo curto), então o Magnific
+// processa continuamente em vez de receber a conta-gotas.
+const DEFAULT_IMAGE_CONC = 6;
+const DEFAULT_VIDEO_CONC = 3;
 
-// Throttle de DISPARO (não de concurrência): garante intervalo mínimo entre
-// dois acquire() consecutivos pra evitar burst de N requests simultâneas.
-// Aumentado pra 1500ms/2500ms — combina com concorrencia menor.
-const IMAGE_DISPATCH_INTERVAL_MS = 1500;
-const VIDEO_DISPATCH_INTERVAL_MS = 2500;
+// Throttle de DISPARO (não de concurrência): intervalo mínimo entre dois
+// acquire() — só evita burst instantâneo. Reduzido p/ 600/1200ms: 45 takes
+// entram na fila em ~27s em vez de ~67s. O cooldown anti-429 (setCooldown)
+// pausa tudo se o Magnific reclamar, então disparo rápido é seguro.
+const IMAGE_DISPATCH_INTERVAL_MS = 600;
+const VIDEO_DISPATCH_INTERVAL_MS = 1200;
 
 /** Semáforo com throttle de disparo: limita N simultâneas E espaça acquires
  *  por intervalMs mínimos. Também tem "global cooldown" que pausa TUDO
