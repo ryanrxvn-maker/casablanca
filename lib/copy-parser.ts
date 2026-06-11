@@ -1367,10 +1367,12 @@ export function isVATask(taskName: string): boolean {
   if (!taskName) return false;
   const t = taskName.trim();
   if (/^VA\s*[-–—]/i.test(t)) return true;
-  // 'VA01 e 02 - ...' / 'VA 01, 02 - ...' — VA seguido DIRETO de numeros.
+  // 'VA01 e 02 - ...' / 'AVA01 e 02 - ...' / 'VA 01, 02 - ...' — (A)VA
+  // seguido DIRETO de numeros. Copywriters alternam os prefixos VA/AVA
+  // (doc real 2026-06-11: 'VA01 - AD126...' e 'AVA01 e 02 - AD97...').
   // Exige o dash depois do bloco de numeros pra nao pegar palavra começando
   // com VA (ex 'VAGA 2 - ...' nao casa: 'GA' quebra o \d apos VA).
-  if (/^VA\s*\d+(?:\s*(?:e|,|\/)\s*\d+)*\s*[-–—]/i.test(t)) return true;
+  if (/^A?VA\s*\d+(?:\s*(?:e|,|\/)\s*\d+)*\s*[-–—]/i.test(t)) return true;
   if (/varia[cç][aã]o\s+de\s+avatar/i.test(taskName)) return true;
   return false;
 }
@@ -1515,7 +1517,12 @@ export function parseVABriefing(
   //    "Depoimento ..." NAO e o avatar principal da variacao.
   //  - Doc pode ter VARIOS ADs, cada um com suas VA01/VA02 → escopo por
   //    adCode (+variant quando presente no header).
-  const newSecRe = /^VA\s*(\d+)\s*[-–—]/i;
+  // Header de secao: 'VA01 - ...' OU 'AVA01 - ...' — copywriters usam os
+  // DOIS prefixos (visto live 2026-06-11: doc com 'VA01 - AD126...' E
+  // 'AVA01 - AD97...' no MESMO arquivo). Sem o A? opcional, as secoes
+  // AVA0N nao eram fronteira e os papeis delas VAZAVAM pra secao anterior
+  // (AD137 ganhou 'Doutor: surgery-2' e 'Doutor: doutorjapa' do AD97).
+  const newSecRe = /^A?VA\s*(\d+)\s*[-–—]/i;
   const isNewSectionHeader = (line: string) =>
     newSecRe.test(line) && /varia[cç][aã]o\s+de\s+avatar/i.test(line);
   const newSecs: Array<{ idx: number; avaNum: number }> = [];
@@ -1529,11 +1536,21 @@ export function parseVABriefing(
     if (sm) newSecs.push({ idx: i, avaNum: parseInt(sm[1], 10) });
   }
   if (newSecs.length > 0) {
-    // Boundary de section: proximo header VA0N OU header doc-level 'VA - AD...'
+    // Boundary de section: proximo header (A)VA0N, header doc-level
+    // 'VA - AD...' OU titulo de bloco-task '(A)VA01 e 02 - AD97...'
+    // (doc multi-AD: cada AD anexado comeca com esse titulo).
     const isAnyBoundary = (line: string) => {
       const t = line.trim();
-      return isNewSectionHeader(t) || /^VA\s*[-–—]\s*AD\d/i.test(t);
+      return isNewSectionHeader(t)
+        || /^VA\s*[-–—]\s*AD\d/i.test(t)
+        || /^A?VA\s*\d+(?:\s*(?:e|,|\/)\s*\d+)*\s*[-–—]\s*AD\d/i.test(t);
     };
+    // FIM DURO de secao: separador '____', 'Edição:' ou footnote '[a]...'.
+    // Cinto de seguranca: papel NUNCA aparece depois dessas linhas — mesmo
+    // que um formato novo de header nao seja reconhecido como boundary,
+    // o scan para aqui e nada vaza da secao seguinte.
+    const isHardSectionEnd = (t: string) =>
+      /^_{8,}\s*$/.test(t) || /^edi[cç][aã]o\s*:/i.test(t) || /^\[[a-z]\]/i.test(t);
     const normDl = (s: string) => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
     const findDl = (name: string) => {
       const target = normDl(name);
@@ -1553,11 +1570,25 @@ export function parseVABriefing(
       for (let i = sec.idx + 1; i < lines.length; i++) {
         if (isAnyBoundary(lines[i])) { end = i; break; }
       }
-      // Coleta TODOS os papeis da secao ('Doutor: x.mp4', 'Depoimento
-      // Mulher: y.mp4', 'UGC: z.mp4'). Principal = primeiro nao-depoimento.
-      const secRoles: VAAvatarRole[] = [];
+      // Coleta os papeis da secao ('Doutor: x.mp4', 'Depoimento Mulher:
+      // y.mp4', 'UGC: z.mp4'). Principal = primeiro nao-depoimento.
+      //
+      // ASSERTIVIDADE (bug 2026-06-11: AD137 ganhou avatares do AD97):
+      //  1. Papel so conta DENTRO do bloco 'Avatar e Vozes:' (quando o
+      //     bloco existe — todos os docs do formato novo tem). Linha
+      //     nao-papel fecha o bloco.
+      //  2. Scan para no FIM DURO ('____' / 'Edição:' / footnote) — papel
+      //     jamais existe depois disso dentro da mesma secao.
+      //  3. Fallback (secao sem 'Avatar e Vozes:'): aceita papel em
+      //     qualquer linha da secao, ainda limitado pelos fins duros.
+      const blockRoles: VAAvatarRole[] = [];
+      const fallbackRoles: VAAvatarRole[] = [];
+      let inAvatarBlock = false;
+      let sawAvatarBlock = false;
       for (let i = sec.idx + 1; i < end; i++) {
         const t = lines[i].trim();
+        if (isHardSectionEnd(t)) break;
+        if (!t) continue; // linha vazia nao fecha o bloco
         // 'Link do AD: AD126G1GL-VFPB04.mp4' — fonte do audio do lipsync.
         // Primeiro encontrado (escopado nas sections da task) vale.
         const linkM = t.match(/^link\s+do\s+ad\s*[:\-]\s*([^\s<>"|]+?\.(?:mp4|mov))\b/i);
@@ -1569,25 +1600,36 @@ export function parseVABriefing(
           }
           continue;
         }
+        if (/^avatar(es)?\s+e\s+vozes\s*:/i.test(t)) {
+          inAvatarBlock = true;
+          sawAvatarBlock = true;
+          continue;
+        }
         // Papel: 'Doutor: arquivo.mp4[a]' / 'UGC: @kiko.urso1.mp4' /
         // 'UGC: 7554583824735194398.mp4'. Footnote [a] colado ou com espaco
         // depois do .mp4 e ignorado pelo \b. 'Link da Copy: <doc>' nao casa
         // (valor nao termina em .mp4/.mov).
         const roleM = t.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ ]{1,40}):\s*@?([^\s<>"|]+?)\.(?:mp4|mov)\b/i);
-        if (roleM) {
+        if (roleM && !/^link\b/i.test(roleM[1].trim())) {
           const role = roleM[1].trim();
-          if (/^link\b/i.test(role)) continue;
           const uname = roleM[2];
-          if (secRoles.some((r) => r.username === uname)) continue;
-          const dl = findDl(uname);
-          secRoles.push({
-            role,
-            username: uname,
-            fileId: dl ? dl.fileId : null,
-            isDepoimento: /^depoimento/i.test(role),
-          });
+          const target = inAvatarBlock ? blockRoles : fallbackRoles;
+          if (!target.some((r) => r.username === uname)) {
+            const dl = findDl(uname);
+            target.push({
+              role,
+              username: uname,
+              fileId: dl ? dl.fileId : null,
+              isDepoimento: /^depoimento/i.test(role),
+            });
+          }
+          continue;
         }
+        // Linha que nao e papel fecha o bloco 'Avatar e Vozes:'
+        // (ex 'Manter o mesmo áudio do criativo validado...')
+        if (inAvatarBlock) inAvatarBlock = false;
       }
+      const secRoles = sawAvatarBlock ? blockRoles : fallbackRoles;
       // Principal primeiro (primeiro nao-depoimento; se so tem depoimento,
       // usa ele mesmo como principal)
       secRoles.sort((a, b) => Number(a.isDepoimento) - Number(b.isDepoimento));

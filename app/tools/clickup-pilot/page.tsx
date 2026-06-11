@@ -4602,6 +4602,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  (caso a heuristica 'quem fala mais = principal' erre).
    *  Key: `${taskId}:${avaCode}` → true = invertido. */
   const [vaSwapSpeakers, setVaSwapSpeakers] = useState<Record<string, boolean>>({});
+  /** VA: painel 👁 de preview aberto por variacao. VA fala o AUDIO do AD
+   *  original (nao tem texto editavel como task normal) — o preview embute
+   *  o player do Drive do AD pra ouvir o que vai ser falado.
+   *  Key: `${taskId}:${avaCode}` → true = aberto. */
+  const [vaPreviewOpen, setVaPreviewOpen] = useState<Record<string, boolean>>({});
 
   /** Papeis de uma variacao VA: doc novo traz roles[] (Doutor + Depoimento
    *  Mulher etc); legado/1 papel vira papel unico sintetico. */
@@ -7073,12 +7078,28 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               {roles.length} locutores · diarização auto
                                             </span>
                                           ) : null}
+                                          {/* 👁 PREVIEW — VA fala o áudio do AD original (não tem
+                                            * texto editável como task normal). O olhinho abre o
+                                            * player do Drive do AD pra ouvir o que vai ser falado. */}
+                                          <button
+                                            type="button"
+                                            onClick={() => setVaPreviewOpen((prev) => ({ ...prev, [swapKey]: !prev[swapKey] }))}
+                                            className={
+                                              'ml-auto rounded-full border px-2 py-0.5 text-[11px] shadow-[0_2px_0_rgba(0,0,0,0.4),0_0_8px_rgba(34,211,238,0.3)] active:translate-y-[1px] transition ' +
+                                              (vaPreviewOpen[swapKey]
+                                                ? 'border-cyan-400/70 bg-cyan-500/25 text-cyan-100'
+                                                : 'border-cyan-500/40 bg-cyan-500/10 text-cyan-200 hover:bg-cyan-500/25')
+                                            }
+                                            title="Preview do que esse avatar vai falar — toca o AD original (o lipsync usa exatamente esse áudio)"
+                                          >
+                                            👁
+                                          </button>
                                           {multiRole ? (
                                             <button
                                               type="button"
                                               onClick={() => setVaSwapSpeakers((prev) => ({ ...prev, [swapKey]: !prev[swapKey] }))}
                                               className={
-                                                'mono ml-auto rounded-full border px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest transition ' +
+                                                'mono rounded-full border px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest transition ' +
                                                 (vaSwapSpeakers[swapKey]
                                                   ? 'border-amber-400/60 bg-amber-400/15 text-amber-200'
                                                   : 'border-line-strong text-text-muted hover:border-fuchsia-400/60 hover:text-fuchsia-200')
@@ -7089,6 +7110,44 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                             </button>
                                           ) : null}
                                         </div>
+                                        {/* PAINEL 👁 — player do AD original (Drive, sessão do user).
+                                          * Multi-locutor: explica o roteamento por papel; os cortes
+                                          * exatos só existem na hora do disparo (diarização). */}
+                                        {vaPreviewOpen[swapKey] ? (
+                                          <div className="mt-2 rounded-[10px] border border-cyan-500/40 bg-cyan-500/5 p-3">
+                                            <div className="mono mb-2 text-[9px] uppercase tracking-widest text-cyan-200">
+                                              O que vai ser falado — áudio do AD original{multiRole ? ' · roteado por locutor' : ' · integral'}
+                                            </div>
+                                            {multiRole ? (
+                                              <div className="mb-2 grid gap-1">
+                                                {roles.map((r, ri) => (
+                                                  <div key={ri} className="mono text-[10px] text-text-muted">
+                                                    <span className="font-bold uppercase text-fuchsia-200">{r.role}</span>
+                                                    {' → '}
+                                                    {r.isDepoimento
+                                                      ? 'fala os trechos do locutor SECUNDÁRIO (menos tempo de fala — o depoimento)'
+                                                      : 'fala os trechos do locutor PRINCIPAL (quem mais fala no AD)'}
+                                                  </div>
+                                                ))}
+                                                <div className="mono text-[9px] text-text-muted/70">
+                                                  Os cortes exatos são detectados por diarização na hora do disparo{vaSwapSpeakers[swapKey] ? ' (mapeamento INVERTIDO ⇄ ativo)' : ''}.
+                                                </div>
+                                              </div>
+                                            ) : null}
+                                            {a.vaBriefing!.linkAdFileId ? (
+                                              <iframe
+                                                src={`https://drive.google.com/file/d/${a.vaBriefing!.linkAdFileId}/preview`}
+                                                className="h-[320px] w-full rounded-[8px] border border-white/10 bg-black"
+                                                allow="autoplay"
+                                                title={`Preview do AD original · ${av.avaCode}`}
+                                              />
+                                            ) : (
+                                              <div className="rounded-[8px] border border-yellow-500/40 bg-yellow-500/5 p-2 text-[11px] text-yellow-200">
+                                                ⚠ AD original ainda não resolvido — escolhe o arquivo no aviso &quot;Escolhe o AD original&quot; abaixo pra liberar o preview.
+                                              </div>
+                                            )}
+                                          </div>
+                                        ) : null}
                                         <div className="mt-2 grid gap-2">
                                           {roles.map((role, ri) => {
                                             const choiceKey = vaRoleKey(a.taskId, av.avaCode, ri);
