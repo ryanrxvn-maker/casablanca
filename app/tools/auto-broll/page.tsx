@@ -512,8 +512,22 @@ function AutoBrollInner() {
           window.dispatchEvent(new Event('darkolab:auto-broll:history-changed'));
         } catch {}
       }
+      // PROGRESS FINAL com TODOS os takes (merged). Sem isso, o grid ao vivo
+      // ficava preso no último onProgress — que vinha do AUTO-RETRY (só os
+      // faltantes, ex: 2/2) — então o painel mostrava "2/2" apesar de 45/45
+      // no resultado real. Reconstruímos o progress do r.takes completo.
+      const finalProgress = {
+        spaceId: r.spaceId,
+        spaceUrl: undefined,
+        takes: r.takes as any,
+        ready: r.successCount,
+        total: takes.length,
+        message: `${r.successCount}/${takes.length} prontos`,
+        phase: 'done',
+        percent: 100,
+      } as PipelineProgress;
       if (r.ok && r.complete && r.zipBlob && r.zipName) {
-        patchJob(job.id, { status: 'done', zip: { blob: r.zipBlob, name: r.zipName } });
+        patchJob(job.id, { status: 'done', zip: { blob: r.zipBlob, name: r.zipName }, progress: finalProgress });
       } else if (r.complete === false) {
         const miss = (r.missingIdxs || []).join(', ');
         // Mesmo incompleto, se temos ZIP parcial deixa baixar — user reclamou
@@ -521,6 +535,7 @@ function AutoBrollInner() {
         patchJob(job.id, {
           status: 'error',
           zip: r.zipBlob && r.zipName ? { blob: r.zipBlob, name: r.zipName } : null,
+          progress: finalProgress,
           error: `${r.successCount}/${takes.length} ok. Faltaram: ${miss || '?'}. ZIP parcial disponível abaixo + entrada criada no Histórico. Rode de novo pra completar os faltantes.`,
         });
       } else {
@@ -910,6 +925,73 @@ function isEntryLive(item: HistEntry): boolean {
   return !!item.inFlight && !!item.lastBeatAt && Date.now() - item.lastBeatAt < 90_000;
 }
 
+/** Mapa idx -> rótulo da cena (section/label do originalJson) pra rotular o
+ *  preview e mostrar O QUE cada take ilustra. */
+function buildLabelMap(item: HistEntry): Record<number, string> {
+  const out: Record<number, string> = {};
+  if (!item.originalJson) return out;
+  try {
+    const arr = JSON.parse(item.originalJson) as any[];
+    arr.forEach((t, i) => {
+      const idx = typeof t.take === 'number' ? t.take : i + 1;
+      const label = String(t.section || t.label || t.name || t.title || '').trim();
+      if (label) out[idx] = label;
+    });
+  } catch {}
+  return out;
+}
+
+/** Grid de preview de UM batch do histórico: cada take com vídeo embutido
+ *  (player nativo) + rótulo. URLs Magnific assinadas duram ~3 dias; se
+ *  expirou, mostra o poster da imagem. Takes que falharam viram placeholder. */
+function HistoryPreviewGrid({ item }: { item: HistEntry }) {
+  const labels = buildLabelMap(item);
+  const takes = [...(item.takeUrls || [])].sort((a, b) => a.idx - b.idx);
+  return (
+    <div className="rounded-[12px] border border-violet/40 bg-bg-soft/30 p-3">
+      <div className="mono mb-2 text-[10px] uppercase tracking-widest text-violet">
+        Preview · {takes.filter((t) => t.status === 'ready' || t.videoUrl).length}/{takes.length} prontos
+      </div>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
+        {takes.map((t) => {
+          const label = labels[t.idx] || `Take ${String(t.idx).padStart(2, '0')}`;
+          const ok = !!t.videoUrl;
+          return (
+            <div key={t.idx} className="overflow-hidden rounded-[10px] border border-line/60 bg-bg/50">
+              <div className="relative aspect-[9/16] bg-black/40">
+                {ok ? (
+                  <video
+                    src={t.videoUrl as string}
+                    poster={t.imageUrl || undefined}
+                    controls
+                    playsInline
+                    muted
+                    preload="metadata"
+                    className="h-full w-full object-cover"
+                  />
+                ) : t.imageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={t.imageUrl} alt={label} className="h-full w-full object-cover opacity-60" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-[10px] text-text-muted">
+                    {t.status === 'failed' ? 'falhou' : t.status}
+                  </div>
+                )}
+                <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-bold text-lime">
+                  {String(t.idx).padStart(2, '0')}
+                </span>
+              </div>
+              <div className="px-1.5 py-1 text-[9px] leading-tight text-text-dim line-clamp-2" title={label}>
+                {label}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /** Keep-alive anti-freeze: enquanto um job roda, toca um tom INAUDÍVEL
  *  (gain 0.0001). Aba "tocando áudio" é isenta do tab-freezing/intensive
  *  throttling do Chrome — sem isso, a aba em segundo plano CONGELA os
@@ -965,6 +1047,8 @@ function BrollHistorySection() {
   // de batches antigos que nao tem originalJson salvo).
   const [pendingJsonFor, setPendingJsonFor] = useState<string | null>(null);
   const [pendingJsonText, setPendingJsonText] = useState<string>('');
+  // zipKey do item com o PREVIEW (grid de vídeos) expandido
+  const [previewFor, setPreviewFor] = useState<string | null>(null);
 
   function load() {
     try {
@@ -1485,6 +1569,14 @@ function BrollHistorySection() {
                 ) : null}
                 <button
                   type="button"
+                  onClick={() => setPreviewFor(previewFor === item.zipKey ? null : item.zipKey)}
+                  className="rounded-[8px] border border-violet/45 bg-violet/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-violet hover:bg-violet/20 transition"
+                  title="Ver preview dos vídeos deste batch"
+                >
+                  {previewFor === item.zipKey ? '▴ Fechar' : '👁 Preview'}
+                </button>
+                <button
+                  type="button"
                   onClick={() => redownload(item)}
                   disabled={loading === item.zipKey || isRetrying}
                   className="rounded-[8px] border border-lime/40 bg-lime/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-lime hover:bg-lime/20 disabled:opacity-50"
@@ -1502,6 +1594,8 @@ function BrollHistorySection() {
                   ×
                 </button>
               </div>
+              {/* Preview expandido: grid de vídeos do batch */}
+              {previewFor === item.zipKey ? <HistoryPreviewGrid item={item} /> : null}
               {/* Editor inline pra colar JSON original em batches antigos */}
               {isEditingJson ? (
                 <div className="rounded-[12px] border border-cyan-400/50 bg-cyan-400/[0.04] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_18px_-8px_rgba(34,211,238,0.35)]">
