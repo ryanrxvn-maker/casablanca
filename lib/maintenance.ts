@@ -12,7 +12,7 @@ export const MAINTENANCE_TOOLS: readonly string[] = [
   '/tools/normalizador',
   '/tools/separador-audio',
   '/tools/troca-produto',
-  // '/tools/remover-elementos', — FORA de manutenção: liberado pra Pro + Admin
+  '/tools/remover-elementos', // EM manutenção: bloqueado pra clientes, só admin acessa
   // '/tools/lipsync', — FORA de manutenção: liberado pra Pro + Admin
 ];
 
