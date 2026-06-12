@@ -638,6 +638,49 @@ console.log('\n[S22] corte cai no silencio (boundaries limpos)');
   }
 }
 
+// S23: take cortada que TERMINA numa pausa (boundary) mas sem a palavra-fim
+// perde pra take completa — erro real #6. A truncada casava as palavras
+// INICIAIS da copy de forma exata e ganhava por pouco.
+console.log('\n[S23] take cortada (mesmo terminando em pausa) perde');
+{
+  const copy = 'E o resultado não muda, agora parece até que as pernas estão mais grossas.';
+  const cuts = matchCopyWindowed(
+    copy,
+    transcript(
+      'e o resultado nao muda agora parece ate que as pernas estao', // truncou
+      'e o resultado nao muda e as pernas parecem ate que ficam muitas vezes mais grossas', // completa
+    ),
+  );
+  check('S23 retorna 1 corte', cuts.length === 1, `retornou ${cuts.length}`);
+  if (cuts.length >= 1) {
+    const t = normalize(cuts[0].transcriptText);
+    check('S23 pegou a take com a palavra-fim ("grossas")',
+      t.includes('grossas'), `texto="${t}"`);
+  }
+}
+
+// S24: copy line longa que o expert NUNCA falou inteira numa take so. A janela
+// NAO pode cruzar a pausa de retake e duplicar palavras (erro real #27).
+console.log('\n[S24] nao funde duas takes (sem duplicar)');
+{
+  const copy =
+    'Eu já ajudei centenas de mulheres a sair desse resultado em menos de um mês.';
+  const cuts = matchCopyWindowed(
+    copy,
+    transcript(
+      'eu ja ajudei centenas de mulheres aqui no meu consultorio na clinica',
+      'eu ja ajudei centenas de mulheres a sair desse resultado em menos de um mes',
+    ),
+  );
+  check('S24 retorna 1 corte', cuts.length === 1, `retornou ${cuts.length}`);
+  if (cuts.length >= 1) {
+    const t = normalize(cuts[0].transcriptText);
+    const ocorrencias = (t.match(/ajudei/g) || []).length;
+    check('S24 nao duplicou "ajudei" (nao fundiu takes)',
+      ocorrencias <= 1, `"${t}" (${ocorrencias}x)`);
+  }
+}
+
 // --------------------------------------------------------------------- //
 
 console.log(

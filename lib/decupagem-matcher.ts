@@ -39,6 +39,9 @@ export const DP_TOL_MS = 0;
 // de proposito (fim de frase ou inicio de retake). Pausas de virgula
 // (~150-250ms) ficam ABAIXO, entao nao quebram uma frase no meio.
 export const GAP_MS = 300;
+// Pausa LONGA — fronteira clara de retake (o expert parou e recomecou). Janela
+// que contem uma dessas no meio esta fundindo duas takes distintas.
+export const HARD_GAP_MS = 500;
 
 export type Word = {
   text: string;
@@ -84,6 +87,7 @@ const STOP = new Set([
   'esse', 'essa', 'este', 'esta', 'mais', 'menos', 'ja', 'ao', 'aos', 'la',
   'meu', 'minha', 'seu', 'sua', 'tao', 'ou', 'mas', 'ne', 'ai', 'aqui', 'ali',
   'te', 'me', 'lhe', 'nao', 'sim', 'foi', 'era', 'sao', 'tem', 'vai', 'vou',
+  'ate', 'ainda', 'tambem', 'assim', 'entao', 'sera', 'ser', 'ter', 'como',
 ]);
 
 function isContent(s: string): boolean {
@@ -285,6 +289,9 @@ export function findTopWindows(
   const eff = content.length >= 2 ? content : targetStems;
   const headStems = eff.slice(0, 3);
   const tailStems = eff.slice(-3);
+  // A ULTIMA palavra-conceito e' a ancora de "a ideia terminou aqui". Se ela
+  // falta, a take quase certamente foi cortada no fim (erro #6).
+  const lastStem = eff.length ? eff[eff.length - 1] : '';
 
   const ratios = getWindowRatios(targetLen);
   const minSize = Math.max(2, Math.floor(targetLen * ratios.min));
@@ -345,10 +352,23 @@ export function findTopWindows(
           ? 1
           : tailStems.filter((t) => inPoolFuzzy(t, tailPoolSet, tailPool))
               .length / tailStems.length;
+      // A ultima palavra-conceito da copy esta no fim da janela? (ancora forte)
+      const lastCov =
+        lastStem === '' || inPoolFuzzy(lastStem, tailPoolSet, tailPool) ? 1 : 0;
 
-      // REJEICAO DURA de take cortada: nao termina numa pausa E nao alcancou o
-      // fim da ideia → e' fala interrompida no meio. Fora. (relaxed pula.)
-      if (!relaxed && !endsAtBoundary && tailCov < 0.5) continue;
+      // REJEICAO DURA de take cortada: nao termina numa pausa E (nao tem a
+      // palavra-fim OU mal cobre o fim da ideia) → fala interrompida. Fora.
+      if (!relaxed && !endsAtBoundary && (lastCov === 0 || tailCov < 0.5)) {
+        continue;
+      }
+
+      // Janela que CRUZA uma pausa longa esta juntando DUAS takes (retake) →
+      // gera duplicacao/vazamento (erro #27). Conta as fronteiras INTERNAS.
+      let internalHardBreaks = 0;
+      for (let g = start; g < end; g++) {
+        if (gaps[g] >= HARD_GAP_MS) internalHardBreaks++;
+      }
+      const mergePenalty = internalHardBreaks * 0.15;
 
       const lcs = lcsLength(targetStems, window);
       const lcsRatio = lcs / Math.max(targetLen, size);
@@ -374,18 +394,21 @@ export function findTopWindows(
 
       const boundary = (startsAtBoundary ? 0.5 : 0) + (endsAtBoundary ? 0.5 : 0);
 
-      // Tail-coverage e boundary DOMINAM: garantem fala completa que termina no
-      // ponto certo. LCS/recall garantem que e' a ideia certa, na ordem certa.
+      // Tail/last-coverage e boundary DOMINAM: garantem fala COMPLETA que
+      // termina no ponto certo. LCS/recall garantem a ideia certa na ordem
+      // certa. mergePenalty derruba janelas que fundem duas takes.
       const score =
-        tailCov * 0.30 +
-        headCov * 0.12 +
-        lcsRatio * 0.18 +
-        recall * 0.13 +
+        lastCov * 0.24 +
+        tailCov * 0.12 +
+        headCov * 0.10 +
+        lcsRatio * 0.14 +
+        recall * 0.11 +
         boundary * 0.12 +
         precision * 0.05 +
         confidence * 0.05 +
         noFillers * 0.03 +
-        cadence * 0.02;
+        cadence * 0.02 -
+        mergePenalty;
 
       if (score < MIN_SCORE_TO_KEEP) continue;
 
