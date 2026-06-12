@@ -320,8 +320,13 @@ function AutoBrollInner() {
     try {
       const histKey = 'darkolab:auto-broll:history';
       const hist = (() => { try { return JSON.parse(localStorage.getItem(histKey) || '[]'); } catch { return []; } })();
-      // Remove qualquer entry antiga deste mesmo jobId pra evitar duplicatas
-      const filtered = hist.filter((h: any) => h.jobId !== job.id);
+      // Remove só PRÉ-SAVES MORTOS do mesmo jobId (0 sucesso, não em voo) pra
+      // evitar duplicata. PRESERVA entries com trabalho concluído (≥1 take ok)
+      // — antes um re-disparo do mesmo job APAGAVA o batch completo anterior
+      // do histórico (user perdeu o 45-completo ao disparar 85).
+      const filtered = hist.filter(
+        (h: any) => h.jobId !== job.id || (h.successCount || 0) > 0 || isEntryLive(h),
+      );
       filtered.unshift({
         jobId: job.id,
         spaceName: job.name || `BROLL_${job.id}`,
@@ -366,7 +371,12 @@ function AutoBrollInner() {
         },
         {
           signal: ac.signal,
-          onProgress: (p) => patchJob(job.id, { progress: p }),
+          onProgress: (p) => {
+            patchJob(job.id, { progress: p });
+            // PERSISTÊNCIA INCREMENTAL: cada take pronto vai pro histórico +
+            // IDB NA HORA → reload/desligar PC no meio nunca perde o que ja foi.
+            persistTakesIncremental(preEntryKey, (p?.takes as any) || []);
+          },
         },
       );
 
@@ -402,7 +412,10 @@ function AutoBrollInner() {
             },
             {
               signal: ac.signal,
-              onProgress: (p) => patchJob(job.id, { progress: p }),
+              onProgress: (p) => {
+                patchJob(job.id, { progress: p });
+                persistTakesIncremental(preEntryKey, (p?.takes as any) || []);
+              },
             },
           );
           // Merge takes do retry com a rodada anterior (preserva os que ja eram
@@ -941,9 +954,155 @@ function buildLabelMap(item: HistEntry): Record<number, string> {
   return out;
 }
 
+/** Chave IDB do MP4 individual de um take (offline-proof, sobrevive expiração
+ *  de URL e PC desligado). */
+function takeVideoKey(zipKey: string, idx: number): string {
+  return `brollvid:${zipKey}:${idx}`;
+}
+
+// Set por zipKey dos takes cujo MP4 já foi (ou está sendo) baixado pro IDB.
+const _savedTakeVideos = new Map<string, Set<number>>();
+
+/** PERSISTÊNCIA INCREMENTAL — chamada a cada onProgress de um run vivo.
+ *  (1) Grava videoUrl/status de cada take PRONTO na entry do histórico
+ *      (localStorage) → sobrevive a reload no meio da geração.
+ *  (2) Baixa o MP4 pro IndexedDB em background (1 por vez, idempotente) →
+ *      sobrevive a URL expirada E a PC desligado.
+ *  Fire-and-forget: NÃO bloqueia o onProgress. Como os vídeos completam
+ *  espaçados (relaxed mode), o download incremental é naturalmente ritmado. */
+function persistTakesIncremental(
+  zipKey: string,
+  takes: Array<{ idx: number; status?: string; videoUrl?: string | null; imageUrl?: string | null }>,
+): void {
+  // (1) merge URLs na entry (síncrono, barato)
+  try {
+    const histKey = 'darkolab:auto-broll:history';
+    const hist = JSON.parse(localStorage.getItem(histKey) || '[]');
+    let changed = false;
+    const updated = hist.map((h: any) => {
+      if (h.zipKey !== zipKey) return h;
+      const tu = [...(h.takeUrls || [])];
+      for (const t of takes) {
+        const v = t.videoUrl;
+        if (!v) continue;
+        const i = tu.findIndex((x: any) => x.idx === t.idx);
+        if (i >= 0) {
+          if (tu[i].status !== 'ready' || tu[i].videoUrl !== v) {
+            tu[i] = { ...tu[i], status: 'ready', videoUrl: v, imageUrl: t.imageUrl || tu[i].imageUrl || null };
+            changed = true;
+          }
+        } else {
+          tu.push({ idx: t.idx, status: 'ready', videoUrl: v, imageUrl: t.imageUrl || null });
+          changed = true;
+        }
+      }
+      if (!changed) return h;
+      const ok = tu.filter((x: any) => x.status === 'ready' || x.videoUrl).length;
+      return { ...h, takeUrls: tu, successCount: ok, failedCount: Math.max(0, (h.totalTakes || tu.length) - ok) };
+    });
+    if (changed) {
+      localStorage.setItem(histKey, JSON.stringify(updated));
+      window.dispatchEvent(new Event('darkolab:auto-broll:history-changed'));
+    }
+  } catch {}
+
+  // (2) baixa MP4s novos pro IDB (offline), idempotente + 1 por vez
+  let saved = _savedTakeVideos.get(zipKey);
+  if (!saved) { saved = new Set(); _savedTakeVideos.set(zipKey, saved); }
+  for (const t of takes) {
+    const v = t.videoUrl;
+    if (!v || saved.has(t.idx)) continue;
+    saved.add(t.idx); // marca ANTES (evita corrida em onProgress paralelo)
+    void (async () => {
+      try {
+        const r = await fetch(v);
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const blob = await r.blob();
+        const { saveBlob } = await import('@/lib/zip-store');
+        await saveBlob(takeVideoKey(zipKey, t.idx), blob, 'video/mp4');
+      } catch {
+        saved!.delete(t.idx); // libera p/ nova tentativa no próximo onProgress
+      }
+    })();
+  }
+}
+
+/** Reconstrói o ZIP de um batch a partir do que sobreviveu: prefere os MP4s
+ *  salvos no IDB (offline), cai pra fetch das URLs Magnific. Nomes descritivos
+ *  pelo section (match CutFeeling). Retorna {blob, n, faltam}. */
+async function buildZipFromEntry(item: HistEntry): Promise<{ blob: Blob; n: number; faltam: number } | null> {
+  const JSZip = (await import('jszip')).default;
+  const { loadBlob } = await import('@/lib/zip-store');
+  const labels = buildLabelMap(item);
+  const zip = new JSZip();
+  let n = 0, faltam = 0;
+  for (const t of [...(item.takeUrls || [])].sort((a, b) => a.idx - b.idx)) {
+    const nn = String(t.idx).padStart(2, '0');
+    const label = labels[t.idx] ? labels[t.idx].replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 70) : '';
+    const name = label ? `${nn} - ${label}.mp4` : `take_${nn}.mp4`;
+    let bytes: ArrayBuffer | null = null;
+    try {
+      const blob = await loadBlob(takeVideoKey(item.zipKey, t.idx), 'video/mp4');
+      if (blob) bytes = await blob.arrayBuffer();
+    } catch {}
+    if (!bytes && t.videoUrl) {
+      try { const r = await fetch(t.videoUrl); if (r.ok) bytes = await r.arrayBuffer(); } catch {}
+    }
+    if (bytes) { zip.file(name, bytes); n++; } else if (t.status === 'ready' || t.videoUrl) { faltam++; }
+  }
+  if (n === 0) return null;
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+  return { blob, n, faltam };
+}
+
 /** Grid de preview de UM batch do histórico: cada take com vídeo embutido
- *  (player nativo) + rótulo. URLs Magnific assinadas duram ~3 dias; se
- *  expirou, mostra o poster da imagem. Takes que falharam viram placeholder. */
+ *  (player nativo) + rótulo. Prefere o MP4 salvo no IDB (offline); se não
+ *  houver, usa a URL Magnific; se expirou, mostra o poster da imagem.
+ *  Takes que falharam viram placeholder. */
+function HistoryPreviewCell({ zipKey, idx, videoUrl, imageUrl, label, status }: {
+  zipKey: string; idx: number; videoUrl: string | null; imageUrl: string | null; label: string; status: string;
+}) {
+  // Prefere o MP4 salvo no IDB (offline-proof). Senão usa a URL Magnific.
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true; let created: string | null = null;
+    (async () => {
+      try {
+        const { loadBlob } = await import('@/lib/zip-store');
+        const blob = await loadBlob(takeVideoKey(zipKey, idx), 'video/mp4');
+        if (blob && alive) { created = URL.createObjectURL(blob); setBlobUrl(created); }
+      } catch {}
+    })();
+    return () => { alive = false; if (created) URL.revokeObjectURL(created); };
+  }, [zipKey, idx]);
+  const src = blobUrl || videoUrl;
+  return (
+    <div className="overflow-hidden rounded-[10px] border border-line/60 bg-bg/50">
+      <div className="relative aspect-[9/16] bg-black/40">
+        {src ? (
+          <video src={src} poster={imageUrl || undefined} controls playsInline muted preload="metadata" className="h-full w-full object-cover" />
+        ) : imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={imageUrl} alt={label} className="h-full w-full object-cover opacity-60" />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-[10px] text-text-muted">
+            {status === 'failed' ? 'falhou' : status}
+          </div>
+        )}
+        <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-bold text-lime">
+          {String(idx).padStart(2, '0')}
+        </span>
+        {blobUrl && (
+          <span className="absolute right-1 top-1 rounded bg-lime/90 px-1 py-0.5 text-[8px] font-bold text-black" title="Salvo offline">💾</span>
+        )}
+      </div>
+      <div className="px-1.5 py-1 text-[9px] leading-tight text-text-dim line-clamp-2" title={label}>
+        {label}
+      </div>
+    </div>
+  );
+}
+
 function HistoryPreviewGrid({ item }: { item: HistEntry }) {
   const labels = buildLabelMap(item);
   const takes = [...(item.takeUrls || [])].sort((a, b) => a.idx - b.idx);
@@ -955,36 +1114,16 @@ function HistoryPreviewGrid({ item }: { item: HistEntry }) {
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
         {takes.map((t) => {
           const label = labels[t.idx] || `Take ${String(t.idx).padStart(2, '0')}`;
-          const ok = !!t.videoUrl;
           return (
-            <div key={t.idx} className="overflow-hidden rounded-[10px] border border-line/60 bg-bg/50">
-              <div className="relative aspect-[9/16] bg-black/40">
-                {ok ? (
-                  <video
-                    src={t.videoUrl as string}
-                    poster={t.imageUrl || undefined}
-                    controls
-                    playsInline
-                    muted
-                    preload="metadata"
-                    className="h-full w-full object-cover"
-                  />
-                ) : t.imageUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={t.imageUrl} alt={label} className="h-full w-full object-cover opacity-60" />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center text-[10px] text-text-muted">
-                    {t.status === 'failed' ? 'falhou' : t.status}
-                  </div>
-                )}
-                <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-bold text-lime">
-                  {String(t.idx).padStart(2, '0')}
-                </span>
-              </div>
-              <div className="px-1.5 py-1 text-[9px] leading-tight text-text-dim line-clamp-2" title={label}>
-                {label}
-              </div>
-            </div>
+            <HistoryPreviewCell
+              key={t.idx}
+              zipKey={item.zipKey}
+              idx={t.idx}
+              videoUrl={t.videoUrl}
+              imageUrl={t.imageUrl}
+              label={label}
+              status={t.status}
+            />
           );
         })}
       </div>
@@ -1078,29 +1217,34 @@ function BrollHistorySection() {
         a.click();
         setTimeout(() => URL.revokeObjectURL(z.blobUrl), 5000);
       } else {
-        // ZIP perdido — tenta reconstruir baixando URLs Magnific
-        if (!confirm('ZIP não está mais no cache local. Reconstruir baixando dos URLs Magnific?\n(Pode levar 30-60s.)')) return;
-        const JSZip = (await import('jszip')).default;
-        const zip = new JSZip();
-        let n = 0;
-        for (const t of item.takeUrls) {
-          if (!t.videoUrl) continue;
-          try {
-            const r = await fetch(t.videoUrl);
-            if (!r.ok) continue;
-            const ab = await r.arrayBuffer();
-            zip.file(`take_${String(t.idx).padStart(2, '0')}.mp4`, ab);
-            n++;
-          } catch {}
+        // ZIP completo não está no cache — reconstrói do que SOBREVIVEU:
+        // MP4s salvos no IDB (offline, mesmo após desligar o PC) + URLs ainda
+        // válidas. Nomes descritivos. Salva o ZIP reconstruído pra ficar
+        // permanente. Mostra parcial se faltou algo (não perde o que tem).
+        const built = await buildZipFromEntry(item);
+        if (!built) {
+          alert(
+            'Nenhum vídeo deste batch está disponível offline nem nas URLs (expiraram). ' +
+            'Se ainda há prompts salvos, use RETOMAR pra regerar.'
+          );
+          return;
         }
-        if (n === 0) { alert('Nenhum vídeo Magnific acessível mais. URLs podem ter expirado.'); return; }
-        const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+        const { blob, n, faltam } = built;
+        // Persiste o ZIP reconstruído no IDB → próximos downloads são instantâneos
+        try {
+          const { saveZip } = await import('@/lib/zip-store');
+          await saveZip(item.zipKey, blob, item.zipName);
+          window.dispatchEvent(new Event('darkolab:auto-broll:history-changed'));
+        } catch {}
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
         a.download = item.zipName;
         a.click();
         setTimeout(() => URL.revokeObjectURL(url), 5000);
+        if (faltam > 0) {
+          alert(`Baixado ZIP com ${n} take(s). ${faltam} não estavam mais acessíveis (URL expirada e sem cópia offline). Use RETOMAR pra completar.`);
+        }
       }
     } catch (e) {
       alert('Erro: ' + ((e as Error)?.message || String(e)));
@@ -1387,6 +1531,8 @@ function BrollHistorySection() {
           onProgress: (p: any) => {
             const ready = (p?.takes || []).filter((t: any) => t.status === 'ready').length;
             setRetryMsg(`Renderizando ${ready}/${missingTakes.length}… (paciencia, Kling demora)`);
+            // Persiste incrementalmente os faltantes que vao ficando prontos
+            persistTakesIncremental(item.zipKey, (p?.takes as any) || []);
           },
         },
       );
