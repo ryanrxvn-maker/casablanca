@@ -180,6 +180,8 @@ function AutoBrollInner() {
   // entre sessões. Default = Nano Banana 2 (o que sempre funcionou). O VÍDEO
   // segue travado em Kling 2.5 — só a imagem que vira animada tem opção.
   const [imageModel, setImageModel] = useToolState<string>('mgAuto:imageModel', IMAGE_MODELS[0].slug);
+  // Aspect escolhível (9:16 OU 16:9) — vale pra imagem E vídeo. Default 9:16.
+  const [aspect, setAspect] = useToolState<string>('mgAuto:aspect', '9:16');
   const [globalMotion, setGlobalMotion] = useToolState<string>('mgAuto:motion', '');
 
   // PERSISTENCIA: jobs[] sobrevive reload (user perdia o JSON colado se
@@ -348,6 +350,7 @@ function AutoBrollInner() {
         // RETOMAR le isso e re-dispara sem precisar o user colar nada.
         originalJson: job.raw,
         imageModel,
+        aspect,
         inFlight: true,
         lastBeatAt: Date.now(),
       });
@@ -374,6 +377,7 @@ function AutoBrollInner() {
           spaceName: job.name.trim() || `DARKO_BROLLS_${job.id}`,
           takes,
           imageModel,
+          aspect: aspect as '9:16' | '16:9',
           videoModel: 'kling-25',
         },
         {
@@ -415,6 +419,7 @@ function AutoBrollInner() {
               spaceName: (job.name.trim() || `DARKO_BROLLS_${job.id}`) + `_AUTORETRY${round}`,
               takes: missingTakes,
               imageModel,
+              aspect: aspect as '9:16' | '16:9',
               videoModel: 'kling-25',
             },
             {
@@ -864,10 +869,41 @@ function AutoBrollInner() {
               kind="video"
               label="Vídeo"
               model="Kling 2.5"
-              specs={['720p', '9:16', '10s']}
+              specs={['720p', aspect, '10s']}
               icon="🎬"
               tint="cyan"
             />
+          </div>
+          {/* ASPECT — vale pra imagem E vídeo (precisam casar). */}
+          <div className="mt-3 rounded-[14px] border border-cyan-400/25 bg-bg-soft/40 p-3">
+            <div className="mono mb-2 text-[10px] uppercase tracking-widest text-cyan-300">Formato (imagem + vídeo)</div>
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                { v: '9:16', label: 'Vertical 9:16', icon: '📱', desc: 'Reels · TikTok · Shorts' },
+                { v: '16:9', label: 'Horizontal 16:9', icon: '🖥️', desc: 'YouTube · VSL · landscape' },
+              ] as const).map((a) => {
+                const active = aspect === a.v;
+                return (
+                  <button
+                    key={a.v}
+                    type="button"
+                    onClick={() => setAspect(a.v)}
+                    disabled={anyRunning}
+                    className={`flex flex-col items-start gap-0.5 rounded-[12px] border px-3 py-2.5 text-left transition disabled:opacity-50 ${
+                      active
+                        ? 'border-cyan-400 bg-cyan-400/15 shadow-[0_0_0_1px_rgba(34,211,238,0.5),0_6px_18px_-8px_rgba(34,211,238,0.55)]'
+                        : 'border-line bg-bg/40 hover:border-cyan-400/50'
+                    }`}
+                  >
+                    <span className="flex w-full items-center gap-1.5 text-[13px] font-bold text-text">
+                      <span>{a.icon}</span>{a.label}
+                      {active && <span className="ml-auto text-cyan-300">●</span>}
+                    </span>
+                    <span className="mono text-[9px] uppercase tracking-wider text-text-muted">{a.desc}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <label className="mt-3 block">
             <span className="label-field">Motion default (opcional, Kling 2.5)</span>
@@ -951,6 +987,8 @@ type HistEntry = {
    *  Adicionado em 2026-05-30; entries antigas nao tem. */
   originalJson?: string;
   imageModel?: string;
+  /** aspect usado no batch (9:16 OU 16:9) — RETOMAR reusa o mesmo. */
+  aspect?: string;
   /** true enquanto um pipeline (disparo OU retomar) esta rodando pra esta
    *  entry. Junto com lastBeatAt bloqueia RETOMAR de double-dispatch. */
   inFlight?: boolean;
@@ -1571,6 +1609,7 @@ function BrollHistorySection() {
           spaceName: item.spaceName + '_RETRY',
           takes: missingTakes,
           imageModel: (item.imageModel as any) || 'imagen-nano-banana-2-flash',
+          aspect: (item.aspect === '16:9' ? '16:9' : '9:16'),
           videoModel: 'kling-25',
         },
         {

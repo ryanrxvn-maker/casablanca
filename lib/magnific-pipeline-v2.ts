@@ -239,6 +239,10 @@ export async function runMagnificPipelineV2(
   const videoConcurrency = cfg.videoConcurrency ?? DEFAULT_VIDEO_CONC;
   // Modelo de IMAGEM escolhido na UI (Nano Banana 2 OU Seedream 4.5).
   const imageModel = resolveImageModel(cfg.imageModel);
+  // Aspect escolhido na UI (9:16 OU 16:9). MESMO valor pra imagem E vídeo —
+  // a imagem precisa preencher o frame do vídeo. Qualquer outro valor cai no
+  // 9:16 seguro (vertical, o default que sempre rodou).
+  const aspect: '9:16' | '16:9' = cfg.aspect === '16:9' ? '16:9' : '9:16';
 
   if (total === 0) {
     return {
@@ -351,11 +355,11 @@ export async function runMagnificPipelineV2(
 
   // Stamp visível na UI: confirma qual versão do pipeline o bundle carregado
   // está rodando (diagnóstico de "user não recarregou a aba").
-  const PIPELINE_BUILD = 'r4';
+  const PIPELINE_BUILD = 'r5';
   const imgLabel = imageModel === 'seedream-4-5' ? 'Seedream 4.5' : 'Nano Banana 2';
-  console.log(`[pipeline] build ${PIPELINE_BUILD} — imagem: ${imageModel} (${imgLabel}) -> Kling 2.5`);
+  console.log(`[pipeline] build ${PIPELINE_BUILD} — imagem: ${imageModel} (${imgLabel}) ${aspect} -> Kling 2.5 ${aspect}`);
   emit(
-    `Disparando ${total} takes · ${imgLabel} → Kling 2.5 (${imageConcurrency} img · ${videoConcurrency} vid · ${PIPELINE_BUILD})...`,
+    `Disparando ${total} takes · ${imgLabel} → Kling 2.5 · ${aspect} (${imageConcurrency} img · ${videoConcurrency} vid · ${PIPELINE_BUILD})...`,
     'dispatch',
     6,
   );
@@ -428,7 +432,7 @@ export async function runMagnificPipelineV2(
         const img = await generateImage({
           prompt,
           model: imageModel,
-          aspectRatio: '9:16',
+          aspectRatio: aspect,
           resolution: '1k',
           smartPrompt: true,
           seed: Math.floor(Math.random() * 1_000_000),
@@ -520,13 +524,13 @@ export async function runMagnificPipelineV2(
           ? await generateVideoFromImage({
               prompt,
               startImageUrl,
-              aspectRatio: '9:16',
+              aspectRatio: aspect,
               resolution: '720p',
               duration: 10,
             }, poller)
           : await generateVideoFromText({
               prompt,
-              aspectRatio: '9:16',
+              aspectRatio: aspect,
               resolution: '720p',
               duration: 10,
             }, poller);
