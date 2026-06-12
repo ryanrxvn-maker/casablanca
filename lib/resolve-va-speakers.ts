@@ -67,19 +67,25 @@ export function resolveVaSpeakers(input: ResolveInput): ResolveResult {
   // só roteamos multi-locutor pra 2 papéis (caso real); >2 cai no AAI
   const twoRoles = expectedSpeakers === 2;
 
-  // --- 1. COPY-ANCHOR ---
+  // --- COPY: cobertura por utterance (conteúdo do roteiro do principal) ---
+  // Usada como (a) ORIENTAÇÃO do pitch (qual cluster é o principal) e (b)
+  // FALLBACK quando o pitch não separa (locutores do mesmo sexo).
+  let copyCoverage: number[] | null = null;
   let copyRanks: number[] | null = null;
   let copyReason = '';
   if (twoRoles && input.copyText && input.copyText.trim().length > 0) {
     const c = attributeByCopy(utterances.map((u) => ({ text: u.text })), input.copyText);
     copyReason = c.reason;
+    copyCoverage = c.coverage;
     if (c.confident && c.ranks) copyRanks = c.ranks;
   }
 
-  // --- 2. PITCH/F0 ---
-  let pitchRanks: number[] | null = null;
-  let pitchReason = '';
-  let pitchHz: number[] | null = null;
+  // --- PITCH/F0: separação ACÚSTICA (física) — PRIMÁRIA quando confiante ---
+  // Voz é o sinal mais confiável de QUEM fala (homem ~110Hz vs mulher
+  // ~200Hz = inequívoco). O copy (que pode ser um briefing bagunçado) só
+  // ORIENTA qual cluster é o principal e VALIDA — nunca sobrescreve a
+  // física. Corrige o bug 2026-06-11 (copy errado mandava trecho do Doutor
+  // pro depoimento mesmo com vozes claramente distintas).
   if (twoRoles && input.channelData && input.sampleRate) {
     const p = clusterUtterancesByPitch(
       input.channelData,
@@ -87,38 +93,64 @@ export function resolveVaSpeakers(input: ResolveInput): ResolveResult {
       utterances.map((u) => ({ start: u.start, end: u.end })),
       2,
     );
-    pitchReason = p.reason;
-    if (p.confident && p.ranks) { pitchRanks = p.ranks; pitchHz = p.clusterHz; }
+    if (p.confident && p.clusters) {
+      // orienta: qual cluster CRU (0/1) é o principal?
+      let principalCluster: number;
+      let orientNote: string;
+      if (copyCoverage) {
+        // principal = cluster cujos trechos casam MAIS com a copy
+        const sum = [0, 0];
+        const cnt = [0, 0];
+        for (let i = 0; i < utterances.length; i++) {
+          const cl = p.clusters[i];
+          if (cl === 0 || cl === 1) {
+            const cov = copyCoverage[i] >= 0 ? copyCoverage[i] : 0;
+            sum[cl] += cov; cnt[cl]++;
+          }
+        }
+        const avg0 = cnt[0] ? sum[0] / cnt[0] : 0;
+        const avg1 = cnt[1] ? sum[1] / cnt[1] : 0;
+        principalCluster = avg0 >= avg1 ? 0 : 1;
+        orientNote = `copy orientou principal (cobertura ${(Math.max(avg0, avg1) * 100).toFixed(0)}% vs ${(Math.min(avg0, avg1) * 100).toFixed(0)}%)`;
+      } else {
+        // sem copy: principal = quem mais fala (rank 0 do pitch)
+        principalCluster = p.clusters[p.ranks!.findIndex((r) => r === 0)] ?? 0;
+        orientNote = 'quem mais fala = principal';
+      }
+      const ranks = utterances.map((_, i) => {
+        const cl = p.clusters![i];
+        if (cl === -1) return i > 0 ? (p.clusters![i - 1] === principalCluster ? 0 : 1) : 0;
+        return cl === principalCluster ? 0 : 1;
+      });
+      // validação opcional pela copy: concordância entre pitch-orientado e copy-anchor
+      let valNote = '';
+      if (copyRanks) {
+        const agree = agreement(ranks, copyRanks);
+        valNote = ` · validado pela copy (${(agree * 100).toFixed(0)}%)`;
+      }
+      const lo = (p.clusterHzRaw?.[0] ?? 0).toFixed(0);
+      const hi = (p.clusterHzRaw?.[1] ?? 0).toFixed(0);
+      return {
+        ranks,
+        method: `tom de voz · ${lo}Hz vs ${hi}Hz${valNote}`,
+        reason: `${p.reason}; ${orientNote}${copyReason ? `; copy: ${copyReason}` : ''}`,
+        confident: true,
+      };
+    }
+    // pitch não confiante (mesmo sexo / gap fraco) — cai pra copy
+    copyReason = copyReason ? `${copyReason}; pitch: ${p.reason}` : `pitch: ${p.reason}`;
   }
 
-  // --- combinação ---
-  if (copyRanks && pitchRanks) {
-    // alinha rótulos: pitch pode ter principal/depoimento invertido vs copy
-    const agree = agreement(copyRanks, pitchRanks);
-    const agreeFlipped = agreement(copyRanks, pitchRanks.map((r) => (r === 0 ? 1 : r === 1 ? 0 : r)));
-    const best = Math.max(agree, agreeFlipped);
-    const hz = pitchHz ? ` · ${pitchHz.map((h) => h.toFixed(0) + 'Hz').join(' vs ')}` : '';
-    return {
-      ranks: copyRanks, // copy é a verdade
-      method: best >= 0.8 ? `copy + tom de voz (concordam ${(best * 100).toFixed(0)}%)${hz}` : `copy (roteiro)${hz}`,
-      reason: `${copyReason}; pitch: ${pitchReason}; concordância ${(best * 100).toFixed(0)}%`,
-      confident: true,
-    };
-  }
+  // --- COPY-ONLY (pitch indisponível/inconclusivo, mas copy separou) ---
   if (copyRanks) {
     return { ranks: copyRanks, method: 'copy (roteiro)', reason: copyReason, confident: true };
   }
-  if (pitchRanks) {
-    const hz = pitchHz ? ` · ${pitchHz.map((h) => h.toFixed(0) + 'Hz').join(' vs ')}` : '';
-    return { ranks: pitchRanks, method: `tom de voz${hz}`, reason: pitchReason, confident: true };
-  }
 
-  // --- 3. AssemblyAI labels (último recurso) ---
-  const reasons = [copyReason, pitchReason].filter(Boolean).join(' · ');
+  // --- AssemblyAI labels (último recurso) ---
   return {
     ranks: ranksFromAaiLabels(utterances),
     method: 'AssemblyAI',
-    reason: reasons ? `copy/pitch inconclusivos (${reasons})` : 'speaker_labels AssemblyAI',
+    reason: copyReason ? `copy/pitch inconclusivos (${copyReason})` : 'speaker_labels AssemblyAI',
     confident: false,
   };
 }

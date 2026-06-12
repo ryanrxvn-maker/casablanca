@@ -20,6 +20,11 @@ export type PitchClusterResult = {
   confident: boolean;
   /** por utterance: rank do locutor (0 = quem MAIS fala no total) */
   ranks: number[] | null;
+  /** por utterance: cluster CRU (0 = loHz, 1 = hiHz, -1 = sem F0) — o
+   *  caller pode re-orientar qual cluster é o principal via copy. */
+  clusters?: number[];
+  /** [F0 do cluster 0 (loHz), F0 do cluster 1 (hiHz)] — cru */
+  clusterHzRaw?: number[];
   /** F0 médio (Hz) por rank, pra log/UI */
   clusterHz: number[] | null;
   /** explicação curta (log/painel) */
@@ -187,22 +192,30 @@ export function clusterUtterancesByPitch(
   // rank: 0 = cluster que MAIS fala (papel principal)
   const rankOfCluster = talkByCluster[0] >= talkByCluster[1] ? [0, 1] : [1, 0];
   const ranks = new Array<number>(utts.length).fill(0);
+  // clusters CRUS por utterance (0 = cluster c0/loHz, 1 = c1/hiHz, -1 = sem F0).
+  // O caller (resolver) pode RE-ORIENTAR qual cluster e o principal usando a
+  // copy (mais robusto que talk-time quando o depoimento e longo).
+  const clusters = new Array<number>(utts.length).fill(-1);
   const clusterByUttIdx = new Map<number, number>();
   for (let i = 0; i < valid.length; i++) clusterByUttIdx.set(valid[i].i, assign[i]);
   for (let i = 0; i < utts.length; i++) {
     const cl = clusterByUttIdx.get(i);
     if (cl !== undefined) {
+      clusters[i] = cl;
       ranks[i] = rankOfCluster[cl];
     } else {
       // F0 não estimável (trecho curto/ruidoso): herda o VIZINHO anterior
       // (continuação da mesma fala é o caso comum); primeiro vai pro principal
       ranks[i] = i > 0 ? ranks[i - 1] : 0;
+      clusters[i] = i > 0 ? clusters[i - 1] : -1;
     }
   }
   const clusterHz = rankOfCluster[0] === 0 ? [c0, c1] : [c1, c0];
   return {
     confident: true,
     ranks,
+    clusters,
+    clusterHzRaw: [c0, c1], // 0=loHz, 1=hiHz (cru, sem orientacao de papel)
     clusterHz,
     reason: `pitch separou ${clusterHz[0].toFixed(0)}Hz (principal) vs ${clusterHz[1].toFixed(0)}Hz (secundário) · gap ${(gap * 100).toFixed(0)}%`,
   };
