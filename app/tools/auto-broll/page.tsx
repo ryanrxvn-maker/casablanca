@@ -95,11 +95,14 @@ const HUE = 'rgba(240,171,252,0.45)';
  */
 
 /**
- * Pipeline TRAVADO em: Nano Banana Pro · 1K · 9:16 + Kling 2.5 · 720p · 9:16 · 10s.
- * Sem opções — garantia de 100% assertividade na seleção dos modelos. Qualquer
- * tentativa de mudar isso é silenciosamente ignorada pela lib (defesa profunda).
+ * Modelo de IMAGEM escolhível (a imagem é depois animada pelo Kling 2.5).
+ * Ambos confirmados ZERO-crédito no Unlimited. O VÍDEO segue travado em
+ * Kling 2.5 720p 9:16 10s. O primeiro da lista é o default seguro.
  */
-const IMAGE_MODEL_FIXED = 'nano-banana-pro' as const;
+const IMAGE_MODELS = [
+  { slug: 'imagen-nano-banana-2-flash', label: 'Nano Banana 2', icon: '🍌', desc: 'Rápido · consistente' },
+  { slug: 'seedream-4-5', label: 'Seedream 4.5', icon: '🌱', desc: 'Detalhe rico · cinematográfico' },
+] as const;
 
 type Job = {
   id: string;
@@ -173,8 +176,10 @@ function AutoBrollInner() {
     }
   }
 
-  // imageModel TRAVADO em nano-banana-pro — sem state, sem opção
-  const imageModel = IMAGE_MODEL_FIXED;
+  // Modelo de IMAGEM escolhível (Nano Banana 2 OU Seedream 4.5). Persiste
+  // entre sessões. Default = Nano Banana 2 (o que sempre funcionou). O VÍDEO
+  // segue travado em Kling 2.5 — só a imagem que vira animada tem opção.
+  const [imageModel, setImageModel] = useToolState<string>('mgAuto:imageModel', IMAGE_MODELS[0].slug);
   const [globalMotion, setGlobalMotion] = useToolState<string>('mgAuto:motion', '');
 
   // PERSISTENCIA: jobs[] sobrevive reload (user perdia o JSON colado se
@@ -821,19 +826,40 @@ function AutoBrollInner() {
         )}
         </ToolStep>
 
-        <ToolStep n={2} icon={<IconStepSliders size={18} />} title="Configuração" hint="Parâmetros travados — máxima qualidade, zero risco de seleção errada" hue={HUE}>
-          {/* Setup TRAVADO. Sem opções de mudar modelo/aspect/quality —
-              a extension SEMPRE escolhe exatamente: Nano Banana Pro 1K 9:16
-              + Kling 2.5 720p 9:16 10s. Zero chance de clicar errado. */}
+        <ToolStep n={2} icon={<IconStepSliders size={18} />} title="Configuração" hint="Escolha o modelo da imagem — o vídeo é sempre Kling 2.5" hue={HUE}>
+          {/* IMAGEM = escolhível (Nano Banana 2 OU Seedream 4.5, ambos
+              zero-crédito). VÍDEO travado em Kling 2.5. */}
           <div className="grid gap-3 md:grid-cols-2">
-            <ModelCard
-              kind="image"
-              label="Imagem"
-              model="Nano Banana Pro"
-              specs={['1K', '9:16']}
-              icon="🍌"
-              tint="violet"
-            />
+            <div className="rounded-[14px] border border-violet/30 bg-bg-soft/40 p-3">
+              <div className="mono mb-2 flex items-center gap-2 text-[10px] uppercase tracking-widest text-violet">
+                <span>Imagem (animada pelo Kling)</span>
+                <span className="rounded-full border border-lime/40 bg-lime/10 px-1.5 py-0.5 text-[8px] text-lime">unlimited · 0 crédito</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {IMAGE_MODELS.map((m) => {
+                  const active = imageModel === m.slug;
+                  return (
+                    <button
+                      key={m.slug}
+                      type="button"
+                      onClick={() => setImageModel(m.slug)}
+                      disabled={anyRunning}
+                      className={`flex flex-col items-start gap-0.5 rounded-[12px] border px-3 py-2.5 text-left transition disabled:opacity-50 ${
+                        active
+                          ? 'border-violet bg-violet/15 shadow-[0_0_0_1px_rgba(167,139,250,0.5),0_6px_18px_-8px_rgba(167,139,250,0.55)]'
+                          : 'border-line bg-bg/40 hover:border-violet/50'
+                      }`}
+                    >
+                      <span className="flex items-center gap-1.5 text-[13px] font-bold text-text">
+                        <span>{m.icon}</span>{m.label}
+                        {active && <span className="ml-auto text-violet">●</span>}
+                      </span>
+                      <span className="mono text-[9px] uppercase tracking-wider text-text-muted">1K · 9:16 · {m.desc}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             <ModelCard
               kind="video"
               label="Vídeo"

@@ -33,7 +33,18 @@ import {
   generateVideoFromImage,
   generateVideoFromText,
   createBatchPoller,
+  type ImageModel as ClientImageModel,
 } from './magnific-api-client';
+
+/** Resolve o imageModel vindo da UI (qualquer string) pro slug que o
+ *  render/v4 entende. Default = nano-banana-2-flash (o que SEMPRE funcionou).
+ *  Só desvia pra Seedream 4.5 se explicitamente pedido. Nunca quebra: slug
+ *  desconhecido cai no default seguro. */
+function resolveImageModel(raw: unknown): ClientImageModel {
+  const s = String(raw || '').toLowerCase();
+  if (s.includes('seedream')) return 'seedream-4-5';
+  return 'imagen-nano-banana-2-flash';
+}
 
 type RunnerResultV2 = {
   ok: boolean;
@@ -226,6 +237,8 @@ export async function runMagnificPipelineV2(
   const total = takes.length;
   const imageConcurrency = cfg.imageConcurrency ?? DEFAULT_IMAGE_CONC;
   const videoConcurrency = cfg.videoConcurrency ?? DEFAULT_VIDEO_CONC;
+  // Modelo de IMAGEM escolhido na UI (Nano Banana 2 OU Seedream 4.5).
+  const imageModel = resolveImageModel(cfg.imageModel);
 
   if (total === 0) {
     return {
@@ -294,7 +307,7 @@ export async function runMagnificPipelineV2(
     const PREFLIGHT_DELAYS = [3_000, 8_000, 20_000];
     for (let attempt = 0; ; attempt++) {
       try {
-        await assertZeroCreditCost();
+        await assertZeroCreditCost(imageModel);
         break;
       } catch (e) {
         if (attempt >= PREFLIGHT_DELAYS.length || !isRetryableError(e)) throw e;
@@ -338,10 +351,11 @@ export async function runMagnificPipelineV2(
 
   // Stamp visível na UI: confirma qual versão do pipeline o bundle carregado
   // está rodando (diagnóstico de "user não recarregou a aba").
-  const PIPELINE_BUILD = 'r3';
-  console.log(`[pipeline] build ${PIPELINE_BUILD} — ghost-detect + pending 30min + watchdog poll-aware`);
+  const PIPELINE_BUILD = 'r4';
+  const imgLabel = imageModel === 'seedream-4-5' ? 'Seedream 4.5' : 'Nano Banana 2';
+  console.log(`[pipeline] build ${PIPELINE_BUILD} — imagem: ${imageModel} (${imgLabel}) -> Kling 2.5`);
   emit(
-    `Disparando ${total} takes (${imageConcurrency} img · ${videoConcurrency} vid · anti-429 · ${PIPELINE_BUILD})...`,
+    `Disparando ${total} takes · ${imgLabel} → Kling 2.5 (${imageConcurrency} img · ${videoConcurrency} vid · ${PIPELINE_BUILD})...`,
     'dispatch',
     6,
   );
@@ -413,6 +427,7 @@ export async function runMagnificPipelineV2(
         noteProgress();
         const img = await generateImage({
           prompt,
+          model: imageModel,
           aspectRatio: '9:16',
           resolution: '1k',
           smartPrompt: true,

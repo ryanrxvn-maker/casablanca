@@ -15,7 +15,8 @@ export type ImageModel =
   | 'imagen-nano-banana-2-flash'
   | 'imagen-nano-banana-2'
   | 'imagen-nano-banana'
-  | 'imagen-nano-banana-pro';
+  | 'imagen-nano-banana-pro'
+  | 'seedream-4-5'; // Seedream 4.5 (zero-crédito no Unlimited, confirmado live)
 
 export type VideoModel = 'kling-25' | 'kling-26' | 'kling-21';
 
@@ -197,7 +198,9 @@ export async function simulateGeneration(
  *  CRÍTICO: invalida cache de conta no INÍCIO. Se user trocou de conta
  *  Freepik nesse meio tempo (logout/login no magnific.com), o batch
  *  vai usar a conta NOVA, não a velha em cache. Zero delay. */
-export async function assertZeroCreditCost(): Promise<void> {
+export async function assertZeroCreditCost(
+  imageModel: ImageModel = DEFAULT_IMAGE_MODEL,
+): Promise<void> {
   invalidateUserIdCache(); // força re-fetch /auth/verify com cookies vivos
   const status = await getUnlimitedStatus();
   if (status.isBanned) throw new Error('Conta Magnific BANIDA.');
@@ -224,7 +227,7 @@ export async function assertZeroCreditCost(): Promise<void> {
   const [img, vid] = await Promise.all([
     simulateGeneration([
       {
-        model: 'imagen-nano-banana-2-flash',
+        model: imageModel, // modelo ESCOLHIDO (nano-banana-2-flash OU seedream-4-5)
         quantity: 1,
         config: { resolution: '1k' },
       },
@@ -238,7 +241,7 @@ export async function assertZeroCreditCost(): Promise<void> {
     ]),
   ]);
   if (img.totalCredits > 0 || !img.hasUnlimited) {
-    throw new Error(`Nano Banana custaria ${img.totalCredits} créditos (não Unlimited).`);
+    throw new Error(`Imagem (${imageModel}) custaria ${img.totalCredits} créditos (não Unlimited).`);
   }
   if (vid.totalCredits > 0 || !vid.hasUnlimited) {
     throw new Error(`Kling 2.5 custaria ${vid.totalCredits} créditos (não Unlimited).`);
