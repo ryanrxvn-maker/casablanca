@@ -4603,10 +4603,40 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  Key: `${taskId}:${avaCode}` → true = invertido. */
   const [vaSwapSpeakers, setVaSwapSpeakers] = useState<Record<string, boolean>>({});
   /** VA: painel 👁 de preview aberto por variacao. VA fala o AUDIO do AD
-   *  original (nao tem texto editavel como task normal) — o preview embute
-   *  o player do Drive do AD pra ouvir o que vai ser falado.
+   *  original (nao tem texto editavel como task normal) — o preview baixa
+   *  o AD via extensao e toca num <video> local.
    *  Key: `${taskId}:${avaCode}` → true = aberto. */
   const [vaPreviewOpen, setVaPreviewOpen] = useState<Record<string, boolean>>({});
+  /** VA 👁: midia do preview por Drive fileId (compartilhado entre AVAs da
+   *  mesma task — baixa 1x). iframe do Drive NAO funciona pra arquivo
+   *  privado (Chrome bloqueia cookie de terceiros → 'doc quebrado'), entao
+   *  baixamos via extensao (fila+streaming) e tocamos blob local. */
+  const [vaPreviewMedia, setVaPreviewMedia] = useState<Record<string, { status: 'loading' | 'ready' | 'error'; url?: string; error?: string; note?: string }>>({});
+  const vaPreviewMediaRef = useRef<Record<string, boolean>>({});
+  async function ensureVaPreviewMedia(fileId: string) {
+    if (vaPreviewMediaRef.current[fileId]) return; // ja baixando/baixado
+    vaPreviewMediaRef.current[fileId] = true;
+    setVaPreviewMedia((p) => ({ ...p, [fileId]: { status: 'loading', note: 'Baixando o AD original do Drive...' } }));
+    try {
+      const { downloadDriveFileViaExtension } = await import('@/lib/heygen-extension-bridge');
+      const dl = await downloadDriveFileViaExtension(fileId, {
+        onProgress: (rec, tot) => setVaPreviewMedia((p) => ({
+          ...p,
+          [fileId]: { status: 'loading', note: `Baixando... ${(rec / 1048576).toFixed(1)}MB${tot ? ` / ${(tot / 1048576).toFixed(1)}MB` : ''}` },
+        })),
+      });
+      if (!dl.ok) {
+        vaPreviewMediaRef.current[fileId] = false;
+        setVaPreviewMedia((p) => ({ ...p, [fileId]: { status: 'error', error: dl.error } }));
+        return;
+      }
+      const url = URL.createObjectURL(new Blob([dl.bytes as BlobPart], { type: 'video/mp4' }));
+      setVaPreviewMedia((p) => ({ ...p, [fileId]: { status: 'ready', url } }));
+    } catch (e) {
+      vaPreviewMediaRef.current[fileId] = false;
+      setVaPreviewMedia((p) => ({ ...p, [fileId]: { status: 'error', error: (e as Error)?.message || 'falha no download' } }));
+    }
+  }
 
   /** Papeis de uma variacao VA: doc novo traz roles[] (Doutor + Depoimento
    *  Mulher etc); legado/1 papel vira papel unico sintetico. */
@@ -7083,7 +7113,12 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                             * player do Drive do AD pra ouvir o que vai ser falado. */}
                                           <button
                                             type="button"
-                                            onClick={() => setVaPreviewOpen((prev) => ({ ...prev, [swapKey]: !prev[swapKey] }))}
+                                            onClick={() => {
+                                              const opening = !vaPreviewOpen[swapKey];
+                                              setVaPreviewOpen((prev) => ({ ...prev, [swapKey]: opening }));
+                                              // dispara o download do AD na abertura (cache por fileId)
+                                              if (opening && a.vaBriefing!.linkAdFileId) ensureVaPreviewMedia(a.vaBriefing!.linkAdFileId);
+                                            }}
                                             className={
                                               'ml-auto rounded-full border px-2 py-0.5 text-[11px] shadow-[0_2px_0_rgba(0,0,0,0.4),0_0_8px_rgba(34,211,238,0.3)] active:translate-y-[1px] transition ' +
                                               (vaPreviewOpen[swapKey]
@@ -7134,14 +7169,52 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 </div>
                                               </div>
                                             ) : null}
-                                            {a.vaBriefing!.linkAdFileId ? (
-                                              <iframe
-                                                src={`https://drive.google.com/file/d/${a.vaBriefing!.linkAdFileId}/preview`}
-                                                className="h-[320px] w-full rounded-[8px] border border-white/10 bg-black"
-                                                allow="autoplay"
-                                                title={`Preview do AD original · ${av.avaCode}`}
-                                              />
-                                            ) : (
+                                            {a.vaBriefing!.linkAdFileId ? (() => {
+                                              // Player LOCAL: iframe do Drive quebra pra arquivo privado
+                                              // (cookie de terceiros bloqueado). Baixamos via extensao
+                                              // (fila+streaming, cache por fileId) e tocamos blob.
+                                              const media = vaPreviewMedia[a.vaBriefing!.linkAdFileId!];
+                                              if (media?.status === 'ready' && media.url) {
+                                                return (
+                                                  /* eslint-disable-next-line jsx-a11y/media-has-caption */
+                                                  <video
+                                                    src={media.url}
+                                                    controls
+                                                    playsInline
+                                                    preload="metadata"
+                                                    className="max-h-[360px] w-full rounded-[8px] border border-white/10 bg-black"
+                                                  />
+                                                );
+                                              }
+                                              if (media?.status === 'error') {
+                                                return (
+                                                  <div className="rounded-[8px] border border-red-500/40 bg-red-500/5 p-2 text-[11px] text-red-300">
+                                                    ⚠ Falha ao baixar o AD pro preview: {media.error}
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => ensureVaPreviewMedia(a.vaBriefing!.linkAdFileId!)}
+                                                      className="mono ml-2 rounded-full border border-red-400/50 px-2 py-0.5 text-[9px] uppercase tracking-widest hover:bg-red-500/15"
+                                                    >
+                                                      tentar de novo
+                                                    </button>
+                                                    <a
+                                                      href={`https://drive.google.com/file/d/${a.vaBriefing!.linkAdFileId}/view`}
+                                                      target="_blank"
+                                                      rel="noreferrer"
+                                                      className="mono ml-2 rounded-full border border-line-strong px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted hover:text-cyan-200"
+                                                    >
+                                                      abrir no Drive ↗
+                                                    </a>
+                                                  </div>
+                                                );
+                                              }
+                                              return (
+                                                <div className="flex h-[80px] items-center justify-center gap-2 rounded-[8px] border border-white/10 bg-black/40">
+                                                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-cyan-300/70 border-t-transparent" />
+                                                  <span className="mono text-[10px] text-cyan-200">{media?.note || 'Preparando preview...'}</span>
+                                                </div>
+                                              );
+                                            })() : (
                                               <div className="rounded-[8px] border border-yellow-500/40 bg-yellow-500/5 p-2 text-[11px] text-yellow-200">
                                                 ⚠ AD original ainda não resolvido — escolhe o arquivo no aviso &quot;Escolhe o AD original&quot; abaixo pra liberar o preview.
                                               </div>

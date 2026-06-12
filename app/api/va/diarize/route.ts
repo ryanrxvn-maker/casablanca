@@ -86,8 +86,12 @@ export async function POST(req: Request) {
         language_code: languageCode,
         speaker_labels: true,
         ...(speakersExpected ? { speakers_expected: speakersExpected } : {}),
-        punctuate: false,
-        format_text: false,
+        // AssemblyAI EXIGE punctuate junto com speaker_labels — com
+        // punctuate:false a API devolve 400 'speaker_labels cannot be True
+        // when punctuate is set to False' (reproduzido live 2026-06-11; era
+        // a causa da diarizacao falhar e o fallback gerar video errado).
+        punctuate: true,
+        format_text: true,
       }),
     });
     if (!trRes.ok) {

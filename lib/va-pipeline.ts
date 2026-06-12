@@ -502,11 +502,17 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
   // segmento pro papel certo. Rank por tempo de fala: locutor que mais
   // fala = papel principal (roleAvatars[0]), segundo = depoimento.
   // Falhou/1 locutor so → fluxo classico (1 avatar pro AD inteiro).
-  const wantsMultiSpeaker = !!input.diarize
-    && input.avatares.some((a) => (a.roleAvatars?.length || 0) >= 2);
+  const maxRolesInPipeline = Math.max(0, ...input.avatares.map((a) => a.roleAvatars?.length || 0));
+  const wantsMultiSpeaker = !!input.diarize && maxRolesInPipeline >= 2;
   let segRoleRank: number[] | null = null; // por segmento: 0 = principal, 1 = depoimento...
   if (wantsMultiSpeaker) {
     progress({ stage: 'diarize', message: 'Detectando locutores (diarizacao AssemblyAI)...', percent: 16 });
+    // HARD FAIL (user reportou 2026-06-11): antes, diarizacao falhada caia
+    // em fallback silencioso "avatar principal fala tudo" — saia video
+    // ERRADO (principal dublando o depoimento da mulher) e o user so via
+    // no resultado final. VA multi-avatar agora EXIGE diarizacao OK: sem
+    // ela, aborta com erro acionavel — nunca gera saida errada calada.
+    let diarizeFailure: string | null = null;
     try {
       const utts = await input.diarize!(audioBlob);
       const speakers = Array.from(new Set((utts || []).map((u) => u.speaker)));
@@ -525,19 +531,18 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
           percent: 19,
         });
       } else {
-        progress({
-          stage: 'diarize',
-          message: `Diarizacao detectou ${speakers.length || 0} locutor(es) — seguindo com avatar principal pro AD inteiro.`,
-          percent: 19,
-        });
+        diarizeFailure = `detectou ${speakers.length || 0} locutor(es), mas o doc indica ${maxRolesInPipeline} papeis (avatares diferentes)`;
       }
     } catch (e) {
-      console.warn('[va-pipeline] diarizacao falhou — fallback avatar principal:', e);
-      progress({
-        stage: 'diarize',
-        message: `⚠ Diarizacao falhou (${(e as Error)?.message || 'erro'}) — seguindo com avatar principal pro AD inteiro.`,
-        percent: 19,
-      });
+      diarizeFailure = (e as Error)?.message || String(e);
+    }
+    if (diarizeFailure) {
+      throw new Error(
+        `VA multi-avatar exige diarizacao OK — sem ela o avatar principal dublaria o trecho do outro papel (video errado). ` +
+        `Falha: ${diarizeFailure}. ` +
+        `Confira a chave AssemblyAI em Configuracoes → API e dispare de novo. ` +
+        `Se o AD original tiver SO 1 locutor de verdade (ouca no 👁), o doc esta com papel a mais.`,
+      );
     }
   }
 
