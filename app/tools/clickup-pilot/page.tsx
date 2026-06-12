@@ -32,6 +32,7 @@ import {
   type ParsedDarkoBriefing,
   type ParsedVABriefing,
 } from '@/lib/copy-parser';
+import { alignEditedToWords } from '@/lib/edited-text-align';
 import { splitCopyIntoParts, cloneVoiceViaExtension, detectExtension } from '@/lib/heygen-extension-bridge';
 import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
 import {
@@ -4601,7 +4602,6 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   /** VA MULTI-LOCUTOR: inverte o mapeamento locutor↔papel de uma variacao
    *  (caso a heuristica 'quem fala mais = principal' erre).
    *  Key: `${taskId}:${avaCode}` → true = invertido. */
-  const [vaSwapSpeakers, setVaSwapSpeakers] = useState<Record<string, boolean>>({});
   /** VA: painel 👁 de preview aberto por variacao. VA fala o AUDIO do AD
    *  original (nao tem texto editavel como task normal) — o preview baixa
    *  o AD via extensao e toca num <video> local.
@@ -4619,56 +4619,22 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   /** Cache do texto da "Link da Copy" por docId (roteiro do principal) —
    *  compartilhado entre prévia 👁 e disparo (busca 1x). */
   const vaCopyTextRef = useRef<Record<string, string>>({});
-  /** OVERRIDE MANUAL de locutor por utterance — a GARANTIA de zero vazamento.
-   *  Voz IA + copy com os 2 papéis + AssemblyAI instável = nenhum auto é
-   *  100%. O user confirma/corrige no 👁 (botão ⇄ mover por linha) e o
-   *  DISPARO usa exatamente isso. Key: `${fileId}` → { startMs → roleIdx }.
-   *  Por fileId pq o transcript é do AD (compartilhado entre AVA01/AVA02). */
-  const [vaSpeakerOverride, setVaSpeakerOverride] = useState<Record<string, Record<number, number>>>({});
-  /** Role efetivo de uma utterance: override do user > auto. */
-  function effectiveUttRole(fileId: string, startMs: number, autoRank: number): number {
-    const ov = vaSpeakerOverride[fileId];
-    return ov && ov[startMs] !== undefined ? ov[startMs] : autoRank;
-  }
-  function setUttRole(fileId: string, startMs: number, roleIdx: number) {
-    setVaSpeakerOverride((prev) => ({
-      ...prev,
-      [fileId]: { ...(prev[fileId] || {}), [startMs]: roleIdx },
-    }));
-  }
-  /** Constrói os SEGMENTOS finais (start/end/rank) a partir do transcript +
-   *  overrides — fonte única pro disparo (preview == disparo). Cortes no
-   *  MEIO dos gaps entre papéis diferentes = zero vazamento. rolesCount
-   *  limita o rank máximo. */
-  function buildVaSegments(fileId: string, rolesCount: number, swapped: boolean): Array<{ start: number; end: number; rank: number }> | null {
+  /** Constrói os SEGMENTOS finais (start/end/rank) ALINHANDO o TEXTO EDITADO
+   *  de cada papel de volta aos words (timestamps) do transcript — a fonte
+   *  de verdade do roteamento. O que o user digitou/recortou no textarea de
+   *  cada papel define EXATAMENTE qual trecho do áudio aquele avatar fala.
+   *  Cortes no meio dos gaps = zero vazamento. preview == disparo. */
+  function buildVaSegments(fileId: string, rolesCount: number): Array<{ start: number; end: number; rank: number }> | null {
     const tr = vaTranscript[fileId];
-    if (!tr || tr.status !== 'ready' || !tr.utterances?.length) return null;
-    const utts = [...tr.utterances].sort((a, b) => a.startMs - b.startMs);
-    // role efetivo por utterance (auto + override + swap)
-    const roleOf = (u: VaUtterance) => {
-      let auto = tr.rankBySpeaker?.[u.speaker] ?? 0;
-      if (swapped && rolesCount >= 2) auto = auto === 0 ? 1 : auto === 1 ? 0 : auto;
-      const eff = effectiveUttRole(fileId, u.startMs, auto);
-      return Math.min(eff, rolesCount - 1);
-    };
-    // funde utterances consecutivas do mesmo role; corta no meio do gap
-    const segs: Array<{ start: number; end: number; rank: number }> = [];
-    for (const u of utts) {
-      const rank = roleOf(u);
-      const last = segs[segs.length - 1];
-      if (last && last.rank === rank) {
-        last.end = Math.max(last.end, u.endMs / 1000);
-      } else {
-        if (last) {
-          const mid = (last.end + u.startMs / 1000) / 2;
-          last.end = mid;
-          segs.push({ start: mid, end: u.endMs / 1000, rank });
-        } else {
-          segs.push({ start: 0, end: u.endMs / 1000, rank });
-        }
-      }
+    if (!tr || tr.status !== 'ready' || !tr.words?.length) return null;
+    const roleTexts: string[] = [];
+    for (let rr = 0; rr < rolesCount; rr++) {
+      roleTexts.push(vaRoleText[`${fileId}:${rr}`] ?? '');
     }
-    return segs.length ? segs : null;
+    // se nenhum textarea tem conteúdo (ainda não inicializou), não há base
+    if (roleTexts.every((t) => !t.trim())) return null;
+    const { segments } = alignEditedToWords(tr.words, roleTexts, tr.durSec || 0);
+    return segments.length ? segments : null;
   }
   /** Baixa o AD do Drive (fila+streaming) e devolve o Blob, cacheado. */
   async function fetchAdBlob(fileId: string, onNote: (note: string) => void): Promise<Blob> {
@@ -4706,12 +4672,19 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    * NOTA: a previa roda no audio CRU do AD (com trilha) pra ser rapida;
    * no disparo a diarizacao roda de novo na voz isolada (mais precisa). */
   type VaUtterance = { speaker: string; startMs: number; endMs: number; text: string };
+  type VaWord = { text: string; startMs: number; endMs: number };
   const [vaTranscript, setVaTranscript] = useState<Record<string, {
     status: 'loading' | 'ready' | 'error';
     note?: string;
     error?: string;
     utterances?: VaUtterance[];
+    /** words com timestamp — base do alinhamento texto-editado → tempo */
+    words?: VaWord[];
+    /** duração do AD (s) pra estender bordas dos segmentos */
+    durSec?: number;
     rankBySpeaker?: Record<string, number>;
+    /** rank auto por utterance (índice = ordem cronológica de utterances) */
+    autoRanks?: number[];
     speakerCount?: number;
     /** Como os locutores foram separados ('tom de voz · 112Hz vs 204Hz' | 'AssemblyAI...') */
     method?: string;
@@ -4719,6 +4692,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   const vaTranscriptRef = useRef<Record<string, boolean>>({});
   /** Painel de transcricao aberto por PAPEL. Key: `${taskId}:${avaCode}#${roleIdx}` */
   const [vaTranscriptOpen, setVaTranscriptOpen] = useState<Record<string, boolean>>({});
+  /** TEXTO EDITÁVEL por papel — a fonte de verdade do roteamento (o user
+   *  recorta/cola/digita). Key: `${fileId}:${roleIdx}`. Pré-preenchido com
+   *  a atribuição auto; o disparo alinha de volta aos words (timestamps). */
+  const [vaRoleText, setVaRoleText] = useState<Record<string, string>>({});
+  const vaRoleTextInit = useRef<Record<string, boolean>>({});
   async function ensureVaTranscript(fileId: string, rolesCount: number, copyDocId?: string | null) {
     if (vaTranscriptRef.current[fileId]) return;
     vaTranscriptRef.current[fileId] = true;
@@ -4770,7 +4748,16 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         startMs: Number(u.startMs) || 0,
         endMs: Number(u.endMs) || 0,
         text: String(u.text || ''),
-      }));
+      })).sort((a: VaUtterance, b: VaUtterance) => a.startMs - b.startMs);
+      const words: VaWord[] = (j.words || []).map((w: VaWord) => ({
+        text: String(w.text || ''),
+        startMs: Number(w.startMs) || 0,
+        endMs: Number(w.endMs) || 0,
+      })).filter((w: VaWord) => w.text);
+      const durSec = Math.max(
+        words.length ? words[words.length - 1].endMs / 1000 : 0,
+        utterances.length ? utterances[utterances.length - 1].endMs / 1000 : 0,
+      );
       // === RESOLVER UNICO (copy > pitch > AssemblyAI) — igual ao disparo ===
       // 1. COPY-ANCHOR: roteiro do principal (ground truth). 2. PITCH/F0.
       // 3. speaker_labels. Mesma funcao do pipeline -> previa = disparo.
@@ -4804,7 +4791,20 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const ranked = Array.from(talk.entries()).sort((a, b) => b[1] - a[1]).map(([s]) => s);
       const rankBySpeaker: Record<string, number> = {};
       ranked.forEach((s, i) => { rankBySpeaker[s] = i; });
-      patch({ status: 'ready', utterances, rankBySpeaker, speakerCount: ranked.length, method });
+      // rank auto por utterance (cronológico) — usado pra pré-preencher os
+      // textareas de cada papel
+      const autoRanks = utterances.map((u) => Math.min(rankBySpeaker[u.speaker] ?? 0, rolesCount - 1));
+      // PRÉ-PREENCHE os textareas por papel com a atribuição auto (1x).
+      // Se auto não separou (tudo rank 0), o principal recebe tudo e o user
+      // recorta o depoimento — o texto é a fonte de verdade do roteamento.
+      for (let rr = 0; rr < rolesCount; rr++) {
+        const key = `${fileId}:${rr}`;
+        if (vaRoleTextInit.current[key]) continue;
+        vaRoleTextInit.current[key] = true;
+        const txt = utterances.filter((_, i) => autoRanks[i] === rr).map((u) => u.text).join(' ').trim();
+        setVaRoleText((prev) => (prev[key] !== undefined ? prev : { ...prev, [key]: txt }));
+      }
+      patch({ status: 'ready', utterances, words, durSec, rankBySpeaker, autoRanks, speakerCount: ranked.length, method });
     } catch (e) {
       vaTranscriptRef.current[fileId] = false;
       patch({ status: 'error', error: (e as Error)?.message || 'falha na transcrição' });
@@ -4951,7 +4951,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     // disparar — a GARANTIA de que o disparo bate com o que o user viu.
     // Auto sozinho não é 100% (voz IA), então o user confirma 1x por task.
     if (!textEngine && maxRoles >= 2 && va.linkAdFileId) {
-      const segs = buildVaSegments(va.linkAdFileId, maxRoles, va.avatares.some((av) => vaSwapSpeakers[`${taskId}:${av.avaCode}`]));
+      const segs = buildVaSegments(va.linkAdFileId, maxRoles);
       if (!segs) issues.push('confirmar 👁 (quem fala cada trecho)');
     }
     return issues;
@@ -5070,7 +5070,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           avatarId: roleAvatars[0].avatarId,
           avatarName: roleAvatars[0].avatarName,
           roleAvatars,
-          swapSpeakers: !!vaSwapSpeakers[`${taskId}:${av.avaCode}`],
+          swapSpeakers: false,
         };
       });
       const voiceByAva: Record<string, string | null> = {};
@@ -5084,8 +5084,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       // isso. Por fileId do AD (transcript compartilhado entre AVA01/02).
       let precomputedSegments: Array<{ start: number; end: number; rank: number }> | null = null;
       if (maxRoles >= 2 && va.linkAdFileId) {
-        const swapped = va.avatares.some((av) => vaSwapSpeakers[`${taskId}:${av.avaCode}`]);
-        precomputedSegments = buildVaSegments(va.linkAdFileId, maxRoles, swapped);
+        precomputedSegments = buildVaSegments(va.linkAdFileId, maxRoles);
       }
 
       // COPY-ANCHOR: busca o roteiro do principal (se o doc tem "Link da
@@ -7342,21 +7341,6 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                           >
                                             👁
                                           </button>
-                                          {multiRole ? (
-                                            <button
-                                              type="button"
-                                              onClick={() => setVaSwapSpeakers((prev) => ({ ...prev, [swapKey]: !prev[swapKey] }))}
-                                              className={
-                                                'mono rounded-full border px-2 py-0.5 text-[8px] font-bold uppercase tracking-widest transition ' +
-                                                (vaSwapSpeakers[swapKey]
-                                                  ? 'border-amber-400/60 bg-amber-400/15 text-amber-200'
-                                                  : 'border-line-strong text-text-muted hover:border-fuchsia-400/60 hover:text-fuchsia-200')
-                                              }
-                                              title="Heurística: quem fala MAIS tempo = papel principal. Se o resultado sair com os avatares trocados, inverte aqui e re-dispara."
-                                            >
-                                              {vaSwapSpeakers[swapKey] ? '⇄ locutores invertidos' : '⇄ inverter locutores'}
-                                            </button>
-                                          ) : null}
                                         </div>
                                         {/* PAINEL 👁 — player do AD original (Drive, sessão do user).
                                           * Multi-locutor: explica o roteamento por papel; os cortes
@@ -7368,17 +7352,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                             </div>
                                             {multiRole ? (
                                               <div className="mb-2 grid gap-1">
-                                                {roles.map((r, ri) => (
-                                                  <div key={ri} className="mono text-[10px] text-text-muted">
-                                                    <span className="font-bold uppercase text-fuchsia-200">{r.role}</span>
-                                                    {' → '}
-                                                    {r.isDepoimento
-                                                      ? 'fala os trechos do locutor SECUNDÁRIO (menos tempo de fala — o depoimento)'
-                                                      : 'fala os trechos do locutor PRINCIPAL (quem mais fala no AD)'}
-                                                  </div>
-                                                ))}
                                                 <div className="mono text-[9px] text-text-muted/70">
-                                                  Os cortes exatos são detectados por diarização na hora do disparo{vaSwapSpeakers[swapKey] ? ' (mapeamento INVERTIDO ⇄ ativo)' : ''}.
+                                                  Confira o vídeo e, no 👁 roxo de cada papel, deixe SÓ o texto que aquele avatar fala. O disparo respeita exatamente isso.
                                                 </div>
                                               </div>
                                             ) : null}
@@ -7556,69 +7531,57 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                       </div>
                                                     );
                                                   }
-                                                  // ready: aplica role EFETIVO (auto + override do user + swap)
-                                                  // por utterance, funde consecutivas do mesmo role em blocos,
-                                                  // e mostra os blocos DESTE papel. Cada bloco tem botão ⇄ pra
-                                                  // mover pro outro papel (a GARANTIA de zero vazamento — o user
-                                                  // corrige o que a auto errou e o DISPARO usa exatamente isso).
-                                                  const swapped = !!vaSwapSpeakers[swapKey] && roles.length >= 2;
-                                                  type TrBlock = { startMs: number; endMs: number; texts: string[]; uttMs: number[]; role: number };
-                                                  const roleOfUtt = (u: VaUtterance) => {
-                                                    let auto = tr.rankBySpeaker?.[u.speaker] ?? 0;
-                                                    if (swapped) auto = auto === 0 ? 1 : auto === 1 ? 0 : auto;
-                                                    return Math.min(effectiveUttRole(trFileId, u.startMs, auto), roles.length - 1);
-                                                  };
-                                                  const blocks: TrBlock[] = [];
-                                                  const sortedUtts = [...(tr.utterances || [])].sort((x, y) => x.startMs - y.startMs);
-                                                  for (const u of sortedUtts) {
-                                                    const r = roleOfUtt(u);
-                                                    const last = blocks[blocks.length - 1];
-                                                    if (last && last.role === r) {
-                                                      last.endMs = Math.max(last.endMs, u.endMs);
-                                                      if (u.text) last.texts.push(u.text);
-                                                      last.uttMs.push(u.startMs);
-                                                    } else {
-                                                      blocks.push({ startMs: u.startMs, endMs: u.endMs, texts: u.text ? [u.text] : [], uttMs: [u.startMs], role: r });
-                                                    }
+                                                  // ready: TEXTAREA EDITÁVEL por papel. O texto é a FONTE DE
+                                                  // VERDADE do roteamento — o user recorta/cola/digita pra dizer
+                                                  // exatamente o que ESTE avatar fala. No disparo, o texto é
+                                                  // alinhado de volta aos words (timestamps) → o avatar lip-synca
+                                                  // SÓ esses trechos do AD original. Zero vazamento, 100% respeitado.
+                                                  const rtKey = `${trFileId}:${ri}`;
+                                                  const roleText = vaRoleText[rtKey] ?? '';
+                                                  // diagnóstico: quantos segundos do AD este papel cobre (alinhado)
+                                                  let coverSec = 0;
+                                                  if (tr.words?.length && roleText.trim()) {
+                                                    const allTexts = roles.map((_, rr) => vaRoleText[`${trFileId}:${rr}`] ?? '');
+                                                    const { segments } = alignEditedToWords(tr.words, allTexts, tr.durSec || 0);
+                                                    coverSec = segments.filter((s) => s.rank === ri).reduce((a, s) => a + (s.end - s.start), 0);
                                                   }
-                                                  const mine = blocks.filter((b) => b.role === ri);
-                                                  const otherRi = ri === 0 ? 1 : 0;
-                                                  const otherRoleLabel = roles[otherRi]?.role || `papel ${otherRi + 1}`;
                                                   return (
                                                     <div className="mt-2 rounded-[8px] border border-fuchsia-500/40 bg-fuchsia-500/5 p-2.5">
                                                       <div className="mono mb-1.5 flex flex-wrap items-center gap-2 text-[9px] uppercase tracking-widest text-fuchsia-200">
                                                         <span>O que {multiRole ? role.role : 'esse avatar'} vai falar</span>
                                                         <span className="text-text-muted normal-case tracking-normal">
-                                                          {tr.method || 'prévia'}{swapped ? ' · ⇄ invertido' : ''}
+                                                          {tr.method || 'prévia'}{coverSec > 0 ? ` · cobre ~${coverSec.toFixed(0)}s do AD` : ''}
                                                         </span>
                                                       </div>
                                                       {multiRole ? (
                                                         <div className="mono mb-1.5 rounded border border-cyan-500/40 bg-cyan-500/5 px-2 py-1 text-[9px] text-cyan-200">
-                                                          ✓ confira: se alguma linha não for do {role.role}, clique <strong>⇄</strong> pra mover pro {otherRoleLabel}. O disparo usa exatamente o que ficar aqui.
+                                                          ✏️ EDITÁVEL: deixe aqui SÓ o que o <strong>{role.role}</strong> fala. Recorte/cole entre os papéis. O disparo casa esse texto com o áudio e lip-synca exatamente esses trechos com este avatar.
                                                         </div>
                                                       ) : null}
-                                                      {mine.length === 0 ? (
-                                                        <div className="text-[11px] text-text-muted">Nenhuma fala neste papel{multiRole ? ' — use o ⇄ no outro painel pra mover linhas pra cá' : ''}.</div>
-                                                      ) : (
-                                                        <div className="grid max-h-[240px] gap-1.5 overflow-y-auto pr-1">
-                                                          {mine.map((b, ui) => (
-                                                            <div key={ui} className="group flex items-start gap-1.5 text-[11px] leading-snug text-white/85">
-                                                              <span className="mono mt-[1px] shrink-0 text-[9px] text-fuchsia-300/80">{fmtMsClock(b.startMs)}–{fmtMsClock(b.endMs)}</span>
-                                                              <span className="flex-1">{b.texts.join(' ')}</span>
-                                                              {multiRole ? (
-                                                                <button
-                                                                  type="button"
-                                                                  onClick={() => b.uttMs.forEach((ms) => setUttRole(trFileId, ms, otherRi))}
-                                                                  title={`Mover esta fala pro ${otherRoleLabel} (não é o ${role.role})`}
-                                                                  className="mono shrink-0 rounded border border-fuchsia-500/40 bg-fuchsia-500/10 px-1.5 py-0.5 text-[9px] text-fuchsia-200 opacity-60 hover:opacity-100 hover:bg-fuchsia-500/25"
-                                                                >
-                                                                  ⇄
-                                                                </button>
-                                                              ) : null}
-                                                            </div>
-                                                          ))}
+                                                      <textarea
+                                                        value={roleText}
+                                                        onChange={(e) => setVaRoleText((prev) => ({ ...prev, [rtKey]: e.target.value }))}
+                                                        spellCheck={false}
+                                                        rows={Math.min(14, Math.max(4, Math.ceil(roleText.length / 60)))}
+                                                        placeholder={multiRole ? `Cole aqui as falas do ${role.role}...` : 'Transcrição...'}
+                                                        className="w-full resize-y rounded-[8px] border border-white/12 bg-bg/70 p-2 text-[12px] leading-relaxed text-white/90 outline-none focus:border-fuchsia-400/60"
+                                                      />
+                                                      {multiRole ? (
+                                                        <div className="mono mt-1 flex items-center gap-2 text-[9px] text-text-muted">
+                                                          <button
+                                                            type="button"
+                                                            onClick={() => {
+                                                              // restaura a atribuição auto deste papel
+                                                              const tt = (tr.utterances || []).filter((_, i) => (tr.autoRanks?.[i] ?? 0) === ri).map((u) => u.text).join(' ').trim();
+                                                              setVaRoleText((prev) => ({ ...prev, [rtKey]: tt }));
+                                                            }}
+                                                            className="rounded-full border border-line-strong px-2 py-0.5 uppercase tracking-widest hover:border-fuchsia-400/60 hover:text-fuchsia-200"
+                                                          >
+                                                            ↺ restaurar auto
+                                                          </button>
+                                                          <span>· o texto NÃO vira legenda — só define quem fala o quê</span>
                                                         </div>
-                                                      )}
+                                                      ) : null}
                                                     </div>
                                                   );
                                                 })() : null}
