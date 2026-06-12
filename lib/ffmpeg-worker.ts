@@ -685,7 +685,52 @@ export async function extractAudioForTranscription(
 }
 
 /**
- * Igual à de cima, mas mantém os DOIS canais (estéreo) intactos — sem
+ * Audio pra DIARIZAÇÃO (speaker_labels) — diferente da transcrição:
+ * separar locutores depende do TIMBRE da voz, e o opus 12k 'voip' da
+ * extractAudioForTranscription apaga exatamente essas características
+ * (otimiza só inteligibilidade) → AssemblyAI confundia Doutor com
+ * Depoimento (user reportou 2026-06-11: fragmentos do Doutor rotulados
+ * como a mulher). 48kbps modo 'audio' preserva o timbre: ~360KB/min,
+ * então até ~12min de AD cabem no limite de 4.5MB do Vercel.
+ */
+export async function extractAudioForDiarization(
+  file: Blob,
+  opts: RunOptions = {},
+): Promise<Blob> {
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const { fetchFile } = await import('@ffmpeg/util');
+
+  const inputName = 'in.' + guessExt(file, 'mp4');
+  const outputName = 'out_diar.opus';
+  const progressHandler = wireProgress(ff, opts.onProgress);
+
+  try {
+    opts.onStage?.('Carregando...');
+    await ff.writeFile(inputName, await fetchFile(file));
+
+    opts.onStage?.('Extraindo...');
+    await ff.exec([
+      '-i', inputName,
+      '-vn',
+      '-c:a', 'libopus',
+      '-b:a', '48k',
+      '-ac', '1',
+      '-ar', '16000',
+      '-application', 'audio',
+      '-vbr', 'on',
+      outputName,
+    ]);
+    const data = await ff.readFile(outputName);
+    return toBlob(data, 'audio/ogg');
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    await safeDelete(ff, inputName);
+    await safeDelete(ff, outputName);
+  }
+}
+
+/**
+ * Igual à extractAudioForTranscription, mas mantém os DOIS canais (estéreo) intactos — sem
  * `-ac 1`, que faria a média (L+R)/2 e, num arquivo de camuflagem por
  * inversão de fase, "limparia" o BLACK artificialmente. Para o botão
  * TRANSCREVER reproduzir fielmente o que um ASR faz com o arquivo REAL

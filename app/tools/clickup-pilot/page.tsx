@@ -4671,8 +4671,23 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     try {
       const blob = await fetchAdBlob(fileId, (note) => patch({ status: 'loading', note }));
       patch({ status: 'loading', note: 'Extraindo áudio...' });
-      const { extractAudioForTranscription } = await import('@/lib/ffmpeg-worker');
-      const compressed = await extractAudioForTranscription(blob);
+      const { extractAudio, extractAudioForDiarization } = await import('@/lib/ffmpeg-worker');
+      const rawWav = await extractAudio(blob);
+      // FILTRO DE VOZ local (bandpass, segundos): trilha sonora confunde o
+      // separador de locutores — sem isso a previa rotulava trechos do
+      // Doutor como a mulher (user reportou 2026-06-11). O disparo usa
+      // Demucs (ainda melhor); aqui o bandpass mantem a previa rapida.
+      patch({ status: 'loading', note: 'Filtrando a voz (tirando trilha)...' });
+      let voiceWav: Blob = rawWav;
+      try {
+        const { isolateVoice } = await import('@/lib/voice-isolator');
+        const iso = await isolateVoice(rawWav, { mode: 'bandpass', format: 'wav' });
+        if (iso && iso.size > 1024) voiceWav = iso;
+      } catch { /* segue com audio cru */ }
+      // 48k 'audio' (NAO o opus 12k voip da transcricao): diarizacao
+      // depende do TIMBRE — compressao agressiva apagava as caracteristicas
+      // da voz e o speaker_labels errava.
+      const compressed = await extractAudioForDiarization(voiceWav);
       patch({ status: 'loading', note: 'Transcrevendo + separando locutores (AssemblyAI, ~30-60s)...' });
       const fd = new FormData();
       fd.append('audio', new File([compressed], 'voz.ogg', { type: 'audio/ogg' }));
@@ -4973,8 +4988,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         // quando alguma variacao tem 2+ papeis). Comprime a voz isolada em
         // opus 12k mono (~90KB/min — folga no limite 4.5MB do Vercel).
         diarize: maxRoles >= 2 ? async (audioBlob: Blob) => {
-          const { extractAudioForTranscription } = await import('@/lib/ffmpeg-worker');
-          const compressed = await extractAudioForTranscription(audioBlob);
+          // 48k 'audio' preserva o timbre (12k voip fazia o speaker_labels
+          // confundir os locutores). Input aqui ja e a voz isolada (Demucs).
+          const { extractAudioForDiarization } = await import('@/lib/ffmpeg-worker');
+          const compressed = await extractAudioForDiarization(audioBlob);
           const fd = new FormData();
           fd.append('audio', new File([compressed], 'voz.ogg', { type: 'audio/ogg' }));
           fd.append('languageCode', 'pt');
@@ -7443,7 +7460,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                       <div className="mono mb-1.5 flex flex-wrap items-center gap-2 text-[9px] uppercase tracking-widest text-fuchsia-200">
                                                         <span>O que {multiRole ? role.role : 'esse avatar'} vai falar</span>
                                                         <span className="text-text-muted normal-case tracking-normal">
-                                                          {tr.speakerCount} locutor{(tr.speakerCount || 0) === 1 ? '' : 'es'} detectado{(tr.speakerCount || 0) === 1 ? '' : 's'} · prévia no áudio cru{swapped ? ' · ⇄ invertido' : ''}
+                                                          {tr.speakerCount} locutor{(tr.speakerCount || 0) === 1 ? '' : 'es'} detectado{(tr.speakerCount || 0) === 1 ? '' : 's'} · prévia com voz filtrada{swapped ? ' · ⇄ invertido' : ''}
                                                         </span>
                                                       </div>
                                                       {multiRole && (tr.speakerCount || 0) < roles.length ? (
