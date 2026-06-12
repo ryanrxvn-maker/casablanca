@@ -523,6 +523,121 @@ console.log('\n[S17] copy fora da ordem falada');
     JSON.stringify(texts(cuts)));
 }
 
+// ===================================================================== //
+// CASOS REAIS — extraidos do AD de lipedema (bruto real, 2026-06-12).
+// Cada um reproduz um erro concreto que o matcher cometia.
+// ===================================================================== //
+
+// S18: take CORTADA no fim perde pra take completa (erro real #6/#9/#17).
+// O expert truncou a primeira tentativa e refez inteira logo depois.
+console.log('\n[S18] take cortada no fim NUNCA escolhida');
+{
+  const copy = 'Um dia desses, uma moça chegou aqui no consultório.';
+  const cuts = matchCopyWindowed(
+    copy,
+    transcript(
+      'um dia desses uma moca chegou aqui no', // truncou em "no"
+      'um dia desses uma moca chegou aqui no meu consultorio', // completa
+    ),
+  );
+  check('S18 retorna 1 corte', cuts.length === 1, `retornou ${cuts.length}`);
+  if (cuts.length >= 1) {
+    const t = normalize(cuts[0].transcriptText);
+    check('S18 pegou a take COMPLETA (tem "consultorio")',
+      t.includes('consultorio'), `texto="${t}"`);
+  }
+}
+
+// S19: a palavra-FIM da copy e' uma marca que o ASR transcreveu diferente
+// (mounjaro vs monjaro) — erro real #3. Fuzzy tem que casar e incluir a marca.
+console.log('\n[S19] palavra-fim com variacao de marca (fuzzy)');
+{
+  const copy = 'E aí começa uma rotina de treino, uma dieta, a usar mounjaro.';
+  const cuts = matchCopyWindowed(
+    copy,
+    // tudo numa fala so (sem pausa) — o corte tem que ir ate "monjaro".
+    transcript(
+      'e ai comeca uma rotina de treino uma dieta a usar monjaro e um mes depois ela se olha',
+    ),
+  );
+  check('S19 retorna 1 corte', cuts.length === 1, `retornou ${cuts.length}`);
+  if (cuts.length >= 1) {
+    const t = normalize(cuts[0].transcriptText);
+    check('S19 corte inclui a marca do fim ("monjaro")',
+      t.includes('monjaro'), `texto="${t}"`);
+    check('S19 nao vazou "um mes depois" (proxima ideia)',
+      !t.includes('mes depois'), `texto="${t}"`);
+  }
+}
+
+// S20: head da copy nao pode sumir — erro real #1 (perdeu "Monjaro" no inicio).
+console.log('\n[S20] primeira palavra-conceito nao some');
+{
+  const copy =
+    'Monjaro, Ozempic ou qualquer uma dessas canetinhas é veneno.';
+  const cuts = matchCopyWindowed(
+    copy,
+    transcript(
+      'monjaro ozempic ou qualquer uma dessas canetinhas aqui e veneno puro',
+    ),
+  );
+  check('S20 retorna 1 corte', cuts.length === 1, `retornou ${cuts.length}`);
+  if (cuts.length >= 1) {
+    const t = normalize(cuts[0].transcriptText);
+    check('S20 comeca em "monjaro" (head preservado)',
+      t.startsWith('monjaro'), `texto="${t}"`);
+  }
+}
+
+// S21: vazamento do inicio da retomada seguinte — erro real #18/#28.
+// Take incompleta ("pernas incham") + comeco do retake ("e isso explica").
+// O matcher tem que pegar a take COMPLETA (termina em "roxas") e nao a curta.
+console.log('\n[S21] nao vaza o comeco do proximo retake');
+{
+  const copy =
+    'E isso explica porque você continua emagrecendo em cima, ' +
+    'mas as suas pernas estão inchadas, doloridas e com manchas roxas.';
+  const cuts = matchCopyWindowed(
+    copy,
+    transcript(
+      'e isso explica porque voce continua emagrecendo em cima mas as suas pernas incham',
+      'e isso explica porque voce continua emagrecendo na parte de cima mas as suas pernas continuam inchadas doloridas e com manchas roxas',
+    ),
+  );
+  check('S21 retorna 1 corte', cuts.length === 1, `retornou ${cuts.length}`);
+  if (cuts.length >= 1) {
+    const t = normalize(cuts[0].transcriptText);
+    check('S21 pegou a take completa (tem "roxas")', t.includes('roxas'),
+      `texto="${t}"`);
+  }
+}
+
+// S22: corte tem que cair NO SILENCIO entre takes (sem vazar nem clipar).
+// Verifica que startMs/endMs caem dentro da pausa, nao em cima da fala.
+console.log('\n[S22] corte cai no silencio (boundaries limpos)');
+{
+  const words = transcript(
+    'lixo antes que nao interessa nada',
+    'a frase boa que a gente quer cortar limpa',
+    'mais lixo depois que tambem nao interessa',
+  );
+  const cuts = matchCopyWindowed('A frase boa que a gente quer cortar limpa.', words);
+  check('S22 retorna 1 corte', cuts.length === 1, `retornou ${cuts.length}`);
+  if (cuts.length === 1) {
+    // take1 = words[0..5], take2 (a boa) = words[6..14], take3 = words[15..].
+    const firstStart = words[6].start; // "a" (inicio da take boa)
+    const lastEnd = words[14].end; // "limpa" (fim da take boa)
+    // O corte cobre do inicio ao fim da take boa, com margem que cai SO no
+    // silencio de 450ms entre takes — nunca dentro da fala vizinha.
+    check('S22 start nao corta o inicio da fala',
+      cuts[0].startMs <= firstStart && cuts[0].startMs >= firstStart - 230,
+      `start=${cuts[0].startMs} firstWord=${firstStart}`);
+    check('S22 end nao corta nem vaza vizinho',
+      cuts[0].endMs >= lastEnd && cuts[0].endMs <= lastEnd + 230,
+      `end=${cuts[0].endMs} lastWord=${lastEnd}`);
+  }
+}
+
 // --------------------------------------------------------------------- //
 
 console.log(

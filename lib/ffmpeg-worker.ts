@@ -1844,6 +1844,11 @@ export function supportsFFmpegMT(): boolean {
 // silenceremove com tolerancia de 50ms (default) pra cortar so as pausas
 // muito longas (vicio de tempo morto, respiracao, etc) sem comer palavras.
 
+// Quanto de cada silencio fica preservado em CADA borda ao remover a pausa.
+// Mantem um respiro natural (sem corte seco) e protege a consoante inicial/
+// final da fala adjacente de ser comida.
+const SILENCE_KEEP_PAD = 0.08;
+
 export async function removeAvatarSilences(
   file: Blob,
   toleranceSec = 0.05,
@@ -1853,43 +1858,83 @@ export async function removeAvatarSilences(
   const { fetchFile } = await import('@ffmpeg/util');
 
   const inputName = 'avatar_in.' + guessExt(file, 'mp4');
-  const outputName = 'avatar_cut.mp4';
-  const progressHandler = wireProgress(ff, opts.onProgress);
 
-  // silenceremove com stop_periods=-1 remove TODOS os silencios, com
-  // stop_threshold em -32dB (ruido ambiente) e duracao minima do
-  // silencio configuravel.
-  const af =
-    `silenceremove=stop_periods=-1:stop_duration=${toleranceSec.toFixed(3)}:` +
-    `stop_threshold=-32dB:detection=peak,aresample=44100`;
+  // ATENCAO (bug historico): NAO usar `silenceremove` (filtro so de audio) +
+  // re-encode do video. Ele encurta SO o audio; o video mantem todos os frames
+  // → audio e video dessincronizam progressivamente a cada pausa removida.
+  //
+  // Abordagem sync-safe: detecta os silencios (silencedetect), monta os
+  // segmentos de FALA e corta video+audio EM LOCKSTEP via cutVideoSegments
+  // (que trima [0:v] e [0:a] juntos). A sincronia e' preservada por construcao.
+
+  let durationSec = 0;
+  const silences: Array<{ start: number; end: number }> = [];
+  let pendingStart: number | null = null;
+  const logHandler = ({ message }: { message: string }) => {
+    const dm = /Duration: (\d+):(\d+):([\d.]+)/.exec(message);
+    if (dm) {
+      const d = +dm[1] * 3600 + +dm[2] * 60 + parseFloat(dm[3]);
+      if (d > durationSec) durationSec = d;
+    }
+    const ss = /silence_start:\s*(-?[\d.]+)/.exec(message);
+    if (ss) pendingStart = Math.max(0, parseFloat(ss[1]));
+    const se = /silence_end:\s*(-?[\d.]+)/.exec(message);
+    if (se && pendingStart !== null) {
+      const end = parseFloat(se[1]);
+      if (end > pendingStart) silences.push({ start: pendingStart, end });
+      pendingStart = null;
+    }
+    opts.onLog?.(message);
+  };
 
   try {
-    opts.onStage?.('Cortando silencios do avatar (tolerancia ' + toleranceSec + 's)...');
+    opts.onStage?.(`Detectando silencios (tolerancia ${toleranceSec}s)...`);
     await ff.writeFile(inputName, await fetchFile(file));
 
-    // Re-encoda video junto pra os timestamps baterem com o audio cortado.
-    await ff.exec([
-      '-i', inputName,
-      '-af', af,
-      '-c:v', 'libx264',
-      '-preset', 'ultrafast',
-      '-tune', 'fastdecode',
-      '-crf', '22',
-      '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
-      '-pix_fmt', 'yuv420p',
-      '-c:a', 'aac',
-      '-b:a', '192k',
-      '-ar', '48000',
-      '-ac', '2',
-      '-movflags', '+faststart',
-      outputName,
-    ]);
-    const data = await ff.readFile(outputName);
-    return toBlob(data, 'video/mp4');
-  } finally {
-    if (progressHandler) ff.off('progress', progressHandler);
+    ff.on('log', logHandler);
+    try {
+      // -32dB = ruido ambiente; d = duracao minima do silencio pra contar.
+      await ff.exec([
+        '-i', inputName,
+        '-af', `silencedetect=noise=-32dB:d=${toleranceSec.toFixed(3)}`,
+        '-f', 'null', '-',
+      ]);
+    } finally {
+      ff.off('log', logHandler);
+    }
+
+    // Sem duracao confiavel ou sem silencios → nada a cortar, devolve original.
+    if (durationSec <= 0 || silences.length === 0) {
+      await safeDelete(ff, inputName);
+      return file;
+    }
+
+    // Monta os segmentos a MANTER: fala + um respiro (SILENCE_KEEP_PAD) em
+    // cada borda do silencio removido.
+    silences.sort((a, b) => a.start - b.start);
+    const keep: Array<{ start: number; end: number }> = [];
+    let cursor = 0;
+    for (const sil of silences) {
+      const segEnd = Math.min(sil.end, sil.start + SILENCE_KEEP_PAD);
+      if (segEnd > cursor + 0.05) keep.push({ start: cursor, end: segEnd });
+      cursor = Math.max(segEnd, sil.end - SILENCE_KEEP_PAD);
+    }
+    if (durationSec - cursor > 0.05) keep.push({ start: cursor, end: durationSec });
+
+    // Nada sobrou pra cortar (silencios curtos demais) → devolve original.
+    if (keep.length === 0) {
+      await safeDelete(ff, inputName);
+      return file;
+    }
+
     await safeDelete(ff, inputName);
-    await safeDelete(ff, outputName);
+
+    // Corte lockstep A/V — sincronia garantida por construcao.
+    opts.onStage?.(`Removendo silencios (${keep.length} trechos de fala)...`);
+    return await cutVideoSegments(file, keep, opts);
+  } catch (e) {
+    await safeDelete(ff, inputName);
+    throw e;
   }
 }
 
