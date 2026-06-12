@@ -7409,11 +7409,32 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                       </div>
                                                     );
                                                   }
-                                                  // ready: filtra falas do locutor mapeado NESTE papel
-                                                  // (mesma heuristica do pipeline + respeita o ⇄ inverter)
+                                                  // ready: ESPELHA o roteamento do pipeline — funde turnos
+                                                  // consecutivos do mesmo locutor E micro-turnos (<1.2s,
+                                                  // diarizacao solta espurios) no bloco anterior, igual o
+                                                  // planSpeakerBoundaries faz no disparo. Depois filtra os
+                                                  // blocos do locutor mapeado NESTE papel (+ ⇄ inverter).
                                                   const swapped = !!vaSwapSpeakers[swapKey] && roles.length >= 2;
-                                                  const mine = (tr.utterances || []).filter((u) => {
-                                                    let rank = tr.rankBySpeaker?.[u.speaker] ?? 0;
+                                                  type TrBlock = { speaker: string; startMs: number; endMs: number; texts: string[] };
+                                                  const blocks: TrBlock[] = [];
+                                                  const sortedUtts = [...(tr.utterances || [])].sort((x, y) => x.startMs - y.startMs);
+                                                  for (const u of sortedUtts) {
+                                                    const last = blocks[blocks.length - 1];
+                                                    const durMs = u.endMs - u.startMs;
+                                                    if (last && (last.speaker === u.speaker || durMs < 1200)) {
+                                                      last.endMs = Math.max(last.endMs, u.endMs);
+                                                      if (u.text) last.texts.push(u.text);
+                                                    } else {
+                                                      blocks.push({ speaker: u.speaker, startMs: u.startMs, endMs: u.endMs, texts: u.text ? [u.text] : [] });
+                                                    }
+                                                  }
+                                                  if (blocks.length > 1 && blocks[0].endMs - blocks[0].startMs < 1200) {
+                                                    blocks[1].startMs = blocks[0].startMs;
+                                                    blocks[1].texts = [...blocks[0].texts, ...blocks[1].texts];
+                                                    blocks.shift();
+                                                  }
+                                                  const mine = blocks.filter((b) => {
+                                                    let rank = tr.rankBySpeaker?.[b.speaker] ?? 0;
                                                     if (swapped) rank = rank === 0 ? 1 : rank === 1 ? 0 : rank;
                                                     return Math.min(rank, roles.length - 1) === ri;
                                                   });
@@ -7433,11 +7454,11 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                       {mine.length === 0 ? (
                                                         <div className="text-[11px] text-text-muted">Nenhuma fala mapeada pra este papel na prévia.</div>
                                                       ) : (
-                                                        <div className="grid max-h-[220px] gap-1 overflow-y-auto pr-1">
-                                                          {mine.map((u, ui) => (
+                                                        <div className="grid max-h-[220px] gap-1.5 overflow-y-auto pr-1">
+                                                          {mine.map((b, ui) => (
                                                             <div key={ui} className="text-[11px] leading-snug text-white/85">
-                                                              <span className="mono mr-1.5 text-[9px] text-fuchsia-300/80">{fmtMsClock(u.startMs)}–{fmtMsClock(u.endMs)}</span>
-                                                              {u.text}
+                                                              <span className="mono mr-1.5 text-[9px] text-fuchsia-300/80">{fmtMsClock(b.startMs)}–{fmtMsClock(b.endMs)}</span>
+                                                              {b.texts.join(' ')}
                                                             </div>
                                                           ))}
                                                         </div>
