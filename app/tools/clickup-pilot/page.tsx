@@ -4619,6 +4619,57 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   /** Cache do texto da "Link da Copy" por docId (roteiro do principal) —
    *  compartilhado entre prévia 👁 e disparo (busca 1x). */
   const vaCopyTextRef = useRef<Record<string, string>>({});
+  /** OVERRIDE MANUAL de locutor por utterance — a GARANTIA de zero vazamento.
+   *  Voz IA + copy com os 2 papéis + AssemblyAI instável = nenhum auto é
+   *  100%. O user confirma/corrige no 👁 (botão ⇄ mover por linha) e o
+   *  DISPARO usa exatamente isso. Key: `${fileId}` → { startMs → roleIdx }.
+   *  Por fileId pq o transcript é do AD (compartilhado entre AVA01/AVA02). */
+  const [vaSpeakerOverride, setVaSpeakerOverride] = useState<Record<string, Record<number, number>>>({});
+  /** Role efetivo de uma utterance: override do user > auto. */
+  function effectiveUttRole(fileId: string, startMs: number, autoRank: number): number {
+    const ov = vaSpeakerOverride[fileId];
+    return ov && ov[startMs] !== undefined ? ov[startMs] : autoRank;
+  }
+  function setUttRole(fileId: string, startMs: number, roleIdx: number) {
+    setVaSpeakerOverride((prev) => ({
+      ...prev,
+      [fileId]: { ...(prev[fileId] || {}), [startMs]: roleIdx },
+    }));
+  }
+  /** Constrói os SEGMENTOS finais (start/end/rank) a partir do transcript +
+   *  overrides — fonte única pro disparo (preview == disparo). Cortes no
+   *  MEIO dos gaps entre papéis diferentes = zero vazamento. rolesCount
+   *  limita o rank máximo. */
+  function buildVaSegments(fileId: string, rolesCount: number, swapped: boolean): Array<{ start: number; end: number; rank: number }> | null {
+    const tr = vaTranscript[fileId];
+    if (!tr || tr.status !== 'ready' || !tr.utterances?.length) return null;
+    const utts = [...tr.utterances].sort((a, b) => a.startMs - b.startMs);
+    // role efetivo por utterance (auto + override + swap)
+    const roleOf = (u: VaUtterance) => {
+      let auto = tr.rankBySpeaker?.[u.speaker] ?? 0;
+      if (swapped && rolesCount >= 2) auto = auto === 0 ? 1 : auto === 1 ? 0 : auto;
+      const eff = effectiveUttRole(fileId, u.startMs, auto);
+      return Math.min(eff, rolesCount - 1);
+    };
+    // funde utterances consecutivas do mesmo role; corta no meio do gap
+    const segs: Array<{ start: number; end: number; rank: number }> = [];
+    for (const u of utts) {
+      const rank = roleOf(u);
+      const last = segs[segs.length - 1];
+      if (last && last.rank === rank) {
+        last.end = Math.max(last.end, u.endMs / 1000);
+      } else {
+        if (last) {
+          const mid = (last.end + u.startMs / 1000) / 2;
+          last.end = mid;
+          segs.push({ start: mid, end: u.endMs / 1000, rank });
+        } else {
+          segs.push({ start: 0, end: u.endMs / 1000, rank });
+        }
+      }
+    }
+    return segs.length ? segs : null;
+  }
   /** Baixa o AD do Drive (fila+streaming) e devolve o Blob, cacheado. */
   async function fetchAdBlob(fileId: string, onNote: (note: string) => void): Promise<Blob> {
     const cached = vaAdBlobRef.current[fileId];
@@ -4884,6 +4935,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const driveId = va.linkAdFileId || extractDriveFileId(vaAdUrl[taskId] || '');
       if (!driveId) issues.push('AD original (Drive)');
     }
+    const maxRoles = Math.max(...va.avatares.map((av) => vaRolesOf(av).length));
     for (const av of va.avatares) {
       const roles = vaRolesOf(av);
       for (let ri = 0; ri < roles.length; ri++) {
@@ -4894,6 +4946,13 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         // opcional (cai na voz default do avatar, igual task normal).
         if (!textEngine && !vaVoiceChoice[vaRoleKey(taskId, av.avaCode, ri)]?.id) issues.push(`voz ${label}`);
       }
+    }
+    // MULTI-PAPEL: exige o 👁 confirmado (segmentos prontos) antes de
+    // disparar — a GARANTIA de que o disparo bate com o que o user viu.
+    // Auto sozinho não é 100% (voz IA), então o user confirma 1x por task.
+    if (!textEngine && maxRoles >= 2 && va.linkAdFileId) {
+      const segs = buildVaSegments(va.linkAdFileId, maxRoles, va.avatares.some((av) => vaSwapSpeakers[`${taskId}:${av.avaCode}`]));
+      if (!segs) issues.push('confirmar 👁 (quem fala cada trecho)');
     }
     return issues;
   }
@@ -5020,11 +5079,20 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       }
       const maxRoles = Math.max(...va.avatares.map((av) => vaRolesOf(av).length));
 
+      // SEGMENTOS CONFIRMADOS NO PREVIEW (a garantia): se o user abriu o 👁
+      // e (talvez) corrigiu quem fala cada trecho, o disparo usa EXATAMENTE
+      // isso. Por fileId do AD (transcript compartilhado entre AVA01/02).
+      let precomputedSegments: Array<{ start: number; end: number; rank: number }> | null = null;
+      if (maxRoles >= 2 && va.linkAdFileId) {
+        const swapped = va.avatares.some((av) => vaSwapSpeakers[`${taskId}:${av.avaCode}`]);
+        precomputedSegments = buildVaSegments(va.linkAdFileId, maxRoles, swapped);
+      }
+
       // COPY-ANCHOR: busca o roteiro do principal (se o doc tem "Link da
-      // Copy") ANTES de disparar — vira a fonte primaria de separacao de
-      // locutor. Best-effort: se o doc nao abrir, cai no pitch.
-      if (maxRoles >= 2 && va.linkCopyDocId && !vaCopyTextRef.current[va.linkCopyDocId]) {
-        patchVA({ message: 'Lendo o roteiro da copy (pra separar os locutores com 100% de certeza)...' });
+      // Copy") ANTES de disparar — orienta a separacao automatica (so usada
+      // se NAO houver segmentos confirmados no preview).
+      if (maxRoles >= 2 && !precomputedSegments && va.linkCopyDocId && !vaCopyTextRef.current[va.linkCopyDocId]) {
+        patchVA({ message: 'Lendo o roteiro da copy (pra separar os locutores)...' });
         try {
           const cr = await fetchDocViaExtension(`https://docs.google.com/document/d/${va.linkCopyDocId}/edit`);
           if (cr.ok && cr.text) vaCopyTextRef.current[va.linkCopyDocId] = cr.text;
@@ -5062,8 +5130,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             text: String(u.text || ''),
           }));
         } : undefined,
-        // COPY-ANCHOR: roteiro do principal (ground truth p/ separar locutores)
+        // COPY-ANCHOR: roteiro do principal (orienta a separacao automatica)
         copyText: vaCopyTextRef.current[va.linkCopyDocId || ''] || null,
+        // SEGMENTOS CONFIRMADOS no preview — quando presentes, o disparo usa
+        // exatamente isso (preview == disparo, zero vazamento).
+        precomputedSegments,
         // === Espelhamento de Voz REAL (sts_pending) — fix 2026-06-03 ===
         // processJob({voiceMirroring:true, voiceId}) agora monta o body
         // nativo (audio_type sts_pending + source_audio_url + voice_id):
@@ -7485,56 +7556,65 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                       </div>
                                                     );
                                                   }
-                                                  // ready: ESPELHA o roteamento do pipeline — funde turnos
-                                                  // consecutivos do mesmo locutor E micro-turnos (<1.2s,
-                                                  // diarizacao solta espurios) no bloco anterior, igual o
-                                                  // planSpeakerBoundaries faz no disparo. Depois filtra os
-                                                  // blocos do locutor mapeado NESTE papel (+ ⇄ inverter).
+                                                  // ready: aplica role EFETIVO (auto + override do user + swap)
+                                                  // por utterance, funde consecutivas do mesmo role em blocos,
+                                                  // e mostra os blocos DESTE papel. Cada bloco tem botão ⇄ pra
+                                                  // mover pro outro papel (a GARANTIA de zero vazamento — o user
+                                                  // corrige o que a auto errou e o DISPARO usa exatamente isso).
                                                   const swapped = !!vaSwapSpeakers[swapKey] && roles.length >= 2;
-                                                  type TrBlock = { speaker: string; startMs: number; endMs: number; texts: string[] };
+                                                  type TrBlock = { startMs: number; endMs: number; texts: string[]; uttMs: number[]; role: number };
+                                                  const roleOfUtt = (u: VaUtterance) => {
+                                                    let auto = tr.rankBySpeaker?.[u.speaker] ?? 0;
+                                                    if (swapped) auto = auto === 0 ? 1 : auto === 1 ? 0 : auto;
+                                                    return Math.min(effectiveUttRole(trFileId, u.startMs, auto), roles.length - 1);
+                                                  };
                                                   const blocks: TrBlock[] = [];
                                                   const sortedUtts = [...(tr.utterances || [])].sort((x, y) => x.startMs - y.startMs);
                                                   for (const u of sortedUtts) {
+                                                    const r = roleOfUtt(u);
                                                     const last = blocks[blocks.length - 1];
-                                                    const durMs = u.endMs - u.startMs;
-                                                    if (last && (last.speaker === u.speaker || durMs < 1200)) {
+                                                    if (last && last.role === r) {
                                                       last.endMs = Math.max(last.endMs, u.endMs);
                                                       if (u.text) last.texts.push(u.text);
+                                                      last.uttMs.push(u.startMs);
                                                     } else {
-                                                      blocks.push({ speaker: u.speaker, startMs: u.startMs, endMs: u.endMs, texts: u.text ? [u.text] : [] });
+                                                      blocks.push({ startMs: u.startMs, endMs: u.endMs, texts: u.text ? [u.text] : [], uttMs: [u.startMs], role: r });
                                                     }
                                                   }
-                                                  if (blocks.length > 1 && blocks[0].endMs - blocks[0].startMs < 1200) {
-                                                    blocks[1].startMs = blocks[0].startMs;
-                                                    blocks[1].texts = [...blocks[0].texts, ...blocks[1].texts];
-                                                    blocks.shift();
-                                                  }
-                                                  const mine = blocks.filter((b) => {
-                                                    let rank = tr.rankBySpeaker?.[b.speaker] ?? 0;
-                                                    if (swapped) rank = rank === 0 ? 1 : rank === 1 ? 0 : rank;
-                                                    return Math.min(rank, roles.length - 1) === ri;
-                                                  });
+                                                  const mine = blocks.filter((b) => b.role === ri);
+                                                  const otherRi = ri === 0 ? 1 : 0;
+                                                  const otherRoleLabel = roles[otherRi]?.role || `papel ${otherRi + 1}`;
                                                   return (
                                                     <div className="mt-2 rounded-[8px] border border-fuchsia-500/40 bg-fuchsia-500/5 p-2.5">
                                                       <div className="mono mb-1.5 flex flex-wrap items-center gap-2 text-[9px] uppercase tracking-widest text-fuchsia-200">
                                                         <span>O que {multiRole ? role.role : 'esse avatar'} vai falar</span>
                                                         <span className="text-text-muted normal-case tracking-normal">
-                                                          {tr.speakerCount} locutor{(tr.speakerCount || 0) === 1 ? '' : 'es'} detectado{(tr.speakerCount || 0) === 1 ? '' : 's'} · {tr.method || 'prévia'}{swapped ? ' · ⇄ invertido' : ''}
+                                                          {tr.method || 'prévia'}{swapped ? ' · ⇄ invertido' : ''}
                                                         </span>
                                                       </div>
-                                                      {multiRole && (tr.speakerCount || 0) < roles.length ? (
-                                                        <div className="mono mb-1.5 rounded border border-yellow-500/40 bg-yellow-500/5 px-2 py-1 text-[9px] text-yellow-200">
-                                                          ⚠ prévia detectou menos locutores que os {roles.length} papéis do doc — no disparo a diarização roda na voz isolada (mais precisa).
+                                                      {multiRole ? (
+                                                        <div className="mono mb-1.5 rounded border border-cyan-500/40 bg-cyan-500/5 px-2 py-1 text-[9px] text-cyan-200">
+                                                          ✓ confira: se alguma linha não for do {role.role}, clique <strong>⇄</strong> pra mover pro {otherRoleLabel}. O disparo usa exatamente o que ficar aqui.
                                                         </div>
                                                       ) : null}
                                                       {mine.length === 0 ? (
-                                                        <div className="text-[11px] text-text-muted">Nenhuma fala mapeada pra este papel na prévia.</div>
+                                                        <div className="text-[11px] text-text-muted">Nenhuma fala neste papel{multiRole ? ' — use o ⇄ no outro painel pra mover linhas pra cá' : ''}.</div>
                                                       ) : (
-                                                        <div className="grid max-h-[220px] gap-1.5 overflow-y-auto pr-1">
+                                                        <div className="grid max-h-[240px] gap-1.5 overflow-y-auto pr-1">
                                                           {mine.map((b, ui) => (
-                                                            <div key={ui} className="text-[11px] leading-snug text-white/85">
-                                                              <span className="mono mr-1.5 text-[9px] text-fuchsia-300/80">{fmtMsClock(b.startMs)}–{fmtMsClock(b.endMs)}</span>
-                                                              {b.texts.join(' ')}
+                                                            <div key={ui} className="group flex items-start gap-1.5 text-[11px] leading-snug text-white/85">
+                                                              <span className="mono mt-[1px] shrink-0 text-[9px] text-fuchsia-300/80">{fmtMsClock(b.startMs)}–{fmtMsClock(b.endMs)}</span>
+                                                              <span className="flex-1">{b.texts.join(' ')}</span>
+                                                              {multiRole ? (
+                                                                <button
+                                                                  type="button"
+                                                                  onClick={() => b.uttMs.forEach((ms) => setUttRole(trFileId, ms, otherRi))}
+                                                                  title={`Mover esta fala pro ${otherRoleLabel} (não é o ${role.role})`}
+                                                                  className="mono shrink-0 rounded border border-fuchsia-500/40 bg-fuchsia-500/10 px-1.5 py-0.5 text-[9px] text-fuchsia-200 opacity-60 hover:opacity-100 hover:bg-fuchsia-500/25"
+                                                                >
+                                                                  ⇄
+                                                                </button>
+                                                              ) : null}
                                                             </div>
                                                           ))}
                                                         </div>

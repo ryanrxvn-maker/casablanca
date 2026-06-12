@@ -96,6 +96,11 @@ export type VAPipelineInput = {
    *  locutor (trecho que casa = principal; resto = depoimento) — vence o
    *  pitch e o speaker_labels. Caller busca o doc e injeta. */
   copyText?: string | null;
+  /** SEGMENTOS CONFIRMADOS no preview (start/end em SEGUNDOS + rank do
+   *  papel). Quando presente, SUBSTITUI a diarização automática: o disparo
+   *  usa EXATAMENTE o que o user confirmou/corrigiu no 👁 (preview ==
+   *  disparo, zero vazamento garantido). Caller monta via buildVaSegments. */
+  precomputedSegments?: Array<{ start: number; end: number; rank: number }> | null;
   /** VA DE AVATAR — modo HeyGen Studio cena-por-cena (Mirror voice).
    *  Quando presente, SUBSTITUI o dispatchAudioTake+mount: pra cada
    *  avatar dispara UMA sessao Studio com TODAS as partes (1 parte =
@@ -509,8 +514,25 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
   // fala = papel principal (roleAvatars[0]), segundo = depoimento.
   // Falhou/1 locutor so → fluxo classico (1 avatar pro AD inteiro).
   const maxRolesInPipeline = Math.max(0, ...input.avatares.map((a) => a.roleAvatars?.length || 0));
-  const wantsMultiSpeaker = !!input.diarize && maxRolesInPipeline >= 2;
   let segRoleRank: number[] | null = null; // por segmento: 0 = principal, 1 = depoimento...
+
+  // === CAMINHO PREFERIDO: SEGMENTOS CONFIRMADOS NO PREVIEW ===
+  // O user confirmou/corrigiu quem fala cada trecho no 👁. Usamos EXATAMENTE
+  // isso (preview == disparo). Pula a diarizacao automatica por completo —
+  // zero risco de divergir do que o user viu.
+  const preSegs = input.precomputedSegments;
+  if (maxRolesInPipeline >= 2 && preSegs && preSegs.length > 0) {
+    boundaries = preSegs.map((s) => ({ start: s.start, end: s.end }));
+    segRoleRank = preSegs.map((s) => Math.min(Math.max(0, s.rank), maxRolesInPipeline - 1));
+    const turnCount = segRoleRank.reduce((acc, r, i) => acc + (i > 0 && segRoleRank![i - 1] !== r ? 1 : 0), 0) + 1;
+    progress({
+      stage: 'diarize',
+      message: `Usando os ${boundaries.length} segmentos CONFIRMADOS no preview · ${turnCount} turnos por papel`,
+      percent: 19,
+    });
+  }
+
+  const wantsMultiSpeaker = !!input.diarize && maxRolesInPipeline >= 2 && !segRoleRank;
   if (wantsMultiSpeaker) {
     progress({ stage: 'diarize', message: 'Detectando locutores (diarizacao AssemblyAI)...', percent: 16 });
     // HARD FAIL (user reportou 2026-06-11): antes, diarizacao falhada caia
@@ -568,7 +590,8 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
     }
     if (diarizeFailure) {
       throw new Error(
-        `VA multi-avatar exige diarizacao OK — sem ela o avatar principal dublaria o trecho do outro papel (video errado). ` +
+        `Abra o 👁 de cada papel e confirme quem fala cada trecho (use o ⇄ pra mover linhas) antes de disparar — ` +
+        `assim o disparo bate exatamente com o preview. Auto: ${diarizeFailure}. ` +
         `Falha: ${diarizeFailure}. ` +
         `Confira a chave AssemblyAI em Configuracoes → API e dispare de novo. ` +
         `Se o AD original tiver SO 1 locutor de verdade (ouca no 👁), o doc esta com papel a mais.`,

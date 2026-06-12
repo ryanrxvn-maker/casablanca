@@ -48,16 +48,6 @@ function agreement(a: number[], b: number[]): number {
   return same / a.length;
 }
 
-/** Rank por tempo de fala dos speaker_labels da AssemblyAI (fallback). */
-function ranksFromAaiLabels(utts: ResolveUtt[]): number[] {
-  const talk = new Map<string, number>();
-  for (const u of utts) talk.set(u.speaker, (talk.get(u.speaker) || 0) + (u.end - u.start));
-  const ranked = Array.from(talk.entries()).sort((x, y) => y[1] - x[1]).map(([s]) => s);
-  const rankBy: Record<string, number> = {};
-  ranked.forEach((s, i) => { rankBy[s] = i; });
-  return utts.map((u) => rankBy[u.speaker] ?? 0);
-}
-
 export function resolveVaSpeakers(input: ResolveInput): ResolveResult {
   const { utterances, expectedSpeakers } = input;
   if (!utterances.length) {
@@ -146,11 +136,16 @@ export function resolveVaSpeakers(input: ResolveInput): ResolveResult {
     return { ranks: copyRanks, method: 'copy (roteiro)', reason: copyReason, confident: true };
   }
 
-  // --- AssemblyAI labels (último recurso) ---
+  // --- NENHUM SINAL CONFIÁVEL (ex: voz IA, mesmo pitch/timbre) ---
+  // NÃO usamos os speaker_labels da AssemblyAI aqui: nos ADs com voz IA
+  // eles vêm embaralhados (A/B/A/B aleatório) e dariam dezenas de blocos
+  // errados pro user corrigir. Em vez disso, DEFAULT = tudo no principal
+  // (1 voz consistente) e o user marca SÓ o(s) trecho(s) de depoimento no
+  // 👁 (poucos cliques). Honesto e seguro.
   return {
-    ranks: ranksFromAaiLabels(utterances),
-    method: 'AssemblyAI',
-    reason: copyReason ? `copy/pitch inconclusivos (${copyReason})` : 'speaker_labels AssemblyAI',
+    ranks: utterances.map(() => 0),
+    method: 'confira no 👁 (auto não separou — marque o depoimento)',
+    reason: copyReason ? `sem sinal confiável (${copyReason})` : 'sem sinal acústico/copy confiável',
     confident: false,
   };
 }

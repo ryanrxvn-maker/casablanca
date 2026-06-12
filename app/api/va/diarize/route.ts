@@ -32,6 +32,7 @@ type TranscriptPoll = {
   status: 'queued' | 'processing' | 'completed' | 'error';
   error?: string;
   utterances?: Array<{ speaker: string; start: number; end: number; text?: string }>;
+  words?: Array<{ text: string; start: number; end: number; speaker?: string | null }>;
 };
 
 export async function POST(req: Request) {
@@ -123,8 +124,16 @@ export async function POST(req: Request) {
           endMs: u.end,
           text: u.text || '',
         }));
+        // WORDS: atribuicao POR PALAVRA (contorno de F0 + cuts nos gaps =
+        // zero vazamento). Cada palavra com timestamp ms + speaker da AAI.
+        const words = (poll.words || []).map((w) => ({
+          text: w.text,
+          startMs: w.start,
+          endMs: w.end,
+          speaker: w.speaker || '',
+        }));
         const speakers = Array.from(new Set(utterances.map((u) => u.speaker)));
-        return NextResponse.json({ ok: true, speakers, utterances });
+        return NextResponse.json({ ok: true, speakers, utterances, words });
       }
     }
     return jsonError('Timeout aguardando diarizacao da AssemblyAI.', 504);
