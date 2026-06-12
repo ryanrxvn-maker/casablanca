@@ -115,10 +115,13 @@ export async function POST(req: Request) {
         return jsonError('AssemblyAI erro na diarizacao.', 502, poll.error || 'sem detalhe');
       }
       if (poll.status === 'completed') {
+        // text incluso: alimenta o 👁 de transcricao por papel na UI
+        // (previsibilidade do que CADA avatar vai falar antes do disparo)
         const utterances = (poll.utterances || []).map((u) => ({
           speaker: u.speaker,
           startMs: u.start,
           endMs: u.end,
+          text: u.text || '',
         }));
         const speakers = Array.from(new Set(utterances.map((u) => u.speaker)));
         return NextResponse.json({ ok: true, speakers, utterances });

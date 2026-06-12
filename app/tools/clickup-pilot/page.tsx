@@ -4613,30 +4613,96 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  baixamos via extensao (fila+streaming) e tocamos blob local. */
   const [vaPreviewMedia, setVaPreviewMedia] = useState<Record<string, { status: 'loading' | 'ready' | 'error'; url?: string; error?: string; note?: string }>>({});
   const vaPreviewMediaRef = useRef<Record<string, boolean>>({});
+  /** Blob do AD baixado (cache por fileId) — compartilhado entre o 👁 video
+   *  e o 👁 de transcricao (baixa UMA vez por task). */
+  const vaAdBlobRef = useRef<Record<string, Blob>>({});
+  /** Baixa o AD do Drive (fila+streaming) e devolve o Blob, cacheado. */
+  async function fetchAdBlob(fileId: string, onNote: (note: string) => void): Promise<Blob> {
+    const cached = vaAdBlobRef.current[fileId];
+    if (cached) return cached;
+    const { downloadDriveFileViaExtension } = await import('@/lib/heygen-extension-bridge');
+    const dl = await downloadDriveFileViaExtension(fileId, {
+      onProgress: (rec, tot) => onNote(`Baixando o AD... ${(rec / 1048576).toFixed(1)}MB${tot ? ` / ${(tot / 1048576).toFixed(1)}MB` : ''}`),
+    });
+    if (!dl.ok) throw new Error(dl.error);
+    const blob = new Blob([dl.bytes as BlobPart], { type: 'video/mp4' });
+    vaAdBlobRef.current[fileId] = blob;
+    return blob;
+  }
   async function ensureVaPreviewMedia(fileId: string) {
     if (vaPreviewMediaRef.current[fileId]) return; // ja baixando/baixado
     vaPreviewMediaRef.current[fileId] = true;
     setVaPreviewMedia((p) => ({ ...p, [fileId]: { status: 'loading', note: 'Baixando o AD original do Drive...' } }));
     try {
-      const { downloadDriveFileViaExtension } = await import('@/lib/heygen-extension-bridge');
-      const dl = await downloadDriveFileViaExtension(fileId, {
-        onProgress: (rec, tot) => setVaPreviewMedia((p) => ({
-          ...p,
-          [fileId]: { status: 'loading', note: `Baixando... ${(rec / 1048576).toFixed(1)}MB${tot ? ` / ${(tot / 1048576).toFixed(1)}MB` : ''}` },
-        })),
-      });
-      if (!dl.ok) {
-        vaPreviewMediaRef.current[fileId] = false;
-        setVaPreviewMedia((p) => ({ ...p, [fileId]: { status: 'error', error: dl.error } }));
-        return;
-      }
-      const url = URL.createObjectURL(new Blob([dl.bytes as BlobPart], { type: 'video/mp4' }));
+      const blob = await fetchAdBlob(fileId, (note) =>
+        setVaPreviewMedia((p) => ({ ...p, [fileId]: { status: 'loading', note } })),
+      );
+      const url = URL.createObjectURL(blob);
       setVaPreviewMedia((p) => ({ ...p, [fileId]: { status: 'ready', url } }));
     } catch (e) {
       vaPreviewMediaRef.current[fileId] = false;
       setVaPreviewMedia((p) => ({ ...p, [fileId]: { status: 'error', error: (e as Error)?.message || 'falha no download' } }));
     }
   }
+
+  /* ===== 👁 TRANSCRIÇÃO POR PAPEL (previsibilidade do que cada avatar fala) =====
+   * Diariza+transcreve o AD UMA vez por task (cache por fileId) e cada
+   * papel mostra SO as falas do locutor mapeado nele (mesma heuristica do
+   * pipeline: quem mais fala = principal; respeita o ⇄ inverter).
+   * NOTA: a previa roda no audio CRU do AD (com trilha) pra ser rapida;
+   * no disparo a diarizacao roda de novo na voz isolada (mais precisa). */
+  type VaUtterance = { speaker: string; startMs: number; endMs: number; text: string };
+  const [vaTranscript, setVaTranscript] = useState<Record<string, {
+    status: 'loading' | 'ready' | 'error';
+    note?: string;
+    error?: string;
+    utterances?: VaUtterance[];
+    rankBySpeaker?: Record<string, number>;
+    speakerCount?: number;
+  }>>({});
+  const vaTranscriptRef = useRef<Record<string, boolean>>({});
+  /** Painel de transcricao aberto por PAPEL. Key: `${taskId}:${avaCode}#${roleIdx}` */
+  const [vaTranscriptOpen, setVaTranscriptOpen] = useState<Record<string, boolean>>({});
+  async function ensureVaTranscript(fileId: string, rolesCount: number) {
+    if (vaTranscriptRef.current[fileId]) return;
+    vaTranscriptRef.current[fileId] = true;
+    const patch = (v: (typeof vaTranscript)[string]) => setVaTranscript((p) => ({ ...p, [fileId]: v }));
+    patch({ status: 'loading', note: 'Preparando...' });
+    try {
+      const blob = await fetchAdBlob(fileId, (note) => patch({ status: 'loading', note }));
+      patch({ status: 'loading', note: 'Extraindo áudio...' });
+      const { extractAudioForTranscription } = await import('@/lib/ffmpeg-worker');
+      const compressed = await extractAudioForTranscription(blob);
+      patch({ status: 'loading', note: 'Transcrevendo + separando locutores (AssemblyAI, ~30-60s)...' });
+      const fd = new FormData();
+      fd.append('audio', new File([compressed], 'voz.ogg', { type: 'audio/ogg' }));
+      fd.append('languageCode', 'pt');
+      if (rolesCount >= 2) fd.append('speakersExpected', String(rolesCount));
+      const r = await fetch('/api/va/diarize', { method: 'POST', body: fd });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j?.ok) throw new Error(j?.error || `diarize HTTP ${r.status}`);
+      const utterances: VaUtterance[] = (j.utterances || []).map((u: VaUtterance) => ({
+        speaker: String(u.speaker),
+        startMs: Number(u.startMs) || 0,
+        endMs: Number(u.endMs) || 0,
+        text: String(u.text || ''),
+      }));
+      // Rank por tempo de fala (mesma heuristica do pipeline)
+      const talk = new Map<string, number>();
+      for (const u of utterances) talk.set(u.speaker, (talk.get(u.speaker) || 0) + (u.endMs - u.startMs));
+      const ranked = Array.from(talk.entries()).sort((a, b) => b[1] - a[1]).map(([s]) => s);
+      const rankBySpeaker: Record<string, number> = {};
+      ranked.forEach((s, i) => { rankBySpeaker[s] = i; });
+      patch({ status: 'ready', utterances, rankBySpeaker, speakerCount: ranked.length });
+    } catch (e) {
+      vaTranscriptRef.current[fileId] = false;
+      patch({ status: 'error', error: (e as Error)?.message || 'falha na transcrição' });
+    }
+  }
+  const fmtMsClock = (ms: number) => {
+    const s = Math.round(ms / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  };
 
   /** Papeis de uma variacao VA: doc novo traz roles[] (Doutor + Depoimento
    *  Mulher etc); legado/1 papel vira papel unico sintetico. */
@@ -7246,6 +7312,32 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                     ) : null}
                                                     <div className="truncate text-[11px] text-text-muted">@{role.username}</div>
                                                   </div>
+                                                  {/* 👁 ROXO: transcrição do que ESTE papel vai falar.
+                                                    * Diariza+transcreve o AD 1x por task; cada papel
+                                                    * filtra só as falas do locutor mapeado nele. */}
+                                                  {(() => {
+                                                    const trKey = `${a.taskId}:${av.avaCode}#${ri}`;
+                                                    const trFileId = a.vaBriefing!.linkAdFileId;
+                                                    return (
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                          const opening = !vaTranscriptOpen[trKey];
+                                                          setVaTranscriptOpen((prev) => ({ ...prev, [trKey]: opening }));
+                                                          if (opening && trFileId) ensureVaTranscript(trFileId, roles.length);
+                                                        }}
+                                                        className={
+                                                          'shrink-0 rounded-full border px-2 py-0.5 text-[11px] shadow-[0_2px_0_rgba(0,0,0,0.4),0_0_8px_rgba(217,70,239,0.3)] active:translate-y-[1px] transition ' +
+                                                          (vaTranscriptOpen[trKey]
+                                                            ? 'border-fuchsia-400/70 bg-fuchsia-500/25 text-fuchsia-100'
+                                                            : 'border-fuchsia-500/40 bg-fuchsia-500/10 text-fuchsia-200 hover:bg-fuchsia-500/25')
+                                                        }
+                                                        title={`Transcrição do que ${multiRole ? `o papel ${role.role}` : 'esse avatar'} vai falar (diarização + transcrição do AD original)`}
+                                                      >
+                                                        👁
+                                                      </button>
+                                                    );
+                                                  })()}
                                                   {role.fileId ? (
                                                     <PilotBtn3D
                                                       icon={<PilotIconDownload size={14} />}
@@ -7284,6 +7376,75 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                     />
                                                   </div>
                                                 </div>
+                                                {/* PAINEL 👁 ROXO — transcrição SÓ das falas deste papel */}
+                                                {vaTranscriptOpen[`${a.taskId}:${av.avaCode}#${ri}`] ? (() => {
+                                                  const trFileId = a.vaBriefing!.linkAdFileId;
+                                                  if (!trFileId) {
+                                                    return (
+                                                      <div className="mt-2 rounded-[8px] border border-yellow-500/40 bg-yellow-500/5 p-2 text-[11px] text-yellow-200">
+                                                        ⚠ AD original não resolvido — escolhe o arquivo no aviso abaixo pra liberar a transcrição.
+                                                      </div>
+                                                    );
+                                                  }
+                                                  const tr = vaTranscript[trFileId];
+                                                  if (!tr || tr.status === 'loading') {
+                                                    return (
+                                                      <div className="mt-2 flex items-center gap-2 rounded-[8px] border border-fuchsia-500/30 bg-fuchsia-500/5 p-2.5">
+                                                        <span className="h-3 w-3 animate-spin rounded-full border-2 border-fuchsia-300/70 border-t-transparent" />
+                                                        <span className="mono text-[10px] text-fuchsia-200">{tr?.note || 'Preparando transcrição...'}</span>
+                                                      </div>
+                                                    );
+                                                  }
+                                                  if (tr.status === 'error') {
+                                                    return (
+                                                      <div className="mt-2 rounded-[8px] border border-red-500/40 bg-red-500/5 p-2 text-[11px] text-red-300">
+                                                        ⚠ Transcrição falhou: {tr.error}
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => ensureVaTranscript(trFileId, roles.length)}
+                                                          className="mono ml-2 rounded-full border border-red-400/50 px-2 py-0.5 text-[9px] uppercase tracking-widest hover:bg-red-500/15"
+                                                        >
+                                                          tentar de novo
+                                                        </button>
+                                                      </div>
+                                                    );
+                                                  }
+                                                  // ready: filtra falas do locutor mapeado NESTE papel
+                                                  // (mesma heuristica do pipeline + respeita o ⇄ inverter)
+                                                  const swapped = !!vaSwapSpeakers[swapKey] && roles.length >= 2;
+                                                  const mine = (tr.utterances || []).filter((u) => {
+                                                    let rank = tr.rankBySpeaker?.[u.speaker] ?? 0;
+                                                    if (swapped) rank = rank === 0 ? 1 : rank === 1 ? 0 : rank;
+                                                    return Math.min(rank, roles.length - 1) === ri;
+                                                  });
+                                                  return (
+                                                    <div className="mt-2 rounded-[8px] border border-fuchsia-500/40 bg-fuchsia-500/5 p-2.5">
+                                                      <div className="mono mb-1.5 flex flex-wrap items-center gap-2 text-[9px] uppercase tracking-widest text-fuchsia-200">
+                                                        <span>O que {multiRole ? role.role : 'esse avatar'} vai falar</span>
+                                                        <span className="text-text-muted normal-case tracking-normal">
+                                                          {tr.speakerCount} locutor{(tr.speakerCount || 0) === 1 ? '' : 'es'} detectado{(tr.speakerCount || 0) === 1 ? '' : 's'} · prévia no áudio cru{swapped ? ' · ⇄ invertido' : ''}
+                                                        </span>
+                                                      </div>
+                                                      {multiRole && (tr.speakerCount || 0) < roles.length ? (
+                                                        <div className="mono mb-1.5 rounded border border-yellow-500/40 bg-yellow-500/5 px-2 py-1 text-[9px] text-yellow-200">
+                                                          ⚠ prévia detectou menos locutores que os {roles.length} papéis do doc — no disparo a diarização roda na voz isolada (mais precisa).
+                                                        </div>
+                                                      ) : null}
+                                                      {mine.length === 0 ? (
+                                                        <div className="text-[11px] text-text-muted">Nenhuma fala mapeada pra este papel na prévia.</div>
+                                                      ) : (
+                                                        <div className="grid max-h-[220px] gap-1 overflow-y-auto pr-1">
+                                                          {mine.map((u, ui) => (
+                                                            <div key={ui} className="text-[11px] leading-snug text-white/85">
+                                                              <span className="mono mr-1.5 text-[9px] text-fuchsia-300/80">{fmtMsClock(u.startMs)}–{fmtMsClock(u.endMs)}</span>
+                                                              {u.text}
+                                                            </div>
+                                                          ))}
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  );
+                                                })() : null}
                                               </div>
                                             );
                                           })}
