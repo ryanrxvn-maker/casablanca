@@ -25,6 +25,7 @@ import type {
   PipelineProgress,
 } from './magnific-pipeline';
 import { buildZip, type ZipEntry } from './zip-builder';
+import { buildTakeFileNames } from './magnific-pipeline';
 import { isExtensionInstalled, ExtensionNotInstalledError } from './magnific-bridge';
 import {
   assertZeroCreditCost,
@@ -659,17 +660,10 @@ export async function runMagnificPipelineV2(
 
   // ───────── Download MP4s ─────────
   emit('Baixando vídeos finais...', 'downloading', 90);
-  // Nome do arquivo = O QUE A CENA ILUSTRA (label/section do JSON), pra dar
-  // match perfeito no CutFeeling por nicho. Ex: "03 - PROSTATA INCHANDO.mp4".
-  // Prefixo NN mantém ordenação + unicidade; sem label cai no take_NN antigo.
-  const fileSafe = (s2: string) =>
-    s2.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 70);
-  function takeFileName(idx: number): string {
-    const t = takes.find((tk) => tk.idx === idx);
-    const label = t?.label ? fileSafe(t.label) : '';
-    const nn = String(idx).padStart(2, '0');
-    return label ? `${nn} - ${label}.mp4` : `take_${nn}.mp4`;
-  }
+  // Nome do arquivo = SÓ O QUE A CENA ILUSTRA (sem número de take), pra o
+  // CutFeeling casar o b-roll com o trecho da copy. Ex: "PROSTATA INCHANDO.mp4".
+  const nameByIdx = buildTakeFileNames(takes as Array<{ idx: number; label?: string }>);
+  const takeFileName = (idx: number) => nameByIdx[idx] || `take_${String(idx).padStart(2, '0')}.mp4`;
   const entries: ZipEntry[] = [];
   let downloaded = 0;
   for (const s of takeStates) {

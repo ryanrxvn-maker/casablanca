@@ -69,6 +69,8 @@ async function testMagnificSession(): Promise<{
 }
 import {
   parseMagnificPrompts,
+  deriveSceneLabel,
+  buildTakeFileNames,
   type MagnificTakeInput,
   type PipelineProgress,
 } from '@/lib/magnific-pipeline';
@@ -938,20 +940,40 @@ function isEntryLive(item: HistEntry): boolean {
   return !!item.inFlight && !!item.lastBeatAt && Date.now() - item.lastBeatAt < 90_000;
 }
 
-/** Mapa idx -> rótulo da cena (section/label do originalJson) pra rotular o
- *  preview e mostrar O QUE cada take ilustra. */
+/** Extrai o array de takes cru do originalJson (aceita array direto OU
+ *  objeto {takes:[...]} / {prompts:[...]}). */
+function rawTakesOf(item: HistEntry): any[] {
+  if (!item.originalJson) return [];
+  try {
+    const j = JSON.parse(item.originalJson);
+    if (Array.isArray(j)) return j;
+    return j?.takes || j?.prompts || j?.nano_banana_prompts || [];
+  } catch { return []; }
+}
+
+/** idx de um take cru: take (num) → id (T01→1) → ordem. */
+function rawTakeIdx(t: any, i: number): number {
+  if (typeof t?.take === 'number') return t.take;
+  if (typeof t?.id === 'string') { const m = t.id.match(/\d+/); if (m) return parseInt(m[0], 10); }
+  return i + 1;
+}
+
+/** Mapa idx -> rótulo descritivo da cena (robusto a qualquer formato de JSON),
+ *  pra rotular o preview. */
 function buildLabelMap(item: HistEntry): Record<number, string> {
   const out: Record<number, string> = {};
-  if (!item.originalJson) return out;
-  try {
-    const arr = JSON.parse(item.originalJson) as any[];
-    arr.forEach((t, i) => {
-      const idx = typeof t.take === 'number' ? t.take : i + 1;
-      const label = String(t.section || t.label || t.name || t.title || '').trim();
-      if (label) out[idx] = label;
-    });
-  } catch {}
+  rawTakesOf(item).forEach((t, i) => {
+    const label = deriveSceneLabel(t);
+    if (label) out[rawTakeIdx(t, i)] = label;
+  });
   return out;
+}
+
+/** Mapa idx -> nome de arquivo .mp4 descritivo (sem número, dedup), pros ZIPs
+ *  reconstruídos baterem com a mesma regra do pipeline. */
+function buildEntryFileNames(item: HistEntry): Record<number, string> {
+  const labels = buildLabelMap(item);
+  return buildTakeFileNames((item.takeUrls || []).map((t) => ({ idx: t.idx, label: labels[t.idx] })));
 }
 
 /** Chave IDB do MP4 individual de um take (offline-proof, sobrevive expiração
@@ -1033,13 +1055,11 @@ function persistTakesIncremental(
 async function buildZipFromEntry(item: HistEntry): Promise<{ blob: Blob; n: number; faltam: number } | null> {
   const JSZip = (await import('jszip')).default;
   const { loadBlob } = await import('@/lib/zip-store');
-  const labels = buildLabelMap(item);
+  const names = buildEntryFileNames(item);
   const zip = new JSZip();
   let n = 0, faltam = 0;
   for (const t of [...(item.takeUrls || [])].sort((a, b) => a.idx - b.idx)) {
-    const nn = String(t.idx).padStart(2, '0');
-    const label = labels[t.idx] ? labels[t.idx].replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 70) : '';
-    const name = label ? `${nn} - ${label}.mp4` : `take_${nn}.mp4`;
+    const name = names[t.idx] || `take_${String(t.idx).padStart(2, '0')}.mp4`;
     let bytes: ArrayBuffer | null = null;
     try {
       const blob = await loadBlob(takeVideoKey(item.zipKey, t.idx), 'video/mp4');
