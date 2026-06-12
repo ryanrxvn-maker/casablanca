@@ -1317,6 +1317,12 @@ export type ParsedVABriefing = {
   linkAdFilename: string | null;
   /** Drive file ID do video original (se link Drive presente) */
   linkAdFileId: string | null;
+  /** Google Doc ID da "Link da Copy" (o ROTEIRO que o avatar principal
+   *  fala). GROUND TRUTH pra atribuicao de locutor: trechos que casam com
+   *  a copy = principal; o resto = depoimento. Null se o doc nao tem. */
+  linkCopyDocId: string | null;
+  /** Texto do link da copy ('ADGL - VFPB04 - 2026') — debug/UI */
+  linkCopyText: string | null;
   /** Avatares de variacao em ordem (2-10) */
   avatares: VAAvatar[];
   /** Texto do unico Gancho */
@@ -1455,7 +1461,7 @@ export function youTubeThumb(videoId: string): string {
 export function parseVABriefing(
   fullDocText: string,
   baseAdIdOrTaskName: string,
-  driveLinks: Array<{ text: string; fileId: string }> = [],
+  driveLinks: Array<{ text: string; fileId: string; isFolder?: boolean }> = [],
   filterAvaNums: number[] = [],
 ): ParsedVABriefing | null {
   if (!fullDocText) return null;
@@ -1565,6 +1571,8 @@ export function parseVABriefing(
     const avatares: VAAvatar[] = [];
     let linkAdFilename: string | null = null;
     let linkAdFileId: string | null = null;
+    let linkCopyDocId: string | null = null;
+    let linkCopyText: string | null = null;
     for (const sec of newSecs) {
       let end = lines.length;
       for (let i = sec.idx + 1; i < lines.length; i++) {
@@ -1597,6 +1605,20 @@ export function parseVABriefing(
             linkAdFilename = linkM[1];
             const dl = findDl(linkM[1]);
             if (dl) linkAdFileId = dl.fileId;
+          }
+          continue;
+        }
+        // 'Link da Copy: ADGL - VFPB04 - 2026' — o ROTEIRO que o avatar
+        // principal fala (Google Doc). GROUND TRUTH pra atribuir locutor:
+        // casa o texto do link com os driveLinks pra pegar o docId. Aceita
+        // SO doc (nao mp4/mov — esses sao avatar).
+        const copyM = t.match(/^link\s+da\s+copy\s*[:\-]\s*(.+?)\s*$/i);
+        if (copyM && !linkCopyDocId) {
+          const copyName = copyM[1].trim();
+          if (!/\.(mp4|mov)$/i.test(copyName)) {
+            linkCopyText = copyName;
+            const dl = findDl(copyName);
+            if (dl && !dl.isFolder) linkCopyDocId = dl.fileId;
           }
           continue;
         }
@@ -1654,6 +1676,8 @@ export function parseVABriefing(
         baseAdId: adCode && variant ? `${adCode}-${variant}` : (adCode || baseAdIdOrTaskName),
         linkAdFilename,
         linkAdFileId,
+        linkCopyDocId,
+        linkCopyText,
         avatares: filteredNew,
         // Formato novo nao tem copy no doc — audio vem do AD original
         // (lipsync). hookText/bodyText vazios sao VALIDOS aqui.
@@ -1867,6 +1891,8 @@ export function parseVABriefing(
     baseAdId,
     linkAdFilename,
     linkAdFileId,
+    linkCopyDocId: null, // formato legado nao usa copy-anchor
+    linkCopyText: null,
     avatares,
     hookText,
     bodyText,

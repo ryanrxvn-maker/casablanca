@@ -19,7 +19,7 @@
  */
 
 import { decodeAudioRobust, detectSilences } from './audio-engine';
-import { clusterUtterancesByPitch } from './pitch-speaker';
+import { resolveVaSpeakers } from './resolve-va-speakers';
 import { extractAudio, concatAvatarParts, concatVideosFast, cutVideoSegments, overlaySegmentsOnVideo } from './ffmpeg-worker';
 import { isolateVoice, type VoiceIsolatorMode } from './voice-isolator';
 import { isolateVoiceNeural } from './voice-isolator-neural';
@@ -56,7 +56,7 @@ export type VAPipelineAvatar = {
 };
 
 /** Turno de fala vindo da diarizacao (segundos). */
-export type VASpeakerUtterance = { speaker: string; start: number; end: number };
+export type VASpeakerUtterance = { speaker: string; start: number; end: number; text?: string };
 
 export type VAPipelineInput = {
   /** Base AD ID (ex 'AD10G1VN-PRPB06') — vira prefixo dos arquivos */
@@ -91,6 +91,11 @@ export type VAPipelineInput = {
    *  So roda quando algum avatar tem roleAvatars com 2+ papeis. Se falhar
    *  ou detectar 1 locutor so, pipeline cai no fluxo classico (1 avatar). */
   diarize?: (audioBlob: Blob) => Promise<VASpeakerUtterance[]>;
+  /** COPY-ANCHOR: texto do roteiro que o avatar PRINCIPAL lê (do "Link da
+   *  Copy" do doc). Quando presente, é a fonte primária de atribuição de
+   *  locutor (trecho que casa = principal; resto = depoimento) — vence o
+   *  pitch e o speaker_labels. Caller busca o doc e injeta. */
+  copyText?: string | null;
   /** VA DE AVATAR — modo HeyGen Studio cena-por-cena (Mirror voice).
    *  Quando presente, SUBSTITUI o dispatchAudioTake+mount: pra cada
    *  avatar dispara UMA sessao Studio com TODAS as partes (1 parte =
@@ -515,46 +520,48 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
     // ela, aborta com erro acionavel — nunca gera saida errada calada.
     let diarizeFailure: string | null = null;
     try {
-      let utts = await input.diarize!(audioBlob);
-      // === PITCH OVERRIDE (2026-06-11) ===
-      // AssemblyAI da o TEXTO+timestamps confiaveis, mas os speaker_labels
-      // se mostraram instaveis nos ADs reais (rotulava trechos do Doutor
-      // como a mulher). Pro caso de 2 papeis, o TOM DE VOZ (F0 por
-      // autocorrelacao na voz isolada) decide QUEM fala — fisica, nao
-      // estatistica. Homem ~110Hz vs mulher ~200Hz = gap enorme. Se o gap
-      // for fraco (locutores do mesmo sexo), mantem os labels AssemblyAI.
-      let pitchNote = '';
-      if (maxRolesInPipeline === 2 && utts && utts.length > 0) {
-        const pitch = clusterUtterancesByPitch(
-          audioBuffer.getChannelData(0),
-          audioBuffer.sampleRate,
-          utts.map((u) => ({ start: u.start, end: u.end })),
-          2,
-        );
-        if (pitch.confident && pitch.ranks) {
-          utts = utts.map((u, i) => ({ ...u, speaker: `P${pitch.ranks![i]}` }));
-          pitchNote = ` · ${pitch.reason}`;
-        } else {
-          pitchNote = ` · pitch inconclusivo (${pitch.reason}) — labels AssemblyAI`;
+      const rawUtts = await input.diarize!(audioBlob);
+      // === RESOLVER UNICO (copy > pitch > AssemblyAI) — 2026-06-11 ===
+      // AssemblyAI da TEXTO+timestamps confiaveis. QUEM fala cada trecho:
+      //  1. COPY-ANCHOR: o "Link da Copy" e o roteiro que o principal le —
+      //     trecho que casa = principal, resto = depoimento (GROUND TRUTH).
+      //  2. PITCH/F0: tom de voz separa homem/mulher por fisica.
+      //  3. speaker_labels: ultimo recurso.
+      let resolveNote = '';
+      if (maxRolesInPipeline === 2 && rawUtts && rawUtts.length > 0) {
+        const resolved = resolveVaSpeakers({
+          utterances: rawUtts.map((u) => ({ speaker: u.speaker, start: u.start, end: u.end, text: u.text || '' })),
+          expectedSpeakers: 2,
+          channelData: audioBuffer.getChannelData(0),
+          sampleRate: audioBuffer.sampleRate,
+          copyText: input.copyText || null,
+        });
+        // relabela por rank resolvido — planSpeakerBoundaries roteia por isso
+        for (let i = 0; i < rawUtts.length; i++) rawUtts[i].speaker = `P${resolved.ranks[i] ?? 0}`;
+        resolveNote = ` · ${resolved.method}`;
+        if (!resolved.confident) {
+          // sem copy nem pitch confiavel: NAO arrisca video errado.
+          diarizeFailure = `nao consegui separar os locutores com confianca (${resolved.reason}). ` +
+            `Cole o "Link da Copy" no doc (roteiro do principal) ou confira que o AD tem 2 vozes claras.`;
         }
       }
-      const speakers = Array.from(new Set((utts || []).map((u) => u.speaker)));
-      if (utts && speakers.length >= 2) {
-        const planned = planSpeakerBoundaries(utts, audioBuffer.duration, silences, targetSec, minSec, maxSec);
+      const speakers = Array.from(new Set((rawUtts || []).map((u) => u.speaker)));
+      if (!diarizeFailure && rawUtts && speakers.length >= 2) {
+        const planned = planSpeakerBoundaries(rawUtts, audioBuffer.duration, silences, targetSec, minSec, maxSec);
         boundaries = planned.map((p) => ({ start: p.start, end: p.end }));
-        // Rank por tempo de fala TOTAL (das utterances cruas)
+        // Rank por tempo de fala TOTAL (das utterances ja relabeladas)
         const talk = new Map<string, number>();
-        for (const u of utts) talk.set(u.speaker, (talk.get(u.speaker) || 0) + (u.end - u.start));
+        for (const u of rawUtts) talk.set(u.speaker, (talk.get(u.speaker) || 0) + (u.end - u.start));
         const ranked = Array.from(talk.entries()).sort((a, b) => b[1] - a[1]).map(([s]) => s);
         segRoleRank = planned.map((p) => Math.max(0, ranked.indexOf(p.speaker)));
         const turnCount = segRoleRank.reduce((acc, r, i) => acc + (i > 0 && segRoleRank![i - 1] !== r ? 1 : 0), 0) + 1;
         progress({
           stage: 'diarize',
-          message: `${speakers.length} locutores detectados · ${turnCount} turnos de fala · ${boundaries.length} segmentos roteados por papel${pitchNote}`,
+          message: `${speakers.length} locutores · ${turnCount} turnos · ${boundaries.length} segmentos roteados por papel${resolveNote}`,
           percent: 19,
         });
-      } else {
-        diarizeFailure = `detectou ${speakers.length || 0} locutor(es), mas o doc indica ${maxRolesInPipeline} papeis (avatares diferentes)${pitchNote}`;
+      } else if (!diarizeFailure) {
+        diarizeFailure = `detectou ${speakers.length || 0} locutor(es), mas o doc indica ${maxRolesInPipeline} papeis (avatares diferentes)${resolveNote}`;
       }
     } catch (e) {
       diarizeFailure = (e as Error)?.message || String(e);

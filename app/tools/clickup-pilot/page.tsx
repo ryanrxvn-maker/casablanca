@@ -4616,6 +4616,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   /** Blob do AD baixado (cache por fileId) — compartilhado entre o 👁 video
    *  e o 👁 de transcricao (baixa UMA vez por task). */
   const vaAdBlobRef = useRef<Record<string, Blob>>({});
+  /** Cache do texto da "Link da Copy" por docId (roteiro do principal) —
+   *  compartilhado entre prévia 👁 e disparo (busca 1x). */
+  const vaCopyTextRef = useRef<Record<string, string>>({});
   /** Baixa o AD do Drive (fila+streaming) e devolve o Blob, cacheado. */
   async function fetchAdBlob(fileId: string, onNote: (note: string) => void): Promise<Blob> {
     const cached = vaAdBlobRef.current[fileId];
@@ -4665,12 +4668,25 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   const vaTranscriptRef = useRef<Record<string, boolean>>({});
   /** Painel de transcricao aberto por PAPEL. Key: `${taskId}:${avaCode}#${roleIdx}` */
   const [vaTranscriptOpen, setVaTranscriptOpen] = useState<Record<string, boolean>>({});
-  async function ensureVaTranscript(fileId: string, rolesCount: number) {
+  async function ensureVaTranscript(fileId: string, rolesCount: number, copyDocId?: string | null) {
     if (vaTranscriptRef.current[fileId]) return;
     vaTranscriptRef.current[fileId] = true;
     const patch = (v: (typeof vaTranscript)[string]) => setVaTranscript((p) => ({ ...p, [fileId]: v }));
     patch({ status: 'loading', note: 'Preparando...' });
     try {
+      // COPY-ANCHOR: busca o roteiro do principal (ground truth) se houver.
+      let copyTextForPreview: string | null = null;
+      if (rolesCount === 2 && copyDocId) {
+        if (vaCopyTextRef.current[copyDocId]) {
+          copyTextForPreview = vaCopyTextRef.current[copyDocId];
+        } else {
+          patch({ status: 'loading', note: 'Lendo o roteiro da copy...' });
+          try {
+            const cr = await fetchDocViaExtension(`https://docs.google.com/document/d/${copyDocId}/edit`);
+            if (cr.ok && cr.text) { vaCopyTextRef.current[copyDocId] = cr.text; copyTextForPreview = cr.text; }
+          } catch { /* segue sem copy */ }
+        }
+      }
       const blob = await fetchAdBlob(fileId, (note) => patch({ status: 'loading', note }));
       patch({ status: 'loading', note: 'Extraindo áudio...' });
       const { extractAudio, extractAudioForDiarization } = await import('@/lib/ffmpeg-worker');
@@ -4704,29 +4720,31 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         endMs: Number(u.endMs) || 0,
         text: String(u.text || ''),
       }));
-      // === PITCH OVERRIDE (mesma logica do disparo) ===
-      // AssemblyAI: texto+timestamps. QUEM fala: TOM DE VOZ (F0 local) —
-      // os speaker_labels erravam nos ADs reais (Doutor rotulado como a
-      // mulher). Com 2 papeis e gap claro de pitch, o pitch decide.
+      // === RESOLVER UNICO (copy > pitch > AssemblyAI) — igual ao disparo ===
+      // 1. COPY-ANCHOR: roteiro do principal (ground truth). 2. PITCH/F0.
+      // 3. speaker_labels. Mesma funcao do pipeline -> previa = disparo.
       let method = 'AssemblyAI';
       if (rolesCount === 2 && utterances.length > 0) {
         try {
-          patch({ status: 'loading', note: 'Verificando tom de voz de cada trecho (F0)...' });
-          const { decodeAudioRobust } = await import('@/lib/audio-engine');
-          const buf = await decodeAudioRobust(voiceWav);
-          const { clusterUtterancesByPitch } = await import('@/lib/pitch-speaker');
-          const pitch = clusterUtterancesByPitch(
-            buf.getChannelData(0),
-            buf.sampleRate,
-            utterances.map((u) => ({ start: u.startMs / 1000, end: u.endMs / 1000 })),
-            2,
-          );
-          if (pitch.confident && pitch.ranks) {
-            utterances = utterances.map((u, i) => ({ ...u, speaker: `P${pitch.ranks![i]}` }));
-            method = `tom de voz · ${pitch.clusterHz!.map((h) => h.toFixed(0) + 'Hz').join(' vs ')}`;
-          } else {
-            method = `AssemblyAI (pitch inconclusivo: ${pitch.reason})`;
-          }
+          patch({ status: 'loading', note: 'Separando os locutores (roteiro + tom de voz)...' });
+          let channelData: Float32Array | null = null;
+          let sampleRate: number | null = null;
+          try {
+            const { decodeAudioRobust } = await import('@/lib/audio-engine');
+            const buf = await decodeAudioRobust(voiceWav);
+            channelData = buf.getChannelData(0);
+            sampleRate = buf.sampleRate;
+          } catch { /* sem pitch — copy/AAI assumem */ }
+          const { resolveVaSpeakers } = await import('@/lib/resolve-va-speakers');
+          const resolved = resolveVaSpeakers({
+            utterances: utterances.map((u) => ({ speaker: u.speaker, start: u.startMs / 1000, end: u.endMs / 1000, text: u.text })),
+            expectedSpeakers: 2,
+            channelData,
+            sampleRate,
+            copyText: copyTextForPreview || null,
+          });
+          utterances = utterances.map((u, i) => ({ ...u, speaker: `P${resolved.ranks[i] ?? 0}` }));
+          method = resolved.method;
         } catch { /* mantem labels AssemblyAI */ }
       }
       // Rank por tempo de fala (mesma heuristica do pipeline)
@@ -5002,6 +5020,17 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       }
       const maxRoles = Math.max(...va.avatares.map((av) => vaRolesOf(av).length));
 
+      // COPY-ANCHOR: busca o roteiro do principal (se o doc tem "Link da
+      // Copy") ANTES de disparar — vira a fonte primaria de separacao de
+      // locutor. Best-effort: se o doc nao abrir, cai no pitch.
+      if (maxRoles >= 2 && va.linkCopyDocId && !vaCopyTextRef.current[va.linkCopyDocId]) {
+        patchVA({ message: 'Lendo o roteiro da copy (pra separar os locutores com 100% de certeza)...' });
+        try {
+          const cr = await fetchDocViaExtension(`https://docs.google.com/document/d/${va.linkCopyDocId}/edit`);
+          if (cr.ok && cr.text) vaCopyTextRef.current[va.linkCopyDocId] = cr.text;
+        } catch { /* segue sem copy — pitch assume */ }
+      }
+
       const pipeRes = await runVAPipeline({
         baseAdId: adNameClean,
         adVideoBytes: dl.bytes,
@@ -5026,12 +5055,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           const r = await fetch('/api/va/diarize', { method: 'POST', body: fd });
           const j = await r.json().catch(() => null);
           if (!r.ok || !j?.ok) throw new Error(j?.error || `diarize HTTP ${r.status}`);
-          return (j.utterances || []).map((u: { speaker: string; startMs: number; endMs: number }) => ({
+          return (j.utterances || []).map((u: { speaker: string; startMs: number; endMs: number; text?: string }) => ({
             speaker: String(u.speaker),
             start: u.startMs / 1000,
             end: u.endMs / 1000,
+            text: String(u.text || ''),
           }));
         } : undefined,
+        // COPY-ANCHOR: roteiro do principal (ground truth p/ separar locutores)
+        copyText: vaCopyTextRef.current[va.linkCopyDocId || ''] || null,
         // === Espelhamento de Voz REAL (sts_pending) — fix 2026-06-03 ===
         // processJob({voiceMirroring:true, voiceId}) agora monta o body
         // nativo (audio_type sts_pending + source_audio_url + voice_id):
@@ -7368,7 +7400,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                         onClick={() => {
                                                           const opening = !vaTranscriptOpen[trKey];
                                                           setVaTranscriptOpen((prev) => ({ ...prev, [trKey]: opening }));
-                                                          if (opening && trFileId) ensureVaTranscript(trFileId, roles.length);
+                                                          if (opening && trFileId) ensureVaTranscript(trFileId, roles.length, a.vaBriefing!.linkCopyDocId);
                                                         }}
                                                         className={
                                                           'shrink-0 rounded-full border px-2 py-0.5 text-[11px] shadow-[0_2px_0_rgba(0,0,0,0.4),0_0_8px_rgba(217,70,239,0.3)] active:translate-y-[1px] transition ' +
@@ -7445,7 +7477,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                         ⚠ Transcrição falhou: {tr.error}
                                                         <button
                                                           type="button"
-                                                          onClick={() => ensureVaTranscript(trFileId, roles.length)}
+                                                          onClick={() => ensureVaTranscript(trFileId, roles.length, a.vaBriefing!.linkCopyDocId)}
                                                           className="mono ml-2 rounded-full border border-red-400/50 px-2 py-0.5 text-[9px] uppercase tracking-widest hover:bg-red-500/15"
                                                         >
                                                           tentar de novo
