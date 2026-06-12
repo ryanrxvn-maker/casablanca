@@ -94,14 +94,28 @@ export function alignEditedToWords(
   if (n === 0) return { wordRanks: [], segments: [], orphans: 0 };
 
   // claim de cada papel
-  const claims = roleTexts.map((t) => lcsClaim(tokenize(t), W));
+  const roleTokens = roleTexts.map((t) => tokenize(t));
+  const claims = roleTokens.map((tk) => lcsClaim(tk, W));
 
-  // por word: papel com maior run; empate → menor rank (principal)
+  // CONFLITO → vence a caixa MAIS ESPECÍFICA (menos tokens). O principal
+  // costuma ser a caixa "tudo" (default), e o depoimento a caixa pequena
+  // com SÓ a fala dele. Se o user colar a fala no depoimento mas esquecer
+  // de tirar do principal, a INTENÇÃO (caixa pequena) vence — perdoa o
+  // "não recortei". Empate de especificidade → maior run; depois menor rank.
+  const order = roleTexts
+    .map((_, r) => r)
+    .sort((a, b) => (roleTokens[a].length - roleTokens[b].length) || (a - b));
   const wordRanks = new Array<number>(n).fill(-1);
   for (let i = 0; i < n; i++) {
-    let bestRank = -1, bestLen = 0;
-    for (let r = 0; r < claims.length; r++) {
-      if (claims[r][i] > bestLen) { bestLen = claims[r][i]; bestRank = r; }
+    let bestRank = -1, bestLen = 0, bestSpec = Infinity;
+    for (const r of order) {
+      const len = claims[r][i];
+      if (len <= 0) continue;
+      const spec = roleTokens[r].length;
+      // mais específica vence; entre iguais, maior run
+      if (bestRank === -1 || spec < bestSpec || (spec === bestSpec && len > bestLen)) {
+        bestRank = r; bestLen = len; bestSpec = spec;
+      }
     }
     wordRanks[i] = bestRank; // -1 = órfã
   }
