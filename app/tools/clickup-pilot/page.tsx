@@ -4659,6 +4659,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     utterances?: VaUtterance[];
     rankBySpeaker?: Record<string, number>;
     speakerCount?: number;
+    /** Como os locutores foram separados ('tom de voz · 112Hz vs 204Hz' | 'AssemblyAI...') */
+    method?: string;
   }>>({});
   const vaTranscriptRef = useRef<Record<string, boolean>>({});
   /** Painel de transcricao aberto por PAPEL. Key: `${taskId}:${avaCode}#${roleIdx}` */
@@ -4696,19 +4698,44 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const r = await fetch('/api/va/diarize', { method: 'POST', body: fd });
       const j = await r.json().catch(() => null);
       if (!r.ok || !j?.ok) throw new Error(j?.error || `diarize HTTP ${r.status}`);
-      const utterances: VaUtterance[] = (j.utterances || []).map((u: VaUtterance) => ({
+      let utterances: VaUtterance[] = (j.utterances || []).map((u: VaUtterance) => ({
         speaker: String(u.speaker),
         startMs: Number(u.startMs) || 0,
         endMs: Number(u.endMs) || 0,
         text: String(u.text || ''),
       }));
+      // === PITCH OVERRIDE (mesma logica do disparo) ===
+      // AssemblyAI: texto+timestamps. QUEM fala: TOM DE VOZ (F0 local) —
+      // os speaker_labels erravam nos ADs reais (Doutor rotulado como a
+      // mulher). Com 2 papeis e gap claro de pitch, o pitch decide.
+      let method = 'AssemblyAI';
+      if (rolesCount === 2 && utterances.length > 0) {
+        try {
+          patch({ status: 'loading', note: 'Verificando tom de voz de cada trecho (F0)...' });
+          const { decodeAudioRobust } = await import('@/lib/audio-engine');
+          const buf = await decodeAudioRobust(voiceWav);
+          const { clusterUtterancesByPitch } = await import('@/lib/pitch-speaker');
+          const pitch = clusterUtterancesByPitch(
+            buf.getChannelData(0),
+            buf.sampleRate,
+            utterances.map((u) => ({ start: u.startMs / 1000, end: u.endMs / 1000 })),
+            2,
+          );
+          if (pitch.confident && pitch.ranks) {
+            utterances = utterances.map((u, i) => ({ ...u, speaker: `P${pitch.ranks![i]}` }));
+            method = `tom de voz · ${pitch.clusterHz!.map((h) => h.toFixed(0) + 'Hz').join(' vs ')}`;
+          } else {
+            method = `AssemblyAI (pitch inconclusivo: ${pitch.reason})`;
+          }
+        } catch { /* mantem labels AssemblyAI */ }
+      }
       // Rank por tempo de fala (mesma heuristica do pipeline)
       const talk = new Map<string, number>();
       for (const u of utterances) talk.set(u.speaker, (talk.get(u.speaker) || 0) + (u.endMs - u.startMs));
       const ranked = Array.from(talk.entries()).sort((a, b) => b[1] - a[1]).map(([s]) => s);
       const rankBySpeaker: Record<string, number> = {};
       ranked.forEach((s, i) => { rankBySpeaker[s] = i; });
-      patch({ status: 'ready', utterances, rankBySpeaker, speakerCount: ranked.length });
+      patch({ status: 'ready', utterances, rankBySpeaker, speakerCount: ranked.length, method });
     } catch (e) {
       vaTranscriptRef.current[fileId] = false;
       patch({ status: 'error', error: (e as Error)?.message || 'falha na transcrição' });
@@ -7460,7 +7487,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                       <div className="mono mb-1.5 flex flex-wrap items-center gap-2 text-[9px] uppercase tracking-widest text-fuchsia-200">
                                                         <span>O que {multiRole ? role.role : 'esse avatar'} vai falar</span>
                                                         <span className="text-text-muted normal-case tracking-normal">
-                                                          {tr.speakerCount} locutor{(tr.speakerCount || 0) === 1 ? '' : 'es'} detectado{(tr.speakerCount || 0) === 1 ? '' : 's'} · prévia com voz filtrada{swapped ? ' · ⇄ invertido' : ''}
+                                                          {tr.speakerCount} locutor{(tr.speakerCount || 0) === 1 ? '' : 'es'} detectado{(tr.speakerCount || 0) === 1 ? '' : 's'} · {tr.method || 'prévia'}{swapped ? ' · ⇄ invertido' : ''}
                                                         </span>
                                                       </div>
                                                       {multiRole && (tr.speakerCount || 0) < roles.length ? (

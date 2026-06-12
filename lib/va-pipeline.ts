@@ -19,6 +19,7 @@
  */
 
 import { decodeAudioRobust, detectSilences } from './audio-engine';
+import { clusterUtterancesByPitch } from './pitch-speaker';
 import { extractAudio, concatAvatarParts, concatVideosFast, cutVideoSegments, overlaySegmentsOnVideo } from './ffmpeg-worker';
 import { isolateVoice, type VoiceIsolatorMode } from './voice-isolator';
 import { isolateVoiceNeural } from './voice-isolator-neural';
@@ -514,7 +515,29 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
     // ela, aborta com erro acionavel — nunca gera saida errada calada.
     let diarizeFailure: string | null = null;
     try {
-      const utts = await input.diarize!(audioBlob);
+      let utts = await input.diarize!(audioBlob);
+      // === PITCH OVERRIDE (2026-06-11) ===
+      // AssemblyAI da o TEXTO+timestamps confiaveis, mas os speaker_labels
+      // se mostraram instaveis nos ADs reais (rotulava trechos do Doutor
+      // como a mulher). Pro caso de 2 papeis, o TOM DE VOZ (F0 por
+      // autocorrelacao na voz isolada) decide QUEM fala — fisica, nao
+      // estatistica. Homem ~110Hz vs mulher ~200Hz = gap enorme. Se o gap
+      // for fraco (locutores do mesmo sexo), mantem os labels AssemblyAI.
+      let pitchNote = '';
+      if (maxRolesInPipeline === 2 && utts && utts.length > 0) {
+        const pitch = clusterUtterancesByPitch(
+          audioBuffer.getChannelData(0),
+          audioBuffer.sampleRate,
+          utts.map((u) => ({ start: u.start, end: u.end })),
+          2,
+        );
+        if (pitch.confident && pitch.ranks) {
+          utts = utts.map((u, i) => ({ ...u, speaker: `P${pitch.ranks![i]}` }));
+          pitchNote = ` · ${pitch.reason}`;
+        } else {
+          pitchNote = ` · pitch inconclusivo (${pitch.reason}) — labels AssemblyAI`;
+        }
+      }
       const speakers = Array.from(new Set((utts || []).map((u) => u.speaker)));
       if (utts && speakers.length >= 2) {
         const planned = planSpeakerBoundaries(utts, audioBuffer.duration, silences, targetSec, minSec, maxSec);
@@ -527,11 +550,11 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
         const turnCount = segRoleRank.reduce((acc, r, i) => acc + (i > 0 && segRoleRank![i - 1] !== r ? 1 : 0), 0) + 1;
         progress({
           stage: 'diarize',
-          message: `${speakers.length} locutores detectados · ${turnCount} turnos de fala · ${boundaries.length} segmentos roteados por papel`,
+          message: `${speakers.length} locutores detectados · ${turnCount} turnos de fala · ${boundaries.length} segmentos roteados por papel${pitchNote}`,
           percent: 19,
         });
       } else {
-        diarizeFailure = `detectou ${speakers.length || 0} locutor(es), mas o doc indica ${maxRolesInPipeline} papeis (avatares diferentes)`;
+        diarizeFailure = `detectou ${speakers.length || 0} locutor(es), mas o doc indica ${maxRolesInPipeline} papeis (avatares diferentes)${pitchNote}`;
       }
     } catch (e) {
       diarizeFailure = (e as Error)?.message || String(e);
