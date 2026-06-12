@@ -60,6 +60,9 @@ export type Candidate = {
   recall: number;
   precision: number;
   lcsRatio: number;
+  // Confianca MEDIA do ASR nas palavras do corte (0..1), so quando o provider
+  // entrega confidence por palavra (AssemblyAI). undefined = sem dado real.
+  confidence?: number;
 };
 
 export type Cut = {
@@ -70,6 +73,8 @@ export type Cut = {
   score: number;
   recall: number;
   precision: number;
+  // Confianca do ASR no trecho (0..1). undefined quando o provider nao da.
+  confidence?: number;
 };
 
 const FILLERS = new Set([
@@ -221,6 +226,55 @@ export function splitIntoPhrases(copy: string): string[] {
     .split(/[.!?\n]+|…/)
     .map((p) => p.trim())
     .filter((p) => p.length > 2);
+}
+
+// =================== Vocab hints (viés de transcrição) ==================
+
+// Palavras comuns que iniciam frase em PT — capitalizadas mas NAO sao nome
+// proprio. Filtradas pra nao virar "boost" inutil.
+const SENT_START = new Set([
+  'entao', 'porque', 'porem', 'quando', 'clique', 'clica', 'mesmo', 'sem',
+  'para', 'voce', 'isso', 'isto', 'como', 'aqui', 'tem', 'mas', 'essa',
+  'esse', 'cada', 'eu', 'meu', 'minha', 'então', 'porquê', 'você', 'ah',
+  'sera', 'será', 'agora', 'depois', 'antes', 'todo', 'toda', 'uma', 'que',
+  'por', 'com', 'tudo', 'basta', 'assim', 'então', 'resultado', 'pernas',
+]);
+
+// Termos de DOMINIO/marca que o ASR erra muito em audio comprimido. Boostados
+// mesmo em minuscula. (Lista vive aqui pra ser facil de estender por nicho.)
+const DOMAIN_TERMS =
+  /\b(lipedema|linf[aá]ticas?|ozempic|mounjaro|monjaro|tirzepatida|semaglutida|retatrutida|retratutida|intermitente|anti-?inflamat[oó]rias?|drenagem|celulites?|fisiculturista|nutricionista)\b/giu;
+
+/**
+ * Extrai termos da COPY pra usar como dica de vocabulario na transcricao
+ * (Whisper `prompt` / AssemblyAI `word_boost`). Pega nomes proprios
+ * (capitalizados no meio da frase, ex: "Mounjaro", "Ozempic", "Matheus") e
+ * termos de dominio conhecidos. Resolve o erro de marca ("Manjaro") sem
+ * induzir alucinacao (lista enxuta, sem frases inteiras).
+ */
+export function extractVocabHints(copy: string): string[] {
+  const hints = new Map<string, string>(); // chave minuscula -> forma original
+  const add = (w: string) => {
+    const clean = w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}-]+$/gu, '');
+    if (clean.length < 4) return;
+    const key = clean.toLowerCase();
+    if (!hints.has(key)) hints.set(key, clean);
+  };
+
+  // 1) Nomes proprios: tokens capitalizados (len>=4) que nao sao so inicio de
+  //    frase comum em PT.
+  for (const raw of copy.split(/\s+/)) {
+    const clean = raw.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}-]+$/gu, '');
+    if (clean.length < 4) continue;
+    if (!/^[A-ZÀ-Ý]/u.test(clean)) continue;
+    if (SENT_START.has(clean.toLowerCase())) continue;
+    add(clean);
+  }
+
+  // 2) Termos de dominio/marca conhecidos (mesmo minusculos).
+  for (const m of copy.matchAll(DOMAIN_TERMS)) add(m[0]);
+
+  return Array.from(hints.values()).slice(0, 40);
 }
 
 // =================== Window matching ====================================
@@ -385,9 +439,11 @@ export function findTopWindows(
 
       const hasConf = wordSlice.some((w) => typeof w.confidence === 'number');
       let confidence: number;
+      let realConf: number | undefined;
       if (hasConf) {
         const cs = wordSlice.map((w) => w.confidence ?? 0.7);
         confidence = cs.reduce((a, b) => a + b, 0) / cs.length;
+        realConf = confidence; // confianca REAL do ASR (pra exibir/avaliar)
       } else {
         confidence = cadence;
       }
@@ -430,6 +486,7 @@ export function findTopWindows(
         recall,
         precision,
         lcsRatio,
+        confidence: realConf,
       });
     }
   }
@@ -692,6 +749,7 @@ export function matchCopyWindowed(copy: string, words: Word[]): Cut[] {
       score: cand.score,
       recall: cand.recall,
       precision: cand.precision,
+      confidence: cand.confidence,
     });
   }
 

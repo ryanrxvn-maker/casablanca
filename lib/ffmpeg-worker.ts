@@ -648,9 +648,27 @@ export async function cutVideoSegments(
 //
 // O frontend usa esse audio pra mandar pro AssemblyAI via /api/decupagem-copy/match.
 
+// Teto de bytes do audio enviado ao servidor (limite Vercel ~4.4MB, com
+// folga pra overhead do container opus).
+const TRANSCRIBE_AUDIO_BUDGET_BYTES = 3_800_000;
+
+/**
+ * Calcula o MAIOR bitrate de audio (kbps) que ainda cabe no budget pra dada
+ * duracao. Audio melhor = ASR mais preciso (menos erro de marca, timestamps
+ * mais confiaveis). Vai de 12kbps (videos longos, ~40min) ate 128kbps
+ * (videos curtos), onde a qualidade ja e' excelente pra fala.
+ */
+export function pickTranscribeBitrateKbps(durationSec?: number): number {
+  if (!durationSec || durationSec <= 0) return 64;
+  const maxBps = (TRANSCRIBE_AUDIO_BUDGET_BYTES * 8) / durationSec;
+  const kbps = Math.floor(maxBps / 1000);
+  return Math.max(12, Math.min(128, kbps));
+}
+
 export async function extractAudioForTranscription(
   file: Blob,
   opts: RunOptions = {},
+  durationSec?: number,
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
   const { fetchFile } = await import('@ffmpeg/util');
@@ -659,20 +677,26 @@ export async function extractAudioForTranscription(
   const outputName = 'out.opus';
   const progressHandler = wireProgress(ff, opts.onProgress);
 
+  // Bitrate adaptativo: maximiza a qualidade sem estourar o limite do servidor.
+  const kbps = pickTranscribeBitrateKbps(durationSec);
+  // Acima de ~24k vale o modo 'audio' (preserva timbre/consoantes); abaixo, o
+  // 'voip' e' mais inteligivel no bitrate baixo.
+  const application = kbps >= 24 ? 'audio' : 'voip';
+
   try {
     opts.onStage?.('Carregando...');
     await ff.writeFile(inputName, await fetchFile(file));
 
-    opts.onStage?.('Extraindo...');
+    opts.onStage?.(`Extraindo audio (${kbps}kbps) pra transcricao...`);
     await ff.exec([
       '-i', inputName,
       '-vn',
       '-c:a', 'libopus',
-      '-b:a', '12k',
+      '-b:a', `${kbps}k`,
       '-ac', '1',
       '-ar', '16000',
-      '-application', 'voip',
-      '-vbr', 'off',
+      '-application', application,
+      '-vbr', 'on',
       outputName,
     ]);
     const data = await ff.readFile(outputName);

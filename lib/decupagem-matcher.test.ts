@@ -22,6 +22,7 @@ import {
   splitIntoPhrases,
   stem,
   normalize,
+  extractVocabHints,
   type Word,
   type Cut,
 } from './decupagem-matcher';
@@ -103,6 +104,26 @@ check(
   'textSimilarity frases distintas baixo',
   textSimilarity('o ceu e azul claro', 'comprar pao na padaria') < 0.3,
 );
+
+// extractVocabHints — dica de vocabulario p/ a transcricao (marcas/nomes).
+{
+  const copy =
+    'Mounjaro, Ozempic ou qualquer canetinha. ' +
+    'O lipedema não some com drenagem linfática. ' +
+    'Meu nome é Matheus Galvão. Clique em saiba mais agora.';
+  const hints = extractVocabHints(copy).map((h) => h.toLowerCase());
+  check('vocab pega a marca Mounjaro', hints.includes('mounjaro'),
+    JSON.stringify(hints));
+  check('vocab pega Ozempic', hints.includes('ozempic'), JSON.stringify(hints));
+  check('vocab pega o nome proprio (Matheus/Galvao)',
+    hints.includes('matheus') || hints.includes('galvão'),
+    JSON.stringify(hints));
+  check('vocab pega termo de dominio (lipedema)', hints.includes('lipedema'),
+    JSON.stringify(hints));
+  check('vocab NAO inclui inicio-de-frase comum ("clique"/"meu")',
+    !hints.includes('clique') && !hints.includes('meu'),
+    JSON.stringify(hints));
+}
 
 // --------------------------------------------------------------------- //
 // S1: expert repete a MESMA frase 10x → 1 corte so

@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getUserKey } from '@/lib/user-keys';
 import { requireTier } from '@/lib/require-tier';
-import { matchCopyWindowed, type Word } from '@/lib/decupagem-matcher';
+import {
+  matchCopyWindowed,
+  extractVocabHints,
+  type Word,
+} from '@/lib/decupagem-matcher';
 
 /**
  * POST /api/decupagem-copy/match
@@ -42,7 +46,9 @@ export async function POST(req: Request) {
 
     const audio = form.get('audio');
     const copyText = String(form.get('copy') ?? '').trim();
-    const requestedProvider = String(form.get('provider') ?? 'groq');
+    // 'auto' (default) = AssemblyAI se houver chave (forced-align + confidence),
+    // senao Groq. Pode forcar 'groq' ou 'assemblyai'.
+    const requestedProvider = String(form.get('provider') ?? 'auto');
 
     if (!(audio instanceof File)) {
       return jsonError('Audio ausente no campo "audio".', 400);
@@ -54,33 +60,42 @@ export async function POST(req: Request) {
       return jsonError('Copy muito grande (max 50000 caracteres).', 400);
     }
 
+    // Termos da copy (marcas/nomes/dominio) que viram dica de vocabulario pro
+    // ASR — resolve mistranscricao de marca ("Manjaro" -> "Mounjaro").
+    const vocab = extractVocabHints(copyText);
+
     let words: Word[] = [];
     let provider = '';
+    const errors: string[] = [];
 
-    if (requestedProvider === 'groq') {
+    // Ordem dos providers conforme escolha. 'auto'/'assemblyai' tentam AAI
+    // primeiro (timestamps forced-aligned + confidence por palavra).
+    const order: Array<'assemblyai' | 'groq'> =
+      requestedProvider === 'groq'
+        ? ['groq', 'assemblyai']
+        : ['assemblyai', 'groq'];
+
+    for (const p of order) {
+      if (words.length > 0) break;
       try {
-        words = await transcribeViaGroq(audio);
-        provider = 'groq';
+        words =
+          p === 'assemblyai'
+            ? await transcribeViaAssemblyAI(audio, vocab)
+            : await transcribeViaGroq(audio, vocab);
+        if (words.length > 0) provider = p;
       } catch (e) {
-        console.warn('[decupagem] Groq falhou, fallback AAI:', e);
+        const msg = e instanceof Error ? e.message : String(e);
+        errors.push(`${p}: ${msg}`);
+        console.warn(`[decupagem] ${p} falhou:`, msg);
       }
     }
 
     if (words.length === 0) {
-      try {
-        words = await transcribeViaAssemblyAI(audio);
-        provider = 'assemblyai';
-      } catch (e) {
-        return jsonError(
-          'Falha em ambos providers. Configure Groq ou AssemblyAI em /configuracoes/api.',
-          502,
-          e instanceof Error ? e.message : String(e),
-        );
-      }
-    }
-
-    if (words.length === 0) {
-      return jsonError('Transcricao vazia.', 504);
+      return jsonError(
+        'Falha na transcricao. Configure Groq ou AssemblyAI em /configuracoes/api.',
+        502,
+        errors.join(' | '),
+      );
     }
 
     const cuts = matchCopyWindowed(copyText, words);
@@ -91,9 +106,20 @@ export async function POST(req: Request) {
       );
     }
 
+    // Confianca media do ASR sobre os trechos efetivamente cortados (so quando
+    // o provider entrega confidence — AssemblyAI). Serve de termometro pro user.
+    const confVals = cuts
+      .map((c) => c.confidence)
+      .filter((v): v is number => typeof v === 'number');
+    const avgConfidence =
+      confVals.length > 0
+        ? confVals.reduce((a, b) => a + b, 0) / confVals.length
+        : null;
+
     return NextResponse.json({
       cuts,
       provider,
+      avgConfidence,
       transcriptPreview: words
         .map((w) => w.text)
         .join(' ')
@@ -111,7 +137,7 @@ export async function POST(req: Request) {
 
 // =================== Transcription ======================================
 
-async function transcribeViaGroq(audio: File): Promise<Word[]> {
+async function transcribeViaGroq(audio: File, vocab: string[] = []): Promise<Word[]> {
   const keyResult = await getUserKey('groq');
   if ('response' in keyResult) throw new Error('Groq key ausente.');
   const apiKey = keyResult.key;
@@ -122,6 +148,11 @@ async function transcribeViaGroq(audio: File): Promise<Word[]> {
   fd.append('response_format', 'verbose_json');
   fd.append('timestamp_granularities[]', 'word');
   fd.append('language', 'pt');
+  // `prompt` = dica de vocabulario (Whisper enviesa a GRAFIA dos termos sem
+  // induzir alucinacao quando e' so uma lista enxuta de nomes/marcas).
+  if (vocab.length > 0) {
+    fd.append('prompt', `Termos do roteiro: ${vocab.join(', ')}.`);
+  }
 
   const res = await fetch(`${GROQ_BASE}/audio/transcriptions`, {
     method: 'POST',
@@ -144,7 +175,10 @@ async function transcribeViaGroq(audio: File): Promise<Word[]> {
   }));
 }
 
-async function transcribeViaAssemblyAI(audio: File): Promise<Word[]> {
+async function transcribeViaAssemblyAI(
+  audio: File,
+  vocab: string[] = [],
+): Promise<Word[]> {
   const keyResult = await getUserKey('assemblyai');
   if ('response' in keyResult) throw new Error('AAI key ausente.');
   const apiKey = keyResult.key;
@@ -169,6 +203,13 @@ async function transcribeViaAssemblyAI(audio: File): Promise<Word[]> {
       language_code: 'pt',
       punctuate: true,
       format_text: true,
+      // disfluencies: captura "uh"/"é"/repeticoes — o texto reflete o que e'
+      // REALMENTE audivel (leaks aparecem), e o matcher corta em volta deles.
+      disfluencies: true,
+      // word_boost: enviesa o reconhecimento dos termos da copy (marcas/nomes).
+      ...(vocab.length > 0
+        ? { word_boost: vocab, boost_param: 'default' }
+        : {}),
     }),
   });
   if (!trRes.ok) throw new Error(`AAI transcript ${trRes.status}`);

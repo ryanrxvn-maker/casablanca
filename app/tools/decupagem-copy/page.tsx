@@ -56,6 +56,7 @@ type Cut = {
   copyPhrase: string;
   transcriptText: string;
   score: number;
+  confidence?: number;
 };
 
 export default function DecupagemCopyPage() {
@@ -82,6 +83,14 @@ function DecupagemCopyInner() {
     null,
   );
   const [cuts, setCuts] = useToolState<Cut[]>('decupcopy:cuts', []);
+  const [avgConfidence, setAvgConfidence] = useToolState<number | null>(
+    'decupcopy:avgConfidence',
+    null,
+  );
+  const [provider, setProvider] = useToolState<string | null>(
+    'decupcopy:provider',
+    null,
+  );
   const [resultUrl, setResultUrl] = useToolState<string | null>(
     'decupcopy:resultUrl',
     null,
@@ -137,6 +146,8 @@ function DecupagemCopyInner() {
     if (resultUrl) URL.revokeObjectURL(resultUrl);
     setResultUrl(null);
     setCuts([]);
+    setAvgConfidence(null);
+    setProvider(null);
     setStage(null);
     setProgress(null);
     setError(null);
@@ -164,10 +175,14 @@ function DecupagemCopyInner() {
       // Step 1: Extract audio
       setStage('Extraindo audio do video...');
       setProgress(0);
-      const audio = await extractAudioForTranscription(file, {
-        onStage: (s) => setStage(s),
-        onProgress: (p: FFProgress) => setProgress(p.ratio * 0.25),
-      });
+      const audio = await extractAudioForTranscription(
+        file,
+        {
+          onStage: (s) => setStage(s),
+          onProgress: (p: FFProgress) => setProgress(p.ratio * 0.25),
+        },
+        duration ?? undefined,
+      );
 
       if (audio.size > 4_400_000) {
         throw new Error(
@@ -182,7 +197,8 @@ function DecupagemCopyInner() {
       const fd = new FormData();
       fd.append('audio', audio, 'audio.opus');
       fd.append('copy', copyText);
-      fd.append('provider', 'groq');
+      // 'auto' = AssemblyAI (forced-align + confidence) se houver chave, senao Groq.
+      fd.append('provider', 'auto');
 
       abortRef.current = new AbortController();
       const res = await fetch('/api/decupagem-copy/match', {
@@ -192,7 +208,12 @@ function DecupagemCopyInner() {
       });
 
       const text = await res.text();
-      let json: { cuts?: Cut[]; provider?: string; error?: string };
+      let json: {
+        cuts?: Cut[];
+        provider?: string;
+        avgConfidence?: number | null;
+        error?: string;
+      };
       try {
         json = JSON.parse(text);
       } catch {
@@ -211,6 +232,10 @@ function DecupagemCopyInner() {
       }
 
       setCuts(json.cuts);
+      setProvider(json.provider ?? null);
+      setAvgConfidence(
+        typeof json.avgConfidence === 'number' ? json.avgConfidence : null,
+      );
       setStage(
         `${json.cuts.length} frase(s) alinhada(s) (${json.provider ?? '?'}). Cortando + concatenando...`,
       );
@@ -477,6 +502,30 @@ function DecupagemCopyInner() {
               </button>
             </div>
 
+            <div className="mb-4 flex flex-wrap items-center gap-2 text-[11px]">
+              <span className="mono rounded-full border border-line bg-bg px-2 py-0.5 uppercase tracking-widest text-text-muted">
+                motor: <span className="text-white">{provider ?? '?'}</span>
+              </span>
+              {avgConfidence !== null ? (
+                <span
+                  className={
+                    'mono rounded-full border px-2 py-0.5 uppercase tracking-widest ' +
+                    (avgConfidence >= 0.85
+                      ? 'border-lime/40 bg-lime/10 text-lime'
+                      : avgConfidence >= 0.7
+                        ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+                        : 'border-red-500/40 bg-red-500/10 text-red-300')
+                  }
+                >
+                  confiança da transcrição: {Math.round(avgConfidence * 100)}%
+                </span>
+              ) : (
+                <span className="mono rounded-full border border-line bg-bg px-2 py-0.5 uppercase tracking-widest text-text-muted">
+                  confiança: indisponível (use AssemblyAI p/ medir)
+                </span>
+              )}
+            </div>
+
             <video
               src={resultUrl}
               controls
@@ -504,6 +553,21 @@ function DecupagemCopyInner() {
                           {Math.round(c.score * 100)}%
                         </span>
                       </span>
+                      {typeof c.confidence === 'number' ? (
+                        <span
+                          className={
+                            'mono rounded-full px-2 py-0.5 ' +
+                            (c.confidence >= 0.85
+                              ? 'bg-lime/10 text-lime'
+                              : c.confidence >= 0.7
+                                ? 'bg-amber-500/10 text-amber-300'
+                                : 'bg-red-500/10 text-red-300')
+                          }
+                          title="Confiança do reconhecimento de fala neste trecho"
+                        >
+                          conf {Math.round(c.confidence * 100)}%
+                        </span>
+                      ) : null}
                     </div>
                     <div className="mt-1 grid gap-0.5 text-[11px]">
                       <div className="text-text-muted">
