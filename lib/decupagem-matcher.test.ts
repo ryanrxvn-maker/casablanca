@@ -1211,6 +1211,29 @@ console.log('\n[S40] complemento de faixas (keepSegmentsFromRemovals)');
     JSON.stringify(clamped));
 }
 
+// S41: o dedup-trim no RESULTADO REAL (transcricao do user) remove TODAS as
+// duplicacoes E a remocao e' pequena o bastante pra trava deterministica
+// (<30% da duracao) APLICAR — provando que a trava nao bloqueia a correcao.
+console.log('\n[S41] dedup-trim no resultado real: aplica e limpa');
+{
+  const result = 'O ozempic ou qualquer uma dessas canetinhas aqui e veneno pra quem tem esse tipo aqui o de celulite tem mulher que tem essa celulite e acha que e gordura normal e ai comeca uma rotina de treino uma dieta a usar manjaro se voce ta passando por isso pare o treino a dieta e o manjaro agora pior coisa que voce pode ta fazendo e eu vou te provar um dia desses uma moca chegou aqui no meu consultorio a queixa sabe qual era que as pernas estavam cada vez mais inchadas e nao importava o que ela fazia nao desinchava por nada ela grava 6 vezes por semana e achava que essa rotina ia deixar as pernas dela mais lisas torneadas firmes e que iria se livrar da famosa celulite sabe pernas cada vez mais grossas doloridas inflamadas isso acontece porque o lipedema nao e uma gordura normal que voce queima so indo para a academia o lipedema e uma inflamacao que piora e muito com o exercicio de impacto e e por isso que voce faz dieta vai para a academia e as suas pernas nao param de inchar que nem um balao porque o lipedema nao e gordura comum que voce elimina com qualquer dieta ou exercicio pesado e uma gordura inflamada cronicamente que fica presa poucos medicos e nutricionistas sabem disso ja que essa doenca comecou a ser mais estudada agora no ano de 2020 e isso explica o porque de voce continuar emagrecendo na parte de cima mas as suas pernas continuarem cada vez mais inchadas doloridas e com aquelas manchas roxas mesmo que voce corte todos os carboidratos faca jejum intermitente treine 6 vezes por semana use manjar ou use impit a gordura vai continuar inchando sem parar e as suas pernas vao ficar cada vez mais deformadas e o que voce precisa e ter uma rotina de alimentacao que seja anti-inflamatoria quando voce tira a inflamacao do jogo a gordura vai comecar a derreter eu vi isso acontecer milhares de vezes em menos de 21 dias e ja ajudei centenas de mulheres a sair desse resultado para esse para esse em menos de um mes clique em saiba mais assista a aula e sai de la com tudo que voce precisa para eliminar o lipedema ja nas proximas 3 semanas e olha sem gastar fortunas em drenagem linfatica sem passar fome comendo so salada sem gastar fortunas com drenagem linfatica sem passar fome comendo so salada e sem procedimentos invasivos caros e sem procedimentos invasivos caros clique agora em saiba mais e veja voce mesmo eu tambem vou te revelar a combinacao de especiarias que toda mulher tem na propria cozinha de casa e que e capaz de reduzir a inflamacao do lipedema em ate 40% em apenas 7 dias entao clique agora em saiba mais';
+  const w = audioOf(result);
+  const durMs = w[w.length - 1].end + 100;
+  const spans = findRepeatedSpans(w);
+  const keep = keepSegmentsFromRemovals(spans, durMs);
+  const keptMs = keep.reduce((a, k) => a + (k.endMs - k.startMs), 0);
+  const removedFrac = (durMs - keptMs) / durMs;
+  check('S41 detectou as duplicacoes do #25', spans.length >= 2,
+    `spans=${spans.length}`);
+  check('S41 remocao SÃ (<30% -> trava deterministica aplica)',
+    removedFrac > 0 && removedFrac < 0.3, `removido=${(removedFrac * 100).toFixed(1)}%`);
+  const out = applyKeep(w, spans).map((x) => x.text).join(' ');
+  check('S41 "gastar fortunas" 1x apos dedup',
+    (out.match(/gastar fortunas/g) || []).length === 1, out.slice(-200));
+  check('S41 "procedimentos invasivos" 1x apos dedup',
+    (out.match(/procedimentos invasivos/g) || []).length === 1, out.slice(-160));
+}
+
 // --------------------------------------------------------------------- //
 
 console.log(

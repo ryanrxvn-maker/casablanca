@@ -441,25 +441,27 @@ function DecupagemCopyInner() {
             const keep = keepSegmentsFromRemovals(spans, durSec * 1000).map(
               (k) => ({ start: k.startMs / 1000, end: k.endMs / 1000 }),
             );
-            if (keep.length > 0) {
+            const keptSec = keep.reduce((a, k) => a + (k.end - k.start), 0);
+            const removedSec = durSec - keptSec;
+            // TRAVA DETERMINISTICA (nao depende de re-auditoria ruidosa, que
+            // estava revertendo dedups bons): o dedup-trim e' preciso e so
+            // remove repeticao adjacente verificada. Aplica SEMPRE, desde que a
+            // remocao seja sã (< 30% da duracao — pega catastrofe/coordenada
+            // errada sem bloquear a correcao legitima).
+            if (keep.length > 0 && removedSec > 0 && removedSec < durSec * 0.3) {
               // Corta DO RESULTADO (bestOut), nao do bruto. Lockstep A/V.
-              const trimmed = await cutVideoSegments(bestOut, keep, {
+              out = await cutVideoSegments(bestOut, keep, {
                 onStage: (s) => setStage(s),
                 onProgress: (p: FFProgress) => setProgress(0.86 + p.ratio * 0.02),
               });
-              const trimmedOutcome = await auditBlob(trimmed);
-              // TRAVA: so adota se a auditoria confirmar que NAO piorou.
-              // Se quebrou (audit pior), REVERTE pro corte anterior.
-              if (
-                trimmedOutcome &&
-                problemCount(trimmedOutcome) <= problemCount(bestOutcome)
-              ) {
-                out = trimmed;
-                bestOutcome = trimmedOutcome;
-              } else {
-                out = bestOut;
-                console.warn('[dedup-trim] descartado (nao melhorou) — mantendo corte anterior');
-              }
+              // Re-audita SO pra atualizar o laudo exibido (informativo) — nao
+              // gateia mais a adocao.
+              const trimmedOutcome = await auditBlob(out);
+              if (trimmedOutcome) bestOutcome = trimmedOutcome;
+            } else if (removedSec >= durSec * 0.3) {
+              console.warn(
+                `[dedup-trim] remocao suspeita (${removedSec.toFixed(1)}s de ${durSec.toFixed(1)}s) — descartado por seguranca`,
+              );
             }
           }
         } catch (dedupErr) {
