@@ -114,6 +114,14 @@ function DecupagemCopyInner() {
     'decupcopy:audit',
     null,
   );
+  const [transcript, setTranscript] = useToolState<string | null>(
+    'decupcopy:transcript',
+    null,
+  );
+  const [transcribing, setTranscribing] = useToolState<boolean>(
+    'decupcopy:transcribing',
+    false,
+  );
   const [resultUrl, setResultUrl] = useToolState<string | null>(
     'decupcopy:resultUrl',
     null,
@@ -179,9 +187,47 @@ function DecupagemCopyInner() {
     setAvgConfidence(null);
     setProvider(null);
     setAuditReport(null);
+    setTranscript(null);
     setStage(null);
     setProgress(null);
     setError(null);
+  }
+
+  // Transcreve o RESULTADO gerado (AssemblyAI/Groq) e mostra o texto — pra
+  // conferir o corte sem subir manualmente no AssemblyAI.
+  async function transcribeResult() {
+    if (!resultUrl) return;
+    setTranscribing(true);
+    setTranscript(null);
+    try {
+      const blob = await (await fetch(resultUrl)).blob();
+      const meta = await probeVideoMetadata(blob);
+      const audio = await extractAudioForTranscription(
+        blob,
+        {},
+        meta?.durationSec,
+      );
+      if (audio.size > 4_400_000) {
+        throw new Error('Áudio do resultado excede ~4.4MB pra transcrição.');
+      }
+      const fd = new FormData();
+      fd.append('audio', audio, 'result.opus');
+      const res = await fetch('/api/decupagem-copy/transcribe', {
+        method: 'POST',
+        body: fd,
+      });
+      const json = (await res.json()) as { text?: string; error?: string };
+      if (!res.ok || !json.text) {
+        throw new Error(json.error || 'Falha ao transcrever.');
+      }
+      setTranscript(json.text);
+    } catch (e) {
+      setTranscript(
+        '[erro] ' + ((e as Error)?.message ?? 'Falha ao transcrever o resultado.'),
+      );
+    } finally {
+      setTranscribing(false);
+    }
   }
 
   async function process() {
@@ -665,9 +711,19 @@ function DecupagemCopyInner() {
                 </span>
                 Decupagem pronta · {cuts.length} cortes na ordem da copy
               </h3>
-              <button onClick={download} className="btn-primary !py-2 text-xs">
-                Baixar MP4
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={transcribeResult}
+                  disabled={transcribing}
+                  className="btn-secondary !py-2 text-xs"
+                  title="Transcreve o resultado (AssemblyAI) pra você conferir sem subir manualmente"
+                >
+                  {transcribing ? 'Transcrevendo…' : 'Transcrever (AssemblyAI)'}
+                </button>
+                <button onClick={download} className="btn-primary !py-2 text-xs">
+                  Baixar MP4
+                </button>
+              </div>
             </div>
 
             <div className="mb-4 flex flex-wrap items-center gap-2 text-[11px]">
@@ -729,6 +785,29 @@ function DecupagemCopyInner() {
               controls
               className="w-full rounded-[12px] border border-lime/30 bg-bg shadow-[0_0_28px_-12px_rgba(200,232,124,0.4)]"
             />
+
+            {transcript ? (
+              <div className="mt-4">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <h4 className="text-[11px] uppercase tracking-widest text-text-muted">
+                    Transcrição do resultado (AssemblyAI)
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => navigator.clipboard?.writeText(transcript)}
+                    className="btn-ghost !py-0.5 !px-2 text-[11px]"
+                  >
+                    Copiar
+                  </button>
+                </div>
+                <textarea
+                  readOnly
+                  value={transcript}
+                  rows={6}
+                  className="input-field w-full resize-y font-mono text-[11px] leading-relaxed"
+                />
+              </div>
+            ) : null}
 
             <div className="mt-4">
               <h4 className="mb-2 text-[11px] uppercase tracking-widest text-text-muted">
