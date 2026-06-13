@@ -526,6 +526,87 @@ console.log('\nregressao: convencao invertida (copy sob a base AD, metadata sob 
   }
 }
 
+/* ----------------- regressao: VARIANTES do mesmo AD no mesmo doc (F2/P1/AVA05) ----------------- */
+// Bug reportado (13/06/2026, AD14GL F2 vs P1): doc com VARIAS variantes do
+// mesmo AD ("- F2", "- P1", "- AVA05"), cada uma com metadata + copy proprias.
+// Todas casam baseAdId "AD14GL" -> findAdSection FUNDIA tudo numa secao e
+// poçava avatares/copy de variantes diferentes: F2 e P1 mostravam OS MESMOS
+// 2 avatares (aaliiceeofc__ + monetzamoraa) e a MESMA copy. Cada heading de
+// copy usa miolo de nicho diferente ("AD14GL - VFPB04 - F2") mas carrega o
+// token de variante. Isolar por token (F2/P1) conserta.
+console.log('\nregressao: variantes do mesmo AD no mesmo doc (F2/P1):');
+{
+  const DOC_VAR = [
+    'AD14GL - VRWA02 - AVA05 (Variação de Avatar)',
+    'INSTRUÇÕES PARA EDIÇÃO:',
+    'Avatar e Vozes:',
+    'Mulher: aaliiceeofc__.mp4',
+    'Manter a mesma voz dos avatares.',
+    '',
+    'AD14GL - VFPB04 - AVA05',
+    'Gancho do AVA05 com a pessoa que usou viagra de pobre.',
+    'Body',
+    'Corpo do AVA05 com bastante texto pra gerar pelo menos um take de body sem cortar frase no meio do caminho aqui.',
+    '',
+    'AD14GL - VRWA02 - F2 (Variação de Formato)',
+    'INSTRUÇÕES PARA EDIÇÃO:',
+    'Avatar e Vozes:',
+    'Mulher: monetzamoraa.mp4',
+    'Cenário: aaliiceeofc__.mp4 [p]',
+    'Manter a mesma voz dos avatares, a não ser que seja um avatar gringo.',
+    'Edição: Edição dopaminérgica;',
+    'Música de fundo: Música animada e batida forte.',
+    '',
+    'AD14GL - VFPB04 - F2',
+    'Eu dormi com mais de mil homens e sempre usei esse Viagra de Pobre neles pro amigão ficar duro.',
+    'Body',
+    'Tem um truque caseiro que deixa qualquer ferramenta firme como pedra e funciona pra qualquer homem sem remédio caro nenhum, presta atenção agora.',
+    '',
+    'AD14GL - VRWA02 - P1 (Mudança de Perspectiva)',
+    'INSTRUÇÕES PARA EDIÇÃO:',
+    'Avatar e Vozes:',
+    'Homem:',
+    'Manter a mesma voz dos avatares, a não ser que seja um avatar gringo.',
+    'Edição: Edição dopaminérgica;',
+    '',
+    'AD14GL - VFPB04 - P1',
+    'Eu dormi com mais de mil mulheres e sempre usei esse Viagra de Pobre nelas pro amigão ficar duro.',
+    'Body',
+    'Corpo do P1 com bastante texto pra gerar pelo menos um take de body sem cortar frase no meio do caminho aqui agora.',
+    '',
+    'AD15GL - VRWA02 - F1',
+    'Outro AD totalmente diferente que serve so de boundary pro merge nao vazar.',
+    'Body',
+    'Corpo do AD15 que nao deve aparecer em nenhuma variante do AD14.',
+  ].join('\n');
+  const CAND_VAR: AvatarCandidate[] = [
+    { id: 'av_monet', name: 'Monet Zamora', groupName: 'Monet', voiceName: '@monetzamoraa', voiceId: 'v_monet' },
+    { id: 'av_alice', name: 'Alice OFC', groupName: 'Alice', voiceName: '@aaliiceeofc__', voiceId: 'v_alice' },
+  ];
+  // --- F2: 1 avatar (Mulher/monetzamoraa). Cenário NAO e avatar. Copy = homens.
+  const rF2 = buildDisparosFromNomenclatures(DOC_VAR, ['AD14GL - VRWA02 - F2'], CAND_VAR);
+  const dF2 = rF2.disparos[0];
+  assert(!!dF2, 'F2 → 1 disparo');
+  if (dF2) {
+    console.log('  F2 parts:', dF2.parts.map((p) => `${p.label}→${p.avatarName ?? 'NULL'}`));
+    const ids = new Set(dF2.parts.map((p) => p.avatarId).filter(Boolean));
+    assert(ids.size === 1 && ids.has('av_monet'), `F2 usa SO monetzamoraa (got ${[...ids].join(',')||'nenhum'})`);
+    assert(!dF2.parts.some((p) => p.avatarId === 'av_alice'), 'F2 NAO inclui aaliiceeofc__ (Cenário/outra variante)');
+    assert(dF2.parts.some((p) => /mil homens/i.test(p.text)), 'F2 copy = a propria (homens)');
+    assert(!dF2.parts.some((p) => /mil mulheres|AVA05|AD15/i.test(p.text)), 'F2 sem copy vazada de P1/AVA05/AD15');
+  }
+  // --- P1: avatar "Homem:" sem arquivo -> 0 avatares casados. Copy = mulheres.
+  const rP1 = buildDisparosFromNomenclatures(DOC_VAR, ['AD14GL - VRWA02 - P1'], CAND_VAR);
+  const dP1 = rP1.disparos[0];
+  assert(!!dP1, 'P1 → 1 disparo');
+  if (dP1) {
+    console.log('  P1 parts:', dP1.parts.map((p) => `${p.label}→${p.avatarName ?? 'NULL'}`));
+    assert(dP1.parts.every((p) => !p.avatarId), 'P1 SEM avatar casado (Homem sem arquivo) — nao poça 2 avatares');
+    assert(dP1.parts.some((p) => /mil mulheres/i.test(p.text)), 'P1 copy = a propria (mulheres)');
+    assert(!dP1.parts.some((p) => /mil homens/i.test(p.text)), 'P1 sem copy vazada do F2 (homens)');
+  }
+}
+
 /* ----------------- doc vazio ----------------- */
 console.log('\nedge cases:');
 const empty = buildDisparosFromDoc('', CANDIDATES);

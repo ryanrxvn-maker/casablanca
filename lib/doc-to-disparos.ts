@@ -20,6 +20,7 @@ import {
   parseAvatars,
   parseParts,
   parseDarkoBriefing,
+  extractVariantToken,
   matchAvatar,
   normAvatarKey,
   type ParsedDarkoBriefing,
@@ -256,9 +257,13 @@ function buildDisparoCore(
   baseAdId: string,
   fullAdId: string,
   candidates: AvatarCandidate[],
+  variant?: string | null,
 ): DiscoveredDisparo | null {
-  // 1) Parser DARKO LAB (preferido)
-  const briefing = parseDarkoBriefing(text, baseAdId);
+  // 1) Parser DARKO LAB (preferido). Variant token (F2/P1/AVA05) isola a secao
+  //    quando o doc tem varias variantes do mesmo AD (senao avatares/copy vazam
+  //    entre variantes). Vem do caller (nomenclatura ORIGINAL — fullAdId pode
+  //    estar truncado antes do token).
+  const briefing = parseDarkoBriefing(text, baseAdId, variant ?? extractVariantToken(fullAdId));
   if (briefing && (briefing.hooks.length > 0 || briefing.body)) {
     const { parts, unmatched } = partsFromBriefing(briefing, candidates);
     if (parts.length > 0) {
@@ -358,7 +363,8 @@ export function buildDisparoForNomenclature(
 ): DiscoveredDisparo | null {
   if (!text || !nomenclature.trim()) return null;
   const { baseAdId, fullAdId } = extractAdIds(nomenclature);
-  const d = buildDisparoCore(text, baseAdId, fullAdId, candidates);
+  // Variant token vem da nomenclatura ORIGINAL (fullAdId trunca antes do token).
+  const d = buildDisparoCore(text, baseAdId, fullAdId, candidates, extractVariantToken(nomenclature));
   // Preserva a nomenclatura digitada como nome do AD (mais claro pro user)
   if (d && nomenclature.trim()) {
     return { ...d, baseAdId: nomenclature.trim(), safeName: safeNameOf(nomenclature) };

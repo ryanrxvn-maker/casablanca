@@ -21,6 +21,7 @@ import {
 import {
   parseAdSection,
   parseDarkoBriefing,
+  extractVariantToken,
   matchAvatar,
   normAvatarKey,
   isVATask,
@@ -1567,7 +1568,12 @@ function ClickUpPilotInner() {
             setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: 'Nome da task nao tem AD ID (ex AD139GL)' } }));
             continue;
           }
-          const briefing = parseDarkoBriefing(docR.text, baseAdId);
+          // Token de variante (F2/P1/AVA05): isola a secao da variante quando o
+          // doc tem varias variantes do mesmo AD — senao avatares/copy de
+          // variantes diferentes vazam (bug AD14GL: F2 e P1 mostravam os mesmos
+          // 2 avatares).
+          const variantToken = extractVariantToken(task.name);
+          const briefing = parseDarkoBriefing(docR.text, baseAdId, variantToken);
           if (!briefing || (briefing.hooks.length === 0 && !briefing.body)) {
             setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: `Parser nao achou hooks nem body pra ${baseAdId} no doc` } }));
             continue;
@@ -4448,7 +4454,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
 
     // Parser 2 (novo): briefing DARKO LAB com convencao G[N] = Hook[N]
     if (baseAdId) {
-      const b = parseDarkoBriefing(text, baseAdId);
+      const b = parseDarkoBriefing(text, baseAdId, extractVariantToken(taskName));
       if (b && (b.hooks.length > 0 || b.body)) {
         setBriefing(b);
         return;

@@ -104,7 +104,42 @@ function sectionHasCopyContent(section: string): boolean {
   return /^\s*(hook\b|h\d+\b|body\b|parte\s*\d+|texto\b)/im.test(section);
 }
 
-export function findAdSection(text: string, adIdOrPrefix: string): string | null {
+/**
+ * Extrai o TOKEN DE VARIANTE de um nome de task/heading (ex "F2", "P1",
+ * "AVA05"). Docs reais poem VARIAS variantes do mesmo AD num doc so:
+ *   "AD14GL - VRWA02 - F2 (Variação de Formato)"   ← avatar Mulher
+ *   "AD14GL - VFPB04 - F2"                          ← copy (homens)
+ *   "AD14GL - VRWA02 - P1 (Mudança de Perspectiva)" ← avatar Homem
+ *   "AD14GL - VFPB04 - P1"                          ← copy (mulheres)
+ * Todas casam o baseAdId "AD14GL" e o findAdSection FUNDIA todas numa secao
+ * so, poçando avatares/copy de variantes diferentes. O token de variante (o
+ * sufixo curto final) e o discriminador real — o miolo (VRWA02/VFPB04) varia.
+ *
+ * Regra: ultimo token "-"-separado (sem parenteticos) que seja 1-3 letras +
+ * 1-3 digitos (F2, P1, AVA05). EXCLUI G<n> (G-sibling tem tratamento proprio)
+ * e codigos AD/nicho (VRWA02/VFPB04 tem 4 letras → nao casam).
+ */
+export function extractVariantToken(taskName: string): string | null {
+  if (!taskName) return null;
+  const noParen = taskName.replace(/\([^)]*\)/g, ' ').replace(/\([^)]*\)/g, ' ').trim();
+  const tokens = noParen.split(/\s*[-–—]\s*/).map((t) => t.trim()).filter(Boolean);
+  if (tokens.length < 2) return null;
+  const last = tokens[tokens.length - 1].toUpperCase();
+  if (/^G\d+$/.test(last)) return null;     // G-sibling — nao e variante
+  if (/^AD\d/.test(last)) return null;       // codigo AD
+  if (/^[A-Z]{1,3}\d{1,3}$/.test(last)) return last;
+  return null;
+}
+
+/** True se a heading contem o token de variante (match exato de token,
+ *  case-insensitive). variant null/'' = sem filtro (sempre true). */
+function headingHasVariant(headingLine: string, variant: string | null | undefined): boolean {
+  if (!variant) return true;
+  const tokens = headingLine.toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+  return tokens.includes(variant.toUpperCase());
+}
+
+export function findAdSection(text: string, adIdOrPrefix: string, variant?: string | null): string | null {
   if (!text) return null;
   const lines = text.split(/\r?\n/);
   const targetUp = adIdOrPrefix.toUpperCase().trim();
@@ -116,6 +151,10 @@ export function findAdSection(text: string, adIdOrPrefix: string): string | null
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim().toUpperCase();
     if (!AD_HEADING_RE.test(line)) continue;
+    // Filtro de VARIANTE: docs com varias variantes do mesmo AD (F2/P1/AVA05)
+    // — so casa headings da variante pedida. Sem variant = sem filtro. Isso
+    // impede o merge de poçar avatares/copy de variantes diferentes.
+    if (!headingHasVariant(line, variant)) continue;
     let score = 0;
     if (line === targetUp) {
       score = 100;
@@ -603,7 +642,7 @@ export function parseGlobalAvatarLinks(section: string): Array<{ role: string; u
  * (ex "AD139GL" → ["AD139G1GL-VFPB04", "AD139G2GL-VFPB04", ...]).
  * Retorna em ordem numerica de N.
  */
-export function findGSiblings(fullDocText: string, baseAdId: string): Array<{ gNum: number; heading: string; section: string }> {
+export function findGSiblings(fullDocText: string, baseAdId: string, variant?: string | null): Array<{ gNum: number; heading: string; section: string }> {
   if (!fullDocText) return [];
   // Extrai numero + sufixo do base. Normaliza removendo espacos/traco antes
   // (cobre 2 convencoes DARKO):
@@ -624,7 +663,7 @@ export function findGSiblings(fullDocText: string, baseAdId: string): Array<{ gN
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim();
     const mm = t.match(re);
-    if (mm) {
+    if (mm && headingHasVariant(t, variant)) {
       found.push({ gNum: parseInt(mm[1], 10), lineStart: i, heading: t });
     }
   }
@@ -1222,7 +1261,7 @@ export function splitBySpeaker(
  *  startsWith(normBase) ja exclui os G-siblings: "AD14G1GL" NAO comeca com
  *  "AD14GL" (bate ate "AD14G", diverge no proximo char), e o limite
  *  digito→sufixo evita casar AD vizinho (AD140GL nao comeca com AD14GL). */
-function findBaseCopyBlock(fullDocText: string, baseAdId: string): string | null {
+function findBaseCopyBlock(fullDocText: string, baseAdId: string, variant?: string | null): string | null {
   if (!fullDocText) return null;
   const lines = fullDocText.split(/\r?\n/);
   const normBase = baseAdId.toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -1230,8 +1269,16 @@ function findBaseCopyBlock(fullDocText: string, baseAdId: string): string | null
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim();
     if (!AD_HEADING_RE.test(t)) continue;
+    // Variante: a copy pode estar sob heading com miolo de nicho diferente
+    // ("AD14GL - VFPB04 - F2") mas SEMPRE carrega o token de variante. Filtra
+    // por ele pra nao pegar a copy de outra variante (P1/AVA05).
+    if (!headingHasVariant(t, variant)) continue;
     const normHead = t.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    if (!normHead.startsWith(normBase)) continue;
+    // Quando ha variante, o miolo do nicho pode divergir do baseAdId — entao
+    // basta o AD-numero+sufixo aparecer; senao exige startsWith do base.
+    const adNum = (normBase.match(/^AD\d+[A-Z]*/) || [''])[0];
+    const matchesBase = variant ? normHead.startsWith(adNum) : normHead.startsWith(normBase);
+    if (!matchesBase) continue;
     const end = findNextAdHeading(lines, i);
     const block = lines.slice(i, end).join('\n');
     if (sectionHasCopyContent(block)) return block;
@@ -1239,8 +1286,8 @@ function findBaseCopyBlock(fullDocText: string, baseAdId: string): string | null
   return null;
 }
 
-export function parseDarkoBriefing(fullDocText: string, baseAdId: string): ParsedDarkoBriefing | null {
-  const baseSection = findAdSection(fullDocText, baseAdId);
+export function parseDarkoBriefing(fullDocText: string, baseAdId: string, variant?: string | null): ParsedDarkoBriefing | null {
+  const baseSection = findAdSection(fullDocText, baseAdId, variant);
   if (!baseSection) return null;
   let avatars = parseAvatars(baseSection);
   // Fallback: alguns ADs usam 'Link do avatar: <file>' em vez de 'Avatar:'
@@ -1265,7 +1312,7 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string): Parse
   for (const a of avatars) {
     if (a.role) knownRoles.push(a.role);
   }
-  const siblings = findGSiblings(fullDocText, baseAdId);
+  const siblings = findGSiblings(fullDocText, baseAdId, variant);
   const hooks: ParsedDarkoBriefing['hooks'] = [];
   let body: string | null = null;
   let bodyRole: string | null = null;
@@ -1313,7 +1360,7 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string): Parse
   // fonte AUTORITATIVA: sobrescreve o hook junk. Bug reportado (13/06/2026,
   // AD14GL): painel mostrava "0 hooks + 0 body splits" com 1 avatar.
   if (!body) {
-    const baseBlock = findBaseCopyBlock(fullDocText, baseAdId);
+    const baseBlock = findBaseCopyBlock(fullDocText, baseAdId, variant);
     if (baseBlock) {
       const parsed = parseGSibling(baseBlock);
       const baseBodySegs = parsed.body
