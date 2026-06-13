@@ -851,16 +851,24 @@ export type AuditReport = {
 export function auditResult(copy: string, auditWords: Word[]): AuditReport {
   const phrases = splitIntoPhrases(copy);
   const auditContent: string[] = [];
+  const contentTime: number[] = []; // start (ms) de cada palavra-conteudo
   for (const w of auditWords) {
     const s = stem(tokenize(w.text)[0] ?? '');
-    if (isContent(s)) auditContent.push(s);
+    if (isContent(s)) {
+      auditContent.push(s);
+      contentTime.push(w.start);
+    }
   }
+  // MESMO detector preciso que o dedup-trim usa (adjacencia + reaparicao).
+  // A flag "duplicated" da auditoria sai dele -> audit e trim CONSISTENTES:
+  // pega duplicacao real (#24) e nao falsa frase limpa cujas palavras se
+  // repetem na frase vizinha (#3/#10).
+  const repeatedSpans = findRepeatedSpans(auditWords);
 
   const out: PhraseAudit[] = [];
   let cursor = 0;
 
   for (let i = 0; i < phrases.length; i++) {
-    const phraseStart = cursor; // onde esta frase comecou a procurar
     const pc = stemTokens(phrases[i]).filter(isContent);
     if (pc.length === 0) {
       out.push({
@@ -912,29 +920,20 @@ export function auditResult(copy: string, auditWords: Word[]): AuditReport {
     const coverage = bestCov < 0 ? 0 : bestCov;
     const tailOk = bestTailOk;
 
-    // Duplicacao por EXCESSO (robusto, simetrico): na regiao da frase (a partir
-    // de phraseStart, larga o bastante p/ 2 ocorrencias), quantas palavras-
-    // conceito aparecem MAIS vezes do que a copy pede? Se boa parte dobra, o
-    // retake vazou no corte. Imune a:
-    //   - qual ocorrencia a janela de coverage travou (ancora em phraseStart);
-    //   - palavra que a copy repete DE PROPOSITO (compara com o esperado).
+    // Duplicacao: existe uma faixa de fala REPETIDA (detector preciso, o mesmo
+    // do dedup-trim) DENTRO da regiao [bestStart, bestLastPos] desta frase?
     let duplicated = false;
-    if (pc.length >= 2 && coverage >= 0.5) {
-      const phraseCount = new Map<string, number>();
-      for (const s of pc) phraseCount.set(s, (phraseCount.get(s) ?? 0) + 1);
-      const regionEnd = Math.min(
-        auditContent.length,
-        phraseStart + Math.round(pc.length * 2.5) + 8,
-      );
-      let excess = 0;
-      for (const [s, expected] of phraseCount) {
-        let cnt = 0;
-        for (let j = phraseStart; j < regionEnd; j++) {
-          if (fuzzyEq(s, auditContent[j])) cnt++;
-        }
-        if (cnt > expected) excess++;
-      }
-      duplicated = excess >= 2 && excess / phraseCount.size >= 0.4;
+    if (coverage >= 0.5 && bestLastPos >= 0 && contentTime.length > 0) {
+      const regStart = contentTime[Math.min(bestStart, contentTime.length - 1)];
+      const regEnd = contentTime[Math.min(bestLastPos, contentTime.length - 1)];
+      // O span de repeticao cobre a 1a ocorrencia [start, end]; a 2a vem logo
+      // depois (~mesmo tamanho). Estende pra cobrir as DUAS ocorrencias e ve se
+      // a regiao da frase (que pode ter travado na 1a OU na 2a) cai dentro.
+      // Nao vaza pro vizinho: o estendido termina ~no fim da 2a ocorrencia.
+      duplicated = repeatedSpans.some((sp) => {
+        const ext = sp.endMs + (sp.endMs - sp.startMs);
+        return sp.startMs < regEnd && ext > regStart;
+      });
     }
 
     let status: 'ok' | 'review' | 'fail';

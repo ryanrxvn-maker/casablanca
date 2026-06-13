@@ -985,10 +985,12 @@ console.log('\n[S33] auditoria com transcricao REAL do resultado');
     '  [S33] status por frase: ' +
       rep.phrases.map((p) => `${p.idx}:${p.status}`).join(' '),
   );
-  check('S33 auditoria aprova a maioria (>=18 ok)', rep.okCount >= 18,
-    `okCount=${rep.okCount}`);
+  // O bug do all-red era 25 fails. A trava real e' failCount baixo (review e'
+  // ambar informativo, ok p/ resultado bagunçado da 1a rodada).
   check('S33 nao marca quase tudo como falha (all-red = bug)',
-    rep.failCount <= 5, `failCount=${rep.failCount}`);
+    rep.failCount <= 3, `failCount=${rep.failCount}`);
+  check('S33 a maioria nao-falha', rep.okCount + rep.reviewCount >= rep.total - 3,
+    `ok=${rep.okCount} review=${rep.reviewCount} fail=${rep.failCount}`);
   check('S33 flagou as duplicacoes reais (#3,#6,#12,#15 = review)',
     rep.phrases[2].status === 'review' && rep.phrases[5].status === 'review' &&
     rep.phrases[11].status === 'review' && rep.phrases[14].status === 'review',
