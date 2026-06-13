@@ -561,7 +561,10 @@ export function findTopWindows(
         cadence * 0.02 -
         mergePenalty;
 
-      if (score < MIN_SCORE_TO_KEEP) continue;
+      // No passe DESESPERADO o piso e' baixo: melhor entregar o melhor trecho
+      // disponivel (a linha existe no bruto, so foi muito improvisada) do que
+      // dropar a frase inteira. A auditoria flaga se vier fraca.
+      if (score < (desperate ? 0.2 : MIN_SCORE_TO_KEEP)) continue;
 
       // ===== FIX-2: estende sobre os conectivos de borda da copy ============
       // O matcher ancora a janela na 1a palavra-CONCEITO, clipando o "Tem"/"E

@@ -117,7 +117,10 @@ async function transcribeViaAssemblyAI(
       language_code: 'pt',
       punctuate: true,
       format_text: true,
-      disfluencies: true,
+      // ATENCAO: `disfluencies` NAO e' suportado em pt pela AssemblyAI — manda-lo
+      // fazia a chamada FALHAR ("not available in this language") e o tool caía
+      // pro Groq (timestamps inferidos, piores). Sem ele, o AAI funciona e
+      // entrega timestamps forced-aligned (bem melhores p/ corte sem vazamento).
       ...(vocab.length > 0
         ? { word_boost: vocab, boost_param: 'default' }
         : {}),
