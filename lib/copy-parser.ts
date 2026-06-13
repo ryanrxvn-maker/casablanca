@@ -1212,6 +1212,33 @@ export function splitBySpeaker(
     .filter((s) => s.text.length > 0);
 }
 
+/** Localiza o bloco de copy sob a heading BASE (sem G<n>) de um AD.
+ *  Alguns docs INVERTEM a convencao DARKO: metadados+avatar ficam sob a
+ *  heading G1 (ex "AD14G1GL - VRWA02 - AVA05") e o hook+body ficam DIRETO sob
+ *  a heading base ("AD14GL - VRWA02 - AVA05"). findGSiblings so olha headings
+ *  com G<digito>, entao a copy se perdia (0 hooks + 0 body). Retorna o bloco
+ *  (heading + copy) ou null se nao houver copy real.
+ *
+ *  startsWith(normBase) ja exclui os G-siblings: "AD14G1GL" NAO comeca com
+ *  "AD14GL" (bate ate "AD14G", diverge no proximo char), e o limite
+ *  digito→sufixo evita casar AD vizinho (AD140GL nao comeca com AD14GL). */
+function findBaseCopyBlock(fullDocText: string, baseAdId: string): string | null {
+  if (!fullDocText) return null;
+  const lines = fullDocText.split(/\r?\n/);
+  const normBase = baseAdId.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!normBase) return null;
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (!AD_HEADING_RE.test(t)) continue;
+    const normHead = t.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (!normHead.startsWith(normBase)) continue;
+    const end = findNextAdHeading(lines, i);
+    const block = lines.slice(i, end).join('\n');
+    if (sectionHasCopyContent(block)) return block;
+  }
+  return null;
+}
+
 export function parseDarkoBriefing(fullDocText: string, baseAdId: string): ParsedDarkoBriefing | null {
   const baseSection = findAdSection(fullDocText, baseAdId);
   if (!baseSection) return null;
@@ -1274,6 +1301,36 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string): Parse
         bodySegments = segs;
         body = segs.map((s) => s.text).join('\n\n');
         bodyRole = segs[0].role;
+      }
+    }
+  }
+
+  // FALLBACK convencao INVERTIDA: metadados sob a heading G1 e hook+body DIRETO
+  // sob a heading base (ex "AD14GL - VRWA02 - AVA05"). findGSiblings so via a
+  // G1 (metadata) -> hook junk (prosa de instrucao vaza) + sem body. A base
+  // tem um marker "Body" REAL — sinal inequivoco de copy. Quando a base tem
+  // body real E os siblings nao produziram body (= eram metadata), a base e a
+  // fonte AUTORITATIVA: sobrescreve o hook junk. Bug reportado (13/06/2026,
+  // AD14GL): painel mostrava "0 hooks + 0 body splits" com 1 avatar.
+  if (!body) {
+    const baseBlock = findBaseCopyBlock(fullDocText, baseAdId);
+    if (baseBlock) {
+      const parsed = parseGSibling(baseBlock);
+      const baseBodySegs = parsed.body
+        ? splitBySpeaker(parsed.body.text, knownRoles, parsed.body.role, avatarUsernames)
+            .map((s) => ({ role: s.role, username: s.username ?? null, text: sanitizeSpokenCopy(s.text, knownRoles) }))
+            .filter((s) => s.text.length > 0)
+        : [];
+      if (baseBodySegs.length > 0) {
+        // Limpa qualquer hook junk vindo da G1 de metadata e refaz da base.
+        hooks.length = 0;
+        if (parsed.hook) {
+          const hookText = sanitizeSpokenCopy(parsed.hook.text, knownRoles);
+          if (hookText) hooks.push({ label: 'HOOK 1', text: hookText, sourceG: 1, role: parsed.hook.role });
+        }
+        bodySegments = baseBodySegs;
+        body = baseBodySegs.map((s) => s.text).join('\n\n');
+        bodyRole = baseBodySegs[0].role;
       }
     }
   }

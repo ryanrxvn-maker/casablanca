@@ -468,6 +468,64 @@ console.log('\nregressao: multi-avatar por chip no body (AD40G1VN):');
   }
 }
 
+/* ----------------- regressao: convencao INVERTIDA (copy sob a base, metadata sob G1) ----------------- */
+// Bug reportado (13/06/2026, AD14GL - VRWA02 - AVA05): doc com DUAS headings —
+//   "AD14G1GL - VRWA02 - AVA05"  → so metadados (INSTRUÇÕES, avatar, refs)
+//   "AD14GL - VRWA02 - AVA05"    → a copy real (hook + Body)
+// findGSiblings so via a G1 (metadata) -> "0 hooks + 0 body splits" com 1
+// avatar detectado. A copy estava sob a heading BASE (sem G), que o parser de
+// G-siblings nunca olhava.
+console.log('\nregressao: convencao invertida (copy sob a base AD, metadata sob G1):');
+{
+  const DOC_INV = [
+    'AD14G1GL - VRWA02 - AVA05',
+    'INSTRUÇÕES PARA EDIÇÃO:',
+    'Avatar e Vozes:',
+    'Muher: 📎 aaliiceeofc__.mp4',
+    'Manter a mesma voz dos avatares, a não ser que seja um avatar gringo.',
+    'Edição: Edição dopaminérgica;',
+    'Referência:',
+    'Atenção na Voz: Gerar o áudio no Eleven Labs (elevenlabs.io). Selecionar o sotaque Brasileiro.',
+    'Referência de um áudio natural: 📎 Áudio ElevenLabs AD107GL.mp3',
+    'Música de fundo: Música animada e batida forte.',
+    'Referência:',
+    'https://www.tiktok.com/@viralmusichitsofficial/video/123',
+    'Tipo de Legenda:',
+    'Observações:',
+    '',
+    'AD14GL - VRWA02 - AVA05',
+    'Eu dormi com mais de mil homens e sempre usei esse Viagra de Pobre neles pro amigão ficar duro o tempo que eu quisesse.',
+    '',
+    'Body',
+    'Isso vai me complicar, mas eu vou contar.',
+    'Tem o truque caseiro que deixa qualquer ferramenta firme como pedra, e funciona pra qualquer homem de qualquer idade sem depender de remédio caro nem receita de médico nenhum.',
+    'Presta atenção nos próximos segundos porque eu vou te ensinar o passo a passo completo agora.',
+  ].join('\n');
+  const CAND_INV: AvatarCandidate[] = [
+    { id: 'av_alice', name: 'Alice OFC', groupName: 'Alice', voiceName: '@aaliiceeofc__', voiceId: 'v_alice' },
+    { id: 'av_y', name: 'Outro', groupName: 'Outro', voiceName: '@naotem9', voiceId: 'v_y' },
+  ];
+  const r = buildDisparosFromNomenclatures(DOC_INV, ['AD14GL - VRWA02 - AVA05'], CAND_INV);
+  console.log('  diagnostic =', r.diagnostic);
+  assert(r.disparos.length === 1, `AD14GL → 1 disparo (got ${r.disparos.length})`);
+  const d = r.disparos[0];
+  if (d) {
+    console.log('  AD14GL parts:', d.parts.map((p) => `${p.label}→${p.avatarName ?? 'NULL'}`));
+    assert(d.fromDarkoBriefing, 'AD14GL parseado pelo DARKO');
+    const hooks = d.parts.filter((p) => /^HOOK/.test(p.label));
+    const body = d.parts.filter((p) => /^BODY/.test(p.label));
+    // Bug: antes era 0 hooks + 0 body. Agora a copy da base e recuperada.
+    assert(hooks.length === 1, `AD14GL tem 1 hook (got ${hooks.length})`);
+    assert(!!hooks[0] && /dormi com mais de mil/i.test(hooks[0].text), 'HOOK = texto real da base ("dormi com mais de mil")');
+    assert(!!hooks[0] && !/INSTRU|Eleven Labs|Referência|\.mp3/i.test(hooks[0].text), 'HOOK sem metadados vazados');
+    assert(body.length >= 1, `AD14GL tem body (got ${body.length})`);
+    assert(d.parts.some((p) => /truque caseiro/i.test(p.text)), 'body contem a fala real ("truque caseiro")');
+    // 1 unico avatar (Muher/aaliiceeofc__) fala tudo.
+    assert(d.parts.every((p) => p.avatarId === 'av_alice'), 'todas as partes → aaliiceeofc__ (1 avatar)');
+    assert(d.parts.every((p) => !/INSTRU|Música de fundo|Tipo de Legenda/i.test(p.text)), 'nenhum metadado vazou na fala');
+  }
+}
+
 /* ----------------- doc vazio ----------------- */
 console.log('\nedge cases:');
 const empty = buildDisparosFromDoc('', CANDIDATES);
