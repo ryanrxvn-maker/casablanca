@@ -702,6 +702,47 @@ console.log('\n[S24] nao funde duas takes (sem duplicar)');
   }
 }
 
+// S25: restart de retake SEM pausa (o expert emenda) — a janela NAO pode
+// fundir as duas tentativas. Erro real #24/#25.
+console.log('\n[S25] fusao por restart sem pausa e' + ' rejeitada');
+{
+  const copy = 'Eu já ajudei muitas mulheres a perder peso rápido.';
+  const cuts = matchCopyWindowed(
+    copy,
+    // UMA fala continua (sem pausa de 450ms): tentativa truncada + restart.
+    transcript(
+      'eu ja ajudei muitas mulheres aqui no consultorio eu ja ajudei muitas mulheres a perder peso rapido',
+    ),
+  );
+  check('S25 retorna 1 corte', cuts.length === 1, `retornou ${cuts.length}`);
+  if (cuts.length >= 1) {
+    const t = normalize(cuts[0].transcriptText);
+    const n = (t.match(/ajudei/g) || []).length;
+    check('S25 nao fundiu (so 1 "ajudei")', n <= 1, `"${t}" (${n}x)`);
+    check('S25 pegou a take boa (tem "rapido")', t.includes('rapido'), t);
+  }
+}
+
+// S26: extensao de cabeca — o corte tem que comecar nos conectivos da copy
+// ("E por isso que voce..."), nao no meio da fala ("faz dieta..."). #13/#20.
+console.log('\n[S26] corte comeca na 1a palavra da frase (extensao de cabeca)');
+{
+  const copy = 'É por isso que você faz dieta, vai pra academia.';
+  const cuts = matchCopyWindowed(
+    copy,
+    // lixo + a frase, tudo na mesma respiracao (sem pausa antes de "e por isso").
+    transcript('entao a pessoa fala e por isso que voce faz dieta vai pra academia'),
+  );
+  check('S26 retorna 1 corte', cuts.length === 1, `retornou ${cuts.length}`);
+  if (cuts.length >= 1) {
+    const t = normalize(cuts[0].transcriptText);
+    check('S26 comeca em "e por isso que voce"',
+      t.startsWith('e por isso que voce'), `texto="${t}"`);
+    check('S26 nao puxou o lixo anterior ("fala"/"pessoa")',
+      !t.includes('pessoa') && !t.includes('fala'), `texto="${t}"`);
+  }
+}
+
 // --------------------------------------------------------------------- //
 
 console.log(

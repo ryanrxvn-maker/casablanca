@@ -347,6 +347,19 @@ export function findTopWindows(
   // falta, a take quase certamente foi cortada no fim (erro #6).
   const lastStem = eff.length ? eff[eff.length - 1] : '';
 
+  // Quantas stopwords a copy tem ANTES da 1a palavra-conceito e DEPOIS da
+  // ultima — usado pra estender o corte sobre esses conectivos (FIX-2),
+  // pro video comecar/terminar numa palavra INTEIRA ("Tem mulher...", "E ai
+  // comeca...", "E por isso que voce faz..."), nao no meio da fala.
+  const firstContentIdx = targetStems.findIndex(isContent);
+  let lastContentIdx = -1;
+  for (let i = targetStems.length - 1; i >= 0; i--) {
+    if (isContent(targetStems[i])) { lastContentIdx = i; break; }
+  }
+  const headLead = firstContentIdx < 0 ? 0 : firstContentIdx;
+  const tailTrail =
+    lastContentIdx < 0 ? 0 : targetStems.length - 1 - lastContentIdx;
+
   const ratios = getWindowRatios(targetLen);
   const minSize = Math.max(2, Math.floor(targetLen * ratios.min));
   // Teto generoso: o expert improvisa MAIS longo que a copy, e a take completa
@@ -384,6 +397,24 @@ export function findTopWindows(
       const window = transcriptStems.slice(start, end + 1);
       const wordSlice = words.slice(start, end + 1);
       const windowSet = new Set(window);
+
+      // ===== FIX-1: anti-fusao DURA (vale no passe estrito E no relaxado) ====
+      // (a) Bigrama de palavras-CONCEITO repetido = a janela atravessou um
+      //     retake (o expert repetiu "desse resultado", "mostrando exatamente"
+      //     etc). Rejeita — nunca funde duas takes (erros #24/#25).
+      const contentSeq = window.filter(isContent);
+      let repeatedBigram = false;
+      const seenBg = new Set<string>();
+      for (let b = 0; b + 1 < contentSeq.length; b++) {
+        const bg = contentSeq[b] + '' + contentSeq[b + 1];
+        if (seenBg.has(bg)) { repeatedBigram = true; break; }
+        seenBg.add(bg);
+      }
+      if (repeatedBigram) continue;
+      // (b) Teto de duracao: take unica improvisada e' generosa, mas o DOBRO
+      //     (duas takes coladas) estoura. Backstop pra fusoes sem bigrama.
+      const winDurMs = wordSlice[wordSlice.length - 1].end - wordSlice[0].start;
+      if (winDurMs > targetLen * 950 + 4000) continue;
 
       let intersect = 0;
       for (const t of targetSet) if (windowSet.has(t)) intersect++;
@@ -468,20 +499,43 @@ export function findTopWindows(
 
       if (score < MIN_SCORE_TO_KEEP) continue;
 
+      // ===== FIX-2: estende sobre os conectivos de borda da copy ============
+      // O matcher ancora a janela na 1a palavra-CONCEITO, clipando o "Tem"/"E
+      // ai"/"E por isso que voce" inicial. Puxa de volta SO as stopwords que a
+      // copy tem na borda, na MESMA respiracao (gap < GAP_MS), no maximo o
+      // tanto que a copy tem (headLead/tailTrail) — nunca vaza palavra de outra
+      // frase nem conteudo.
+      let exStart = start;
+      for (let k = 0; k < headLead && exStart > 0; k++) {
+        const prev = exStart - 1;
+        if (gaps[prev] >= GAP_MS) break;
+        const ps = transcriptStems[prev];
+        if (isContent(ps) || !targetSet.has(ps)) break;
+        exStart = prev;
+      }
+      let exEnd = end;
+      for (let k = 0; k < tailTrail && exEnd < transcriptStems.length - 1; k++) {
+        if (gaps[exEnd] >= GAP_MS) break;
+        const nx = transcriptStems[exEnd + 1];
+        if (isContent(nx) || !targetSet.has(nx)) break;
+        exEnd = exEnd + 1;
+      }
+      const exSlice = words.slice(exStart, exEnd + 1);
+
       // ---- Snap do corte pro meio do silencio adjacente -------------------
-      const gapBefore = start === 0 ? Infinity : gaps[start - 1];
-      const gapAfter = gaps[end];
+      const gapBefore = exStart === 0 ? Infinity : gaps[exStart - 1];
+      const gapAfter = gaps[exEnd];
       const padBefore = Math.min(MARGIN_MS, Math.max(0, gapBefore / 2));
       const padAfter = Math.min(MARGIN_MS, Math.max(0, gapAfter / 2));
-      const startMs = Math.max(0, wordSlice[0].start - padBefore);
-      const endMs = wordSlice[wordSlice.length - 1].end + padAfter;
+      const startMs = Math.max(0, exSlice[0].start - padBefore);
+      const endMs = exSlice[exSlice.length - 1].end + padAfter;
 
       candidates.push({
-        startIdx: start,
-        endIdx: end,
+        startIdx: exStart,
+        endIdx: exEnd,
         startMs,
         endMs,
-        text: wordSlice.map((w) => w.text).join(' '),
+        text: exSlice.map((w) => w.text).join(' '),
         score,
         recall,
         precision,
