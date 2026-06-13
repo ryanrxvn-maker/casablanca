@@ -1234,6 +1234,118 @@ console.log('\n[S41] dedup-trim no resultado real: aplica e limpa');
     (out.match(/procedimentos invasivos/g) || []).length === 1, out.slice(-160));
 }
 
+// ===================================================================== //
+// ROBUSTEZ — garantir que NUNCA crasha e nunca produz saida invalida,
+// pra qualquer copy+bruto (protege user E clientes de input estranho).
+// ===================================================================== //
+
+// Valida invariantes de um conjunto de cuts (o que a UI/ffmpeg consome).
+function cutsValid(cuts: Cut[]): string | null {
+  for (let i = 0; i < cuts.length; i++) {
+    const c = cuts[i];
+    if (!isFinite(c.startMs) || !isFinite(c.endMs)) return `#${i} NaN/Inf`;
+    if (c.startMs < 0 || c.endMs < 0) return `#${i} negativo`;
+    if (c.endMs <= c.startMs) return `#${i} end<=start`;
+    if (i > 0 && c.startMs < cuts[i - 1].startMs) return `#${i} fora de ordem`;
+    if (i > 0 && c.startMs < cuts[i - 1].endMs) return `#${i} overlap`;
+  }
+  return null;
+}
+
+// S42: FUZZ — 300 transcripts+copies aleatorios. NADA pode crashar e toda
+// saida tem que ser valida (sem NaN, sem overlap, ordenada).
+console.log('\n[S42] fuzz: 300 inputs aleatorios, zero crash, saida valida');
+{
+  // PRNG deterministico (LCG) pra o teste ser reproduzivel.
+  let seed = 123456789;
+  const rnd = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+  const VOCAB = ('lipedema gordura treino dieta academia inchar pernas medico '
+    + 'inflamacao mounjaro ozempic celulite saiba mais clique aula resultado '
+    + 'uma de que voce e a o em nao com sem por isso aqui agora').split(' ');
+  const word = () => VOCAB[Math.floor(rnd() * VOCAB.length)];
+  const sentence = (n: number) =>
+    Array.from({ length: n }, word).join(' ');
+
+  let crashes = 0;
+  let invalid = 0;
+  let crashDetail = '';
+  for (let t = 0; t < 300; t++) {
+    // copy: 1..8 frases de 2..12 palavras
+    const nPhr = 1 + Math.floor(rnd() * 8);
+    const copy = Array.from(
+      { length: nPhr },
+      () => sentence(2 + Math.floor(rnd() * 11)),
+    ).join('. ') + '.';
+    // transcript: 0..60 palavras (as vezes repetindo frases da copy)
+    const tw: Word[] = [];
+    let ts = 0;
+    const nTok = Math.floor(rnd() * 60);
+    for (let i = 0; i < nTok; i++) {
+      tw.push({ text: word(), start: ts, end: ts + 200, confidence: rnd() });
+      ts += 200 + Math.floor(rnd() * 1500); // gaps variados (inclui buracos)
+    }
+    try {
+      const cuts = matchCopyWindowed(copy, tw);
+      const err = cutsValid(cuts);
+      if (err) { invalid++; crashDetail = `cutsInvalid t=${t}: ${err}`; }
+      const rep = auditResult(copy, tw);
+      if (rep.total !== splitIntoPhrases(copy).length) {
+        invalid++; crashDetail = `audit total errado t=${t}`;
+      }
+      const spans = findRepeatedSpans(tw);
+      for (const s of spans) {
+        if (!(s.endMs > s.startMs) || s.startMs < 0) {
+          invalid++; crashDetail = `span invalido t=${t}`;
+        }
+      }
+      const durMs = tw.length ? tw[tw.length - 1].end + 100 : 1000;
+      const keep = keepSegmentsFromRemovals(spans, durMs);
+      for (const k of keep) {
+        if (!(k.endMs > k.startMs) || k.endMs > durMs + 1) {
+          invalid++; crashDetail = `keep invalido t=${t}`;
+        }
+      }
+    } catch (e) {
+      crashes++;
+      crashDetail = `CRASH t=${t}: ${(e as Error)?.message}`;
+    }
+  }
+  check('S42 zero crashes em 300 inputs', crashes === 0, crashDetail);
+  check('S42 zero saidas invalidas', invalid === 0, crashDetail);
+}
+
+// S43: copy MUITO maior que o bruto (cliente cola copy gigante, video curto).
+console.log('\n[S43] copy gigante + bruto curto: sem crash, sem overlap');
+{
+  const copy = Array.from({ length: 40 }, (_, i) =>
+    `Frase numero ${i} com conteudo distinto sobre lipedema e gordura`).join('. ');
+  const cuts = matchCopyWindowed(copy, transcript('frase numero 0 com conteudo distinto sobre lipedema e gordura'));
+  check('S43 nao crashou e cuts validos', cutsValid(cuts) === null,
+    cutsValid(cuts) || 'ok');
+}
+
+// S44: a MESMA frase aparece 5x ESPALHADA (nao adjacente) no video — nao pode
+// ser tratada como duplicacao-vazada (sao tomadas distintas, dedup so pega
+// adjacente).
+console.log('\n[S44] frase repetida ESPALHADA nao e' + ' falso-dedup');
+{
+  const w = transcript(
+    'compre agora o produto incrivel',
+    'lixo qualquer aqui no meio',
+    'mais lixo diferente aqui agora',
+    'outra coisa totalmente distinta',
+    'compre agora o produto incrivel',
+  );
+  const spans = findRepeatedSpans(w);
+  // as 2 ocorrencias estao a 450ms+conteudo de distancia (nao adjacentes) →
+  // NAO sao restart; dedup nao deve cortar.
+  check('S44 dedup nao corta repeticao espalhada', spans.length === 0,
+    JSON.stringify(spans));
+}
+
 // --------------------------------------------------------------------- //
 
 console.log(
