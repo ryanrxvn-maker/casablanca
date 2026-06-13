@@ -42,6 +42,13 @@ export const GAP_MS = 300;
 // Pausa LONGA — fronteira clara de retake (o expert parou e recomecou). Janela
 // que contem uma dessas no meio esta fundindo duas takes distintas.
 export const HARD_GAP_MS = 500;
+// BURACO — gap interno tao grande que so existe porque o ASR COLAPSOU uma
+// retake repetida em 1 ocorrencia no texto, mas os timestamps abracam as duas.
+// Janela com buraco = duplicacao INVISIVEL no texto (so audivel). Rejeitar.
+export const HOLE_GAP_MS = 1100;
+// Densidade minima de fala (soma das duracoes das palavras / span da janela).
+// Abaixo disso ha silencio/colapso demais dentro do corte (varios buracos).
+export const MIN_SPEECH_DENSITY = 0.5;
 
 export type Word = {
   text: string;
@@ -332,6 +339,10 @@ export function findTopWindows(
   gaps: number[],
   topK: number,
   relaxed = false,
+  // Passe "desesperado": estrito e relaxado nao acharam NADA, entao desliga os
+  // guards de buraco/densidade/duracao (mantem anti-duplicacao de TEXTO) pra
+  // nunca sumir uma linha em silencio — o pior candidato vem flagado no audit.
+  desperate = false,
 ): Candidate[] {
   const targetLen = targetStems.length;
   if (targetLen < 2 || transcriptStems.length === 0) return [];
@@ -376,7 +387,7 @@ export function findTopWindows(
 
     // A janela tem que COMECAR onde a ideia comeca: uma das palavras-cabeca
     // da copy aparece nas primeiras palavras. (relaxed: ignora.)
-    if (!relaxed) {
+    if (!relaxed && !desperate) {
       const headWin = transcriptStems.slice(start, start + 4);
       const headWinSet = new Set(headWin);
       const headHit = headStems.some((h) =>
@@ -411,16 +422,33 @@ export function findTopWindows(
         seenBg.add(bg);
       }
       if (repeatedBigram) continue;
-      // (b) Teto de duracao: take unica improvisada e' generosa, mas o DOBRO
-      //     (duas takes coladas) estoura. Backstop pra fusoes sem bigrama.
       const winDurMs = wordSlice[wordSlice.length - 1].end - wordSlice[0].start;
-      if (winDurMs > targetLen * 950 + 4000) continue;
+      if (!desperate) {
+        // (b) Teto de duracao: take unica improvisada e' generosa, mas o DOBRO
+        //     (duas takes coladas) estoura. Backstop pra fusoes sem bigrama.
+        if (winDurMs > targetLen * 950 + 4000) continue;
+
+        // ===== P0: rejeicao por BURACO/DENSIDADE (o ASR colapsa retake) ======
+        // (c) Buraco interno >= HOLE_GAP_MS: o ASR transcreveu 1 ocorrencia mas
+        //     os timestamps abracam DUAS (duplicacao invisivel no texto). Onde
+        //     ele colapsou sobra um buraco de segundos entre palavras. Rejeita.
+        let maxInternalGap = 0;
+        for (let g = start; g < end; g++) {
+          if (gaps[g] > maxInternalGap) maxInternalGap = gaps[g];
+        }
+        if (maxInternalGap >= HOLE_GAP_MS) continue;
+        // (d) Densidade de fala: soma das duracoes / span. Baixa = silencio/
+        //     colapso demais dentro do corte (varios buracos medios).
+        let speechMs = 0;
+        for (const w of wordSlice) speechMs += Math.max(0, w.end - w.start);
+        if (winDurMs > 0 && speechMs / winDurMs < MIN_SPEECH_DENSITY) continue;
+      }
 
       let intersect = 0;
       for (const t of targetSet) if (windowSet.has(t)) intersect++;
       const recall = intersect / targetLen;
       const precision = intersect / size;
-      if (recall < (relaxed ? 0.5 : 0.55)) continue;
+      if (recall < (desperate ? 0.4 : relaxed ? 0.5 : 0.55)) continue;
 
       // Cobertura de FIM e INICIO (fuzzy), checando nas pontas da janela.
       const headPool = window.slice(0, 5);
@@ -443,7 +471,7 @@ export function findTopWindows(
 
       // REJEICAO DURA de take cortada: nao termina numa pausa E (nao tem a
       // palavra-fim OU mal cobre o fim da ideia) → fala interrompida. Fora.
-      if (!relaxed && !endsAtBoundary && (lastCov === 0 || tailCov < 0.5)) {
+      if (!relaxed && !desperate && !endsAtBoundary && (lastCov === 0 || tailCov < 0.5)) {
         continue;
       }
 
@@ -773,7 +801,7 @@ export function matchCopyWindowed(copy: string, words: Word[]): Cut[] {
       TOP_K_PER_PHRASE,
       false,
     );
-    // Fallback: nenhuma janela "limpa" passou — tenta relaxado pra nunca
+    // Fallback 1: nenhuma janela "limpa" passou — tenta relaxado pra nunca
     // sumir uma linha que existe no bruto (so com palavras improvisadas).
     if (cands.length === 0) {
       cands = findTopWindows(
@@ -782,6 +810,20 @@ export function matchCopyWindowed(copy: string, words: Word[]): Cut[] {
         transcriptStems,
         gaps,
         TOP_K_PER_PHRASE,
+        true,
+      );
+    }
+    // Fallback 2 (desesperado): nem relaxado achou — desliga os guards de
+    // buraco/densidade/duracao pra NUNCA sumir linha em silencio. O candidato
+    // (possivelmente sujo) sera flagado pelo audit pos-render.
+    if (cands.length === 0) {
+      cands = findTopWindows(
+        targetStems,
+        words,
+        transcriptStems,
+        gaps,
+        TOP_K_PER_PHRASE,
+        true,
         true,
       );
     }

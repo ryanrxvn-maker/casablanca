@@ -743,6 +743,72 @@ console.log('\n[S26] corte comeca na 1a palavra da frase (extensao de cabeca)');
   }
 }
 
+// S27: o ASR COLAPSOU uma retake (transcreveu 1x) mas os timestamps abracam
+// as duas — sobra um BURACO de segundos no meio. Erro real #3/#12/#15/#25.
+// Construtor manual pra injetar o buraco entre as palavras.
+console.log('\n[S27] buraco interno (retake colapsada pelo ASR) e' + ' rejeitado');
+{
+  // Take com buraco de 3s no meio (onde o ASR comeu a repeticao) + take limpa.
+  const words: Word[] = [];
+  let t = 1000;
+  const push = (toks: string, gapAfterLast: number) => {
+    const arr = toks.split(/\s+/).filter(Boolean);
+    arr.forEach((tok, i) => {
+      words.push({ text: tok, start: t, end: t + 280 });
+      t += 280 + (i === arr.length - 1 ? gapAfterLast : 70);
+    });
+  };
+  // 1a metade da fala, BURACO de 3000ms (retake colapsada), 2a metade —
+  // se a janela abracar as duas pontas, ela contem o buraco.
+  push('e ai comeca uma rotina de treino', 3000);
+  push('uma dieta a usar monjaro', 450);
+  // take limpa logo depois (sem buraco): a copy inteira numa fala so.
+  push('e ai comeca uma rotina de treino uma dieta a usar monjaro', 450);
+  const cuts = matchCopyWindowed(
+    'E aí começa uma rotina de treino, uma dieta, a usar mounjaro.',
+    words,
+  );
+  check('S27 retorna 1 corte', cuts.length === 1, `retornou ${cuts.length}`);
+  if (cuts.length >= 1) {
+    // O corte escolhido NAO pode conter o buraco de 3s (span coerente).
+    const span = cuts[0].endMs - cuts[0].startMs;
+    check('S27 corte sem buraco (span < 6s)', span < 6000,
+      `span=${span}ms`);
+    const t2 = normalize(cuts[0].transcriptText);
+    check('S27 pegou take limpa (tem "monjaro")', t2.includes('monjaro'), t2);
+  }
+}
+
+// S28: janela de baixa densidade de fala (muito silencio/colapso) e' rejeitada
+// em favor de uma take densa e limpa.
+console.log('\n[S28] densidade de fala baixa e' + ' rejeitada');
+{
+  const words: Word[] = [];
+  let t = 1000;
+  const push = (toks: string, gapAfterLast: number) => {
+    const arr = toks.split(/\s+/).filter(Boolean);
+    arr.forEach((tok, i) => {
+      words.push({ text: tok, start: t, end: t + 280 });
+      t += 280 + (i === arr.length - 1 ? gapAfterLast : 70);
+    });
+  };
+  // take esticada por 2 buracos de 900ms (densidade baixa, sem um buraco unico
+  // >= 1100) + take limpa.
+  push('o metodo funciona', 900);
+  push('em qualquer', 900);
+  push('pessoa comprovadamente', 450);
+  push('o metodo funciona em qualquer pessoa comprovadamente', 450);
+  const cuts = matchCopyWindowed(
+    'O método funciona em qualquer pessoa comprovadamente.',
+    words,
+  );
+  check('S28 retorna 1 corte', cuts.length === 1, `retornou ${cuts.length}`);
+  if (cuts.length >= 1) {
+    const span = cuts[0].endMs - cuts[0].startMs;
+    check('S28 corte denso (span < 4s)', span < 4000, `span=${span}ms`);
+  }
+}
+
 // --------------------------------------------------------------------- //
 
 console.log(
