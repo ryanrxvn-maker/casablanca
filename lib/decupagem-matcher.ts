@@ -36,8 +36,13 @@ export const MARGIN_MS = 120;
 export const EDGE_PAD_MS = 55;
 export const TOP_K_PER_PHRASE = 6;
 export const MIN_SCORE_TO_KEEP = 0.45;
-// TOL no DP — 0 = nao permite nenhum overlap entre takes escolhidas.
-export const DP_TOL_MS = 0;
+// TOL no DP — overlap maximo tolerado entre cuts vizinhos. NAO pode ser 0:
+// o snap de borda (pad de ate MARGIN_MS cada lado) faz cuts ADJACENTES e
+// contiguos no bruto se sobreporem em ~100-240ms de PADDING (silencio), e com
+// TOL=0 o DP descartava a 2a frase inteira (bug: linha "Isso acontece..."
+// sumia). 250ms cobre o pad sem permitir overlap de CONTEUDO real; o
+// enforceNoTimeOverlap depois corta a costura no meio (sem perder palavra).
+export const DP_TOL_MS = 250;
 // Pausa (ms) que marca fronteira de fala/take. Acima disso, o expert pausou
 // de proposito (fim de frase ou inicio de retake). Pausas de virgula
 // (~150-250ms) ficam ABAIXO, entao nao quebram uma frase no meio.
@@ -796,11 +801,18 @@ export function dedupCutsGlobal(cuts: Cut[]): Cut[] {
       const k = kept[i];
       const sim = textSimilarity(cur.transcriptText, k.transcriptText);
       const samePhrase = curPhrase === normalize(k.copyPhrase);
-      const timeOverlap =
-        !(cur.endMs <= k.startMs || cur.startMs >= k.endMs);
+      // Overlap temporal SUBSTANCIAL (mesmo pedaco de video) — NAO um simples
+      // toque de padding entre cortes adjacentes-distintos. Antes, qualquer
+      // sobreposicao (ate 100ms de pad) dropava a frase vizinha inteira (bug:
+      // "Isso acontece..." sumia por tocar 100ms no corte anterior).
+      const ovStart = Math.max(cur.startMs, k.startMs);
+      const ovEnd = Math.min(cur.endMs, k.endMs);
+      const ov = Math.max(0, ovEnd - ovStart);
+      const minDur = Math.min(cur.endMs - cur.startMs, k.endMs - k.startMs);
+      const timeOverlap = minDur > 0 && ov / minDur > 0.5;
 
-      // So funde se for LITERALMENTE o mesmo pedaco de video, ou se a
-      // copy repete a propria linha e o expert refez. NUNCA funde duas
+      // So funde se for LITERALMENTE o mesmo pedaco de video (overlap real), ou
+      // se a copy repete a propria linha e o expert refez. NUNCA funde duas
       // linhas DISTINTAS da copy so por serem textualmente parecidas
       // ("ganhar rapido" vs "ganhar facil" sobrevivem as duas).
       const isDuplicate = timeOverlap || (samePhrase && sim >= 0.5);
