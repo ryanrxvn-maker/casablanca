@@ -87,6 +87,9 @@ export type Cut = {
   confidence?: number;
   // Procedencia do match (ver Candidate.pass). 'desperate' = revisar.
   pass?: 'strict' | 'relaxed' | 'desperate';
+  // Outras takes candidatas da MESMA frase (ranqueadas), pro auto-retry trocar
+  // quando a auditoria reprova este corte. Leves: so tempo + texto.
+  alts?: Array<{ startMs: number; endMs: number; text: string }>;
 };
 
 const FILLERS = new Set([
@@ -1011,6 +1014,12 @@ export function matchCopyWindowed(copy: string, words: Word[]): Cut[] {
   for (let i = 0; i < phrases.length; i++) {
     const cand = optimal[i];
     if (!cand) continue;
+    // Takes alternativas da MESMA frase (outras janelas candidatas), pro
+    // auto-retry trocar quando a auditoria reprovar este corte.
+    const alts = candidatesPerPhrase[i]
+      .filter((c) => c !== cand)
+      .slice(0, 3)
+      .map((c) => ({ startMs: c.startMs, endMs: c.endMs, text: c.text }));
     // startMs/endMs ja vem snapados pro meio do silencio adjacente.
     rawCuts.push({
       startMs: cand.startMs,
@@ -1022,6 +1031,7 @@ export function matchCopyWindowed(copy: string, words: Word[]): Cut[] {
       precision: cand.precision,
       confidence: cand.confidence,
       pass: cand.pass,
+      alts,
     });
   }
 

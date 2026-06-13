@@ -58,6 +58,7 @@ type Cut = {
   score: number;
   confidence?: number;
   pass?: 'strict' | 'relaxed' | 'desperate';
+  alts?: Array<{ startMs: number; endMs: number; text: string }>;
 };
 
 type PhraseAudit = {
@@ -270,59 +271,107 @@ function DecupagemCopyInner() {
       );
       setProgress(0.5);
 
-      // Step 3: Cut + concat with FFmpeg WASM
-      // NAO fazemos mais silence-split por cut — causava duplicacao quando
-      // o cut continha 2 takes consecutivas. Usamos cuts limpos do matcher.
-      const segments = json.cuts.map((c) => ({
-        start: c.startMs / 1000,
-        end: c.endMs / 1000,
-      }));
+      // Step 3: Cut + concat (FFmpeg WASM) com AUTO-RETRY guiado pela auditoria.
+      // Cada corte traz takes ALTERNATIVAS (cut.alts). Cortamos, auditamos, e
+      // pros cortes reprovados (fail/duplicada) trocamos pela alternativa e
+      // re-cortamos + re-auditamos. Garantia NUNCA-PIORA: so adota a nova
+      // versao se reduzir os problemas; senao mantem a melhor.
+      const baseCuts: Cut[] = json.cuts;
 
-      setStage(
-        `Cortando ${segments.length} segmento(s) e concatenando...`,
-      );
-      let out = await cutVideoSegments(file, segments, {
-        onStage: (s) => setStage(s),
-        onProgress: (p: FFProgress) =>
-          setProgress(0.5 + p.ratio * 0.4),
-      });
+      // Corta um conjunto de segmentos -> MP4.
+      const cutFrom = (segs: Array<{ start: number; end: number }>) =>
+        cutVideoSegments(file, segs, {
+          onStage: (s) => setStage(s),
+          onProgress: (p: FFProgress) => setProgress(0.5 + p.ratio * 0.3),
+        });
 
-      // Step 3.5: AUDITORIA pós-render (P1). Re-transcreve o RESULTADO (ANTES
-      // do silence-removal, pra os offsets baterem) SEM viés e confere frase a
-      // frase contra a copy — a conferencia manual automatizada. Best-effort:
-      // se falhar, segue sem laudo (nunca bloqueia a entrega).
-      try {
-        setStage('Auditando o resultado (conferindo contra a copy)...');
-        setProgress(0.86);
-        const resultDur = segments.reduce(
-          (acc, s) => acc + Math.max(0, s.end - s.start),
-          0,
-        );
-        const auditAudio = await extractAudioForTranscription(
-          out,
-          { onStage: (s) => setStage(s) },
-          resultDur,
-        );
-        if (auditAudio.size <= 4_400_000) {
+      // Audita um MP4 (re-transcreve SEM vies e confere vs copy). null se falhar.
+      const auditBlob = async (blob: Blob): Promise<AuditReport | null> => {
+        try {
+          const dur = await (async () => {
+            const meta = await probeVideoMetadata(blob);
+            return meta?.durationSec;
+          })();
+          const a = await extractAudioForTranscription(
+            blob,
+            { onStage: (s) => setStage(s) },
+            dur,
+          );
+          if (a.size > 4_400_000) return null;
           const afd = new FormData();
-          afd.append('audio', auditAudio, 'audit.opus');
+          afd.append('audio', a, 'audit.opus');
           afd.append('copy', copyText);
           const ares = await fetch('/api/decupagem-copy/audit', {
             method: 'POST',
             body: afd,
             signal: abortRef.current?.signal,
           });
-          if (ares.ok) {
-            const ajson = (await ares.json()) as { report?: AuditReport };
-            if (ajson.report) setAuditReport(ajson.report);
-          } else {
-            console.warn('[audit] HTTP', ares.status);
-          }
+          if (!ares.ok) return null;
+          const ajson = (await ares.json()) as { report?: AuditReport };
+          return ajson.report ?? null;
+        } catch (e) {
+          if ((e as Error)?.name === 'AbortError') throw e;
+          console.warn('[audit] falhou (best-effort):', e);
+          return null;
         }
-      } catch (auditErr) {
-        if ((auditErr as Error)?.name === 'AbortError') throw auditErr;
-        console.warn('[audit] falhou (best-effort):', auditErr);
+      };
+
+      // Quantos problemas (fail + duplicada) num laudo. Menor = melhor.
+      const problemCount = (r: AuditReport | null) =>
+        r ? r.phrases.filter((p) => p.status === 'fail' || p.duplicated).length : 999;
+
+      const segOf = (c: Cut) => ({ start: c.startMs / 1000, end: c.endMs / 1000 });
+
+      setStage(`Cortando ${baseCuts.length} segmento(s) e concatenando...`);
+      let curCuts = baseCuts.map((c) => ({ ...c }));
+      let out = await cutFrom(curCuts.map(segOf));
+
+      setStage('Auditando o resultado (conferindo contra a copy)...');
+      setProgress(0.82);
+      let bestCuts = curCuts;
+      let bestOut = out;
+      let bestReport = await auditBlob(out);
+      const triedAlt = new Set<number>(); // indices ja trocados
+
+      // Ate 2 rodadas de correcao automatica.
+      for (let round = 0; round < 2 && problemCount(bestReport) > 0; round++) {
+        if (!bestReport) break;
+        const problemPhrases = new Set(
+          bestReport.phrases
+            .filter((p) => p.status === 'fail' || p.duplicated)
+            .map((p) => p.phrase.trim()),
+        );
+        let changed = false;
+        const nextCuts = bestCuts.map((c, i) => {
+          if (
+            problemPhrases.has(c.copyPhrase.trim()) &&
+            c.alts &&
+            c.alts.length > 0 &&
+            !triedAlt.has(i)
+          ) {
+            triedAlt.add(i);
+            changed = true;
+            const alt = c.alts[0];
+            const rest = c.alts.slice(1);
+            return { ...c, startMs: alt.startMs, endMs: alt.endMs, transcriptText: alt.text, alts: rest };
+          }
+          return c;
+        });
+        if (!changed) break;
+
+        setStage(`Auto-corrigindo ${problemPhrases.size} corte(s) e re-auditando (rodada ${round + 1})...`);
+        const out2 = await cutFrom(nextCuts.map(segOf));
+        const report2 = await auditBlob(out2);
+        if (problemCount(report2) < problemCount(bestReport)) {
+          bestCuts = nextCuts;
+          bestOut = out2;
+          bestReport = report2;
+        } // senao: descarta (nunca-piora) e tenta proxima rodada com outros alts
       }
+
+      out = bestOut;
+      setCuts(bestCuts);
+      if (bestReport) setAuditReport(bestReport);
 
       // Step 4: Silence removal GLOBAL no MP4 final (depois do concat).
       // Remove pausas naturais entre frases sem dividir cuts.
