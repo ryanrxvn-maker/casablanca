@@ -957,6 +957,74 @@ export function auditResult(copy: string, auditWords: Word[]): AuditReport {
   return { phrases: out, okCount, reviewCount, failCount, total: out.length };
 }
 
+// =================== Dedup-trim do RESULTADO (P2) =======================
+
+/**
+ * Acha trechos de fala REPETIDA (restart/retake que vazou) no RESULTADO ja
+ * cortado, usando os timestamps por palavra da re-transcricao. Retorna as
+ * faixas de tempo (ms) a REMOVER — sempre a 1a ocorrencia (abandonada),
+ * mantendo a 2a (que continua na frase completa).
+ *
+ * Isto e' o que o matcher NAO consegue: ele e' cego pra duplicacao que o ASR
+ * do BRUTO colapsou. Aqui operamos no que esta REALMENTE no video — entao
+ * garante zero fala repetida, independente de existir take limpa no bruto.
+ *
+ * Detecta: a partir de uma palavra-conceito, um bigrama de conteudo que
+ * REINICIA adiante (dentro de ~40 palavras) com >=70% do 1o bloco reaparecendo
+ * no 2o = e' a mesma frase refeita. Remove [inicio do 1o bloco, inicio do 2o].
+ * Tolera variacao do ASR (fuzzy) e palavra inserida no meio ("pessoal").
+ */
+export function findRepeatedSpans(
+  words: Word[],
+): Array<{ startMs: number; endMs: number }> {
+  const n = words.length;
+  if (n < 4) return [];
+  const stems = words.map((w) => stem(tokenize(w.text)[0] ?? ''));
+  const isC = (k: number) => isContent(stems[k]);
+  const nextContent = (k: number) => {
+    let j = k;
+    while (j < n && !isC(j)) j++;
+    return j < n ? j : -1;
+  };
+
+  const spans: Array<{ startMs: number; endMs: number }> = [];
+  let i = 0;
+  while (i < n) {
+    if (!isC(i)) { i++; continue; }
+    const a2 = nextContent(i + 1);
+    if (a2 < 0) break;
+
+    let found = -1;
+    const limit = Math.min(n, i + 40);
+    for (let j = a2 + 1; j < limit; j++) {
+      if (!isC(j) || !fuzzyEq(stems[j], stems[i])) continue;
+      const jn = nextContent(j + 1);
+      if (jn < 0 || !fuzzyEq(stems[jn], stems[a2])) continue;
+
+      // O 1o bloco [i, j) reaparece no 2o bloco [j, ...)? (restart de verdade)
+      const firstContent: string[] = [];
+      for (let k = i; k < j; k++) if (isC(k)) firstContent.push(stems[k]);
+      if (firstContent.length < 2) continue;
+      const secEnd = Math.min(n, j + (j - i) + 6);
+      let reappear = 0;
+      for (const s of firstContent) {
+        for (let k = j; k < secEnd; k++) {
+          if (isC(k) && fuzzyEq(stems[k], s)) { reappear++; break; }
+        }
+      }
+      if (reappear / firstContent.length >= 0.7) { found = j; break; }
+    }
+
+    if (found > i) {
+      spans.push({ startMs: words[i].start, endMs: words[found].start });
+      i = found;
+    } else {
+      i++;
+    }
+  }
+  return spans;
+}
+
 // =================== Pipeline principal =================================
 
 export function matchCopyWindowed(copy: string, words: Word[]): Cut[] {

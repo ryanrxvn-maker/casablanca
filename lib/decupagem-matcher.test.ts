@@ -24,9 +24,20 @@ import {
   normalize,
   extractVocabHints,
   auditResult,
+  findRepeatedSpans,
   type Word,
   type Cut,
 } from './decupagem-matcher';
+
+// Aplica as faixas-a-remover num Word[] (simula o corte de dedup no resultado).
+function applySpans(
+  words: Word[],
+  spans: Array<{ startMs: number; endMs: number }>,
+): Word[] {
+  return words.filter(
+    (w) => !spans.some((s) => w.start >= s.startMs && w.start < s.endMs),
+  );
+}
 
 // Constroi Word[] de uma transcricao (palavras 280ms, gap 70ms) — usado pra
 // simular a transcricao do RESULTADO na auditoria.
@@ -1087,6 +1098,51 @@ console.log('\n[S36] deteccao de duplicacao no resultado real (precisao)');
   // Limpas (1x no audio) NAO podem ser flagadas:
   check('S36 NAO flagou #16 (poucos medicos, limpa)', !dup(15), 'idx15');
   check('S36 NAO flagou #24 (clique assista aula, limpa)', !dup(23), 'idx23');
+}
+
+// S37: dedup-trim REMOVE a fala repetida no resultado (restart/retake vazado).
+// Casos reais: #3 (e ai comeca 2x), #6 (um dia desses 2x, com "pessoal"
+// inserido na 2a), #25 (sem gastar fortunas 2x).
+console.log('\n[S37] dedup-trim corta a fala repetida no resultado');
+{
+  // #3
+  {
+    const w = audioOf('e ai comeca uma rotina de treino e ai comeca uma rotina de treino uma dieta a usar monjaro');
+    const spans = findRepeatedSpans(w);
+    const out = applySpans(w, spans).map((x) => x.text).join(' ');
+    check('S37 #3 removeu a repeticao (1 "comeca")',
+      (out.match(/comeca/g) || []).length === 1, out);
+    check('S37 #3 manteve o resto ("dieta"/"monjaro")',
+      out.includes('dieta') && out.includes('monjaro'), out);
+  }
+  // #6 com palavra inserida na 2a ocorrencia
+  {
+    const w = audioOf('um dia desses uma moca chegou aqui no meu consultorio um dia desses uma moca chegou pessoal aqui no meu consultorio e a queixa era');
+    const spans = findRepeatedSpans(w);
+    const out = applySpans(w, spans).map((x) => x.text).join(' ');
+    check('S37 #6 removeu a repeticao (1 "consultorio")',
+      (out.match(/consultorio/g) || []).length === 1, out);
+    check('S37 #6 manteve a continuacao ("queixa")', out.includes('queixa'), out);
+  }
+  // #25
+  {
+    const w = audioOf('sem gastar fortunas em drenagem linfatica sem passar fome comendo so salada sem gastar fortunas em drenagem linfatica sem passar fome comendo so salada e sem procedimentos invasivos caros');
+    const spans = findRepeatedSpans(w);
+    const out = applySpans(w, spans).map((x) => x.text).join(' ');
+    check('S37 #25 removeu a repeticao (1 "fortunas")',
+      (out.match(/fortunas/g) || []).length === 1, out);
+    check('S37 #25 manteve o fecho ("procedimentos")',
+      out.includes('procedimentos'), out);
+  }
+}
+
+// S38: frase LIMPA (sem repeticao) nao pode ter nada removido.
+console.log('\n[S38] dedup-trim nao toca frase limpa');
+{
+  const w = audioOf('porque o lipedema nao e gordura comum que voce elimina com qualquer dieta ou exercicio pesado');
+  const spans = findRepeatedSpans(w);
+  check('S38 nenhum trecho removido', spans.length === 0,
+    JSON.stringify(spans));
 }
 
 // --------------------------------------------------------------------- //

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireTier } from '@/lib/require-tier';
-import { auditResult } from '@/lib/decupagem-matcher';
+import { auditResult, findRepeatedSpans } from '@/lib/decupagem-matcher';
 import { transcribeAudio } from '@/lib/transcribe';
 
 /**
@@ -68,9 +68,13 @@ export async function POST(req: Request) {
     }
 
     const report = auditResult(copyText, words);
+    // Faixas de fala REPETIDA no resultado (restart/retake vazado) a remover —
+    // o que o matcher e' cego pra ver no bruto. Em ms, no tempo do RESULTADO.
+    const dedupSpans = findRepeatedSpans(words);
 
     return NextResponse.json({
       report,
+      dedupSpans,
       provider,
       transcriptPreview: words
         .map((w) => w.text)

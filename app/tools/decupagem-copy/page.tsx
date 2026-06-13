@@ -285,17 +285,18 @@ function DecupagemCopyInner() {
           onProgress: (p: FFProgress) => setProgress(0.5 + p.ratio * 0.3),
         });
 
-      // Audita um MP4 (re-transcreve SEM vies e confere vs copy). null se falhar.
-      const auditBlob = async (blob: Blob): Promise<AuditReport | null> => {
+      type Span = { startMs: number; endMs: number };
+      type Outcome = { report: AuditReport; dedupSpans: Span[] };
+
+      // Audita um MP4 (re-transcreve SEM vies, confere vs copy E acha as faixas
+      // de fala repetida a remover). null se falhar.
+      const auditBlob = async (blob: Blob): Promise<Outcome | null> => {
         try {
-          const dur = await (async () => {
-            const meta = await probeVideoMetadata(blob);
-            return meta?.durationSec;
-          })();
+          const meta = await probeVideoMetadata(blob);
           const a = await extractAudioForTranscription(
             blob,
             { onStage: (s) => setStage(s) },
-            dur,
+            meta?.durationSec,
           );
           if (a.size > 4_400_000) return null;
           const afd = new FormData();
@@ -307,8 +308,12 @@ function DecupagemCopyInner() {
             signal: abortRef.current?.signal,
           });
           if (!ares.ok) return null;
-          const ajson = (await ares.json()) as { report?: AuditReport };
-          return ajson.report ?? null;
+          const ajson = (await ares.json()) as {
+            report?: AuditReport;
+            dedupSpans?: Span[];
+          };
+          if (!ajson.report) return null;
+          return { report: ajson.report, dedupSpans: ajson.dedupSpans ?? [] };
         } catch (e) {
           if ((e as Error)?.name === 'AbortError') throw e;
           console.warn('[audit] falhou (best-effort):', e);
@@ -317,8 +322,8 @@ function DecupagemCopyInner() {
       };
 
       // Quantos problemas (fail + duplicada) num laudo. Menor = melhor.
-      const problemCount = (r: AuditReport | null) =>
-        r ? r.phrases.filter((p) => p.status === 'fail' || p.duplicated).length : 999;
+      const problemCount = (o: Outcome | null) =>
+        o ? o.report.phrases.filter((p) => p.status === 'fail' || p.duplicated).length : 999;
 
       const segOf = (c: Cut) => ({ start: c.startMs / 1000, end: c.endMs / 1000 });
 
@@ -330,14 +335,14 @@ function DecupagemCopyInner() {
       setProgress(0.82);
       let bestCuts = curCuts;
       let bestOut = out;
-      let bestReport = await auditBlob(out);
+      let bestOutcome = await auditBlob(out);
       const triedAlt = new Set<number>(); // indices ja trocados
 
-      // Ate 2 rodadas de correcao automatica.
-      for (let round = 0; round < 2 && problemCount(bestReport) > 0; round++) {
-        if (!bestReport) break;
+      // Ate 2 rodadas de correcao automatica (troca por take alternativa).
+      for (let round = 0; round < 2 && problemCount(bestOutcome) > 0; round++) {
+        if (!bestOutcome) break;
         const problemPhrases = new Set(
-          bestReport.phrases
+          bestOutcome.report.phrases
             .filter((p) => p.status === 'fail' || p.duplicated)
             .map((p) => p.phrase.trim()),
         );
@@ -361,17 +366,55 @@ function DecupagemCopyInner() {
 
         setStage(`Auto-corrigindo ${problemPhrases.size} corte(s) e re-auditando (rodada ${round + 1})...`);
         const out2 = await cutFrom(nextCuts.map(segOf));
-        const report2 = await auditBlob(out2);
-        if (problemCount(report2) < problemCount(bestReport)) {
+        const outcome2 = await auditBlob(out2);
+        if (problemCount(outcome2) < problemCount(bestOutcome)) {
           bestCuts = nextCuts;
           bestOut = out2;
-          bestReport = report2;
+          bestOutcome = outcome2;
         } // senao: descarta (nunca-piora) e tenta proxima rodada com outros alts
       }
 
       out = bestOut;
+
+      // Step 3.7: DEDUP-TRIM — remove a fala REPETIDA que sobrou no resultado
+      // (restart/retake que o matcher e' cego pra ver no bruto). Opera no video
+      // REAL, com corte lockstep A/V (cutVideoSegments) — garante zero
+      // duplicacao independente de existir take limpa no bruto.
+      const spans = bestOutcome?.dedupSpans ?? [];
+      if (spans.length > 0) {
+        try {
+          setStage(`Removendo ${spans.length} trecho(s) de fala repetida...`);
+          setProgress(0.86);
+          const meta = await probeVideoMetadata(out);
+          const durSec = meta?.durationSec ?? 0;
+          if (durSec > 0) {
+            // Monta os segmentos a MANTER = complemento das faixas removidas.
+            const remove = spans
+              .map((s) => ({ start: s.startMs / 1000, end: s.endMs / 1000 }))
+              .filter((s) => s.end > s.start)
+              .sort((a, b) => a.start - b.start);
+            const keep: Array<{ start: number; end: number }> = [];
+            let cursor = 0;
+            for (const r of remove) {
+              if (r.start > cursor + 0.05) keep.push({ start: cursor, end: r.start });
+              cursor = Math.max(cursor, r.end);
+            }
+            if (durSec > cursor + 0.05) keep.push({ start: cursor, end: durSec });
+            if (keep.length > 0) {
+              out = await cutFrom(keep);
+              // Re-audita o resultado limpo pra o laudo refletir a correcao.
+              const finalOutcome = await auditBlob(out);
+              if (finalOutcome) bestOutcome = finalOutcome;
+            }
+          }
+        } catch (dedupErr) {
+          if ((dedupErr as Error)?.name === 'AbortError') throw dedupErr;
+          console.warn('[dedup-trim] falhou (best-effort):', dedupErr);
+        }
+      }
+
       setCuts(bestCuts);
-      if (bestReport) setAuditReport(bestReport);
+      if (bestOutcome) setAuditReport(bestOutcome.report);
 
       // Step 4: Silence removal GLOBAL no MP4 final (depois do concat).
       // Remove pausas naturais entre frases sem dividir cuts.
