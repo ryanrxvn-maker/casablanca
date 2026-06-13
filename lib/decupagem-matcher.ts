@@ -31,6 +31,9 @@
 // Margem MAXIMA de silencio em volta do corte. O corte real cai no meio da
 // pausa detectada (min(MARGIN, gap/2)), entao nunca invade a fala vizinha.
 export const MARGIN_MS = 120;
+// Piso de pad nas bordas do corte — protege a 1a/ultima palavra de clipar
+// quando nao ha pausa adjacente (sem isso o ASR perde a palavra da borda).
+export const EDGE_PAD_MS = 55;
 export const TOP_K_PER_PHRASE = 6;
 export const MIN_SCORE_TO_KEEP = 0.45;
 // TOL no DP — 0 = nao permite nenhum overlap entre takes escolhidas.
@@ -590,10 +593,16 @@ export function findTopWindows(
       const exSlice = words.slice(exStart, exEnd + 1);
 
       // ---- Snap do corte pro meio do silencio adjacente -------------------
+      // Pad = metade do silencio adjacente, MAS com um piso (EDGE_PAD) pra
+      // proteger a 1a/ultima palavra de ser clipada quando NAO ha pausa (o ASR
+      // marca o fim da palavra um pouco cedo; sem pad a consoante final some e
+      // o ASR perde a palavra — ex: "inflamacao" no #22). O piso e' pequeno
+      // (~meia silaba), entao um eventual vazamento da palavra vizinha e'
+      // inaudivel. Nunca passa de MARGIN_MS.
       const gapBefore = exStart === 0 ? Infinity : gaps[exStart - 1];
       const gapAfter = gaps[exEnd];
-      const padBefore = Math.min(MARGIN_MS, Math.max(0, gapBefore / 2));
-      const padAfter = Math.min(MARGIN_MS, Math.max(0, gapAfter / 2));
+      const padBefore = Math.min(MARGIN_MS, Math.max(EDGE_PAD_MS, gapBefore / 2));
+      const padAfter = Math.min(MARGIN_MS, Math.max(EDGE_PAD_MS, gapAfter / 2));
       const startMs = Math.max(0, exSlice[0].start - padBefore);
       const endMs = exSlice[exSlice.length - 1].end + padAfter;
 
