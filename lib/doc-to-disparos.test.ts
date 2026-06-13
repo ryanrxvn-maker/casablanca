@@ -392,6 +392,82 @@ console.log('\nregressao: ClickUp attachment chip (📎) format:');
   assert(av.length === 0, 'metadados com 📎 continuam bloqueados');
 }
 
+/* ----------------- regressao: multi-avatar por CHIP no body (AD40G1VN) ----------------- */
+// Bug reportado (12/06/2026, screenshot AD40G1VN - VRWA02): doc com
+//   "Link do avatar: a.mp4 + b.mp4 + c.mp4 + <numerico>.mp4" no topo
+// e o body separando as falas por CHIP do filename do avatar (linha
+// "monetzamoraa3.mp4" sozinha antes de cada bloco) — em vez de labels
+// "Mulher:"/"Doutor:". Antes do fix: 0 hooks (GANCHO comido pelo sanitizer)
+// + body inteiro indo pra 1 avatar (chip nao virava boundary de speaker).
+console.log('\nregressao: multi-avatar por chip no body (AD40G1VN):');
+{
+  const DOC_CHIP_BODY = [
+    'AD40G1VN - VRWA02',
+    'Link do avatar: monetzamoraa3.mp4 + nanychan_uwu.mp4 + gihribeiroo20.mp4 + 7494773934441762056.mp4',
+    'Instruções para edição: Edição mais UGC com poucos inserts usando imagens em duplo sentido.',
+    'https://drive.google.com/drive/folders/abc',
+    '',
+    'GANCHO',
+    'Este é o segredo sujo para satisfazer quatro namoradas aos 67 anos. Ah… E você não vai nem cansar.',
+    '',
+    'BODY',
+    'monetzamoraa3.mp4',
+    'Preste muita atenção, porque vamos ensinar apenas uma vez.',
+    'Toda mulher sabe que quanto mais grosso e maior, mais a gente sente prazer.',
+    'Porque o mangote vai atingir todos os nossos pontos de prazer…',
+    '',
+    'nanychan_uwu.mp4',
+    'Nós vamos mostrar como fazer esse truque com 3 ingredientes naturais, que quando misturados são 11 vezes mais fortes do que qualquer tadala e azulzinho.',
+    'O homem que faz esse truque vai virar o rambo, preparado para atirar quando precisar.',
+    '',
+    'gihribeiroo20.mp4',
+    'Quem apresentou essa receita pra gente foi nossa vizinha lá do condomínio.',
+    'Uma noite a gente escutou ela gemendo horrores e a gente tinha que saber qual era o segredo do marido dela.',
+    '',
+    '7494773934441762056.mp4',
+    'Só não faz igual ao nosso namorado.',
+    'Ele exagerou na dose e além de me arrombar toda, ficou com o amigão duro a noite inteira.',
+  ].join('\n');
+  const CAND_CHIP: AvatarCandidate[] = [
+    { id: 'av_monet', name: 'Monet Zamora', groupName: 'Monet', voiceName: '@monetzamoraa3', voiceId: 'v_monet' },
+    { id: 'av_nany', name: 'Nany Chan', groupName: 'Nany', voiceName: '@nanychan_uwu', voiceId: 'v_nany' },
+    { id: 'av_gih', name: 'Gih Ribeiro', groupName: 'Gih', voiceName: '@gihribeiroo20', voiceId: 'v_gih' },
+    { id: '7494773934441762056', name: 'Foto TP', groupName: 'Fotos', voiceName: '@tpvoice', voiceId: 'v_tp' },
+  ];
+  const r = buildDisparosFromNomenclatures(DOC_CHIP_BODY, ['AD40VN - VRWA02'], CAND_CHIP);
+  console.log('  diagnostic =', r.diagnostic);
+  assert(r.disparos.length === 1, `AD40 → 1 disparo (got ${r.disparos.length})`);
+  const d = r.disparos[0];
+  if (d) {
+    console.log('  AD40 parts:', d.parts.map((p) => `${p.label}→${p.avatarName ?? 'NULL'}`));
+    assert(d.fromDarkoBriefing, 'AD40 parseado pelo DARKO');
+    // Bug 2: GANCHO recuperado (sanitizer nao comeu mais a fala).
+    const hooks = d.parts.filter((p) => /^HOOK/.test(p.label));
+    assert(hooks.length === 1, `AD40 tem 1 hook (got ${hooks.length})`);
+    const hook1 = hooks[0];
+    assert(!!hook1 && /segredo sujo/i.test(hook1.text), 'HOOK 1 = texto real do GANCHO ("segredo sujo")');
+    assert(!!hook1 && !/Link do avatar|\.mp4/i.test(hook1.text), 'HOOK 1 sem metadados/link vazado');
+    // Bug 1: cada bloco do body vai pro avatar do seu chip — nao tudo no 1o.
+    const body = d.parts.filter((p) => /^BODY/.test(p.label));
+    assert(body.length >= 4, `AD40 tem >=4 partes de body (got ${body.length})`);
+    const findPart = (kw: RegExp) => d.parts.find((p) => kw.test(p.text));
+    const pMonet = findPart(/mangote|grosso e maior/i);
+    const pNany = findPart(/ingredientes naturais|rambo/i);
+    const pGih = findPart(/vizinha|condomínio/i);
+    const pTp = findPart(/Só não faz igual|amigão duro/i);
+    assert(!!pMonet && pMonet.avatarId === 'av_monet', 'bloco 1 → monetzamoraa3 (Monet)');
+    assert(!!pNany && pNany.avatarId === 'av_nany', 'bloco 2 → nanychan_uwu (Nany)');
+    assert(!!pGih && pGih.avatarId === 'av_gih', 'bloco 3 → gihribeiroo20 (Gih)');
+    assert(!!pTp && pTp.avatarId === '7494773934441762056', 'bloco 4 → talking-photo numerico');
+    // Nenhum chip vazou pra fala (avatar nao recita o filename).
+    assert(d.parts.every((p) => !/\.(mp4|mov)\b/i.test(p.text)), 'nenhum filename de chip vazou no texto');
+    // Todas as 4 identidades distintas aparecem (nao colapsou no 1o avatar).
+    const ids = new Set(body.map((p) => p.avatarId));
+    assert(ids.size === 4, `body usa os 4 avatares distintos (got ${ids.size})`);
+    assert(body.every((p) => !!p.avatarId), 'nenhuma parte de body sem avatar (fallback)');
+  }
+}
+
 /* ----------------- doc vazio ----------------- */
 console.log('\nedge cases:');
 const empty = buildDisparosFromDoc('', CANDIDATES);

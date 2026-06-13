@@ -21,6 +21,7 @@ import {
   parseParts,
   parseDarkoBriefing,
   matchAvatar,
+  normAvatarKey,
   type ParsedDarkoBriefing,
 } from './copy-parser';
 import { splitCopyIntoParts } from './heygen-extension-bridge';
@@ -121,40 +122,49 @@ function buildAvatarMatch(
   candidates: AvatarCandidate[],
 ): {
   matchedByRole: Record<string, { id: string; name: string; voiceId: string | null }>;
+  matchedByUsername: Record<string, { id: string; name: string; voiceId: string | null }>;
   unmatched: string[];
 } {
   const matchedByRole: Record<string, { id: string; name: string; voiceId: string | null }> = {};
+  const matchedByUsername: Record<string, { id: string; name: string; voiceId: string | null }> = {};
   const unmatched: string[] = [];
   for (const av of avatars) {
     const m = matchAvatar(av.username, candidates);
     if (m && m.score >= 30) {
       const cand = candidates.find((c) => c.id === m.id);
-      matchedByRole[av.role.toLowerCase()] = {
-        id: m.id,
-        name: m.name,
-        voiceId: cand?.voiceId ?? null,
-      };
+      const matched = { id: m.id, name: m.name, voiceId: cand?.voiceId ?? null };
+      matchedByRole[av.role.toLowerCase()] = matched;
+      const uk = normAvatarKey(av.username);
+      if (uk) matchedByUsername[uk] = matched;
     } else {
       unmatched.push(`${av.role}: @${av.username}`);
     }
   }
-  return { matchedByRole, unmatched };
+  return { matchedByRole, matchedByUsername, unmatched };
 }
 
 /** Escolhe avatar pra um trecho — MESMA prioridade do clickup-pilot:
+ *  0) username do segmento (chip/filename do avatar no body) — autoritativo
  *  1) role detectado pelo parser (match exato, depois fuzzy)
  *  2) label contem um role conhecido
  *  3) primeiras 2 linhas do texto contem um role
  *  4) fallback: primeiro avatar casado. */
 function makePicker(
   matchedByRole: Record<string, { id: string; name: string; voiceId: string | null }>,
+  matchedByUsername: Record<string, { id: string; name: string; voiceId: string | null }> = {},
 ) {
   const firstMatched = Object.values(matchedByRole)[0] || null;
   return function pick(
     text: string,
     label: string,
     detectedRole: string | null = null,
+    username: string | null = null,
   ): { id: string; name: string; voiceId: string | null } | null {
+    // 0) Avatar declarado pelo chip/filename do segmento — vence tudo.
+    if (username) {
+      const uk = normAvatarKey(username);
+      if (uk && matchedByUsername[uk]) return matchedByUsername[uk];
+    }
     if (detectedRole) {
       const dr = detectedRole.toLowerCase().trim();
       if (matchedByRole[dr]) return matchedByRole[dr];
@@ -181,8 +191,8 @@ function partsFromBriefing(
   briefing: ParsedDarkoBriefing,
   candidates: AvatarCandidate[],
 ): { parts: DisparoPart[]; unmatched: string[] } {
-  const { matchedByRole, unmatched } = buildAvatarMatch(briefing.avatars, candidates);
-  const pick = makePicker(matchedByRole);
+  const { matchedByRole, matchedByUsername, unmatched } = buildAvatarMatch(briefing.avatars, candidates);
+  const pick = makePicker(matchedByRole, matchedByUsername);
   const parts: DisparoPart[] = [];
 
   for (const h of briefing.hooks) {
@@ -216,7 +226,7 @@ function partsFromBriefing(
             : segParts.length === 1
               ? `BODY ${si + 1}`
               : `BODY ${si + 1}.${pi + 1}`;
-      const av = pick(segParts[pi], label, seg.role);
+      const av = pick(segParts[pi], label, seg.role, (seg as any).username ?? null);
       parts.push({
         label,
         text: segParts[pi],

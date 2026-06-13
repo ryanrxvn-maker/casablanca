@@ -82,7 +82,21 @@ export type BatchJob3DProps = {
   /** Acoes extras renderizadas na barra de botoes do header (ex: VA mostra
    *  "baixar AD original"). Drop-in — fica antes do toggle expand. */
   extraActions?: React.ReactNode;
+  /** CANAL(is) de distribuicao (KWAI/META/YT/TIKTOK...) — chips coloridos ao
+   *  lado do nome da task, pra bater de olho quem e YouTube/Meta/Kwai na fila. */
+  channels?: Array<{ label: string; color: string }>;
 };
+
+/** Contraste de texto pra chip de canal (mesma regra do board no pilot). */
+function chipTextColor(hex: string): string {
+  const h = (hex || '').replace('#', '');
+  if (h.length < 6) return '#fff';
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? '#1a1a1a' : '#fff';
+}
 
 // ───────────────────────── Botão 3D icon-only ─────────────────────────
 
@@ -361,6 +375,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     folderUrl,
     defaultMinimized = true,
     extraActions,
+    channels,
   } = props;
 
   const [tilt, setTilt] = useState<{ x: number; y: number } | null>(null);
@@ -429,6 +444,20 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
             <div className="flex min-w-0 flex-1 items-center gap-2.5">
               <PhasePill label={effectiveLabel} tone={showAsWarn ? 'warn' : phaseInfo.tone} icon={phaseInfo.icon} pulsing={isRunning} />
               <h3 className="mono truncate text-[12px] font-semibold text-white">{taskName}</h3>
+              {channels && channels.length > 0 ? (
+                <span className="flex shrink-0 flex-wrap items-center gap-1">
+                  {channels.map((ch, i) => (
+                    <span
+                      key={`${ch.label}-${i}`}
+                      className="mono inline-flex items-center rounded-full px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-wider"
+                      style={{ backgroundColor: ch.color, color: chipTextColor(ch.color) }}
+                      title={`Canal: ${ch.label}`}
+                    >
+                      {ch.label}
+                    </span>
+                  ))}
+                </span>
+              ) : null}
               <span className="mono inline-flex items-center gap-1 text-[10px] text-text-muted">
                 <IconClock size={10} />
                 {formatElapsed(elapsedMs)}

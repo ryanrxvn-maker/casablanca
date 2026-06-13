@@ -793,7 +793,14 @@ export function parseGSibling(section: string): {
   }
   const beforeBody = bodyMarkerIdx >= 0 ? lines.slice(1, bodyMarkerIdx) : lines.slice(1);
   const afterBody = bodyMarkerIdx >= 0 ? lines.slice(bodyMarkerIdx + 1) : [];
-  const hook = extractTextBlock(beforeBody);
+  // Marker "Gancho"/"Hook" dentro do beforeBody: a fala do hook comeca DEPOIS
+  // dele. Sem isso, metadados que precedem o gancho ("Link do avatar:",
+  // "Instruções para edição:") fazem o sanitizer cortar a fala inteira — bug
+  // real: doc com "Link do avatar / GANCHO / BODY" caia em "0 hooks".
+  let hookLines = beforeBody;
+  const ganchoIdx = beforeBody.findIndex((l) => /^(gancho|hook)\b/i.test(l.trim()));
+  if (ganchoIdx >= 0) hookLines = beforeBody.slice(ganchoIdx + 1);
+  const hook = extractTextBlock(hookLines);
   const body = extractTextBlock(afterBody);
   return {
     hook: hook.text ? hook : null,
@@ -817,8 +824,11 @@ export type ParsedDarkoBriefing = {
   bodyRole: string | null;
   /** Body segmentado por SPEAKER. Cada item = um trecho falado por um role
    *  diferente. Usado pelo dispatch pra criar partTemplates por avatar.
-   *  Quando body tem 1 unico speaker, bodySegments tem 1 item. */
-  bodySegments: Array<{ role: string | null; text: string }>;
+   *  Quando body tem 1 unico speaker, bodySegments tem 1 item.
+   *  `username` (quando presente) e o avatar declarado que fala esse
+   *  segmento — vem do chip/filename que separa os blocos no body (formato
+   *  "Link do avatar" multi-avatar). Consumer mapeia username → slot. */
+  bodySegments: Array<{ role: string | null; username?: string | null; text: string }>;
   /** G siblings encontrados (debug) */
   gSiblings: Array<{ gNum: number; heading: string }>;
 };
@@ -1080,28 +1090,86 @@ export function detectSpeakerLabelLine(line: string, knownRoles: string[] = []):
   return head;
 }
 
+/** Normaliza um username/filename de avatar pra comparacao robusta:
+ *  lowercase, sem @, sem extensao .mp4/.mov, so letras+digitos.
+ *  Ex "@Nany_uwu.mp4" → "nanyuwu"; "7494773934441762056.mp4" → "7494...". */
+export function normAvatarKey(s: string): string {
+  return (s || '')
+    .toLowerCase()
+    .replace(/^@/, '')
+    .replace(/\.(mp4|mov)$/i, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+/** Detecta uma linha que e SO o chip/filename de um avatar — usada como
+ *  boundary de speaker quando o briefing separa as falas por filename do
+ *  avatar (formato "Link do avatar: a + b + c" no topo + chip do avatar
+ *  antes de cada bloco no body) em vez de labels "Mulher:"/"Doutor:".
+ *
+ *  Formatos cobertos (linha INTEIRA, sem fala depois):
+ *    "monetzamoraa3.mp4"            (filename puro)
+ *    "@nanychan_uwu.mp4"            (com @)
+ *    "📎 gihribeiroo20.mp4"         (chip do ClickUp/Docs)
+ *    "7494773934441762056.mp4"     (talking-photo numerico)
+ *
+ *  GUARD-RAIL: so vira boundary se o basename normalizado casar com um dos
+ *  avatares DECLARADOS (avatarKeys). Isso evita que "Música de fundo:
+ *  Scary Piano.mp4" ou qualquer filename de producao vire um speaker.
+ *
+ *  Retorna o username DECLARADO casado (pra vincular o segmento ao avatar)
+ *  ou null. */
+function detectAvatarFilenameLine(line: string, avatarKeys: Map<string, string>): string | null {
+  const t = (line || '').trim();
+  if (!t || avatarKeys.size === 0) return null;
+  // Linha = [prefixo opcional: whitespace/emoji-chip/bullet/@] <basename>.mp4|.mov
+  // e NADA mais (a fala real nunca termina em .mp4).
+  // IMPORTANTE: o prefixo NAO inclui digitos/pontos/letras — senao um
+  // basename numerico ("7494773934441762056.mp4") ou acentuado teria o
+  // comeco engolido pelo prefixo guloso e o capture sairia errado.
+  const m = t.match(
+    /^[\s\u{1F000}-\u{1FAFF}\u{2190}-\u{27BF}\u{FE0F}•·▪◦*\-]*@?([A-Za-zÀ-ÿ0-9][\wÀ-ÿ.\s-]*?)\.(?:mp4|mov)\s*$/iu,
+  );
+  if (!m) return null;
+  const key = normAvatarKey(m[1]);
+  if (!key) return null;
+  return avatarKeys.get(key) || null;
+}
+
 /**
  * Segmenta um bloco de texto (body ou hook) em partes por SPEAKER.
  *
  * Cada vez que aparece um "speaker label" (linha "Role:" / "Role (extras):
- * @file.mp4" / "Role" solo), inicia uma nova sub-secao com aquele role.
- * Texto antes do primeiro speaker label vai pra primeira secao (com role
+ * @file.mp4" / "Role" solo) OU um chip/filename de avatar declarado
+ * ("monetzamoraa3.mp4" sozinho na linha), inicia uma nova sub-secao.
+ * Texto antes do primeiro boundary vai pra primeira secao (com role
  * = firstRole se conhecido, senao null).
  *
- * Linhas que SAO speaker labels NAO entram na fala — sao descartadas.
+ * Boundaries por filename vinculam o segmento ao `username` do avatar (o
+ * consumer mapeia username → slot do avatar, sem depender de role textual).
+ *
+ * Linhas que SAO boundaries NAO entram na fala — sao descartadas.
  * Linhas "Avatar fala: X" tem o prefixo removido (X entra na fala).
  *
- * Saida: array de {role, text} — text ja sem labels mas SEM ainda passar
- * por sanitizeSpokenCopy (caller deve sanitizar cada segmento).
+ * @param avatarUsernames usernames dos avatares declarados no briefing
+ *        (habilita boundary por chip/filename). Vazio = so labels textuais.
+ *
+ * Saida: array de {role, username, text} — text ja sem labels mas SEM ainda
+ * passar por sanitizeSpokenCopy (caller deve sanitizar cada segmento).
  */
 export function splitBySpeaker(
   raw: string,
   knownRoles: string[] = [],
   firstRole: string | null = null,
-): Array<{ role: string | null; text: string }> {
+  avatarUsernames: string[] = [],
+): Array<{ role: string | null; username: string | null; text: string }> {
+  const avatarKeys = new Map<string, string>();
+  for (const u of avatarUsernames) {
+    const k = normAvatarKey(u);
+    if (k && !avatarKeys.has(k)) avatarKeys.set(k, u);
+  }
   const lines = (raw || '').replace(/\r/g, '').split('\n');
-  const segments: Array<{ role: string | null; lines: string[] }> = [
-    { role: firstRole, lines: [] },
+  const segments: Array<{ role: string | null; username: string | null; lines: string[] }> = [
+    { role: firstRole, username: null, lines: [] },
   ];
   for (const ln of lines) {
     const t = ln.trim();
@@ -1109,6 +1177,21 @@ export function splitBySpeaker(
       segments[segments.length - 1].lines.push(ln);
       continue;
     }
+    // 1) Boundary por chip/filename de avatar declarado (formato "Link do
+    //    avatar" multi-avatar — o avatar de cada bloco vem como filename).
+    const avUser = detectAvatarFilenameLine(t, avatarKeys);
+    if (avUser) {
+      const cur = segments[segments.length - 1];
+      const curHasText = cur.lines.some((l) => l.trim().length > 0);
+      if (!curHasText) {
+        // PRIMEIRA linha (ou segmento ainda vazio) — vincula o avatar a ele.
+        cur.username = avUser;
+      } else {
+        segments.push({ role: null, username: avUser, lines: [] });
+      }
+      continue;
+    }
+    // 2) Boundary por speaker label textual ("Mulher:", "Doutor:", ...).
     const role = detectSpeakerLabelLine(t, knownRoles);
     if (role) {
       // Inicia novo segmento. Se segment atual nao tem conteudo util,
@@ -1118,14 +1201,14 @@ export function splitBySpeaker(
       if (!curHasText) {
         cur.role = role;
       } else {
-        segments.push({ role, lines: [] });
+        segments.push({ role, username: null, lines: [] });
       }
       continue;
     }
     segments[segments.length - 1].lines.push(ln);
   }
   return segments
-    .map((s) => ({ role: s.role, text: s.lines.join('\n').trim() }))
+    .map((s) => ({ role: s.role, username: s.username, text: s.lines.join('\n').trim() }))
     .filter((s) => s.text.length > 0);
 }
 
@@ -1159,7 +1242,8 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string): Parse
   const hooks: ParsedDarkoBriefing['hooks'] = [];
   let body: string | null = null;
   let bodyRole: string | null = null;
-  let bodySegments: Array<{ role: string | null; text: string }> = [];
+  let bodySegments: Array<{ role: string | null; username?: string | null; text: string }> = [];
+  const avatarUsernames = avatars.map((a) => a.username).filter(Boolean);
   for (const sib of siblings) {
     const parsed = parseGSibling(sib.section);
     // CADA SIBLING = EXATAMENTE 1 HOOK (mesmo que tenha multiplos paragrafos).
@@ -1183,8 +1267,8 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string): Parse
     if (parsed.body) {
       // Segmenta body POR SPEAKER antes de sanitizar — speaker labels viram
       // boundaries de segmento, nao sao lidos como fala.
-      const segs = splitBySpeaker(parsed.body.text, knownRoles, parsed.body.role)
-        .map((s) => ({ role: s.role, text: sanitizeSpokenCopy(s.text, knownRoles) }))
+      const segs = splitBySpeaker(parsed.body.text, knownRoles, parsed.body.role, avatarUsernames)
+        .map((s) => ({ role: s.role, username: s.username ?? null, text: sanitizeSpokenCopy(s.text, knownRoles) }))
         .filter((s) => s.text.length > 0);
       if (segs.length > 0) {
         bodySegments = segs;

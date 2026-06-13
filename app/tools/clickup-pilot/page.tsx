@@ -22,6 +22,7 @@ import {
   parseAdSection,
   parseDarkoBriefing,
   matchAvatar,
+  normAvatarKey,
   isVATask,
   isTrocaAudioTask,
   parseVABriefing,
@@ -381,6 +382,11 @@ type BatchTaskState = {
   isVA?: boolean;
   /** VA: URL de download do AD original (Drive). Mostra botao extra no card. */
   adOriginalUrl?: string;
+  /** CANAL(is) de distribuicao (KWAI/META/YT/TIKTOK...) snapshot do custom
+   *  field da task no momento do disparo. Persistido pra sobreviver reload
+   *  (o board pode nao ter recarregado ainda). Render usa este snapshot e,
+   *  na ausencia, cai no resolveChannels(task) ao vivo. */
+  channels?: Array<{ label: string; color: string }>;
 };
 
 type RoleSlot = {
@@ -1648,7 +1654,17 @@ function ClickUpPilotInner() {
           //   3. Primeiras 2 linhas do texto mencionam o role (legacy)
           //   4. Primeiro role do briefing (fallback fraco)
           const firstRole = roleSlots[0]?.role.toLowerCase() || null;
-          function pickRoleForText(text: string, label: string, detectedRole: string | null): string | null {
+          function pickRoleForText(text: string, label: string, detectedRole: string | null, username: string | null = null): string | null {
+            // 0) username do segmento (chip/filename do avatar no body) —
+            //    autoritativo: casa direto com o slot do avatar declarado.
+            if (username) {
+              const uk = normAvatarKey(username);
+              if (uk) {
+                for (const slot of roleSlots) {
+                  if (normAvatarKey(slot.username) === uk) return slot.role.toLowerCase();
+                }
+              }
+            }
             if (detectedRole) {
               const dr = detectedRole.toLowerCase().trim();
               // Match exato primeiro
@@ -1702,7 +1718,7 @@ function ClickUpPilotInner() {
               partTemplates.push({
                 label,
                 text: segParts[pi],
-                matchByRole: pickRoleForText(segParts[pi], label, seg.role),
+                matchByRole: pickRoleForText(segParts[pi], label, seg.role, (seg as any).username ?? null),
               });
             }
           }
@@ -1852,6 +1868,27 @@ function ClickUpPilotInner() {
   useEffect(() => {
     persistBatchStates(batchStates);
   }, [batchStates]);
+
+  /** Backfill do snapshot de CANAL nos cards da fila quando o board carrega.
+   *  Cards criados antes do board (ou de versoes antigas) ficam sem
+   *  `channels`; aqui preenchemos uma vez por task, persistindo no batch.
+   *  Guard de igualdade evita loop de render. */
+  useEffect(() => {
+    if (!tasks.length) return;
+    setBatchStates((prev) => {
+      let changed = false;
+      const next: Record<string, BatchTaskState> = {};
+      for (const [id, b] of Object.entries(prev)) {
+        if (b.channels && b.channels.length) { next[id] = b; continue; }
+        const task = tasks.find((t) => t.id === id);
+        const ch = task ? resolveChannels(task) : [];
+        if (ch.length > 0) { next[id] = { ...b, channels: ch }; changed = true; }
+        else { next[id] = b; }
+      }
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks]);
 
   /** Escuta flags de cancelamento vindos da pagina /tools/background.
    *  Quando user clica "Cancelar" la, gravamos taskId em
@@ -4459,17 +4496,27 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const adNameSource = briefing?.baseAdId || parsed?.adId || selectedTask.name;
     const adName = adNameSource.replace(/[^a-z0-9_-]/gi, '_');
     const matchedByRole: Record<string, { id: string; name: string }> = {};
+    const matchedByUsername: Record<string, { id: string; name: string }> = {};
     const unmatchedAvatars: string[] = [];
     for (const av of avatarsSource) {
       const m = matchAvatar(av.username, avatarCandidates);
       if (m && m.score >= 30) {
-        matchedByRole[av.role.toLowerCase()] = { id: m.id, name: m.name };
+        const matched = { id: m.id, name: m.name };
+        matchedByRole[av.role.toLowerCase()] = matched;
+        const uk = normAvatarKey(av.username);
+        if (uk) matchedByUsername[uk] = matched;
       } else {
         unmatchedAvatars.push(`${av.role}: @${av.username}`);
       }
     }
     const firstMatched = Object.values(matchedByRole)[0] || null;
-    function pickAvatarForText(text: string, label: string, detectedRole: string | null = null): { id: string; name: string } | null {
+    function pickAvatarForText(text: string, label: string, detectedRole: string | null = null, username: string | null = null): { id: string; name: string } | null {
+      // Prioridade 0: username do segmento (chip/filename do avatar no body) —
+      // autoritativo, vence role/label/fallback.
+      if (username) {
+        const uk = normAvatarKey(username);
+        if (uk && matchedByUsername[uk]) return matchedByUsername[uk];
+      }
       // Prioridade 1: role detectado pelo parser (linha "Mulher:"/"Homem:"/etc
       // do briefing, descartada do texto). Match exato primeiro, depois fuzzy.
       if (detectedRole) {
@@ -4520,7 +4567,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
               : (segParts.length === 1)
                 ? `BODY ${si + 1}`
                 : `BODY ${si + 1}.${pi + 1}`;
-          const av = pickAvatarForText(segParts[pi], label, seg.role);
+          const av = pickAvatarForText(segParts[pi], label, seg.role, (seg as any).username ?? null);
           planParts.push({
             label,
             text: segParts[pi],
@@ -6614,11 +6661,20 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                             );
                           })() : null;
 
+                          // Canais (KWAI/META/YT/TIKTOK...) pro chip no card da
+                          // fila: usa o snapshot do disparo; se ausente (ex card
+                          // antigo), resolve ao vivo do board.
+                          const taskForChannels = tasks.find((t) => t.id === b.taskId);
+                          const channels = b.channels && b.channels.length
+                            ? b.channels
+                            : (taskForChannels ? resolveChannels(taskForChannels) : []);
+
                           return (
                             <BatchJobCard3D
                               key={b.taskId}
                               taskId={b.taskId}
                               taskName={b.taskName}
+                              channels={channels}
                               phase={b.phase as any}
                               partsTotal={b.parts.length}
                               partsDispatched={partsDispatched}

@@ -769,10 +769,14 @@ export async function downloadDriveFileViaExtension(fileId: string, opts: DriveD
     for (let attempt = 1; attempt <= 2; attempt++) {
       const r = await downloadDriveOnce(fileId, opts);
       if (r.ok) return r;
-      last = r;
-      const transient = /inatividade|caiu no meio|timeout|estagnou|fetch_exception|faltou/i.test(r.error);
-      if (!transient) return r;
-      console.warn(`[drive-dl] tentativa ${attempt}/2 falhou (${r.error}) — retry em 2s`);
+      // Apos o early-return, r e sempre o ramo de erro. Anotacao explicita
+      // (zero efeito em runtime) — a compilacao isolada do test-runner nao
+      // estreita a uniao discriminada sozinha.
+      const failed = r as { ok: false; error: string };
+      last = failed;
+      const transient = /inatividade|caiu no meio|timeout|estagnou|fetch_exception|faltou/i.test(failed.error);
+      if (!transient) return failed;
+      console.warn(`[drive-dl] tentativa ${attempt}/2 falhou (${failed.error}) — retry em 2s`);
       await new Promise((res) => setTimeout(res, 2000));
     }
     return last;
