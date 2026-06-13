@@ -1776,6 +1776,11 @@ function ClickUpPilotInner() {
   /** Batch state — tasks rodando em background (dispatch + poll + download + zip) */
   const [batchStates, setBatchStates] = useState<Record<string, BatchTaskState>>({});
   const batchCancelRef = useRef<Record<string, boolean>>({});
+  /** Espelho de batchStates pra leitura SINCRONA fora do ciclo de render
+   *  (watchdog/promoter por interval). Sem isso o watchdog leria closure
+   *  velho e nunca veria tasks novas na fila. */
+  const batchStatesRef = useRef<Record<string, BatchTaskState>>({});
+  batchStatesRef.current = batchStates;
 
   /** Semafaro de slots HeyGen (in-memory). Cresce quando um wrapper
    *  gated PEGA o slot (acquireSlot ok) e decresce no finally. Sempre
@@ -3368,6 +3373,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         await new Promise((r) => setTimeout(r, 1000));
       }
       heygenSlotsRef.current++;
+      // Marca fase ATIVA imediatamente ao pegar o slot — fecha o gap entre
+      // acquire e o runTaskInBackground setar 'dispatching'. Sem isso, o
+      // watchdog poderia ver counter>active nesse intervalo e "curar" cedo
+      // demais. (run/resume sobrescrevem a fase logo em seguida.)
+      setBatchStates((prev) => {
+        const cur = prev[taskId];
+        if (!cur || cur.phase !== 'queued') return prev;
+        return { ...prev, [taskId]: { ...cur, phase: 'dispatching', message: 'Pegando vaga...', finishedAt: undefined } };
+      });
       try {
         // batchCancelRef pode ter sido setado entre espera e o try — re-checa.
         if (batchCancelRef.current[taskId]) return;
@@ -3385,17 +3399,27 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     }
   }
 
-  /** PROMOTER — escaneia batchStates por entradas 'queued' e dispara
-   *  enquanto houver vaga. Roda quando batchStates muda (apos um run
-   *  finalizar, libera slot → promove proxima). Tambem no mount (resume
-   *  de reload). FIFO por startedAt (mais antigo primeiro).
-   *
-   *  Nao usa heygenPendingRef como filtro — runHeyGenGated faz dedup
-   *  interno. Aqui so checamos slots livres pra evitar disparar 10
-   *  wrappers a esmo (cada um faria 1 setTimeout — desperdicio). */
-  useEffect(() => {
+  /** Conta slots REALMENTE ocupados a partir do batchStates (fonte da
+   *  verdade que sobrevive reload/unmount), nao do contador em memoria.
+   *  Uma task so ocupa slot quando esta numa fase ATIVA (dispatching..post).
+   *  'queued' = esperando (nao ocupa); 'done'/'failed' = liberou. */
+  function countActiveSlots(): number {
+    return Object.values(batchStatesRef.current).filter(
+      (b) => b.kind !== 'troca' && ACTIVE_BATCH_PHASES.includes(b.phase),
+    ).length;
+  }
+
+  /** Debounce de leak: quantos ticks seguidos o contador ficou ACIMA do
+   *  real. So cura apos 2 ticks (>~6s) pra nao confundir com o gap curtissimo
+   *  entre acquire (slot++) e a fase virar 'dispatching'. */
+  const slotLeakTicksRef = useRef(0);
+
+  /** PROMOTER — FIFO (startedAt asc, sem furar fila): promove tasks 'queued'
+   *  enquanto houver vaga real. Idempotente (heygenPendingRef dedup +
+   *  runHeyGenGated). Chamado pelo effect on-change E pelo watchdog. */
+  function promoteQueuedTasks() {
     if (heygenSlotsRef.current >= MAX_HEYGEN_PARALLEL) return;
-    const queued = Object.values(batchStates)
+    const queued = Object.values(batchStatesRef.current)
       // TROCA DE ÁUDIO roda fora do HeyGen — promoter NUNCA toca nelas.
       .filter((b) => b.phase === 'queued' && b.kind !== 'troca' && !heygenPendingRef.current[b.taskId])
       .sort((a, b) => a.startedAt - b.startedAt);
@@ -3406,10 +3430,51 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const kind: 'run' | 'resume' = b.parts.some((p) => p.videoId) ? 'resume' : 'run';
       void runHeyGenGated(b.taskId, kind);
     }
-    // ESLint: runHeyGenGated nao precisa estar em deps — ela usa refs/setters
-    // que sao estaveis. batchStates e a unica fonte real de mudanca.
+  }
+
+  // Ref sempre com a versao MAIS RECENTE do promoter — o watchdog ([] deps)
+  // precisa chamar closures atuais (taskAnalyses/runTaskInBackground frescos),
+  // nao as do primeiro render.
+  const promoterRef = useRef(promoteQueuedTasks);
+  promoterRef.current = promoteQueuedTasks;
+
+  // Promoter on-change: roda quando batchStates muda (run terminou → libera
+  // slot → promove proxima).
+  useEffect(() => {
+    promoteQueuedTasks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchStates]);
+
+  /** WATCHDOG (a cada 3s) — GARANTIA de que a fila NUNCA congela:
+   *
+   *  1) AUTO-CURA do contador: o `heygenSlotsRef` e in-memory e pode VAZAR
+   *     (ex: navegar pra outra aba/reload mata o wrapper antes do finally que
+   *     decrementa; no remount o contador volta a 0 mas um run antigo pode ter
+   *     deixado o numero torto). Se o contador ficar ACIMA do nº real de tasks
+   *     em fase ativa por 2 ticks seguidos, reseta pro valor real. Sem isso,
+   *     um contador preso em MAX deixava tasks 'queued' eternamente (bug
+   *     reportado: A1 ficou em "aguardando vaga" com os 2 anteriores ja
+   *     PRONTOS).
+   *  2) RE-PROMOVE: mesmo que o effect on-change tenha perdido um evento,
+   *     o watchdog promove FIFO toda vez que sobra vaga. */
+  useEffect(() => {
+    const id = setInterval(() => {
+      const active = countActiveSlots();
+      if (heygenSlotsRef.current > active) {
+        slotLeakTicksRef.current += 1;
+        if (slotLeakTicksRef.current >= 2) {
+          console.warn(`[promoter] contador de slots curado: ${heygenSlotsRef.current} → ${active} (vazou; nenhum run ativo a mais).`);
+          heygenSlotsRef.current = active;
+          slotLeakTicksRef.current = 0;
+        }
+      } else {
+        slotLeakTicksRef.current = 0;
+      }
+      promoterRef.current();
+    }, 3000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** RETOMAR (HeyGen lipsync) — funciona INDEPENDENTE da situacao:
    *  - tem videoIds disparados → re-checa status no HeyGen + re-baixa (rapido)
