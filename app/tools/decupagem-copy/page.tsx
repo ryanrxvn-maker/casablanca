@@ -377,39 +377,56 @@ function DecupagemCopyInner() {
       out = bestOut;
 
       // Step 3.7: DEDUP-TRIM — remove a fala REPETIDA que sobrou no resultado
-      // (restart/retake que o matcher e' cego pra ver no bruto). Opera no video
-      // REAL, com corte lockstep A/V (cutVideoSegments) — garante zero
-      // duplicacao independente de existir take limpa no bruto.
+      // (restart/retake que o matcher e' cego pra ver no bruto).
+      // CRITICO: as faixas vem da auditoria do RESULTADO (tempo do RESULTADO),
+      // entao o corte tem que ser feito a partir do BLOB DO RESULTADO (bestOut),
+      // NUNCA do bruto (file) — coordenadas de timeline diferentes.
       const spans = bestOutcome?.dedupSpans ?? [];
       if (spans.length > 0) {
         try {
           setStage(`Removendo ${spans.length} trecho(s) de fala repetida...`);
           setProgress(0.86);
-          const meta = await probeVideoMetadata(out);
+          const meta = await probeVideoMetadata(bestOut);
           const durSec = meta?.durationSec ?? 0;
           if (durSec > 0) {
-            // Monta os segmentos a MANTER = complemento das faixas removidas.
+            // Segmentos a MANTER = complemento das faixas removidas (no tempo
+            // do RESULTADO).
             const remove = spans
               .map((s) => ({ start: s.startMs / 1000, end: s.endMs / 1000 }))
-              .filter((s) => s.end > s.start)
+              .filter((s) => s.end > s.start && s.start < durSec)
               .sort((a, b) => a.start - b.start);
             const keep: Array<{ start: number; end: number }> = [];
             let cursor = 0;
             for (const r of remove) {
-              if (r.start > cursor + 0.05) keep.push({ start: cursor, end: r.start });
+              if (r.start > cursor + 0.05) keep.push({ start: cursor, end: Math.min(r.start, durSec) });
               cursor = Math.max(cursor, r.end);
             }
             if (durSec > cursor + 0.05) keep.push({ start: cursor, end: durSec });
             if (keep.length > 0) {
-              out = await cutFrom(keep);
-              // Re-audita o resultado limpo pra o laudo refletir a correcao.
-              const finalOutcome = await auditBlob(out);
-              if (finalOutcome) bestOutcome = finalOutcome;
+              // Corta DO RESULTADO (bestOut), nao do bruto. Lockstep A/V.
+              const trimmed = await cutVideoSegments(bestOut, keep, {
+                onStage: (s) => setStage(s),
+                onProgress: (p: FFProgress) => setProgress(0.86 + p.ratio * 0.02),
+              });
+              const trimmedOutcome = await auditBlob(trimmed);
+              // TRAVA: so adota se a auditoria confirmar que NAO piorou.
+              // Se quebrou (audit pior), REVERTE pro corte anterior.
+              if (
+                trimmedOutcome &&
+                problemCount(trimmedOutcome) <= problemCount(bestOutcome)
+              ) {
+                out = trimmed;
+                bestOutcome = trimmedOutcome;
+              } else {
+                out = bestOut;
+                console.warn('[dedup-trim] descartado (nao melhorou) — mantendo corte anterior');
+              }
             }
           }
         } catch (dedupErr) {
           if ((dedupErr as Error)?.name === 'AbortError') throw dedupErr;
           console.warn('[dedup-trim] falhou (best-effort):', dedupErr);
+          out = bestOut;
         }
       }
 
