@@ -119,6 +119,17 @@ function isContent(s: string): boolean {
 
 // =================== Tokenizacao + utils ================================
 
+// Dígito -> palavra (PT, sem acento) pra a copy ("seis vezes") casar com o que
+// o ASR escreve como número ("6 vezes"). Convertemos DIGITO->PALAVRA (e nao o
+// contrario) pra o token continuar sendo palavra-CONCEITO (>=3 chars); "6"
+// sozinho seria curto demais e cairia fora do matching de conteudo.
+const NUM_WORD: Record<string, string> = {
+  '1': 'um', '2': 'dois', '3': 'tres', '4': 'quatro', '5': 'cinco',
+  '6': 'seis', '7': 'sete', '8': 'oito', '9': 'nove', '10': 'dez',
+  '11': 'onze', '12': 'doze', '15': 'quinze', '20': 'vinte', '30': 'trinta',
+  '40': 'quarenta', '50': 'cinquenta', '60': 'sessenta', '100': 'cem',
+};
+
 export function normalize(s: string): string {
   return s
     .toLowerCase()
@@ -126,7 +137,12 @@ export function normalize(s: string): string {
     .replace(/[̀-ͯ]/g, '')
     .replace(/[^\w\s]/g, ' ')
     .replace(/\s+/g, ' ')
-    .trim();
+    .trim()
+    // numero -> palavra (so tokens 100% digito que tem mapa; anos tipo 2020
+    // e numeros sem mapa ficam como estao)
+    .split(' ')
+    .map((t) => (/^\d+$/.test(t) && NUM_WORD[t] ? NUM_WORD[t] : t))
+    .join(' ');
 }
 
 /**
