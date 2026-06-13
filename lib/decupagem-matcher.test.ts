@@ -1015,6 +1015,80 @@ console.log('\n[S35] copy que repete palavra de proposito nao e' + ' punida');
   }
 }
 
+// S36: precisao da deteccao de duplicacao com transcricao REAL (2a rodada).
+// Dups reais devem ser flagadas; frases limpas NAO (sem falso-positivo).
+console.log('\n[S36] deteccao de duplicacao no resultado real (precisao)');
+{
+  const copy28 = [
+    'Mounjaro, Ozempic ou qualquer uma dessas canetinhas é veneno pra quem tem esse tipo de celulite aqui',
+    'Tem mulher que tem essas celulites e acha que é gordura normal',
+    'E aí começa uma rotina de treino, uma dieta, a usar mounjaro',
+    'E o resultado não muda, agora parece até que as pernas estão mais grossas',
+    'Se você tá passando por isso, pare o treino, a dieta e o mounjaro agora',
+    'Porque isso é a pior coisa que você está fazendo e eu vou te provar',
+    'Um dia desses, uma moça chegou aqui no consultório',
+    'A queixa era que as pernas estavam inchadas e não desinchava por nada',
+    'Ela treinava pernas 6 vezes por semana, achando que ia conquistar pernas torneadas, lisas e firmes e se livrar dessa celulite',
+    'Pernas cada vez mais grossas, doloridas e inflamadas',
+    'Isso acontece porque lipedema não é gordura comum que você queima na academia',
+    'É uma inflamação que piora, e muito, com o exercício de impacto',
+    'É por isso que você faz dieta, vai para academia e suas pernas não param de inchar igual um balão',
+    'Porque o lipedema NÃO é gordura comum que você elimina com qualquer dieta ou exercício pesado',
+    'É uma gordura inflamada que fica presa ali',
+    'Poucos médicos sabem disso, já que essa doença começou a ser mais estudada agora em 2020',
+    'Mesmo que você corte todos os carboidratos, faça jejum intermitente, treine seis vezes por semana, use mounjaro e ozempic',
+    'a gordura vai continuar inchando sem parar e suas pernas vão ficar cada vez mais deformadas',
+    'Por quê',
+    'E o que você precisa é ter uma rotina de alimentação anti-inflamatória',
+    'Quando você tira a inflamação do jogo, a gordura vai começar a derreter',
+    'Eu vi isso acontecer milhares de vezes',
+    'Meu nome é Matheus Galvão, sou nutricionista, fui fisiculturista e já ajudei centenas de mulheres a sair desse resultado em menos de um mês',
+    'Clique em saiba mais, assista à aula e saia de lá com tudo o que você precisa para eliminar o lipedema nas próximas três semanas',
+    'Sem gastar fortunas em drenagem linfática, sem passar fome comendo só salada e sem procedimentos invasivos caros',
+    'Clique agora em saiba mais e veja você mesma',
+    'lá eu também vou te revelar a combinação de especiarias que toda mulher tem na cozinha e que reduz a inflamação do lipedema em até 40% em apenas sete dias',
+    'Então clica agora em saiba mais',
+  ].join('.\n');
+
+  const result2 =
+    'O Ozempic ou qualquer uma dessas canetinhas aqui é veneno para quem tem esse tipo aqui ó de celulite. ' +
+    'Tem mulher que tem essa celulite e acha que é gordura normal. ' +
+    'E aí começa uma rotina de treino, e aí começa uma rotina de treino, uma dieta, a usar Monjaro no treino, ' +
+    'e o resultado ele não muda, e o resultado não muda. Agora parece até que as pernas e o resultado não muda, e as pernas parece até que ficam muitas vezes mais grossas. ' +
+    'Se você tá passando por isso, pare o treino, treino, a dieta e o manjar agora. ' +
+    'Pior coisa que você pode tá fazendo, e eu vou te provar. ' +
+    'Um dia desses uma moça chegou aqui no meu consultório, um dia desses uma moça chegou aqui no meu consultório e a queixa era que as pernas estavam mais inchadas e não desinchavam por nada. ' +
+    'Ela treinava 6 vezes por semana e olha só, ela treinava, e olha só, ela treinava 6 vezes por semana e achava que essa rotina ia deixar as pernas dela mais lisas torneadas firmes e queria se livrar da famosa celulite sabe. ' +
+    'Pernas cada vez mais grossas, doloridas, inflamadas. ' +
+    'Isso acontece porque o lipedema não é uma gordura normal que você queima só indo para academia, é uma inflamação. ' +
+    'O lipedema é uma inflamação que piora e muito com exercício de impacto. ' +
+    'É por isso que você faz dieta, vai para academia e as suas pernas elas não param de inchar. É por isso que você faz dieta, vai para academia e as suas pernas elas não param de inchar igual um balão. ' +
+    'Porque o lipedema não é gordura gordura comum que você elimina com qualquer dieta ou exercício pesado. ' +
+    'Na verdade, é uma gordura inflamada cronicamente que fica presa ali. ' +
+    'Poucos médicos e nutricionistas sabem disso, já que essa doença começou a ser mais estudada agora, no ano de 2020. ' +
+    'Mesmo que você corte todos os carboidratos, faça jejum intermitente, treine 6 vezes por semana, use manjaro ou Ozempic, a gordura vai continuar inchando sem parar e suas pernas vão ficar cada vez mais deformadas. ' +
+    'Sabe por quê? O que você precisa é ter uma rotina de alimentação que seja anti-inflamatória. ' +
+    'Quando você tira a inflamação do jogo, a gordura vai começar a derreter. ' +
+    'Eu vi isso acontecer milhares de vezes em menos de 21 dias e já ajudei centenas de mulheres a sair desse resultado para esse para esse em menos de um mês. ' +
+    'Clique em saiba mais, assista a aula e sai de lá com tudo que você precisa para eliminar o lipedema já nas próximas 3 semanas. ' +
+    'E ora, sem gastar fortunas em drenagem linfática, sem passar fome comendo só salada, sem gastar fortunas com drenagem linfática, sem passar fome comendo só salada e sem procedimentos invasivos caros. E sem procedimentos invasivos caros. ' +
+    'Clique agora em saiba mais e veja você mesmo. ' +
+    'lá vou te revelar a combinação de especiarias que toda mulher tem na própria cozinha de casa e que é capaz de reduzir a inflamação do lipedema em até 40% em apenas 7 dias. ' +
+    'Então clique agora em saiba mais';
+
+  const rep = auditResult(copy28, audioOf(normalize(result2)));
+  const dup = (k: number) => rep.phrases[k]?.duplicated === true;
+  console.log('  [S36] dups: ' +
+    rep.phrases.filter((p) => p.duplicated).map((p) => p.idx).join(','));
+  // Reais duplicadas no audio: #3(2) #4(3) #7(6) #9(8) #13(12) #25(24).
+  check('S36 flagou #4 (e o resultado nao muda 3x)', dup(3), 'idx3');
+  check('S36 flagou #7 (um dia desses 2x)', dup(6), 'idx6');
+  check('S36 flagou #13 (e por isso que voce 2x)', dup(12), 'idx12');
+  // Limpas (1x no audio) NAO podem ser flagadas:
+  check('S36 NAO flagou #16 (poucos medicos, limpa)', !dup(15), 'idx15');
+  check('S36 NAO flagou #24 (clique assista aula, limpa)', !dup(23), 'idx23');
+}
+
 // --------------------------------------------------------------------- //
 
 console.log(

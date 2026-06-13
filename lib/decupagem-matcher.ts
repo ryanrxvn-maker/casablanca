@@ -909,24 +909,29 @@ export function auditResult(copy: string, auditWords: Word[]): AuditReport {
     const coverage = bestCov < 0 ? 0 : bestCov;
     const tailOk = bestTailOk;
 
-    // Duplicacao: a ancora (2 primeiras palavras-conceito) aparece 2x na
-    // regiao desta frase = o retake vazou no corte. Escaneia a janela INTEIRA
-    // da frase — pra TRAS tambem (de phraseStart), porque a janela costuma
-    // travar na ocorrencia mais limpa (a 2a), deixando a 1a atras de bestStart.
+    // Duplicacao por EXCESSO (robusto, simetrico): na regiao da frase (a partir
+    // de phraseStart, larga o bastante p/ 2 ocorrencias), quantas palavras-
+    // conceito aparecem MAIS vezes do que a copy pede? Se boa parte dobra, o
+    // retake vazou no corte. Imune a:
+    //   - qual ocorrencia a janela de coverage travou (ancora em phraseStart);
+    //   - palavra que a copy repete DE PROPOSITO (compara com o esperado).
     let duplicated = false;
     if (pc.length >= 2 && coverage >= 0.5) {
-      const dupStart = Math.max(phraseStart, bestStart - (pc.length + 6));
-      const dupEnd = Math.min(
+      const phraseCount = new Map<string, number>();
+      for (const s of pc) phraseCount.set(s, (phraseCount.get(s) ?? 0) + 1);
+      const regionEnd = Math.min(
         auditContent.length,
-        (bestLastPos >= 0 ? bestLastPos : bestStart) + pc.length + 6,
+        phraseStart + Math.round(pc.length * 2.5) + 8,
       );
-      let hits = 0;
-      for (let j = dupStart; j + 1 < dupEnd; j++) {
-        if (fuzzyEq(pc[0], auditContent[j]) && fuzzyEq(pc[1], auditContent[j + 1])) {
-          hits++;
+      let excess = 0;
+      for (const [s, expected] of phraseCount) {
+        let cnt = 0;
+        for (let j = phraseStart; j < regionEnd; j++) {
+          if (fuzzyEq(s, auditContent[j])) cnt++;
         }
+        if (cnt > expected) excess++;
       }
-      duplicated = hits >= 2;
+      duplicated = excess >= 2 && excess / phraseCount.size >= 0.4;
     }
 
     let status: 'ok' | 'review' | 'fail';
