@@ -1025,6 +1025,38 @@ export function findRepeatedSpans(
   return spans;
 }
 
+/**
+ * Dado as faixas a REMOVER (ms) e a duracao total (ms), retorna os segmentos a
+ * MANTER (complemento). PURO e testavel — e' a matematica que, se errada,
+ * quebra o video. Clampa nos limites e ignora faixas degeneradas.
+ *
+ * IMPORTANTE: removeMs e durationMs tem que estar no MESMO timeline (o do
+ * RESULTADO, quando usado no dedup-trim). Cortar com isto a partir do blob
+ * errado (ex: bruto) gera lixo — por isso o caller corta do RESULTADO.
+ */
+export function keepSegmentsFromRemovals(
+  removeMs: Array<{ startMs: number; endMs: number }>,
+  durationMs: number,
+): Array<{ startMs: number; endMs: number }> {
+  const MIN = 50; // 0.05s — ignora restos minusculos
+  const remove = removeMs
+    .map((s) => ({
+      startMs: Math.max(0, Math.min(s.startMs, durationMs)),
+      endMs: Math.max(0, Math.min(s.endMs, durationMs)),
+    }))
+    .filter((s) => s.endMs > s.startMs)
+    .sort((a, b) => a.startMs - b.startMs);
+
+  const keep: Array<{ startMs: number; endMs: number }> = [];
+  let cursor = 0;
+  for (const r of remove) {
+    if (r.startMs > cursor + MIN) keep.push({ startMs: cursor, endMs: r.startMs });
+    cursor = Math.max(cursor, r.endMs);
+  }
+  if (durationMs > cursor + MIN) keep.push({ startMs: cursor, endMs: durationMs });
+  return keep;
+}
+
 // =================== Pipeline principal =================================
 
 export function matchCopyWindowed(copy: string, words: Word[]): Cut[] {

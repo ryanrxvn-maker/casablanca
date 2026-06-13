@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo } from 'react';
+import { keepSegmentsFromRemovals } from '@/lib/decupagem-matcher';
 import { ToolShell } from '@/components/ToolShell';
 import { ToolHero3D } from '@/components/ToolHero3D';
 import { FileUpload } from '@/components/FileUpload';
@@ -390,18 +391,10 @@ function DecupagemCopyInner() {
           const durSec = meta?.durationSec ?? 0;
           if (durSec > 0) {
             // Segmentos a MANTER = complemento das faixas removidas (no tempo
-            // do RESULTADO).
-            const remove = spans
-              .map((s) => ({ start: s.startMs / 1000, end: s.endMs / 1000 }))
-              .filter((s) => s.end > s.start && s.start < durSec)
-              .sort((a, b) => a.start - b.start);
-            const keep: Array<{ start: number; end: number }> = [];
-            let cursor = 0;
-            for (const r of remove) {
-              if (r.start > cursor + 0.05) keep.push({ start: cursor, end: Math.min(r.start, durSec) });
-              cursor = Math.max(cursor, r.end);
-            }
-            if (durSec > cursor + 0.05) keep.push({ start: cursor, end: durSec });
+            // do RESULTADO). Matematica pura/testada (keepSegmentsFromRemovals).
+            const keep = keepSegmentsFromRemovals(spans, durSec * 1000).map(
+              (k) => ({ start: k.startMs / 1000, end: k.endMs / 1000 }),
+            );
             if (keep.length > 0) {
               // Corta DO RESULTADO (bestOut), nao do bruto. Lockstep A/V.
               const trimmed = await cutVideoSegments(bestOut, keep, {

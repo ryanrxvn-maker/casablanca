@@ -25,9 +25,20 @@ import {
   extractVocabHints,
   auditResult,
   findRepeatedSpans,
+  keepSegmentsFromRemovals,
   type Word,
   type Cut,
 } from './decupagem-matcher';
+
+// Mantem so as palavras dentro dos segmentos KEEP (simula o corte do resultado).
+function applyKeep(
+  words: Word[],
+  keep: Array<{ startMs: number; endMs: number }>,
+): Word[] {
+  return words.filter((w) =>
+    keep.some((k) => w.start >= k.startMs && w.start < k.endMs),
+  );
+}
 
 // Aplica as faixas-a-remover num Word[] (simula o corte de dedup no resultado).
 function applySpans(
@@ -1143,6 +1154,59 @@ console.log('\n[S38] dedup-trim nao toca frase limpa');
   const spans = findRepeatedSpans(w);
   check('S38 nenhum trecho removido', spans.length === 0,
     JSON.stringify(spans));
+}
+
+// S39: SIMULACAO end-to-end do dedup-trim (exatamente a logica da pagina):
+// findRepeatedSpans -> keepSegmentsFromRemovals -> aplica no RESULTADO.
+// Prova que as coordenadas batem e o video final fica sem duplicacao.
+console.log('\n[S39] simulacao end-to-end do dedup-trim (coordenadas certas)');
+{
+  // "resultado" com duplicacoes reais (tempo do RESULTADO, 0-based).
+  const result = audioOf(
+    'e ai comeca uma rotina de treino e ai comeca uma rotina de treino uma dieta a usar monjaro ' +
+    'um dia desses uma moca chegou aqui no meu consultorio um dia desses uma moca chegou pessoal aqui no meu consultorio e a queixa era',
+  );
+  const durMs = result[result.length - 1].end + 100;
+  const spans = findRepeatedSpans(result);
+  const keep = keepSegmentsFromRemovals(spans, durMs);
+  const finalWords = applyKeep(result, keep);
+  const out = finalWords.map((w) => w.text).join(' ');
+  check('S39 sem "comeca" duplicado', (out.match(/comeca/g) || []).length === 1, out);
+  check('S39 sem "consultorio" duplicado',
+    (out.match(/consultorio/g) || []).length === 1, out);
+  check('S39 manteve o conteudo final ("monjaro","queixa")',
+    out.includes('monjaro') && out.includes('queixa'), out);
+  // O video final tem que ser MENOR que o original (removeu de verdade) mas
+  // nao pode ter sumido (sanity dos segmentos KEEP).
+  check('S39 keep cobre a maior parte (nao zerou)',
+    finalWords.length >= result.length * 0.5 && finalWords.length < result.length,
+    `${finalWords.length}/${result.length}`);
+}
+
+// S40: keepSegmentsFromRemovals — matematica do complemento (a que quebrou).
+console.log('\n[S40] complemento de faixas (keepSegmentsFromRemovals)');
+{
+  // remover [1000,2000] e [3000,3500] de um video de 5000ms.
+  const keep = keepSegmentsFromRemovals(
+    [{ startMs: 1000, endMs: 2000 }, { startMs: 3000, endMs: 3500 }],
+    5000,
+  );
+  check('S40 3 segmentos mantidos', keep.length === 3, JSON.stringify(keep));
+  check('S40 segmentos corretos',
+    keep[0].startMs === 0 && keep[0].endMs === 1000 &&
+    keep[1].startMs === 2000 && keep[1].endMs === 3000 &&
+    keep[2].startMs === 3500 && keep[2].endMs === 5000,
+    JSON.stringify(keep));
+  // sem remocoes -> video inteiro.
+  const whole = keepSegmentsFromRemovals([], 5000);
+  check('S40 sem remocao = video inteiro',
+    whole.length === 1 && whole[0].startMs === 0 && whole[0].endMs === 5000,
+    JSON.stringify(whole));
+  // faixa fora dos limites e' clampada, nao quebra.
+  const clamped = keepSegmentsFromRemovals([{ startMs: 4000, endMs: 99999 }], 5000);
+  check('S40 clampa faixa que passa do fim',
+    clamped.length === 1 && clamped[0].startMs === 0 && clamped[0].endMs === 4000,
+    JSON.stringify(clamped));
 }
 
 // --------------------------------------------------------------------- //
