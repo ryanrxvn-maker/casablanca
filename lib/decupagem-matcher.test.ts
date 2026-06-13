@@ -891,6 +891,130 @@ console.log('\n[S32] auditoria pega palavra-fantasma (Mounjaro vs Ozempic)');
     `status=${rep.phrases[0].status} cov=${rep.phrases[0].coverage.toFixed(2)}`);
 }
 
+// S33: REPRO REAL — copy do AD lipedema + transcricao REAL do resultado.
+// A maioria das frases esta correta no audio, entao a auditoria TEM que
+// aprovar >= 20. (Expõe o bug do detector que marcava 27/28 como ausente.)
+console.log('\n[S33] auditoria com transcricao REAL do resultado');
+{
+  const realCopy = [
+    'Mounjaro, Ozempic ou qualquer uma dessas canetinhas é veneno pra quem tem esse tipo de celulite aqui',
+    'Tem mulher que tem essas celulites e acha que é gordura normal',
+    'E aí começa uma rotina de treino, uma dieta, a usar mounjaro',
+    'Se você tá passando por isso, pare o treino, a dieta e o mounjaro agora',
+    'Porque isso é a pior coisa que você está fazendo e eu vou te provar',
+    'Um dia desses, uma moça chegou aqui no consultório',
+    'A queixa era que as pernas estavam inchadas e não desinchava por nada',
+    'Ela treinava pernas 6 vezes por semana, achando que ia conquistar pernas torneadas, lisas e firmes e se livrar dessa celulite',
+    'Pernas cada vez mais grossas, doloridas e inflamadas',
+    'Isso acontece porque lipedema não é gordura comum que você queima na academia',
+    'É uma inflamação que piora, e muito, com o exercício de impacto',
+    'É por isso que você faz dieta, vai para academia e suas pernas não param de inchar igual um balão',
+    'Porque o lipedema NÃO é gordura comum que você elimina com qualquer dieta ou exercício pesado',
+    'É uma gordura inflamada que fica presa ali',
+    'Poucos médicos sabem disso, já que essa doença começou a ser mais estudada agora em 2020',
+    'E isso explica porque você continua emagrecendo em cima, mas as suas pernas estão inchadas, doloridas e com manchas roxas',
+    'Mesmo que você corte todos os carboidratos, faça jejum intermitente, treine seis vezes por semana, use mounjaro e ozempic',
+    'a gordura vai continuar inchando sem parar e suas pernas vão ficar cada vez mais deformadas',
+    'Por quê',
+    'E o que você precisa é ter uma rotina de alimentação anti-inflamatória',
+    'Quando você tira a inflamação do jogo, a gordura vai começar a derreter',
+    'Eu vi isso acontecer milhares de vezes',
+    'Clique em saiba mais, assista à aula e saia de lá com tudo o que você precisa para eliminar o lipedema nas próximas três semanas',
+    'Sem gastar fortunas em drenagem linfática, sem passar fome comendo só salada e sem procedimentos invasivos caros',
+    'Clique agora em saiba mais e veja você mesma',
+    'lá eu também vou te revelar a combinação de especiarias que toda mulher tem na cozinha e que reduz a inflamação do lipedema em até 40% em apenas sete dias',
+    'Então clica agora em saiba mais',
+  ].join('.\n');
+
+  const realResult =
+    'O Ozempic ou qualquer uma dessas canetinhas aqui é veneno para quem tem esse tipo aqui ó de celulite. ' +
+    'Tem mulher que tem essa celulite e acha que é gordura normal. ' +
+    'E aí começa uma rotina de treino, e aí começa uma rotina de treino, uma dieta, a usar Monjaro. ' +
+    'Se você tá passando por isso, pare o treino, a dieta e o Monjaro agora. ' +
+    'Pior coisa que você pode estar fazendo, e eu vou te provar. ' +
+    'Um dia desses, uma moça chegou aqui no meu consultório. ' +
+    'Um dia desses, uma moça chegou pessoal aqui no meu consultório. ' +
+    'E a queixa era que as pernas estavam mais inchadas e não desinchavam por nada. ' +
+    'Ela treinava sério, e olha só, ela treinava pernas 6 vezes por semana achando que ia conquistar pernas mais torneadas, lisas e firmes, e que iria se livrar dessa celulite. ' +
+    'Pernas cada vez mais grossas, doloridas, inflamadas. ' +
+    'Isso acontece porque o lipedema, ela não é uma gordura normal que você queima só indo para academia, é uma inflamação. ' +
+    'O lipedema é uma inflamação que piora, e muito, com exercícios de impacto. ' +
+    'É por isso que você faz dieta, vai para academia e as suas pernas não param de inchar. ' +
+    'É por isso que você faz dieta, vai para academia e as suas pernas não param de inchar igual um balão. ' +
+    'Porque o lipedema não é gordura comum que você elimina com qualquer dieta ou exercício pesado. ' +
+    'Na verdade, é uma gordura inflamada cronicamente que fica presa ali. ' +
+    'Poucos médicos e nutricionistas sabem disso. Já que essa doença, poucos médicos e nutricionistas sabem disso, já que essa doença começou a ser mais estudada agora, no ano de 2020. ' +
+    'E isso explica o porquê você continuar emagrecendo na parte de cima, mas as suas pernas continuarem cada vez mais inchadas, doloridas e com aquelas manchas roxas. ' +
+    'Mesmo que você corte todos os carboidratos, faça jejum intermitente, treine 6 vezes por semana, use manjar ou Zen Peak, a gordura vai continuar inchando sem parar e suas pernas vão ficar vão ficar cada vez mais deformadas. ' +
+    'Sabe por quê? E o que você precisa é ter uma rotina de alimentação que seja anti-inflamatória. ' +
+    'Quando você tira a inflamação do jogo, a gordura vai começar a derreter. ' +
+    'Eu vi isso acontecer milhares de vezes em menos de 21 dias e já ajudei centenas de mulheres a sair desse resultado para esse, para esse, em menos de um mês. ' +
+    'Clique em saiba mais, assista a aula e sai de lá com tudo o que você precisa para eliminar o lipedema já nas próximas 3 semanas. ' +
+    'E olha, sem gastar fortunas em drenagem linfática, sem passar fome comendo só salada, sem gastar fortunas com drenagem linfática, sem passar fome comendo só salada e sem procedimentos invasivos caros. E sem procedimentos invasivos caros. ' +
+    'Clique agora em saiba mais e veja você mesmo. ' +
+    'El também vou te revelar a combinação de especiarias que toda mulher tem na própria cozinha de casa e que é capaz de reduzir a inflamação do lipedema em até 40% em apenas 7 dias. ' +
+    'Então clique agora em saiba mais';
+
+  const rep = auditResult(realCopy, audioOf(normalize(realResult)));
+  console.log(
+    `  [S33] laudo: ${rep.okCount} ok / ${rep.reviewCount} review / ${rep.failCount} fail de ${rep.total}`,
+  );
+  console.log(
+    '  [S33] status por frase: ' +
+      rep.phrases.map((p) => `${p.idx}:${p.status}`).join(' '),
+  );
+  check('S33 auditoria aprova a maioria (>=18 ok)', rep.okCount >= 18,
+    `okCount=${rep.okCount}`);
+  check('S33 nao marca quase tudo como falha (all-red = bug)',
+    rep.failCount <= 5, `failCount=${rep.failCount}`);
+  check('S33 flagou as duplicacoes reais (#3,#6,#12,#15 = review)',
+    rep.phrases[2].status === 'review' && rep.phrases[5].status === 'review' &&
+    rep.phrases[11].status === 'review' && rep.phrases[14].status === 'review',
+    JSON.stringify([2, 5, 11, 14].map((k) => rep.phrases[k].status)));
+}
+
+// S34: restart REFORMULADO sem pausa (palavras levemente diferentes, sem
+// bigrama identico, sem buraco) — FIX-1b pega pela palavra-conceito repetida.
+// Modela o #12 real ("É por isso que você faz dieta... faz dieta...").
+console.log('\n[S34] restart reformulado (unigrama repetido) e' + ' rejeitado');
+{
+  const copy = 'É por isso que você faz dieta e suas pernas não param de inchar.';
+  const cuts = matchCopyWindowed(
+    copy,
+    // 1a tentativa + restart reformulado, TUDO sem pausa (mesma respiracao):
+    // "dieta", "pernas", "inchar" aparecem 2x — a copy so pede 1x.
+    transcript(
+      'e por isso que voce faz dieta e as suas pernas vivem inchando e por isso que voce faz dieta e suas pernas nao param de inchar',
+    ),
+  );
+  check('S34 retorna 1 corte', cuts.length === 1, `retornou ${cuts.length}`);
+  if (cuts.length >= 1) {
+    const t = normalize(cuts[0].transcriptText);
+    const nDieta = (t.match(/dieta/g) || []).length;
+    check('S34 nao duplicou (1 "dieta" so)', nDieta <= 1, `"${t}" (${nDieta}x)`);
+  }
+}
+
+// S35: copy que LEGITIMAMENTE repete uma palavra-conceito (ex: "saiba mais...
+// saiba mais") NAO pode ser punida pelo FIX-1b.
+console.log('\n[S35] copy que repete palavra de proposito nao e' + ' punida');
+{
+  const copy = 'Clique em saiba mais, sim, clique em saiba mais agora.';
+  const cuts = matchCopyWindowed(
+    copy,
+    transcript('clique em saiba mais sim clique em saiba mais agora'),
+  );
+  // FIX-1b NAO pode rejeitar/zerar a frase so porque a copy repete "saiba"
+  // (a repeticao e' esperada pela copy → permitida).
+  check('S35 acha o corte (FIX-1b nao pune repeticao legitima)',
+    cuts.length === 1, `retornou ${cuts.length}`);
+  if (cuts.length >= 1) {
+    const t = normalize(cuts[0].transcriptText);
+    check('S35 corte valido com o conteudo da copy',
+      t.includes('saiba') && t.includes('clique'), t);
+  }
+}
+
 // --------------------------------------------------------------------- //
 
 console.log(

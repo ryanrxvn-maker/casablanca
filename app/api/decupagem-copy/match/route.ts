@@ -91,6 +91,10 @@ export async function POST(req: Request) {
         ? confVals.reduce((a, b) => a + b, 0) / confVals.length
         : null;
 
+    // debug=1: devolve o words array COMPLETO (word-level timestamps) pra
+    // replay offline de qualquer misterio — em vez do ciclo testa-adivinha.
+    const debug = String(form.get('debug') ?? '') === '1';
+
     return NextResponse.json({
       cuts,
       provider,
@@ -99,6 +103,7 @@ export async function POST(req: Request) {
         .map((w) => w.text)
         .join(' ')
         .slice(0, 500),
+      ...(debug ? { words } : {}),
     });
   } catch (e) {
     console.error('[decupagem-copy match]', e);

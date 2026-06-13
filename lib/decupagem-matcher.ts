@@ -70,6 +70,9 @@ export type Candidate = {
   // Confianca MEDIA do ASR nas palavras do corte (0..1), so quando o provider
   // entrega confidence por palavra (AssemblyAI). undefined = sem dado real.
   confidence?: number;
+  // De qual passe veio: 'strict' (take limpa), 'relaxed' (improvisada) ou
+  // 'desperate' (sem take limpa — provavelmente imperfeito, merece revisao).
+  pass?: 'strict' | 'relaxed' | 'desperate';
 };
 
 export type Cut = {
@@ -82,6 +85,8 @@ export type Cut = {
   precision: number;
   // Confianca do ASR no trecho (0..1). undefined quando o provider nao da.
   confidence?: number;
+  // Procedencia do match (ver Candidate.pass). 'desperate' = revisar.
+  pass?: 'strict' | 'relaxed' | 'desperate';
 };
 
 const FILLERS = new Set([
@@ -371,6 +376,14 @@ export function findTopWindows(
   const tailTrail =
     lastContentIdx < 0 ? 0 : targetStems.length - 1 - lastContentIdx;
 
+  // Quantas vezes a copy espera CADA palavra-conceito. Se a janela repete uma
+  // que a copy so pede 1x, e' retake REFORMULADO vazando (FIX-1b) — o sinal
+  // que nao depende de pausa nem de grafia identica (#3/#6/#12/#15/#25).
+  const targetContentCount = new Map<string, number>();
+  for (const t of targetStems) {
+    if (isContent(t)) targetContentCount.set(t, (targetContentCount.get(t) ?? 0) + 1);
+  }
+
   const ratios = getWindowRatios(targetLen);
   const minSize = Math.max(2, Math.floor(targetLen * ratios.min));
   // Teto generoso: o expert improvisa MAIS longo que a copy, e a take completa
@@ -424,6 +437,26 @@ export function findTopWindows(
       if (repeatedBigram) continue;
       const winDurMs = wordSlice[wordSlice.length - 1].end - wordSlice[0].start;
       if (!desperate) {
+        // (a2) FIX-1b: palavra-CONCEITO repetida que a copy so pede 1x =
+        //     retake reformulado vazou (o expert refez com palavras diferentes,
+        //     mas as ancoras "dieta/academia/pernas" se repetem). Pega o que o
+        //     bigrama nao pega (reformulacao) e o que o buraco nao pega (restart
+        //     rapido sem pausa). Rejeita.
+        const winContentCount = new Map<string, number>();
+        let unigramOverflow = false;
+        for (const s of contentSeq) {
+          const c = (winContentCount.get(s) ?? 0) + 1;
+          winContentCount.set(s, c);
+          if (c >= 2 && (targetContentCount.get(s) ?? 0) <= 1) {
+            unigramOverflow = true;
+            break;
+          }
+        }
+        if (unigramOverflow) continue;
+
+        // (b) Teto de duracao: take unica improvisada e' generosa, mas o DOBRO
+        //     (duas takes coladas) estoura. Backstop pra fusoes sem bigrama.
+        if (winDurMs > targetLen * 950 + 4000) continue;
         // (b) Teto de duracao: take unica improvisada e' generosa, mas o DOBRO
         //     (duas takes coladas) estoura. Backstop pra fusoes sem bigrama.
         if (winDurMs > targetLen * 950 + 4000) continue;
@@ -569,6 +602,7 @@ export function findTopWindows(
         precision,
         lcsRatio,
         confidence: realConf,
+        pass: desperate ? 'desperate' : relaxed ? 'relaxed' : 'strict',
       });
     }
   }
@@ -823,6 +857,7 @@ export function auditResult(copy: string, auditWords: Word[]): AuditReport {
   let cursor = 0;
 
   for (let i = 0; i < phrases.length; i++) {
+    const phraseStart = cursor; // onde esta frase comecou a procurar
     const pc = stemTokens(phrases[i]).filter(isContent);
     if (pc.length === 0) {
       out.push({
@@ -832,41 +867,66 @@ export function auditResult(copy: string, auditWords: Word[]): AuditReport {
       continue;
     }
 
-    // Casamento GULOSO em ordem dentro de uma janela de lookahead.
-    const lookEnd = Math.min(auditContent.length, cursor + pc.length * 3 + 8);
-    let local = cursor;
-    let matched = 0;
-    let tailOk = false;
-    for (let k = 0; k < pc.length; k++) {
-      for (let j = local; j < lookEnd; j++) {
-        if (fuzzyEq(pc[k], auditContent[j])) {
-          matched++;
-          local = j + 1;
-          if (k === pc.length - 1) tailOk = true;
-          break;
-        }
-      }
-    }
-    const coverage = matched / pc.length;
-
-    // Duplicacao: o inicio da frase REAPARECE logo apos a 1a ocorrencia?
-    let duplicated = false;
-    if (pc.length >= 2 && tailOk) {
-      const dupEnd = Math.min(auditContent.length, local + pc.length + 4);
-      for (let j = local; j + 1 < dupEnd; j++) {
-        if (fuzzyEq(pc[0], auditContent[j]) && fuzzyEq(pc[1], auditContent[j + 1])) {
-          duplicated = true;
-          // consome a 2a ocorrencia pra nao confundir com a proxima frase
-          let l2 = j;
-          for (let k = 0; k < pc.length; k++) {
-            for (let x = l2; x < dupEnd + pc.length && x < auditContent.length; x++) {
-              if (fuzzyEq(pc[k], auditContent[x])) { l2 = x + 1; break; }
-            }
+    // COBERTURA POR JANELA (set-based, NAO guloso-encadeado). Desliza uma
+    // janela local a partir do cursor e escolhe a posicao com maior cobertura
+    // das palavras-conceito da frase. Imune a:
+    //   - salto distante por fuzzy (uma palavra solta la longe nao arrasta o
+    //     cursor — a janela e' local e pontuada por CLUSTER);
+    //   - reordenacao (set, nao ordem) — "as suas pernas continuarem" etc.
+    // Janela JUSTA (nao pode abracar 2+ frases, senao um ghost word casa
+    // fuzzy com palavra de outra frase e arrasta o cursor — bug do all-red).
+    const W = pc.length + 6;
+    const scanLimit = Math.min(auditContent.length, cursor + W * 2 + 12);
+    let bestCov = -1;
+    let bestStart = cursor;
+    let bestTailOk = false;
+    let bestLastPos = -1;
+    for (let s = cursor; s <= scanLimit; s++) {
+      const winEnd = Math.min(auditContent.length, s + W);
+      if (s >= winEnd) break;
+      let found = 0;
+      let lastPos = -1;
+      let tailHit = false;
+      for (let p = 0; p < pc.length; p++) {
+        for (let j = s; j < winEnd; j++) {
+          if (fuzzyEq(pc[p], auditContent[j])) {
+            found++;
+            if (j > lastPos) lastPos = j;
+            if (p === pc.length - 1) tailHit = true;
+            break;
           }
-          local = Math.max(local, l2);
-          break;
         }
       }
+      const cov = found / pc.length;
+      if (cov > bestCov) {
+        bestCov = cov; bestStart = s; bestTailOk = tailHit; bestLastPos = lastPos;
+      }
+      if (bestCov >= 1 && bestTailOk) break;
+      // achou um cluster bom — nao vagueia atras de um melhor longe (evita
+      // grudar numa ocorrencia posterior/duplicada).
+      if (bestCov >= 0.7 && s > bestStart + 2) break;
+    }
+    const coverage = bestCov < 0 ? 0 : bestCov;
+    const tailOk = bestTailOk;
+
+    // Duplicacao: a ancora (2 primeiras palavras-conceito) aparece 2x na
+    // regiao desta frase = o retake vazou no corte. Escaneia a janela INTEIRA
+    // da frase — pra TRAS tambem (de phraseStart), porque a janela costuma
+    // travar na ocorrencia mais limpa (a 2a), deixando a 1a atras de bestStart.
+    let duplicated = false;
+    if (pc.length >= 2 && coverage >= 0.5) {
+      const dupStart = Math.max(phraseStart, bestStart - (pc.length + 6));
+      const dupEnd = Math.min(
+        auditContent.length,
+        (bestLastPos >= 0 ? bestLastPos : bestStart) + pc.length + 6,
+      );
+      let hits = 0;
+      for (let j = dupStart; j + 1 < dupEnd; j++) {
+        if (fuzzyEq(pc[0], auditContent[j]) && fuzzyEq(pc[1], auditContent[j + 1])) {
+          hits++;
+        }
+      }
+      duplicated = hits >= 2;
     }
 
     let status: 'ok' | 'review' | 'fail';
@@ -875,7 +935,12 @@ export function auditResult(copy: string, auditWords: Word[]): AuditReport {
     else status = 'ok';
 
     out.push({ idx: i, phrase: phrases[i], coverage, tailOk, duplicated, status });
-    cursor = Math.max(cursor, local);
+    // So avanca o cursor se casou de verdade — frase ausente nao queima a
+    // regiao da proxima. E LIMITA o avanco ao cluster (bestStart + W): um match
+    // fuzzy isolado na borda da janela nao pode catapultar o cursor adiante.
+    if (coverage >= 0.5 && bestLastPos >= 0) {
+      cursor = Math.min(bestLastPos + 1, bestStart + W);
+    }
   }
 
   const okCount = out.filter((p) => p.status === 'ok').length;
@@ -951,6 +1016,7 @@ export function matchCopyWindowed(copy: string, words: Word[]): Cut[] {
       recall: cand.recall,
       precision: cand.precision,
       confidence: cand.confidence,
+      pass: cand.pass,
     });
   }
 

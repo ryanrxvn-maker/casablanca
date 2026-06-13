@@ -57,6 +57,7 @@ type Cut = {
   transcriptText: string;
   score: number;
   confidence?: number;
+  pass?: 'strict' | 'relaxed' | 'desperate';
 };
 
 type PhraseAudit = {
@@ -590,21 +591,34 @@ function DecupagemCopyInner() {
                 </span>
               )}
               {auditReport ? (
-                <span
-                  className={
-                    'mono rounded-full border px-2 py-0.5 uppercase tracking-widest ' +
-                    (auditReport.failCount === 0 && auditReport.reviewCount === 0
-                      ? 'border-lime/40 bg-lime/10 text-lime'
-                      : auditReport.failCount === 0
-                        ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
-                        : 'border-red-500/40 bg-red-500/10 text-red-300')
-                  }
-                  title="Auditoria independente: re-transcrição do resultado conferida contra a copy"
-                >
-                  {auditReport.failCount === 0 && auditReport.reviewCount === 0
-                    ? `auditado ✓ ${auditReport.okCount}/${auditReport.total}`
-                    : `auditoria: ${auditReport.failCount} falha(s) · ${auditReport.reviewCount} p/ revisar`}
-                </span>
+                auditReport.total > 0 &&
+                auditReport.failCount / auditReport.total > 0.8 ? (
+                  // Guarda anti-panico: quase tudo "falha" = a transcricao da
+                  // auditoria saiu ruim (nao 27 cortes ruins). Nao pintar de
+                  // vermelho — sinalizar inconclusivo.
+                  <span
+                    className="mono rounded-full border border-line bg-bg px-2 py-0.5 uppercase tracking-widest text-text-muted"
+                    title="A transcrição da auditoria saiu fraca — laudo não confiável desta vez"
+                  >
+                    auditoria inconclusiva
+                  </span>
+                ) : (
+                  <span
+                    className={
+                      'mono rounded-full border px-2 py-0.5 uppercase tracking-widest ' +
+                      (auditReport.failCount === 0 && auditReport.reviewCount === 0
+                        ? 'border-lime/40 bg-lime/10 text-lime'
+                        : auditReport.failCount === 0
+                          ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+                          : 'border-red-500/40 bg-red-500/10 text-red-300')
+                    }
+                    title="Auditoria independente: re-transcrição do resultado conferida contra a copy"
+                  >
+                    {auditReport.failCount === 0 && auditReport.reviewCount === 0
+                      ? `auditado ✓ ${auditReport.okCount}/${auditReport.total}`
+                      : `auditoria: ${auditReport.failCount} falha(s) · ${auditReport.reviewCount} p/ revisar`}
+                  </span>
+                )
               ) : null}
             </div>
 
@@ -624,7 +638,7 @@ function DecupagemCopyInner() {
                   const border =
                     a?.status === 'fail'
                       ? 'border-red-500/50'
-                      : a?.status === 'review'
+                      : a?.status === 'review' || c.pass === 'desperate'
                         ? 'border-amber-500/40'
                         : 'border-line';
                   return (
@@ -643,6 +657,14 @@ function DecupagemCopyInner() {
                           {Math.round(c.score * 100)}%
                         </span>
                       </span>
+                      {c.pass === 'desperate' ? (
+                        <span
+                          className="mono rounded-full bg-amber-500/10 px-2 py-0.5 text-amber-300"
+                          title="Não havia take limpa pra esta frase no bruto — revise"
+                        >
+                          sem take limpa
+                        </span>
+                      ) : null}
                       {a && a.status !== 'ok' ? (
                         <span
                           className={
