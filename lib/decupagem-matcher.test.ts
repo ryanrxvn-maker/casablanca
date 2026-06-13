@@ -23,9 +23,22 @@ import {
   stem,
   normalize,
   extractVocabHints,
+  auditResult,
   type Word,
   type Cut,
 } from './decupagem-matcher';
+
+// Constroi Word[] de uma transcricao (palavras 280ms, gap 70ms) — usado pra
+// simular a transcricao do RESULTADO na auditoria.
+function audioOf(text: string): Word[] {
+  const out: Word[] = [];
+  let t = 0;
+  for (const tok of text.split(/\s+/).filter(Boolean)) {
+    out.push({ text: tok, start: t, end: t + 280 });
+    t += 350;
+  }
+  return out;
+}
 
 // --------------------------------------------------------------------- //
 // Mini harness
@@ -807,6 +820,75 @@ console.log('\n[S28] densidade de fala baixa e' + ' rejeitada');
     const span = cuts[0].endMs - cuts[0].startMs;
     check('S28 corte denso (span < 4s)', span < 4000, `span=${span}ms`);
   }
+}
+
+// ===================================================================== //
+// P1 — auditoria pos-render (auditResult)
+// ===================================================================== //
+
+const AUDIT_COPY =
+  'Mounjaro é veneno pra celulite.\n' +
+  'Tem mulher que acha que é gordura normal.\n' +
+  'O processo é tão rápido que parece lipo.';
+
+// S29: resultado PERFEITO (audio == copy, em ordem) → tudo ok.
+console.log('\n[S29] auditoria de resultado perfeito → tudo ok');
+{
+  const audio = audioOf(
+    'monjaro e veneno pra celulite ' +
+    'tem mulher que acha que e gordura normal ' +
+    'o processo e tao rapido que parece lipo',
+  );
+  const rep = auditResult(AUDIT_COPY, audio);
+  check('S29 3 frases', rep.total === 3, `${rep.total}`);
+  check('S29 todas ok', rep.okCount === 3,
+    JSON.stringify(rep.phrases.map((p) => p.status)));
+}
+
+// S30: uma linha SUMIU do resultado → aquela frase = fail.
+console.log('\n[S30] auditoria detecta linha ausente');
+{
+  const audio = audioOf(
+    'monjaro e veneno pra celulite ' +
+    // a 2a frase (tem mulher...) NAO esta no audio
+    'o processo e tao rapido que parece lipo',
+  );
+  const rep = auditResult(AUDIT_COPY, audio);
+  check('S30 frase ausente = fail', rep.phrases[1].status === 'fail',
+    JSON.stringify(rep.phrases.map((p) => `${p.idx}:${p.status}`)));
+  check('S30 as outras seguem ok', rep.phrases[0].status === 'ok' &&
+    rep.phrases[2].status === 'ok',
+    JSON.stringify(rep.phrases.map((p) => p.status)));
+}
+
+// S31: uma frase DUPLICADA no resultado (retake vazou) → review.
+console.log('\n[S31] auditoria detecta duplicacao');
+{
+  const audio = audioOf(
+    'monjaro e veneno pra celulite ' +
+    'tem mulher que acha que e gordura normal ' +
+    'tem mulher que acha que e gordura normal ' + // DUPLICOU
+    'o processo e tao rapido que parece lipo',
+  );
+  const rep = auditResult(AUDIT_COPY, audio);
+  check('S31 frase duplicada flagada', rep.phrases[1].duplicated === true,
+    JSON.stringify(rep.phrases.map((p) => `${p.idx}:dup=${p.duplicated}`)));
+  check('S31 status nao-ok na duplicada', rep.phrases[1].status !== 'ok',
+    rep.phrases[1].status);
+}
+
+// S32: GHOST word — copy diz "Mounjaro" mas o resultado fala "Ozempic"
+// (o ASR de geracao alucinou a marca). Coverage cai → review/fail.
+console.log('\n[S32] auditoria pega palavra-fantasma (Mounjaro vs Ozempic)');
+{
+  const audio = audioOf(
+    'ozempic e veneno pra celulite ' + // disse Ozempic, nao Mounjaro
+    'tem mulher que acha que e gordura normal ' +
+    'o processo e tao rapido que parece lipo',
+  );
+  const rep = auditResult(AUDIT_COPY, audio);
+  check('S32 frase com fantasma nao fica ok', rep.phrases[0].status !== 'ok',
+    `status=${rep.phrases[0].status} cov=${rep.phrases[0].coverage.toFixed(2)}`);
 }
 
 // --------------------------------------------------------------------- //

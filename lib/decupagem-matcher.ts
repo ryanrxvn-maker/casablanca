@@ -779,6 +779,111 @@ export function enforceNoTimeOverlap(cuts: Cut[]): Cut[] {
   return result;
 }
 
+// =================== Auditoria pos-render (P1) ==========================
+
+export type PhraseAudit = {
+  idx: number;
+  phrase: string;
+  coverage: number; // fracao das palavras-conceito da copy ouvidas no resultado
+  tailOk: boolean; // a ultima palavra-conceito da frase apareceu?
+  duplicated: boolean; // a frase aparece 2x seguidas (retake vazou)?
+  status: 'ok' | 'review' | 'fail';
+};
+
+export type AuditReport = {
+  phrases: PhraseAudit[];
+  okCount: number;
+  reviewCount: number;
+  failCount: number;
+  total: number;
+};
+
+/**
+ * AUDITORIA INDEPENDENTE do MP4 final (P1).
+ *
+ * Recebe a copy e a transcricao do RESULTADO re-transcrito SEM viés (sem
+ * word_boost/prompt — a verificacao nao pode herdar a alucinacao da geracao).
+ * Para cada frase da copy, confere SEQUENCIALMENTE no audio do resultado:
+ *   - coverage: quantas palavras-conceito da frase foram realmente ouvidas;
+ *   - tailOk:   a ultima palavra-conceito (ancora de "frase completa") veio;
+ *   - duplicated: a frase aparece 2x seguidas (retake vazou no corte).
+ *
+ * status: fail (corte ruim/ausente — vermelho), review (suspeito — ambar),
+ * ok (verde). E' EXATAMENTE a conferencia manual, automatizada.
+ */
+export function auditResult(copy: string, auditWords: Word[]): AuditReport {
+  const phrases = splitIntoPhrases(copy);
+  const auditContent: string[] = [];
+  for (const w of auditWords) {
+    const s = stem(tokenize(w.text)[0] ?? '');
+    if (isContent(s)) auditContent.push(s);
+  }
+
+  const out: PhraseAudit[] = [];
+  let cursor = 0;
+
+  for (let i = 0; i < phrases.length; i++) {
+    const pc = stemTokens(phrases[i]).filter(isContent);
+    if (pc.length === 0) {
+      out.push({
+        idx: i, phrase: phrases[i], coverage: 1, tailOk: true,
+        duplicated: false, status: 'ok',
+      });
+      continue;
+    }
+
+    // Casamento GULOSO em ordem dentro de uma janela de lookahead.
+    const lookEnd = Math.min(auditContent.length, cursor + pc.length * 3 + 8);
+    let local = cursor;
+    let matched = 0;
+    let tailOk = false;
+    for (let k = 0; k < pc.length; k++) {
+      for (let j = local; j < lookEnd; j++) {
+        if (fuzzyEq(pc[k], auditContent[j])) {
+          matched++;
+          local = j + 1;
+          if (k === pc.length - 1) tailOk = true;
+          break;
+        }
+      }
+    }
+    const coverage = matched / pc.length;
+
+    // Duplicacao: o inicio da frase REAPARECE logo apos a 1a ocorrencia?
+    let duplicated = false;
+    if (pc.length >= 2 && tailOk) {
+      const dupEnd = Math.min(auditContent.length, local + pc.length + 4);
+      for (let j = local; j + 1 < dupEnd; j++) {
+        if (fuzzyEq(pc[0], auditContent[j]) && fuzzyEq(pc[1], auditContent[j + 1])) {
+          duplicated = true;
+          // consome a 2a ocorrencia pra nao confundir com a proxima frase
+          let l2 = j;
+          for (let k = 0; k < pc.length; k++) {
+            for (let x = l2; x < dupEnd + pc.length && x < auditContent.length; x++) {
+              if (fuzzyEq(pc[k], auditContent[x])) { l2 = x + 1; break; }
+            }
+          }
+          local = Math.max(local, l2);
+          break;
+        }
+      }
+    }
+
+    let status: 'ok' | 'review' | 'fail';
+    if (coverage < 0.5 || !tailOk) status = 'fail';
+    else if (duplicated || coverage < 0.8) status = 'review';
+    else status = 'ok';
+
+    out.push({ idx: i, phrase: phrases[i], coverage, tailOk, duplicated, status });
+    cursor = Math.max(cursor, local);
+  }
+
+  const okCount = out.filter((p) => p.status === 'ok').length;
+  const reviewCount = out.filter((p) => p.status === 'review').length;
+  const failCount = out.filter((p) => p.status === 'fail').length;
+  return { phrases: out, okCount, reviewCount, failCount, total: out.length };
+}
+
 // =================== Pipeline principal =================================
 
 export function matchCopyWindowed(copy: string, words: Word[]): Cut[] {

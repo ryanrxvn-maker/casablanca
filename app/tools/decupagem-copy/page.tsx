@@ -59,6 +59,22 @@ type Cut = {
   confidence?: number;
 };
 
+type PhraseAudit = {
+  idx: number;
+  phrase: string;
+  coverage: number;
+  tailOk: boolean;
+  duplicated: boolean;
+  status: 'ok' | 'review' | 'fail';
+};
+type AuditReport = {
+  phrases: PhraseAudit[];
+  okCount: number;
+  reviewCount: number;
+  failCount: number;
+  total: number;
+};
+
 export default function DecupagemCopyPage() {
   return (
     <TierGate require="pro" toolName="Decupagem Inteligente">
@@ -89,6 +105,10 @@ function DecupagemCopyInner() {
   );
   const [provider, setProvider] = useToolState<string | null>(
     'decupcopy:provider',
+    null,
+  );
+  const [auditReport, setAuditReport] = useToolState<AuditReport | null>(
+    'decupcopy:audit',
     null,
   );
   const [resultUrl, setResultUrl] = useToolState<string | null>(
@@ -131,6 +151,13 @@ function DecupagemCopyInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file]);
 
+  // Laudo por frase, indexado pelo texto da copy (mesma fonte: splitIntoPhrases).
+  const auditByPhrase = useMemo(() => {
+    const m = new Map<string, PhraseAudit>();
+    if (auditReport) for (const p of auditReport.phrases) m.set(p.phrase.trim(), p);
+    return m;
+  }, [auditReport]);
+
   const validation = useMemo(() => {
     if (!file) return null;
     if (file.size > MAX_FILE_BYTES) {
@@ -148,6 +175,7 @@ function DecupagemCopyInner() {
     setCuts([]);
     setAvgConfidence(null);
     setProvider(null);
+    setAuditReport(null);
     setStage(null);
     setProgress(null);
     setError(null);
@@ -257,6 +285,43 @@ function DecupagemCopyInner() {
         onProgress: (p: FFProgress) =>
           setProgress(0.5 + p.ratio * 0.4),
       });
+
+      // Step 3.5: AUDITORIA pós-render (P1). Re-transcreve o RESULTADO (ANTES
+      // do silence-removal, pra os offsets baterem) SEM viés e confere frase a
+      // frase contra a copy — a conferencia manual automatizada. Best-effort:
+      // se falhar, segue sem laudo (nunca bloqueia a entrega).
+      try {
+        setStage('Auditando o resultado (conferindo contra a copy)...');
+        setProgress(0.86);
+        const resultDur = segments.reduce(
+          (acc, s) => acc + Math.max(0, s.end - s.start),
+          0,
+        );
+        const auditAudio = await extractAudioForTranscription(
+          out,
+          { onStage: (s) => setStage(s) },
+          resultDur,
+        );
+        if (auditAudio.size <= 4_400_000) {
+          const afd = new FormData();
+          afd.append('audio', auditAudio, 'audit.opus');
+          afd.append('copy', copyText);
+          const ares = await fetch('/api/decupagem-copy/audit', {
+            method: 'POST',
+            body: afd,
+            signal: abortRef.current?.signal,
+          });
+          if (ares.ok) {
+            const ajson = (await ares.json()) as { report?: AuditReport };
+            if (ajson.report) setAuditReport(ajson.report);
+          } else {
+            console.warn('[audit] HTTP', ares.status);
+          }
+        }
+      } catch (auditErr) {
+        if ((auditErr as Error)?.name === 'AbortError') throw auditErr;
+        console.warn('[audit] falhou (best-effort):', auditErr);
+      }
 
       // Step 4: Silence removal GLOBAL no MP4 final (depois do concat).
       // Remove pausas naturais entre frases sem dividir cuts.
@@ -524,6 +589,23 @@ function DecupagemCopyInner() {
                   confiança: indisponível (use AssemblyAI p/ medir)
                 </span>
               )}
+              {auditReport ? (
+                <span
+                  className={
+                    'mono rounded-full border px-2 py-0.5 uppercase tracking-widest ' +
+                    (auditReport.failCount === 0 && auditReport.reviewCount === 0
+                      ? 'border-lime/40 bg-lime/10 text-lime'
+                      : auditReport.failCount === 0
+                        ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
+                        : 'border-red-500/40 bg-red-500/10 text-red-300')
+                  }
+                  title="Auditoria independente: re-transcrição do resultado conferida contra a copy"
+                >
+                  {auditReport.failCount === 0 && auditReport.reviewCount === 0
+                    ? `auditado ✓ ${auditReport.okCount}/${auditReport.total}`
+                    : `auditoria: ${auditReport.failCount} falha(s) · ${auditReport.reviewCount} p/ revisar`}
+                </span>
+              ) : null}
             </div>
 
             <video
@@ -537,10 +619,18 @@ function DecupagemCopyInner() {
                 Cortes detectados (debug)
               </h4>
               <ul className="grid gap-1.5">
-                {cuts.map((c, i) => (
+                {cuts.map((c, i) => {
+                  const a = auditByPhrase.get(c.copyPhrase.trim());
+                  const border =
+                    a?.status === 'fail'
+                      ? 'border-red-500/50'
+                      : a?.status === 'review'
+                        ? 'border-amber-500/40'
+                        : 'border-line';
+                  return (
                   <li
                     key={i}
-                    className="rounded-[8px] border border-line bg-bg p-2 text-xs"
+                    className={`rounded-[8px] border ${border} bg-bg p-2 text-xs`}
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="mono rounded-full bg-lime/10 px-2 py-0.5 text-lime">
@@ -553,6 +643,30 @@ function DecupagemCopyInner() {
                           {Math.round(c.score * 100)}%
                         </span>
                       </span>
+                      {a && a.status !== 'ok' ? (
+                        <span
+                          className={
+                            'mono rounded-full px-2 py-0.5 ' +
+                            (a.status === 'fail'
+                              ? 'bg-red-500/10 text-red-300'
+                              : 'bg-amber-500/10 text-amber-300')
+                          }
+                          title="Auditoria do resultado vs copy"
+                        >
+                          {a.duplicated
+                            ? 'audit: duplicada'
+                            : !a.tailOk
+                              ? 'audit: incompleta/ausente'
+                              : `audit: revisar (${Math.round(a.coverage * 100)}%)`}
+                        </span>
+                      ) : a ? (
+                        <span
+                          className="mono rounded-full bg-lime/10 px-2 py-0.5 text-lime"
+                          title="Auditoria confirmou esta frase no resultado"
+                        >
+                          audit ✓
+                        </span>
+                      ) : null}
                       {typeof c.confidence === 'number' ? (
                         <span
                           className={
@@ -581,7 +695,8 @@ function DecupagemCopyInner() {
                       </div>
                     </div>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             </div>
           </div>
