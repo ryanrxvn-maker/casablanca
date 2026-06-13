@@ -1346,6 +1346,20 @@ console.log('\n[S44] frase repetida ESPALHADA nao e' + ' falso-dedup');
     JSON.stringify(spans));
 }
 
+// S45: fragmento de 1 palavra ("Resultado?") funde na frase seguinte em vez de
+// virar uma frase dropada/fail espuria.
+console.log('\n[S45] fragmento curto funde na frase vizinha');
+{
+  const ph = splitIntoPhrases('Resultado? Pernas cada vez mais grossas e doloridas.');
+  check('S45 fundiu (1 frase, nao 2)', ph.length === 1, JSON.stringify(ph));
+  check('S45 frase tem Resultado E Pernas',
+    /resultado/i.test(ph[0]) && /pernas/i.test(ph[0]), JSON.stringify(ph));
+  // frases normais NAO sao fundidas
+  const ph2 = splitIntoPhrases('Primeira frase completa aqui. Segunda frase completa aqui.');
+  check('S45 frases normais ficam separadas', ph2.length === 2,
+    JSON.stringify(ph2));
+}
+
 // --------------------------------------------------------------------- //
 
 console.log(

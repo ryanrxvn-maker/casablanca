@@ -261,10 +261,30 @@ function getWindowRatios(targetLen: number): { min: number; max: number } {
 }
 
 export function splitIntoPhrases(copy: string): string[] {
-  return copy
+  const raw = copy
     .split(/[.!?\n]+|…/)
     .map((p) => p.trim())
     .filter((p) => p.length > 2);
+
+  // FUNDE fragmentos de <2 tokens ("Resultado?", "Ah...") na PROXIMA frase.
+  // Sem isso o matcher dropa o fragmento (precisa de >=2 stems) e o corte da
+  // frase seguinte comeca DEPOIS dele — comendo "Resultado?", "Por quê" curto,
+  // etc. No bruto esses fragmentos sao contiguos com a frase seguinte, entao
+  // fundir faz o corte capturar tudo. (Se for o ultimo, funde no anterior.)
+  const out: string[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const tokens = stemTokens(raw[i]).length;
+    if (tokens < 2 && (i + 1 < raw.length || out.length > 0)) {
+      if (i + 1 < raw.length) {
+        raw[i + 1] = raw[i] + ' ' + raw[i + 1]; // funde na proxima
+      } else {
+        out[out.length - 1] = out[out.length - 1] + ' ' + raw[i]; // ou anterior
+      }
+      continue;
+    }
+    out.push(raw[i]);
+  }
+  return out;
 }
 
 // =================== Vocab hints (viés de transcrição) ==================
