@@ -98,6 +98,9 @@ export type Cut = {
   // Outras takes candidatas da MESMA frase (ranqueadas), pro auto-retry trocar
   // quando a auditoria reprova este corte. Leves: so tempo + texto.
   alts?: Array<{ startMs: number; endMs: number; text: string }>;
+  // true se este corte e' a CAUDA costurada de outra tomada (splicing) — a
+  // frase nao existia inteira numa take so. UI marca pra revisao.
+  spliced?: boolean;
 };
 
 const FILLERS = new Set([
@@ -1118,6 +1121,95 @@ export function keepSegmentsFromRemovals(
 
 // =================== Pipeline principal =================================
 
+// =================== Splicing por sub-frase (P3) ========================
+
+/** Snap de um [startIdx,endIdx] em segmento de tempo (mesma logica do matcher). */
+function snapSegment(
+  startIdx: number,
+  endIdx: number,
+  words: Word[],
+  gaps: number[],
+): { startMs: number; endMs: number; text: string } {
+  const gapBefore = startIdx === 0 ? Infinity : gaps[startIdx - 1];
+  const gapAfter = gaps[endIdx];
+  const padBefore = Math.min(MARGIN_MS, Math.max(EDGE_PAD_MS, gapBefore / 2));
+  const padAfter = Math.min(MARGIN_MS, Math.max(EDGE_PAD_MS, gapAfter / 2));
+  return {
+    startMs: Math.max(0, words[startIdx].start - padBefore),
+    endMs: words[endIdx].end + padAfter,
+    text: words.slice(startIdx, endIdx + 1).map((w) => w.text).join(' '),
+  };
+}
+
+/**
+ * SPLICING (P3): quando a frase da copy NAO foi falada inteira numa tomada (o
+ * corte escolhido cobre a cabeca mas perde a CAUDA), acha a cauda faltante em
+ * OUTRA tomada e devolve onde cortar a 1a (trimEndIdx, na palavra-ponte) + o
+ * trecho da 2a (tail). Costura: [cabeca ate a ponte] + [cauda da outra take].
+ *
+ * SEGURO: so dispara quando a ULTIMA palavra-conceito da copy esta FALTANDO no
+ * corte (cauda incompleta). Pros 30+ cortes completos, retorna null e nao toca
+ * em nada. Se nao achar uma cauda limpa, retorna null (mantem o corte unico).
+ */
+export function findTailSplice(
+  phraseStems: string[],
+  cand: Candidate,
+  words: Word[],
+  transcriptStems: string[],
+  gaps: number[],
+): { trimEndIdx: number; tailStartIdx: number; tailEndIdx: number } | null {
+  const content: Array<{ s: string }> = [];
+  for (const s of phraseStems) if (isContent(s)) content.push({ s });
+  if (content.length < 3) return null;
+
+  const chosen = transcriptStems.slice(cand.startIdx, cand.endIdx + 1);
+  const coveredFuzzy = (s: string) => chosen.some((t) => fuzzyEq(s, t));
+
+  const lastC = content[content.length - 1].s;
+  if (coveredFuzzy(lastC)) return null; // cauda ja completa — nada a fazer
+
+  // ultimo content da copy que o corte cobre = palavra-PONTE
+  let joinK = -1;
+  for (let k = content.length - 1; k >= 0; k--) {
+    if (coveredFuzzy(content[k].s)) { joinK = k; break; }
+  }
+  if (joinK < 0 || joinK >= content.length - 1) return null;
+  const anchor = content[joinK].s;
+  const firstMissing = content[joinK + 1].s;
+  const subTarget = content.slice(joinK).map((c) => c.s); // ponte + cauda
+  if (subTarget.length < 2) return null;
+
+  // acha tomada com a cauda (ponte + missing), SEM overlap com o corte atual,
+  // contendo a ultima palavra da copy e terminando numa pausa.
+  const comps = findTopWindows(subTarget, words, transcriptStems, gaps, 6, true)
+    .filter((c) => {
+      const overlap = !(c.endIdx < cand.startIdx || c.startIdx > cand.endIdx);
+      if (overlap) return false;
+      const win = transcriptStems.slice(c.startIdx, c.endIdx + 1);
+      return win.some((t) => fuzzyEq(lastC, t)) && win.some((t) => fuzzyEq(anchor, t));
+    });
+  if (!comps.length) return null;
+  const comp = comps[0];
+
+  // trim do corte atual: ultima palavra (no corte) que casa a PONTE
+  let trimEndIdx = -1;
+  for (let i = cand.endIdx; i >= cand.startIdx; i--) {
+    if (fuzzyEq(anchor, transcriptStems[i])) { trimEndIdx = i; break; }
+  }
+  if (trimEndIdx < 0) return null;
+
+  // inicio da cauda: 1a palavra (no comp, APOS a ponte) que casa o 1o missing
+  let tailStartIdx = -1;
+  let seenAnchor = false;
+  for (let i = comp.startIdx; i <= comp.endIdx; i++) {
+    if (!seenAnchor && fuzzyEq(anchor, transcriptStems[i])) { seenAnchor = true; continue; }
+    if (seenAnchor && fuzzyEq(firstMissing, transcriptStems[i])) { tailStartIdx = i; break; }
+  }
+  if (tailStartIdx < 0 || tailStartIdx > comp.endIdx) return null;
+
+  return { trimEndIdx, tailStartIdx, tailEndIdx: comp.endIdx };
+}
+
 export function matchCopyWindowed(copy: string, words: Word[]): Cut[] {
   if (words.length === 0) return [];
   const phrases = splitIntoPhrases(copy);
@@ -1179,6 +1271,29 @@ export function matchCopyWindowed(copy: string, words: Word[]): Cut[] {
       .filter((c) => c !== cand)
       .slice(0, 3)
       .map((c) => ({ startMs: c.startMs, endMs: c.endMs, text: c.text }));
+    // SPLICING: a cauda da frase esta faltando neste corte (frase falada em
+    // pedacos)? Acha a cauda em outra tomada e costura. So altera ESTE corte
+    // (trim na ponte) + adiciona o segmento de cauda; nao toca em nenhum outro.
+    const splice = findTailSplice(
+      stemTokens(phrases[i]), cand, words, transcriptStems, gaps,
+    );
+    if (splice) {
+      const head = snapSegment(cand.startIdx, splice.trimEndIdx, words, gaps);
+      const tail = snapSegment(splice.tailStartIdx, splice.tailEndIdx, words, gaps);
+      rawCuts.push({
+        startMs: head.startMs, endMs: head.endMs, copyPhrase: phrases[i],
+        transcriptText: head.text, score: cand.score, recall: cand.recall,
+        precision: cand.precision, confidence: cand.confidence, pass: cand.pass, alts,
+      });
+      rawCuts.push({
+        startMs: tail.startMs, endMs: tail.endMs, copyPhrase: phrases[i],
+        transcriptText: tail.text, score: cand.score, recall: cand.recall,
+        precision: cand.precision, confidence: cand.confidence,
+        pass: cand.pass, spliced: true,
+      });
+      continue;
+    }
+
     // startMs/endMs ja vem snapados pro meio do silencio adjacente.
     rawCuts.push({
       startMs: cand.startMs,

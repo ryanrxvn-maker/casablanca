@@ -22,12 +22,17 @@ import {
   splitIntoPhrases,
   stem,
   normalize,
+  tokenize,
+  stemTokens,
+  computeGaps,
   extractVocabHints,
   auditResult,
   findRepeatedSpans,
+  findTailSplice,
   keepSegmentsFromRemovals,
   type Word,
   type Cut,
+  type Candidate,
 } from './decupagem-matcher';
 
 // Mantem so as palavras dentro dos segmentos KEEP (simula o corte do resultado).
@@ -1358,6 +1363,43 @@ console.log('\n[S45] fragmento curto funde na frase vizinha');
   const ph2 = splitIntoPhrases('Primeira frase completa aqui. Segunda frase completa aqui.');
   check('S45 frases normais ficam separadas', ph2.length === 2,
     JSON.stringify(ph2));
+}
+
+// S46: SPLICING — frase falada em PEDACOS (cabeca numa take, cauda em outra).
+// findTailSplice acha a cauda faltante na outra tomada.
+console.log('\n[S46] splicing recupera cauda de outra tomada');
+{
+  const w = transcript(
+    'compre o produto incrivel',          // take A: cabeca (sem "hoje")
+    'outra coisa qualquer aqui agora',     // lixo
+    'o produto incrivel hoje mesmo',       // take B: tem a cauda "hoje"
+  );
+  const tS = w.map((x) => stem(tokenize(x.text)[0] || ''));
+  const gaps = computeGaps(w);
+  // corte escolhido = take A (idx 0..3), cauda "hoje" faltando
+  const cand: Candidate = {
+    startIdx: 0, endIdx: 3, startMs: w[0].start, endMs: w[3].end,
+    text: 'compre o produto incrivel', score: 0.6, recall: 1, precision: 1, lcsRatio: 1,
+  };
+  const sp = findTailSplice(
+    stemTokens('compre o produto incrivel hoje'), cand, w, tS, gaps,
+  );
+  check('S46 achou splice da cauda', sp !== null, JSON.stringify(sp));
+  if (sp) {
+    check('S46 cauda aponta pra "hoje"', /hoje/i.test(w[sp.tailStartIdx].text),
+      `tailStart=${w[sp.tailStartIdx]?.text}`);
+  }
+  // cauda COMPLETA (nada faltando) -> nao splica
+  const cand2: Candidate = {
+    startIdx: 0, endIdx: 3, startMs: w[0].start, endMs: w[3].end,
+    text: 'compre o produto incrivel hoje', score: 1, recall: 1, precision: 1, lcsRatio: 1,
+  };
+  // cauda completa (ultima content "incrivel" ja coberta) -> nao splica
+  const spNone = findTailSplice(
+    stemTokens('compre o produto incrivel'), cand2, w, tS, gaps,
+  );
+  check('S46 nao splica quando cauda completa', spNone === null,
+    JSON.stringify(spNone));
 }
 
 // --------------------------------------------------------------------- //

@@ -60,6 +60,7 @@ type Cut = {
   confidence?: number;
   pass?: 'strict' | 'relaxed' | 'desperate';
   alts?: Array<{ startMs: number; endMs: number; text: string }>;
+  spliced?: boolean;
 };
 
 type PhraseAudit = {
@@ -846,6 +847,14 @@ function DecupagemCopyInner() {
                           title="Não havia take limpa pra esta frase no bruto — revise"
                         >
                           sem take limpa
+                        </span>
+                      ) : null}
+                      {c.spliced ? (
+                        <span
+                          className="mono rounded-full bg-violet/10 px-2 py-0.5 text-violet"
+                          title="Cauda costurada de outra tomada (a frase não foi dita inteira numa take só)"
+                        >
+                          costurado
                         </span>
                       ) : null}
                       {a && a.status !== 'ok' ? (
