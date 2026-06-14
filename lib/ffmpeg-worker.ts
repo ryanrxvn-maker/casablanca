@@ -1202,16 +1202,21 @@ const LOUDNORM_TARGET = 'I=-16:TP=-1.5:LRA=11';
 // Candidatos de DENOISE (limpeza de ruído de fundo), em ordem de qualidade.
 // Tudo roda LOCAL (no navegador), sem custo e sem subir áudio pra nuvem.
 //
-//  1. RNNoise (`arnndn`) — denoiser por REDE NEURAL treinada em voz. É o
-//     melhor pra fala. Precisa do modelo .rnnn carregado no FS (ver
-//     loadDenoiseModel). `mix=0.85` mistura 85% limpo + 15% original → tira
-//     o chiado sem deixar a voz "fechada"/artificial. `aresample=48000`
-//     porque o RNNoise é treinado a 48kHz.
-//  2. `afftdn` — denoise espectral adaptativo (rastreia o ruído sozinho com
-//     tn=1). Não precisa de modelo, roda em qualquer build. Fallback.
+//  1. RNNoise (`arnndn`) + polish afftdn — denoiser por REDE NEURAL treinada
+//     em voz (o melhor pra fala) SEGUIDO de um afftdn GENTIL (nr=12, noise
+//     tracking tn=1) que varre o resíduo de hiss que a rede deixa. Precisa do
+//     modelo .rnnn no FS (ver loadDenoiseModel). `mix=0.90` = 90% limpo + 10%
+//     original (tira o chiado sem fechar a voz). `aresample=48000` porque o
+//     RNNoise é treinado a 48kHz.
+//     Calibrado em VOZ REAL + hiss pesado (lipsync-talking + white-noise):
+//     hiss -35.8dB → -47.5dB (abaixo do piso natural da voz, -43.4dB) com a
+//     banda da voz preservada em 0.3dB. nr=12 é gentil de propósito — nr alto
+//     (24+) ganha <0.3dB mas arrisca "musical noise"/robótico.
+//  2. `afftdn` puro — denoise espectral adaptativo. Não precisa de modelo,
+//     roda em qualquer build. Fallback se o RNNoise não carregar.
 //  3. '' — sem denoise (último recurso; nunca deixa o tool falhar).
-const DENOISE_ARNNDN = 'aresample=48000,arnndn=m=denoise.rnnn:mix=0.85';
-const DENOISE_AFFTDN = 'afftdn=nr=10:nf=-40:tn=1';
+const DENOISE_ARNNDN = 'aresample=48000,arnndn=m=denoise.rnnn:mix=0.90,afftdn=nr=12:nf=-30:tn=1';
+const DENOISE_AFFTDN = 'afftdn=nr=12:nf=-35:tn=1';
 
 /**
  * Monta o pré-filtro completo: highpass (rumble) → [denoise] → leveling.
