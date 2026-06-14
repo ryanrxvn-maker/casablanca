@@ -141,7 +141,49 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     };
   }
 
-  // === Stage 1: ASSEMBLE (HOOK[N] + BODYs concatenados) ===
+  // Helper compartilhado: roda uma promise com timeout. ffmpeg-wasm pode TRAVAR
+  // (loop infinito) num decode de áudio corrompido — sem timeout o pipeline
+  // ficava pendurado pra sempre (user reportou RETOMAR travando, 2026-05-28).
+  const withTimeout = <T,>(p: Promise<T>, ms: number, label: string): Promise<T> =>
+    Promise.race([
+      p,
+      new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`${label} timeout ${ms / 1000}s`)), ms)),
+    ]);
+
+  // Regula a voz de UM clipe a -16 LUFS: denoise (limpa hiss/ruído) +
+  // nivelamento transparente (loudnorm linear, perfil 'natural' SEM speechnorm
+  // → sem robótico) + true-peak -1.5 (anti-clipping). NUNCA lança: se
+  // falhar/timeout, devolve o blob original intacto.
+  const regularVoz = async (blob: Blob, label: string): Promise<Blob> => {
+    try {
+      return await withTimeout(
+        prepareVoiceForDecupagem(blob, { onStage: (s) => console.log(`[clickup-pilot-pipeline] regul ${label}: ${s}`) }),
+        150_000,
+        'regulagemVoz',
+      );
+    } catch (e) {
+      console.warn(`[clickup-pilot-pipeline] regul ${label}: falhou (${(e as Error)?.message?.slice(0, 80)}), mantendo clipe original`);
+      return blob;
+    }
+  };
+
+  // Nivela CADA parte a -16 LUFS ANTES de concatenar. É o que IGUALA o volume
+  // de avatares/renders diferentes (HOOK gravado alto, BODY baixo, etc.): como
+  // um editor profissional, normaliza cada clipe pro mesmo patamar e SÓ DEPOIS
+  // monta. Nivelar o montado inteiro (loudnorm linear) NÃO resolvia — aplica um
+  // ganho único, então a parte alta continua alta e a baixa baixa (medido: gap
+  // de 20 LUFS só caía pra 7.6). Por-parte → todas idênticas a -16 LUFS.
+  // Sequencial (não Promise.all): ffmpeg-wasm é instância única, exec paralelo
+  // colidiria no FS virtual. Roda mesmo com decupagem DESLIGADA.
+  const nivelarPartes = async (blobs: Blob[], label: string): Promise<Blob[]> => {
+    const out2: Blob[] = [];
+    for (let i = 0; i < blobs.length; i++) {
+      out2.push(await regularVoz(blobs[i], `${label} parte ${i + 1}/${blobs.length}`));
+    }
+    return out2;
+  };
+
+  // === Stage 1: ASSEMBLE (HOOK[N] + BODYs concatenados, cada parte nivelada) ===
   for (let g = 0; g < groupings.length; g++) {
     const { hookIdx, gNum } = groupings[g];
     const filename = `${insertGSuffix(baseAdId, gNum)}.mp4`;
@@ -176,6 +218,11 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       continue;
     }
 
+    // NIVELA cada parte a -16 LUFS ANTES de juntar → iguala avatares/renders
+    // de volumes diferentes + limpa hiss + crava true-peak (anti-clipping).
+    onProgress?.({ stage: 'regulando', currentFilename: filename, doneCount: g, totalCount: total });
+    const leveledBlobs = await nivelarPartes(blobs, filename);
+
     // Tenta fast concat (5-10x mais rapido) primeiro. Mas fast concat sem
     // re-encode pode produzir output corrompido se codec/dimensao divergem
     // entre as partes (raro com HeyGen mesmo avatar, mas acontece). Por isso
@@ -189,13 +236,13 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     try {
       const tFast = Date.now();
       try {
-        assembled = await concatVideosFast(blobs);
+        assembled = await concatVideosFast(leveledBlobs);
         usedFastPath = true;
         console.log(`[clickup-pilot-pipeline] assemble ${filename}: FAST OK ${(assembled.size/(1024*1024)).toFixed(1)}MB em ${((Date.now()-tFast)/1000).toFixed(1)}s`);
       } catch (fastErr) {
         console.warn(`[clickup-pilot-pipeline] assemble ${filename}: fast FALHOU (${(fastErr as Error)?.message?.slice(0,80)}), tentando re-encode...`);
         const tSlow = Date.now();
-        assembled = await concatAvatarParts(blobs);
+        assembled = await concatAvatarParts(leveledBlobs);
         console.log(`[clickup-pilot-pipeline] assemble ${filename}: SLOW OK ${(assembled.size/(1024*1024)).toFixed(1)}MB em ${((Date.now()-tSlow)/1000).toFixed(1)}s`);
       }
     } catch (e) {
@@ -206,45 +253,9 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     out.push({ filename, rawAssembled: assembled, _usedFastPath: usedFastPath } as AssembledPart & { _usedFastPath: boolean });
   }
 
-  // Helper compartilhado: roda uma promise com timeout. ffmpeg-wasm pode TRAVAR
-  // (loop infinito) num decode de áudio corrompido — sem timeout o pipeline
-  // ficava pendurado pra sempre (user reportou RETOMAR travando, 2026-05-28).
-  const withTimeout = <T,>(p: Promise<T>, ms: number, label: string): Promise<T> =>
-    Promise.race([
-      p,
-      new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`${label} timeout ${ms / 1000}s`)), ms)),
-    ]);
-
-  // Regula a voz de UM montado: denoise (limpa hiss/ruído) + nivelamento
-  // transparente (loudnorm linear, perfil 'natural' SEM speechnorm → sem
-  // robótico). NUNCA lança: se falhar/timeout, devolve o blob original intacto.
-  const regularVoz = async (blob: Blob, label: string): Promise<Blob> => {
-    try {
-      return await withTimeout(
-        prepareVoiceForDecupagem(blob, { onStage: (s) => console.log(`[clickup-pilot-pipeline] regul ${label}: ${s}`) }),
-        150_000,
-        'regulagemVoz',
-      );
-    } catch (e) {
-      console.warn(`[clickup-pilot-pipeline] regul ${label}: falhou (${(e as Error)?.message?.slice(0, 80)}), mantendo montado original`);
-      return blob;
-    }
-  };
-
-  // === Stage 1.5: REGULAGEM DE VOZ (SEMPRE — independe do toggle decupagem) ===
-  // Limpa o ruído (inclusive o hiss que o HeyGen às vezes coloca em renders
-  // específicos — por isso "só algumas partes do mesmo avatar xiam") e nivela a
-  // voz do montado INTEIRO. Roda mesmo com decupagem DESLIGADA, porque o montado
-  // (montadoZip) é entregue de qualquer forma — é o que garante que NENHUM áudio
-  // sai xiando, com ou sem decupagem. Como o rawAssembled já sai limpo aqui, a
-  // decupagem (Stage 2) e a camuflagem (Stage 3) consomem o áudio já regulado,
-  // sem reprocessar (1 limpeza só por montado).
-  for (let g = 0; g < out.length; g++) {
-    const item = out[g];
-    if (!item.rawAssembled || item.rawAssembled.size === 0 || item.errors?.assemble) continue;
-    onProgress?.({ stage: 'regulando', currentFilename: item.filename, doneCount: g, totalCount: total });
-    item.rawAssembled = await regularVoz(item.rawAssembled, item.filename);
-  }
+  // (A regulagem de voz agora acontece POR PARTE no Stage 1, antes do concat —
+  // ver nivelarPartes/regularVoz acima. Assim o montado já sai limpo, nivelado
+  // e com volumes IGUAIS entre as partes, com ou sem decupagem.)
 
   // === Stage 2: DECUPAGEM (com retry de assemble se fast produziu lixo) ===
   // Quando `decupagem: false`, pula stage inteiro — user pediu ad montado
@@ -286,10 +297,12 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         piecesIdx.push(...bodies);
         const blobs = piecesIdx.map(i => parts[i].blob!).filter(Boolean);
         const tSlow = Date.now();
-        const reAssembled = await concatAvatarParts(blobs);
+        // Nivela cada parte a -16 ANTES do re-concat (mesmo do Stage 1) →
+        // montado re-feito sai com volumes iguais entre as partes.
+        const leveledBlobs = await nivelarPartes(blobs, item.filename);
+        const reAssembled = await concatAvatarParts(leveledBlobs);
         console.log(`[clickup-pilot-pipeline] re-assemble ${item.filename}: SLOW OK em ${((Date.now()-tSlow)/1000).toFixed(1)}s`);
-        // Regula o montado re-feito também (o do Stage 1.5 era o fast bogus).
-        item.rawAssembled = await regularVoz(reAssembled, item.filename);
+        item.rawAssembled = reAssembled;
         item._usedFastPath = false;
         res = await tryDecup(item.rawAssembled);
       } catch (e) {
