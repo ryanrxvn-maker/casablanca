@@ -59,6 +59,20 @@ export async function POST(req: Request) {
       });
     }
 
+    // Teto POR EMAIL (além do por-IP acima): estrangula enumeração em massa
+    // mesmo se o atacante rotacionar IP. Diagnóstico legítimo de 1 usuário
+    // cabe folgado em 5/10min.
+    if (!rateLimit('diagnose-email:' + cleanEmail, 5, 600_000)) {
+      return NextResponse.json<DiagnoseResp>(
+        {
+          reason: 'unknown',
+          message: 'Muitas verificações pra esse email. Aguarde um pouco.',
+          canResend: false,
+        },
+        { status: 429 },
+      );
+    }
+
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
     if (!url || !serviceKey) {

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { rateLimit, clientIp } from '@/lib/rate-limit';
 
 /**
  * POST /api/auth/forgot-password
@@ -27,6 +28,15 @@ export async function POST(req: Request) {
         { ok: false, error: 'Email inválido.' },
         { status: 400 },
       );
+    }
+
+    // Rate-limit anti email-bomb / cota Supabase: por IP e por email.
+    // Estourou → responde ok:true igual (sem vazar, sem mandar email).
+    if (
+      !rateLimit('forgot-ip:' + clientIp(req), 6, 600_000) ||
+      !rateLimit('forgot-email:' + cleanEmail, 3, 3_600_000)
+    ) {
+      return NextResponse.json({ ok: true });
     }
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { rateLimit, clientIp } from '@/lib/rate-limit';
 
 /**
  * POST /api/auth/sms/send-code
@@ -50,8 +51,24 @@ async function sendTwilio(phone: string, body: string): Promise<boolean> {
 
 export async function POST(req: Request) {
   try {
+    // Fricção por IP: corta rajadas de SMS-pumping antes de tocar no banco.
+    // Best-effort (in-memory por instância) — o teto real é o cap diário DB abaixo.
+    if (!rateLimit('otp-send-ip:' + clientIp(req), 5, 600_000)) {
+      return NextResponse.json({
+        ok: true,
+        throttled: true,
+        message: 'Muitas solicitações. Aguarde alguns minutos.',
+      });
+    }
+
     const { phone } = (await req.json()) as { phone?: string };
     if (!phone || phone.length < 8) {
+      return NextResponse.json({ ok: true });
+    }
+    // Normaliza pra E.164 e valida o formato — não dispara SMS (custo) pra
+    // número malformado. Retorna 200 mesmo se inválido (não vaza info).
+    const normalizedPhone = phone.replace(/[^\d+]/g, '');
+    if (!/^\+?[1-9]\d{7,14}$/.test(normalizedPhone)) {
       return NextResponse.json({ ok: true });
     }
 
@@ -72,6 +89,24 @@ export async function POST(req: Request) {
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
       { cookies: { getAll: () => [], setAll: () => {} } },
     );
+
+    // Cap diário GLOBAL (no banco, independe de instância serverless):
+    // máx 10 códigos por usuário em 24h. Barra SMS-pumping/toll-fraud e
+    // tira a munição do brute-force (poucos códigos por dia → poucas tentativas).
+    const DAILY_MAX = 10;
+    const since24h = new Date(Date.now() - 86_400_000).toISOString();
+    const { count: sentToday } = await admin
+      .from('phone_otp_codes')
+      .select('id', { count: 'exact', head: true })
+      .eq('profile_id', uid)
+      .gte('created_at', since24h);
+    if ((sentToday ?? 0) >= DAILY_MAX) {
+      return NextResponse.json({
+        ok: true,
+        throttled: true,
+        message: 'Limite diário de códigos atingido. Tente novamente amanhã.',
+      });
+    }
 
     // Rate-limit: último código enviado < 30s?
     const { data: recent } = await admin
@@ -95,15 +130,15 @@ export async function POST(req: Request) {
     const code = genCode();
     await admin.from('phone_otp_codes').insert({
       profile_id: uid,
-      phone,
+      phone: normalizedPhone,
       code,
     });
 
-    // Atualiza phone no profile (pra refletir o que foi inserido)
-    await admin.from('profiles').update({ phone }).eq('id', uid);
+    // NÃO grava phone no profile aqui — seria um telefone NÃO verificado.
+    // O verify-code persiste o phone no profile só após confirmar o código.
 
     const body = `Auto Edit · Seu código: ${code}. Vale por 10 min.`;
-    const sent = await sendTwilio(phone, body);
+    const sent = await sendTwilio(normalizedPhone, body);
     if (!sent) {
       // Dev mode: loga no servidor pra você ver
       console.log('[sms-otp] (dev) phone=' + phone + ' code=' + code);

@@ -19,6 +19,7 @@ import { separateStems } from '@/lib/audio-separator-server';
 import { RAW_STEMS, type RawStem } from '@/lib/audio-separator';
 import { serviceClient } from '@/app/api/admin/_helpers';
 import { requireTier } from '@/lib/require-tier';
+import { assertPublicHttpUrl, safeFetch, SsrfError } from '@/lib/safe-fetch';
 
 export const runtime = 'nodejs';
 // Demucs num clip de alguns minutos roda em ~30-120s; re-host adiciona pouco.
@@ -47,6 +48,16 @@ export async function POST(req: NextRequest) {
       { error: 'audioUrl ausente ou inválida.' },
       { status: 400 },
     );
+  }
+  // Anti-SSRF: a audioUrl é repassada pro Replicate baixar; barra destino
+  // interno antes (impede usar o Replicate/servidor como proxy pra rede interna).
+  try {
+    await assertPublicHttpUrl(audioUrl);
+  } catch (e) {
+    if (e instanceof SsrfError) {
+      return NextResponse.json({ error: 'audioUrl não permitida.' }, { status: 400 });
+    }
+    return NextResponse.json({ error: 'Falha ao validar a audioUrl.' }, { status: 400 });
   }
 
   // 1) Separa via Replicate Demucs → 4 trilhas brutas (replicate.delivery).
@@ -87,7 +98,7 @@ export async function POST(req: NextRequest) {
 
     let bytes: ArrayBuffer;
     try {
-      const dl = await fetch(srcUrl);
+      const dl = await safeFetch(srcUrl);
       if (!dl.ok) throw new Error(`HTTP ${dl.status}`);
       bytes = await dl.arrayBuffer();
     } catch (e) {

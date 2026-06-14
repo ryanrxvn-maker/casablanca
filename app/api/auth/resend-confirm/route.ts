@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { rateLimit, clientIp } from '@/lib/rate-limit';
 
 /**
  * POST /api/auth/resend-confirm
@@ -23,6 +24,14 @@ export async function POST(req: Request) {
         { ok: false, error: 'Email inválido.' },
         { status: 400 },
       );
+    }
+
+    // Rate-limit anti email-bomb / cota Supabase: por IP e por email.
+    if (
+      !rateLimit('resend-ip:' + clientIp(req), 6, 600_000) ||
+      !rateLimit('resend-email:' + cleanEmail, 3, 3_600_000)
+    ) {
+      return NextResponse.json({ ok: true });
     }
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -51,11 +60,10 @@ export async function POST(req: Request) {
       },
     });
 
+    // NÃO devolve error.message — diferenciava "email não existe" de "já
+    // confirmado" (enumeração de conta). Loga no server, responde ok sempre.
     if (error) {
-      return NextResponse.json(
-        { ok: false, error: error.message },
-        { status: 400 },
-      );
+      console.warn('[auth/resend-confirm]', error.message);
     }
 
     return NextResponse.json({ ok: true });

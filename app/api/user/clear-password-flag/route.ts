@@ -21,6 +21,20 @@ export async function POST() {
       return NextResponse.json({ error: 'Nao autenticado.' }, { status: 401 });
     }
 
+    // Só limpa a flag se a senha foi REALMENTE trocada agora. O /trocar-senha
+    // chama supabase.auth.updateUser({password}) (que atualiza user.updated_at)
+    // e logo em seguida bate aqui — então updated_at recente = troca acabou de
+    // ocorrer. Sem isso, um usuário podia zerar a flag e seguir na senha
+    // provisória pra sempre, furando a rotação forçada.
+    const updatedAt = user.updated_at ? new Date(user.updated_at).getTime() : 0;
+    const FRESH_MS = 30 * 60_000; // 30 min de folga pra fluxos lentos
+    if (!updatedAt || Date.now() - updatedAt > FRESH_MS) {
+      return NextResponse.json(
+        { error: 'Troque a senha antes de continuar.' },
+        { status: 409 },
+      );
+    }
+
     const { error } = await supabase
       .from('profiles')
       .update({ must_change_password: false })

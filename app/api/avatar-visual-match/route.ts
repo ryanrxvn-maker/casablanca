@@ -13,6 +13,7 @@
 import { NextResponse } from 'next/server';
 import { getUserKey } from '@/lib/user-keys';
 import { requireTier } from '@/lib/require-tier';
+import { safeFetch } from '@/lib/safe-fetch';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -35,7 +36,9 @@ function jsonError(message: string, status = 400, detail?: string) {
 /** Fetch image and convert to base64 + detect mime */
 async function fetchImageBase64(url: string): Promise<{ data: string; mediaType: string } | null> {
   try {
-    const r = await fetch(url, { redirect: 'follow' });
+    // safeFetch: segue redirect (Drive usa) mas revalida cada salto contra
+    // destino interno (anti-SSRF). URL interna → SsrfError → cai no catch → null.
+    const r = await safeFetch(url);
     if (!r.ok) return null;
     const ct = (r.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();
     const buf = Buffer.from(await r.arrayBuffer());

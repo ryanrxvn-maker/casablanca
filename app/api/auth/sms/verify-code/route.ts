@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
+import { timingSafeEqual } from 'crypto';
+import { rateLimit } from '@/lib/rate-limit';
 
 /**
  * POST /api/auth/sms/verify-code
@@ -41,6 +43,16 @@ export async function POST(req: Request) {
       );
     }
 
+    // Teto por usuário: no máx 12 tentativas de verificação por hora,
+    // independente de quantos códigos foram pedidos. Fecha a janela de
+    // brute-force "pede código novo → tenta mais 5".
+    if (!rateLimit('otp-verify:' + uid, 12, 3_600_000)) {
+      return NextResponse.json(
+        { ok: false, error: 'Muitas tentativas. Tente novamente mais tarde.' },
+        { status: 429 },
+      );
+    }
+
     const admin = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -75,7 +87,12 @@ export async function POST(req: Request) {
       );
     }
 
-    if (cleaned !== (otp.code as string)) {
+    // Comparação em TEMPO CONSTANTE (anti-timing). Buffers de tamanhos
+    // diferentes nunca batem — guarda o tamanho antes do timingSafeEqual.
+    const aBuf = Buffer.from(cleaned);
+    const bBuf = Buffer.from(String(otp.code ?? ''));
+    const codeMatches = aBuf.length === bBuf.length && timingSafeEqual(aBuf, bBuf);
+    if (!codeMatches) {
       await admin
         .from('phone_otp_codes')
         .update({ attempts: (otp.attempts as number) + 1 })

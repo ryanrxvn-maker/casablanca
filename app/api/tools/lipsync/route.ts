@@ -28,6 +28,7 @@ import {
   dreamFaceErrorToHttp,
 } from '@/lib/dreamface-api';
 import { runOnDreamFaceQueue } from '@/lib/dreamface-queue';
+import { safeFetch, SsrfError } from '@/lib/safe-fetch';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -81,8 +82,11 @@ async function download(
 ): Promise<{ buffer: Buffer; contentType: string }> {
   let res: Response;
   try {
-    res = await fetch(url, { cache: 'no-store' });
+    // safeFetch: valida a URL do usuário e cada redirect contra destinos
+    // internos (anti-SSRF) antes de baixar.
+    res = await safeFetch(url, { cache: 'no-store' });
   } catch (e) {
+    if (e instanceof SsrfError) throw new Error(`URL do ${label} não permitida.`);
     throw new Error(`Falha ao baixar o ${label} (${e instanceof Error ? e.message : 'rede'}).`);
   }
   if (!res.ok) throw new Error(`Falha ao baixar o ${label} (HTTP ${res.status}).`);

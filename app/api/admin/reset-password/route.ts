@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { randomInt } from 'crypto';
 import { jsonError, requireAdmin, serviceClient } from '../_helpers';
 
 /**
@@ -20,16 +21,17 @@ export const runtime = 'nodejs';
 export const maxDuration = 10;
 
 function genTempPassword(): string {
-  // Letras sem ambiguidade (sem I, l, O, 0)
+  // Letras sem ambiguidade (sem I, l, O, 0). randomInt = CSPRNG (não
+  // Math.random, que é previsível e não serve pra credencial).
   const letters = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz';
   const digits = '23456789';
   let p = '';
   for (let i = 0; i < 4; i++) {
-    p += letters.charAt(Math.floor(Math.random() * letters.length));
+    p += letters.charAt(randomInt(letters.length));
   }
   p += '-';
   for (let i = 0; i < 4; i++) {
-    p += digits.charAt(Math.floor(Math.random() * digits.length));
+    p += digits.charAt(randomInt(digits.length));
   }
   return p;
 }
