@@ -6341,6 +6341,19 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                         }
                         return true;
                       })
+                      // ESPELHO DO CLICKUP: ordena por data de vencimento
+                      // ascendente (mais atrasada/antiga primeiro), igual o
+                      // board do user ("Data de vencimento ↑"). Sort estavel
+                      // (V8) preserva a ordem da API nos empates de data.
+                      // Tasks sem due_date vao pro fim, como no ClickUp.
+                      .sort((a, b) => {
+                        const da = a.due_date ? Number(a.due_date) : null;
+                        const db = b.due_date ? Number(b.due_date) : null;
+                        if (da == null && db == null) return 0;
+                        if (da == null) return 1;
+                        if (db == null) return -1;
+                        return da - db;
+                      })
                       .map((t) => {
                       const isChecked = selectedTaskIds.has(t.id);
                       const isOpen = isChecked; // visual highlight = selecionado
