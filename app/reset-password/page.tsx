@@ -24,10 +24,34 @@ function ResetPasswordInner() {
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
+  // recoveryMode = o usuário chegou clicando no LINK do email (sessão de
+  // recovery já estabelecida pelo Supabase). Nesse caso NÃO precisa digitar
+  // código — é só criar a senha nova. Garante que o reset funciona TANTO pelo
+  // link (template padrão) QUANTO pelo código de 6 dígitos (template custom).
+  const [recoveryMode, setRecoveryMode] = useState(false);
   const refs = useRef<(HTMLInputElement | null)[]>([]);
 
   useEffect(() => {
     refs.current[0]?.focus();
+  }, []);
+
+  useEffect(() => {
+    const supabase = createClient();
+    // Backup síncrono: se a URL traz o token do link, já entra em recoveryMode
+    // (cobre corrida com o processamento async da sessão).
+    if (
+      typeof window !== 'undefined' &&
+      /type=recovery|access_token=|[?&]code=/.test(
+        window.location.hash + window.location.search,
+      )
+    ) {
+      setRecoveryMode(true);
+    }
+    // Evento oficial do Supabase ao detectar o link de recovery na URL.
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') setRecoveryMode(true);
+    });
+    return () => sub.subscription.unsubscribe();
   }, []);
 
   function setDigit(idx: number, v: string) {
@@ -62,13 +86,16 @@ function ResetPasswordInner() {
     setInfo(null);
 
     const token = digits.join('');
-    if (!email.trim()) {
-      setError('Informe seu email.');
-      return;
-    }
-    if (token.length !== 6) {
-      setError('Digite o código completo de 6 dígitos.');
-      return;
+    // No modo link (recoveryMode) a sessão já existe — não exige email/código.
+    if (!recoveryMode) {
+      if (!email.trim()) {
+        setError('Informe seu email.');
+        return;
+      }
+      if (token.length !== 6) {
+        setError('Digite o código completo de 6 dígitos.');
+        return;
+      }
     }
     if (password.length < 6) {
       setError('A senha precisa ter ao menos 6 caracteres.');
@@ -83,29 +110,36 @@ function ResetPasswordInner() {
     try {
       const supabase = createClient();
 
-      // 1) Valida o código de recovery — estabelece sessão temporária
-      const { error: vErr } = await supabase.auth.verifyOtp({
-        email: email.trim().toLowerCase(),
-        token,
-        type: 'recovery',
-      });
+      // 1) Se veio pelo CÓDIGO, valida o OTP de recovery (estabelece sessão).
+      //    Se veio pelo LINK, a sessão de recovery já está ativa — pula direto.
+      if (!recoveryMode) {
+        const { error: vErr } = await supabase.auth.verifyOtp({
+          email: email.trim().toLowerCase(),
+          token,
+          type: 'recovery',
+        });
 
-      if (vErr) {
-        setError(
-          /invalid|expired/i.test(vErr.message)
-            ? 'Código inválido ou expirado. Peça um novo abaixo.'
-            : vErr.message,
-        );
-        return;
+        if (vErr) {
+          setError(
+            /invalid|expired/i.test(vErr.message)
+              ? 'Código inválido ou expirado. Peça um novo abaixo.'
+              : vErr.message,
+          );
+          return;
+        }
       }
 
-      // 2) Atualiza a senha com a sessão recém-estabelecida
+      // 2) Atualiza a senha com a sessão de recovery (do código ou do link).
       const { error: uErr } = await supabase.auth.updateUser({
         password,
       });
 
       if (uErr) {
-        setError(uErr.message);
+        setError(
+          /Auth session missing|session/i.test(uErr.message)
+            ? 'Link expirado ou já usado. Peça um novo email abaixo.'
+            : uErr.message,
+        );
         return;
       }
 
@@ -149,7 +183,11 @@ function ResetPasswordInner() {
   return (
     <AuthShell
       title="Redefinir senha"
-      subtitle="Digite o código que chegou no email e escolha uma senha nova."
+      subtitle={
+        recoveryMode
+          ? 'Escolha uma senha nova pra sua conta.'
+          : 'Digite o código que chegou no email e escolha uma senha nova.'
+      }
       footer={
         <span className="text-text-muted">
           Mudou de ideia?{' '}
@@ -160,6 +198,16 @@ function ResetPasswordInner() {
       }
     >
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        {recoveryMode ? (
+          <div
+            role="status"
+            className="rounded-[12px] border border-lime/40 bg-lime/10 px-3 py-2 text-xs text-lime"
+          >
+            ✓ Link verificado. Agora é só criar a sua senha nova abaixo.
+          </div>
+        ) : null}
+
+        {!recoveryMode && (
         <div>
           <label className="label-field" htmlFor="reset-email">
             Email
@@ -175,7 +223,9 @@ function ResetPasswordInner() {
             readOnly={!!emailFromQuery}
           />
         </div>
+        )}
 
+        {!recoveryMode && (
         <div>
           <label className="label-field">Código de 6 dígitos</label>
           <div className="flex justify-between gap-2">
@@ -202,6 +252,7 @@ function ResetPasswordInner() {
             ))}
           </div>
         </div>
+        )}
 
         <div>
           <label className="label-field" htmlFor="new-password">
@@ -261,14 +312,16 @@ function ResetPasswordInner() {
           )}
         </button>
 
-        <button
-          type="button"
-          onClick={handleResend}
-          disabled={resending}
-          className="btn-ghost text-xs"
-        >
-          {resending ? 'Reenviando…' : 'Não chegou? Reenviar código'}
-        </button>
+        {!recoveryMode && (
+          <button
+            type="button"
+            onClick={handleResend}
+            disabled={resending}
+            className="btn-ghost text-xs"
+          >
+            {resending ? 'Reenviando…' : 'Não chegou? Reenviar código'}
+          </button>
+        )}
       </form>
     </AuthShell>
   );

@@ -31,10 +31,11 @@ export async function POST(req: Request) {
     }
 
     // Rate-limit anti email-bomb / cota Supabase: por IP e por email.
+    // Folga pra cliente perdido reenviar (5/h/email); ainda barra abuso.
     // Estourou → responde ok:true igual (sem vazar, sem mandar email).
     if (
-      !rateLimit('forgot-ip:' + clientIp(req), 6, 600_000) ||
-      !rateLimit('forgot-email:' + cleanEmail, 3, 3_600_000)
+      !rateLimit('forgot-ip:' + clientIp(req), 8, 600_000) ||
+      !rateLimit('forgot-email:' + cleanEmail, 5, 3_600_000)
     ) {
       return NextResponse.json({ ok: true });
     }
