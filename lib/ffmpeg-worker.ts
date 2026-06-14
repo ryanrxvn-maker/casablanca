@@ -573,7 +573,10 @@ export async function cutVideoSegments(
       '-crf', '26',
       '-g', '60',
       '-c:a', 'aac',
-      '-b:a', '192k',
+      // 256k: a voz já vem nivelada (prepareVoiceForDecupagem), então este
+      // re-encode do corte é a última geração AAC — bitrate alto o mantém
+      // transparente (sem acumular artefato/"xiado" do tandem-encode).
+      '-b:a', '256k',
       '-ar', '48000',
       '-ac', '2',
       '-movflags', '+faststart',
@@ -1314,9 +1317,21 @@ function loudnormApplyFilter(s: LoudnormStats): string {
  *   só se o stream for incompatível com o container mp4, ex.: webm/vp9).
  * - MP3/WAV: descarta o vídeo e gera só o áudio normalizado.
  */
+/**
+ * Perfil de leveling:
+ *  - 'full'    → macro (dynaudnorm) + micro de FALA (speechnorm). É o mais
+ *                agressivo a igualar timbres/níveis MUITO diferentes (ex.: 2
+ *                vozes num arquivo). Usado pelo Normalizador.
+ *  - 'natural' → SÓ macro (dynaudnorm suave) + loudnorm linear. Sem speechnorm
+ *                — que é justamente o filtro que mais "marca"/processa a voz.
+ *                É o perfil da DECUPAGEM: regula o nível e limpa o ruído de
+ *                forma transparente, sem deixar a voz robótica.
+ */
+export type NormalizeProfile = 'full' | 'natural';
+
 export async function normalizeVolume(
   file: Blob,
-  params: { output: NormalizeOutFormat },
+  params: { output: NormalizeOutFormat; profile?: NormalizeProfile },
   opts: RunOptions = {},
 ): Promise<Blob> {
   const ff = await getFFmpeg(opts.onStage, opts.onLog);
@@ -1337,8 +1352,11 @@ export async function normalizeVolume(
     // Combinações (leveling × denoise) da melhor pra mais segura: primeiro o
     // leveling completo (com speechnorm) com cada denoise; depois o leveling
     // de segurança (só dynaudnorm), caso o speechnorm não exista no build.
+    // No perfil 'natural' (decupagem) pulamos o LEVEL_FULL: nada de speechnorm,
+    // pra a voz sair transparente/não-robótica — só dynaudnorm suave + loudnorm.
+    const levels = params.profile === 'natural' ? [LEVEL_SAFE] : [LEVEL_FULL, LEVEL_SAFE];
     const candidates: Array<{ denoise: string; level: string }> = [];
-    for (const level of [LEVEL_FULL, LEVEL_SAFE]) {
+    for (const level of levels) {
       for (const denoise of denoises) candidates.push({ denoise, level });
     }
 
@@ -1448,6 +1466,36 @@ export async function normalizeVolume(
   } finally {
     await safeDelete(ff, inputName);
     await safeDelete(ff, outputName);
+  }
+}
+
+/**
+ * Prepara a voz pra DECUPAGEM: regula o nível e limpa o ruído de forma
+ * transparente (perfil 'natural' — loudnorm linear + denoise + dynaudnorm
+ * suave, SEM speechnorm). É o passo que garante que:
+ *   - voz baixa/alta sai sempre no mesmo nível confortável (-16 LUFS) →
+ *     nenhuma parte vira "silêncio" e é cortada;
+ *   - chiado/ruído de fundo (inclusive o que vem do HeyGen em alguns trechos)
+ *     é removido ANTES de amplificar, então não há "xiado" inflado;
+ *   - sem compressão agressiva → nada de voz robótica.
+ *
+ * NUNCA lança: se o leveling falhar/timeout, devolve o arquivo ORIGINAL, pra a
+ * decupagem seguir como antes (degradação graciosa, nunca pior que hoje).
+ *
+ * `format`: 'mp4' mantém o vídeo (`-c:v copy`); 'wav'/'mp3' só áudio.
+ */
+export async function prepareVoiceForDecupagem(
+  file: Blob,
+  opts: RunOptions = {},
+  format: NormalizeOutFormat = 'mp4',
+): Promise<Blob> {
+  try {
+    opts.onStage?.('Regulando a voz (nível + limpeza)...');
+    return await normalizeVolume(file, { output: format, profile: 'natural' }, opts);
+  } catch (e) {
+    if (isCancellationError(e)) throw e;
+    console.warn('[ffmpeg-worker] prepareVoiceForDecupagem falhou, usando áudio original:', (e as Error)?.message);
+    return file;
   }
 }
 

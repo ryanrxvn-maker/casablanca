@@ -31,6 +31,7 @@ import {
   cutVideoSegments,
   extractAudioAs,
   isCancellationError,
+  prepareVoiceForDecupagem,
 } from '@/lib/ffmpeg-worker';
 import { CancelButton } from '@/components/CancelButton';
 import { formatTime } from '@/lib/utils';
@@ -143,8 +144,16 @@ export default function DecupagemPage() {
     const effectiveKind: OutputKind = isFree ? 'audio' : fileIsVideo ? outputKind : 'audio';
 
     if (effectiveKind === 'audio') {
+      // Regula a voz (nível + limpeza, transparente) ANTES de cortar — voz
+      // baixa não vira silêncio e o ruído some sem deixar a voz robótica.
+      onStage('Regulando a voz...');
+      const leveled = await prepareVoiceForDecupagem(
+        file,
+        { onStage, onProgress: ({ ratio }) => onProgress(ratio * 0.5) },
+        'wav',
+      );
       onStage('Carregando...');
-      const decoded = await decodeAudioRobust(file, () => onStage('Carregando...'));
+      const decoded = await decodeAudioRobust(leveled, () => onStage('Carregando...'));
       onStage('Cortando silêncios...');
       const trimmed = trimSilences(decoded, keepSilence);
       let blob: Blob;
@@ -170,8 +179,17 @@ export default function DecupagemPage() {
     }
 
     // vídeo
+    // Regula a voz do vídeo INTEIRO (nível + limpeza, vídeo intacto via
+    // -c:v copy) antes de detectar silêncio e cortar. Detecção e corte rodam
+    // sobre o arquivo já nivelado → voz baixa não some, sem ruído/robótico.
+    onStage('Regulando a voz...');
+    const leveled = await prepareVoiceForDecupagem(
+      file,
+      { onStage, onProgress: ({ ratio }) => onProgress(ratio * 0.4) },
+      'mp4',
+    );
     onStage('Analisando...');
-    const decoded = await decodeAudioRobust(file, () => onStage('Analisando...'));
+    const decoded = await decodeAudioRobust(leveled, () => onStage('Analisando...'));
     const silences = detectSilences(decoded);
     const segments = computeSpeechSegments(silences, decoded.duration, keepSilence);
     if (segments.length === 0) {
@@ -179,9 +197,9 @@ export default function DecupagemPage() {
     }
     const newDur = segments.reduce((a, s) => a + (s.end - s.start), 0);
     onStage(`Cortando ${segments.length} trechos de fala...`);
-    const blob = await cutVideoSegments(file, segments, {
+    const blob = await cutVideoSegments(leveled, segments, {
       onStage: (s) => onStage(s),
-      onProgress: ({ ratio }) => onProgress(ratio),
+      onProgress: ({ ratio }) => onProgress(0.4 + ratio * 0.6),
     });
     return {
       kind: 'video',

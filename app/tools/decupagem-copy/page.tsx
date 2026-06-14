@@ -15,6 +15,7 @@ import {
   cutVideoSegments,
   extractAudioForTranscription,
   isCancellationError,
+  prepareVoiceForDecupagem,
   probeVideoMetadata,
   removeAvatarSilences,
   type FFProgress,
@@ -250,14 +251,30 @@ function DecupagemCopyInner() {
     setProcessing(true);
 
     try {
-      // Step 1: Extract audio
-      setStage('Extraindo audio do video...');
+      // Step 0: Regula a voz (nível + limpeza, vídeo intacto). Faz UMA vez e
+      // reusa pro ASR E pro corte: voz nivelada → ASR transcreve até trechos
+      // baixos (menos frase sem casar = menos corte indevido) E o vídeo final
+      // sai com a voz limpa e consistente. Mesma timeline (só re-leva o áudio),
+      // então os timestamps do matcher continuam válidos.
+      setStage('Regulando a voz...');
       setProgress(0);
-      const audio = await extractAudioForTranscription(
+      const leveledFile = await prepareVoiceForDecupagem(
         file,
         {
           onStage: (s) => setStage(s),
-          onProgress: (p: FFProgress) => setProgress(p.ratio * 0.25),
+          onProgress: (p: FFProgress) => setProgress(p.ratio * 0.12),
+        },
+        'mp4',
+      );
+
+      // Step 1: Extract audio
+      setStage('Extraindo audio do video...');
+      setProgress(0.12);
+      const audio = await extractAudioForTranscription(
+        leveledFile,
+        {
+          onStage: (s) => setStage(s),
+          onProgress: (p: FFProgress) => setProgress(0.12 + p.ratio * 0.13),
         },
         duration ?? undefined,
       );
@@ -326,9 +343,10 @@ function DecupagemCopyInner() {
       // versao se reduzir os problemas; senao mantem a melhor.
       const baseCuts: Cut[] = json.cuts;
 
-      // Corta um conjunto de segmentos -> MP4.
+      // Corta um conjunto de segmentos -> MP4. Corta do arquivo JÁ NIVELADO
+      // (mesma timeline do ASR) pra o resultado sair com a voz regulada.
       const cutFrom = (segs: Array<{ start: number; end: number }>) =>
-        cutVideoSegments(file, segs, {
+        cutVideoSegments(leveledFile, segs, {
           onStage: (s) => setStage(s),
           onProgress: (p: FFProgress) => setProgress(0.5 + p.ratio * 0.3),
         });

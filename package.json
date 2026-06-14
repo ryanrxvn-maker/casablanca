@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
-    "test": "tsc lib/decupagem-matcher.ts lib/decupagem-matcher.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck && node .test-tmp/decupagem-matcher.test.js && tsc lib/copy-parser.ts lib/heygen-extension-bridge.ts lib/doc-to-disparos.ts lib/doc-to-disparos.test.ts lib/doc-to-disparos.real.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom && node .test-tmp/doc-to-disparos.test.js && node .test-tmp/doc-to-disparos.real.test.js"
+    "test": "tsc lib/decupagem-matcher.ts lib/decupagem-matcher.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck && node .test-tmp/decupagem-matcher.test.js && tsc lib/copy-parser.ts lib/heygen-extension-bridge.ts lib/doc-to-disparos.ts lib/doc-to-disparos.test.ts lib/doc-to-disparos.real.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom && node .test-tmp/doc-to-disparos.test.js && node .test-tmp/doc-to-disparos.real.test.js && tsc lib/audio-engine.ts lib/audio-engine.test.ts --outDir .test-tmp --module commonjs --target es2020 --moduleResolution node --skipLibCheck --lib es2020,dom && node .test-tmp/audio-engine.test.js"
   },
   "dependencies": {
     "@fal-ai/client": "^1.10.1",

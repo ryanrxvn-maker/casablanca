@@ -8,9 +8,16 @@
 
 export const SAMPLE_RATE = 44100;
 export const RMS_WINDOW_MS = 20;          // 20ms de janela
-export const SILENCE_THRESHOLD = 0.008;   // RMS abaixo disso = silêncio
+export const SILENCE_THRESHOLD = 0.008;   // RMS — piso ABSOLUTO de segurança (ver nota)
 export const MIN_SILENCE_SEC = 0.15;      // duração mínima para contar como silêncio
 export const TARGET_CHUNKS_PER_MIN = 4.2; // ~12-15 partes para 3min
+
+// Piso/teto do threshold ADAPTATIVO de silêncio. O threshold real é derivado
+// do piso de ruído do PRÓPRIO áudio (ver computeAdaptiveSilenceThreshold), pra
+// que voz baixa NUNCA seja confundida com silêncio. Os clamps protegem os 2
+// extremos: áudio digitalmente mudo (piso ~0) e áudio muito ruidoso.
+export const SILENCE_FLOOR_MIN = 0.0008;  // nunca abaixo disso (digital silence)
+export const SILENCE_FLOOR_MAX = 0.02;    // nunca acima disso (não comer fala)
 
 // ---------- Decodificação --------------------------------------------------
 
@@ -57,8 +64,55 @@ export async function decodeAudioRobust(
 export type SilenceRegion = { start: number; end: number }; // em segundos
 
 /**
- * Detecta regiões silenciosas usando RMS com janela de 20ms.
- * Retorna array de regiões (start/end em segundos) com duração ≥ MIN_SILENCE_SEC.
+ * Percentil simples (p em [0,1]) de um array já COPIADO. Ordena in-place.
+ */
+function percentileSorted(sorted: Float32Array, p: number): number {
+  if (sorted.length === 0) return 0;
+  const idx = Math.min(
+    sorted.length - 1,
+    Math.max(0, Math.round(p * (sorted.length - 1))),
+  );
+  return sorted[idx];
+}
+
+/**
+ * Deriva o threshold de silêncio a partir do PISO DE RUÍDO do próprio áudio,
+ * em vez de um valor fixo. Esse é o pulo-do-gato que impede voz baixa de ser
+ * cortada: quando o HeyGen entrega a voz num volume baixo, um threshold fixo
+ * (0.008) classifica fala real como silêncio. Aqui o threshold "flutua" junto
+ * com o nível do arquivo.
+ *
+ * Estratégia:
+ *   - piso de ruído = p10 das janelas RMS (o que existe nos momentos quietos).
+ *   - fala         = p90 das janelas RMS (picos de voz).
+ *   - threshold    = piso × 2.5 (≈ +8dB acima do ruído) — fala fica sempre
+ *                    acima; ruído de fundo, abaixo.
+ *   - clamps: nunca acima de 25% da fala (não comer voz), nem dos limites
+ *     absolutos SILENCE_FLOOR_MIN/MAX (digital-silence e áudio ruidoso).
+ *
+ * Resultado: voz baixa OU alta → fala preservada; só o silêncio real é cortado.
+ */
+export function computeAdaptiveSilenceThreshold(rmsWindows: Float32Array): number {
+  if (rmsWindows.length < 4) return SILENCE_THRESHOLD;
+  const sorted = rmsWindows.slice().sort();
+  const noiseFloor = percentileSorted(sorted, 0.1);
+  const speech = percentileSorted(sorted, 0.9);
+
+  // Se não há dinâmica (fala ~ ruído: áudio quase constante), cai no fixo —
+  // é o caso degenerado onde adaptar não ajuda.
+  if (speech <= noiseFloor * 1.5) return SILENCE_THRESHOLD;
+
+  let thr = noiseFloor * 2.5;
+  thr = Math.min(thr, speech * 0.25);                 // nunca comer fala
+  thr = Math.max(SILENCE_FLOOR_MIN, Math.min(SILENCE_FLOOR_MAX, thr));
+  return thr;
+}
+
+/**
+ * Detecta regiões silenciosas usando RMS com janela de 20ms e um threshold
+ * ADAPTATIVO (relativo ao piso de ruído do arquivo — ver
+ * computeAdaptiveSilenceThreshold). Retorna regiões (start/end em segundos)
+ * com duração ≥ MIN_SILENCE_SEC.
  */
 export function detectSilences(buffer: AudioBuffer): SilenceRegion[] {
   const sampleRate = buffer.sampleRate;
@@ -67,15 +121,23 @@ export function detectSilences(buffer: AudioBuffer): SilenceRegion[] {
   const total = channelData.length;
   const regions: SilenceRegion[] = [];
 
-  let silentStart: number | null = null;
-
-  for (let i = 0; i < total; i += windowSize) {
+  // 1ª passada: RMS por janela (guarda o array pra derivar o threshold).
+  const nWindows = Math.ceil(total / windowSize);
+  const rmsWindows = new Float32Array(nWindows);
+  for (let w = 0, i = 0; i < total; i += windowSize, w++) {
     const end = Math.min(i + windowSize, total);
     let sum = 0;
     for (let j = i; j < end; j++) sum += channelData[j] * channelData[j];
-    const rms = Math.sqrt(sum / (end - i));
+    rmsWindows[w] = Math.sqrt(sum / (end - i));
+  }
 
-    if (rms < SILENCE_THRESHOLD) {
+  const threshold = computeAdaptiveSilenceThreshold(rmsWindows);
+
+  // 2ª passada: marca regiões silenciosas com o threshold adaptado.
+  let silentStart: number | null = null;
+  for (let w = 0; w < nWindows; w++) {
+    const i = w * windowSize;
+    if (rmsWindows[w] < threshold) {
       if (silentStart === null) silentStart = i;
     } else if (silentStart !== null) {
       const startSec = silentStart / sampleRate;

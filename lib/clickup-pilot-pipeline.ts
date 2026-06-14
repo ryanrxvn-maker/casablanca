@@ -19,7 +19,7 @@
  */
 
 import { decodeAudioRobust, detectSilences } from './audio-engine';
-import { concatAvatarParts, concatVideosFast, cutVideoSegments, muxAudioIntoVideo, extractAudio } from './ffmpeg-worker';
+import { concatAvatarParts, concatVideosFast, cutVideoSegments, muxAudioIntoVideo, extractAudio, prepareVoiceForDecupagem } from './ffmpeg-worker';
 import { camuflar } from './camuflagem';
 
 export type AssembledPart = {
@@ -226,8 +226,27 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`${label} timeout ${ms / 1000}s`)), ms)),
       ]);
 
-    const tryDecup = async (source: Blob): Promise<{ ok: true; decupado: Blob } | { ok: false; reason: string }> => {
+    const tryDecup = async (rawSource: Blob): Promise<{ ok: true; decupado: Blob } | { ok: false; reason: string }> => {
       try {
+        // === REGULAGEM DE VOZ (sempre, sem toggle) ===
+        // Nivela e limpa a voz ANTES de detectar silêncio e cortar. Resolve os
+        // dois problemas de raiz: (1) voz baixa não vira mais "silêncio" cortado
+        // pq sai sempre em -16 LUFS; (2) chiado/ruído (inclusive do HeyGen em
+        // alguns trechos) é removido antes de amplificar — sem voz robótica.
+        // Roda no arquivo INTEIRO (contínuo) → níveis consistentes entre cortes.
+        // Timeout próprio + fallback: se falhar, segue com o áudio original.
+        let source = rawSource;
+        try {
+          source = await withTimeout(
+            prepareVoiceForDecupagem(rawSource, { onStage: (s) => console.log(`[clickup-pilot-pipeline] regul ${item.filename}: ${s}`) }),
+            150_000,
+            'regulagemVoz',
+          );
+        } catch (levErr) {
+          console.warn(`[clickup-pilot-pipeline] regul ${item.filename}: falhou (${(levErr as Error)?.message?.slice(0,80)}), seguindo com audio original`);
+          source = rawSource;
+        }
+
         const audioBuf = await withTimeout(decodeAudioRobust(source), 120_000, 'decodeAudio');
         const silences = detectSilences(audioBuf);
         const segments = computeSpeechSegments(silences, audioBuf.duration, keepSilenceSec);
