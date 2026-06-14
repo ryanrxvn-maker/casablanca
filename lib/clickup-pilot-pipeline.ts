@@ -36,7 +36,7 @@ export type AssembledPart = {
 };
 
 export type PipelineProgress = {
-  stage: 'assembling' | 'decupando' | 'camuflando' | 'done';
+  stage: 'assembling' | 'regulando' | 'decupando' | 'camuflando' | 'done';
   currentFilename?: string;
   doneCount: number;
   totalCount: number;
@@ -206,6 +206,46 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     out.push({ filename, rawAssembled: assembled, _usedFastPath: usedFastPath } as AssembledPart & { _usedFastPath: boolean });
   }
 
+  // Helper compartilhado: roda uma promise com timeout. ffmpeg-wasm pode TRAVAR
+  // (loop infinito) num decode de áudio corrompido — sem timeout o pipeline
+  // ficava pendurado pra sempre (user reportou RETOMAR travando, 2026-05-28).
+  const withTimeout = <T,>(p: Promise<T>, ms: number, label: string): Promise<T> =>
+    Promise.race([
+      p,
+      new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`${label} timeout ${ms / 1000}s`)), ms)),
+    ]);
+
+  // Regula a voz de UM montado: denoise (limpa hiss/ruído) + nivelamento
+  // transparente (loudnorm linear, perfil 'natural' SEM speechnorm → sem
+  // robótico). NUNCA lança: se falhar/timeout, devolve o blob original intacto.
+  const regularVoz = async (blob: Blob, label: string): Promise<Blob> => {
+    try {
+      return await withTimeout(
+        prepareVoiceForDecupagem(blob, { onStage: (s) => console.log(`[clickup-pilot-pipeline] regul ${label}: ${s}`) }),
+        150_000,
+        'regulagemVoz',
+      );
+    } catch (e) {
+      console.warn(`[clickup-pilot-pipeline] regul ${label}: falhou (${(e as Error)?.message?.slice(0, 80)}), mantendo montado original`);
+      return blob;
+    }
+  };
+
+  // === Stage 1.5: REGULAGEM DE VOZ (SEMPRE — independe do toggle decupagem) ===
+  // Limpa o ruído (inclusive o hiss que o HeyGen às vezes coloca em renders
+  // específicos — por isso "só algumas partes do mesmo avatar xiam") e nivela a
+  // voz do montado INTEIRO. Roda mesmo com decupagem DESLIGADA, porque o montado
+  // (montadoZip) é entregue de qualquer forma — é o que garante que NENHUM áudio
+  // sai xiando, com ou sem decupagem. Como o rawAssembled já sai limpo aqui, a
+  // decupagem (Stage 2) e a camuflagem (Stage 3) consomem o áudio já regulado,
+  // sem reprocessar (1 limpeza só por montado).
+  for (let g = 0; g < out.length; g++) {
+    const item = out[g];
+    if (!item.rawAssembled || item.rawAssembled.size === 0 || item.errors?.assemble) continue;
+    onProgress?.({ stage: 'regulando', currentFilename: item.filename, doneCount: g, totalCount: total });
+    item.rawAssembled = await regularVoz(item.rawAssembled, item.filename);
+  }
+
   // === Stage 2: DECUPAGEM (com retry de assemble se fast produziu lixo) ===
   // Quando `decupagem: false`, pula stage inteiro — user pediu ad montado
   // sem cortes de silencio. Toggle por task no ClickUp Pilot.
@@ -216,37 +256,11 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     if (!item.rawAssembled || item.errors?.assemble) continue;
     onProgress?.({ stage: 'decupando', currentFilename: item.filename, doneCount: g, totalCount: total });
 
-    // TIMEOUT defensivo: ffmpeg-wasm pode TRAVAR (loop infinito) num decode
-    // de áudio corrompido. Sem timeout, o pipeline ficava pendurado pra sempre
-    // (user reportou RETOMAR travando, 2026-05-28). Cap de 3min por decupagem
-    // — se passar, desiste dessa parte e segue (entrega o montado raw).
-    const withTimeout = <T,>(p: Promise<T>, ms: number, label: string): Promise<T> =>
-      Promise.race([
-        p,
-        new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`${label} timeout ${ms / 1000}s`)), ms)),
-      ]);
-
-    const tryDecup = async (rawSource: Blob): Promise<{ ok: true; decupado: Blob } | { ok: false; reason: string }> => {
+    // Cap de 3min por decupagem — se passar, desiste dessa parte e segue
+    // (entrega o montado já regulado). O `source` JÁ vem limpo/nivelado do
+    // Stage 1.5, então aqui é só detectar silêncio e cortar.
+    const tryDecup = async (source: Blob): Promise<{ ok: true; decupado: Blob } | { ok: false; reason: string }> => {
       try {
-        // === REGULAGEM DE VOZ (sempre, sem toggle) ===
-        // Nivela e limpa a voz ANTES de detectar silêncio e cortar. Resolve os
-        // dois problemas de raiz: (1) voz baixa não vira mais "silêncio" cortado
-        // pq sai sempre em -16 LUFS; (2) chiado/ruído (inclusive do HeyGen em
-        // alguns trechos) é removido antes de amplificar — sem voz robótica.
-        // Roda no arquivo INTEIRO (contínuo) → níveis consistentes entre cortes.
-        // Timeout próprio + fallback: se falhar, segue com o áudio original.
-        let source = rawSource;
-        try {
-          source = await withTimeout(
-            prepareVoiceForDecupagem(rawSource, { onStage: (s) => console.log(`[clickup-pilot-pipeline] regul ${item.filename}: ${s}`) }),
-            150_000,
-            'regulagemVoz',
-          );
-        } catch (levErr) {
-          console.warn(`[clickup-pilot-pipeline] regul ${item.filename}: falhou (${(levErr as Error)?.message?.slice(0,80)}), seguindo com audio original`);
-          source = rawSource;
-        }
-
         const audioBuf = await withTimeout(decodeAudioRobust(source), 120_000, 'decodeAudio');
         const silences = detectSilences(audioBuf);
         const segments = computeSpeechSegments(silences, audioBuf.duration, keepSilenceSec);
@@ -274,9 +288,10 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         const tSlow = Date.now();
         const reAssembled = await concatAvatarParts(blobs);
         console.log(`[clickup-pilot-pipeline] re-assemble ${item.filename}: SLOW OK em ${((Date.now()-tSlow)/1000).toFixed(1)}s`);
-        item.rawAssembled = reAssembled;
+        // Regula o montado re-feito também (o do Stage 1.5 era o fast bogus).
+        item.rawAssembled = await regularVoz(reAssembled, item.filename);
         item._usedFastPath = false;
-        res = await tryDecup(reAssembled);
+        res = await tryDecup(item.rawAssembled);
       } catch (e) {
         console.error(`[clickup-pilot-pipeline] re-assemble ${item.filename}: FAIL`, e);
       }
