@@ -4710,6 +4710,36 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   /** VA: URL/Drive ID do AD original (input manual quando parser nao detecta).
    *  Key: taskId → string */
   const [vaAdUrl, setVaAdUrl] = useState<Record<string, string>>({});
+  /** VA: painel "trocar AD" aberto manualmente MESMO com AD ja detectado.
+   *  Caso real: o AD que o copy apontou vem com AUDIO CAMUFLADO (fase
+   *  invertida) que nao roda no lipsync — o user troca pelo link de um AD
+   *  com audio LIMPO. Key: taskId → boolean */
+  const [vaAdOverrideOpen, setVaAdOverrideOpen] = useState<Record<string, boolean>>({});
+  /** VA: marca que o AD original foi TROCADO manualmente (chip na UI).
+   *  Key: taskId → boolean */
+  const [vaAdSwapped, setVaAdSwapped] = useState<Record<string, boolean>>({});
+  /** VA: aplica a TROCA do AD original. Escreve o fileId colado direto em
+   *  vaBriefing.linkAdFileId — IGUAL ao botao de candidato do doc (mesma
+   *  garantia) — pra que TUDO (preview 👁, transcricao, diarizacao e
+   *  disparo) passe a usar o AD limpo. NAO toca no pipeline de disparo (ele
+   *  ja le linkAdFileId primeiro), so substitui a fonte. */
+  function applyVaAdSwap(taskId: string) {
+    const fileId = extractDriveFileId(vaAdUrl[taskId] || '');
+    if (!fileId) return;
+    setTaskAnalyses((prev) => {
+      const cur = prev[taskId];
+      if (!cur?.vaBriefing) return prev;
+      return {
+        ...prev,
+        [taskId]: {
+          ...cur,
+          vaBriefing: { ...cur.vaBriefing, linkAdFileId: fileId, linkAdFilename: 'AD trocado manualmente' },
+        } as any,
+      };
+    });
+    setVaAdSwapped((prev) => ({ ...prev, [taskId]: true }));
+    setVaAdOverrideOpen((prev) => ({ ...prev, [taskId]: false }));
+  }
   // VA: estado do pipeline AGORA vive em batchStates (mesma fila/card das
   // tasks normais). Removido o vaPipelineState separado.
   /** VA: SMART MODE per task — detecta face no AD original e troca apenas
@@ -7424,6 +7454,25 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         {!a.vaBriefing.linkAdFileId ? (
                                           <span className="mono rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] text-amber-200">AD não detectado</span>
                                         ) : null}
+                                        {vaAdSwapped[a.taskId] ? (
+                                          <span className="mono rounded-full border border-lime/40 bg-lime/10 px-2 py-0.5 text-[10px] text-lime">✓ AD trocado manual</span>
+                                        ) : null}
+                                        {/* TROCAR AD — só faz sentido quando JÁ existe AD detectado.
+                                          * O AD do copy às vezes vem com áudio CAMUFLADO (fase
+                                          * invertida) que não roda no lipsync; abre o painel pra
+                                          * colar o link de um AD com áudio LIMPO. Quando NÃO há AD
+                                          * detectado o painel já aparece sozinho (não precisa toggle). */}
+                                        {a.vaBriefing.linkAdFileId ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => setVaAdOverrideOpen((prev) => ({ ...prev, [a.taskId]: !prev[a.taskId] }))}
+                                            disabled={ACTIVE_BATCH_PHASES.includes(batchStates[a.taskId]?.phase as BatchTaskState['phase']) || batchStates[a.taskId]?.phase === 'queued'}
+                                            className="mono inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-400/10 px-2 py-0.5 text-[10px] text-amber-200 transition hover:border-amber-300 hover:bg-amber-400/20 disabled:cursor-not-allowed disabled:opacity-40"
+                                            title="AD com áudio CAMUFLADO (fase invertida) não funciona no lipsync — clica pra colar o link de um AD com áudio LIMPO"
+                                          >
+                                            🔁 {vaAdOverrideOpen[a.taskId] ? 'fechar' : 'trocar AD'}
+                                          </button>
+                                        ) : null}
                                       </>
                                     )}
                                   </div>
@@ -7734,11 +7783,16 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   })}
                                   {/* AD original nao detectado: lista candidatos (1-click) + input
                                       manual. NAO aparece no motor texto (canal organico nao usa AD). */}
-                                  {!a.vaBriefing.linkAdFileId && !vaUsesTextEngine(a.taskId) ? (
+                                  {!vaUsesTextEngine(a.taskId) && (!a.vaBriefing.linkAdFileId || vaAdOverrideOpen[a.taskId]) ? (
                                     <div className="rounded-[10px] border border-yellow-500/40 bg-yellow-500/5 p-3">
                                       <div className="mono mb-2 text-[10px] uppercase tracking-widest text-yellow-200">
-                                        Escolhe o AD original
+                                        {a.vaBriefing.linkAdFileId ? '🔁 Trocar AD original (áudio camuflado)' : 'Escolhe o AD original'}
                                       </div>
+                                      {a.vaBriefing.linkAdFileId ? (
+                                        <div className="mb-2 text-[10px] leading-snug text-amber-200/80">
+                                          O AD que o copy apontou pode vir com <strong>áudio camuflado</strong> (fase invertida) que não funciona no lipsync. Cola o link de um AD com <strong>áudio limpo</strong> e clica em aplicar — passa a valer pro preview, transcrição e disparo.
+                                        </div>
+                                      ) : null}
                                       {(a.vaBriefing as any).candidateLinks && (a.vaBriefing as any).candidateLinks.length > 0 ? (
                                         <div className="mb-2">
                                           <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">
@@ -7786,6 +7840,19 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         <div className="mono mt-1 text-[9px] uppercase tracking-widest text-lime">✓ Drive ID extraido: {extractDriveFileId(vaAdUrl[a.taskId])}</div>
                                       ) : vaAdUrl[a.taskId] ? (
                                         <div className="mono mt-1 text-[9px] uppercase tracking-widest text-red-300">✗ URL invalida — formato esperado: drive.google.com/file/d/XXX/view</div>
+                                      ) : null}
+                                      {/* APLICAR — grava o fileId em linkAdFileId pra que preview,
+                                        * transcrição, diarização E disparo usem o AD limpo. Sem
+                                        * clicar aqui, um AD JÁ detectado continua valendo. */}
+                                      {extractDriveFileId(vaAdUrl[a.taskId] || '') ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => applyVaAdSwap(a.taskId)}
+                                          disabled={ACTIVE_BATCH_PHASES.includes(batchStates[a.taskId]?.phase as BatchTaskState['phase']) || batchStates[a.taskId]?.phase === 'queued'}
+                                          className="mono mt-2 w-full rounded border border-lime/50 bg-lime/10 px-2 py-1.5 text-[10px] font-bold uppercase tracking-widest text-lime transition hover:bg-lime/20 disabled:cursor-not-allowed disabled:opacity-40"
+                                        >
+                                          ✓ Aplicar troca do AD
+                                        </button>
                                       ) : null}
                                     </div>
                                   ) : null}
