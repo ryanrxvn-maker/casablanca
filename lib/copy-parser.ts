@@ -2021,22 +2021,59 @@ export function parseVABriefing(
     ? allAvatares.filter((a) => filterAvaNums.includes(a.avaNum))
     : allAvatares;
 
-  // 5. Gancho (texto): seccao apos "Gancho" ate proxima heading (Body/Depoimento)
-  // SCOPED a vaSectionEnd pra nao puxar gancho da section seguinte
+  // Marcadores de secao de copy — LENIENTES. O copywriter escreve o rotulo do
+  // hook de varias formas e o ANTIGO regex exigia a linha EXATAMENTE "gancho"
+  // (/^gancho\s*$/), entao "Gancho:", "Gancho 1", "GANCHO 1:", "• Gancho" ou
+  // "Gancho[a]" (footnote) passavam batido e o HOOK SUMIA do disparo. Aqui
+  // casa todas essas formas — mas ancorado em linha-SO-marcador (rotulo +
+  // numero + ":" opcionais) pra NUNCA casar uma frase falada que por acaso
+  // comece com "gancho"/"body". Aceita tambem o alias EN "Hook"/"Corpo".
+  const HOOK_MARK_RE = /^[\s•\-*]*(?:gancho|hook)\s*\d*\s*[:.\-]?\s*(?:\[[a-z]{1,3}\]\s*)?$/i;
+  const BODY_MARK_RE = /^[\s•\-*]*(?:body|corpo)\s*\d*\s*[:.\-]?\s*(?:\[[a-z]{1,3}\]\s*)?$/i;
+
+  // 5/6. Indices dos marcadores (SCOPED a vaSectionEnd pra nao puxar da
+  // section seguinte).
+  const gIdx = lines.findIndex((l, i) => i > vaHeaderIdx && i < vaSectionEnd && HOOK_MARK_RE.test(l.trim()));
+  const bIdx = lines.findIndex((l, i) => i > vaHeaderIdx && i < vaSectionEnd && BODY_MARK_RE.test(l.trim()));
+
+  // 5. Gancho (texto): apos o marcador "Gancho" ate a proxima heading
+  // (Body/Depoimento) ou fim de copy.
   let hookText = '';
-  const gIdx = lines.findIndex((l, i) => i > vaHeaderIdx && i < vaSectionEnd && /^gancho\s*$/i.test(l.trim()));
   if (gIdx >= 0) {
     let end = vaSectionEnd;
     for (let i = gIdx + 1; i < vaSectionEnd; i++) {
       const t = lines[i].trim();
-      if (/^body\s*$/i.test(t) || /^depoimento\b/i.test(t) || isCopyEndBoundary(t)) { end = i; break; }
+      if (BODY_MARK_RE.test(t) || /^depoimento\b/i.test(t) || isCopyEndBoundary(t)) { end = i; break; }
     }
     hookText = lines.slice(gIdx + 1, end).join('\n').trim().replace(/\s*\[[a-z]{1,3}\]/gi, '');
+  } else if (bIdx >= 0) {
+    // FALLBACK — doc SEM rotulo "Gancho" mas COM "Body". Estilo visto live
+    // (screenshot AD07G1GL): heading "AD07G1GL-RIPCTWA" + "Doutor: x.mp4" +
+    // <texto do hook> + "Body" + ... — sem a palavra "Gancho". O hook e a
+    // fala ANTES do Body. So dispara quando o hook estaria VAZIO (gIdx<0) E
+    // existe Body, entao NUNCA regride um doc que ja funcionava. Descarta
+    // linhas de heading/metadata/role/avatar pra sobrar so a fala.
+    const hookLines: string[] = [];
+    for (let i = vaHeaderIdx + 1; i < bIdx; i++) {
+      const t = lines[i].trim();
+      if (!t) continue;
+      if (isCopyEndBoundary(t)) break;
+      if (AD_HEADING_RE.test(t)) continue;                          // sub-heading AD (ex "AD07G1GL-RIPCTWA")
+      if (/^varia[cç][aã]o\s+de\s+avatar/i.test(t)) continue;
+      if (/^link\s+(?:do\s+ad|da\s+copy|do\s+avatar|avatar)\b/i.test(t)) continue;
+      if (/^avatar\b/i.test(t)) continue;                            // "Avatar @x.mp4" / "Avatar e Vozes:" / "Avatar: ..."
+      if (/^fonte\s+de\s+tr[aá]fego\b/i.test(t)) continue;
+      if (/^instru[cç][oõ]es\b/i.test(t)) continue;
+      if (/^(?:.*[-–—]\s*)?AVA\s*\d+\b/i.test(t)) continue;          // linha de codigo AVA
+      if (/\.(?:mp4|mov)\b/i.test(t)) continue;                      // qualquer referencia de arquivo (avatar/AD) — fala nunca tem .mp4
+      if (isPureRoleOrMentionLine(t)) continue;                      // "Doutor: x.mp4", "@x.mp4"
+      hookLines.push(lines[i]);
+    }
+    hookText = hookLines.join('\n').trim().replace(/\s*\[[a-z]{1,3}\]/gi, '');
   }
 
   // 6. Body — SCOPED a vaSectionEnd
   let bodyText = '';
-  const bIdx = lines.findIndex((l, i) => i > vaHeaderIdx && i < vaSectionEnd && /^body\s*$/i.test(l.trim()));
   if (bIdx >= 0) {
     let end = vaSectionEnd;
     for (let i = bIdx + 1; i < vaSectionEnd; i++) {
