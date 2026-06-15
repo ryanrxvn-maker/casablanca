@@ -449,6 +449,10 @@ type TaskAnalysis = {
    *  da task. Persistido pra mostrar botao "abrir doc" sem ter que ir
    *  manualmente no ClickUp puxar o link. */
   docUrl?: string;
+  /** Ancora de heading do Google Docs (#heading=h.xxxx) da seção EXATA do AD
+   *  dessa task — extraída do export HTML pela extensão. Anexada ao docUrl no
+   *  botão "abrir doc" pra abrir o Google Docs já na copy do AD (sem rolar). */
+  docHeadingId?: string;
   /** ClickUp URL direto da task (atalho — vem do feed da listagem). */
   taskUrl?: string;
 };
@@ -1036,7 +1040,7 @@ function ClickUpPilotInner() {
    * Retorna tambem driveLinks: links pra videos em Drive citados no doc
    * (necessarios pra visual match de avatares).
    */
-  function fetchDocViaExtensionOnce(url: string): Promise<{ ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string }>; transient?: boolean }> {
+  function fetchDocViaExtensionOnce(url: string): Promise<{ ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string }>; headings?: Array<{ id: string; text: string }>; transient?: boolean }> {
     return new Promise((resolve) => {
       const requestId = `doc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       // Timeout em DOIS estagios (extensao v4.16.2+ manda HG_DOC_ACK assim
@@ -1050,7 +1054,7 @@ function ClickUpPilotInner() {
       let acked = false;
       let done = false;
       const timers: ReturnType<typeof setTimeout>[] = [];
-      const finish = (r: { ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string }>; transient?: boolean }) => {
+      const finish = (r: { ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string }>; headings?: Array<{ id: string; text: string }>; transient?: boolean }) => {
         if (done) return;
         done = true;
         window.removeEventListener('message', handler);
@@ -1067,6 +1071,7 @@ function ClickUpPilotInner() {
             text: ev.data.text,
             error,
             driveLinks: ev.data.driveLinks,
+            headings: ev.data.headings,
             // permissao/inexistente nao melhora com retry; resto sim
             transient: !ev.data.ok && !!error && !/permiss|nao existe|não existe|privado/i.test(error),
           });
@@ -1086,8 +1091,8 @@ function ClickUpPilotInner() {
   /** Doc fetch com retry automatico: ate 3 tentativas pra erro transient
    *  (timeout, glitch de rede, service worker dormindo). Erro definitivo
    *  (sem permissao / doc nao existe) falha direto sem retry. */
-  async function fetchDocViaExtension(url: string): Promise<{ ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string }> }> {
-    let last: { ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string }>; transient?: boolean } = { ok: false, error: 'sem tentativa' };
+  async function fetchDocViaExtension(url: string): Promise<{ ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string }>; headings?: Array<{ id: string; text: string }> }> {
+    let last: { ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string }>; headings?: Array<{ id: string; text: string }>; transient?: boolean } = { ok: false, error: 'sem tentativa' };
     for (let attempt = 1; attempt <= 3; attempt++) {
       last = await fetchDocViaExtensionOnce(url);
       if (last.ok || !last.transient) return last;
@@ -1106,6 +1111,39 @@ function ClickUpPilotInner() {
       .toLowerCase()
       .replace(/\.(mp4|mov)$/i, '')
       .replace(/[^\w]/g, ''); // strip espacos, pontos, hifens, etc
+  }
+
+  /** Acha o id de heading (#heading=h.xxxx) da seção do AD dentro da lista de
+   *  headings que a extensão extraiu do export do doc. Casa a 1a linha (o
+   *  heading) da seção do AD — a MESMA que o parser usa — com a lista. Retorna
+   *  null se não achar → link fica sem âncora (comportamento antigo, sem regressão). */
+  function findDocHeadingId(
+    docText: string,
+    baseAdId: string | null,
+    variant: string | null | undefined,
+    headings: Array<{ id: string; text: string }> | undefined,
+  ): string | null {
+    if (!baseAdId || !headings || headings.length === 0) return null;
+    const section = findAdSection(docText, baseAdId, variant);
+    const firstLine = (section ? section.split(/\r?\n/)[0] : '').trim();
+    const target = normalizeForMatch(firstLine);
+    if (target.length < 4) return null;
+    // 1) match exato normalizado
+    let hit = headings.find((h) => normalizeForMatch(h.text) === target);
+    // 2) prefixo nos dois sentidos (texto do export pode diferir levemente)
+    if (!hit) hit = headings.find((h) => {
+      const n = normalizeForMatch(h.text);
+      return n.length >= 4 && (n.startsWith(target) || target.startsWith(n));
+    });
+    return hit ? hit.id : null;
+  }
+
+  /** Monta o link do doc apontando DIRETO pra copy do AD (#heading=...),
+   *  preservando a aba (?tab=) que já vem no docUrl do ClickUp. Sem headingId
+   *  retorna o docUrl puro. */
+  function docDeepLink(docUrl?: string, headingId?: string): string | undefined {
+    if (!docUrl || !headingId) return docUrl;
+    return `${docUrl.split('#')[0]}#heading=${headingId}`;
   }
 
   /** Resolve username pra Drive file ID pesquisando driveLinks por match de texto.
@@ -1365,6 +1403,17 @@ function ClickUpPilotInner() {
           if (!docR.ok || !docR.text) {
             setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: `Doc fetch: ${docR.error || 'sem texto'}` } }));
             continue;
+          }
+          // 2.2 DEEP-LINK: âncora de heading da seção EXATA do AD → o botão
+          // "abrir doc" abre o Google Docs já na copy desse AD (sem rolar/buscar).
+          // Best-effort: sem heading achado, o botão usa o docUrl normal (a aba
+          // que já vem do ClickUp é preservada). Headings só vêm pelo export_html.
+          {
+            const adForHeading = (task.name.match(/\b(AD\d+[A-Z0-9]*)/i) || [])[1]?.toUpperCase() || null;
+            const headingId = findDocHeadingId(docR.text, adForHeading, extractVariantToken(task.name), docR.headings);
+            if (headingId) {
+              setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], docHeadingId: headingId } }));
+            }
           }
           // 2.5 VARIACAO DE AVATAR: detector + parser dedicado
           // Tasks 'VA - ...' OU docs com 'Variação de avatar' tem pipeline
@@ -7138,8 +7187,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                           <PilotBtn3D
                                             icon={<PilotIconDoc size={16} />}
                                             color="cyan"
-                                            title={a.docUrl ? 'Abrir doc da copy' : 'Abrir task no ClickUp'}
-                                            href={a.docUrl || a.taskUrl}
+                                            title={a.docUrl ? (a.docHeadingId ? 'Abrir doc direto na copy do AD' : 'Abrir doc da copy') : 'Abrir task no ClickUp'}
+                                            href={docDeepLink(a.docUrl, a.docHeadingId) || a.taskUrl}
                                           />
                                         ) : null}
                                         {adFileId ? (
@@ -7189,8 +7238,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                       <PilotBtn3D
                                         icon={<PilotIconDoc size={16} />}
                                         color="cyan"
-                                        title={a.docUrl ? 'Abrir doc da copy (Google Docs)' : 'Abrir task no ClickUp'}
-                                        href={a.docUrl || a.taskUrl}
+                                        title={a.docUrl ? (a.docHeadingId ? 'Abrir doc direto na copy do AD' : 'Abrir doc da copy (Google Docs)') : 'Abrir task no ClickUp'}
+                                        href={docDeepLink(a.docUrl, a.docHeadingId) || a.taskUrl}
                                       />
                                     ) : null}
                                     {/* Disparar HeyGen */}

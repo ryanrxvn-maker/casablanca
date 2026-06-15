@@ -1477,7 +1477,26 @@ function parseGoogleDocsHtml(html) {
   // Collapse newlines triplas+
   text = text.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+/g, ' ').replace(/ ?\n ?/g, '\n').trim();
 
-  return { text, driveLinks };
+  // === HEADINGS (ancoras do editor) ===
+  // O export traz cada heading como <hN id="h.xxxx">texto</hN>. Esse id E o
+  // MESMO usado no deep-link do editor (#heading=h.xxxx) — provado live no doc
+  // VRWA02. Guardamos {id, text} pra app montar link que abre o Google Docs
+  // DIRETO na copy do AD (sem o user ter que rolar/buscar). `html` ainda esta
+  // intacto aqui (o processamento de texto acima criou `text`, nao mutou html).
+  const headings = [];
+  const seenH = new Set();
+  const hRe = /<h([1-6])\b[^>]*\bid=["'](h\.[a-zA-Z0-9_-]+)["'][^>]*>([\s\S]*?)<\/h\1>/gi;
+  let hm;
+  while ((hm = hRe.exec(html)) !== null) {
+    const hid = hm[2];
+    if (seenH.has(hid)) continue;
+    const htext = decodeHtmlEntities(hm[3].replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
+    if (!htext) continue;
+    seenH.add(hid);
+    headings.push({ id: hid, text: htext });
+  }
+
+  return { text, driveLinks, headings };
 }
 
 /** Fetcha Google Doc SEM ABRIR TAB usando export?format=html.
@@ -1551,6 +1570,7 @@ async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
         text: parsed.text,
         length: parsed.text.length,
         driveLinks: parsed.driveLinks,
+        headings: parsed.headings || [],
         source: 'export_html',
       });
       return;
@@ -1625,6 +1645,9 @@ async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
       text: result?.text || '',
       length: (result?.text || '').length,
       driveLinks: result?.driveLinks || [],
+      // Fallback mobilebasic NAO expõe os ids de heading do editor (DOM diferente
+      // do export) → sem deep-link nesse caminho (app cai no docUrl normal).
+      headings: [],
       source: 'tab_fallback',
     });
   } catch (e) {
