@@ -1553,9 +1553,20 @@ function ClickUpPilotInner() {
               });
               continue;
             }
-            // Detectou VA mas parser falhou → erro estruturado
-            setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: 'Task parece VA mas parser falhou em extrair avatares/hook/body' } }));
-            continue;
+            // parseVABriefing falhou. DECISAO de roteamento:
+            //  - Se o DOC tem header VA real ("Variação de avatar" na secao),
+            //    e bug de parse VA de verdade → erro estruturado (NAO re-rota
+            //    pro motor normal, senao geraria com engine errado).
+            //  - Se a deteccao VA veio SO do NOME da task (isVATask) e o doc e
+            //    uma copy NORMAL (formato GANCHO/BODY, ex AD39G1VN-VRWA02 — sem
+            //    "Variação de avatar"), CAI no parser normal abaixo em vez de
+            //    errar. Sem isso o hook sumia atoa numa task "VA - AD39..." cujo
+            //    doc e copy comum (parseDarkoBriefing extrai hook+body certo).
+            if (hasVaHeaderInSection(sectionForVaCheck)) {
+              setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: 'Task parece VA mas parser falhou em extrair avatares/hook/body' } }));
+              continue;
+            }
+            // senao: NAO da continue — escapa do bloco VA e cai no fluxo normal.
           }
           // 3. Parse: encontra base AD ID + briefing (fluxo normal nao-VA)
           // AD ID em qualquer posicao + sufixo alfanumerico completo: a regex
