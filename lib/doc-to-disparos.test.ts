@@ -16,7 +16,7 @@ import {
   toBaseAdId,
   type AvatarCandidate,
 } from './doc-to-disparos';
-import { matchAvatar, parseAvatars } from './copy-parser';
+import { matchAvatar, parseAvatars, parseVABriefing, extractAvatarFileTokens } from './copy-parser';
 
 let failures = 0;
 function assert(cond: boolean, msg: string) {
@@ -606,6 +606,72 @@ console.log('\nregressao: variantes do mesmo AD no mesmo doc (F2/P1):');
     assert(!dP1.parts.some((p) => /mil homens/i.test(p.text)), 'P1 sem copy vazada do F2 (homens)');
   }
 }
+
+/* ----------------- parseVABriefing: VA multi-avatar por AVA ----------------- */
+// Regressao do bug 2026-06-16 (doc real AD02G1VN-PRPB07): cada AVA tem 2
+// avatares ("Avatar: x.mp4 + @y.mp4") = Doutor(Gancho) + Homem(Body). O parser
+// pegava so 1 avatar, capturava "GANCHO" como username e nao detectava o AD
+// (filename "AD02G1VN - PRPB07.mp4" tem espaco).
+console.log('\nparseVABriefing (VA multi-avatar):');
+const VA_DOC = [
+  'Instruções gerais para edição:',
+  'Cada anúncio abaixo deve ser feito com edição',
+  'Ambas as versões devem ter entre 20 e 100mb.',
+  '',
+  'AD02G1VN - PRPB07 - Variação de avatar  - Silas',
+  'Link do ad: AD02G1VN - PRPB07.mp4',
+  'Instruções para edição: Usar uma edição nova, mas mantém o mesmo hook visual.',
+  '',
+  'AD02G1VN-PRPB07-AVA01',
+  'Avatar: radyrahbanmd2.mp4 + @robertofranciscopaulo72.mp4',
+  'AD02G1VN-PRPB07-AVA02',
+  'Avatar: drromaoyouseff4.mp4 + @kiko.urso1.mp4',
+  '',
+  'GANCHO',
+  'Doutor:',
+  'Coloque o quiabo entre as suas pernas antes de dormir e veja sua próstata desinchar nas próximas 48 horas.',
+  '',
+  'BODY',
+  'Homem:',
+  'Pode parecer um absurdo, mas foi um pote de baba de quiabo que salvou minha masculinidade.',
+].join('\n');
+
+// extractAvatarFileTokens: pega ambos, ignora separador "+"
+const toks = extractAvatarFileTokens('Avatar: radyrahbanmd2.mp4 + @robertofranciscopaulo72.mp4');
+assert(toks.length === 2 && toks[0] === 'radyrahbanmd2' && toks[1] === 'robertofranciscopaulo72', 'extractAvatarFileTokens pega 2 avatares (sep "+")');
+assert(extractAvatarFileTokens('GANCHO').length === 0, 'extractAvatarFileTokens ignora "GANCHO" (sem .mp4)');
+
+const va = parseVABriefing(VA_DOC, 'VA - AD02G1VN - PRPB07 - AVA01 e 02 - Silas', [], [1, 2]);
+assert(!!va, 'parseVABriefing → resolve');
+if (va) {
+  assert(va.avatares.length === 2, `2 AVAs detectados (got ${va.avatares.length})`);
+  const ava01 = va.avatares.find((a) => a.avaCode === 'AVA01');
+  const ava02 = va.avatares.find((a) => a.avaCode === 'AVA02');
+  assert(!!ava01 && ava01.username === 'radyrahbanmd2', 'AVA01 principal = radyrahbanmd2');
+  assert(!!ava01 && !!ava01.roles && ava01.roles.length === 2, 'AVA01 tem 2 papeis (diarizacao)');
+  assert(!!ava01 && ava01.roles?.[1]?.username === 'robertofranciscopaulo72', 'AVA01 papel 2 = robertofranciscopaulo72');
+  assert(!!ava02 && ava02.username === 'drromaoyouseff4', 'AVA02 principal = drromaoyouseff4');
+  assert(!!ava02 && ava02.roles?.[1]?.username === 'kiko.urso1', 'AVA02 papel 2 = kiko.urso1');
+  assert(!va.avatares.some((a) => /gancho/i.test(a.username)), 'NENHUM avatar com username "GANCHO"');
+  assert(va.linkAdFilename === 'AD02G1VN - PRPB07.mp4', `AD detectado com espacos (got ${va.linkAdFilename})`);
+  assert(/quiabo entre as suas pernas/i.test(va.hookText), 'hook (Gancho) capturado');
+  assert(/baba de quiabo/i.test(va.bodyText), 'body capturado');
+}
+
+// 1 avatar por AVA = comportamento classico (roles ausente)
+const VA_SINGLE = [
+  'AD09G1VN - PRPB07 - Variação de avatar - Silas',
+  'Link do ad: AD09G1VN-PRPB07.mp4',
+  'AD09G1VN-PRPB07-AVA01',
+  'Avatar: @lara.mp4',
+  'GANCHO',
+  'Doutor:',
+  'Texto do hook aqui.',
+].join('\n');
+const vaSingle = parseVABriefing(VA_SINGLE, 'VA - AD09G1VN - PRPB07', [], []);
+assert(!!vaSingle && vaSingle.avatares.length === 1, '1 AVA single-avatar');
+assert(!!vaSingle && vaSingle.avatares[0].username === 'lara', 'single: username = lara');
+assert(!!vaSingle && !vaSingle.avatares[0].roles, 'single: roles AUSENTE (classico)');
 
 /* ----------------- doc vazio ----------------- */
 console.log('\nedge cases:');

@@ -635,6 +635,32 @@ export function parseGlobalAvatarLinks(section: string): Array<{ role: string; u
   return [];
 }
 
+/**
+ * Extrai TODOS os usernames de avatar (sem extensao) de um trecho de texto.
+ * Varre cada "<nome>.mp4|.mov" — entao suporta MULTIPLOS avatares por linha
+ * com QUALQUER separador ("+", " e ", ",", "/", "|"). O "@" inicial e
+ * ignorado; filenames com espaco/acento ("Dr. Marco Túlio.mp4") sao aceitos.
+ * Descarta tokens que sao codigo de AD (ex "AD02G1VN - PRPB07" do "Link do ad")
+ * ou esquema de URL. Dedup case-insensitive, preserva ordem.
+ */
+export function extractAvatarFileTokens(text: string): string[] {
+  const re = /@?([a-zA-ZÀ-ÿ0-9_][a-zA-ZÀ-ÿ0-9._\s-]*?)\.(?:mp4|mov)\b/gi;
+  const out: string[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const u = m[1].trim();
+    if (
+      u.length >= 3 &&
+      !/^AD\d/i.test(u) &&
+      !/^(?:https?|www|drive|google)$/i.test(u) &&
+      !out.some((x) => x.toLowerCase() === u.toLowerCase())
+    ) {
+      out.push(u);
+    }
+  }
+  return out;
+}
+
 /* ============= Convencao G[N] = Hook[N] (DARKO LAB briefings) ============= */
 
 /**
@@ -1947,10 +1973,12 @@ export function parseVABriefing(
   let linkAdFileId: string | null = null;
   for (let i = vaHeaderIdx; i < Math.min(vaHeaderIdx + 15, lines.length); i++) {
     const t = lines[i].trim();
-    // 1) Tenta extrair filename completo (inclui acentos)
-    const m = t.match(/^link\s+do\s+ad\s*[:\-]\s*[^\S\n]*([^\s<>"|]+?\.(?:mp4|mov))\b/i);
+    // 1) Tenta extrair filename completo (inclui acentos E ESPACOS — ex
+    // "Link do ad: AD02G1VN - PRPB07.mp4"). A regex antiga usava [^\s] e
+    // parava no primeiro espaco → "AD não detectado" em filenames com espaco.
+    const m = t.match(/^link\s+do\s+ad\s*[:\-]\s*([^\n<>"|]+?\.(?:mp4|mov))\b/i);
     if (m) {
-      linkAdFilename = m[1];
+      linkAdFilename = m[1].trim();
       // Match nos driveLinks por:
       //   a) text === filename
       //   b) text inclui filename
@@ -1968,51 +1996,78 @@ export function parseVABriefing(
     }
   }
 
-  // 4. Avatares de variacao: linhas tipo "<base>-AVA<NN>" seguidas de "Avatar <filename>"
-  // Tambem aceita: AVAxx + Avatar @username.mp4
-  // SCOPED a section atual (vaSectionEnd = inicio da proxima section ou EOF)
+  // 4. Avatares de variacao: linhas "<base>-AVA<NN>" seguidas de "Avatar: <file>".
+  // SUPORTA MULTIPLOS avatares por AVA — ex "Avatar: rady.mp4 + @roberto.mp4"
+  // (Doutor + Homem). 2+ avatares → diarizacao multi-locutor (roles[]); 1
+  // avatar = comportamento classico (roles ausente). SCOPED a vaSectionEnd.
+  //
+  // Bug 2026-06-16 (este doc, AD02G1VN-PRPB07): a regex antiga so pegava 1
+  // filename E exigia a linha terminar logo apos o .mp4 → a linha "x.mp4 +
+  // @y.mp4" NAO casava, o AVA ficava sem username e o look-ahead capturava
+  // "GANCHO" como avatar (card mostrava "1 avatar · @GANCHO"). O extrator
+  // global por .mp4 resolve os dois: pega TODOS os files e ignora "GANCHO"
+  // (sem .mp4).
   const allAvatares: VAAvatar[] = [];
   const seenAvaCodes = new Set<string>();
   for (let i = vaHeaderIdx; i < vaSectionEnd; i++) {
     const t = lines[i].trim();
-    // Match codigo AVA: base + -AVA<NN>
     const avaCodeMatch = t.match(/^(?:.*[-–—]\s*)?AVA\s*(\d+)\b/i);
     if (!avaCodeMatch) continue;
     const avaNum = parseInt(avaCodeMatch[1], 10);
     const avaCode = `AVA${String(avaNum).padStart(2, '0')}`;
     if (seenAvaCodes.has(avaCode)) continue;
-    // Procura linha seguinte (1-3 linhas abaixo) com "Avatar <filename>" ou "@<file>"
-    let username: string | null = null;
-    let fileId: string | null = null;
+    // Coleta os avatares nas linhas seguintes ate o proximo codigo AVA, um
+    // marcador de copy (Gancho/Body) ou um run de linhas sem avatar.
+    const usernames: string[] = [];
     let youtubeUrl: string | null = null;
     let thumbUrl: string | null = null;
-    for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+    for (let j = i + 1; j < Math.min(i + 6, vaSectionEnd); j++) {
       const nl = lines[j].trim();
-      if (!nl) continue;
-      // Avatar referenciado por LINK do YouTube (ex "Avatar: https://youtube.com/
-      // wath?v=GPtBiYPmwSo (clonar a voz...)"). Tipico em criativos YouTube "sem
-      // edicao" + clone de voz, onde nao ha @file.mp4. Extrai o id pra thumb.
+      if (!nl) { if (usernames.length) break; else continue; }
+      // proximo AVA OU marcador de copy fecha o bloco de avatares
+      if (/^(?:.*[-–—]\s*)?AVA\s*\d+\b/i.test(nl)) break;
+      if (/^[\s•\-*]*(?:gancho|hook|body|corpo|depoimento)\b/i.test(nl)) break;
+      // Avatar por LINK do YouTube (clone de voz, sem @file.mp4)
       if (/youtu\.?be/i.test(nl)) {
         const ytId = extractYouTubeId(nl);
         if (ytId) {
-          username = ytId;
+          usernames.push(ytId);
           youtubeUrl = `https://www.youtube.com/watch?v=${ytId}`;
           thumbUrl = youTubeThumb(ytId);
           break;
         }
       }
-      // "Avatar lara.mp4" ou "Avatar @x.mp4" ou "@x.mp4"
-      const m = nl.match(/^(?:Avatar\s*)?[^@a-z0-9]*@?([a-zA-Z0-9_][a-zA-Z0-9._-]+?)(?:\.(?:mp4|mov))?\s*$/i);
-      if (m && m[1].length >= 3 && !/^AD\d+/i.test(m[1])) {
-        username = m[1];
-        const dl = driveLinks.find((d) => d.text.includes(username!));
-        if (dl) fileId = dl.fileId;
-        break;
+      const toks = extractAvatarFileTokens(nl);
+      if (toks.length) {
+        for (const u of toks) {
+          if (!usernames.some((x) => x.toLowerCase() === u.toLowerCase())) usernames.push(u);
+        }
+        continue;
       }
+      // Linha sem avatar: se ja temos avatares, fecha; senao (ex "Avatar:"
+      // vazio em linha propria, com os files nas linhas seguintes) continua.
+      if (usernames.length) break;
     }
-    if (!username) continue;
+    if (usernames.length === 0) continue;
     seenAvaCodes.add(avaCode);
-    allAvatares.push({ avaNum, avaCode, username, fileId, youtubeUrl, thumbUrl });
+    const resolveFileId = (u: string): string | null => {
+      const dl = driveLinks.find((d) => d.text.includes(u));
+      return dl ? dl.fileId : null;
+    };
+    const primary = usernames[0];
+    const primaryFileId = youtubeUrl ? null : resolveFileId(primary);
+    // 2+ avatares → roles[] generico "Avatar N" (o splitter de diarizacao
+    // mapeia quem fala o que pelos labels do body). 1 avatar → roles ausente
+    // = comportamento classico, nada muda nos docs de 1 avatar.
+    const roles: VAAvatarRole[] | undefined = usernames.length >= 2
+      ? usernames.map((u, idx) => ({
+          role: `Avatar ${idx + 1}`,
+          username: u,
+          fileId: youtubeUrl && idx === 0 ? null : resolveFileId(u),
+          isDepoimento: false,
+        }))
+      : undefined;
+    allAvatares.push({ avaNum, avaCode, username: primary, fileId: primaryFileId, youtubeUrl, thumbUrl, roles });
   }
 
   // FILTRO: se task name diz quais AVAs gerar (ex 'AVA05 e 06'), restringe.
