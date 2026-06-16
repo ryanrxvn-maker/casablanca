@@ -432,26 +432,6 @@ export async function ttsToFile(text: string, voiceId: string): Promise<File> {
   throw new Error(`TTS sem audio (status ${r.status}, ct=${ct}, keys=${keys})${previewStr}`);
 }
 
-/**
- * FALLBACK (engine B do modo texto): gera audio via ElevenLabs chamando a
- * rota server-side `/api/troca-produto/elevenlabs-tts` (usa a key do user +
- * tier pro). Retorna um File MP3 pronto pro uploadAudio(). Roda no browser —
- * a rota cuida da auth/segredo. `voiceId` aqui e do namespace ElevenLabs.
- */
-export async function ttsViaElevenLabs(text: string, voiceId: string): Promise<File> {
-  const res = await fetch('/api/troca-produto/elevenlabs-tts', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ voiceId, text }),
-  });
-  if (!res.ok) {
-    const t = await res.text().catch(() => '');
-    throw new Error(`Fallback ElevenLabs falhou (status ${res.status}): ${t.slice(0, 200)}`);
-  }
-  const buf = await res.arrayBuffer();
-  return new File([new Uint8Array(buf)], 'tts-eleven.mp3', { type: 'audio/mpeg' });
-}
-
 /* ============= Criar video ============= */
 
 export type CreateVideoParams = {
@@ -903,12 +883,6 @@ export type ProcessJobInput = {
    *  espelhando o audio uploaded). Equivalente ao checkbox "Voice
    *  Mirroring" no Quick Create do HeyGen. */
   voiceMirroring?: boolean;
-  /** MODO TEXTO — rede de seguranca (engine B): se o TTS server-side nativo
-   *  do HeyGen (tts_pending) falhar, cai pra TTS via ElevenLabs usando ESTE
-   *  voice_id (namespace ElevenLabs, NAO HeyGen). Opcional e opt-in: sem ele,
-   *  uma falha no primario sobe como erro claro em vez de trocar a voz por
-   *  baixo dos panos. Ver [[project_heygen_tts_410]]. */
-  elevenFallbackVoiceId?: string;
 };
 
 export async function processJob(
@@ -965,48 +939,22 @@ export async function processJob(
     voiceId = found;
   }
 
-  // ── ENGINE A (primario): TTS server-side NATIVO do HeyGen via tts_pending.
-  // Submete texto + voice_id DIRETO no /v2/avatar/shortcut/submit (endpoint
-  // CORE de geracao) e o HeyGen sintetiza no render, com a VOZ NATIVA do
-  // avatar. Substitui o antigo /v2/online/text_to_speech.stream que a HeyGen
-  // aposentou (410 Gone). Ver [[project_heygen_tts_410]].
-  let created: { video_id: string; avatar_id: string };
-  try {
-    onProgress?.('submitting', { msg: 'Gerando por texto (TTS nativo do avatar)...' });
-    created = await createVideoWithText({
-      title: job.title,
-      avatarId: job.avatarId,
-      engine: job.engine,
-      text: job.text,
-      voiceId: voiceId!,
-      orientation: job.orientation,
-      resolution: job.resolution,
-      motionPrompt: job.motionPrompt,
-    });
-  } catch (primaryErr) {
-    // ── ENGINE B (rede de seguranca, opt-in): se o nativo falhar E houver
-    // voz ElevenLabs configurada, gera o audio fora e segue pelo caminho
-    // `uploaded`. So dispara com voz ElevenLabs EXPLICITA — nunca troca a voz
-    // silenciosamente. Sem fallback configurado, sobe o erro original.
-    if (!job.elevenFallbackVoiceId) throw primaryErr;
-    console.warn('[DARKO LAB] TTS nativo (tts_pending) falhou, caindo pra ElevenLabs:', (primaryErr as Error)?.message);
-    onProgress?.('tts', { msg: 'TTS nativo falhou — gerando voz via ElevenLabs (fallback)...' });
-    const audioFile = await ttsViaElevenLabs(job.text, job.elevenFallbackVoiceId);
-    onProgress?.('upload', { msg: 'Preparando upload do fallback...' });
-    const audio = await uploadAudio(audioFile, {
-      onStep: (step, info) => onProgress?.(`upload-${step}`, info),
-    });
-    onProgress?.('submitting', { duration: audio.duration, fallback: 'elevenlabs' });
-    created = await createVideo({
-      title: job.title,
-      avatarId: job.avatarId,
-      engine: job.engine,
-      audio,
-      orientation: job.orientation,
-      resolution: job.resolution,
-      motionPrompt: job.motionPrompt,
-    });
-  }
+  // TTS server-side NATIVO do HeyGen via tts_pending: submete texto +
+  // voice_id DIRETO no /v2/avatar/shortcut/submit (endpoint CORE de geracao)
+  // e o HeyGen sintetiza no render, com a VOZ NATIVA do avatar. Substitui o
+  // antigo /v2/online/text_to_speech.stream que a HeyGen aposentou (410 Gone).
+  // Ver [[project_heygen_tts_410]].
+  onProgress?.('submitting', { msg: 'Gerando por texto (TTS nativo do avatar)...' });
+  const created = await createVideoWithText({
+    title: job.title,
+    avatarId: job.avatarId,
+    engine: job.engine,
+    text: job.text,
+    voiceId: voiceId!,
+    orientation: job.orientation,
+    resolution: job.resolution,
+    motionPrompt: job.motionPrompt,
+  });
 
   if (job.title && job.title !== 'Avatar Video') {
     onProgress?.('renaming', { videoId: created.video_id });
