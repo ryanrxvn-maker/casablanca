@@ -369,6 +369,13 @@ export async function getAvatarDefaultVoice(
 /* ============= TTS pra modo TEXTO ============= */
 
 /**
+ * @deprecated MORTO desde jun/2026 — a HeyGen aposentou o endpoint interno
+ * `/v2/online/text_to_speech.stream` (410 "This endpoint is no longer
+ * available"), e TODO TTS standalone (404). O modo texto agora usa o TTS
+ * server-side NATIVO via `createVideoWithText` (audio_type `tts_pending` no
+ * submit). NAO reusar esta funcao — fica so como registro do shape antigo.
+ * Ver [[project_heygen_tts_410]].
+ *
  * Gera audio TTS via HeyGen (text → audio bytes). Retorna File de audio
  * que pode ser passado pra uploadAudio() depois.
  */
@@ -423,6 +430,26 @@ export async function ttsToFile(text: string, voiceId: string): Promise<File> {
   const preview = r.body?._text ?? r.body?._rawPreview ?? '';
   const previewStr = preview ? ` preview="${String(preview).slice(0, 200)}"` : '';
   throw new Error(`TTS sem audio (status ${r.status}, ct=${ct}, keys=${keys})${previewStr}`);
+}
+
+/**
+ * FALLBACK (engine B do modo texto): gera audio via ElevenLabs chamando a
+ * rota server-side `/api/troca-produto/elevenlabs-tts` (usa a key do user +
+ * tier pro). Retorna um File MP3 pronto pro uploadAudio(). Roda no browser —
+ * a rota cuida da auth/segredo. `voiceId` aqui e do namespace ElevenLabs.
+ */
+export async function ttsViaElevenLabs(text: string, voiceId: string): Promise<File> {
+  const res = await fetch('/api/troca-produto/elevenlabs-tts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ voiceId, text }),
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    throw new Error(`Fallback ElevenLabs falhou (status ${res.status}): ${t.slice(0, 200)}`);
+  }
+  const buf = await res.arrayBuffer();
+  return new File([new Uint8Array(buf)], 'tts-eleven.mp3', { type: 'audio/mpeg' });
 }
 
 /* ============= Criar video ============= */
@@ -544,11 +571,24 @@ export type CreateVideoWithTextParams = {
 };
 
 /**
- * Submete video com TEXTO + VOICE_ID direto, deixando HeyGen fazer TTS
- * server-side. Tenta multiplas shapes de audio_data sequencialmente porque
- * nao temos certeza de qual o /v2/avatar/shortcut/submit interno aceita.
+ * Submete video com TEXTO + VOICE_ID direto, deixando o HeyGen fazer o TTS
+ * server-side DENTRO da geracao (sem chamada de TTS separada). Substitui o
+ * fluxo antigo que pre-gerava audio via /v2/online/text_to_speech.stream —
+ * endpoint INTERNO que a HeyGen aposentou (410 Gone, jun/2026).
  *
- * Se TODAS falharem, joga erro acumulado pra UI debugar.
+ * SHAPE CONFIRMADA AO VIVO (eng. reversa via interceptor + probe do schema,
+ * 2026-06-16): o /v2/avatar/shortcut/submit aceita audio_type ∈ {uploaded,
+ * tts, sts, tts_pending}. O modo texto e o `tts_pending` — analogo EXATO do
+ * `sts_pending` do Espelhamento de Voz (difere a sintese pro render):
+ *   audio_data: { audio_type:'tts_pending', text:<script>, voice_id:<voiceId> }
+ * O campo e `text` (NAO `input_text`) — o validador do servidor confirma:
+ *   "audio_data.tts_pending.text is invalid: Field required".
+ *
+ * Vantagem de robustez: roda no endpoint CORE de geracao (o mesmo do modo
+ * normal `uploaded` e do VA `sts_pending`), nao num endpoint auxiliar de TTS
+ * que pode sumir sozinho. Se a HeyGen mudar o schema, o erro de validacao
+ * abaixo e auto-explicativo (o servidor diz qual campo falta) — fim da
+ * adivinhacao de shape.
  */
 export async function createVideoWithText(
   params: CreateVideoWithTextParams,
@@ -556,6 +596,9 @@ export async function createVideoWithText(
   const { title, avatarId, engine, text, voiceId, orientation = 'portrait', resolution, motionPrompt } = params;
   const eng = ENGINES[engine];
   if (!eng) throw new Error(`Motor desconhecido: ${engine}`);
+  if (!voiceId) {
+    throw new Error('createVideoWithText: voice_id obrigatorio pro TTS server-side (tts_pending).');
+  }
 
   const settings = eng.settings(avatarId);
   if (motionPrompt && eng.supports_motion_prompt) {
@@ -563,52 +606,25 @@ export async function createVideoWithText(
     settings.prompt = motionPrompt;
   }
 
-  // Shapes possiveis pra audio_data em modo texto. Ordem do mais provavel
-  // pro menos provavel. Cada uma e tentada ate uma retornar 200.
-  const audioDataShapes: Array<Record<string, any>> = [
-    // Shape 1: padrao publico V2 do HeyGen (mais provavel)
-    { audio_type: 'text', input_text: text, voice_id: voiceId },
-    // Shape 2: variante "tts"
-    { audio_type: 'tts', input_text: text, voice_id: voiceId },
-    // Shape 3: variante com "text" em vez de "input_text"
-    { audio_type: 'text', text, voice_id: voiceId },
-    // Shape 4: voice nested
-    { audio_type: 'text', voice: { input_text: text, voice_id: voiceId } },
-    // Shape 5: script
-    { audio_type: 'script', input_text: text, voice_id: voiceId },
-  ];
-
-  const baseBody = {
+  const body = {
     video_title: title || 'Avatar Video',
     video_orientation: orientation,
     resolution: resolution || eng.default_resolution,
     avatar_id: avatarId,
     source_type: eng.source_type,
     fit: 'cover',
+    audio_data: { audio_type: 'tts_pending', text, voice_id: voiceId },
     avatar_settings: settings,
     enable_caption: false,
     create_new_avatar: false,
   };
 
-  const errors: string[] = [];
-  for (let i = 0; i < audioDataShapes.length; i++) {
-    const audio_data = audioDataShapes[i];
-    const body = { ...baseBody, audio_data };
-    const r = await jsonCall('POST', '/v2/avatar/shortcut/submit', body);
-    if (r.ok && r.body?.data?.video_id) {
-      console.log(`[DARKO LAB] createVideoWithText shape #${i + 1} OK:`, audio_data);
-      return r.body.data;
-    }
-    const msg = r.body?.message ?? r.body?.msg ?? r.body?._text?.slice(0, 200) ?? '?';
-    errors.push(`shape#${i + 1}(${Object.keys(audio_data).join(',')})→${r.status}:${msg}`);
-    // Erros de validacao indicam shape errada → tenta proxima.
-    // Mas se erro for permissao/quota/avatar invalido, parar.
-    const fatalRe = /(permiss|forbidden|quota|credit|avatar.*invalid|avatar.*not.*found|avatar.*exist)/i;
-    if (fatalRe.test(String(msg))) {
-      throw new Error(`createVideoWithText fatal: ${msg}`);
-    }
+  const r = await jsonCall('POST', '/v2/avatar/shortcut/submit', body);
+  if (r.ok && r.body?.data?.video_id) {
+    return r.body.data;
   }
-  throw new Error(`createVideoWithText: nenhuma shape aceita. Tentativas: ${errors.join(' | ')}`);
+  const msg = r.body?.message ?? r.body?.msg ?? r.body?._text?.slice(0, 200) ?? '?';
+  throw new Error(`createVideoWithText falhou (tts_pending, status ${r.status}): ${msg}`);
 }
 
 /* ============= Polling + download de videos prontos ============= */
@@ -887,6 +903,12 @@ export type ProcessJobInput = {
    *  espelhando o audio uploaded). Equivalente ao checkbox "Voice
    *  Mirroring" no Quick Create do HeyGen. */
   voiceMirroring?: boolean;
+  /** MODO TEXTO — rede de seguranca (engine B): se o TTS server-side nativo
+   *  do HeyGen (tts_pending) falhar, cai pra TTS via ElevenLabs usando ESTE
+   *  voice_id (namespace ElevenLabs, NAO HeyGen). Opcional e opt-in: sem ele,
+   *  uma falha no primario sobe como erro claro em vez de trocar a voz por
+   *  baixo dos panos. Ver [[project_heygen_tts_410]]. */
+  elevenFallbackVoiceId?: string;
 };
 
 export async function processJob(
@@ -943,26 +965,48 @@ export async function processJob(
     voiceId = found;
   }
 
-  // TTS via /v2/online/text_to_speech.stream (ndjson, parsed pelo proxy).
-  // Texto-direto pro submit (5 shapes) NAO funcionou nos testes, removido
-  // do fluxo principal pra nao gastar 5 API calls inuteis. Mantido como
-  // funcao exportada caso futuramente vejamos a shape correta.
-  onProgress?.('tts', { msg: 'Gerando audio TTS (voz original do avatar)...' });
-  const audioFile = await ttsToFile(job.text, voiceId!);
-  onProgress?.('upload', { msg: 'Preparando upload...' });
-  const audio = await uploadAudio(audioFile, {
-    onStep: (step, info) => onProgress?.(`upload-${step}`, info),
-  });
-  onProgress?.('submitting', { duration: audio.duration });
-  const created = await createVideo({
-    title: job.title,
-    avatarId: job.avatarId,
-    engine: job.engine,
-    audio,
-    orientation: job.orientation,
-    resolution: job.resolution,
-    motionPrompt: job.motionPrompt,
-  });
+  // ── ENGINE A (primario): TTS server-side NATIVO do HeyGen via tts_pending.
+  // Submete texto + voice_id DIRETO no /v2/avatar/shortcut/submit (endpoint
+  // CORE de geracao) e o HeyGen sintetiza no render, com a VOZ NATIVA do
+  // avatar. Substitui o antigo /v2/online/text_to_speech.stream que a HeyGen
+  // aposentou (410 Gone). Ver [[project_heygen_tts_410]].
+  let created: { video_id: string; avatar_id: string };
+  try {
+    onProgress?.('submitting', { msg: 'Gerando por texto (TTS nativo do avatar)...' });
+    created = await createVideoWithText({
+      title: job.title,
+      avatarId: job.avatarId,
+      engine: job.engine,
+      text: job.text,
+      voiceId: voiceId!,
+      orientation: job.orientation,
+      resolution: job.resolution,
+      motionPrompt: job.motionPrompt,
+    });
+  } catch (primaryErr) {
+    // ── ENGINE B (rede de seguranca, opt-in): se o nativo falhar E houver
+    // voz ElevenLabs configurada, gera o audio fora e segue pelo caminho
+    // `uploaded`. So dispara com voz ElevenLabs EXPLICITA — nunca troca a voz
+    // silenciosamente. Sem fallback configurado, sobe o erro original.
+    if (!job.elevenFallbackVoiceId) throw primaryErr;
+    console.warn('[DARKO LAB] TTS nativo (tts_pending) falhou, caindo pra ElevenLabs:', (primaryErr as Error)?.message);
+    onProgress?.('tts', { msg: 'TTS nativo falhou — gerando voz via ElevenLabs (fallback)...' });
+    const audioFile = await ttsViaElevenLabs(job.text, job.elevenFallbackVoiceId);
+    onProgress?.('upload', { msg: 'Preparando upload do fallback...' });
+    const audio = await uploadAudio(audioFile, {
+      onStep: (step, info) => onProgress?.(`upload-${step}`, info),
+    });
+    onProgress?.('submitting', { duration: audio.duration, fallback: 'elevenlabs' });
+    created = await createVideo({
+      title: job.title,
+      avatarId: job.avatarId,
+      engine: job.engine,
+      audio,
+      orientation: job.orientation,
+      resolution: job.resolution,
+      motionPrompt: job.motionPrompt,
+    });
+  }
 
   if (job.title && job.title !== 'Avatar Video') {
     onProgress?.('renaming', { videoId: created.video_id });
