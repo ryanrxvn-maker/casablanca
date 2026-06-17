@@ -3451,6 +3451,23 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         } else {
           await runTaskInBackground(taskId);
         }
+      } catch (err) {
+        // GARANTIA: o run NUNCA pode estourar uma excecao sem marcar a task
+        // como terminal. runTaskInBackground/runVAPipelineForTask tem try/catch
+        // INTERNO, mas o SETUP deles (buildPlan, acesso ao vaBriefing, asserts
+        // `!`) roda ANTES desse try interno — se estourar ali, o erro subia ate
+        // aqui sem ninguem marcar failed, e a task ficava ORFA em 'dispatching'
+        // mostrando "Pegando vaga..." pra sempre (bug 2026-06-16: 1 task ok, as
+        // outras 2 presas infinito; e como o slot e liberado no finally, um 3o
+        // disparo entrava — parecendo furar o limite de 2). Aqui fechamos isso:
+        // qualquer throw vira 'failed' com erro claro + botao Retomar.
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[runHeyGenGated] ${taskId} estourou:`, err);
+        setBatchStates((prev) => {
+          const cur = prev[taskId];
+          if (!cur || cur.phase === 'done') return prev;
+          return { ...prev, [taskId]: { ...cur, phase: 'failed', message: `Falhou no disparo: ${msg}`, finishedAt: Date.now() } };
+        });
       } finally {
         heygenSlotsRef.current = Math.max(0, heygenSlotsRef.current - 1);
       }
@@ -3473,6 +3490,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  real. So cura apos 2 ticks (>~6s) pra nao confundir com o gap curtissimo
    *  entre acquire (slot++) e a fase virar 'dispatching'. */
   const slotLeakTicksRef = useRef(0);
+
+  /** Ticks seguidos que cada task ficou ÓRFÃ (fase ativa porém sem wrapper
+   *  rodando = heygenPendingRef ausente). Cura após 2 ticks pra não pegar o
+   *  gap curtíssimo entre promover e o wrapper marcar a fase. */
+  const orphanTicksRef = useRef<Record<string, number>>({});
 
   /** PROMOTER — FIFO (startedAt asc, sem furar fila): promove tasks 'queued'
    *  enquanto houver vaga real. Idempotente (heygenPendingRef dedup +
@@ -3530,6 +3552,40 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       } else {
         slotLeakTicksRef.current = 0;
       }
+
+      // 3) AUTO-CURA DE ÓRFÃS: task PRESA em 'dispatching' (o "Pegando vaga...")
+      //    porém SEM wrapper rodando (heygenPendingRef ausente) = o run saiu/
+      //    estourou sem marcar terminal → ficaria assim pra sempre, ocupando
+      //    slot fantasma e bloqueando a fila. O catch do runHeyGenGated já fecha
+      //    o caminho conhecido; isto é a rede de segurança pra QUALQUER caminho
+      //    futuro. ESCOPO em 'dispatching' de propósito: é a fase exata do bug,
+      //    ANTES de qualquer mount/Magnific (rendering/post), então NUNCA marca
+      //    por engano uma task que segue trabalhando num passo posterior.
+      //    TROCA tem pipeline próprio (sem heygenPendingRef) → já não cai aqui.
+      const orphanIds = new Set<string>();
+      for (const b of Object.values(batchStatesRef.current)) {
+        if (b.kind === 'troca') continue;
+        if (b.phase !== 'dispatching') continue;
+        if (heygenPendingRef.current[b.taskId]) continue; // wrapper vivo — ok
+        orphanIds.add(b.taskId);
+        orphanTicksRef.current[b.taskId] = (orphanTicksRef.current[b.taskId] || 0) + 1;
+        if (orphanTicksRef.current[b.taskId] >= 2) {
+          console.warn(`[promoter] task órfã curada (ativa sem wrapper): ${b.taskId} → failed`);
+          delete orphanTicksRef.current[b.taskId];
+          setBatchStates((prev) => {
+            const cur = prev[b.taskId];
+            // re-checa: se avançou de 'dispatching' nesse meio-tempo, está
+            // progredindo — não marca falha.
+            if (!cur || cur.phase !== 'dispatching') return prev;
+            return { ...prev, [b.taskId]: { ...cur, phase: 'failed', message: 'Disparo travou (nenhum processo ativo) — clique Retomar pra re-disparar.', finishedAt: Date.now() } };
+          });
+        }
+      }
+      // zera o contador de quem deixou de ser órfã (voltou a rodar / terminou)
+      for (const id of Object.keys(orphanTicksRef.current)) {
+        if (!orphanIds.has(id)) delete orphanTicksRef.current[id];
+      }
+
       promoterRef.current();
     }, 3000);
     return () => clearInterval(id);
