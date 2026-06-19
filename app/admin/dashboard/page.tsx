@@ -616,6 +616,32 @@ function UserControl() {
     }
   }
 
+  /** Reconcilia o acesso com o Stripe — conserta "pagou e continuou free"
+   *  lendo o estado REAL do Stripe, sem depender do webhook. Só concede. */
+  async function reconcileBilling(u: SearchUser) {
+    setBusyId(u.id);
+    try {
+      const res = await fetch('/api/admin/reconcile-billing', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId: u.id }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(j.error || 'Falha ao sincronizar com o Stripe.');
+        return;
+      }
+      alert(
+        j.applied
+          ? `✅ Aplicado: ${String(j.tier).toUpperCase()} — ${j.reason}`
+          : `Nada a aplicar: ${j.reason}`,
+      );
+      await search(q); // recarrega
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
     <Panel title="Controle de usuários">
       <form
@@ -695,6 +721,15 @@ function UserControl() {
                       {t}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    disabled={busyId === u.id}
+                    onClick={() => reconcileBilling(u)}
+                    title="Lê o estado real do Stripe e aplica o plano pago (conserta 'pagou e continuou free')"
+                    className="rounded-full border border-emerald-400/50 px-3 py-1 text-[11px] font-bold uppercase text-emerald-300 transition hover:bg-emerald-400/15 disabled:opacity-40"
+                  >
+                    Sincronizar c/ Stripe
+                  </button>
                   {u.last_ip ? (
                     <span className="ml-auto font-mono text-[11px] text-text-dim">
                       IP {u.last_ip}

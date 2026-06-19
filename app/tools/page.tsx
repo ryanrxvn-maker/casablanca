@@ -1,5 +1,6 @@
 import { Suspense } from 'react';
 import { ToolsHub } from '@/components/ToolsHub';
+import { BillingReturnReconcile } from '@/components/BillingReturnReconcile';
 
 /**
  * Landing das ferramentas — Hub central com cards organizados por suite.
@@ -9,6 +10,7 @@ import { ToolsHub } from '@/components/ToolsHub';
 export default function ToolsIndex() {
   return (
     <Suspense fallback={null}>
+      <BillingReturnReconcile />
       <ToolsHub />
     </Suspense>
   );

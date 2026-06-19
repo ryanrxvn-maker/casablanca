@@ -3,6 +3,7 @@ import type Stripe from 'stripe';
 import { getStripe } from '@/lib/stripe';
 import { serviceClient } from '@/app/api/admin/_helpers';
 import { notifyOwner, brlFromCents } from '@/lib/notify';
+import { stripeSubPeriodEndISO } from '@/lib/billing-reconcile';
 import {
   isPaidTier,
   isBilling,
@@ -48,16 +49,42 @@ function activeStatus(status: string): boolean {
 
 /** Aplica no profile o estado atual da assinatura. */
 async function applySubscription(sub: SubLike) {
-  const userId = sub.metadata?.userId;
   const planRaw = sub.metadata?.plan ?? '';
-  if (!userId || !isPaidTier(planRaw)) return;
-  const plan = planRaw as PaidTier;
   const customerId =
     typeof sub.customer === 'string' ? sub.customer : sub.customer?.id;
+  const svc = serviceClient();
+
+  // userId vem do metadata; se faltar (subscription criada sem metadata, ou
+  // API antiga), acha o dono pelo customer salvo no checkout. Garante que o
+  // cliente NUNCA fica sem upgrade por um metadata perdido.
+  let userId: string | undefined = sub.metadata?.userId;
+  if (!userId && customerId) {
+    const { data } = await svc
+      .from('profiles')
+      .select('id')
+      .eq('stripe_customer_id', customerId)
+      .maybeSingle();
+    userId = (data as { id?: string } | null)?.id ?? undefined;
+  }
+
+  if (!userId || !isPaidTier(planRaw)) {
+    console.error('[billing webhook] applySubscription: sem userId/plan', {
+      subId: sub.id,
+      customerId,
+      metadata: sub.metadata,
+    });
+    await notifyOwner(
+      '⚠️ Webhook sem metadata',
+      `<p>Assinatura <b>${sub.id}</b> (customer ${customerId ?? '—'}) chegou sem ` +
+        `userId/plan válidos. Cliente pode ter ficado sem upgrade — ` +
+        `use "Sincronizar c/ Stripe" no painel.</p>`,
+    );
+    return;
+  }
+  const plan = planRaw as PaidTier;
 
   const active = activeStatus(sub.status);
-  const svc = serviceClient();
-  await svc
+  const { error } = await svc
     .from('profiles')
     .update({
       stripe_customer_id: customerId ?? null,
@@ -65,11 +92,18 @@ async function applySubscription(sub: SubLike) {
       subscription_status: sub.status, // active | past_due | canceled | unpaid | ...
       subscription_plan: active ? plan : null,
       tier: active ? plan : 'free', // cartão falhou/cancelou → free
-      current_period_end: sub.current_period_end
-        ? new Date(sub.current_period_end * 1000).toISOString()
-        : null,
+      current_period_end: stripeSubPeriodEndISO(sub),
     })
     .eq('id', userId);
+
+  if (error) {
+    console.error('[billing webhook] update do profile falhou', error);
+    await notifyOwner(
+      '🚨 Falha ao aplicar plano (pago, mas NÃO subiu)',
+      `<p>Pagamento OK mas o update do profile <b>${userId}</b> falhou: ` +
+        `${error.message}. Reconcilie pelo painel.</p>`,
+    );
+  }
 }
 
 /** Grava o comprovante de uma cobrança (1a ou renovação). Idempotente por invoice. */
@@ -112,16 +146,40 @@ async function recordInvoice(invoice: InvoiceLike, sub: SubLike) {
 
 /** ANUAL = pagamento único: libera acesso por 1 ano (não renova). */
 async function grantOneTime(session: Stripe.Checkout.Session) {
-  const userId = session.metadata?.userId;
   const planRaw = session.metadata?.plan ?? '';
-  if (!userId || !isPaidTier(planRaw)) return;
-  const plan = planRaw as PaidTier;
   const billing = session.metadata?.billing;
   const period: Billing = isBilling(billing ?? '') ? (billing as Billing) : 'annual';
   const customerId =
     typeof session.customer === 'string' ? session.customer : session.customer?.id;
+  const svc = serviceClient();
 
-  await serviceClient()
+  // Fallback de userId pelo customer (igual applySubscription).
+  let userId = session.metadata?.userId;
+  if (!userId && customerId) {
+    const { data } = await svc
+      .from('profiles')
+      .select('id')
+      .eq('stripe_customer_id', customerId)
+      .maybeSingle();
+    userId = (data as { id?: string } | null)?.id ?? undefined;
+  }
+
+  if (!userId || !isPaidTier(planRaw)) {
+    console.error('[billing webhook] grantOneTime: sem userId/plan', {
+      sessionId: session.id,
+      customerId,
+      metadata: session.metadata,
+    });
+    await notifyOwner(
+      '⚠️ Pagamento único sem metadata',
+      `<p>Sessão <b>${session.id}</b> (customer ${customerId ?? '—'}) sem ` +
+        `userId/plan. Reconcilie pelo painel.</p>`,
+    );
+    return;
+  }
+  const plan = planRaw as PaidTier;
+
+  const { error } = await svc
     .from('profiles')
     .update({
       stripe_customer_id: customerId ?? null,
@@ -132,6 +190,15 @@ async function grantOneTime(session: Stripe.Checkout.Session) {
       current_period_end: periodEndFrom(period).toISOString(),
     })
     .eq('id', userId);
+
+  if (error) {
+    console.error('[billing webhook] update (one-time) falhou', error);
+    await notifyOwner(
+      '🚨 Falha ao aplicar plano anual (pago, mas NÃO subiu)',
+      `<p>Pagamento OK mas o update do profile <b>${userId}</b> falhou: ` +
+        `${error.message}. Reconcilie pelo painel.</p>`,
+    );
+  }
 }
 
 /** Grava o comprovante de um pagamento único (anual). Idempotente por session. */
@@ -220,6 +287,11 @@ export async function POST(req: Request) {
               : session.subscription?.id;
           if (subId) {
             const sub = (await stripe.subscriptions.retrieve(subId)) as SubLike;
+            // Fallback: subscription recém-criada pode não ter metadata ainda;
+            // a session sempre tem (checkout/route.ts envia em ambos os lugares).
+            if (!sub.metadata?.userId && session.metadata?.userId) {
+              sub.metadata = { ...session.metadata };
+            }
             await applySubscription(sub);
           }
         } else if (session.mode === 'payment' && session.payment_status === 'paid') {
