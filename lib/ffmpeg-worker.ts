@@ -638,7 +638,8 @@ export async function cutVideoSegments(
 //
 // A implementacao real (motor de duas passadas) esta mais abaixo, junto de
 // `normalizeVolume`. Veja o bloco de doc do LEVEL_PREFILTER / normalizeVolume
-// para a estrategia completa (EBU R128 two-pass + leveling dinamico).
+// para a estrategia completa (medição EBU R128 na passada 1 + ganho ESTÁTICO
+// medido + brickwall na passada 2 — ver buildFinalGain).
 
 // ---------- Decupagem com Copy (audio extraction p/ transcricao) --------
 //
@@ -1183,10 +1184,9 @@ export async function extractFrameAt(
  * Medido (caso extremo, gap de 16 LUFS entre as 2 vozes): a diferença cai pra
  * ~2.7 LUFS (quase imperceptível) mantendo LRA ~4.5 (dinâmica natural de voz).
  *
- * Depois, o `loudnorm` two-pass (ver normalizeVolume) crava a loudness final
- * em -16 LUFS com true-peak -1.5dB, aplicando ganho LINEAR quando dá — sem
- * reintroduzir compressão/artefato. Sem alimiter extra: o próprio loudnorm já
- * faz o true-peak limiting do estágio final.
+ * Depois, o estágio de ganho FINAL (buildFinalGain) crava a loudness em -16
+ * LUFS com true-peak -1.5dB aplicando um ganho ESTÁTICO medido + brickwall —
+ * NUNCA loudnorm dinâmico (que bombeava as pausas = ET/fade). Ver buildFinalGain.
  */
 // Leveling completo (macro + micro de fala). É o preferido.
 const LEVEL_FULL =
@@ -1196,8 +1196,62 @@ const LEVEL_FULL =
 // build. Continua equalizando bem, só um pouco menos cirúrgico.
 const LEVEL_SAFE = 'dynaudnorm=f=200:g=17:p=0.9:m=8:r=0.6:s=6';
 
+// Leveling do perfil 'natural' (DECUPAGEM + nivelamento por-parte do HeyGen).
+// IGUALA o volume parte-a-parte ("ajeitar parte a parte") SEM bombear o ruído:
+//   · m=4   → maxgain capado (+12dB). Era m=8 (+18dB) — o que inflava o chão de
+//             ruído de um áudio baixo virando "voz de ET". Capar mata isso.
+//   · s=0   → ZERO compressão (s=6 era um compressor extra que criava artefato).
+//   · r=0.9 → alvo RMS alto: equaliza bem palavra-baixa↔palavra-alta.
+// O ganho ABSOLUTO final é ESTÁTICO (ver buildFinalGain) — nunca loudnorm
+// dinâmico. Medido (ffmpeg nativo, voz a -53 LUFS + chiado): com o motor antigo
+// o gap fala↔ruído nas pausas caía pra 0dB (ruído no nível da fala = "ET"); com
+// este, fica em +13dB (ruído limpo bem abaixo da fala). Sem fade/swell.
+const LEVEL_NATURAL = 'dynaudnorm=f=200:g=17:p=0.9:m=4:r=0.9:s=0';
+
 // Alvo de loudness final (padrão broadcast/streaming pra voz).
 const LOUDNORM_TARGET = 'I=-16:TP=-1.5:LRA=11';
+
+// --- Estágio de ganho FINAL: ESTÁTICO (um único ganho), nunca dinâmico. ------
+// O loudnorm two-pass, mesmo com linear=true, CAÍA pra modo dinâmico em quase
+// todo arquivo (a aplicação do ganho linear estouraria o true-peak → ffmpeg
+// volta pro dinâmico) e o dinâmico BOMBEava as pausas: o ruído subia até o
+// nível da fala (a "voz de ET" em áudio baixo) e as partes baixas "incham"
+// depois das altas (os FADES que o user reclamou). A correção é aplicar um
+// ganho fixo medido + um brickwall de true-peak, garantindo que cada pausa
+// fique EXATAMENTE o mesmo tanto abaixo da fala — sem swell, sem ET, sem fade.
+const LOUDNESS_TARGET_LUFS = -16;
+const TRUE_PEAK_TARGET_DB = -1.5;
+// Quanto de ganho EXTRA além do "no-clip" o limiter pode cobrir. Deixa arquivos
+// normais chegarem em -16 (o limiter segura os picos) sem blast em áudio quieto.
+const LIMITER_HEADROOM_DB = 6;
+// Teto ABSOLUTO de ganho. Voz baixa real (ex.: -53 LUFS) precisa de ~+37dB e
+// passa de boa; acima disso o arquivo é basicamente mudo/quebrado e amplificar
+// só inflaria ruído. Backstop pra nunca "blastar" um input patológico.
+const MAX_STATIC_GAIN_DB = 40;
+// Brickwall true-peak a -1.5 dBTP (limit linear = 10^(-1.5/20) ≈ 0.841).
+// level=false → NÃO auto-normaliza (só corta pico). Transparente na fala.
+// (`false` é o token bool canônico — válido em qualquer build, incl. o WASM.)
+const TRUE_PEAK_LIMITER =
+  'alimiter=level_in=1:level_out=1:limit=0.841:level=false:attack=5:release=50';
+
+/**
+ * Monta o estágio de ganho FINAL a partir da loudness/true-peak JÁ medidos do
+ * sinal pré-filtrado (input_i / input_tp do loudnorm da passada 1). Ganho:
+ *   ganho = min( alvoLUFS − I ,  (alvoTP − TP) + headroom )
+ * Sem medição (raro) cai no loudnorm de sempre — não pior que hoje.
+ */
+function buildFinalGain(stats: LoudnormStats | null, withLimiter: boolean): string {
+  if (!stats) return `loudnorm=${LOUDNORM_TARGET}`;
+  const inI = parseFloat(stats.input_i);
+  const inTP = parseFloat(stats.input_tp);
+  const gainToTarget = LOUDNESS_TARGET_LUFS - (Number.isFinite(inI) ? inI : LOUDNESS_TARGET_LUFS);
+  const headroom = withLimiter ? LIMITER_HEADROOM_DB : 0;
+  const gainNoClip =
+    TRUE_PEAK_TARGET_DB - (Number.isFinite(inTP) ? inTP : TRUE_PEAK_TARGET_DB) + headroom;
+  const gainDb = Math.min(gainToTarget, gainNoClip, MAX_STATIC_GAIN_DB);
+  const vol = `volume=${gainDb.toFixed(2)}dB`;
+  return withLimiter ? `${vol},${TRUE_PEAK_LIMITER}` : vol;
+}
 
 // Candidatos de DENOISE (limpeza de ruído de fundo), em ordem de qualidade.
 // Tudo roda LOCAL (no navegador), sem custo e sem subir áudio pra nuvem.
@@ -1285,34 +1339,23 @@ function parseLoudnormStats(logText: string): LoudnormStats | null {
   return null;
 }
 
-/** Monta a string do loudnorm de aplicação com os valores já medidos. */
-function loudnormApplyFilter(s: LoudnormStats): string {
-  return (
-    `loudnorm=${LOUDNORM_TARGET}` +
-    `:measured_I=${s.input_i}` +
-    `:measured_TP=${s.input_tp}` +
-    `:measured_LRA=${s.input_lra}` +
-    `:measured_thresh=${s.input_thresh}` +
-    `:offset=${s.target_offset}` +
-    `:linear=true:print_format=summary`
-  );
-}
 
 /**
  * Equaliza o volume de vozes diferentes num mesmo arquivo E limpa o ruído
  * de fundo, em qualidade máxima. Motor de DUAS PASSADAS (EBU R128):
  *
  *   Passada 1 — análise: roda denoise + leveling + loudnorm em modo
- *     `print_format=json` jogando a saída no muxer null. Lê a loudness real
- *     JÁ com o denoise aplicado (pra os valores baterem na passada 2).
- *   Passada 2 — aplicação: mesmo pré-filtro + loudnorm com os valores
- *     medidos e `linear=true` → crava -16 LUFS com ganho linear (sem
- *     artefato) e true-peak -1.5dB garantido.
+ *     `print_format=json` jogando a saída no muxer null. Lê a loudness e o
+ *     true-peak reais JÁ com o pré-filtro aplicado (input_i / input_tp).
+ *   Passada 2 — aplicação: mesmo pré-filtro + ganho ESTÁTICO medido
+ *     (`volume` + brickwall true-peak) → crava -16 LUFS / -1.5 dBTP SEM
+ *     bombear pausa nenhuma. Nada de loudnorm dinâmico (a causa do "ET" em
+ *     áudio baixo e dos fades/swells). Ver buildFinalGain.
  *
  * Escada de fallback dupla — denoise (RNNoise → afftdn → nenhum) × leveling
  * (full com speechnorm → safe só dynaudnorm). Tenta a melhor combinação e
- * vai degradando até uma rodar; a análise ainda cai pra single-pass se a
- * medição falhar. Ou seja: NUNCA devolve erro por causa de um filtro
+ * vai degradando até uma rodar; se a medição falhar, o ganho final cai pro
+ * loudnorm de sempre. Ou seja: NUNCA devolve erro por causa de um filtro
  * indisponível ou da medição.
  *
  * Caso típico: vídeo com 2 avatares — um gravado alto, outro baixo, com
@@ -1328,10 +1371,11 @@ function loudnormApplyFilter(s: LoudnormStats): string {
  *  - 'full'    → macro (dynaudnorm) + micro de FALA (speechnorm). É o mais
  *                agressivo a igualar timbres/níveis MUITO diferentes (ex.: 2
  *                vozes num arquivo). Usado pelo Normalizador.
- *  - 'natural' → SÓ macro (dynaudnorm suave) + loudnorm linear. Sem speechnorm
- *                — que é justamente o filtro que mais "marca"/processa a voz.
- *                É o perfil da DECUPAGEM: regula o nível e limpa o ruído de
- *                forma transparente, sem deixar a voz robótica.
+ *  - 'natural' → SÓ macro (dynaudnorm capado m=4) + ganho final ESTÁTICO. Sem
+ *                speechnorm — o filtro que mais "marca"/processa a voz. É o
+ *                perfil da DECUPAGEM e do nivelamento por-parte do HeyGen:
+ *                regula o nível e limpa o ruído de forma transparente, iguala
+ *                parte-a-parte, sem robotizar e sem fade/ET.
  */
 export type NormalizeProfile = 'full' | 'natural';
 
@@ -1358,9 +1402,10 @@ export async function normalizeVolume(
     // Combinações (leveling × denoise) da melhor pra mais segura: primeiro o
     // leveling completo (com speechnorm) com cada denoise; depois o leveling
     // de segurança (só dynaudnorm), caso o speechnorm não exista no build.
-    // No perfil 'natural' (decupagem) pulamos o LEVEL_FULL: nada de speechnorm,
-    // pra a voz sair transparente/não-robótica — só dynaudnorm suave + loudnorm.
-    const levels = params.profile === 'natural' ? [LEVEL_SAFE] : [LEVEL_FULL, LEVEL_SAFE];
+    // No perfil 'natural' (decupagem/HeyGen): SÓ o LEVEL_NATURAL (dynaudnorm
+    // capado m=4, sem speechnorm) → iguala parte-a-parte sem inflar ruído nem
+    // robotizar. O ganho final é estático (buildFinalGain) — sem fade/ET.
+    const levels = params.profile === 'natural' ? [LEVEL_NATURAL] : [LEVEL_FULL, LEVEL_SAFE];
     const candidates: Array<{ denoise: string; level: string }> = [];
     for (const level of levels) {
       for (const denoise of denoises) candidates.push({ denoise, level });
@@ -1393,6 +1438,13 @@ export async function normalizeVolume(
         denoiseUsed = cand.denoise;
         levelUsed = cand.level;
         measured = parseLoudnormStats(logLines.join('\n'));
+        if (!measured) {
+          // Exec rodou mas o parse do loudnorm falhou (log perdido/formato
+          // diferente). buildFinalGain vai cair no loudnorm DINÂMICO — o
+          // bombeamento (ET/fade) que esse refactor existe pra matar. É raro,
+          // mas tem que ser visível no campo pra diagnosticar (não silencioso).
+          console.warn('[ffmpeg-worker] normalizeVolume: medição de loudness não parseou — caindo no loudnorm dinâmico (ganho estático indisponível). Verificar formato do print_format=json no build WASM.');
+        }
         break;
       } catch (e) {
         if (isCancellationError(e)) throw e;
@@ -1400,62 +1452,77 @@ export async function normalizeVolume(
       }
     }
 
-    // -------- Passada 2: aplicação --------------------------------------
-    const loudnorm = measured
-      ? loudnormApplyFilter(measured)
-      : `loudnorm=${LOUDNORM_TARGET}`;
-    const filter = `${buildPrefilter(denoiseUsed, levelUsed)},${loudnorm}`;
+    // -------- Passada 2: aplicação (ganho ESTÁTICO, nunca dinâmico) ------
+    // filterFor(true)  = prefiltro + volume(ganho medido) + brickwall true-peak.
+    // filterFor(false) = sem o limiter (ganho já é no-clip) — fallback se o
+    //   alimiter não existir no build WASM. Garante que NUNCA volta pro loudnorm
+    //   dinâmico (que bombeava as pausas = ET/fade), exceto se a medição falhou.
+    const prefilter = buildPrefilter(denoiseUsed, levelUsed);
+    const filterFor = (withLimiter: boolean) =>
+      `${prefilter},${buildFinalGain(measured, withLimiter)}`;
 
     const progressHandler = wireProgress(ff, opts.onProgress);
     try {
-      if (params.output === 'mp4') {
-        opts.onStage?.('Normalizando + remontando vídeo (2/2)...');
-        // 1ª tentativa: copia o vídeo SEM reencode (lossless, rápido).
-        const copyArgs = [
-          '-i', inputName,
-          '-af', filter,
-          '-c:v', 'copy',
-          '-c:a', 'aac',
-          '-b:a', '256k',
-          '-movflags', '+faststart',
-          outputName,
-        ];
-        try {
-          await ff.exec(copyArgs);
-        } catch (e) {
-          if (isCancellationError(e)) throw e;
-          // Stream de vídeo incompatível com mp4 (ex.: webm/vp9). Reencoda.
-          opts.onStage?.('Stream incompatível — remontando vídeo (2/2)...');
-          await safeDelete(ff, outputName);
-          await ff.exec([
+      const runApply = async (filter: string) => {
+        if (params.output === 'mp4') {
+          opts.onStage?.('Normalizando + remontando vídeo (2/2)...');
+          // 1ª tentativa: copia o vídeo SEM reencode (lossless, rápido).
+          const copyArgs = [
             '-i', inputName,
             '-af', filter,
-            '-c:v', 'libx264',
-            '-preset', 'veryfast',
-            '-crf', '18',
-            '-pix_fmt', 'yuv420p',
+            '-c:v', 'copy',
             '-c:a', 'aac',
             '-b:a', '256k',
             '-movflags', '+faststart',
             outputName,
+          ];
+          try {
+            await ff.exec(copyArgs);
+          } catch (e) {
+            if (isCancellationError(e)) throw e;
+            // Stream de vídeo incompatível com mp4 (ex.: webm/vp9). Reencoda.
+            opts.onStage?.('Stream incompatível — remontando vídeo (2/2)...');
+            await safeDelete(ff, outputName);
+            await ff.exec([
+              '-i', inputName,
+              '-af', filter,
+              '-c:v', 'libx264',
+              '-preset', 'veryfast',
+              '-crf', '18',
+              '-pix_fmt', 'yuv420p',
+              '-c:a', 'aac',
+              '-b:a', '256k',
+              '-movflags', '+faststart',
+              outputName,
+            ]);
+          }
+        } else if (params.output === 'mp3') {
+          opts.onStage?.('Normalizando e exportando MP3 (2/2)...');
+          await ff.exec([
+            '-i', inputName, '-af', filter,
+            '-vn', '-c:a', 'libmp3lame', '-q:a', '0',
+            outputName,
+          ]);
+        } else {
+          opts.onStage?.('Normalizando e exportando WAV (2/2)...');
+          // pcm 24-bit, sem forçar sample-rate (preserva o do source → sem
+          // resample desnecessário).
+          await ff.exec([
+            '-i', inputName, '-af', filter,
+            '-vn', '-c:a', 'pcm_s24le',
+            outputName,
           ]);
         }
-      } else if (params.output === 'mp3') {
-        opts.onStage?.('Normalizando e exportando MP3 (2/2)...');
-        await ff.exec([
-          '-i', inputName, '-af', filter,
-          '-vn', '-c:a', 'libmp3lame', '-q:a', '0',
-          outputName,
-        ]);
-      } else {
-        opts.onStage?.('Normalizando e exportando WAV (2/2)...');
-        // pcm 24-bit, sem forçar sample-rate (preserva o do source → sem
-        // resample desnecessário).
-        await ff.exec([
-          '-i', inputName, '-af', filter,
-          '-vn', '-c:a', 'pcm_s24le',
-          outputName,
-        ]);
+      };
+
+      try {
+        await runApply(filterFor(true));
+      } catch (e) {
+        if (isCancellationError(e)) throw e;
+        // alimiter indisponível (raro) → refaz sem o limiter; o ganho do
+        // caminho sem-limiter já é no-clip, então segue seguro.
+        await safeDelete(ff, outputName);
+        await runApply(filterFor(false));
       }
     } finally {
       if (progressHandler) ff.off('progress', progressHandler);
@@ -1477,12 +1544,14 @@ export async function normalizeVolume(
 
 /**
  * Prepara a voz pra DECUPAGEM: regula o nível e limpa o ruído de forma
- * transparente (perfil 'natural' — loudnorm linear + denoise + dynaudnorm
- * suave, SEM speechnorm). É o passo que garante que:
+ * transparente (perfil 'natural' — denoise + dynaudnorm capado + ganho
+ * ESTÁTICO, SEM speechnorm e SEM loudnorm dinâmico). É o passo que garante que:
  *   - voz baixa/alta sai sempre no mesmo nível confortável (-16 LUFS) →
  *     nenhuma parte vira "silêncio" e é cortada;
  *   - chiado/ruído de fundo (inclusive o que vem do HeyGen em alguns trechos)
  *     é removido ANTES de amplificar, então não há "xiado" inflado;
+ *   - o ganho final é estático (sem bombeamento) → as pausas ficam sempre o
+ *     mesmo tanto abaixo da fala: nada de "voz de ET" nem fade in/out;
  *   - sem compressão agressiva → nada de voz robótica.
  *
  * NUNCA lança: se o leveling falhar/timeout, devolve o arquivo ORIGINAL, pra a
