@@ -33,6 +33,10 @@ export type AssembledPart = {
   camuflado?: Blob;
   /** Erros por estagio */
   errors?: { assemble?: string; decupagem?: string; camuflagem?: string };
+  /** Labels de partes ESPERADAS (expected:true) que faltaram blob e foram
+   *  puladas → a montagem saiu INCOMPLETA ("faltando texto"). Se preenchido,
+   *  a task NUNCA deve marcar 100% pronto nem liberar download limpo. */
+  missingParts?: string[];
 };
 
 export type PipelineProgress = {
@@ -45,8 +49,11 @@ export type PipelineProgress = {
 export type PipelineInputs = {
   /** baseAdId da task (ex: AD140GL ou AD140G) — sufixo G[N] sera inserido */
   baseAdId: string;
-  /** MP4s individuais ja baixados, na ordem do plan (HOOK 1, HOOK 2, ..., BODY 1, BODY 2, ...) */
-  parts: Array<{ label: string; blob: Blob | null }>;
+  /** MP4s individuais ja baixados, na ordem do plan (HOOK 1, HOOK 2, ..., BODY 1, BODY 2, ...)
+   *  `expected: true` = essa parte TEM conteúdo (foi disparada/renderizada) e
+   *  DEVE ter blob. Se vier sem blob, a montagem é flagada como incompleta
+   *  (≠ parte intencionalmente vazia, que vem com expected ausente/false). */
+  parts: Array<{ label: string; blob: Blob | null; expected?: boolean }>;
   /** Roda decupagem nos montados (sempre true atualmente) */
   decupagem: boolean;
   /** Roda camuflagem (gera 3a versao) */
@@ -172,7 +179,9 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   // um editor profissional, normaliza cada clipe pro mesmo patamar e SÓ DEPOIS
   // monta. Nivelar o montado inteiro (loudnorm linear) NÃO resolvia — aplica um
   // ganho único, então a parte alta continua alta e a baixa baixa (medido: gap
-  // de 20 LUFS só caía pra 7.6). Por-parte → todas idênticas a -16 LUFS.
+  // de 20 LUFS só caía pra 7.6). Por-parte → todas no MESMO patamar (~-16 LUFS;
+  // o dynaudnorm já junta as partes e o ganho estático mira -16, capando só
+  // picos raros — resíduo <2 LUFS, bem abaixo do gap audível de antes).
   // Sequencial (não Promise.all): ffmpeg-wasm é instância única, exec paralelo
   // colidiria no FS virtual. Roda mesmo com decupagem DESLIGADA.
   const nivelarPartes = async (blobs: Blob[], label: string): Promise<Blob[]> => {
@@ -196,6 +205,11 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
 
     const blobs: Blob[] = [];
     const skippedLabels: string[] = [];
+    // Partes ESPERADAS (expected:true = tinha conteúdo/foi renderizada) que
+    // chegaram SEM blob → a montagem vai sair "faltando texto". Isso NÃO é
+    // uma parte intencionalmente vazia: é conteúdo perdido (download falhou,
+    // cache sumiu, etc). Tem que travar o "100% pronto" e o download limpo.
+    const missingExpected: string[] = [];
     for (const i of piecesIdx) {
       const p = parts[i];
       if (!p?.blob) {
@@ -205,12 +219,16 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         // User reportou (2026-05-27): RETOMAR travava porque 1 parte vazia
         // fazia break → montagem inteira abortava. Agora monta com o que tem.
         skippedLabels.push(p?.label || '?');
+        if (p?.expected) missingExpected.push(p.label || '?');
         continue;
       }
       blobs.push(p.blob);
     }
     if (skippedLabels.length > 0) {
       console.warn(`[clickup-pilot-pipeline] assemble ${filename}: PULOU ${skippedLabels.length} parte(s) sem video (${skippedLabels.join(', ')}), montando com ${blobs.length} disponíveis`);
+    }
+    if (missingExpected.length > 0) {
+      console.error(`[clickup-pilot-pipeline] assemble ${filename}: INCOMPLETA — faltou ${missingExpected.length} parte(s) ESPERADA(s) (${missingExpected.join(', ')}). Montagem NÃO está 100%.`);
     }
     if (blobs.length === 0) {
       console.warn(`[clickup-pilot-pipeline] assemble ${filename}: SKIP - nenhuma parte com video`);
@@ -250,7 +268,12 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       out.push({ filename, rawAssembled: new Blob(), errors: { assemble: (e as Error)?.message || 'falha no concat' } });
       continue;
     }
-    out.push({ filename, rawAssembled: assembled, _usedFastPath: usedFastPath } as AssembledPart & { _usedFastPath: boolean });
+    out.push({
+      filename,
+      rawAssembled: assembled,
+      missingParts: missingExpected.length ? missingExpected : undefined,
+      _usedFastPath: usedFastPath,
+    } as AssembledPart & { _usedFastPath: boolean });
   }
 
   // (A regulagem de voz agora acontece POR PARTE no Stage 1, antes do concat —
@@ -368,7 +391,11 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   onProgress?.({ stage: 'done', doneCount: total, totalCount: total });
   const decupCount = out.filter(i=>i.decupado).length;
   const camuCount = out.filter(i=>i.camuflado).length;
-  const summary = `${out.length} montagens · ${decupCount} decupados${camuflagem ? ` · ${camuCount} camuflados` : ''}`;
+  const incompletas = out.filter(i=>i.missingParts?.length);
+  const incompletoStr = incompletas.length
+    ? ` · ⚠ ${incompletas.length} INCOMPLETA(s) [${incompletas.map(i=>`${i.filename}: faltou ${i.missingParts!.join('/')}`).join('; ')}]`
+    : '';
+  const summary = `${out.length} montagens · ${decupCount} decupados${camuflagem ? ` · ${camuCount} camuflados` : ''}${incompletoStr}`;
   console.log('[clickup-pilot-pipeline] DONE', summary);
   return { items: out, diagnostics: { totalParts: parts.length, hooksFound: hooks.length, bodiesFound: bodies.length, unrecognizedLabels: unrecognized, summary } };
 }

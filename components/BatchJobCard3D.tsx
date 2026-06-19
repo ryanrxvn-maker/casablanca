@@ -42,6 +42,10 @@ export type BatchJob3DProps = {
   allOk: boolean;
   /** parcial = phase=done mas algo faltou */
   isPartialDone: boolean;
+  /** Trava o download do MP4 final: a entrega NÃO está 100% (falta parte/
+   *  texto, render incompleto, etc). Garante que o user nunca baixe uma
+   *  versão zoada — tem que clicar Retomar pra completar primeiro. */
+  downloadBlocked?: boolean;
   /** URLs prontas */
   takesUrl?: string;
   takesFilename?: string;
@@ -353,6 +357,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     elapsedMs,
     allOk,
     isPartialDone,
+    downloadBlocked,
     takesUrl,
     takesFilename,
     montadoUrl,
@@ -383,9 +388,16 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
   const [resolvingDoc, setResolvingDoc] = useState(false);
 
   const phaseInfo = PHASE_MAP[phase];
-  // Override pra parcial
+  // Override pra parcial. Distingue:
+  //  - downloadBlocked → FALTA conteúdo (parte/texto): tem que Retomar, download travado.
+  //  - isPartialDone só (sem block) → montado completo mas um pós-processo
+  //    opcional (decupagem/camuflagem) falhou: é entregável, download liberado.
   const showAsWarn = isPartialDone;
-  const effectiveLabel = showAsWarn ? 'Incompleto — clica Retomar' : phaseInfo.label;
+  const effectiveLabel = downloadBlocked
+    ? 'Incompleto — clica Retomar'
+    : isPartialDone
+      ? 'Pronto · pós-processo parcial'
+      : phaseInfo.label;
   const ringColor =
     showAsWarn ? 'border-amber-400/35'
     : phase === 'done' ? 'border-lime/35'
@@ -650,13 +662,20 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                   });
                 };
 
-                const tooltip = isPartialDone ? 'Baixar MP4 (parcial)' : 'Baixar MP4';
+                // TRAVA o download quando a entrega NÃO está 100% (falta
+                // parte/texto, render incompleto). O user pediu: só baixar o
+                // vídeo de fato pronto, nunca uma versão zoada. Tem que clicar
+                // Retomar pra completar antes. (troca não passa downloadBlocked.)
+                const tooltip = downloadBlocked
+                  ? '⚠ Incompleto — clique Retomar pra completar (não baixa versão zoada)'
+                  : 'Baixar MP4';
                 return (
                   <Btn3D
                     icon={<IconDownload size={16} />}
-                    color="lime"
+                    color={downloadBlocked ? 'neutral' : 'lime'}
                     title={tooltip}
-                    onClick={() => void handleDownloadAll()}
+                    disabled={downloadBlocked}
+                    onClick={downloadBlocked ? undefined : () => void handleDownloadAll()}
                   />
                 );
               })() : null}

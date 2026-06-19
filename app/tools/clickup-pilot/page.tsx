@@ -353,6 +353,9 @@ type BatchTaskState = {
   pipeStats?: {
     expectedMontagens: number;
     okMontagens: number;
+    /** Montagens que sairam INCOMPLETAS (faltou parte esperada = "faltando
+     *  texto"). > 0 → nunca 100% pronto, download fica travado. */
+    incompleteMontagens?: number;
     okDecupados: number;
     okCamuflados: number;
     expectedDecupagem: boolean;
@@ -2215,7 +2218,10 @@ function ClickUpPilotInner() {
       setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'downloading', message: `Baixando ${validIds.length} videos...` } }));
       const JSZip = (await import('jszip')).default;
       const zip = new JSZip();
-      const partBlobs: Array<{ label: string; blob: Blob | null }> = plan.parts.map((p: any) => ({ label: p.label, blob: null }));
+      // expected:true = parte COM conteúdo (texto não-vazio) → DEVE virar blob.
+      // Parte intencionalmente vazia (sem texto) fica expected:false e pode
+      // faltar sem marcar a montagem como incompleta.
+      const partBlobs: Array<{ label: string; blob: Blob | null; expected?: boolean }> = plan.parts.map((p: any) => ({ label: p.label, blob: null, expected: !!(p.text && String(p.text).trim()) }));
       let downloaded = 0;
       const downloadOne = async (i: number) => {
         if (batchCancelRef.current[taskId]) return;
@@ -2398,7 +2404,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const decupagemOn = isDecupagemEnabled(taskId);
       const pipeStats = {
         expectedMontagens: assembled.length,
-        okMontagens: assembled.filter((it) => !it.errors?.assemble && it.rawAssembled && it.rawAssembled.size > 0).length,
+        // Montagem INCOMPLETA (faltou parte esperada) NÃO conta como ok →
+        // trava o "100% pronto" e o download limpo (o user NUNCA recebe
+        // "faltando texto" como se estivesse pronto).
+        okMontagens: assembled.filter((it) => !it.errors?.assemble && it.rawAssembled && it.rawAssembled.size > 0 && !it.missingParts?.length).length,
+        incompleteMontagens: assembled.filter((it) => !!it.missingParts?.length).length,
         okDecupados: assembled.filter((it) => !!it.decupado).length,
         okCamuflados: assembled.filter((it) => !!it.camuflado).length,
         expectedDecupagem: decupagemOn,
@@ -2655,8 +2665,17 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'downloading', message: `Hidratando blobs do cache local...` } }));
       const JSZip = (await import('jszip')).default;
       const zip = new JSZip();
-      const partBlobs: Array<{ label: string; blob: Blob | null }> =
-        state.parts.map((p) => ({ label: p.label, blob: null }));
+      // expected:true = parte COM conteúdo (texto no plano) → DEVE virar blob.
+      // CRÍTICO: usa o TEXTO do replan, NÃO o videoId. Se o dispatch falhou e a
+      // parte ficou sem videoId mas TINHA texto, ela continua "esperada" → cai
+      // no gate de incompleta. Marcar por videoId deixava a montagem sair
+      // "faltando texto" como se fosse 100%. Sem replan (batch antigo) → !!videoId.
+      const expectedByText = (i: number, p: { videoId: string | null }) => {
+        const t = state.replan?.parts?.[i]?.text;
+        return t != null ? !!String(t).trim() : !!p.videoId;
+      };
+      const partBlobs: Array<{ label: string; blob: Blob | null; expected?: boolean }> =
+        state.parts.map((p, i) => ({ label: p.label, blob: null, expected: expectedByText(i, p) }));
 
       // === HIDRATAÇÃO RETOMAR (fix 2026-05-27) ===
       // Antes de re-baixar do HeyGen, tenta hidratar cada parte do IndexedDB
@@ -2871,7 +2890,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const decupagemOn = isDecupagemEnabled(taskId);
       const pipeStats = {
         expectedMontagens: assembled.length,
-        okMontagens: assembled.filter((it) => !it.errors?.assemble && it.rawAssembled && it.rawAssembled.size > 0).length,
+        // Montagem INCOMPLETA (faltou parte esperada) NÃO conta como ok →
+        // trava o "100% pronto" e o download limpo (o user NUNCA recebe
+        // "faltando texto" como se estivesse pronto).
+        okMontagens: assembled.filter((it) => !it.errors?.assemble && it.rawAssembled && it.rawAssembled.size > 0 && !it.missingParts?.length).length,
+        incompleteMontagens: assembled.filter((it) => !!it.missingParts?.length).length,
         okDecupados: assembled.filter((it) => !!it.decupado).length,
         okCamuflados: assembled.filter((it) => !!it.camuflado).length,
         expectedDecupagem: decupagemOn,
@@ -3851,13 +3874,22 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     try {
       const { loadBlob, saveZip } = await import('@/lib/zip-store');
       // Hidrata blobs do IDB (todos, fresh — incluindo os editados)
-      const partBlobs: Array<{ label: string; blob: Blob | null }> = await Promise.all(
-        b.parts.map(async (p) => {
-          if (!p.videoId) return { label: p.label, blob: null };
+      // expected:true = parte COM conteúdo (texto no plano) → DEVE ter blob.
+      // Texto do replan, NÃO videoId: parte com texto que falhou dispatch segue
+      // esperada → gate de incompleta (não sai "faltando texto" como 100%).
+      // Sem replan (batch antigo) → !!videoId.
+      const rbExpected = (i: number, p: { videoId: string | null }) => {
+        const t = b.replan?.parts?.[i]?.text;
+        return t != null ? !!String(t).trim() : !!p.videoId;
+      };
+      const partBlobs: Array<{ label: string; blob: Blob | null; expected?: boolean }> = await Promise.all(
+        b.parts.map(async (p, i) => {
+          const expected = rbExpected(i, p);
+          if (!p.videoId) return { label: p.label, blob: null, expected };
           try {
             const blob = await loadBlob(`pilot:${taskId}:part:${p.label}`, 'video/mp4');
-            return { label: p.label, blob: blob && blob.size > 1024 ? blob : null };
-          } catch { return { label: p.label, blob: null }; }
+            return { label: p.label, blob: blob && blob.size > 1024 ? blob : null, expected };
+          } catch { return { label: p.label, blob: null, expected }; }
         }),
       );
 
@@ -3924,7 +3956,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const decupagemOn = isDecupagemEnabled(taskId);
       const pipeStats = {
         expectedMontagens: assembled.length,
-        okMontagens: assembled.filter((it) => !it.errors?.assemble && it.rawAssembled && it.rawAssembled.size > 0).length,
+        // Montagem INCOMPLETA (faltou parte esperada) NÃO conta como ok →
+        // trava o "100% pronto" e o download limpo (o user NUNCA recebe
+        // "faltando texto" como se estivesse pronto).
+        okMontagens: assembled.filter((it) => !it.errors?.assemble && it.rawAssembled && it.rawAssembled.size > 0 && !it.missingParts?.length).length,
+        incompleteMontagens: assembled.filter((it) => !!it.missingParts?.length).length,
         okDecupados: assembled.filter((it) => !!it.decupado).length,
         okCamuflados: assembled.filter((it) => !!it.camuflado).length,
         expectedDecupagem: decupagemOn,
@@ -6774,12 +6810,34 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                             ? (
                                 b.pipeStats.expectedMontagens > 0
                                 && b.pipeStats.okMontagens === b.pipeStats.expectedMontagens
+                                // NENHUMA montagem incompleta (faltando texto):
+                                && !b.pipeStats.incompleteMontagens
                                 && (!b.pipeStats.expectedDecupagem || b.pipeStats.okDecupados === b.pipeStats.expectedMontagens)
                                 && (!b.pipeStats.expectedCamuflagem || b.pipeStats.okCamuflados === b.pipeStats.expectedMontagens)
                               )
                             : (b.phase === 'done' && !!b.montadoZipUrl);
                           const allOk = dispatchOk && renderOk && pipeOk;
                           const isPartialDone = b.phase === 'done' && !allOk;
+                          // CONTEÚDO do montado completo = todas as partes/texto
+                          // presentes. Decupagem e camuflagem são pós-processos
+                          // OPCIONAIS: se falharem, o montado ainda tem TODO o
+                          // texto + áudio nivelado (não é "zoada"), então o
+                          // download NÃO trava — só o aviso aparece. Travava
+                          // vídeo bom de vez quando a decupagem (passo frágil)
+                          // falhava de forma determinística e o Retomar re-falhava.
+                          const montagemContentOk = b.pipeStats
+                            ? (
+                                b.pipeStats.expectedMontagens > 0
+                                && b.pipeStats.okMontagens === b.pipeStats.expectedMontagens
+                                && !b.pipeStats.incompleteMontagens
+                              )
+                            : (b.phase === 'done' && !!b.montadoZipUrl);
+                          // Só trava download quando FALTA conteúdo (parte/texto/
+                          // render), nunca por pós-processo opcional. Troca tem
+                          // fluxo próprio (prova/transcrição) → nunca trava aqui.
+                          const downloadBlocked =
+                            b.phase === 'done' && b.kind !== 'troca'
+                            && !(dispatchOk && renderOk && montagemContentOk);
                           const elapsedMs = (b.finishedAt || nowTick) - b.startedAt;
                           const running = ['dispatching', 'rendering', 'downloading', 'post'].includes(b.phase);
                           const queued = b.phase === 'queued';
@@ -6913,6 +6971,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               elapsedMs={elapsedMs}
                               allOk={allOk}
                               isPartialDone={isPartialDone}
+                              // Trava download só quando FALTA conteúdo (parte/
+                              // texto/render). Pós-processo opcional (decupagem/
+                              // camuflagem) que falhou NÃO trava o montado válido.
+                              downloadBlocked={downloadBlocked}
                               takesUrl={b.zipBlobUrl}
                               takesFilename={b.zipFilename}
                               montadoUrl={b.montadoZipUrl}
