@@ -124,10 +124,10 @@ export default function CamuflagemPage() {
     'camuflagem:format',
     'wav',
   );
-  const [target, setTarget] = useToolState<Target>(
-    'camuflagem:target',
-    'platforms',
-  );
+  // Alvo fixo: TikTok/Kwai/YouTube. A camuflagem por inversão de fase só faz
+  // sentido contra plataformas que somam/mediam L+R, então o alvo é sempre
+  // 'platforms' — sem card de escolha.
+  const target = 'platforms' as Target;
   const [processingAll, setProcessingAll] = useToolState<boolean>(
     'camuflagem:processingAll',
     false,
@@ -517,7 +517,7 @@ export default function CamuflagemPage() {
     <ToolShell
       title="Camuflagem"
       eyebrow="ÁUDIO"
-      description="Escolha pra quem você quer enganar. O selo só fica verde se realmente camuflar."
+      description="Esconde o áudio que a IA lê do TikTok/Kwai/YouTube. O selo só fica verde se realmente camuflar."
       hue={HUE}
       icon={<IconCamuflagem size={56} />}
     >
@@ -542,28 +542,7 @@ export default function CamuflagemPage() {
 
         {mode === 'camuflar' ? (
         <>
-        <ToolStep n={1} icon={<IconStepTarget size={18} />} title="Alvo" hint="Quem você quer enganar define o que conta como sucesso" hue={HUE}>
-          <ToolChoice
-            value={target}
-            onChange={(v) => !processingAll && setTarget(v as Target)}
-            options={[
-              { value: 'platforms', label: 'TikTok / Kwai', sub: 'YouTube' },
-              { value: 'single', label: 'IAs de ASR', sub: 'canal único' },
-              { value: 'universal', label: 'Todos', sub: 'mais difícil' },
-            ]}
-            disabled={processingAll}
-            hue={HUE}
-          />
-          <p className="mt-3 text-[11px] leading-relaxed text-text-muted">
-            {target === 'platforms'
-              ? 'TikTok/Kwai/YouTube reduzem o áudio pra mono somando os canais. A inversão de fase engana esses: eles escutam o WHITE.'
-              : target === 'single'
-                ? 'Engines que pegam UM canal isolado escutam o BLACK em volume cheio. A inversão de fase NÃO camufla contra elas.'
-                : 'Só fica verde se TODA IA (somadora E de canal único) escutar o WHITE.'}
-          </p>
-        </ToolStep>
-
-        <ToolStep n={2} icon={<IconStepSliders size={18} />} title="Intensidade" hint="Quanto maior, mais difícil de detectar" hue={HUE}>
+        <ToolStep n={1} icon={<IconStepSliders size={18} />} title="Intensidade" hint="Quanto maior, mais difícil de detectar" hue={HUE}>
           <ToolSlider
             label="Volume da camuflagem"
             min={5}
@@ -576,7 +555,7 @@ export default function CamuflagemPage() {
           />
         </ToolStep>
 
-        <ToolStep n={3} icon={<IconStepFormat size={18} />} title="Formato de saída" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepFormat size={18} />} title="Formato de saída" hue={HUE}>
           <ToolChoice
             value={format}
             onChange={(v) => {
@@ -598,7 +577,7 @@ export default function CamuflagemPage() {
           ) : null}
         </ToolStep>
 
-        <ToolStep n={4} icon={<IconStepFiles size={18} />} title="Pares BLACK + WHITE" hint="BLACK = público · WHITE = IA escuta" hue={HUE}>
+        <ToolStep n={3} icon={<IconStepFiles size={18} />} title="Pares BLACK + WHITE" hint="BLACK = público · WHITE = IA escuta" hue={HUE}>
         <div className="flex flex-col gap-4">
           {pairs.map((pair, i) => (
             <div
