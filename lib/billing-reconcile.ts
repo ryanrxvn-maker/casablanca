@@ -1,3 +1,4 @@
+import type Stripe from 'stripe';
 import { getStripe } from '@/lib/stripe';
 import { serviceClient } from '@/app/api/admin/_helpers';
 import {
@@ -39,6 +40,20 @@ function planFromAmount(amount?: number | null): PaidTier | null {
   for (const t of tiers)
     for (const c of cycles) if (PRICE_AMOUNT[t][c] === amount) return t;
   return null;
+}
+
+const PLAN_RANK: Record<PaidTier, number> = { basic: 1, pro: 2 };
+
+/** Resolve o plano pago de uma subscription: metadata.plan ou, faltando, pelo
+ *  valor do item. Não depende de o checkout ter gravado metadata. */
+function planOfSub(sub: unknown): PaidTier | null {
+  const s = sub as {
+    metadata?: { plan?: string };
+    items?: { data?: Array<{ price?: { unit_amount?: number | null } }> };
+  };
+  const mp = s.metadata?.plan ?? '';
+  if (isPaidTier(mp)) return mp;
+  return planFromAmount(s.items?.data?.[0]?.price?.unit_amount);
 }
 
 /** Fim do período de uma assinatura. Na API Basil (2025-03-31+) o campo saiu
@@ -95,42 +110,69 @@ export async function reconcileUserBilling(
 
   const stripe = getStripe();
 
-  // ── 1) Assinatura recorrente ativa? (mensal) ──────────────────────────
+  // ── 1) Assinatura recorrente que CONCEDE acesso? ───────────────────────
   const subs = await stripe.subscriptions.list({
     customer: customerId,
     status: 'all',
     limit: 10,
   });
-  const activeSub = subs.data.find(
-    (s) => s.status === 'active' || s.status === 'trialing',
-  );
-  if (activeSub) {
-    const metaPlan = (activeSub.metadata?.plan ?? '') as string;
-    const unitAmount = (
-      activeSub as unknown as {
-        items?: { data?: Array<{ price?: { unit_amount?: number | null } }> };
+
+  // Entre as ativas/trial, escolhe o MELHOR plano (pro > basic) — determinístico.
+  // (Cliente que deu upgrade basic→pro pode ter 2 subs ativas por um tempo; sem
+  // isso o .find() poderia gravar 'basic' enquanto a 'pro' real está ativa.)
+  let best: { sub: Stripe.Subscription; plan: PaidTier } | null = null;
+  for (const s of subs.data) {
+    if (s.status !== 'active' && s.status !== 'trialing') continue;
+    const plan = planOfSub(s);
+    if (!plan) continue;
+    if (!best || PLAN_RANK[plan] > PLAN_RANK[best.plan]) best = { sub: s, plan };
+  }
+
+  // Resgate: sub ainda 'incomplete'/'past_due' mas cuja fatura JÁ foi paga
+  // (cliente voltou do checkout antes do Stripe marcar 'active'). Concede.
+  if (!best) {
+    const pending = subs.data.find(
+      (s) => s.status === 'incomplete' || s.status === 'past_due',
+    );
+    if (pending) {
+      try {
+        const full = await stripe.subscriptions.retrieve(pending.id, {
+          expand: ['latest_invoice'],
+        });
+        const inv = (full as unknown as { latest_invoice?: unknown })
+          .latest_invoice;
+        const invObj =
+          inv && typeof inv === 'object'
+            ? (inv as { status?: string; paid?: boolean })
+            : null;
+        const invoicePaid =
+          !!invObj && (invObj.status === 'paid' || invObj.paid === true);
+        const plan = planOfSub(full);
+        if (invoicePaid && plan) best = { sub: full, plan };
+      } catch {
+        /* sem resgate agora */
       }
-    ).items?.data?.[0]?.price?.unit_amount;
-    const plan = isPaidTier(metaPlan) ? metaPlan : planFromAmount(unitAmount);
-    if (plan && isPaidTier(plan)) {
-      await svc
-        .from('profiles')
-        .update({
-          stripe_customer_id: customerId,
-          stripe_subscription_id: activeSub.id,
-          subscription_status: activeSub.status,
-          subscription_plan: plan,
-          tier: plan,
-          current_period_end: stripeSubPeriodEndISO(activeSub),
-        })
-        .eq('id', userId);
-      return {
-        applied: true,
-        tier: plan,
-        reason: `assinatura ${activeSub.status} (${plan})`,
-        source: 'subscription',
-      };
     }
+  }
+
+  if (best) {
+    await svc
+      .from('profiles')
+      .update({
+        stripe_customer_id: customerId,
+        stripe_subscription_id: best.sub.id,
+        subscription_status: best.sub.status,
+        subscription_plan: best.plan,
+        tier: best.plan,
+        current_period_end: stripeSubPeriodEndISO(best.sub),
+      })
+      .eq('id', userId);
+    return {
+      applied: true,
+      tier: best.plan,
+      reason: `assinatura ${best.sub.status} (${best.plan})`,
+      source: 'subscription',
+    };
   }
 
   // ── 2) Pagamento único recente e VIGENTE? (anual parcelável) ───────────

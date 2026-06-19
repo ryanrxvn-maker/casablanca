@@ -38,11 +38,21 @@ export function periodEndFrom(billing: Billing, from: Date = new Date()): Date {
 
 /** True se o acesso pago já venceu — rede de segurança além do webhook.
  *  • 'paid' (modelo único legado): expira exatamente no fim do período.
- *  • 'active'/'trialing' (recorrente): só expira se o fim do período já
- *    passou + 3 dias de tolerância (absorve atraso de webhook/retentativa;
- *    o normal é o webhook derrubar pra free assim que vira past_due/canceled).
- *  • canceled/past_due/unpaid: o webhook já setou tier=free → ignora aqui.
- *  Tiers manuais/admin (status null) nunca expiram. */
+ *  • recorrente (active/trialing/past_due/paused/incomplete): expira se o fim
+ *    do período já passou + 3 dias de tolerância. O webhook PRESERVA o tier em
+ *    status transitório (não derruba quem pagou por um soluço de cobrança ou
+ *    evento fora de ordem); então é AQUI que o acesso de um transitório que não
+ *    renovou acaba caindo — no fim do período pago + grace. Renovou → o webhook
+ *    empurra current_period_end pra frente e isto nunca dispara.
+ *  • 'canceled'/'unpaid'/'incomplete_expired': o webhook já setou tier=free.
+ *  Tiers manuais/admin (status null/'admin_grant') nunca expiram. */
+const RECURRING_STATUSES = new Set([
+  'active',
+  'trialing',
+  'past_due',
+  'paused',
+  'incomplete',
+]);
 export function isPaidExpired(
   status: string | null | undefined,
   periodEnd: string | null | undefined,
@@ -50,7 +60,7 @@ export function isPaidExpired(
   if (!periodEnd) return false;
   const end = new Date(periodEnd).getTime();
   if (status === 'paid') return end < Date.now();
-  if (status === 'active' || status === 'trialing') {
+  if (RECURRING_STATUSES.has(status ?? '')) {
     const GRACE_MS = 3 * 24 * 60 * 60 * 1000;
     return end + GRACE_MS < Date.now();
   }
