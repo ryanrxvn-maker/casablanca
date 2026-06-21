@@ -321,13 +321,13 @@ export default function SeparadorAudioPage() {
           {file ? (
             <div className="mt-3 grid grid-cols-2 gap-2 text-[12px] text-text-muted">
               <div className="rounded-[10px] border border-line/60 bg-bg-soft/40 px-3 py-2">
-                <div className="mono text-[10px] uppercase tracking-widest text-text-dim">
+                <div className="label-tech text-[10px] uppercase tracking-widest text-text-dim">
                   Arquivo
                 </div>
                 <div className="mt-0.5 truncate text-white">{file.name}</div>
               </div>
               <div className="rounded-[10px] border border-line/60 bg-bg-soft/40 px-3 py-2">
-                <div className="mono text-[10px] uppercase tracking-widest text-text-dim">
+                <div className="label-tech text-[10px] uppercase tracking-widest text-text-dim">
                   Tamanho
                 </div>
                 <div className="mt-0.5 mono text-white">{formatBytes(file.size)}</div>
@@ -366,7 +366,7 @@ export default function SeparadorAudioPage() {
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet opacity-60" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-violet shadow-[0_0_8px_rgba(167,139,250,0.9)]" />
             </span>
-            <span className="mono uppercase tracking-widest text-[11.5px]">
+            <span className="label-tech uppercase tracking-widest text-[11.5px]">
               {stageMsg}
             </span>
           </div>
@@ -462,7 +462,7 @@ function StemCard({
             {label}
           </h3>
           <span
-            className="mono shrink-0 rounded-full border px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.16em]"
+            className="label-tech shrink-0 rounded-full border px-2 py-0.5 text-[9.5px] font-bold uppercase tracking-[0.16em]"
             style={{
               fontFamily: 'var(--font-tech)',
               color: hue.replace('0.5', '1'),

@@ -477,7 +477,7 @@ export default function DecupagemPage() {
         {/* PREVIEW de TODOS os arquivos prontos */}
         {doneCount > 0 ? (
           <div className="grid gap-4">
-            <div className="mono text-[10px] uppercase tracking-widest text-lime">
+            <div className="label-tech text-[10px] uppercase tracking-widest text-lime">
               {doneCount} pronto{doneCount === 1 ? '' : 's'} — preview + download de cada
             </div>
             {queue

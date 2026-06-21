@@ -1,10 +1,10 @@
 import type { Metadata } from 'next';
 
 import {
-  Space_Grotesk,
+  Hanken_Grotesk,
   JetBrains_Mono,
-  Bricolage_Grotesque,
-  Instrument_Serif,
+  Manrope,
+  Fraunces,
 } from 'next/font/google';
 import { MouseGlow } from '@/components/MouseGlow';
 import { RippleRoot } from '@/components/RippleRoot';
@@ -14,19 +14,25 @@ import { ThemeManager } from '@/components/ThemeManager';
 import './globals.css';
 
 /**
- * Tipografia DARKO LAB v2 — identidade premium, nada generico.
+ * Tipografia DARKO LAB v3 — sistema PREMIUM, grau "design studio".
  *
- *  display  · Space Grotesk        → UI geral (sem custos cognitivos)
- *  mono     · JetBrains Mono       → numeros, timestamps, codigo
- *  tech     · Bricolage Grotesque  → titulos, brand, labels (substitui o Orbitron
- *                                     com cara de "vibe code"; geometria moderna
- *                                     com personalidade marcante).
- *  serif    · Instrument Serif     → acentos editoriais (frases italicas no hero)
+ * A regra: fontes display com personalidade forte (Orbitron, Bricolage) sempre
+ * acabaram lendo como "vibe code". A cura premium é RESTRIÇÃO tipográfica —
+ * grotescas refinadas e neutras, hierarquia por PESO, e uma serifada editorial
+ * variável como assinatura de luxo. É o caminho do Stripe / Linear / Vercel.
+ *
+ *  display · Hanken Grotesk  → corpo + UI geral. Neo-grotesca humanista,
+ *                              calma, legível, cara de produto caro.
+ *  tech    · Manrope         → títulos, brand, labels uppercase, tabs.
+ *                              Geométrica nítida, premium, sem maneirismo.
+ *  serif   · Fraunces        → acentos editoriais (opsz variável: nos tamanhos
+ *                              grandes vira alto-contraste dramático = luxo).
+ *  mono    · JetBrains Mono  → números, timestamps, badges, código (mantida).
  */
-const display = Space_Grotesk({
+const display = Hanken_Grotesk({
   subsets: ['latin'],
   variable: '--font-display',
-  weight: ['400', '500', '600', '700'],
+  weight: ['400', '500', '600', '700', '800', '900'],
   display: 'swap',
 });
 
@@ -37,18 +43,20 @@ const mono = JetBrains_Mono({
   display: 'swap',
 });
 
-const tech = Bricolage_Grotesque({
+const tech = Manrope({
   subsets: ['latin'],
   variable: '--font-tech',
-  weight: ['500', '700', '800'],
+  weight: ['500', '600', '700', '800'],
   display: 'swap',
 });
 
-const serif = Instrument_Serif({
+// Fraunces variável: eixo opsz ligado pra optical-sizing automático (serifas
+// finas no texto, dramáticas no display) — é o que dá o ar editorial premium.
+const serif = Fraunces({
   subsets: ['latin'],
   variable: '--font-serif',
-  weight: ['400'],
-  style: ['italic', 'normal'],
+  axes: ['opsz'],
+  style: ['normal', 'italic'],
   display: 'swap',
 });
 

@@ -65,7 +65,7 @@ export function TierGate({
     return (
       <ToolShell title={toolName} description="Verificando acesso…" hue={TIER_HUE[require]}>
         <div
-          className="mono text-[11px] uppercase tracking-[0.18em] text-text-muted"
+          className="label-tech text-[11px] uppercase tracking-[0.18em] text-text-muted"
           style={{ fontFamily: 'var(--font-tech)' }}
         >
           Carregando…

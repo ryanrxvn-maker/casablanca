@@ -799,7 +799,7 @@ function PhasePill({
   };
   return (
     <span
-      className={`mono relative inline-flex items-center gap-1 rounded-full border px-2 py-[3px] text-[9.5px] font-semibold uppercase tracking-widest ${toneClasses[tone]} shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]`}
+      className={`label-tech relative inline-flex items-center gap-1 rounded-full border px-2 py-[3px] text-[9.5px] font-semibold uppercase tracking-widest ${toneClasses[tone]} shadow-[inset_0_1px_0_rgba(255,255,255,0.1)]`}
     >
       {pulsing && tone === 'progress' ? (
         <span className="absolute inset-0 rounded-full border border-current/30 animate-ping opacity-40" aria-hidden />

@@ -114,12 +114,12 @@ export function AvatarFirstSlot({
             disabled={disabled}
             className="accent-purple-400"
           />
-          <span className="mono text-[10px] uppercase tracking-widest text-purple-300">
+          <span className="label-tech text-[10px] uppercase tracking-widest text-purple-300">
             🆕 Avatar First — avatar nao existe? upa imagem + audio
           </span>
         </label>
         {completedAvatar ? (
-          <span className="mono rounded border border-lime/60 bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime">
+          <span className="label-tech rounded border border-lime/60 bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime">
             ✓ avatar criado
           </span>
         ) : null}
@@ -129,7 +129,7 @@ export function AvatarFirstSlot({
         <div className="mt-3 space-y-2">
           {/* Nome do avatar */}
           <div>
-            <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">Nome do avatar (sera salvo no HeyGen)</div>
+            <div className="label-tech mb-1 text-[9px] uppercase tracking-widest text-text-muted">Nome do avatar (sera salvo no HeyGen)</div>
             <input
               type="text"
               value={avatarName}
@@ -143,7 +143,7 @@ export function AvatarFirstSlot({
           {/* Upload imagem */}
           <div className="grid grid-cols-2 gap-2">
             <label className={`flex cursor-pointer flex-col rounded border border-dashed px-2 py-2 text-[10px] hover:border-purple-400 ${imageFile ? 'border-purple-500/60 bg-purple-500/5 text-purple-200' : 'border-line-strong text-text-muted'}`}>
-              <span className="mono uppercase tracking-widest">📷 Imagem avatar</span>
+              <span className="label-tech uppercase tracking-widest">📷 Imagem avatar</span>
               <span className="mt-0.5 truncate text-[9px]">
                 {imageFile ? imageFile.name : 'click pra escolher (PNG/JPG)'}
               </span>
@@ -157,7 +157,7 @@ export function AvatarFirstSlot({
             </label>
 
             <label className={`flex cursor-pointer flex-col rounded border border-dashed px-2 py-2 text-[10px] hover:border-purple-400 ${audioFile ? 'border-purple-500/60 bg-purple-500/5 text-purple-200' : 'border-line-strong text-text-muted'}`}>
-              <span className="mono uppercase tracking-widest">🎤 Audio voz</span>
+              <span className="label-tech uppercase tracking-widest">🎤 Audio voz</span>
               <span className="mt-0.5 truncate text-[9px]">
                 {audioFile ? `${audioFile.name}${audioDuration ? ' (' + audioDuration.toFixed(1) + 's)' : ''}` : 'click (MP3/WAV/M4A)'}
               </span>
@@ -192,7 +192,7 @@ export function AvatarFirstSlot({
 
           {completedAvatar ? (
             <div className="rounded border border-lime/40 bg-lime/10 px-2 py-1.5 text-[11px]">
-              <div className="mono text-[9px] uppercase tracking-widest text-lime mb-1">✓ Avatar pronto pra usar</div>
+              <div className="label-tech text-[9px] uppercase tracking-widest text-lime mb-1">✓ Avatar pronto pra usar</div>
               <div className="text-text-muted">avatar_id: <span className="mono text-white">{completedAvatar.avatarId.slice(0, 20)}...</span></div>
               <div className="text-text-muted">voice: <span className="mono text-white">{completedAvatar.voiceName}</span></div>
             </div>
@@ -201,13 +201,13 @@ export function AvatarFirstSlot({
               type="button"
               onClick={startFlow}
               disabled={!canStart}
-              className="mono w-full rounded border border-purple-500/60 bg-purple-500/20 px-3 py-2 text-[11px] uppercase tracking-widest text-purple-100 hover:bg-purple-500/30 disabled:opacity-40 disabled:cursor-not-allowed"
+              className="label-tech w-full rounded border border-purple-500/60 bg-purple-500/20 px-3 py-2 text-[11px] uppercase tracking-widest text-purple-100 hover:bg-purple-500/30 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {running ? '⟳ Processando...' : '▶ Criar avatar + clonar voz'}
             </button>
           )}
 
-          <div className="mono text-[9px] uppercase tracking-widest text-text-muted">
+          <div className="label-tech text-[9px] uppercase tracking-widest text-text-muted">
             ⚠ BETA — consome 1 slot Photo Avatar (5 total).
           </div>
         </div>

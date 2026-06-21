@@ -594,7 +594,7 @@ export default function CamuflagemPage() {
               }
             >
               <div className="mb-3 flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-widest text-text-muted">
+                <span className="label-tech text-xs text-text-muted">
                   Par {i + 1}
                   {pair.status === 'processing' ? (
                     <span className="ml-2 text-lime">
@@ -820,7 +820,7 @@ export default function CamuflagemPage() {
                   ) : null}
                   {pair.transcript ? (
                     <div className="rounded-[8px] border border-lime/30 bg-bg-soft/50 px-3 py-2">
-                      <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-text-muted">
+                      <div className="label-tech mb-1 text-[10px] text-text-muted">
                         {target === 'platforms'
                           ? 'O que TikTok/Kwai/YouTube escutariam (mono-media L+R do arquivo real)'
                           : 'O que um ASR de canal unico escuta (estereo cru do arquivo real)'}
@@ -1017,7 +1017,7 @@ export default function CamuflagemPage() {
               }
             >
               <div className="mb-3 flex items-center justify-between">
-                <span className="text-xs font-semibold uppercase tracking-widest text-text-muted">
+                <span className="label-tech text-xs text-text-muted">
                   Arquivo {i + 1}
                   {it.status === 'processing' ? (
                     <span className="ml-2 text-lime">

@@ -206,7 +206,7 @@ export default function PillarPage({ params }: { params: { slug: string } }) {
               <Link
                 key={r.slug}
                 href={`/recursos/${r.slug}`}
-                className="rounded-full border border-line/60 px-4 py-2 text-[13.5px] text-text-muted transition-colors hover:border-violet/40 hover:text-white"
+                className="hover-lift rounded-full border border-line/60 px-4 py-2 text-[13.5px] text-text-muted transition-colors hover:border-violet/40 hover:text-white"
               >
                 {r.label} →
               </Link>

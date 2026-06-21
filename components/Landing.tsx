@@ -701,7 +701,7 @@ function BrollShowcaseGrid() {
               >
                 TAKE
               </span>
-              <span className="text-[8px] font-black text-white">
+              <span className="text-[8px] font-extrabold text-white">
                 {String(i + 1).padStart(2, '0')}
               </span>
             </div>

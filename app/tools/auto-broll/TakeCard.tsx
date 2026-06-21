@@ -252,7 +252,7 @@ export function TakeCard({ take, position, total }: Props) {
           // FAILED STATE
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center">
             <span className="text-3xl">⚠</span>
-            <span className="mono text-[10px] font-bold uppercase tracking-widest text-red-300">
+            <span className="label-tech text-[10px] font-bold uppercase tracking-widest text-red-300">
               Falha
             </span>
             <p className="line-clamp-3 text-[10px] leading-relaxed text-red-300/80">
@@ -408,7 +408,7 @@ function ExpandedVideoModal({
             type="button"
             onClick={onDownload}
             disabled={downloading}
-            className="mono inline-flex items-center gap-2 rounded-full border border-lime/60 bg-lime/95 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-black shadow-[0_8px_24px_-8px_rgba(200,232,124,0.5)] transition-all hover:scale-105 disabled:opacity-60"
+            className="label-tech inline-flex items-center gap-2 rounded-full border border-lime/60 bg-lime/95 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-black shadow-[0_8px_24px_-8px_rgba(200,232,124,0.5)] transition-all hover:scale-105 disabled:opacity-60"
             style={{ fontFamily: 'var(--font-tech)' }}
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
@@ -468,7 +468,7 @@ function StatusPill({
   return (
     <span
       className={
-        'mono inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[8.5px] font-bold uppercase tracking-[0.14em] ' +
+        'label-tech inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[8.5px] font-bold uppercase tracking-[0.14em] ' +
         cls
       }
       style={{ fontFamily: 'var(--font-tech)' }}

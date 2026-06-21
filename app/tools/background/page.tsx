@@ -265,7 +265,7 @@ export default function BackgroundTasksPage() {
           <div className="ml-auto flex items-center gap-2">
             <Link
               href="/tools/clickup-pilot"
-              className="mono rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
+              className="label-tech rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
             >
               ← ClickUp Pilot
             </Link>
@@ -273,7 +273,7 @@ export default function BackgroundTasksPage() {
               type="button"
               onClick={clearAllDone}
               disabled={counts.done + counts.failed === 0}
-              className="mono rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300 disabled:opacity-40"
+              className="label-tech rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300 disabled:opacity-40"
             >
               Limpar concluidos/falhas
             </button>
@@ -282,7 +282,7 @@ export default function BackgroundTasksPage() {
 
         {/* Filtro de tipo — separa lipsync (HeyGen) de b-rolls (Magnific) */}
         <div className="flex flex-wrap items-center gap-2">
-          <span className="mono text-[10px] uppercase tracking-widest text-text-muted">Mostrar:</span>
+          <span className="label-tech text-[10px] uppercase tracking-widest text-text-muted">Mostrar:</span>
           {([
             { k: 'all', label: 'Tudo' },
             { k: 'lip', label: '🎙 Lipsync (HeyGen)' },
@@ -293,7 +293,7 @@ export default function BackgroundTasksPage() {
               type="button"
               onClick={() => setTypeFilter(opt.k)}
               className={
-                'mono rounded-md border px-3 py-1.5 text-[10px] uppercase tracking-widest transition ' +
+                'label-tech rounded-md border px-3 py-1.5 text-[10px] uppercase tracking-widest transition ' +
                 (typeFilter === opt.k
                   ? 'border-lime bg-lime/15 text-lime'
                   : 'border-line-strong text-text-muted hover:border-lime/50 hover:text-lime')
@@ -306,7 +306,7 @@ export default function BackgroundTasksPage() {
 
         {typeFilter === 'broll' ? null : sorted.length === 0 ? (
           <div className="rounded-[14px] border border-dashed border-line-strong bg-bg-soft/20 p-12 text-center">
-            <div className="mono text-[11px] uppercase tracking-widest text-text-muted">
+            <div className="label-tech text-[11px] uppercase tracking-widest text-text-muted">
               Nenhuma batch task em andamento
             </div>
             <div className="mt-3 text-[13px] text-text-muted">
@@ -431,7 +431,7 @@ export default function BackgroundTasksPage() {
                         <button
                           type="button"
                           onClick={() => cancelTask(b.taskId)}
-                          className="mono rounded-md border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-red-300 hover:bg-red-500/20"
+                          className="label-tech rounded-md border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-red-300 hover:bg-red-500/20"
                           title="Cancela polling/download/pos-prod"
                         >
                           ✕ Cancelar
@@ -440,7 +440,7 @@ export default function BackgroundTasksPage() {
                       <button
                         type="button"
                         onClick={() => removeTask(b.taskId)}
-                        className="mono rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
+                        className="label-tech rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
                         title="Remove essa entrada do historico (nao apaga ZIPs ja baixados)"
                       >
                         Remover
@@ -461,7 +461,7 @@ export default function BackgroundTasksPage() {
         {/* Fila Magnific B-Rolls — serial 1/vez */}
         {typeFilter !== 'lip' && Object.keys(magnific).length > 0 ? (
           <div className="rounded-[14px] border border-lime/40 bg-lime/5 p-4">
-            <div className="mono mb-3 text-[11px] uppercase tracking-widest text-lime">
+            <div className="label-tech mb-3 text-[11px] uppercase tracking-widest text-lime">
               🍌 Fila Magnific B-Rolls ({Object.keys(magnific).length}) · serial 1 por vez
             </div>
             <div className="grid gap-3">
@@ -518,7 +518,7 @@ export default function BackgroundTasksPage() {
         ) : null}
 
         <div className="rounded-[14px] border border-dashed border-line-strong bg-bg-soft/10 p-3">
-          <div className="mono text-[10px] uppercase tracking-widest text-text-muted">
+          <div className="label-tech text-[10px] uppercase tracking-widest text-text-muted">
             Como funciona
           </div>
           <div className="mt-1 text-[11px] text-text-muted leading-relaxed">

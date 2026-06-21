@@ -254,23 +254,23 @@ export default function LipsyncHistoryPage() {
         {/* Stats */}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
           <div className="rounded-[10px] border border-line-strong bg-bg-soft/30 px-3 py-2">
-            <div className="mono text-[9px] uppercase tracking-widest text-text-muted">Total</div>
+            <div className="label-tech text-[9px] uppercase tracking-widest text-text-muted">Total</div>
             <div className="font-bold text-white text-lg">{stats.total}</div>
           </div>
           <div className="rounded-[10px] border border-lime/40 bg-lime/5 px-3 py-2">
-            <div className="mono text-[9px] uppercase tracking-widest text-lime">Concluidos</div>
+            <div className="label-tech text-[9px] uppercase tracking-widest text-lime">Concluidos</div>
             <div className="font-bold text-lime text-lg">{stats.done}</div>
           </div>
           <div className="rounded-[10px] border border-cyan-500/40 bg-cyan-500/5 px-3 py-2">
-            <div className="mono text-[9px] uppercase tracking-widest text-cyan-200">Rodando</div>
+            <div className="label-tech text-[9px] uppercase tracking-widest text-cyan-200">Rodando</div>
             <div className="font-bold text-cyan-200 text-lg">{stats.inProgress}</div>
           </div>
           <div className="rounded-[10px] border border-red-500/40 bg-red-500/5 px-3 py-2">
-            <div className="mono text-[9px] uppercase tracking-widest text-red-300">Falhas</div>
+            <div className="label-tech text-[9px] uppercase tracking-widest text-red-300">Falhas</div>
             <div className="font-bold text-red-300 text-lg">{stats.failed}</div>
           </div>
           <div className="rounded-[10px] border border-purple-500/40 bg-purple-500/5 px-3 py-2">
-            <div className="mono text-[9px] uppercase tracking-widest text-purple-300">Videos gerados</div>
+            <div className="label-tech text-[9px] uppercase tracking-widest text-purple-300">Videos gerados</div>
             <div className="font-bold text-purple-200 text-lg">{stats.videosDone}</div>
           </div>
         </div>
@@ -325,20 +325,20 @@ export default function LipsyncHistoryPage() {
           <div className="ml-auto flex gap-2">
             <Link
               href="/tools/clickup-pilot"
-              className="mono rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
+              className="label-tech rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
             >
               → ClickUp Pilot
             </Link>
             <Link
               href="/tools/background"
-              className="mono rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-fuchsia-500/60 hover:text-fuchsia-300"
+              className="label-tech rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-fuchsia-500/60 hover:text-fuchsia-300"
             >
               → Background ao vivo
             </Link>
             <button
               type="button"
               onClick={clearAllFailed}
-              className="mono rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
+              className="label-tech rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
             >
               Limpar falhas
             </button>
@@ -347,7 +347,7 @@ export default function LipsyncHistoryPage() {
 
         {filtered.length === 0 ? (
           <div className="rounded-[14px] border border-dashed border-line-strong bg-bg-soft/20 p-10 text-center">
-            <div className="mono text-[11px] uppercase tracking-widest text-text-muted">
+            <div className="label-tech text-[11px] uppercase tracking-widest text-text-muted">
               Nenhum lipsync no historico
             </div>
             <div className="mt-2 text-[13px] text-text-muted">
@@ -368,17 +368,17 @@ export default function LipsyncHistoryPage() {
                 e.status === 'failed' ? 'Falhou' : 'Em andamento';
 
               return (
-                <div key={e.id} className="rounded-[12px] border border-line-strong bg-bg-soft/30 p-3">
+                <div key={e.id} className="hover-lift rounded-[12px] border border-line-strong bg-bg-soft/30 p-3">
                   <div className="flex items-start gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className={`mono rounded-md border px-2 py-0.5 text-[9px] uppercase tracking-widest ${e.kind === 'va' ? 'border-purple-500/40 bg-purple-500/10 text-purple-200' : 'border-cyan-500/40 bg-cyan-500/10 text-cyan-200'}`}>
+                        <span className={`label-tech rounded-md border px-2 py-0.5 text-[9px] uppercase tracking-widest ${e.kind === 'va' ? 'border-purple-500/40 bg-purple-500/10 text-purple-200' : 'border-cyan-500/40 bg-cyan-500/10 text-cyan-200'}`}>
                           {e.kind === 'va' ? 'VA' : 'BATCH'}
                         </span>
                         <span className="mono rounded-md border border-line-strong bg-bg/40 px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted">
                           {e.baseAdId}
                         </span>
-                        <span className={`mono rounded-md border px-2 py-0.5 text-[9px] uppercase tracking-widest ${statusColor}`}>
+                        <span className={`label-tech rounded-md border px-2 py-0.5 text-[9px] uppercase tracking-widest ${statusColor}`}>
                           {statusLabel}
                         </span>
                         <span className="mono text-[9px] uppercase tracking-widest text-text-muted">
@@ -403,7 +403,7 @@ export default function LipsyncHistoryPage() {
                               key={i}
                               href={z.href}
                               download={z.filename}
-                              className="mono rounded border border-lime/40 bg-lime/10 px-2 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/20"
+                              className="label-tech rounded border border-lime/40 bg-lime/10 px-2 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/20"
                               title={z.filename}
                             >
                               ↓ {z.label}
@@ -439,7 +439,7 @@ export default function LipsyncHistoryPage() {
                                     alert('Erro carregando ZIP: ' + (err?.message || err));
                                   }
                                 }}
-                                className="mono rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/20"
+                                className="label-tech rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/20"
                                 title="Carrega ZIP do IndexedDB (persistido entre reloads)"
                               >
                                 ↓ {label} (do disco)
@@ -458,7 +458,7 @@ export default function LipsyncHistoryPage() {
                                 <div key={i} className="flex items-center gap-2 text-[11px]">
                                   <span className="mono text-text-muted shrink-0">{p.label}</span>
                                   <span className="text-text-muted truncate">→ {p.renamedTo}</span>
-                                  <span className={`mono ml-auto rounded px-1.5 py-0.5 text-[9px] uppercase tracking-widest ${
+                                  <span className={`label-tech ml-auto rounded px-1.5 py-0.5 text-[9px] uppercase tracking-widest ${
                                     p.videoStatus === 'completed' ? 'bg-lime/10 text-lime' :
                                     p.error ? 'bg-red-500/10 text-red-300' :
                                     'bg-bg-soft/40 text-text-muted'
@@ -479,7 +479,7 @@ export default function LipsyncHistoryPage() {
                                 <div key={i} className="flex items-center gap-2 text-[11px]">
                                   <span className="mono text-purple-200 shrink-0">{a.avaCode}</span>
                                   <span className="text-text-muted">@{a.username}</span>
-                                  <span className={`mono ml-auto rounded px-1.5 py-0.5 text-[9px] uppercase tracking-widest ${
+                                  <span className={`label-tech ml-auto rounded px-1.5 py-0.5 text-[9px] uppercase tracking-widest ${
                                     a.status === 'done' ? 'bg-lime/10 text-lime' : 'bg-red-500/10 text-red-300'
                                   }`}>
                                     {a.status}
@@ -499,7 +499,7 @@ export default function LipsyncHistoryPage() {
                       <button
                         type="button"
                         onClick={() => setExpanded((prev) => ({ ...prev, [e.id]: !prev[e.id] }))}
-                        className="mono rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
+                        className="label-tech rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
                       >
                         {isExpanded ? '▲ Menos' : '▼ Detalhes'}
                       </button>
@@ -508,7 +508,7 @@ export default function LipsyncHistoryPage() {
                           <button
                             type="button"
                             onClick={() => { sendJobCommand('heygen', (e.raw as BatchTaskState).taskId, 'retomar'); navigateToEngine(); }}
-                            className="mono rounded-md border border-cyan-500/60 bg-cyan-500/15 px-3 py-1.5 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25"
+                            className="label-tech rounded-md border border-cyan-500/60 bg-cyan-500/15 px-3 py-1.5 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25"
                             title="Retomar no motor (abre o ClickUp Pilot e re-checa/baixa ou re-roda do zero)"
                           >
                             🔄 Retomar
@@ -516,7 +516,7 @@ export default function LipsyncHistoryPage() {
                           <button
                             type="button"
                             onClick={() => sendJobCommand('heygen', (e.raw as BatchTaskState).taskId, 'pausar')}
-                            className="mono rounded-md border border-yellow-500/50 bg-yellow-500/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-yellow-200 hover:bg-yellow-500/20"
+                            className="label-tech rounded-md border border-yellow-500/50 bg-yellow-500/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-yellow-200 hover:bg-yellow-500/20"
                             title="Pausar — sinaliza a aba que estiver rodando esse job"
                           >
                             ⏸ Pausar
@@ -524,7 +524,7 @@ export default function LipsyncHistoryPage() {
                           <button
                             type="button"
                             onClick={() => { if (confirm(`DEBUG: reiniciar "${e.taskName}" do ZERO? Re-dispara tudo no HeyGen.`)) { sendJobCommand('heygen', (e.raw as BatchTaskState).taskId, 'debug'); navigateToEngine(); } }}
-                            className="mono rounded-md border border-fuchsia-500/50 bg-fuchsia-500/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20"
+                            className="label-tech rounded-md border border-fuchsia-500/50 bg-fuchsia-500/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20"
                             title="DEBUG (reserva p/ bugs): reinicia a geracao de LIPS do zero no motor"
                           >
                             🐞 Debug
@@ -534,7 +534,7 @@ export default function LipsyncHistoryPage() {
                       <button
                         type="button"
                         onClick={() => removeEntry(e)}
-                        className="mono rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
+                        className="label-tech rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
                       >
                         Remover
                       </button>
@@ -547,7 +547,7 @@ export default function LipsyncHistoryPage() {
         )}
 
         <div className="rounded-[14px] border border-dashed border-line-strong bg-bg-soft/10 p-3">
-          <div className="mono text-[10px] uppercase tracking-widest text-text-muted">Notas</div>
+          <div className="label-tech text-[10px] uppercase tracking-widest text-text-muted">Notas</div>
           <div className="mt-1 text-[11px] text-text-muted leading-relaxed">
             • Persistencia local — depende do localStorage do browser. Limpar dados do site apaga tudo.<br/>
             • ZIPs marcados como &quot;perdido&quot; foram gerados numa sessao anterior; a Blob URL foi

@@ -69,7 +69,7 @@ export function MotorConfigPicker({
             <path d="M9 4v-2M15 4v-2M9 22v-2M15 22v-2M4 9h-2M4 15h-2M22 9h-2M22 15h-2" />
             <rect x="9" y="9" width="6" height="6" rx="1" />
           </svg>
-          <span className="mono relative text-[10px] font-bold uppercase tracking-[0.14em]">{motorLabel}</span>
+          <span className="label-tech relative text-[10px] font-bold uppercase tracking-[0.14em]">{motorLabel}</span>
         </button>
       ) : (
         <div className="flex items-center justify-end gap-2">
@@ -104,7 +104,7 @@ export function MotorConfigPicker({
                     else setConfig({ kind: 'individual', perSlot: {} });
                   }}
                   className={
-                    'mono rounded-full px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] transition-all ' +
+                    'label-tech rounded-full px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] transition-all ' +
                     (active
                       ? 'bg-gradient-to-b from-cyan-400/30 to-cyan-400/10 text-cyan-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_2px_8px_-2px_rgba(34,211,238,0.4)]'
                       : 'text-text-muted hover:text-white')
@@ -230,7 +230,7 @@ export function MotorConfigPicker({
 
           {config.kind === 'individual' ? (
             <div className="rounded-[12px] border border-amber-400/45 bg-gradient-to-br from-amber-400/12 to-transparent p-3">
-              <div className="mono text-[10px] font-bold uppercase tracking-[0.16em] text-amber-700">
+              <div className="label-tech text-[10px] font-bold uppercase tracking-[0.16em] text-amber-700">
                 Por avatar
               </div>
               <div className="mt-1 text-[11.5px] text-foreground/85" style={{ fontFamily: 'var(--font-tech)' }}>

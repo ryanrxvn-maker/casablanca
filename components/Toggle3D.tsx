@@ -95,7 +95,7 @@ export function Toggle3D({
 
       {/* Label — sem ON/OFF nem hint (estado visual ja indica) */}
       <span className="flex min-w-0 flex-1 flex-col leading-tight">
-        <span className={'mono text-[11px] font-bold uppercase tracking-widest transition-colors ' + (on ? colorClasses.text : 'text-text-muted')}>
+        <span className={'label-tech text-[11px] font-bold uppercase tracking-widest transition-colors ' + (on ? colorClasses.text : 'text-text-muted')}>
           {label}
         </span>
       </span>

@@ -93,7 +93,7 @@ export function AutoBrollHero() {
           {/* Eyebrow */}
           <div className="flex flex-wrap items-center gap-2">
             <span
-              className="mono inline-flex items-center gap-1.5 rounded-full border border-violet/40 bg-violet/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-violet shadow-[0_0_18px_-4px_rgba(167,139,250,0.55)]"
+              className="label-tech inline-flex items-center gap-1.5 rounded-full border border-violet/40 bg-violet/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-violet shadow-[0_0_18px_-4px_rgba(167,139,250,0.55)]"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
               <span className="relative flex h-1.5 w-1.5">
@@ -103,7 +103,7 @@ export function AutoBrollHero() {
               MAGNIFIC · AUTO B-ROLL
             </span>
             <span
-              className="mono inline-flex items-center gap-1 rounded-full border border-lime/40 bg-lime/10 px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.18em] text-lime"
+              className="label-tech inline-flex items-center gap-1 rounded-full border border-lime/40 bg-lime/10 px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.18em] text-lime"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
               ∞ UNLIMITED · ZERO CRÉDITO
@@ -112,9 +112,10 @@ export function AutoBrollHero() {
 
           {/* Title with gradient */}
           <h1
-            className="text-5xl font-black leading-[1.02] tracking-tight md:text-7xl"
+            className="text-5xl font-extrabold leading-[1.02] tracking-tight md:text-7xl"
             style={{
-              fontFamily: 'var(--font-display)',
+              fontFamily: 'var(--font-tech)',
+              letterSpacing: '-0.03em',
               backgroundImage:
                 'linear-gradient(135deg, #ffffff 0%, #fafafa 30%, #c2cf86 60%, #a78bfa 100%)',
               WebkitBackgroundClip: 'text',
@@ -285,13 +286,13 @@ function PipelineStep({
       </span>
       <div className="flex flex-col gap-0">
         <span
-          className={`mono text-[10px] font-bold uppercase tracking-[0.14em] ${tone}`}
+          className={`label-tech text-[10px] font-bold uppercase tracking-[0.14em] ${tone}`}
           style={{ fontFamily: 'var(--font-tech)' }}
         >
           {label}
         </span>
         <span
-          className="mono text-[9px] uppercase tracking-widest text-text-dim"
+          className="label-tech text-[9px] uppercase tracking-widest text-text-dim"
           style={{ fontFamily: 'var(--font-tech)' }}
         >
           {sub}
@@ -330,7 +331,7 @@ function StatPill({ value, label }: { value: string; label: string }) {
         {value}
       </span>
       <span
-        className="mono text-[9.5px] uppercase tracking-[0.14em] text-text-muted"
+        className="label-tech text-[9.5px] uppercase tracking-[0.14em] text-text-muted"
         style={{ fontFamily: 'var(--font-tech)' }}
       >
         {label}

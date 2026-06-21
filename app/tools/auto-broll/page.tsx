@@ -657,7 +657,7 @@ function AutoBrollInner() {
                 </div>
                 <div className="flex flex-col gap-0.5">
                   <span
-                    className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-lime"
+                    className="label-tech text-[10px] font-bold uppercase tracking-[0.18em] text-lime"
                     style={{ fontFamily: 'var(--font-tech)' }}
                   >
                     Magnific · Conectado
@@ -700,14 +700,14 @@ function AutoBrollInner() {
                   )}
                   {sessionOk?.ok ? (
                     <span
-                      className="mono mt-0.5 inline-flex w-fit items-center gap-1 rounded-full bg-lime/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-lime"
+                      className="label-tech mt-0.5 inline-flex w-fit items-center gap-1 rounded-full bg-lime/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-lime"
                       style={{ fontFamily: 'var(--font-tech)' }}
                     >
                       ✓ {sessionOk.detail || 'sessão validada'}
                     </span>
                   ) : sessionOk && !sessionOk.ok ? (
                     <span
-                      className="mono mt-0.5 inline-flex w-fit items-center gap-1 rounded-full bg-red-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-red-300"
+                      className="label-tech mt-0.5 inline-flex w-fit items-center gap-1 rounded-full bg-red-500/15 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-red-300"
                       style={{ fontFamily: 'var(--font-tech)' }}
                     >
                       ✗ {sessionOk.detail}
@@ -719,7 +719,7 @@ function AutoBrollInner() {
                 type="button"
                 onClick={handleTestSession}
                 disabled={testingSession}
-                className="mono inline-flex items-center gap-1.5 rounded-[10px] border border-lime/30 bg-bg-soft/60 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-text-muted backdrop-blur transition-all hover:border-lime hover:bg-lime/5 hover:text-lime active:translate-y-px disabled:opacity-50"
+                className="label-tech inline-flex items-center gap-1.5 rounded-[10px] border border-lime/30 bg-bg-soft/60 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-text-muted backdrop-blur transition-all hover:border-lime hover:bg-lime/5 hover:text-lime active:translate-y-px disabled:opacity-50"
                 style={{ fontFamily: 'var(--font-tech)' }}
               >
                 {testingSession ? (
@@ -836,7 +836,7 @@ function AutoBrollInner() {
               zero-crédito). VÍDEO travado em Kling 2.5. */}
           <div className="grid gap-3 md:grid-cols-2">
             <div className="rounded-[14px] border border-violet/30 bg-bg-soft/40 p-3">
-              <div className="mono mb-2 flex items-center gap-2 text-[10px] uppercase tracking-widest text-violet">
+              <div className="label-tech mb-2 flex items-center gap-2 text-[10px] uppercase tracking-widest text-violet">
                 <span>Imagem (animada pelo Kling)</span>
                 <span className="rounded-full border border-lime/40 bg-lime/10 px-1.5 py-0.5 text-[8px] text-lime">unlimited · 0 crédito</span>
               </div>
@@ -876,7 +876,7 @@ function AutoBrollInner() {
           </div>
           {/* ASPECT — vale pra imagem E vídeo (precisam casar). */}
           <div className="mt-3 rounded-[14px] border border-cyan-400/25 bg-bg-soft/40 p-3">
-            <div className="mono mb-2 text-[10px] uppercase tracking-widest text-cyan-300">Formato (imagem + vídeo)</div>
+            <div className="label-tech mb-2 text-[10px] uppercase tracking-widest text-cyan-300">Formato (imagem + vídeo)</div>
             <div className="grid grid-cols-2 gap-2">
               {([
                 { v: '9:16', label: 'Vertical 9:16', icon: '📱', desc: 'Reels · TikTok · Shorts' },
@@ -1727,7 +1727,7 @@ function BrollHistorySection() {
     >
       {hist.length === 0 ? (
         <div className="rounded-[12px] border border-line/40 bg-bg-soft/30 p-4 text-center">
-          <div className="mono text-[10px] uppercase tracking-widest text-text-muted mb-1">
+          <div className="label-tech text-[10px] uppercase tracking-widest text-text-muted mb-1">
             Sem batches finalizados ainda
           </div>
           <div className="text-[11px] text-text-dim">
@@ -1858,7 +1858,7 @@ function BrollHistorySection() {
                       type="button"
                       onClick={handlePasteFromClipboard}
                       disabled={retrying === item.zipKey}
-                      className="mono inline-flex items-center gap-1 rounded-md border border-violet/45 bg-violet/10 px-2.5 py-1 text-[10px] uppercase tracking-widest text-violet hover:bg-violet/20 hover:border-violet/65 disabled:opacity-40 transition"
+                      className="label-tech inline-flex items-center gap-1 rounded-md border border-violet/45 bg-violet/10 px-2.5 py-1 text-[10px] uppercase tracking-widest text-violet hover:bg-violet/20 hover:border-violet/65 disabled:opacity-40 transition"
                       title="Colar JSON da area de transferencia (Ctrl+C antes)"
                     >
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1871,7 +1871,7 @@ function BrollHistorySection() {
                       type="button"
                       onClick={() => void handleRecoverFromMagnific(item)}
                       disabled={retrying === item.zipKey}
-                      className="mono inline-flex items-center gap-1 rounded-md border border-amber-500/55 bg-amber-500/15 px-2.5 py-1 text-[10px] uppercase tracking-widest text-amber-700 hover:bg-amber-500/25 hover:border-amber-500/75 disabled:opacity-40 transition"
+                      className="label-tech inline-flex items-center gap-1 rounded-md border border-amber-500/55 bg-amber-500/15 px-2.5 py-1 text-[10px] uppercase tracking-widest text-amber-700 hover:bg-amber-500/25 hover:border-amber-500/75 disabled:opacity-40 transition"
                       title="Tenta buscar o JSON direto do Magnific (precisa da extensao Freepik Sync conectada)"
                     >
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -1883,7 +1883,7 @@ function BrollHistorySection() {
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-2">
                     {pendingJsonText.trim() ? (
-                      <span className="mono text-[9px] uppercase tracking-widest text-lime/80">
+                      <span className="label-tech text-[9px] uppercase tracking-widest text-lime/80">
                         ✓ JSON ja preenchido — clica RETOMAR pra disparar
                       </span>
                     ) : <span />}
@@ -2007,7 +2007,7 @@ function JobCard({
         {/* Nome do AD */}
         <label className="block">
           <span
-            className="mono mb-1.5 block text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
+            className="label-tech mb-1.5 block text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
             style={{ fontFamily: 'var(--font-tech)' }}
           >
             Código do AD / Nome do Pack
@@ -2026,7 +2026,7 @@ function JobCard({
         <div>
           <div className="mb-1.5 flex items-center justify-between">
             <span
-              className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
+              className="label-tech text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
               Prompts do job
@@ -2115,7 +2115,7 @@ function JobCard({
           type="button"
           onClick={onDebug}
           disabled={!extConnected || takesCount === 0}
-          className="mono inline-flex items-center gap-1.5 rounded-[10px] border border-fuchsia-500/50 bg-fuchsia-500/10 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-fuchsia-200 transition-all hover:bg-fuchsia-500/20 active:translate-y-px disabled:opacity-40"
+          className="label-tech inline-flex items-center gap-1.5 rounded-[10px] border border-fuchsia-500/50 bg-fuchsia-500/10 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-fuchsia-200 transition-all hover:bg-fuchsia-500/20 active:translate-y-px disabled:opacity-40"
           title="Aborta o atual e recria do ZERO"
           style={{ fontFamily: 'var(--font-tech)' }}
         >
@@ -2125,7 +2125,7 @@ function JobCard({
           <button
             type="button"
             onClick={onDownload}
-            className="mono inline-flex items-center gap-1.5 rounded-[10px] border border-lime/50 bg-lime/10 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-lime transition-all hover:bg-lime/20 active:translate-y-px"
+            className="label-tech inline-flex items-center gap-1.5 rounded-[10px] border border-lime/50 bg-lime/10 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-lime transition-all hover:bg-lime/20 active:translate-y-px"
             style={{ fontFamily: 'var(--font-tech)' }}
           >
             ⬇ Baixar ZIP ({(job.zip.blob.size / 1024 / 1024).toFixed(1)} MB)
@@ -2141,7 +2141,7 @@ function JobCard({
               <div className="flex flex-col gap-1">
                 <div className="flex items-center gap-2">
                   <span
-                    className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
+                    className="label-tech text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
                     style={{ fontFamily: 'var(--font-tech)' }}
                   >
                     Pipeline
@@ -2154,7 +2154,7 @@ function JobCard({
                   </span>
                   {p.phase && (
                     <span
-                      className="mono rounded-full border border-violet/40 bg-violet/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-violet"
+                      className="label-tech rounded-full border border-violet/40 bg-violet/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-violet"
                       style={{ fontFamily: 'var(--font-tech)' }}
                     >
                       {p.phase}
@@ -2180,7 +2180,7 @@ function JobCard({
                   </button>
                 ) : (
                   <span
-                    className="mono rounded-full border border-line bg-bg/60 px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted"
+                    className="label-tech rounded-full border border-line bg-bg/60 px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted"
                     style={{ fontFamily: 'var(--font-tech)' }}
                   >
                     ZIP final sai quando todos terminam
@@ -2286,13 +2286,13 @@ function ModelCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span
-              className={`mono text-[9px] font-bold uppercase tracking-[0.22em] ${tintCls.accent}`}
+              className={`label-tech text-[9px] font-bold uppercase tracking-[0.22em] ${tintCls.accent}`}
               style={{ fontFamily: 'var(--font-tech)' }}
             >
               {label}
             </span>
             <span
-              className="mono inline-flex items-center gap-1 rounded-full border border-lime/45 bg-lime/10 px-1.5 py-0 text-[8.5px] font-bold uppercase tracking-[0.14em] text-lime"
+              className="label-tech inline-flex items-center gap-1 rounded-full border border-lime/45 bg-lime/10 px-1.5 py-0 text-[8.5px] font-bold uppercase tracking-[0.14em] text-lime"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
               ∞ unlimited

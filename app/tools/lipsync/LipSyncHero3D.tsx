@@ -113,9 +113,9 @@ export function LipSyncHero3D() {
           {/* TITULO GIGANTE — nome da ferramenta */}
           <div>
             <h1
-              className="text-[44px] font-black leading-[0.92] tracking-tight md:text-[68px] lg:text-[78px]"
+              className="text-[44px] font-extrabold leading-[0.92] tracking-tight md:text-[68px] lg:text-[78px]"
               style={{
-                fontFamily: 'var(--font-display)',
+                fontFamily: 'var(--font-tech)',
                 backgroundImage:
                   'linear-gradient(135deg, #ffffff 0%, #f5e6ff 22%, #e879f9 50%, #a78bfa 78%, #67e8f9 100%)',
                 WebkitBackgroundClip: 'text',
@@ -123,7 +123,7 @@ export function LipSyncHero3D() {
                 backgroundClip: 'text',
                 backgroundSize: '220% 220%',
                 animation: 'lipShine 7s ease-in-out infinite',
-                letterSpacing: '-0.035em',
+                letterSpacing: '-0.03em',
               }}
             >
               Lipsync
@@ -509,13 +509,13 @@ function Step({
       </span>
       <div className="flex flex-col gap-0">
         <span
-          className={`mono text-[10px] font-bold uppercase tracking-[0.14em] ${tone || 'text-text-muted'}`}
+          className={`label-tech text-[10px] font-bold uppercase tracking-[0.14em] ${tone || 'text-text-muted'}`}
           style={{ fontFamily: 'var(--font-tech)' }}
         >
           {label}
         </span>
         <span
-          className="mono text-[9px] uppercase tracking-widest text-text-dim"
+          className="label-tech text-[9px] uppercase tracking-widest text-text-dim"
           style={{ fontFamily: 'var(--font-tech)' }}
         >
           {sub}
@@ -572,7 +572,7 @@ function Metric({
         {value}
       </span>
       <span
-        className="mono text-[9.5px] uppercase tracking-[0.14em] text-text-muted"
+        className="label-tech text-[9.5px] uppercase tracking-[0.14em] text-text-muted"
         style={{ fontFamily: 'var(--font-tech)' }}
       >
         {label}

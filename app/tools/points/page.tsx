@@ -298,7 +298,7 @@ export default function PointsPage() {
           backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(34,211,238,0.08) 2px, rgba(34,211,238,0.08) 3px)',
         }} />
         <div className="relative z-10">
-          <div className="mono text-[10px] uppercase tracking-widest text-cyan-300 opacity-70">// CURRENT MONTH</div>
+          <div className="label-tech text-[10px] uppercase tracking-widest text-cyan-300 opacity-70">// CURRENT MONTH</div>
           <div className="flex flex-wrap items-baseline gap-4 mt-1">
             <div
               className="font-bold text-[72px] leading-none"
@@ -313,13 +313,13 @@ export default function PointsPage() {
               {loadingPoints ? '...' : points}
             </div>
             <div className="flex flex-col">
-              <div className="mono text-[11px] uppercase tracking-widest text-cyan-200">PONTOS</div>
+              <div className="label-tech text-[11px] uppercase tracking-widest text-cyan-200">PONTOS</div>
               {cur ? (
                 <div className="mono text-[11px] uppercase tracking-widest" style={{ color: cur.primaryColor }}>
                   ★ {cur.englishName} · {fmtBRL(cur.bonusBRL)}
                 </div>
               ) : (
-                <div className="mono text-[10px] uppercase tracking-widest text-text-muted">Ainda sem meta</div>
+                <div className="label-tech text-[10px] uppercase tracking-widest text-text-muted">Ainda sem meta</div>
               )}
             </div>
             <div className="ml-auto flex flex-col items-end gap-1">
@@ -327,7 +327,7 @@ export default function PointsPage() {
                 type="button"
                 onClick={fetchPoints}
                 disabled={loadingPoints}
-                className="mono rounded border border-line-strong px-3 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime disabled:opacity-40"
+                className="label-tech rounded border border-line-strong px-3 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime disabled:opacity-40"
               >
                 {loadingPoints ? '⟳ Carregando...' : '⟳ Atualizar'}
               </button>
@@ -356,7 +356,7 @@ export default function PointsPage() {
               </div>
             </div>
           ) : (
-            <div className="mt-4 rounded border border-amber-400/40 bg-amber-400/10 px-3 py-2 mono text-[10px] uppercase tracking-widest text-amber-300">
+            <div className="mt-4 rounded border border-amber-400/40 bg-amber-400/10 px-3 py-2 label-tech text-[10px] uppercase tracking-widest text-amber-300">
               ★ LEGEND atingido · meta máxima · {fmtBRL(POINTS_TIERS[POINTS_TIERS.length - 1].bonusBRL)}
             </div>
           )}
@@ -379,7 +379,7 @@ export default function PointsPage() {
               </button>
               {showDebug ? (
                 <div className="mt-2 rounded border border-cyan-500/30 bg-cyan-500/5 p-3 text-[11px]">
-                  <div className="mono mb-2 text-[10px] uppercase tracking-widest text-cyan-300">// DEBUG SYNC CLICKUP</div>
+                  <div className="label-tech mb-2 text-[10px] uppercase tracking-widest text-cyan-300">// DEBUG SYNC CLICKUP</div>
 
                   {/* Header enxuto: workspace + listas excluidas + atrasadas */}
                   <div className="mb-2 text-[10px] text-text-muted flex flex-wrap gap-x-3 gap-y-1">
@@ -414,7 +414,7 @@ export default function PointsPage() {
                   {/* Erros agregados */}
                   {(debugInfo.errors || []).length > 0 ? (
                     <div className="mt-2 rounded border border-red-500/40 bg-red-500/5 p-2 text-red-300">
-                      <div className="mono text-[10px] uppercase tracking-widest mb-1">// ERROS</div>
+                      <div className="label-tech text-[10px] uppercase tracking-widest mb-1">// ERROS</div>
                       {debugInfo.errors.map((e: string, i: number) => (
                         <div key={i} className="font-mono text-[10px]">{e}</div>
                       ))}
@@ -424,7 +424,7 @@ export default function PointsPage() {
                   {/* Sample tasks com peso — main info que o user pediu */}
                   {(debugInfo.sampleScoreTasks || []).length > 0 ? (
                     <div className="mt-3">
-                      <div className="mono mb-1 text-[10px] uppercase tracking-widest text-cyan-300">// TASKS QUE SOMARAM ({debugInfo.countedTasks})</div>
+                      <div className="label-tech mb-1 text-[10px] uppercase tracking-widest text-cyan-300">// TASKS QUE SOMARAM ({debugInfo.countedTasks})</div>
                       <div className="space-y-1">
                         {debugInfo.sampleScoreTasks.map((t: any, i: number) => (
                           <div key={i} className="rounded bg-bg/40 px-2 py-1 text-[11px] flex items-center justify-between gap-2">
@@ -445,7 +445,7 @@ export default function PointsPage() {
 
       {/* === MEDALHAS === */}
       <div className="mb-6">
-        <div className="mono mb-4 text-[10px] uppercase tracking-widest text-text-muted">// TIERS</div>
+        <div className="label-tech mb-4 text-[10px] uppercase tracking-widest text-text-muted">// TIERS</div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 sm:gap-3 py-6">
           {POINTS_TIERS.map((t) => (
             <MedalCard
@@ -463,7 +463,7 @@ export default function PointsPage() {
         <div className="rounded-[16px] border border-amber-400/40 bg-gradient-to-br from-amber-500/5 to-bg/60 p-5">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
-              <div className="mono text-[10px] uppercase tracking-widest text-amber-300">// CONFIDENTIAL · ADMIN ONLY</div>
+              <div className="label-tech text-[10px] uppercase tracking-widest text-amber-300">// CONFIDENTIAL · ADMIN ONLY</div>
               <h3 className="text-lg font-bold text-white">Modo Financeiro</h3>
               <div className="text-[11px] text-text-muted">Previsibilidade · histórico mensal · gráfico trade</div>
             </div>
@@ -472,7 +472,7 @@ export default function PointsPage() {
                 type="button"
                 onClick={() => setFinancialMode((v) => !v)}
                 className={
-                  'mono rounded-full border px-4 py-1.5 text-[10px] uppercase tracking-widest transition-all duration-300 ' +
+                  'label-tech rounded-full border px-4 py-1.5 text-[10px] uppercase tracking-widest transition-all duration-300 ' +
                   (financialMode
                     ? 'border-amber-400 bg-amber-400/20 text-amber-300 shadow-[0_0_20px_-4px_rgba(251,191,36,0.6)]'
                     : 'border-line-strong text-text-muted hover:border-amber-400 hover:text-amber-300')
@@ -484,7 +484,7 @@ export default function PointsPage() {
                 type="button"
                 onClick={() => setChartMode((v) => !v)}
                 className={
-                  'mono rounded-full border px-4 py-1.5 text-[10px] uppercase tracking-widest transition-all duration-300 ' +
+                  'label-tech rounded-full border px-4 py-1.5 text-[10px] uppercase tracking-widest transition-all duration-300 ' +
                   (chartMode
                     ? 'border-cyan-400 bg-cyan-400/20 text-cyan-200 shadow-[0_0_20px_-4px_rgba(34,211,238,0.6)]'
                     : 'border-line-strong text-text-muted hover:border-cyan-400 hover:text-cyan-200')
@@ -504,7 +504,7 @@ export default function PointsPage() {
                     type="button"
                     onClick={() => setFilterMonths(m)}
                     className={
-                      'mono rounded-md px-3 py-1 text-[10px] uppercase tracking-widest transition ' +
+                      'label-tech rounded-md px-3 py-1 text-[10px] uppercase tracking-widest transition ' +
                       (filterMonths === m
                         ? 'border border-amber-400 bg-amber-400/20 text-amber-300'
                         : 'border border-line-strong text-text-muted hover:border-amber-400 hover:text-white')
@@ -517,15 +517,15 @@ export default function PointsPage() {
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-4">
                 <div className="rounded-[10px] border border-amber-400/40 bg-amber-400/5 p-3">
-                  <div className="mono text-[9px] uppercase tracking-widest text-amber-300">Total faturado</div>
+                  <div className="label-tech text-[9px] uppercase tracking-widest text-amber-300">Total faturado</div>
                   <div className="mono text-xl text-amber-300 font-bold">{fmtBRL(periodTotal)}</div>
                 </div>
                 <div className="rounded-[10px] border border-line bg-bg-soft/40 p-3">
-                  <div className="mono text-[9px] uppercase tracking-widest text-text-muted">Meses no histórico</div>
+                  <div className="label-tech text-[9px] uppercase tracking-widest text-text-muted">Meses no histórico</div>
                   <div className="mono text-xl text-white">{filteredHistory.length}</div>
                 </div>
                 <div className="rounded-[10px] border border-lime/40 bg-lime/5 p-3">
-                  <div className="mono text-[9px] uppercase tracking-widest text-lime">Streak (meses seguidos)</div>
+                  <div className="label-tech text-[9px] uppercase tracking-widest text-lime">Streak (meses seguidos)</div>
                   <div className="mono text-xl text-lime">{streak}</div>
                 </div>
               </div>
@@ -533,14 +533,14 @@ export default function PointsPage() {
               {/* GRAFICO TRADE-STYLE */}
               {chartMode ? (
                 <div className="rounded-[10px] border border-cyan-500/40 bg-bg p-3">
-                  <div className="mono mb-2 text-[9px] uppercase tracking-widest text-cyan-200">// MONTHLY EARNINGS · TRADE VIEW</div>
+                  <div className="label-tech mb-2 text-[9px] uppercase tracking-widest text-cyan-200">// MONTHLY EARNINGS · TRADE VIEW</div>
                   <TradeChart history={filteredHistory} />
                 </div>
               ) : null}
 
               {/* HISTORICO TABELA */}
               <div className="mt-4 rounded-[10px] border border-line bg-bg-soft/30 p-3 max-h-[400px] overflow-y-auto">
-                <div className="mono mb-2 text-[9px] uppercase tracking-widest text-text-muted">// HISTORY</div>
+                <div className="label-tech mb-2 text-[9px] uppercase tracking-widest text-text-muted">// HISTORY</div>
                 {filteredHistory.length === 0 ? (
                   <div className="text-[11px] text-text-muted text-center py-4">
                     Sem histórico de meses ainda. Snapshot eh criado ao fechar cada mês.
@@ -577,7 +577,7 @@ export default function PointsPage() {
                     saveHistory(next);
                     setHistory(next);
                   }}
-                  className="mono mt-3 rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-1 text-[10px] uppercase tracking-widest text-amber-300 hover:bg-amber-400/20"
+                  className="label-tech mt-3 rounded-md border border-amber-400/40 bg-amber-400/10 px-3 py-1 text-[10px] uppercase tracking-widest text-amber-300 hover:bg-amber-400/20"
                 >
                   📸 Snapshot do mês atual ({currentMonthKey()})
                 </button>
@@ -588,7 +588,7 @@ export default function PointsPage() {
       ) : null}
 
       <div className="mt-4">
-        <Link href="/tools" className="mono text-[10px] uppercase tracking-widest text-text-muted hover:text-lime">
+        <Link href="/tools" className="label-tech text-[10px] uppercase tracking-widest text-text-muted hover:text-lime">
           ← Voltar pra ferramentas
         </Link>
       </div>

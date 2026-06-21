@@ -271,7 +271,7 @@ export default function NormalizadorPage() {
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,232,124,0.9)]" />
                 </span>
               ) : null}
-              <span className="mono uppercase tracking-widest">{stageMsg}</span>
+              <span className="label-tech uppercase tracking-widest">{stageMsg}</span>
             </div>
           </div>
         ) : null}

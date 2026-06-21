@@ -83,7 +83,7 @@ export default async function RemoverLegendaPage() {
         <div className="mx-auto w-full max-w-2xl px-5">
           <div className="rounded-[16px] border border-red-500/40 bg-red-500/5 p-6 space-y-4">
             <div>
-              <div className="mono text-[10px] uppercase tracking-widest text-red-300">
+              <div className="label-tech text-[10px] uppercase tracking-widest text-red-300">
                 Acesso negado · /tools/remover-elementos
               </div>
               <h1 className="mt-1 text-2xl font-bold text-white">Esta ferramenta é Pro</h1>
@@ -96,7 +96,7 @@ export default async function RemoverLegendaPage() {
             </div>
 
             <div className="rounded-[10px] border border-line-strong bg-bg-soft/40 p-4 space-y-1 text-[12px]">
-              <div className="mono text-[10px] uppercase tracking-widest text-text-muted">Diagnóstico</div>
+              <div className="label-tech text-[10px] uppercase tracking-widest text-text-muted">Diagnóstico</div>
               <div className="grid grid-cols-[140px_1fr] gap-x-3 gap-y-1 mt-2">
                 <span className="text-text-muted">Email</span>
                 <span className="mono text-white">{d.email ?? '—'}</span>
@@ -113,7 +113,7 @@ export default async function RemoverLegendaPage() {
 
             <Link
               href="/tools"
-              className="mono inline-block rounded-lg border border-line-strong px-4 py-2 text-[11px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
+              className="label-tech inline-block rounded-lg border border-line-strong px-4 py-2 text-[11px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
             >
               ← Voltar pras ferramentas
             </Link>

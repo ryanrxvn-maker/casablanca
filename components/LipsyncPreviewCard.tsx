@@ -214,7 +214,7 @@ export function LipsyncPreviewCard({
         ) : failed ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center">
             <span className="text-3xl">⚠</span>
-            <span className="mono text-[10px] font-bold uppercase tracking-widest text-red-300">Falha</span>
+            <span className="label-tech text-[10px] font-bold uppercase tracking-widest text-red-300">Falha</span>
             <p className="line-clamp-3 text-[10px] leading-relaxed text-red-300/80">{take.error || 'erro na renderização'}</p>
           </div>
         ) : (

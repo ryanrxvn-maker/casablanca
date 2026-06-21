@@ -357,7 +357,7 @@ export function HeyGenAvatarPicker({
             <button
               type="button"
               onClick={() => setOpenGroupId(null)}
-              className="mono rounded-md border border-line-strong bg-bg-soft px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
+              className="label-tech rounded-md border border-line-strong bg-bg-soft px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
             >
               ← Voltar
             </button>

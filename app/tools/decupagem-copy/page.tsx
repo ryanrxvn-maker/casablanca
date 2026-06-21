@@ -709,7 +709,7 @@ function DecupagemCopyInner() {
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-lime shadow-[0_0_8px_rgba(200,232,124,0.9)]" />
                 </span>
               ) : null}
-              <span className="mono uppercase tracking-widest">{stage}</span>
+              <span className="label-tech tracking-widest">{stage}</span>
             </div>
             {progress !== null ? (
               <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-line">
@@ -748,13 +748,13 @@ function DecupagemCopyInner() {
             </div>
 
             <div className="mb-4 flex flex-wrap items-center gap-2 text-[11px]">
-              <span className="mono rounded-full border border-line bg-bg px-2 py-0.5 uppercase tracking-widest text-text-muted">
+              <span className="label-tech rounded-full border border-line bg-bg px-2 py-0.5 tracking-widest text-text-muted">
                 motor: <span className="text-white">{provider ?? '?'}</span>
               </span>
               {avgConfidence !== null ? (
                 <span
                   className={
-                    'mono rounded-full border px-2 py-0.5 uppercase tracking-widest ' +
+                    'label-tech rounded-full border px-2 py-0.5 tracking-widest ' +
                     (avgConfidence >= 0.85
                       ? 'border-lime/40 bg-lime/10 text-lime'
                       : avgConfidence >= 0.7
@@ -765,7 +765,7 @@ function DecupagemCopyInner() {
                   confiança da transcrição: {Math.round(avgConfidence * 100)}%
                 </span>
               ) : (
-                <span className="mono rounded-full border border-line bg-bg px-2 py-0.5 uppercase tracking-widest text-text-muted">
+                <span className="label-tech rounded-full border border-line bg-bg px-2 py-0.5 tracking-widest text-text-muted">
                   confiança: indisponível (use AssemblyAI p/ medir)
                 </span>
               )}
@@ -776,7 +776,7 @@ function DecupagemCopyInner() {
                   // auditoria saiu ruim (nao 27 cortes ruins). Nao pintar de
                   // vermelho — sinalizar inconclusivo.
                   <span
-                    className="mono rounded-full border border-line bg-bg px-2 py-0.5 uppercase tracking-widest text-text-muted"
+                    className="label-tech rounded-full border border-line bg-bg px-2 py-0.5 tracking-widest text-text-muted"
                     title="A transcrição da auditoria saiu fraca — laudo não confiável desta vez"
                   >
                     auditoria inconclusiva
@@ -784,7 +784,7 @@ function DecupagemCopyInner() {
                 ) : (
                   <span
                     className={
-                      'mono rounded-full border px-2 py-0.5 uppercase tracking-widest ' +
+                      'label-tech rounded-full border px-2 py-0.5 tracking-widest ' +
                       (auditReport.failCount === 0 && auditReport.reviewCount === 0
                         ? 'border-lime/40 bg-lime/10 text-lime'
                         : auditReport.failCount === 0

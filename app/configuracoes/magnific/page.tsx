@@ -184,19 +184,19 @@ export default function MagnificConfigPage() {
                     Status da Conexão
                   </h3>
                   {loading ? (
-                    <span className="mono rounded-full bg-white/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted">
+                    <span className="label-tech rounded-full bg-white/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted">
                       CARREGANDO…
                     </span>
                   ) : status?.configured && status?.extensionAlive ? (
-                    <span className="mono rounded-full bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime">
+                    <span className="label-tech rounded-full bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime">
                       CONECTADO · USER {status.magnificUserId}
                     </span>
                   ) : status?.configured && !status?.extensionAlive ? (
-                    <span className="mono rounded-full bg-amber-400/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-amber-300">
+                    <span className="label-tech rounded-full bg-amber-400/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-amber-300">
                       EXTENSÃO REMOVIDA · COOKIES SALVOS
                     </span>
                   ) : (
-                    <span className="mono rounded-full bg-red-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-red-300">
+                    <span className="label-tech rounded-full bg-red-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-red-300">
                       NÃO CONECTADO
                     </span>
                   )}

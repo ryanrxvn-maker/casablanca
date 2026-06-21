@@ -96,7 +96,7 @@ export function MedalCard({
 
       <div className="relative z-10 mt-3 text-center">
         <div
-          className="mono text-[11px] uppercase tracking-widest font-bold"
+          className="label-tech text-[11px] uppercase tracking-widest font-bold"
           style={{
             color: achieved ? tier.primaryColor : '#71717A',
             textShadow: achieved ? `0 0 8px ${tier.primaryColor}88` : 'none',

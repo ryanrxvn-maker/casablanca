@@ -463,7 +463,7 @@ export default function DownloaderPage() {
                 <span className="text-lime">
                   Auto Edit · Downloader v{ext.version}
                 </span>
-                <span className="mono ml-2 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
+                <span className="label-tech ml-2 rounded-full bg-lime/15 px-2 py-0.5 text-[10px] uppercase text-lime">
                   ✓ motor online
                 </span>
               </div>
@@ -722,7 +722,7 @@ export default function DownloaderPage() {
           </div>
           {adult && (
             <div className="mt-3 rounded-[10px] border border-rose-900/50 bg-rose-950/20 px-3 py-2">
-              <p className="mono text-[10px] uppercase tracking-widest text-rose-400">
+              <p className="label-tech text-[10px] uppercase tracking-widest text-rose-400">
                 Modo +18 ativo
               </p>
               <div className="mono mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-rose-300/80">

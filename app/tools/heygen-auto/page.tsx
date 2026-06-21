@@ -1900,12 +1900,12 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
               </div>
 
               <div className="mt-4 grid gap-3">
-                  <div className="mono text-[10px] uppercase tracking-widest text-text-muted">
+                  <div className="label-tech text-[10px] uppercase tracking-widest text-text-muted">
                     Hooks ({structuredHooks.length}/10) — cada um vira 1 take final
                   </div>
                   {structuredHooks.map((h, hi) => (
                     <div key={hi} className="rounded-[10px] border border-lime/30 bg-lime/5 p-3">
-                      <div className="mono flex items-center justify-between mb-2 text-[10px] uppercase tracking-widest text-lime">
+                      <div className="label-tech flex items-center justify-between mb-2 text-[10px] uppercase tracking-widest text-lime">
                         <span>HOOK {hi + 1}</span>
                         {structuredHooks.length > 1 ? (
                           <button
@@ -1965,12 +1965,12 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                       type="button"
                       onClick={() => setStructuredHooks((prev) => [...prev, { text: '', audio: null }])}
                       disabled={processing}
-                      className="mono rounded-[10px] border border-dashed border-line-strong bg-bg/30 py-2 px-3 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime/40 hover:bg-lime/5 hover:text-lime transition disabled:opacity-50"
+                      className="label-tech rounded-[10px] border border-dashed border-line-strong bg-bg/30 py-2 px-3 text-[10px] uppercase tracking-widest text-text-muted hover:border-lime/40 hover:bg-lime/5 hover:text-lime transition disabled:opacity-50"
                     >
                       + adicionar hook ({structuredHooks.length}/10)
                     </button>
                   ) : (
-                    <div className="mono text-[10px] uppercase tracking-widest text-text-muted text-center py-2">
+                    <div className="label-tech text-[10px] uppercase tracking-widest text-text-muted text-center py-2">
                       Limite de 10 hooks atingido
                     </div>
                   )}
@@ -1985,13 +1985,13 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                       disabled={processing}
                       className="h-4 w-4 cursor-pointer accent-fuchsia-400"
                     />
-                    <label htmlFor="hgauto-body-enabled" className="mono cursor-pointer text-[10px] uppercase tracking-widest text-fuchsia-200">
+                    <label htmlFor="hgauto-body-enabled" className="label-tech cursor-pointer text-[10px] uppercase tracking-widest text-fuchsia-200">
                       Incluir BODY (texto/audio que vai depois de cada hook no video montado)
                     </label>
                   </div>
                   {structuredBody.enabled ? (
                     <div className="rounded-[10px] border border-fuchsia-500/30 bg-fuchsia-500/5 p-3">
-                      <div className="mono mb-2 text-[10px] uppercase tracking-widest text-fuchsia-200">BODY</div>
+                      <div className="label-tech mb-2 text-[10px] uppercase tracking-widest text-fuchsia-200">BODY</div>
                       {mode === 'copy' ? (
                         <div className="dark-island overflow-hidden rounded-[12px] border border-line bg-black/60 transition-colors focus-within:border-fuchsia-400/50">
                           <textarea
@@ -2168,7 +2168,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
               />
               {camuflagemMode ? (
                 <div className="mt-3 rounded-[12px] border border-fuchsia-500/30 bg-fuchsia-500/5 p-3">
-                  <div className="mono mb-2 text-[10px] uppercase tracking-widest text-fuchsia-200">
+                  <div className="label-tech mb-2 text-[10px] uppercase tracking-widest text-fuchsia-200">
                     Audio WHITE pra camuflagem (audio OU video — extrai audio se video)
                   </div>
                   <div className="grid items-center gap-2 sm:grid-cols-[1fr_140px]">
@@ -2218,7 +2218,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                 <div>
                   <div className="text-sm font-semibold text-white">
                     Hey Auto Dynamic{' '}
-                    <span className="mono ml-2 rounded-full border border-fuchsia-500/40 bg-fuchsia-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-fuchsia-300">
+                    <span className="label-tech ml-2 rounded-full border border-fuchsia-500/40 bg-fuchsia-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-fuchsia-300">
                       multi-avatar
                     </span>
                   </div>
@@ -2234,7 +2234,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
 
               {dynamicMode && mode === 'copy' && parts.length > 0 ? (
                 <div className="mt-4 space-y-2">
-                  <div className="mono text-[10px] uppercase tracking-widest text-text-muted">
+                  <div className="label-tech text-[10px] uppercase tracking-widest text-text-muted">
                     Avatar por parte ({parts.length} take
                     {parts.length === 1 ? '' : 's'})
                   </div>
@@ -2274,7 +2274,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
 
               {dynamicMode && mode === 'audio' && audioParts.length > 0 ? (
                 <div className="mt-4 space-y-2">
-                  <div className="mono text-[10px] uppercase tracking-widest text-text-muted">
+                  <div className="label-tech text-[10px] uppercase tracking-widest text-text-muted">
                     Audios — ordem + avatar por parte ({audioParts.length}{' '}
                     arquivo{audioParts.length === 1 ? '' : 's'})
                   </div>
@@ -2426,11 +2426,11 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                                 {item.source === 'doc' ? 'docs' : 'manual'} · {item.mode} · motor {item.motor}
                               </span>
                               {item.decupagem ? (
-                                <span className="mono rounded-full bg-cyan-400/15 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-300">
+                                <span className="label-tech rounded-full bg-cyan-400/15 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-300">
                                   ✂️ decupa
                                 </span>
                               ) : (
-                                <span className="mono rounded-full bg-bg px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted">
+                                <span className="label-tech rounded-full bg-bg px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted">
                                   sem decupa
                                 </span>
                               )}
@@ -2574,7 +2574,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                         {/* Preview dos takes (loading → vídeo jogável), igual Auto B-roll */}
                         {item.takePreviews && item.takePreviews.length > 0 ? (
                           <div className="mt-3">
-                            <div className="mono mb-2 text-[9px] uppercase tracking-widest text-text-muted">
+                            <div className="label-tech mb-2 text-[9px] uppercase tracking-widest text-text-muted">
                               Preview dos takes ({item.takePreviews.filter((t) => t.status === 'completed').length}/{item.takePreviews.length} prontos)
                             </div>
                             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
@@ -2868,7 +2868,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
               className="mt-5 rounded-[12px] border border-line bg-bg/40 p-3"
             >
               <div className="mb-2 flex items-center justify-between gap-2">
-                <span className="mono text-[10px] uppercase tracking-widest text-cyan-300">
+                <span className="label-tech text-[10px] uppercase tracking-widest text-cyan-300">
                   Nomenclaturas dos ADs (opcional)
                 </span>
                 <Toggle3DIcon
@@ -2926,7 +2926,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                 type="button"
                 onClick={() => setDocAdNames((prev) => [...prev, ''])}
                 disabled={docFetching || docAutoAll || docAdNames.length >= 30}
-                className="mono mt-2 rounded-[10px] border border-dashed border-cyan-400/40 bg-cyan-400/5 px-3 py-1.5 text-[10px] uppercase tracking-widest text-cyan-300 transition hover:bg-cyan-400/10 disabled:opacity-40"
+                className="label-tech mt-2 rounded-[10px] border border-dashed border-cyan-400/40 bg-cyan-400/5 px-3 py-1.5 text-[10px] uppercase tracking-widest text-cyan-300 transition hover:bg-cyan-400/10 disabled:opacity-40"
               >
                 + adicionar AD
               </button>
@@ -2953,7 +2953,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
             {/* Preview dos disparos detectados */}
             {docPreview && docPreview.length > 0 ? (
               <div className="mt-4 grid gap-2">
-                <div className="mono text-[10px] uppercase tracking-widest text-text-muted">
+                <div className="label-tech text-[10px] uppercase tracking-widest text-text-muted">
                   {docPreview.length} AD(s) detectado(s) — escolha quais enfileirar
                 </div>
                 <div className="grid max-h-[420px] gap-2 overflow-y-auto pr-1">
@@ -2973,7 +2973,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                       <div
                         key={d.baseAdId}
                         className={
-                          'rounded-[12px] border px-3 py-2.5 transition ' +
+                          'hover-lift rounded-[12px] border px-3 py-2.5 transition ' +
                           (checked ? 'border-cyan-400/50 bg-cyan-400/5' : 'border-line bg-bg-soft/30')
                         }
                       >
@@ -3015,7 +3015,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                         {/* Slots de avatar: thumb + trocar avatar + escolher voz, por speaker */}
                         {(docSlots[d.baseAdId] || []).length > 0 ? (
                           <div className="mt-2 grid gap-2 rounded-md border border-cyan-400/20 bg-cyan-400/5 p-2">
-                            <div className="mono text-[9px] uppercase tracking-widest text-cyan-300">
+                            <div className="label-tech text-[9px] uppercase tracking-widest text-cyan-300">
                               Avatares deste AD ({(docSlots[d.baseAdId] || []).length}) — troque o avatar e a voz de cada um
                             </div>
                             {(docSlots[d.baseAdId] || []).map((slot, si) => {
@@ -3037,7 +3037,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                                   className="grid gap-2 rounded-md border border-line bg-bg/40 p-2 sm:grid-cols-[180px_1fr]"
                                 >
                                   <div className="grid gap-1">
-                                    <div className="mono text-[9px] uppercase tracking-widest text-fuchsia-200">
+                                    <div className="label-tech text-[9px] uppercase tracking-widest text-fuchsia-200">
                                       {slot.roleLabel}
                                     </div>
                                     <CompactAvatarPicker
@@ -3054,7 +3054,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                                     />
                                   </div>
                                   <div className="grid content-start gap-1">
-                                    <div className="mono text-[9px] uppercase tracking-widest text-text-muted">
+                                    <div className="label-tech text-[9px] uppercase tracking-widest text-text-muted">
                                       voz {!effVoiceId ? '· ⚠ sem voz padrão — escolha uma' : ''}
                                     </div>
                                     <CompactVoiceSelector
@@ -3079,7 +3079,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                         <div className="mt-2 grid gap-1.5 pl-7">
                           {hooks.map((h, i) => (
                             <div key={i} className="rounded-md border border-line bg-bg/40 px-2 py-1.5">
-                              <div className="mono text-[9px] uppercase tracking-widest text-fuchsia-200">
+                              <div className="label-tech text-[9px] uppercase tracking-widest text-fuchsia-200">
                                 {h.label}
                               </div>
                               <div className="mt-0.5 text-[11px] text-text">
@@ -3089,7 +3089,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                           ))}
                           {others.map((o, i) => (
                             <div key={`o${i}`} className="rounded-md border border-line bg-bg/40 px-2 py-1.5">
-                              <div className="mono text-[9px] uppercase tracking-widest text-text-muted">
+                              <div className="label-tech text-[9px] uppercase tracking-widest text-text-muted">
                                 {o.label}
                               </div>
                               <div className="mt-0.5 text-[11px] text-text">{o.text}</div>

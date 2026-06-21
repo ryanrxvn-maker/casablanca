@@ -441,7 +441,7 @@ function TrocaProdutoInner() {
               <div className="shimmer h-3 w-2/3 rounded-full bg-bg" />
             </div>
             {stageMsg && (
-              <p className="mono mt-4 text-[11px] uppercase tracking-widest text-text-muted">
+              <p className="label-tech mt-4 text-[11px] uppercase tracking-widest text-text-muted">
                 {stageMsg}
               </p>
             )}
@@ -532,7 +532,7 @@ function TrocaProdutoInner() {
                   return (
                     <li
                       key={i}
-                      className="fade-in-up flex items-start gap-3 rounded-lg border border-line bg-black/30 p-3"
+                      className="hover-lift fade-in-up flex items-start gap-3 rounded-lg border border-line bg-black/30 p-3"
                       style={{ animationDelay: `${Math.min(i, 10) * 35}ms` }}
                     >
                       <input

@@ -203,13 +203,13 @@ export default function VoiceTestPage() {
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
-                <h3 className="mono text-[10px] uppercase tracking-widest text-text-muted mb-1">
+                <h3 className="label-tech text-[10px] uppercase tracking-widest text-text-muted mb-1">
                   Antes (original)
                 </h3>
                 <audio controls src={result.original.url} className="w-full" />
               </div>
               <div>
-                <h3 className="mono text-[10px] uppercase tracking-widest text-lime mb-1">
+                <h3 className="label-tech text-[10px] uppercase tracking-widest text-lime mb-1">
                   Depois (vocals isolated)
                 </h3>
                 <audio controls src={result.isolated.url} className="w-full" />

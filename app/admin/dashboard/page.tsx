@@ -267,7 +267,7 @@ export default function DashboardPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-[13px]">
                   <thead>
-                    <tr className="text-[10.5px] uppercase tracking-[0.16em] text-text-dim">
+                    <tr className="label-tech text-[10.5px] uppercase tracking-[0.16em] text-text-dim">
                       <th className="pb-2 pr-4">Usuário</th>
                       <th className="pb-2 pr-4">Plano</th>
                       <th className="pb-2 pr-4">Ferramenta</th>
@@ -328,7 +328,7 @@ export default function DashboardPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-[13px]">
                   <thead>
-                    <tr className="text-[10.5px] uppercase tracking-[0.16em] text-text-dim">
+                    <tr className="label-tech text-[10.5px] uppercase tracking-[0.16em] text-text-dim">
                       <th className="pb-2 pr-4">Cliente</th>
                       <th className="pb-2 pr-4">Plano</th>
                       <th className="pb-2 pr-4">Valor</th>
@@ -442,7 +442,7 @@ function StatCard({
 }) {
   return (
     <div
-      className="relative overflow-hidden rounded-[18px] border p-5"
+      className="hover-lift relative overflow-hidden rounded-[18px] border p-5"
       style={{
         borderColor: hue.replace('0.6', '0.4'),
         background:
@@ -676,7 +676,7 @@ function UserControl() {
             return (
               <div
                 key={u.id}
-                className="rounded-[14px] border border-line/60 bg-black/20 p-4"
+                className="hover-lift rounded-[14px] border border-line/60 bg-black/20 p-4"
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="min-w-0">
@@ -702,7 +702,7 @@ function UserControl() {
 
                 {/* Ações de tier */}
                 <div className="mt-3 flex flex-wrap items-center gap-2">
-                  <span className="text-[10.5px] uppercase tracking-[0.16em] text-text-dim">
+                  <span className="label-tech text-[10.5px] uppercase tracking-[0.16em] text-text-dim">
                     Definir:
                   </span>
                   {(['free', 'basic', 'pro'] as const).map((t) => (
@@ -740,7 +740,7 @@ function UserControl() {
                 {/* Comprovantes */}
                 {u.payments.length > 0 ? (
                   <div className="mt-3 border-t border-line/40 pt-2.5">
-                    <div className="mb-1.5 text-[10.5px] uppercase tracking-[0.16em] text-text-dim">
+                    <div className="label-tech mb-1.5 text-[10.5px] uppercase tracking-[0.16em] text-text-dim">
                       Comprovantes ({u.payments.length})
                     </div>
                     <ul className="flex flex-col gap-1.5">

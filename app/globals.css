@@ -63,7 +63,14 @@ body {
   font-family: var(--font-display), 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-feature-settings: 'ss01', 'cv11', 'cv02';
+  /* Renderização premium: kerning + ligaturas + alternates contextuais (todas
+     seguras/neutras pra Hanken Grotesk — sem trocar letterforms por acaso),
+     optical sizing automático, e micro-tracking negativo que dá o aperto
+     "produto caro" sem prejudicar leitura. */
+  font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1;
+  font-optical-sizing: auto;
+  text-rendering: optimizeLegibility;
+  letter-spacing: -0.006em;
 }
 
 /* ─── Regra universal: NUNCA hifenizar ou quebrar palavra no meio ─── */
@@ -634,14 +641,16 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
     border-top: none;
   }
 
-  /* Title profissional — Bricolage Grotesque, peso forte, leve negative tracking.
-   * hyphens:none + overflow-wrap:normal evita quebrar palavras como "automático"
-   * no meio (problema visual). */
+  /* Title profissional — Manrope geométrica, peso forte, tracking negativo
+   * apertado (cara de produto caro). hyphens:none + overflow-wrap:normal evita
+   * quebrar palavras como "automático" no meio (problema visual). */
   .section-title {
     @apply text-3xl font-extrabold tracking-tight md:text-4xl;
     font-family: var(--font-tech), var(--font-display), system-ui;
-    letter-spacing: -0.02em;
-    line-height: 1.05;
+    letter-spacing: -0.022em;
+    line-height: 1.04;
+    font-optical-sizing: auto;
+    text-wrap: balance;
     hyphens: none;
     -webkit-hyphens: none;
     overflow-wrap: normal;
@@ -651,30 +660,44 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
   .hero-title {
     @apply text-4xl font-extrabold tracking-tight md:text-6xl;
     font-family: var(--font-tech), var(--font-display), system-ui;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.034em;
     line-height: 1;
+    font-optical-sizing: auto;
+    text-wrap: balance;
     hyphens: none;
     -webkit-hyphens: none;
     overflow-wrap: normal;
     word-break: normal;
   }
 
-  .display-subtle {
-    hyphens: none;
-    -webkit-hyphens: none;
-    overflow-wrap: normal;
-    word-break: normal;
-  }
-
+  /* Acento editorial — Fraunces variável. opsz automático faz as serifas
+   * ficarem dramáticas nos tamanhos grandes (assinatura de luxo). Use em
+   * palavras-acento do hero, frases de apoio, números editoriais. */
   .display-subtle {
     font-family: var(--font-serif), Georgia, serif;
     font-style: italic;
     font-weight: 400;
+    font-optical-sizing: auto;
+    letter-spacing: -0.005em;
     color: rgb(var(--text-muted));
+    hyphens: none;
+    -webkit-hyphens: none;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+
+  /* Palavra-acento serifada premium (não-itálica) pra títulos editoriais. */
+  .text-editorial {
+    font-family: var(--font-serif), Georgia, serif;
+    font-weight: 500;
+    font-optical-sizing: auto;
+    letter-spacing: -0.01em;
   }
 
   .mono {
     font-family: var(--font-mono), 'JetBrains Mono', ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1, 'zero' 1;
   }
 
   /* Kinetic text — palavra que sobe e desbota com leve rotacao X */
@@ -690,6 +713,180 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
     width: 1em;
     text-align: left;
     animation: dots 1.4s infinite steps(4, end);
+  }
+
+  /* ════════════════ PREMIUM UTILITIES v3 (opt-in) ════════════════
+     Detalhe "design studio": profundidade real, micro-interações no mouse,
+     vidro fosco e tipografia-acento. Tudo opt-in (não muda nada por acaso) e
+     já respeitado pelo bloco prefers-reduced-motion no fim do arquivo. */
+
+  /* Texto com gradiente da marca — violet→lime suave. Números/acentos/hero. */
+  .text-gradient-brand {
+    background: linear-gradient(120deg, #c4b5fd 0%, #a78bfa 46%, #bcc98c 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+  /* Gradiente branco→cinza: dá relevo premium em títulos sem cor. */
+  .text-gradient-soft {
+    background: linear-gradient(180deg, #ffffff 0%, rgb(var(--text-muted)) 145%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+
+  /* Vidro fosco premium — borda luminosa + top highlight + sombra profunda. */
+  .glass-panel {
+    position: relative;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0)),
+      rgba(20, 20, 24, 0.55);
+    backdrop-filter: blur(14px) saturate(1.12);
+    -webkit-backdrop-filter: blur(14px) saturate(1.12);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 18px 44px -26px rgba(0, 0, 0, 0.85);
+  }
+
+  /* Lift no hover — pra linhas/cards que não usam .card-3d. */
+  .hover-lift {
+    transition:
+      transform 0.32s cubic-bezier(.2, .8, .2, 1),
+      box-shadow 0.32s cubic-bezier(.2, .8, .2, 1),
+      border-color 0.3s ease;
+    will-change: transform;
+  }
+  .hover-lift:hover {
+    transform: translateY(-2px);
+    border-color: rgba(167, 139, 250, 0.28);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.06),
+      0 18px 38px -20px rgba(0, 0, 0, 0.9),
+      0 0 36px -16px rgba(167, 139, 250, 0.3);
+  }
+
+  /* Glow de borda no hover (sem deslocar). */
+  .hover-glow {
+    transition: border-color 0.3s ease, box-shadow 0.35s ease;
+  }
+  .hover-glow:hover {
+    border-color: rgba(167, 139, 250, 0.4);
+    box-shadow: 0 0 30px -10px rgba(167, 139, 250, 0.4);
+  }
+
+  /* Varredura de luz só ao passar o mouse — premium em botões/cards. */
+  .sheen-hover {
+    position: relative;
+    overflow: hidden;
+  }
+  .sheen-hover::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(
+      115deg,
+      transparent 30%,
+      rgba(255, 255, 255, 0.1) 50%,
+      transparent 70%
+    );
+    transform: translateX(-130%);
+    transition: transform 0.7s cubic-bezier(.2, .8, .2, 1);
+  }
+  .sheen-hover:hover::after {
+    transform: translateX(130%);
+  }
+
+  /* Divisor hairline com gradiente (some nas pontas). */
+  .divider-grad {
+    height: 1px;
+    border: 0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.1) 50%,
+      transparent
+    );
+  }
+
+  /* Chip 3D — pílula de ação pequena com profundidade (TROCAR/BAIXAR/REMOVER). */
+  .chip-3d {
+    @apply relative inline-flex items-center justify-center gap-1.5 rounded-full border border-line-strong bg-bg-soft/70 px-3 py-1 text-[11px] font-semibold text-text-muted transition-all duration-300 active:scale-[0.96];
+    font-family: var(--font-tech), var(--font-display), system-ui;
+    letter-spacing: 0.03em;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.05),
+      0 4px 10px -6px rgba(0, 0, 0, 0.6);
+  }
+  .chip-3d:hover {
+    color: #fff;
+    border-color: rgba(167, 139, 250, 0.5);
+    transform: translateY(-1px);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.08),
+      0 10px 20px -8px rgba(0, 0, 0, 0.8),
+      0 0 24px -10px rgba(167, 139, 250, 0.45);
+  }
+
+  /* Icon button 3D — círculo com profundidade e glow no hover. */
+  .icon-3d {
+    @apply relative inline-flex items-center justify-center rounded-full border border-line-strong bg-bg-soft/60 text-text-muted transition-all duration-300 active:scale-[0.92];
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.05),
+      0 4px 12px -6px rgba(0, 0, 0, 0.6);
+  }
+  .icon-3d:hover {
+    color: #fff;
+    border-color: rgba(167, 139, 250, 0.55);
+    transform: translateY(-1px);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.09),
+      0 10px 22px -8px rgba(0, 0, 0, 0.85),
+      0 0 26px -10px rgba(167, 139, 250, 0.5);
+  }
+
+  /* Numeral premium — tabular, levemente apertado, pra métricas/contadores. */
+  .num {
+    font-family: var(--font-mono), 'JetBrains Mono', ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1, 'zero' 1;
+    letter-spacing: -0.01em;
+  }
+
+  /* Label premium — drop-in pra substituir `mono` em rótulos uppercase de UI
+     (não-numéricos). Troca a monoespaçada "terminal/vibe-code" pela Manrope
+     geométrica com tracking refinado = cara de produto desenhado. Mantém o
+     `mono` só onde é número/código/timestamp de verdade. */
+  .label-tech {
+    font-family: var(--font-tech), var(--font-display), system-ui;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    font-optical-sizing: auto;
+  }
+
+  /* Cabeçalho de seção com barrinha-acento (violet→lime). Use num wrapper flex:
+     <div class="section-eyebrow"><span/>TÍTULO</div> — a barra é o ::before. */
+  .section-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    font-family: var(--font-tech), var(--font-display), system-ui;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: rgba(255, 255, 255, 0.92);
+  }
+  .section-eyebrow::before {
+    content: '';
+    width: 3px;
+    height: 0.9em;
+    border-radius: 9999px;
+    background: linear-gradient(180deg, rgb(var(--violet)), rgba(200, 232, 124, 0.7));
+    box-shadow: 0 0 12px rgba(167, 139, 250, 0.55);
   }
 }
 

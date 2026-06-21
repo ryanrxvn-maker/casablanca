@@ -112,7 +112,7 @@ function VerifyPhoneInner() {
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Link
           href="/"
-          className="mono inline-flex items-center gap-1.5 rounded-full border border-line-strong px-3 py-1.5 text-[10.5px] uppercase tracking-widest text-text-muted transition hover:border-violet hover:text-violet"
+          className="label-tech inline-flex items-center gap-1.5 rounded-full border border-line-strong px-3 py-1.5 text-[10.5px] uppercase tracking-widest text-text-muted transition hover:border-violet hover:text-violet"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
@@ -123,7 +123,7 @@ function VerifyPhoneInner() {
         <button
           type="button"
           onClick={() => router.back()}
-          className="mono inline-flex items-center gap-1.5 rounded-full border border-line-strong px-3 py-1.5 text-[10.5px] uppercase tracking-widest text-text-muted transition hover:border-violet hover:text-violet"
+          className="label-tech inline-flex items-center gap-1.5 rounded-full border border-line-strong px-3 py-1.5 text-[10.5px] uppercase tracking-widest text-text-muted transition hover:border-violet hover:text-violet"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M19 12H5" />
@@ -134,7 +134,7 @@ function VerifyPhoneInner() {
         <button
           type="button"
           onClick={handleLogout}
-          className="mono ml-auto inline-flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/5 px-3 py-1.5 text-[10.5px] uppercase tracking-widest text-red-300 transition hover:bg-red-500/15"
+          className="label-tech ml-auto inline-flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/5 px-3 py-1.5 text-[10.5px] uppercase tracking-widest text-red-300 transition hover:bg-red-500/15"
         >
           Sair
         </button>

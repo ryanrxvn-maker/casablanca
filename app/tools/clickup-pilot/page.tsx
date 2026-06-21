@@ -7254,8 +7254,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                   {/* Preview previsibilidade — antes de iniciar */}
                   {Object.keys(taskAnalyses).length > 0 ? (
                     <div className="mt-4">
-                      <div className="mono mb-2 text-[10px] uppercase tracking-widest text-text-muted">
-                        Análise — o que vai ser disparado
+                      <div className="section-eyebrow mb-3 text-[11px]">
+                        Análise <span className="ml-1 font-semibold tracking-[0.14em] text-text-dim">— o que vai ser disparado</span>
                       </div>
                       <ul className="grid gap-2">
                         {Object.values(taskAnalyses)
@@ -7554,7 +7554,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     </div>
                                     {/* Link do criativo original */}
                                     <div className="mt-2">
-                                      <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">Criativo original (Drive)</div>
+                                      <div className="label-tech mb-1 text-[9px] uppercase tracking-widest text-text-muted">Criativo original (Drive)</div>
                                       {detectedDriveId ? (
                                         <div className="mono text-[10px] flex flex-wrap items-center gap-2">
                                           <span className="rounded border border-lime/40 bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime">✓ Vídeo detectado: {detectedDriveId}</span>
@@ -7589,7 +7589,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     </div>
                                     {/* Upload do novo WHITE */}
                                     <div className="mt-3">
-                                      <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">Novo áudio WHITE (IA)</div>
+                                      <div className="label-tech mb-1 text-[9px] uppercase tracking-widest text-text-muted">Novo áudio WHITE (IA)</div>
                                       <label
                                         onDragOver={(e) => { e.preventDefault(); if (!trocaDragOver[a.taskId]) setTrocaDragOver((p) => ({ ...p, [a.taskId]: true })); }}
                                         onDragLeave={(e) => { e.preventDefault(); setTrocaDragOver((p) => ({ ...p, [a.taskId]: false })); }}
@@ -7756,7 +7756,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                           * exatos só existem na hora do disparo (diarização). */}
                                         {vaPreviewOpen[swapKey] ? (
                                           <div className="mt-2 rounded-[10px] border border-cyan-500/40 bg-cyan-500/5 p-3">
-                                            <div className="mono mb-2 text-[9px] uppercase tracking-widest text-cyan-200">
+                                            <div className="label-tech mb-2 text-[9px] uppercase tracking-widest text-cyan-200">
                                               O que vai ser falado — áudio do AD original{multiRole ? ' · roteado por locutor' : ' · integral'}
                                             </div>
                                             {multiRole ? (
@@ -7891,7 +7891,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 </div>
                                                 <div className="mt-2 grid gap-2 sm:grid-cols-2">
                                                   <div>
-                                                    <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">Avatar HeyGen{multiRole ? ` · ${role.role}` : ''}</div>
+                                                    <div className="label-tech mb-1 text-[9px] uppercase tracking-widest text-text-muted">Avatar HeyGen{multiRole ? ` · ${role.role}` : ''}</div>
                                                     <CompactAvatarPicker
                                                       selected={chosen}
                                                       setSelected={(newAv) => setVaAvatarChoice((prev) => ({ ...prev, [choiceKey]: newAv }))}
@@ -7900,7 +7900,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                     />
                                                   </div>
                                                   <div>
-                                                    <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">Voz{avaTextEngine ? ' (opcional)' : ''}</div>
+                                                    <div className="label-tech mb-1 text-[9px] uppercase tracking-widest text-text-muted">Voz{avaTextEngine ? ' (opcional)' : ''}</div>
                                                     <CompactVoiceSelector
                                                       selected={voiceChosen}
                                                       setSelected={(v) => setVaVoiceChoice((prev) => ({ ...prev, [choiceKey]: v }))}
@@ -8015,7 +8015,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                       ) : null}
                                       {(a.vaBriefing as any).candidateLinks && (a.vaBriefing as any).candidateLinks.length > 0 ? (
                                         <div className="mb-2">
-                                          <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">
+                                          <div className="label-tech mb-1 text-[9px] uppercase tracking-widest text-text-muted">
                                             Links detectados no doc — clica no AD correto:
                                           </div>
                                           <div className="flex flex-col gap-1">
@@ -8045,7 +8045,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                           </div>
                                         </div>
                                       ) : null}
-                                      <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">
+                                      <div className="label-tech mb-1 text-[9px] uppercase tracking-widest text-text-muted">
                                         Ou cola a URL do Drive:
                                       </div>
                                       <input
@@ -8105,13 +8105,13 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   {/* Hook + body preview */}
                                   {a.vaBriefing.hookText ? (
                                     <details className="rounded-[10px] border border-line bg-bg/40 p-2">
-                                      <summary className="mono cursor-pointer text-[10px] uppercase tracking-widest text-lime">Gancho</summary>
+                                      <summary className="label-tech cursor-pointer text-[10px] uppercase tracking-widest text-lime">Gancho</summary>
                                       <div className="mt-1.5 text-[11px] text-text-muted whitespace-pre-wrap">{a.vaBriefing.hookText.slice(0, 400)}{a.vaBriefing.hookText.length > 400 ? '…' : ''}</div>
                                     </details>
                                   ) : null}
                                   {a.vaBriefing.bodyText ? (
                                     <details className="rounded-[10px] border border-line bg-bg/40 p-2">
-                                      <summary className="mono cursor-pointer text-[10px] uppercase tracking-widest text-fuchsia-300">Corpo</summary>
+                                      <summary className="label-tech cursor-pointer text-[10px] uppercase tracking-widest text-fuchsia-300">Corpo</summary>
                                       <div className="mt-1.5 text-[11px] text-text-muted whitespace-pre-wrap">{a.vaBriefing.bodyText}</div>
                                     </details>
                                   ) : null}
@@ -8139,7 +8139,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     </div>
                                   ) : (
                                   <div className="mt-1.5 grid gap-2">
-                                    <div className="mono text-[9px] uppercase tracking-widest text-text-muted">
+                                    <div className="label-tech text-[9.5px] tracking-[0.18em] text-text-muted">
                                       Avatares ({a.roleSlots.length}) — selecione cada um e a voz
                                     </div>
                                     {a.roleSlots.length === 0 ? (
@@ -8178,7 +8178,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         ? `https://drive.google.com/thumbnail?id=${slot.briefingFileId}&sz=w200`
                                         : (slot.youtubeThumb || null);
                                       return (
-                                        <div key={sIdx} className="rounded-[12px] border border-white/8 bg-gradient-to-br from-white/[0.04] via-white/[0.015] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_2px_8px_-4px_rgba(0,0,0,0.3)]">
+                                        <div key={sIdx} className="hover-lift rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_14px_-6px_rgba(0,0,0,0.4)]">
                                           <div className="mono flex flex-wrap items-center gap-2 text-[10px]">
                                             <span className="rounded-full bg-lime/18 border border-lime/40 px-2 py-[3px] text-lime uppercase tracking-widest font-bold">{slot.role}</span>
                                             <span className="text-white/70">{slot.youtubeUrl ? 'ref. YouTube' : `@${slot.username}`}</span>
@@ -8348,7 +8348,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                           {/* ═══ SELETORES (Avatar + Voz) — grid limpo ═══ */}
                                           <div className="mt-2.5 grid gap-2">
                                             <div>
-                                              <div className="mono mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
+                                              <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
                                                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                                   <circle cx="12" cy="8" r="4" />
                                                   <path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2" />
@@ -8372,7 +8372,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                             </div>
                                             {slot.avatarId ? (
                                               <div>
-                                                <div className="mono mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
+                                                <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
                                                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                                     <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
                                                     <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4" />
@@ -8490,7 +8490,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                     );
                     return (
                       <div className="mb-3">
-                        <div className="mono mb-1 text-[10px] uppercase tracking-widest text-text-muted">
+                        <div className="label-tech mb-1 text-[10px] uppercase tracking-widest text-text-muted">
                           Docs encontrados:
                         </div>
                         <ul className="grid gap-1.5">
@@ -8516,14 +8516,14 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                             );
                           })}
                         </ul>
-                        <div className="mono mt-1.5 text-[9px] uppercase tracking-widest text-text-muted">
+                        <div className="label-tech mt-1.5 text-[9px] uppercase tracking-widest text-text-muted">
                           Auto-fetch funciona se doc estiver com sharing 'qualquer pessoa com link pode ver'. Senao, cola manualmente abaixo.
                         </div>
                       </div>
                     );
                   })()}
 
-                  <div className="mb-2 mono text-[10px] uppercase tracking-widest text-text-muted">
+                  <div className="mb-2 label-tech text-[10px] uppercase tracking-widest text-text-muted">
                     OU cola aqui o conteudo (Ctrl+A → Ctrl+C no Google Docs)
                   </div>
                   <textarea

@@ -114,7 +114,7 @@ export function JobControlPanel({
         type="button"
         onClick={() => act(scope, taskId, 'retomar', label)}
         disabled={!!queued}
-        className="mono rounded border border-cyan-500/60 bg-cyan-500/15 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-40 disabled:cursor-not-allowed"
+        className="label-tech rounded border border-cyan-500/60 bg-cyan-500/15 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/25 disabled:opacity-40 disabled:cursor-not-allowed"
         title={queued ? 'Na fila — o motor promove automaticamente quando liberar vaga (max 2 lipsyncs simultaneos)' : 'Retomar (abre o ClickUp Pilot e re-roda/baixa no motor real)'}
       >
         🔄 Retomar
@@ -122,7 +122,7 @@ export function JobControlPanel({
       <button
         type="button"
         onClick={() => act(scope, taskId, 'pausar', label)}
-        className="mono rounded border border-yellow-500/50 bg-yellow-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-yellow-200 hover:bg-yellow-500/20"
+        className="label-tech rounded border border-yellow-500/50 bg-yellow-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-yellow-200 hover:bg-yellow-500/20"
         title="Pausar (sinaliza a aba que estiver rodando o job pra abortar)"
       >
         ⏸ Pausar
@@ -131,7 +131,7 @@ export function JobControlPanel({
         type="button"
         onClick={() => act(scope, taskId, 'debug', label)}
         disabled={!!queued}
-        className="mono rounded border border-fuchsia-500/50 bg-fuchsia-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
+        className="label-tech rounded border border-fuchsia-500/50 bg-fuchsia-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20 disabled:opacity-40 disabled:cursor-not-allowed"
         title={queued ? 'Aguarde sair da fila' : 'DEBUG (reserva p/ bugs/loop): aborta e recria do ZERO no motor'}
       >
         🐞 Debug

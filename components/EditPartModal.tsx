@@ -81,7 +81,7 @@ export function EditPartModal({
         {/* Header */}
         <div className="mb-4 flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="mono text-[9px] uppercase tracking-[0.18em] text-cyan-300/80">Re-gerar take</div>
+            <div className="label-tech text-[9px] uppercase tracking-[0.18em] text-cyan-300/80">Re-gerar take</div>
             <h3 className="mono mt-0.5 text-[14px] font-bold text-white" style={{ fontFamily: 'var(--font-tech)' }}>
               <span className="text-lime">{input.label}</span>
             </h3>
@@ -108,13 +108,13 @@ export function EditPartModal({
           <div className="mb-4 grid gap-3 sm:grid-cols-2">
             {avatarPicker ? (
               <div>
-                <div className="mono mb-1.5 text-[9px] uppercase tracking-widest text-text-muted">Avatar</div>
+                <div className="label-tech mb-1.5 text-[9px] uppercase tracking-widest text-text-muted">Avatar</div>
                 {avatarPicker}
               </div>
             ) : null}
             {voicePicker ? (
               <div>
-                <div className="mono mb-1.5 text-[9px] uppercase tracking-widest text-text-muted">Voz</div>
+                <div className="label-tech mb-1.5 text-[9px] uppercase tracking-widest text-text-muted">Voz</div>
                 {voicePicker}
               </div>
             ) : null}
@@ -150,7 +150,7 @@ export function EditPartModal({
             type="button"
             onClick={() => { if (!busy) onClose(); }}
             disabled={busy}
-            className="mono rounded-full border border-white/15 px-4 py-2 text-[10px] uppercase tracking-widest text-text-muted transition-colors hover:border-white/35 hover:text-white disabled:opacity-40"
+            className="label-tech rounded-full border border-white/15 px-4 py-2 text-[10px] uppercase tracking-widest text-text-muted transition-colors hover:border-white/35 hover:text-white disabled:opacity-40"
           >
             Cancelar
           </button>

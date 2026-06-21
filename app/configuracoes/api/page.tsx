@@ -228,11 +228,11 @@ export default function ApiKeysPage() {
                           {m.label}
                         </h3>
                         {s?.configured ? (
-                          <span className="mono rounded-full bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime">
+                          <span className="label-tech rounded-full bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime">
                             CONFIGURADA · ····{s.last4}
                           </span>
                         ) : (
-                          <span className="mono rounded-full bg-red-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-red-300">
+                          <span className="label-tech rounded-full bg-red-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-red-300">
                             NAO CONFIGURADA
                           </span>
                         )}

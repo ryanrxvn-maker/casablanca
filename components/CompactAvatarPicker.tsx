@@ -116,7 +116,7 @@ export function CompactAvatarPicker({
         onClick={() => !disabled && setOpen((o) => !o)}
         disabled={disabled}
         className={
-          'group flex w-full items-center gap-2 rounded-[10px] border border-line-strong bg-bg-soft/40 px-2 py-1.5 text-left transition hover:border-lime hover:bg-lime/5 disabled:opacity-50 ' +
+          'group flex w-full items-center gap-2 rounded-[12px] border border-line-strong bg-bg-soft/40 px-2 py-1.5 text-left transition-all duration-300 hover:border-lime hover:bg-lime/5 hover:-translate-y-[1px] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_10px_24px_-12px_rgba(200,232,124,0.5)] disabled:opacity-50 ' +
           (selected ? 'border-lime/40 ' : '') +
           (open ? 'border-lime' : '')
         }
@@ -140,12 +140,12 @@ export function CompactAvatarPicker({
             {display?.name ?? <span className="text-text-muted">Sem avatar</span>}
           </div>
           {selected ? null : (
-            <div className="mono text-[8px] uppercase tracking-widest text-text-muted">
+            <div className="label-tech text-[8px] tracking-[0.16em] text-text-muted">
               padrao (global)
             </div>
           )}
         </div>
-        <span className="mono shrink-0 rounded-full border border-line-strong px-1.5 py-0.5 text-[8px] uppercase tracking-widest text-text-muted group-hover:border-lime group-hover:text-lime">
+        <span className="label-tech shrink-0 rounded-full border border-line-strong bg-bg-soft/50 px-2 py-0.5 text-[8px] tracking-[0.16em] text-text-muted shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] transition-all group-hover:border-lime group-hover:text-lime group-hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.08),0_0_16px_-6px_rgba(200,232,124,0.6)]">
           {open ? 'Fechar' : 'Trocar'}
         </span>
       </button>
@@ -157,7 +157,7 @@ export function CompactAvatarPicker({
           style={{ top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxH }}
         >
           <div className="flex items-center justify-between border-b border-line/40 bg-bg-soft/40 px-3 py-2">
-            <h3 className="mono text-[10px] uppercase tracking-widest text-lime">
+            <h3 className="label-tech text-[10px] tracking-[0.18em] text-lime">
               {label ?? 'Escolher avatar'}
             </h3>
             <div className="flex items-center gap-1.5">

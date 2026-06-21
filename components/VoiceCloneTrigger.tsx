@@ -162,7 +162,7 @@ export function VoiceCloneTrigger({
         onClick={() => !disabled && setOpen((o) => !o)}
         disabled={disabled}
         className={
-          'mono inline-flex items-center gap-1 self-start rounded border border-fuchsia-500/40 bg-fuchsia-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20 disabled:opacity-50 ' +
+          'label-tech inline-flex items-center gap-1 self-start rounded border border-fuchsia-500/40 bg-fuchsia-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20 disabled:opacity-50 ' +
           (open ? 'border-fuchsia-300 bg-fuchsia-500/20' : '')
         }
         title="Clona uma voz nova no HeyGen a partir de audio/video"
@@ -177,7 +177,7 @@ export function VoiceCloneTrigger({
           style={{ top: pos.top, left: pos.left, width: pos.width }}
         >
           <div className="flex items-center justify-between border-b border-line/40 bg-bg-soft/40 px-3 py-2">
-            <h3 className="mono text-[10px] uppercase tracking-widest text-fuchsia-200">Opcoes do clone</h3>
+            <h3 className="label-tech text-[10px] uppercase tracking-widest text-fuchsia-200">Opcoes do clone</h3>
             <button
               type="button"
               onClick={() => setOpen(false)}

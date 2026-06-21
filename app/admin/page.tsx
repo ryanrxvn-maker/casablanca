@@ -349,7 +349,7 @@ export default function AdminPage() {
                     return (
                       <li
                         key={u.id}
-                        className="rounded-[12px] border border-line bg-bg p-3"
+                        className="hover-lift rounded-[12px] border border-line bg-bg p-3"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="min-w-0 flex-1">
@@ -371,7 +371,7 @@ export default function AdminPage() {
                                 return (
                                   <span
                                     className={
-                                      'mono rounded-full px-2 py-0.5 text-[9px] uppercase tracking-widest ' +
+                                      'label-tech rounded-full px-2 py-0.5 text-[9px] uppercase tracking-widest ' +
                                       tierStyles
                                     }
                                   >
@@ -380,35 +380,35 @@ export default function AdminPage() {
                                 );
                               })()}
                               {u.is_active ? (
-                                <span className="mono rounded-full bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime">
+                                <span className="label-tech rounded-full bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime">
                                   ATIVO
                                 </span>
                               ) : (
-                                <span className="mono rounded-full bg-red-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-red-300">
+                                <span className="label-tech rounded-full bg-red-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-red-300">
                                   INATIVO
                                 </span>
                               )}
                               {u.phone_verified ? (
                                 <span
-                                  className="mono rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-emerald-300"
+                                  className="label-tech rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-emerald-300"
                                   title="Telefone verificado"
                                 >
                                   TEL ✓
                                 </span>
                               ) : u.phone ? (
                                 <span
-                                  className="mono rounded-full bg-yellow-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-yellow-300"
+                                  className="label-tech rounded-full bg-yellow-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-yellow-300"
                                   title="Telefone não verificado"
                                 >
                                   TEL ?
                                 </span>
                               ) : u.legacy_no_phone ? (
-                                <span className="mono rounded-full bg-bg-soft/40 px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-dim">
+                                <span className="label-tech rounded-full bg-bg-soft/40 px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-dim">
                                   LEGACY
                                 </span>
                               ) : null}
                               {online ? (
-                                <span className="mono inline-flex items-center gap-1 rounded-full border border-lime/60 bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime">
+                                <span className="label-tech inline-flex items-center gap-1 rounded-full border border-lime/60 bg-lime/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-lime">
                                   <span className="relative flex h-1.5 w-1.5">
                                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lime opacity-60" />
                                     <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-lime" />
@@ -416,12 +416,12 @@ export default function AdminPage() {
                                   ONLINE
                                 </span>
                               ) : (
-                                <span className="mono rounded-full bg-bg-soft/40 px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-dim">
+                                <span className="label-tech rounded-full bg-bg-soft/40 px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-dim">
                                   offline
                                 </span>
                               )}
                               {u.must_change_password ? (
-                                <span className="mono rounded-full bg-yellow-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-yellow-300">
+                                <span className="label-tech rounded-full bg-yellow-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-yellow-300">
                                   SENHA PROVISORIA
                                 </span>
                               ) : null}

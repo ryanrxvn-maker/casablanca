@@ -94,7 +94,7 @@ export default async function LipSyncPage() {
         <div className="mx-auto w-full max-w-2xl px-5">
           <div className="rounded-[16px] border border-red-500/40 bg-red-500/5 p-6 space-y-4">
             <div>
-              <div className="mono text-[10px] uppercase tracking-widest text-red-300">
+              <div className="label-tech text-[10px] uppercase tracking-widest text-red-300">
                 Acesso negado · /tools/lipsync
               </div>
               <h1 className="mt-1 text-2xl font-bold text-white">
@@ -109,7 +109,7 @@ export default async function LipSyncPage() {
             </div>
 
             <div className="rounded-[10px] border border-line-strong bg-bg-soft/40 p-4 space-y-1 text-[12px]">
-              <div className="mono text-[10px] uppercase tracking-widest text-text-muted">
+              <div className="label-tech text-[10px] uppercase tracking-widest text-text-muted">
                 Diagnostico
               </div>
               <div className="grid grid-cols-[140px_1fr] gap-x-3 gap-y-1 mt-2">
@@ -143,7 +143,7 @@ export default async function LipSyncPage() {
             </div>
 
             <div className="rounded-[10px] border border-cyan-500/40 bg-cyan-500/5 p-4 space-y-2 text-[12px] text-cyan-100">
-              <div className="mono text-[10px] uppercase tracking-widest text-cyan-300">
+              <div className="label-tech text-[10px] uppercase tracking-widest text-cyan-300">
                 Como liberar
               </div>
               <p>
@@ -157,13 +157,13 @@ export default async function LipSyncPage() {
             <div className="flex gap-2">
               <Link
                 href="/planos"
-                className="mono rounded-lg border border-lime/60 px-4 py-2 text-[11px] uppercase tracking-widest text-lime hover:bg-lime/10"
+                className="label-tech rounded-lg border border-lime/60 px-4 py-2 text-[11px] uppercase tracking-widest text-lime hover:bg-lime/10"
               >
                 Fazer upgrade pra Pro →
               </Link>
               <Link
                 href="/tools"
-                className="mono rounded-lg border border-line-strong px-4 py-2 text-[11px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
+                className="label-tech rounded-lg border border-line-strong px-4 py-2 text-[11px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
               >
                 ← Voltar pras ferramentas
               </Link>
