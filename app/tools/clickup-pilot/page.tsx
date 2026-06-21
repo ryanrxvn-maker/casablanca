@@ -790,7 +790,7 @@ function ClickUpPilotInner() {
   const [statusFilter, setStatusFilterRaw] = useState(DEFAULT_EDIT_STATUSES.join(','));
 
   // Filtros de data + prioridade (client-side, aplicados depois de listTasks)
-  type DateFilter = 'all' | 'today' | 'yesterday' | 'overdue' | 'next7' | 'next30' | 'specific';
+  type DateFilter = 'all' | 'today' | 'tomorrow' | 'yesterday' | 'overdue' | 'next7' | 'specific';
   type PriorityFilter = 'all' | 'urgent' | 'high';
   const [dateFilter, setDateFilter] = useState<DateFilter>('all');
   const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('all');
@@ -6338,12 +6338,12 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                       </div>
                       <div className="flex flex-wrap gap-2">
                         {([
-                          { id: 'all' as const, label: 'Todos' },
-                          { id: 'today' as const, label: 'Hoje' },
+                          { id: 'all' as const, label: 'Todas' },
                           { id: 'yesterday' as const, label: 'Ontem' },
+                          { id: 'today' as const, label: 'Hoje' },
+                          { id: 'tomorrow' as const, label: 'Amanhã' },
                           { id: 'overdue' as const, label: 'Atrasadas' },
-                          { id: 'next7' as const, label: 'Próx 7d' },
-                          { id: 'next30' as const, label: 'Próx 30d' },
+                          { id: 'next7' as const, label: 'Próximos 7 dias' },
                           { id: 'specific' as const, label: 'Data específica' },
                         ]).map((f) => {
                           const active = dateFilter === f.id;
@@ -6452,8 +6452,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                       <div className="flex flex-wrap gap-2">
                         {([
                           { id: 'all' as const, label: 'Todas', dot: 'rgba(148,163,184,0.7)' },
-                          { id: 'urgent' as const, label: 'Urgent', dot: '#ef4444' },
-                          { id: 'high' as const, label: 'High', dot: '#f97316' },
+                          { id: 'urgent' as const, label: 'Urgente', dot: '#ef4444' },
+                          { id: 'high' as const, label: 'Alta', dot: '#f97316' },
                         ]).map((f) => {
                           const active = priorityFilter === f.id;
                           return (
@@ -6503,14 +6503,14 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                           const yesterday = today.getTime() - DAY;
                           if (dateFilter === 'today') {
                             if (due < today.getTime() || due >= tomorrow) return false;
+                          } else if (dateFilter === 'tomorrow') {
+                            if (due < tomorrow || due >= tomorrow + DAY) return false;
                           } else if (dateFilter === 'yesterday') {
                             if (due < yesterday || due >= today.getTime()) return false;
                           } else if (dateFilter === 'overdue') {
                             if (due >= today.getTime()) return false;
                           } else if (dateFilter === 'next7') {
                             if (due < now || due > now + 7 * DAY) return false;
-                          } else if (dateFilter === 'next30') {
-                            if (due < now || due > now + 30 * DAY) return false;
                           } else if (dateFilter === 'specific') {
                             // Sem data escolhida: não filtra (mostra tudo até user escolher)
                             if (!specificDate) return true;
