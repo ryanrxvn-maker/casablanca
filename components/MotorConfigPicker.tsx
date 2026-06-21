@@ -167,7 +167,7 @@ export function MotorConfigPicker({
 
           {config.kind === 'percent' ? (
             <div>
-              <div className="mono mb-1.5 text-[9px] uppercase tracking-widest text-text-muted">
+              <div className="label-tech mb-1.5 text-[9px] uppercase tracking-widest text-text-muted">
                 Distribuir por % (random por take · {takeCount} takes total):
               </div>
               <div className="space-y-2">

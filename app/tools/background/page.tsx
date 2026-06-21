@@ -333,7 +333,7 @@ export default function BackgroundTasksPage() {
                         <span className="mono rounded-md border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[10px] uppercase tracking-widest text-cyan-200">
                           {b.baseAdId}
                         </span>
-                        <span className={`mono rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-widest ${phaseColor(b.phase)}`}>
+                        <span className={`label-tech rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-widest ${phaseColor(b.phase)}`}>
                           {phaseLabel(b.phase)}
                         </span>
                         <span className="mono text-[10px] uppercase tracking-widest text-text-muted">
@@ -446,7 +446,7 @@ export default function BackgroundTasksPage() {
                         Remover
                       </button>
                       {cancelMap[b.taskId] ? (
-                        <span className="mono rounded-md border border-yellow-500/40 bg-yellow-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-yellow-200 text-center">
+                        <span className="label-tech rounded-md border border-yellow-500/40 bg-yellow-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-yellow-200 text-center">
                           cancel solicitado
                         </span>
                       ) : null}
@@ -483,7 +483,7 @@ export default function BackgroundTasksPage() {
                       <span className="mono rounded-md border border-lime/40 bg-lime/10 px-2 py-0.5 text-[10px] uppercase tracking-widest text-lime">
                         {j.adName}
                       </span>
-                      <span className={`mono rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-widest ${stColor}`}>
+                      <span className={`label-tech rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-widest ${stColor}`}>
                         {stLabel}
                       </span>
                       <span className="mono text-[10px] uppercase tracking-widest text-text-muted">

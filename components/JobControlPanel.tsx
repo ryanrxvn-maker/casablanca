@@ -151,7 +151,7 @@ export function JobControlPanel({
 
   return (
     <div className="rounded-[14px] border border-line-strong bg-bg-soft/30 p-3">
-      <div className="mono flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-text-muted">
+      <div className="label-tech flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-text-muted">
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
@@ -181,7 +181,7 @@ export function JobControlPanel({
         <div className="grid gap-3">
           {showHeygen && batchList.length > 0 ? (
             <div>
-              <div className="mono mb-1.5 text-[9px] uppercase tracking-widest text-cyan-200">
+              <div className="label-tech mb-1.5 text-[9px] uppercase tracking-widest text-cyan-200">
                 Hey Auto (lipsync) — {batchList.length}
               </div>
               <ul className="grid gap-1.5">
@@ -213,7 +213,7 @@ export function JobControlPanel({
 
           {showMag && magList.length > 0 ? (
             <div>
-              <div className="mono mb-1.5 text-[9px] uppercase tracking-widest text-lime">
+              <div className="label-tech mb-1.5 text-[9px] uppercase tracking-widest text-lime">
                 Magnific Auto B-Rolls — {magList.length} · fila serial 1/vez
               </div>
               <ul className="grid gap-1.5">

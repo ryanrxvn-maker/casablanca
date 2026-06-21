@@ -246,7 +246,7 @@ export function HeyGenVoicePicker({
                         }
                       >
                         <span>🎙 {v.name}</span>
-                        <span className="mono text-[9px]">
+                        <span className="label-tech text-[9px]">
                           {active ? 'OK' : 'usar'}
                         </span>
                       </button>

@@ -6249,7 +6249,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
               {errorAction ? (
                 <a
                   href={errorAction.href}
-                  className="mono shrink-0 rounded border border-lime/60 bg-lime/15 px-3 py-1 text-[10px] uppercase tracking-widest text-lime hover:bg-lime/25"
+                  className="label-tech shrink-0 rounded border border-lime/60 bg-lime/15 px-3 py-1 text-[10px] tracking-widest text-lime hover:bg-lime/25"
                 >
                   {errorAction.label} →
                 </a>
@@ -6814,7 +6814,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                   {/* Painel batch — tasks rodando ou completas */}
                   {Object.keys(batchStates).length > 0 ? (
                     <div className="mt-4 rounded-[18px] border border-fuchsia-500/25 bg-gradient-to-br from-fuchsia-500/[0.06] via-fuchsia-500/[0.02] to-transparent p-4 backdrop-blur-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_12px_36px_-18px_rgba(217,70,239,0.35)]">
-                      <div className="mono mb-3 flex items-center justify-between text-[10px] uppercase tracking-widest text-fuchsia-200">
+                      <div className="label-tech mb-3 flex items-center justify-between text-[10px] tracking-widest text-fuchsia-200">
                         <span className="inline-flex items-center gap-2">
                           <span className="relative flex h-2 w-2">
                             <span className="absolute inline-flex h-full w-full rounded-full bg-fuchsia-400 opacity-60 animate-ping" />
@@ -7457,7 +7457,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   </div>
                                   {/* Volume slider */}
                                   <div className="mt-2 flex items-center gap-2">
-                                    <span className="mono text-[9px] uppercase tracking-widest text-fuchsia-300/80 shrink-0">Volume</span>
+                                    <span className="label-tech text-[9px] tracking-widest text-fuchsia-300/80 shrink-0">Volume</span>
                                     <input
                                       type="range"
                                       min={5}
@@ -8118,7 +8118,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   {/* Depoimento opcional */}
                                   {a.vaBriefing.depoimentoText ? (
                                     <div className="rounded-[10px] border border-fuchsia-500/40 bg-fuchsia-500/5 p-2">
-                                      <div className="mono mb-1 text-[10px] uppercase tracking-widest text-fuchsia-200 flex items-center gap-2">
+                                      <div className="label-tech mb-1 text-[10px] tracking-widest text-fuchsia-200 flex items-center gap-2">
                                         <span>🎭 Depoimento com avatar</span>
                                         {a.vaBriefing.depoimentoUsername ? <span className="rounded border border-fuchsia-500/40 px-1.5 py-0.5">@{a.vaBriefing.depoimentoUsername}</span> : null}
                                       </div>

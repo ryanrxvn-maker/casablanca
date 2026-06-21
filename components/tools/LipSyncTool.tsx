@@ -531,7 +531,7 @@ export default function LipSyncTool() {
         <div className="rounded-[18px] border border-line/60 bg-bg-soft/30 p-3 space-y-2 max-h-[640px] overflow-y-auto">
           <div className="flex items-center justify-between mb-1 px-1">
             <span
-              className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
+              className="label-tech text-[10px] font-bold tracking-[0.18em] text-text-muted"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
               VÍDEOS
@@ -593,7 +593,7 @@ export default function LipSyncTool() {
           {/* Header */}
           <div>
             <div
-              className="mono text-[10px] font-bold uppercase tracking-[0.22em] text-fuchsia-300"
+              className="label-tech text-[10px] font-bold tracking-[0.22em] text-fuchsia-300"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
               SUA BOCA VAI FALAR
@@ -610,7 +610,7 @@ export default function LipSyncTool() {
           <div>
             <div className="mb-2 flex items-baseline justify-between gap-2">
               <label
-                className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
+                className="label-tech text-[10px] font-bold tracking-[0.18em] text-text-muted"
                 style={{ fontFamily: 'var(--font-tech)' }}
               >
                 Áudio
@@ -746,7 +746,7 @@ export default function LipSyncTool() {
             <button
               type="button"
               onClick={handleReset}
-              className="mono w-full text-[10px] uppercase tracking-[0.18em] text-text-muted hover:text-red-300 transition"
+              className="label-tech w-full text-[10px] tracking-[0.18em] text-text-muted hover:text-red-300 transition"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
               ↺ Limpar formulário
@@ -761,7 +761,7 @@ export default function LipSyncTool() {
           <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-2">
               <span
-                className="mono text-[11px] font-bold uppercase tracking-[0.2em] text-white"
+                className="label-tech text-[11px] font-bold tracking-[0.2em] text-white"
                 style={{ fontFamily: 'var(--font-tech)' }}
               >
                 MEUS LIPSYNCS
@@ -772,7 +772,7 @@ export default function LipSyncTool() {
               <button
                 type="button"
                 onClick={clearJobs}
-                className="mono text-[10px] uppercase tracking-[0.16em] text-text-muted hover:text-red-300 transition"
+                className="label-tech text-[10px] tracking-[0.16em] text-text-muted hover:text-red-300 transition"
                 style={{ fontFamily: 'var(--font-tech)' }}
               >
                 Limpar prontos
@@ -802,7 +802,7 @@ export default function LipSyncTool() {
       {/* TIPS rodape */}
       <div className="rounded-[12px] border border-dashed border-line-strong bg-bg-soft/15 px-4 py-3">
         <div
-          className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
+          className="label-tech text-[10px] font-bold tracking-[0.18em] text-text-muted"
           style={{ fontFamily: 'var(--font-tech)' }}
         >
           Pra sair perfeito
@@ -945,7 +945,7 @@ function PreviewStage({ selected, flash }: { selected: VideoItem | null; flash: 
           {flash && (
             <div className="pointer-events-none absolute inset-x-0 bottom-4 z-30 flex justify-center">
               <span
-                className="mono inline-flex items-center gap-2 rounded-full border border-lime/55 bg-black/70 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.16em] text-lime backdrop-blur-md"
+                className="label-tech inline-flex items-center gap-2 rounded-full border border-lime/55 bg-black/70 px-4 py-2 text-[11px] font-bold tracking-[0.16em] text-lime backdrop-blur-md"
                 style={{ fontFamily: 'var(--font-tech)', animation: 'flashUp 2.6s ease-out forwards' }}
               >
                 <span className="h-2 w-2 rounded-full bg-lime animate-pulse" />
@@ -991,7 +991,7 @@ function Toggle3D({
     <div className="flex items-center justify-between gap-3 rounded-[14px] border border-line/60 bg-bg/30 px-3.5 py-2.5">
       <div className="min-w-0">
         <div
-          className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted"
+          className="label-tech text-[10px] font-bold tracking-[0.18em] text-text-muted"
           style={{ fontFamily: 'var(--font-tech)' }}
         >
           {label}
@@ -1100,7 +1100,7 @@ function AudioMiniPlayer({
           <button
             type="button"
             onClick={onChange}
-            className="mono rounded-md border border-line-strong px-2 py-1 text-[9px] uppercase tracking-widest text-text-muted hover:text-fuchsia-300 hover:border-fuchsia-400/40"
+            className="label-tech rounded-md border border-line-strong px-2 py-1 text-[9px] tracking-widest text-text-muted hover:text-fuchsia-300 hover:border-fuchsia-400/40"
             style={{ fontFamily: 'var(--font-tech)' }}
           >
             Trocar

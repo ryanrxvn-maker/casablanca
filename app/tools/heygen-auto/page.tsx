@@ -2486,7 +2486,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                             <button
                               type="button"
                               onClick={cancelQueue}
-                              className="mono rounded-md border border-yellow-500/40 bg-yellow-500/10 px-2.5 py-1 text-[10px] uppercase tracking-widest text-yellow-300 transition hover:bg-yellow-500/20"
+                              className="label-tech rounded-md border border-yellow-500/40 bg-yellow-500/10 px-2.5 py-1 text-[10px] tracking-widest text-yellow-300 transition hover:bg-yellow-500/20"
                             >
                               ⏸ Pausar
                             </button>
@@ -2495,7 +2495,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                               type="button"
                               onClick={() => resumeQueueItem(item.id)}
                               disabled={queueRunning || !extStatus.connected}
-                              className="mono rounded-md border border-cyan-400/40 bg-cyan-400/10 px-2.5 py-1 text-[10px] uppercase tracking-widest text-cyan-300 transition hover:bg-cyan-400/20 disabled:opacity-40"
+                              className="label-tech rounded-md border border-cyan-400/40 bg-cyan-400/10 px-2.5 py-1 text-[10px] tracking-widest text-cyan-300 transition hover:bg-cyan-400/20 disabled:opacity-40"
                               title={item.videoIds?.length ? 'Retoma sem re-disparar (re-renderiza + baixa os mesmos vídeos)' : 'Roda esse AD agora'}
                             >
                               🔄 {item.videoIds?.length ? 'Retomar' : 'Rodar'}
@@ -2504,7 +2504,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                           <button
                             type="button"
                             onClick={() => setQueueDebugOpen((p) => ({ ...p, [item.id]: !p[item.id] }))}
-                            className="mono rounded-md border border-line-strong px-2.5 py-1 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-fuchsia-400 hover:text-fuchsia-300"
+                            className="label-tech rounded-md border border-line-strong px-2.5 py-1 text-[10px] tracking-widest text-text-muted transition hover:border-fuchsia-400 hover:text-fuchsia-300"
                           >
                             🐞 Debug
                           </button>
@@ -2514,7 +2514,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                             <button
                               type="button"
                               onClick={() => item.batchId && downloadQueueZip(item.batchId, 'montado')}
-                              className="mono rounded-md border border-lime/50 bg-lime/10 px-2.5 py-1 text-[10px] uppercase tracking-widest text-lime transition hover:bg-lime/20"
+                              className="label-tech rounded-md border border-lime/50 bg-lime/10 px-2.5 py-1 text-[10px] tracking-widest text-lime transition hover:bg-lime/20"
                               title={item.zips.montado}
                             >
                               ⬇ Montado
@@ -2524,7 +2524,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                             <button
                               type="button"
                               onClick={() => item.batchId && downloadQueueZip(item.batchId, 'takes')}
-                              className="mono rounded-md border border-line-strong px-2.5 py-1 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime"
+                              className="label-tech rounded-md border border-line-strong px-2.5 py-1 text-[10px] tracking-widest text-text-muted transition hover:border-lime hover:text-lime"
                               title={item.zips.takes}
                             >
                               ⬇ Takes
@@ -2534,7 +2534,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                             <button
                               type="button"
                               onClick={() => item.batchId && downloadQueueZip(item.batchId, 'camo')}
-                              className="mono rounded-md border border-fuchsia-500/40 px-2.5 py-1 text-[10px] uppercase tracking-widest text-fuchsia-300 transition hover:bg-fuchsia-500/10"
+                              className="label-tech rounded-md border border-fuchsia-500/40 px-2.5 py-1 text-[10px] tracking-widest text-fuchsia-300 transition hover:bg-fuchsia-500/10"
                               title={item.zips.camo}
                             >
                               ⬇ Camuflado

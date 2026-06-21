@@ -123,7 +123,7 @@ export function EditPartModal({
 
         {/* Script editor */}
         <div>
-          <div className="mono mb-1.5 flex items-center justify-between text-[9px] uppercase tracking-widest text-text-muted">
+          <div className="label-tech mb-1.5 flex items-center justify-between text-[9px] uppercase tracking-widest text-text-muted">
             <span>Script</span>
             <span className="text-text-muted/60">{text.length} chars</span>
           </div>

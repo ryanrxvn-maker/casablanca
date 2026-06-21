@@ -332,7 +332,7 @@ export default function RemoverLegendaTool() {
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 md:px-8 space-y-7">
       <header className="pt-2">
-        <div className="mono text-[10px] font-bold uppercase tracking-[0.22em] text-fuchsia-300" style={{ fontFamily: 'var(--font-tech)' }}>
+        <div className="label-tech text-[10px] font-bold tracking-[0.22em] text-fuchsia-300">
           VÍDEO LIMPO · IA SMART · NUVEM · QUALQUER TAMANHO
         </div>
         <h1 className="mt-1 text-[28px] md:text-[34px] font-extrabold tracking-tight text-white" style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}>
@@ -348,7 +348,7 @@ export default function RemoverLegendaTool() {
         {/* BIBLIOTECA */}
         <div className="rounded-[18px] border border-line/60 bg-bg-soft/30 p-3 space-y-2 max-h-[640px] overflow-y-auto">
           <div className="flex items-center justify-between mb-1 px-1">
-            <span className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted" style={{ fontFamily: 'var(--font-tech)' }}>VÍDEOS</span>
+            <span className="label-tech text-[10px] font-bold tracking-[0.18em] text-text-muted">VÍDEOS</span>
             {videos.length > 0 && <span className="mono text-[10px] text-text-dim">{videos.length}</span>}
           </div>
           <button
@@ -399,7 +399,7 @@ export default function RemoverLegendaTool() {
         {/* PAINEL */}
         <aside className="rounded-[18px] border border-line/60 bg-bg-soft/30 p-4 md:p-5 space-y-5">
           <div>
-            <div className="mono text-[10px] font-bold uppercase tracking-[0.22em] text-fuchsia-300" style={{ fontFamily: 'var(--font-tech)' }}>MODO AUTOMÁTICO</div>
+            <div className="label-tech text-[10px] font-bold tracking-[0.22em] text-fuchsia-300">MODO AUTOMÁTICO</div>
             <h2 className="mt-1 text-[20px] font-extrabold tracking-tight text-white" style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}>Smart Remover</h2>
             <p className="mt-2 text-[11.5px] leading-snug text-text-muted">Detecta a legenda/marca automaticamente e reconstrói o fundo. Sai um MP4 limpo pra usar.</p>
           </div>
@@ -431,8 +431,7 @@ export default function RemoverLegendaTool() {
             <button
               type="button"
               onClick={() => { videos.forEach((v) => URL.revokeObjectURL(v.url)); setVideos([]); setSelectedId(''); setFormError(''); }}
-              className="mono w-full text-[10px] uppercase tracking-[0.18em] text-text-muted hover:text-red-300 transition"
-              style={{ fontFamily: 'var(--font-tech)' }}
+              className="label-tech w-full text-[10px] tracking-[0.18em] text-text-muted hover:text-red-300 transition"
             >↺ Limpar</button>
           )}
         </aside>
@@ -442,11 +441,11 @@ export default function RemoverLegendaTool() {
         <section className="space-y-3">
           <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-2">
-              <span className="mono text-[11px] font-bold uppercase tracking-[0.2em] text-white" style={{ fontFamily: 'var(--font-tech)' }}>VÍDEOS LIMPOS</span>
+              <span className="label-tech text-[11px] font-bold tracking-[0.2em] text-white">VÍDEOS LIMPOS</span>
               <span className="mono text-[10px] text-text-dim">{jobs.length}</span>
             </div>
             {jobs.some((j) => !isActive(j.stage)) && (
-              <button type="button" onClick={clearDoneJobs} className="mono text-[10px] uppercase tracking-[0.16em] text-text-muted hover:text-red-300 transition" style={{ fontFamily: 'var(--font-tech)' }}>Limpar prontos</button>
+              <button type="button" onClick={clearDoneJobs} className="label-tech text-[10px] tracking-[0.16em] text-text-muted hover:text-red-300 transition">Limpar prontos</button>
             )}
           </div>
           <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
@@ -456,7 +455,7 @@ export default function RemoverLegendaTool() {
       )}
 
       <div className="rounded-[12px] border border-dashed border-line-strong bg-bg-soft/15 px-4 py-3">
-        <div className="mono text-[10px] font-bold uppercase tracking-[0.18em] text-text-muted" style={{ fontFamily: 'var(--font-tech)' }}>Pra sair perfeito</div>
+        <div className="label-tech text-[10px] font-bold tracking-[0.18em] text-text-muted">Pra sair perfeito</div>
         <ul className="mt-2 grid gap-1 text-[11.5px] text-text-muted md:grid-cols-2">
           <li>· Legenda/marca em posição fixa limpa melhor.</li>
           <li>· 720p ou mais pra reconstrução nítida.</li>
@@ -472,7 +471,7 @@ export default function RemoverLegendaTool() {
         <div className="pointer-events-none fixed inset-0 z-[110] flex items-center justify-center bg-fuchsia-500/10 backdrop-blur-[2px]">
           <div className="rounded-[20px] border-2 border-dashed border-fuchsia-400/70 bg-black/65 px-10 py-7 text-center">
             <div className="text-[44px] leading-none">⬇</div>
-            <div className="mono mt-2 text-[13px] font-bold uppercase tracking-[0.2em] text-white" style={{ fontFamily: 'var(--font-tech)' }}>Solta o vídeo pra subir</div>
+            <div className="label-tech mt-2 text-[13px] font-bold tracking-[0.2em] text-white">Solta o vídeo pra subir</div>
             <div className="mono mt-1 text-[10px] text-white/60">MP4, MOV, WEBM… até 300MB</div>
           </div>
         </div>
@@ -486,7 +485,7 @@ export default function RemoverLegendaTool() {
         >
           <div onClick={(e) => e.stopPropagation()} className="flex flex-col items-center gap-2.5">
             <div className="flex items-center justify-between gap-4" style={{ width: 'min(92vw, 41vh)' }}>
-              <span className="mono text-[12px] font-bold uppercase tracking-[0.18em] text-white" style={{ fontFamily: 'var(--font-tech)' }}>
+              <span className="label-tech text-[12px] font-bold tracking-[0.18em] text-white">
                 {compareJob.label} · antes / depois
               </span>
               <button type="button" onClick={() => setCompareJob(null)} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/20 bg-black/60 text-white transition hover:bg-white/10">✕</button>
@@ -498,8 +497,8 @@ export default function RemoverLegendaTool() {
             <a
               href={`/api/tools/remove-subtitle/download?record_id=${encodeURIComponent(compareJob.recordId)}&mode=smart&dl=1`}
               download="video_limpo.mp4"
-              className="mono rounded-[12px] border border-lime/50 bg-lime/15 px-4 py-3 text-center text-[12px] font-bold uppercase tracking-widest text-lime transition hover:bg-lime/25"
-              style={{ width: 'min(92vw, 41vh)', fontFamily: 'var(--font-tech)' }}
+              className="label-tech rounded-[12px] border border-lime/50 bg-lime/15 px-4 py-3 text-center text-[12px] font-bold tracking-widest text-lime transition hover:bg-lime/25"
+              style={{ width: 'min(92vw, 41vh)' }}
             >↓ Baixar MP4 limpo</a>
             <p className="mono text-center text-[10px] text-white/55">Arraste o divisor ⇆ pra comparar · preview sem áudio</p>
           </div>
@@ -581,7 +580,7 @@ function JobCard({ job, total, onCompare }: { job: Job; total: number; onCompare
             title="Ver comparação antes/depois em tela grande"
           >
             <video src={previewUrl} muted loop playsInline preload="metadata" className="aspect-[3/4] w-full object-contain" />
-            <span className="mono absolute left-1.5 top-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[8px] uppercase tracking-widest text-lime">Limpo ✓</span>
+            <span className="label-tech absolute left-1.5 top-1.5 rounded bg-black/70 px-1.5 py-0.5 text-[8px] tracking-widest text-lime">Limpo ✓</span>
             <span className="absolute inset-0 flex items-center justify-center bg-black/35 opacity-0 transition group-hover:opacity-100">
               <span className="mono inline-flex items-center gap-1.5 rounded-full bg-white/95 px-3 py-1.5 text-[11px] font-bold text-black">⤢ Comparar antes/depois</span>
             </span>
@@ -590,14 +589,12 @@ function JobCard({ job, total, onCompare }: { job: Job; total: number; onCompare
             <button
               type="button"
               onClick={onCompare}
-              className="mono rounded-[10px] border border-white/15 bg-white/5 px-3 py-2 text-center text-[11px] font-bold uppercase tracking-widest text-white/85 transition hover:bg-white/10"
-              style={{ fontFamily: 'var(--font-tech)' }}
+              className="label-tech rounded-[10px] border border-white/15 bg-white/5 px-3 py-2 text-center text-[11px] font-bold tracking-widest text-white/85 transition hover:bg-white/10"
             >⤢ Comparar</button>
             <a
               href={dlUrl}
               download="video_limpo.mp4"
-              className="mono rounded-[10px] border border-lime/40 bg-lime/10 px-3 py-2 text-center text-[11px] font-bold uppercase tracking-widest text-lime transition hover:bg-lime/20"
-              style={{ fontFamily: 'var(--font-tech)' }}
+              className="label-tech rounded-[10px] border border-lime/40 bg-lime/10 px-3 py-2 text-center text-[11px] font-bold tracking-widest text-lime transition hover:bg-lime/20"
             >↓ Baixar</a>
           </div>
         </div>
@@ -667,8 +664,8 @@ function BeforeAfter({ beforeUrl, afterUrl }: { beforeUrl: string; afterUrl: str
         className="pointer-events-none absolute inset-0 h-full w-full object-contain"
         style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }}
       />
-      <span className="mono pointer-events-none absolute left-2 top-2 rounded-full border border-white/15 bg-black/55 px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest text-white/85 backdrop-blur-md">Antes</span>
-      <span className="mono pointer-events-none absolute right-2 top-2 rounded-full border border-lime/30 bg-black/55 px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest text-lime backdrop-blur-md">Depois ✓</span>
+      <span className="label-tech pointer-events-none absolute left-2 top-2 rounded-full border border-white/15 bg-black/55 px-2.5 py-1 text-[10px] font-bold tracking-widest text-white/85 backdrop-blur-md">Antes</span>
+      <span className="label-tech pointer-events-none absolute right-2 top-2 rounded-full border border-lime/30 bg-black/55 px-2.5 py-1 text-[10px] font-bold tracking-widest text-lime backdrop-blur-md">Depois ✓</span>
       {/* divisor */}
       <div className="pointer-events-none absolute inset-y-0 z-20" style={{ left: `${pos}%` }}>
         <div className="absolute inset-y-0 left-0 w-[2px] -translate-x-1/2 bg-white/90 shadow-[0_0_10px_rgba(0,0,0,0.6)]" />

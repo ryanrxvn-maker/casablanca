@@ -189,7 +189,7 @@ export function VoiceCloneTrigger({
           <div className="space-y-3 p-3">
             {/* Modelo */}
             <div>
-              <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">Modelo</div>
+              <div className="label-tech mb-1 text-[9px] uppercase tracking-widest text-text-muted">Modelo</div>
               <div className="grid grid-cols-3 gap-1">
                 {(['V3', 'V2', 'multilingual'] as const).map((m) => (
                   <button
@@ -216,7 +216,7 @@ export function VoiceCloneTrigger({
 
             {/* Lingua */}
             <div>
-              <div className="mono mb-1 text-[9px] uppercase tracking-widest text-text-muted">Lingua do audio</div>
+              <div className="label-tech mb-1 text-[9px] uppercase tracking-widest text-text-muted">Lingua do audio</div>
               <div className="grid grid-cols-4 gap-1">
                 {(['pt', 'en', 'es', 'auto'] as const).map((l) => (
                   <button
@@ -287,7 +287,7 @@ export function VoiceCloneTrigger({
             <button
               type="button"
               onClick={pickFile}
-              className="w-full mono rounded border border-fuchsia-500/60 bg-fuchsia-500/20 px-3 py-2 text-[11px] uppercase tracking-widest text-fuchsia-100 hover:bg-fuchsia-500/30"
+              className="w-full label-tech rounded border border-fuchsia-500/60 bg-fuchsia-500/20 px-3 py-2 text-[11px] uppercase tracking-widest text-fuchsia-100 hover:bg-fuchsia-500/30"
             >
               Selecionar audio / video →
             </button>
