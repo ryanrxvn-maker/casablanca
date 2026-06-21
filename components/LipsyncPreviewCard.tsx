@@ -28,6 +28,7 @@ export function LipsyncPreviewCard({
   percent = 0,
   fileBase = 'take',
   onEdit,
+  onRetry,
   isRegenerating = false,
 }: {
   take: LipsyncTake;
@@ -39,6 +40,8 @@ export function LipsyncPreviewCard({
   fileBase?: string;
   /** Se fornecido, mostra botao EDIT no card pronto. Usa pra re-gerar so essa parte com novo script/voz. */
   onEdit?: () => void;
+  /** Se fornecido e o card FALHOU, mostra "Tentar de novo" (re-roda o mesmo disparo). */
+  onRetry?: () => void;
   /** Marca esse card como "re-gerando agora" — overlay shimmer + bloqueia clicks. */
   isRegenerating?: boolean;
 }) {
@@ -216,6 +219,15 @@ export function LipsyncPreviewCard({
             <span className="text-3xl">⚠</span>
             <span className="label-tech text-[10px] font-bold uppercase tracking-widest text-red-300">Falha</span>
             <p className="line-clamp-3 text-[10px] leading-relaxed text-red-300/80">{take.error || 'erro na renderização'}</p>
+            {onRetry ? (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="label-tech mt-1 rounded-full border border-violet/55 bg-violet/15 px-3 py-1 text-[9px] uppercase tracking-widest text-violet-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition-all hover:-translate-y-[1px] hover:border-violet/75 hover:bg-violet/25 active:scale-95"
+              >
+                ↻ Tentar de novo
+              </button>
+            ) : null}
           </div>
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gradient-to-br from-violet/[0.08] via-bg-soft to-bg">

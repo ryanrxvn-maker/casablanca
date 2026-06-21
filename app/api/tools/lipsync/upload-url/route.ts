@@ -22,6 +22,40 @@ export const maxDuration = 30;
 // Next.js NÃO permite export arbitrário em route.ts (só GET/POST/config).
 const BUCKET = 'lipsync-uploads';
 
+/**
+ * Higiene de quota: remove objetos ANTIGOS (>2h) do usuário no bucket — tanto
+ * inputs (rosto/áudio, já baixados pro server e consumidos) quanto outputs (MP4
+ * que o cliente baixa em segundos). Um job inteiro dura minutos, então tudo com
+ * mais de 2h é órfão e deletar é SEGURO — e impede o bucket de encher (quota
+ * free ~1GB) e voltar a travar uploads. Best-effort: nunca quebra o request.
+ */
+async function cleanupOldUserObjects(
+  sb: ReturnType<typeof serviceClient>,
+  userId: string,
+): Promise<void> {
+  const MAX_AGE_MS = 2 * 60 * 60 * 1000;
+  const now = Date.now();
+  const isOld = (createdAt?: string | null): boolean => {
+    if (!createdAt) return false;
+    const t = new Date(createdAt).getTime();
+    return Number.isFinite(t) && now - t > MAX_AGE_MS;
+  };
+  for (const prefix of [userId, `outputs/${userId}`]) {
+    try {
+      const { data } = await sb.storage
+        .from(BUCKET)
+        .list(prefix, { limit: 1000, sortBy: { column: 'created_at', order: 'asc' } });
+      if (!Array.isArray(data)) continue;
+      const stale = data
+        .filter((o) => o?.name && isOld((o as { created_at?: string }).created_at))
+        .map((o) => `${prefix}/${o.name}`);
+      if (stale.length) await sb.storage.from(BUCKET).remove(stale);
+    } catch {
+      /* best-effort — higiene nunca derruba o upload */
+    }
+  }
+}
+
 export async function POST(req: Request) {
   const guard = await requireToolAccess('/tools/lipsync', 'pro');
   if (!guard.ok) return guard.response;
@@ -69,6 +103,13 @@ export async function POST(req: Request) {
       { error: 'Falha ao preparar o storage.', detail: e instanceof Error ? e.message : String(e) },
       { status: 502 },
     );
+  }
+
+  // Higiene de storage — 1x por job (só no upload do vídeo, que sobe uma vez):
+  // limpa órfãos >2h pra o bucket nunca encher e travar uploads. Não bloqueia
+  // o áudio (que sobe N vezes nos chunks).
+  if (kind === 'video') {
+    await cleanupOldUserObjects(sb, guard.userId);
   }
 
   const path = `${guard.userId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${kind}.${ext}`;

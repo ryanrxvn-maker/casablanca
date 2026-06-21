@@ -232,6 +232,11 @@ export default function LipSyncTool() {
   const videoInputRef = useRef<HTMLInputElement | null>(null);
   const audioInputRef = useRef<HTMLInputElement | null>(null);
   const jobSeqRef = useRef<number>(0);
+  /** Inputs capturados por job (id → arquivos+config) — permite RE-RODAR o
+   *  mesmo disparo: auto-retry transparente + botão "Tentar de novo" no card. */
+  const jobInputsRef = useRef<
+    Map<string, { faceFile: File; audioSrc: File; audioMs: number; cleanOn: boolean }>
+  >(new Map());
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selected = videos.find((v) => v.id === selectedId) ?? null;
@@ -416,7 +421,9 @@ export default function LipSyncTool() {
    * etapa de ffmpeg passa pela fila interna (withFFLock). SEM pós-produção:
    * o que sai do motor já é o resultado final (mais rápido + nada pra travar).
    */
-  async function runJob(id: string, faceFile: File, audioSrc: File, audioMs: number, cleanOn: boolean) {
+  async function runJob(
+    id: string, faceFile: File, audioSrc: File, audioMs: number, cleanOn: boolean, attempt = 1,
+  ) {
     try {
       const {
         prepareFaceVideo, cleanAudioMp3, splitAudioChunks, concatLipVideos,
@@ -473,8 +480,26 @@ export default function LipSyncTool() {
 
       patchJob(id, { status: 'done', percent: 100, videoUrl: URL.createObjectURL(finalBlob) });
     } catch (err) {
+      // AUTO-RETRY 1x se a falha foi TRANSITÓRIA (rede/upload/storage) e mesmo
+      // assim furou todas as tentativas internas — o card volta pra "na fila" e
+      // refaz sozinho. Falha não-transitória (ex.: input inválido) mostra erro
+      // na hora (com botão "Tentar de novo" pro usuário).
+      if (attempt < 2 && isNetworkError(err)) {
+        patchJob(id, { status: 'queued', percent: 6, floor: 6, error: null });
+        await new Promise((r) => setTimeout(r, 1500));
+        return runJob(id, faceFile, audioSrc, audioMs, cleanOn, attempt + 1);
+      }
       patchJob(id, { status: 'error', error: errMsg(err) || 'Algo deu errado.' });
     }
+  }
+
+  /** Re-roda um disparo que falhou, com os MESMOS inputs capturados (botão no
+   *  card de falha). Garante recuperação em 1 clique pra qualquer erro. */
+  function retryJob(id: string) {
+    const inp = jobInputsRef.current.get(id);
+    if (!inp) return;
+    patchJob(id, { status: 'queued', percent: 6, floor: 6, error: null, videoUrl: null });
+    void runJob(id, inp.faceFile, inp.audioSrc, inp.audioMs, inp.cleanOn);
   }
 
   /** Dispara — NÃO bloqueia: cria o card, libera o form, roda em background. */
@@ -528,6 +553,9 @@ export default function LipSyncTool() {
     if (flashTimer.current) clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => setFlash(false), 2600);
 
+    // Guarda os inputs pra permitir re-rodar (auto-retry + botão no card).
+    jobInputsRef.current.set(id, { faceFile, audioSrc, audioMs: ms, cleanOn: doClean });
+
     // Roda em background — sem await: a UI segue livre.
     void runJob(id, faceFile, audioSrc, ms, doClean);
   }
@@ -536,7 +564,10 @@ export default function LipSyncTool() {
   function clearJobs() {
     setJobs((prev) => {
       prev.forEach((j) => {
-        if (!isActive(j.status) && j.videoUrl) URL.revokeObjectURL(j.videoUrl);
+        if (!isActive(j.status)) {
+          if (j.videoUrl) URL.revokeObjectURL(j.videoUrl);
+          jobInputsRef.current.delete(j.id); // libera os File refs do job removido
+        }
       });
       return prev.filter((j) => isActive(j.status));
     });
@@ -869,6 +900,7 @@ export default function LipSyncTool() {
                 total={totalNum}
                 percent={job.percent}
                 fileBase="lipsync"
+                onRetry={job.status === 'error' ? () => retryJob(job.id) : undefined}
               />
             ))}
           </div>
