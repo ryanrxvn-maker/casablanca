@@ -36,13 +36,36 @@ export const maxDuration = 300;
 const OUTPUT_BUCKET = 'lipsync-uploads';
 
 /**
+ * Re-tenta uma leitura idempotente (GET) com backoff. NÃO re-tenta URL
+ * bloqueada por SSRF (erro definitivo). Garante que um blip de rede no
+ * server→Supabase / server→motor não derrube uma geração inteira.
+ */
+async function withRetryServer<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
+  let last: unknown;
+  for (let i = 1; i <= tries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      last = e;
+      if (e instanceof SsrfError) throw e;
+      if (i >= tries) break;
+      await new Promise((r) => setTimeout(r, 500 * i));
+    }
+  }
+  throw last;
+}
+
+/**
  * Re-hospeda o MP4 do motor no Supabase: o cliente NUNCA vê a URL de
  * origem (privacidade do motor), libera CORS pro pós-processamento
  * client-side, e dá uma URL estável (sem expiração de assinatura).
  */
 async function rehostOutput(srcUrl: string, userId: string, workId: string): Promise<string> {
-  const r = await fetch(srcUrl, { cache: 'no-store' });
-  if (!r.ok) throw new Error(`download do MP4 falhou (${r.status})`);
+  const r = await withRetryServer(async () => {
+    const rr = await fetch(srcUrl, { cache: 'no-store' });
+    if (!rr.ok) throw new Error(`download do MP4 falhou (${rr.status})`);
+    return rr;
+  });
   const buf = Buffer.from(await r.arrayBuffer());
   const sb = serviceClient();
   await sb.storage.createBucket(OUTPUT_BUCKET, { public: true }).catch(() => {});
@@ -83,8 +106,14 @@ async function download(
   let res: Response;
   try {
     // safeFetch: valida a URL do usuário e cada redirect contra destinos
-    // internos (anti-SSRF) antes de baixar.
-    res = await safeFetch(url, { cache: 'no-store' });
+    // internos (anti-SSRF) antes de baixar. Re-tenta blip de rede / 5xx
+    // (o storage acabou de receber o upload — às vezes leva 1 retry pra
+    // ficar consistente/disponível).
+    res = await withRetryServer(async () => {
+      const rr = await safeFetch(url, { cache: 'no-store' });
+      if (!rr.ok && rr.status >= 500) throw new Error(`HTTP ${rr.status}`);
+      return rr;
+    });
   } catch (e) {
     if (e instanceof SsrfError) throw new Error(`URL do ${label} não permitida.`);
     throw new Error(`Falha ao baixar o ${label} (${e instanceof Error ? e.message : 'rede'}).`);

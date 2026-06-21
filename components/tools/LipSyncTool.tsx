@@ -75,6 +75,58 @@ function errMsg(e: unknown): string {
   return String(e);
 }
 
+/** true = erro de REDE (fetch rejeitou / conexão caiu), seguro pra re-tentar. */
+function isNetworkError(e: unknown): boolean {
+  const m = errMsg(e).toLowerCase();
+  return (
+    m.includes('failed to fetch') ||
+    m.includes('networkerror') ||
+    m.includes('network error') ||
+    m.includes('load failed') ||         // Safari
+    m.includes('connection') ||
+    m.includes('timed out') ||
+    m.includes('timeout') ||
+    m.includes('econnreset') ||
+    m.includes('fetch failed')
+  );
+}
+
+/**
+ * Re-tenta uma operação com backoff exponencial + jitter. É o que GARANTE o
+ * upload: as falhas em produção ("Failed to fetch" / "Falha no upload pro
+ * storage") são blips de rede no caminho browser→Vercel e browser→Supabase —
+ * uma 2ª/3ª tentativa quase sempre passa. Cada tentativa re-executa `fn` do
+ * zero (ex.: pega uma signed URL nova), então é seguro pra uploads.
+ */
+async function withRetry<T>(
+  fn: (attempt: number) => Promise<T>,
+  opts: { tries?: number; baseDelayMs?: number; onRetry?: (attempt: number, err: unknown) => void } = {},
+): Promise<T> {
+  const tries = opts.tries ?? 4;
+  const base = opts.baseDelayMs ?? 700;
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    try {
+      return await fn(attempt);
+    } catch (e) {
+      lastErr = e;
+      if (attempt >= tries) break;
+      opts.onRetry?.(attempt, e);
+      const delay = Math.min(8000, base * 2 ** (attempt - 1)) + Math.random() * 400;
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw lastErr;
+}
+
+/**
+ * Teto rígido de upload (Supabase Storage corta ~50MB). A pré-produção já
+ * comprime rosto/áudio bem abaixo disso; este guard só dispara se o ffmpeg
+ * falhou e sobrou um arquivo cru gigante — aí damos um erro CLARO em vez de
+ * um 413 silencioso que vira "Falha no upload" sem explicação.
+ */
+const UPLOAD_HARD_MAX = 49 * 1024 * 1024;
+
 /**
  * LipSyncTool — UI de geração de lipsync.
  *
@@ -275,27 +327,39 @@ export default function LipSyncTool() {
      pública que o servidor baixa pra gerar. A Vercel corta corpos
      > ~4,5MB; subindo direto o arquivo nunca toca a Vercel. */
   async function uploadPublic(file: File, kind: 'video' | 'audio'): Promise<string> {
-    const ext = (file.name.split('.').pop() || (kind === 'audio' ? 'mp3' : 'mp4')).toLowerCase();
-    const r = await fetch('/api/tools/lipsync/upload-url', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kind, ext }),
-    });
-    const d = await r.json();
-    if (!r.ok) throw new Error(d?.error || `Falha ao iniciar upload (HTTP ${r.status})`);
-    const supabase = createClient();
-    let upErr: unknown = null;
-    try {
-      const { error } = await supabase.storage
-        .from(UPLOAD_BUCKET)
-        .uploadToSignedUrl(d.path, d.token, file);
-      upErr = error;
-    } catch (e) {
-      upErr = e;
+    // Guard de tamanho — nunca tenta subir algo que o storage vai recusar (413).
+    if (file.size > UPLOAD_HARD_MAX) {
+      throw new Error(
+        `O ${kind === 'audio' ? 'áudio' : 'vídeo'} ficou grande demais pro upload ` +
+          `(${(file.size / 1048576).toFixed(0)}MB). ` +
+          (kind === 'audio'
+            ? 'Tenta de novo com o "limpar áudio" ligado (reduz o tamanho).'
+            : 'Usa um vídeo de rosto mais curto/leve.'),
+      );
     }
-    if (upErr) throw new Error('Falha no upload pro storage: ' + errMsg(upErr));
-    if (!d.publicUrl || typeof d.publicUrl !== 'string') throw new Error('Upload não retornou URL.');
-    return d.publicUrl as string;
+    const ext = (file.name.split('.').pop() || (kind === 'audio' ? 'mp3' : 'mp4')).toLowerCase();
+    // Re-tenta TODO o ciclo (signed URL NOVA a cada tentativa + PUT). Os blips
+    // de rede browser→Vercel e browser→Supabase somem na 2ª/3ª tentativa.
+    try {
+      return await withRetry(async () => {
+        const r = await fetch('/api/tools/lipsync/upload-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kind, ext }),
+        });
+        const d = await r.json().catch(() => null);
+        if (!r.ok) throw new Error(d?.error || `Falha ao iniciar upload (HTTP ${r.status})`);
+        const supabase = createClient();
+        const { error } = await supabase.storage
+          .from(UPLOAD_BUCKET)
+          .uploadToSignedUrl(d.path, d.token, file);
+        if (error) throw error;
+        if (!d.publicUrl || typeof d.publicUrl !== 'string') throw new Error('Upload não retornou URL.');
+        return d.publicUrl as string;
+      }, { tries: 4 });
+    } catch (e) {
+      throw new Error('Falha no upload pro storage: ' + errMsg(e));
+    }
   }
 
   /** Uma geração (rosto + 1 trecho de áudio): sobe → gera → baixa. SEM
@@ -304,21 +368,33 @@ export default function LipSyncTool() {
     faceUrl: string, audioChunk: File, chunkMs: number, label?: string,
   ): Promise<Blob> {
     const aUrl = await uploadPublic(audioChunk, 'audio');
-    const res = await fetch('/api/tools/lipsync', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ video_url: faceUrl, audio_url: aUrl, audio_ms: chunkMs }),
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok || !data?.output_video_url) {
+    // O POST de geração só re-tenta em erro de REDE (o fetch nem chegou no
+    // servidor) — assim um blip não dispara 2 renders no motor. Uma RESPOSTA
+    // HTTP (mesmo de erro) encerra o retry e cai na checagem abaixo.
+    type GenData = { output_video_url?: string; error?: unknown } | null;
+    const { status, ok, data } = await withRetry(async () => {
+      const res = await fetch('/api/tools/lipsync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ video_url: faceUrl, audio_url: aUrl, audio_ms: chunkMs }),
+      });
+      const json = (await res.json().catch(() => null)) as GenData;
+      return { status: res.status, ok: res.ok, data: json };
+    }, { tries: 3, baseDelayMs: 1200 });
+
+    if (!ok || !data?.output_video_url) {
       throw new Error(
         (data && (typeof data.error === 'string' ? data.error : data.error ? errMsg(data.error) : null)) ||
-          (label ? `Falha ao gerar ${label}.` : `O servidor respondeu erro ${res.status}.`),
+          (label ? `Falha ao gerar ${label}.` : `O servidor respondeu erro ${status}.`),
       );
     }
-    const r = await fetch(data.output_video_url);
-    if (!r.ok) throw new Error(`Falha ao baixar o resultado${label ? ` (${label})` : ''}.`);
-    return r.blob();
+    // Download do resultado é idempotente → re-tenta à vontade.
+    const outUrl = data.output_video_url;
+    return withRetry(async () => {
+      const r = await fetch(outUrl);
+      if (!r.ok) throw new Error(`Falha ao baixar o resultado${label ? ` (${label})` : ''} (HTTP ${r.status}).`);
+      return r.blob();
+    }, { tries: 4 });
   }
 
   /* ─── Jobs ───────────────────────────────────────────────────── */
