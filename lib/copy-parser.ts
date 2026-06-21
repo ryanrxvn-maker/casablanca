@@ -498,7 +498,7 @@ export function parseAvatars(section: string, links: DocLink[] = []): ParsedAvat
         // ClickUp truncated chips ficam "(17 dias...)..." — sem o strip do
         // "..." primeiro, a regex de parens nao detecta o trailing block.
         const username = raw
-          .replace(/^📎\s*/, '')
+          .replace(MEDIA_CHIP_LEAD_RE, '')    // strip 📎/🎥/📹/🎬/▶️ lead (não só 📎)
           .replace(/^@/, '')
           .replace(/\.(mp4|mov)\b.*$/i, '')   // tudo depois de .mp4 vai junto
           .replace(/\s*\.{2,}\s*$/g, '')      // "..." trailing primeiro

@@ -1187,6 +1187,10 @@ function ClickUpPilotInner() {
     if (uNoTrailDigits.length >= 4) {
       for (const link of links) {
         const t = normalizeForMatch(link.text).replace(/\d+$/, '');
+        // GUARD: link 100% numerico (talking-photo "7508...mp4") vira "" aqui;
+        // sem isto, `uNoTrailDigits.includes("")` casava QUALQUER username e
+        // retornava o fileId errado (bug da thumb do depoimento no avatar YT).
+        if (t.length < 4) continue;
         if (t === uNoTrailDigits || t.includes(uNoTrailDigits) || uNoTrailDigits.includes(t)) {
           return link.fileId;
         }
@@ -1662,6 +1666,9 @@ function ClickUpPilotInner() {
           // 3.5. Resolve Drive file IDs pros avatares (pra visual match futuro).
           // Preserva o videoFileId/youtubeUrl que o parser ja resolveu por link.
           for (const av of briefing.avatars) {
+            // Avatar de YouTube NAO tem arquivo no Drive — o username e o video
+            // ID e casaria links numericos por acaso (thumb errada). Pula.
+            if (av.youtubeUrl) continue;
             av.videoFileId = av.videoFileId || resolveVideoFileId(av.username, docR.driveLinks);
           }
           // 4. Monta roleSlots — UM por avatar do briefing, mesmo se sem match

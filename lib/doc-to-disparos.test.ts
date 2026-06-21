@@ -783,6 +783,11 @@ assert(depoAv.length === 1, `depoimento → 1 avatar (got ${depoAv.length})`);
 assert(depoAv[0]?.username === '7508150707225251077', `depoimento username = talking-photo id (got ${depoAv[0]?.username})`);
 assert(/depoimento/i.test(depoAv[0]?.role || ''), `role contém "depoimento" (got ${depoAv[0]?.role})`);
 
+// (a2) com emoji de vídeo 🎥 (não só 📎) — username tem que sair LIMPO, sem o
+// emoji grudado (senão "@🎥 7508..." e a thumb/match quebram).
+const depoEmoji = parseAvatars('Depoimento com avatar: 🎥 7508150707225251077.mp4', []);
+assert(depoEmoji.length === 1 && depoEmoji[0]?.username === '7508150707225251077', `depoimento 🎥 → username limpo (got ${depoEmoji[0]?.username})`);
+
 // (b) NEGATIVO: "Depoimento:" seguido só de texto NÃO vira avatar
 const depoText = parseAvatars('Depoimento:\nMinha mãe melhorou muito com esse ritual incrível.', []);
 assert(depoText.length === 0, 'depoimento só com texto NÃO vira avatar');
