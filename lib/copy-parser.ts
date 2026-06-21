@@ -16,13 +16,26 @@
 export type ParsedAvatar = {
   /** "Doutor", "Mulher", etc. */
   role: string;
-  /** "renatomartins1" (sem @ e sem .mp4) */
+  /** "renatomartins1" (sem @ e sem .mp4). Pra avatar referenciado por link de
+   *  YouTube, e o video ID (mesma convencao do parser VA). */
   username: string;
   /** linha completa pra debug */
   raw: string;
-  /** Drive file ID do video referenciado (preenchido externamente apos parse) */
+  /** Drive file ID do video referenciado (preenchido externamente apos parse,
+   *  OU aqui mesmo quando o avatar veio de um smart-chip de Drive sem .mp4). */
   videoFileId?: string | null;
+  /** URL do YouTube quando o avatar foi referenciado por link/smart-chip de
+   *  YouTube (ex "Doutora: 🎥 O IMPACTO DO ESTRESSE...") em vez de @file.mp4.
+   *  Tipico em criativos "sem edicao" + clone de voz. */
+  youtubeUrl?: string | null;
+  /** Thumbnail pra UI. YouTube → img.youtube.com/vi/<id>/hqdefault.jpg. */
+  thumbUrl?: string | null;
 };
+
+/** Link capturado do doc (Google Docs export / mobilebasic). `fileId` aponta
+ *  pra um arquivo/pasta do Drive (null pra links externos); `url` e a URL
+ *  bruta (YouTube, etc). A extensao popula ambos quando disponiveis. */
+export type DocLink = { text: string; fileId: string | null; url?: string | null; isFolder?: boolean };
 
 export type ParsedPart = {
   /** "HOOK 1", "HOOK 2", "BODY", "PARTE 1" */
@@ -236,7 +249,10 @@ const NON_AVATAR_PREFIXES = [
   /^avatar\s+padr[aã]o\b/i,               // "Avatar padrão:"
   /^link\s+avatar\b/i,                    // "Link avatar:"
   /^link\s+do\s+ad\b/i,                   // "Link do ad:" (VA briefing)
-  /^depoimento\b/i,                       // "Depoimento com avatar:"
+  // NB: "Depoimento" NAO entra aqui de proposito. "Depoimento com avatar:
+  // <file>.mp4" / "Depoimento Mulher: @x.mp4" SAO avatares (o locutor do
+  // depoimento) — tem que ser identificados igual aos demais. Um "Depoimento:"
+  // seguido so de texto nao vira avatar porque parseAvatars exige @/.mp4/chip/link.
   // — Metadados de PRODUCAO/EDICAO que apontam pra mp4 mas NAO sao avatares.
   // User reportou bug: "Música de fundo: 📎 Scary Piano.mp4" virava avatar
   // "@Scary Piano" porque o regex aceitava a linha como Role:Username. Aqui:
@@ -276,6 +292,92 @@ function isPlausibleAvatarRole(role: string): boolean {
   return true;
 }
 
+/** Emojis de "chip de midia" que o Google Docs/ClickUp colocam ANTES do
+ *  titulo de um video linkado (🎥 filme, 📹 camera, 🎬 claquete, ▶️ play,
+ *  🎞️ filme, 📺 tv, 🎦 cinema). Quando o smart-chip do YouTube e exportado
+ *  como texto, o titulo costuma vir precedido por um desses — strip antes de
+ *  casar com o link capturado. */
+const MEDIA_CHIP_LEAD_RE = /^[\s\u{1F3A5}\u{1F4F9}\u{1F3AC}\u{25B6}\u{FE0F}\u{1F39E}\u{1F4FA}\u{1F3A6}\u{1F4CE}]+/u;
+
+/** Normaliza um texto livre (titulo de link ou valor de linha) pra comparacao
+ *  tolerante: minusculo, sem acento, so [a-z0-9] separados por espaco unico. */
+function normForLinkMatch(s: string): string {
+  return (s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/** Acha o link capturado cujo TEXTO corresponde ao `value` de uma linha de
+ *  avatar (ex valor = "O IMPACTO DO ESTRESSE..." casa o smart-chip de mesmo
+ *  titulo). Match: igualdade normalizada OU containment com overlap forte de
+ *  tokens (>=4 chars) pra nao casar titulos por acaso. */
+function findLinkForValue(value: string, links: DocLink[]): DocLink | null {
+  const v = normForLinkMatch(value);
+  if (v.length < 3 || !links || links.length === 0) return null;
+  // 1) igualdade normalizada exata
+  for (const l of links) {
+    if (normForLinkMatch(l.text) === v) return l;
+  }
+  // 2) containment com COBERTURA alta. O titulo do link e o valor da linha tem
+  //    que ser quase a MESMA coisa. Sem isso, uma NARRATIVA longa ("Doutor:
+  //    ...a memória recuperada...") casaria um link de titulo curto que por
+  //    acaso aparece no meio dela → falso positivo de avatar. A razao de
+  //    cobertura (menor/maior >= 0.6) mata esse caso: titulo curto dentro de
+  //    frase longa tem cobertura baixa e e rejeitado.
+  for (const l of links) {
+    const t = normForLinkMatch(l.text);
+    if (!t) continue;
+    if (!(t.includes(v) || v.includes(t))) continue;
+    const shorter = t.length <= v.length ? t : v;
+    const longer = t.length <= v.length ? v : t;
+    if (shorter.length < longer.length * 0.6) continue; // cobertura insuficiente → provavel narrativa
+    const toks = shorter.split(' ').filter((w) => w.length >= 4);
+    if (toks.length === 0) {
+      if (shorter.length >= 6 && longer.includes(shorter)) return l;
+      continue;
+    }
+    if (toks.every((w) => longer.includes(w))) return l;
+  }
+  return null;
+}
+
+/** Resolve um avatar referenciado por LINK (sem @user/.mp4). Tenta, em ordem:
+ *   1. URL de YouTube DIRETO no texto do valor (paste cru)
+ *   2. titulo do valor casando um link capturado de YouTube (smart-chip)
+ *   3. titulo do valor casando um link capturado de Drive (chip sem .mp4)
+ *  Retorna {username, youtubeUrl, thumbUrl, fileId} ou null se nada casou. */
+function resolveLinkAvatar(
+  value: string,
+  links: DocLink[],
+): { username: string; youtubeUrl: string | null; thumbUrl: string | null; fileId: string | null } | null {
+  const clean = value.replace(MEDIA_CHIP_LEAD_RE, '').trim();
+  if (clean.length < 3) return null;
+  // (1) URL de YouTube direto no texto
+  let ytId = extractYouTubeId(clean);
+  if (ytId) {
+    return { username: ytId, youtubeUrl: `https://www.youtube.com/watch?v=${ytId}`, thumbUrl: youTubeThumb(ytId), fileId: null };
+  }
+  // (2)/(3) casa o titulo contra os links capturados
+  const link = findLinkForValue(clean, links);
+  if (link) {
+    if (link.url) {
+      ytId = extractYouTubeId(link.url);
+      if (ytId) {
+        return { username: ytId, youtubeUrl: `https://www.youtube.com/watch?v=${ytId}`, thumbUrl: youTubeThumb(ytId), fileId: null };
+      }
+    }
+    if (link.fileId) {
+      // Smart-chip de Drive cujo texto e um TITULO (sem .mp4 visivel).
+      const uname = normForLinkMatch(clean).replace(/\s+/g, '').slice(0, 60) || 'avatar';
+      return { username: uname, youtubeUrl: null, thumbUrl: null, fileId: link.fileId };
+    }
+  }
+  return null;
+}
+
 /** Extrai avatares mencionados em formato flexivel.
  *
  *  Formatos aceitos (em ordem de prioridade):
@@ -294,7 +396,7 @@ function isPlausibleAvatarRole(role: string): boolean {
  *  Filtra metadados ("Voz:", "Referência:", "Atenção:", "Caixinha:",
  *  "Avatar fala:", "Instruções:", "Observação:") que aparecem em briefings
  *  mas NAO sao avatares. */
-export function parseAvatars(section: string): ParsedAvatar[] {
+export function parseAvatars(section: string, links: DocLink[] = []): ParsedAvatar[] {
   const out: ParsedAvatar[] = [];
   const lines = section.split(/\r?\n/);
 
@@ -449,6 +551,56 @@ export function parseAvatars(section: string): ParsedAvatar[] {
         pendingRole = role;
         pendingRoleLine = i;
         continue;
+      }
+    }
+
+    // Tentativa 4: avatar por LINK / smart-chip de MIDIA (YouTube/Drive) que
+    // NAO tem @username nem .mp4 visivel. Ex "Doutora: 🎥 O IMPACTO DO
+    // ESTRESSE NOS HORMONIOS FEMININOS" — o valor e o TITULO de um hyperlink
+    // do YouTube (smart-chip), nunca aparece "@" nem ".mp4". So vira avatar se
+    // o valor casar uma URL de YouTube (no proprio texto ou num link
+    // capturado) OU um link de Drive — entao narrativa comum ("Doutor: voce
+    // sabia...") NUNCA e confundida com avatar. Cobre tambem o formato
+    // 2-linhas ("Doutora:" + titulo do chip na linha seguinte).
+    {
+      let role: string | null = null;
+      let value: string | null = null;
+      const m4 = trimmed.match(reAttachmentChip);
+      if (m4 && isPlausibleAvatarRole(m4[1].trim())) {
+        role = m4[1].trim();
+        value = m4[2].trim();
+      } else if (pendingRole) {
+        role = pendingRole;
+        value = trimmed;
+      }
+      if (role && value && value.length >= 3) {
+        // GATE anti-fantasma: so trata como avatar-por-link se a linha tem
+        // SINAL de midia inequivoco — emoji de chip, URL de YouTube no texto,
+        // OU o valor casa EXATAMENTE (normalizado) o titulo de um link
+        // capturado. Sem isso, uma NARRATIVA que apenas CONTEM o titulo de um
+        // link ("Homem: o impacto do estresse... muda tudo na sua vida") viraria
+        // um avatar fantasma. O match exato preserva o caso real do AD03 (chip
+        // img → so o titulo puro sobra no texto, sem emoji).
+        const cleanV = value.replace(MEDIA_CHIP_LEAD_RE, '').trim();
+        const nv = normForLinkMatch(cleanV);
+        const hasMediaSignal =
+          MEDIA_CHIP_LEAD_RE.test(value) ||
+          !!extractYouTubeId(cleanV) ||
+          (nv.length >= 3 && links.some((l) => normForLinkMatch(l.text) === nv));
+        const linkAv = hasMediaSignal ? resolveLinkAvatar(value, links) : null;
+        if (linkAv) {
+          out.push({
+            role,
+            username: linkAv.username,
+            raw: trimmed,
+            youtubeUrl: linkAv.youtubeUrl,
+            thumbUrl: linkAv.thumbUrl,
+            videoFileId: linkAv.fileId,
+          });
+          pendingRole = null;
+          pendingRoleLine = -1;
+          continue;
+        }
       }
     }
 
@@ -1312,10 +1464,10 @@ function findBaseCopyBlock(fullDocText: string, baseAdId: string, variant?: stri
   return null;
 }
 
-export function parseDarkoBriefing(fullDocText: string, baseAdId: string, variant?: string | null): ParsedDarkoBriefing | null {
+export function parseDarkoBriefing(fullDocText: string, baseAdId: string, variant?: string | null, links: DocLink[] = []): ParsedDarkoBriefing | null {
   const baseSection = findAdSection(fullDocText, baseAdId, variant);
   if (!baseSection) return null;
-  let avatars = parseAvatars(baseSection);
+  let avatars = parseAvatars(baseSection, links);
   // Fallback: alguns ADs usam 'Link do avatar: <file>' em vez de 'Avatar:'
   // — vira avatar GLOBAL da copy (todos hooks + body desse avatar).
   // Suporta MULTIPLOS avatares na mesma linha separados por +/,/e:
@@ -1332,13 +1484,28 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string, varian
       }));
     }
   }
+  const siblings = findGSiblings(fullDocText, baseAdId, variant);
+  // AVATARES INLINE: alem da secao "Avatar:" base, alguns avatares sao
+  // declarados DENTRO da copy — classico do "Depoimento com avatar:
+  // <file>.mp4" que aparece no fim do corpo, depois do Body. Varre TODAS as
+  // secoes do AD (base + cada G-sibling) e adiciona os avatares que ainda nao
+  // temos (dedup por username). E ADITIVO: nunca remove um avatar ja achado.
+  // parseAvatars exige @user/.mp4/chip/link, entao prosa do corpo nunca vira
+  // avatar — so declaracoes reais (a thumb resolve depois via fileId/youtube).
+  for (const sec of [baseSection, ...siblings.map((s) => s.section)]) {
+    for (const extra of parseAvatars(sec, links)) {
+      const k = normAvatarKey(extra.username);
+      if (k && !avatars.some((a) => normAvatarKey(a.username) === k)) {
+        avatars.push(extra);
+      }
+    }
+  }
   // Coleta roles do briefing pra ajudar o sanitizador a detectar labels
   // soltos ("Doutor", "Mulher" em vermelho — sem ":" nem filename).
   const knownRoles: string[] = [];
   for (const a of avatars) {
     if (a.role) knownRoles.push(a.role);
   }
-  const siblings = findGSiblings(fullDocText, baseAdId, variant);
   const hooks: ParsedDarkoBriefing['hooks'] = [];
   let body: string | null = null;
   let bodyRole: string | null = null;
@@ -1675,7 +1842,7 @@ export function youTubeThumb(videoId: string): string {
 export function parseVABriefing(
   fullDocText: string,
   baseAdIdOrTaskName: string,
-  driveLinks: Array<{ text: string; fileId: string; isFolder?: boolean }> = [],
+  driveLinks: DocLink[] = [],
   filterAvaNums: number[] = [],
 ): ParsedVABriefing | null {
   if (!fullDocText) return null;

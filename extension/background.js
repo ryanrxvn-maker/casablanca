@@ -1410,7 +1410,6 @@ function parseGoogleDocsHtml(html) {
         break;
       }
     }
-    if (!fileId) continue;
     // Strip HTML do texto do link + DECODE entities (PT-BR full).
     // CRITICAL: tem que decodar entities aqui senao linkText fica
     // "Viva Saud&aacute;vel..." e o normalizeForMatch (page.tsx) nao
@@ -1423,10 +1422,18 @@ function parseGoogleDocsHtml(html) {
       const altMatch = m[2].match(/<img[^>]+alt=["']([^"']+)["']/i);
       if (altMatch) linkText = decodeHtmlEntities(altMatch[1]).trim();
     }
-    const key = `${fileId}::${linkText}`;
+    // YouTube: avatar referenciado por smart-chip/hyperlink de YouTube (clone
+    // de voz, criativo "sem edicao") NAO tem fileId de Drive. Antes a gente
+    // dropava (continue) e o titulo "O IMPACTO DO ESTRESSE..." chegava no
+    // parser sem URL → "NENHUM AVATAR IDENTIFICADO". Agora capturamos o link
+    // com `url` pro parser casar o titulo e montar a thumb do YouTube.
+    const isYouTube = /(?:youtube\.com|youtu\.be)/i.test(realUrl);
+    if (!fileId && !isYouTube) continue;
+    // Dedup por (fileId|url)::texto — fileId pode ser null pra YouTube.
+    const key = `${fileId || realUrl}::${linkText}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    driveLinks.push({ text: linkText, fileId, isFolder });
+    driveLinks.push({ text: linkText, fileId: fileId || null, isFolder, url: realUrl });
   }
 
   // === TEXTO ===
@@ -1618,10 +1625,15 @@ async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
           const links = Array.from(document.querySelectorAll('a'))
             .map((a) => {
               const text = (a.textContent || '').trim();
-              const href = a.href || '';
+              let href = a.href || '';
+              // Google as vezes embrulha o destino em /url?q=<real>
+              const q = href.match(/[?&]q=([^&]+)/);
+              if (q) { try { href = decodeURIComponent(q[1]); } catch {} }
               const m = href.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-              if (!m) return null;
-              return { text, fileId: m[1] };
+              if (m) return { text, fileId: m[1], url: href };
+              // YouTube: avatar por link (clone de voz) — sem fileId de Drive.
+              if (/(?:youtube\.com|youtu\.be)/i.test(href)) return { text, fileId: null, url: href };
+              return null;
             })
             .filter(Boolean);
           return {

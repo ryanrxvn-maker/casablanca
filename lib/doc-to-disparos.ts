@@ -24,6 +24,7 @@ import {
   matchAvatar,
   normAvatarKey,
   type ParsedDarkoBriefing,
+  type DocLink,
 } from './copy-parser';
 import { splitCopyIntoParts } from './heygen-extension-bridge';
 
@@ -119,7 +120,7 @@ export function discoverBaseAdIds(text: string): string[] {
 /** Constroi o mapa role->avatar + lista de nao-casados, identico ao
  *  clickup-pilot (matchAvatar score >= 30). */
 function buildAvatarMatch(
-  avatars: Array<{ role: string; username: string }>,
+  avatars: Array<{ role: string; username: string; youtubeUrl?: string | null }>,
   candidates: AvatarCandidate[],
 ): {
   matchedByRole: Record<string, { id: string; name: string; voiceId: string | null }>;
@@ -130,7 +131,11 @@ function buildAvatarMatch(
   const matchedByUsername: Record<string, { id: string; name: string; voiceId: string | null }> = {};
   const unmatched: string[] = [];
   for (const av of avatars) {
-    const m = matchAvatar(av.username, candidates);
+    // Avatar referenciado por YouTube (clone de voz): username e o video ID
+    // (11 chars base64url), NAO um handle de avatar. Alimentar isso no
+    // matchAvatar casa um avatar ERRADO da biblioteca por acaso (~2% das vezes
+    // via token/group substring). Fica PENDENTE — o user escolhe o avatar.
+    const m = av.youtubeUrl ? null : matchAvatar(av.username, candidates);
     if (m && m.score >= 30) {
       const cand = candidates.find((c) => c.id === m.id);
       const matched = { id: m.id, name: m.name, voiceId: cand?.voiceId ?? null };
@@ -258,12 +263,14 @@ function buildDisparoCore(
   fullAdId: string,
   candidates: AvatarCandidate[],
   variant?: string | null,
+  links: DocLink[] = [],
 ): DiscoveredDisparo | null {
   // 1) Parser DARKO LAB (preferido). Variant token (F2/P1/AVA05) isola a secao
   //    quando o doc tem varias variantes do mesmo AD (senao avatares/copy vazam
   //    entre variantes). Vem do caller (nomenclatura ORIGINAL — fullAdId pode
-  //    estar truncado antes do token).
-  const briefing = parseDarkoBriefing(text, baseAdId, variant ?? extractVariantToken(fullAdId));
+  //    estar truncado antes do token). `links` habilita identificar avatar por
+  //    smart-chip de YouTube/Drive (sem @user/.mp4 no texto).
+  const briefing = parseDarkoBriefing(text, baseAdId, variant ?? extractVariantToken(fullAdId), links);
   if (briefing && (briefing.hooks.length > 0 || briefing.body)) {
     const { parts, unmatched } = partsFromBriefing(briefing, candidates);
     if (parts.length > 0) {
@@ -312,8 +319,9 @@ export function buildDisparoForAd(
   text: string,
   baseAdId: string,
   candidates: AvatarCandidate[],
+  links: DocLink[] = [],
 ): DiscoveredDisparo | null {
-  return buildDisparoCore(text, baseAdId, baseAdId, candidates);
+  return buildDisparoCore(text, baseAdId, baseAdId, candidates, undefined, links);
 }
 
 /**
@@ -360,11 +368,12 @@ export function buildDisparoForNomenclature(
   text: string,
   nomenclature: string,
   candidates: AvatarCandidate[],
+  links: DocLink[] = [],
 ): DiscoveredDisparo | null {
   if (!text || !nomenclature.trim()) return null;
   const { baseAdId, fullAdId } = extractAdIds(nomenclature);
   // Variant token vem da nomenclatura ORIGINAL (fullAdId trunca antes do token).
-  const d = buildDisparoCore(text, baseAdId, fullAdId, candidates, extractVariantToken(nomenclature));
+  const d = buildDisparoCore(text, baseAdId, fullAdId, candidates, extractVariantToken(nomenclature), links);
   // Preserva a nomenclatura digitada como nome do AD (mais claro pro user)
   if (d && nomenclature.trim()) {
     return { ...d, baseAdId: nomenclature.trim(), safeName: safeNameOf(nomenclature) };
@@ -380,6 +389,7 @@ export function buildDisparosFromNomenclatures(
   text: string,
   nomenclatures: string[],
   candidates: AvatarCandidate[],
+  links: DocLink[] = [],
 ): { disparos: DiscoveredDisparo[]; notFound: string[]; diagnostic: string } {
   if (!text || !text.trim()) {
     return { disparos: [], notFound: [], diagnostic: 'Doc vazio — cole/importe a copy.' };
@@ -391,7 +401,7 @@ export function buildDisparosFromNomenclatures(
     const name = raw.trim();
     if (!name || seen.has(name.toUpperCase())) continue;
     seen.add(name.toUpperCase());
-    const d = buildDisparoForNomenclature(text, name, candidates);
+    const d = buildDisparoForNomenclature(text, name, candidates, links);
     if (d) disparos.push(d);
     else notFound.push(name);
   }
@@ -412,11 +422,12 @@ export function buildDisparosFromNomenclatures(
 export function buildDisparosFromDoc(
   text: string,
   candidates: AvatarCandidate[],
-  opts: { onlyBaseAdId?: string } = {},
+  opts: { onlyBaseAdId?: string; links?: DocLink[] } = {},
 ): DiscoverResult {
   if (!text || !text.trim()) {
     return { disparos: [], detectedAdIds: [], diagnostic: 'Doc vazio — cole/importe a copy.' };
   }
+  const links = opts.links ?? [];
 
   let bases = opts.onlyBaseAdId ? [toBaseAdId(opts.onlyBaseAdId)] : discoverBaseAdIds(text);
 
@@ -425,7 +436,7 @@ export function buildDisparosFromDoc(
   // 1a linha (assume header AD), entao prefixamos um header sintetico pra que
   // o conteudo real seja preservado. Avatares vem de parseAvatars no texto cru.
   if (bases.length === 0) {
-    const avatars = parseAvatars(text);
+    const avatars = parseAvatars(text, links);
     const partsParsed = parseParts(`COPY-IMPORTADA\n${text}`);
     if (partsParsed.length > 0) {
       const { matchedByRole, unmatched } = buildAvatarMatch(avatars, candidates);
@@ -465,7 +476,7 @@ export function buildDisparosFromDoc(
 
   const disparos: DiscoveredDisparo[] = [];
   for (const base of bases) {
-    const d = buildDisparoForAd(text, base, candidates);
+    const d = buildDisparoForAd(text, base, candidates, links);
     if (d) disparos.push(d);
   }
 

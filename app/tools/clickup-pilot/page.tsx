@@ -401,6 +401,12 @@ type RoleSlot = {
   /** Drive file ID do video referenciado no briefing (preview do avatar
    *  que o copy quer). Permite mostrar thumb pra user identificar quem e. */
   briefingFileId: string | null;
+  /** URL do YouTube quando o avatar foi referenciado por smart-chip/link de
+   *  YouTube (criativo "sem edição" + clone de voz) em vez de @file.mp4. */
+  youtubeUrl?: string | null;
+  /** Thumb do YouTube (img.youtube.com) — mostra o video de referência mesmo
+   *  sem arquivo no Drive. */
+  youtubeThumb?: string | null;
   /** Avatar HeyGen escolhido (null = pendente, user precisa selecionar) */
   avatarId: string | null;
   avatarName: string | null;
@@ -625,6 +631,9 @@ function ClickUpPilotInner() {
    *  1 ativo por vez sempre. Persiste reload via localStorage. */
   const [magnificQueue, setMagnificQueueState] = useState<MagnificQueue>({});
   const magnificProcessingRef = useRef(false);
+  // Ultimos driveLinks (Drive + YouTube) do doc buscado — usados pelo runParser
+  // (fluxo manual single-task) pra identificar avatar por smart-chip de YouTube.
+  const lastDocLinksRef = useRef<Array<{ text: string; fileId: string | null; url?: string | null }>>([]);
   const [magnificTick, setMagnificTick] = useState(0);
   const magnificCancelRef = useRef<Record<string, boolean>>({});
   /** AbortController do job Magnific rodando agora (pra Pausar/Debug
@@ -1043,7 +1052,7 @@ function ClickUpPilotInner() {
    * Retorna tambem driveLinks: links pra videos em Drive citados no doc
    * (necessarios pra visual match de avatares).
    */
-  function fetchDocViaExtensionOnce(url: string): Promise<{ ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string }>; headings?: Array<{ id: string; text: string }>; transient?: boolean }> {
+  function fetchDocViaExtensionOnce(url: string): Promise<{ ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string | null; url?: string | null }>; headings?: Array<{ id: string; text: string }>; transient?: boolean }> {
     return new Promise((resolve) => {
       const requestId = `doc_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       // Timeout em DOIS estagios (extensao v4.16.2+ manda HG_DOC_ACK assim
@@ -1057,7 +1066,7 @@ function ClickUpPilotInner() {
       let acked = false;
       let done = false;
       const timers: ReturnType<typeof setTimeout>[] = [];
-      const finish = (r: { ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string }>; headings?: Array<{ id: string; text: string }>; transient?: boolean }) => {
+      const finish = (r: { ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string | null; url?: string | null }>; headings?: Array<{ id: string; text: string }>; transient?: boolean }) => {
         if (done) return;
         done = true;
         window.removeEventListener('message', handler);
@@ -1094,8 +1103,8 @@ function ClickUpPilotInner() {
   /** Doc fetch com retry automatico: ate 3 tentativas pra erro transient
    *  (timeout, glitch de rede, service worker dormindo). Erro definitivo
    *  (sem permissao / doc nao existe) falha direto sem retry. */
-  async function fetchDocViaExtension(url: string): Promise<{ ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string }>; headings?: Array<{ id: string; text: string }> }> {
-    let last: { ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string }>; headings?: Array<{ id: string; text: string }>; transient?: boolean } = { ok: false, error: 'sem tentativa' };
+  async function fetchDocViaExtension(url: string): Promise<{ ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string | null; url?: string | null }>; headings?: Array<{ id: string; text: string }> }> {
+    let last: { ok: boolean; text?: string; error?: string; driveLinks?: Array<{ text: string; fileId: string | null; url?: string | null }>; headings?: Array<{ id: string; text: string }>; transient?: boolean } = { ok: false, error: 'sem tentativa' };
     for (let attempt = 1; attempt <= 3; attempt++) {
       last = await fetchDocViaExtensionOnce(url);
       if (last.ok || !last.transient) return last;
@@ -1158,20 +1167,25 @@ function ClickUpPilotInner() {
    *  '@marcella.malvar2' procura link cujo texto contem 'marcellamalvar2'.
    *  'Dr. Marco Túlio' procura 'drmarcotulio'.
    *  'omédicodoshomens' procura 'omedicodoshomens'. */
-  function resolveVideoFileId(username: string, driveLinks: Array<{ text: string; fileId: string }> | undefined): string | null {
-    if (!driveLinks || driveLinks.length === 0) return null;
+  function resolveVideoFileId(username: string, driveLinks: Array<{ text: string; fileId: string | null; url?: string | null }> | undefined): string | null {
+    // So links de DRIVE (com fileId) sao candidatos. driveLinks agora tambem
+    // carrega links de YouTube (fileId null) — sem este filtro, um link de
+    // YouTube cujo titulo casa o username retornaria null e SOMBREARIA o .mp4
+    // real do Drive que vem depois no array (avatar perdia thumb + "Baixar").
+    const links = (driveLinks || []).filter((l) => l.fileId);
+    if (links.length === 0) return null;
     const u = normalizeForMatch(username.replace(/^@/, ''));
     if (u.length < 3) return null;
     const uNoTrailDigits = u.replace(/\d+$/, ''); // 'manualdohomemsolo2' → 'manualdohomemsolo'
 
     // 1. Match direto: text normalizado contem username
-    for (const link of driveLinks) {
+    for (const link of links) {
       const t = normalizeForMatch(link.text);
       if (t.includes(u)) return link.fileId;
     }
     // 2. Match por nucleus (sem digitos finais nem extensao)
     if (uNoTrailDigits.length >= 4) {
-      for (const link of driveLinks) {
+      for (const link of links) {
         const t = normalizeForMatch(link.text).replace(/\d+$/, '');
         if (t === uNoTrailDigits || t.includes(uNoTrailDigits) || uNoTrailDigits.includes(t)) {
           return link.fileId;
@@ -1192,7 +1206,7 @@ function ClickUpPilotInner() {
       .split(/[^a-z0-9]+/)
       .filter((tk) => tk.length >= 3);
     if (tokens.length > 0) {
-      for (const link of driveLinks) {
+      for (const link of links) {
         const t = normalizeForMatch(link.text);
         if (tokens.every((tk) => t.includes(tk))) return link.fileId;
       }
@@ -1538,7 +1552,7 @@ function ClickUpPilotInner() {
                   const criativosFolder = docR.driveLinks.find((d: any) =>
                     /criativos|criativo|videos|drive criativos/i.test(d.text || '')) ||
                     docR.driveLinks.find((d: any) => (d as any).isFolder);
-                  if (criativosFolder) {
+                  if (criativosFolder && criativosFolder.fileId) {
                     console.log(`[clickup-pilot] VA: tentando pasta "${criativosFolder.text}" (${criativosFolder.fileId})`);
                     try {
                       const { listDriveFolderViaExtension } = await import('@/lib/heygen-extension-bridge');
@@ -1567,6 +1581,7 @@ function ClickUpPilotInner() {
                     const folderLinks = (docR.driveLinks || []).filter((d: any) =>
                       d.fileId && d.fileId.length > 15);
                     for (const fl of folderLinks) {
+                      if (!fl.fileId) continue;
                       const folderRes = await listDriveFolderViaExtension(fl.fileId);
                       if (!folderRes.ok || !folderRes.files?.length) continue;
                       const match = folderRes.files.find((f) => fuzzyMatch(f.name));
@@ -1636,14 +1651,18 @@ function ClickUpPilotInner() {
           // variantes diferentes vazam (bug AD14GL: F2 e P1 mostravam os mesmos
           // 2 avatares).
           const variantToken = extractVariantToken(task.name);
-          const briefing = parseDarkoBriefing(docR.text, baseAdId, variantToken);
+          // driveLinks agora carrega tambem links de YouTube (url, fileId null)
+          // — passa pro parser pra ele identificar avatar por smart-chip de
+          // YouTube ("Doutora: 🎥 O IMPACTO DO ESTRESSE...") e montar a thumb.
+          const briefing = parseDarkoBriefing(docR.text, baseAdId, variantToken, docR.driveLinks || []);
           if (!briefing || (briefing.hooks.length === 0 && !briefing.body)) {
             setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: `Parser nao achou hooks nem body pra ${baseAdId} no doc` } }));
             continue;
           }
-          // 3.5. Resolve Drive file IDs pros avatares (pra visual match futuro)
+          // 3.5. Resolve Drive file IDs pros avatares (pra visual match futuro).
+          // Preserva o videoFileId/youtubeUrl que o parser ja resolveu por link.
           for (const av of briefing.avatars) {
-            av.videoFileId = resolveVideoFileId(av.username, docR.driveLinks);
+            av.videoFileId = av.videoFileId || resolveVideoFileId(av.username, docR.driveLinks);
           }
           // 4. Monta roleSlots — UM por avatar do briefing, mesmo se sem match
           //    Order de prioridade pra fechar o slot:
@@ -1654,10 +1673,18 @@ function ClickUpPilotInner() {
           //    d) pendente sem voz
           const roleSlots: RoleSlot[] = [];
           for (const av of briefing.avatars) {
-            const m = matchAvatar(av.username, avatarCandidates);
             const briefingFileId = av.videoFileId || null;
+            // Avatar por link de YouTube (smart-chip "🎥 título") — mostra a
+            // thumb do vídeo de referência mesmo sem arquivo no Drive.
+            const youtubeUrl = av.youtubeUrl || null;
+            const youtubeThumb = av.thumbUrl || null;
+            // Avatar de YouTube: username = video ID (11 chars), NAO um handle.
+            // NAO casar com a biblioteca (matchAvatar casaria um avatar errado
+            // por substring) nem com voz por nome — fica PENDENTE pro user
+            // escolher o avatar (o YouTube e só a referência pra clonar a voz).
+            const m = youtubeUrl ? null : matchAvatar(av.username, avatarCandidates);
             // Voz auto-resolvida da biblioteca por nome (independente de match de avatar)
-            const voiceFromLib = voiceByNorm.get(normalizeVoiceName(av.username)) || null;
+            const voiceFromLib = youtubeUrl ? null : (voiceByNorm.get(normalizeVoiceName(av.username)) || null);
             if (m && m.score >= 30) {
               const candFull = avatarCandidates.find(c => c.id === m.id);
               // MEMORIA AVATAR→VOZ: se ja escolhi voz pra esse avatar antes,
@@ -1667,6 +1694,8 @@ function ClickUpPilotInner() {
                 role: av.role,
                 username: av.username,
                 briefingFileId,
+                youtubeUrl,
+                youtubeThumb,
                 avatarId: m.id,
                 avatarName: m.name,
                 avatarThumb: candFull?.thumb || null,
@@ -1689,6 +1718,8 @@ function ClickUpPilotInner() {
                   role: av.role,
                   username: av.username,
                   briefingFileId,
+                  youtubeUrl,
+                  youtubeThumb,
                   avatarId: recalled.avatarId,
                   avatarName: recalled.avatarName,
                   avatarThumb: candFull.thumb || null,
@@ -1705,6 +1736,8 @@ function ClickUpPilotInner() {
               role: av.role,
               username: av.username,
               briefingFileId,
+              youtubeUrl,
+              youtubeThumb,
               avatarId: null,
               avatarName: null,
               avatarThumb: null,
@@ -4625,6 +4658,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       // 1. Tenta via extensao (sessao Google logada — funciona pra doc privado)
       const extR = await fetchDocViaExtension(url);
       if (extR.ok && extR.text) {
+        lastDocLinksRef.current = extR.driveLinks || [];
         setDocContent(extR.text);
         setTimeout(() => runParser(extR.text || ''), 100);
         return;
@@ -4669,9 +4703,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const result = parseAdSection(text, fullAdId) || parseAdSection(text, fullAdId.split(/\s|-/)[0]);
     if (result) setParsed(result);
 
-    // Parser 2 (novo): briefing DARKO LAB com convencao G[N] = Hook[N]
+    // Parser 2 (novo): briefing DARKO LAB com convencao G[N] = Hook[N].
+    // Passa os links do doc pra identificar avatar por smart-chip de YouTube.
     if (baseAdId) {
-      const b = parseDarkoBriefing(text, baseAdId, extractVariantToken(taskName));
+      const b = parseDarkoBriefing(text, baseAdId, extractVariantToken(taskName), lastDocLinksRef.current);
       if (b && (b.hooks.length > 0 || b.body)) {
         setBriefing(b);
         return;
@@ -8129,14 +8164,17 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                       const effectiveVoiceLabel = slot.voiceOverride?.name || (slot.avatarVoiceId ? 'voz padrao do avatar' : noVoice ? 'sem voz' : '?');
                                       const visualKey = `${a.taskId}:${sIdx}`;
                                       const isVisualSearching = visualMatching[visualKey];
+                                      // Thumb do briefing: arquivo do Drive OU, quando o avatar
+                                      // veio de um smart-chip de YouTube, a thumb do vídeo (assim
+                                      // o avatar de link aparece igual aos de arquivo).
                                       const briefingThumbUrl = slot.briefingFileId
                                         ? `https://drive.google.com/thumbnail?id=${slot.briefingFileId}&sz=w200`
-                                        : null;
+                                        : (slot.youtubeThumb || null);
                                       return (
                                         <div key={sIdx} className="rounded-[12px] border border-white/8 bg-gradient-to-br from-white/[0.04] via-white/[0.015] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_2px_8px_-4px_rgba(0,0,0,0.3)]">
                                           <div className="mono flex flex-wrap items-center gap-2 text-[10px]">
                                             <span className="rounded-full bg-lime/18 border border-lime/40 px-2 py-[3px] text-lime uppercase tracking-widest font-bold">{slot.role}</span>
-                                            <span className="text-white/70">@{slot.username}</span>
+                                            <span className="text-white/70">{slot.youtubeUrl ? 'ref. YouTube' : `@${slot.username}`}</span>
                                             <span className="text-text-muted">· {partsCount} parte{partsCount === 1 ? '' : 's'}</span>
                                             {!slot.matchedBy ? (
                                               <span className="ml-1 inline-flex items-center gap-1 rounded-full border border-red-400/50 bg-red-500/15 px-2 py-[2px] text-[9px] font-bold uppercase tracking-widest text-red-300">
@@ -8206,7 +8244,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                               ) : (
                                                                 <span aria-hidden>🎤</span>
                                                               )}
-                                                              <span className="truncate text-[9px] font-semibold">{selected ? selected.name : `@${slot.username}`}</span>
+                                                              <span className="truncate text-[9px] font-semibold">{selected ? selected.name : (slot.youtubeUrl ? 'ref. YouTube' : `@${slot.username}`)}</span>
                                                             </span>
                                                           </div>
                                                           <div className="flex shrink-0 items-center gap-1.5">
@@ -8268,7 +8306,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 Briefing
                                               </div>
                                               <div className="mt-0.5 text-[13px] font-semibold text-foreground truncate" style={{ fontFamily: 'var(--font-tech)' }}>
-                                                @{slot.username}.mp4
+                                                {slot.youtubeUrl ? `${slot.role} · YouTube` : `@${slot.username}.mp4`}
                                               </div>
                                               {slot.briefingFileId ? (
                                                 <a
@@ -8282,6 +8320,16 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                     <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
                                                   </svg>
                                                   Baixar
+                                                </a>
+                                              ) : slot.youtubeUrl ? (
+                                                <a
+                                                  href={slot.youtubeUrl}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="mono mt-1.5 inline-flex items-center gap-1 rounded-md border border-red-500/45 bg-red-500/12 px-2 py-1 text-[9.5px] font-bold uppercase tracking-widest text-red-300 hover:bg-red-500/22 hover:border-red-500/65 transition"
+                                                  title="Abrir o vídeo do YouTube (referência pra clonar a voz)"
+                                                >
+                                                  ▶ YouTube
                                                 </a>
                                               ) : (
                                                 <span className="mono mt-1.5 inline-flex items-center gap-1 rounded-md border border-white/12 bg-white/[0.04] px-2 py-1 text-[9.5px] uppercase tracking-widest text-text-muted">

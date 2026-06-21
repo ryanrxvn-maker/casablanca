@@ -16,7 +16,7 @@ import {
   toBaseAdId,
   type AvatarCandidate,
 } from './doc-to-disparos';
-import { matchAvatar, parseAvatars, parseVABriefing, extractAvatarFileTokens } from './copy-parser';
+import { matchAvatar, parseAvatars, parseVABriefing, parseDarkoBriefing, extractAvatarFileTokens, type DocLink } from './copy-parser';
 
 let failures = 0;
 function assert(cond: boolean, msg: string) {
@@ -672,6 +672,146 @@ const vaSingle = parseVABriefing(VA_SINGLE, 'VA - AD09G1VN - PRPB07', [], []);
 assert(!!vaSingle && vaSingle.avatares.length === 1, '1 AVA single-avatar');
 assert(!!vaSingle && vaSingle.avatares[0].username === 'lara', 'single: username = lara');
 assert(!!vaSingle && !vaSingle.avatares[0].roles, 'single: roles AUSENTE (classico)');
+
+/* ----------------- avatar por SMART-CHIP de YouTube (AD03GL) ----------------- *
+ * Doc real: "Doutora: 🎥 O IMPACTO DO ESTRESSE NOS HORMÔNIOS FEMININOS" e um
+ * hyperlink do YouTube. No texto exportado so sobra o TITULO (o .mp4/@ nunca
+ * aparece) — o parser antigo nao achava avatar nenhum ("NENHUM AVATAR
+ * IDENTIFICADO"). Agora o titulo casa o link capturado → avatar + thumb. */
+console.log('\nyoutube smart-chip avatar:');
+const YT_LINKS: DocLink[] = [
+  { text: 'O IMPACTO DO ESTRESSE NOS HORMÔNIOS FEMININOS', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', fileId: null },
+];
+// (a) smart-chip: emoji sobreviveu no texto + titulo casa o link
+const ytAvatars = parseAvatars('Avatar e Vozes:\nDoutora: 🎥 O IMPACTO DO ESTRESSE NOS HORMÔNIOS FEMININOS', YT_LINKS);
+assert(ytAvatars.length === 1, `smart-chip YT → 1 avatar (got ${ytAvatars.length})`);
+assert(ytAvatars[0]?.role === 'Doutora', `role = Doutora (got ${ytAvatars[0]?.role})`);
+assert(ytAvatars[0]?.youtubeUrl === 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'youtubeUrl resolvido do link');
+assert(ytAvatars[0]?.thumbUrl === 'https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg', 'thumbUrl = hqdefault do video');
+assert(ytAvatars[0]?.username === 'dQw4w9WgXcQ', 'username = video ID (convencao VA)');
+
+// (b) sem o emoji no texto (img-chip → titulo puro) ainda casa o link
+const ytNoEmoji = parseAvatars('Doutora: O IMPACTO DO ESTRESSE NOS HORMÔNIOS FEMININOS', YT_LINKS);
+assert(ytNoEmoji.length === 1 && !!ytNoEmoji[0]?.youtubeUrl?.includes('dQw4w9WgXcQ'), 'titulo puro (sem emoji) casa o link YT');
+
+// (c) URL crua de YouTube no proprio texto (sem precisar de links)
+const ytRaw = parseAvatars('Doutor: https://youtu.be/abc123XYZ_-', []);
+assert(ytRaw.length === 1 && !!ytRaw[0]?.youtubeUrl?.includes('abc123XYZ_-'), 'URL crua youtu.be vira avatar sem links');
+
+// (d) formato 2-linhas: "Doutora:" + titulo do chip na linha seguinte
+const ytTwoLine = parseAvatars('Doutora:\n🎥 O IMPACTO DO ESTRESSE NOS HORMÔNIOS FEMININOS', YT_LINKS);
+assert(ytTwoLine.length === 1 && ytTwoLine[0]?.role === 'Doutora' && !!ytTwoLine[0]?.youtubeUrl, '2-linhas (role + titulo) casa');
+
+// (e) REGRESSAO: AD01-style chip .mp4 de Drive continua igual (sem youtubeUrl)
+const mp4Chip = parseAvatars('Mulher: 🎥 mygermangrandma.mp4', []);
+assert(mp4Chip.length === 1 && mp4Chip[0]?.username === 'mygermangrandma', 'regressao: chip .mp4 → username limpo');
+assert(!mp4Chip[0]?.youtubeUrl, 'regressao: chip .mp4 NAO tem youtubeUrl');
+
+// (f) NEGATIVO: narrativa "Doutor: voce sabia..." NUNCA vira avatar YT
+const narrative = parseAvatars('Doutor: você sabia que 9 em cada 10 homens ignoram isso?', YT_LINKS);
+assert(narrative.length === 0, 'narrativa comum NAO vira avatar (sem match de link)');
+
+// (g) NEGATIVO: "Referência:" com link de YouTube e bloqueado (metadata)
+const refLine = parseAvatars('Referência: 🎥 O IMPACTO DO ESTRESSE NOS HORMÔNIOS FEMININOS', YT_LINKS);
+assert(refLine.length === 0, 'linha "Referência:" NAO vira avatar (NON_AVATAR_PREFIXES)');
+
+// (g2) NEGATIVO CRÍTICO: narrativa longa que CONTÉM um título de link curto
+// NÃO pode virar avatar (cobertura baixa). Ex link "memória recuperada" + fala
+// "Doutor: Mais de 5 mil brasileiros já tiveram a memória recuperada e hoje...".
+const SHORT_LINK: DocLink[] = [{ text: 'memória recuperada', url: 'https://youtu.be/zzz999AAA__', fileId: null }];
+const fp = parseAvatars('Doutor: Mais de 5 mil brasileiros já tiveram a memória recuperada e hoje vivem uma vida normal.', SHORT_LINK);
+assert(fp.length === 0, 'narrativa que contém título de link curto NÃO vira avatar (guard de cobertura)');
+
+// (g3) NEGATIVO crítico (review): narrativa de ALTA cobertura que contém o
+// título quase inteiro NÃO pode virar avatar. Sem o gate de sinal-de-mídia, a
+// frase "Homem: <título> muda tudo..." (cobertura > 0.6) virava avatar fantasma.
+const phantomHigh = parseAvatars('Homem: O IMPACTO DO ESTRESSE NOS HORMÔNIOS FEMININOS muda tudo na sua vida hoje', YT_LINKS);
+assert(phantomHigh.length === 0, 'narrativa de alta cobertura contendo o título NÃO vira avatar (gate de sinal de mídia)');
+
+// (g4) END-TO-END: doc com o chip LEGÍTIMO + uma fala que repete o título
+// deve achar SÓ 1 avatar (a Doutora do chip), nunca um "Homem" fantasma.
+const PHANTOM_DOC = [
+  'AD09GL - RIPCFPB',
+  'Avatar e Vozes:',
+  'Doutora: 🎥 O IMPACTO DO ESTRESSE NOS HORMÔNIOS FEMININOS',
+  '',
+  'AD09G1GL-RIPCFPB',
+  'Homem:',
+  'O IMPACTO DO ESTRESSE NOS HORMÔNIOS FEMININOS muda tudo na sua vida, presta atenção.',
+  '',
+  'Body',
+  'Doutora:',
+  'E hoje eu vou te mostrar como reverter isso de forma natural em poucos dias sem remédio.',
+].join('\n');
+const phantomE2E = parseDarkoBriefing(PHANTOM_DOC, 'AD09GL', null, YT_LINKS);
+assert(!!phantomE2E && phantomE2E.avatars.length === 1, `doc com fala repetindo título → 1 avatar (got ${phantomE2E?.avatars.length})`);
+assert(!!phantomE2E && /doutora/i.test(phantomE2E.avatars[0]?.role || ''), 'o único avatar é a Doutora (chip), não um Homem fantasma');
+
+// (h) END-TO-END: parseDarkoBriefing com doc AD03-like + links
+const AD03_DOC = [
+  'AD03GL - RIPCFPB',
+  'INSTRUÇÕES PARA EDIÇÃO:',
+  'Avatar e Vozes:',
+  'Doutora: 🎥 O IMPACTO DO ESTRESSE NOS HORMÔNIOS FEMININOS',
+  'Manter a mesma voz dos avatares, a não ser que seja um avatar gringo.',
+  '',
+  'AD03G1GL-RIPCFPB',
+  'Doutora:',
+  'Você sabia que o estresse destrói os hormônios femininos silenciosamente?',
+  '',
+  'Body',
+  'Doutora:',
+  'E hoje eu vou te mostrar exatamente como reverter isso de forma natural em poucos dias, sem remédio caro e sem terapia hormonal complicada, presta atenção.',
+].join('\n');
+const ad03 = parseDarkoBriefing(AD03_DOC, 'AD03GL', null, YT_LINKS);
+assert(!!ad03, 'parseDarkoBriefing AD03 → resolve');
+assert(!!ad03 && ad03.avatars.length === 1, `AD03 → 1 avatar identificado (got ${ad03?.avatars.length})`);
+assert(!!ad03 && ad03.avatars[0]?.role === 'Doutora' && !!ad03.avatars[0]?.youtubeUrl, 'AD03 avatar = Doutora com youtubeUrl');
+assert(!!ad03 && ad03.hooks.length >= 1, 'AD03 hook capturado');
+assert(!!ad03 && !!ad03.body, 'AD03 body capturado');
+
+/* ----------------- avatar de DEPOIMENTO (inline no corpo) ----------------- *
+ * Doc real (AD memória): no fim da copy vem "Depoimento com avatar: 📎
+ * 7508150707225251077.mp4" + o texto do depoimento. Antes NAO era identificado
+ * por 2 motivos: (1) "depoimento" estava no blocklist de roles, (2) a linha
+ * fica no CORPO, nao na seção "Avatar:" base. Agora é identificado e o texto
+ * do depoimento é roteado pra esse avatar. */
+console.log('\ndepoimento avatar (inline no corpo):');
+// (a) parseAvatars reconhece a linha de depoimento com talking-photo numérico
+const depoAv = parseAvatars('Depoimento com avatar: 📎 7508150707225251077.mp4', []);
+assert(depoAv.length === 1, `depoimento → 1 avatar (got ${depoAv.length})`);
+assert(depoAv[0]?.username === '7508150707225251077', `depoimento username = talking-photo id (got ${depoAv[0]?.username})`);
+assert(/depoimento/i.test(depoAv[0]?.role || ''), `role contém "depoimento" (got ${depoAv[0]?.role})`);
+
+// (b) NEGATIVO: "Depoimento:" seguido só de texto NÃO vira avatar
+const depoText = parseAvatars('Depoimento:\nMinha mãe melhorou muito com esse ritual incrível.', []);
+assert(depoText.length === 0, 'depoimento só com texto NÃO vira avatar');
+
+// (c) END-TO-END: depoimento declarado DENTRO do corpo (depois do Body)
+const DEPO_DOC = [
+  'AD10GL - MEPB',
+  'Avatar e Vozes:',
+  'Doutor: @drtakashi.mp4',
+  '',
+  'AD10G1GL-MEPB',
+  'Doutor:',
+  'Esse ritual faz tudo se conectar e voltar a funcionar.',
+  '',
+  'Body',
+  'Doutor:',
+  'Mais de 5 mil brasileiros já tiveram a memória recuperada e hoje vivem uma vida normal como se nada tivesse acontecido.',
+  '',
+  'Depoimento com avatar: 📎 7508150707225251077.mp4',
+  'Minha mãe com 65 anos estava nos estágios iniciais do Alzheimer. Ela já tomava donepezila e galantamina, mas não adiantava nada. Foi então que eu descobri um ritual que melhorou muito a memória dela.',
+].join('\n');
+const depo = parseDarkoBriefing(DEPO_DOC, 'AD10GL', null, []);
+assert(!!depo, 'parseDarkoBriefing depoimento → resolve');
+assert(!!depo && depo.avatars.length === 2, `2 avatares: Doutor + Depoimento (got ${depo?.avatars.length})`);
+assert(!!depo && depo.avatars.some((a) => a.username === '7508150707225251077'), 'avatar do depoimento (talking-photo) identificado');
+assert(!!depo && depo.avatars.some((a) => /depoimento/i.test(a.role)), 'role "Depoimento ..." presente');
+assert(!!depo && depo.bodySegments.some((s) => /depoimento/i.test(s.role || '')), 'segmento do depoimento roteado pro role Depoimento');
+assert(!!depo && /minha mãe com 65/i.test(depo.body || ''), 'texto do depoimento entrou no corpo (não foi descartado)');
+assert(!!depo && !/7508150707225251077/.test(depo.body || ''), 'linha do chip .mp4 NÃO vaza pra fala');
 
 /* ----------------- doc vazio ----------------- */
 console.log('\nedge cases:');
