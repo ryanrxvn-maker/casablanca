@@ -1,11 +1,12 @@
 'use client';
 
+import { useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { formatBRL } from '@/lib/utils';
 import { ToolStep, ToolSlider, ToolMetric, ToolResultCard } from '@/components/tool-kit';
 import { IconCalculadora, IconStepMoney, IconStepClock, IconStepTag } from '@/components/ToolIcons';
-import { printBudgetReport } from './report';
+import { downloadBudgetReport } from './report';
 
 const HUE = 'rgba(148,163,184,0.4)';
 
@@ -80,9 +81,10 @@ export default function CalculadoraPage() {
   const total = subtotal - valorDesconto;
 
   const canPrint = vpm > 0 && totalSeconds > 0;
+  const [gerando, setGerando] = useState(false);
 
-  const gerarRelatorio = () => {
-    if (!canPrint) return;
+  const gerarRelatorio = async () => {
+    if (!canPrint || gerando) return;
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     const docNumber = `ORC-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
@@ -104,26 +106,28 @@ export default function CalculadoraPage() {
         };
       });
 
-    const ok = printBudgetReport({
-      docNumber,
-      dateLabel,
-      validadeLabel: '7 dias',
-      cliente: cliente.trim(),
-      vpmLabel: formatBRL(vpm),
-      duracaoTotalLabel: fmtDur(totalSeconds),
-      qtdAds: items.length,
-      items,
-      subtotalLabel: formatBRL(subtotal),
-      descontoPct: desconto,
-      descontoLabel: `-${formatBRL(valorDesconto)}`,
-      totalLabel: formatBRL(total),
-      logoUrl: `${window.location.origin}/auto-edit-logo@256.png`,
-    });
-
-    if (!ok) {
-      alert(
-        'O navegador bloqueou a janela do relatório. Permita pop-ups pra este site e tente de novo.',
-      );
+    setGerando(true);
+    try {
+      await downloadBudgetReport({
+        docNumber,
+        dateLabel,
+        validadeLabel: '7 dias',
+        cliente: cliente.trim(),
+        vpmLabel: formatBRL(vpm),
+        duracaoTotalLabel: fmtDur(totalSeconds),
+        qtdAds: items.length,
+        items,
+        subtotalLabel: formatBRL(subtotal),
+        descontoPct: desconto,
+        descontoLabel: `-${formatBRL(valorDesconto)}`,
+        totalLabel: formatBRL(total),
+        logoUrl: `${window.location.origin}/auto-edit-logo@256.png`,
+      });
+    } catch (err) {
+      console.error('[calculadora] falha ao gerar PDF', err);
+      alert('Não consegui gerar o PDF agora. Tenta de novo em instantes.');
+    } finally {
+      setGerando(false);
     }
   };
 
@@ -291,23 +295,29 @@ export default function CalculadoraPage() {
             <button
               type="button"
               onClick={gerarRelatorio}
-              disabled={!canPrint}
-              aria-label="Imprimir relatório do orçamento em PDF"
+              disabled={!canPrint || gerando}
+              aria-label="Baixar relatório do orçamento em PDF"
               className="report3d mt-3.5"
             >
               <span className="report3d-ico" aria-hidden>
-                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
-                  <path d="M14 3v5h5" />
-                  <path d="M8.5 17v-3" />
-                  <path d="M12 17v-5" />
-                  <path d="M15.5 17v-2" />
-                </svg>
+                {gerando ? (
+                  <svg className="report3d-spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+                    <path d="M12 3a9 9 0 1 0 9 9" />
+                  </svg>
+                ) : (
+                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+                    <path d="M14 3v5h5" />
+                    <path d="M8.5 17v-3" />
+                    <path d="M12 17v-5" />
+                    <path d="M15.5 17v-2" />
+                  </svg>
+                )}
               </span>
-              <span>Imprimir Relatório</span>
+              <span>{gerando ? 'Gerando PDF…' : 'Baixar Relatório (PDF)'}</span>
             </button>
             <p className="mt-2 text-center text-[11px] text-text-muted">
-              Gera um PDF profissional do orçamento — é só salvar e mandar pro cliente.
+              Baixa um PDF profissional do orçamento na hora — é só mandar pro cliente.
             </p>
           </div>
         </ToolResultCard>
@@ -372,6 +382,14 @@ export default function CalculadoraPage() {
           border-radius: 9px;
           background: rgba(255, 255, 255, 0.16);
           box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+        }
+        .report3d-spin {
+          animation: report3d-rot 0.7s linear infinite;
+        }
+        @keyframes report3d-rot {
+          to {
+            transform: rotate(360deg);
+          }
         }
       `}</style>
     </ToolShell>
