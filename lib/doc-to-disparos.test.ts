@@ -818,6 +818,34 @@ assert(!!depo && depo.bodySegments.some((s) => /depoimento/i.test(s.role || ''))
 assert(!!depo && /minha mãe com 65/i.test(depo.body || ''), 'texto do depoimento entrou no corpo (não foi descartado)');
 assert(!!depo && !/7508150707225251077/.test(depo.body || ''), 'linha do chip .mp4 NÃO vaza pra fala');
 
+// (d) REGRESSÃO CRÍTICA (RIPCFPB): a Referência "AD53G2VN-ME.mp4" PARECE um
+// título de AD (AD53G2VN-ME) e cortava a seção do AD no meio — o depoimento no
+// corpo (depois da Referência) sumia. Filename .mp4 NÃO é heading de AD.
+const REF_AD_DOC = [
+  'AD03GL - RIPCFPB',
+  'INSTRUÇÕES PARA EDIÇÃO:',
+  'Avatar e Vozes:',
+  'Doutora: @drtakashi.mp4',
+  'Edição: dopaminérgica;',
+  'Referência:',
+  'AD53G2VN-ME.mp4',
+  '',
+  'Body',
+  'Doutora:',
+  'Mais de 5 mil brasileiros já tiveram a memória recuperada e hoje vivem uma vida normal.',
+  '',
+  'Depoimento com avatar: 7508150707225251077.mp4',
+  'Minha mãe com 65 anos estava nos estágios iniciais do Alzheimer e melhorou muito com o ritual.',
+  '',
+  'AD04GL - RIPCFPB',
+  'Avatar e Vozes:',
+  'Homem: peterattiamd.mp4',
+].join('\n');
+const refAd = parseDarkoBriefing(REF_AD_DOC, 'AD03GL', null, []);
+assert(!!refAd && refAd.avatars.some((a) => a.username === '7508150707225251077'), 'Referência tipo-AD ".mp4" NÃO trunca a seção — depoimento no corpo é detectado');
+assert(!!refAd && refAd.avatars.length === 2, `2 avatares (Doutora + Depoimento) apesar da Referência tipo-AD (got ${refAd?.avatars.length})`);
+assert(!!refAd && /minha mãe com 65/i.test(refAd.body || ''), 'corpo (com testemunho) não foi cortado pela Referência tipo-AD');
+
 /* ----------------- doc vazio ----------------- */
 console.log('\nedge cases:');
 const empty = buildDisparosFromDoc('', CANDIDATES);

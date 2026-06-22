@@ -55,6 +55,18 @@ export type ParsedAdSection = {
 
 const AD_HEADING_RE = /^AD\d+[A-Z0-9]*\s*-\s*[A-Z0-9]+/i;
 
+/** True se a linha e um HEADING de AD de verdade (ex "AD03GL - RIPCFPB"), e NAO
+ *  um nome de ARQUIVO que por acaso casa o padrao — ex a Referência
+ *  "AD53G2VN-ME.mp4" do briefing, ou "AD600VN[T]-VFPB02-AVA02.mp4". Filenames
+ *  terminam em extensao de midia e NUNCA sao headings de secao; tratá-los como
+ *  heading CORTAVA a secao do AD no meio (perdia corpo + depoimento). */
+function isAdHeadingLine(line: string): boolean {
+  const t = (line || '').trim();
+  if (!AD_HEADING_RE.test(t)) return false;
+  if (/\.(mp4|mov|mp3|wav|m4a|aac|png|jpe?g|webp|gif|pdf)\b/i.test(t)) return false;
+  return true;
+}
+
 /**
  * Localiza a secao do AD especifico no texto bruto do doc.
  *
@@ -105,7 +117,7 @@ function headingMatchesTaskFuzzy(heading: string, taskId: string): boolean {
 /** Encontra o próximo heading AD após startIdx (delimita section). */
 function findNextAdHeading(lines: string[], startIdx: number): number {
   for (let i = startIdx + 1; i < lines.length; i++) {
-    if (AD_HEADING_RE.test(lines[i].trim())) return i;
+    if (isAdHeadingLine(lines[i])) return i;
   }
   return lines.length;
 }
@@ -163,7 +175,7 @@ export function findAdSection(text: string, adIdOrPrefix: string, variant?: stri
   const cands: Cand[] = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim().toUpperCase();
-    if (!AD_HEADING_RE.test(line)) continue;
+    if (!isAdHeadingLine(line)) continue;
     // Filtro de VARIANTE: docs com varias variantes do mesmo AD (F2/P1/AVA05)
     // — so casa headings da variante pedida. Sem variant = sem filtro. Isso
     // impede o merge de poçar avatares/copy de variantes diferentes.
@@ -211,7 +223,7 @@ export function findAdSection(text: string, adIdOrPrefix: string, variant?: stri
   const startIdx = cands[0].idx;
   let endIdx = lines.length;
   for (let i = startIdx + 1; i < lines.length; i++) {
-    if (AD_HEADING_RE.test(lines[i].trim()) && !candIdxSet.has(i)) {
+    if (isAdHeadingLine(lines[i]) && !candIdxSet.has(i)) {
       endIdx = i;
       break;
     }
@@ -851,7 +863,7 @@ export function findGSiblings(fullDocText: string, baseAdId: string, variant?: s
       let end = lines.length;
       for (let i = f.lineStart + 1; i < lines.length; i++) {
         const t = lines[i].trim();
-        if (/^AD\d+[A-Z0-9]*\s*-\s*[A-Z0-9]+/i.test(t)) { end = i; break; }
+        if (isAdHeadingLine(t)) { end = i; break; }
       }
       return {
         gNum: f.gNum,
@@ -1446,7 +1458,7 @@ function findBaseCopyBlock(fullDocText: string, baseAdId: string, variant?: stri
   if (!normBase) return null;
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim();
-    if (!AD_HEADING_RE.test(t)) continue;
+    if (!isAdHeadingLine(t)) continue;
     // Variante: a copy pode estar sob heading com miolo de nicho diferente
     // ("AD14GL - VFPB04 - F2") mas SEMPRE carrega o token de variante. Filtra
     // por ele pra nao pegar a copy de outra variante (P1/AVA05).
