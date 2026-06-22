@@ -1594,7 +1594,12 @@ function BrollHistorySection() {
         `Os ${item.successCount} ja prontos serao preservados. ZIP sera atualizado no final.`
       )) return;
 
-      // 2. Dispara so as faltantes
+      // 2. Dispara so as faltantes — EM ATÉ N RODADAS pra AUTO-CONVERGIR sem o
+      //    user clicar RETOMAR repetidamente. PARA quando uma rodada não rende
+      //    NENHUMA nova (genuinamente travado: prompt vetado por política ou
+      //    sessão Magnific caída) — assim NUNCA entra em loop infinito.
+      //    Mesmo se o pipeline abortar uma rodada inteira, a rodada conta 0
+      //    progresso e a gente para honesto em vez de re-disparar pra sempre.
       setRetryMsg(`Re-disparando ${missingTakes.length} take(s)…`);
       // Marca a entry como em-voo + heartbeat por timer: RETOMAR em outra
       // aba (ou um segundo clique pos-reload) fica bloqueado enquanto vive.
@@ -1604,25 +1609,56 @@ function BrollHistorySection() {
         20_000,
       );
       const { runMagnificPipelineV2 } = await import('@/lib/magnific-pipeline-v2');
-      const r = await runMagnificPipelineV2(
-        {
-          spaceName: item.spaceName + '_RETRY',
-          takes: missingTakes,
-          imageModel: (item.imageModel as any) || 'imagen-nano-banana-2-flash',
-          aspect: (item.aspect === '16:9' ? '16:9' : '9:16'),
-          videoModel: 'kling-25',
-        },
-        {
-          onProgress: (p: any) => {
-            const ready = (p?.takes || []).filter((t: any) => t.status === 'ready').length;
-            setRetryMsg(`Renderizando ${ready}/${missingTakes.length}… (paciencia, Kling demora)`);
-            // Persiste incrementalmente os faltantes que vao ficando prontos
-            persistTakesIncremental(item.zipKey, (p?.takes as any) || []);
+      // idxs JÁ prontos antes de começar — preserva. Vamos acumulando.
+      const doneIdxs = new Set<number>(readyIdxs);
+      // Resultados acumulados de TODAS as rodadas (rodadas posteriores
+      // sobrescrevem por idx no merge final, então sucesso tardio vence falha).
+      const accumTakes: any[] = [];
+      const newZipBlobs: Blob[] = [];
+      let remaining = missingTakes;
+      const MAX_ROUNDS = 4;
+      for (let round = 1; round <= MAX_ROUNDS && remaining.length > 0; round++) {
+        setRetryMsg(`Rodada ${round}/${MAX_ROUNDS}: re-disparando ${remaining.length} take(s)… (Kling demora, esperando em paz)`);
+        const roundTotal = remaining.length;
+        const r = await runMagnificPipelineV2(
+          {
+            spaceName: item.spaceName + '_RETRY',
+            takes: remaining,
+            imageModel: (item.imageModel as any) || 'imagen-nano-banana-2-flash',
+            aspect: (item.aspect === '16:9' ? '16:9' : '9:16'),
+            videoModel: 'kling-25',
           },
-        },
-      );
+          {
+            onProgress: (p: any) => {
+              const ready = (p?.takes || []).filter((t: any) => t.status === 'ready' || !!t.videoUrl).length;
+              setRetryMsg(`Rodada ${round}/${MAX_ROUNDS} · ${ready}/${roundTotal} prontos… (paciencia, Kling demora)`);
+              // Persiste incrementalmente os faltantes que vao ficando prontos
+              // (localStorage + MP4 no IDB) — sobrevive a reload/crash.
+              persistTakesIncremental(item.zipKey, (p?.takes as any) || []);
+            },
+          },
+        );
+        if (r.zipBlob) newZipBlobs.push(r.zipBlob);
+        // videoUrl = verdade do sucesso (independe do status string).
+        let newThisRound = 0;
+        for (const t of (r.takes as any[]) || []) {
+          accumTakes.push(t);
+          if (!!t.videoUrl && !doneIdxs.has(t.idx)) { doneIdxs.add(t.idx); newThisRound++; }
+        }
+        remaining = allTakes.filter((t) => !doneIdxs.has(t.idx));
+        console.log(`[retomar] rodada ${round}: +${newThisRound} novas · faltam ${remaining.length}`);
+        // SEM PROGRESSO nesta rodada = travado de verdade. Para de rodar pra
+        // não loopar à toa — o user vê quantas sobraram (e o motivo provável).
+        if (newThisRound === 0) {
+          console.warn(`[retomar] rodada ${round} não rendeu nenhuma nova — parando (provável bloqueio de política/sessão)`);
+          break;
+        }
+        if (remaining.length === 0) break;
+        // Folga curta entre rodadas pra Magnific respirar antes da próxima leva.
+        await new Promise((res) => setTimeout(res, 5_000));
+      }
 
-      // 3. Merge ZIP antigo + novos MP4s
+      // 3. Merge ZIP antigo + novos MP4s (de TODAS as rodadas)
       setRetryMsg('Mergeando MP4s no ZIP…');
       const { loadZip, saveZip } = await import('@/lib/zip-store');
       const JSZip = (await import('jszip')).default;
@@ -1644,15 +1680,19 @@ function BrollHistorySection() {
       } catch (e) {
         console.warn('[retomar] zip antigo nao acessivel — usando so os novos:', e);
       }
-      // 3b. Adiciona os novos (vem como blob no resultado do pipeline)
-      if (r.zipBlob) {
-        const newBytes = await r.zipBlob.arrayBuffer();
-        const newZipObj = await JSZip.loadAsync(newBytes);
-        for (const name of Object.keys(newZipObj.files)) {
-          const f = newZipObj.files[name];
-          if (f.dir) continue;
-          const ab = await f.async('arraybuffer');
-          merged.file(name, ab); // overwrite se duplicado
+      // 3b. Adiciona os novos de cada rodada (overwrite se duplicado)
+      for (const zb of newZipBlobs) {
+        try {
+          const newBytes = await zb.arrayBuffer();
+          const newZipObj = await JSZip.loadAsync(newBytes);
+          for (const name of Object.keys(newZipObj.files)) {
+            const f = newZipObj.files[name];
+            if (f.dir) continue;
+            const ab = await f.async('arraybuffer');
+            merged.file(name, ab); // overwrite se duplicado
+          }
+        } catch (e) {
+          console.warn('[retomar] zip de rodada não pôde ser mesclado:', e);
         }
       }
       const mergedBlob = await merged.generateAsync({
@@ -1662,9 +1702,11 @@ function BrollHistorySection() {
       });
       await saveZip(item.zipKey, mergedBlob, item.zipName);
 
-      // 4. Atualiza entry: merge takeUrls (novos sobrescrevem antigos do mesmo idx)
+      // 4. Atualiza entry: merge takeUrls (novos sobrescrevem antigos do mesmo
+      //    idx; rodadas posteriores já vêm depois em accumTakes, então sucesso
+      //    tardio vence falha anterior do mesmo idx).
       const newTakeUrls = [...item.takeUrls];
-      for (const newT of r.takes as any[]) {
+      for (const newT of accumTakes) {
         const idx = newTakeUrls.findIndex((t) => t.idx === newT.idx);
         const entry = {
           idx: newT.idx,
@@ -1676,7 +1718,7 @@ function BrollHistorySection() {
         else newTakeUrls.push(entry);
       }
       const successCount = newTakeUrls.filter((t) => t.status === 'ready' || !!t.videoUrl).length;
-      const failedCount = newTakeUrls.length - successCount;
+      const failedCount = Math.max(0, item.totalTakes - successCount);
       const updated: HistEntry = {
         ...item,
         takeUrls: newTakeUrls,
@@ -1689,11 +1731,11 @@ function BrollHistorySection() {
       localStorage.setItem('darkolab:auto-broll:history', JSON.stringify(newHist));
       window.dispatchEvent(new Event('darkolab:auto-broll:history-changed'));
 
-      const stillMissing = item.totalTakes - successCount;
+      const stillMissing = Math.max(0, item.totalTakes - successCount);
       alert(
         stillMissing === 0
           ? `Retomar concluido: ${successCount}/${item.totalTakes} prontos! ZIP atualizado.`
-          : `Retomar parcial: ${successCount}/${item.totalTakes} prontos · ${stillMissing} ainda faltam. ZIP atualizado com o que deu certo. Pode clicar RETOMAR de novo.`
+          : `Retomar parou: ${successCount}/${item.totalTakes} prontos · ${stillMissing} seguem travadas após ${MAX_ROUNDS} rodadas (provável prompt vetado por política ou sessão Magnific). ZIP atualizado com o que deu certo — pode clicar RETOMAR de novo mais tarde.`
       );
     } catch (e) {
       alert('RETOMAR falhou: ' + ((e as Error)?.message || String(e)));
