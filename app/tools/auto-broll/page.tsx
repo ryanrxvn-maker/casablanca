@@ -1266,6 +1266,14 @@ function BrollHistorySection() {
   const [loading, setLoading] = useState<string | null>(null);
   const [retrying, setRetrying] = useState<string | null>(null);
   const [retryMsg, setRetryMsg] = useState<string>('');
+  // Progresso VISUAL do RETOMAR (barra + contador + rodada), igual ao disparo
+  // do zero. done/total = takes renderizadas nesta retomada / faltantes totais.
+  const [retryStats, setRetryStats] = useState<
+    null | { done: number; total: number; round: number; maxRounds: number }
+  >(null);
+  // Segundos decorridos da retomada atual (sinal "tá vivo" quando a barra
+  // fica parada esperando o Kling em prioridade reduzida).
+  const [retryElapsed, setRetryElapsed] = useState<number>(0);
   // zipKey do item que esta com o editor inline expandido (pra colar JSON
   // de batches antigos que nao tem originalJson salvo).
   const [pendingJsonFor, setPendingJsonFor] = useState<string | null>(null);
@@ -1568,7 +1576,10 @@ function BrollHistorySection() {
   async function retomar(item: HistEntry, originalJson: string) {
     setRetrying(item.zipKey);
     setRetryMsg('Preparando…');
+    setRetryStats(null);
+    setRetryElapsed(0);
     let retomarBeat: ReturnType<typeof setInterval> | null = null;
+    let elapsedTimer: ReturnType<typeof setInterval> | null = null;
     // Anti-freeze: gesture do clique permite iniciar o áudio keep-alive
     const stopKeepAlive = startTabKeepAlive();
     try {
@@ -1608,9 +1619,19 @@ function BrollHistorySection() {
         () => patchHistEntry(item.zipKey, { lastBeatAt: Date.now() }),
         20_000,
       );
+      const retomarStartedAt = Date.now();
+      elapsedTimer = setInterval(
+        () => setRetryElapsed(Math.floor((Date.now() - retomarStartedAt) / 1000)),
+        1_000,
+      );
       const { runMagnificPipelineV2 } = await import('@/lib/magnific-pipeline-v2');
       // idxs JÁ prontos antes de começar — preserva. Vamos acumulando.
       const doneIdxs = new Set<number>(readyIdxs);
+      // Progresso visual: total = faltantes desta retomada; done = soma das
+      // rodadas anteriores + prontas da rodada atual (atualiza no onProgress).
+      const originalMissing = missingTakes.length;
+      let completedBefore = 0;
+      setRetryStats({ done: 0, total: originalMissing, round: 1, maxRounds: 4 });
       // Resultados acumulados de TODAS as rodadas (rodadas posteriores
       // sobrescrevem por idx no merge final, então sucesso tardio vence falha).
       const accumTakes: any[] = [];
@@ -1619,6 +1640,7 @@ function BrollHistorySection() {
       const MAX_ROUNDS = 4;
       for (let round = 1; round <= MAX_ROUNDS && remaining.length > 0; round++) {
         setRetryMsg(`Rodada ${round}/${MAX_ROUNDS}: re-disparando ${remaining.length} take(s)… (Kling demora, esperando em paz)`);
+        setRetryStats({ done: completedBefore, total: originalMissing, round, maxRounds: MAX_ROUNDS });
         const roundTotal = remaining.length;
         const r = await runMagnificPipelineV2(
           {
@@ -1632,6 +1654,7 @@ function BrollHistorySection() {
             onProgress: (p: any) => {
               const ready = (p?.takes || []).filter((t: any) => t.status === 'ready' || !!t.videoUrl).length;
               setRetryMsg(`Rodada ${round}/${MAX_ROUNDS} · ${ready}/${roundTotal} prontos… (paciencia, Kling demora)`);
+              setRetryStats({ done: completedBefore + ready, total: originalMissing, round, maxRounds: MAX_ROUNDS });
               // Persiste incrementalmente os faltantes que vao ficando prontos
               // (localStorage + MP4 no IDB) — sobrevive a reload/crash.
               persistTakesIncremental(item.zipKey, (p?.takes as any) || []);
@@ -1645,6 +1668,8 @@ function BrollHistorySection() {
           accumTakes.push(t);
           if (!!t.videoUrl && !doneIdxs.has(t.idx)) { doneIdxs.add(t.idx); newThisRound++; }
         }
+        completedBefore += newThisRound;
+        setRetryStats({ done: completedBefore, total: originalMissing, round, maxRounds: MAX_ROUNDS });
         remaining = allTakes.filter((t) => !doneIdxs.has(t.idx));
         console.log(`[retomar] rodada ${round}: +${newThisRound} novas · faltam ${remaining.length}`);
         // SEM PROGRESSO nesta rodada = travado de verdade. Para de rodar pra
@@ -1741,9 +1766,12 @@ function BrollHistorySection() {
       alert('RETOMAR falhou: ' + ((e as Error)?.message || String(e)));
     } finally {
       if (retomarBeat) clearInterval(retomarBeat);
+      if (elapsedTimer) clearInterval(elapsedTimer);
       stopKeepAlive();
       setRetrying(null);
       setRetryMsg('');
+      setRetryStats(null);
+      setRetryElapsed(0);
       patchHistEntry(item.zipKey, { inFlight: false });
     }
   }
@@ -1867,6 +1895,29 @@ function BrollHistorySection() {
                   ×
                 </button>
               </div>
+              {/* Barra de progresso do RETOMAR — visibilidade igual ao disparo
+               *  do zero: contador X/total, rodada, tempo decorrido e barra. */}
+              {isRetrying && retryStats ? (
+                <div className="rounded-[12px] border border-cyan-400/40 bg-cyan-400/[0.05] px-4 py-3">
+                  <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-widest text-cyan-300">
+                    <span>
+                      Rodada {retryStats.round}/{retryStats.maxRounds} · {retryStats.done}/{retryStats.total} renderizados
+                    </span>
+                    <span className="tabular-nums text-cyan-300/80">
+                      {Math.floor(retryElapsed / 60)}m {String(retryElapsed % 60).padStart(2, '0')}s
+                    </span>
+                  </div>
+                  <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-bg/60">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-violet transition-all duration-500"
+                      style={{ width: `${Math.min(100, Math.round((retryStats.done / Math.max(1, retryStats.total)) * 100))}%` }}
+                    />
+                  </div>
+                  <div className="mt-1.5 text-[9px] text-text-muted">
+                    Kling renderiza em lotes de 3 — pode demorar (mais ainda em prioridade reduzida). Tá rodando: não feche a aba. O cronômetro andando = vivo.
+                  </div>
+                </div>
+              ) : null}
               {/* Preview expandido: grid de vídeos do batch */}
               {previewFor === item.zipKey ? <HistoryPreviewGrid item={item} /> : null}
               {/* Editor inline pra colar JSON original em batches antigos */}
