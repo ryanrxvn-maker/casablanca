@@ -1684,6 +1684,20 @@ function ClickUpPilotInner() {
           // — passa pro parser pra ele identificar avatar por smart-chip de
           // YouTube ("Doutora: 🎥 O IMPACTO DO ESTRESSE...") e montar a thumb.
           const briefing = parseDarkoBriefing(docR.text, baseAdId, variantToken, docR.driveLinks || []);
+          // [PILOT-DEBUG] diagnóstico do depoimento — mostra o que foi detectado
+          // e onde a linha de depoimento cai (qual seção de AD). Tirar print do
+          // console (F12) se algum avatar/depoimento não aparecer.
+          try {
+            const _sec = findAdSection(docR.text, baseAdId, variantToken) || '';
+            const _hasDepoInSec = _sec.split(/\r?\n/).filter((l) => /depoimento/i.test(l));
+            const _hasDepoInDoc = docR.text.split(/\r?\n/).filter((l) => /depoimento/i.test(l));
+            console.log(
+              `[PILOT-DEBUG] ${baseAdId} (task "${task.name}")`,
+              '\n  avatares detectados:', (briefing?.avatars || []).map((a) => `${a.role} :: ${a.username}${a.youtubeUrl ? ' [YT]' : ''}`),
+              '\n  linha(s) de depoimento NA SEÇÃO deste AD:', _hasDepoInSec.length ? _hasDepoInSec : '(NENHUMA — está em outro AD)',
+              '\n  linha(s) de depoimento NO DOC INTEIRO:', _hasDepoInDoc,
+            );
+          } catch (_e) { /* debug only */ }
           if (!briefing || (briefing.hooks.length === 0 && !briefing.body)) {
             setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: `Parser nao achou hooks nem body pra ${baseAdId} no doc` } }));
             continue;
