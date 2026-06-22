@@ -73,6 +73,7 @@ import {
   buildTakeFileNames,
   type MagnificTakeInput,
   type PipelineProgress,
+  type TakeState,
 } from '@/lib/magnific-pipeline';
 import { runMagnificPipelineV2 } from '@/lib/magnific-pipeline-v2';
 import { ToolStep } from '@/components/tool-kit';
@@ -1143,8 +1144,8 @@ async function buildZipFromEntry(item: HistEntry): Promise<{ blob: Blob; n: numb
  *  (player nativo) + rótulo. Prefere o MP4 salvo no IDB (offline); se não
  *  houver, usa a URL Magnific; se expirou, mostra o poster da imagem.
  *  Takes que falharam viram placeholder. */
-function HistoryPreviewCell({ zipKey, idx, videoUrl, imageUrl, label, status }: {
-  zipKey: string; idx: number; videoUrl: string | null; imageUrl: string | null; label: string; status: string;
+function HistoryPreviewCell({ zipKey, idx, videoUrl, imageUrl, label, status, live }: {
+  zipKey: string; idx: number; videoUrl: string | null; imageUrl: string | null; label: string; status: string; live?: TakeState | null;
 }) {
   // Prefere o MP4 salvo no IDB (offline-proof). Senão usa a URL Magnific.
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
@@ -1159,11 +1160,28 @@ function HistoryPreviewCell({ zipKey, idx, videoUrl, imageUrl, label, status }: 
     })();
     return () => { alive = false; if (created) URL.revokeObjectURL(created); };
   }, [zipKey, idx]);
-  const src = blobUrl || videoUrl;
+  // Estado AO VIVO (retomada): em geração mostra coelho + barra; recém-pronto
+  // toca a URL nova na hora (antes do MP4 cair no IDB).
+  const liveInProgress = !!live && (live.status === 'idle' || live.status === 'running' || live.status === 'image-done');
+  const livePercent = live && live.status === 'running' ? live.percent : live && live.status === 'image-done' ? 50 : 0;
+  const liveVideoUrl = live && (live.status === 'video-done' || live.status === 'ready') ? live.videoUrl : null;
+  const src = blobUrl || liveVideoUrl || videoUrl;
   return (
     <div className="overflow-hidden rounded-[10px] border border-line/60 bg-bg/50">
       <div className="relative aspect-[9/16] bg-black/40">
-        {src ? (
+        {liveInProgress ? (
+          // EM GERAÇÃO AO VIVO — coelho saltitante + shimmer + barra (igual
+          // ao disparo do zero). Refs de keyframes (abHop/abShimmer) injetadas
+          // 1x pelo HistoryPreviewGrid.
+          <div className="absolute inset-0 flex items-center justify-center overflow-hidden bg-gradient-to-br from-violet/[0.10] via-bg-soft to-bg">
+            <div aria-hidden className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/[0.06] to-transparent" style={{ animation: 'abShimmer 2.4s ease-in-out infinite' }} />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/auto-edit-logo@64.png" alt="" width={32} height={32} className="relative z-10 drop-shadow-[0_0_12px_rgba(167,139,250,0.85)]" style={{ animation: 'abHop 1.6s ease-in-out infinite' }} />
+            <div className="absolute bottom-0 left-0 right-0 h-1 bg-line/40">
+              <div className="h-full bg-gradient-to-r from-violet via-violet-deep to-cyan-400 transition-all duration-500" style={{ width: `${Math.max(livePercent, 6)}%`, boxShadow: '0 0 8px rgba(167,139,250,0.6)' }} />
+            </div>
+          </div>
+        ) : src ? (
           <video src={src} poster={imageUrl || undefined} controls playsInline muted preload="metadata" className="h-full w-full object-cover" />
         ) : imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -1176,9 +1194,14 @@ function HistoryPreviewCell({ zipKey, idx, videoUrl, imageUrl, label, status }: 
         <span className="absolute left-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-bold text-lime">
           {String(idx).padStart(2, '0')}
         </span>
-        {blobUrl && (
+        {liveInProgress ? (
+          <span className="absolute right-1 top-1 flex h-3 w-3 items-center justify-center" title="Gerando agora">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet opacity-70" />
+            <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-violet" />
+          </span>
+        ) : blobUrl ? (
           <span className="absolute right-1 top-1 rounded bg-lime/90 px-1 py-0.5 text-[8px] font-bold text-black" title="Salvo offline">💾</span>
-        )}
+        ) : null}
       </div>
       <div className="px-1.5 py-1 text-[9px] leading-tight text-text-dim line-clamp-2" title={label}>
         {label}
@@ -1187,13 +1210,22 @@ function HistoryPreviewCell({ zipKey, idx, videoUrl, imageUrl, label, status }: 
   );
 }
 
-function HistoryPreviewGrid({ item }: { item: HistEntry }) {
+function HistoryPreviewGrid({ item, live }: { item: HistEntry; live?: Record<number, TakeState> | null }) {
   const labels = buildLabelMap(item);
   const takes = [...(item.takeUrls || [])].sort((a, b) => a.idx - b.idx);
+  const readyCount = takes.filter((t) => t.status === 'ready' || t.videoUrl).length;
+  const liveOn = !!live;
   return (
-    <div className="rounded-[12px] border border-violet/40 bg-bg-soft/30 p-3">
-      <div className="mono mb-2 text-[10px] uppercase tracking-widest text-violet">
-        Preview · {takes.filter((t) => t.status === 'ready' || t.videoUrl).length}/{takes.length} prontos
+    <div className={'rounded-[12px] border bg-bg-soft/30 p-3 ' + (liveOn ? 'border-cyan-400/40' : 'border-violet/40')}>
+      {/* Keyframes globais (1x) referenciados pelas células em geração ao vivo. */}
+      {liveOn ? (
+        <style>{`
+          @keyframes abHop { 0%,100%{transform:translateY(0) scale(1) rotate(-3deg)} 50%{transform:translateY(-7px) scale(1.08) rotate(3deg)} }
+          @keyframes abShimmer { 0%,100%{transform:translateX(-100%)} 50%{transform:translateX(100%)} }
+        `}</style>
+      ) : null}
+      <div className={'mono mb-2 text-[10px] uppercase tracking-widest ' + (liveOn ? 'text-cyan-300' : 'text-violet')}>
+        {liveOn ? 'Retomando ao vivo' : 'Preview'} · {readyCount}/{takes.length} prontos
       </div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
         {takes.map((t) => {
@@ -1207,6 +1239,7 @@ function HistoryPreviewGrid({ item }: { item: HistEntry }) {
               imageUrl={t.imageUrl}
               label={label}
               status={t.status}
+              live={live ? live[t.idx] || null : null}
             />
           );
         })}
@@ -1274,6 +1307,9 @@ function BrollHistorySection() {
   // Segundos decorridos da retomada atual (sinal "tá vivo" quando a barra
   // fica parada esperando o Kling em prioridade reduzida).
   const [retryElapsed, setRetryElapsed] = useState<number>(0);
+  // Estados AO VIVO por take (idx -> TakeState) durante a retomada — alimenta
+  // a grade dinâmica (coelho + barra) igual ao disparo do zero.
+  const [retryLive, setRetryLive] = useState<Record<number, TakeState>>({});
   // zipKey do item que esta com o editor inline expandido (pra colar JSON
   // de batches antigos que nao tem originalJson salvo).
   const [pendingJsonFor, setPendingJsonFor] = useState<string | null>(null);
@@ -1578,6 +1614,7 @@ function BrollHistorySection() {
     setRetryMsg('Preparando…');
     setRetryStats(null);
     setRetryElapsed(0);
+    setRetryLive({});
     let retomarBeat: ReturnType<typeof setInterval> | null = null;
     let elapsedTimer: ReturnType<typeof setInterval> | null = null;
     // Anti-freeze: gesture do clique permite iniciar o áudio keep-alive
@@ -1604,6 +1641,10 @@ function BrollHistorySection() {
         `(idxs: ${missingTakes.map((t) => t.idx).join(', ')})\n\n` +
         `Os ${item.successCount} ja prontos serao preservados. ZIP sera atualizado no final.`
       )) return;
+
+      // Abre o preview deste batch automaticamente: a grade dinâmica (coelho +
+      // barra por take) aparece sem o user precisar clicar em "Preview".
+      setPreviewFor(item.zipKey);
 
       // 2. Dispara so as faltantes — EM ATÉ N RODADAS pra AUTO-CONVERGIR sem o
       //    user clicar RETOMAR repetidamente. PARA quando uma rodada não rende
@@ -1655,6 +1696,12 @@ function BrollHistorySection() {
               const ready = (p?.takes || []).filter((t: any) => t.status === 'ready' || !!t.videoUrl).length;
               setRetryMsg(`Rodada ${round}/${MAX_ROUNDS} · ${ready}/${roundTotal} prontos… (paciencia, Kling demora)`);
               setRetryStats({ done: completedBefore + ready, total: originalMissing, round, maxRounds: MAX_ROUNDS });
+              // Estados ao vivo por take pra grade dinâmica (coelho + barra).
+              setRetryLive((prev) => {
+                const next = { ...prev };
+                for (const t of ((p?.takes as TakeState[]) || [])) next[t.idx] = t;
+                return next;
+              });
               // Persiste incrementalmente os faltantes que vao ficando prontos
               // (localStorage + MP4 no IDB) — sobrevive a reload/crash.
               persistTakesIncremental(item.zipKey, (p?.takes as any) || []);
@@ -1772,6 +1819,7 @@ function BrollHistorySection() {
       setRetryMsg('');
       setRetryStats(null);
       setRetryElapsed(0);
+      setRetryLive({});
       patchHistEntry(item.zipKey, { inFlight: false });
     }
   }
@@ -1918,8 +1966,13 @@ function BrollHistorySection() {
                   </div>
                 </div>
               ) : null}
-              {/* Preview expandido: grid de vídeos do batch */}
-              {previewFor === item.zipKey ? <HistoryPreviewGrid item={item} /> : null}
+              {/* Preview expandido: grid de vídeos do batch (dinâmico no retomar) */}
+              {previewFor === item.zipKey ? (
+                <HistoryPreviewGrid
+                  item={item}
+                  live={retrying === item.zipKey ? retryLive : null}
+                />
+              ) : null}
               {/* Editor inline pra colar JSON original em batches antigos */}
               {isEditingJson ? (
                 <div className="rounded-[12px] border border-cyan-400/50 bg-cyan-400/[0.04] p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_18px_-8px_rgba(34,211,238,0.35)]">
