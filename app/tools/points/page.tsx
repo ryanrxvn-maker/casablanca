@@ -138,10 +138,12 @@ export default function PointsPage() {
       // O widget "Pontuação" do ClickUp conta SÓ a pasta "Tarefas time". O
       // AutoEdit puxava o workspace inteiro (Tráfego 02, CONTINGÊNCIA, etc) e
       // por isso inflava. Aqui filtramos pra MESMA pasta → espelho exato.
-      // "Container" = pasta (folder) OU, se a lista estiver solta no espaço,
-      // o nome do espaço (space). Robusto a "Tarefas time" ser folder OU space.
+      // O dashboard do ClickUp ("Silas | Tarefas time") é escopo de um ESPAÇO
+      // (space). Os folders são "[P] DF VALIDADAS" etc — "Tarefas time" não é
+      // folder, é o ESPAÇO que contém esses folders. Então agrupamos por ESPAÇO
+      // (space) e, na falta, pela pasta. inScope casa space OU folder.
       const containerOf = (t: Task): string =>
-        ((t.folder?.name || t.space?.name || '').trim()) || '(sem pasta)';
+        ((t.space?.name || t.folder?.name || '').trim()) || '(sem espaço)';
       const foldersMap = new Map<string, number>();
       for (const t of allMine) {
         foldersMap.set(containerOf(t), (foldersMap.get(containerOf(t)) || 0) + 1);
@@ -151,8 +153,9 @@ export default function PointsPage() {
         .sort((a, b) => b.count - a.count);
       setAvailableFolders(folderList);
 
-      // Resolve o escopo: escolha do user (localStorage) > auto-detecta a pasta
-      // que contém "tarefas time" > tudo (fallback seguro, = comportamento antigo).
+      // Resolve o escopo: escolha salva > auto-detecta o ESPAÇO "Tarefas time"
+      // > o espaço com mais tasks (melhor palpite) — NUNCA cai em "tudo" à toa,
+      // pra não inflar com Tráfego 02/CONTINGÊNCIA.
       const scopePref = typeof window !== 'undefined' ? localStorage.getItem(SCOPE_KEY) : null;
       let effectiveScope: string | null;
       if (scopePref === '__ALL__') {
@@ -161,14 +164,16 @@ export default function PointsPage() {
         effectiveScope = scopePref;
       } else {
         const auto = folderList.find((f) => f.name.toLowerCase().includes('tarefas time'));
-        effectiveScope = auto ? auto.name : null;
+        effectiveScope = auto ? auto.name : (folderList[0]?.name ?? null);
       }
       setScopeResolved(effectiveScope);
 
       const scopeLc = (effectiveScope || '').toLowerCase().trim();
       const inScope = (t: Task): boolean => {
         if (!scopeLc) return true; // sem escopo = tudo
-        return containerOf(t).toLowerCase() === scopeLc;
+        const sp = (t.space?.name || '').toLowerCase().trim();
+        const fo = (t.folder?.name || '').toLowerCase().trim();
+        return sp === scopeLc || fo === scopeLc;
       };
       // A partir daqui, TUDO (concluídas, atrasadas, pontos) usa só o escopo.
       const scoped = allMine.filter(inScope);
@@ -370,11 +375,11 @@ export default function PointsPage() {
             <div
               className="font-bold text-[72px] leading-none"
               style={{
-                background: cur ? `linear-gradient(135deg, ${cur.primaryColor}, ${cur.secondaryColor})` : 'linear-gradient(135deg, #22D3EE, #06B6D4)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                backgroundClip: 'text',
-                textShadow: cur ? `0 0 40px ${cur.primaryColor}40` : '0 0 40px rgba(34,211,238,0.3)',
+                // COR SÓLIDA — o truque de gradiente-no-texto (background-clip:text)
+                // estava falhando e deixando o número INVISÍVEL (só um quadrado
+                // colorido). Cor sólida = número SEMPRE visível.
+                color: cur ? cur.primaryColor : '#22D3EE',
+                textShadow: cur ? `0 0 40px ${cur.primaryColor}55` : '0 0 40px rgba(34,211,238,0.4)',
               }}
             >
               {loadingPoints ? '...' : points}
@@ -398,23 +403,6 @@ export default function PointsPage() {
               >
                 {loadingPoints ? '⟳ Carregando...' : '⟳ Atualizar'}
               </button>
-              {/* ESCOPO — espelha o ClickUp. Conta SÓ a pasta escolhida. */}
-              {availableFolders.length > 0 && (
-                <select
-                  value={scopeResolved ?? '__ALL__'}
-                  onChange={(e) => selectScope(e.target.value === '__ALL__' ? '__ALL__' : e.target.value)}
-                  disabled={loadingPoints}
-                  title="Pasta do ClickUp que conta pontos (espelha o widget Pontuação)"
-                  className="mono max-w-[180px] rounded border border-line-strong bg-bg px-2 py-1 text-[9px] uppercase tracking-widest text-text-muted outline-none hover:border-cyan-400 focus:border-cyan-400 disabled:opacity-40"
-                >
-                  <option value="__ALL__">todas as pastas</option>
-                  {availableFolders.map((f) => (
-                    <option key={f.name} value={f.name}>
-                      {f.name} ({f.count})
-                    </option>
-                  ))}
-                </select>
-              )}
               <div className="mono text-[9px] uppercase tracking-widest text-text-muted">
                 {currentMonthKey()}{scopeResolved ? ` · ${scopeResolved}` : ''}
               </div>
