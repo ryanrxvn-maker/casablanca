@@ -60,12 +60,22 @@ const COOLDOWN_MS = (() => {
   const n = Number(process.env.DREAMFACE_COOLDOWN_MS);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 5 * 60 * 1000;
 })();
-/** Quanto esperar por uma vaga quando TODAS as contas saudáveis estão ocupadas. */
+/** Quanto o SERVIDOR espera por uma vaga quando TODAS as contas saudáveis estão
+ *  ocupadas. Curto de propósito: a função serverless não fica idle/cara — quem
+ *  segura a "fila" longa é o cliente (re-tenta o POST sem re-subir nada). Soma
+ *  com a geração (≤~210s) tem de caber no maxDuration (300s) com folga. */
 const MAX_WAIT_MS = (() => {
   const n = Number(process.env.DREAMFACE_MAX_WAIT_MS);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 90_000;
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 20_000;
 })();
 const POLL_MS = 400;
+/** Auto-cura: acima disso, um slot "ocupado" é considerado órfão (o detentor
+ *  morreu — função serverless congelada/timeout) e é liberado, pra a conta
+ *  nunca travar pra sempre. Bem acima do teto real de uma geração (~3-4min). */
+const STALE_MS = (() => {
+  const n = Number(process.env.DREAMFACE_STALE_MS);
+  return Number.isFinite(n) && n >= 60_000 ? Math.floor(n) : 6 * 60 * 1000;
+})();
 
 // ───────────────────────── carga das contas ─────────────────────────
 let _accounts: DreamFaceAccount[] | null = null;
@@ -201,6 +211,17 @@ async function acquire(exclude: Set<string>): Promise<DreamFaceAccount | null> {
   for (;;) {
     const now = Date.now();
     const all = loadAccounts();
+
+    // AUTO-CURA: libera slots órfãos (detentor morreu / função congelada) —
+    // se a conta está "ocupada" há mais que STALE_MS, zera o inFlight pra ela
+    // não ficar travada como cheia pra sempre.
+    for (const a of all) {
+      const s = state(a.label);
+      if (s.inFlight > 0 && s.lastStartAt > 0 && now - s.lastStartAt > STALE_MS) {
+        s.inFlight = 0;
+      }
+    }
+
     const eligible = all.filter((a) => !exclude.has(a.label) && state(a.label).cooldownUntil <= now);
     if (!eligible.length) return null; // nada saudável pra tentar
 

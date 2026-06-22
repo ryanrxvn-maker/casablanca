@@ -373,19 +373,31 @@ export default function LipSyncTool() {
     faceUrl: string, audioChunk: File, chunkMs: number, label?: string,
   ): Promise<Blob> {
     const aUrl = await uploadPublic(audioChunk, 'audio');
-    // O POST de geração só re-tenta em erro de REDE (o fetch nem chegou no
-    // servidor) — assim um blip não dispara 2 renders no motor. Uma RESPOSTA
-    // HTTP (mesmo de erro) encerra o retry e cai na checagem abaixo.
     type GenData = { output_video_url?: string; error?: unknown } | null;
-    const { status, ok, data } = await withRetry(async () => {
-      const res = await fetch('/api/tools/lipsync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ video_url: faceUrl, audio_url: aUrl, audio_ms: chunkMs }),
-      });
-      const json = (await res.json().catch(() => null)) as GenData;
-      return { status: res.status, ok: res.ok, data: json };
-    }, { tries: 3, baseDelayMs: 1200 });
+
+    // Loop de CAPACIDADE: 503 = todas as contas do pool ocupadas NESTE instante
+    // (nenhuma geração começou no servidor). Espera com backoff e re-POSTa SEM
+    // re-subir nada — pro usuário é só "na fila" um pouco mais, nunca um erro.
+    // O POST em si (erro de REDE) re-tenta conservador por dentro (não dispara
+    // 2 renders no motor). Resposta HTTP normal encerra e cai na checagem.
+    let resp: { status: number; ok: boolean; data: GenData } | null = null;
+    for (let busy = 0; busy < 6; busy++) {
+      const r = await withRetry(async () => {
+        const res = await fetch('/api/tools/lipsync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ video_url: faceUrl, audio_url: aUrl, audio_ms: chunkMs }),
+        });
+        const json = (await res.json().catch(() => null)) as GenData;
+        return { status: res.status, ok: res.ok, data: json };
+      }, { tries: 3, baseDelayMs: 1200 });
+      if (r.status !== 503) { resp = r; break; }
+      await new Promise((s) => setTimeout(s, Math.min(8000, 2000 * 2 ** busy) + Math.random() * 400));
+    }
+    if (!resp) {
+      throw new Error('A fila de geração está cheia agora. Tenta de novo em instantes.');
+    }
+    const { status, ok, data } = resp;
 
     if (!ok || !data?.output_video_url) {
       throw new Error(
