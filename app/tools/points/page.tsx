@@ -134,46 +134,43 @@ export default function PointsPage() {
       }
       if (!teamId) { setPointsError('Sem teams ClickUp.'); return; }
 
-      // ─── ESCOPO (pasta do dashboard) ────────────────────────────────────
-      // O widget "Pontuação" do ClickUp conta SÓ a pasta "Tarefas time". O
-      // AutoEdit puxava o workspace inteiro (Tráfego 02, CONTINGÊNCIA, etc) e
-      // por isso inflava. Aqui filtramos pra MESMA pasta → espelho exato.
-      // O dashboard do ClickUp ("Silas | Tarefas time") é escopo de um ESPAÇO
-      // (space). Os folders são "[P] DF VALIDADAS" etc — "Tarefas time" não é
-      // folder, é o ESPAÇO que contém esses folders. Então agrupamos por ESPAÇO
-      // (space) e, na falta, pela pasta. inScope casa space OU folder.
-      const containerOf = (t: Task): string =>
-        ((t.space?.name || t.folder?.name || '').trim()) || '(sem espaço)';
-      const foldersMap = new Map<string, number>();
+      // ─── ESCOPO (espelha o recorte do dashboard) ────────────────────────
+      // O dashboard "Silas | Tarefas time" conta um RECORTE das tasks do user
+      // (provavelmente a LISTA com o nome dele), não o workspace todo. "Tarefas
+      // time" não aparece como pasta/espaço nas tasks. Então: detectamos TODOS
+      // os recortes (lista/pasta/espaço) e o escopo casa em QUALQUER nível.
+      // Auto-default: recorte com o NOME do user (dashboard é por pessoa) →
+      // senão "tarefas time" → senão nada. O picker no debug (com PESO por
+      // recorte) deixa travar EXATAMENTE no que bate o ClickUp.
+      const containerNames = new Set<string>();
       for (const t of allMine) {
-        foldersMap.set(containerOf(t), (foldersMap.get(containerOf(t)) || 0) + 1);
+        [t.list?.name, t.folder?.name, t.space?.name].forEach((n) => {
+          const v = (n || '').trim();
+          if (v) containerNames.add(v);
+        });
       }
-      const folderList = Array.from(foldersMap.entries())
-        .map(([name, count]) => ({ name, count }))
-        .sort((a, b) => b.count - a.count);
-      setAvailableFolders(folderList);
-
-      // Resolve o escopo: escolha salva > auto-detecta o ESPAÇO "Tarefas time"
-      // > o espaço com mais tasks (melhor palpite) — NUNCA cai em "tudo" à toa,
-      // pra não inflar com Tráfego 02/CONTINGÊNCIA.
+      const names = Array.from(containerNames);
       const scopePref = typeof window !== 'undefined' ? localStorage.getItem(SCOPE_KEY) : null;
+      const uname = (me.username || '').toLowerCase().trim();
       let effectiveScope: string | null;
       if (scopePref === '__ALL__') {
         effectiveScope = null;
       } else if (scopePref) {
         effectiveScope = scopePref;
       } else {
-        const auto = folderList.find((f) => f.name.toLowerCase().includes('tarefas time'));
-        effectiveScope = auto ? auto.name : (folderList[0]?.name ?? null);
+        const byUser = uname && !uname.includes('@')
+          ? (names.find((n) => n.toLowerCase() === uname) || names.find((n) => n.toLowerCase().includes(uname)))
+          : undefined;
+        const byTT = names.find((n) => n.toLowerCase().includes('tarefas time'));
+        effectiveScope = byUser || byTT || null;
       }
       setScopeResolved(effectiveScope);
 
       const scopeLc = (effectiveScope || '').toLowerCase().trim();
       const inScope = (t: Task): boolean => {
         if (!scopeLc) return true; // sem escopo = tudo
-        const sp = (t.space?.name || '').toLowerCase().trim();
-        const fo = (t.folder?.name || '').toLowerCase().trim();
-        return sp === scopeLc || fo === scopeLc;
+        return [t.list?.name, t.folder?.name, t.space?.name]
+          .some((n) => (n || '').toLowerCase().trim() === scopeLc);
       };
       // A partir daqui, TUDO (concluídas, atrasadas, pontos) usa só o escopo.
       const scoped = allMine.filter(inScope);
@@ -230,6 +227,43 @@ export default function PointsPage() {
 
       // Match PESO field (priority over alternativas)
       const fieldMatcher = /^(peso|pontos?|points?|score)$/i;
+
+      // CANDIDATOS DE ESCOPO (data-driven): pra CADA recorte (lista/pasta/espaço)
+      // soma o PESO das concluídas do mês SEM escopo → o user vê qual recorte
+      // bate o ClickUp (ex: "Silas (lista): 80 · 70.9pts") e clica pra travar.
+      const pesoOf = (t: Task): number => {
+        const f = (t.custom_fields || []).find((cf: any) => fieldMatcher.test((cf.name || '').trim()));
+        const v = f?.value != null ? parseFloat(String(f.value)) : NaN;
+        return isNaN(v) ? 0 : v;
+      };
+      const completedNoScope = allMine.filter((t) => {
+        const stype = (t.status?.type || '').toLowerCase();
+        const isClosed = stype === 'closed' || stype === 'done';
+        const ts = (Number(t.date_closed) || 0) || (Number(t.date_done) || 0);
+        if (!isClosed || ts < firstOfMonth) return false;
+        return !EXCLUDED_LIST_REGEX.test((t.list?.name || '').toLowerCase());
+      });
+      const candMap = new Map<string, { name: string; level: string; count: number; peso: number }>();
+      const addCand = (nm: string | undefined, level: string, peso: number) => {
+        const n = (nm || '').trim();
+        if (!n) return;
+        const key = `${level}::${n}`;
+        const c = candMap.get(key) || { name: n, level, count: 0, peso: 0 };
+        c.count += 1;
+        c.peso += peso;
+        candMap.set(key, c);
+      };
+      for (const t of completedNoScope) {
+        const p = pesoOf(t);
+        addCand(t.list?.name, 'lista', p);
+        addCand(t.folder?.name, 'pasta', p);
+        addCand(t.space?.name, 'espaço', p);
+      }
+      const candidates = Array.from(candMap.values())
+        .map((v) => ({ name: v.name, level: v.level, count: v.count, peso: Math.round(v.peso * 100) / 100 }))
+        .sort((a, b) => b.peso - a.peso)
+        .slice(0, 16);
+
       let total = 0;
       let countedTasks = 0;
       const matchedFieldName: Record<string, number> = {};
@@ -279,7 +313,7 @@ export default function PointsPage() {
         userName: me.username,
         firstOfMonth: new Date(firstOfMonth).toISOString().slice(0, 10),
         scopeResolved: effectiveScope || '(todas as pastas)',
-        foldersFound: folderList.slice(0, 20),
+        candidates,
         totalTasksMine: allMine.length,
         scopedTasks: scoped.length,
         completedThisMonth: completedThisMonth.length,
@@ -470,23 +504,28 @@ export default function PointsPage() {
                         ))}
                       </span>
                     ) : null}
-                    {(debugInfo.foldersFound || []).length > 0 ? (
-                      <span>
-                        Pastas (clica pra escopar):
-                        {(debugInfo.foldersFound || []).map((f: any) => {
-                          const isScope = (debugInfo.scopeResolved || '').toLowerCase() === (f.name || '').toLowerCase();
-                          return (
-                            <button
-                              key={f.name}
-                              type="button"
-                              onClick={() => selectScope(f.name)}
-                              className={`mono ml-1.5 rounded px-1.5 py-0.5 text-[9px] ${isScope ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-400/50' : 'bg-bg/40 text-text-muted border border-line-strong hover:border-cyan-400/40'}`}
-                            >
-                              {f.name} ({f.count}){isScope ? ' ✓' : ''}
-                            </button>
-                          );
-                        })}
-                      </span>
+                    {(debugInfo.candidates || []).length > 0 ? (
+                      <div className="w-full">
+                        <div className="mb-1 text-[10px] text-cyan-200">
+                          👉 Clica no recorte que bate a sua Pontuação do ClickUp (trava pra sempre):
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {(debugInfo.candidates || []).map((c: any) => {
+                            const isScope = (debugInfo.scopeResolved || '').toLowerCase() === (c.name || '').toLowerCase();
+                            return (
+                              <button
+                                key={`${c.level}:${c.name}`}
+                                type="button"
+                                onClick={() => selectScope(c.name)}
+                                className={`mono rounded px-1.5 py-0.5 text-[9px] ${isScope ? 'bg-cyan-500/25 text-cyan-100 border border-cyan-400/60' : 'bg-bg/40 text-text-muted border border-line-strong hover:border-cyan-400/50'}`}
+                                title={`${c.level}: ${c.name} — ${c.count} concluídas, ${c.peso} pts`}
+                              >
+                                {c.name} <span className="text-text-dim">({c.level})</span> · <span className="text-lime font-bold">{c.peso}pts</span> / {c.count}{isScope ? ' ✓' : ''}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     ) : null}
                     {(debugInfo.listsFound || []).filter((e: any) => !e[1].included).length > 0 ? (
                       <span>
