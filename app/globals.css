@@ -63,14 +63,7 @@ body {
   font-family: var(--font-display), 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  /* Renderização premium: kerning + ligaturas + alternates contextuais (todas
-     seguras/neutras pra Hanken Grotesk — sem trocar letterforms por acaso),
-     optical sizing automático, e micro-tracking negativo que dá o aperto
-     "produto caro" sem prejudicar leitura. */
-  font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1;
-  font-optical-sizing: auto;
-  text-rendering: optimizeLegibility;
-  letter-spacing: -0.006em;
+  font-feature-settings: 'ss01', 'cv11', 'cv02';
 }
 
 /* ─── Regra universal: NUNCA hifenizar ou quebrar palavra no meio ─── */
@@ -641,16 +634,14 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
     border-top: none;
   }
 
-  /* Title profissional — Manrope geométrica, peso forte, tracking negativo
-   * apertado (cara de produto caro). hyphens:none + overflow-wrap:normal evita
-   * quebrar palavras como "automático" no meio (problema visual). */
+  /* Title profissional — Bricolage Grotesque, peso forte, leve negative tracking.
+   * hyphens:none + overflow-wrap:normal evita quebrar palavras como "automático"
+   * no meio (problema visual). */
   .section-title {
     @apply text-3xl font-extrabold tracking-tight md:text-4xl;
     font-family: var(--font-tech), var(--font-display), system-ui;
-    letter-spacing: -0.022em;
-    line-height: 1.04;
-    font-optical-sizing: auto;
-    text-wrap: balance;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
     hyphens: none;
     -webkit-hyphens: none;
     overflow-wrap: normal;
@@ -660,25 +651,18 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
   .hero-title {
     @apply text-4xl font-extrabold tracking-tight md:text-6xl;
     font-family: var(--font-tech), var(--font-display), system-ui;
-    letter-spacing: -0.034em;
+    letter-spacing: -0.03em;
     line-height: 1;
-    font-optical-sizing: auto;
-    text-wrap: balance;
     hyphens: none;
     -webkit-hyphens: none;
     overflow-wrap: normal;
     word-break: normal;
   }
 
-  /* Acento editorial — Fraunces variável. opsz automático faz as serifas
-   * ficarem dramáticas nos tamanhos grandes (assinatura de luxo). Use em
-   * palavras-acento do hero, frases de apoio, números editoriais. */
   .display-subtle {
     font-family: var(--font-serif), Georgia, serif;
     font-style: italic;
     font-weight: 400;
-    font-optical-sizing: auto;
-    letter-spacing: -0.005em;
     color: rgb(var(--text-muted));
     hyphens: none;
     -webkit-hyphens: none;
@@ -686,11 +670,10 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
     word-break: normal;
   }
 
-  /* Palavra-acento serifada premium (não-itálica) pra títulos editoriais. */
+  /* Palavra-acento serifada (não-itálica) pra títulos editoriais — Instrument Serif. */
   .text-editorial {
     font-family: var(--font-serif), Georgia, serif;
-    font-weight: 500;
-    font-optical-sizing: auto;
+    font-weight: 400;
     letter-spacing: -0.01em;
   }
 
@@ -860,12 +843,13 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
      (não-numéricos). Troca a monoespaçada "terminal/vibe-code" pela Manrope
      geométrica com tracking refinado = cara de produto desenhado. Mantém o
      `mono` só onde é número/código/timestamp de verdade. */
+  /* Rótulos pequenos premium — Inter (única fonte nova, SÓ aqui). Limpa e
+     nítida em tamanho pequeno; substitui a cara "vibe code" da monoespaçada. */
   .label-tech {
-    font-family: var(--font-tech), var(--font-display), system-ui;
-    font-weight: 700;
+    font-family: var(--font-label), var(--font-display), system-ui;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.15em;
-    font-optical-sizing: auto;
+    letter-spacing: 0.12em;
   }
 
   /* Cabeçalho de seção com barrinha-acento (violet→lime). Use num wrapper flex:

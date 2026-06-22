@@ -229,14 +229,11 @@ export function ToolHero3D({
             )}
           </div>
 
-          {/* Title gradient — Manrope (geométrica) extrabold, tracking apertado
-              pra cara de display premium. opsz auto. */}
+          {/* Title gradient */}
           <h1
-            className="text-5xl font-extrabold leading-[1.02] md:text-7xl"
+            className="text-5xl font-black leading-[1.02] tracking-tight md:text-7xl"
             style={{
-              fontFamily: 'var(--font-tech)',
-              letterSpacing: '-0.035em',
-              fontOpticalSizing: 'auto',
+              fontFamily: 'var(--font-display)',
               backgroundImage: `linear-gradient(135deg, ${t.gradient[0]} 0%, ${t.gradient[1]} 30%, ${t.gradient[2]} 60%, ${t.gradient[3]} 100%)`,
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',

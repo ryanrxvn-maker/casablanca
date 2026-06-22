@@ -1,10 +1,11 @@
 import type { Metadata } from 'next';
 
 import {
-  Hanken_Grotesk,
+  Space_Grotesk,
   JetBrains_Mono,
-  Manrope,
-  Fraunces,
+  Bricolage_Grotesque,
+  Instrument_Serif,
+  Inter,
 } from 'next/font/google';
 import { MouseGlow } from '@/components/MouseGlow';
 import { RippleRoot } from '@/components/RippleRoot';
@@ -14,25 +15,21 @@ import { ThemeManager } from '@/components/ThemeManager';
 import './globals.css';
 
 /**
- * Tipografia DARKO LAB v3 — sistema PREMIUM, grau "design studio".
+ * Tipografia DARKO LAB — fontes ORIGINAIS (boas) preservadas. A ÚNICA mudança
+ * premium é nos TEXTOS PEQUENOS (rótulos), via --font-label = Inter.
  *
- * A regra: fontes display com personalidade forte (Orbitron, Bricolage) sempre
- * acabaram lendo como "vibe code". A cura premium é RESTRIÇÃO tipográfica —
- * grotescas refinadas e neutras, hierarquia por PESO, e uma serifada editorial
- * variável como assinatura de luxo. É o caminho do Stripe / Linear / Vercel.
- *
- *  display · Hanken Grotesk  → corpo + UI geral. Neo-grotesca humanista,
- *                              calma, legível, cara de produto caro.
- *  tech    · Manrope         → títulos, brand, labels uppercase, tabs.
- *                              Geométrica nítida, premium, sem maneirismo.
- *  serif   · Fraunces        → acentos editoriais (opsz variável: nos tamanhos
- *                              grandes vira alto-contraste dramático = luxo).
- *  mono    · JetBrains Mono  → números, timestamps, badges, código (mantida).
+ *  display · Space Grotesk        → corpo + UI geral (original)
+ *  tech    · Bricolage Grotesque  → títulos, brand, tabs (original)
+ *  serif   · Instrument Serif     → acentos editoriais (original)
+ *  mono    · JetBrains Mono       → números, timestamps, código (original)
+ *  label   · Inter                → APENAS rótulos pequenos (.label-tech) —
+ *                                    limpa e premium em tamanho pequeno, sem
+ *                                    cara de "vibe code". NÃO toca no resto.
  */
-const display = Hanken_Grotesk({
+const display = Space_Grotesk({
   subsets: ['latin'],
   variable: '--font-display',
-  weight: ['400', '500', '600', '700', '800', '900'],
+  weight: ['400', '500', '600', '700'],
   display: 'swap',
 });
 
@@ -43,20 +40,27 @@ const mono = JetBrains_Mono({
   display: 'swap',
 });
 
-const tech = Manrope({
+const tech = Bricolage_Grotesque({
   subsets: ['latin'],
   variable: '--font-tech',
-  weight: ['500', '600', '700', '800'],
+  weight: ['500', '700', '800'],
   display: 'swap',
 });
 
-// Fraunces variável: eixo opsz ligado pra optical-sizing automático (serifas
-// finas no texto, dramáticas no display) — é o que dá o ar editorial premium.
-const serif = Fraunces({
+const serif = Instrument_Serif({
   subsets: ['latin'],
   variable: '--font-serif',
-  axes: ['opsz'],
-  style: ['normal', 'italic'],
+  weight: ['400'],
+  style: ['italic', 'normal'],
+  display: 'swap',
+});
+
+// Inter — SÓ pros textos pequenos (rótulos uppercase via .label-tech). Limpa,
+// neutra, premium em tamanho pequeno. É a única fonte nova; o resto é original.
+const label = Inter({
+  subsets: ['latin'],
+  variable: '--font-label',
+  weight: ['500', '600', '700'],
   display: 'swap',
 });
 
@@ -211,7 +215,7 @@ export default function RootLayout({
   return (
     <html
       lang="pt-BR"
-      className={`${display.variable} ${mono.variable} ${tech.variable} ${serif.variable}`}
+      className={`${display.variable} ${mono.variable} ${tech.variable} ${serif.variable} ${label.variable}`}
     >
       <body>
         {/* Anti-flash: aplica o tema salvo ANTES da pintura, mas SÓ dentro da
