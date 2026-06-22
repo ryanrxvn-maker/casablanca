@@ -314,7 +314,6 @@ export const PILLARS: Pillar[] = [
           'Lipsync em lote — dispara vários avatares de uma vez',
           'Remover legenda gravada e marca d’água em massa',
           'Legendas automáticas a partir da fala',
-          'Troca de produto no áudio sem regravar a voz',
         ],
       },
       {
@@ -471,68 +470,6 @@ export const PILLARS: Pillar[] = [
     ],
   },
   {
-    slug: 'trocar-produto-no-video',
-    keyword: 'trocar produto no vídeo',
-    title: 'Trocar produto no vídeo sem regravar a voz (no automático)',
-    description:
-      'Trocar o produto ou a marca no vídeo sem regravar: a IA substitui no áudio e a voz original continua intacta. Em segundos. Comece grátis.',
-    kicker: 'Troca de produto',
-    h1: 'Trocar produto no vídeo sem regravar',
-    intro: [
-      'Trocar produto no vídeo é substituir a marca ou o produto citado sem precisar gravar tudo de novo. Mudou o anunciante? A IA troca a menção no áudio e a voz original do criador continua intacta — mesmo timbre, mesma entonação.',
-      'É o que permite reaproveitar um mesmo criativo pra vários produtos sem chamar a pessoa pra regravar.',
-    ],
-    blocks: [
-      {
-        h2: 'Como trocar o produto no áudio sem regravar?',
-        body: [
-          'Você indica o que precisa ser substituído e a IA gera o novo trecho de fala com a mesma voz, encaixando no lugar da menção antiga. O resto do áudio permanece igual, então a transição fica natural.',
-        ],
-      },
-      {
-        h2: 'Por que isso economiza tanto tempo?',
-        body: [
-          'Regravar um vídeo só por causa do nome do produto significa reagendar o criador, regravar e reeditar tudo. Trocar só a menção no áudio resolve em segundos e mantém o criativo que já estava aprovado.',
-        ],
-      },
-      {
-        h2: 'Para quem serve trocar o produto no vídeo?',
-        body: [
-          'Serve pra quem revende criativos e pra agências que rodam o mesmo formato com anunciantes diferentes.',
-        ],
-        list: [
-          'Adaptar um criativo de UGC pra outra marca',
-          'Atualizar o nome do produto sem regravar',
-          'Reusar um vídeo aprovado em outra campanha',
-        ],
-      },
-      {
-        h2: 'Precisa instalar algo?',
-        body: [
-          'Não. A troca de produto roda no navegador. Você começa no plano grátis e libera mais volume nos planos Basic (R$ 57/mês) e Pro (R$ 116/mês).',
-        ],
-      },
-    ],
-    faq: [
-      {
-        q: 'A voz fica diferente depois da troca?',
-        a: 'O objetivo é manter a voz original do criador — mesmo timbre e entonação — substituindo apenas a menção do produto, pra a transição soar natural.',
-      },
-      {
-        q: 'Dá pra trocar o produto em vários vídeos?',
-        a: 'Sim. Como o resto do Auto Edit, dá pra processar em lote em vez de tratar um vídeo por vez.',
-      },
-      {
-        q: 'Preciso do criador para regravar?',
-        a: 'Não. A ideia é justamente não precisar regravar: a IA substitui a menção no áudio existente.',
-      },
-    ],
-    related: [
-      { slug: 'lipsync-em-lote', label: 'Lipsync em lote' },
-      { slug: 'remover-legenda-de-video', label: 'Remover legenda de vídeo' },
-    ],
-  },
-  {
     slug: 'editar-videos-para-canais-dark',
     keyword: 'editar vídeos para canais dark',
     title: 'Editar vídeos para canais dark no automático e em lote',
@@ -600,12 +537,12 @@ export const PILLARS: Pillar[] = [
     keyword: 'automação de UGC',
     title: 'Automação de UGC: produza criativos em lote sem regravar',
     description:
-      'Automação de UGC pra agências: lipsync em lote, troca de produto e remoção de legenda pra reaproveitar criativos em escala. Comece grátis no Auto Edit.',
+      'Automação de UGC pra agências: lipsync em lote e remoção de legenda pra reaproveitar criativos em escala. Comece grátis no Auto Edit.',
     kicker: 'UGC',
     h1: 'Automação de UGC',
     intro: [
       'Automação de UGC é produzir e adaptar criativos de usuário (user-generated content) em escala, sem regravar e sem montar cada variação na mão. Pra agência, o gargalo nunca é gravar — é multiplicar o mesmo criativo em dezenas de versões.',
-      'O Auto Edit resolve isso com ferramentas em lote: lipsync de vários avatares de uma vez, troca de produto no áudio e limpeza de legenda gravada pra reaproveitar o que já existe.',
+      'O Auto Edit resolve isso com ferramentas em lote: lipsync de vários avatares de uma vez e limpeza de legenda gravada pra reaproveitar o que já existe.',
     ],
     blocks: [
       {
@@ -615,7 +552,6 @@ export const PILLARS: Pillar[] = [
         ],
         list: [
           'Lipsync em lote — dezenas de variações de avatar de uma vez',
-          'Troca de produto — adapta o mesmo criativo pra outra marca sem regravar',
           'Remover legenda gravada e marca d’água pra reaproveitar criativos',
           'Legenda automática pra cada variação',
         ],
@@ -642,11 +578,11 @@ export const PILLARS: Pillar[] = [
     faq: [
       {
         q: 'A automação de UGC substitui o criador?',
-        a: 'Não. Ela automatiza a multiplicação e adaptação dos criativos (lipsync, troca de produto, legenda), não a gravação original. O criador continua sendo a fonte do conteúdo.',
+        a: 'Não. Ela automatiza a multiplicação e adaptação dos criativos (lipsync, legenda), não a gravação original. O criador continua sendo a fonte do conteúdo.',
       },
       {
         q: 'Dá para adaptar um criativo para vários clientes?',
-        a: 'Sim. Com a troca de produto no áudio e a remoção de legenda, dá pra reaproveitar o mesmo criativo aprovado em campanhas e marcas diferentes.',
+        a: 'Sim. Removendo a legenda gravada e gerando novas variações em lote, dá pra reaproveitar o mesmo criativo aprovado em campanhas e marcas diferentes.',
       },
       {
         q: 'Funciona para volume de agência?',
@@ -655,7 +591,6 @@ export const PILLARS: Pillar[] = [
     ],
     related: [
       { slug: 'lipsync-em-lote', label: 'Lipsync em lote' },
-      { slug: 'trocar-produto-no-video', label: 'Trocar produto no vídeo' },
     ],
   },
   {

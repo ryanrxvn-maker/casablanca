@@ -76,7 +76,6 @@ const ALL_TOOLS: Tool[] = [
   { key: 'separar-audios', label: 'Dividir áudios' },
   { key: 'compressor', label: 'Compressor' },
   { key: 'camuflagem', label: 'Camuflagem' },
-  { key: 'troca-produto', label: 'Troca de produto' },
   { key: 'decupagem-inteligente', label: 'Decupagem Inteligente' },
   { key: 'separador-audio', label: 'Separador de Áudio (voz/SFX/inst)' },
 ];
@@ -1497,14 +1496,6 @@ const TOOL_DETAILS: ToolInfo[] = [
     hue: 'rgba(45,212,191,0.5)',
     desc: 'Disfarça o áudio pra dificultar detecção automática de plataformas.',
     win: 'Mais segurança pro seu conteúdo. Sem perder qualidade audível.',
-  },
-  {
-    key: 'troca-produto',
-    name: 'Troca de produto',
-    cat: 'IA',
-    hue: 'rgba(244,114,182,0.55)',
-    desc: 'Substitui o nome do produto no áudio sem regravar a voz original.',
-    win: 'Trocou de cliente ou marca? Troca no áudio em segundos.',
   },
   {
     key: 'decupagem-inteligente',

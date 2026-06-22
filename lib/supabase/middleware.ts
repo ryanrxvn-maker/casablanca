@@ -58,11 +58,13 @@ const PRO_ONLY_TOOLS = [
   '/tools/lipsync',            // Criar um avatar (lipsync) — Pro-only
 ];
 
-// Rotas exclusivamente do admin (mesmo beta não acessa)
+// Rotas exclusivamente do admin (mesmo beta E emails de bypass de manutenção
+// NÃO acessam — esse gate roda antes da lógica de manutenção/bypass).
 const ADMIN_ONLY_PREFIXES = [
   '/admin',
   '/tools/ltx-video',
   '/tools/points', // sistema de pontos é interno
+  '/tools/troca-produto', // admin-only DURO: nem cliente de bypass usa; não revelada ao público
 ];
 
 export async function updateSession(request: NextRequest) {

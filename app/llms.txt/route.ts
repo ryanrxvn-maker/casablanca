@@ -22,7 +22,6 @@ const BODY = `# Auto Edit
 - Remover legenda gravada e marca d'água em lote.
 - Lipsync em lote (vários avatares de uma vez) — escala de UGC.
 - Geração automática de B-roll a partir de um JSON.
-- Troca de produto no áudio sem regravar a voz original.
 - Legendas automáticas.
 
 ## Fatos

@@ -95,7 +95,7 @@ async function readResponseJson(res: Response): Promise<{
 
 export default function TrocaProdutoPage() {
   return (
-    <TierGate require="pro" toolName="Troca de produto">
+    <TierGate require="admin" toolName="Troca de produto">
       <TrocaProdutoInner />
     </TierGate>
   );

@@ -177,7 +177,6 @@ const JSON_LD = {
         'Lipsync em lote',
         'Remover legenda gravada e marca d’água',
         'Legendas automáticas',
-        'Troca de produto no áudio sem regravar',
       ],
       offers: {
         '@type': 'AggregateOffer',

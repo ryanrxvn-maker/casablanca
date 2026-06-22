@@ -172,6 +172,7 @@ const AI: ToolEntry[] = [
     icon: <IconTrocaProduto size={26} />,
     hue: 'rgba(244, 114, 182, 0.42)',
     badge: 'IA',
+    adminOnly: true, // oculto pra não-admin: ferramenta não revelada ao público
   },
   {
     href: '/tools/remover-elementos',

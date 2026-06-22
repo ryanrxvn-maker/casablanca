@@ -13,6 +13,7 @@
  */
 
 import { useRouter } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
 import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -53,6 +54,8 @@ type Entry = {
   icon: ReactNode;
   /** Categoria pra exibir em grupos */
   group: 'Ferramentas' | 'IA' | 'Atalhos' | 'Configurações' | 'Conta';
+  /** Só aparece pra admin (ferramenta não revelada ao público). */
+  adminOnly?: boolean;
 };
 
 /** Banco fixo — sempre em sincronia com o resto do app. */
@@ -70,7 +73,7 @@ const ENTRIES: Entry[] = [
 
   // IA
   { id: 'auto-broll', group: 'IA', label: 'Auto B-roll', hint: 'Gera B-rolls em massa pelo JSON', href: '/tools/auto-broll', icon: <IconAutoBroll size={20} />, keywords: ['broll', 'b-roll', 'magnific'] },
-  { id: 'troca-produto', group: 'IA', label: 'Troca de produto', hint: 'Substitui produto do áudio', href: '/tools/troca-produto', icon: <IconTrocaProduto size={20} />, keywords: ['voz', 'clone', 'eleven', 'voiceover'] },
+  { id: 'troca-produto', group: 'IA', label: 'Troca de produto', hint: 'Substitui produto do áudio', href: '/tools/troca-produto', icon: <IconTrocaProduto size={20} />, keywords: ['voz', 'clone', 'eleven', 'voiceover'], adminOnly: true },
   { id: 'remover', group: 'IA', label: 'Remover Legenda/Marca d’Água', hint: 'Remove legenda e marca d’água', href: '/tools/remover-elementos', icon: <IconRemoverElementos size={20} />, keywords: ['smart remover', 'watermark', 'marca', 'logo', 'inpaint'] },
   { id: 'decupagem-copy', group: 'IA', label: 'Decupagem Inteligente', hint: 'Decupa seguindo sua copy', href: '/tools/decupagem-copy', icon: <IconDecupageCopy size={20} />, keywords: ['smart decup', 'script', 'roteiro'] },
   { id: 'copy-srt', group: 'IA', label: 'Gerador de SRT', hint: 'Legendas no tempo do seu áudio', href: '/tools/copy-srt', icon: <IconCopySRT size={20} />, keywords: ['srt generator', 'legenda', 'subtitle'] },
@@ -471,6 +474,7 @@ function SearchModal({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const [q, setQ] = useState('');
   const [active, setActive] = useState(0);
+  const [isAdmin, setIsAdmin] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   // Foca o input ao abrir
@@ -479,6 +483,29 @@ function SearchModal({ onClose }: { onClose: () => void }) {
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = '';
+    };
+  }, []);
+
+  // Descobre se é admin: entradas adminOnly (ex.: Troca de produto) só
+  // aparecem na busca pra admin — ferramenta não revelada ao público.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const supabase = createClient();
+        const { data: u } = await supabase.auth.getUser();
+        const uid = u.user?.id;
+        if (!uid) return;
+        const { data } = await supabase
+          .from('profiles')
+          .select('is_admin')
+          .eq('id', uid)
+          .maybeSingle();
+        if (!cancelled) setIsAdmin(!!data?.is_admin);
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -498,12 +525,13 @@ function SearchModal({ onClose }: { onClose: () => void }) {
   const results = useMemo(() => {
     const scored = ENTRIES
       .filter((e) => !FEATURED_ID_SET.has(e.id))
+      .filter((e) => !e.adminOnly || isAdmin)
       .map((e) => ({ e, s: score(q, e) }))
       .filter((it) => it.s > 0)
       .sort((a, b) => b.s - a.s)
       .slice(0, 24);
     return scored.map((it) => it.e);
-  }, [q]);
+  }, [q, isAdmin]);
 
   // Lista única pra keyboard nav: destaques primeiro, depois o resto.
   // Ordem aqui = ordem visual → setActive(idx) corresponde 1:1.

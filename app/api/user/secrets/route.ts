@@ -30,6 +30,16 @@ const VALID_SERVICES: Service[] = [
   'groq',
 ];
 
+/**
+ * Chaves que SÓ admin pode configurar. ElevenLabs alimenta a Troca de
+ * Produto — ferramenta admin-only que não é revelada ao público — então
+ * conta não-admin não pode nem salvar a chave (defesa server-side; a UI
+ * já esconde o card). Espelha ADMIN_ONLY_SERVICES no front.
+ */
+const ADMIN_ONLY_SERVICES: ReadonlySet<Service> = new Set<Service>([
+  'elevenlabs',
+]);
+
 const COL_KEY: Record<Service, string> = {
   anthropic: 'anthropic_key',
   assemblyai: 'assemblyai_key',
@@ -128,6 +138,16 @@ export async function PUT(req: Request) {
     const key = String(body.key ?? '').trim();
     if (!service || !VALID_SERVICES.includes(service)) {
       return jsonError('Service invalido.', 400);
+    }
+    if (ADMIN_ONLY_SERVICES.has(service)) {
+      const { data: prof } = await supabase
+        .from('profiles')
+        .select('is_admin')
+        .eq('id', user.id)
+        .maybeSingle();
+      if ((prof as { is_admin?: boolean } | null)?.is_admin !== true) {
+        return jsonError('Service invalido.', 400);
+      }
     }
     if (key.length < 10) {
       return jsonError('Chave parece muito curta.', 400);

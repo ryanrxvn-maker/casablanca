@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { createClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
 import { ToolShell } from '@/components/ToolShell';
 
@@ -106,9 +107,14 @@ const INIT_BUSY: Record<Service, boolean> = {
   groq: false,
 };
 
+/** Chaves visíveis só pra admin (ferramentas não reveladas ao público).
+ *  ElevenLabs só é usada pela Troca de Produto — que é admin-only. */
+const ADMIN_ONLY_SERVICES: ReadonlySet<Service> = new Set(['elevenlabs']);
+
 export default function ApiKeysPage() {
   const [status, setStatus] = useState<SecretsStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<{
     kind: 'ok' | 'err';
@@ -142,6 +148,32 @@ export default function ApiKeysPage() {
   useEffect(() => {
     load();
   }, []);
+
+  // Descobre se é admin: chaves admin-only (ElevenLabs) só aparecem pra admin.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const supabase = createClient();
+        const { data: u } = await supabase.auth.getUser();
+        const uid = u.user?.id;
+        if (!uid) return;
+        const { data } = await supabase
+          .from('profiles')
+          .select('is_admin')
+          .eq('id', uid)
+          .maybeSingle();
+        if (!cancelled) setIsAdmin((data as { is_admin?: boolean } | null)?.is_admin === true);
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const visibleMeta = META.filter(
+    (m) => !ADMIN_ONLY_SERVICES.has(m.id) || isAdmin,
+  );
 
   async function save(service: Service) {
     const key = drafts[service].trim();
@@ -213,9 +245,16 @@ export default function ApiKeysPage() {
           ) : null}
 
           <div className="flex flex-col gap-4">
-            {META.map((m) => {
+            {visibleMeta.map((m) => {
               const s = status?.[m.id];
               const isBusy = busy[m.id];
+              // Não vaza a Troca de Produto (admin-only) pra não-admin: a
+              // AssemblyAI também serve a Decupagem por Copy, então pra
+              // não-admin mostramos só esse uso.
+              const usedBy =
+                m.id === 'assemblyai' && !isAdmin
+                  ? 'Decupagem por Copy'
+                  : m.usedBy;
               return (
                 <div
                   key={m.id}
@@ -238,7 +277,7 @@ export default function ApiKeysPage() {
                         )}
                       </div>
                       <p className="mt-0.5 text-[11px] text-text-muted">
-                        Usado em: <span className="text-lime">{m.usedBy}</span>
+                        Usado em: <span className="text-lime">{usedBy}</span>
                       </p>
                     </div>
                     {s?.configured ? (
