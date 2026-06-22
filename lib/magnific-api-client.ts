@@ -527,7 +527,17 @@ export function createBatchPoller(onActivity?: () => void): BatchPoller {
         sub.reject(new Error(`Polling timeout pra ${id} após ${Math.round((now - sub.startedAt)/60000)}min`));
       }
     }
-    if (subs.size === 0) return;
+    if (subs.size === 0) {
+      // Poller VIVO porém sem renders pendentes = todos os takes estão em
+      // backoff/cooldown de DISPATCH (comum sob 300 takes que saturam o
+      // concurrent-cap da Magnific). Isso é "throttled", NÃO é stall: alimenta
+      // o watchdog do pipeline pra ele não abortar o batch inteiro durante uma
+      // janela de espera legítima (era o que matava ~290 takes de uma vez).
+      // Bridge morta DE VERDADE mantém subs.size>0 com fetch falhando, então o
+      // watchdog continua disparando nesse caso — sem mascarar stall real.
+      onActivity?.();
+      return;
+    }
     const ids = Array.from(subs.keys());
     let m: Map<string, CreationResult>;
     try {
