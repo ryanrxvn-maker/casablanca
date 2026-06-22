@@ -290,17 +290,26 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     if (!item.rawAssembled || item.errors?.assemble) continue;
     onProgress?.({ stage: 'decupando', currentFilename: item.filename, doneCount: g, totalCount: total });
 
-    // Cap de 3min por decupagem — se passar, desiste dessa parte e segue
-    // (entrega o montado já regulado). O `source` JÁ vem limpo/nivelado do
-    // Stage 1.5, então aqui é só detectar silêncio e cortar.
+    // Timeouts PROPORCIONAIS à duração (fix 2026-06-21). O cap FIXO de 180s no
+    // corte era a causa do "0 decupados → INCOMPLETO" em montagem longa: o
+    // cutVideoSegments RE-ENCODA o vídeo inteiro no ffmpeg-wasm (lento, client-
+    // side), e uma montagem de 14 partes (~4-5min) não cabia em 180s →
+    // estourava → 0 decupados → a task travava em INCOMPLETO mesmo com TODOS os
+    // takes prontos (download nunca era liberado limpo). As tasks curtas (≤9
+    // partes) couberam, as longas não. Agora o teto escala com a duração real.
     const tryDecup = async (source: Blob): Promise<{ ok: true; decupado: Blob } | { ok: false; reason: string }> => {
       try {
-        const audioBuf = await withTimeout(decodeAudioRobust(source), 120_000, 'decodeAudio');
+        const audioBuf = await withTimeout(decodeAudioRobust(source), 240_000, 'decodeAudio');
+        const durSec = audioBuf.duration || 0;
         const silences = detectSilences(audioBuf);
-        const segments = computeSpeechSegments(silences, audioBuf.duration, keepSilenceSec);
-        console.log(`[clickup-pilot-pipeline] decup ${item.filename}: ${silences.length} silencios, ${segments.length} segmentos de fala`);
+        const segments = computeSpeechSegments(silences, durSec, keepSilenceSec);
+        // Orçamento do corte: ~6s de wall-clock por segundo de vídeo (folga 6x
+        // sobre o pior caso ~1-2x realtime do wasm) + 90s de overhead, piso 180s.
+        // É um TETO de segurança contra trava real, não o tempo esperado.
+        const cutTimeoutMs = Math.max(180_000, Math.ceil(durSec) * 6000 + 90_000);
+        console.log(`[clickup-pilot-pipeline] decup ${item.filename}: ${durSec.toFixed(0)}s, ${silences.length} silencios, ${segments.length} segmentos · teto corte ${(cutTimeoutMs / 1000).toFixed(0)}s`);
         if (segments.length === 0) return { ok: false, reason: 'Sem fala detectada' };
-        const decupado = await withTimeout(cutVideoSegments(source, segments), 180_000, 'cutVideo');
+        const decupado = await withTimeout(cutVideoSegments(source, segments), cutTimeoutMs, 'cutVideo');
         return { ok: true, decupado };
       } catch (e) {
         return { ok: false, reason: (e as Error)?.message || 'falha decupagem' };
