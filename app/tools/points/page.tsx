@@ -74,9 +74,15 @@ export default function PointsPage() {
   // igual ao widget "Pontuação". Persiste a escolha; default auto-detecta a
   // pasta "Tarefas time". Valores: nome da pasta, '__ALL__' (todas), ou null
   // (auto). A lógica do cálculo lê DIRETO do localStorage (sem state stale).
-  const SCOPE_KEY = 'darkolab:points:scope';
+  // v2: ignora prefs antigas de escopo (que apontavam pra recorte errado) →
+  // recomeça em "todas" e deixa o user travar pelo picker.
+  const SCOPE_KEY = 'darkolab:points:scope:v2';
+  // STATUS que conta ponto. null = só o status FINAL (type 'closed' = concluído);
+  // '__DONE__' = closed+done (testado/revisão também); nome = status exato.
+  const STATUS_KEY = 'darkolab:points:status:v1';
   const [scopeFolder, setScopeFolder] = useState<string | null>(null); // só p/ a UI
   const [scopeResolved, setScopeResolved] = useState<string | null>(null); // o que foi usado
+  const [statusResolved, setStatusResolved] = useState<string | null>(null);
   const [availableFolders, setAvailableFolders] = useState<Array<{ name: string; count: number }>>([]);
 
   useEffect(() => {
@@ -198,20 +204,27 @@ export default function PointsPage() {
       //   na lista TESTES nao soma. Excluimos por regex no nome.
       const EXCLUDED_LIST_REGEX = /\b(teste|testes|test|sandbox|draft|rascunho|exemplo)\b/i;
 
-      // Tasks CONCLUIDAS este mes (replica widget Pontuacao):
-      //   - status.type === 'closed' OU 'done'
-      //   - date_closed BETWEEN firstOfMonth AND now
-      //   - list.name NAO bate EXCLUDED_LIST_REGEX
+      // ─── STATUS que conta ponto (configurável) ──────────────────────────
+      // O widget "Pontuação" do ClickUp conta SÓ o status FINAL (concluído). O
+      // AutoEdit contava closed+done → inflava com testado/revisão/escalado
+      // ("vão virar ponto ainda"). Default: SÓ type 'closed' (final). O user
+      // pode trocar pelo picker de status no debug (ex: cravar "CONCLUÍDO").
+      const statusPref = typeof window !== 'undefined' ? localStorage.getItem(STATUS_KEY) : null;
+      setStatusResolved(statusPref || 'concluído (status final)');
+      const isConcluida = (t: Task): boolean => {
+        const type = (t.status?.type || '').toLowerCase();
+        const name = (t.status?.status || '').toLowerCase().trim();
+        if (statusPref && statusPref !== '__DONE__') return name === statusPref.toLowerCase().trim();
+        if (statusPref === '__DONE__') return type === 'closed' || type === 'done';
+        return type === 'closed'; // DEFAULT: só o status final (concluído)
+      };
+      const completedAt = (t: Task): number => (Number(t.date_closed) || 0) || (Number(t.date_done) || 0);
+
+      // Tasks CONCLUIDAS este mes no escopo (replica widget Pontuacao).
       const completedThisMonth = scoped.filter((t) => {
-        const stype = (t.status?.type || '').toLowerCase();
-        const isClosed = stype === 'closed' || stype === 'done';
-        const closedTs = Number(t.date_closed) || 0;
-        const doneTs = Number(t.date_done) || 0;
-        const completionTs = closedTs || doneTs;
-        if (!isClosed || completionTs < firstOfMonth) return false;
-        // Exclui listas TESTES/sandbox/etc
-        const listName = (t.list?.name || '').toLowerCase();
-        if (EXCLUDED_LIST_REGEX.test(listName)) return false;
+        if (!isConcluida(t)) return false;
+        if (completedAt(t) < firstOfMonth) return false;
+        if (EXCLUDED_LIST_REGEX.test((t.list?.name || '').toLowerCase())) return false;
         return true;
       });
 
@@ -237,10 +250,8 @@ export default function PointsPage() {
         return isNaN(v) ? 0 : v;
       };
       const completedNoScope = allMine.filter((t) => {
-        const stype = (t.status?.type || '').toLowerCase();
-        const isClosed = stype === 'closed' || stype === 'done';
-        const ts = (Number(t.date_closed) || 0) || (Number(t.date_done) || 0);
-        if (!isClosed || ts < firstOfMonth) return false;
+        if (!isConcluida(t)) return false;
+        if (completedAt(t) < firstOfMonth) return false;
         return !EXCLUDED_LIST_REGEX.test((t.list?.name || '').toLowerCase());
       });
       const candMap = new Map<string, { name: string; level: string; count: number; peso: number }>();
@@ -263,6 +274,26 @@ export default function PointsPage() {
         .map((v) => ({ name: v.name, level: v.level, count: v.count, peso: Math.round(v.peso * 100) / 100 }))
         .sort((a, b) => b.peso - a.peso)
         .slice(0, 16);
+
+      // STATUS BREAKDOWN (data-driven): no ESCOPO atual, pra cada status
+      // closed/done do mês, soma o PESO → o user vê qual status = 70,9 (ex:
+      // "CONCLUÍDO · 70.9 / 80") e clica pra travar a definição de "concluída".
+      const statusMap = new Map<string, { name: string; type: string; count: number; peso: number }>();
+      for (const t of scoped) {
+        const type = (t.status?.type || '').toLowerCase();
+        if (type !== 'closed' && type !== 'done') continue;
+        if (completedAt(t) < firstOfMonth) continue;
+        if (EXCLUDED_LIST_REGEX.test((t.list?.name || '').toLowerCase())) continue;
+        const nm = (t.status?.status || '?').trim();
+        const key = nm.toLowerCase();
+        const c = statusMap.get(key) || { name: nm, type, count: 0, peso: 0 };
+        c.count += 1;
+        c.peso += pesoOf(t);
+        statusMap.set(key, c);
+      }
+      const statusBreakdown = Array.from(statusMap.values())
+        .map((v) => ({ name: v.name, type: v.type, count: v.count, peso: Math.round(v.peso * 100) / 100 }))
+        .sort((a, b) => b.peso - a.peso);
 
       let total = 0;
       let countedTasks = 0;
@@ -313,7 +344,9 @@ export default function PointsPage() {
         userName: me.username,
         firstOfMonth: new Date(firstOfMonth).toISOString().slice(0, 10),
         scopeResolved: effectiveScope || '(todas as pastas)',
+        statusResolved: statusPref || 'concluído (status final)',
         candidates,
+        statusBreakdown,
         totalTasksMine: allMine.length,
         scopedTasks: scoped.length,
         completedThisMonth: completedThisMonth.length,
@@ -352,6 +385,16 @@ export default function PointsPage() {
       else localStorage.setItem(SCOPE_KEY, name);
     }
     setScopeFolder(name);
+    fetchPoints();
+  }
+
+  // Troca a definição de "concluída" (qual STATUS conta ponto) e re-calcula.
+  // null = só status final (closed); '__DONE__' = closed+done; nome = exato.
+  function selectStatus(val: string | null) {
+    if (typeof window !== 'undefined') {
+      if (val == null) localStorage.removeItem(STATUS_KEY);
+      else localStorage.setItem(STATUS_KEY, val);
+    }
     fetchPoints();
   }
 
@@ -524,6 +567,53 @@ export default function PointsPage() {
                               </button>
                             );
                           })}
+                        </div>
+                      </div>
+                    ) : null}
+                    {(debugInfo.statusBreakdown || []).length > 0 ? (
+                      <div className="w-full">
+                        <div className="mb-1 text-[10px] text-cyan-200">
+                          👉 Ou clica no STATUS que conta ponto pra você (ex: o que bate 70,9 = seu &quot;concluído&quot;):
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {(debugInfo.statusBreakdown || []).map((s: any) => {
+                            const isSel = (debugInfo.statusResolved || '').toLowerCase() === (s.name || '').toLowerCase();
+                            return (
+                              <button
+                                key={s.name}
+                                type="button"
+                                onClick={() => selectStatus(s.name)}
+                                className={`mono rounded px-1.5 py-0.5 text-[9px] ${isSel ? 'bg-lime/25 text-lime border border-lime/60' : 'bg-bg/40 text-text-muted border border-line-strong hover:border-lime/50'}`}
+                                title={`status "${s.name}" [${s.type}] — ${s.count} tasks, ${s.peso} pts`}
+                              >
+                                {s.name} <span className="text-text-dim">[{s.type}]</span> · <span className="text-lime font-bold">{s.peso}pts</span> / {s.count}{isSel ? ' ✓' : ''}
+                              </button>
+                            );
+                          })}
+                          <button
+                            type="button"
+                            onClick={() => selectStatus('__DONE__')}
+                            className="mono rounded px-1.5 py-0.5 text-[9px] bg-bg/40 text-text-muted border border-line-strong hover:border-fuchsia-400/50"
+                            title="Conta TODOS os status closed+done (inclui testado/revisão)"
+                          >
+                            todos (closed+done)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => selectStatus(null)}
+                            className="mono rounded px-1.5 py-0.5 text-[9px] bg-bg/40 text-text-muted border border-line-strong hover:border-cyan-400/50"
+                            title="Volta pro padrão: só o status final (closed)"
+                          >
+                            ↺ só final
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => selectScope('__ALL__')}
+                            className="mono rounded px-1.5 py-0.5 text-[9px] bg-bg/40 text-text-muted border border-line-strong hover:border-cyan-400/50"
+                            title="Conta todas as pastas (sem recorte)"
+                          >
+                            ↺ todas as pastas
+                          </button>
                         </div>
                       </div>
                     ) : null}
