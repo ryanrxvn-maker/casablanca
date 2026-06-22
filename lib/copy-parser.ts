@@ -1197,9 +1197,20 @@ export function sanitizeSpokenCopy(raw: string, knownRoles: string[] = [], dropE
         .replace(/\.[a-z]{1,2}\s*$/i, '');
       const t = cleaned.trim();
       if (!t) return l; // preserva paragrafos
-      // Linha que e EXATAMENTE um titulo de YouTube (sobra de label de locutor
-      // "Doutora: O IMPACTO DO ESTRESSE...") — descarta pra nao virar fala.
-      if (dropSet.size > 0 && dropSet.has(normForLinkMatch(t))) return null;
+      // ANTI-VAZAMENTO: linha que e EXATAMENTE uma referencia de avatar (titulo
+      // de YouTube, filename, @username) — sobra de label de locutor — NUNCA
+      // pode virar fala. Testa a linha inteira E o que sobra apos um prefixo
+      // "Role:" (cobre "Doutora: O IMPACTO..." mesmo se escapou do boundary).
+      // Match EXATO (normalizado) → seguro: fala real nunca e exatamente uma ref.
+      if (dropSet.size > 0) {
+        const nt = normForLinkMatch(t);
+        if (nt.length >= 5 && dropSet.has(nt)) return null;
+        const ci = t.indexOf(':');
+        if (ci > 0 && ci <= 40) {
+          const after = normForLinkMatch(t.slice(ci + 1));
+          if (after.length >= 5 && dropSet.has(after)) return null;
+        }
+      }
       // URLs / referencias
       if (/(https?:\/\/|\bwww\.[a-z0-9-]+\.|drive\.google\.com|tiktok\.com)/i.test(t)) return null;
       // Markers
@@ -1587,11 +1598,16 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string, varian
   for (const a of avatars) {
     if (a.role) knownRoles.push(a.role);
   }
-  // Titulos de links de YouTube — quando um label de locutor repete a
-  // referencia do avatar ("Doutora: O IMPACTO DO ESTRESSE...") e o ":"/emoji
-  // somem no export, o titulo vazaria pra fala. Passamos pro sanitizer
-  // descartar essas linhas (igualdade normalizada).
-  const ytTitles = links.filter((l) => l.url && extractYouTubeId(l.url)).map((l) => l.text);
+  // REFERENCIAS DE AVATAR (anti-vazamento): tudo que e referencia e NAO fala —
+  // titulo de YouTube, filename do link, username do avatar (+ .mp4). Quando um
+  // label de locutor repete a referencia ("Doutora: O IMPACTO DO ESTRESSE...")
+  // e o ":"/emoji somem no export, a referencia vazaria pra fala. Passamos pro
+  // sanitizer descartar QUALQUER linha que seja EXATAMENTE uma dessas refs.
+  const ytTitles = Array.from(new Set([
+    ...links.filter((l) => l.url && extractYouTubeId(l.url)).map((l) => l.text),
+    ...links.map((l) => l.text),
+    ...avatars.flatMap((a) => [a.username, `${a.username}.mp4`, `${a.username}.mov`]),
+  ].map((s) => (s || '').trim()).filter((s) => s.length >= 3)));
   const hooks: ParsedDarkoBriefing['hooks'] = [];
   let body: string | null = null;
   let bodyRole: string | null = null;

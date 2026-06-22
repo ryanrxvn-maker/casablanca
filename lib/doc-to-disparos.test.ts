@@ -903,6 +903,55 @@ assert(!!refAd && refAd.avatars.some((a) => a.username === '7508150707225251077'
 assert(!!refAd && refAd.avatars.length === 2, `2 avatares (Doutora + Depoimento) apesar da Referência tipo-AD (got ${refAd?.avatars.length})`);
 assert(!!refAd && /minha mãe com 65/i.test(refAd.body || ''), 'corpo (com testemunho) não foi cortado pela Referência tipo-AD');
 
+/* ============ MATRIZ DE ROBUSTEZ — invariantes do parser de docs ============
+ * Prova 2 regras INVIOLÁVEIS em N formatações (com/sem ":", com/sem 🎥):
+ *   (1) NO-LEAK    — NUNCA vaza referência (título YT / filename / nomenclatura
+ *                    AD / URL) na fala do avatar.
+ *   (2) NO-MISSING — NUNCA falta copy real na fala.
+ * + o avatar do depoimento é SEMPRE identificado. */
+console.log('\nmatriz de robustez (no-leak / no-missing em N formatações):');
+const M_YT = 'O IMPACTO DO ESTRESSE NOS HORMÔNIOS FEMININOS';
+const M_LINKS: DocLink[] = [
+  { text: M_YT, url: 'https://www.youtube.com/watch?v=AbCdEfGhIjk', fileId: null },
+  { text: '7508150707225251077.mp4', fileId: 'DEPOID', url: null },
+];
+const speechOf = (b: ReturnType<typeof parseDarkoBriefing>): string =>
+  !b ? '' : [b.hooks.map((h) => h.text).join('\n'), b.body || ''].join('\n');
+const FORBIDDEN = ['IMPACTO DO ESTRESSE', '7508150707225251077', 'AD53G2VN', 'peterattiamd', 'https?:\\/\\/'];
+const mainVariants = [`Doutora: 🎥 ${M_YT}`, `Doutora: ${M_YT}`];
+const depoVariants = [
+  'Depoimento com avatar: 📎 7508150707225251077.mp4',
+  'Depoimento com avatar: 7508150707225251077.mp4',
+  'Depoimento com avatar 7508150707225251077.mp4',       // SEM ":" (o bug)
+  'Depoimento com avatar 🎥 7508150707225251077.mp4',    // SEM ":" + 🎥
+];
+let matrixFails = 0;
+let matrixRuns = 0;
+for (const mainL of mainVariants) {
+  for (const depoL of depoVariants) {
+    matrixRuns++;
+    const doc = [
+      'AD03GL - RIPCFPB', 'INSTRUÇÕES PARA EDIÇÃO:', 'Avatar e Vozes:', mainL,
+      'Referência:', 'AD53G2VN-ME.mp4', '',
+      'AD03G1GL-RIPCFPB', mainL, 'Gancho', 'GANCHOFRASE você sabia que o estresse destrói sua memória', '',
+      'Body', mainL, 'CORPOUM mais de cinco mil brasileiros recuperaram a memória', '',
+      depoL, 'DEPOFRASE minha mãe melhorou muito com o ritual natural', '',
+      mainL, 'CORPODOIS se você sofre disso esse ritual vai te ajudar', '',
+      'AD04GL - RIPCFPB', 'Avatar e Vozes:', 'Homem: peterattiamd.mp4',
+    ].join('\n');
+    const b = parseDarkoBriefing(doc, 'AD03GL', null, M_LINKS);
+    const sp = speechOf(b);
+    const okAvatar = !!b && b.avatars.some((a) => a.username === '7508150707225251077');
+    const missing = ['GANCHOFRASE', 'CORPOUM', 'DEPOFRASE', 'CORPODOIS'].filter((p) => !sp.includes(p));
+    const leak = FORBIDDEN.find((f) => new RegExp(f, 'i').test(sp));
+    if (!okAvatar || missing.length || leak) {
+      matrixFails++;
+      console.log(`  FAIL [${mainL.slice(0, 14)}.. | ${depoL.slice(0, 26)}..] avatar=${okAvatar} missing=[${missing}] leak=${leak || '-'}`);
+    }
+  }
+}
+assert(matrixFails === 0, `matriz robustez: ${matrixRuns - matrixFails}/${matrixRuns} combinações OK (avatar + copy completa + zero vazamento)`);
+
 /* ----------------- doc vazio ----------------- */
 console.log('\nedge cases:');
 const empty = buildDisparosFromDoc('', CANDIDATES);
