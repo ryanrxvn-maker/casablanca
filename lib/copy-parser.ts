@@ -535,6 +535,33 @@ export function parseAvatars(section: string, links: DocLink[] = []): ParsedAvat
       }
     }
 
+    // Tentativa 1c: avatar SEM dois-pontos. O export do Google Docs as vezes
+    // COME o ":" do rotulo quando ele precede um smart-chip — visto no doc REAL
+    // (RIPCFPB): a linha chega como
+    //   "Depoimento com avatar 7508150707225251077.mp4"   (SEM ":"!)
+    // em vez de "Depoimento com avatar: ...". Sem isto o avatar do depoimento
+    // some. Role = texto antes do filename; filename = token .mp4/.mov final
+    // (o separador consome emoji de chip 🎥 entre role e arquivo). GUARD DURO:
+    // so vira avatar se o role contiver palavra-chave de LOCUTOR — assim
+    // narrativa que por acaso termine em .mp4 nunca e confundida com avatar.
+    const m1c = trimmed.match(
+      /^[\s•\-*\d.)\]]*([A-Za-zÀ-ÿ][^:@]{1,58}?)\s+[^@A-Za-zÀ-ÿ0-9]*@?([A-Za-zÀ-ÿ0-9][\wÀ-ÿ.-]*?)\.(?:mp4|mov)\s*$/i,
+    );
+    if (m1c) {
+      const role = m1c[1].replace(/[\s:]+$/, '').trim();
+      const username = m1c[2].trim();
+      const isSpeakerRole = /\b(depoimento|avatar|doutor[a]?|mulher|homem|narrador[a]?|locutor[a]?|ugc|paciente|cliente|testemunh|depoente|m[eé]dic[oa])\b/i.test(role);
+      if (isSpeakerRole && isPlausibleAvatarRole(role) &&
+          username.length >= 3 &&
+          !/^(http|https|www|exemplo|ex)$/i.test(username) &&
+          !/^AD\d+VN/i.test(username)) {
+        out.push({ role, username, raw: trimmed });
+        pendingRole = null;
+        pendingRoleLine = -1;
+        continue;
+      }
+    }
+
     // Tentativa 2: @username sozinho na linha — se temos pending role, casa
     const m2 = trimmed.match(reOnlyMention);
     if (m2) {

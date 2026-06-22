@@ -788,6 +788,22 @@ assert(/depoimento/i.test(depoAv[0]?.role || ''), `role contém "depoimento" (go
 const depoEmoji = parseAvatars('Depoimento com avatar: 🎥 7508150707225251077.mp4', []);
 assert(depoEmoji.length === 1 && depoEmoji[0]?.username === '7508150707225251077', `depoimento 🎥 → username limpo (got ${depoEmoji[0]?.username})`);
 
+// (a3) CRÍTICO (doc REAL RIPCFPB): export do Google Docs COMEU o ":" do rótulo
+// antes do smart-chip → a linha chega SEM dois-pontos:
+//   "Depoimento com avatar 7508150707225251077.mp4"
+// Tem que virar avatar mesmo assim (rótulo com palavra de locutor + .mp4).
+const depoNoColon = parseAvatars('Depoimento com avatar 7508150707225251077.mp4', []);
+assert(depoNoColon.length === 1 && depoNoColon[0]?.username === '7508150707225251077', `depoimento SEM ":" → detectado (got ${JSON.stringify(depoNoColon)})`);
+assert(/depoimento/i.test(depoNoColon[0]?.role || ''), 'depoimento sem ":" → role contém "depoimento"');
+const depoNoColonEmoji = parseAvatars('Depoimento com avatar 🎥 7508150707225251077.mp4', []);
+assert(depoNoColonEmoji.length === 1 && depoNoColonEmoji[0]?.username === '7508150707225251077', 'depoimento sem ":" + 🎥 → detectado, username limpo');
+// NEGATIVO: narrativa terminando em .mp4 SEM palavra de locutor NÃO vira avatar
+const fpNoColon = parseAvatars('Então clique e assista o vídeo aula completo gratis.mp4', []);
+assert(fpNoColon.length === 0, 'narrativa terminando em .mp4 (sem keyword de locutor) NÃO vira avatar');
+// NEGATIVO: "Música de fundo X.mp4" (asset, não locutor) NÃO vira avatar
+const fpMusica = parseAvatars('Música de fundo Scary Piano.mp4', []);
+assert(fpMusica.length === 0, '"Música de fundo ...mp4" sem ":" NÃO vira avatar');
+
 // (b) NEGATIVO: "Depoimento:" seguido só de texto NÃO vira avatar
 const depoText = parseAvatars('Depoimento:\nMinha mãe melhorou muito com esse ritual incrível.', []);
 assert(depoText.length === 0, 'depoimento só com texto NÃO vira avatar');
