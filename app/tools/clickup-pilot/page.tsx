@@ -29,6 +29,8 @@ import {
   parseVABriefing,
   sanitizeSpokenCopy,
   extractAvaNumsFromTaskName,
+  extractYouTubeId,
+  youTubeThumb,
   findAdSection,
   type ParsedAdSection,
   type ParsedDarkoBriefing,
@@ -1218,6 +1220,29 @@ function ClickUpPilotInner() {
     return null;
   }
 
+  /** Acha um link de YouTube cujo texto casa o `username` — cobre o chip
+   *  ".mp4" que na verdade aponta pra YouTube (editor renomeia o chip pra
+   *  "<handle>.mp4" mas o href e do YouTube). So roda como FALLBACK quando nao
+   *  ha arquivo de Drive. Retorna {url, thumb} ou null. */
+  function resolveYouTubeFromLinks(
+    username: string,
+    driveLinks: Array<{ text: string; fileId: string | null; url?: string | null }> | undefined,
+  ): { url: string; thumb: string } | null {
+    if (!driveLinks || driveLinks.length === 0) return null;
+    const u = normalizeForMatch(username.replace(/^@/, ''));
+    if (u.length < 3) return null;
+    for (const link of driveLinks) {
+      if (!link.url) continue;
+      const id = extractYouTubeId(link.url);
+      if (!id) continue;
+      const t = normalizeForMatch(link.text);
+      if (t && (t.includes(u) || u.includes(t))) {
+        return { url: `https://www.youtube.com/watch?v=${id}`, thumb: youTubeThumb(id) };
+      }
+    }
+    return null;
+  }
+
   /** Visual match via Claude vision API (~5s, $0.005). Retorna avatar matched ou null */
   async function visualMatchAvatar(
     refImageUrl: string,
@@ -1659,6 +1684,20 @@ function ClickUpPilotInner() {
           // — passa pro parser pra ele identificar avatar por smart-chip de
           // YouTube ("Doutora: 🎥 O IMPACTO DO ESTRESSE...") e montar a thumb.
           const briefing = parseDarkoBriefing(docR.text, baseAdId, variantToken, docR.driveLinks || []);
+          // [PILOT-DEBUG] diagnóstico do depoimento — mostra o que foi detectado
+          // e onde a linha de depoimento cai (qual seção de AD). Tirar print do
+          // console (F12) se algum avatar/depoimento não aparecer.
+          try {
+            const _sec = findAdSection(docR.text, baseAdId, variantToken) || '';
+            const _hasDepoInSec = _sec.split(/\r?\n/).filter((l) => /depoimento/i.test(l));
+            const _hasDepoInDoc = docR.text.split(/\r?\n/).filter((l) => /depoimento/i.test(l));
+            console.log(
+              `[PILOT-DEBUG] ${baseAdId} (task "${task.name}")`,
+              '\n  avatares detectados:', (briefing?.avatars || []).map((a) => `${a.role} :: ${a.username}${a.youtubeUrl ? ' [YT]' : ''}`),
+              '\n  linha(s) de depoimento NA SEÇÃO deste AD:', _hasDepoInSec.length ? _hasDepoInSec : '(NENHUMA — está em outro AD)',
+              '\n  linha(s) de depoimento NO DOC INTEIRO:', _hasDepoInDoc,
+            );
+          } catch (_e) { /* debug only */ }
           if (!briefing || (briefing.hooks.length === 0 && !briefing.body)) {
             setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: `Parser nao achou hooks nem body pra ${baseAdId} no doc` } }));
             continue;
@@ -1669,7 +1708,14 @@ function ClickUpPilotInner() {
             // Avatar de YouTube NAO tem arquivo no Drive — o username e o video
             // ID e casaria links numericos por acaso (thumb errada). Pula.
             if (av.youtubeUrl) continue;
-            av.videoFileId = av.videoFileId || resolveVideoFileId(av.username, docR.driveLinks);
+            const fid = av.videoFileId || resolveVideoFileId(av.username, docR.driveLinks);
+            if (fid) { av.videoFileId = fid; continue; }
+            // SEM arquivo de Drive: o chip ".mp4" pode na verdade apontar pra um
+            // link de YouTube (o editor renomeia o chip pra "<handle>.mp4" mas o
+            // href e do YouTube). Acha o link de YT cujo texto casa o username e
+            // anexa youtube+thumb — senao o avatar ficaria "sem link"/sem thumb.
+            const yt = resolveYouTubeFromLinks(av.username, docR.driveLinks);
+            if (yt) { av.youtubeUrl = yt.url; av.thumbUrl = yt.thumb; }
           }
           // 4. Monta roleSlots — UM por avatar do briefing, mesmo se sem match
           //    Order de prioridade pra fechar o slot:
@@ -2307,6 +2353,140 @@ function ClickUpPilotInner() {
         })());
       }
       await Promise.all(dlWorkers);
+
+      // ═══ AUTO-CURA IN-RUN (fix 2026-06-21) ═══════════════════════════════
+      // GARANTIA de montagem COMPLETA sem precisar clicar RETOMAR. Depois do
+      // 1o download, se sobrou alguma parte ESPERADA (tem texto) ainda SEM blob,
+      // o run conserta sozinho ANTES de montar:
+      //   (a) re-download barato — parte renderizou (status completed+url) mas o
+      //       download falhou; tenta de novo (downloadVideoBytes ja tem 4 retries).
+      //   (b) re-dispatch — parte sem videoId (dispatch falhou de vez) OU render
+      //       'failed'/zombie; re-submete no HeyGen + re-polla + re-baixa.
+      // Bounded em 2 rodadas de re-dispatch pra nao loopar infinito. Se ainda
+      // assim faltar (quota real/limite), a montagem sai flagada INCOMPLETA como
+      // antes (sem regressao) — mas agora isso vira excecao, nao regra.
+      const expectedMissing = () =>
+        partBlobs.map((pb, i) => ({ pb, i }))
+          .filter(({ pb }) => pb.expected && !pb.blob)
+          .map(({ i }) => i);
+
+      let healMissing = expectedMissing();
+      if (healMissing.length > 0 && !batchCancelRef.current[taskId]) {
+        console.warn(`[clickup-pilot] AUTO-CURA: ${healMissing.length} parte(s) esperada(s) sem blob:`, healMissing.map((i) => plan!.parts[i].label));
+
+        // (a) re-download das que JA renderizaram mas o download falhou
+        const redownloadFirst = healMissing.filter((i) => {
+          const vid = results[i]?.videoId;
+          const st = vid ? finalStatuses[vid] : null;
+          return st?.status === 'completed' && !!st.videoUrl;
+        });
+        if (redownloadFirst.length > 0) {
+          setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'downloading', message: `Re-baixando ${redownloadFirst.length} take(s) que falharam no download...` } }));
+          for (const i of redownloadFirst) {
+            if (batchCancelRef.current[taskId]) break;
+            const vid = results[i].videoId!;
+            const url = finalStatuses[vid]?.videoUrl;
+            if (!url) continue;
+            try {
+              const bytes = await downloadVideoBytes(url);
+              const part = plan!.parts[i];
+              zip.file(labelToFilename(part.label), bytes);
+              const partBlob = new Blob([bytes as BlobPart], { type: 'video/mp4' });
+              partBlobs[i] = { label: part.label, blob: partBlob, expected: partBlobs[i].expected };
+              try {
+                const { saveBlob } = await import('@/lib/zip-store');
+                await saveBlob(`pilot:${taskId}:part:${part.label}`, partBlob, 'video/mp4');
+              } catch {}
+            } catch (e) { console.warn(`[clickup-pilot] auto-cura re-download ${plan!.parts[i].label} falhou:`, (e as Error)?.message); }
+          }
+        }
+
+        // (b) re-dispatch das que nao tem video bom (sem videoId OU render failed)
+        const MAX_HEAL_ROUNDS = 2;
+        for (let round = 1; round <= MAX_HEAL_ROUNDS; round++) {
+          if (batchCancelRef.current[taskId]) break;
+          healMissing = expectedMissing();
+          if (healMissing.length === 0) break;
+
+          const redispatchIdxs = healMissing.filter((i) => {
+            const vid = results[i]?.videoId;
+            const st = vid ? finalStatuses[vid] : null;
+            const neverDispatched = !vid;
+            const renderFailed = st?.status === 'failed' || st?.status === 'unknown' || (st?.status === 'completed' && !st.videoUrl);
+            return (neverDispatched || renderFailed) && !!plan!.parts[i].avatarId;
+          });
+          if (redispatchIdxs.length === 0) break;
+
+          console.warn(`[clickup-pilot] AUTO-CURA rodada ${round}/${MAX_HEAL_ROUNDS}: re-disparando ${redispatchIdxs.length} parte(s):`, redispatchIdxs.map((i) => plan!.parts[i].label));
+          setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'dispatching', message: `Auto-cura: re-disparando ${redispatchIdxs.length} parte(s) travada(s) (rodada ${round}/${MAX_HEAL_ROUNDS})...` } }));
+
+          const healJobs = redispatchIdxs.map((i) => {
+            const p = plan!.parts[i] as any; // plan parts carregam voiceId em runtime (mesmo padrao do dispatch original)
+            return { label: p.label, copy: p.text, avatarId: p.avatarId!, voiceId: p.voiceId || undefined, motor: motorsPerPart[i] };
+          });
+
+          let healResults: Awaited<ReturnType<typeof runHeyGenJobs>>;
+          try {
+            healResults = await runHeyGenJobs(healJobs, {
+              parallel: 3, mode: 'copy', avatarId: healJobs[0].avatarId, voiceId: undefined,
+              motor: 'III', adNameSafe: adNameClean,
+              isCancelled: () => !!batchCancelRef.current[taskId],
+              onProgress: () => {},
+              onResult: (r) => {
+                const stateIdx = redispatchIdxs[r.index - 1];
+                if (r.videoId) results[stateIdx] = { ...results[stateIdx], videoId: r.videoId, error: null };
+                setBatchStates((prev) => {
+                  const s = prev[taskId];
+                  if (!s) return prev;
+                  const newParts = s.parts.map((p, i) => i === stateIdx ? { ...p, videoId: r.videoId, error: r.error || undefined } : p);
+                  return { ...prev, [taskId]: { ...s, parts: newParts } };
+                });
+              },
+            });
+          } catch (e) { console.error(`[clickup-pilot] auto-cura re-dispatch rodada ${round} crashou:`, e); break; }
+
+          const healIds = healResults.filter((r) => r.videoId).map((r) => r.videoId!);
+          if (healIds.length === 0) break;
+
+          setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'rendering', message: `Auto-cura: renderizando ${healIds.length} re-disparada(s) (rodada ${round})...` } }));
+          const healStatuses = await pollVideosUntilReady(healIds, {
+            intervalMs: 8000, timeoutMs: 20 * 60 * 1000, maxPendingMsPerId: 12 * 60 * 1000,
+            isCancelled: () => !!batchCancelRef.current[taskId],
+            onStatus: (st) => {
+              const done = Object.values(st).filter((s) => s.status === 'completed').length;
+              setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], message: `Auto-cura re-render: ${done}/${healIds.length} prontos (rodada ${round})` } }));
+            },
+          });
+          Object.assign(finalStatuses, healStatuses);
+
+          // baixa as re-disparadas que ficaram prontas
+          setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'downloading', message: `Auto-cura: baixando re-disparadas (rodada ${round})...` } }));
+          for (const i of redispatchIdxs) {
+            if (batchCancelRef.current[taskId]) break;
+            const vid = results[i]?.videoId;
+            const st = vid ? finalStatuses[vid] : null;
+            if (st?.status !== 'completed' || !st.videoUrl) continue;
+            try {
+              const bytes = await downloadVideoBytes(st.videoUrl);
+              const part = plan!.parts[i];
+              zip.file(labelToFilename(part.label), bytes);
+              const partBlob = new Blob([bytes as BlobPart], { type: 'video/mp4' });
+              partBlobs[i] = { label: part.label, blob: partBlob, expected: partBlobs[i].expected };
+              try {
+                const { saveBlob } = await import('@/lib/zip-store');
+                await saveBlob(`pilot:${taskId}:part:${part.label}`, partBlob, 'video/mp4');
+              } catch {}
+            } catch (e) { console.warn(`[clickup-pilot] auto-cura download ${plan!.parts[i].label} falhou:`, (e as Error)?.message); }
+          }
+        }
+
+        const stillMissing = expectedMissing();
+        if (stillMissing.length === 0) {
+          console.log('[clickup-pilot] AUTO-CURA: todas as partes esperadas completas ✓');
+        } else {
+          console.error(`[clickup-pilot] AUTO-CURA esgotou: ${stillMissing.length} parte(s) ainda sem video (${stillMissing.map((i) => plan!.parts[i].label).join(', ')}). Montagem vai sair INCOMPLETA — provavel quota/limite HeyGen.`);
+        }
+      }
 
       // ZIP 1 — takes individuais
       const takesBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });

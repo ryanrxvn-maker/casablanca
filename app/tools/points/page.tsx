@@ -70,6 +70,20 @@ export default function PointsPage() {
     if (saved) setSelectedTeamId(saved);
   }, []);
 
+  // ESCOPO (pasta/folder do dashboard ClickUp) — conta SÓ tasks dessa pasta,
+  // igual ao widget "Pontuação". Persiste a escolha; default auto-detecta a
+  // pasta "Tarefas time". Valores: nome da pasta, '__ALL__' (todas), ou null
+  // (auto). A lógica do cálculo lê DIRETO do localStorage (sem state stale).
+  const SCOPE_KEY = 'darkolab:points:scope';
+  const [scopeFolder, setScopeFolder] = useState<string | null>(null); // só p/ a UI
+  const [scopeResolved, setScopeResolved] = useState<string | null>(null); // o que foi usado
+  const [availableFolders, setAvailableFolders] = useState<Array<{ name: string; count: number }>>([]);
+
+  useEffect(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem(SCOPE_KEY) : null;
+    if (saved != null) setScopeFolder(saved);
+  }, []);
+
   async function fetchPoints() {
     if (!getClickUpToken()) {
       setPointsError('Configure o token ClickUp em /tools/clickup-pilot primeiro.');
@@ -120,6 +134,45 @@ export default function PointsPage() {
       }
       if (!teamId) { setPointsError('Sem teams ClickUp.'); return; }
 
+      // ─── ESCOPO (pasta do dashboard) ────────────────────────────────────
+      // O widget "Pontuação" do ClickUp conta SÓ a pasta "Tarefas time". O
+      // AutoEdit puxava o workspace inteiro (Tráfego 02, CONTINGÊNCIA, etc) e
+      // por isso inflava. Aqui filtramos pra MESMA pasta → espelho exato.
+      // "Container" = pasta (folder) OU, se a lista estiver solta no espaço,
+      // o nome do espaço (space). Robusto a "Tarefas time" ser folder OU space.
+      const containerOf = (t: Task): string =>
+        ((t.folder?.name || t.space?.name || '').trim()) || '(sem pasta)';
+      const foldersMap = new Map<string, number>();
+      for (const t of allMine) {
+        foldersMap.set(containerOf(t), (foldersMap.get(containerOf(t)) || 0) + 1);
+      }
+      const folderList = Array.from(foldersMap.entries())
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count);
+      setAvailableFolders(folderList);
+
+      // Resolve o escopo: escolha do user (localStorage) > auto-detecta a pasta
+      // que contém "tarefas time" > tudo (fallback seguro, = comportamento antigo).
+      const scopePref = typeof window !== 'undefined' ? localStorage.getItem(SCOPE_KEY) : null;
+      let effectiveScope: string | null;
+      if (scopePref === '__ALL__') {
+        effectiveScope = null;
+      } else if (scopePref) {
+        effectiveScope = scopePref;
+      } else {
+        const auto = folderList.find((f) => f.name.toLowerCase().includes('tarefas time'));
+        effectiveScope = auto ? auto.name : null;
+      }
+      setScopeResolved(effectiveScope);
+
+      const scopeLc = (effectiveScope || '').toLowerCase().trim();
+      const inScope = (t: Task): boolean => {
+        if (!scopeLc) return true; // sem escopo = tudo
+        return containerOf(t).toLowerCase() === scopeLc;
+      };
+      // A partir daqui, TUDO (concluídas, atrasadas, pontos) usa só o escopo.
+      const scoped = allMine.filter(inScope);
+
       // Coleta TODOS nomes de custom fields
       const allFieldNames = new Map<string, number>();
       for (const t of allMine) {
@@ -147,7 +200,7 @@ export default function PointsPage() {
       //   - status.type === 'closed' OU 'done'
       //   - date_closed BETWEEN firstOfMonth AND now
       //   - list.name NAO bate EXCLUDED_LIST_REGEX
-      const completedThisMonth = allMine.filter((t) => {
+      const completedThisMonth = scoped.filter((t) => {
         const stype = (t.status?.type || '').toLowerCase();
         const isClosed = stype === 'closed' || stype === 'done';
         const closedTs = Number(t.date_closed) || 0;
@@ -199,7 +252,7 @@ export default function PointsPage() {
       }
 
       // Tasks atrasadas (debug — equivale ao 17.2 do print do user)
-      const overdueTasks = allMine.filter((t) => {
+      const overdueTasks = scoped.filter((t) => {
         const stype = (t.status?.type || '').toLowerCase();
         if (stype === 'closed' || stype === 'done') return false;
         const due = Number(t.due_date) || 0;
@@ -220,7 +273,10 @@ export default function PointsPage() {
         userId: me.id,
         userName: me.username,
         firstOfMonth: new Date(firstOfMonth).toISOString().slice(0, 10),
+        scopeResolved: effectiveScope || '(todas as pastas)',
+        foldersFound: folderList.slice(0, 20),
         totalTasksMine: allMine.length,
+        scopedTasks: scoped.length,
         completedThisMonth: completedThisMonth.length,
         overdueTasks: overdueTasks.length,
         overdueSum: Math.round(overdueSum * 100) / 100,
@@ -246,6 +302,17 @@ export default function PointsPage() {
   function selectTeam(id: string) {
     setSelectedTeamId(id);
     if (typeof window !== 'undefined') localStorage.setItem('darkolab:points:teamId', id);
+    fetchPoints();
+  }
+
+  // Troca o ESCOPO (pasta) e re-calcula. fetchPoints lê o escopo direto do
+  // localStorage, então gravar ANTES de chamar evita state stale.
+  function selectScope(name: string | null) {
+    if (typeof window !== 'undefined') {
+      if (name == null) localStorage.removeItem(SCOPE_KEY);
+      else localStorage.setItem(SCOPE_KEY, name);
+    }
+    setScopeFolder(name);
     fetchPoints();
   }
 
@@ -331,8 +398,25 @@ export default function PointsPage() {
               >
                 {loadingPoints ? '⟳ Carregando...' : '⟳ Atualizar'}
               </button>
+              {/* ESCOPO — espelha o ClickUp. Conta SÓ a pasta escolhida. */}
+              {availableFolders.length > 0 && (
+                <select
+                  value={scopeResolved ?? '__ALL__'}
+                  onChange={(e) => selectScope(e.target.value === '__ALL__' ? '__ALL__' : e.target.value)}
+                  disabled={loadingPoints}
+                  title="Pasta do ClickUp que conta pontos (espelha o widget Pontuação)"
+                  className="mono max-w-[180px] rounded border border-line-strong bg-bg px-2 py-1 text-[9px] uppercase tracking-widest text-text-muted outline-none hover:border-cyan-400 focus:border-cyan-400 disabled:opacity-40"
+                >
+                  <option value="__ALL__">todas as pastas</option>
+                  {availableFolders.map((f) => (
+                    <option key={f.name} value={f.name}>
+                      {f.name} ({f.count})
+                    </option>
+                  ))}
+                </select>
+              )}
               <div className="mono text-[9px] uppercase tracking-widest text-text-muted">
-                {currentMonthKey()}
+                {currentMonthKey()}{scopeResolved ? ` · ${scopeResolved}` : ''}
               </div>
             </div>
           </div>
@@ -375,7 +459,7 @@ export default function PointsPage() {
                 onClick={() => setShowDebug((v) => !v)}
                 className="mono text-[10px] uppercase tracking-widest text-text-muted hover:text-cyan-300"
               >
-                {showDebug ? '▼' : '▶'} debug ({debugInfo.totalTasksMine} tasks suas · {debugInfo.completedThisMonth} concluídas este mes · {debugInfo.countedTasks} com PESO · atrasadas: {debugInfo.overdueTasks} = {debugInfo.overdueSum}pts)
+                {showDebug ? '▼' : '▶'} debug ({debugInfo.totalTasksMine} tasks suas → {debugInfo.scopedTasks} na pasta &quot;{debugInfo.scopeResolved}&quot; · {debugInfo.completedThisMonth} concluídas este mes · {debugInfo.countedTasks} com PESO · atrasadas: {debugInfo.overdueTasks} = {debugInfo.overdueSum}pts)
               </button>
               {showDebug ? (
                 <div className="mt-2 rounded border border-cyan-500/30 bg-cyan-500/5 p-3 text-[11px]">
@@ -396,6 +480,24 @@ export default function PointsPage() {
                             {t.name}
                           </button>
                         ))}
+                      </span>
+                    ) : null}
+                    {(debugInfo.foldersFound || []).length > 0 ? (
+                      <span>
+                        Pastas (clica pra escopar):
+                        {(debugInfo.foldersFound || []).map((f: any) => {
+                          const isScope = (debugInfo.scopeResolved || '').toLowerCase() === (f.name || '').toLowerCase();
+                          return (
+                            <button
+                              key={f.name}
+                              type="button"
+                              onClick={() => selectScope(f.name)}
+                              className={`mono ml-1.5 rounded px-1.5 py-0.5 text-[9px] ${isScope ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-400/50' : 'bg-bg/40 text-text-muted border border-line-strong hover:border-cyan-400/40'}`}
+                            >
+                              {f.name} ({f.count}){isScope ? ' ✓' : ''}
+                            </button>
+                          );
+                        })}
                       </span>
                     ) : null}
                     {(debugInfo.listsFound || []).filter((e: any) => !e[1].included).length > 0 ? (

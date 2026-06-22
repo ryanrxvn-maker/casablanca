@@ -113,6 +113,75 @@ function unwrap(r: { ok: boolean; status: number; body: any }) {
   return r.body.data;
 }
 
+/* ============= Retry transitorio (anti-INCOMPLETO) =============
+ * Quando varias tasks disparam juntas, TODAS passam pelo MESMO proxy do
+ * content-script de UMA aba HeyGen. Sob carga, chamadas individuais batem em
+ * timeout (90s do proxy), 429 (rate-limit) ou 5xx (gateway sobrecarregado).
+ * SEM retry, um unico blip numa parte deixava a parte sem video → montagem
+ * "INCOMPLETA" → "clica RETOMAR". O withRetry abaixo cura esses blips na
+ * fonte, com backoff exponencial + jitter, ANTES de virar falha definitiva.
+ * (Mesmo padrao que blindou o upload do lipsync — ver project_lipsync_upload_retries.) */
+
+/** Erro TRANSITORIO (se cura sozinho no retry):
+ *   - status 0   = timeout do proxy (90s) ou rede caiu
+ *   - 408/425/429 = too-early / rate-limit (servidor REJEITOU antes de processar)
+ *   - 5xx        = gateway/servidor sobrecarregado (pico quando N tasks disparam juntas)
+ *   - mensagens de rede/fetch/proxy
+ * NAO inclui 4xx de validacao (400/401/403/404/410) — esses NUNCA se curam
+ * (avatar invalido, voz inexistente, endpoint aposentado) e re-tentar so perde tempo. */
+export function isTransientFailure(status: number | undefined, msg?: string): boolean {
+  if (status === 0 || status === 408 || status === 425 || status === 429) return true;
+  if (status != null && status >= 500 && status <= 599) return true;
+  const m = (msg || '').toLowerCase();
+  // "quota"/"limite de creditos" e ESGOTAMENTO (permanente) — retry nao cura,
+  // tem que aparecer pro user. So tratamos rate-limit/overload/rede como transitorio.
+  if (/quota|insufficient|saldo|creditos?\b|credit/.test(m)) return false;
+  return /timeout|failed to fetch|fetch failed|network|networkerror|load failed|connection|econn|socket|proxy heygen|rate.?limit|too many|overload|temporar|unavailable|try again|503|502|504/.test(m);
+}
+
+/** Tenta extrair o status HTTP embutido na mensagem de Error que os helpers
+ *  lancam (ex: "API 502:", "(status 0)", "status 429"). -1 se nao achar. */
+function statusFromError(e: unknown): number {
+  const msg = (e as Error)?.message || '';
+  const mm = msg.match(/status\s*(\d{1,3})|\((\d{1,3})\)|API\s+(\d{1,3})/i);
+  if (mm) return parseInt(mm[1] || mm[2] || mm[3], 10);
+  return -1;
+}
+
+/** Roda `fn` com retry exponencial + jitter. So re-tenta quando o erro e
+ *  transitorio (shouldRetry). Espera ~base * 2^(n-1) com jitter entre tentativas.
+ *  Lanca o ULTIMO erro se esgotar as tentativas ou se o erro nao for transitorio. */
+export async function withRetry<T>(
+  fn: () => Promise<T>,
+  opts: {
+    tries?: number;
+    baseDelayMs?: number;
+    label?: string;
+    /** Default: classifica pelo status/mensagem (isTransientFailure). */
+    shouldRetry?: (e: unknown, attempt: number) => boolean;
+  } = {},
+): Promise<T> {
+  const tries = opts.tries ?? 3;
+  const base = opts.baseDelayMs ?? 800;
+  const label = opts.label || 'op';
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      const transient = opts.shouldRetry
+        ? opts.shouldRetry(e, attempt)
+        : isTransientFailure(statusFromError(e), (e as Error)?.message);
+      if (attempt >= tries || !transient) break;
+      const wait = Math.round(base * Math.pow(2, attempt - 1) * (0.7 + Math.random() * 0.6));
+      console.warn(`[heygen withRetry] ${label}: tentativa ${attempt}/${tries} falhou (${(e as Error)?.message?.slice(0, 90)}) — re-tentando em ${wait}ms`);
+      await new Promise((r) => setTimeout(r, wait));
+    }
+  }
+  throw lastErr;
+}
+
 /* ============= ENGINES ============= */
 
 export type EngineKey = 'iii' | 'iv' | 'v';
@@ -496,7 +565,8 @@ export async function createVideo(params: CreateVideoParams): Promise<{ video_id
     };
     const rm = await jsonCall('POST', '/v2/avatar/shortcut/submit', mirrorBody);
     if (!rm.ok) {
-      throw new Error(rm.body?.message || `Falha ao criar video (Espelhamento de Voz, status ${rm.status})`);
+      // status SEMPRE embutido → withRetry consegue classificar transitorio (429/5xx/0).
+      throw new Error(`Falha ao criar video (Espelhamento de Voz, status ${rm.status}): ${rm.body?.message || rm.body?.msg || '?'}`);
     }
     return rm.body.data;
   }
@@ -532,7 +602,8 @@ export async function createVideo(params: CreateVideoParams): Promise<{ video_id
   };
   const r = await jsonCall('POST', '/v2/avatar/shortcut/submit', body);
   if (!r.ok) {
-    throw new Error(r.body?.message || `Falha ao criar video (status ${r.status})`);
+    // status SEMPRE embutido → withRetry consegue classificar transitorio (429/5xx/0).
+    throw new Error(`Falha ao criar video (status ${r.status}): ${r.body?.message || r.body?.msg || '?'}`);
   }
   return r.body.data;
 }
@@ -849,20 +920,28 @@ export async function pollVideosUntilReady(
  * se falhar (CORS), routeia via proxy da extensao (que tem origin certo).
  */
 export async function downloadVideoBytes(videoUrl: string): Promise<Uint8Array> {
-  try {
-    const r = await fetch(videoUrl);
-    if (r.ok) {
-      const buf = await r.arrayBuffer();
-      return new Uint8Array(buf);
+  // Download e idempotente (GET no CDN) → retry agressivo (4 tentativas). Um
+  // blip de rede/CORS/proxy NAO pode mais deixar a parte sem blob (= montagem
+  // INCOMPLETA). Tenta direct fetch primeiro; se falhar, routeia via proxy.
+  return withRetry(async () => {
+    try {
+      const r = await fetch(videoUrl);
+      if (r.ok) {
+        const buf = await r.arrayBuffer();
+        const u8 = new Uint8Array(buf);
+        if (u8.byteLength > 1024) return u8; // sanity: <1KB = corpo de erro, nao MP4
+      }
+    } catch {
+      /* cai pro proxy */
     }
-  } catch {
-    /* cai pro proxy */
-  }
-  const r = await heygenApiFetch({ url: videoUrl, method: 'GET' });
-  if (!r.ok) throw new Error(`Falha download (status ${r.status}): ${r.body?.message || r.body?._text?.slice(0, 100) || '?'}`);
-  const b64 = r.body?._bytesBase64;
-  if (!b64) throw new Error('Proxy nao retornou bytes do video. Body keys: ' + Object.keys(r.body || {}).join(','));
-  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const r = await heygenApiFetch({ url: videoUrl, method: 'GET' });
+    if (!r.ok) throw new Error(`Falha download (status ${r.status}): ${r.body?.message || r.body?._text?.slice(0, 100) || '?'}`);
+    const b64 = r.body?._bytesBase64;
+    if (!b64) throw new Error('Proxy nao retornou bytes do video (status 0). Body keys: ' + Object.keys(r.body || {}).join(','));
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    if (bytes.byteLength <= 1024) throw new Error(`Download retornou ${bytes.byteLength}B (provavel erro transitorio, status 0)`);
+    return bytes;
+  }, { tries: 4, baseDelayMs: 1000, label: 'downloadVideo' });
 }
 
 /* ============= Pipeline completo ============= */
@@ -897,17 +976,21 @@ export async function processJob(
     });
 
     onProgress?.('submitting', { duration: audio.duration, voiceMirroring: !!job.voiceMirroring, voiceId: job.voiceId || null });
-    const created = await createVideo({
-      title: job.title,
-      avatarId: job.avatarId,
-      engine: job.engine,
-      audio,
-      orientation: job.orientation,
-      resolution: job.resolution,
-      motionPrompt: job.motionPrompt,
-      voiceMirroring: job.voiceMirroring,
-      voiceId: job.voiceId, // VA: voz custom do user (Mirror Voice ID)
-    });
+    // Retry conservador (transitorio-only) — mesmo racional do submit por texto.
+    const created = await withRetry(
+      () => createVideo({
+        title: job.title,
+        avatarId: job.avatarId,
+        engine: job.engine,
+        audio,
+        orientation: job.orientation,
+        resolution: job.resolution,
+        motionPrompt: job.motionPrompt,
+        voiceMirroring: job.voiceMirroring,
+        voiceId: job.voiceId, // VA: voz custom do user (Mirror Voice ID)
+      }),
+      { tries: 3, baseDelayMs: 1200, label: `submit-audio ${job.title}` },
+    );
 
     if (job.title && job.title !== 'Avatar Video') {
       onProgress?.('renaming', { videoId: created.video_id });
@@ -930,7 +1013,17 @@ export async function processJob(
   let voiceId = job.voiceId;
   if (!voiceId) {
     onProgress?.('voice-lookup', { msg: 'Buscando voz default do avatar...' });
-    const found = await getAvatarDefaultVoice(job.avatarId);
+    // voice-lookup e GET idempotente (3 endpoints + fallback). Um null pode ser
+    // blip transitorio do proxy → re-tenta ate 3x (sempre, e seguro) antes de
+    // desistir. Sem isso, 1 hiccup no lookup matava a parte inteira.
+    const found = await withRetry(
+      async () => {
+        const v = await getAvatarDefaultVoice(job.avatarId);
+        if (!v) throw new Error('voice-lookup vazio (status 0 — transitorio?)');
+        return v;
+      },
+      { tries: 3, baseDelayMs: 700, label: `voice-lookup ${job.avatarId}`, shouldRetry: () => true },
+    ).catch(() => null);
     if (!found) {
       throw new Error(
         'Nao foi possivel descobrir a voz default desse avatar. Marque "Substituir voz padrao do avatar" e escolha uma voz manualmente.',
@@ -945,16 +1038,24 @@ export async function processJob(
   // antigo /v2/online/text_to_speech.stream que a HeyGen aposentou (410 Gone).
   // Ver [[project_heygen_tts_410]].
   onProgress?.('submitting', { msg: 'Gerando por texto (TTS nativo do avatar)...' });
-  const created = await createVideoWithText({
-    title: job.title,
-    avatarId: job.avatarId,
-    engine: job.engine,
-    text: job.text,
-    voiceId: voiceId!,
-    orientation: job.orientation,
-    resolution: job.resolution,
-    motionPrompt: job.motionPrompt,
-  });
+  // Retry CONSERVADOR no submit: so re-tenta em erro transitorio (429/5xx/timeout
+  // do proxy) — NUNCA num 4xx de validacao. Submit nao e 100% idempotente (um
+  // timeout pode ter criado o video do lado do servidor), mas em modo unlimited
+  // uma duplicata so ocupa historico e nunca e pollada/baixada — trade-off
+  // aceitavel vs. deixar a parte "faltando texto" na montagem.
+  const created = await withRetry(
+    () => createVideoWithText({
+      title: job.title,
+      avatarId: job.avatarId,
+      engine: job.engine,
+      text: job.text!, // guard `if (!job.text) throw` acima garante; narrowing some no closure
+      voiceId: voiceId!,
+      orientation: job.orientation,
+      resolution: job.resolution,
+      motionPrompt: job.motionPrompt,
+    }),
+    { tries: 3, baseDelayMs: 1200, label: `submit ${job.title}` },
+  );
 
   if (job.title && job.title !== 'Avatar Video') {
     onProgress?.('renaming', { videoId: created.video_id });
