@@ -54,6 +54,30 @@ export type DisparoPart = {
   role: string | null;
 };
 
+/** Avatar do briefing (1 por role/speaker) com TODO o material pra UI casar o
+ *  layout do clickup-pilot: thumb (Drive ou YouTube), botao Baixar, @username,
+ *  status de match (pendente quando matchedAvatarId == null). */
+export type DisparoAvatar = {
+  /** Role/speaker exibido ("Doutor", "Mulher", "Avatar"). '' = sem role. */
+  role: string;
+  /** Chave de agrupamento (role.toLowerCase(); '' = sem role) — casa com o
+   *  role das DisparoPart pra juntar partes ao slot. */
+  roleKey: string;
+  /** "@renatomartins1" sem @ e sem .mp4 (ou video ID quando ref. YouTube). */
+  username: string;
+  /** Drive file ID do video do briefing — habilita thumb + botao Baixar. */
+  briefingFileId: string | null;
+  /** URL do YouTube quando o avatar veio de smart-chip de YouTube (clone de voz). */
+  youtubeUrl: string | null;
+  /** Thumb do video do YouTube pra UI. */
+  youtubeThumb: string | null;
+  /** Avatar HeyGen casado automaticamente (null = pendente, user escolhe). */
+  matchedAvatarId: string | null;
+  matchedAvatarName: string | null;
+  /** Voz padrao do avatar casado (se houver). */
+  matchedVoiceId: string | null;
+};
+
 export type DiscoveredDisparo = {
   /** Base AD ID detectado (ex "AD139GL"). Vira prefixo dos arquivos. */
   baseAdId: string;
@@ -61,6 +85,9 @@ export type DiscoveredDisparo = {
   safeName: string;
   /** Partes prontas pra dispatch */
   parts: DisparoPart[];
+  /** Avatares do briefing (1 por role) com material pra UI — espelha os
+   *  roleSlots do clickup-pilot (thumb/Baixar/@username/pendente). */
+  avatars: DisparoAvatar[];
   /** Avatares do briefing que NAO casaram com a biblioteca (debug/UI) */
   unmatchedAvatars: string[];
   /** True quando veio do parser DARKO (G[N]=Hook[N]); false = parser legado */
@@ -149,6 +176,90 @@ function buildAvatarMatch(
   return { matchedByRole, matchedByUsername, unmatched };
 }
 
+/** Normaliza um texto pra match de filename (sem acento, sem extensao, so
+ *  alfanumerico). Espelha o normalizeForMatch do clickup-pilot. */
+function normForMatch(s: string): string {
+  return (s || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/\.(mp4|mov)$/i, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+/** Resolve o Drive file ID do video de um avatar a partir dos smart-chips/links
+ *  capturados no doc — PORT fiel do resolveVideoFileId do clickup-pilot. So
+ *  links de Drive (com fileId) sao candidatos; links de YouTube (fileId null)
+ *  sao ignorados pra nao sombrear o .mp4 real. */
+function resolveVideoFileId(username: string, links: DocLink[]): string | null {
+  const driveLinks = (links || []).filter((l) => l.fileId);
+  if (driveLinks.length === 0) return null;
+  const u = normForMatch(username.replace(/^@/, ''));
+  if (u.length < 3) return null;
+  const uNoTrailDigits = u.replace(/\d+$/, ''); // 'manualdohomemsolo2' → 'manualdohomemsolo'
+  // 1) Match direto: texto normalizado do link contem o username
+  for (const link of driveLinks) {
+    if (normForMatch(link.text).includes(u)) return link.fileId;
+  }
+  // 2) Match por nucleo (sem digitos finais)
+  if (uNoTrailDigits.length >= 4) {
+    for (const link of driveLinks) {
+      const t = normForMatch(link.text).replace(/\d+$/, '');
+      if (t.length < 4) continue; // link 100% numerico vira "" — nunca casa tudo
+      if (t === uNoTrailDigits || t.includes(uNoTrailDigits) || uNoTrailDigits.includes(t)) {
+        return link.fileId;
+      }
+    }
+  }
+  // 3) Match por TOKENS (nomes com acento/espaco/ponto: "@Dr. Marco Túlio.mp4")
+  const tokens = username
+    .replace(/^@/, '')
+    .replace(/\.(mp4|mov)$/i, '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((tk) => tk.length >= 3);
+  if (tokens.length > 0) {
+    for (const link of driveLinks) {
+      const t = normForMatch(link.text);
+      if (tokens.every((tk) => t.includes(tk))) return link.fileId;
+    }
+  }
+  return null;
+}
+
+/** Monta os DisparoAvatar (1 por avatar do briefing) com thumb/Baixar/@username
+ *  + status de match — exatamente o que o roleSlot do clickup-pilot precisa pra
+ *  renderizar o card de avatar. */
+function avatarInfosFrom(
+  avatars: Array<{ role: string; username: string; videoFileId?: string | null; youtubeUrl?: string | null; thumbUrl?: string | null }>,
+  matchedByRole: Record<string, { id: string; name: string; voiceId: string | null }>,
+  links: DocLink[],
+): DisparoAvatar[] {
+  const firstMatched = Object.values(matchedByRole)[0];
+  return avatars.map((av) => {
+    const roleKey = (av.role || '').toLowerCase();
+    // Casa o match pelo role; sem role explicito usa o 1o avatar casado (single).
+    const matched = roleKey ? matchedByRole[roleKey] : firstMatched;
+    const youtubeUrl = av.youtubeUrl || null;
+    // YouTube nao tem arquivo no Drive — username e o video ID; resolver fileId
+    // casaria um .mp4 numerico errado. Fica so com a thumb do video.
+    const briefingFileId = youtubeUrl ? null : (av.videoFileId || resolveVideoFileId(av.username, links));
+    return {
+      role: av.role || '',
+      roleKey,
+      username: av.username,
+      briefingFileId,
+      youtubeUrl,
+      youtubeThumb: av.thumbUrl || null,
+      matchedAvatarId: matched?.id || null,
+      matchedAvatarName: matched?.name || null,
+      matchedVoiceId: matched?.voiceId ?? null,
+    };
+  });
+}
+
 /** Escolhe avatar pra um trecho — MESMA prioridade do clickup-pilot:
  *  0) username do segmento (chip/filename do avatar no body) — autoritativo
  *  1) role detectado pelo parser (match exato, depois fuzzy)
@@ -196,9 +307,11 @@ function makePicker(
 function partsFromBriefing(
   briefing: ParsedDarkoBriefing,
   candidates: AvatarCandidate[],
-): { parts: DisparoPart[]; unmatched: string[] } {
+  links: DocLink[] = [],
+): { parts: DisparoPart[]; unmatched: string[]; avatars: DisparoAvatar[] } {
   const { matchedByRole, matchedByUsername, unmatched } = buildAvatarMatch(briefing.avatars, candidates);
   const pick = makePicker(matchedByRole, matchedByUsername);
+  const avatars = avatarInfosFrom(briefing.avatars, matchedByRole, links);
   const parts: DisparoPart[] = [];
 
   for (const h of briefing.hooks) {
@@ -244,7 +357,7 @@ function partsFromBriefing(
     }
   }
 
-  return { parts, unmatched };
+  return { parts, unmatched, avatars };
 }
 
 function safeNameOf(s: string): string {
@@ -272,12 +385,13 @@ function buildDisparoCore(
   //    smart-chip de YouTube/Drive (sem @user/.mp4 no texto).
   const briefing = parseDarkoBriefing(text, baseAdId, variant ?? extractVariantToken(fullAdId), links);
   if (briefing && (briefing.hooks.length > 0 || briefing.body)) {
-    const { parts, unmatched } = partsFromBriefing(briefing, candidates);
+    const { parts, unmatched, avatars } = partsFromBriefing(briefing, candidates, links);
     if (parts.length > 0) {
       return {
         baseAdId: briefing.baseAdId || baseAdId,
         safeName: safeNameOf(briefing.baseAdId || baseAdId),
         parts,
+        avatars,
         unmatchedAvatars: unmatched,
         fromDarkoBriefing: true,
       };
@@ -291,6 +405,7 @@ function buildDisparoCore(
   if (legacy && legacy.parts.length > 0) {
     const { matchedByRole, unmatched } = buildAvatarMatch(legacy.avatars, candidates);
     const pick = makePicker(matchedByRole);
+    const avatars = avatarInfosFrom(legacy.avatars, matchedByRole, links);
     const parts: DisparoPart[] = legacy.parts.map((p) => {
       const av = pick(p.text, p.label);
       return {
@@ -306,6 +421,7 @@ function buildDisparoCore(
       baseAdId: legacy.adId || baseAdId,
       safeName: safeNameOf(legacy.adId || baseAdId),
       parts,
+      avatars,
       unmatchedAvatars: unmatched,
       fromDarkoBriefing: false,
     };
@@ -441,6 +557,7 @@ export function buildDisparosFromDoc(
     if (partsParsed.length > 0) {
       const { matchedByRole, unmatched } = buildAvatarMatch(avatars, candidates);
       const pick = makePicker(matchedByRole);
+      const avatarInfos = avatarInfosFrom(avatars, matchedByRole, links);
       const parts: DisparoPart[] = partsParsed.map((p) => {
         const av = pick(p.text, p.label);
         return {
@@ -458,6 +575,7 @@ export function buildDisparosFromDoc(
             baseAdId: 'COPY',
             safeName: 'copy',
             parts,
+            avatars: avatarInfos,
             unmatchedAvatars: unmatched,
             fromDarkoBriefing: false,
           },

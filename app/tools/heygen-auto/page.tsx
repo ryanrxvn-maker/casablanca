@@ -23,7 +23,9 @@ import {
   buildDisparosFromNomenclatures,
   type AvatarCandidate,
   type DiscoveredDisparo,
+  type DisparoAvatar,
 } from '@/lib/doc-to-disparos';
+import type { DocLink } from '@/lib/copy-parser';
 import { MotorConfigPicker } from '@/components/MotorConfigPicker';
 import { defaultMotorConfig, resolveMotors, estimateSecondsFromText, estimateSecondsFromAudio, type MotorConfig } from '@/lib/motor-config';
 import {
@@ -352,8 +354,21 @@ function HeyGenAutoInner() {
     avatarName: string | null;
     defaultVoiceId: string | null; // voz padrao do avatar casado
     voiceOverride: { id: string; name: string } | null; // voz custom escolhida
+    // Material do briefing pra UI casar o roleSlot do ClickUp Pilot:
+    username: string | null; // @handle do avatar no doc
+    briefingFileId: string | null; // Drive file ID → thumb + Baixar
+    youtubeUrl: string | null; // avatar por link de YouTube (clone de voz)
+    youtubeThumb: string | null; // thumb do video do YouTube
+    autoMatched: boolean; // true = avatar casou automatico (false = pendente)
   };
   const [docSlots, setDocSlots] = useState<Record<string, DocSlot[]>>({});
+  /** Tela cheia de analise (igual ClickUp Pilot) — abre apos "Analisar copy".
+   *  O modal pequeno (docModalOpen) e SO pra importar; o resultado vem aqui. */
+  const [docAnalysisOpen, setDocAnalysisOpen] = useState(false);
+  /** Preview do texto (editavel) aberto por slot. Key = `${baseAdId}:${slotIdx}`. */
+  const [docPreviewOpen, setDocPreviewOpen] = useState<Record<string, boolean>>({});
+  /** Feedback do botao "Copiar todos os bodies". */
+  const [copiedAllDocBodies, setCopiedAllDocBodies] = useState(false);
 
   /* --------------- Extension detection --------------- */
   useEffect(() => {
@@ -952,7 +967,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
    */
   function fetchDocViaExtensionOnce(
     url: string,
-  ): Promise<{ ok: boolean; text?: string; error?: string; transient?: boolean }> {
+  ): Promise<{ ok: boolean; text?: string; error?: string; transient?: boolean; driveLinks?: DocLink[] }> {
     return new Promise((resolve) => {
       if (typeof window === 'undefined') {
         resolve({ ok: false, error: 'Sem window.' });
@@ -967,7 +982,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
       let acked = false;
       let done = false;
       const timers: ReturnType<typeof setTimeout>[] = [];
-      const finish = (r: { ok: boolean; text?: string; error?: string; transient?: boolean }) => {
+      const finish = (r: { ok: boolean; text?: string; error?: string; transient?: boolean; driveLinks?: DocLink[] }) => {
         if (done) return;
         done = true;
         window.removeEventListener('message', handler);
@@ -979,10 +994,13 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
         if (ev.data?.type === 'HG_DOC_ACK') { acked = true; return; }
         if (ev.data?.type === 'HG_DOC_RESULT') {
           const error = ev.data.error ? String(ev.data.error) : undefined;
+          // driveLinks = smart-chips de Drive/YouTube capturados pela extensao —
+          // habilita thumb + Baixar + avatar por link (igual ClickUp Pilot).
           finish({
             ok: !!ev.data.ok,
             text: ev.data.text,
             error,
+            driveLinks: Array.isArray(ev.data.driveLinks) ? (ev.data.driveLinks as DocLink[]) : undefined,
             transient: !ev.data.ok && !!error && !/permiss|nao existe|não existe|privado/i.test(error),
           });
         }
@@ -1003,8 +1021,8 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
    *  (sem permissao / doc nao existe) falha direto sem retry. */
   async function fetchDocViaExtension(
     url: string,
-  ): Promise<{ ok: boolean; text?: string; error?: string }> {
-    let last: { ok: boolean; text?: string; error?: string; transient?: boolean } = { ok: false, error: 'sem tentativa' };
+  ): Promise<{ ok: boolean; text?: string; error?: string; driveLinks?: DocLink[] }> {
+    let last: { ok: boolean; text?: string; error?: string; transient?: boolean; driveLinks?: DocLink[] } = { ok: false, error: 'sem tentativa' };
     for (let attempt = 1; attempt <= 3; attempt++) {
       last = await fetchDocViaExtensionOnce(url);
       if (last.ok || !last.transient) return last;
@@ -1048,7 +1066,9 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     return await file.text();
   }
 
-  /** Agrupa as partes de um AD em slots de avatar (1 por role/speaker). */
+  /** Agrupa as partes de um AD em slots de avatar (1 por role/speaker) e junta
+   *  o material do briefing (thumb/Baixar/@username/pendente) de d.avatars —
+   *  espelha o roleSlot do ClickUp Pilot. */
   function buildSlotsForDisparo(d: DiscoveredDisparo): DocSlot[] {
     const order: string[] = [];
     const seen = new Set<string>();
@@ -1059,15 +1079,42 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
         order.push(key);
       }
     }
+    const avatars = d.avatars || [];
+    // Acha o avatar do briefing que casa esse slot: por roleKey exato, depois
+    // fuzzy (um contem o outro), depois single (1 avatar/1 slot), por fim por
+    // avatarId ja casado.
+    const findAvatar = (key: string, avatarId: string | null): DisparoAvatar | undefined => {
+      if (key) {
+        const exact = avatars.find((a) => a.roleKey === key);
+        if (exact) return exact;
+        const fuzzy = avatars.find(
+          (a) => a.roleKey && (a.roleKey.includes(key) || key.includes(a.roleKey)),
+        );
+        if (fuzzy) return fuzzy;
+      }
+      if (order.length === 1 && avatars.length >= 1) return avatars[0];
+      if (avatarId) {
+        const byId = avatars.find((a) => a.matchedAvatarId === avatarId);
+        if (byId) return byId;
+      }
+      return undefined;
+    };
     return order.map((key, idx) => {
       const part = d.parts.find((p) => (p.role || '').toLowerCase() === key)!;
+      const info = findAvatar(key, part.avatarId);
       return {
         role: key,
-        roleLabel: part.role || (order.length === 1 ? 'Avatar' : `Avatar ${idx + 1}`),
+        roleLabel:
+          info?.role || part.role || (order.length === 1 ? 'Avatar' : `Avatar ${idx + 1}`),
         avatarId: part.avatarId,
         avatarName: part.avatarName,
         defaultVoiceId: part.voiceId,
         voiceOverride: null,
+        username: info?.username ?? null,
+        briefingFileId: info?.briefingFileId ?? null,
+        youtubeUrl: info?.youtubeUrl ?? null,
+        youtubeThumb: info?.youtubeThumb ?? null,
+        autoMatched: !!part.avatarId,
       };
     });
   }
@@ -1079,12 +1126,72 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     }));
   }
 
+  /** Remove um slot de avatar inteiro (some do disparo). */
+  function removeDocSlot(baseAdId: string, slotIdx: number) {
+    setDocSlots((prev) => ({
+      ...prev,
+      [baseAdId]: (prev[baseAdId] || []).filter((_, i) => i !== slotIdx),
+    }));
+  }
+
+  /** Edita o texto EXATO de uma parte (HOOK/BODY) antes do disparo — igual o
+   *  textarea editavel do preview por avatar no ClickUp Pilot. */
+  function updateDocPartText(baseAdId: string, partIdx: number, text: string) {
+    setDocPreview((prev) =>
+      prev
+        ? prev.map((d) =>
+            d.baseAdId === baseAdId
+              ? { ...d, parts: d.parts.map((p, i) => (i === partIdx ? { ...p, text } : p)) }
+              : d,
+          )
+        : prev,
+    );
+  }
+
+  /** Exclui uma parte (nao vira take no HeyGen) — pra tirar lixo de producao. */
+  function removeDocPart(baseAdId: string, partIdx: number) {
+    setDocPreview((prev) =>
+      prev
+        ? prev.map((d) =>
+            d.baseAdId === baseAdId
+              ? { ...d, parts: d.parts.filter((_, i) => i !== partIdx) }
+              : d,
+          )
+        : prev,
+    );
+  }
+
+  /** Copia o BODY de todos os ADs selecionados, identificado por AD (igual o
+   *  "Copiar todos os bodies" do ClickUp Pilot). */
+  async function copyAllDocBodies() {
+    if (!docPreview) return;
+    const blocks: string[] = [];
+    for (const d of docPreview) {
+      if (!docSelected[d.baseAdId]) continue;
+      const body = d.parts
+        .filter((p) => /^BODY/i.test(p.label))
+        .map((p) => p.text || '')
+        .join(' ')
+        .trim();
+      if (body) blocks.push(`### ${d.baseAdId}\n${body}`);
+    }
+    if (blocks.length === 0) return;
+    try {
+      await navigator.clipboard.writeText(blocks.join('\n\n'));
+      setCopiedAllDocBodies(true);
+      setTimeout(() => setCopiedAllDocBodies(false), 2000);
+    } catch {}
+  }
+
   /** Analisa o doc (busca o link OU usa o texto importado), roda a inteligencia
    *  do ClickUp Pilot e gera o preview de disparos. */
   async function parseDocAndPreview() {
     setDocError(null);
     setDocPreview(null);
     let text = docText;
+    // Smart-chips (Drive/YouTube) capturados pela extensao — habilitam thumb +
+    // Baixar + avatar por link, mesma capacidade do ClickUp Pilot.
+    let docLinks: DocLink[] = [];
     if (docTab === 'link') {
       if (!docLink.trim()) {
         setDocError('Cole o link do Google Docs (compartilhado como "qualquer pessoa com o link").');
@@ -1097,6 +1204,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
         const extR = await fetchDocViaExtension(docLink.trim());
         if (extR.ok && extR.text) {
           text = extR.text;
+          docLinks = extR.driveLinks || [];
           setDocText(text);
         } else {
           // 2) Fallback servidor (so docs publicos).
@@ -1152,7 +1260,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     const names = docAutoAll ? [] : docAdNames.map((s) => s.trim()).filter(Boolean);
     let disparos: DiscoveredDisparo[];
     if (names.length > 0) {
-      const r = buildDisparosFromNomenclatures(text, names, snapCandidates);
+      const r = buildDisparosFromNomenclatures(text, names, snapCandidates, docLinks);
       if (r.disparos.length === 0) {
         setDocError(r.diagnostic);
         return;
@@ -1163,7 +1271,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
       }
       disparos = r.disparos;
     } else {
-      const res = buildDisparosFromDoc(text, snapCandidates);
+      const res = buildDisparosFromDoc(text, snapCandidates, { links: docLinks });
       if (res.disparos.length === 0) {
         setDocError(res.diagnostic);
         return;
@@ -1179,6 +1287,10 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     }
     setDocSelected(sel);
     setDocSlots(slotsMap);
+    setDocPreviewOpen({});
+    // Resultado vai pra TELA CHEIA (igual ClickUp Pilot); o modal de import some.
+    setDocModalOpen(false);
+    setDocAnalysisOpen(true);
   }
 
   /** Enfileira os disparos selecionados no preview do doc. */
@@ -1218,7 +1330,9 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
     }
     setQueue((prev) => [...prev, ...items]);
     setDocModalOpen(false);
+    setDocAnalysisOpen(false);
     setDocPreview(null);
+    setDocPreviewOpen({});
     setDocText('');
     setDocLink('');
     setDocFileName(null);
@@ -2950,100 +3064,351 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
               </div>
             ) : null}
 
-            {/* Preview dos disparos detectados */}
-            {docPreview && docPreview.length > 0 ? (
-              <div className="mt-4 grid gap-2">
-                <div className="label-tech text-[10px] uppercase tracking-widest text-text-muted">
-                  {docPreview.length} AD(s) detectado(s) — escolha quais enfileirar
-                </div>
-                <div className="grid max-h-[420px] gap-2 overflow-y-auto pr-1">
-                  {docPreview.map((d) => {
-                    const checked = !!docSelected[d.baseAdId];
-                    const hooks = d.parts.filter((p) => /^HOOK/i.test(p.label));
-                    const bodyParts = d.parts.filter((p) => /^BODY/i.test(p.label));
-                    const others = d.parts.filter(
-                      (p) => !/^HOOK/i.test(p.label) && !/^BODY/i.test(p.label),
-                    );
-                    const bodyText = bodyParts.map((p) => p.text || '').join(' ').trim();
-                    // Avatares únicos casados (nome) — resumo no topo do card
-                    const avatarNames = Array.from(
-                      new Set(d.parts.map((p) => p.avatarName).filter(Boolean) as string[]),
-                    );
-                    return (
-                      <div
-                        key={d.baseAdId}
-                        className={
-                          'hover-lift rounded-[12px] border px-3 py-2.5 transition ' +
-                          (checked ? 'border-cyan-400/50 bg-cyan-400/5' : 'border-line bg-bg-soft/30')
-                        }
-                      >
-                        <label className="flex cursor-pointer items-start gap-3">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(e) =>
-                              setDocSelected((prev) => ({ ...prev, [d.baseAdId]: e.target.checked }))
-                            }
-                            className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-cyan-400"
-                          />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="mono text-sm text-white">{d.baseAdId}</span>
-                              <span className="mono rounded-full border border-line-strong px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted">
-                                {hooks.length} hook{hooks.length === 1 ? '' : 's'}
-                                {bodyParts.length > 0 ? ` · body ${bodyParts.length} take${bodyParts.length === 1 ? '' : 's'}` : ''}
-                              </span>
-                              {d.fromDarkoBriefing ? null : (
-                                <span className="mono rounded-full bg-yellow-500/15 px-2 py-0.5 text-[9px] uppercase tracking-widest text-yellow-300">
-                                  copy genérica
-                                </span>
-                              )}
-                            </div>
-                            {/* Resumo dos avatares casados */}
-                            <div className="mt-1 text-[11px]">
-                              {avatarNames.length > 0 ? (
-                                <span className="text-lime">🎭 {avatarNames.join(', ')}</span>
-                              ) : (
-                                <span className="text-yellow-300">
-                                  ⚠ {d.unmatchedAvatars.length ? d.unmatchedAvatars.join(', ') : 'avatar não casado'} — escolha abaixo
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </label>
+            {/* O resultado da análise NÃO renderiza mais aqui no modal —
+                abre em TELA CHEIA (docAnalysisOpen), com o mesmo layout do
+                ClickUp Pilot. Este modal é SÓ pra importar. */}
+          </div>
+        </div>
+      ) : null}
 
-                        {/* Slots de avatar: thumb + trocar avatar + escolher voz, por speaker */}
-                        {(docSlots[d.baseAdId] || []).length > 0 ? (
-                          <div className="mt-2 grid gap-2 rounded-md border border-cyan-400/20 bg-cyan-400/5 p-2">
-                            <div className="label-tech text-[9px] uppercase tracking-widest text-cyan-300">
-                              Avatares deste AD ({(docSlots[d.baseAdId] || []).length}) — troque o avatar e a voz de cada um
-                            </div>
-                            {(docSlots[d.baseAdId] || []).map((slot, si) => {
-                              const selectedOpt: AvatarOption | null = slot.avatarId
-                                ? avatarById.get(slot.avatarId) ?? ({
-                                    id: slot.avatarId,
-                                    name: slot.avatarName || slot.avatarId,
-                                    thumb: null,
-                                    videoPreview: null,
-                                    type: 'avatar',
-                                    version: 'III',
-                                    voiceId: slot.defaultVoiceId,
-                                  } as AvatarOption)
-                                : null;
-                              const effVoiceId = slot.voiceOverride?.id || slot.defaultVoiceId || null;
-                              return (
-                                <div
-                                  key={si}
-                                  className="grid gap-2 rounded-md border border-line bg-bg/40 p-2 sm:grid-cols-[180px_1fr]"
+      {/* ═══════════════ TELA CHEIA DE ANÁLISE (igual ClickUp Pilot) ═══════════════
+          O modal acima é só pra importar; o RESULTADO da análise abre aqui em
+          tela cheia, com o mesmo layout/capacidade do ClickUp Pilot: cada AD
+          vira um card com avatares (thumb + Baixar + @username + pendente),
+          troca de avatar/voz, preview do texto editável por avatar, e os CTAs
+          "Copiar todos os bodies" + "Adicionar à fila". */}
+      {docAnalysisOpen && docPreview && docPreview.length > 0 ? (
+        <div className="fixed inset-0 z-[130] flex flex-col bg-black/85 backdrop-blur-sm">
+          {/* Header */}
+          <div className="flex items-center justify-between gap-3 border-b border-cyan-400/20 bg-bg-soft/95 px-5 py-4 md:px-8">
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold text-white md:text-xl">Análise da copy</h2>
+              <p className="mt-0.5 text-[12px] text-text-muted">
+                {docPreview.length} AD(s) detectado(s) — escolha quais enfileirar, troque o avatar/voz
+                de cada speaker e revise o texto. Mesma inteligência do ClickUp Pilot.
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDocAnalysisOpen(false);
+                  setDocModalOpen(true);
+                }}
+                className="mono rounded-[10px] border border-line-strong px-3 py-2 text-[11px] uppercase tracking-widest text-text-muted transition hover:border-cyan-400/60 hover:text-white"
+              >
+                ← Voltar pra importação
+              </button>
+              <button
+                type="button"
+                onClick={() => setDocAnalysisOpen(false)}
+                className="rounded-lg border border-line-strong px-2.5 py-1.5 text-sm text-text-muted transition hover:border-red-500/60 hover:text-red-300"
+                title="Fechar (mantém a análise — reabra pra continuar)"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+
+          {docError ? (
+            <div className="border-b border-red-500/30 bg-red-500/10 px-5 py-2.5 text-xs text-red-300 md:px-8">
+              {docError}
+            </div>
+          ) : null}
+
+          {/* Toolbar: marcar/desmarcar todos */}
+          <div className="flex items-center gap-2 border-b border-line/60 bg-bg/40 px-5 py-2 md:px-8">
+            <button
+              type="button"
+              onClick={() =>
+                setDocSelected(Object.fromEntries(docPreview.map((d) => [d.baseAdId, true])))
+              }
+              className="mono rounded-md border border-lime/40 bg-lime/10 px-2.5 py-1 text-[10px] uppercase tracking-widest text-lime transition hover:bg-lime/20"
+            >
+              ✓ marcar todos
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                setDocSelected(Object.fromEntries(docPreview.map((d) => [d.baseAdId, false])))
+              }
+              className="mono rounded-md border border-line-strong px-2.5 py-1 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-red-500/50 hover:text-red-300"
+            >
+              limpar
+            </button>
+            <span className="mono ml-auto text-[10px] uppercase tracking-widest text-text-muted">
+              {Object.values(docSelected).filter(Boolean).length}/{docPreview.length} selecionado(s)
+            </span>
+          </div>
+
+          {/* Lista de ADs */}
+          <div className="flex-1 overflow-y-auto px-4 py-5 md:px-8">
+            <ul className="mx-auto grid max-w-[1100px] gap-4">
+              {docPreview.map((d) => {
+                const checked = !!docSelected[d.baseAdId];
+                const hooks = d.parts.filter((p) => /^HOOK/i.test(p.label));
+                const bodyParts = d.parts.filter((p) => /^BODY/i.test(p.label));
+                const slots = docSlots[d.baseAdId] || [];
+                return (
+                  <li
+                    key={d.baseAdId}
+                    className={
+                      'rounded-[16px] border p-4 transition ' +
+                      (checked
+                        ? 'border-cyan-400/40 bg-cyan-400/[0.04]'
+                        : 'border-line bg-bg-soft/40')
+                    }
+                  >
+                    {/* Header do AD */}
+                    <div className="flex items-start justify-between gap-3">
+                      <label className="flex min-w-0 cursor-pointer items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) =>
+                            setDocSelected((prev) => ({ ...prev, [d.baseAdId]: e.target.checked }))
+                          }
+                          className="mt-1 h-4 w-4 shrink-0 cursor-pointer accent-cyan-400"
+                        />
+                        <div className="min-w-0">
+                          <h3
+                            className="mono text-[16px] font-bold text-white"
+                            style={{ fontFamily: 'var(--font-tech)' }}
+                          >
+                            {d.baseAdId}
+                          </h3>
+                          <div className="mono mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-text-muted">
+                            <span>
+                              {d.parts.length} takes ({hooks.length} hook{hooks.length === 1 ? '' : 's'} +{' '}
+                              {bodyParts.length} body split{bodyParts.length === 1 ? '' : 's'}) — Avatar III
+                            </span>
+                            {d.fromDarkoBriefing ? null : (
+                              <span className="rounded-full bg-yellow-500/15 px-2 py-0.5 uppercase tracking-widest text-yellow-300">
+                                copy genérica
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </label>
+                    </div>
+
+                    {/* Avatares */}
+                    {slots.length > 0 ? (
+                      <div className="mt-3 grid gap-2">
+                        <div className="label-tech text-[9.5px] tracking-[0.18em] text-text-muted">
+                          Avatares ({slots.length}) — selecione cada um e a voz
+                        </div>
+                        {slots.map((slot, sIdx) => {
+                          const selectedOpt: AvatarOption | null = slot.avatarId
+                            ? avatarById.get(slot.avatarId) ??
+                              ({
+                                id: slot.avatarId,
+                                name: slot.avatarName || slot.avatarId,
+                                thumb: null,
+                                videoPreview: null,
+                                type: 'avatar',
+                                version: 'III',
+                                voiceId: slot.defaultVoiceId,
+                              } as AvatarOption)
+                            : null;
+                          const effVoiceId = slot.voiceOverride?.id || slot.defaultVoiceId || null;
+                          const noVoice = !!slot.avatarId && !effVoiceId;
+                          const effectiveVoiceLabel = slot.voiceOverride?.name
+                            ? slot.voiceOverride.name
+                            : slot.defaultVoiceId
+                              ? 'voz padrão do avatar'
+                              : noVoice
+                                ? 'sem voz'
+                                : '?';
+                          // Partes que esse avatar vai falar — single avatar fala tudo.
+                          const partsForRole =
+                            slots.length === 1
+                              ? d.parts.map((p, i) => ({ p, i }))
+                              : d.parts
+                                  .map((p, i) => ({ p, i }))
+                                  .filter(({ p }) => (p.role || '').toLowerCase() === slot.role);
+                          const briefingThumbUrl = slot.briefingFileId
+                            ? `https://drive.google.com/thumbnail?id=${slot.briefingFileId}&sz=w200`
+                            : slot.youtubeThumb || null;
+                          const previewKey = `${d.baseAdId}:${sIdx}`;
+                          return (
+                            <div
+                              key={sIdx}
+                              className="hover-lift rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_14px_-6px_rgba(0,0,0,0.4)]"
+                            >
+                              {/* Cabeçalho do slot */}
+                              <div className="mono flex flex-wrap items-center gap-2 text-[10px]">
+                                <span className="rounded-full border border-lime/40 bg-lime/18 px-2 py-[3px] font-bold uppercase tracking-widest text-lime">
+                                  {slot.roleLabel}
+                                </span>
+                                <span className="text-white/70">
+                                  {slot.youtubeUrl
+                                    ? 'ref. YouTube'
+                                    : slot.username
+                                      ? `@${slot.username}`
+                                      : 'sem @handle'}
+                                </span>
+                                <span className="text-text-muted">
+                                  · {partsForRole.length} parte{partsForRole.length === 1 ? '' : 's'}
+                                </span>
+                                {!slot.avatarId ? (
+                                  <span className="ml-1 inline-flex items-center gap-1 rounded-full border border-red-400/50 bg-red-500/15 px-2 py-[2px] text-[9px] font-bold uppercase tracking-widest text-red-300">
+                                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-400" />
+                                    Pendente
+                                  </span>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setDocPreviewOpen((prev) => ({ ...prev, [previewKey]: !prev[previewKey] }))
+                                  }
+                                  className="ml-auto rounded-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-200 shadow-[0_2px_0_rgba(0,0,0,0.4),0_0_8px_rgba(34,211,238,0.3)] transition hover:bg-cyan-500/25 active:translate-y-[1px]"
+                                  title="Preview do texto que esse avatar vai falar (editável — corrige leak de indicativo)"
                                 >
-                                  <div className="grid gap-1">
-                                    <div className="label-tech text-[9px] uppercase tracking-widest text-fuchsia-200">
-                                      {slot.roleLabel}
+                                  👁
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => removeDocSlot(d.baseAdId, sIdx)}
+                                  className="rounded-full px-1.5 py-0.5 text-text-muted transition hover:bg-red-500/10 hover:text-red-300"
+                                  title="Remover este slot"
+                                >
+                                  ×
+                                </button>
+                              </div>
+
+                              {/* Preview editável do texto */}
+                              {docPreviewOpen[previewKey] ? (
+                                <div className="mt-2 rounded-[10px] border border-cyan-500/40 bg-cyan-500/5 p-3">
+                                  <div className="mono mb-2 text-[9px] uppercase tracking-widest text-cyan-200">
+                                    preview do texto pro HeyGen ({slot.roleLabel}) — editável
+                                  </div>
+                                  {partsForRole.length === 0 ? (
+                                    <div className="rounded-[8px] border border-yellow-500/40 bg-yellow-500/5 p-2 text-[11px] text-yellow-200">
+                                      ⚠ Nenhuma parte foi atribuída a este avatar.
                                     </div>
+                                  ) : (
+                                    <div className="grid gap-2">
+                                      {partsForRole.map(({ p, i }) => (
+                                        <div key={i} className="rounded-[8px] border border-line bg-bg/60 p-2">
+                                          <div className="mono mb-1.5 flex items-center justify-between gap-2 text-[9px] uppercase tracking-widest">
+                                            <span className="shrink-0 font-bold text-cyan-300">{p.label}</span>
+                                            <div className="flex shrink-0 items-center gap-1.5">
+                                              <span className="text-text-muted">
+                                                {p.text.length}c · {p.text.split(/\s+/).filter(Boolean).length}p
+                                              </span>
+                                              <button
+                                                type="button"
+                                                onClick={() => removeDocPart(d.baseAdId, i)}
+                                                title="Excluir esse trecho — não vira take no HeyGen"
+                                                className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-red-400/40 bg-red-500/10 text-red-300 transition hover:border-red-400/70 hover:bg-red-500/25"
+                                              >
+                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
+                                                  <path d="m6 6 12 12M18 6 6 18" />
+                                                </svg>
+                                              </button>
+                                            </div>
+                                          </div>
+                                          <textarea
+                                            value={p.text}
+                                            onChange={(e) => updateDocPartText(d.baseAdId, i, e.target.value)}
+                                            className="mono w-full resize-y rounded border border-line-strong bg-bg/40 px-2 py-1.5 text-[12px] text-text focus:border-cyan-500/60 focus:outline-none"
+                                            rows={Math.max(3, Math.min(12, p.text.split('\n').length + 1))}
+                                            spellCheck={false}
+                                            placeholder="(vazio — esse part não vai gerar nada)"
+                                          />
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  <div className="mono mt-2 text-[9px] uppercase tracking-widest text-text-muted">
+                                    é o texto EXATO que vai pro avatar — o que você editar aqui é o que dispara.
+                                  </div>
+                                </div>
+                              ) : null}
+
+                              {/* Briefing: thumb + Baixar */}
+                              <div className="mt-3 flex items-center gap-3 rounded-[14px] border border-white/8 bg-gradient-to-br from-white/[0.06] via-white/[0.02] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
+                                <div className="relative shrink-0">
+                                  {briefingThumbUrl ? (
+                                    /* eslint-disable-next-line @next/next/no-img-element */
+                                    <img
+                                      src={briefingThumbUrl}
+                                      alt={slot.username || slot.roleLabel}
+                                      className="h-20 w-20 rounded-[12px] object-cover shadow-[0_4px_14px_rgba(0,0,0,0.35)] ring-2 ring-white/10"
+                                      referrerPolicy="no-referrer"
+                                      loading="lazy"
+                                      decoding="async"
+                                    />
+                                  ) : (
+                                    <div className="flex h-20 w-20 items-center justify-center rounded-[12px] border border-white/12 bg-white/[0.05] text-white/40">
+                                      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <circle cx="12" cy="8" r="4" />
+                                        <path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2" />
+                                      </svg>
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="mono text-[9px] font-semibold uppercase tracking-[0.18em] text-cyan-300/85">
+                                    Briefing
+                                  </div>
+                                  <div
+                                    className="mt-0.5 truncate text-[13px] font-semibold text-white"
+                                    style={{ fontFamily: 'var(--font-tech)' }}
+                                  >
+                                    {slot.youtubeUrl
+                                      ? `${slot.roleLabel} · YouTube`
+                                      : slot.username
+                                        ? `@${slot.username}.mp4`
+                                        : slot.roleLabel}
+                                  </div>
+                                  {slot.briefingFileId ? (
+                                    <a
+                                      href={`https://drive.google.com/uc?export=download&id=${slot.briefingFileId}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="mono mt-1.5 inline-flex items-center gap-1 rounded-md border border-lime/45 bg-lime/12 px-2 py-1 text-[9.5px] font-bold uppercase tracking-widest text-lime transition hover:border-lime/65 hover:bg-lime/22"
+                                      title="Baixar o arquivo do copywriter no Drive"
+                                    >
+                                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
+                                      </svg>
+                                      Baixar
+                                    </a>
+                                  ) : slot.youtubeUrl ? (
+                                    <a
+                                      href={slot.youtubeUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="mono mt-1.5 inline-flex items-center gap-1 rounded-md border border-red-500/45 bg-red-500/12 px-2 py-1 text-[9.5px] font-bold uppercase tracking-widest text-red-300 transition hover:border-red-500/65 hover:bg-red-500/22"
+                                      title="Abrir o vídeo do YouTube (referência pra clonar a voz)"
+                                    >
+                                      ▶ YouTube
+                                    </a>
+                                  ) : (
+                                    <span className="mono mt-1.5 inline-flex items-center gap-1 rounded-md border border-white/12 bg-white/[0.04] px-2 py-1 text-[9.5px] uppercase tracking-widest text-text-muted">
+                                      sem link
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Seletores: Avatar + Voz */}
+                              <div className="mt-2.5 grid gap-2">
+                                <div>
+                                  <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
+                                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <circle cx="12" cy="8" r="4" />
+                                      <path d="M4 21v-2a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v2" />
+                                    </svg>
+                                    Avatar HeyGen
+                                  </div>
+                                  <div className="max-w-[420px]">
                                     <CompactAvatarPicker
                                       selected={selectedOpt}
                                       setSelected={(a) =>
-                                        updateDocSlot(d.baseAdId, si, {
+                                        updateDocSlot(d.baseAdId, sIdx, {
                                           avatarId: a?.id || null,
                                           avatarName: a?.name || null,
                                           defaultVoiceId: (a as any)?.voiceId ?? null,
@@ -3053,72 +3418,78 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                                       label={`Avatar pra ${slot.roleLabel}`}
                                     />
                                   </div>
-                                  <div className="grid content-start gap-1">
-                                    <div className="label-tech text-[9px] uppercase tracking-widest text-text-muted">
-                                      voz {!effVoiceId ? '· ⚠ sem voz padrão — escolha uma' : ''}
+                                </div>
+                                {slot.avatarId ? (
+                                  <div>
+                                    <div className="label-tech mb-1 flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-[0.16em] text-text-muted">
+                                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                                        <path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4" />
+                                      </svg>
+                                      Voz
+                                      <span
+                                        className={`ml-auto normal-case tracking-normal ${slot.voiceOverride ? 'text-lime' : noVoice ? 'text-red-300' : 'text-text-muted/70'}`}
+                                      >
+                                        {effectiveVoiceLabel}
+                                      </span>
+                                      {noVoice && !slot.voiceOverride ? (
+                                        <span className="rounded-full border border-red-400/50 bg-red-500/15 px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-widest text-red-300">
+                                          ⚠ escolha
+                                        </span>
+                                      ) : null}
                                     </div>
                                     <CompactVoiceSelector
                                       selected={slot.voiceOverride}
-                                      setSelected={(v) => updateDocSlot(d.baseAdId, si, { voiceOverride: v })}
+                                      setSelected={(v) => updateDocSlot(d.baseAdId, sIdx, { voiceOverride: v })}
                                     />
-                                    {slot.voiceOverride ? (
-                                      <span className="mono text-[9px] text-lime">voz custom: {slot.voiceOverride.name}</span>
-                                    ) : slot.defaultVoiceId ? (
-                                      <span className="mono text-[9px] text-text-muted">usando a voz do avatar</span>
-                                    ) : (
-                                      <span className="mono text-[9px] text-yellow-300">sem voz definida</span>
-                                    )}
                                   </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : null}
-
-                        {/* TEXTO real dos hooks + body */}
-                        <div className="mt-2 grid gap-1.5 pl-7">
-                          {hooks.map((h, i) => (
-                            <div key={i} className="rounded-md border border-line bg-bg/40 px-2 py-1.5">
-                              <div className="label-tech text-[9px] uppercase tracking-widest text-fuchsia-200">
-                                {h.label}
-                              </div>
-                              <div className="mt-0.5 text-[11px] text-text">
-                                {h.text}
+                                ) : null}
                               </div>
                             </div>
-                          ))}
-                          {others.map((o, i) => (
-                            <div key={`o${i}`} className="rounded-md border border-line bg-bg/40 px-2 py-1.5">
-                              <div className="label-tech text-[9px] uppercase tracking-widest text-text-muted">
-                                {o.label}
-                              </div>
-                              <div className="mt-0.5 text-[11px] text-text">{o.text}</div>
-                            </div>
-                          ))}
-                          {bodyText ? (
-                            <div className="rounded-md border border-line bg-bg/40 px-2 py-1.5">
-                              <div className="mono text-[9px] uppercase tracking-widest text-cyan-300">
-                                BODY · {bodyParts.length} take{bodyParts.length === 1 ? '' : 's'} (~20s cada)
-                              </div>
-                              <div className="mt-0.5 max-h-[120px] overflow-y-auto whitespace-pre-wrap text-[11px] text-text-muted">
-                                {bodyText}
-                              </div>
-                            </div>
-                          ) : null}
-                        </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
-                </div>
-                <button
-                  type="button"
-                  onClick={enqueueSelectedDocDisparos}
-                  className="btn-primary mt-1"
-                >
-                  + Adicionar {Object.values(docSelected).filter(Boolean).length} à fila
-                </button>
-              </div>
-            ) : null}
+                    ) : (
+                      <div className="mt-3 rounded-[10px] border border-yellow-500/40 bg-yellow-500/5 p-3 text-[11px] text-text-muted">
+                        <span className="mono text-[9px] uppercase tracking-widest text-yellow-200">
+                          ⚠ Nenhum avatar identificado
+                        </span>
+                        <div className="mt-1">O parser não achou linha &ldquo;Avatar:&rdquo; com @username no doc.</div>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+
+          {/* CTA bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-lime/40 bg-bg/95 px-5 py-3 shadow-[0_-4px_30px_-10px_rgba(200,232,124,0.4)] md:px-8">
+            <span className="mono text-[11px] text-text-muted">
+              <span className="text-lime">
+                ✓ {Object.values(docSelected).filter(Boolean).length} selecionado(s)
+              </span>{' '}
+              · {docPreview.reduce((n, d) => n + (docSelected[d.baseAdId] ? d.parts.length : 0), 0)} take(s)
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={copyAllDocBodies}
+                className="mono rounded border border-fuchsia-500/50 bg-fuchsia-500/10 px-3 py-2 text-[11px] uppercase tracking-widest text-fuchsia-200 transition hover:bg-fuchsia-500/20"
+                title="Copia o body de TODAS as tasks selecionadas, identificado por AD."
+              >
+                {copiedAllDocBodies ? '✓ bodies copiados' : '⧉ Copiar todos os bodies'}
+              </button>
+              <button
+                type="button"
+                onClick={enqueueSelectedDocDisparos}
+                disabled={Object.values(docSelected).filter(Boolean).length === 0}
+                className="btn-primary disabled:opacity-40"
+                title="Adiciona os ADs selecionados na fila de disparos do HeyGen"
+              >
+                + Adicionar {Object.values(docSelected).filter(Boolean).length} à fila
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
