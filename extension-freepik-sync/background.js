@@ -290,88 +290,126 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === 'magnific-fetch') {
     (async () => {
       try {
-        const tabs = await chrome.tabs.query({
-          url: ['https://www.magnific.com/*', 'https://magnific.com/*'],
-        });
-        let tab = tabs[0];
-        if (!tab) {
-          // Cria aba magnific em background pra ter contexto
-          tab = await chrome.tabs.create({
-            url: 'https://www.magnific.com/',
-            active: false,
-          });
-          // Aguarda load
-          await new Promise((resolve) => {
-            const listener = (tabId, info) => {
-              if (tabId === tab.id && info.status === 'complete') {
-                chrome.tabs.onUpdated.removeListener(listener);
-                resolve();
-              }
+        // ───── Acha uma aba magnific.com VIVA (auto-cura) ─────
+        // Aba descartada/congelada (Chrome Memory Saver — comum quando a aba
+        // fica horas em background) OU em host fora do permitido faz o
+        // executeScript estourar "Cannot access contents of the page. Extension
+        // manifest must request permission to access the respective host".
+        // Então: prioriza aba não-descartada; reativa a descartada; e se o
+        // executeScript ainda falhar, cria uma aba FRESCA em www.magnific.com.
+        const __waitComplete = (tabId, ms) =>
+          new Promise((resolve) => {
+            let done = false;
+            const finish = () => {
+              if (done) return;
+              done = true;
+              try { chrome.tabs.onUpdated.removeListener(listener); } catch {}
+              resolve();
+            };
+            const listener = (tid, info) => {
+              if (tid === tabId && info.status === 'complete') finish();
             };
             chrome.tabs.onUpdated.addListener(listener);
-            setTimeout(() => {
-              chrome.tabs.onUpdated.removeListener(listener);
-              resolve();
-            }, 15000);
+            // Se já estiver completa e viva, resolve na hora.
+            chrome.tabs.get(tabId).then((t) => {
+              if (t && t.status === 'complete' && !t.discarded) finish();
+            }).catch(() => {});
+            setTimeout(finish, ms || 15000);
           });
+
+        const __wantedMagnific = ['https://www.magnific.com/*', 'https://magnific.com/*'];
+        let __cands = await chrome.tabs.query({ url: __wantedMagnific });
+        // não-descartada primeiro; entre essas, 'complete' primeiro.
+        __cands.sort((a, b) => {
+          const ad = a.discarded ? 1 : 0, bd = b.discarded ? 1 : 0;
+          if (ad !== bd) return ad - bd;
+          const ac = a.status === 'complete' ? 0 : 1, bc = b.status === 'complete' ? 0 : 1;
+          return ac - bc;
+        });
+        let tab = __cands[0];
+        // Aba descartada/congelada → reativa (reload) e espera carregar.
+        if (tab && tab.discarded) {
+          try { await chrome.tabs.reload(tab.id); } catch {}
+          await __waitComplete(tab.id, 20000);
+          try { tab = (await chrome.tabs.get(tab.id)) || tab; } catch {}
+        }
+        if (!tab) {
+          // Nenhuma aba magnific aberta → cria em background.
+          tab = await chrome.tabs.create({ url: 'https://www.magnific.com/', active: false });
+          await __waitComplete(tab.id, 20000);
         }
 
-        // Injeta + executa fetch no contexto da aba (page context = perfect creds)
-        const results = await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          world: 'MAIN', // page context
-          args: [msg.path || '/', msg.init || {}],
-          func: async (path, init) => {
+        // ───── Fetch no contexto da página (cookies/CSRF perfeitos) ─────
+        const __magnificFetchFunc = async (path, init) => {
+          try {
+            const url = path.startsWith('http')
+              ? path
+              : `${location.origin}${path.startsWith('/') ? '' : '/'}${path}`;
+            const headers = {
+              accept: 'application/json',
+              'X-Requested-With': 'XMLHttpRequest',
+              ...(init.headers || {}),
+            };
+            // XSRF do document.cookie (mesma que axios da page usa)
             try {
-              const url = path.startsWith('http')
-                ? path
-                : `${location.origin}${path.startsWith('/') ? '' : '/'}${path}`;
-              const headers = {
-                accept: 'application/json',
-                'X-Requested-With': 'XMLHttpRequest',
-                ...(init.headers || {}),
-              };
-              // XSRF do document.cookie (mesma que axios da page usa)
-              try {
-                const m = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
-                if (m && !headers['X-XSRF-TOKEN'] && !headers['x-xsrf-token']) {
-                  headers['X-XSRF-TOKEN'] = decodeURIComponent(m[1]);
-                }
-              } catch {}
-              const opts = {
-                method: init.method || 'GET',
-                headers,
-                credentials: 'include',
-                cache: 'no-store',
-              };
-              if (init.body !== undefined) {
-                if (typeof init.body === 'string') {
-                  opts.body = init.body;
-                } else {
-                  headers['content-type'] = headers['content-type'] || 'application/json';
-                  opts.body = JSON.stringify(init.body);
-                }
+              const m = document.cookie.match(/XSRF-TOKEN=([^;]+)/);
+              if (m && !headers['X-XSRF-TOKEN'] && !headers['x-xsrf-token']) {
+                headers['X-XSRF-TOKEN'] = decodeURIComponent(m[1]);
               }
-              const r = await fetch(url, opts);
-              const text = await r.text();
-              const respHeaders = {};
-              r.headers.forEach((v, k) => {
-                respHeaders[k] = v;
-              });
-              return {
-                __ok: true,
-                ok: r.ok,
-                status: r.status,
-                statusText: r.statusText,
-                headers: respHeaders,
-                body: text,
-                url: r.url,
-              };
-            } catch (e) {
-              return { __ok: false, error: String(e?.message || e) };
+            } catch {}
+            const opts = {
+              method: init.method || 'GET',
+              headers,
+              credentials: 'include',
+              cache: 'no-store',
+            };
+            if (init.body !== undefined) {
+              if (typeof init.body === 'string') {
+                opts.body = init.body;
+              } else {
+                headers['content-type'] = headers['content-type'] || 'application/json';
+                opts.body = JSON.stringify(init.body);
+              }
             }
-          },
-        });
+            const r = await fetch(url, opts);
+            const text = await r.text();
+            const respHeaders = {};
+            r.headers.forEach((v, k) => {
+              respHeaders[k] = v;
+            });
+            return {
+              __ok: true,
+              ok: r.ok,
+              status: r.status,
+              statusText: r.statusText,
+              headers: respHeaders,
+              body: text,
+              url: r.url,
+            };
+          } catch (e) {
+            return { __ok: false, error: String(e?.message || e) };
+          }
+        };
+        const __runOn = (tabId) =>
+          chrome.scripting.executeScript({
+            target: { tabId },
+            world: 'MAIN', // page context
+            args: [msg.path || '/', msg.init || {}],
+            func: __magnificFetchFunc,
+          });
+
+        let results;
+        try {
+          results = await __runOn(tab.id);
+        } catch (eExec) {
+          // Aba morreu no meio OU host fora do permitido (ex.: aba em
+          // magnific.com sem www e manifest desatualizado). Cria uma aba FRESCA
+          // em www.magnific.com (host garantido) e tenta UMA vez mais.
+          console.warn('[freepik-sync] executeScript falhou, recriando aba magnific limpa:', eExec?.message || eExec);
+          const fresh = await chrome.tabs.create({ url: 'https://www.magnific.com/', active: false });
+          await __waitComplete(fresh.id, 20000);
+          results = await __runOn(fresh.id);
+        }
         const result = results?.[0]?.result;
         if (!result || result.__ok === false) {
           sendResponse({
