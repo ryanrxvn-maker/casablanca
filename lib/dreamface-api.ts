@@ -58,10 +58,22 @@ export type DreamFaceConfig = {
   /** OPCIONAIS — o pipeline autoriza pelo account_id/user_id no corpo. */
   cookie?: string;
   token?: string;
+  /** Proxy de IP fixo DESTA conta (cada cookie idealmente sai por 1 IP fixo).
+   *  Se ausente, cai no DREAMFACE_PROXY_URL global. */
+  proxyUrl?: string;
 };
+
+/** Normaliza um cookie cru (tira o prefixo "cookie:" e quebras de linha). */
+export function cleanCookie(raw?: string | null): string | undefined {
+  const c = raw?.replace(/^\s*cookie:\s*/i, '').replace(/[\r\n]+/g, ' ').trim();
+  return c || undefined;
+}
 
 export class DreamFaceError extends Error {
   code: string;
+  /** true = o job JÁ foi submetido nesta conta. O pool NÃO deve fazer failover
+   *  (re-rodar em outra conta geraria o vídeo 2x à toa). */
+  afterSubmit?: boolean;
   constructor(code: string, message: string) {
     super(message);
     this.name = 'DreamFaceError';
@@ -82,16 +94,14 @@ function cfg(): DreamFaceConfig {
   // autorizam SÓ pelo account_id/user_id no corpo (credentials:'omit'
   // retorna 200/THS). Sem cookie = sem expiração, durável pra sempre.
   // Mandamos cookie/token só se existirem (defesa extra / future-proof).
-  const cookie = process.env.DREAMFACE_COOKIE?.replace(/^\s*cookie:\s*/i, '')
-    .replace(/[\r\n]+/g, ' ')
-    .trim();
   return {
     accountId,
     userId,
     appVersion: process.env.DREAMFACE_APP_VERSION?.trim() || '4.7.1',
     templateId: process.env.DREAMFACE_TEMPLATE_ID?.trim() || '6606889f54e4e700070db4b1',
-    cookie: cookie || undefined,
+    cookie: cleanCookie(process.env.DREAMFACE_COOKIE),
     token: process.env.DREAMFACE_TOKEN?.trim() || undefined,
+    proxyUrl: process.env.DREAMFACE_PROXY_URL?.trim() || undefined,
   };
 }
 
@@ -103,27 +113,37 @@ export function isDreamFaceConfigured(): boolean {
 // Vercel rotaciona IP de egress. Pra não tomar bloqueio com 1 cookie
 // vindo de N IPs, roteamos TODAS as chamadas por 1 proxy de IP fixo.
 
-let _dispatcherPromise: Promise<unknown> | null = null;
-async function getDispatcher(): Promise<unknown> {
-  const url = process.env.DREAMFACE_PROXY_URL?.trim();
+// Cache de dispatchers POR URL de proxy — assim cada conta usa seu próprio IP
+// fixo sem recriar o agente a cada chamada.
+const _dispatchers = new Map<string, Promise<unknown>>();
+async function getDispatcher(proxyUrl?: string): Promise<unknown> {
+  const url = (proxyUrl || process.env.DREAMFACE_PROXY_URL || '').trim();
   if (!url) return undefined;
-  if (!_dispatcherPromise) {
-    _dispatcherPromise = (async () => {
+  let p = _dispatchers.get(url);
+  if (!p) {
+    p = (async () => {
       try {
         const { ProxyAgent } = await import('undici');
         return new ProxyAgent(url);
-      } catch (e) {
-        console.error('[dreamface] falha ao iniciar proxy, caindo pra fetch direto:', e);
+      } catch {
+        // NÃO logar o erro cru nem a URL: a mensagem do undici pode embutir o
+        // proxy http://user:pass@... (vazaria credencial no log do servidor).
+        console.error('[dreamface] proxy inválido/indisponível — caindo pra fetch direto (URL omitida).');
         return undefined;
       }
     })();
+    _dispatchers.set(url, p);
   }
-  return _dispatcherPromise;
+  return p;
 }
 
-/** fetch que aplica o proxy (quando DREAMFACE_PROXY_URL setado). */
-async function rawFetch(url: string, init: RequestInit & { dispatcher?: unknown } = {}): Promise<Response> {
-  const dispatcher = await getDispatcher();
+/** fetch que aplica o proxy (por conta, ou o global como fallback). */
+async function rawFetch(
+  url: string,
+  init: RequestInit & { dispatcher?: unknown } = {},
+  proxyUrl?: string,
+): Promise<Response> {
+  const dispatcher = await getDispatcher(proxyUrl);
   if (dispatcher) {
     const { fetch: undiciFetch } = await import('undici');
     // undici fetch é spec-compatível (.ok/.status/.json/.text). O option
@@ -175,7 +195,7 @@ async function dfPostJson<T = unknown>(c: DreamFaceConfig, path: string, body: u
     method: 'POST',
     headers: { ...browserHeaders(c), 'content-type': 'application/json' },
     body: JSON.stringify(body),
-  });
+  }, c.proxyUrl);
   const json = (await safeJson(res, path)) as DFResponse<T>;
   checkAuthOrThrow(res, json, path);
   return json;
@@ -186,14 +206,14 @@ async function dfPostForm<T = unknown>(c: DreamFaceConfig, path: string, form: F
     method: 'POST',
     headers: browserHeaders(c), // NÃO setar content-type: o boundary é automático
     body: form as unknown as BodyInit,
-  });
+  }, c.proxyUrl);
   const json = (await safeJson(res, path)) as DFResponse<T>;
   checkAuthOrThrow(res, json, path);
   return json;
 }
 
 async function dfGet<T = unknown>(c: DreamFaceConfig, path: string): Promise<DFResponse<T>> {
-  const res = await rawFetch(BASE + path, { headers: browserHeaders(c) });
+  const res = await rawFetch(BASE + path, { headers: browserHeaders(c) }, c.proxyUrl);
   const json = (await safeJson(res, path)) as DFResponse<T>;
   checkAuthOrThrow(res, json, path);
   return json;
@@ -319,7 +339,7 @@ export async function uploadAndRegisterAvatar(
     method: 'PUT',
     headers: { 'content-type': ct, 'x-oss-storage-class': 'Standard' },
     body: videoBuffer as unknown as BodyInit,
-  });
+  }, c.proxyUrl);
   if (!putRes.ok) {
     throw new DreamFaceError('upload_failed', `Falha no upload do vídeo pro DreamFace (HTTP ${putRes.status}).`);
   }
@@ -501,8 +521,11 @@ export type GenerateLipsyncResult = {
  * avatar, submete, faz poll e resolve o MP4 final. Tudo server-side,
  * por 1 cookie + 1 IP (proxy).
  */
-export async function generateLipsync(input: GenerateLipsyncInput): Promise<GenerateLipsyncResult> {
-  const c = cfg();
+export async function generateLipsync(
+  input: GenerateLipsyncInput,
+  config?: DreamFaceConfig,
+): Promise<GenerateLipsyncResult> {
+  const c = config ?? cfg();
 
   // Uploads em paralelo (vídeo+registro || áudio) — máxima velocidade.
   const [avatar, audioUrl] = await Promise.all([
@@ -532,12 +555,19 @@ export async function generateLipsync(input: GenerateLipsyncInput): Promise<Gene
     audioName: input.audioName,
   });
 
-  const { workId } = await pollUntilDone(c, animateId, { onStage: input.onStage });
-
-  input.onStage?.('resolving');
-  const url = await resolveMp4(c, workId);
-
-  return { url, workId, animateId, avatarId: avatar.id };
+  // A PARTIR DAQUI o job já foi criado NESTA conta. Se o poll/resolve falhar
+  // (rede/auth/timeout), NÃO vale re-rodar em outra conta (geraria 2x) — marca
+  // o erro como afterSubmit pra o pool segurar o failover. O auth ainda derruba
+  // a conta no pool (cooldown), só não re-submete este job.
+  try {
+    const { workId } = await pollUntilDone(c, animateId, { onStage: input.onStage });
+    input.onStage?.('resolving');
+    const url = await resolveMp4(c, workId);
+    return { url, workId, animateId, avatarId: avatar.id };
+  } catch (e) {
+    if (e instanceof DreamFaceError) e.afterSubmit = true;
+    throw e;
+  }
 }
 
 // ───────────────────────────── Health ─────────────────────────────
@@ -546,10 +576,14 @@ export async function generateLipsync(input: GenerateLipsyncInput): Promise<Gene
  * Checa se o cookie/sessão estão válidos (chama avatar/list).
  * Usado pelo endpoint de status/health admin.
  */
-export async function checkHealth(): Promise<{ ok: boolean; reason?: string }> {
-  if (!isDreamFaceConfigured()) return { ok: false, reason: 'config_missing' };
+export async function checkHealth(config?: DreamFaceConfig): Promise<{ ok: boolean; reason?: string }> {
+  let c: DreamFaceConfig;
   try {
-    const c = cfg();
+    c = config ?? cfg();
+  } catch {
+    return { ok: false, reason: 'config_missing' };
+  }
+  try {
     const j = await dfPostJson(c, '/df-server/avatar/list', {
       account_id: c.accountId,
       user_id: c.userId,
@@ -588,6 +622,7 @@ const CLIENT_MSG: Record<string, string> = {
   no_output_url: 'A geração concluiu mas não retornou o vídeo. Tenta de novo.',
   api_error: 'O serviço de geração recusou a solicitação agora. Tenta de novo em instantes.',
   bad_response: 'A geração instabilizou. Tenta de novo.',
+  busy: 'A fila de geração está cheia agora. Tenta de novo em instantes.',
   internal: 'Algo deu errado na geração. Tenta de novo.',
 };
 
@@ -605,6 +640,7 @@ const HTTP_STATUS: Record<string, number> = {
   no_output_url: 502,
   api_error: 502,
   bad_response: 502,
+  busy: 503,
 };
 
 /**
@@ -612,6 +648,11 @@ const HTTP_STATUS: Record<string, number> = {
  * `message` é sempre genérica/sem marca; `detail` carrega o texto cru
  * (que pode citar DreamFace/endpoint) APENAS pra log server-side.
  */
+/** Remove userinfo (user:pass@) de qualquer URL no texto — defesa pra logs. */
+function redactCreds(s: string): string {
+  return s.replace(/([a-z][a-z0-9+.-]*:\/\/)[^@/\s]+@/gi, '$1***@');
+}
+
 export function dreamFaceErrorToHttp(
   e: unknown,
 ): { status: number; message: string; code: string; detail: string } {
@@ -620,9 +661,9 @@ export function dreamFaceErrorToHttp(
       status: HTTP_STATUS[e.code] ?? 500,
       message: CLIENT_MSG[e.code] ?? CLIENT_MSG.internal,
       code: e.code,
-      detail: e.message,
+      detail: redactCreds(e.message),
     };
   }
-  const detail = e instanceof Error ? e.message : String(e);
+  const detail = redactCreds(e instanceof Error ? e.message : String(e));
   return { status: 500, message: CLIENT_MSG.internal, code: 'internal', detail };
 }

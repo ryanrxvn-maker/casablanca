@@ -24,10 +24,9 @@ import { serviceClient } from '@/app/api/admin/_helpers';
 import { requireToolAccess } from '@/lib/require-tier';
 import {
   generateLipsync,
-  isDreamFaceConfigured,
   dreamFaceErrorToHttp,
 } from '@/lib/dreamface-api';
-import { runOnDreamFaceQueue } from '@/lib/dreamface-queue';
+import { runWithDreamFaceAccount, hasAccounts } from '@/lib/dreamface-pool';
 import { safeFetch, SsrfError } from '@/lib/safe-fetch';
 
 export const runtime = 'nodejs';
@@ -132,7 +131,7 @@ export async function POST(req: Request) {
   const guard = await requireToolAccess('/tools/lipsync', 'pro');
   if (!guard.ok) return guard.response;
 
-  if (!isDreamFaceConfigured()) {
+  if (!hasAccounts()) {
     // Erro de setup (só admin vê) — mantém sem marca do motor por segurança.
     return NextResponse.json(
       {
@@ -180,16 +179,22 @@ export async function POST(req: Request) {
       download(audio_url, MAX_AUDIO_BYTES, 'áudio'),
     ]);
 
-    const result = await runOnDreamFaceQueue(() =>
-      generateLipsync({
-        videoBuffer: video.buffer,
-        videoName: basename(video_url, 'face.mp4'),
-        videoType: video.contentType || 'video/mp4',
-        audioBuffer: audio.buffer,
-        audioName: basename(audio_url, 'voice.mp3'),
-        audioType: audio.contentType || 'audio/mpeg',
-        audioMs,
-      }),
+    // Pool inteligente: escolhe a melhor conta DreamFace (menos ocupada),
+    // roda em paralelo com as outras e faz FAILOVER automático se a conta
+    // cair (auth/rede) — tenta a próxima conta saudável sozinho.
+    const result = await runWithDreamFaceAccount((config) =>
+      generateLipsync(
+        {
+          videoBuffer: video.buffer,
+          videoName: basename(video_url, 'face.mp4'),
+          videoType: video.contentType || 'video/mp4',
+          audioBuffer: audio.buffer,
+          audioName: basename(audio_url, 'voice.mp3'),
+          audioType: audio.contentType || 'audio/mpeg',
+          audioMs,
+        },
+        config,
+      ),
     );
 
     // Esconde a origem: re-hospeda o MP4 no Supabase. Se falhar, cai pra

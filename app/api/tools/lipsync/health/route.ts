@@ -1,17 +1,16 @@
 /**
- * /api/tools/lipsync/health — diagnóstico admin do motor DreamFace.
+ * /api/tools/lipsync/health — diagnóstico admin do POOL de contas DreamFace.
  *
- * Diz se o cookie/sessão estão válidos, se o proxy de IP fixo está
- * configurado e o estado da fila serial. Útil pra saber na hora se o
- * DREAMFACE_COOKIE caiu (precisa renovar).
+ * Diz quantas contas existem, quantas estão SAUDÁVEIS (cookie válido) e o
+ * estado de cada uma (label + ok + motivo + carga), sem NUNCA expor cookie/IDs.
+ * Útil pra saber na hora se alguma conta caiu e precisa renovar o cookie.
  *
  * Admin-only.
  */
 
 import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/app/api/admin/_helpers';
-import { checkHealth, isDreamFaceConfigured } from '@/lib/dreamface-api';
-import { queueStats } from '@/lib/dreamface-queue';
+import { checkPoolHealth, poolStats, hasAccounts } from '@/lib/dreamface-pool';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -20,31 +19,38 @@ export async function GET() {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
-  const configured = isDreamFaceConfigured();
   const proxyConfigured = Boolean(process.env.DREAMFACE_PROXY_URL);
 
-  if (!configured) {
+  if (!hasAccounts()) {
     return NextResponse.json({
       ok: false,
       configured: false,
+      accounts: 0,
       proxyConfigured,
       reason: 'config_missing',
-      hint: 'Defina DREAMFACE_COOKIE, DREAMFACE_ACCOUNT_ID e DREAMFACE_USER_ID.',
-      queue: queueStats(),
+      hint:
+        'Nenhuma conta. Defina DREAMFACE_ACCOUNTS (JSON array) — ex.: ' +
+        '[{"label":"c1","accountId":"...","userId":"...","cookie":"...","proxyUrl":"..."}] — ' +
+        'ou os envs únicos DREAMFACE_ACCOUNT_ID/USER_ID/COOKIE.',
+      pool: poolStats(),
     });
   }
 
-  const health = await checkHealth();
+  const health = await checkPoolHealth();
   return NextResponse.json({
-    ok: health.ok,
+    ok: health.healthy > 0,
     configured: true,
+    accounts: health.accounts,
+    healthy: health.healthy,
     proxyConfigured,
-    reason: health.reason ?? null,
-    hint: health.ok
-      ? proxyConfigured
-        ? 'Tudo certo. DreamFace acessível (auth por account_id/user_id) e proxy de IP fixo ativo.'
-        : 'DreamFace acessível. ATENÇÃO: sem DREAMFACE_PROXY_URL — em produção (Vercel) configure um proxy de IP fixo pra evitar bloqueio.'
-      : 'DreamFace indisponível, IDs (account/user) errados, ou IP bloqueado (use DREAMFACE_PROXY_URL).',
-    queue: queueStats(),
+    hint:
+      health.healthy === 0
+        ? 'TODAS as contas estão fora (cookie expirado ou IP bloqueado). Renove os cookies em DREAMFACE_ACCOUNTS.'
+        : health.healthy < health.accounts
+          ? `${health.healthy}/${health.accounts} contas OK — as demais caíram (cookie/IP). Renove pra recuperar a capacidade total.`
+          : `Todas as ${health.accounts} conta(s) OK. Distribuição inteligente + failover ativos.`,
+    // label + ok + motivo + carga (SEM cookie/IDs).
+    accountsDetail: health.details,
+    pool: poolStats(),
   });
 }
