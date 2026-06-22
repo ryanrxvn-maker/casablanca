@@ -639,8 +639,14 @@ export function ToolMetric({
   label: string;
   accent?: 'violet' | 'lime' | 'rose';
 }) {
+  // Usa as variáveis de tema (adaptam claro/escuro). No claro o --lime vira
+  // verde-oliva escuro legível; hardcoded #c2cf86 sumia no fundo branco.
   const color =
-    accent === 'lime' ? '#c2cf86' : accent === 'rose' ? '#f472b6' : '#c084fc';
+    accent === 'lime'
+      ? 'rgb(var(--lime))'
+      : accent === 'rose'
+        ? 'rgb(var(--pink))'
+        : 'rgb(var(--violet))';
   return (
     <div className="rounded-[14px] border border-line bg-bg-soft/50 px-4 py-3.5">
       <div
