@@ -434,6 +434,9 @@ type TaskAnalysis = {
   partTemplates: Array<{ label: string; text: string; matchByRole: string | null }>;
   /** Body cru do parser (antes do split) — fonte pro botao "copiar body" */
   bodyRaw?: string;
+  /** RAIO-X de diagnóstico (temporário): mostra avatares detectados + onde cada
+   *  linha de "depoimento" do doc cai (abaixo de qual título de AD). */
+  debugXray?: string;
   error?: string;
   /** Quando disparou pra HeyGen (timestamp) — null se ainda nao */
   dispatchedAt?: number | null;
@@ -1864,6 +1867,25 @@ function ClickUpPilotInner() {
             }
           }
           const bodyPartsCount = bodyIdx;
+          // RAIO-X temporário: pra cada linha de "depoimento" no doc, mostra
+          // abaixo de qual título de AD ela cai — revela se o depoimento está
+          // indo pra outro AD (fronteira de seção) ou se some no parse.
+          let debugXray = '';
+          try {
+            const _ln = docR.text.split(/\r?\n/);
+            const _adAbove = (idx: number) => {
+              for (let i = idx; i >= 0; i--) {
+                const tt = _ln[i].trim();
+                if (/^AD\d+[A-Z0-9]*\s*-\s*[A-Z0-9]+/i.test(tt) && !/\.(mp4|mov|mp3|png|jpe?g)\b/i.test(tt)) return tt.slice(0, 28);
+              }
+              return '(sem título acima)';
+            };
+            const _depo = _ln.map((l, i) => ({ l, i })).filter(({ l }) => /depoiment/i.test(l));
+            debugXray =
+              `ESTE AD (${baseAdId}) → avatares: ${briefing.avatars.map((a) => a.role + (a.youtubeUrl ? '·YT' : '') + (a.videoFileId ? '·file' : '')).join(' | ') || 'NENHUM'}\n` +
+              `linhas "depoimento" no DOC INTEIRO (${_depo.length}):\n` +
+              (_depo.map(({ l, i }) => `  • cai em [${_adAbove(i)}]  →  "${l.trim().slice(0, 46)}"`).join('\n') || '  (nenhuma)');
+          } catch { /* debug */ }
           const allHaveAvatar = roleSlots.every((s) => s.avatarId);
           // Propaga o mesmo resultado pra TODAS siblings G1/G2 do grupo
           // (compartilham o doc — ja analisamos uma vez).
@@ -1883,6 +1905,7 @@ function ClickUpPilotInner() {
                 roleSlots,
                 partTemplates,
                 bodyRaw: briefing.body || undefined,
+                debugXray,
                 dispatchedAt: getDispatchedAt(sid),
                 // Marca siblings como "compartilhada com primary"
                 sharedWithPrimaryId: sid === task.id ? undefined : task.id,
@@ -8297,6 +8320,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                   <div className="mono text-[10px] flex flex-wrap items-center gap-2">
                                     <span>{a.totalParts} takes ({a.hookCount} hook{(a.hookCount ?? 0) === 1 ? '' : 's'} + {a.bodyPartsCount} body split{(a.bodyPartsCount ?? 0) === 1 ? '' : 's'}){onlyMagnificMode ? ' — só copy (B-Rolls)' : ' — Avatar III'}</span>
                                   </div>
+                                  {a.debugXray ? (
+                                    /* RAIO-X temporário de diagnóstico do depoimento — tirar print disto */
+                                    <pre className="mono mt-1 whitespace-pre-wrap break-words rounded-[8px] border border-fuchsia-500/40 bg-fuchsia-500/5 px-2 py-1.5 text-[9.5px] leading-snug text-fuchsia-200">{'🔍 RAIO-X\n' + a.debugXray}</pre>
+                                  ) : null}
                                   {/* Only Magnific: nao gera lipsync — avatares ignorados,
                                    *  so a copy do doc importa. RoleSlots escondidos. */}
                                   {onlyMagnificMode ? (
