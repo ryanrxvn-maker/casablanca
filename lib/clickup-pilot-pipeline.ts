@@ -273,82 +273,96 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       rawAssembled: assembled,
       missingParts: missingExpected.length ? missingExpected : undefined,
       _usedFastPath: usedFastPath,
-    } as AssembledPart & { _usedFastPath: boolean });
+      // Guarda as partes JÁ NIVELADAS pra Stage 2 decupar uma a uma (arquivos
+      // pequenos = ffmpeg-wasm confiável, sem estouro de memória da montagem
+      // gigante). Liberadas após a decupagem.
+      _leveledParts: leveledBlobs,
+    } as AssembledPart & { _usedFastPath: boolean; _leveledParts: Blob[] });
   }
 
   // (A regulagem de voz agora acontece POR PARTE no Stage 1, antes do concat —
   // ver nivelarPartes/regularVoz acima. Assim o montado já sai limpo, nivelado
   // e com volumes IGUAIS entre as partes, com ou sem decupagem.)
 
-  // === Stage 2: DECUPAGEM (com retry de assemble se fast produziu lixo) ===
-  // Quando `decupagem: false`, pula stage inteiro — user pediu ad montado
-  // sem cortes de silencio. Toggle por task no ClickUp Pilot.
+  // === Stage 2: DECUPAGEM POR PARTE (robusto p/ montagem grande) ===
+  // ANTES: decupava a montagem JÁ CONCATENADA (ex: 181MB, vários min) num
+  // cutVideoSegments só. Em vídeo grande o ffmpeg-wasm estourava MEMÓRIA/timeout
+  // → 0 decupados → task travava em INCOMPLETO mesmo com TODOS os takes prontos.
+  // Aumentar o timeout só resolvia o caso médio (montagem de ~5min cabia), NÃO o
+  // grande (181MB continuava estourando memória).
+  //
+  // AGORA: decupa CADA PARTE nivelada individualmente (arquivo pequeno ~10-40s =
+  // ffmpeg-wasm SEMPRE engole, rápido e sem estouro) e concatena os decupados.
+  // Se uma parte falhar (sem fala/erro), usa a versão nivelada ORIGINAL dela →
+  // NUNCA perde conteúdo. O resultado: decupagem funciona em qualquer tamanho de
+  // montagem. Bônus: o keepSilence=0.12 nas bordas de cada parte vira a pausa
+  // natural entre takes que o user pediu.
+  // Quando `decupagem: false`, pula stage inteiro (toggle por task).
   if (!decupagem) {
     console.log('[clickup-pilot-pipeline] decupagem desligada pelo toggle — pulando stage 2');
   } else for (let g = 0; g < out.length; g++) {
-    const item = out[g] as AssembledPart & { _usedFastPath?: boolean };
-    if (!item.rawAssembled || item.errors?.assemble) continue;
-    onProgress?.({ stage: 'decupando', currentFilename: item.filename, doneCount: g, totalCount: total });
+    const item = out[g] as AssembledPart & { _leveledParts?: Blob[] };
+    if (item.errors?.assemble) continue;
+    const leveled = item._leveledParts || [];
+    if (leveled.length === 0) continue;
 
-    // Timeouts PROPORCIONAIS à duração (fix 2026-06-21). O cap FIXO de 180s no
-    // corte era a causa do "0 decupados → INCOMPLETO" em montagem longa: o
-    // cutVideoSegments RE-ENCODA o vídeo inteiro no ffmpeg-wasm (lento, client-
-    // side), e uma montagem de 14 partes (~4-5min) não cabia em 180s →
-    // estourava → 0 decupados → a task travava em INCOMPLETO mesmo com TODOS os
-    // takes prontos (download nunca era liberado limpo). As tasks curtas (≤9
-    // partes) couberam, as longas não. Agora o teto escala com a duração real.
-    const tryDecup = async (source: Blob): Promise<{ ok: true; decupado: Blob } | { ok: false; reason: string }> => {
+    // Decupa UMA parte. Retorna o blob cortado, ou null se não dá pra cortar
+    // (sem fala detectável OU erro) — aí o chamador usa a parte original.
+    const tryDecupOne = async (src: Blob, label: string): Promise<Blob | null> => {
       try {
-        const audioBuf = await withTimeout(decodeAudioRobust(source), 240_000, 'decodeAudio');
+        const audioBuf = await withTimeout(decodeAudioRobust(src), 90_000, `decode ${label}`);
         const durSec = audioBuf.duration || 0;
         const silences = detectSilences(audioBuf);
         const segments = computeSpeechSegments(silences, durSec, keepSilenceSec);
-        // Orçamento do corte: ~6s de wall-clock por segundo de vídeo (folga 6x
-        // sobre o pior caso ~1-2x realtime do wasm) + 90s de overhead, piso 180s.
-        // É um TETO de segurança contra trava real, não o tempo esperado.
-        const cutTimeoutMs = Math.max(180_000, Math.ceil(durSec) * 6000 + 90_000);
-        console.log(`[clickup-pilot-pipeline] decup ${item.filename}: ${durSec.toFixed(0)}s, ${silences.length} silencios, ${segments.length} segmentos · teto corte ${(cutTimeoutMs / 1000).toFixed(0)}s`);
-        if (segments.length === 0) return { ok: false, reason: 'Sem fala detectada' };
-        const decupado = await withTimeout(cutVideoSegments(source, segments), cutTimeoutMs, 'cutVideo');
-        return { ok: true, decupado };
+        if (segments.length === 0) return null; // sem fala detectável → mantém original
+        // Parte é curta; teto generoso por segurança (não é o tempo esperado).
+        const cutMs = Math.max(60_000, Math.ceil(durSec) * 6000 + 30_000);
+        return await withTimeout(cutVideoSegments(src, segments), cutMs, `cut ${label}`);
       } catch (e) {
-        return { ok: false, reason: (e as Error)?.message || 'falha decupagem' };
+        console.warn(`[clickup-pilot-pipeline] decup ${label}: falhou (${(e as Error)?.message?.slice(0, 70)}), mantendo parte original`);
+        return null;
       }
     };
 
-    let res = await tryDecup(item.rawAssembled);
+    const decupadoParts: Blob[] = [];
+    let cutCount = 0;
+    for (let k = 0; k < leveled.length; k++) {
+      onProgress?.({ stage: 'decupando', currentFilename: `${item.filename} (${k + 1}/${leveled.length})`, doneCount: g, totalCount: total });
+      const cut = await tryDecupOne(leveled[k], `${item.filename} p${k + 1}/${leveled.length}`);
+      if (cut && cut.size > 1024) { decupadoParts.push(cut); cutCount++; }
+      else decupadoParts.push(leveled[k]); // fallback: parte nivelada original (sem corte)
+    }
 
-    // Se fast concat foi usado e decupagem falhou (output sem timestamps validos),
-    // re-faz assemble com re-encode + retenta decupagem
-    if (!res.ok && item._usedFastPath) {
-      console.warn(`[clickup-pilot-pipeline] decup ${item.filename}: fast deu output bogus (${res.reason.slice(0,80)}), re-fazendo assemble com re-encode...`);
-      try {
-        const { hookIdx } = groupings[g];
-        const piecesIdx: number[] = [];
-        if (hookIdx !== null) piecesIdx.push(hookIdx);
-        piecesIdx.push(...bodies);
-        const blobs = piecesIdx.map(i => parts[i].blob!).filter(Boolean);
-        const tSlow = Date.now();
-        // Nivela cada parte a -16 ANTES do re-concat (mesmo do Stage 1) →
-        // montado re-feito sai com volumes iguais entre as partes.
-        const leveledBlobs = await nivelarPartes(blobs, item.filename);
-        const reAssembled = await concatAvatarParts(leveledBlobs);
-        console.log(`[clickup-pilot-pipeline] re-assemble ${item.filename}: SLOW OK em ${((Date.now()-tSlow)/1000).toFixed(1)}s`);
-        item.rawAssembled = reAssembled;
-        item._usedFastPath = false;
-        res = await tryDecup(item.rawAssembled);
-      } catch (e) {
-        console.error(`[clickup-pilot-pipeline] re-assemble ${item.filename}: FAIL`, e);
+    if (cutCount === 0) {
+      // Nenhuma parte tinha fala detectável pra cortar → não há decupagem real;
+      // deixa o rawAssembled como entrega (montado sem corte).
+      console.warn(`[clickup-pilot-pipeline] decup ${item.filename}: 0/${leveled.length} partes cortadas — entregando montado sem decupagem`);
+      item.errors = { ...item.errors, decupagem: 'nenhuma parte com fala detectável pra decupar' };
+      item._leveledParts = undefined;
+      continue;
+    }
+
+    // Concatena os decupados. Se TODAS as partes foram cortadas, elas têm codec/
+    // params idênticos (cutVideoSegments usa params fixos) → fast concat (copy,
+    // sem re-encode, sem perda). Se houve MISTURA (alguma parte original como
+    // fallback, codec pode divergir) → slow concat que normaliza tudo.
+    try {
+      let dec: Blob;
+      if (decupadoParts.length === 1) {
+        dec = decupadoParts[0];
+      } else if (cutCount === leveled.length) {
+        try { dec = await concatVideosFast(decupadoParts); }
+        catch { dec = await concatAvatarParts(decupadoParts); }
+      } else {
+        dec = await concatAvatarParts(decupadoParts);
       }
+      item.decupado = dec;
+      console.log(`[clickup-pilot-pipeline] decup ${item.filename}: OK ${cutCount}/${leveled.length} partes cortadas · ${(dec.size / (1024 * 1024)).toFixed(1)}MB`);
+    } catch (e) {
+      console.error(`[clickup-pilot-pipeline] decup ${item.filename}: concat dos decupados FAIL`, e);
+      item.errors = { ...item.errors, decupagem: 'concat dos decupados falhou: ' + ((e as Error)?.message || '?') };
     }
-
-    if (res.ok) {
-      item.decupado = res.decupado;
-      console.log(`[clickup-pilot-pipeline] decup ${item.filename}: OK ${(item.decupado.size/(1024*1024)).toFixed(1)}MB`);
-    } else {
-      console.error(`[clickup-pilot-pipeline] decup ${item.filename}: FAIL`, res.reason);
-      item.errors = { ...item.errors, decupagem: res.reason };
-    }
+    item._leveledParts = undefined; // libera memória das partes niveladas
   }
 
   // === Stage 3: CAMUFLAGEM ===
