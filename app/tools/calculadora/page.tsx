@@ -18,17 +18,19 @@ function newAd(time = ''): AdRow {
   return { id: `ad_${_adSeq}`, time };
 }
 
-/** Converte "MM:SS" / "HH:MM:SS" / minutos decimais ("2,5") em SEGUNDOS. */
+/**
+ * Converte a duração de um AD em SEGUNDOS, SEMPRE interpretando como
+ * minutos e segundos — não importa o separador. `06:19`, `06,19` e
+ * `06.19` são todos 6 min 19 seg. Sem separador (`6`) = 6 minutos.
+ * Três partes (`1:06:19`) = horas:minutos:segundos.
+ */
 function parseDur(s: string): number {
   const t = (s || '').trim();
   if (!t) return 0;
-  if (t.includes(':')) {
-    const parts = t.split(':').map((p) => parseInt(p.replace(/\D/g, ''), 10) || 0);
-    if (parts.length >= 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
-    return parts[0] * 60 + (parts[1] || 0);
-  }
-  // Sem ":" → trata como minutos decimais
-  return (parseFloat(t.replace(',', '.')) || 0) * 60;
+  const parts = t.split(/[.,:]/).map((p) => parseInt(p.replace(/\D/g, ''), 10) || 0);
+  if (parts.length === 1) return parts[0] * 60; // só minutos
+  if (parts.length >= 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  return parts[0] * 60 + parts[1]; // minutos : segundos
 }
 
 /** Segundos → "MM:SS" (ou "HH:MM:SS" se passar de 1h). */
@@ -117,7 +119,7 @@ export default function CalculadoraPage() {
           </div>
         </ToolStep>
 
-        <ToolStep n={2} icon={<IconStepClock size={18} />} title="ADs" hint="Coloca a duração de cada AD (MM:SS) — a gente soma tudo" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepClock size={18} />} title="ADs" hint="Duração de cada AD em minutos e segundos — pode usar : , ou . (ex: 06:19)" hue={HUE}>
           <div className="flex flex-col gap-2">
             {ads.map((ad, i) => {
               const sec = parseDur(ad.time);
@@ -179,7 +181,7 @@ export default function CalculadoraPage() {
               Duração total
             </span>
             <span className="mono text-[13px] text-white" style={{ fontFamily: 'var(--font-mono)' }}>
-              {fmtDur(totalSeconds)} · {min.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} min
+              {fmtDur(totalSeconds)}
             </span>
           </div>
         </ToolStep>
