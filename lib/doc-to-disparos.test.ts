@@ -830,9 +830,50 @@ assert(!!depo, 'parseDarkoBriefing depoimento → resolve');
 assert(!!depo && depo.avatars.length === 2, `2 avatares: Doutor + Depoimento (got ${depo?.avatars.length})`);
 assert(!!depo && depo.avatars.some((a) => a.username === '7508150707225251077'), 'avatar do depoimento (talking-photo) identificado');
 assert(!!depo && depo.avatars.some((a) => /depoimento/i.test(a.role)), 'role "Depoimento ..." presente');
-assert(!!depo && depo.bodySegments.some((s) => /depoimento/i.test(s.role || '')), 'segmento do depoimento roteado pro role Depoimento');
+// O segmento do depoimento pode rotear por ROLE ("Depoimento ...") OU por
+// USERNAME (talking-photo id) — o username é até mais preciso (casa o slot
+// exato). Aceita os dois (pickRoleForText no app casa username→slot).
+assert(!!depo && depo.bodySegments.some((s) => /depoimento/i.test(s.role || '') || s.username === '7508150707225251077'), 'segmento do depoimento roteado pro avatar do depoimento (role OU username)');
 assert(!!depo && /minha mãe com 65/i.test(depo.body || ''), 'texto do depoimento entrou no corpo (não foi descartado)');
 assert(!!depo && !/7508150707225251077/.test(depo.body || ''), 'linha do chip .mp4 NÃO vaza pra fala');
+
+// (c2) END-TO-END RIPCFPB COMPLETO: avatar base por link YouTube, labels de
+// locutor no corpo repetindo o título do YT, depoimento SEM ":" no corpo.
+// Garante: (1) 2 avatares, (2) testemunho roteado pro depoimento, (3) título
+// do YouTube NÃO vaza pra fala, (4) corpo da copy preservado.
+const RIP_LINKS: DocLink[] = [
+  { text: 'O IMPACTO DO ESTRESSE NOS HORMÔNIOS FEMININOS', url: 'https://www.youtube.com/watch?v=AbCdEfGhIjk', fileId: null },
+  { text: '7508150707225251077.mp4', fileId: 'DEPOFILEID', url: null },
+];
+const RIP_DOC = [
+  'AD03GL - RIPCFPB',
+  'INSTRUÇÕES PARA EDIÇÃO:',
+  'Avatar e Vozes:',
+  'Doutora: 🎥 O IMPACTO DO ESTRESSE NOS HORMÔNIOS FEMININOS',
+  'Referência:',
+  'AD53G2VN-ME.mp4',
+  '',
+  'Body',
+  'Doutora: O IMPACTO DO ESTRESSE NOS HORMÔNIOS FEMININOS',
+  'Mais de 5 mil brasileiros já tiveram a memória recuperada e hoje vivem uma vida normal.',
+  '',
+  'Depoimento com avatar 7508150707225251077.mp4',
+  'Minha mãe com 65 anos estava nos estágios iniciais do Alzheimer e melhorou muito com o ritual.',
+  '',
+  'Doutora: O IMPACTO DO ESTRESSE NOS HORMÔNIOS FEMININOS',
+  'Se você está sofrendo com esquecimentos leves, esse ritual vai ajudar.',
+  '',
+  'AD04GL - RIPCFPB',
+  'Avatar e Vozes:',
+  'Homem: peterattiamd.mp4',
+].join('\n');
+const rip = parseDarkoBriefing(RIP_DOC, 'AD03GL', null, RIP_LINKS);
+assert(!!rip && rip.avatars.length === 2, `RIPCFPB → 2 avatares (Doutora YT + Depoimento) (got ${rip?.avatars.length})`);
+assert(!!rip && rip.avatars.some((a) => !!a.youtubeUrl), 'RIPCFPB → Doutora com youtubeUrl');
+assert(!!rip && rip.avatars.some((a) => a.username === '7508150707225251077'), 'RIPCFPB → depoimento (sem ":") identificado');
+assert(!!rip && rip.bodySegments.some((s) => s.username === '7508150707225251077' && /minha mãe com 65/i.test(s.text)), 'RIPCFPB → testemunho roteado pro avatar do depoimento');
+assert(!!rip && !/IMPACTO DO ESTRESSE/i.test(rip.body || ''), 'RIPCFPB → título do YouTube NÃO vaza pra fala');
+assert(!!rip && /mais de 5 mil/i.test(rip.body || '') && /minha mãe/i.test(rip.body || ''), 'RIPCFPB → corpo da copy preservado');
 
 // (d) REGRESSÃO CRÍTICA (RIPCFPB): a Referência "AD53G2VN-ME.mp4" PARECE um
 // título de AD (AD53G2VN-ME) e cortava a seção do AD no meio — o depoimento no

@@ -1133,8 +1133,12 @@ export type ParsedDarkoBriefing = {
  *                    soltos ("Doutor" sozinho na linha indica speaker, mas
  *                    sem essa lista nao da pra distinguir de fala normal).
  */
-export function sanitizeSpokenCopy(raw: string, knownRoles: string[] = []): string {
+export function sanitizeSpokenCopy(raw: string, knownRoles: string[] = [], dropExactLines: string[] = []): string {
   let s = (raw || '').replace(/\r/g, '');
+  // Linhas que devem ser DESCARTADAS por igualdade (normalizada) — ex titulo de
+  // YouTube que sobrou de um label de locutor "Doutora: O IMPACTO DO ESTRESSE..."
+  // (o ":" + emoji somem no export e o titulo vazaria pra fala do avatar).
+  const dropSet = new Set(dropExactLines.map((x) => normForLinkMatch(x)).filter((x) => x.length >= 5));
 
   // (1) ancora no ultimo "BODY" isolado (linha "BODY" ou "BODY:")
   const bodyMarkerRe = /(?:^|\n)[ \t]*BODY[ \t]*:?[ \t]*(?:\n|$)/gi;
@@ -1193,6 +1197,9 @@ export function sanitizeSpokenCopy(raw: string, knownRoles: string[] = []): stri
         .replace(/\.[a-z]{1,2}\s*$/i, '');
       const t = cleaned.trim();
       if (!t) return l; // preserva paragrafos
+      // Linha que e EXATAMENTE um titulo de YouTube (sobra de label de locutor
+      // "Doutora: O IMPACTO DO ESTRESSE...") — descarta pra nao virar fala.
+      if (dropSet.size > 0 && dropSet.has(normForLinkMatch(t))) return null;
       // URLs / referencias
       if (/(https?:\/\/|\bwww\.[a-z0-9-]+\.|drive\.google\.com|tiktok\.com)/i.test(t)) return null;
       // Markers
@@ -1316,7 +1323,31 @@ export function detectSpeakerLabelLine(line: string, knownRoles: string[] = []):
   // Aceita: "Doutor:", "Voz do Homem:", "Leandro (Homem depoimento):",
   //         "Homem - Ator pornô:", "Mulher (Esposa de Leandro): @x.mp4"
   const m = t.match(/^([A-Za-zÀ-ÿ]+(?:\s+[A-Za-zÀ-ÿ]+){0,2})(?:[\s\-–—()][A-Za-zÀ-ÿ0-9 \-\(\)]{0,60})?\s*(?::\s*(?:[^@a-zA-ZÀ-ÿ0-9]*@?[\w._\-À-ÿ]+(?:\.(?:mp4|mov))?)?)?\s*$/);
-  if (!m) return null;
+  if (!m) {
+    // FALLBACK: "<RoleConhecido>: <referência multi-palavra SEM pontuação>" — o
+    // regex acima exige valor de 1 token, mas labels de locutor as vezes
+    // repetem a referência do avatar depois do ":" (ex título de YouTube
+    // "Doutora: O IMPACTO DO ESTRESSE..."). Trata como label (boundary) so se: o
+    // head e role CONHECIDO, sem vírgula antes do ":", e o valor NAO parece fala
+    // (sem . , ; ? ! no meio) — assim fala same-line nunca e descartada.
+    const ci = t.indexOf(':');
+    if (ci > 1 && !t.slice(0, ci).includes(',')) {
+      const headTry = t.slice(0, ci).trim();
+      const valTry = t.slice(ci + 1).trim();
+      const hw = headTry.split(/\s+/);
+      if (hw.length <= 3 && headTry.length <= 40 && valTry.length > 0 && !/[.,;!?]/.test(valTry)) {
+        const knownSet = new Set<string>([
+          'doutor', 'doutora', 'dr', 'dra', 'mulher', 'homem',
+          'narrador', 'narradora', 'locutor', 'locutora', 'avatar', 'voz', 'depoimento',
+          ...knownRoles.map((r) => r.toLowerCase().trim()),
+          ...knownRoles.map((r) => r.toLowerCase().trim().split(/[\s(\-]/)[0]),
+        ].filter(Boolean));
+        const headLower = headTry.toLowerCase();
+        if (knownSet.has(headLower) || knownSet.has(headLower.split(/[\s(\-]/)[0])) return headTry;
+      }
+    }
+    return null;
+  }
   const head = m[1].trim();
   if (!head) return null;
   const wordCount = head.split(/\s+/).length;
@@ -1385,10 +1416,21 @@ function detectAvatarFilenameLine(line: string, avatarKeys: Map<string, string>)
   const m = t.match(
     /^[\s\u{1F000}-\u{1FAFF}\u{2190}-\u{27BF}\u{FE0F}•·▪◦*\-]*@?([A-Za-zÀ-ÿ0-9][\wÀ-ÿ.\s-]*?)\.(?:mp4|mov)\s*$/iu,
   );
-  if (!m) return null;
-  const key = normAvatarKey(m[1]);
-  if (!key) return null;
-  return avatarKeys.get(key) || null;
+  if (m) {
+    const key = normAvatarKey(m[1]);
+    if (key && avatarKeys.has(key)) return avatarKeys.get(key)!;
+  }
+  // FALLBACK: linha "<rótulo de locutor> <arquivo>.mp4" SEM dois-pontos — o
+  // export do Google Docs come o ":" antes do smart-chip, entao a troca de
+  // locutor do depoimento chega como "Depoimento com avatar 7508....mp4". Pega
+  // o ARQUIVO no fim da linha; so vira boundary se ele casar um avatar
+  // DECLARADO (avatarKeys) — narrativa nunca termina num filename declarado.
+  const m2 = t.match(/@?([A-Za-zÀ-ÿ0-9][\wÀ-ÿ.-]*?)\.(?:mp4|mov)\s*$/i);
+  if (m2) {
+    const key2 = normAvatarKey(m2[1]);
+    if (key2 && avatarKeys.has(key2)) return avatarKeys.get(key2)!;
+  }
+  return null;
 }
 
 /**
@@ -1545,6 +1587,11 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string, varian
   for (const a of avatars) {
     if (a.role) knownRoles.push(a.role);
   }
+  // Titulos de links de YouTube — quando um label de locutor repete a
+  // referencia do avatar ("Doutora: O IMPACTO DO ESTRESSE...") e o ":"/emoji
+  // somem no export, o titulo vazaria pra fala. Passamos pro sanitizer
+  // descartar essas linhas (igualdade normalizada).
+  const ytTitles = links.filter((l) => l.url && extractYouTubeId(l.url)).map((l) => l.text);
   const hooks: ParsedDarkoBriefing['hooks'] = [];
   let body: string | null = null;
   let bodyRole: string | null = null;
@@ -1558,7 +1605,7 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string, varian
     if (parsed.hook) {
       // Hook costuma ter 1 speaker, mas o "Role (extras): @file.mp4" header
       // pode vir embutido — sanitize com knownRoles tira o resto.
-      const hookText = sanitizeSpokenCopy(parsed.hook.text, knownRoles);
+      const hookText = sanitizeSpokenCopy(parsed.hook.text, knownRoles, ytTitles);
       if (hookText) {
         hooks.push({
           label: `HOOK ${sib.gNum}`,
@@ -1574,7 +1621,7 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string, varian
       // Segmenta body POR SPEAKER antes de sanitizar — speaker labels viram
       // boundaries de segmento, nao sao lidos como fala.
       const segs = splitBySpeaker(parsed.body.text, knownRoles, parsed.body.role, avatarUsernames)
-        .map((s) => ({ role: s.role, username: s.username ?? null, text: sanitizeSpokenCopy(s.text, knownRoles) }))
+        .map((s) => ({ role: s.role, username: s.username ?? null, text: sanitizeSpokenCopy(s.text, knownRoles, ytTitles) }))
         .filter((s) => s.text.length > 0);
       if (segs.length > 0) {
         bodySegments = segs;
@@ -1597,14 +1644,14 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string, varian
       const parsed = parseGSibling(baseBlock);
       const baseBodySegs = parsed.body
         ? splitBySpeaker(parsed.body.text, knownRoles, parsed.body.role, avatarUsernames)
-            .map((s) => ({ role: s.role, username: s.username ?? null, text: sanitizeSpokenCopy(s.text, knownRoles) }))
+            .map((s) => ({ role: s.role, username: s.username ?? null, text: sanitizeSpokenCopy(s.text, knownRoles, ytTitles) }))
             .filter((s) => s.text.length > 0)
         : [];
       if (baseBodySegs.length > 0) {
         // Limpa qualquer hook junk vindo da G1 de metadata e refaz da base.
         hooks.length = 0;
         if (parsed.hook) {
-          const hookText = sanitizeSpokenCopy(parsed.hook.text, knownRoles);
+          const hookText = sanitizeSpokenCopy(parsed.hook.text, knownRoles, ytTitles);
           if (hookText) hooks.push({ label: 'HOOK 1', text: hookText, sourceG: 1, role: parsed.hook.role });
         }
         bodySegments = baseBodySegs;
