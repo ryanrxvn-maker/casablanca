@@ -67,6 +67,19 @@ export type PipelineInputs = {
   keepSilenceSec?: number;
   /** Callback de progresso */
   onProgress?: (p: PipelineProgress) => void;
+
+  /** ── Cache de clips intermediários por PARTE (acelera RETOMAR/rebuild) ──
+   *  Nivelar e decupar cada parte é o trabalho pesado (ffmpeg-wasm). Num
+   *  re-run (RETOMAR/Atualizar montagem) o conteúdo das partes é o MESMO, então
+   *  podemos reaproveitar o que já foi processado em vez de refazer do zero
+   *  (o que fazia o RETOMAR levar ~100min). O caller persiste em IndexedDB.
+   *
+   *  `readClipCache`: LÊ do cache? Fresh dispatch passa false (conteúdo pode
+   *  ter mudado — recomputa) mas SEMPRE escreve, populando p/ o próximo resume.
+   *  Resume/rebuild passa true (conteúdo idêntico → reusa). */
+  readClipCache?: boolean;
+  loadCachedClip?: (kind: 'leveled' | 'decupado', label: string) => Promise<Blob | null>;
+  saveCachedClip?: (kind: 'leveled' | 'decupado', label: string, blob: Blob) => Promise<void>;
 };
 
 /** Insere "G<N>" antes do sufixo final do baseAdId. Ex:
@@ -117,7 +130,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   // keepSilenceSec=0.12: margem mantida nas bordas das fala. Era 0.05 (muito
   // agressivo, video ficava entrecortado). 0.12 da pausa natural entre takes
   // sem soar robotico — feedback do user em 12/05/2026.
-  const { baseAdId, parts, decupagem, camuflagem, whiteAudio, camuflagemVolume = 30, keepSilenceSec = 0.12, onProgress } = input;
+  const { baseAdId, parts, decupagem, camuflagem, whiteAudio, camuflagemVolume = 30, keepSilenceSec = 0.12, onProgress, readClipCache = false, loadCachedClip, saveCachedClip } = input;
   const { hooks, bodies } = classifyParts(parts);
   const out: AssembledPart[] = [];
   const unrecognized = parts.filter((p, i) => !hooks.includes(i) && !bodies.includes(i)).map((p) => p.label);
@@ -184,10 +197,28 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   // picos raros — resíduo <2 LUFS, bem abaixo do gap audível de antes).
   // Sequencial (não Promise.all): ffmpeg-wasm é instância única, exec paralelo
   // colidiria no FS virtual. Roda mesmo com decupagem DESLIGADA.
-  const nivelarPartes = async (blobs: Blob[], label: string): Promise<Blob[]> => {
+  // partLabels[i] = label da parte i (ex 'BODY 3') → chave do cache de clip.
+  // Se readClipCache e há clip 'leveled' salvo dessa parte, REUSA (pula o
+  // nivelamento pesado). Sempre ESCREVE pra acelerar o próximo resume.
+  const nivelarPartes = async (blobs: Blob[], partLabels: string[], groupLabel: string): Promise<Blob[]> => {
     const out2: Blob[] = [];
     for (let i = 0; i < blobs.length; i++) {
-      out2.push(await regularVoz(blobs[i], `${label} parte ${i + 1}/${blobs.length}`));
+      const lbl = partLabels[i];
+      if (readClipCache && loadCachedClip && lbl) {
+        try {
+          const cached = await loadCachedClip('leveled', lbl);
+          if (cached && cached.size > 1024) {
+            console.log(`[clickup-pilot-pipeline] nivel ${lbl}: CACHE HIT (pulou nivelamento)`);
+            out2.push(cached);
+            continue;
+          }
+        } catch {}
+      }
+      const leveled = await regularVoz(blobs[i], `${groupLabel} parte ${i + 1}/${blobs.length}`);
+      out2.push(leveled);
+      if (saveCachedClip && lbl) {
+        try { await saveCachedClip('leveled', lbl, leveled); } catch {}
+      }
     }
     return out2;
   };
@@ -204,6 +235,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     console.log(`[clickup-pilot-pipeline] assemble ${filename}: pecas=${piecesIdx.length}`, piecesIdx.map(i=>parts[i]?.label));
 
     const blobs: Blob[] = [];
+    const blobLabels: string[] = []; // labels das partes COM blob (paralelo a `blobs`)
     const skippedLabels: string[] = [];
     // Partes ESPERADAS (expected:true = tinha conteúdo/foi renderizada) que
     // chegaram SEM blob → a montagem vai sair "faltando texto". Isso NÃO é
@@ -223,6 +255,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         continue;
       }
       blobs.push(p.blob);
+      blobLabels.push(p.label);
     }
     if (skippedLabels.length > 0) {
       console.warn(`[clickup-pilot-pipeline] assemble ${filename}: PULOU ${skippedLabels.length} parte(s) sem video (${skippedLabels.join(', ')}), montando com ${blobs.length} disponíveis`);
@@ -239,7 +272,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     // NIVELA cada parte a -16 LUFS ANTES de juntar → iguala avatares/renders
     // de volumes diferentes + limpa hiss + crava true-peak (anti-clipping).
     onProgress?.({ stage: 'regulando', currentFilename: filename, doneCount: g, totalCount: total });
-    const leveledBlobs = await nivelarPartes(blobs, filename);
+    const leveledBlobs = await nivelarPartes(blobs, blobLabels, filename);
 
     // Tenta fast concat (5-10x mais rapido) primeiro. Mas fast concat sem
     // re-encode pode produzir output corrompido se codec/dimensao divergem
@@ -275,9 +308,10 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       _usedFastPath: usedFastPath,
       // Guarda as partes JÁ NIVELADAS pra Stage 2 decupar uma a uma (arquivos
       // pequenos = ffmpeg-wasm confiável, sem estouro de memória da montagem
-      // gigante). Liberadas após a decupagem.
+      // gigante). Liberadas após a decupagem. _partLabels = chaves do cache.
       _leveledParts: leveledBlobs,
-    } as AssembledPart & { _usedFastPath: boolean; _leveledParts: Blob[] });
+      _partLabels: blobLabels,
+    } as AssembledPart & { _usedFastPath: boolean; _leveledParts: Blob[]; _partLabels: string[] });
   }
 
   // (A regulagem de voz agora acontece POR PARTE no Stage 1, antes do concat —
@@ -301,9 +335,10 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   if (!decupagem) {
     console.log('[clickup-pilot-pipeline] decupagem desligada pelo toggle — pulando stage 2');
   } else for (let g = 0; g < out.length; g++) {
-    const item = out[g] as AssembledPart & { _leveledParts?: Blob[] };
+    const item = out[g] as AssembledPart & { _leveledParts?: Blob[]; _partLabels?: string[] };
     if (item.errors?.assemble) continue;
     const leveled = item._leveledParts || [];
+    const partLabels = item._partLabels || [];
     if (leveled.length === 0) continue;
 
     // Decupa UMA parte. Retorna o blob cortado, ou null se não dá pra cortar
@@ -328,7 +363,21 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     let cutCount = 0;
     for (let k = 0; k < leveled.length; k++) {
       onProgress?.({ stage: 'decupando', currentFilename: `${item.filename} (${k + 1}/${leveled.length})`, doneCount: g, totalCount: total });
-      const cut = await tryDecupOne(leveled[k], `${item.filename} p${k + 1}/${leveled.length}`);
+      const lbl = partLabels[k];
+      // CACHE: num re-run, reusa o decupado já feito dessa parte (pula corte).
+      let cut: Blob | null = null;
+      if (readClipCache && loadCachedClip && lbl) {
+        try {
+          const c = await loadCachedClip('decupado', lbl);
+          if (c && c.size > 1024) { cut = c; console.log(`[clickup-pilot-pipeline] decup ${lbl}: CACHE HIT (pulou corte)`); }
+        } catch {}
+      }
+      if (!cut) {
+        cut = await tryDecupOne(leveled[k], `${item.filename} p${k + 1}/${leveled.length}`);
+        if (cut && cut.size > 1024 && saveCachedClip && lbl) {
+          try { await saveCachedClip('decupado', lbl, cut); } catch {}
+        }
+      }
       if (cut && cut.size > 1024) { decupadoParts.push(cut); cutCount++; }
       else decupadoParts.push(leveled[k]); // fallback: parte nivelada original (sem corte)
     }

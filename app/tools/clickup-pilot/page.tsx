@@ -155,6 +155,27 @@ function markDispatched(taskId: string) {
  *  liberar vaga. NAO mexer pra cima sem revisar throttling HeyGen. */
 const MAX_HEYGEN_PARALLEL = 2;
 
+/** Hooks de cache de clips intermediários (leveled/decupado) por parte, em
+ *  IndexedDB. Acelera RETOMAR/Atualizar montagem: o pipeline reusa o que já foi
+ *  nivelado/decupado em vez de refazer tudo no ffmpeg-wasm (era o que fazia o
+ *  RETOMAR levar ~100min). Chave: pilot:<taskId>:<kind>:<label>. */
+function makeClipCacheHooks(taskId: string) {
+  return {
+    loadCachedClip: async (kind: 'leveled' | 'decupado', label: string): Promise<Blob | null> => {
+      try {
+        const { loadBlob } = await import('@/lib/zip-store');
+        return await loadBlob(`pilot:${taskId}:${kind}:${label}`, 'video/mp4');
+      } catch { return null; }
+    },
+    saveCachedClip: async (kind: 'leveled' | 'decupado', label: string, blob: Blob): Promise<void> => {
+      try {
+        const { saveBlob } = await import('@/lib/zip-store');
+        await saveBlob(`pilot:${taskId}:${kind}:${label}`, blob, 'video/mp4');
+      } catch {}
+    },
+  };
+}
+
 /** Phases consideradas "ocupando slot" — soma destas vs MAX define se
  *  ha vaga pra disparar mais uma. 'queued'/'done'/'failed' NAO ocupam. */
 const ACTIVE_BATCH_PHASES: ReadonlyArray<BatchTaskState['phase']> = [
@@ -2508,6 +2529,10 @@ function ClickUpPilotInner() {
           camuflagem: _tc.camuflagem,
           whiteAudio: _tc.whiteAudio,
           camuflagemVolume: _tc.camuflagemVolume,
+          // Fresh dispatch: NÃO lê cache (conteúdo novo) mas ESCREVE (popula
+          // pro próximo RETOMAR pular nivelamento/decupagem).
+          readClipCache: false,
+          ...makeClipCacheHooks(taskId),
           onProgress: (p) => {
             setBatchStates((prev) => ({
               ...prev,
@@ -2999,6 +3024,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           camuflagem: _tc.camuflagem,
           whiteAudio: _tc.whiteAudio,
           camuflagemVolume: _tc.camuflagemVolume,
+          // RETOMAR: mesmo conteúdo → LÊ o cache (pula nivelamento/decupagem já
+          // feitos). Era isso que fazia o RETOMAR refazer tudo e levar ~100min.
+          readClipCache: true,
+          ...makeClipCacheHooks(taskId),
           onProgress: (p) => {
             setBatchStates((prev) => ({
               ...prev,
@@ -4040,8 +4069,13 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const bytes = await downloadVideoBytes(st.videoUrl);
       const partBlob = new Blob([bytes as BlobPart], { type: 'video/mp4' });
       try {
-        const { saveBlob } = await import('@/lib/zip-store');
+        const { saveBlob, deleteZip } = await import('@/lib/zip-store');
         await saveBlob(`pilot:${taskId}:part:${label}`, partBlob, 'video/mp4');
+        // Parte MUDOU → invalida os clips derivados (leveled/decupado) dela, pra
+        // o rebuild ("Atualizar montagem") recomputar SÓ essa parte e não reusar
+        // cache stale. As outras partes seguem cacheadas (rebuild rápido).
+        await deleteZip(`pilot:${taskId}:leveled:${label}`).catch(() => {});
+        await deleteZip(`pilot:${taskId}:decupado:${label}`).catch(() => {});
       } catch (e) { console.warn('[edit-part] save blob IDB falhou:', e); }
 
       // 6) Atualiza state final com URL pronta + marca como dirty (montagem
@@ -4112,6 +4146,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         camuflagem: _tc.camuflagem,
         whiteAudio: _tc.whiteAudio,
         camuflagemVolume: _tc.camuflagemVolume,
+        // Atualizar montagem: reusa cache das partes NÃO editadas; as editadas
+        // tiveram o cache invalidado na hora da edição (regen) → recomputam só elas.
+        readClipCache: true,
+        ...makeClipCacheHooks(taskId),
         onProgress: (p) => {
           setBatchStates((prev) => ({
             ...prev,
