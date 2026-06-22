@@ -155,6 +155,24 @@ function markDispatched(taskId: string) {
  *  liberar vaga. NAO mexer pra cima sem revisar throttling HeyGen. */
 const MAX_HEYGEN_PARALLEL = 2;
 
+/** SERIALIZA o pós-processo de vídeo (decupagem/regulagem/montagem). O
+ *  ffmpeg-wasm é um SINGLETON compartilhado no navegador (lib/ffmpeg-worker.ts
+ *  getFFmpeg) — com 2 tasks rodando em paralelo (MAX_HEYGEN_PARALLEL), os 2
+ *  pós-processos usariam o MESMO ffmpeg ao mesmo tempo e se ATROPELAM (escrevem
+ *  no mesmo FS virtual, um chama freeFFmpeg enquanto o outro processa) → 1 task
+ *  conclui e as outras falham na decupagem/regulagem ("1 PRONTO, resto
+ *  INCOMPLETO"). Esta fila garante 1 montagem por vez. O HeyGen continua
+ *  paralelo (gated por MAX_HEYGEN_PARALLEL) — só a parte ffmpeg serializa. */
+let _postPipelineChain: Promise<unknown> = Promise.resolve();
+function runPostPipelineSerial(
+  args: Parameters<typeof runPostPipeline>[0],
+): ReturnType<typeof runPostPipeline> {
+  const run = _postPipelineChain.then(() => runPostPipeline(args));
+  // A fila SEGUE mesmo se uma montagem falhar (não trava as próximas).
+  _postPipelineChain = run.then(() => undefined, () => undefined);
+  return run;
+}
+
 /** Hooks de cache de clips intermediários (leveled/decupado) por parte, em
  *  IndexedDB. Acelera RETOMAR/Atualizar montagem: o pipeline reusa o que já foi
  *  nivelado/decupado em vez de refazer tudo no ffmpeg-wasm (era o que fazia o
@@ -2522,7 +2540,7 @@ function ClickUpPilotInner() {
       let pipeRes: Awaited<ReturnType<typeof runPostPipeline>>;
       try {
         const _tc = getTaskCamuflagem(taskId);
-        pipeRes = await runPostPipeline({
+        pipeRes = await runPostPipelineSerial({
           baseAdId: rBaseAdId,
           parts: partBlobs,
           decupagem: isDecupagemEnabled(taskId),
@@ -3017,7 +3035,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       let pipeRes: Awaited<ReturnType<typeof runPostPipeline>>;
       try {
         const _tc = getTaskCamuflagem(taskId);
-        pipeRes = await runPostPipeline({
+        pipeRes = await runPostPipelineSerial({
           baseAdId: state.baseAdId,
           parts: partBlobs,
           decupagem: isDecupagemEnabled(taskId),
@@ -4139,7 +4157,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       }));
 
       const _tc = getTaskCamuflagem(taskId);
-      const pipeRes = await runPostPipeline({
+      const pipeRes = await runPostPipelineSerial({
         baseAdId: b.baseAdId,
         parts: partBlobs,
         decupagem: isDecupagemEnabled(taskId),
