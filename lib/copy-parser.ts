@@ -1556,10 +1556,31 @@ function findBaseCopyBlock(fullDocText: string, baseAdId: string, variant?: stri
   return null;
 }
 
+/** Extrai SO o bloco de DECLARACAO de avatar (a parte "Avatar e Vozes:" /
+ *  INSTRUCOES, ANTES da copy comecar). O avatar PRINCIPAL e declarado aqui —
+ *  nunca num label solto no corpo. Trunca no 1o marcador de copy (heading de
+ *  G-sibling, Body, Corpo, Gancho, Hook, Headline). Isso impede que um label de
+ *  avatar de OUTRO AD que sobrou no corpo (copy-paste entre criativos) seja lido
+ *  como avatar DESTE AD — bug de MISTURA de avatares entre ADs (corrigido
+ *  2026-06-22, regressao do isAdHeadingLine que passou a incluir o corpo). */
+function avatarDeclBlock(section: string): string {
+  const lines = section.split(/\r?\n/);
+  for (let i = 1; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (/^AD\d+G\d+/i.test(t) || /^(body|corpo|gancho|hook|headline)\b/i.test(t)) {
+      return lines.slice(0, i).join('\n');
+    }
+  }
+  return section;
+}
+
 export function parseDarkoBriefing(fullDocText: string, baseAdId: string, variant?: string | null, links: DocLink[] = []): ParsedDarkoBriefing | null {
   const baseSection = findAdSection(fullDocText, baseAdId, variant);
   if (!baseSection) return null;
-  let avatars = parseAvatars(baseSection, links);
+  // Avatar PRINCIPAL vem SO do bloco de declaracao (antes da copy) — nunca de
+  // labels que sobraram no corpo. O depoimento inline e adicionado depois.
+  const declBlock = avatarDeclBlock(baseSection);
+  let avatars = parseAvatars(declBlock, links);
   // Fallback: alguns ADs usam 'Link do avatar: <file>' em vez de 'Avatar:'
   // — vira avatar GLOBAL da copy (todos hooks + body desse avatar).
   // Suporta MULTIPLOS avatares na mesma linha separados por +/,/e:
@@ -1567,7 +1588,7 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string, varian
   //   → 2 slots (Avatar 1, Avatar 2). Body com labels Mulher/Doutor
   //   vira 2 segmentos no splitBySpeaker — user atribui avatar por slot.
   if (avatars.length === 0) {
-    const globals = parseGlobalAvatarLinks(baseSection);
+    const globals = parseGlobalAvatarLinks(declBlock);
     if (globals.length > 0) {
       avatars = globals.map((g) => ({
         role: g.role,
@@ -1577,15 +1598,20 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string, varian
     }
   }
   const siblings = findGSiblings(fullDocText, baseAdId, variant);
-  // AVATARES INLINE: alem da secao "Avatar:" base, alguns avatares sao
-  // declarados DENTRO da copy — classico do "Depoimento com avatar:
-  // <file>.mp4" que aparece no fim do corpo, depois do Body. Varre TODAS as
-  // secoes do AD (base + cada G-sibling) e adiciona os avatares que ainda nao
-  // temos (dedup por username). E ADITIVO: nunca remove um avatar ja achado.
-  // parseAvatars exige @user/.mp4/chip/link, entao prosa do corpo nunca vira
-  // avatar — so declaracoes reais (a thumb resolve depois via fileId/youtube).
+  // AVATARES INLINE DE DEPOIMENTO: alem da secao "Avatar:" base, o locutor do
+  // DEPOIMENTO costuma ser declarado DENTRO do corpo ("Depoimento com avatar:
+  // <file>.mp4", depois do Body). Varre o corpo (base + G-siblings) e adiciona
+  // SO avatares de role DEPOIMENTO que ainda nao temos.
+  //
+  // CRITICO (regressao corrigida 2026-06-22): a varredura NAO pode adicionar
+  // labels de avatar PRINCIPAL do corpo. Nesses docs (copy-paste entre ADs) o
+  // corpo de um AD as vezes carrega um label de avatar de OUTRO AD (ex "Mulher:
+  // mygermangrandma.mp4" que sobrou). Adicionar isso MISTURAVA o avatar de um AD
+  // no outro. O avatar PRINCIPAL vem SEMPRE da secao base — nunca de um label
+  // solto no corpo. So o depoimento (locutor adicional real) e inline.
   for (const sec of [baseSection, ...siblings.map((s) => s.section)]) {
     for (const extra of parseAvatars(sec, links)) {
+      if (!/depoiment/i.test(extra.role)) continue; // só DEPOIMENTO inline; principal vem da base
       const k = normAvatarKey(extra.username);
       if (k && !avatars.some((a) => normAvatarKey(a.username) === k)) {
         avatars.push(extra);

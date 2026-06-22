@@ -952,6 +952,38 @@ for (const mainL of mainVariants) {
 }
 assert(matrixFails === 0, `matriz robustez: ${matrixRuns - matrixFails}/${matrixRuns} combinações OK (avatar + copy completa + zero vazamento)`);
 
+/* ===== ISOLAMENTO ENTRE ADs — avatar de um AD NUNCA vaza pra outro ===== *
+ * Bug real (2026-06-22): docs copy-paste deixam no CORPO de um AD um label de
+ * avatar de OUTRO AD (ex "Mulher: mygermangrandma.mp4" sobrou no corpo do AD02).
+ * Com a seção incluindo o corpo, o avatar principal vazava entre ADs. O avatar
+ * PRINCIPAL tem que vir SÓ da declaração ("Avatar e Vozes:"); o corpo só
+ * contribui o DEPOIMENTO. */
+console.log('\nisolamento entre ADs (avatar não vaza):');
+const ISO_LINKS: DocLink[] = [{ text: '7508150707225251077.mp4', fileId: 'DEPOID', url: null }];
+const ISO_DOC = [
+  'AD01GL - RIPCFPB', 'Avatar e Vozes:', 'Mulher: mygermangrandma.mp4', '',
+  'AD01G1GL-RIPCFPB', 'Mulher:', 'Gancho AD01.', 'Body', 'Mulher: mygermangrandma.mp4', 'Corpo do AD01.', '',
+  'AD02GL - RIPCFPB', 'Avatar e Vozes:', 'Doutor: vivianlamounier.mp4', '',
+  'AD02G1GL-RIPCFPB', 'Doutor:', 'Gancho AD02.', 'Body',
+  'Mulher: mygermangrandma.mp4',  // ← LEFTOVER de copy-paste do AD01
+  'Corpo do AD02.', '',
+  'Depoimento com avatar 7508150707225251077.mp4', 'Testemunho do AD02.', '',
+  'AD04GL - RIPCFPB', 'Avatar e Vozes:', 'Homem: peterattiamd.mp4', '',
+  'AD04G1GL-RIPCFPB', 'Homem:', 'Gancho AD04.', 'Body',
+  'Mulher: mygermangrandma.mp4',  // ← LEFTOVER no AD04 também
+  'Corpo do AD04.',
+].join('\n');
+const ad01 = parseDarkoBriefing(ISO_DOC, 'AD01GL', null, ISO_LINKS);
+const ad02 = parseDarkoBriefing(ISO_DOC, 'AD02GL', null, ISO_LINKS);
+const ad04 = parseDarkoBriefing(ISO_DOC, 'AD04GL', null, ISO_LINKS);
+const u = (b: ReturnType<typeof parseDarkoBriefing>) => (b?.avatars || []).map((a) => a.username);
+assert(JSON.stringify(u(ad01)) === JSON.stringify(['mygermangrandma']), `AD01 só mygermangrandma (got ${JSON.stringify(u(ad01))})`);
+assert(!u(ad02).includes('mygermangrandma'), `AD02 NÃO pega avatar do AD01 (got ${JSON.stringify(u(ad02))})`);
+assert(u(ad02).includes('vivianlamounier'), 'AD02 mantém seu próprio avatar (vivianlamounier)');
+assert(u(ad02).includes('7508150707225251077'), 'AD02 mantém o depoimento inline');
+assert(!u(ad04).includes('mygermangrandma'), `AD04 NÃO pega avatar do AD01 (got ${JSON.stringify(u(ad04))})`);
+assert(u(ad04).includes('peterattiamd'), 'AD04 mantém seu próprio avatar (peterattiamd)');
+
 /* ----------------- doc vazio ----------------- */
 console.log('\nedge cases:');
 const empty = buildDisparosFromDoc('', CANDIDATES);
