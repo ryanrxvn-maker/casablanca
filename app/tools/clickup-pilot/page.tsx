@@ -29,6 +29,8 @@ import {
   parseVABriefing,
   sanitizeSpokenCopy,
   extractAvaNumsFromTaskName,
+  extractYouTubeId,
+  youTubeThumb,
   findAdSection,
   type ParsedAdSection,
   type ParsedDarkoBriefing,
@@ -1218,6 +1220,29 @@ function ClickUpPilotInner() {
     return null;
   }
 
+  /** Acha um link de YouTube cujo texto casa o `username` — cobre o chip
+   *  ".mp4" que na verdade aponta pra YouTube (editor renomeia o chip pra
+   *  "<handle>.mp4" mas o href e do YouTube). So roda como FALLBACK quando nao
+   *  ha arquivo de Drive. Retorna {url, thumb} ou null. */
+  function resolveYouTubeFromLinks(
+    username: string,
+    driveLinks: Array<{ text: string; fileId: string | null; url?: string | null }> | undefined,
+  ): { url: string; thumb: string } | null {
+    if (!driveLinks || driveLinks.length === 0) return null;
+    const u = normalizeForMatch(username.replace(/^@/, ''));
+    if (u.length < 3) return null;
+    for (const link of driveLinks) {
+      if (!link.url) continue;
+      const id = extractYouTubeId(link.url);
+      if (!id) continue;
+      const t = normalizeForMatch(link.text);
+      if (t && (t.includes(u) || u.includes(t))) {
+        return { url: `https://www.youtube.com/watch?v=${id}`, thumb: youTubeThumb(id) };
+      }
+    }
+    return null;
+  }
+
   /** Visual match via Claude vision API (~5s, $0.005). Retorna avatar matched ou null */
   async function visualMatchAvatar(
     refImageUrl: string,
@@ -1669,7 +1694,14 @@ function ClickUpPilotInner() {
             // Avatar de YouTube NAO tem arquivo no Drive — o username e o video
             // ID e casaria links numericos por acaso (thumb errada). Pula.
             if (av.youtubeUrl) continue;
-            av.videoFileId = av.videoFileId || resolveVideoFileId(av.username, docR.driveLinks);
+            const fid = av.videoFileId || resolveVideoFileId(av.username, docR.driveLinks);
+            if (fid) { av.videoFileId = fid; continue; }
+            // SEM arquivo de Drive: o chip ".mp4" pode na verdade apontar pra um
+            // link de YouTube (o editor renomeia o chip pra "<handle>.mp4" mas o
+            // href e do YouTube). Acha o link de YT cujo texto casa o username e
+            // anexa youtube+thumb — senao o avatar ficaria "sem link"/sem thumb.
+            const yt = resolveYouTubeFromLinks(av.username, docR.driveLinks);
+            if (yt) { av.youtubeUrl = yt.url; av.thumbUrl = yt.thumb; }
           }
           // 4. Monta roleSlots — UM por avatar do briefing, mesmo se sem match
           //    Order de prioridade pra fechar o slot:
