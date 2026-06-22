@@ -5,6 +5,7 @@ import { useToolState } from '@/components/ToolsStateProvider';
 import { formatBRL } from '@/lib/utils';
 import { ToolStep, ToolSlider, ToolMetric, ToolResultCard } from '@/components/tool-kit';
 import { IconCalculadora, IconStepMoney, IconStepClock, IconStepTag } from '@/components/ToolIcons';
+import { printBudgetReport } from './report';
 
 const HUE = 'rgba(148,163,184,0.4)';
 
@@ -56,6 +57,10 @@ export default function CalculadoraPage() {
     'calculadora:desconto',
     '0',
   );
+  const [cliente, setCliente] = useToolState<string>(
+    'calculadora:cliente',
+    '',
+  );
 
   const vpm = parseFloat(valorPorMinuto.replace(',', '.')) || 0;
   const desconto = Math.max(0, Math.min(100, parseFloat(descontoPct.replace(',', '.')) || 0));
@@ -73,6 +78,54 @@ export default function CalculadoraPage() {
   const subtotal = vpm * min;
   const valorDesconto = subtotal * (desconto / 100);
   const total = subtotal - valorDesconto;
+
+  const canPrint = vpm > 0 && totalSeconds > 0;
+
+  const gerarRelatorio = () => {
+    if (!canPrint) return;
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const docNumber = `ORC-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+    const dateLabel = now.toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+    });
+
+    const items = ads
+      .filter((ad) => parseDur(ad.time) > 0)
+      .map((ad, i) => {
+        const sec = parseDur(ad.time);
+        return {
+          nome: `AD ${i + 1}`,
+          sub: 'Vídeo editado',
+          duracao: fmtDur(sec),
+          valor: formatBRL(vpm * (sec / 60)),
+        };
+      });
+
+    const ok = printBudgetReport({
+      docNumber,
+      dateLabel,
+      validadeLabel: '7 dias',
+      cliente: cliente.trim(),
+      vpmLabel: formatBRL(vpm),
+      duracaoTotalLabel: fmtDur(totalSeconds),
+      qtdAds: items.length,
+      items,
+      subtotalLabel: formatBRL(subtotal),
+      descontoPct: desconto,
+      descontoLabel: `-${formatBRL(valorDesconto)}`,
+      totalLabel: formatBRL(total),
+      logoUrl: `${window.location.origin}/auto-edit-logo@256.png`,
+    });
+
+    if (!ok) {
+      alert(
+        'O navegador bloqueou a janela do relatório. Permita pop-ups pra este site e tente de novo.',
+      );
+    }
+  };
 
   return (
     <ToolShell
@@ -216,8 +269,111 @@ export default function CalculadoraPage() {
             />
             <ToolMetric value={formatBRL(total)} label="Total" accent="lime" />
           </div>
+
+          {/* Emissão do relatório PDF pro cliente */}
+          <div className="mt-5 border-t border-line pt-4">
+            <label className="block">
+              <span
+                className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                Cliente / Projeto <span className="opacity-50">(opcional)</span>
+              </span>
+              <input
+                inputMode="text"
+                placeholder="Ex: João Silva — Campanha Junho"
+                className="input-field mt-2"
+                value={cliente}
+                onChange={(e) => setCliente(e.target.value)}
+              />
+            </label>
+
+            <button
+              type="button"
+              onClick={gerarRelatorio}
+              disabled={!canPrint}
+              aria-label="Imprimir relatório do orçamento em PDF"
+              className="report3d mt-3.5"
+            >
+              <span className="report3d-ico" aria-hidden>
+                <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z" />
+                  <path d="M14 3v5h5" />
+                  <path d="M8.5 17v-3" />
+                  <path d="M12 17v-5" />
+                  <path d="M15.5 17v-2" />
+                </svg>
+              </span>
+              <span>Imprimir Relatório</span>
+            </button>
+            <p className="mt-2 text-center text-[11px] text-text-muted">
+              Gera um PDF profissional do orçamento — é só salvar e mandar pro cliente.
+            </p>
+          </div>
         </ToolResultCard>
       </div>
+
+      <style jsx>{`
+        .report3d {
+          position: relative;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          width: 100%;
+          padding: 15px 22px;
+          border-radius: 16px;
+          font-family: var(--font-tech);
+          font-weight: 800;
+          font-size: 14.5px;
+          letter-spacing: 0.01em;
+          color: #fff;
+          background: linear-gradient(180deg, #9173f8 0%, #6d4ee8 58%, #5a3fd6 100%);
+          border: 1px solid rgba(255, 255, 255, 0.22);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.4),
+            inset 0 -3px 0 rgba(0, 0, 0, 0.16),
+            0 7px 0 #4127a6,
+            0 12px 24px -8px rgba(109, 78, 232, 0.7);
+          transform: translateY(0);
+          transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.2s ease;
+          cursor: pointer;
+        }
+        .report3d:hover:not(:disabled) {
+          transform: translateY(-1px);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.45),
+            inset 0 -3px 0 rgba(0, 0, 0, 0.16),
+            0 8px 0 #4127a6,
+            0 18px 30px -8px rgba(109, 78, 232, 0.8);
+        }
+        .report3d:active:not(:disabled) {
+          transform: translateY(6px);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.35),
+            inset 0 -2px 0 rgba(0, 0, 0, 0.18),
+            0 1px 0 #4127a6,
+            0 5px 12px -8px rgba(109, 78, 232, 0.6);
+        }
+        .report3d:disabled {
+          cursor: not-allowed;
+          filter: grayscale(0.45) brightness(0.9);
+          opacity: 0.5;
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.25),
+            0 6px 0 #4127a6;
+        }
+        .report3d-ico {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 30px;
+          height: 30px;
+          border-radius: 9px;
+          background: rgba(255, 255, 255, 0.16);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+        }
+      `}</style>
     </ToolShell>
   );
 }
