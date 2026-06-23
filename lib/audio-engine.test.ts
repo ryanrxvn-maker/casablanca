@@ -11,6 +11,7 @@ import {
   computeAdaptiveSilenceThreshold,
   detectSilences,
   downloadBlob,
+  trimSilences,
   SILENCE_FLOOR_MIN,
   SILENCE_FLOOR_MAX,
 } from './audio-engine';
@@ -185,6 +186,36 @@ console.log('\nGARANTIA — downloadBlob baixa por Object URL, NUNCA base64 (rai
   g.document = prev.document;
   g.FileReader = prev.FileReader;
   g.setTimeout = prev.setTimeout;
+}
+
+console.log('\nGARANTIA — a "tolerância de silêncio" (keepSilence) é aplicada FIEL ao valor escolhido:');
+
+// 8. Mesmo áudio (fala 1s · silêncio 1s · fala 1s = 3s), variando só o
+//    keepSilence. A fórmula mantém `keepSilence` seg de silêncio de CADA lado da
+//    fala → cada aumento Δ no slider mantém 2·Δ a mais. Provamos a proporção
+//    EXATA (independe da precisão da detecção, que é igual nos três casos).
+{
+  const make = () => mockBuffer([
+    { level: 0.05, sec: 1.0 },    // fala
+    { level: 0.0002, sec: 1.0 },  // silêncio (1s, bem detectável)
+    { level: 0.05, sec: 1.0 },    // fala
+  ]);
+
+  const d0 = trimSilences(make(), 0).duration;     // remove TODO o silêncio
+  const d10 = trimSilences(make(), 0.1).duration;  // mantém 0.1s de cada lado
+  const d20 = trimSilences(make(), 0.2).duration;  // mantém 0.2s de cada lado
+
+  // keep=0 → ~2s de fala (silêncio inteiro removido).
+  ok(Math.abs(d0 - 2.0) < 0.12, `keep=0 remove o silêncio todo (~2s, got ${d0.toFixed(3)}s)`);
+
+  // Cada +0.1 no slider mantém +0.2s (0.1 de cada lado). Proporção EXATA.
+  const step1 = d10 - d0;
+  const step2 = d20 - d10;
+  ok(Math.abs(step1 - 0.2) < 0.02, `+0.10 de tolerância → +0.20s mantidos (got +${step1.toFixed(3)}s)`);
+  ok(Math.abs(step2 - 0.2) < 0.02, `+0.10 de novo → +0.20s mantidos, linear (got +${step2.toFixed(3)}s)`);
+
+  // Mais tolerância NUNCA corta menos do que era — monotônico.
+  ok(d20 > d10 && d10 > d0, `mais tolerância = mais silêncio mantido (${d0.toFixed(2)} < ${d10.toFixed(2)} < ${d20.toFixed(2)})`);
 }
 
 console.log(`\n${fail === 0 ? '✓' : '✗'} audio-engine: ${pass} ok, ${fail} fail`);
