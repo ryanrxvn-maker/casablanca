@@ -190,6 +190,27 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       : Math.max(180_000, Math.round(mb * 4_000));    // remux: 4s/MB, piso 3min
   };
 
+  // Roda uma op ffmpeg-wasm com timeout + AUTO-RETRY (mata o worker entre
+  // tentativas → instância limpa a cada try). Mesma lógica assertiva da
+  // decupagem, reusável pras etapas frágeis transitórias (ex camuflagem). Só
+  // p/ falhas TRANSITÓRIAS (hang/poison) — não usar onde a falha é determinística
+  // (ex fast-concat com codec incompatível, que tem o slow-concat como fallback).
+  const retryFFmpeg = async <T,>(fn: () => Promise<T>, ms: number, label: string, tries = 3): Promise<T> => {
+    let lastErr: unknown = null;
+    for (let attempt = 1; attempt <= tries; attempt++) {
+      try {
+        return await withTimeout(fn(), ms, `${label} (t${attempt})`);
+      } catch (e) {
+        lastErr = e;
+        try { cancelFFmpeg(); } catch { /* ignora */ }
+        if (attempt < tries) {
+          console.warn(`[clickup-pilot-pipeline] ${label}: t${attempt} falhou (${(e as Error)?.message?.slice(0, 70)}) — reset+retry`);
+        }
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error(`${label}: esgotou ${tries} tentativas`);
+  };
+
   // Regula a voz de UM clipe a -16 LUFS: denoise (limpa hiss/ruído) +
   // nivelamento transparente (loudnorm linear, perfil 'natural' SEM speechnorm
   // → sem robótico) + true-peak -1.5 (anti-clipping). NUNCA lança: se
@@ -495,7 +516,7 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         const isVideo = (whiteAudio.type || '').startsWith('video/') ||
           /\.(mp4|mov|webm|mkv)$/i.test((whiteAudio as File).name || '');
         if (isVideo) {
-          whiteBlob = await extractAudio(whiteAudio);
+          whiteBlob = await retryFFmpeg(() => extractAudio(whiteAudio), 180_000, 'extractAudio(white)');
         }
       } catch (e) {
         console.error(`[clickup-pilot-pipeline] camu extractAudio(white): FAIL`, e);
@@ -512,15 +533,20 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         if (!source || item.errors?.assemble) continue;
         onProgress?.({ stage: 'camuflando', currentFilename: item.filename, doneCount: g, totalCount: total });
         try {
-          // Extrai audio do montado+decupado (BLACK)
-          const blackAudio = await extractAudio(source);
-          // Aplica camuflagem
-          const camuWav = await camuflar({ black: blackAudio, white: whiteBlob, volumePercent: camuflagemVolume });
-          // Substitui audio no video
-          item.camuflado = await muxAudioIntoVideo(source, camuWav);
+          // AUTO-RETRY (reset entre tentativas): extrai BLACK → camufla → remuxa.
+          // Camuflagem é HARD requirement do META (não pode entregar áudio NÃO
+          // camuflado), então na falha FINAL fica como ERRO (bloqueia) — diferente
+          // da decupagem (realce, que cai no montado completo). Timeout generoso
+          // proporcional ao tamanho do montado.
+          const camuMs = Math.max(180_000, Math.round((source.size / (1024 * 1024)) * 8_000));
+          item.camuflado = await retryFFmpeg(async () => {
+            const blackAudio = await extractAudio(source);                                  // BLACK
+            const camuWav = await camuflar({ black: blackAudio, white: whiteBlob, volumePercent: camuflagemVolume });
+            return await muxAudioIntoVideo(source, camuWav);                                // substitui audio
+          }, camuMs, `camu ${item.filename}`);
           console.log(`[clickup-pilot-pipeline] camu ${item.filename}: OK`);
         } catch (e) {
-          console.error(`[clickup-pilot-pipeline] camu ${item.filename}: FAIL`, e);
+          console.error(`[clickup-pilot-pipeline] camu ${item.filename}: FAIL (após retries)`, e);
           item.errors = { ...item.errors, camuflagem: (e as Error)?.message || 'falha camuflagem' };
         }
       }
