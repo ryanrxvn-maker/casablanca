@@ -62,6 +62,10 @@ export default function CalculadoraPage() {
     'calculadora:cliente',
     '',
   );
+  const [pixOn, setPixOn] = useToolState<boolean>('calculadora:pixOn', false);
+  const [pixKey, setPixKey] = useToolState<string>('calculadora:pixKey', '');
+  const [pixNome, setPixNome] = useToolState<string>('calculadora:pixNome', '');
+  const [pixCidade, setPixCidade] = useToolState<string>('calculadora:pixCidade', '');
 
   const vpm = parseFloat(valorPorMinuto.replace(',', '.')) || 0;
   const desconto = Math.max(0, Math.min(100, parseFloat(descontoPct.replace(',', '.')) || 0));
@@ -122,6 +126,15 @@ export default function CalculadoraPage() {
         descontoLabel: `-${formatBRL(valorDesconto)}`,
         totalLabel: formatBRL(total),
         logoUrl: `${window.location.origin}/auto-edit-logo@256.png`,
+        pix:
+          pixOn && pixKey.trim()
+            ? {
+                key: pixKey.trim(),
+                name: pixNome.trim(),
+                city: pixCidade.trim(),
+                amount: total,
+              }
+            : undefined,
       });
     } catch (err) {
       console.error('[calculadora] falha ao gerar PDF', err);
@@ -253,6 +266,94 @@ export default function CalculadoraPage() {
             onChange={(v) => setDescontoPct(String(v))}
             display={(v) => v + '%'}
           />
+        </ToolStep>
+
+        <ToolStep n={4} icon={<IconStepMoney size={18} />} title="Pagamento (PIX)" hint="Opcional — gera QR Code de PIX no relatório" hue={HUE}>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={pixOn}
+            onClick={() => setPixOn(!pixOn)}
+            className="flex w-full items-center justify-between rounded-[12px] border border-line-strong bg-bg-soft/40 px-4 py-3 transition hover:border-violet/40"
+          >
+            <span className="text-[13px] font-semibold text-white">
+              Incluir PIX no relatório
+            </span>
+            <span
+              className={
+                'relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 ' +
+                (pixOn ? 'bg-violet' : 'bg-line-strong')
+              }
+            >
+              <span
+                className={
+                  'inline-block h-4.5 w-4.5 transform rounded-full bg-white shadow transition-transform duration-200 ' +
+                  (pixOn ? 'translate-x-[22px]' : 'translate-x-[3px]')
+                }
+                style={{ height: 18, width: 18 }}
+              />
+            </span>
+          </button>
+
+          {pixOn ? (
+            <div className="mt-3 flex flex-col gap-3">
+              <label className="block">
+                <span
+                  className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+                  style={{ fontFamily: 'var(--font-tech)' }}
+                >
+                  Chave PIX
+                </span>
+                <input
+                  inputMode="text"
+                  placeholder="e-mail, telefone, CPF/CNPJ ou aleatória"
+                  className="input-field mt-2"
+                  value={pixKey}
+                  onChange={(e) => setPixKey(e.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </label>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="block">
+                  <span
+                    className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    Nome do recebedor <span className="opacity-50">(opcional)</span>
+                  </span>
+                  <input
+                    inputMode="text"
+                    placeholder="Ex: Pedro Souza"
+                    className="input-field mt-2"
+                    value={pixNome}
+                    onChange={(e) => setPixNome(e.target.value)}
+                    autoComplete="off"
+                  />
+                </label>
+                <label className="block">
+                  <span
+                    className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    Cidade <span className="opacity-50">(opcional)</span>
+                  </span>
+                  <input
+                    inputMode="text"
+                    placeholder="Ex: São Paulo"
+                    className="input-field mt-2"
+                    value={pixCidade}
+                    onChange={(e) => setPixCidade(e.target.value)}
+                    autoComplete="off"
+                  />
+                </label>
+              </div>
+              <p className="text-[11px] text-text-muted">
+                O QR já vem com o valor total ({formatBRL(total)}) preenchido. A chave fica
+                só no seu navegador — nada é enviado pra servidor.
+              </p>
+            </div>
+          ) : null}
         </ToolStep>
 
         <ToolResultCard

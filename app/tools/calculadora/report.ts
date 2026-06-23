@@ -16,6 +16,13 @@ export type BudgetReportItem = {
   valor: string; // "R$ 284,25"
 };
 
+export type BudgetReportPix = {
+  key: string; // chave PIX
+  name: string; // nome do recebedor (opcional)
+  city: string; // cidade (opcional)
+  amount: number; // valor a embutir no QR (0 = sem valor)
+};
+
 export type BudgetReportData = {
   docNumber: string;
   dateLabel: string;
@@ -30,7 +37,11 @@ export type BudgetReportData = {
   descontoLabel: string;
   totalLabel: string;
   logoUrl: string;
+  /** Quando presente e com chave → renderiza bloco PIX + QR no relatório. */
+  pix?: BudgetReportPix;
 };
+
+import { buildPixPayload } from './pix';
 
 function esc(s: string): string {
   return String(s)
@@ -91,6 +102,15 @@ const REPORT_CSS = `
   .ae-report .total-box .tl{ font-size:9.5px; font-weight:800; letter-spacing:.22em; text-transform:uppercase; opacity:.85; }
   .ae-report .total-box .tl small{ display:block; font-size:8.5px; letter-spacing:.16em; opacity:.78; font-weight:700; margin-top:4px; }
   .ae-report .total-box .tv{ font-family:'Fraunces',serif; font-weight:700; font-size:30px; letter-spacing:-.01em; }
+  .ae-report .pix{ display:flex; gap:16px; align-items:center; margin:22px 18mm 0; padding:14px 16px; border:1px solid var(--line); border-radius:14px; background:#fbfbfd; }
+  .ae-report .pix-qr{ width:104px; height:104px; flex:0 0 104px; border:1px solid var(--line); border-radius:10px; background:#fff; padding:6px; }
+  .ae-report .pix-qr img{ width:100%; height:100%; display:block; }
+  .ae-report .pix-info{ flex:1; min-width:0; }
+  .ae-report .pix-info .nt{ font-size:8.5px; font-weight:800; letter-spacing:.2em; text-transform:uppercase; color:var(--violet); margin-bottom:6px; }
+  .ae-report .pix-row{ font-size:11px; color:var(--sub); margin-bottom:5px; }
+  .ae-report .pix-row b{ color:var(--ink); font-weight:700; }
+  .ae-report .pix-cc-lbl{ font-size:8px; font-weight:800; letter-spacing:.18em; text-transform:uppercase; color:var(--faint); margin:7px 0 3px; }
+  .ae-report .pix-cc{ font-size:7.5px; line-height:1.5; color:var(--sub); word-break:break-all; background:#fff; border:1px solid var(--line); border-radius:8px; padding:6px 8px; }
   .ae-report .spacer{ flex:1; min-height:18px; }
   .ae-report .notes{ margin:30px 18mm 0; padding:14px 16px; border:1px solid var(--line); border-radius:12px; background:#fbfbfd; }
   .ae-report .notes .nt{ font-size:8.5px; font-weight:800; letter-spacing:.2em; text-transform:uppercase; color:var(--faint); margin-bottom:7px; }
@@ -102,7 +122,7 @@ const REPORT_CSS = `
   .ae-report .footer .fnum{ font-size:9px; color:var(--faint); }
 `;
 
-function reportMarkup(d: BudgetReportData): string {
+function reportMarkup(d: BudgetReportData, pixCardHtml: string): string {
   const rows = d.items
     .map(
       (it, i) => `
@@ -175,6 +195,7 @@ function reportMarkup(d: BudgetReportData): string {
         </div>
       </div>
     </div>
+    ${pixCardHtml}
     <div class="spacer"></div>
     <div class="notes">
       <div class="nt">Condições</div>
@@ -226,6 +247,37 @@ function slug(s: string): string {
 export async function downloadBudgetReport(d: BudgetReportData): Promise<void> {
   ensureFonts();
 
+  // PIX (opcional): monta BR Code + QR code, tudo no client.
+  let pixCardHtml = '';
+  if (d.pix && d.pix.key.trim()) {
+    const brcode = buildPixPayload({
+      key: d.pix.key,
+      name: d.pix.name,
+      city: d.pix.city,
+      amount: d.pix.amount,
+    });
+    if (brcode) {
+      const QRCode = (await import('qrcode')).default;
+      const qrDataUrl = await QRCode.toDataURL(brcode, {
+        margin: 0,
+        width: 240,
+        errorCorrectionLevel: 'M',
+        color: { dark: '#16161dff', light: '#ffffffff' },
+      });
+      pixCardHtml = `
+        <div class="pix">
+          <div class="pix-qr"><img src="${esc(qrDataUrl)}" alt="QR Code PIX" /></div>
+          <div class="pix-info">
+            <div class="nt">Pagamento via PIX</div>
+            <div class="pix-row">Chave: <b>${esc(d.pix.key.trim())}</b></div>
+            <div class="pix-row">Aponte a câmera do app do banco pro QR Code ou use o copia e cola abaixo.</div>
+            <div class="pix-cc-lbl">PIX Copia e Cola</div>
+            <div class="pix-cc mono">${esc(brcode)}</div>
+          </div>
+        </div>`;
+    }
+  }
+
   const wrap = document.createElement('div');
   wrap.style.cssText =
     'position:fixed; left:-10000px; top:0; width:210mm; background:#fff; z-index:-1;';
@@ -233,16 +285,16 @@ export async function downloadBudgetReport(d: BudgetReportData): Promise<void> {
   style.textContent = REPORT_CSS;
   const page = document.createElement('div');
   page.className = 'ae-report';
-  page.innerHTML = reportMarkup(d);
+  page.innerHTML = reportMarkup(d, pixCardHtml);
   wrap.appendChild(style);
   wrap.appendChild(page);
   document.body.appendChild(wrap);
 
   try {
-    const img = page.querySelector('img');
+    const imgs = Array.from(page.querySelectorAll('img'));
     await Promise.all([
       document.fonts ? document.fonts.ready : Promise.resolve(),
-      img ? imgReady(img) : Promise.resolve(),
+      ...imgs.map(imgReady),
     ]);
     // pequeno respiro pro layout assentar com as fontes carregadas
     await new Promise((r) => setTimeout(r, 80));
