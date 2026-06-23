@@ -593,6 +593,7 @@ export async function cutVideoSegments(
       await cutBatch(segments, 'out.mp4');
       const data = await ff.readFile('out.mp4');
       await safeDelete(ff, 'out.mp4');
+      assertValidMp4(data as Uint8Array, 'vídeo decupado');
       return toBlob(data, 'video/mp4');
     }
 
@@ -626,6 +627,7 @@ export async function cutVideoSegments(
     const data = await ff.readFile('out.mp4');
     await safeDelete(ff, listName);
     await safeDelete(ff, 'out.mp4');
+    assertValidMp4(data as Uint8Array, 'vídeo decupado');
     return toBlob(data, 'video/mp4');
   } finally {
     if (progressHandler) ff.off('progress', progressHandler);
@@ -1611,6 +1613,57 @@ function toBlob(data: Uint8Array | string, type: string): Blob {
   const copy = new Uint8Array(data.length);
   copy.set(data);
   return new Blob([copy.buffer], { type });
+}
+
+// ---------- Validação de integridade do MP4 -------------------------------
+//
+// Rede de segurança: se o encode estourar a memória do navegador (arquivo
+// grande), o ffmpeg-wasm pode "terminar" mas deixar a saída TRUNCADA — sem o
+// átomo `moov` (o índice). Esse é exatamente o arquivo que "não abre". Em vez
+// de entregar lixo, validamos a estrutura ANTES de devolver e, se estiver
+// quebrado, lançamos um erro CLARO. Pior caso = aviso honesto, nunca um MP4
+// corrompido silencioso.
+
+/** Procura a assinatura de 4 bytes de um átomo MP4 dentro de um trecho. */
+function scanAtom(data: Uint8Array, sig: string, from: number, to: number): boolean {
+  const s0 = sig.charCodeAt(0), s1 = sig.charCodeAt(1), s2 = sig.charCodeAt(2), s3 = sig.charCodeAt(3);
+  const end = Math.min(to, data.length) - 3;
+  for (let i = Math.max(0, from); i < end; i++) {
+    if (data[i] === s0 && data[i + 1] === s1 && data[i + 2] === s2 && data[i + 3] === s3) return true;
+  }
+  return false;
+}
+
+/**
+ * Garante que `data` é um MP4 estruturalmente íntegro (ftyp + moov + mdat).
+ * Lança erro humano se estiver truncado/vazio. Exportada pra ser testável.
+ *
+ * Como SEMPRE gravamos com `-movflags +faststart`, o `moov` fica no começo do
+ * arquivo — mas varremos o início E o fim por garantia (cobre o caso raro do
+ * faststart não ter movido o índice).
+ */
+export function assertValidMp4(data: Uint8Array, ctx = 'vídeo'): void {
+  if (!data || data.length < 4096) {
+    throw new Error(
+      `O ${ctx} saiu vazio/incompleto. O navegador provavelmente ficou sem memória com um arquivo grande — comprime o vídeo no Compressor e tenta de novo.`,
+    );
+  }
+  // ftyp: todo MP4 abre com ele, nos primeiros bytes.
+  const hasFtyp = scanAtom(data, 'ftyp', 0, 64);
+  // moov: o índice. Sem ele o player não abre. Varre 64MB do início (faststart)
+  // e, se não achar, os últimos 32MB (índice no fim).
+  const FRONT = Math.min(data.length, 64 * 1024 * 1024);
+  let hasMoov = scanAtom(data, 'moov', 0, FRONT);
+  if (!hasMoov && data.length > FRONT) {
+    hasMoov = scanAtom(data, 'moov', data.length - 32 * 1024 * 1024, data.length);
+  }
+  if (!hasFtyp || !hasMoov) {
+    throw new Error(
+      `O ${ctx} saiu corrompido (${!hasFtyp ? 'sem cabeçalho ftyp' : 'sem o índice moov'}). ` +
+        `Não vou te entregar um arquivo que não abre: o vídeo é pesado demais pra processar no navegador. ` +
+        `Comprime ele no Compressor primeiro e tenta de novo.`,
+    );
+  }
 }
 
 /**
