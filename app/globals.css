@@ -237,7 +237,7 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
    * sozinho (prop ignorada) em browser antigo, sem bug. */
   .av-cv {
     content-visibility: auto;
-    contain-intrinsic-size: auto 150px;
+    contain-intrinsic-size: auto 180px;
   }
 
   /* Celula 3D — glass escuro, acabamento RESTRITO (estilo Linear/Raycast):
@@ -253,6 +253,10 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
     transition:
       border-color 0.3s ease,
       box-shadow 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  /* no CLARO: fundo neutro claro (o gradiente escuro vazava vinheta na borda) */
+  html[data-theme='light'] .av-cell {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(0, 0, 0, 0.05));
   }
   /* anel de borda — UM acento (violet), fino e discreto. Acende no hover. */
   .av-cell::after {
@@ -890,6 +894,17 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.06),
       0 18px 44px -26px rgba(0, 0, 0, 0.85);
+  }
+  /* glass-panel no CLARO: vidro fosco off-white (era vidro ESCURO fixo →
+   * lia "estranho/lamacento" num fundo claro). */
+  html[data-theme='light'] .glass-panel {
+    border-color: rgba(0, 0, 0, 0.08);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.42)),
+      rgba(236, 235, 230, 0.78);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.8),
+      0 20px 48px -28px rgba(0, 0, 0, 0.32);
   }
 
   /* Lift no hover — pra linhas/cards que não usam .card-3d. */

@@ -165,7 +165,10 @@ export function CompactAvatarPicker({
                 <span className="absolute left-0 h-4 w-4 rounded-full border border-violet/50 bg-violet/20" />
                 <span className="absolute left-2 h-4 w-4 rounded-full border border-lime/50 bg-lime/20" />
               </span>
-              <h3 className="label-tech text-[10px] tracking-[0.18em] text-white">
+              <h3
+                className="text-[11px] font-extrabold uppercase leading-none text-text"
+                style={{ fontFamily: 'var(--font-tech), system-ui', letterSpacing: '0.16em' }}
+              >
                 {label ?? 'Escolher avatar'}
               </h3>
             </div>

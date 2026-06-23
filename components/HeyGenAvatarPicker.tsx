@@ -319,7 +319,10 @@ export function HeyGenAvatarPicker({
             <span className="absolute left-1.5 h-6 w-6 rounded-full border border-cyan/40 bg-gradient-to-br from-cyan/20 to-bg-soft" />
             <span className="absolute left-3 h-6 w-6 rounded-full border border-lime/50 bg-gradient-to-br from-lime/25 to-bg-soft shadow-[0_0_12px_-4px_rgba(200,232,124,0.7)]" />
           </span>
-          <h2 className="label-field !mb-0 truncate bg-gradient-to-r from-white via-white to-violet/80 bg-clip-text text-transparent">
+          <h2
+            className="!mb-0 truncate text-[12px] font-extrabold uppercase leading-none text-text"
+            style={{ fontFamily: 'var(--font-tech), system-ui', letterSpacing: '0.16em' }}
+          >
             {label}
           </h2>
         </div>
@@ -415,12 +418,12 @@ export function HeyGenAvatarPicker({
         </div>
       ) : (
         <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px]">
-          <span className="rounded-full border border-violet/30 bg-violet/10 px-2 py-0.5 font-semibold tracking-wide text-violet">
-            {filteredGroups.length}
-            <span className="text-text-muted">/{groups.length}</span> avatares
+          <span className="inline-flex items-center gap-1 rounded-full border border-violet/30 bg-violet/10 px-2 py-0.5 font-semibold tracking-wide text-violet">
+            <span className="mono tabular-nums">{filteredGroups.length}</span>
+            <span className="mono tabular-nums text-text-muted">/{groups.length}</span> avatares
           </span>
-          <span className="rounded-full border border-line-strong bg-bg-soft/50 px-2 py-0.5 tracking-wide text-text-muted">
-            {totalLooks} looks
+          <span className="inline-flex items-center gap-1 rounded-full border border-line-strong bg-bg-soft/50 px-2 py-0.5 tracking-wide text-text-muted">
+            <span className="mono tabular-nums">{totalLooks}</span> looks
           </span>
         </div>
       )}
@@ -477,7 +480,7 @@ export function HeyGenAvatarPicker({
                     <span className="av-spot" aria-hidden />
                     <span className="av-sheen" aria-hidden />
                     <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/55 to-transparent p-1.5 pt-6">
-                      <div className="truncate text-[11px] font-semibold text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>{l.name}</div>
+                      <div className="truncate text-[11px] font-semibold" style={{ color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>{l.name}</div>
                     </div>
                     {isSelected ? (
                       <div className="absolute right-1 top-1 rounded-full bg-lime px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-black shadow-[0_0_14px_-3px_rgba(200,232,124,0.9)]">
@@ -495,8 +498,8 @@ export function HeyGenAvatarPicker({
       {/* Skeleton GRID no carregamento inicial — estrutura premium antes das
        *  thumbs chegarem (so quando ainda nao ha nenhum avatar). */}
       {(!inlineMode || !openGroup) && loading && groups.length === 0 ? (
-        <div className="mt-3 grid grid-cols-3 gap-2.5 px-0.5 sm:grid-cols-4 md:grid-cols-5">
-          {Array.from({ length: 15 }).map((_, i) => (
+        <div className="mt-3 grid grid-cols-2 gap-3 px-0.5 sm:grid-cols-3 md:grid-cols-4">
+          {Array.from({ length: 12 }).map((_, i) => (
             <div
               key={i}
               className="aspect-square"
@@ -533,7 +536,7 @@ export function HeyGenAvatarPicker({
 
       {/* Grid de AVATARES (igual UI "Choose an Avatar" do HeyGen) */}
       {(!inlineMode || !openGroup) && filteredGroups.length > 0 ? (
-        <div className="mt-3 grid max-h-[480px] grid-cols-3 gap-2.5 overflow-y-auto overflow-x-hidden px-0.5 pb-1 pr-1 [perspective:1200px] sm:grid-cols-4 md:grid-cols-5">
+        <div className="mt-3 grid max-h-[520px] grid-cols-2 gap-3 overflow-y-auto overflow-x-hidden px-0.5 pb-1 pr-1 [perspective:1200px] sm:grid-cols-3 md:grid-cols-4">
           {filteredGroups.map((g, i) => {
             const isSelectedGroup = selected?.groupId === g.id;
             // Fallbacks pro thumb do grupo: thumb do 1o look, 2o look, etc
@@ -576,13 +579,15 @@ export function HeyGenAvatarPicker({
                     </div>
                   ) : null}
                   {/* Overlay nome + hint "ver looks" no hover */}
-                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/55 to-transparent p-2 pt-6">
-                    <div className="truncate text-[12px] font-semibold leading-tight text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/55 to-transparent p-2.5 pt-7">
+                    {/* cor fixa inline (sem classe text-white) → não escurece no
+                     *  tema claro: o texto vive sobre o scrim escuro da foto. */}
+                    <div className="truncate text-[13px] font-semibold leading-tight tracking-[-0.01em]" style={{ color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>
                       {g.name}
                     </div>
-                    <div className="mt-0.5 flex items-center gap-1 text-[8.5px] uppercase tracking-wider text-white/55 transition-colors group-hover:text-lime" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
-                      <span className="group-hover:hidden">{g.looksCount} look{g.looksCount > 1 ? 's' : ''}</span>
-                      <span className="hidden items-center gap-0.5 group-hover:inline-flex">Ver looks →</span>
+                    <div className="mt-0.5 flex items-center gap-1 text-[8.5px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.6)', textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
+                      <span className="group-hover:hidden"><span className="mono tabular-nums">{g.looksCount}</span> look{g.looksCount > 1 ? 's' : ''}</span>
+                      <span className="hidden items-center gap-0.5 group-hover:inline-flex" style={{ color: '#fff' }}>Ver looks →</span>
                     </div>
                   </div>
                   {isSelectedGroup ? (
@@ -666,7 +671,7 @@ export function HeyGenAvatarPicker({
                       <span className="av-spot" aria-hidden />
                       <span className="av-sheen" aria-hidden />
                       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/55 to-transparent p-2 pt-6">
-                        <div className="truncate text-[12px] font-semibold text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>
+                        <div className="truncate text-[12px] font-semibold" style={{ color: '#fff', textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>
                           {l.name}
                         </div>
                       </div>
