@@ -319,7 +319,8 @@ export async function downloadBudgetReport(d: BudgetReportData): Promise<void> {
     const rect = page.getBoundingClientRect();
     const cssWidth = rect.width;
     const mmPerPx = pageW / cssWidth;
-    const pageHeightCss = pageH / mmPerPx; // altura de 1 A4 em px
+    // Reserva 12mm no rodapé de cada página (margem + espaço pra numeração).
+    const pageHeightCss = (pageH - 12) / mmPerPx;
     const nodeTop = rect.top;
     const children = Array.from(page.children);
 
@@ -383,6 +384,19 @@ export async function downloadBudgetReport(d: BudgetReportData): Promise<void> {
       const sliceMm = (srcH / SCALE) * mmPerPx;
       if (i > 0) pdf.addPage();
       pdf.addImage(slice.toDataURL('image/png'), 'PNG', 0, 0, pageW, sliceMm, undefined, 'FAST');
+    }
+
+    // Numeração só quando o orçamento ocupa mais de uma página.
+    const nPages = pdf.getNumberOfPages();
+    if (nPages > 1) {
+      for (let p = 1; p <= nPages; p++) {
+        pdf.setPage(p);
+        pdf.setFontSize(8);
+        pdf.setTextColor(154, 154, 168);
+        pdf.text(`Página ${p} de ${nPages}`, pageW / 2, pageH - 7, {
+          align: 'center',
+        });
+      }
     }
 
     const nome = d.cliente ? slug(d.cliente) : d.docNumber;
