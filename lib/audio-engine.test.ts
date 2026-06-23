@@ -10,6 +10,7 @@
 import {
   computeAdaptiveSilenceThreshold,
   detectSilences,
+  downloadBlob,
   SILENCE_FLOOR_MIN,
   SILENCE_FLOOR_MAX,
 } from './audio-engine';
@@ -127,6 +128,63 @@ console.log('\nGARANTIA — detectSilences NÃO corta voz baixa:');
   ]);
   const regions = detectSilences(buf);
   ok(regions.length === 1 && regions[0].end > 1.5, 'silêncio no fim ainda detectado');
+}
+
+console.log('\nGARANTIA — downloadBlob baixa por Object URL, NUNCA base64 (raiz da corrupção):');
+
+// 7. O bug que entregava vídeo decupado "corrompido / não abre": o download
+//    antigo convertia o arquivo inteiro pra data URL base64, que o browser
+//    TRUNCAVA em arquivos grandes (MP4 sem moov atom). Este teste trava a
+//    regressão: downloadBlob TEM que usar URL.createObjectURL (referência
+//    direta ao blob) e NUNCA tocar em FileReader/readAsDataURL.
+{
+  const g = globalThis as unknown as Record<string, unknown>;
+  const prev = {
+    URL: g.URL, document: g.document, FileReader: g.FileReader, setTimeout: g.setTimeout,
+  };
+
+  let fileReaderUsed = false;
+  const created: Blob[] = [];
+  const revoked: string[] = [];
+  let hrefSet: string | undefined;
+  let downloadSet: string | undefined;
+  let clicked = false;
+  const SENTINEL = 'blob:fake/obj-url-123';
+
+  const fakeAnchor = {
+    click() { clicked = true; },
+    remove() {},
+  } as Record<string, unknown>;
+  Object.defineProperty(fakeAnchor, 'href', { set(v: string) { hrefSet = v; }, get() { return hrefSet; } });
+  Object.defineProperty(fakeAnchor, 'download', { set(v: string) { downloadSet = v; }, get() { return downloadSet; } });
+
+  g.URL = {
+    createObjectURL: (b: Blob) => { created.push(b); return SENTINEL; },
+    revokeObjectURL: (u: string) => { revoked.push(u); },
+  };
+  // Se QUALQUER caminho tentar base64, o teste pega na hora.
+  g.FileReader = class { readAsDataURL() { fileReaderUsed = true; } };
+  g.document = { createElement: () => fakeAnchor, body: { appendChild() {} } };
+  g.setTimeout = (() => 0); // não agenda a revogação no teste
+
+  // Blob de vídeo. O tamanho é irrelevante para a garantia: o que importa é
+  // que ele é passado POR REFERÊNCIA pro createObjectURL (sem cópia, sem
+  // conversão), então funciona igual pra 1KB ou 3GB.
+  const videoBlob = new Blob([new Uint8Array(2048)], { type: 'video/mp4' });
+  void downloadBlob(videoBlob, 'video_decupado.mp4');
+
+  ok(!fileReaderUsed, 'NUNCA usa FileReader/readAsDataURL (base64 era a raiz da corrupção)');
+  ok(created.length === 1, 'cria exatamente 1 Object URL');
+  ok(created[0] === videoBlob, 'Object URL aponta pro blob EXATO (sem cópia/truncamento)');
+  ok(hrefSet === SENTINEL, 'a.href = Object URL');
+  ok(typeof hrefSet === 'string' && !hrefSet.startsWith('data:'), 'href NÃO é data: URL (não-base64)');
+  ok(downloadSet === 'video_decupado.mp4', 'nome do arquivo preservado');
+  ok(clicked, 'disparou o download (click)');
+
+  g.URL = prev.URL;
+  g.document = prev.document;
+  g.FileReader = prev.FileReader;
+  g.setTimeout = prev.setTimeout;
 }
 
 console.log(`\n${fail === 0 ? '✓' : '✗'} audio-engine: ${pass} ok, ${fail} fail`);

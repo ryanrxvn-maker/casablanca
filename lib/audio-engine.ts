@@ -460,14 +460,36 @@ export function blobToDataURL(blob: Blob): Promise<string> {
   });
 }
 
-export async function downloadBlob(blob: Blob, filename: string): Promise<void> {
-  const dataUrl = await blobToDataURL(blob);
+/**
+ * Dispara o download de um Blob.
+ *
+ * USA OBJECT URL — referência direta ao blob. NUNCA data URL base64.
+ *
+ * Por que isso é crítico (bug que corrompia vídeo decupado): a versão antiga
+ * convertia o arquivo INTEIRO pra base64 (`readAsDataURL`) e jogava em
+ * `a.href`. Dois problemas matavam arquivos grandes:
+ *   1. base64 incha o conteúdo ~33%.
+ *   2. o navegador (Chrome) TRUNCA data: URLs grandes usadas em download.
+ * Resultado: o MP4 chegava cortado, SEM o moov atom → "corrompido, não abre".
+ * Passava batido em áudio (MP3/WAV pequeno cabia na data URL), mas todo output
+ * grande (vídeo decupado, zips, compressor) vinha quebrado.
+ *
+ * Object URL aponta pro blob na memória sem inflar nem truncar — aguenta
+ * arquivos de vários GB. É o jeito correto e robusto de baixar blob no browser.
+ */
+export function downloadBlob(blob: Blob, filename: string): Promise<void> {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = dataUrl;
+  a.href = url;
   a.download = filename;
+  a.rel = 'noopener';
   document.body.appendChild(a);
   a.click();
   a.remove();
+  // Só revoga DEPOIS que o download pegou a URL. Revogar na hora cancelaria
+  // downloads grandes no meio. 60s é folga suficiente pro browser iniciar.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  return Promise.resolve();
 }
 
 // ---------- Implementação mínima de AudioBuffer ---------------------------
