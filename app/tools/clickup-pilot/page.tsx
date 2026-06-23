@@ -247,6 +247,49 @@ function loadPersistedReplan(taskId: string): {
   }
 }
 
+/** ============= VA RESUME SNAPSHOT (sobrevive restart do PC) =============
+ *  O pipeline VA re-roda do ZERO no resume (não tem resume parcial de videoIds)
+ *  e depende de MUITO estado em memória que NÃO sobrevive reload: vaBriefing
+ *  (taskAnalyses), escolhas de avatar/voz (vaAvatarChoice/vaVoiceChoice), adUrl,
+ *  transcript/roleText (multi-papel) e o roteamento text-engine. Sem isso, ao
+ *  reabrir o navegador o runVAPipelineForTask morria em "briefing nao sobrevive
+ *  reload" → FALHOU sem retomar (user reportou 2026-06-23: reiniciou o PC).
+ *
+ *  Solução: no DISPARO, gravamos um SNAPSHOT com TUDO que o runner precisa
+ *  (capturado no ponto-em-que-disparou = correto), por task, no localStorage.
+ *  No mount, reidratamos esse estado ANTES do promoter retomar — o runner fica
+ *  INTOCADO, só passa a achar seus inputs. 1 chave por task (fácil de podar). */
+const VA_RESUME_PREFIX = 'darkolab:clickup-pilot:va-resume:';
+type VAResumeSnapshot = {
+  vaBriefing: any;
+  taskName: string;
+  baseAdId: string;
+  docUrl?: string | null;
+  taskUrl?: string | null;
+  adUrl?: string | null;            // vaAdUrl[taskId] (fallback de driveId)
+  usesTextEngine?: boolean;          // congela o roteamento (tasks[] some no restart)
+  avatarChoices?: Record<string, unknown>;  // chaves vaRoleKey desta task
+  voiceChoices?: Record<string, unknown>;
+  transcript?: unknown;              // vaTranscript[fileId] (multi-papel)
+  roleTexts?: Record<string, string>;       // vaRoleText[`${fileId}:${ri}`]
+  fileId?: string | null;            // linkAdFileId (chave do transcript/roleText)
+};
+function persistVAResumeSnapshot(taskId: string, snap: VAResumeSnapshot) {
+  if (typeof window === 'undefined') return;
+  try { localStorage.setItem(VA_RESUME_PREFIX + taskId, JSON.stringify(snap)); } catch { /* quota: resume sem snapshot, igual antes */ }
+}
+function loadVAResumeSnapshot(taskId: string): VAResumeSnapshot | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(VA_RESUME_PREFIX + taskId);
+    return raw ? (JSON.parse(raw) as VAResumeSnapshot) : null;
+  } catch { return null; }
+}
+function clearVAResumeSnapshot(taskId: string) {
+  if (typeof window === 'undefined') return;
+  try { localStorage.removeItem(VA_RESUME_PREFIX + taskId); } catch { /* ignora */ }
+}
+
 /** ============= CANAL (plataforma/distribuicao) =============
  *  Le o custom field "CANAL" da task do ClickUp (dropdown) e resolve
  *  label + cor. Cor primaria = a propria cor da opcao no ClickUp (match
@@ -2021,6 +2064,53 @@ function ClickUpPilotInner() {
     setBatchStates(restored);
     if (interruptedCount > 0) {
       console.info(`[batch restore] ${interruptedCount} batch(es) interrompidos — re-enfileirados pro promoter.`);
+    }
+
+    // REIDRATAÇÃO VA (resume após RESTART do PC): pra cada task VA reenfileirada,
+    // carrega o snapshot persistido no disparo e repõe o estado que o runner
+    // precisa (vaBriefing em taskAnalyses + escolhas avatar/voz + adUrl +
+    // transcript/roleText + roteamento). Roda no MESMO tick do setBatchStates →
+    // quando o promoter pega a 'queued' e chama runVAPipelineForTask, tudo já
+    // está no lugar e ela re-roda do certo, em vez de morrer em "briefing nao
+    // sobrevive reload". Sem snapshot (task antiga) → comportamento de antes.
+    {
+      const taPatch: Record<string, any> = {};
+      const avChoices: Record<string, unknown> = {};
+      const voChoices: Record<string, unknown> = {};
+      const adUrls: Record<string, string> = {};
+      const transcripts: Record<string, unknown> = {};
+      const rTexts: Record<string, string> = {};
+      const teOverride: Record<string, boolean> = {};
+      let vaRehydrated = 0;
+      for (const [taskId, st] of Object.entries(restored)) {
+        if (st.phase !== 'queued' || !st.isVA) continue;
+        const snap = loadVAResumeSnapshot(taskId);
+        if (!snap?.vaBriefing) continue;
+        taPatch[taskId] = {
+          taskId, taskName: snap.taskName, baseAdId: snap.baseAdId,
+          docUrl: snap.docUrl ?? undefined, taskUrl: snap.taskUrl ?? undefined,
+          status: 'partial', vaBriefing: snap.vaBriefing,
+        };
+        Object.assign(avChoices, snap.avatarChoices || {});
+        Object.assign(voChoices, snap.voiceChoices || {});
+        if (snap.adUrl) adUrls[taskId] = snap.adUrl;
+        if (snap.fileId && snap.transcript) transcripts[snap.fileId] = snap.transcript;
+        Object.assign(rTexts, snap.roleTexts || {});
+        if (typeof snap.usesTextEngine === 'boolean') teOverride[taskId] = snap.usesTextEngine;
+        vaRehydrated++;
+      }
+      if (vaRehydrated > 0) {
+        // prev tem prioridade: nunca sobrescreve uma análise/escolha FRESCA que o
+        // user fez depois (merge é só pro estado que sumiu no restart).
+        setTaskAnalyses((prev) => ({ ...taPatch, ...prev }) as typeof prev);
+        setVaAvatarChoice((prev) => ({ ...(avChoices as typeof prev), ...prev }));
+        setVaVoiceChoice((prev) => ({ ...(voChoices as typeof prev), ...prev }));
+        setVaAdUrl((prev) => ({ ...adUrls, ...prev }));
+        setVaTranscript((prev) => ({ ...(transcripts as typeof prev), ...prev }));
+        setVaRoleText((prev) => ({ ...rTexts, ...prev }));
+        setVaTextEngineOverride((prev) => ({ ...teOverride, ...prev }));
+        console.info(`[batch restore] ${vaRehydrated} task(s) VA reidratada(s) do snapshot — resume após restart OK.`);
+      }
     }
 
     // HIDRATAÇÃO BLOB URLs (fix 2026-05-30):
@@ -5135,6 +5225,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   /** VA: avatar HeyGen escolhido por avaCode pra cada task VA.
    *  Key: `${taskId}:${avaCode}` → AvatarOption */
   const [vaAvatarChoice, setVaAvatarChoice] = useState<Record<string, AvatarOption | null>>({});
+  /** VA: congela o roteamento text-engine vs lipsync no DISPARO (key: taskId →
+   *  bool). No resume após restart, `tasks[]` está vazio até "Carregar tasks",
+   *  então organicChannelLabels mentiria; o override do snapshot preserva a
+   *  decisão original. Só usado no resume reidratado. */
+  const [vaTextEngineOverride, setVaTextEngineOverride] = useState<Record<string, boolean>>({});
   /** VA: URL/Drive ID do AD original (input manual quando parser nao detecta).
    *  Key: taskId → string */
   const [vaAdUrl, setVaAdUrl] = useState<Record<string, string>>({});
@@ -5460,6 +5555,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  canal organico + doc sem copy caia no motor texto e morria em
    *  'briefing sem hook nem body falado' (user reportou 2026-06-10). */
   function vaUsesTextEngine(taskId: string): boolean {
+    // RESUME após restart: usa a decisão CONGELADA no disparo (tasks[] pode estar
+    // vazio agora → organicChannelLabels mentiria). Override só existe em resume.
+    if (taskId in vaTextEngineOverride) return vaTextEngineOverride[taskId];
     const a = taskAnalyses[taskId];
     if (!vaHasSpokenCopy(a?.vaBriefing)) return false;
     return organicChannelLabels(tasks.find((t) => t.id === taskId)).length > 0;
@@ -5551,6 +5649,35 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const va = a.vaBriefing;
     const baseAdId = va.baseAdId;
     const adNameClean = baseAdId.replace(/\s+/g, '');
+
+    // SNAPSHOT DE RESUME (sobrevive restart do PC): grava AGORA, no disparo,
+    // TUDO que este runner precisa — capturado no ponto-em-que-disparou. Assim,
+    // se o navegador fechar no meio, o resume reidrata isto e re-roda do certo
+    // (em vez de morrer em "briefing nao sobrevive reload"). Best-effort.
+    try {
+      const tid = `${taskId}:`;
+      const fileId = va.linkAdFileId || extractDriveFileId(vaAdUrl[taskId] || '') || null;
+      const pick = (obj: Record<string, unknown>, pref: string) =>
+        Object.fromEntries(Object.entries(obj).filter(([k]) => k.startsWith(pref)));
+      const roleTexts = fileId
+        ? Object.fromEntries(Object.entries(vaRoleText).filter(([k]) => k.startsWith(`${fileId}:`)))
+        : {};
+      persistVAResumeSnapshot(taskId, {
+        // briefing slim (sem candidateLinks — bloat e nao usado pelo runner)
+        vaBriefing: { ...va, candidateLinks: undefined },
+        taskName: a.taskName,
+        baseAdId,
+        docUrl: batchStates[taskId]?.docUrl || a.docUrl || null,
+        taskUrl: batchStates[taskId]?.taskUrl || a.taskUrl || null,
+        adUrl: vaAdUrl[taskId] || null,
+        usesTextEngine: vaUsesTextEngine(taskId),  // congela o roteamento (tasks[] some no restart)
+        avatarChoices: pick(vaAvatarChoice as Record<string, unknown>, tid),
+        voiceChoices: pick(vaVoiceChoice as Record<string, unknown>, tid),
+        fileId,
+        transcript: fileId ? vaTranscript[fileId] : undefined,
+        roleTexts,
+      });
+    } catch { /* best-effort */ }
 
     // ROUTER MOTOR — VA com canal organico (KWAI/YT/TikTok) E copy no doc
     // NAO faz lipsync no AD original: gera cada parte (hook+body) por TEXTO
