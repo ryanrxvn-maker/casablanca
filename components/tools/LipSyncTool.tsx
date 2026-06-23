@@ -411,7 +411,10 @@ export default function LipSyncTool() {
     //    generoso (o normal é bem menos). ──
     type StatusData = { status?: string; output_video_url?: string; error?: unknown } | null;
     const startedAt = Date.now();
-    const MAX_WAIT_MS = 15 * 60 * 1000; // 15 min por trecho (rede de segurança)
+    // Cap de segurança PROPORCIONAL à duração (piso 20min): um render nunca é
+    // descartado cedo. Como o servidor NÃO fica preso (cada /status é leve), dá
+    // pra esperar à vontade — só corta se o motor realmente travar.
+    const MAX_WAIT_MS = Math.max(20 * 60 * 1000, chunkMs * 8);
     let outUrl = '';
     for (;;) {
       if (Date.now() - startedAt > MAX_WAIT_MS) {
