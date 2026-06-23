@@ -448,6 +448,10 @@ type RoleSlot = {
   /** Thumb do YouTube (img.youtube.com) — mostra o video de referência mesmo
    *  sem arquivo no Drive. */
   youtubeThumb?: string | null;
+  /** Avatar declarado por IMAGEM EMBUTIDA (print colado no doc). Vale a data
+   *  URL/src do print — mostrada como thumb de referência. Igual ao YouTube:
+   *  fica PENDENTE (nao casa com a biblioteca; user escolhe vendo o print). */
+  imageThumb?: string | null;
   /** Avatar HeyGen escolhido (null = pendente, user precisa selecionar) */
   avatarId: string | null;
   avatarName: string | null;
@@ -1732,7 +1736,8 @@ function ClickUpPilotInner() {
           for (const av of briefing.avatars) {
             // Avatar de YouTube NAO tem arquivo no Drive — o username e o video
             // ID e casaria links numericos por acaso (thumb errada). Pula.
-            if (av.youtubeUrl) continue;
+            // Avatar por IMAGEM embutida tambem nao tem arquivo nem username.
+            if (av.youtubeUrl || av.imageUrl) continue;
             const fid = av.videoFileId || resolveVideoFileId(av.username, docR.driveLinks);
             if (fid) { av.videoFileId = fid; continue; }
             // SEM arquivo de Drive: o chip ".mp4" pode na verdade apontar pra um
@@ -1755,14 +1760,18 @@ function ClickUpPilotInner() {
             // Avatar por link de YouTube (smart-chip "🎥 título") — mostra a
             // thumb do vídeo de referência mesmo sem arquivo no Drive.
             const youtubeUrl = av.youtubeUrl || null;
-            const youtubeThumb = av.thumbUrl || null;
-            // Avatar de YouTube: username = video ID (11 chars), NAO um handle.
-            // NAO casar com a biblioteca (matchAvatar casaria um avatar errado
-            // por substring) nem com voz por nome — fica PENDENTE pro user
-            // escolher o avatar (o YouTube e só a referência pra clonar a voz).
-            const m = youtubeUrl ? null : matchAvatar(av.username, avatarCandidates);
+            // Thumb de referência do briefing: YouTube OU imagem embutida (print
+            // colado no doc). Ambas mostram quem o copy quer, sem arquivo Drive.
+            const imageThumb = av.imageUrl || null;
+            const youtubeThumb = av.thumbUrl || imageThumb || null;
+            // Avatar de YouTube (username = video ID) OU por IMAGEM (sem username):
+            // NAO casa com a biblioteca (matchAvatar casaria errado por substring,
+            // e imagem nem tem username) nem voz por nome — fica PENDENTE pro user
+            // escolher o avatar vendo a referência.
+            const noAutoMatch = youtubeUrl || imageThumb;
+            const m = noAutoMatch ? null : matchAvatar(av.username, avatarCandidates);
             // Voz auto-resolvida da biblioteca por nome (independente de match de avatar)
-            const voiceFromLib = youtubeUrl ? null : (voiceByNorm.get(normalizeVoiceName(av.username)) || null);
+            const voiceFromLib = noAutoMatch ? null : (voiceByNorm.get(normalizeVoiceName(av.username)) || null);
             if (m && m.score >= 30) {
               const candFull = avatarCandidates.find(c => c.id === m.id);
               // MEMORIA AVATAR→VOZ: se ja escolhi voz pra esse avatar antes,
@@ -1774,6 +1783,7 @@ function ClickUpPilotInner() {
                 briefingFileId,
                 youtubeUrl,
                 youtubeThumb,
+                imageThumb,
                 avatarId: m.id,
                 avatarName: m.name,
                 avatarThumb: candFull?.thumb || null,
@@ -1798,6 +1808,7 @@ function ClickUpPilotInner() {
                   briefingFileId,
                   youtubeUrl,
                   youtubeThumb,
+                  imageThumb,
                   avatarId: recalled.avatarId,
                   avatarName: recalled.avatarName,
                   avatarThumb: candFull.thumb || null,
@@ -1816,6 +1827,7 @@ function ClickUpPilotInner() {
               briefingFileId,
               youtubeUrl,
               youtubeThumb,
+              imageThumb,
               avatarId: null,
               avatarName: null,
               avatarThumb: null,
@@ -8398,12 +8410,19 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                       // o avatar de link aparece igual aos de arquivo).
                                       const briefingThumbUrl = slot.briefingFileId
                                         ? `https://drive.google.com/thumbnail?id=${slot.briefingFileId}&sz=w200`
-                                        : (slot.youtubeThumb || null);
+                                        : (slot.youtubeThumb || slot.imageThumb || null);
+                                      // Rotulo da referência: imagem do doc (print) / YouTube / @username
+                                      const refLabel = slot.imageThumb
+                                        ? 'imagem do doc'
+                                        : (slot.youtubeUrl ? 'ref. YouTube' : `@${slot.username}`);
+                                      const refTitle = slot.imageThumb
+                                        ? `${slot.role} · imagem do doc`
+                                        : (slot.youtubeUrl ? `${slot.role} · YouTube` : `@${slot.username}.mp4`);
                                       return (
                                         <div key={sIdx} className="hover-lift rounded-[14px] border border-white/10 bg-gradient-to-br from-white/[0.05] via-white/[0.02] to-transparent p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_14px_-6px_rgba(0,0,0,0.4)]">
                                           <div className="mono flex flex-wrap items-center gap-2 text-[10px]">
                                             <span className="rounded-full bg-lime/18 border border-lime/40 px-2 py-[3px] text-lime uppercase tracking-widest font-bold">{slot.role}</span>
-                                            <span className="text-white/70">{slot.youtubeUrl ? 'ref. YouTube' : `@${slot.username}`}</span>
+                                            <span className="text-white/70">{refLabel}</span>
                                             <span className="text-text-muted">· {partsCount} parte{partsCount === 1 ? '' : 's'}</span>
                                             {!slot.matchedBy ? (
                                               <span className="ml-1 inline-flex items-center gap-1 rounded-full border border-red-400/50 bg-red-500/15 px-2 py-[2px] text-[9px] font-bold uppercase tracking-widest text-red-300">
@@ -8473,7 +8492,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                               ) : (
                                                                 <span aria-hidden>🎤</span>
                                                               )}
-                                                              <span className="truncate text-[9px] font-semibold">{selected ? selected.name : (slot.youtubeUrl ? 'ref. YouTube' : `@${slot.username}`)}</span>
+                                                              <span className="truncate text-[9px] font-semibold">{selected ? selected.name : refLabel}</span>
                                                             </span>
                                                           </div>
                                                           <div className="flex shrink-0 items-center gap-1.5">
@@ -8535,7 +8554,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 Briefing
                                               </div>
                                               <div className="mt-0.5 text-[13px] font-semibold text-foreground truncate" style={{ fontFamily: 'var(--font-tech)' }}>
-                                                {slot.youtubeUrl ? `${slot.role} · YouTube` : `@${slot.username}.mp4`}
+                                                {refTitle}
                                               </div>
                                               {slot.briefingFileId ? (
                                                 <a
@@ -8560,6 +8579,10 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                 >
                                                   ▶ YouTube
                                                 </a>
+                                              ) : slot.imageThumb ? (
+                                                <span className="mono mt-1.5 inline-flex items-center gap-1 rounded-md border border-fuchsia-400/45 bg-fuchsia-500/12 px-2 py-1 text-[9.5px] font-bold uppercase tracking-widest text-fuchsia-200" title="Avatar identificado por um print colado no doc — escolha o avatar da biblioteca que corresponde a essa imagem">
+                                                  🖼 imagem do doc
+                                                </span>
                                               ) : (
                                                 <span className="mono mt-1.5 inline-flex items-center gap-1 rounded-md border border-white/12 bg-white/[0.04] px-2 py-1 text-[9.5px] uppercase tracking-widest text-text-muted">
                                                   sem link

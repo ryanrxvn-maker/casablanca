@@ -28,14 +28,23 @@ export type ParsedAvatar = {
    *  YouTube (ex "Doutora: 🎥 O IMPACTO DO ESTRESSE...") em vez de @file.mp4.
    *  Tipico em criativos "sem edicao" + clone de voz. */
   youtubeUrl?: string | null;
-  /** Thumbnail pra UI. YouTube → img.youtube.com/vi/<id>/hqdefault.jpg. */
+  /** Thumbnail pra UI. YouTube → img.youtube.com/vi/<id>/hqdefault.jpg.
+   *  Avatar por IMAGEM embutida → a propria imagem (data URL / src). */
   thumbUrl?: string | null;
+  /** Preenchido quando o avatar foi declarado por uma IMAGEM EMBUTIDA (print
+   *  colado no doc, sem @user/.mp4/link). Vale a data URL (extensao baixou a
+   *  imagem com a sessao logada) ou o src cru. Igual ao YouTube: NUNCA casa com
+   *  a biblioteca (nao ha username) — fica PENDENTE pro user escolher vendo o
+   *  print. */
+  imageUrl?: string | null;
 };
 
 /** Link capturado do doc (Google Docs export / mobilebasic). `fileId` aponta
  *  pra um arquivo/pasta do Drive (null pra links externos); `url` e a URL
- *  bruta (YouTube, etc). A extensao popula ambos quando disponiveis. */
-export type DocLink = { text: string; fileId: string | null; url?: string | null; isFolder?: boolean };
+ *  bruta (YouTube, etc). `isImage` marca uma IMAGEM EMBUTIDA (print de avatar):
+ *  `text` e o marcador "[[DOCIMG:N]]" injetado no texto na posicao da imagem e
+ *  `url` e a data URL / src dela. A extensao popula conforme disponivel. */
+export type DocLink = { text: string; fileId: string | null; url?: string | null; isFolder?: boolean; isImage?: boolean };
 
 export type ParsedPart = {
   /** "HOOK 1", "HOOK 2", "BODY", "PARTE 1" */
@@ -329,6 +338,11 @@ function normForLinkMatch(s: string): string {
 function findLinkForValue(value: string, links: DocLink[]): DocLink | null {
   const v = normForLinkMatch(value);
   if (v.length < 3 || !links || links.length === 0) return null;
+  // Links de IMAGEM embutida nao sao candidatos a "avatar por link" — o `text`
+  // deles e so o marcador [[DOCIMG:N]] e o `url` e uma data URL (nao YouTube/
+  // Drive). Sao tratados na Tentativa 5 (por marcador), nunca por titulo.
+  links = links.filter((l) => !l.isImage);
+  if (links.length === 0) return null;
   // 1) igualdade normalizada exata
   for (const l of links) {
     if (normForLinkMatch(l.text) === v) return l;
@@ -449,6 +463,12 @@ export function parseAvatars(section: string, links: DocLink[] = []): ParsedAvat
   let pendingRole: string | null = null;
   let pendingRoleLine = -1;
 
+  // True se o role e um rotulo de PESSOA (locutor) — usado pra escolher o role
+  // de um avatar declarado por imagem (print), ignorando headers tipo
+  // "Avatar e Vozes:" / "Instruções:".
+  const isPersonRole = (r: string | null): boolean =>
+    /\b(mulher|homem|doutor[ a]?|m[eé]dic[oa]|narrador[a]?|locutor[a]?|paciente|cliente|depoiment|depoente|testemunh|ugc|senhor[a]?|jovem|av[oó]|esposa|marido|especialista|expert|ator|atriz)\b/i.test(r || '');
+
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
     if (!trimmed) {
@@ -462,6 +482,38 @@ export function parseAvatars(section: string, links: DocLink[] = []): ParsedAvat
 
     // Pula linhas que parecem ser comentarios pesados (urls, etc)
     if (/^https?:\/\//.test(trimmed)) continue;
+
+    // Tentativa 5: avatar declarado por IMAGEM EMBUTIDA (print colado no doc).
+    // A extensao injeta um marcador "[[DOCIMG:N]]" na POSICAO da imagem e
+    // empurra um DocLink {isImage, url:<data URL>}. Alguns copys colam SO o
+    // print do avatar a ser usado (sem @user/.mp4/link). Vira avatar PENDENTE
+    // com a thumb do print — o user escolhe o da biblioteca vendo a referencia
+    // (igual ao YouTube). O role vem do label de PESSOA adjacente (pendingRole
+    // ANTES — "Mulher:" + print — OU lookahead DEPOIS — print + "Mulher:", que
+    // e o layout real visto no doc); senao "Avatar".
+    const mImg = trimmed.match(/^\[\[DOCIMG:(\d+)\]\]$/);
+    if (mImg) {
+      const imgLink = links.find((l) => l.isImage && l.text === trimmed);
+      if (imgLink && imgLink.url) {
+        let role: string | null =
+          pendingRole && isPersonRole(pendingRole) ? pendingRole : null;
+        if (!role) {
+          let seenNonEmpty = 0;
+          for (let j = i + 1; j < lines.length && seenNonEmpty < 3; j++) {
+            const lt = lines[j].trim();
+            if (!lt) continue;
+            seenNonEmpty++;
+            const rm = lt.match(reRoleOnly) || lt.match(reAttachmentChip);
+            if (rm && isPersonRole(rm[1])) { role = rm[1].trim(); break; }
+          }
+        }
+        out.push({ role: role || 'Avatar', username: '', raw: trimmed, imageUrl: imgLink.url, thumbUrl: imgLink.url });
+        pendingRole = null;
+        pendingRoleLine = -1;
+      }
+      // marcador (com ou sem link) NUNCA cai nas outras tentativas / fala
+      continue;
+    }
 
     // Tentativa 1: linha completa "Role: @user[.mp4]" OU "Role: user.mp4"
     // Grupo 2 = username com @, Grupo 3 = username sem @ (com extensao obrigatoria)
@@ -1215,6 +1267,9 @@ export function sanitizeSpokenCopy(raw: string, knownRoles: string[] = [], dropE
       if (/(https?:\/\/|\bwww\.[a-z0-9-]+\.|drive\.google\.com|tiktok\.com)/i.test(t)) return null;
       // Markers
       if (/Tela\s*dividida/i.test(t)) return null;
+      // Marcador de imagem embutida ([[DOCIMG:N]]) — referencia de avatar por
+      // print, NUNCA e fala (so aparece se uma imagem estiver no meio da copy).
+      if (/^\[\[DOCIMG:\d+\]\]$/i.test(t)) return null;
       if (/^(Link\s+do\s+avatar|Instru[cç][õo]es)\s*[:\-]/i.test(t)) return null;
       // Metadata prefixes — entire line out
       if (/^(Voz(?:\s+(?:do|da|de|off|over)\s+\w+)?|Refer[eê]ncia|Aten[cç][aã]o(?:\s+\w+)?|Observa[cç][aã]o|Obs|Nota)\s*[:\-]/i.test(t)) return null;

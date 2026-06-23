@@ -989,6 +989,63 @@ console.log('\nedge cases:');
 const empty = buildDisparosFromDoc('', CANDIDATES);
 assert(empty.disparos.length === 0, 'doc vazio → 0 disparos');
 
+/* ----------------- avatar por IMAGEM EMBUTIDA (print colado no doc) ----------------- */
+console.log('\navatar por imagem embutida (print):');
+{
+  const imgUrl = 'data:image/png;base64,AAAABBBBCCCCDDDD';
+  const imgLinks: DocLink[] = [{ text: '[[DOCIMG:0]]', fileId: null, url: imgUrl, isImage: true }];
+
+  // Layout A: label "Mulher:" ANTES do print → role vem do pendingRole
+  const aA = parseAvatars('Avatar e Vozes:\nMulher:\n[[DOCIMG:0]]\n', imgLinks);
+  assert(aA.length === 1, `label-antes: exatamente 1 avatar (got ${aA.length})`);
+  assert(aA[0]?.role === 'Mulher', `label-antes: role=Mulher (got ${aA[0]?.role})`);
+  assert(aA[0]?.imageUrl === imgUrl, 'label-antes: imageUrl = data URL do print');
+  assert(aA[0]?.thumbUrl === imgUrl, 'label-antes: thumbUrl = data URL (preview na UI)');
+  assert(aA[0]?.username === '', 'label-antes: sem username (nunca casa biblioteca)');
+
+  // Layout B: print ANTES do label "Mulher:" → role vem do lookahead (layout real do doc)
+  const aB = parseAvatars('Avatar e Vozes:\n[[DOCIMG:0]]\nMulher:\n', imgLinks);
+  assert(aB.length === 1 && aB[0]?.role === 'Mulher', `print-antes-do-label: role=Mulher via lookahead (got ${JSON.stringify(aB.map((x) => x.role))})`);
+  assert(aB[0]?.imageUrl === imgUrl, 'print-antes-do-label: imageUrl preenchido');
+
+  // Layout C: print sem label de pessoa → role fallback "Avatar"
+  const aC = parseAvatars('Avatar e Vozes:\n[[DOCIMG:0]]\n', imgLinks);
+  assert(aC.length === 1 && aC[0]?.role === 'Avatar', `sem-label: role=Avatar fallback (got ${aC[0]?.role})`);
+  assert(aC[0]?.imageUrl === imgUrl, 'sem-label: imageUrl preenchido');
+
+  // Marcador SEM link correspondente (idx errado) → NAO vira avatar e nao quebra
+  const aNone = parseAvatars('Mulher:\n[[DOCIMG:9]]\n', imgLinks);
+  assert(aNone.length === 0, `marcador orfao (link 0 != marcador 9): 0 avatares (got ${aNone.length})`);
+
+  // E2E: parseDarkoBriefing — avatar por imagem + marcador NUNCA vaza pra fala
+  const IMG_DOC = [
+    'AD300GL - FLPB04',
+    'Avatar e Vozes:',
+    'Mulher:',
+    '[[DOCIMG:0]]',
+    '',
+    'AD300G1GL-FLPB04',
+    'Mulher:',
+    'Esse e o gancho do anuncio sobre lipedema, presta atencao agora.',
+    '',
+    'Body',
+    'Mulher:',
+    'No corpo eu explico a solucao completa pro inchaco nas pernas.',
+  ].join('\n');
+  const bf = parseDarkoBriefing(IMG_DOC, 'AD300GL', null, imgLinks);
+  assert(!!bf, 'e2e: briefing parseado');
+  assert((bf?.avatars.length || 0) === 1, `e2e: 1 avatar (got ${bf?.avatars.length})`);
+  assert(bf?.avatars[0]?.role === 'Mulher', `e2e: role=Mulher (got ${bf?.avatars[0]?.role})`);
+  assert(bf?.avatars[0]?.imageUrl === imgUrl, 'e2e: avatar carrega imageUrl do print');
+  const spoken = [
+    ...(bf?.hooks || []).map((h) => h.text),
+    bf?.body || '',
+    ...((bf?.bodySegments || []).map((s) => s.text)),
+  ].join('\n');
+  assert(!/DOCIMG/i.test(spoken), 'e2e: marcador [[DOCIMG]] NUNCA aparece na fala (hook/body)');
+  assert(/lipedema/.test(spoken) && /inchaco/.test(spoken), 'e2e: fala real preservada (gancho + corpo)');
+}
+
 console.log('');
 if (failures > 0) {
   console.error(`✗ ${failures} assert(s) falharam`);
