@@ -1336,6 +1336,9 @@ function BrollHistorySection() {
   // Fase de EMPACOTAMENTO do ZIP (pós-geração) — barra dedicada pro user saber
   // que NÃO travou: está lendo/compactando os MP4s (300 arquivos demora).
   const [retryPacking, setRetryPacking] = useState<null | { label: string; percent: number }>(null);
+  // Progresso do BAIXAR quando precisa RECONSTRUIR o ZIP (300 MP4s ~1.3GB leva
+  // ~1min) — sem isso o botão "..." parece travado.
+  const [dlPacking, setDlPacking] = useState<null | { zipKey: string; label: string; percent: number }>(null);
   // zipKey do item que esta com o editor inline expandido (pra colar JSON
   // de batches antigos que nao tem originalJson salvo).
   const [pendingJsonFor, setPendingJsonFor] = useState<string | null>(null);
@@ -1381,7 +1384,14 @@ function BrollHistorySection() {
       // RECONSTRÓI do que está salvo: MP4s no IDB (offline, sobrevive reload/PC
       // desligado) + fallback nas URLs ainda válidas. Nomes descritivos. Salva
       // o ZIP correto + grava zipCount → próximos downloads confiam no cache.
-      const built = await buildZipFromEntry(item);
+      setDlPacking({ zipKey: item.zipKey, label: 'Preparando…', percent: 0 });
+      const built = await buildZipFromEntry(item, (phase, done, total) => {
+        if (phase === 'read') {
+          setDlPacking({ zipKey: item.zipKey, label: `Reconstruindo: lendo vídeos… ${done}/${total}`, percent: Math.round((done / Math.max(1, total)) * 60) });
+        } else {
+          setDlPacking({ zipKey: item.zipKey, label: 'Compactando ZIP…', percent: 60 + Math.round(done * 0.4) });
+        }
+      });
       if (!built) {
         alert(
           'Nenhum vídeo deste batch está disponível offline nem nas URLs (expiraram). ' +
@@ -1408,6 +1418,7 @@ function BrollHistorySection() {
       alert('Erro: ' + ((e as Error)?.message || String(e)));
     } finally {
       setLoading(null);
+      setDlPacking(null);
     }
   }
 
@@ -1999,6 +2010,30 @@ function BrollHistorySection() {
                   </div>
                   <div className="mt-1.5 text-[9px] text-text-muted">
                     Gerou tudo! Agora juntando os vídeos num ZIP só — quanto mais takes, mais demora. Não feche a aba; o ZIP libera no fim.
+                  </div>
+                </div>
+              ) : null}
+              {/* Barra do BAIXAR quando reconstrói o ZIP dos MP4s individuais
+               *  (cache incompleto/antigo). Mostra que NÃO travou. */}
+              {dlPacking && dlPacking.zipKey === item.zipKey ? (
+                <div className="rounded-[12px] border border-lime/40 bg-lime/[0.06] px-4 py-3">
+                  <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-widest text-lime">
+                    <span className="inline-flex items-center gap-1.5">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" strokeDasharray="32 32" />
+                      </svg>
+                      ⬇ Preparando download · {dlPacking.label}
+                    </span>
+                    <span className="tabular-nums text-lime/80">{dlPacking.percent}%</span>
+                  </div>
+                  <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-bg/60">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-lime to-emerald-400 transition-all duration-300"
+                      style={{ width: `${Math.min(100, Math.max(2, dlPacking.percent))}%` }}
+                    />
+                  </div>
+                  <div className="mt-1.5 text-[9px] text-text-muted">
+                    Montando o ZIP completo a partir dos vídeos salvos no navegador. Não feche a aba — o download começa sozinho no fim.
                   </div>
                 </div>
               ) : null}
