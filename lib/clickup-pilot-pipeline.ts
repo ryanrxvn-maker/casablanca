@@ -243,6 +243,15 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     return out2;
   };
 
+  // CLEAN SLATE por task: mata qualquer instância ffmpeg-wasm HERDADA (de uma
+  // task anterior do MESMO lote, ou de um run que travou) pra ESTE pipeline
+  // começar com worker FRESCO. Cross-task poisoning (instância degradada pela
+  // task anterior) era o que fazia "o 1º do lote vai e o resto trava em
+  // decupando/regulando". getFFmpeg() reinicializa sozinho na 1ª op (~1-3s, do
+  // cache). O pipeline roda SERIAL (runPostPipelineSerial) → matar a instância
+  // aqui nunca atinge outra op em andamento.
+  try { cancelFFmpeg(); } catch { /* ignora */ }
+
   // === Stage 1: ASSEMBLE (HOOK[N] + BODYs concatenados, cada parte nivelada) ===
   for (let g = 0; g < groupings.length; g++) {
     const { hookIdx, gNum } = groupings[g];
@@ -362,21 +371,38 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     if (leveled.length === 0) continue;
 
     // Decupa UMA parte. Retorna o blob cortado, ou null se não dá pra cortar
-    // (sem fala detectável OU erro) — aí o chamador usa a parte original.
+    // (sem fala detectável OU erro persistente) — aí o chamador usa a original.
+    // ASSERTIVIDADE: o ffmpeg-wasm trava de forma INTERMITENTE (uma parte que
+    // falha numa tentativa costuma passar na seguinte com instância limpa). Em
+    // vez de depender do user clicar RETOMAR de novo, AUTO-TENTA até 3x, MATANDO
+    // o worker entre tentativas (cancelFFmpeg → getFFmpeg reinicia fresco). Só
+    // "sem fala detectável" (não é erro) retorna na hora, sem retry.
     const tryDecupOne = async (src: Blob, label: string): Promise<Blob | null> => {
-      try {
-        const audioBuf = await withTimeout(decodeAudioRobust(src), 90_000, `decode ${label}`);
-        const durSec = audioBuf.duration || 0;
-        const silences = detectSilences(audioBuf);
-        const segments = computeSpeechSegments(silences, durSec, keepSilenceSec);
-        if (segments.length === 0) return null; // sem fala detectável → mantém original
-        // Parte é curta; teto generoso por segurança (não é o tempo esperado).
-        const cutMs = Math.max(60_000, Math.ceil(durSec) * 6000 + 30_000);
-        return await withTimeout(cutVideoSegments(src, segments), cutMs, `cut ${label}`);
-      } catch (e) {
-        console.warn(`[clickup-pilot-pipeline] decup ${label}: falhou (${(e as Error)?.message?.slice(0, 70)}), mantendo parte original`);
-        return null;
+      const MAX = 3;
+      for (let attempt = 1; attempt <= MAX; attempt++) {
+        try {
+          const audioBuf = await withTimeout(decodeAudioRobust(src), 90_000, `decode ${label} (t${attempt})`);
+          const durSec = audioBuf.duration || 0;
+          const silences = detectSilences(audioBuf);
+          const segments = computeSpeechSegments(silences, durSec, keepSilenceSec);
+          if (segments.length === 0) return null; // sem fala → mantém original (NÃO é erro)
+          // Parte é curta; teto generoso por segurança (não é o tempo esperado).
+          const cutMs = Math.max(60_000, Math.ceil(durSec) * 6000 + 30_000);
+          return await withTimeout(cutVideoSegments(src, segments), cutMs, `cut ${label} (t${attempt})`);
+        } catch (e) {
+          const msg = (e as Error)?.message?.slice(0, 70);
+          // Mata o worker pra a PRÓXIMA tentativa pegar instância LIMPA (timeout
+          // já reseta via withTimeout; numa falha não-timeout reseta aqui).
+          try { cancelFFmpeg(); } catch { /* ignora */ }
+          if (attempt < MAX) {
+            console.warn(`[clickup-pilot-pipeline] decup ${label}: t${attempt} falhou (${msg}) — reset+retry`);
+            continue;
+          }
+          console.warn(`[clickup-pilot-pipeline] decup ${label}: ${MAX}x falhou (${msg}), mantendo parte original`);
+          return null;
+        }
       }
+      return null;
     };
 
     const decupadoParts: Blob[] = [];
