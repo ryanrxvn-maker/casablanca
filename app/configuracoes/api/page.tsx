@@ -40,28 +40,12 @@ const META: Array<{
   usedBy: string;
 }> = [
   {
-    id: 'anthropic',
-    label: 'Anthropic (Claude)',
-    helper:
-      'Comeca com sk-ant-... Crie em console.anthropic.com → Settings → API Keys.',
-    link: 'https://console.anthropic.com/settings/keys',
-    usedBy: 'Auto B-Roll · Remover Legenda',
-  },
-  {
     id: 'assemblyai',
     label: 'AssemblyAI',
     helper:
       'Chave alfanumerica longa. Pega em assemblyai.com (dashboard, sidebar).',
     link: 'https://www.assemblyai.com/app/account',
     usedBy: 'Troca de Produto · Decupagem por Copy',
-  },
-  {
-    id: 'elevenlabs',
-    label: 'ElevenLabs',
-    helper:
-      'Comeca com xi_... Crie em elevenlabs.io → Profile → API Keys.',
-    link: 'https://elevenlabs.io/app/settings/api-keys',
-    usedBy: 'Troca de Produto',
   },
   {
     id: 'heygen',
