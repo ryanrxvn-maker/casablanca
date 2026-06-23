@@ -86,8 +86,13 @@ async function main() {
   const audioBuffer = Buffer.from(await ar.arrayBuffer());
   console.log(`   vídeo ${(videoBuffer.length / 1024 / 1024).toFixed(1)}MB · áudio ${(audioBuffer.length / 1024).toFixed(0)}KB`);
 
+  // ── Testa o CAMINHO ASSÍNCRONO REAL (o mesmo que a rota web usa agora):
+  //    startLipsync (submete e volta) → checkLipsyncStatus (poll leve em loop)
+  //    → resolveMp4. Prova que start + status + resolve funcionam separados. ──
   const t0 = Date.now();
-  const result = await lib.generateLipsync({
+
+  console.log('2) START (upload + registra avatar + submit)…');
+  const { animateId, avatarId } = await lib.startLipsync({
     videoBuffer,
     videoName: 'e2e_face.mp4',
     videoType: vr.headers.get('content-type')?.split(';')[0] || 'video/mp4',
@@ -97,19 +102,48 @@ async function main() {
     audioMs: AUDIO_MS,
     onStage: (s) => console.log('   …', s),
   });
+  const submitSecs = ((Date.now() - t0) / 1000).toFixed(1);
+  console.log(`   ✓ submetido em ${submitSecs}s (sem esperar render) — animate_id ${mask(animateId)} · avatar ${mask(avatarId)}`);
+
+  console.log('3) POLL /status (cada checagem é leve, igual à rota web)…');
+  const POLL_TIMEOUT_MS = 280_000;
+  const POLL_EVERY_MS = 3000;
+  let workId = '';
+  for (;;) {
+    if (Date.now() - t0 > POLL_TIMEOUT_MS) throw new Error('poll estourou o timeout do teste');
+    const st = await lib.checkLipsyncStatus(
+      { accountId: process.env.DREAMFACE_ACCOUNT_ID, userId: process.env.DREAMFACE_USER_ID,
+        appVersion: process.env.DREAMFACE_APP_VERSION || '4.7.1',
+        templateId: process.env.DREAMFACE_TEMPLATE_ID || '6606889f54e4e700070db4b1',
+        cookie: process.env.DREAMFACE_COOKIE, proxyUrl: process.env.DREAMFACE_PROXY_URL },
+      animateId,
+    );
+    if (st.status === 'done') { workId = st.workId; break; }
+    if (st.status === 'failed') throw new Error('o motor reportou falha (web_work_status -1)');
+    process.stdout.write('.');
+    await new Promise((r) => setTimeout(r, POLL_EVERY_MS));
+  }
+
+  console.log('');
+  console.log('4) RESOLVE MP4…');
+  const url = await lib.resolveMp4(
+    { accountId: process.env.DREAMFACE_ACCOUNT_ID, userId: process.env.DREAMFACE_USER_ID,
+      appVersion: process.env.DREAMFACE_APP_VERSION || '4.7.1',
+      templateId: process.env.DREAMFACE_TEMPLATE_ID || '6606889f54e4e700070db4b1',
+      cookie: process.env.DREAMFACE_COOKIE, proxyUrl: process.env.DREAMFACE_PROXY_URL },
+    workId,
+  );
 
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
   console.log('');
-  console.log(`✅ MP4 gerado em ${secs}s`);
-  console.log('   work_id:', result.workId);
-  console.log('   avatar_id:', result.avatarId);
+  console.log(`✅ MP4 pronto em ${secs}s (total) — work_id ${mask(workId)}`);
 
   // confirma que o MP4 é baixável
-  const head = await fetch(result.url, { headers: { Range: 'bytes=0-99' } });
+  const head = await fetch(url, { headers: { Range: 'bytes=0-99' } });
   console.log('   MP4 fetch:', head.status, head.headers.get('content-type'));
-  console.log('   url host:', new URL(result.url).host);
+  console.log('   url host:', new URL(url).host);
   console.log('');
-  console.log(head.ok ? '🎉 E2E OK — lipsync ilimitado funcionando server-to-server.' : '⚠ MP4 não baixou (verifique).');
+  console.log(head.ok ? '🎉 E2E ASSÍNCRONO OK — start + status + resolve funcionando server-to-server.' : '⚠ MP4 não baixou (verifique).');
 }
 
 main().catch((e) => {

@@ -1,43 +1,43 @@
 /**
- * /api/tools/lipsync — gera lipsync via DreamFace (API privada do app
- * web, conta paga consumer). "Ilimitado", sem créditos, server-to-server.
+ * /api/tools/lipsync — INÍCIO (assíncrono) da geração de lipsync via DreamFace.
  *
- * Antes: Replicate Wav2Lip (por geração). Agora: DreamFace Avatar Video
- * lipsync rodando na conta anual — custo fixo da conta, gerações ilimitadas.
+ * MODO ASSÍNCRONO (por quê): a função serverless da Vercel morre em 300s. Um
+ * render de áudio longo no motor passa disso fácil — antes a gente segurava a
+ * função esperando o render e ela estourava o timeout (erro "demorou demais"
+ * mesmo o motor TENDO concluído). Agora:
+ *   1. Este POST só BAIXA os arquivos, SOBE pro motor e SUBMETE o job —
+ *      volta em segundos com um TOKEN de job assinado (sem esperar o render).
+ *   2. O cliente acompanha o render com GET /api/tools/lipsync/status?job=...
+ *      (poll leve), que resolve+re-hospeda o MP4 quando fica pronto.
+ * Resultado: a ÚNICA espera vira o render do motor — nada estoura timeout.
  *
  * FLUXO:
- *   - Client sobe vídeo (rosto) + áudio pro fal.storage → URLs públicas.
+ *   - Client sobe vídeo (rosto) + áudio pro Supabase → URLs públicas.
  *   - Manda { video_url, audio_url, audio_ms } pra cá.
- *   - O servidor BAIXA as duas URLs e roda o pipeline DreamFace
- *     (upload→registra avatar→submit→poll→resolve MP4), tudo por 1
- *     cookie + 1 IP fixo (proxy), em fila serial (ritmo humano).
- *   - Devolve { success, output_video_url } (MP4 final no OSS).
+ *   - O servidor BAIXA as duas URLs, escolhe a melhor conta do pool e roda o
+ *     START (upload→registra avatar→submit), tudo por 1 cookie + 1 IP (proxy).
+ *   - Devolve { success, status:'generating', job } — token opaco assinado.
  *
- * ANTI-BLOQUEIO: ver lib/dreamface-api.ts e lib/dreamface-queue.ts.
+ * ANTI-BLOQUEIO: ver lib/dreamface-api.ts e lib/dreamface-pool.ts.
  *   O IP do usuário final nunca chega no DreamFace — é tudo server-side.
  *
  * Pro + Admin (requireToolAccess('/tools/lipsync','pro')).
  */
 
 import { NextResponse } from 'next/server';
-import { serviceClient } from '@/app/api/admin/_helpers';
 import { requireToolAccess } from '@/lib/require-tier';
-import {
-  generateLipsync,
-  dreamFaceErrorToHttp,
-} from '@/lib/dreamface-api';
+import { startLipsync, dreamFaceErrorToHttp } from '@/lib/dreamface-api';
 import { runWithDreamFaceAccount, hasAccounts } from '@/lib/dreamface-pool';
+import { signLipsyncJob } from '@/lib/lipsync-job-token';
 import { safeFetch, SsrfError } from '@/lib/safe-fetch';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
 
-const OUTPUT_BUCKET = 'lipsync-uploads';
-
 /**
  * Re-tenta uma leitura idempotente (GET) com backoff. NÃO re-tenta URL
  * bloqueada por SSRF (erro definitivo). Garante que um blip de rede no
- * server→Supabase / server→motor não derrube uma geração inteira.
+ * server→Supabase não derrube o início de uma geração.
  */
 async function withRetryServer<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
   let last: unknown;
@@ -54,29 +54,6 @@ async function withRetryServer<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
   throw last;
 }
 
-/**
- * Re-hospeda o MP4 do motor no Supabase: o cliente NUNCA vê a URL de
- * origem (privacidade do motor), libera CORS pro pós-processamento
- * client-side, e dá uma URL estável (sem expiração de assinatura).
- */
-async function rehostOutput(srcUrl: string, userId: string, workId: string): Promise<string> {
-  const r = await withRetryServer(async () => {
-    const rr = await fetch(srcUrl, { cache: 'no-store' });
-    if (!rr.ok) throw new Error(`download do MP4 falhou (${rr.status})`);
-    return rr;
-  });
-  const buf = Buffer.from(await r.arrayBuffer());
-  const sb = serviceClient();
-  await sb.storage.createBucket(OUTPUT_BUCKET, { public: true }).catch(() => {});
-  const path = `outputs/${userId}/${Date.now()}-${workId}.mp4`;
-  const { error } = await sb.storage
-    .from(OUTPUT_BUCKET)
-    .upload(path, buf, { contentType: 'video/mp4', upsert: true });
-  if (error) throw new Error('re-host Supabase: ' + error.message);
-  const { data } = sb.storage.from(OUTPUT_BUCKET).getPublicUrl(path);
-  return data.publicUrl;
-}
-
 interface LipSyncBody {
   video_url?: string;
   audio_url?: string;
@@ -85,7 +62,7 @@ interface LipSyncBody {
 
 const MAX_VIDEO_BYTES = 300 * 1024 * 1024; // 300MB
 const MAX_AUDIO_BYTES = 60 * 1024 * 1024; // 60MB
-const MAX_AUDIO_MS = 185_000; // DreamFace limita ~180s
+const MAX_AUDIO_MS = 185_000; // DreamFace limita ~180s por geração (por trecho)
 
 function basename(url: string, fallback: string): string {
   try {
@@ -172,8 +149,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    // Baixa vídeo + áudio em paralelo (URLs públicas do fal — sem proxy,
-    // download direto e rápido).
+    // Baixa vídeo + áudio em paralelo (URLs públicas do Supabase).
     const [video, audio] = await Promise.all([
       download(video_url, MAX_VIDEO_BYTES, 'vídeo'),
       download(audio_url, MAX_AUDIO_BYTES, 'áudio'),
@@ -181,9 +157,12 @@ export async function POST(req: Request) {
 
     // Pool inteligente: escolhe a melhor conta DreamFace (menos ocupada),
     // roda em paralelo com as outras e faz FAILOVER automático se a conta
-    // cair (auth/rede) — tenta a próxima conta saudável sozinho.
-    const result = await runWithDreamFaceAccount((config) =>
-      generateLipsync(
+    // cair (auth/rede) — tenta a próxima conta saudável sozinho. O slot é
+    // segurado só durante o START (upload+submit), não durante o render.
+    let usedLabel = '';
+    const { animateId } = await runWithDreamFaceAccount(async (config, label) => {
+      usedLabel = label;
+      return startLipsync(
         {
           videoBuffer: video.buffer,
           videoName: basename(video_url, 'face.mp4'),
@@ -194,23 +173,18 @@ export async function POST(req: Request) {
           audioMs,
         },
         config,
-      ),
-    );
+      );
+    });
 
-    // Esconde a origem: re-hospeda o MP4 no Supabase. Se falhar, cai pra
-    // URL direta (gerar é melhor que falhar), mas o normal é re-hospedar.
-    let outputUrl = result.url;
-    try {
-      outputUrl = await rehostOutput(result.url, guard.userId, result.workId);
-    } catch (e) {
-      console.error('[lipsync] re-host falhou, usando URL direta:', e instanceof Error ? e.message : e);
-    }
+    // Token opaco assinado: carrega {conta, animate_id, user} pro /status
+    // pollar o MESMO motor — sem banco, válido cross-instância.
+    const job = signLipsyncJob({ label: usedLabel, animateId, userId: guard.userId });
 
     return NextResponse.json({
       success: true,
       engine: 'autoedit',
-      output_video_url: outputUrl,
-      work_id: result.workId,
+      status: 'generating',
+      job,
     });
   } catch (err) {
     // `detail` (cru, pode citar o motor) vai SÓ pro log. `message` (sem

@@ -496,6 +496,37 @@ export async function resolveMp4(c: DreamFaceConfig, workId: string): Promise<st
   throw new DreamFaceError('no_output_url', 'O job concluiu mas o DreamFace não devolveu a URL do MP4.');
 }
 
+/**
+ * Checagem ÚNICA (sem loop) do status de um job já submetido. É o coração do
+ * modo ASSÍNCRONO: a rota /status chama isto a cada poll do cliente — barato e
+ * rápido, nunca segura a função serverless esperando o render. Mapeia
+ * animate_image_id → work via get_recent_creation_list.
+ *   - 'generating' = ainda processando (ou ainda não apareceu na lista)
+ *   - 'done'       = pronto (workId pra resolver o MP4)
+ *   - 'failed'     = o motor reportou falha definitiva (rosto/áudio ruim)
+ */
+export async function checkLipsyncStatus(
+  c: DreamFaceConfig,
+  animateId: string,
+): Promise<{ status: 'generating' | 'done' | 'failed'; workId?: string }> {
+  // size:50 (não 30): margem extra pra o job não "sumir" da página 1 se a conta
+  // tiver muitas criações recentes entre o submit e o poll. Barato e mais seguro.
+  const j = await dfPostJson<{ list?: RawWorkItem[] }>(c, '/dw-server/work/v2/get_recent_creation_list', {
+    user_id: c.userId,
+    account_id: c.accountId,
+    page: 1,
+    size: 50,
+    is_web: true,
+    app_version: c.appVersion,
+  });
+  const list = j.data?.list ?? [];
+  const item = list.find((w) => w.animate_id === animateId);
+  if (!item) return { status: 'generating' }; // ainda não indexou → segue gerando
+  if (item.web_work_status === 200) return { status: 'done', workId: item.id };
+  if (item.web_work_status === -1) return { status: 'failed' };
+  return { status: 'generating' };
+}
+
 // ───────────────────── Orquestrador de alto nível ─────────────────────
 
 export type GenerateLipsyncInput = {
@@ -517,14 +548,15 @@ export type GenerateLipsyncResult = {
 };
 
 /**
- * Roda o pipeline completo: upload vídeo+áudio EM PARALELO, registra
- * avatar, submete, faz poll e resolve o MP4 final. Tudo server-side,
- * por 1 cookie + 1 IP (proxy).
+ * FASE 1 (rápida): faz upload vídeo+áudio EM PARALELO, registra o avatar,
+ * valida o rosto e SUBMETE o job. Retorna assim que o motor aceita o job —
+ * NÃO espera o render. É o que torna o fluxo assíncrono: a função serverless
+ * volta em segundos e o cliente acompanha o render com /status (poll leve).
  */
-export async function generateLipsync(
+export async function startLipsync(
   input: GenerateLipsyncInput,
   config?: DreamFaceConfig,
-): Promise<GenerateLipsyncResult> {
+): Promise<{ animateId: string; avatarId: string }> {
   const c = config ?? cfg();
 
   // Uploads em paralelo (vídeo+registro || áudio) — máxima velocidade.
@@ -554,6 +586,21 @@ export async function generateLipsync(
     videoName: input.videoName,
     audioName: input.audioName,
   });
+  return { animateId, avatarId: avatar.id };
+}
+
+/**
+ * Pipeline SÍNCRONO completo (start + poll + resolve) — usado pelo teste E2E
+ * e por qualquer caller server-side que possa esperar até o fim. A rota web
+ * NÃO usa mais isto (usa startLipsync + /status pra não estourar o teto de
+ * 300s da função). Tudo server-side, por 1 cookie + 1 IP (proxy).
+ */
+export async function generateLipsync(
+  input: GenerateLipsyncInput,
+  config?: DreamFaceConfig,
+): Promise<GenerateLipsyncResult> {
+  const c = config ?? cfg();
+  const { animateId, avatarId } = await startLipsync(input, c);
 
   // A PARTIR DAQUI o job já foi criado NESTA conta. Se o poll/resolve falhar
   // (rede/auth/timeout), NÃO vale re-rodar em outra conta (geraria 2x) — marca
@@ -563,7 +610,7 @@ export async function generateLipsync(
     const { workId } = await pollUntilDone(c, animateId, { onStage: input.onStage });
     input.onStage?.('resolving');
     const url = await resolveMp4(c, workId);
-    return { url, workId, animateId, avatarId: avatar.id };
+    return { url, workId, animateId, avatarId };
   } catch (e) {
     if (e instanceof DreamFaceError) e.afterSubmit = true;
     throw e;

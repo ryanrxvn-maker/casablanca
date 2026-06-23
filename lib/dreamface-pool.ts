@@ -264,6 +264,17 @@ export function accountCount(): number {
 }
 
 /**
+ * Config de uma conta pelo label — pra o /status pollar o MESMO motor que
+ * recebeu o submit (o label vem assinado no token do job). Retorna null se a
+ * conta sumiu do pool (env mudou entre o submit e o poll — raríssimo); o caller
+ * trata como "ainda gerando" e o cliente re-tenta.
+ */
+export function getAccountConfigByLabel(label: string): DreamFaceConfig | null {
+  const a = loadAccounts().find((x) => x.label === label);
+  return a ? a.config : null;
+}
+
+/**
  * Roda `fn` na MELHOR conta do pool, com FAILOVER automático: se a conta
  * escolhida der erro de auth (cookie morto) ou rede, marca-a em cooldown e
  * tenta a próxima conta saudável. Erro de INPUT (no_face/generation_failed)

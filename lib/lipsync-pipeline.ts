@@ -28,15 +28,15 @@ import {
 import { postprocessLipSyncOutput } from './lipsync-postprocess';
 
 /**
- * Máx por trecho. NÃO é o limite do motor (que aceita ~180s) — é o limite
- * de TEMPO DE RENDER: cada trecho roda numa função serverless (Vercel, teto
- * 300s) que espera o motor renderizar. Render de áudio longo demora — um
- * trecho de ~175s estourou o timeout. Trechos de ~100s renderizam com folga
- * dentro do orçamento. Áudio de 10min → ~6 trechos costurados.
+ * Máx por trecho. Agora o disparo é ASSÍNCRONO (POST submete e volta; o cliente
+ * acompanha o render por /status) — então o trecho NÃO precisa mais caber no
+ * teto de 300s da função serverless. O único limite real é o do MOTOR, que
+ * aceita ~180s por geração. Por isso voltamos a trechos longos: menos emendas,
+ * menos uploads, mais rápido. Áudio ≤~178s vira UMA geração só (zero costura).
  */
-export const MAX_CHUNK_SEC = 100;
-/** Acima disso, o áudio é dividido em trechos. */
-export const CHUNK_THRESHOLD_SEC = 108;
+export const MAX_CHUNK_SEC = 170;
+/** Acima disso, o áudio é dividido em trechos (deixa folga sob o limite ~180s). */
+export const CHUNK_THRESHOLD_SEC = 178;
 
 /** Limite seguro do Supabase Storage (cap ~50MB) — abaixo disso vai nativo. */
 const STORAGE_SAFE_BYTES = 44 * 1024 * 1024;

@@ -367,20 +367,20 @@ export default function LipSyncTool() {
     }
   }
 
-  /** Uma geração (rosto + 1 trecho de áudio): sobe → gera → baixa. SEM
-   *  pós-produção: o que sai do motor já é o resultado final. */
+  /** Uma geração (rosto + 1 trecho de áudio), ASSÍNCRONA: sobe áudio → START
+   *  (submete no motor, volta na hora com um token) → POLL leve até pronto →
+   *  baixa. A única espera real é o render do motor — nada estoura timeout. */
   async function generateOne(
     faceUrl: string, audioChunk: File, chunkMs: number, label?: string,
   ): Promise<Blob> {
     const aUrl = await uploadPublic(audioChunk, 'audio');
-    type GenData = { output_video_url?: string; error?: unknown } | null;
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-    // Loop de CAPACIDADE: 503 = todas as contas do pool ocupadas NESTE instante
-    // (nenhuma geração começou no servidor). Espera com backoff e re-POSTa SEM
-    // re-subir nada — pro usuário é só "na fila" um pouco mais, nunca um erro.
-    // O POST em si (erro de REDE) re-tenta conservador por dentro (não dispara
-    // 2 renders no motor). Resposta HTTP normal encerra e cai na checagem.
-    let resp: { status: number; ok: boolean; data: GenData } | null = null;
+    // ── 1. START — submete no motor e volta rápido com um token de job ──
+    // 503 = pool cheio NESTE instante. Espera com backoff e re-POSTa SEM
+    // re-subir nada — pro usuário é só "na fila" um pouco mais, nunca erro.
+    type StartData = { job?: string; status?: string; error?: unknown } | null;
+    let job = '';
     for (let busy = 0; busy < 6; busy++) {
       const r = await withRetry(async () => {
         const res = await fetch('/api/tools/lipsync', {
@@ -388,25 +388,61 @@ export default function LipSyncTool() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ video_url: faceUrl, audio_url: aUrl, audio_ms: chunkMs }),
         });
-        const json = (await res.json().catch(() => null)) as GenData;
+        const json = (await res.json().catch(() => null)) as StartData;
         return { status: res.status, ok: res.ok, data: json };
       }, { tries: 3, baseDelayMs: 1200 });
-      if (r.status !== 503) { resp = r; break; }
-      await new Promise((s) => setTimeout(s, Math.min(8000, 2000 * 2 ** busy) + Math.random() * 400));
+      if (r.status === 503) {
+        await sleep(Math.min(8000, 2000 * 2 ** busy) + Math.random() * 400);
+        continue;
+      }
+      if (!r.ok || !r.data?.job) {
+        throw new Error(
+          (r.data && (typeof r.data.error === 'string' ? r.data.error : r.data.error ? errMsg(r.data.error) : null)) ||
+            (label ? `Falha ao iniciar ${label}.` : `O servidor respondeu erro ${r.status}.`),
+        );
+      }
+      job = r.data.job;
+      break;
     }
-    if (!resp) {
-      throw new Error('A fila de geração está cheia agora. Tenta de novo em instantes.');
-    }
-    const { status, ok, data } = resp;
+    if (!job) throw new Error('A fila de geração está cheia agora. Tenta de novo em instantes.');
 
-    if (!ok || !data?.output_video_url) {
-      throw new Error(
-        (data && (typeof data.error === 'string' ? data.error : data.error ? errMsg(data.error) : null)) ||
-          (label ? `Falha ao gerar ${label}.` : `O servidor respondeu erro ${status}.`),
-      );
+    // ── 2. POLL — acompanha o render. Cada checagem é leve; blip de rede no
+    //    poll NÃO derruba o job (re-tenta no próximo ciclo). Cap de segurança
+    //    generoso (o normal é bem menos). ──
+    type StatusData = { status?: string; output_video_url?: string; error?: unknown } | null;
+    const startedAt = Date.now();
+    const MAX_WAIT_MS = 15 * 60 * 1000; // 15 min por trecho (rede de segurança)
+    let outUrl = '';
+    for (;;) {
+      if (Date.now() - startedAt > MAX_WAIT_MS) {
+        throw new Error(`A geração${label ? ` (${label})` : ''} está demorando demais. Tenta de novo.`);
+      }
+      await sleep(3500 + Math.random() * 900);
+      let st: StatusData = null;
+      try {
+        st = await withRetry(async () => {
+          const res = await fetch(`/api/tools/lipsync/status?job=${encodeURIComponent(job)}`);
+          const json = (await res.json().catch(() => null)) as StatusData;
+          // 5xx = erro transitório de servidor → re-tenta (não é resposta final).
+          if (!res.ok && res.status >= 500) throw new Error(`status HTTP ${res.status}`);
+          // 4xx (ex.: token expirado) é definitivo → cai pro tratamento abaixo.
+          if (!res.ok) return json ?? { status: 'error', error: `erro ${res.status}` };
+          return json;
+        }, { tries: 4, baseDelayMs: 1000 });
+      } catch {
+        continue; // blip de rede no poll → tenta de novo no próximo ciclo
+      }
+      if (!st) continue;
+      if (st.status === 'done' && st.output_video_url) { outUrl = st.output_video_url; break; }
+      if (st.status === 'failed' || st.status === 'error') {
+        throw new Error(
+          (typeof st.error === 'string' && st.error) || `Falha ao gerar${label ? ` ${label}` : ''}.`,
+        );
+      }
+      // 'generating' → segue pollando
     }
-    // Download do resultado é idempotente → re-tenta à vontade.
-    const outUrl = data.output_video_url;
+
+    // ── 3. Download do resultado (idempotente → re-tenta à vontade) ──
     return withRetry(async () => {
       const r = await fetch(outUrl);
       if (!r.ok) throw new Error(`Falha ao baixar o resultado${label ? ` (${label})` : ''} (HTTP ${r.status}).`);
