@@ -244,7 +244,7 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
    * borda fina, highlight interno, sombra refinada. O brilho/cor aparece so
    * no hover — sem ruido visual no estado normal. */
   .av-cell {
-    @apply relative h-full w-full overflow-hidden rounded-[14px] border border-line-strong/70 text-left;
+    @apply relative h-full w-full overflow-hidden rounded-[16px] border border-line-strong/70 text-left;
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(0, 0, 0, 0.18));
     box-shadow:
@@ -362,7 +362,7 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
   }
   /* celula-placeholder do GRID de loading (estrutura antes das thumbs) */
   .av-skel-cell {
-    @apply relative h-full w-full overflow-hidden rounded-[14px] border border-line-strong/60;
+    @apply relative h-full w-full overflow-hidden rounded-[16px] border border-line-strong/60;
     background: linear-gradient(
       110deg,
       rgb(var(--bg-soft)) 8%,

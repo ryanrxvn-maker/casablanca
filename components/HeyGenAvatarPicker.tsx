@@ -194,6 +194,9 @@ function usePreWarmImages(urls: (string | null)[]) {
         const img = new Image();
         img.decoding = 'async';
         img.referrerPolicy = 'no-referrer';
+        // As ~8 primeiras (1a tela) vao com prioridade ALTA de rede pra
+        // aparecerem antes; o resto fica baixa pra nao competir com elas.
+        (img as any).fetchPriority = i < 8 ? 'high' : 'low';
         img.src = u;
       }
       if (i < todo.length) handle = ric(pump);
@@ -269,12 +272,12 @@ export function HeyGenAvatarPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Pre-warm so as thumbs da PRIMEIRA TELA do grid (≤30), nao as 130 — pre-
-  // aquecer todas disparava ~130 GETs+decodes no open e travava a abertura.
-  // O resto carrega sob demanda (loading="lazy" + content-visibility) quando
-  // o user scrolla, suave. Os looks (213+) tambem nao sao aquecidos aqui —
-  // cada grupo aquece os seus sob demanda quando abre (abaixo).
-  const groupThumbUrls = useMemo(() => groups.slice(0, 30).map((g) => g.thumb), [groups]);
+  // Pre-warm so as thumbs da PRIMEIRA TELA do grid (~16), nao as 130 nem 30 —
+  // com cards maiores cabem ~12 na 1a tela; aquecer 30 dividia a banda entre
+  // visiveis e invisiveis e deixava as visiveis MAIS lentas. Focar nas ~16
+  // primeiras (1a tela + 1 linha de folga) faz elas aparecerem mais rapido.
+  // O resto carrega sob demanda (loading="lazy" + content-visibility) no scroll.
+  const groupThumbUrls = useMemo(() => groups.slice(0, 16).map((g) => g.thumb), [groups]);
   usePreWarmImages(groupThumbUrls);
 
   // Filtro: busca em nome do AVATAR ou nome do LOOK.
@@ -454,7 +457,7 @@ export function HeyGenAvatarPicker({
               <div className="mono text-[9px] uppercase text-text-muted">{openGroup.looksCount} look{openGroup.looksCount > 1 ? 's' : ''}</div>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2.5 [perspective:1200px] sm:grid-cols-3">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2.5 [perspective:1200px]">
             {openGroup.looks.map((l, i) => {
               const isSelected = selected?.id === l.id;
               return (
@@ -466,7 +469,7 @@ export function HeyGenAvatarPicker({
                       setOpenGroupId(null);
                     }}
                     disabled={disabled}
-                    className={'group av-cell !rounded-[14px]' + (isSelected ? ' is-sel' : '')}
+                    className={'group av-cell' + (isSelected ? ' is-sel' : '')}
                   >
                     <ThumbWithFallback
                       primary={l.thumb}
@@ -498,7 +501,7 @@ export function HeyGenAvatarPicker({
       {/* Skeleton GRID no carregamento inicial — estrutura premium antes das
        *  thumbs chegarem (so quando ainda nao ha nenhum avatar). */}
       {(!inlineMode || !openGroup) && loading && groups.length === 0 ? (
-        <div className="mt-3 grid grid-cols-2 gap-3 px-0.5 sm:grid-cols-3 md:grid-cols-4">
+        <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(168px,1fr))] gap-3 px-0.5">
           {Array.from({ length: 12 }).map((_, i) => (
             <div
               key={i}
@@ -536,7 +539,14 @@ export function HeyGenAvatarPicker({
 
       {/* Grid de AVATARES (igual UI "Choose an Avatar" do HeyGen) */}
       {(!inlineMode || !openGroup) && filteredGroups.length > 0 ? (
-        <div className="mt-3 grid max-h-[520px] grid-cols-2 gap-3 overflow-y-auto overflow-x-hidden px-0.5 pb-1 pr-1 [perspective:1200px] sm:grid-cols-3 md:grid-cols-4">
+        <div
+          className={
+            'mt-3 grid grid-cols-[repeat(auto-fill,minmax(168px,1fr))] gap-3 px-0.5 pb-1 [perspective:1200px] ' +
+            // No popup (inlineMode) o scroll é do corpo do popup → grid flui sem
+            // segundo scrollbar. Na página cheia, o grid tem seu próprio scroll.
+            (inlineMode ? '' : 'max-h-[540px] overflow-y-auto overflow-x-hidden pr-1')
+          }
+        >
           {filteredGroups.map((g, i) => {
             const isSelectedGroup = selected?.groupId === g.id;
             // Fallbacks pro thumb do grupo: thumb do 1o look, 2o look, etc
@@ -561,7 +571,7 @@ export function HeyGenAvatarPicker({
                     fallbacks={fallbacks}
                     alt={g.name}
                     className="absolute inset-0 h-full w-full object-cover"
-                    eager={i < 6}
+                    eager={i < 8}
                     onAllFailed={reportThumbFailed}
                     withSkeleton
                   />
@@ -645,7 +655,7 @@ export function HeyGenAvatarPicker({
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 [perspective:1200px] sm:grid-cols-3">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3 [perspective:1200px]">
               {openGroup.looks.map((l, i) => {
                 const isSelected = selected?.id === l.id;
                 return (

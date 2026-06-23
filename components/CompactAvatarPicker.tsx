@@ -33,36 +33,48 @@ export function CompactAvatarPicker({
   const popRef = useRef<HTMLDivElement>(null);
   const display = selected ?? fallback ?? null;
 
-  const PANEL_W = 720;  // largura desejada
-  const PANEL_H = 540;  // altura desejada
+  const PANEL_W = 760;  // largura desejada
+  const PANEL_H = 560;  // altura desejada
 
+  // Posicionamento "flip + shift" (estilo Popper): a biblioteca SEMPRE abre com
+  // a altura cheia (maxH) e 100% visivel — nunca encolhe nem aparece cortada,
+  // esteja a task no topo, meio ou fim da pagina.
+  //  1) cabe inteira ABAIXO do gatilho?  abre abaixo.
+  //  2) senao, cabe inteira ACIMA?        abre acima.
+  //  3) senao (viewport apertado), escolhe o lado com mais espaco e DESLIZA
+  //     (clamp) pra dentro das margens — fica inteira na tela, grid rola dentro.
   const computePos = () => {
     const btn = btnRef.current;
     if (!btn) return;
     const r = btn.getBoundingClientRect();
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const width = Math.min(PANEL_W, vw - 24);
+    const MARGIN = 12;
     const SPACING = 8;
-    const spaceBelow = vh - r.bottom - SPACING;
-    const spaceAbove = r.top - SPACING;
-    const targetH = Math.min(PANEL_H, vh - 40);
+    const width = Math.min(PANEL_W, vw - MARGIN * 2);
+    const maxH = Math.min(PANEL_H, vh - MARGIN * 2);
+
+    const fitsBelow = vh - r.bottom - SPACING - MARGIN >= maxH;
+    const fitsAbove = r.top - SPACING - MARGIN >= maxH;
+
     let top: number;
-    let maxH: number;
     let placement: 'below' | 'above';
-    if (spaceBelow >= 320 || spaceBelow >= spaceAbove) {
+    if (fitsBelow) {
       placement = 'below';
-      maxH = Math.min(targetH, spaceBelow);
       top = r.bottom + SPACING;
-    } else {
+    } else if (fitsAbove) {
       placement = 'above';
-      maxH = Math.min(targetH, spaceAbove);
-      top = r.top - maxH - SPACING;
+      top = r.top - SPACING - maxH;
+    } else {
+      placement = vh - r.bottom >= r.top ? 'below' : 'above';
+      top = placement === 'below' ? r.bottom + SPACING : r.top - SPACING - maxH;
     }
-    if (top < 12) top = 12;
+    // clamp vertical — garante 100% dentro das margens em qualquer caso
+    top = Math.min(Math.max(top, MARGIN), Math.max(MARGIN, vh - MARGIN - maxH));
+
     let left = r.left + r.width / 2 - width / 2;
-    if (left + width > vw - 12) left = vw - width - 12;
-    if (left < 12) left = 12;
+    if (left + width > vw - MARGIN) left = vw - MARGIN - width;
+    if (left < MARGIN) left = MARGIN;
     setPos({ top, left, width, maxH, placement });
   };
 
