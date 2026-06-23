@@ -461,7 +461,7 @@ export function HeyGenAvatarPicker({
             {openGroup.looks.map((l, i) => {
               const isSelected = selected?.id === l.id;
               return (
-                <Tilt3D key={l.id} max={9} className="aspect-[3/4]">
+                <Tilt3D key={l.id} max={4} scale={false} className="aspect-[3/4]">
                   <button
                     type="button"
                     onClick={() => {
@@ -558,7 +558,7 @@ export function HeyGenAvatarPicker({
               // viewport SEM cortar o glow do hover/selecionado (a paint
               // containment so clipa descendentes, nao a box-shadow do proprio
               // elemento).
-              <Tilt3D key={g.id} max={9} className="aspect-square">
+              <Tilt3D key={g.id} max={4} scale={false} className="aspect-square">
                 <button
                   type="button"
                   onClick={() => setOpenGroupId(g.id)}
@@ -659,7 +659,7 @@ export function HeyGenAvatarPicker({
               {openGroup.looks.map((l, i) => {
                 const isSelected = selected?.id === l.id;
                 return (
-                  <Tilt3D key={l.id} max={9} className="aspect-[3/4]">
+                  <Tilt3D key={l.id} max={4} scale={false} className="aspect-[3/4]">
                     <button
                       type="button"
                       onClick={() => {
