@@ -57,9 +57,9 @@ const REPORT_CSS = `
   .ae-report{
     --ink:#16161d; --sub:#5f5f6d; --faint:#9a9aa8; --line:#ececf1;
     --violet:#6d4ee8; --paper:#ffffff;
-    width:210mm; min-height:297mm; background:var(--paper); color:var(--ink);
+    width:210mm; background:var(--paper); color:var(--ink);
     font-family:'Manrope',-apple-system,'Segoe UI',sans-serif;
-    display:flex; flex-direction:column; padding-bottom:24mm;
+    display:flex; flex-direction:column; padding-bottom:16mm;
   }
   .ae-report .topbar{ height:7px; background:#6d4ee8;
     background-image:linear-gradient(90deg,#8b6cf6,#6d4ee8 45%,#bcc98c); }
@@ -196,7 +196,6 @@ function reportMarkup(d: BudgetReportData, pixCardHtml: string): string {
       </div>
     </div>
     ${pixCardHtml}
-    <div class="spacer"></div>
     <div class="notes">
       <div class="nt">Condições</div>
       <ul>
@@ -314,22 +313,68 @@ export async function downloadBudgetReport(d: BudgetReportData): Promise<void> {
     const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
     const pageW = 210;
     const pageH = 297;
-    const imgW = pageW;
-    const imgH = (canvas.height * pageW) / canvas.width;
-    const data = canvas.toDataURL('image/png');
+    const SCALE = 2; // == html2canvas scale
 
-    if (imgH <= pageH + 0.5) {
-      pdf.addImage(data, 'PNG', 0, 0, imgW, imgH, undefined, 'FAST');
-    } else {
-      // Conteúdo maior que uma página → fatia em múltiplas A4.
-      let heightLeft = imgH;
-      let position = 0;
-      while (heightLeft > 0) {
-        pdf.addImage(data, 'PNG', 0, position, imgW, imgH, undefined, 'FAST');
-        heightLeft -= pageH;
-        position -= pageH;
-        if (heightLeft > 0.5) pdf.addPage();
+    // Geometria em CSS px (o nó tem 210mm de largura).
+    const rect = page.getBoundingClientRect();
+    const cssWidth = rect.width;
+    const mmPerPx = pageW / cssWidth;
+    const pageHeightCss = pageH / mmPerPx; // altura de 1 A4 em px
+    const totalCss = rect.height;
+    const nodeTop = rect.top;
+
+    // Bordas onde é SEGURO cortar (fim de cada bloco atômico, em ordem).
+    // Nunca corta no meio de uma linha de AD, do total ou do card PIX.
+    const bottomOf = (el: Element) => el.getBoundingClientRect().bottom - nodeTop;
+    const breaks: number[] = [];
+    Array.from(page.children).forEach((child) => {
+      if (child.tagName === 'TABLE') {
+        const thead = child.querySelector('thead');
+        if (thead) breaks.push(bottomOf(thead));
+        child.querySelectorAll('tbody tr').forEach((tr) => breaks.push(bottomOf(tr)));
+      } else {
+        breaks.push(bottomOf(child));
       }
+    });
+    breaks.push(totalCss); // fim real do documento (inclui o padding inferior)
+    const boundaries = Array.from(new Set(breaks.map((b) => Math.round(b))))
+      .filter((b) => b > 0)
+      .sort((a, b) => a - b);
+
+    // Monta as páginas: cada uma vai até a última borda que ainda cabe.
+    const pages: Array<[number, number]> = [];
+    let start = 0;
+    const EPS = 1;
+    while (start < totalCss - EPS) {
+      const limit = start + pageHeightCss;
+      let cut = -1;
+      for (const b of boundaries) {
+        if (b > start + EPS && b <= limit + EPS) cut = b;
+      }
+      // Bloco maior que uma página inteira → corte rígido (fallback raro).
+      if (cut < 0) cut = Math.min(limit, totalCss);
+      pages.push([start, cut]);
+      start = cut;
+    }
+    if (pages.length === 0) pages.push([0, totalCss]);
+
+    // Recorta cada página numa canvas própria → imagem nítida, sem sobra.
+    for (let i = 0; i < pages.length; i++) {
+      const [a, b] = pages[i];
+      const srcY = Math.round(a * SCALE);
+      const srcH = Math.min(Math.round((b - a) * SCALE), canvas.height - srcY);
+      const slice = document.createElement('canvas');
+      slice.width = canvas.width;
+      slice.height = srcH;
+      const ctx = slice.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, slice.width, slice.height);
+        ctx.drawImage(canvas, 0, srcY, canvas.width, srcH, 0, 0, canvas.width, srcH);
+      }
+      const sliceMm = (srcH / SCALE) * mmPerPx;
+      if (i > 0) pdf.addPage();
+      pdf.addImage(slice.toDataURL('image/png'), 'PNG', 0, 0, pageW, sliceMm, undefined, 'FAST');
     }
 
     const nome = d.cliente ? slug(d.cliente) : d.docNumber;
