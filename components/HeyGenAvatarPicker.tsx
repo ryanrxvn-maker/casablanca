@@ -419,14 +419,25 @@ export function HeyGenAvatarPicker({
           })()}
         </div>
       ) : (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px]">
-          <span className="inline-flex items-center gap-1 rounded-full border border-violet/30 bg-violet/10 px-2 py-0.5 font-semibold tracking-wide text-violet">
-            <span className="mono tabular-nums">{filteredGroups.length}</span>
-            <span className="mono tabular-nums text-text-muted">/{groups.length}</span> avatares
-          </span>
-          <span className="inline-flex items-center gap-1 rounded-full border border-line-strong bg-bg-soft/50 px-2 py-0.5 tracking-wide text-text-muted">
-            <span className="mono tabular-nums">{totalLooks}</span> looks
-          </span>
+        <div className="mt-2.5 flex items-center gap-3">
+          {/* Estatística editorial: número como herói (mono tabular), rótulo
+           *  minúsculo em caixa-alta espaçada, divisor fino. Sem pills. */}
+          <div className="flex items-baseline gap-1.5">
+            {filteredGroups.length !== groups.length ? (
+              <span className="flex items-baseline gap-1">
+                <span className="mono tabular-nums text-[13px] font-semibold leading-none text-text">{filteredGroups.length}</span>
+                <span className="mono tabular-nums text-[10px] leading-none text-text-dim">de {groups.length}</span>
+              </span>
+            ) : (
+              <span className="mono tabular-nums text-[13px] font-semibold leading-none text-text">{groups.length}</span>
+            )}
+            <span className="text-[9px] font-medium uppercase tracking-[0.18em] text-text-muted">avatares</span>
+          </div>
+          <span className="h-2.5 w-px bg-line-strong/80" aria-hidden />
+          <div className="flex items-baseline gap-1.5">
+            <span className="mono tabular-nums text-[13px] font-semibold leading-none text-text">{totalLooks}</span>
+            <span className="text-[9px] font-medium uppercase tracking-[0.18em] text-text-muted">looks</span>
+          </div>
         </div>
       )}
 
