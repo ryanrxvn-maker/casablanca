@@ -1,10 +1,23 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   type LibraryAvatar,
   type LibraryAvatarGroup,
 } from '@/lib/heygen-extension-bridge';
+
+/**
+ * content-visibility: o browser PULA layout/paint/decode das celulas que
+ * estao FORA do viewport do grid (130+ avatares = 130 botoes + imgs). Sem
+ * isso, abrir o picker pinta as 130 de uma vez = engasgo. contain-intrinsic-size
+ * reserva ~altura da celula ate ela entrar em tela (`auto` lembra o tamanho
+ * real depois do 1o render → sem pulo de scroll). Degrada sozinho (propriedade
+ * ignorada) em browser antigo, sem bug.
+ */
+const GRID_CELL_CV: CSSProperties = {
+  contentVisibility: 'auto',
+  containIntrinsicSize: 'auto 140px',
+};
 import {
   getLibrarySnapshot,
   reloadLibrary,
@@ -248,21 +261,27 @@ export function HeyGenAvatarPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Pre-warm so as thumbs dos GRUPOS (o grid que aparece no open). Os looks
-  // (213+) NAO sao pre-aquecidos aqui — eram a causa do storm de ~300 GETs no
-  // open. Cada grupo aquece seus looks sob demanda quando abre (abaixo).
-  const groupThumbUrls = useMemo(() => groups.map((g) => g.thumb), [groups]);
+  // Pre-warm so as thumbs da PRIMEIRA TELA do grid (≤30), nao as 130 — pre-
+  // aquecer todas disparava ~130 GETs+decodes no open e travava a abertura.
+  // O resto carrega sob demanda (loading="lazy" + content-visibility) quando
+  // o user scrolla, suave. Os looks (213+) tambem nao sao aquecidos aqui —
+  // cada grupo aquece os seus sob demanda quando abre (abaixo).
+  const groupThumbUrls = useMemo(() => groups.slice(0, 30).map((g) => g.thumb), [groups]);
   usePreWarmImages(groupThumbUrls);
 
-  // Filtro: busca em nome do AVATAR ou nome do LOOK
+  // Filtro: busca em nome do AVATAR ou nome do LOOK.
+  // useDeferredValue: a digitacao no input fica fluida (prioridade alta) e o
+  // re-filtro/re-render das 130 celulas roda em prioridade BAIXA, sem travar
+  // a tecla. Sem isso, cada tecla reconciliava as 130 na hora = engasgo.
   const q = query.trim().toLowerCase();
+  const deferredQ = useDeferredValue(q);
   const filteredGroups = useMemo(() => {
-    if (!q) return groups;
+    if (!deferredQ) return groups;
     return groups.filter((g) => {
-      if (g.name.toLowerCase().includes(q)) return true;
-      return g.looks.some((l) => l.name.toLowerCase().includes(q));
+      if (g.name.toLowerCase().includes(deferredQ)) return true;
+      return g.looks.some((l) => l.name.toLowerCase().includes(deferredQ));
     });
-  }, [groups, q]);
+  }, [groups, deferredQ]);
 
   const totalLooks = useMemo(
     () => groups.reduce((acc, g) => acc + g.looksCount, 0),
@@ -429,6 +448,7 @@ export function HeyGenAvatarPicker({
                 type="button"
                 onClick={() => setOpenGroupId(g.id)}
                 disabled={disabled}
+                style={GRID_CELL_CV}
                 className={
                   'group relative aspect-square overflow-hidden rounded-[12px] border text-left transition-all duration-200 hover:scale-[1.02] active:scale-[0.99] ' +
                   (isSelectedGroup
