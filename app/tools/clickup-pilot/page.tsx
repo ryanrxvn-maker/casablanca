@@ -8580,9 +8580,19 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                                   ▶ YouTube
                                                 </a>
                                               ) : slot.imageThumb ? (
-                                                <span className="mono mt-1.5 inline-flex items-center gap-1 rounded-md border border-fuchsia-400/45 bg-fuchsia-500/12 px-2 py-1 text-[9.5px] font-bold uppercase tracking-widest text-fuchsia-200" title="Avatar identificado por um print colado no doc — escolha o avatar da biblioteca que corresponde a essa imagem">
-                                                  🖼 imagem do doc
-                                                </span>
+                                                <a
+                                                  href={slot.imageThumb}
+                                                  download={`print-${slot.role.toLowerCase().replace(/[^a-z0-9]+/gi, '-')}.${slot.imageThumb.startsWith('data:image/png') ? 'png' : slot.imageThumb.startsWith('data:image/webp') ? 'webp' : 'jpg'}`}
+                                                  target="_blank"
+                                                  rel="noopener noreferrer"
+                                                  className="mono mt-1.5 inline-flex items-center gap-1 rounded-md border border-fuchsia-400/45 bg-fuchsia-500/12 px-2 py-1 text-[9.5px] font-bold uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/22 hover:border-fuchsia-400/65 transition"
+                                                  title="Baixar o print do avatar colado no doc — use de referência pra escolher o avatar da biblioteca"
+                                                >
+                                                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                    <path d="M12 3v12m0 0l-4-4m4 4l4-4M5 21h14" />
+                                                  </svg>
+                                                  🖼 Baixar print
+                                                </a>
                                               ) : (
                                                 <span className="mono mt-1.5 inline-flex items-center gap-1 rounded-md border border-white/12 bg-white/[0.04] px-2 py-1 text-[9.5px] uppercase tracking-widest text-text-muted">
                                                   sem link
