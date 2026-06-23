@@ -14,7 +14,7 @@ const VPM_PRESETS = [50, 80, 100, 150, 200, 300] as const;
 
 type AdRow = { id: string; time: string };
 
-type SavedPix = { id: string; key: string; name: string; city: string };
+type SavedPix = { id: string; key: string };
 
 const PIX_STORE_KEY = 'calculadora:pixSaved';
 
@@ -68,8 +68,6 @@ export default function CalculadoraPage() {
   );
   const [pixOn, setPixOn] = useToolState<boolean>('calculadora:pixOn', false);
   const [pixKey, setPixKey] = useToolState<string>('calculadora:pixKey', '');
-  const [pixNome, setPixNome] = useToolState<string>('calculadora:pixNome', '');
-  const [pixCidade, setPixCidade] = useToolState<string>('calculadora:pixCidade', '');
 
   const vpm = parseFloat(valorPorMinuto.replace(',', '.')) || 0;
   const desconto = Math.max(0, Math.min(100, parseFloat(descontoPct.replace(',', '.')) || 0));
@@ -118,24 +116,15 @@ export default function CalculadoraPage() {
   const salvarChavePix = () => {
     const key = pixKey.trim();
     if (!key) return;
-    const entry: SavedPix = {
-      id: `pix_${Date.now()}`,
-      key,
-      name: pixNome.trim(),
-      city: pixCidade.trim(),
-    };
-    // Dedupe por chave (atualiza nome/cidade se já existir).
+    const entry: SavedPix = { id: `pix_${Date.now()}`, key };
+    // Dedupe por chave.
     const without = savedPix.filter(
       (e) => e.key.toLowerCase() !== key.toLowerCase(),
     );
     persistSaved([entry, ...without].slice(0, 12));
   };
 
-  const aplicarChavePix = (e: SavedPix) => {
-    setPixKey(e.key);
-    setPixNome(e.name);
-    setPixCidade(e.city);
-  };
+  const aplicarChavePix = (e: SavedPix) => setPixKey(e.key);
 
   const removerChavePix = (id: string) =>
     persistSaved(savedPix.filter((e) => e.id !== id));
@@ -181,12 +170,7 @@ export default function CalculadoraPage() {
         logoUrl: `${window.location.origin}/auto-edit-logo@256.png`,
         pix:
           pixOn && pixKey.trim()
-            ? {
-                key: pixKey.trim(),
-                name: pixNome.trim(),
-                city: pixCidade.trim(),
-                amount: total,
-              }
+            ? { key: pixKey.trim(), name: '', city: '', amount: total }
             : undefined,
       });
     } catch (err) {
@@ -378,12 +362,12 @@ export default function CalculadoraPage() {
                             className="max-w-[180px] truncate"
                             title={e.key}
                           >
-                            {e.name || e.key}
+                            {e.key}
                           </button>
                           <button
                             type="button"
                             onClick={() => removerChavePix(e.id)}
-                            aria-label={`Remover chave ${e.name || e.key}`}
+                            aria-label={`Remover chave ${e.key}`}
                             className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-text-muted/70 transition hover:bg-red-500/20 hover:text-red-300"
                           >
                             <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
@@ -426,44 +410,9 @@ export default function CalculadoraPage() {
                   </button>
                 </div>
               </label>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <label className="block">
-                  <span
-                    className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
-                    style={{ fontFamily: 'var(--font-tech)' }}
-                  >
-                    Nome do recebedor <span className="opacity-50">(opcional)</span>
-                  </span>
-                  <input
-                    inputMode="text"
-                    placeholder="Ex: Pedro Souza"
-                    className="input-field mt-2"
-                    value={pixNome}
-                    onChange={(e) => setPixNome(e.target.value)}
-                    autoComplete="off"
-                  />
-                </label>
-                <label className="block">
-                  <span
-                    className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
-                    style={{ fontFamily: 'var(--font-tech)' }}
-                  >
-                    Cidade <span className="opacity-50">(opcional)</span>
-                  </span>
-                  <input
-                    inputMode="text"
-                    placeholder="Ex: São Paulo"
-                    className="input-field mt-2"
-                    value={pixCidade}
-                    onChange={(e) => setPixCidade(e.target.value)}
-                    autoComplete="off"
-                  />
-                </label>
-              </div>
               <p className="text-[11px] text-text-muted">
-                Só a chave já basta — nome e cidade são opcionais. O QR já vem com o valor
-                total ({formatBRL(total)}) preenchido. Tudo fica só no seu navegador, nada é
-                enviado pra servidor.
+                O QR já vem com o valor total ({formatBRL(total)}) preenchido. A chave fica
+                só no seu navegador — nada é enviado pra servidor.
               </p>
             </div>
           ) : null}
