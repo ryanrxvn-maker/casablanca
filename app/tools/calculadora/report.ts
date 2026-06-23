@@ -63,7 +63,7 @@ const REPORT_CSS = `
   }
   .ae-report .topbar{ height:7px; background:#6d4ee8;
     background-image:linear-gradient(90deg,#8b6cf6,#6d4ee8 45%,#bcc98c); }
-  .ae-report .head{ display:flex; justify-content:space-between; align-items:flex-start; padding:24mm 18mm 0; }
+  .ae-report .head{ display:flex; justify-content:space-between; align-items:flex-start; padding:16mm 18mm 0; }
   .ae-report .brand{ display:flex; align-items:center; gap:13px; }
   .ae-report .brand img{ width:50px; height:50px; object-fit:contain; }
   .ae-report .wm{ font-family:'Fraunces',serif; font-weight:700; font-size:25px; letter-spacing:-.01em; line-height:1; color:var(--ink); }
@@ -80,7 +80,7 @@ const REPORT_CSS = `
   .ae-report .from{ text-align:right; }
   .ae-report .from-name{ font-size:12px; font-weight:700; color:var(--ink); }
   .ae-report .from-line{ font-size:10px; color:var(--sub); margin-top:3px; }
-  .ae-report .section-label{ font-size:9px; font-weight:800; letter-spacing:.2em; text-transform:uppercase; color:var(--faint); padding:26px 18mm 0; }
+  .ae-report .section-label{ font-size:9px; font-weight:800; letter-spacing:.2em; text-transform:uppercase; color:var(--faint); padding:20px 18mm 0; }
   .ae-report table{ width:calc(100% - 36mm); margin:8px 18mm 0; border-collapse:collapse; }
   .ae-report thead th{ font-size:8.5px; font-weight:800; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); text-align:left; padding:9px 12px; border-bottom:1.5px solid var(--ink); }
   .ae-report thead th.r{ text-align:right; }
@@ -91,7 +91,7 @@ const REPORT_CSS = `
   .ae-report .cell-dur{ text-align:right; color:var(--sub); font-size:12px; width:26%; }
   .ae-report .cell-val{ text-align:right; font-weight:700; font-size:12.5px; color:var(--ink); width:26%; }
   .ae-report .mono{ font-family:'JetBrains Mono',ui-monospace,monospace; }
-  .ae-report .summary-wrap{ display:flex; justify-content:flex-end; padding:18px 18mm 0; }
+  .ae-report .summary-wrap{ display:flex; justify-content:flex-end; padding:14px 18mm 0; }
   .ae-report .summary{ width:54%; }
   .ae-report .sum-row{ display:flex; justify-content:space-between; align-items:center; font-size:11.5px; color:var(--sub); padding:7px 2px; }
   .ae-report .sum-row span:first-child{ font-weight:600; }
@@ -102,7 +102,7 @@ const REPORT_CSS = `
   .ae-report .total-box .tl{ font-size:9.5px; font-weight:800; letter-spacing:.22em; text-transform:uppercase; opacity:.85; }
   .ae-report .total-box .tl small{ display:block; font-size:8.5px; letter-spacing:.16em; opacity:.78; font-weight:700; margin-top:4px; }
   .ae-report .total-box .tv{ font-family:'Fraunces',serif; font-weight:700; font-size:30px; letter-spacing:-.01em; }
-  .ae-report .pix{ display:flex; gap:16px; align-items:center; margin:22px 18mm 0; padding:14px 16px; border:1px solid var(--line); border-radius:14px; background:#fbfbfd; }
+  .ae-report .pix{ display:flex; gap:16px; align-items:center; margin:16px 18mm 0; padding:14px 16px; border:1px solid var(--line); border-radius:14px; background:#fbfbfd; }
   .ae-report .pix-qr{ width:104px; height:104px; flex:0 0 104px; border:1px solid var(--line); border-radius:10px; background:#fff; padding:6px; }
   .ae-report .pix-qr img{ width:100%; height:100%; display:block; }
   .ae-report .pix-info{ flex:1; min-width:0; }
@@ -112,7 +112,7 @@ const REPORT_CSS = `
   .ae-report .pix-cc-lbl{ font-size:8px; font-weight:800; letter-spacing:.18em; text-transform:uppercase; color:var(--faint); margin:7px 0 3px; }
   .ae-report .pix-cc{ font-size:7.5px; line-height:1.5; color:var(--sub); word-break:break-all; background:#fff; border:1px solid var(--line); border-radius:8px; padding:6px 8px; }
   .ae-report .spacer{ flex:1; min-height:18px; }
-  .ae-report .notes{ margin:30px 18mm 0; padding:14px 16px; border:1px solid var(--line); border-radius:12px; background:#fbfbfd; }
+  .ae-report .notes{ margin:20px 18mm 0; padding:14px 16px; border:1px solid var(--line); border-radius:12px; background:#fbfbfd; }
   .ae-report .notes .nt{ font-size:8.5px; font-weight:800; letter-spacing:.2em; text-transform:uppercase; color:var(--faint); margin-bottom:7px; }
   .ae-report .notes ul{ padding-left:16px; }
   .ae-report .notes li{ font-size:10px; color:var(--sub); line-height:1.8; }
@@ -320,14 +320,14 @@ export async function downloadBudgetReport(d: BudgetReportData): Promise<void> {
     const cssWidth = rect.width;
     const mmPerPx = pageW / cssWidth;
     const pageHeightCss = pageH / mmPerPx; // altura de 1 A4 em px
-    const totalCss = rect.height;
     const nodeTop = rect.top;
+    const children = Array.from(page.children);
 
     // Bordas onde é SEGURO cortar (fim de cada bloco atômico, em ordem).
     // Nunca corta no meio de uma linha de AD, do total ou do card PIX.
     const bottomOf = (el: Element) => el.getBoundingClientRect().bottom - nodeTop;
     const breaks: number[] = [];
-    Array.from(page.children).forEach((child) => {
+    children.forEach((child) => {
       if (child.tagName === 'TABLE') {
         const thead = child.querySelector('thead');
         if (thead) breaks.push(bottomOf(thead));
@@ -336,27 +336,35 @@ export async function downloadBudgetReport(d: BudgetReportData): Promise<void> {
         breaks.push(bottomOf(child));
       }
     });
-    breaks.push(totalCss); // fim real do documento (inclui o padding inferior)
+
+    // Fim REAL do conteúdo = base do último bloco (rodapé) + respiro pequeno.
+    // Ignora o padding inferior do CSS pra não vazar uma página em branco.
+    const lastEl = children[children.length - 1];
+    const docEnd = lastEl
+      ? Math.min(rect.height, bottomOf(lastEl) + 36)
+      : rect.height;
+    breaks.push(docEnd);
+
     const boundaries = Array.from(new Set(breaks.map((b) => Math.round(b))))
-      .filter((b) => b > 0)
+      .filter((b) => b > 0 && b <= Math.round(docEnd))
       .sort((a, b) => a - b);
 
     // Monta as páginas: cada uma vai até a última borda que ainda cabe.
     const pages: Array<[number, number]> = [];
     let start = 0;
     const EPS = 1;
-    while (start < totalCss - EPS) {
+    while (start < docEnd - EPS) {
       const limit = start + pageHeightCss;
       let cut = -1;
       for (const b of boundaries) {
         if (b > start + EPS && b <= limit + EPS) cut = b;
       }
       // Bloco maior que uma página inteira → corte rígido (fallback raro).
-      if (cut < 0) cut = Math.min(limit, totalCss);
+      if (cut < 0) cut = Math.min(limit, docEnd);
       pages.push([start, cut]);
       start = cut;
     }
-    if (pages.length === 0) pages.push([0, totalCss]);
+    if (pages.length === 0) pages.push([0, docEnd]);
 
     // Recorta cada página numa canvas própria → imagem nítida, sem sobra.
     for (let i = 0; i < pages.length; i++) {
