@@ -57,6 +57,27 @@ type QueueItem = {
 
 const MAX_QUEUE = 10;
 
+// Teto de tamanho. A decupagem roda 100% no navegador (ffmpeg.wasm carrega o
+// arquivo inteiro na memória), e o WebAssembly tem um teto rígido (~2 GB num
+// único bloco). Acima de ~1.5 GB o ffmpeg fica sem folga pra trabalhar e
+// estoura no meio. Bloqueamos no upload com recado humano em vez de deixar o
+// cliente descobrir com um "File could not be read! Code=-1".
+const MAX_FILE_MB = 1536; // 1.5 GB
+const MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024;
+
+const TOO_BIG_MSG =
+  `Esse vídeo é muito pesado pra processar aqui no navegador (máx ${(MAX_FILE_MB / 1024).toFixed(1).replace('.0', '')} GB). ` +
+  `Reduz o peso na ferramenta Compressor primeiro e tenta de novo.`;
+
+// Traduz falhas técnicas do ffmpeg/navegador num recado que o cliente entende.
+function friendlyError(e: unknown): string {
+  const raw = (e as Error)?.message || '';
+  if (/could not be read|out of memory|memory|allocation|RangeError|Aborted|Maximum call/i.test(raw)) {
+    return TOO_BIG_MSG;
+  }
+  return raw || 'Não consegui processar esse arquivo. Tenta de novo.';
+}
+
 function isVideoFile(file: File): boolean {
   if (file.type.startsWith('video/')) return true;
   return /\.(mp4|webm|mov|mkv|avi)$/i.test(file.name);
@@ -111,11 +132,15 @@ export default function DecupagemPage() {
     setQueue((prev) => {
       const room = MAX_QUEUE - prev.length;
       if (room <= 0) return prev;
-      const accepted = files.slice(0, room).map((f) => ({
-        id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        file: f,
-        status: 'pending' as QueueStatus,
-      }));
+      const accepted = files.slice(0, room).map((f) => {
+        const tooBig = f.size > MAX_FILE_BYTES;
+        return {
+          id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          file: f,
+          status: (tooBig ? 'error' : 'pending') as QueueStatus,
+          error: tooBig ? TOO_BIG_MSG : undefined,
+        };
+      });
       return [...prev, ...accepted];
     });
   }
@@ -219,6 +244,11 @@ export default function DecupagemPage() {
       for (const item of queue) {
         if (cancelRef.current) break;
         if (item.status === 'done') continue; // já processado, pula
+        if (item.file.size > MAX_FILE_BYTES) {
+          // Arquivo grande demais pro navegador — nem tenta carregar.
+          patchItem(item.id, { status: 'error', error: TOO_BIG_MSG, stage: undefined, progress: null });
+          continue;
+        }
         patchItem(item.id, { status: 'processing', stage: 'Iniciando...', progress: null, error: undefined });
         try {
           const result = await processOne(
@@ -234,7 +264,7 @@ export default function DecupagemPage() {
           }
           patchItem(item.id, {
             status: 'error',
-            error: (e as Error)?.message || 'Falha ao processar.',
+            error: friendlyError(e),
             stage: undefined,
             progress: null,
           });
@@ -298,7 +328,7 @@ export default function DecupagemPage() {
           n={1}
           icon={<IconStepUpload size={18} />}
           title={`Solta os arquivos (até ${MAX_QUEUE})`}
-          hint="MP3, WAV, MP4, WEBM ou MOV — vários de uma vez"
+          hint={`MP3, WAV, MP4, WEBM ou MOV — vários de uma vez · até ${(MAX_FILE_MB / 1024).toFixed(1).replace('.0', '')} GB cada`}
           hue="rgba(163,230,53,0.4)"
         >
           <ToolDropzone
