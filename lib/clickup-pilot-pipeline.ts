@@ -19,7 +19,7 @@
  */
 
 import { decodeAudioRobust, detectSilences } from './audio-engine';
-import { concatAvatarParts, concatVideosFast, cutVideoSegments, muxAudioIntoVideo, extractAudio, prepareVoiceForDecupagem } from './ffmpeg-worker';
+import { concatAvatarParts, concatVideosFast, cutVideoSegments, muxAudioIntoVideo, extractAudio, prepareVoiceForDecupagem, cancelFFmpeg } from './ffmpeg-worker';
 import { camuflar } from './camuflagem';
 
 export type AssembledPart = {
@@ -167,8 +167,28 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   const withTimeout = <T,>(p: Promise<T>, ms: number, label: string): Promise<T> =>
     Promise.race([
       p,
-      new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`${label} timeout ${ms / 1000}s`)), ms)),
+      new Promise<T>((_, rej) => setTimeout(() => {
+        // ffmpeg-wasm TRAVOU no worker. CRÍTICO: mata o worker (cancelFFmpeg) pra
+        // a PRÓXIMA op — e o RETOMAR — começarem com instância LIMPA. Sem isso a
+        // instância poisoned fazia TODA op seguinte (resto do nivelamento, concat,
+        // decupagem) travar também → a task ficava presa em "regulando" pra sempre
+        // e o RETOMAR re-travava no mesmo ponto (user reportou 2026-06-23). O
+        // getFFmpeg() reinicializa sozinho na próxima chamada. Pipeline é serial,
+        // então matar a instância aqui não afeta nenhuma outra op em andamento.
+        try { cancelFFmpeg(); } catch { /* ignora */ }
+        rej(new Error(`${label} timeout ${ms / 1000}s`));
+      }, ms)),
     ]);
+
+  // Timeout GENEROSO p/ concat (proporcional ao tamanho total) — nunca mata um
+  // re-encode legítimo (mesmo de montagem grande), só pega um HANG infinito do
+  // ffmpeg-wasm. fast=remux (rápido); slow=re-encode (lento). Pisos altos.
+  const concatTimeoutMs = (blobs: Blob[], slow: boolean): number => {
+    const mb = blobs.reduce((s, b) => s + (b?.size || 0), 0) / (1024 * 1024);
+    return slow
+      ? Math.max(600_000, Math.round(mb * 15_000))   // re-encode: 15s/MB, piso 10min
+      : Math.max(180_000, Math.round(mb * 4_000));    // remux: 4s/MB, piso 3min
+  };
 
   // Regula a voz de UM clipe a -16 LUFS: denoise (limpa hiss/ruído) +
   // nivelamento transparente (loudnorm linear, perfil 'natural' SEM speechnorm
@@ -287,13 +307,13 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     try {
       const tFast = Date.now();
       try {
-        assembled = await concatVideosFast(leveledBlobs);
+        assembled = await withTimeout(concatVideosFast(leveledBlobs), concatTimeoutMs(leveledBlobs, false), `concat-fast ${filename}`);
         usedFastPath = true;
         console.log(`[clickup-pilot-pipeline] assemble ${filename}: FAST OK ${(assembled.size/(1024*1024)).toFixed(1)}MB em ${((Date.now()-tFast)/1000).toFixed(1)}s`);
       } catch (fastErr) {
         console.warn(`[clickup-pilot-pipeline] assemble ${filename}: fast FALHOU (${(fastErr as Error)?.message?.slice(0,80)}), tentando re-encode...`);
         const tSlow = Date.now();
-        assembled = await concatAvatarParts(leveledBlobs);
+        assembled = await withTimeout(concatAvatarParts(leveledBlobs), concatTimeoutMs(leveledBlobs, true), `concat-slow ${filename}`);
         console.log(`[clickup-pilot-pipeline] assemble ${filename}: SLOW OK ${(assembled.size/(1024*1024)).toFixed(1)}MB em ${((Date.now()-tSlow)/1000).toFixed(1)}s`);
       }
     } catch (e) {
@@ -400,10 +420,10 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       if (decupadoParts.length === 1) {
         dec = decupadoParts[0];
       } else if (cutCount === leveled.length) {
-        try { dec = await concatVideosFast(decupadoParts); }
-        catch { dec = await concatAvatarParts(decupadoParts); }
+        try { dec = await withTimeout(concatVideosFast(decupadoParts), concatTimeoutMs(decupadoParts, false), `decup-concat-fast ${item.filename}`); }
+        catch { dec = await withTimeout(concatAvatarParts(decupadoParts), concatTimeoutMs(decupadoParts, true), `decup-concat-slow ${item.filename}`); }
       } else {
-        dec = await concatAvatarParts(decupadoParts);
+        dec = await withTimeout(concatAvatarParts(decupadoParts), concatTimeoutMs(decupadoParts, true), `decup-concat ${item.filename}`);
       }
       item.decupado = dec;
       console.log(`[clickup-pilot-pipeline] decup ${item.filename}: OK ${cutCount}/${leveled.length} partes cortadas · ${(dec.size / (1024 * 1024)).toFixed(1)}MB`);
