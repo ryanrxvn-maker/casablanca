@@ -42,7 +42,10 @@ type AudioFmt = 'wav' | 'mp3';
 
 type Result =
   | { kind: 'video'; blob: Blob; url: string; originalDur: number; newDur: number }
-  | { kind: 'audio'; blob: Blob; url: string; format: AudioFmt; originalDur: number; newDur: number };
+  | { kind: 'audio'; blob: Blob; url: string; format: AudioFmt; originalDur: number; newDur: number }
+  // Resultado processado NO SERVIDOR (arquivo grande): não temos o blob, só a
+  // URL de download direto do worker (Content-Disposition força o nome).
+  | { kind: 'server'; downloadUrl: string; outputKind: OutputKind; originalDur: number; newDur: number };
 
 type QueueStatus = 'pending' | 'processing' | 'done' | 'error';
 type QueueItem = {
@@ -64,6 +67,12 @@ const MAX_QUEUE = 10;
 // cliente descobrir com um "File could not be read! Code=-1".
 const MAX_FILE_MB = 1536; // 1.5 GB
 const MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024;
+
+// Acima deste tamanho, o arquivo NÃO é processado no navegador (ffmpeg-wasm
+// estoura a memória). Vai pro SERVIDOR (Modal + ffmpeg nativo), que aguenta até
+// 1.5 GB sempre e devolve um MP4 íntegro. Abaixo disso fica no navegador
+// (instantâneo e sem custo). Só pra contas pagas (servidor tem custo).
+const SERVER_THRESHOLD_BYTES = 200 * 1024 * 1024; // 200 MB
 
 const TOO_BIG_MSG =
   `Esse vídeo é muito pesado pra processar aqui no navegador (máx ${(MAX_FILE_MB / 1024).toFixed(1).replace('.0', '')} GB). ` +
@@ -107,6 +116,57 @@ function computeSpeechSegments(
   return segs.filter((s) => s.end - s.start > 0.05);
 }
 
+function fileExt(name: string): string {
+  const m = /\.([a-zA-Z0-9]+)$/.exec(name);
+  return (m ? m[1] : 'mp4').toLowerCase();
+}
+
+// Upload direto pro worker Modal com progresso (XHR — fetch não dá progresso de
+// upload). `ticketBase` = { base, ticket } vindos da nossa rota /ticket.
+function uploadToModal(
+  base: string,
+  ticket: string,
+  file: File,
+  onProgress: (ratio: number) => void,
+  isCancelled: () => boolean,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const ext = fileExt(file.name);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${base}/up?ext=${encodeURIComponent(ext)}`);
+    xhr.setRequestHeader('X-Decup-Ticket', ticket);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const j = JSON.parse(xhr.responseText);
+          if (j?.id) return resolve(j.id as string);
+          reject(new Error('Resposta de upload inválida.'));
+        } catch {
+          reject(new Error('Resposta de upload inválida.'));
+        }
+      } else {
+        reject(new Error(`Falha no envio (HTTP ${xhr.status}).`));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Falha de rede no envio pro servidor.'));
+    xhr.onabort = () => reject(new Error('CANCELLED_BY_USER'));
+    // Cancelamento cooperativo.
+    const timer = setInterval(() => {
+      if (isCancelled()) {
+        clearInterval(timer);
+        try { xhr.abort(); } catch { /* noop */ }
+      }
+    }, 500);
+    xhr.onloadend = () => clearInterval(timer);
+    xhr.send(file);
+  });
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export default function DecupagemPage() {
   const tier = useTier();
   const isFree = tier === 'free';
@@ -145,17 +205,88 @@ export default function DecupagemPage() {
     });
   }
 
+  function revokeResult(r?: Result) {
+    if (r && 'url' in r) URL.revokeObjectURL(r.url);
+  }
+
   function removeItem(id: string) {
     setQueue((prev) => {
       const it = prev.find((q) => q.id === id);
-      if (it?.result) URL.revokeObjectURL(it.result.url);
+      revokeResult(it?.result);
       return prev.filter((q) => q.id !== id);
     });
   }
 
   function clearQueue() {
-    queue.forEach((q) => q.result && URL.revokeObjectURL(q.result.url));
+    queue.forEach((q) => revokeResult(q.result));
     setQueue([]);
+  }
+
+  // Processa UM arquivo grande NO SERVIDOR (Modal + ffmpeg nativo). Sobe direto
+  // pro worker (ticket descartável), dispara o job e acompanha por polling.
+  async function processOnServer(
+    file: File,
+    outKind: OutputKind,
+    onStage: (s: string) => void,
+    onProgress: (r: number | null) => void,
+  ): Promise<Result> {
+    onStage('Preparando envio...');
+    const tRes = await fetch('/api/tools/decupagem/ticket', { method: 'POST' });
+    if (!tRes.ok) {
+      const j = await tRes.json().catch(() => null);
+      throw new Error(j?.error || 'Não consegui preparar o envio pro servidor.');
+    }
+    const { base, ticket } = (await tRes.json()) as { base: string; ticket: string };
+
+    onStage('Enviando pro servidor...');
+    const inputId = await uploadToModal(
+      base,
+      ticket,
+      file,
+      (ratio) => onProgress(ratio * 0.5), // upload = primeira metade da barra
+      () => cancelRef.current,
+    );
+
+    onStage('Decupando no servidor...');
+    onProgress(null); // indeterminado durante o processamento
+    const sRes = await fetch('/api/tools/decupagem/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        input_id: inputId,
+        keepSilence,
+        outputKind: outKind,
+        fileName: file.name,
+      }),
+    });
+    if (!sRes.ok) {
+      const j = await sRes.json().catch(() => null);
+      throw new Error(j?.error || 'Falha ao iniciar a decupagem no servidor.');
+    }
+    const { job } = (await sRes.json()) as { job: string };
+
+    // Polling até concluir. Vídeo grande pode levar minutos.
+    for (let i = 0; i < 600; i++) {
+      if (cancelRef.current) throw new Error('CANCELLED_BY_USER');
+      await sleep(5000);
+      const st = await fetch(`/api/tools/decupagem/status?job=${encodeURIComponent(job)}`);
+      const j = await st.json().catch(() => null);
+      if (!j) continue;
+      if (j.status === 'done') {
+        return {
+          kind: 'server',
+          downloadUrl: j.download_url as string,
+          outputKind: outKind,
+          originalDur: Number(j.original_dur) || 0,
+          newDur: Number(j.new_dur) || 0,
+        };
+      }
+      if (j.status === 'failed' || j.status === 'error') {
+        throw new Error(j.error || 'O servidor não conseguiu decupar esse arquivo.');
+      }
+      // 'processing' → segue no loop
+    }
+    throw new Error('O servidor demorou demais. Tenta de novo.');
   }
 
   // Processa UM arquivo → retorna Result (não mexe em state global).
@@ -167,6 +298,13 @@ export default function DecupagemPage() {
     const file = item.file;
     const fileIsVideo = isVideoFile(file);
     const effectiveKind: OutputKind = isFree ? 'audio' : fileIsVideo ? outputKind : 'audio';
+
+    // Arquivo grande → SERVIDOR (ffmpeg nativo, sem teto de memória do navegador).
+    // Só pra contas pagas; conta grátis segue no navegador (e recebe aviso se
+    // passar do limite que o navegador aguenta).
+    if (!isFree && file.size > SERVER_THRESHOLD_BYTES) {
+      return await processOnServer(file, effectiveKind, onStage, onProgress);
+    }
 
     if (effectiveKind === 'audio') {
       // Regula a voz (nível + limpeza, transparente) ANTES de cortar — voz
@@ -282,19 +420,35 @@ export default function DecupagemPage() {
 
   async function downloadOne(item: QueueItem) {
     if (!item.result) return;
+    const r = item.result;
+    // Resultado do servidor: baixa direto do worker (Content-Disposition já
+    // força o nome certo). Navegação simples, sem fetch/CORS.
+    if (r.kind === 'server') {
+      const a = document.createElement('a');
+      a.href = r.downloadUrl;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      return;
+    }
     const base = baseName(item.file.name);
-    const ext = item.result.kind === 'video' ? 'mp4' : item.result.format;
-    await downloadBlob(item.result.blob, `${base}_decupado.${ext}`);
+    const ext = r.kind === 'video' ? 'mp4' : r.format;
+    await downloadBlob(r.blob, `${base}_decupado.${ext}`);
   }
 
   async function downloadAll() {
-    const done = queue.filter((q) => q.result);
+    // O ZIP só junta os processados NO NAVEGADOR (têm blob). Os do servidor se
+    // baixam individualmente (são arquivos grandes, fora do ZIP).
+    const done = queue.filter((q) => q.result && q.result.kind !== 'server') as Array<
+      QueueItem & { result: Exclude<Result, { kind: 'server' }> }
+    >;
     if (done.length === 0) return;
     const JSZip = (await import('jszip')).default;
     const zip = new JSZip();
     const used = new Set<string>();
     for (const q of done) {
-      const r = q.result!;
+      const r = q.result;
       const ext = r.kind === 'video' ? 'mp4' : r.format;
       let name = `${baseName(q.file.name)}_decupado.${ext}`;
       let i = 2;
@@ -307,6 +461,8 @@ export default function DecupagemPage() {
   }
 
   const doneCount = queue.filter((q) => q.status === 'done').length;
+  // Só os processados no navegador entram no ZIP (servidor baixa individual).
+  const zippableCount = queue.filter((q) => q.result && q.result.kind !== 'server').length;
   const audioOptions = [
     { value: 'mp3' as const, label: 'MP3', sub: 'menor' },
     { value: 'wav' as const, label: 'WAV', sub: 'qualidade máx' },
@@ -494,7 +650,7 @@ export default function DecupagemPage() {
                 : `Decupar fila (${queue.length})`}
             </ToolAction>
           )}
-          {doneCount >= 2 ? (
+          {zippableCount >= 2 ? (
             <button onClick={downloadAll} className="btn-lime !py-2.5 text-xs" disabled={processing}>
               ↓ Baixar todos (ZIP)
             </button>
@@ -522,7 +678,11 @@ export default function DecupagemPage() {
                       <ToolMetric value={formatTime(r.newDur)} label="Após decupagem" accent="lime" />
                       <ToolMetric value={`–${reduced}%`} label="Redução" accent="lime" />
                     </div>
-                    {r.kind === 'video' ? (
+                    {r.kind === 'server' ? (
+                      <div className="rounded-[14px] border border-lime/30 bg-lime/[0.05] px-4 py-3 text-[12px] text-text-muted">
+                        ✓ Processado no servidor (arquivo grande). Clica em baixar pra pegar o {r.outputKind === 'audio' ? 'áudio' : 'vídeo'} decupado.
+                      </div>
+                    ) : r.kind === 'video' ? (
                       <video
                         src={r.url}
                         controls
@@ -534,7 +694,7 @@ export default function DecupagemPage() {
                     )}
                     <div className="mt-4 flex justify-end">
                       <button onClick={() => downloadOne(item)} className="btn-lime !py-2.5 text-xs">
-                        Baixar {r.kind === 'video' ? 'MP4' : r.format.toUpperCase()}
+                        Baixar {r.kind === 'server' ? (r.outputKind === 'audio' ? 'MP3' : 'MP4') : r.kind === 'video' ? 'MP4' : r.format.toUpperCase()}
                       </button>
                     </div>
                   </ToolResultCard>
