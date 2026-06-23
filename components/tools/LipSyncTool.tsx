@@ -477,24 +477,35 @@ export default function LipSyncTool() {
   ) {
     try {
       const {
-        prepareFaceVideo, cleanAudioMp3, splitAudioChunks, concatLipVideos,
+        prepareFaceVideo, cleanAudioMp3, extractAudioMp3, splitAudioChunks, concatLipVideos,
         CHUNK_THRESHOLD_SEC, MAX_CHUNK_SEC,
       } = await import('@/lib/lipsync-pipeline');
 
       // 1. PRÉ-PRODUÇÃO: rosto (native se ≤44MB; senão comprime preservando
-      //    qualidade) + áudio. O "limpar áudio" é OPCIONAL (toggle): se
-      //    ligado, normaliza (com timeout→fallback pro cru, nunca prende);
-      //    se desligado, manda o áudio ORIGINAL intacto.
+      //    qualidade) + áudio. O áudio é SEMPRE preparado num mp3 leve antes do
+      //    upload — NUNCA sobe o container cru (era o bug do "áudio grande
+      //    demais (73MB)" quando a fonte era o próprio mp4 de rosto+voz):
+      //      • limpar áudio LIGADO  → cleanAudioMp3 (extrai+limpa+normaliza)
+      //      • limpar áudio DESLIGADO → áudio ORIGINAL se já for um arquivo de
+      //        áudio dentro do teto; senão EXTRAI (mp3 transparente, SEM DSP de
+      //        limpeza — tom intacto, só menor).
+      //    Em QUALQUER falha cai pra extração crua; nunca trava o disparo.
       patchJob(id, { status: 'pre' });
-      const audioPrep: Promise<File> = cleanOn
-        ? (async (): Promise<File> => {
-            try {
-              return await withTimeout(cleanAudioMp3(audioSrc), 90_000);
-            } catch {
-              return audioSrc; // fallback: áudio cru (garante o disparo)
-            }
-          })()
-        : Promise.resolve(audioSrc); // toggle off → áudio original, sem mexer
+      const AUDIO_PASSTHROUGH_MAX = 44 * 1024 * 1024;
+      const audioPrep: Promise<File> = (async (): Promise<File> => {
+        try {
+          if (cleanOn) return await withTimeout(cleanAudioMp3(audioSrc), 90_000);
+          if (audioSrc.type.startsWith('audio/') && audioSrc.size <= AUDIO_PASSTHROUGH_MAX) return audioSrc;
+          return await withTimeout(extractAudioMp3(audioSrc), 90_000);
+        } catch {
+          // Fallback universal: extrai sem limpar (jamais sobe o container gigante).
+          try {
+            return await withTimeout(extractAudioMp3(audioSrc), 90_000);
+          } catch {
+            return audioSrc; // último recurso — uploadPublic ainda guarda o tamanho
+          }
+        }
+      })();
       const [face, cleanAudio] = await Promise.all([prepareFaceVideo(faceFile), audioPrep]);
       bumpFloor(id, 14);
 

@@ -117,6 +117,43 @@ export async function cleanAudioMp3(file: File, onStage?: FFLoadStage): Promise<
 }
 
 /**
+ * EXTRAÇÃO sem limpeza ("limpar áudio" DESLIGADO): tira só a faixa de áudio
+ * (descarta o vídeo) e transcodifica pra um mp3 TRANSPARENTE — SEM nenhum DSP
+ * de limpeza (sem highpass/denoise/loudnorm/compressão). O tom fica idêntico
+ * ao original; o que muda é só o tamanho (um mp4 de rosto+voz de 70MB vira um
+ * mp3 de poucos MB), pra SEMPRE caber no upload. Resolve o bug "áudio grande
+ * demais (73MB)" que acontecia quando a fonte de áudio era o próprio mp4.
+ * Blindagem: se mesmo assim passar do teto (áudio absurdamente longo), recomprime
+ * num bitrate menor — nunca devolve algo grande demais pro storage.
+ */
+export async function extractAudioMp3(file: File, onStage?: FFLoadStage): Promise<File> {
+  return track('pre_extractAudio', async () =>
+    withFFLock(async () => {
+      const ff = await getFFmpeg(onStage);
+      const { fetchFile } = await import('@ffmpeg/util');
+      const uniq = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      const ext = (file.name.split('.').pop() || 'mp4').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 4) || 'mp4';
+      const inName = `axin_${uniq}.${ext}`;
+      const outName = `axout_${uniq}.mp3`;
+      await ff.writeFile(inName, await fetchFile(file));
+      const encode = async (codecArgs: string[]): Promise<Uint8Array> => {
+        // -vn: descarta vídeo. SEM -af: nenhum filtro de limpeza (áudio original).
+        await ff.exec(['-i', inName, '-vn', ...codecArgs, '-y', outName]);
+        const d = await ff.readFile(outName);
+        return d instanceof Uint8Array ? d : new Uint8Array();
+      };
+      // q:a 2 = VBR ~190kbps, perceptualmente transparente.
+      let data = await encode(['-c:a', 'libmp3lame', '-q:a', '2']);
+      // Rede de segurança: se ainda estourar o teto de upload, recomprime menor.
+      if (data.length > STORAGE_SAFE_BYTES) data = await encode(['-c:a', 'libmp3lame', '-b:a', '96k']);
+      try { await ff.deleteFile(inName); } catch { /* ignore */ }
+      try { await ff.deleteFile(outName); } catch { /* ignore */ }
+      return ffToFile(data, 'voz_original.mp3', 'audio/mpeg');
+    }),
+  );
+}
+
+/**
  * PRÉ-PRODUÇÃO (vídeo): só comprime o rosto quando o arquivo é grande
  * (> limite do storage). Vídeo pequeno passa NATIVO (instantâneo, ZERO
  * perda) — é o caso comum. Quando precisa comprimir, PRESERVA a qualidade:
