@@ -4,7 +4,6 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type LibraryAvatar,
 } from '@/lib/heygen-extension-bridge';
-import { Tilt3D } from '@/components/Tilt3D';
 import {
   getLibrarySnapshot,
   reloadLibrary,
@@ -457,11 +456,11 @@ export function HeyGenAvatarPicker({
               <div className="mono text-[9px] uppercase text-text-muted">{openGroup.looksCount} look{openGroup.looksCount > 1 ? 's' : ''}</div>
             </div>
           </div>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2.5 [perspective:1200px]">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(162px,1fr))] gap-2.5">
             {openGroup.looks.map((l, i) => {
               const isSelected = selected?.id === l.id;
               return (
-                <Tilt3D key={l.id} max={4} scale={false} className="aspect-[3/4]">
+                <div key={l.id} className="aspect-[3/4]">
                   <button
                     type="button"
                     onClick={() => {
@@ -491,7 +490,7 @@ export function HeyGenAvatarPicker({
                       </div>
                     ) : null}
                   </button>
-                </Tilt3D>
+                </div>
               );
             })}
           </div>
@@ -501,7 +500,7 @@ export function HeyGenAvatarPicker({
       {/* Skeleton GRID no carregamento inicial — estrutura premium antes das
        *  thumbs chegarem (so quando ainda nao ha nenhum avatar). */}
       {(!inlineMode || !openGroup) && loading && groups.length === 0 ? (
-        <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(168px,1fr))] gap-3 px-0.5">
+        <div className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(186px,1fr))] gap-3 px-0.5">
           {Array.from({ length: 12 }).map((_, i) => (
             <div
               key={i}
@@ -541,7 +540,7 @@ export function HeyGenAvatarPicker({
       {(!inlineMode || !openGroup) && filteredGroups.length > 0 ? (
         <div
           className={
-            'mt-3 grid grid-cols-[repeat(auto-fill,minmax(168px,1fr))] gap-3 px-0.5 pb-1 [perspective:1200px] ' +
+            'mt-3 grid grid-cols-[repeat(auto-fill,minmax(186px,1fr))] gap-3 px-0.5 pb-1 ' +
             // No popup (inlineMode) o scroll é do corpo do popup → grid flui sem
             // segundo scrollbar. Na página cheia, o grid tem seu próprio scroll.
             (inlineMode ? '' : 'max-h-[540px] overflow-y-auto overflow-x-hidden pr-1')
@@ -552,13 +551,13 @@ export function HeyGenAvatarPicker({
             // Fallbacks pro thumb do grupo: thumb do 1o look, 2o look, etc
             const fallbacks = g.looks.map((l) => l.thumb);
             return (
-              // Tilt3D: tilt 3D real seguindo o mouse (so a celula em hover
-              // dispara — sem custo no scroll). av-cv (content-visibility) vai
-              // no BOTAO, nao na wrapper: pula paint/decode das ~110 fora do
-              // viewport SEM cortar o glow do hover/selecionado (a paint
-              // containment so clipa descendentes, nao a box-shadow do proprio
-              // elemento).
-              <Tilt3D key={g.id} max={4} scale={false} className="aspect-square">
+              // Wrapper leve (div) só pro sizing do grid. av-cv
+              // (content-visibility) vai no BOTAO: pula paint/decode das ~110
+              // fora do viewport SEM cortar o glow do hover/selecionado (a paint
+              // containment só clipa descendentes, não a box-shadow do próprio
+              // elemento). Sem Tilt3D = sem 132 handlers de mousemove/estado =
+              // abertura e scroll fluidos; hover é só lift CSS (discreto).
+              <div key={g.id} className="aspect-square">
                 <button
                   type="button"
                   onClick={() => setOpenGroupId(g.id)}
@@ -606,7 +605,7 @@ export function HeyGenAvatarPicker({
                     </div>
                   ) : null}
                 </button>
-              </Tilt3D>
+              </div>
             );
           })}
         </div>
@@ -655,11 +654,11 @@ export function HeyGenAvatarPicker({
               </button>
             </div>
 
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3 [perspective:1200px]">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(162px,1fr))] gap-3">
               {openGroup.looks.map((l, i) => {
                 const isSelected = selected?.id === l.id;
                 return (
-                  <Tilt3D key={l.id} max={4} scale={false} className="aspect-[3/4]">
+                  <div key={l.id} className="aspect-[3/4]">
                     <button
                       type="button"
                       onClick={() => {
@@ -691,7 +690,7 @@ export function HeyGenAvatarPicker({
                         </div>
                       ) : null}
                     </button>
-                  </Tilt3D>
+                  </div>
                 );
               })}
             </div>

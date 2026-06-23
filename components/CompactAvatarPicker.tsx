@@ -166,7 +166,9 @@ export function CompactAvatarPicker({
         <div
           ref={popRef}
           className="glass-panel fixed z-[120] overflow-hidden rounded-[16px] border border-violet/30 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75),0_0_44px_-16px_rgba(167,139,250,0.5)]"
-          style={{ top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxH, animation: 'av-pop-in 0.22s cubic-bezier(.2,.8,.2,1)' }}
+          // blur menor (6px vs 14px) = abertura/scroll bem mais fluidos; fade
+          // PURO (sem scale) evita re-borrar o backdrop a cada frame da abertura.
+          style={{ top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxH, animation: 'av-fade 0.16s ease', backdropFilter: 'blur(6px) saturate(1.05)', WebkitBackdropFilter: 'blur(6px) saturate(1.05)' }}
         >
           {/* faixa gradiente no topo */}
           <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-violet/70 to-transparent" />
