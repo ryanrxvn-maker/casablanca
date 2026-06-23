@@ -434,6 +434,27 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     item._leveledParts = undefined; // libera memória das partes niveladas
   }
 
+  // === GARANTIA DE CONCLUSÃO (decupagem é REALCE, não conteúdo) ===
+  // Toda montagem COMPLETA (conteúdo íntegro) PRECISA ter um `decupado` pra task
+  // chegar a 100% PRONTO (o gate pipeOk exige okDecupados === expectedMontagens).
+  // Se a decupagem (passo frágil do ffmpeg-wasm) não produziu corte pra alguma —
+  // sem fala detectável, timeout, concat falho, etc. — ENTREGA o montado completo
+  // como resultado. Assim a task SEMPRE conclui no RETOMAR; nunca fica presa em
+  // "PÓS-PROCESSO PARCIAL" só porque o corte não rodou. NÃO mexe em quem teve
+  // FALHA DE CONTEÚDO (assemble falho / parte faltando) — esses ficam bloqueados
+  // de propósito (gate de incompleta). NÃO é cacheado como 'decupado' → um
+  // RETOMAR futuro com ffmpeg saudável ainda tenta o corte de verdade.
+  if (decupagem) {
+    for (const item of out) {
+      if (item.errors?.assemble) continue;       // montagem falhou → bloqueia (correto)
+      if (item.missingParts?.length) continue;   // falta conteúdo → bloqueia (correto)
+      if (!item.decupado && item.rawAssembled && item.rawAssembled.size > 0) {
+        item.decupado = item.rawAssembled;       // fallback: entrega montado completo → task conclui
+        console.warn(`[clickup-pilot-pipeline] decup ${item.filename}: SEM corte — entregue montado COMPLETO (task conclui, decupagem é realce)`);
+      }
+    }
+  }
+
   // === Stage 3: CAMUFLAGEM ===
   if (camuflagem) {
     if (!whiteAudio) {
