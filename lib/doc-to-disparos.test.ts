@@ -995,34 +995,44 @@ console.log('\navatar por imagem embutida (print):');
   const imgUrl = 'data:image/png;base64,AAAABBBBCCCCDDDD';
   const imgLinks: DocLink[] = [{ text: '[[DOCIMG:0]]', fileId: null, url: imgUrl, isImage: true }];
 
-  // Layout A: label "Mulher:" ANTES do print → role vem do pendingRole
-  const aA = parseAvatars('Avatar e Vozes:\nMulher:\n[[DOCIMG:0]]\n', imgLinks);
-  assert(aA.length === 1, `label-antes: exatamente 1 avatar (got ${aA.length})`);
-  assert(aA[0]?.role === 'Mulher', `label-antes: role=Mulher (got ${aA[0]?.role})`);
-  assert(aA[0]?.imageUrl === imgUrl, 'label-antes: imageUrl = data URL do print');
-  assert(aA[0]?.thumbUrl === imgUrl, 'label-antes: thumbUrl = data URL (preview na UI)');
-  assert(aA[0]?.username === '', 'label-antes: sem username (nunca casa biblioteca)');
+  // Layout REAL (AD160GL): label + imagem INLINE na mesma linha "Mulher:  [[DOCIMG:0]] [fm]"
+  // ([fm] = ancora de comentario do Google Docs, ruido). Role vem do "Mulher:" antes do marcador.
+  const aInline = parseAvatars('Avatar e Vozes:\nMulher:  [[DOCIMG:0]] [fm]\nManter a mesma voz dos avatares.\n', imgLinks);
+  assert(aInline.length === 1, `inline: exatamente 1 avatar (got ${aInline.length})`);
+  assert(aInline[0]?.role === 'Mulher', `inline: role=Mulher do label na mesma linha (got ${aInline[0]?.role})`);
+  assert(aInline[0]?.imageUrl === imgUrl, 'inline: imageUrl = data URL do print');
+  assert(aInline[0]?.thumbUrl === imgUrl, 'inline: thumbUrl = data URL (preview na UI)');
+  assert(aInline[0]?.username === '', 'inline: sem username (nunca casa biblioteca)');
 
-  // Layout B: print ANTES do label "Mulher:" → role vem do lookahead (layout real do doc)
+  // Layout A: label "Mulher:" na LINHA ANTERIOR → role vem do pendingRole
+  const aA = parseAvatars('Avatar e Vozes:\nMulher:\n[[DOCIMG:0]]\n', imgLinks);
+  assert(aA.length === 1 && aA[0]?.role === 'Mulher', `label-linha-antes: role=Mulher (got ${aA[0]?.role})`);
+
+  // Layout B: print ANTES do label "Mulher:" → role vem do lookahead
   const aB = parseAvatars('Avatar e Vozes:\n[[DOCIMG:0]]\nMulher:\n', imgLinks);
   assert(aB.length === 1 && aB[0]?.role === 'Mulher', `print-antes-do-label: role=Mulher via lookahead (got ${JSON.stringify(aB.map((x) => x.role))})`);
-  assert(aB[0]?.imageUrl === imgUrl, 'print-antes-do-label: imageUrl preenchido');
 
-  // Layout C: print sem label de pessoa → role fallback "Avatar"
-  const aC = parseAvatars('Avatar e Vozes:\n[[DOCIMG:0]]\n', imgLinks);
-  assert(aC.length === 1 && aC[0]?.role === 'Avatar', `sem-label: role=Avatar fallback (got ${aC[0]?.role})`);
-  assert(aC[0]?.imageUrl === imgUrl, 'sem-label: imageUrl preenchido');
+  // ANTI-FALSO-POSITIVO 1: imagem SEM label de pessoa → NAO e avatar (era o bug)
+  const aNoLbl = parseAvatars('Avatar e Vozes:\n[[DOCIMG:0]]\n', imgLinks);
+  assert(aNoLbl.length === 0, `sem-label-pessoa: 0 avatares — sem fallback (got ${aNoLbl.length})`);
+
+  // ANTI-FALSO-POSITIVO 2: "Tipo de Legenda:  [[DOCIMG:0]]" → NAO e avatar (legenda, nao pessoa)
+  const aLegenda = parseAvatars('Tipo de Legenda:  [[DOCIMG:0]]\n', imgLinks);
+  assert(aLegenda.length === 0, `tipo-de-legenda: 0 avatares (label nao e pessoa) (got ${aLegenda.length})`);
 
   // Marcador SEM link correspondente (idx errado) → NAO vira avatar e nao quebra
-  const aNone = parseAvatars('Mulher:\n[[DOCIMG:9]]\n', imgLinks);
+  const aNone = parseAvatars('Mulher:  [[DOCIMG:9]]\n', imgLinks);
   assert(aNone.length === 0, `marcador orfao (link 0 != marcador 9): 0 avatares (got ${aNone.length})`);
 
-  // E2E: parseDarkoBriefing — avatar por imagem + marcador NUNCA vaza pra fala
+  // E2E: parseDarkoBriefing com o layout REAL (inline) — avatar por imagem +
+  // marcador NUNCA vaza pra fala. Espelha o doc AD160GL real.
   const IMG_DOC = [
     'AD300GL - FLPB04',
+    'INSTRUÇÕES PARA EDIÇÃO:',
     'Avatar e Vozes:',
-    'Mulher:',
-    '[[DOCIMG:0]]',
+    'Mulher:  [[DOCIMG:0]] [fm]',
+    'Manter a mesma voz dos avatares, a nao ser que seja um avatar gringo.',
+    'Tipo de Legenda:  [[DOCIMG:1]]',
     '',
     'AD300G1GL-FLPB04',
     'Mulher:',
@@ -1032,11 +1042,16 @@ console.log('\navatar por imagem embutida (print):');
     'Mulher:',
     'No corpo eu explico a solucao completa pro inchaco nas pernas.',
   ].join('\n');
-  const bf = parseDarkoBriefing(IMG_DOC, 'AD300GL', null, imgLinks);
+  // imgLinks2: marcador 0 = avatar (usado), marcador 1 = legenda (NAO deve virar avatar)
+  const imgLinks2: DocLink[] = [
+    { text: '[[DOCIMG:0]]', fileId: null, url: imgUrl, isImage: true },
+    { text: '[[DOCIMG:1]]', fileId: null, url: 'data:image/png;base64,LEGENDAXYZ', isImage: true },
+  ];
+  const bf = parseDarkoBriefing(IMG_DOC, 'AD300GL', null, imgLinks2);
   assert(!!bf, 'e2e: briefing parseado');
-  assert((bf?.avatars.length || 0) === 1, `e2e: 1 avatar (got ${bf?.avatars.length})`);
+  assert((bf?.avatars.length || 0) === 1, `e2e: 1 avatar (legenda NAO entra) (got ${bf?.avatars.length})`);
   assert(bf?.avatars[0]?.role === 'Mulher', `e2e: role=Mulher (got ${bf?.avatars[0]?.role})`);
-  assert(bf?.avatars[0]?.imageUrl === imgUrl, 'e2e: avatar carrega imageUrl do print');
+  assert(bf?.avatars[0]?.imageUrl === imgUrl, 'e2e: avatar carrega imageUrl do print (nao da legenda)');
   const spoken = [
     ...(bf?.hooks || []).map((h) => h.text),
     bf?.body || '',

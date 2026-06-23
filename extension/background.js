@@ -1436,32 +1436,32 @@ function parseGoogleDocsHtml(html) {
     driveLinks.push({ text: linkText, fileId: fileId || null, isFolder, url: realUrl });
   }
 
-  // === IMAGENS EMBUTIDAS (prints de avatar colados no doc) ===
-  // Alguns copys declaram o avatar SO com um print colado (sem @user/.mp4/link).
-  // Capturamos cada imagem de CONTEUDO, injetamos um marcador "[[DOCIMG:N]]" na
-  // POSICAO dela no texto (pro parser saber que ha uma imagem ali, dentro do
-  // bloco "Avatar e Vozes:") e guardamos o src. O handleFetchDoc depois baixa
-  // cada uma (sessao logada) e converte pra data URL.
+  // === IMAGENS EMBUTIDAS (prints de avatar declarados por "Role: <imagem>") ===
+  // O export?format=html embute TODAS as imagens como data URI base64 (NAO
+  // googleusercontent) — inclusive legenda/logo/edicao (esse doc tinha 77, so 1
+  // era avatar). Aqui so colocamos um placeholder cru [[DOCIMGRAW:N]] na POSICAO
+  // de cada imagem de conteudo e guardamos src+dimensoes. Quem decide qual e
+  // PRINT DE AVATAR e pickAvatarImages() (regra: precedida por label de PESSOA),
+  // rodada DEPOIS do texto pronto.
   // - Imagens DENTRO de <a> sao chips de arquivo (ja viram driveLinks) → fora.
-  // - Imagens minusculas (<48px) sao icones/bullets → fora.
-  const docImages = [];
+  const rawImgs = [];
   let htmlForText = html.replace(/<a\b[^>]*>[\s\S]*?<\/a>/gi, (a) => a.replace(/<img\b[^>]*>/gi, ''));
   htmlForText = htmlForText.replace(/<img\b[^>]*>/gi, (tag) => {
     const srcM = tag.match(/\bsrc\s*=\s*["']([^"']+)["']/i);
     const src = srcM ? srcM[1] : '';
-    if (!/^https?:/i.test(src)) return '';  // data-uri/spacer/relativo → ignora
-    const wM = tag.match(/\bwidth\s*=\s*["']?(\d+)/i) || tag.match(/width:\s*(\d+(?:\.\d+)?)\s*px/i);
-    const hM = tag.match(/\bheight\s*=\s*["']?(\d+)/i) || tag.match(/height:\s*(\d+(?:\.\d+)?)\s*px/i);
+    // aceita data: URI (export embute base64) E http (fallback googleusercontent)
+    if (!/^(data:image\/|https?:)/i.test(src)) return '';
+    const wM = tag.match(/\bwidth\s*=\s*["']?(\d+)/i) || tag.match(/width:\s*(\d+(?:\.\d+)?)/i);
+    const hM = tag.match(/\bheight\s*=\s*["']?(\d+)/i) || tag.match(/height:\s*(\d+(?:\.\d+)?)/i);
     const w = wM ? Math.round(Number(wM[1])) : 0;
     const h = hM ? Math.round(Number(hM[1])) : 0;
-    if ((w && w < 48) || (h && h < 48)) return '';  // muito pequena = nao e print
-    const idx = docImages.length;
-    docImages.push({ src, width: w || null, height: h || null });
-    return `\n[[DOCIMG:${idx}]]\n`;
+    const idx = rawImgs.length;
+    rawImgs.push({ src, w, h });
+    return ` [[DOCIMGRAW:${idx}]] `;  // INLINE (sem \n) → fica na linha do "Role:"
   });
 
   // === TEXTO ===
-  // Insere quebras antes de blocos (do htmlForText — ja com marcadores de imagem)
+  // Insere quebras antes de blocos (do htmlForText — ja com placeholders inline)
   let text = htmlForText
     .replace(/<\/(p|div|li|h[1-6]|br)>/gi, '\n')
     .replace(/<br\s*\/?>/gi, '\n');
@@ -1508,6 +1508,12 @@ function parseGoogleDocsHtml(html) {
   // Collapse newlines triplas+
   text = text.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+/g, ' ').replace(/ ?\n ?/g, '\n').trim();
 
+  // Decide quais imagens sao PRINT DE AVATAR (label de pessoa antes) → renumera
+  // os marcadores e monta docImages. As nao-avatar somem do texto.
+  const picked = pickAvatarImages(text, rawImgs);
+  text = picked.text;
+  const docImages = picked.docImages;
+
   // === HEADINGS (ancoras do editor) ===
   // O export traz cada heading como <hN id="h.xxxx">texto</hN>. Esse id E o
   // MESMO usado no deep-link do editor (#heading=h.xxxx) — provado live no doc
@@ -1530,12 +1536,54 @@ function parseGoogleDocsHtml(html) {
   return { text, driveLinks, headings, docImages };
 }
 
+/** Decide quais imagens embutidas sao PRINT DE AVATAR e renumera os marcadores.
+ *  REGRA (validada no doc real AD160GL): uma imagem so e avatar quando vem logo
+ *  depois de um LABEL DE PESSOA ("Mulher:", "Homem:", "Doutor:"...) — na MESMA
+ *  linha ("Mulher:  <img>", o layout real) OU na linha imediatamente anterior.
+ *  Isso distingue o print do avatar das imagens de legenda/edicao/logo (o export
+ *  embute TODAS como data URI). `rawImgs[i] = {src,w,h}`; `text` tem placeholders
+ *  [[DOCIMGRAW:i]]. Retorna { text } com [[DOCIMG:K]] SO nos avatares (resto
+ *  removido) e { docImages } na ordem K. Compartilhada export + fallback. */
+function pickAvatarImages(text, rawImgs) {
+  const docImages = [];
+  if (!rawImgs || !rawImgs.length || !/\[\[DOCIMGRAW:/.test(text)) {
+    return { text: text.replace(/\s*\[\[DOCIMGRAW:\d+\]\]\s*/g, ' '), docImages };
+  }
+  const PERSON_BEFORE = /(mulher|homem|doutor[a]?|doutora|m[eé]dic[oa]|narrador[a]?|locutor[a]?|paciente|depoiment[oa]?|depoente|testemunh[a-zõç]*|senhor[a]?|av[oó]|esposa|marido|especialista|expert|ator|atriz|jovem)\s*:\s*$/i;
+  const PERSON_LINE = /^(mulher|homem|doutor[a]?|doutora|m[eé]dic[oa]|narrador[a]?|locutor[a]?|paciente|depoiment[oa]?|depoente|senhor[a]?|av[oó]|esposa|marido|especialista)\s*:\s*$/i;
+  const stripRaw = (s) => s.replace(/\[\[DOCIMGRAW:\d+\]\]/g, '').trim();
+  const lines = text.split('\n');
+  const kept = new Map(); // rawIdx -> keptIdx
+  for (let li = 0; li < lines.length; li++) {
+    const re = /\[\[DOCIMGRAW:(\d+)\]\]/g; let pm;
+    while ((pm = re.exec(lines[li])) !== null) {
+      const rawIdx = Number(pm[1]);
+      if (kept.has(rawIdx)) continue;
+      const m = rawImgs[rawIdx];
+      if (!m) continue;
+      const before = stripRaw(lines[li].slice(0, pm.index));
+      let prev = '';
+      for (let k = li - 1; k >= 0 && k > li - 3; k--) { const c = stripRaw(lines[k]); if (c) { prev = c; break; } }
+      const isAvatar = PERSON_BEFORE.test(before) || PERSON_LINE.test(prev);
+      const bigEnough = (!m.w && !m.h) || m.w >= 64 || m.h >= 64; // descarta icone/emoji inline
+      if (isAvatar && bigEnough) {
+        kept.set(rawIdx, docImages.length);
+        docImages.push({ src: m.src, width: m.w || null, height: m.h || null });
+      }
+    }
+  }
+  const newText = text.replace(/\s*\[\[DOCIMGRAW:(\d+)\]\]\s*/g, (full, d) =>
+    kept.has(Number(d)) ? ` [[DOCIMG:${kept.get(Number(d))}]] ` : ' ');
+  return { text: newText, docImages };
+}
+
 /** Baixa uma imagem (com a sessao logada — host_permissions cobre
  *  googleusercontent) e devolve como data URL. Assim o print aparece no app
- *  SEM esbarrar em CORS/auth. Cap de tamanho: prints grandes (>~1.8MB) caem no
- *  src cru (o app tenta com referrerPolicy=no-referrer). Roda no service worker
- *  (fetch/btoa/Uint8Array disponiveis). */
+ *  SEM esbarrar em CORS/auth. Se ja for data: URI (export embute base64), usa
+ *  direto (sem fetch). Cap de tamanho: prints grandes (>~1.8MB) caem no src cru
+ *  (o app tenta com referrerPolicy=no-referrer). Roda no service worker. */
 async function fetchImageAsDataUrl(url, maxBytes = 1_800_000) {
+  if (/^data:/i.test(url)) return url;  // ja e data URI → usa direto
   const resp = await fetch(url, { credentials: 'include' });
   if (!resp.ok) throw new Error('img http ' + resp.status);
   const buf = await resp.arrayBuffer();
@@ -1696,25 +1744,25 @@ async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
             .filter(Boolean);
 
           // IMAGENS EMBUTIDAS (prints de avatar) — paridade com o caminho export.
-          // Mesma heuristica: ignora imgs dentro de <a> (chips de arquivo, ja
-          // viram links) e imgs pequenas (<48px = icones/bullets).
+          // Coleta imgs de conteudo (fora de <a>, src http). Quem decide qual e
+          // AVATAR e pickAvatarImages() no background (label de PESSOA antes).
           const imgs = Array.from(document.querySelectorAll('img')).filter((img) => {
             if (img.closest('a')) return false;
             const src = img.currentSrc || img.src || '';
-            if (!/^https?:/i.test(src)) return false;
-            const w = img.naturalWidth || img.width || img.offsetWidth || 0;
-            const h = img.naturalHeight || img.height || img.offsetHeight || 0;
-            if ((w && w < 48) || (h && h < 48)) return false;
-            return true;
+            return /^https?:/i.test(src);
           });
-          const docImages = imgs.map((img) => ({ src: img.currentSrc || img.src }));
+          const rawImgs = imgs.map((img) => ({
+            src: img.currentSrc || img.src,
+            w: img.naturalWidth || img.width || img.offsetWidth || 0,
+            h: img.naturalHeight || img.height || img.offsetHeight || 0,
+          }));
 
-          // SEM prints → text = innerText puro (comportamento antigo, ZERO
-          // regressao). COM prints → reconstroi o texto inserindo "[[DOCIMG:N]]"
-          // na POSICAO de cada imagem, pro parser achar o print dentro do bloco
-          // "Avatar e Vozes:" (Tentativa 5).
+          // SEM imgs → text = innerText puro (comportamento antigo, ZERO
+          // regressao). COM imgs → reconstroi o texto inserindo "[[DOCIMGRAW:N]]"
+          // INLINE na POSICAO de cada imagem (fica na mesma linha do "Mulher:"),
+          // pro pickAvatarImages decidir e o parser achar (Tentativa 5).
           let text;
-          if (docImages.length) {
+          if (rawImgs.length) {
             const imgIndex = new Map(imgs.map((img, i) => [img, i]));
             const BLOCK = new Set(['P', 'DIV', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TR', 'BLOCKQUOTE', 'SECTION']);
             let out = '';
@@ -1724,7 +1772,7 @@ async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
                 if (child.nodeType !== 1) continue;
                 const tag = child.tagName;
                 if (tag === 'IMG') {
-                  if (imgIndex.has(child)) out += `\n[[DOCIMG:${imgIndex.get(child)}]]\n`;
+                  if (imgIndex.has(child)) out += ` [[DOCIMGRAW:${imgIndex.get(child)}]] `;
                   continue;
                 }
                 if (tag === 'BR') { out += '\n'; continue; }
@@ -1743,7 +1791,7 @@ async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
             text,
             isLogin: /accounts\.google\.com/.test(location.href),
             driveLinks: links,
-            docImages,
+            rawImgs,
           };
         },
       });
@@ -1756,25 +1804,27 @@ async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
       reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', { ok: false, error: 'Doc privado e nao logado no Google.' });
       return;
     }
-    // Imagens embutidas (prints de avatar) capturadas no fallback: baixa cada
-    // uma (service worker tem host_permissions p/ googleusercontent) → data URL
-    // e anexa como DocLink {isImage} cujo `text` casa o marcador "[[DOCIMG:N]]"
-    // ja injetado no texto. Falha de uma imagem cai no src cru (no-referrer no
-    // <img> do app). Paridade total com o caminho export.
+    // Imagens embutidas (prints de avatar) capturadas no fallback: filtra pelas
+    // que tem label de PESSOA antes (pickAvatarImages, mesma regra do export),
+    // baixa cada uma (service worker tem host_permissions p/ googleusercontent)
+    // → data URL e anexa como DocLink {isImage} cujo `text` casa o marcador
+    // "[[DOCIMG:K]]" ja no texto. Falha cai no src cru (no-referrer no <img>).
+    const picked = pickAvatarImages(result?.text || '', result?.rawImgs || []);
+    const fbText = picked.text;
     const fbLinks = result?.driveLinks || [];
-    if (Array.isArray(result?.docImages) && result.docImages.length) {
-      await Promise.all(result.docImages.map(async (im, idx) => {
+    if (picked.docImages.length) {
+      await Promise.all(picked.docImages.map(async (im, idx) => {
         let dataUrl = null;
         try { dataUrl = await fetchImageAsDataUrl(im.src); }
         catch (e) { console.warn('[DARKO LAB BG] img fallback', idx, 'fetch falhou:', e?.message || e); }
         fbLinks.push({ text: `[[DOCIMG:${idx}]]`, fileId: null, url: dataUrl || im.src, isImage: true });
       }));
     }
-    console.log('[DARKO LAB BG] HG_FETCH_DOC via fallback OK textLen=', (result?.text || '').length, 'links=', fbLinks.length, 'imgs=', (result?.docImages || []).length);
+    console.log('[DARKO LAB BG] HG_FETCH_DOC via fallback OK textLen=', fbText.length, 'links=', fbLinks.length, 'imgs=', picked.docImages.length);
     reportToPage(bridgeTabId, requestId, 'HG_DOC_RESULT', {
       ok: true,
-      text: result?.text || '',
-      length: (result?.text || '').length,
+      text: fbText,
+      length: fbText.length,
       driveLinks: fbLinks,
       // Fallback mobilebasic NAO expõe os ids de heading do editor (DOM diferente
       // do export) → sem deep-link nesse caminho (app cai no docUrl normal).

@@ -484,19 +484,28 @@ export function parseAvatars(section: string, links: DocLink[] = []): ParsedAvat
     if (/^https?:\/\//.test(trimmed)) continue;
 
     // Tentativa 5: avatar declarado por IMAGEM EMBUTIDA (print colado no doc).
-    // A extensao injeta um marcador "[[DOCIMG:N]]" na POSICAO da imagem e
-    // empurra um DocLink {isImage, url:<data URL>}. Alguns copys colam SO o
-    // print do avatar a ser usado (sem @user/.mp4/link). Vira avatar PENDENTE
+    // A extensao injeta "[[DOCIMG:N]]" SO em imagens precedidas por um label de
+    // PESSOA (ela ja descarta legenda/logo/edicao) e empurra um DocLink
+    // {isImage, url:<data URL>}. O layout REAL (visto no doc) e INLINE — a imagem
+    // ocupa o lugar do @user.mp4: "Mulher:  [[DOCIMG:N]]". Vira avatar PENDENTE
     // com a thumb do print — o user escolhe o da biblioteca vendo a referencia
-    // (igual ao YouTube). O role vem do label de PESSOA adjacente (pendingRole
-    // ANTES — "Mulher:" + print — OU lookahead DEPOIS — print + "Mulher:", que
-    // e o layout real visto no doc); senao "Avatar".
-    const mImg = trimmed.match(/^\[\[DOCIMG:(\d+)\]\]$/);
+    // (igual ao YouTube). Role: (a) "Role:" ANTES do marcador na MESMA linha,
+    // (b) pendingRole (label na linha de cima), (c) lookahead (label logo
+    // depois). SEM fallback "Avatar": imagem sem label de PESSOA NAO e avatar
+    // (era o bug que transformava print de "Tipo de Legenda:" em avatar).
+    const mImg = trimmed.match(/\[\[DOCIMG:(\d+)\]\]/);
     if (mImg) {
-      const imgLink = links.find((l) => l.isImage && l.text === trimmed);
+      const marker = mImg[0];
+      const imgLink = links.find((l) => l.isImage && l.text === marker);
       if (imgLink && imgLink.url) {
-        let role: string | null =
-          pendingRole && isPersonRole(pendingRole) ? pendingRole : null;
+        let role: string | null = null;
+        // (a) "Role:" antes do marcador na MESMA linha (ex "Mulher:  [[DOCIMG:0]]")
+        const before = trimmed.slice(0, mImg.index ?? 0);
+        const sameLine = before.match(/([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s()]{0,40}?)\s*:\s*$/);
+        if (sameLine && isPersonRole(sameLine[1])) role = sameLine[1].trim();
+        // (b) label numa linha ANTES (pendingRole "Mulher:" + print embaixo)
+        if (!role && pendingRole && isPersonRole(pendingRole)) role = pendingRole;
+        // (c) lookahead: print + "Mulher:" logo depois
         if (!role) {
           let seenNonEmpty = 0;
           for (let j = i + 1; j < lines.length && seenNonEmpty < 3; j++) {
@@ -507,11 +516,14 @@ export function parseAvatars(section: string, links: DocLink[] = []): ParsedAvat
             if (rm && isPersonRole(rm[1])) { role = rm[1].trim(); break; }
           }
         }
-        out.push({ role: role || 'Avatar', username: '', raw: trimmed, imageUrl: imgLink.url, thumbUrl: imgLink.url });
-        pendingRole = null;
-        pendingRoleLine = -1;
+        // SEM role de PESSOA → nao e avatar (imagem de legenda/edicao/logo).
+        if (role) {
+          out.push({ role, username: '', raw: trimmed, imageUrl: imgLink.url, thumbUrl: imgLink.url });
+          pendingRole = null;
+          pendingRoleLine = -1;
+        }
       }
-      // marcador (com ou sem link) NUNCA cai nas outras tentativas / fala
+      // marcador (com ou sem link/role) NUNCA cai nas outras tentativas / fala
       continue;
     }
 
@@ -1186,7 +1198,11 @@ export type ParsedDarkoBriefing = {
  *                    sem essa lista nao da pra distinguir de fala normal).
  */
 export function sanitizeSpokenCopy(raw: string, knownRoles: string[] = [], dropExactLines: string[] = []): string {
-  let s = (raw || '').replace(/\r/g, '');
+  // Marcador de imagem embutida ([[DOCIMG:N]]) e referencia de avatar, NUNCA
+  // fala. O layout real e inline ("Mulher:  [[DOCIMG:0]]"), entao removemos o
+  // marcador de QUALQUER lugar antes de tudo (defesa extra — o bloco de
+  // declaracao ja nao vai pra fala, mas garante que nunca vaze).
+  let s = (raw || '').replace(/\r/g, '').replace(/\[\[DOCIMG:\d+\]\]/g, '');
   // Linhas que devem ser DESCARTADAS por igualdade (normalizada) — ex titulo de
   // YouTube que sobrou de um label de locutor "Doutora: O IMPACTO DO ESTRESSE..."
   // (o ":" + emoji somem no export e o titulo vazaria pra fala do avatar).
