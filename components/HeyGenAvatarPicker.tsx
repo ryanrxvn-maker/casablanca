@@ -1,23 +1,10 @@
 'use client';
 
-import { useDeferredValue, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type LibraryAvatar,
-  type LibraryAvatarGroup,
 } from '@/lib/heygen-extension-bridge';
-
-/**
- * content-visibility: o browser PULA layout/paint/decode das celulas que
- * estao FORA do viewport do grid (130+ avatares = 130 botoes + imgs). Sem
- * isso, abrir o picker pinta as 130 de uma vez = engasgo. contain-intrinsic-size
- * reserva ~altura da celula ate ela entrar em tela (`auto` lembra o tamanho
- * real depois do 1o render → sem pulo de scroll). Degrada sozinho (propriedade
- * ignorada) em browser antigo, sem bug.
- */
-const GRID_CELL_CV: CSSProperties = {
-  contentVisibility: 'auto',
-  containIntrinsicSize: 'auto 140px',
-};
+import { Tilt3D } from '@/components/Tilt3D';
 import {
   getLibrarySnapshot,
   reloadLibrary,
@@ -75,6 +62,7 @@ function ThumbWithFallback({
   className,
   eager,
   onAllFailed,
+  withSkeleton,
 }: {
   primary: string | null;
   fallbacks: (string | null)[];
@@ -82,6 +70,9 @@ function ThumbWithFallback({
   className: string;
   eager?: boolean;
   onAllFailed?: () => void;
+  /** Mostra skeleton shimmer atras + fade-in da img ao carregar. So usar
+   *  em containers `relative overflow-hidden` (celulas do grid/looks). */
+  withSkeleton?: boolean;
 }) {
   // Lista ordenada de URLs candidatas (sem nulls/duplicatas).
   // Memoiza pela CHAVE estavel (string) e nao pela referencia do array
@@ -101,12 +92,23 @@ function ThumbWithFallback({
 
   const [idx, setIdx] = useState(0);
   const [allFailed, setAllFailed] = useState(candidates.length === 0);
+  const [loaded, setLoaded] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
 
   // Reset quando candidates muda (novo avatar)
   useEffect(() => {
     setIdx(0);
     setAllFailed(candidates.length === 0);
+    setLoaded(false);
   }, [candidates]);
+
+  // Imagem ja em cache do browser pode estar `complete` antes do React
+  // anexar o onLoad → marca como carregada na hora pra nao prender o skeleton.
+  useEffect(() => {
+    if (imgRef.current?.complete && imgRef.current.naturalWidth > 0) {
+      setLoaded(true);
+    }
+  }, [idx, candidates]);
 
   if (allFailed) {
     const initial = (alt || '?').trim().charAt(0).toUpperCase();
@@ -125,24 +127,30 @@ function ThumbWithFallback({
 
   const currentSrc = candidates[idx];
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={currentSrc}
-      alt={alt}
-      className={className}
-      loading={eager ? 'eager' : 'lazy'}
-      decoding="async"
-      // @ts-ignore - fetchPriority eh suportado mas nao tipado em todos os React
-      fetchpriority={eager ? 'high' : 'low'}
-      onError={() => {
-        if (idx + 1 < candidates.length) {
-          setIdx(idx + 1);
-        } else {
-          setAllFailed(true);
-          onAllFailed?.();
-        }
-      }}
-    />
+    <>
+      {withSkeleton && !loaded ? <div className="av-skel" aria-hidden /> : null}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        ref={imgRef}
+        src={currentSrc}
+        alt={alt}
+        className={className + (withSkeleton ? ' av-img' + (loaded ? ' is-loaded' : '') : '')}
+        loading={eager ? 'eager' : 'lazy'}
+        decoding="async"
+        referrerPolicy="no-referrer"
+        // @ts-ignore - fetchPriority eh suportado mas nao tipado em todos os React
+        fetchpriority={eager ? 'high' : 'low'}
+        onLoad={() => setLoaded(true)}
+        onError={() => {
+          if (idx + 1 < candidates.length) {
+            setIdx(idx + 1);
+          } else {
+            setAllFailed(true);
+            onAllFailed?.();
+          }
+        }}
+      />
+    </>
   );
 }
 
@@ -303,30 +311,62 @@ export function HeyGenAvatarPicker({
 
   return (
     <div>
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="label-field !mb-0">{label}</h2>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          {/* icone pilha de avatares — 3 discos sobrepostos com glow */}
+          <span className="relative flex h-7 w-9 shrink-0 items-center">
+            <span className="absolute left-0 h-6 w-6 rounded-full border border-violet/50 bg-gradient-to-br from-violet/30 to-bg-soft shadow-[0_0_12px_-4px_rgba(167,139,250,0.7)]" />
+            <span className="absolute left-1.5 h-6 w-6 rounded-full border border-cyan/40 bg-gradient-to-br from-cyan/20 to-bg-soft" />
+            <span className="absolute left-3 h-6 w-6 rounded-full border border-lime/50 bg-gradient-to-br from-lime/25 to-bg-soft shadow-[0_0_12px_-4px_rgba(200,232,124,0.7)]" />
+          </span>
+          <h2 className="label-field !mb-0 truncate bg-gradient-to-r from-white via-white to-violet/80 bg-clip-text text-transparent">
+            {label}
+          </h2>
+        </div>
         <button
           type="button"
           onClick={loadLibrary}
           disabled={loading || disabled}
-          className="rounded-md border border-line-strong bg-bg-soft px-2.5 py-1 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime disabled:opacity-50"
+          className="group/rl flex shrink-0 items-center gap-1.5 rounded-full border border-line-strong bg-bg-soft/60 px-3 py-1 text-[10px] uppercase tracking-widest text-text-muted backdrop-blur-sm transition-all hover:border-lime hover:text-lime hover:shadow-[0_0_18px_-6px_rgba(200,232,124,0.6)] disabled:opacity-50"
         >
-          {loading ? 'Atualizando...' : 'Recarregar biblioteca'}
+          <svg
+            viewBox="0 0 24 24"
+            className={'h-3 w-3 transition-transform ' + (loading ? 'animate-spin' : 'group-hover/rl:rotate-180')}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+            <path d="M21 3v6h-6" />
+          </svg>
+          {loading ? 'Atualizando...' : 'Recarregar'}
         </button>
       </div>
 
-      <input
-        type="text"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder={
-          groups.length > 0
-            ? `Filtrar pelos seus ${groups.length} avatares (${totalLooks} looks)...`
-            : 'Carregando biblioteca...'
-        }
-        className="input-field"
-        disabled={disabled || loading}
-      />
+      {/* busca premium — anel gradiente sutil + lupa */}
+      <div className="group/search relative">
+        <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted transition-colors group-focus-within/search:text-lime">
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <circle cx="11" cy="11" r="7" />
+            <path d="m21 21-4.3-4.3" />
+          </svg>
+        </span>
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={
+            groups.length > 0
+              ? `Filtrar pelos seus ${groups.length} avatares (${totalLooks} looks)...`
+              : 'Carregando biblioteca...'
+          }
+          className="input-field !pl-10 transition-shadow focus:!border-violet/60 focus:shadow-[0_0_0_3px_rgba(167,139,250,0.12),0_0_24px_-10px_rgba(167,139,250,0.5)]"
+          disabled={disabled || loading}
+        />
+      </div>
 
       {loading ? (
         <div className="mt-2 flex items-center gap-2 text-[11px] text-lime">
@@ -363,8 +403,14 @@ export function HeyGenAvatarPicker({
           })()}
         </div>
       ) : (
-        <div className="mt-2 text-[11px] text-text-muted">
-          {filteredGroups.length} de {groups.length} avatares · {totalLooks} looks total
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px]">
+          <span className="rounded-full border border-violet/30 bg-violet/10 px-2 py-0.5 font-semibold tracking-wide text-violet">
+            {filteredGroups.length}
+            <span className="text-text-muted">/{groups.length}</span> avatares
+          </span>
+          <span className="rounded-full border border-line-strong bg-bg-soft/50 px-2 py-0.5 tracking-wide text-text-muted">
+            {totalLooks} looks
+          </span>
         </div>
       )}
 
@@ -394,41 +440,40 @@ export function HeyGenAvatarPicker({
               <div className="mono text-[9px] uppercase text-text-muted">{openGroup.looksCount} look{openGroup.looksCount > 1 ? 's' : ''}</div>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {openGroup.looks.map((l) => {
+          <div className="grid grid-cols-2 gap-2.5 [perspective:1200px] sm:grid-cols-3">
+            {openGroup.looks.map((l, i) => {
               const isSelected = selected?.id === l.id;
               return (
-                <button
-                  key={l.id}
-                  type="button"
-                  onClick={() => {
-                    setSelected(lookToOption(l));
-                    setOpenGroupId(null);
-                  }}
-                  disabled={disabled}
-                  className={
-                    'group relative aspect-[3/4] overflow-hidden rounded-[10px] border text-left transition-all duration-200 hover:scale-[1.02] active:scale-[0.99] ' +
-                    (isSelected
-                      ? 'border-lime shadow-[0_0_14px_-4px_rgba(200,232,124,0.6)]'
-                      : 'border-line-strong hover:border-lime/60')
-                  }
-                >
-                  <ThumbWithFallback
-                    primary={l.thumb}
-                    fallbacks={[openGroup.thumb]}
-                    alt={l.name}
-                    className="absolute inset-0 h-full w-full object-cover"
-                    eager
-                  />
-                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/65 to-transparent p-1.5">
-                    <div className="truncate text-[11px] font-semibold text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>{l.name}</div>
-                  </div>
-                  {isSelected ? (
-                    <div className="absolute right-1 top-1 rounded bg-lime px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-black">
-                      ✓ Use
+                <Tilt3D key={l.id} max={9} className="aspect-[3/4]">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelected(lookToOption(l));
+                      setOpenGroupId(null);
+                    }}
+                    disabled={disabled}
+                    className={'group av-cell !rounded-[14px]' + (isSelected ? ' is-sel' : '')}
+                  >
+                    <ThumbWithFallback
+                      primary={l.thumb}
+                      fallbacks={[openGroup.thumb]}
+                      alt={l.name}
+                      className="absolute inset-0 h-full w-full object-cover"
+                      eager={i < 6}
+                      withSkeleton
+                    />
+                    <span className="av-gloss" aria-hidden />
+                    <span className="av-sheen" aria-hidden />
+                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-1.5 pt-5">
+                      <div className="truncate text-[11px] font-semibold text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>{l.name}</div>
                     </div>
-                  ) : null}
-                </button>
+                    {isSelected ? (
+                      <div className="absolute right-1 top-1 rounded-full bg-lime px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-black shadow-[0_0_14px_-3px_rgba(200,232,124,0.9)]">
+                        ✓ Use
+                      </div>
+                    ) : null}
+                  </button>
+                </Tilt3D>
               );
             })}
           </div>
@@ -437,49 +482,53 @@ export function HeyGenAvatarPicker({
 
       {/* Grid de AVATARES (igual UI "Choose an Avatar" do HeyGen) */}
       {(!inlineMode || !openGroup) && filteredGroups.length > 0 ? (
-        <div className="mt-3 grid max-h-[480px] grid-cols-3 gap-2 overflow-y-auto pr-1 sm:grid-cols-4 md:grid-cols-5">
+        <div className="mt-3 grid max-h-[480px] grid-cols-3 gap-2.5 overflow-y-auto overflow-x-hidden px-0.5 pb-1 pr-1 [perspective:1200px] sm:grid-cols-4 md:grid-cols-5">
           {filteredGroups.map((g, i) => {
             const isSelectedGroup = selected?.groupId === g.id;
             // Fallbacks pro thumb do grupo: thumb do 1o look, 2o look, etc
             const fallbacks = g.looks.map((l) => l.thumb);
             return (
-              <button
-                key={g.id}
-                type="button"
-                onClick={() => setOpenGroupId(g.id)}
-                disabled={disabled}
-                style={GRID_CELL_CV}
-                className={
-                  'group relative aspect-square overflow-hidden rounded-[12px] border text-left transition-all duration-200 hover:scale-[1.02] active:scale-[0.99] ' +
-                  (isSelectedGroup
-                    ? 'border-lime shadow-[0_0_18px_-4px_rgba(200,232,124,0.6)]'
-                    : 'border-line-strong hover:border-lime/60')
-                }
-                title={`${g.name} - ${g.looksCount} look${g.looksCount > 1 ? 's' : ''}`}
-              >
-                <ThumbWithFallback
-                  primary={g.thumb}
-                  fallbacks={fallbacks}
-                  alt={g.name}
-                  className="absolute inset-0 h-full w-full object-cover"
-                  eager={i < 6}
-                  onAllFailed={reportThumbFailed}
-                />
-                {/* Overlay dark */}
-                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/65 to-transparent p-2">
-                  <div className="truncate text-[12px] font-semibold text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>
-                    {g.name}
+              // Tilt3D: tilt 3D real seguindo o mouse (so a celula em hover
+              // dispara — sem custo no scroll). av-cv (content-visibility) vai
+              // no BOTAO, nao na wrapper: pula paint/decode das ~110 fora do
+              // viewport SEM cortar o glow do hover/selecionado (a paint
+              // containment so clipa descendentes, nao a box-shadow do proprio
+              // elemento).
+              <Tilt3D key={g.id} max={9} className="aspect-square">
+                <button
+                  type="button"
+                  onClick={() => setOpenGroupId(g.id)}
+                  disabled={disabled}
+                  className={'group av-cell av-cv' + (isSelectedGroup ? ' is-sel' : '')}
+                  title={`${g.name} - ${g.looksCount} look${g.looksCount > 1 ? 's' : ''}`}
+                >
+                  <ThumbWithFallback
+                    primary={g.thumb}
+                    fallbacks={fallbacks}
+                    alt={g.name}
+                    className="absolute inset-0 h-full w-full object-cover"
+                    eager={i < 6}
+                    onAllFailed={reportThumbFailed}
+                    withSkeleton
+                  />
+                  <span className="av-gloss" aria-hidden />
+                  <span className="av-sheen" aria-hidden />
+                  {/* Overlay dark */}
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-2 pt-5">
+                    <div className="truncate text-[12px] font-semibold text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>
+                      {g.name}
+                    </div>
+                    <div className="mono text-[9px] uppercase text-white/75" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
+                      {g.looksCount} look{g.looksCount > 1 ? 's' : ''}
+                    </div>
                   </div>
-                  <div className="mono text-[9px] uppercase text-white/75" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
-                    {g.looksCount} look{g.looksCount > 1 ? 's' : ''}
-                  </div>
-                </div>
-                {isSelectedGroup ? (
-                  <div className="absolute right-1.5 top-1.5 rounded bg-lime px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-black">
-                    Selecionado
-                  </div>
-                ) : null}
-              </button>
+                  {isSelectedGroup ? (
+                    <div className="absolute right-1.5 top-1.5 rounded-full bg-lime px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-black shadow-[0_0_14px_-3px_rgba(200,232,124,0.9)]">
+                      ✓
+                    </div>
+                  ) : null}
+                </button>
+              </Tilt3D>
             );
           })}
         </div>
@@ -489,15 +538,19 @@ export function HeyGenAvatarPicker({
        *  No inlineMode os looks aparecem inline acima (substituem o grid). */}
       {!inlineMode && openGroup ? (
         <div
-          className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-sm sm:items-center"
+          className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-md sm:items-center"
           onClick={() => setOpenGroupId(null)}
+          style={{ animation: 'fade-in-up 0.2s ease' }}
         >
           <div
-            className="relative max-h-[85vh] w-full max-w-3xl overflow-y-auto rounded-t-[20px] border border-line-strong bg-bg-base p-4 sm:rounded-[20px]"
+            className="glass-panel relative max-h-[85vh] w-full max-w-3xl overflow-y-auto rounded-t-[22px] border border-violet/25 p-4 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.85),0_0_60px_-24px_rgba(167,139,250,0.5)] sm:rounded-[22px]"
             onClick={(e) => e.stopPropagation()}
+            style={{ animation: 'av-pop-in 0.28s cubic-bezier(.2,.8,.2,1)' }}
           >
-            <div className="mb-3 flex items-center gap-3">
-              <div className="h-10 w-10 shrink-0 overflow-hidden rounded-full">
+            {/* faixa gradiente decorativa no topo */}
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-violet/60 to-transparent" />
+            <div className="mb-4 flex items-center gap-3">
+              <div className="h-11 w-11 shrink-0 overflow-hidden rounded-full ring-2 ring-violet/40 ring-offset-2 ring-offset-bg">
                 <ThumbWithFallback
                   primary={openGroup.thumb}
                   fallbacks={openGroup.looks.map((l) => l.thumb)}
@@ -510,56 +563,56 @@ export function HeyGenAvatarPicker({
                 <div className="truncate text-lg font-semibold text-white">
                   {openGroup.name}
                 </div>
-                <div className="mono text-[10px] uppercase text-text-muted">
-                  {openGroup.name}&apos;s Looks · {openGroup.looksCount}
+                <div className="mono text-[10px] uppercase tracking-wider text-text-muted">
+                  {openGroup.looksCount} look{openGroup.looksCount > 1 ? 's' : ''} disponíve{openGroup.looksCount > 1 ? 'is' : 'l'}
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setOpenGroupId(null)}
-                className="rounded-md border border-line-strong bg-bg-soft px-3 py-1 text-[10px] uppercase tracking-widest text-text-muted transition hover:border-lime hover:text-lime"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-line-strong bg-bg-soft/60 text-text-muted transition-all hover:rotate-90 hover:border-lime hover:text-lime"
+                aria-label="Fechar"
               >
-                Fechar
+                ✕
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {openGroup.looks.map((l) => {
+            <div className="grid grid-cols-2 gap-3 [perspective:1200px] sm:grid-cols-3">
+              {openGroup.looks.map((l, i) => {
                 const isSelected = selected?.id === l.id;
                 return (
-                  <button
-                    key={l.id}
-                    type="button"
-                    onClick={() => {
-                      setSelected(lookToOption(l));
-                      setOpenGroupId(null);
-                    }}
-                    disabled={disabled}
-                    className={
-                      'group relative aspect-[3/4] overflow-hidden rounded-[12px] border text-left transition-all duration-200 hover:scale-[1.02] active:scale-[0.99] ' +
-                      (isSelected
-                        ? 'border-lime shadow-[0_0_18px_-4px_rgba(200,232,124,0.6)]'
-                        : 'border-line-strong hover:border-lime/60')
-                    }
-                  >
-                    <ThumbWithFallback
-                      primary={l.thumb}
-                      fallbacks={[openGroup.thumb]}
-                      alt={l.name}
-                      className="absolute inset-0 h-full w-full object-cover"
-                      eager
-                    />
-                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/65 to-transparent p-2">
-                      <div className="truncate text-[12px] font-semibold text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>
-                        {l.name}
+                  <Tilt3D key={l.id} max={9} className="aspect-[3/4]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelected(lookToOption(l));
+                        setOpenGroupId(null);
+                      }}
+                      disabled={disabled}
+                      className={'group av-cell' + (isSelected ? ' is-sel' : '')}
+                    >
+                      <ThumbWithFallback
+                        primary={l.thumb}
+                        fallbacks={[openGroup.thumb]}
+                        alt={l.name}
+                        className="absolute inset-0 h-full w-full object-cover"
+                        eager={i < 9}
+                        withSkeleton
+                      />
+                      <span className="av-gloss" aria-hidden />
+                      <span className="av-sheen" aria-hidden />
+                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-2 pt-6">
+                        <div className="truncate text-[12px] font-semibold text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>
+                          {l.name}
+                        </div>
                       </div>
-                    </div>
-                    {isSelected ? (
-                      <div className="absolute right-1.5 top-1.5 rounded bg-lime px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-black">
-                        ✓ Use
-                      </div>
-                    ) : null}
-                  </button>
+                      {isSelected ? (
+                        <div className="absolute right-1.5 top-1.5 rounded-full bg-lime px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-black shadow-[0_0_14px_-3px_rgba(200,232,124,0.9)]">
+                          ✓ Use
+                        </div>
+                      ) : null}
+                    </button>
+                  </Tilt3D>
                 );
               })}
             </div>
@@ -569,8 +622,11 @@ export function HeyGenAvatarPicker({
 
       {/* Pill do selecionado embaixo */}
       {selected ? (
-        <div className="mt-3 flex items-center gap-3 rounded-[12px] border border-lime/30 bg-lime/5 px-3 py-2 text-xs text-lime">
-          <div className="h-8 w-8 shrink-0 overflow-hidden rounded-md">
+        <div
+          className="mt-3 flex items-center gap-3 rounded-[14px] border border-lime/30 bg-gradient-to-r from-lime/10 to-lime/[0.03] px-3 py-2 text-xs text-lime shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_0_24px_-12px_rgba(200,232,124,0.6)]"
+          style={{ animation: 'av-pop-in 0.3s cubic-bezier(.2,.8,.2,1)' }}
+        >
+          <div className="h-9 w-9 shrink-0 overflow-hidden rounded-lg ring-1 ring-lime/40">
             <ThumbWithFallback
               primary={selected.thumb}
               fallbacks={[]}
@@ -580,10 +636,12 @@ export function HeyGenAvatarPicker({
             />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="truncate font-semibold">
-              ✓ {selected.groupName ? `${selected.groupName} - ${selected.name}` : selected.name}
+            <div className="mono text-[8px] uppercase tracking-[0.16em] text-lime/60">Selecionado</div>
+            <div className="truncate font-semibold text-white">
+              {selected.groupName ? `${selected.groupName} · ${selected.name}` : selected.name}
             </div>
           </div>
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-lime text-[10px] font-bold text-black shadow-[0_0_12px_-2px_rgba(200,232,124,0.9)]">✓</span>
         </div>
       ) : null}
     </div>

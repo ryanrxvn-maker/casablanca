@@ -227,6 +227,134 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
     @apply p-6 md:p-8;
   }
 
+  /* ──────────────── Avatar library (HeyGenAvatarPicker) ────────────────
+   * Grid premium dos avatares/looks da biblioteca HeyGen. So transforms,
+   * opacity e box-shadow animam (GPU) — o tilt 3D vem do <Tilt3D>. */
+
+  /* content-visibility: o browser PULA layout/paint/decode das celulas FORA
+   * do viewport (130+ avatares). Vai na wrapper Tilt3D (grid item). `auto`
+   * lembra o tamanho real depois do 1o render → sem pulo de scroll. Degrada
+   * sozinho (prop ignorada) em browser antigo, sem bug. */
+  .av-cv {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 150px;
+  }
+
+  /* Celula 3D — glass escuro + anel gradiente iridescente (violet→cyan) que
+   * acende no hover + gloss superior + sheen diagonal varrendo. */
+  .av-cell {
+    @apply relative h-full w-full overflow-hidden rounded-[16px] border border-line-strong/80 text-left;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.22));
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.05) inset,
+      0 10px 24px -16px rgba(0, 0, 0, 0.85);
+    transition:
+      border-color 0.35s ease,
+      box-shadow 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  /* anel gradiente (mask) — invisivel ate o hover */
+  .av-cell::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(
+      140deg,
+      rgba(167, 139, 250, 0.6),
+      rgba(126, 213, 226, 0.32) 45%,
+      transparent 72%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+            mask-composite: exclude;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.35s ease;
+  }
+  .av-cell:hover::after {
+    opacity: 1;
+  }
+  .av-cell:hover {
+    border-color: rgba(167, 139, 250, 0.45);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.1) inset,
+      0 26px 50px -24px rgba(0, 0, 0, 0.95),
+      0 0 44px -14px rgba(167, 139, 250, 0.4);
+  }
+  /* sheen diagonal — varre uma vez ao entrar o hover */
+  .av-sheen {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0;
+    background: linear-gradient(
+      115deg,
+      transparent 32%,
+      rgba(255, 255, 255, 0.16) 48%,
+      transparent 64%
+    );
+    transform: translateX(-120%);
+  }
+  .av-cell:hover .av-sheen {
+    opacity: 1;
+    animation: av-sheen-pass 0.9s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  /* gloss superior fixo — da volume de "vidro" */
+  .av-gloss {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(
+      120% 55% at 50% -8%,
+      rgba(255, 255, 255, 0.14),
+      transparent 60%
+    );
+  }
+  /* estado selecionado — anel lime fixo + glow, sem o anel iridescente */
+  .av-cell.is-sel {
+    border-color: rgb(var(--lime));
+    box-shadow:
+      0 0 0 1px rgb(var(--lime)) inset,
+      0 0 30px -6px rgba(200, 232, 124, 0.6);
+  }
+  .av-cell.is-sel::after {
+    opacity: 0;
+  }
+
+  /* skeleton shimmer enquanto a thumb baixa — performance PERCEBIDA */
+  .av-skel {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      110deg,
+      rgb(var(--bg-soft)) 8%,
+      rgb(var(--line-strong)) 20%,
+      rgb(var(--bg-soft)) 34%
+    );
+    background-size: 220% 100%;
+    animation: av-skel-pan 1.25s linear infinite;
+  }
+  /* thumb faz fade-in + assenta o zoom quando carrega (decode async) */
+  .av-img {
+    opacity: 0;
+    transform: scale(1.05);
+    transition:
+      opacity 0.5s ease,
+      transform 0.7s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .av-img.is-loaded {
+    opacity: 1;
+    transform: scale(1);
+  }
+  /* ken-burns lento no hover (so depois de carregada) */
+  .av-cell:hover .av-img.is-loaded {
+    transform: scale(1.06);
+  }
+
   /* Card "neon" — variant pra cards de ferramentas/destaque, sem o conic */
   .card-tool {
     @apply relative rounded-[18px] border border-line/80 bg-gradient-to-b from-bg-soft/90 to-bg/60 backdrop-blur-md;
@@ -1042,6 +1170,20 @@ input[type='range']::-moz-range-thumb {
 @keyframes card-border-spin {
   0% { --angle: 0deg; }
   100% { --angle: 360deg; }
+}
+
+/* Avatar library — sheen que varre a celula no hover + skeleton shimmer */
+@keyframes av-sheen-pass {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(120%); }
+}
+@keyframes av-skel-pan {
+  0% { background-position: 140% 0; }
+  100% { background-position: -40% 0; }
+}
+@keyframes av-pop-in {
+  0% { opacity: 0; transform: translateY(8px) scale(0.96); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 /* Logo — pulso suave nos olhos do coelho */

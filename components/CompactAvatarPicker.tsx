@@ -153,19 +153,28 @@ export function CompactAvatarPicker({
       {open && pos && typeof document !== 'undefined' ? createPortal(
         <div
           ref={popRef}
-          className="fixed z-[120] overflow-hidden rounded-[14px] border border-lime/40 bg-bg shadow-[0_12px_40px_-6px_rgba(0,0,0,0.6),0_0_28px_-12px_rgba(200,232,124,0.4)]"
-          style={{ top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxH }}
+          className="glass-panel fixed z-[120] overflow-hidden rounded-[16px] border border-violet/30 shadow-[0_24px_60px_-12px_rgba(0,0,0,0.75),0_0_44px_-16px_rgba(167,139,250,0.5)]"
+          style={{ top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxH, animation: 'av-pop-in 0.22s cubic-bezier(.2,.8,.2,1)' }}
         >
-          <div className="flex items-center justify-between border-b border-line/40 bg-bg-soft/40 px-3 py-2">
-            <h3 className="label-tech text-[10px] tracking-[0.18em] text-lime">
-              {label ?? 'Escolher avatar'}
-            </h3>
+          {/* faixa gradiente no topo */}
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-violet/70 to-transparent" />
+          <div className="flex items-center justify-between border-b border-line/40 bg-gradient-to-r from-violet/[0.08] via-bg-soft/40 to-cyan/[0.05] px-3 py-2.5">
+            <div className="flex items-center gap-2">
+              {/* mini pilha de avatares */}
+              <span className="relative flex h-4 w-6 shrink-0 items-center">
+                <span className="absolute left-0 h-4 w-4 rounded-full border border-violet/50 bg-violet/20" />
+                <span className="absolute left-2 h-4 w-4 rounded-full border border-lime/50 bg-lime/20" />
+              </span>
+              <h3 className="label-tech text-[10px] tracking-[0.18em] text-white">
+                {label ?? 'Escolher avatar'}
+              </h3>
+            </div>
             <div className="flex items-center gap-1.5">
               {selected ? (
                 <button
                   type="button"
                   onClick={() => { setSelected(null); setOpen(false); }}
-                  className="rounded-md border border-line-strong px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
+                  className="rounded-full border border-line-strong px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted transition-all hover:border-red-500/60 hover:text-red-300"
                 >
                   Voltar pro padrao
                 </button>
@@ -173,7 +182,8 @@ export function CompactAvatarPicker({
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="rounded-md border border-line-strong px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
+                className="flex h-6 w-6 items-center justify-center rounded-full border border-line-strong text-text-muted transition-all hover:rotate-90 hover:border-lime hover:text-lime"
+                aria-label="Fechar"
               >
                 ✕
               </button>
