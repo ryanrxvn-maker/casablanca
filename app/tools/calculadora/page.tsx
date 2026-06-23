@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { formatBRL } from '@/lib/utils';
@@ -13,6 +13,10 @@ const HUE = 'rgba(148,163,184,0.4)';
 const VPM_PRESETS = [50, 80, 100, 150, 200, 300] as const;
 
 type AdRow = { id: string; time: string };
+
+type SavedPix = { id: string; key: string; name: string; city: string };
+
+const PIX_STORE_KEY = 'calculadora:pixSaved';
 
 let _adSeq = 0;
 function newAd(time = ''): AdRow {
@@ -86,6 +90,55 @@ export default function CalculadoraPage() {
 
   const canPrint = vpm > 0 && totalSeconds > 0;
   const [gerando, setGerando] = useState(false);
+
+  // Chaves PIX salvas no navegador (localStorage) — reuso com 1 clique.
+  const [savedPix, setSavedPix] = useState<SavedPix[]>([]);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PIX_STORE_KEY);
+      if (raw) setSavedPix(JSON.parse(raw) as SavedPix[]);
+    } catch {
+      /* localStorage indisponível — segue sem chaves salvas */
+    }
+  }, []);
+
+  const persistSaved = (list: SavedPix[]) => {
+    setSavedPix(list);
+    try {
+      localStorage.setItem(PIX_STORE_KEY, JSON.stringify(list));
+    } catch {
+      /* ignora falha de escrita (modo privado etc.) */
+    }
+  };
+
+  const pixKeySaved = savedPix.some(
+    (e) => e.key.toLowerCase() === pixKey.trim().toLowerCase(),
+  );
+
+  const salvarChavePix = () => {
+    const key = pixKey.trim();
+    if (!key) return;
+    const entry: SavedPix = {
+      id: `pix_${Date.now()}`,
+      key,
+      name: pixNome.trim(),
+      city: pixCidade.trim(),
+    };
+    // Dedupe por chave (atualiza nome/cidade se já existir).
+    const without = savedPix.filter(
+      (e) => e.key.toLowerCase() !== key.toLowerCase(),
+    );
+    persistSaved([entry, ...without].slice(0, 12));
+  };
+
+  const aplicarChavePix = (e: SavedPix) => {
+    setPixKey(e.key);
+    setPixNome(e.name);
+    setPixCidade(e.city);
+  };
+
+  const removerChavePix = (id: string) =>
+    persistSaved(savedPix.filter((e) => e.id !== id));
 
   const gerarRelatorio = async () => {
     if (!canPrint || gerando) return;
@@ -297,6 +350,53 @@ export default function CalculadoraPage() {
 
           {pixOn ? (
             <div className="mt-3 flex flex-col gap-3">
+              {savedPix.length > 0 ? (
+                <div>
+                  <span
+                    className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    Chaves salvas
+                  </span>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {savedPix.map((e) => {
+                      const active =
+                        e.key.toLowerCase() === pixKey.trim().toLowerCase();
+                      return (
+                        <span
+                          key={e.id}
+                          className={
+                            'group inline-flex items-center gap-1.5 rounded-full border py-1 pl-3 pr-1.5 text-[11.5px] transition-all duration-200 ' +
+                            (active
+                              ? 'border-violet/65 bg-violet/15 text-white'
+                              : 'border-line-strong text-text-muted hover:border-violet hover:text-white')
+                          }
+                        >
+                          <button
+                            type="button"
+                            onClick={() => aplicarChavePix(e)}
+                            className="max-w-[180px] truncate"
+                            title={e.key}
+                          >
+                            {e.name || e.key}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removerChavePix(e.id)}
+                            aria-label={`Remover chave ${e.name || e.key}`}
+                            className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-text-muted/70 transition hover:bg-red-500/20 hover:text-red-300"
+                          >
+                            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+                              <path d="M6 6l12 12M18 6L6 18" />
+                            </svg>
+                          </button>
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
               <label className="block">
                 <span
                   className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
@@ -304,15 +404,27 @@ export default function CalculadoraPage() {
                 >
                   Chave PIX
                 </span>
-                <input
-                  inputMode="text"
-                  placeholder="e-mail, telefone, CPF/CNPJ ou aleatória"
-                  className="input-field mt-2"
-                  value={pixKey}
-                  onChange={(e) => setPixKey(e.target.value)}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
+                <div className="mt-2 flex gap-2">
+                  <input
+                    inputMode="text"
+                    placeholder="e-mail, telefone, CPF/CNPJ ou aleatória"
+                    className="input-field flex-1"
+                    value={pixKey}
+                    onChange={(e) => setPixKey(e.target.value)}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <button
+                    type="button"
+                    onClick={salvarChavePix}
+                    disabled={!pixKey.trim() || pixKeySaved}
+                    title={pixKeySaved ? 'Chave já salva' : 'Salvar chave pra reusar'}
+                    className="shrink-0 whitespace-nowrap rounded-[12px] border border-line-strong px-3.5 text-[12px] font-bold text-text-muted transition hover:border-violet/55 hover:text-white active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-line-strong disabled:hover:text-text-muted"
+                    style={{ fontFamily: 'var(--font-tech)' }}
+                  >
+                    {pixKeySaved ? '✓ Salva' : 'Salvar'}
+                  </button>
+                </div>
               </label>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <label className="block">
@@ -349,8 +461,9 @@ export default function CalculadoraPage() {
                 </label>
               </div>
               <p className="text-[11px] text-text-muted">
-                O QR já vem com o valor total ({formatBRL(total)}) preenchido. A chave fica
-                só no seu navegador — nada é enviado pra servidor.
+                Só a chave já basta — nome e cidade são opcionais. O QR já vem com o valor
+                total ({formatBRL(total)}) preenchido. Tudo fica só no seu navegador, nada é
+                enviado pra servidor.
               </p>
             </div>
           ) : null}
