@@ -1310,6 +1310,9 @@ function BrollHistorySection() {
   // Estados AO VIVO por take (idx -> TakeState) durante a retomada — alimenta
   // a grade dinâmica (coelho + barra) igual ao disparo do zero.
   const [retryLive, setRetryLive] = useState<Record<number, TakeState>>({});
+  // Fase de EMPACOTAMENTO do ZIP (pós-geração) — barra dedicada pro user saber
+  // que NÃO travou: está lendo/compactando os MP4s (300 arquivos demora).
+  const [retryPacking, setRetryPacking] = useState<null | { label: string; percent: number }>(null);
   // zipKey do item que esta com o editor inline expandido (pra colar JSON
   // de batches antigos que nao tem originalJson salvo).
   const [pendingJsonFor, setPendingJsonFor] = useState<string | null>(null);
@@ -1730,32 +1733,39 @@ function BrollHistorySection() {
         await new Promise((res) => setTimeout(res, 5_000));
       }
 
-      // 3. Merge ZIP antigo + novos MP4s (de TODAS as rodadas)
-      setRetryMsg('Mergeando MP4s no ZIP…');
+      // 3. Merge ZIP antigo + novos MP4s (de TODAS as rodadas). Esta fase pode
+      //    demorar (300 MP4s = centenas de MB): barra DEDICADA pro user saber
+      //    que está empacotando, não travado. O cronômetro (elapsedTimer) segue
+      //    rodando = prova extra de vida.
+      setRetryMsg('Empacotando ZIP…');
+      setRetryPacking({ label: 'Preparando empacotamento…', percent: 0 });
       const { loadZip, saveZip } = await import('@/lib/zip-store');
       const JSZip = (await import('jszip')).default;
       const merged = new JSZip();
-      // 3a. Copia arquivos do ZIP antigo (se existir)
+      // 3a. Copia arquivos do ZIP antigo (se existir) — progresso por arquivo.
       try {
         const oldZip = await loadZip(item.zipKey);
         if (oldZip) {
           const oldBytes = await fetch(oldZip.blobUrl).then((res) => res.arrayBuffer());
           const oldZipObj = await JSZip.loadAsync(oldBytes);
-          for (const name of Object.keys(oldZipObj.files)) {
-            const f = oldZipObj.files[name];
-            if (f.dir) continue;
-            const ab = await f.async('arraybuffer');
+          const names = Object.keys(oldZipObj.files).filter((n) => !oldZipObj.files[n].dir);
+          let copied = 0;
+          for (const name of names) {
+            const ab = await oldZipObj.files[name].async('arraybuffer');
             merged.file(name, ab);
+            copied++;
+            // leitura ocupa 0–45% da barra
+            setRetryPacking({ label: `Lendo vídeos prontos… ${copied}/${names.length}`, percent: Math.round((copied / Math.max(1, names.length)) * 45) });
           }
           URL.revokeObjectURL(oldZip.blobUrl);
         }
       } catch (e) {
         console.warn('[retomar] zip antigo nao acessivel — usando so os novos:', e);
       }
-      // 3b. Adiciona os novos de cada rodada (overwrite se duplicado)
-      for (const zb of newZipBlobs) {
+      // 3b. Adiciona os novos de cada rodada (overwrite se duplicado) — 45–55%.
+      for (let zi = 0; zi < newZipBlobs.length; zi++) {
         try {
-          const newBytes = await zb.arrayBuffer();
+          const newBytes = await newZipBlobs[zi].arrayBuffer();
           const newZipObj = await JSZip.loadAsync(newBytes);
           for (const name of Object.keys(newZipObj.files)) {
             const f = newZipObj.files[name];
@@ -1763,15 +1773,23 @@ function BrollHistorySection() {
             const ab = await f.async('arraybuffer');
             merged.file(name, ab); // overwrite se duplicado
           }
+          setRetryPacking({ label: 'Juntando vídeos novos…', percent: 45 + Math.round(((zi + 1) / Math.max(1, newZipBlobs.length)) * 10) });
         } catch (e) {
           console.warn('[retomar] zip de rodada não pôde ser mesclado:', e);
         }
       }
-      const mergedBlob = await merged.generateAsync({
-        type: 'blob',
-        compression: 'DEFLATE',
-        compressionOptions: { level: 1 },
-      });
+      // 3c. Compacta — 55–100% via callback de progresso do JSZip.
+      const mergedBlob = await merged.generateAsync(
+        {
+          type: 'blob',
+          compression: 'DEFLATE',
+          compressionOptions: { level: 1 },
+        },
+        (metadata) => {
+          setRetryPacking({ label: 'Compactando ZIP…', percent: 55 + Math.round((metadata.percent || 0) * 0.45) });
+        },
+      );
+      setRetryPacking({ label: 'Salvando…', percent: 100 });
       await saveZip(item.zipKey, mergedBlob, item.zipName);
 
       // 4. Atualiza entry: merge takeUrls (novos sobrescrevem antigos do mesmo
@@ -1820,6 +1838,7 @@ function BrollHistorySection() {
       setRetryStats(null);
       setRetryElapsed(0);
       setRetryLive({});
+      setRetryPacking(null);
       patchHistEntry(item.zipKey, { inFlight: false });
     }
   }
@@ -1963,6 +1982,31 @@ function BrollHistorySection() {
                   </div>
                   <div className="mt-1.5 text-[9px] text-text-muted">
                     Kling renderiza em lotes de 3 — pode demorar (mais ainda em prioridade reduzida). Tá rodando: não feche a aba. O cronômetro andando = vivo.
+                  </div>
+                </div>
+              ) : null}
+              {/* Barra DEDICADA de empacotamento do ZIP (pós-geração). Aparece
+               *  quando todos os takes renderizaram e o app está lendo +
+               *  compactando os MP4s — fase que antes parecia travada. */}
+              {isRetrying && retryPacking ? (
+                <div className="rounded-[12px] border border-emerald-500/40 bg-emerald-500/[0.06] px-4 py-3">
+                  <div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-widest text-emerald-300">
+                    <span className="inline-flex items-center gap-1.5">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" strokeDasharray="32 32" />
+                      </svg>
+                      📦 Empacotando ZIP · {retryPacking.label}
+                    </span>
+                    <span className="tabular-nums text-emerald-300/80">{retryPacking.percent}%</span>
+                  </div>
+                  <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-bg/60">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-lime transition-all duration-300"
+                      style={{ width: `${Math.min(100, Math.max(2, retryPacking.percent))}%` }}
+                    />
+                  </div>
+                  <div className="mt-1.5 text-[9px] text-text-muted">
+                    Gerou tudo! Agora juntando os vídeos num ZIP só — quanto mais takes, mais demora. Não feche a aba; o ZIP libera no fim.
                   </div>
                 </div>
               ) : null}
