@@ -1163,6 +1163,65 @@ async function buildZipFromEntry(
   return { blob, n, faltam };
 }
 
+/** Reconstrói o ZIP e grava DIRETO NO DISCO via File System Access API,
+ *  pedaço por pedaço (streaming) — memória CONSTANTE, aguenta qualquer tamanho
+ *  (300 takes = vários GB). Mata o "Array buffer allocation failed" de montar o
+ *  ZIP inteiro na RAM. Adiciona os MP4s como Blob (lidos sob demanda, sem
+ *  segurar tudo na heap) e usa compression STORE (mp4 já é comprimido → zero
+ *  CPU/RAM desperdiçada). Backpressure via pause/resume. */
+async function streamZipFromEntryToDisk(
+  item: HistEntry,
+  fileHandle: { createWritable: () => Promise<{ write: (d: Uint8Array) => Promise<void>; close: () => Promise<void> }> },
+  onProgress: (label: string, percent: number) => void,
+): Promise<{ n: number; faltam: number }> {
+  const JSZip = (await import('jszip')).default;
+  const { loadBlob, saveBlob } = await import('@/lib/zip-store');
+  const names = buildEntryFileNames(item);
+  const zip = new JSZip();
+  const takes = [...(item.takeUrls || [])].sort((a, b) => a.idx - b.idx);
+  let n = 0, faltam = 0, read = 0;
+  for (const t of takes) {
+    const name = names[t.idx] || `take_${String(t.idx).padStart(2, '0')}.mp4`;
+    let blob: Blob | null = null;
+    try { blob = await loadBlob(takeVideoKey(item.zipKey, t.idx), 'video/mp4'); } catch {}
+    if (!blob && t.videoUrl) {
+      try {
+        const r = await fetch(t.videoUrl);
+        if (r.ok) { blob = await r.blob(); try { await saveBlob(takeVideoKey(item.zipKey, t.idx), blob, 'video/mp4'); } catch {} }
+      } catch {}
+    }
+    if (blob) { zip.file(name, blob); n++; } else if (t.status === 'ready' || t.videoUrl) faltam++;
+    read++;
+    onProgress(`Lendo vídeos… ${read}/${takes.length}`, Math.round((read / Math.max(1, takes.length)) * 35));
+  }
+  const writable = await fileHandle.createWritable();
+  if (n === 0) { await writable.close(); return { n: 0, faltam }; }
+  await new Promise<void>((resolve, reject) => {
+    // generateInternalStream não está nos tipos do JSZip — cast pra any.
+    const stream = (zip as unknown as {
+      generateInternalStream: (o: object) => {
+        on: (ev: string, cb: (a?: unknown, b?: unknown) => void) => unknown;
+        pause: () => void; resume: () => void;
+      };
+    }).generateInternalStream({ type: 'uint8array', streamFiles: true, compression: 'STORE' });
+    stream.on('data', (chunk, meta) => {
+      stream.pause();
+      writable.write(chunk as Uint8Array)
+        .then(() => {
+          const pct = (meta as { percent?: number } | undefined)?.percent || 0;
+          onProgress('Gravando ZIP no disco…', 35 + Math.round(pct * 0.65));
+          stream.resume();
+        })
+        .catch(reject);
+    });
+    stream.on('error', (e) => reject(e));
+    stream.on('end', () => resolve());
+    stream.resume();
+  });
+  await writable.close();
+  return { n, faltam };
+}
+
 /** Grid de preview de UM batch do histórico: cada take com vídeo embutido
  *  (player nativo) + rótulo. Prefere o MP4 salvo no IDB (offline); se não
  *  houver, usa a URL Magnific; se expirou, mostra o poster da imagem.
@@ -1363,44 +1422,82 @@ function BrollHistorySection() {
   }, []);
 
   async function redownload(item: typeof hist[number]) {
+    // FONTE DE VERDADE = os MP4s individuais no IDB (1 por take). O cache (ZIP
+    // pronto) só é confiável se o zipCount cobre todos os takes prontos; senão
+    // (cache antigo/incompleto) reconstruímos. Batch grande (vários GB) montado
+    // 100% na RAM estoura ("Array buffer allocation failed") → gravamos em
+    // STREAMING direto no disco (File System Access). Fallback p/ blob em
+    // memória se o navegador não tiver a API.
+    const readyCount = (item.takeUrls || []).filter((t) => t.status === 'ready' || !!t.videoUrl).length;
+    const cacheConfiavel = item.zipCount != null && item.zipCount >= readyCount && readyCount > 0;
+
+    // 1) Cache comprovadamente completo → baixa direto (rápido).
+    if (cacheConfiavel) {
+      setLoading(item.zipKey);
+      try {
+        const { loadZip } = await import('@/lib/zip-store');
+        const z = await loadZip(item.zipKey);
+        if (z) {
+          const a = document.createElement('a');
+          a.href = z.blobUrl;
+          a.download = z.filename;
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(z.blobUrl), 5000);
+          setLoading(null);
+          return;
+        }
+      } catch { /* cache sumiu → cai pra reconstrução abaixo */ }
+      setLoading(null);
+    }
+
+    // 2) STREAMING pro disco — pega o handle do arquivo AGORA (gesto do clique
+    //    ainda fresco), ANTES de qualquer await pesado, senão a API recusa.
+    const picker = (window as unknown as {
+      showSaveFilePicker?: (o: object) => Promise<{ createWritable: () => Promise<{ write: (d: Uint8Array) => Promise<void>; close: () => Promise<void> }> }>;
+    }).showSaveFilePicker;
+    let fileHandle: { createWritable: () => Promise<{ write: (d: Uint8Array) => Promise<void>; close: () => Promise<void> }> } | null = null;
+    if (typeof picker === 'function') {
+      try {
+        fileHandle = await picker({
+          suggestedName: item.zipName,
+          types: [{ description: 'ZIP', accept: { 'application/zip': ['.zip'] } }],
+        });
+      } catch (e) {
+        if ((e as { name?: string })?.name === 'AbortError') return; // user cancelou
+        fileHandle = null; // sem suporte/permissão → fallback em memória
+      }
+    }
+
     setLoading(item.zipKey);
+    setDlPacking({ zipKey: item.zipKey, label: 'Preparando…', percent: 0 });
     try {
-      const { loadZip, saveZip } = await import('@/lib/zip-store');
-      // Quantos takes DEVERIAM estar no ZIP (prontos). O cache só é confiável
-      // se comprovadamente cobre todos eles (zipCount). Sem isso (cache antigo
-      // OU escrito incompleto por um merge bugado), NÃO confiamos: reconstruímos
-      // dos MP4s individuais no IDB — a fonte de verdade. Mata o "veio 97/300".
-      const readyCount = (item.takeUrls || []).filter((t) => t.status === 'ready' || !!t.videoUrl).length;
-      const cacheConfiavel = item.zipCount != null && item.zipCount >= readyCount && readyCount > 0;
-      const z = cacheConfiavel ? await loadZip(item.zipKey) : null;
-      if (z) {
-        const a = document.createElement('a');
-        a.href = z.blobUrl;
-        a.download = z.filename;
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(z.blobUrl), 5000);
+      if (fileHandle) {
+        const { n, faltam } = await streamZipFromEntryToDisk(item, fileHandle, (label, percent) =>
+          setDlPacking({ zipKey: item.zipKey, label, percent }),
+        );
+        if (n === 0) {
+          alert('Nenhum vídeo deste batch está acessível (nem offline nem por URL). Use RETOMAR pra regerar.');
+          return;
+        }
+        if (faltam > 0) {
+          alert(`ZIP salvo com ${n} take(s). ${faltam} não estavam mais acessíveis. Use RETOMAR pra completar.`);
+        }
         return;
       }
-      // RECONSTRÓI do que está salvo: MP4s no IDB (offline, sobrevive reload/PC
-      // desligado) + fallback nas URLs ainda válidas. Nomes descritivos. Salva
-      // o ZIP correto + grava zipCount → próximos downloads confiam no cache.
-      setDlPacking({ zipKey: item.zipKey, label: 'Preparando…', percent: 0 });
+
+      // 3) FALLBACK (navegador sem File System Access): monta em memória. Pode
+      //    estourar em batch gigante, mas é o único caminho sem a API.
       const built = await buildZipFromEntry(item, (phase, done, total) => {
-        if (phase === 'read') {
-          setDlPacking({ zipKey: item.zipKey, label: `Reconstruindo: lendo vídeos… ${done}/${total}`, percent: Math.round((done / Math.max(1, total)) * 60) });
-        } else {
-          setDlPacking({ zipKey: item.zipKey, label: 'Compactando ZIP…', percent: 60 + Math.round(done * 0.4) });
-        }
+        if (phase === 'read') setDlPacking({ zipKey: item.zipKey, label: `Lendo vídeos… ${done}/${total}`, percent: Math.round((done / Math.max(1, total)) * 60) });
+        else setDlPacking({ zipKey: item.zipKey, label: 'Compactando ZIP…', percent: 60 + Math.round(done * 0.4) });
       });
       if (!built) {
-        alert(
-          'Nenhum vídeo deste batch está disponível offline nem nas URLs (expiraram). ' +
-          'Se ainda há prompts salvos, use RETOMAR pra regerar.'
-        );
+        alert('Nenhum vídeo deste batch está acessível (nem offline nem por URL). Use RETOMAR pra regerar.');
         return;
       }
       const { blob, n, faltam } = built;
       try {
+        const { saveZip } = await import('@/lib/zip-store');
         await saveZip(item.zipKey, blob, item.zipName);
         patchHistEntry(item.zipKey, { zipCount: n });
         window.dispatchEvent(new Event('darkolab:auto-broll:history-changed'));
@@ -1412,7 +1509,7 @@ function BrollHistorySection() {
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 5000);
       if (faltam > 0) {
-        alert(`Baixado ZIP com ${n} take(s). ${faltam} não estavam mais acessíveis (URL expirada e sem cópia offline). Use RETOMAR pra completar.`);
+        alert(`Baixado ZIP com ${n} take(s). ${faltam} não estavam mais acessíveis. Use RETOMAR pra completar.`);
       }
     } catch (e) {
       alert('Erro: ' + ((e as Error)?.message || String(e)));
@@ -1792,31 +1889,20 @@ function BrollHistorySection() {
       //    → bug "veio 97/300"). buildZipFromEntry pega TUDO do IDB (e re-salva
       //    o que vier de URL). Barra dedicada de progresso. zipCount = garantia
       //    pro BAIXAR confiar no cache só quando ele cobre todos os prontos.
-      setRetryMsg('Empacotando ZIP…');
-      setRetryPacking({ label: 'Preparando…', percent: 0 });
-      const { saveZip } = await import('@/lib/zip-store');
-      const entryParaZip: HistEntry = { ...item, takeUrls: newTakeUrls, successCount, failedCount };
-      const built = await buildZipFromEntry(entryParaZip, (phase, done, total) => {
-        if (phase === 'read') {
-          setRetryPacking({ label: `Lendo vídeos… ${done}/${total}`, percent: Math.round((done / Math.max(1, total)) * 60) });
-        } else {
-          setRetryPacking({ label: 'Compactando ZIP…', percent: 60 + Math.round(done * 0.4) });
-        }
-      });
-      let zipCount = 0;
-      if (built) {
-        zipCount = built.n;
-        setRetryPacking({ label: 'Salvando…', percent: 100 });
-        await saveZip(item.zipKey, built.blob, item.zipName);
-      }
+      // NÃO montamos o ZIP aqui. Cada MP4 já está salvo individualmente no IDB
+      // (persistTakesIncremental) = fonte de verdade. Montar um ZIP de vários GB
+      // na RAM AGORA estouraria ("Array buffer allocation failed"); o
+      // empacotamento acontece no BAIXAR, em STREAMING pro disco. Zeramos
+      // zipCount pra forçar o BAIXAR a (re)construir do que tem no IDB.
+      setRetryMsg('Finalizando…');
 
-      // 5. Atualiza a entry no localStorage (takeUrls + contagens + zipCount).
+      // 5. Atualiza a entry no localStorage (takeUrls + contagens).
       const updated: HistEntry = {
         ...item,
         takeUrls: newTakeUrls,
         successCount,
         failedCount,
-        zipCount,
+        zipCount: undefined,
       };
       const histRaw = localStorage.getItem('darkolab:auto-broll:history');
       const histArr: HistEntry[] = histRaw ? JSON.parse(histRaw) : [];
