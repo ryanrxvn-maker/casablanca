@@ -240,20 +240,21 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
     contain-intrinsic-size: auto 150px;
   }
 
-  /* Celula 3D — glass escuro + anel gradiente iridescente (violet→cyan) que
-   * acende no hover + gloss superior + sheen diagonal varrendo. */
+  /* Celula 3D — glass escuro, acabamento RESTRITO (estilo Linear/Raycast):
+   * borda fina, highlight interno, sombra refinada. O brilho/cor aparece so
+   * no hover — sem ruido visual no estado normal. */
   .av-cell {
-    @apply relative h-full w-full overflow-hidden rounded-[16px] border border-line-strong/80 text-left;
+    @apply relative h-full w-full overflow-hidden rounded-[14px] border border-line-strong/70 text-left;
     background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.22));
+      linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(0, 0, 0, 0.18));
     box-shadow:
-      0 1px 0 rgba(255, 255, 255, 0.05) inset,
-      0 10px 24px -16px rgba(0, 0, 0, 0.85);
+      0 1px 0 rgba(255, 255, 255, 0.04) inset,
+      0 8px 20px -14px rgba(0, 0, 0, 0.8);
     transition:
-      border-color 0.35s ease,
-      box-shadow 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
+      border-color 0.3s ease,
+      box-shadow 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
-  /* anel gradiente (mask) — invisivel ate o hover */
+  /* anel de borda — UM acento (violet), fino e discreto. Acende no hover. */
   .av-cell::after {
     content: '';
     position: absolute;
@@ -261,10 +262,10 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
     border-radius: inherit;
     padding: 1px;
     background: linear-gradient(
-      140deg,
-      rgba(167, 139, 250, 0.6),
-      rgba(126, 213, 226, 0.32) 45%,
-      transparent 72%
+      150deg,
+      rgba(167, 139, 250, 0.5),
+      rgba(167, 139, 250, 0.08) 48%,
+      transparent 76%
     );
     -webkit-mask:
       linear-gradient(#000 0 0) content-box,
@@ -273,19 +274,36 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
             mask-composite: exclude;
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.35s ease;
+    transition: opacity 0.3s ease;
   }
   .av-cell:hover::after {
     opacity: 1;
   }
   .av-cell:hover {
-    border-color: rgba(167, 139, 250, 0.45);
+    border-color: rgba(167, 139, 250, 0.35);
     box-shadow:
-      0 1px 0 rgba(255, 255, 255, 0.1) inset,
-      0 26px 50px -24px rgba(0, 0, 0, 0.95),
-      0 0 44px -14px rgba(167, 139, 250, 0.4);
+      0 1px 0 rgba(255, 255, 255, 0.08) inset,
+      0 22px 44px -22px rgba(0, 0, 0, 0.92),
+      0 0 34px -16px rgba(167, 139, 250, 0.32);
   }
-  /* sheen diagonal — varre uma vez ao entrar o hover */
+  /* spotlight que SEGUE o cursor — usa --gx/--gy que o <Tilt3D> ja injeta,
+   * amarrando a luz ao tilt 3D. Detalhe que separa "premium" de "pro". */
+  .av-spot {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0;
+    background: radial-gradient(
+      180px circle at var(--gx, 50%) var(--gy, 50%),
+      rgba(255, 255, 255, 0.13),
+      transparent 48%
+    );
+    transition: opacity 0.3s ease;
+  }
+  .av-cell:hover .av-spot {
+    opacity: 1;
+  }
+  /* sheen diagonal — varre uma vez, sutil, ao entrar o hover */
   .av-sheen {
     position: absolute;
     inset: 0;
@@ -293,8 +311,8 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
     opacity: 0;
     background: linear-gradient(
       115deg,
-      transparent 32%,
-      rgba(255, 255, 255, 0.16) 48%,
+      transparent 36%,
+      rgba(255, 255, 255, 0.12) 50%,
       transparent 64%
     );
     transform: translateX(-120%);
@@ -303,23 +321,23 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
     opacity: 1;
     animation: av-sheen-pass 0.9s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
-  /* gloss superior fixo — da volume de "vidro" */
+  /* gloss superior fixo — volume de "vidro", bem discreto */
   .av-gloss {
     position: absolute;
     inset: 0;
     pointer-events: none;
     background: radial-gradient(
-      120% 55% at 50% -8%,
-      rgba(255, 255, 255, 0.14),
-      transparent 60%
+      120% 50% at 50% -10%,
+      rgba(255, 255, 255, 0.1),
+      transparent 58%
     );
   }
-  /* estado selecionado — anel lime fixo + glow, sem o anel iridescente */
+  /* estado selecionado — anel lime fino + glow suave, sem o anel violet */
   .av-cell.is-sel {
     border-color: rgb(var(--lime));
     box-shadow:
-      0 0 0 1px rgb(var(--lime)) inset,
-      0 0 30px -6px rgba(200, 232, 124, 0.6);
+      0 0 0 1px rgba(200, 232, 124, 0.9) inset,
+      0 0 24px -8px rgba(200, 232, 124, 0.5);
   }
   .av-cell.is-sel::after {
     opacity: 0;
@@ -338,13 +356,25 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
     background-size: 220% 100%;
     animation: av-skel-pan 1.25s linear infinite;
   }
+  /* celula-placeholder do GRID de loading (estrutura antes das thumbs) */
+  .av-skel-cell {
+    @apply relative h-full w-full overflow-hidden rounded-[14px] border border-line-strong/60;
+    background: linear-gradient(
+      110deg,
+      rgb(var(--bg-soft)) 8%,
+      rgb(var(--line-strong)) 20%,
+      rgb(var(--bg-soft)) 34%
+    );
+    background-size: 220% 100%;
+    animation: av-skel-pan 1.4s linear infinite;
+  }
   /* thumb faz fade-in + assenta o zoom quando carrega (decode async) */
   .av-img {
     opacity: 0;
-    transform: scale(1.05);
+    transform: scale(1.04);
     transition:
-      opacity 0.5s ease,
-      transform 0.7s cubic-bezier(0.2, 0.8, 0.2, 1);
+      opacity 0.45s ease,
+      transform 0.65s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
   .av-img.is-loaded {
     opacity: 1;
@@ -352,7 +382,7 @@ html[data-theme='light'] aside a:not(:hover) .sb-nav-icon:not(.sb-icon-active) {
   }
   /* ken-burns lento no hover (so depois de carregada) */
   .av-cell:hover .av-img.is-loaded {
-    transform: scale(1.06);
+    transform: scale(1.05);
   }
 
   /* Card "neon" — variant pra cards de ferramentas/destaque, sem o conic */

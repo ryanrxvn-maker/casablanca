@@ -363,9 +363,20 @@ export function HeyGenAvatarPicker({
               ? `Filtrar pelos seus ${groups.length} avatares (${totalLooks} looks)...`
               : 'Carregando biblioteca...'
           }
-          className="input-field !pl-10 transition-shadow focus:!border-violet/60 focus:shadow-[0_0_0_3px_rgba(167,139,250,0.12),0_0_24px_-10px_rgba(167,139,250,0.5)]"
+          className="input-field !pl-10 !pr-9 transition-shadow focus:!border-violet/60 focus:shadow-[0_0_0_3px_rgba(167,139,250,0.12),0_0_24px_-10px_rgba(167,139,250,0.5)]"
           disabled={disabled || loading}
         />
+        {query ? (
+          <button
+            type="button"
+            onClick={() => setQuery('')}
+            className="absolute right-2.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full border border-line-strong bg-bg-soft/70 text-[10px] text-text-muted transition-all hover:border-lime hover:text-lime"
+            aria-label="Limpar busca"
+            tabIndex={-1}
+          >
+            ✕
+          </button>
+        ) : null}
       </div>
 
       {loading ? (
@@ -463,8 +474,9 @@ export function HeyGenAvatarPicker({
                       withSkeleton
                     />
                     <span className="av-gloss" aria-hidden />
+                    <span className="av-spot" aria-hidden />
                     <span className="av-sheen" aria-hidden />
-                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-1.5 pt-5">
+                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/55 to-transparent p-1.5 pt-6">
                       <div className="truncate text-[11px] font-semibold text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>{l.name}</div>
                     </div>
                     {isSelected ? (
@@ -477,6 +489,45 @@ export function HeyGenAvatarPicker({
               );
             })}
           </div>
+        </div>
+      ) : null}
+
+      {/* Skeleton GRID no carregamento inicial — estrutura premium antes das
+       *  thumbs chegarem (so quando ainda nao ha nenhum avatar). */}
+      {(!inlineMode || !openGroup) && loading && groups.length === 0 ? (
+        <div className="mt-3 grid grid-cols-3 gap-2.5 px-0.5 sm:grid-cols-4 md:grid-cols-5">
+          {Array.from({ length: 15 }).map((_, i) => (
+            <div
+              key={i}
+              className="aspect-square"
+              style={{ animation: 'av-pop-in 0.4s ease both', animationDelay: `${Math.min(i, 10) * 28}ms` }}
+            >
+              <div className="av-skel-cell" />
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {/* Empty state — filtro nao casou nenhum avatar */}
+      {(!inlineMode || !openGroup) && !loading && !error && groups.length > 0 && filteredGroups.length === 0 ? (
+        <div className="mt-3 flex flex-col items-center justify-center gap-2 rounded-[16px] border border-dashed border-line-strong bg-bg-soft/30 px-4 py-10 text-center">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full border border-line-strong bg-bg-soft/60 text-text-muted">
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <circle cx="11" cy="11" r="7" />
+              <path d="m21 21-4.3-4.3" />
+            </svg>
+          </div>
+          <div className="text-[13px] font-semibold text-white">Nenhum avatar encontrado</div>
+          <div className="max-w-[260px] text-[11px] text-text-muted">
+            Nada casou com <span className="font-semibold text-text">&ldquo;{query}&rdquo;</span>. Tente outro nome.
+          </div>
+          <button
+            type="button"
+            onClick={() => setQuery('')}
+            className="mt-1 rounded-full border border-line-strong bg-bg-soft/60 px-3 py-1 text-[10px] uppercase tracking-widest text-text-muted transition-all hover:border-lime hover:text-lime"
+          >
+            Limpar busca
+          </button>
         </div>
       ) : null}
 
@@ -512,18 +563,30 @@ export function HeyGenAvatarPicker({
                     withSkeleton
                   />
                   <span className="av-gloss" aria-hidden />
+                  <span className="av-spot" aria-hidden />
                   <span className="av-sheen" aria-hidden />
-                  {/* Overlay dark */}
-                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-2 pt-5">
-                    <div className="truncate text-[12px] font-semibold text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>
+                  {/* chip de looks — canto sup. esq., glass sutil (so multi-look) */}
+                  {g.looksCount > 1 ? (
+                    <div className="absolute left-1.5 top-1.5 flex items-center gap-0.5 rounded-full border border-white/15 bg-black/40 px-1.5 py-[3px] text-[8px] font-semibold text-white/90 backdrop-blur-sm">
+                      <svg viewBox="0 0 24 24" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden>
+                        <rect x="3" y="3" width="13" height="13" rx="2" />
+                        <path d="M8 21h11a2 2 0 0 0 2-2V8" />
+                      </svg>
+                      {g.looksCount}
+                    </div>
+                  ) : null}
+                  {/* Overlay nome + hint "ver looks" no hover */}
+                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/55 to-transparent p-2 pt-6">
+                    <div className="truncate text-[12px] font-semibold leading-tight text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>
                       {g.name}
                     </div>
-                    <div className="mono text-[9px] uppercase text-white/75" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
-                      {g.looksCount} look{g.looksCount > 1 ? 's' : ''}
+                    <div className="mt-0.5 flex items-center gap-1 text-[8.5px] uppercase tracking-wider text-white/55 transition-colors group-hover:text-lime" style={{ textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>
+                      <span className="group-hover:hidden">{g.looksCount} look{g.looksCount > 1 ? 's' : ''}</span>
+                      <span className="hidden items-center gap-0.5 group-hover:inline-flex">Ver looks →</span>
                     </div>
                   </div>
                   {isSelectedGroup ? (
-                    <div className="absolute right-1.5 top-1.5 rounded-full bg-lime px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide text-black shadow-[0_0_14px_-3px_rgba(200,232,124,0.9)]">
+                    <div className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-lime text-[10px] font-bold text-black shadow-[0_0_14px_-3px_rgba(200,232,124,0.9)]">
                       ✓
                     </div>
                   ) : null}
@@ -600,8 +663,9 @@ export function HeyGenAvatarPicker({
                         withSkeleton
                       />
                       <span className="av-gloss" aria-hidden />
+                      <span className="av-spot" aria-hidden />
                       <span className="av-sheen" aria-hidden />
-                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/60 to-transparent p-2 pt-6">
+                      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/55 to-transparent p-2 pt-6">
                         <div className="truncate text-[12px] font-semibold text-white" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.85)' }}>
                           {l.name}
                         </div>
