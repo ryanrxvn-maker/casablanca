@@ -238,14 +238,43 @@ export default function DecupagemPage() {
     }
     const { base, ticket } = (await tRes.json()) as { base: string; ticket: string };
 
+    // Acorda o container do servidor ANTES de mandar o arquivo grande. Container
+    // frio às vezes redireciona (303) o primeiro request grande; com ele já
+    // quente, o upload entra direto.
+    onStage('Acordando o servidor...');
+    try {
+      await fetch(`${base}/health`, { cache: 'no-store' });
+      await sleep(1500);
+    } catch { /* segue — o retry abaixo cobre */ }
+
+    // Upload com retry: se o container ainda estava frio e derrubou, tenta de
+    // novo (com o servidor já quente da tentativa anterior).
     onStage('Enviando pro servidor...');
-    const inputId = await uploadToModal(
-      base,
-      ticket,
-      file,
-      (ratio) => onProgress(ratio * 0.5), // upload = primeira metade da barra
-      () => cancelRef.current,
-    );
+    let inputId = '';
+    let lastErr: unknown = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (cancelRef.current) throw new Error('CANCELLED_BY_USER');
+      try {
+        inputId = await uploadToModal(
+          base,
+          ticket,
+          file,
+          (ratio) => onProgress(ratio * 0.5), // upload = primeira metade da barra
+          () => cancelRef.current,
+        );
+        break;
+      } catch (e) {
+        if ((e as Error)?.message === 'CANCELLED_BY_USER') throw e;
+        lastErr = e;
+        await sleep(2000); // deixa o servidor terminar de subir e tenta de novo
+      }
+    }
+    if (!inputId) {
+      throw new Error(
+        'Não consegui enviar o arquivo pro servidor (tentei 3x). Verifica a conexão e tenta de novo.' +
+          (lastErr ? ` (${(lastErr as Error).message})` : ''),
+      );
+    }
 
     onStage('Decupando no servidor...');
     onProgress(null); // indeterminado durante o processamento
