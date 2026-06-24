@@ -2133,6 +2133,17 @@ function ClickUpPilotInner() {
               const m = await loadZip(`batch:${taskId}:montado`);
               if (m) { updates.montadoZipUrl = m.blobUrl; updates.montadoZipName = m.filename; }
             } catch {}
+            // VA (texto E lipsync) salva o resultado em `va:<taskId>:zip` (chave
+            // diferente do batch normal). Sem re-hidratar isso, uma VA PRONTA
+            // perdia o montadoZipUrl no F5 → o card caía em "INCOMPLETO" (o
+            // pipeOk da VA é phase==='done' && !!montadoZipUrl). Fallback só se o
+            // batch:montado não veio (não sobrescreve o normal).
+            if (!updates.montadoZipUrl) {
+              try {
+                const v = await loadZip(`va:${taskId}:zip`);
+                if (v) { updates.montadoZipUrl = v.blobUrl; updates.montadoZipName = v.filename; }
+              } catch {}
+            }
             try {
               const c = await loadZip(`batch:${taskId}:camo`);
               if (c) { updates.camufladoZipUrl = c.blobUrl; updates.camufladoZipName = c.filename; }
@@ -7258,7 +7269,11 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 && (!b.pipeStats.expectedDecupagem || b.pipeStats.okDecupados === b.pipeStats.expectedMontagens)
                                 && (!b.pipeStats.expectedCamuflagem || b.pipeStats.okCamuflados === b.pipeStats.expectedMontagens)
                               )
-                            : (b.phase === 'done' && !!b.montadoZipUrl);
+                            // montadoZipName SOBREVIVE o reload (o persist só
+                            // descarta as URLs blob); usar ele aqui evita a VA
+                            // PRONTA piscar "INCOMPLETO" enquanto a re-hidratação
+                            // assíncrona do montadoZipUrl (do IDB) não termina.
+                            : (b.phase === 'done' && (!!b.montadoZipUrl || !!b.montadoZipName));
                           const allOk = dispatchOk && renderOk && pipeOk;
                           const isPartialDone = b.phase === 'done' && !allOk;
                           // CONTEÚDO do montado completo = todas as partes/texto
@@ -7274,7 +7289,11 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 && b.pipeStats.okMontagens === b.pipeStats.expectedMontagens
                                 && !b.pipeStats.incompleteMontagens
                               )
-                            : (b.phase === 'done' && !!b.montadoZipUrl);
+                            // montadoZipName SOBREVIVE o reload (o persist só
+                            // descarta as URLs blob); usar ele aqui evita a VA
+                            // PRONTA piscar "INCOMPLETO" enquanto a re-hidratação
+                            // assíncrona do montadoZipUrl (do IDB) não termina.
+                            : (b.phase === 'done' && (!!b.montadoZipUrl || !!b.montadoZipName));
                           // Só trava download quando FALTA conteúdo (parte/texto/
                           // render), nunca por pós-processo opcional. Troca tem
                           // fluxo próprio (prova/transcrição) → nunca trava aqui.
