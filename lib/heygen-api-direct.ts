@@ -129,13 +129,24 @@ function unwrap(r: { ok: boolean; status: number; body: any }) {
  *   - mensagens de rede/fetch/proxy
  * NAO inclui 4xx de validacao (400/401/403/404/410) — esses NUNCA se curam
  * (avatar invalido, voz inexistente, endpoint aposentado) e re-tentar so perde tempo. */
+/** ESGOTAMENTO de cota/crédito/limite DIÁRIO do HeyGen — TERMINAL: retry NÃO
+ *  cura (só o reset diário ou outra conta resolve), tem que aparecer pro user.
+ *  CRÍTICO: o limite diário vem com status 429 e mensagem "Your Video Generation
+ *  usage has exceeded the maximum daily limit." — sem casar isso, o 429 era
+ *  tratado como rate-limit transitório e re-tentado à toa (user reportou
+ *  2026-06-23: VAs falhando = na verdade cota diária estourada). */
+export function isQuotaError(msg?: string): boolean {
+  const m = (msg || '').toLowerCase();
+  return /quota|insufficient|saldo|cr[eé]ditos?\b|credit|maximum daily|daily limit|daily quota|usage has exceeded|exceeded the maximum|limit reached|usage limit/.test(m);
+}
+
 export function isTransientFailure(status: number | undefined, msg?: string): boolean {
+  // Cota/limite DIÁRIO é TERMINAL mesmo vindo como 429 → checa ANTES da regra
+  // "429 = transitório" (senão o limite diário era re-tentado em loop).
+  if (isQuotaError(msg)) return false;
   if (status === 0 || status === 408 || status === 425 || status === 429) return true;
   if (status != null && status >= 500 && status <= 599) return true;
   const m = (msg || '').toLowerCase();
-  // "quota"/"limite de creditos" e ESGOTAMENTO (permanente) — retry nao cura,
-  // tem que aparecer pro user. So tratamos rate-limit/overload/rede como transitorio.
-  if (/quota|insufficient|saldo|creditos?\b|credit/.test(m)) return false;
   return /timeout|failed to fetch|fetch failed|network|networkerror|load failed|connection|econn|socket|proxy heygen|rate.?limit|too many|overload|temporar|unavailable|try again|503|502|504/.test(m);
 }
 

@@ -6020,7 +6020,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
     });
 
     try {
-      const { processJob, downloadVideoBytes } = await import('@/lib/heygen-api-direct');
+      const { processJob, downloadVideoBytes, isQuotaError } = await import('@/lib/heygen-api-direct');
       const { concatAvatarParts } = await import('@/lib/ffmpeg-worker');
       const items: Array<{ avaCode: string; filename: string; blob: Blob | null; error?: string }> = [];
 
@@ -6066,6 +6066,10 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
               } catch (e) {
                 lastErr = (e as Error)?.message || 'falha';
                 upsertPart(label, { error: lastErr });
+                // COTA/limite diário do HeyGen = TERMINAL: re-tentar não cura
+                // (só o reset diário/outra conta), então PARA na hora — não
+                // desperdiça as 3 tentativas nem o tempo do user.
+                if (isQuotaError(lastErr)) break;
                 if (attempt < 3) console.warn(`[VA-texto ${label}] t${attempt} falhou (${lastErr}) — re-dispara`);
               }
             }
@@ -6122,6 +6126,9 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
         else zip.file(`${item.filename.replace('.mp4', '')}_ERRO.txt`, item.error || 'falha sem detalhes');
       }
       const okCount = items.filter((i) => i.blob).length;
+      // COTA: se alguma falha foi limite diário do HeyGen, sinaliza CLARO no card
+      // (não é bug nem "retomar resolve" — é a conta no teto diário).
+      const hitQuota = items.some((i) => !i.blob && isQuotaError(i.error || ''));
       zip.file('_DIAGNOSTICO.txt',
 `Pipeline VA (motor TEXTO — canal ${channelLabels.join('/') || 'organico'}) - relatorio
 ============================================================
@@ -6141,7 +6148,11 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
 
       patchVA({
         phase: 'done',
-        message: `Pronto (texto): ${okCount}/${items.length} AVA${items.length === 1 ? '' : 's'}`,
+        message: okCount === 0 && hitQuota
+          ? `⚠ HeyGen no LIMITE DIÁRIO de geração — aguarde o reset (~24h) ou troque de conta. NÃO é bug; re-disparar agora vai falhar igual.`
+          : hitQuota
+            ? `Pronto (texto): ${okCount}/${items.length} AVAs — resto bateu no LIMITE DIÁRIO do HeyGen (espere o reset)`
+            : `Pronto (texto): ${okCount}/${items.length} AVA${items.length === 1 ? '' : 's'}`,
         montadoZipUrl: zipUrl, montadoZipName: zipName,
         finishedAt: Date.now(),
       });
