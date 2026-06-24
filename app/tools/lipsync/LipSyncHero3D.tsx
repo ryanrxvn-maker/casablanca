@@ -127,14 +127,8 @@ export function LipSyncHero3D() {
               }}
             >
               Lipsync
-              <br />
-              <span style={{ opacity: 0.9 }}>o que você quiser.</span>
             </h1>
           </div>
-
-          <p className="max-w-[540px] text-[15px] leading-relaxed text-text-muted md:text-[17px]">
-            Sobe o vídeo do rosto. Sobe o áudio. <span className="text-white">A boca da pessoa passa a falar exatamente o que tá no áudio</span> — com naturalidade absurda. Sem cara de IA, sem dentes torto, sem olho morto.
-          </p>
 
           {/* PIPELINE — 4 etapas, sem jargao */}
           <div className="mt-1 flex flex-wrap items-center gap-1">
