@@ -16,7 +16,7 @@ import {
   toBaseAdId,
   type AvatarCandidate,
 } from './doc-to-disparos';
-import { matchAvatar, parseAvatars, parseVABriefing, parseDarkoBriefing, extractAvatarFileTokens, type DocLink } from './copy-parser';
+import { matchAvatar, parseAvatars, parseVABriefing, parseDarkoBriefing, extractAvatarFileTokens, sanitizeSpokenCopy, type DocLink } from './copy-parser';
 
 let failures = 0;
 function assert(cond: boolean, msg: string) {
@@ -1133,6 +1133,16 @@ console.log('\navatar "Avatar N:" inline no corpo (print + .mp4):');
   const bf47 = parseDarkoBriefing(DOC_DECL, 'AD47GL', null, []);
   assert((bf47?.avatars || []).some((a) => /kiko/i.test(a.username || '')), 'AD47: pega o avatar do bloco de declaração');
   assert(!(bf47?.avatars || []).some((a) => /gihribeiro/i.test(a.username || '')), 'AD47: NÃO pega o label "Mulher:" vazado no corpo (fallback não roda — declBlock achou avatar)');
+
+  // LABEL não vaza pra FALA: "Avatar 1:"/"Avatar 2:" (e roles conhecidos) NUNCA
+  // podem virar parte do texto falado pro HeyGen — nem em linha própria nem
+  // INLINE colado na fala (caso real do print).
+  const kr = ['Avatar 1', 'Avatar 2'];
+  assert(sanitizeSpokenCopy('Avatar 1: [[DOCIMG:0]]\nAtropelei meu neto.', kr) === 'Atropelei meu neto.', 'sanitize: label "Avatar 1:" em linha própria some');
+  assert(sanitizeSpokenCopy('Avatar 1:  Atropelei meu neto.', kr) === 'Atropelei meu neto.', 'sanitize: label "Avatar 1:" INLINE some (mantém a fala)');
+  assert(sanitizeSpokenCopy('Avatar 2: Ai eu parei com a finasterida.', kr) === 'Ai eu parei com a finasterida.', 'sanitize: "Avatar 2:" inline some');
+  assert(!/avatar\s*1/i.test(sanitizeSpokenCopy('Avatar 1: Voce conhece alguem?', kr)), 'sanitize: "Avatar 1" NUNCA sobra na fala');
+  assert(sanitizeSpokenCopy('Eu disse: oi pra ela.', kr) === 'Eu disse: oi pra ela.', 'sanitize: fala normal com ":" NÃO é cortada (head não é role)');
 }
 
 console.log('');

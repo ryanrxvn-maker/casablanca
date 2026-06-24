@@ -1303,6 +1303,21 @@ export function sanitizeSpokenCopy(raw: string, knownRoles: string[] = [], dropE
         const after = af[1].trim();
         return after ? l.replace(/^(\s*)Avatar\s+fala\s*[:\-]\s*/i, '$1') : null;
       }
+      // Speaker label INLINE colado na fala ("Avatar 1: Atropelei...", "Doutor:
+      // bom dia") — tira SÓ o prefixo do role, MANTÉM a fala. Só pra role
+      // CONHECIDO (knownRoleSet) pra não cortar "Eu disse: oi". Cobre o avatar
+      // declarado por print cujo label "Avatar N:" às vezes fica na MESMA linha
+      // da fala (o label sozinho já é descartado pelo bloco de role-label abaixo).
+      {
+        const pm = t.match(/^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9 ()\-]{0,40}?)\s*:\s+\S/);
+        if (pm) {
+          const head = pm[1].toLowerCase().trim();
+          const core = head.split(/[\s(\-]/)[0];
+          if ((knownRoleSet.has(head) || knownRoleSet.has(core)) && !pm[1].includes(',')) {
+            return l.replace(/^(\s*)[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9 ()\-]{0,40}?\s*:\s+/, '$1');
+          }
+        }
+      }
       // mention solo (@x.mp4)
       if (/^@[\w._\-À-ÿ]+(?:\.(?:mp4|mov))?\s*$/i.test(t)) return null;
       // filename solto sem @ (ex "thethaetresmyarena.mp4" ou "kiko.urso3.mp4")
