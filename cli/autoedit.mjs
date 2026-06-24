@@ -128,6 +128,9 @@ async function api(method, path, { json, query, headers, raw } = {}) {
   if (!cfg.key) {
     die('Sem AUTOEDIT_CLI_KEY. Rode: autoedit config --key <sua-chave>  (ou exporte AUTOEDIT_CLI_KEY)');
   }
+  // Git Bash (MSYS) no Windows converte um arg que começa com "/" num caminho
+  // Windows — "/api/x" vira "C:/Program Files/Git/api/x". Recupera a rota real.
+  if (!isUrl(path) && path.includes('/api/')) path = path.slice(path.indexOf('/api/'));
   let url = isUrl(path) ? path : cfg.url + (path.startsWith('/') ? path : '/' + path);
   if (query && Object.keys(query).length) {
     const u = new URL(url);
@@ -145,6 +148,9 @@ async function api(method, path, { json, query, headers, raw } = {}) {
     res = await fetch(url, { method, headers: h, body });
   } catch (e) {
     throw new Error(`rede: ${e.message} (${url})`);
+  }
+  if (process.env.AE_DEBUG) {
+    console.error(`[AE_DEBUG] ${method} ${url} -> ${res.status} ct=${res.headers.get('content-type')} redir=${res.redirected} finalUrl=${res.url} vid=${res.headers.get('x-vercel-id')}`);
   }
   const text = await res.text();
   let data;
