@@ -26,7 +26,6 @@ import {
   IconNormalizador,
   IconRemoverElementos,
   IconSeparadorAudio,
-  IconTrocaProduto,
 } from './ToolIcons';
 
 /**
@@ -163,14 +162,6 @@ const AI: ToolEntry[] = [
     description: 'Gera B-rolls em massa pelo JSON.',
     icon: <IconAutoBroll size={26} />,
     hue: 'rgba(240, 171, 252, 0.42)',
-    badge: 'IA',
-  },
-  {
-    href: '/tools/troca-produto',
-    label: 'Troca de produto',
-    description: 'Substitui o produto do áudio.',
-    icon: <IconTrocaProduto size={26} />,
-    hue: 'rgba(244, 114, 182, 0.42)',
     badge: 'IA',
   },
   {
@@ -1398,7 +1389,6 @@ function LockIcon({ size = 18 }: { size?: number }) {
 // "Hey Auto requer Pro" em vez de "/tools/heygen-auto requer Pro".
 const TOOL_LABELS: Record<string, string> = {
   '/tools/auto-broll': 'Auto B-roll',
-  '/tools/troca-produto': 'Troca de produto',
   '/tools/heygen-auto': 'Hey Auto',
   '/tools/decupagem-copy': 'Decupagem Inteligente',
   '/tools/clickup-pilot': 'ClickUp Pilot',

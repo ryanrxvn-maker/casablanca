@@ -50,7 +50,6 @@ const FREE_EXTRA_OK_PREFIXES = ['/pilot', '/planos'];
 // Ferramentas que SÓ Pro/Admin acessam — Basic é bloqueado nelas
 const PRO_ONLY_TOOLS = [
   '/tools/auto-broll',
-  '/tools/troca-produto',
   '/tools/heygen-auto',
   '/tools/decupagem-copy',     // Smart Decup
   '/tools/clickup-pilot',

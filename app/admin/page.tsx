@@ -46,7 +46,6 @@ const TOOL_LABELS: Record<string, string> = {
   normalizador: 'Normalizador',
   calculadora: 'Calculadora',
   'auto-broll': 'Auto B-Roll',
-  'troca-produto': 'Troca de Produto',
   'remover-elementos': 'Remover Legenda',
   'decupagem-copy': 'Decupagem por Copy',
 };

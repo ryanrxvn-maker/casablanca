@@ -30,7 +30,6 @@ const TITLES: Record<string, string> = {
   '/tools/separador-audio': 'Separador de Áudio',
   '/tools/calculadora': 'Calculadora',
   '/tools/auto-broll': 'Auto B-roll',
-  '/tools/troca-produto': 'Troca de produto',
   '/tools/remover-elementos': 'Remover Legenda/Marca d’Água',
   '/tools/decupagem-copy': 'Decupagem Inteligente',
   '/tools/copy-srt': 'Gerador de SRT',

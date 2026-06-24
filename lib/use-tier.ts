@@ -18,7 +18,7 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/normalizador',
     '/tools/calculadora',
     '/tools/copy-srt',
-    // ⚠ NÃO inclui: auto-broll, troca-produto, heygen-auto, decupagem-copy (smart decup), remover-elementos (smart remover), ltx-video, clickup-pilot
+    // ⚠ NÃO inclui: auto-broll, heygen-auto, decupagem-copy (smart decup), remover-elementos (smart remover), ltx-video, clickup-pilot
   ]),
   pro: new Set([
     // pro = tudo
@@ -33,7 +33,6 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/remover-elementos',
     '/tools/copy-srt',
     '/tools/auto-broll',
-    '/tools/troca-produto',
     '/tools/heygen-auto',
     '/tools/decupagem-copy',
     '/tools/clickup-pilot',

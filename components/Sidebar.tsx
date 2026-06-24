@@ -409,7 +409,6 @@ const BASE_PATHS = [
 ];
 const AI_PATHS = [
   '/tools/auto-broll',
-  '/tools/troca-produto',
   '/tools/remover-elementos',
   '/tools/decupagem-copy',
   '/tools/copy-srt',

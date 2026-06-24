@@ -45,7 +45,7 @@ const META: Array<{
     helper:
       'Chave alfanumerica longa. Pega em assemblyai.com (dashboard, sidebar).',
     link: 'https://www.assemblyai.com/app/account',
-    usedBy: 'Troca de Produto · Decupagem por Copy',
+    usedBy: 'Decupagem por Copy · Camuflagem · Gerador de SRT',
   },
   {
     id: 'heygen',

@@ -12,7 +12,6 @@ import {
   IconDecupagem,
   IconHeyGenAuto,
   IconRemoverElementos,
-  IconTrocaProduto,
 } from './ToolIcons';
 
 /**
@@ -161,7 +160,6 @@ function HeroVisual() {
         <FloatIcon delay={0} className="absolute left-[8%] top-[12%]" hue="rgba(240,171,252,0.45)" icon={<IconAutoBroll size={28} />} />
         <FloatIcon delay={300} className="absolute right-[6%] top-[20%]" hue="rgba(103,232,249,0.45)" icon={<IconHeyGenAuto size={28} />} />
         <FloatIcon delay={600} className="absolute left-[5%] bottom-[18%]" hue="rgba(163,230,53,0.4)" icon={<IconDecupagem size={28} />} />
-        <FloatIcon delay={900} className="absolute right-[8%] bottom-[10%]" hue="rgba(244,114,182,0.45)" icon={<IconTrocaProduto size={28} />} />
         <FloatIcon delay={1200} className="absolute right-[40%] top-[5%]" hue="rgba(167,139,250,0.45)" icon={<IconRemoverElementos size={28} />} />
       </div>
 
@@ -1631,12 +1629,6 @@ function CapabilitiesSection() {
       hue: 'rgba(240,171,252,0.55)',
       title: 'Disparar B-roll do dia inteiro',
       desc: 'Cola o JSON, liga a fila, faz outra coisa. Volta com a pasta cheia de cortes.',
-    },
-    {
-      icon: <IconTrocaProduto size={32} />,
-      hue: 'rgba(244,114,182,0.5)',
-      title: 'Trocar produto sem regravar',
-      desc: 'Mudou a marca? Substitui no áudio em segundos. A voz original continua intacta.',
     },
     {
       icon: <IconHeyGenAuto size={32} />,

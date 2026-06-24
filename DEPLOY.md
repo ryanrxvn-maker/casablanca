@@ -1,7 +1,7 @@
 # DARKO LAB — Guia de deploy
 
 Passo a passo para colocar o DARKO LAB em produção na Vercel com Supabase +
-chaves das APIs de IA (Anthropic, AssemblyAI, ElevenLabs).
+chaves das APIs de IA (Anthropic, AssemblyAI).
 
 Leva cerca de 25-40 minutos se você já tem conta nos serviços.
 
@@ -92,9 +92,8 @@ Se quiser login com Google:
 
 ## 3. Chaves das APIs de IA
 
-A AI Suite precisa de três chaves. Sem elas, as rotas `/tools/auto-broll` e
-`/tools/troca-produto` respondem com erro mas o resto do app continua
-funcionando.
+A AI Suite precisa de três chaves. Sem elas, a rota `/tools/auto-broll`
+responde com erro mas o resto do app continua funcionando.
 
 ### 3.1 Anthropic (Claude) — Auto B-Roll
 
@@ -104,7 +103,7 @@ funcionando.
 4. Abasteça a conta com créditos (pay-as-you-go). Um run de Auto B-Roll
    típico consome menos de $0,05.
 
-### 3.2 AssemblyAI — Troca de Produto (transcrição)
+### 3.2 AssemblyAI — transcrição (Decupagem, Camuflagem, SRT)
 
 1. Acesse [assemblyai.com](https://www.assemblyai.com) e faça signup.
 2. No dashboard, copie a **API Key** da sidebar.
@@ -112,18 +111,10 @@ funcionando.
    pay-as-you-go (~$0,65/hora no plano padrão no momento da escrita — cheque
    o pricing atual).
 
-### 3.3 ElevenLabs — Troca de Produto (voice clone + TTS)
+### 3.3 (Opcional) Replicate — separação voz/música
 
-1. Acesse [elevenlabs.io](https://elevenlabs.io) e faça signup.
-2. **Profile → API Keys → Create**.
-3. Plano Starter ou superior é recomendado — o free tier **não permite
-   Instant Voice Clone**, que é obrigatório pra Troca de Produto.
-
-### 3.4 (Opcional) Replicate — separação voz/música
-
-Se no futuro a Troca de Produto for estendida pra isolar a voz antes da
-clonagem (via Demucs), precisa de uma chave do Replicate. Não é usada hoje,
-mas a variável fica no `.env.local.example` pra caso.
+Usada pelo Separador de Áudio (Demucs) e pela Mind Ads Suite. A variável
+fica no `.env.local.example`.
 
 ---
 
@@ -171,8 +162,6 @@ mas a variável fica no `.env.local.example` pra caso.
    - `/tools/audio-split` com um MP3 pequeno → confirma que FFmpeg WASM
      roda.
    - `/tools/auto-broll` com copy curta → confirma Claude respondendo.
-   - `/tools/troca-produto` com um áudio curto → confirma AssemblyAI +
-     ElevenLabs end-to-end.
 
 ---
 
@@ -319,15 +308,7 @@ Abra a URL de produção e valide:
    aparecer a tabela de cenas + video prompts + JSON do Nano Banana. Se der
    erro 401, `ANTHROPIC_API_KEY` não chegou na Vercel.
 
-9. **AI Suite — Troca de Produto.** Sobe um áudio de ~1 min com menção a
-   um produto. Confirma:
-   - AssemblyAI retornou transcript com matches do `word_boost`.
-   - Ao confirmar, o ElevenLabs clona a voz (leva ~5s).
-   - O TTS gera o nome novo na voz clonada.
-   - FFmpeg WASM emenda o MP3 final. A voz clonada é deletada ao final
-     (ver aba Voices no ElevenLabs — não deve acumular voice temp).
-
-10. **Banco limpo.** No SQL Editor do Supabase:
+9. **Banco limpo.** No SQL Editor do Supabase:
     ```sql
     select table_name from information_schema.tables
      where table_schema='public' and table_name in
@@ -353,18 +334,10 @@ URI se o domínio mudou.
 Checa logs da função `/api/auto-broll` na Vercel. 99% das vezes é
 `ANTHROPIC_API_KEY` ausente ou sem créditos na conta Anthropic.
 
-**Troca de Produto falha na transcrição.**
-AssemblyAI demora até ~4 min em áudios longos. A rota tem timeout de 4min.
+**Transcrição (AssemblyAI) falha ou expira.**
+AssemblyAI demora até ~4 min em áudios longos. As rotas têm timeout de 4min.
 Se passar disso, divide o áudio antes (`/tools/audio-split`) e roda em
 blocos.
-
-**ElevenLabs "voice_clone_not_allowed_on_free_plan".**
-Exatamente isso: free tier não clona. Precisa de Starter ou superior.
-
-**Voice clone não foi deletada após o uso.**
-A rota `elevenlabs-delete` roda no `finally` do frontend. Se o usuário
-fechou a aba no meio, a voice pode ficar órfã. Limpa manualmente no
-dashboard da ElevenLabs (Voices → temp).
 
 **FFmpeg demora muito na primeira vez.**
 Normal: o core WASM tem ~30MB. A partir da segunda sessão carrega do Cache
@@ -384,9 +357,7 @@ Para dimensionar quanto custa rodar o DARKO LAB em produção com uso real:
   se passar de uns 100k requests/mês.
 - **Anthropic (Claude Sonnet 4.5)**: ~$0,02-0,05 por run do Auto B-Roll.
 - **AssemblyAI**: ~$0,65/hora de áudio transcrito.
-- **ElevenLabs Starter** ($5/mo): inclui 30k chars de TTS, voice clone
-  habilitado. Um run típico de Troca de Produto usa ~300 chars.
 
-Projeção: um usuário rodando 10 Auto B-Rolls + 10 Trocas de Produto de
-20min por mês custa aprox. $0,50 (Claude) + $2,20 (AssemblyAI) + plano
-Starter da ElevenLabs.
+Projeção: um usuário rodando 10 Auto B-Rolls + algumas horas de transcrição
+(Decupagem/SRT) por mês custa aprox. $0,50 (Claude) + alguns dólares de
+AssemblyAI.

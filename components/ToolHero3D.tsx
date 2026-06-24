@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from 'react';
  * stats, illustration). All AI tools follow this template — each gets
  * its own color, copy, pipeline icons and tool-specific illustration.
  *
- * Used by: AutoBroll, Troca Produto, Remover Legenda, Decupagem Inteligente,
+ * Used by: AutoBroll, Remover Legenda, Decupagem Inteligente,
  * Gerador SRT, HeyGen Auto.
  */
 

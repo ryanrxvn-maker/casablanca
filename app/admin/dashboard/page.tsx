@@ -78,7 +78,6 @@ const TOOL_LABEL: Record<string, string> = {
   calculadora: 'Calculadora',
   'copy-srt': 'Copy SRT',
   'auto-broll': 'Auto B-roll',
-  'troca-produto': 'Troca de Produto',
   'heygen-auto': 'Hey Auto',
   'clickup-pilot': 'ClickUp Pilot',
   'remover-elementos': 'Remover Legenda',

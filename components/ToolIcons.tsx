@@ -284,25 +284,6 @@ export function IconAutoBroll(p: IconProps) {
   );
 }
 
-/** Troca de Produto — gradient rosa */
-export function IconTrocaProduto(p: IconProps) {
-  const raw = useId();
-  const id = `g-${raw.replace(/:/g, '')}`;
-  return (
-    <svg {...baseProps(p, `url(#${id})`)}>
-      <defs>
-        <linearGradient id={id} x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#fda4af" />
-          <stop offset="100%" stopColor="#ec4899" />
-        </linearGradient>
-      </defs>
-      <path d="M4 12c0-4 3-7 8-7 5 0 8 3 8 7 0 4-3 7-8 7-1.2 0-2.4-.2-3.5-.5L4 20l1.2-3.2C4.4 15.4 4 13.7 4 12z" />
-      <path d="M9 10l6 0M9 10l2-2M9 10l2 2" />
-      <path d="M15 14l-6 0M15 14l-2-2M15 14l-2 2" />
-    </svg>
-  );
-}
-
 /** Copy → SRT — gradient violeta */
 export function IconCopySRT(p: IconProps) {
   const raw = useId();
@@ -707,15 +688,6 @@ export function IconStepLabel(p: IconProps) {
     <svg {...stepBase(p)}>
       <rect x="3" y="6" width="18" height="12" rx="2" />
       <path d="M3 10h18" />
-    </svg>
-  );
-}
-
-/** Product Swap — troca de produto */
-export function IconStepSwap(p: IconProps) {
-  return (
-    <svg {...stepBase(p)}>
-      <path d="M4 8h13l-3-3M20 16H7l3 3" />
     </svg>
   );
 }

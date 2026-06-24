@@ -79,48 +79,6 @@ export function estimateAutoBroll(copyChars: number): CostEstimate {
 }
 
 // =====================================================================
-// Troca de Produto — AssemblyAI + ElevenLabs
-// =====================================================================
-
-export function estimateTrocaProduto(params: {
-  durationSec: number;
-  numReplacements?: number;
-  productNameLength?: number;
-}): CostEstimate {
-  const transcribeUsd = params.durationSec * PRICES.assemblyAiPerSec;
-
-  const reps = Math.max(0, params.numReplacements ?? 0);
-  const charLen = Math.max(1, params.productNameLength ?? 10);
-  // Cada replacement gera 1 TTS com nome + algum contexto (~30 chars total)
-  const ttsChars = reps * (charLen + 30);
-  const ttsUsd = ttsChars * PRICES.elevenlabsPerChar;
-
-  const usd = transcribeUsd + ttsUsd;
-
-  return {
-    usd,
-    brl: mkBRL(usd),
-    approximate: true,
-    breakdown: [
-      {
-        service: 'AssemblyAI (transcricao)',
-        quantity: `${(params.durationSec / 60).toFixed(1)} min`,
-        usd: transcribeUsd,
-      },
-      ...(reps > 0
-        ? [
-            {
-              service: 'ElevenLabs TTS',
-              quantity: `${reps} × ${charLen} chars`,
-              usd: ttsUsd,
-            },
-          ]
-        : []),
-    ],
-  };
-}
-
-// =====================================================================
 // Remover Elementos — Claude Haiku Vision
 // =====================================================================
 

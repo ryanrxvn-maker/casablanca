@@ -31,9 +31,8 @@ Chrome Extension v1.2.0 (automação HeyGen).
 ### AI Suite
 
 1. **Auto B-Roll** — gera prompts de B-roll com Claude pra cada take
-2. **Troca de Produto** — substitui produto via voice clone + TTS
-3. **Remover Legenda** — apaga regiões com FFmpeg delogo
-4. **Decupagem por Copy v2** — alinha vídeo bruto com copy assertivamente
+2. **Remover Legenda** — apaga regiões com FFmpeg delogo
+3. **Decupagem por Copy v2** — alinha vídeo bruto com copy assertivamente
    (Groq Whisper + algoritmo DP)
 5. **Copy → SRT** — gera legendas .srt alinhadas com texto da copy
 6. **HeyGen Auto Avatar** — automação HeyGen via extensão Chrome (sem API)
@@ -168,7 +167,6 @@ extension/                     Chrome Extension v1.2.0
 | Ferramenta | Provider | Custo |
 |---|---|---|
 | Auto B-Roll | Anthropic | $0.05/run |
-| Troca de Produto | AssemblyAI + ElevenLabs | $0.20/min |
 | Remover Legenda | Anthropic Vision | $0.02/run |
 | Decupagem por Copy v2 | Groq Whisper | $0.04/h vídeo |
 | Decupagem v2 (fallback) | AssemblyAI | $0.45/h |

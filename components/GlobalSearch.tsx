@@ -40,7 +40,6 @@ import {
   IconSeparadorAudio,
   IconSearch,
   IconStepGear,
-  IconTrocaProduto,
 } from './ToolIcons';
 
 type Entry = {
@@ -70,7 +69,6 @@ const ENTRIES: Entry[] = [
 
   // IA
   { id: 'auto-broll', group: 'IA', label: 'Auto B-roll', hint: 'Gera B-rolls em massa pelo JSON', href: '/tools/auto-broll', icon: <IconAutoBroll size={20} />, keywords: ['broll', 'b-roll', 'magnific'] },
-  { id: 'troca-produto', group: 'IA', label: 'Troca de produto', hint: 'Substitui produto do áudio', href: '/tools/troca-produto', icon: <IconTrocaProduto size={20} />, keywords: ['voz', 'clone', 'eleven', 'voiceover'] },
   { id: 'remover', group: 'IA', label: 'Remover Legenda/Marca d’Água', hint: 'Remove legenda e marca d’água', href: '/tools/remover-elementos', icon: <IconRemoverElementos size={20} />, keywords: ['smart remover', 'watermark', 'marca', 'logo', 'inpaint'] },
   { id: 'decupagem-copy', group: 'IA', label: 'Decupagem Inteligente', hint: 'Decupa seguindo sua copy', href: '/tools/decupagem-copy', icon: <IconDecupageCopy size={20} />, keywords: ['smart decup', 'script', 'roteiro'] },
   { id: 'copy-srt', group: 'IA', label: 'Gerador de SRT', hint: 'Legendas no tempo do seu áudio', href: '/tools/copy-srt', icon: <IconCopySRT size={20} />, keywords: ['srt generator', 'legenda', 'subtitle'] },
