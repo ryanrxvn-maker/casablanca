@@ -1143,6 +1143,30 @@ console.log('\navatar "Avatar N:" inline no corpo (print + .mp4):');
   assert(sanitizeSpokenCopy('Avatar 2: Ai eu parei com a finasterida.', kr) === 'Ai eu parei com a finasterida.', 'sanitize: "Avatar 2:" inline some');
   assert(!/avatar\s*1/i.test(sanitizeSpokenCopy('Avatar 1: Voce conhece alguem?', kr)), 'sanitize: "Avatar 1" NUNCA sobra na fala');
   assert(sanitizeSpokenCopy('Eu disse: oi pra ela.', kr) === 'Eu disse: oi pra ela.', 'sanitize: fala normal com ":" NÃO é cortada (head não é role)');
+
+  // ROTEAMENTO: corpo com Avatar 1 E Avatar 2 → cada fala vai pro SEU avatar
+  // (antes "Avatar 1:" e "Avatar 2:" viravam o mesmo speaker "Avatar" e tudo caía
+  // no Avatar 1; Avatar 2 ficava com 0 partes).
+  const DOC_ROUTE = [
+    'AD48GL - PRPB06',
+    'INSTRUCOES PARA EDICAO:',
+    'Manter a voz.',
+    '',
+    'AD48G1GL-PRPB06',
+    'Avatar 1: Ratinho 1.mp4',
+    'Esse e o gancho falado pelo avatar 1.',
+    'Body',
+    'Avatar 1: Ratinho 1.mp4',
+    'Primeira parte do corpo, ainda o avatar 1 falando bastante coisa.',
+    'Avatar 2: [[DOCIMG:1]]',
+    'Ai eu parei com a finasterida e fui pesquisar sobre o acafrao.',
+  ].join('\n');
+  const bf48 = parseDarkoBriefing(DOC_ROUTE, 'AD48GL', null, [{ text: '[[DOCIMG:1]]', fileId: null, url: 'data:image/png;base64,AV2', isImage: true }]);
+  const roles48 = (bf48?.bodySegments || []).map((s) => s.role);
+  assert(roles48.some((r) => /avatar\s*1/i.test(r || '')), `roteamento: existe segmento do Avatar 1 (got ${JSON.stringify(roles48)})`);
+  assert(roles48.some((r) => /avatar\s*2/i.test(r || '')), `roteamento: existe segmento do Avatar 2 — NÃO cai tudo no 1 (got ${JSON.stringify(roles48)})`);
+  const segA2 = (bf48?.bodySegments || []).find((s) => /avatar\s*2/i.test(s.role || ''));
+  assert(/finasterida/i.test(segA2?.text || ''), 'roteamento: a fala do Avatar 2 é a parte certa (finasterida)');
 }
 
 console.log('');

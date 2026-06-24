@@ -1421,6 +1421,13 @@ export function detectSpeakerLabelLine(line: string, knownRoles: string[] = []):
   const colonIdx = t.indexOf(':');
   if (colonIdx > 0 && t.slice(0, colonIdx).includes(',')) return null;
 
+  // "Avatar N" NUMERADO é um speaker DISTINTO (Avatar 1 ≠ Avatar 2). O regex
+  // geral abaixo captura só o head alpha "Avatar" e PERDE o número → os dois
+  // viravam o MESMO speaker e TODO o corpo caía no Avatar 1 (Avatar 2 ficava com
+  // 0 partes). Detecta explicitamente e devolve "Avatar N" com o número.
+  const avN = t.match(/^avatar\s*(\d+)\s*(?:[:\-]|$)/i);
+  if (avN) return `Avatar ${avN[1]}`;
+
   // Padrao: "Role-head[ extras: parens/trace/palavras][: opcional filename]"
   // Captura SO o head (primeira palavra ou 2-3 palavras alpha).
   // Aceita: "Doutor:", "Voz do Homem:", "Leandro (Homem depoimento):",
