@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { createClient as createServerClient } from '@/lib/supabase/server';
+import { cliMachineIdentity } from '@/lib/cli-auth';
 
 /**
  * Helpers compartilhados pelas rotas /api/admin/*.
@@ -27,6 +28,10 @@ export function jsonError(message: string, status = 500, detail?: string) {
 export async function requirePro(): Promise<
   { ok: true; userId: string; isAdmin: boolean } | { ok: false; response: NextResponse }
 > {
+  // Auth de máquina (CLI/MCP) → admin. Inerte sem AUTOEDIT_CLI_KEY.
+  const machine = cliMachineIdentity();
+  if (machine) return { ok: true, userId: machine.userId, isAdmin: true };
+
   try {
     const supabase = createServerClient();
     const { data: { user } } = await supabase.auth.getUser();
@@ -76,6 +81,10 @@ export async function requirePro(): Promise<
 export async function requireAdmin(): Promise<
   { ok: true; userId: string } | { ok: false; response: NextResponse }
 > {
+  // Auth de máquina (CLI/MCP) → admin. Inerte sem AUTOEDIT_CLI_KEY.
+  const machine = cliMachineIdentity();
+  if (machine) return { ok: true, userId: machine.userId };
+
   try {
     const supabase = createServerClient();
     const {

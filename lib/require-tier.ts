@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { isPaidExpired } from '@/lib/plan-prices';
 import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
+import { cliMachineIdentity } from '@/lib/cli-auth';
 
 /**
  * Guard de tier server-side pra route handlers (/api/*).
@@ -33,6 +34,13 @@ export type TierGate =
   | { ok: false; response: NextResponse };
 
 export async function requireTier(min: Tier): Promise<TierGate> {
+  // Auth de máquina (CLI/MCP): atalho server-to-server. Concede tier admin —
+  // passa qualquer `min`. Inerte se AUTOEDIT_CLI_KEY não estiver setada.
+  const machine = cliMachineIdentity();
+  if (machine) {
+    return { ok: true, userId: machine.userId, email: machine.email, tier: 'admin', isAdmin: true };
+  }
+
   try {
     const supabase = createClient();
     const {
