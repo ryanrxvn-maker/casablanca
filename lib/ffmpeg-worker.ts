@@ -30,6 +30,13 @@ const CDNS = [
 ];
 
 const LOAD_TIMEOUT_MS = 90_000; // 90s total pra carregar core + wasm
+// WATCHDOG GLOBAL de exec: teto MUITO generoso (só pega HANG infinito do
+// ffmpeg-wasm, nunca mata encode legítimo). Se um exec passar disso, a instância
+// está travada (worker poisoned) → matamos e a próxima getFFmpeg reinicia limpa.
+// Backstop pra TODO consumidor (decupagem, VA, compressor, etc.); os pipelines
+// que querem recuperação RÁPIDA põem timeouts menores por cima (e o exec aqui só
+// garante que NADA fica pendurado pra sempre). 25min.
+const EXEC_WATCHDOG_MS = 25 * 60 * 1000;
 
 /**
  * Carrega (se necessario) e retorna a instancia singleton do FFmpeg.
@@ -90,6 +97,27 @@ async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
 
   const ff = new FFmpeg();
   if (onLog) ff.on('log', ({ message }) => onLog(message));
+
+  // WATCHDOG no exec: envolve o exec nativo. Se um exec travar (hang infinito do
+  // wasm), depois de EXEC_WATCHDOG_MS matamos a instância (terminate) e zeramos o
+  // singleton → a PRÓXIMA getFFmpeg reinicia limpa, em vez de a instância poisoned
+  // travar TODA operação seguinte. Backstop universal (todo helper passa por aqui).
+  // O exec nativo perdedor da corrida tem .catch no-op pra não virar unhandled.
+  const _origExec = ff.exec.bind(ff) as (...x: unknown[]) => Promise<number>;
+  const wrappedExec = (...a: unknown[]): Promise<number> => {
+    let to: ReturnType<typeof setTimeout> | undefined;
+    const real = _origExec(...a);
+    real.catch(() => { /* swallow late rejection se o watchdog ganhou */ });
+    const watchdog = new Promise<number>((_, rej) => {
+      to = setTimeout(() => {
+        try { ff.terminate(); } catch { /* ignora */ }
+        if (instance === ff) instance = null; // força reinit limpo no próximo getFFmpeg
+        rej(new Error(`ffmpeg exec travou (watchdog ${EXEC_WATCHDOG_MS / 60000}min) — instância reiniciada`));
+      }, EXEC_WATCHDOG_MS);
+    });
+    return Promise.race([real, watchdog]).finally(() => { if (to) clearTimeout(to); });
+  };
+  (ff as unknown as { exec: unknown }).exec = wrappedExec;
 
   let lastErr: unknown = null;
   for (let i = 0; i < CDNS.length; i++) {

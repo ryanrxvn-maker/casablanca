@@ -20,7 +20,7 @@
 
 import { decodeAudioRobust, detectSilences } from './audio-engine';
 import { resolveVaSpeakers } from './resolve-va-speakers';
-import { extractAudio, concatAvatarParts, concatVideosFast, cutVideoSegments, overlaySegmentsOnVideo } from './ffmpeg-worker';
+import { extractAudio, concatAvatarParts, concatVideosFast, cutVideoSegments, overlaySegmentsOnVideo, cancelFFmpeg } from './ffmpeg-worker';
 import { isolateVoice, type VoiceIsolatorMode } from './voice-isolator';
 import { isolateVoiceNeural } from './voice-isolator-neural';
 import { detectFacePresence, type SegmentFaceResult } from './face-detector';
@@ -367,6 +367,28 @@ function sliceAudioBufferToWAV(audioBuffer: AudioBuffer, startSec: number, endSe
 
 /* ============================== PIPELINE ============================== */
 
+/** Roda uma op ffmpeg-wasm com timeout + AUTO-RETRY (mata o worker entre
+ *  tentativas → instância limpa a cada try). O ffmpeg-wasm trava de forma
+ *  INTERMITENTE; sem isso, extractAudio/concat/overlay do VA ficavam pendurados
+ *  pra sempre (user reportou 2026-06-23: VA presa em "Extraindo audio" /
+ *  "montando"). Recuperação RÁPIDA (o watchdog do exec é só backstop de 25min). */
+async function vaFFmpegRetry<T>(fn: () => Promise<T>, ms: number, label: string, tries = 3): Promise<T> {
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    try {
+      return await Promise.race([
+        fn(),
+        new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`${label} timeout ${Math.round(ms / 1000)}s`)), ms)),
+      ]);
+    } catch (e) {
+      lastErr = e;
+      try { cancelFFmpeg(); } catch { /* ignora */ }
+      if (attempt < tries) console.warn(`[va-pipeline] ${label}: t${attempt} falhou (${(e as Error)?.message?.slice(0, 70)}) — reset+retry`);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(`${label}: esgotou ${tries} tentativas`);
+}
+
 export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineResult> {
   const targetSec = input.targetSegmentSec ?? 20;
   const minSec = input.minSegmentSec ?? 8;
@@ -378,7 +400,7 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
   const adVideoBlob = input.adVideoBytes instanceof Blob
     ? input.adVideoBytes
     : new Blob([input.adVideoBytes as BlobPart], { type: 'video/mp4' });
-  const rawAudioBlob = await extractAudio(adVideoBlob);
+  const rawAudioBlob = await vaFFmpegRetry(() => extractAudio(adVideoBlob), 240_000, 'extractAudio(AD)');
 
   // 1.5. Voice isolation — OBRIGATORIO pra VA (sem musica/SFX/ruido).
   //
@@ -808,7 +830,7 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
           end: b.end,
           video: videoBlobs[idx] as Blob,
         }));
-        const finalVideo = await overlaySegmentsOnVideo(adVideoBlob, overlays);
+        const finalVideo = await vaFFmpegRetry(() => overlaySegmentsOnVideo(adVideoBlob, overlays), 900_000, `overlay ${av.avaCode}`, 2);
         items.push({ avaCode: av.avaCode, filename: smartFilename, blob: finalVideo });
       } catch (e) {
         items.push({
@@ -831,10 +853,11 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
     try {
       let mounted: Blob;
       try {
-        mounted = await concatVideosFast(videoBlobs as Blob[]);
+        // fast = remux rápido; timeout+reset, sem retry (o fallback slow É a recuperação)
+        mounted = await vaFFmpegRetry(() => concatVideosFast(videoBlobs as Blob[]), 300_000, `concat-fast ${av.avaCode}`, 1);
       } catch {
-        // Fast falhou → fallback slow re-encode
-        mounted = await concatAvatarParts(videoBlobs as Blob[]);
+        // Fast falhou → fallback slow re-encode (com retry+reset; pega hang intermitente)
+        mounted = await vaFFmpegRetry(() => concatAvatarParts(videoBlobs as Blob[]), 900_000, `concat-slow ${av.avaCode}`, 2);
       }
       items.push({ avaCode: av.avaCode, filename, blob: mounted });
     } catch (e) {

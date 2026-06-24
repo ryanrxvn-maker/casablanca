@@ -6036,34 +6036,41 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
             if (batchCancelRef.current[taskId]) throw new Error('cancelado');
             const label = `${av.avaCode}·${part.label}`;
             upsertPart(label, { videoId: null, videoStatus: 'pending', error: null });
-            patchVA({ phase: 'rendering', message: `${av.avaCode}: gerando ${part.label} por texto...` });
-            let job;
-            try {
-              job = await processJob({
-                text: part.text,
-                avatarId: choice.id,
-                voiceId,
-                title: `${adNameClean}_${av.avaCode}_${part.label}`,
-                engine: 'iii', orientation: 'portrait',
-              }, { onProgress: (stage: string) => console.log(`[VA-texto ${label}] ${stage}`) });
-            } catch (e) {
-              upsertPart(label, { error: (e as Error)?.message || 'falha no dispatch' });
-              throw e;
+            // ASSERTIVIDADE: o render HeyGen zombia/falha de forma INTERMITENTE.
+            // Antes, 1 parte que falhava matava o AVATAR inteiro (= "1/2 AVAs",
+            // user reportou 2026-06-23). Agora RE-DISPARA a parte até 3x (cada
+            // tentativa = novo videoId) antes de desistir — transiente se cura
+            // sozinho, sem o user ter que clicar Retomar.
+            let partBytes: Uint8Array | null = null;
+            let lastErr = '';
+            for (let attempt = 1; attempt <= 3 && !partBytes; attempt++) {
+              if (batchCancelRef.current[taskId]) throw new Error('cancelado');
+              patchVA({ phase: 'rendering', message: `${av.avaCode}: gerando ${part.label} por texto${attempt > 1 ? ` (tentativa ${attempt})` : ''}...` });
+              try {
+                const job = await processJob({
+                  text: part.text,
+                  avatarId: choice.id,
+                  voiceId,
+                  title: `${adNameClean}_${av.avaCode}_${part.label}`,
+                  engine: 'iii', orientation: 'portrait',
+                }, { onProgress: (stage: string) => console.log(`[VA-texto ${label} t${attempt}] ${stage}`) });
+                if (!job.videoId) throw new Error('processJob nao retornou videoId');
+                upsertPart(label, { videoId: job.videoId, videoStatus: 'pending', error: null });
+                const statuses = await pollVideosUntilReady([job.videoId], { intervalMs: 8000, timeoutMs: 30 * 60 * 1000, maxPendingMsPerId: 15 * 60 * 1000 });
+                const st = statuses[job.videoId];
+                if (!st || st.status !== 'completed' || !st.videoUrl) {
+                  throw new Error(`nao renderizou (status=${st?.status}): ${st?.error || 'sem detalhes'}`);
+                }
+                upsertPart(label, { videoStatus: 'completed', videoUrl: st.videoUrl, error: null });
+                partBytes = await downloadVideoBytes(st.videoUrl);
+              } catch (e) {
+                lastErr = (e as Error)?.message || 'falha';
+                upsertPart(label, { error: lastErr });
+                if (attempt < 3) console.warn(`[VA-texto ${label}] t${attempt} falhou (${lastErr}) — re-dispara`);
+              }
             }
-            if (!job.videoId) {
-              upsertPart(label, { error: 'processJob nao retornou videoId' });
-              throw new Error(`${label}: processJob nao retornou videoId.`);
-            }
-            upsertPart(label, { videoId: job.videoId, videoStatus: 'pending' });
-            const statuses = await pollVideosUntilReady([job.videoId], { intervalMs: 8000, timeoutMs: 30 * 60 * 1000 });
-            const st = statuses[job.videoId];
-            if (!st || st.status !== 'completed' || !st.videoUrl) {
-              upsertPart(label, { videoStatus: st?.status, error: st?.error || 'nao renderizou' });
-              throw new Error(`Video ${label} nao renderizou (status=${st?.status}): ${st?.error || 'sem detalhes'}`);
-            }
-            upsertPart(label, { videoStatus: 'completed', videoUrl: st.videoUrl });
-            const bytes = await downloadVideoBytes(st.videoUrl);
-            partBlobs.push(new Blob([bytes as BlobPart], { type: 'video/mp4' }));
+            if (!partBytes) throw new Error(`${label} falhou após 3 tentativas: ${lastErr}`);
+            partBlobs.push(new Blob([partBytes as BlobPart], { type: 'video/mp4' }));
           }
         } catch (e) {
           if ((e as Error)?.message === 'cancelado') throw e;
@@ -6074,10 +6081,32 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
           items.push({ avaCode: av.avaCode, filename, blob: null, error: avError || 'sem partes geradas' });
           continue;
         }
-        // Concatena as partes (HOOK+BODY...) → 1 video por AVA.
+        // Concatena as partes (HOOK+BODY...) → 1 video por AVA. RETRY+RESET: o
+        // concat (ffmpeg-wasm) trava de forma intermitente — antes a task ficava
+        // presa em "montando vídeo final" pra sempre (user reportou 2026-06-23).
+        // Agora 3 tentativas matando o worker entre elas (instância limpa).
         patchVA({ phase: 'post', message: `${av.avaCode}: montando vídeo final...` });
         try {
-          const mounted = partBlobs.length === 1 ? partBlobs[0] : await concatAvatarParts(partBlobs);
+          let mounted: Blob | null = null;
+          if (partBlobs.length === 1) {
+            mounted = partBlobs[0];
+          } else {
+            const { cancelFFmpeg } = await import('@/lib/ffmpeg-worker');
+            let lastErr: unknown = null;
+            for (let attempt = 1; attempt <= 3 && !mounted; attempt++) {
+              try {
+                mounted = await Promise.race([
+                  concatAvatarParts(partBlobs),
+                  new Promise<Blob>((_, rej) => setTimeout(() => rej(new Error('concat timeout 600s')), 600_000)),
+                ]);
+              } catch (e) {
+                lastErr = e;
+                try { cancelFFmpeg(); } catch { /* ignora */ }
+                if (attempt < 3) console.warn(`[VA-texto ${av.avaCode}] montagem t${attempt} falhou (${(e as Error)?.message?.slice(0, 70)}) — reset+retry`);
+              }
+            }
+            if (!mounted) throw lastErr instanceof Error ? lastErr : new Error('concat esgotou 3 tentativas');
+          }
           items.push({ avaCode: av.avaCode, filename, blob: mounted });
         } catch (e) {
           items.push({ avaCode: av.avaCode, filename, blob: null, error: 'mount: ' + ((e as Error)?.message || '?') });
