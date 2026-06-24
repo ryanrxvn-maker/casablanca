@@ -467,7 +467,10 @@ export function parseAvatars(section: string, links: DocLink[] = []): ParsedAvat
   // de um avatar declarado por imagem (print), ignorando headers tipo
   // "Avatar e Vozes:" / "Instruções:".
   const isPersonRole = (r: string | null): boolean =>
-    /\b(mulher|homem|doutor[ a]?|m[eé]dic[oa]|narrador[a]?|locutor[a]?|paciente|cliente|depoiment|depoente|testemunh|ugc|senhor[a]?|jovem|av[oó]|esposa|marido|especialista|expert|ator|atriz)\b/i.test(r || '');
+    // person words OU "Avatar N" NUMERADO (ex "Avatar 1", "Avatar 2") — alguns
+    // docs declaram o avatar por print com esse label em vez de "Mulher:". O
+    // número é proposital: NÃO casa "Avatar e Vozes" (header) nem "Avatar:" só.
+    /\b(mulher|homem|doutor[ a]?|m[eé]dic[oa]|narrador[a]?|locutor[a]?|paciente|cliente|depoiment|depoente|testemunh|ugc|senhor[a]?|jovem|av[oó]|esposa|marido|especialista|expert|ator|atriz|avatar\s*\d+)\b/i.test(r || '');
 
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
@@ -501,7 +504,10 @@ export function parseAvatars(section: string, links: DocLink[] = []): ParsedAvat
         let role: string | null = null;
         // (a) "Role:" antes do marcador na MESMA linha (ex "Mulher:  [[DOCIMG:0]]")
         const before = trimmed.slice(0, mImg.index ?? 0);
-        const sameLine = before.match(/([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s()]{0,40}?)\s*:\s*$/);
+        // inclui 0-9 no role pra casar "Avatar 1:" / "Avatar 2:" (o dígito é
+        // parte do label). O role ainda passa por isPersonRole, então só rótulo
+        // de pessoa OU "Avatar N" vira avatar — "Take 1:" etc. não.
+        const sameLine = before.match(/([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ0-9\s()]{0,40}?)\s*:\s*$/);
         if (sameLine && isPersonRole(sameLine[1])) role = sameLine[1].trim();
         // (b) label numa linha ANTES (pendingRole "Mulher:" + print embaixo)
         if (!role && pendingRole && isPersonRole(pendingRole)) role = pendingRole;
@@ -1669,6 +1675,29 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string, varian
     }
   }
   const siblings = findGSiblings(fullDocText, baseAdId, variant);
+
+  // FALLBACK — avatares declarados INLINE no CORPO como label de locutor
+  // recorrente (doc SEM bloco "Avatar e Vozes:"): "Avatar 1: <print>",
+  // "Avatar 2: <print>", "Avatar 1: Ratinho 1.mp4". Varre a seção do PRÓPRIO AD
+  // (base + G-siblings DESTE ad), coleta as declarações (imagem via Tentativa 5
+  // OU arquivo .mp4) e DEDUP por avatar (o mesmo "Avatar 1:" se repete a cada
+  // trecho que ele fala). SÓ roda quando os caminhos normais acharam 0 → zero
+  // regressão pros docs com bloco de declaração. Scope no próprio AD reduz o
+  // risco de pegar label vazado de outro AD (a regressão que o declBlock evita).
+  if (avatars.length === 0) {
+    const seenK = new Set<string>();
+    for (const sec of [baseSection, ...siblings.map((s) => s.section)]) {
+      for (const av of parseAvatars(sec, links)) {
+        const k = av.username ? normAvatarKey(av.username) : `role:${(av.role || '').toLowerCase().trim()}`;
+        if (!k || seenK.has(k)) continue;
+        seenK.add(k);
+        avatars.push(av);
+      }
+    }
+    if (avatars.length > 0) {
+      console.log(`[copy-parser] ${baseAdId}: ${avatars.length} avatar(es) recuperados do CORPO (sem bloco de declaração):`, avatars.map((a) => a.role));
+    }
+  }
   // AVATARES INLINE DE DEPOIMENTO: alem da secao "Avatar:" base, o locutor do
   // DEPOIMENTO costuma ser declarado DENTRO do corpo ("Depoimento com avatar:
   // <file>.mp4", depois do Body). Varre o corpo (base + G-siblings) e adiciona
@@ -1792,6 +1821,11 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string, varian
     const seen = new Set<string>();
     const pushRole = (r: string | null) => {
       if (!r) return;
+      // SÓ renomeia por labels REAIS (Mulher/Doutor/...). Se o label do corpo
+      // TAMBÉM é genérico "Avatar N" (caso do doc que declara o avatar por print
+      // como "Avatar 1:"/"Avatar 2:" no corpo), NÃO entra — os avatares já têm o
+      // role certo; mapear por ordem embaralharia "Avatar 1"→"Avatar 2".
+      if (/^avatar(?:\s+\d+)?$/i.test(r.trim())) return;
       const key = r.toLowerCase().trim();
       if (!key || seen.has(key)) return;
       seen.add(key);

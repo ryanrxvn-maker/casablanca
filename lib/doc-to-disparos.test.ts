@@ -1061,6 +1061,78 @@ console.log('\navatar por imagem embutida (print):');
   assert(/lipedema/.test(spoken) && /inchaco/.test(spoken), 'e2e: fala real preservada (gancho + corpo)');
 }
 
+/* ----------- avatar "Avatar 1/2:" declarado INLINE no CORPO (sem bloco) ----------- */
+console.log('\navatar "Avatar N:" inline no corpo (print + .mp4):');
+{
+  const img1 = 'data:image/png;base64,AV1AV1AV1';
+  const img2 = 'data:image/png;base64,AV2AV2AV2';
+  // AD45: Avatar 1 por PRINT (repete no hook E no body) + Avatar 2 por PRINT.
+  // Declarados INLINE no corpo dos G-siblings (NÃO há bloco "Avatar e Vozes:").
+  const DOC45 = [
+    'AD45GL - PRPB06',
+    'INSTRUÇÕES PARA EDIÇÃO:',
+    'Manter a mesma voz dos avatares.',
+    '',
+    'AD45G1GL-PRPB06',
+    'Avatar 1:  [[DOCIMG:0]]',
+    'Voce conhece alguem que tomou finasterida e a prostata diminuiu?',
+    'Body',
+    'Avatar 1:  [[DOCIMG:0]]',
+    'Porque depois dos 40 a inflamacao na prostata aparece.',
+    'Avatar 2:  [[DOCIMG:1]]',
+    'Ai eu parei com a finasterida e fui pesquisar.',
+  ].join('\n');
+  const links45: DocLink[] = [
+    { text: '[[DOCIMG:0]]', fileId: null, url: img1, isImage: true },
+    { text: '[[DOCIMG:1]]', fileId: null, url: img2, isImage: true },
+  ];
+  const bf45 = parseDarkoBriefing(DOC45, 'AD45GL', null, links45);
+  assert(!!bf45, 'AD45: briefing parseado');
+  assert((bf45?.avatars.length || 0) === 2, `AD45: 2 avatares (Avatar 1 dedup + Avatar 2) (got ${bf45?.avatars.length}: ${JSON.stringify((bf45?.avatars||[]).map(a=>a.role))})`);
+  const a1 = bf45?.avatars.find((a) => /avatar\s*1/i.test(a.role));
+  const a2 = bf45?.avatars.find((a) => /avatar\s*2/i.test(a.role));
+  assert(a1?.imageUrl === img1, 'AD45: Avatar 1 carrega o print img1');
+  assert(a2?.imageUrl === img2, 'AD45: Avatar 2 carrega o print img2');
+
+  // AD46: Avatar 1 por ARQUIVO ("Ratinho 1.mp4") + Avatar 2 por PRINT (misto).
+  const DOC46 = [
+    'AD46GL - PRPB06',
+    'INSTRUÇÕES PARA EDIÇÃO:',
+    'Manter a mesma voz dos avatares.',
+    '',
+    'AD46G1GL-PRPB06',
+    'Avatar 1: Ratinho 1.mp4',
+    'A melhor coisa que voce pode tomar pra sua prostata.',
+    'Body',
+    'Avatar 2:  [[DOCIMG:1]]',
+    'Ai eu parei com a finasterida.',
+  ].join('\n');
+  const bf46 = parseDarkoBriefing(DOC46, 'AD46GL', null, links45);
+  assert((bf46?.avatars.length || 0) === 2, `AD46 misto: 2 avatares (got ${bf46?.avatars.length}: ${JSON.stringify((bf46?.avatars||[]).map(a=>a.role))})`);
+  const m1 = bf46?.avatars.find((a) => /ratinho/i.test(a.username || ''));
+  const m2 = bf46?.avatars.find((a) => a.imageUrl === img2);
+  assert(!!m1, 'AD46: Avatar 1 = arquivo Ratinho (por .mp4)');
+  assert(!!m2, 'AD46: Avatar 2 = print (imageUrl)');
+  // roles NÃO podem embaralhar (o rename automático não pode trocar Avatar 1↔2)
+  assert(/avatar\s*1/i.test(m1?.role || ''), `AD46: Ratinho mantém role "Avatar 1" (got ${m1?.role})`);
+  assert(/avatar\s*2/i.test(m2?.role || ''), `AD46: print mantém role "Avatar 2" (got ${m2?.role})`);
+
+  // ANTI-REGRESSÃO: doc COM bloco "Avatar e Vozes:" NÃO usa o fallback do corpo
+  // (avatar principal continua vindo só da declaração — não pega label do corpo).
+  const DOC_DECL = [
+    'AD47GL - PRPB06',
+    'Avatar e Vozes:',
+    'Homem: @kiko.urso1.mp4',
+    '',
+    'AD47G1GL-PRPB06',
+    'Mulher: gihribeiroo20.mp4',
+    'Texto que sobrou de outro AD no corpo.',
+  ].join('\n');
+  const bf47 = parseDarkoBriefing(DOC_DECL, 'AD47GL', null, []);
+  assert((bf47?.avatars || []).some((a) => /kiko/i.test(a.username || '')), 'AD47: pega o avatar do bloco de declaração');
+  assert(!(bf47?.avatars || []).some((a) => /gihribeiro/i.test(a.username || '')), 'AD47: NÃO pega o label "Mulher:" vazado no corpo (fallback não roda — declBlock achou avatar)');
+}
+
 console.log('');
 if (failures > 0) {
   console.error(`✗ ${failures} assert(s) falharam`);

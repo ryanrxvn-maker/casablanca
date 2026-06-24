@@ -1549,8 +1549,10 @@ function pickAvatarImages(text, rawImgs) {
   if (!rawImgs || !rawImgs.length || !/\[\[DOCIMGRAW:/.test(text)) {
     return { text: text.replace(/\s*\[\[DOCIMGRAW:\d+\]\]\s*/g, ' '), docImages };
   }
-  const PERSON_BEFORE = /(mulher|homem|doutor[a]?|doutora|m[eé]dic[oa]|narrador[a]?|locutor[a]?|paciente|depoiment[oa]?|depoente|testemunh[a-zõç]*|senhor[a]?|av[oó]|esposa|marido|especialista|expert|ator|atriz|jovem)\s*:\s*$/i;
-  const PERSON_LINE = /^(mulher|homem|doutor[a]?|doutora|m[eé]dic[oa]|narrador[a]?|locutor[a]?|paciente|depoiment[oa]?|depoente|senhor[a]?|av[oó]|esposa|marido|especialista)\s*:\s*$/i;
+  // person words OU "Avatar N" numerado (ex "Avatar 1:", "Avatar 2:") — alguns
+  // docs declaram o print com esse label. O número evita casar "Avatar e Vozes:".
+  const PERSON_BEFORE = /(mulher|homem|doutor[a]?|doutora|m[eé]dic[oa]|narrador[a]?|locutor[a]?|paciente|depoiment[oa]?|depoente|testemunh[a-zõç]*|senhor[a]?|av[oó]|esposa|marido|especialista|expert|ator|atriz|jovem|avatar\s*\d+)\s*:\s*$/i;
+  const PERSON_LINE = /^(mulher|homem|doutor[a]?|doutora|m[eé]dic[oa]|narrador[a]?|locutor[a]?|paciente|depoiment[oa]?|depoente|senhor[a]?|av[oó]|esposa|marido|especialista|avatar\s*\d+)\s*:\s*$/i;
   const stripRaw = (s) => s.replace(/\[\[DOCIMGRAW:\d+\]\]/g, '').trim();
   const lines = text.split('\n');
   const kept = new Map(); // rawIdx -> keptIdx
