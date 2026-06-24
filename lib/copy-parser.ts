@@ -1684,6 +1684,7 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string, varian
   // trecho que ele fala). SÓ roda quando os caminhos normais acharam 0 → zero
   // regressão pros docs com bloco de declaração. Scope no próprio AD reduz o
   // risco de pegar label vazado de outro AD (a regressão que o declBlock evita).
+  let avatarsFromBody = false; // avatares vieram do fallback do corpo → roles já autoritativos (NÃO renomear)
   if (avatars.length === 0) {
     const seenK = new Set<string>();
     for (const sec of [baseSection, ...siblings.map((s) => s.section)]) {
@@ -1695,6 +1696,7 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string, varian
       }
     }
     if (avatars.length > 0) {
+      avatarsFromBody = true;
       console.log(`[copy-parser] ${baseAdId}: ${avatars.length} avatar(es) recuperados do CORPO (sem bloco de declaração):`, avatars.map((a) => a.role));
     }
   }
@@ -1814,7 +1816,13 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string, varian
   // Isso faz o slotsByRole no dispatch achar "mulher" → @monetzamoraa
   // direto. Sem isso, dispatch caia em firstSlot (sempre o 1o avatar)
   // pra tudo.
-  const avatarsAreGeneric = avatars.length > 0 && avatars.every((a) => /^avatar(?:\s+\d+)?$/i.test(a.role.trim()));
+  // Rename só pro caso "Link do avatar: a.mp4 + b.mp4" (roles SINTÉTICOS genéricos
+  // "Avatar 1/2" + body com labels REAIS Mulher/Doutor). Quando os avatares
+  // vieram do FALLBACK DO CORPO, os roles JÁ são as declarações reais
+  // ("Avatar 1:"/"Avatar 2:" no corpo) → NÃO renomear (senão um "Doutor" solto
+  // no corpo — comentário/anotação — renomearia "Avatar 1"→"Doutor", o bug visto
+  // no AD46).
+  const avatarsAreGeneric = !avatarsFromBody && avatars.length > 0 && avatars.every((a) => /^avatar(?:\s+\d+)?$/i.test(a.role.trim()));
   if (avatarsAreGeneric) {
     // Coleta roles unicos detectados em ordem (hooks primeiro, dps body)
     const detected: string[] = [];

@@ -1103,6 +1103,8 @@ console.log('\navatar "Avatar N:" inline no corpo (print + .mp4):');
     'AD46G1GL-PRPB06',
     'Avatar 1: Ratinho 1.mp4',
     'A melhor coisa que voce pode tomar pra sua prostata.',
+    'Doutor',
+    'Sem cinematica, apenas o Doutor ja mostrando a bebida.',
     'Body',
     'Avatar 2:  [[DOCIMG:1]]',
     'Ai eu parei com a finasterida.',
