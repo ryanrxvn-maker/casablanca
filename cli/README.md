@@ -76,16 +76,20 @@ separar-audio) são só açúcar que encadeia upload → disparo → poll → do
 ## Arquitetura
 
 ```
-cli/autoedit.mjs           ← CLI (este arquivo)
+cli/core.mjs               ← núcleo: client HTTP + auth + upload + poll (SEM stdout)
+cli/autoedit.mjs           ← casca CLI (UI + comandos) sobre o core
+mcp/autoedit-mcp.mjs       ← casca MCP (tools nativas) sobre o MESMO core
 lib/cli-auth.ts            ← valida x-autoedit-key → identidade de máquina (admin)
 app/api/cli/whoami         ← health-check + bootstrap (config pública do Supabase)
 ```
 
-A auth de máquina está plugada nos 3 gates do app (`requireTier`, `requirePro`,
-`requireAdmin`), então **toda** rota que usa um desses gates já obedece o CLI.
+Um núcleo, duas cascas — zero duplicação. A auth de máquina está plugada nos 3
+gates do app (`requireTier`, `requirePro`, `requireAdmin`), então **toda** rota
+que usa um desses gates já obedece o CLI/MCP.
 
-## Próximo passo: MCP
+## MCP (tools nativas pro Claude)
 
-Este CLI é o núcleo. Um servidor **MCP** é um wrapper fino por cima — expõe
-`whoami`/`lipsync`/`separar-audio`/`call` como tools nativas pro Claude chamar
-direto, reusando exatamente o mesmo client HTTP e a mesma chave.
+Já pronto: [`mcp/autoedit-mcp.mjs`](../mcp/README.md). Registre com
+`claude mcp add autoedit -s user -- node "<repo>/mcp/autoedit-mcp.mjs"` e o
+Claude passa a chamar `autoedit_lipsync`, `autoedit_separar_audio`,
+`autoedit_call` etc. direto, sem você digitar comando.
