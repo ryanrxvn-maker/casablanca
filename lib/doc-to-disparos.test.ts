@@ -1176,6 +1176,23 @@ console.log('\navatar "Avatar N:" inline no corpo (print + .mp4):');
   assert(roles48.some((r) => /avatar\s*2/i.test(r || '')), `roteamento: existe segmento do Avatar 2 — NÃO cai tudo no 1 (got ${JSON.stringify(roles48)})`);
   const segA2 = (bf48?.bodySegments || []).find((s) => /avatar\s*2/i.test(s.role || ''));
   assert(/finasterida/i.test(segA2?.text || ''), 'roteamento: a fala do Avatar 2 é a parte certa (finasterida)');
+
+  // INLINE: label + marcador + 1a FALA na MESMA linha ("Avatar 2: [[DOCIMG]] Aí
+  // eu parei...") — caso do fallback mobilebasic que FUNDE as linhas. A 1a fala
+  // do avatar NÃO pode ser engolida (user reportou "Aí eu parei" sumindo).
+  const DOC_INLINE = [
+    'AD49GL - PRPB06', 'INSTRUCOES PARA EDICAO:', 'Manter a voz.', '',
+    'AD49G1GL-PRPB06',
+    'Avatar 1: Ratinho 1.mp4 Esse e o gancho do avatar 1 falando aqui.',
+    'Body',
+    'Avatar 2: [[DOCIMG:1]] Ai eu parei com a finasterida.',
+    'Uma semana depois pesquisando achei um video do Dr Lair.',
+  ].join('\n');
+  const bf49 = parseDarkoBriefing(DOC_INLINE, 'AD49GL', null, [{ text: '[[DOCIMG:1]]', fileId: null, url: 'data:image/png;base64,AV2', isImage: true }]);
+  const a2txt = (bf49?.bodySegments || []).filter((s) => /avatar\s*2/i.test(s.role || '')).map((s) => s.text).join(' ');
+  assert(/parei com a finasterida/i.test(a2txt), `inline: 1a fala do Avatar 2 ("Aí eu parei") NÃO é engolida (got "${a2txt.slice(0, 50)}")`);
+  // e o label NÃO vaza junto
+  assert(!/avatar\s*2\s*:/i.test(a2txt) && !/DOCIMG/.test(a2txt), 'inline: label/marcador não vazam na fala do Avatar 2');
 }
 
 console.log('');

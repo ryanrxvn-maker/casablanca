@@ -1612,15 +1612,34 @@ export function splitBySpeaker(
     // 2) Boundary por speaker label textual ("Mulher:", "Doutor:", ...).
     const role = detectSpeakerLabelLine(t, knownRoles);
     if (role) {
+      // FALA COLADA no label na MESMA linha ("Avatar 2: [[DOCIMG:1]] Aí eu parei
+      // com a finasterida.") — comum quando o print do avatar fica inline. Tira
+      // o "Role:", o marcador de imagem e filenames; o que sobrar SÓ vira fala se
+      // PARECER fala (tem minúscula + pontuação), NUNCA se for referência (título
+      // de YouTube em CAPS, filename, marcador). Sem isso a 1a fala do avatar
+      // sumia (user reportou: "Aí eu parei com a finasterida" engolido).
+      let trailing = '';
+      const ci = ln.indexOf(':');
+      if (ci >= 0) {
+        trailing = ln.slice(ci + 1)
+          .replace(/\[\[DOCIMG(?:RAW)?:\d+\]\]/gi, '')
+          .replace(/@?[A-Za-zÀ-ÿ0-9][\wÀ-ÿ.\s-]*?\.(?:mp4|mov)\b/gi, '')
+          .trim();
+      }
+      const trailingIsSpeech = trailing.length >= 8 && /[a-zà-ÿ]/.test(trailing) && /[.,;!?]/.test(trailing);
       // Inicia novo segmento. Se segment atual nao tem conteudo util,
       // sobrescreve o role dele (provavel caso da PRIMEIRA linha ser label).
       const cur = segments[segments.length - 1];
       const curHasText = cur.lines.some((l) => l.trim().length > 0);
+      let target: { role: string | null; username: string | null; lines: string[] };
       if (!curHasText) {
         cur.role = role;
+        target = cur;
       } else {
-        segments.push({ role, username: null, lines: [] });
+        target = { role, username: null, lines: [] };
+        segments.push(target);
       }
+      if (trailingIsSpeech) target.lines.push(trailing);
       continue;
     }
     segments[segments.length - 1].lines.push(ln);
