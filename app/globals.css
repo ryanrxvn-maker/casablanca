@@ -1317,6 +1317,35 @@ input[type='range']::-moz-range-thumb {
   animation: fade-in-up 320ms cubic-bezier(0.2, 0.9, 0.3, 1) both;
 }
 
+/* ───── Heros promo (carrossel): fundo cinematográfico animado ─────
+   Usado por components/HeroSlideBg.tsx nos slides ClickUp Pilot / Auto B-roll. */
+.hero-light-veil {
+  background: rgba(255, 255, 255, 0.82);
+  opacity: 0; /* invisível no escuro */
+  pointer-events: none;
+}
+html[data-theme='light'] .hero-light-veil {
+  opacity: 1; /* clareia a imagem escura no modo claro pro texto não sumir */
+}
+.hero-vignette {
+  pointer-events: none;
+  background: radial-gradient(120% 120% at 50% 50%, transparent 45%, rgba(0, 0, 0, 0.85) 100%);
+  opacity: 0.32;
+  animation: heroVignette 5s ease-in-out infinite;
+}
+@keyframes heroVignette {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 0.45; }
+}
+/* Drift automático no mobile/touch (substitui o parallax do mousemove) */
+@keyframes heroDrift {
+  0% { transform: scale(1.1) translateX(-2%); }
+  100% { transform: scale(1.1) translateX(2%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-vignette { animation: none; opacity: 0.3; }
+}
+
 /* Kinetic-in pra textos editoriais */
 @keyframes kinetic-in {
   0% { opacity: 0; transform: translateY(22px) rotateX(-30deg); }

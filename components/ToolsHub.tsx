@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useTier, tierAllowsTool, tierCanAutomate } from '@/lib/use-tier';
 import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
 import { MaintenanceBadge } from '@/components/MaintenanceBadge';
+import { HeroSlideBg } from './HeroSlideBg';
 
 /** 'blocked' = cliente sem acesso · 'admin' = admin acessa pra testar. */
 type MaintMode = 'blocked' | 'admin' | undefined;
@@ -543,6 +544,9 @@ function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
         background: 'var(--banner-bg)',
       }}
     >
+      {/* Fundo cinematográfico animado (imagem + parallax + partículas + vinheta) */}
+      <HeroSlideBg image="/hero/pilot-bg.jpg" />
+
       {/* Mesh gradient animado — duas manchas que pulsam fora de fase */}
       <div
         aria-hidden
@@ -594,7 +598,7 @@ function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
         </div>
       </div>
 
-      <div className="relative flex flex-col items-start gap-6 px-7 py-10 md:flex-row md:items-center md:justify-between md:px-12 md:py-14">
+      <div className="relative z-[2] flex flex-col items-start gap-6 px-7 py-10 md:flex-row md:items-center md:justify-between md:px-12 md:py-14">
         <div className="max-w-[600px]">
           <div
             className="mb-4 inline-flex items-center gap-2 rounded-full border border-lime/50 bg-black/50 px-3.5 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.22em] text-lime backdrop-blur-md"
@@ -709,6 +713,9 @@ function AutoBrollSlide({ canStartAutomation }: { canStartAutomation: boolean })
         background: 'var(--banner-bg-2)',
       }}
     >
+      {/* Fundo cinematográfico animado (imagem + parallax + partículas + vinheta) */}
+      <HeroSlideBg image="/hero/auto-broll-bg.jpg" />
+
       {/* Mesh pulses */}
       <div
         aria-hidden
@@ -751,7 +758,7 @@ function AutoBrollSlide({ canStartAutomation }: { canStartAutomation: boolean })
         <BrollMiniGrid />
       </div>
 
-      <div className="relative flex flex-col items-start gap-6 px-7 py-10 md:flex-row md:items-center md:justify-between md:px-12 md:py-14">
+      <div className="relative z-[2] flex flex-col items-start gap-6 px-7 py-10 md:flex-row md:items-center md:justify-between md:px-12 md:py-14">
         <div className="max-w-[600px]">
           <div
             className="mb-4 inline-flex items-center gap-2 rounded-full border border-violet/55 bg-black/50 px-3.5 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.22em] text-violet backdrop-blur-md"
