@@ -589,19 +589,6 @@ function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
 
       <div className="relative z-[2] flex flex-col items-start gap-6 px-7 py-10 md:flex-row md:items-center md:justify-between md:px-12 md:py-14">
         <div className="max-w-[600px]">
-          <div
-            className="mb-4 inline-flex items-center gap-2 rounded-full border border-lime/50 bg-black/50 px-3.5 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.22em] text-lime backdrop-blur-md"
-            style={{
-              fontFamily: 'var(--font-tech)',
-              boxShadow: '0 0 22px -6px rgba(200,232,124,0.55), inset 0 1px 0 rgba(255,255,255,0.08)',
-            }}
-          >
-            <span
-              className="inline-block h-2 w-2 animate-pulse-soft rounded-full bg-lime"
-              style={{ boxShadow: '0 0 10px rgba(200,232,124,0.95), 0 0 20px rgba(200,232,124,0.5)' }}
-            />
-            ClickUp Pilot · novo
-          </div>
           <h3
             className="text-[28px] font-extrabold leading-[1.05] tracking-tight text-white md:text-[40px]"
             style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.025em' }}
@@ -739,22 +726,6 @@ function AutoBrollSlide({ canStartAutomation }: { canStartAutomation: boolean })
 
       <div className="relative z-[2] flex flex-col items-start gap-6 px-7 py-10 md:flex-row md:items-center md:justify-between md:px-12 md:py-14">
         <div className="max-w-[600px]">
-          <div
-            className="mb-4 inline-flex items-center gap-2 rounded-full border border-violet/55 bg-black/50 px-3.5 py-1.5 text-[10.5px] font-bold uppercase tracking-[0.22em] text-violet backdrop-blur-md"
-            style={{
-              fontFamily: 'var(--font-tech)',
-              boxShadow:
-                '0 0 22px -6px rgba(167,139,250,0.55), inset 0 1px 0 rgba(255,255,255,0.08)',
-            }}
-          >
-            <span
-              className="inline-block h-2 w-2 animate-pulse-soft rounded-full bg-violet"
-              style={{
-                boxShadow: '0 0 10px rgba(167,139,250,0.95), 0 0 20px rgba(167,139,250,0.5)',
-              }}
-            />
-            Auto B-Roll · em série
-          </div>
           <h3
             className="text-[28px] font-extrabold leading-[1.05] tracking-tight text-white md:text-[40px]"
             style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.025em' }}
