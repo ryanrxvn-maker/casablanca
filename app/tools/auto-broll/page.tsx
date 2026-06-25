@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { CancelButton } from '@/components/CancelButton';
 /**
@@ -832,91 +832,86 @@ function AutoBrollInner() {
         )}
         </ToolStep>
 
-        <ToolStep n={2} icon={<IconStepSliders size={18} />} title="Configuração" hint="Escolha o modelo da imagem — o vídeo é sempre Kling 2.5" hue={HUE}>
-          {/* IMAGEM = escolhível (Nano Banana 2 OU Seedream 4.5, ambos
-              zero-crédito). VÍDEO travado em Kling 2.5. */}
-          <div className="grid gap-3 md:grid-cols-2">
-            <div className="rounded-[14px] border border-violet/30 bg-bg-soft/40 p-3">
-              <div className="label-tech mb-2 flex items-center gap-2 text-[10px] uppercase tracking-widest text-violet">
-                <span>Imagem (animada pelo Kling)</span>
-                <span className="rounded-full border border-lime/40 bg-lime/10 px-1.5 py-0.5 text-[8px] text-lime">unlimited · 0 crédito</span>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {IMAGE_MODELS.map((m) => {
-                  const active = imageModel === m.slug;
-                  return (
-                    <button
-                      key={m.slug}
-                      type="button"
-                      onClick={() => setImageModel(m.slug)}
-                      disabled={anyRunning}
-                      className={`flex flex-col items-start gap-0.5 rounded-[12px] border px-3 py-2.5 text-left transition disabled:opacity-50 ${
-                        active
-                          ? 'border-violet bg-violet/15 shadow-[0_0_0_1px_rgba(167,139,250,0.5),0_6px_18px_-8px_rgba(167,139,250,0.55)]'
-                          : 'border-line bg-bg/40 hover:border-violet/50'
-                      }`}
-                    >
-                      <span className="flex items-center gap-1.5 text-[13px] font-bold text-text">
-                        <span>{m.icon}</span>{m.label}
-                        {active && <span className="ml-auto text-violet">●</span>}
-                      </span>
-                      <span className="mono text-[9px] uppercase tracking-wider text-text-muted">1K · 9:16 · {m.desc}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <ModelCard
-              kind="video"
-              label="Vídeo"
-              model="Kling 2.5"
-              specs={['720p', aspect, '10s']}
-              icon="🎬"
-              tint="cyan"
-            />
-          </div>
-          {/* ASPECT — vale pra imagem E vídeo (precisam casar). */}
-          <div className="mt-3 rounded-[14px] border border-cyan-400/25 bg-bg-soft/40 p-3">
-            <div className="label-tech mb-2 text-[10px] uppercase tracking-widest text-cyan-300">Formato (imagem + vídeo)</div>
-            <div className="grid grid-cols-2 gap-2">
-              {([
-                { v: '9:16', label: 'Vertical 9:16', icon: '📱', desc: 'Reels · TikTok · Shorts' },
-                { v: '16:9', label: 'Horizontal 16:9', icon: '🖥️', desc: 'YouTube · VSL · landscape' },
-              ] as const).map((a) => {
-                const active = aspect === a.v;
-                return (
-                  <button
-                    key={a.v}
-                    type="button"
-                    onClick={() => setAspect(a.v)}
+        <ToolStep n={2} icon={<IconStepSliders size={18} />} title="Configuração" hue={HUE}>
+          <div className="grid gap-3.5">
+            {/* IMAGEM — modelo escolhível (Nano Banana 2 / Seedream 4.5) */}
+            <ConfigBlock label="Imagem" tint="violet" infinity>
+              <div className="grid grid-cols-2 gap-2.5">
+                {IMAGE_MODELS.map((m) => (
+                  <PickCard
+                    key={m.slug}
+                    active={imageModel === m.slug}
                     disabled={anyRunning}
-                    className={`flex flex-col items-start gap-0.5 rounded-[12px] border px-3 py-2.5 text-left transition disabled:opacity-50 ${
-                      active
-                        ? 'border-cyan-400 bg-cyan-400/15 shadow-[0_0_0_1px_rgba(34,211,238,0.5),0_6px_18px_-8px_rgba(34,211,238,0.55)]'
-                        : 'border-line bg-bg/40 hover:border-cyan-400/50'
-                    }`}
-                  >
-                    <span className="flex w-full items-center gap-1.5 text-[13px] font-bold text-text">
-                      <span>{a.icon}</span>{a.label}
-                      {active && <span className="ml-auto text-cyan-300">●</span>}
-                    </span>
-                    <span className="mono text-[9px] uppercase tracking-wider text-text-muted">{a.desc}</span>
-                  </button>
-                );
-              })}
+                    onClick={() => setImageModel(m.slug)}
+                    tint="violet"
+                    icon={m.slug === 'seedream-4-5' ? <IconBloom /> : <IconSpark />}
+                    title={m.label}
+                    desc={m.desc}
+                  />
+                ))}
+              </div>
+            </ConfigBlock>
+
+            {/* FORMATO — vale pra imagem E vídeo (precisam casar) */}
+            <ConfigBlock label="Formato" tint="cyan">
+              <div className="grid grid-cols-2 gap-2.5">
+                {([
+                  { v: '9:16', label: 'Vertical', desc: 'Reels · TikTok · Shorts', icon: <IconFrameV /> },
+                  { v: '16:9', label: 'Horizontal', desc: 'YouTube · VSL', icon: <IconFrameH /> },
+                ] as const).map((a) => (
+                  <PickCard
+                    key={a.v}
+                    active={aspect === a.v}
+                    disabled={anyRunning}
+                    onClick={() => setAspect(a.v)}
+                    tint="cyan"
+                    icon={a.icon}
+                    title={a.label}
+                    desc={a.desc}
+                    badge={a.v}
+                  />
+                ))}
+              </div>
+            </ConfigBlock>
+
+            {/* VÍDEO — travado em Kling 2.5 (sem escolha, sem crédito) */}
+            <div
+              className="relative flex items-center gap-3 overflow-hidden rounded-[14px] border border-cyan-400/25 px-3.5 py-2.5"
+              style={{ background: 'linear-gradient(180deg, rgba(34,211,238,0.05), rgba(0,0,0,0.14))' }}
+            >
+              <span
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-cyan-400/35 text-cyan-300"
+                style={{ background: 'linear-gradient(160deg, rgba(34,211,238,0.18), rgba(0,0,0,0.35))', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)' }}
+              >
+                <IconClapper />
+              </span>
+              <div className="min-w-0">
+                <div className="text-[9.5px] font-bold uppercase tracking-[0.2em] text-cyan-300/70" style={{ fontFamily: 'var(--font-label)' }}>Vídeo</div>
+                <div className="text-[14px] font-bold tracking-tight text-white" style={{ fontFamily: 'var(--font-tech)' }}>Kling 2.5</div>
+              </div>
+              <div className="ml-auto flex items-center gap-1.5">
+                {['720p', aspect, '10s'].map((s) => (
+                  <span key={s} className="rounded-md border border-line/70 bg-bg/50 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wider text-text-muted" style={{ fontFamily: 'var(--font-mono)' }}>{s}</span>
+                ))}
+                <span className="ml-0.5 text-text-dim" title="Modelo de vídeo fixo"><IconLock /></span>
+              </div>
             </div>
+
+            {/* MOVIMENTO — opcional */}
+            <label className="block">
+              <span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.2em] text-text-muted" style={{ fontFamily: 'var(--font-label)' }}>
+                Movimento <span className="text-text-dim">· opcional</span>
+              </span>
+              <input
+                type="text"
+                value={globalMotion}
+                onChange={(e) => setGlobalMotion(e.target.value)}
+                placeholder="ex: slow push-in, soft handheld"
+                className="input-field"
+                disabled={anyRunning}
+              />
+            </label>
           </div>
-          <label className="mt-3 block">
-            <span className="label-field">Motion default (opcional, Kling 2.5)</span>
-            <input
-              type="text"
-              value={globalMotion}
-              onChange={(e) => setGlobalMotion(e.target.value)}
-              placeholder="Ex: slow camera push-in, soft handheld motion"
-              className="input-field"
-              disabled={anyRunning}
-            />
-          </label>
         </ToolStep>
 
         <ToolStep n={3} icon={<IconStepPipeline size={18} />} title="Jobs" hint="Cada lista de prompts roda em série" hue={HUE}>
@@ -1948,19 +1943,20 @@ function BrollHistorySection() {
       n={4}
       icon={<IconStepPipeline size={18} />}
       title={hist.length === 0 ? 'Histórico' : `Histórico (${hist.length})`}
-      hint="Re-baixe ZIPs gerados anteriormente, mesmo após reload"
       hue={HUE}
     >
       {hist.length === 0 ? (
-        <div className="rounded-[12px] border border-line/40 bg-bg-soft/30 p-4 text-center">
-          <div className="label-tech text-[10px] uppercase tracking-widest text-text-muted mb-1">
-            Sem batches finalizados ainda
-          </div>
-          <div className="text-[11px] text-text-dim">
-            Quando um job completar, ele será salvo aqui automaticamente.
-            <br />
-            Você poderá re-baixar o ZIP mesmo após reload, ou reconstruir a partir das URLs Magnific.
-          </div>
+        <div className="flex flex-col items-center gap-2.5 rounded-[16px] border border-line/40 bg-bg/20 px-4 py-9 text-center">
+          <span
+            className="flex h-11 w-11 items-center justify-center rounded-[13px] border border-line/60 text-text-dim"
+            style={{ background: 'linear-gradient(160deg, rgba(167,139,250,0.10), rgba(0,0,0,0.3))' }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 8l9-5 9 5v8l-9 5-9-5z" /><path d="M3 8l9 5 9-5M12 13v8" />
+            </svg>
+          </span>
+          <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-text-muted" style={{ fontFamily: 'var(--font-label)' }}>Nenhum batch ainda</div>
+          <div className="text-[11px] text-text-dim">Os ZIPs aparecem aqui ao concluir.</div>
         </div>
       ) : (
       <div className="grid gap-2">
@@ -1969,87 +1965,135 @@ function BrollHistorySection() {
           const dateStr = ts.toLocaleDateString('pt-BR') + ' ' + ts.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
           const isEditingJson = pendingJsonFor === item.zipKey;
           const isRetrying = retrying === item.zipKey;
+          const complete = item.successCount > 0 && item.failedCount === 0;
           return (
             <div key={item.zipKey} className="grid gap-2">
-              <div className="flex items-center gap-3 rounded-[12px] border border-line/60 bg-bg-soft/40 px-4 py-3 backdrop-blur-sm hover:border-violet/40 transition">
-                <div className="flex-1 min-w-0">
-                  <div className="mono text-[11px] uppercase tracking-widest text-violet truncate">{item.spaceName}</div>
-                  <div className="mt-0.5 flex flex-wrap gap-2 text-[10px] text-text-muted">
-                    <span>{dateStr}</span>
-                    <span>·</span>
-                    <span className="text-lime">{item.successCount}/{item.totalTakes} ok</span>
-                    {item.failedCount > 0 && (<><span>·</span><span className="text-yellow-300">{item.failedCount} falhas</span></>)}
-                    {!item.originalJson && item.failedCount > 0 && (<><span>·</span><span className="text-cyan-300/70">⚠ batch antigo — RETOMAR pedira JSON</span></>)}
+              <div
+                className="group relative flex flex-wrap items-center gap-3 overflow-hidden rounded-[14px] border px-4 py-3 transition-all duration-300 hover:-translate-y-[1px]"
+                style={{
+                  borderColor: complete ? 'rgba(200,232,124,0.30)' : 'rgba(255,255,255,0.10)',
+                  background: 'linear-gradient(180deg, rgba(255,255,255,0.022), rgba(0,0,0,0.16))',
+                }}
+              >
+                {/* Faixa de status na borda esquerda */}
+                <span
+                  aria-hidden
+                  className="pointer-events-none absolute inset-y-0 left-0 w-[3px]"
+                  style={{
+                    background: complete
+                      ? 'linear-gradient(180deg, rgba(200,232,124,0.9), rgba(200,232,124,0.08))'
+                      : 'linear-gradient(180deg, rgba(34,211,238,0.7), rgba(34,211,238,0.05))',
+                  }}
+                />
+                <HistRing done={item.successCount} total={item.totalTakes} complete={complete} />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13px] font-bold tracking-tight text-white" style={{ fontFamily: 'var(--font-tech)' }}>{item.spaceName}</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px]">
+                    <span className="text-text-dim" style={{ fontFamily: 'var(--font-mono)' }}>{dateStr}</span>
+                    <span className="text-lime/90" style={{ fontFamily: 'var(--font-mono)' }}>{item.successCount}/{item.totalTakes}</span>
+                    {item.failedCount > 0 ? (
+                      <span className="rounded-full border border-amber-400/35 bg-amber-400/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-300" style={{ fontFamily: 'var(--font-label)' }}>{item.failedCount} faltam</span>
+                    ) : null}
+                    {!item.originalJson && item.failedCount > 0 ? (
+                      <span className="rounded-full border border-cyan-400/30 bg-cyan-400/[0.07] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-cyan-300/80" style={{ fontFamily: 'var(--font-label)' }} title="Batch antigo — RETOMAR vai pedir o JSON original">JSON pendente</span>
+                    ) : null}
                   </div>
                 </div>
-                {/* RETOMAR — SEMPRE aparece quando ha falhas. Funciona com OU
-                 *  sem originalJson (se nao tiver, abre editor pra colar).
-                 *  BLOQUEADO enquanto o run original esta VIVO (heartbeat):
-                 *  double-dispatch dobrava a carga na conta Magnific →
-                 *  "exceeded concurrent" → cascata de falhas. */}
-                {item.failedCount > 0 ? (
+                <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                  {/* RETOMAR — SEMPRE aparece quando ha falhas. Funciona com OU
+                   *  sem originalJson (se nao tiver, abre editor pra colar).
+                   *  BLOQUEADO enquanto o run original esta VIVO (heartbeat):
+                   *  double-dispatch dobrava a carga na conta Magnific →
+                   *  "exceeded concurrent" → cascata de falhas. */}
+                  {item.failedCount > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => onRetomarClick(item)}
+                      disabled={isRetrying || loading === item.zipKey || isEntryLive(item)}
+                      className="inline-flex items-center gap-1.5 rounded-[10px] border border-cyan-400/45 px-2.5 py-2 text-[10.5px] font-bold uppercase tracking-wider text-cyan-300 transition-all duration-200 hover:-translate-y-0.5 hover:border-cyan-400/75 active:translate-y-0 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+                      style={{ background: 'linear-gradient(180deg, rgba(34,211,238,0.16), rgba(34,211,238,0.04))', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)' }}
+                      title={
+                        isEntryLive(item)
+                          ? 'Job AINDA RODANDO — aguarde terminar (retomar agora dobraria a carga e causaria falhas)'
+                          : isRetrying
+                          ? 'Retomando…'
+                          : item.originalJson
+                            ? `Retomar inteligente: re-dispara so as ${item.failedCount} faltantes + mergeia no ZIP`
+                            : `Retomar: vai pedir o JSON original (batch antigo sem ele salvo)`
+                      }
+                    >
+                      {isRetrying ? (
+                        <>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+                            <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+                            <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
+                          </svg>
+                          <span className="normal-case tracking-normal text-[10px]">{retryMsg || 'Retomando…'}</span>
+                        </>
+                      ) : (
+                        <>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+                            <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+                            <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
+                          </svg>
+                          Retomar
+                          <span className="rounded-full bg-cyan-400/20 px-1.5 text-[9px] tabular-nums">{item.failedCount}</span>
+                        </>
+                      )}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
-                    onClick={() => onRetomarClick(item)}
-                    disabled={isRetrying || loading === item.zipKey || isEntryLive(item)}
-                    className="inline-flex items-center gap-1.5 rounded-[8px] border border-cyan-400/55 bg-cyan-400/15 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-cyan-300 hover:bg-cyan-400/25 hover:border-cyan-400/75 disabled:opacity-50 disabled:cursor-not-allowed transition"
-                    title={
-                      isEntryLive(item)
-                        ? 'Job AINDA RODANDO — aguarde terminar (retomar agora dobraria a carga e causaria falhas)'
-                        : isRetrying
-                        ? 'Retomando…'
-                        : item.originalJson
-                          ? `Retomar inteligente: re-dispara so as ${item.failedCount} faltantes + mergeia no ZIP`
-                          : `Retomar: vai pedir o JSON original (batch antigo sem ele salvo)`
-                    }
+                    onClick={() => setPreviewFor(previewFor === item.zipKey ? null : item.zipKey)}
+                    className="inline-flex items-center gap-1.5 rounded-[10px] border border-violet/40 px-2.5 py-2 text-[10.5px] font-bold uppercase tracking-wider text-violet transition-all duration-200 hover:-translate-y-0.5 hover:border-violet/70 active:translate-y-0"
+                    style={{ background: 'linear-gradient(180deg, rgba(167,139,250,0.14), rgba(167,139,250,0.04))', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.07)' }}
+                    title="Ver preview dos vídeos deste batch"
                   >
-                    {isRetrying ? (
+                    {previewFor === item.zipKey ? (
                       <>
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
-                          <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
-                          <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
-                        </svg>
-                        <span className="normal-case tracking-normal text-[10px]">{retryMsg || 'Retomando…'}</span>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 15l6-6 6 6" /></svg>
+                        Fechar
                       </>
                     ) : (
                       <>
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
-                          <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
-                          <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
-                        </svg>
-                        Retomar ({item.failedCount})
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z" /><circle cx="12" cy="12" r="3" /></svg>
+                        Preview
                       </>
                     )}
                   </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => setPreviewFor(previewFor === item.zipKey ? null : item.zipKey)}
-                  className="rounded-[8px] border border-violet/45 bg-violet/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-violet hover:bg-violet/20 transition"
-                  title="Ver preview dos vídeos deste batch"
-                >
-                  {previewFor === item.zipKey ? '▴ Fechar' : '👁 Preview'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => redownload(item)}
-                  disabled={loading === item.zipKey || isRetrying}
-                  className="rounded-[8px] border border-lime/40 bg-lime/10 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-widest text-lime hover:bg-lime/20 disabled:opacity-50"
-                  title="Baixar ZIP novamente"
-                >
-                  {loading === item.zipKey ? '...' : '↓ Baixar'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => remove(item)}
-                  disabled={isRetrying}
-                  className="rounded-[8px] border border-text-muted/30 bg-bg/40 px-2 py-1.5 text-[11px] text-text-muted hover:border-red-500/40 hover:text-red-300 disabled:opacity-30"
-                  title="Remover do histórico"
-                >
-                  ×
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => redownload(item)}
+                    disabled={loading === item.zipKey || isRetrying}
+                    className="inline-flex items-center gap-1.5 rounded-[10px] border border-lime/55 px-3 py-2 text-[10.5px] font-bold uppercase tracking-wider text-lime transition-all duration-200 hover:-translate-y-0.5 hover:border-lime/85 active:translate-y-0 disabled:opacity-50 disabled:hover:translate-y-0"
+                    style={{ background: 'linear-gradient(180deg, rgba(200,232,124,0.20), rgba(200,232,124,0.06))', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12), 0 10px 22px -12px rgba(200,232,124,0.65)' }}
+                    title="Baixar ZIP novamente"
+                  >
+                    {loading === item.zipKey ? (
+                      <>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" className="animate-spin"><circle cx="12" cy="12" r="10" strokeDasharray="32 32" /></svg>
+                        <span className="normal-case tracking-normal">Baixando</span>
+                      </>
+                    ) : (
+                      <>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12M7 11l5 5 5-5M5 21h14" /></svg>
+                        Baixar
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => remove(item)}
+                    disabled={isRetrying}
+                    className="inline-flex h-[34px] w-[34px] items-center justify-center rounded-[10px] border border-line/60 text-text-muted transition-all duration-200 hover:-translate-y-0.5 hover:border-red-500/45 hover:text-red-300 active:translate-y-0 disabled:opacity-30 disabled:hover:translate-y-0"
+                    style={{ background: 'rgba(0,0,0,0.2)' }}
+                    title="Remover do histórico"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13" /></svg>
+                  </button>
+                </div>
               </div>
               {/* Barra de progresso do RETOMAR — visibilidade igual ao disparo
                *  do zero: contador X/total, rodada, tempo decorrido e barra. */}
@@ -2523,113 +2567,208 @@ function JobCard({
 // TakeRow legado removido — substituído pelo TakeCard grid 3D.
 
 /* ────────────────────────────────────────────────────────────────────
- * ModelCard — card 3D mostrando o modelo travado (Nano Banana / Kling)
- * com hover lift + glow tinted + animação border shine
+ * Config primitives — premium, copy mínima, 3D sutil (sem movimento
+ * exagerado). ConfigBlock = rótulo + régua que some. PickCard = opção
+ * selecionável com ícone SVG em tile, check animado e glow no ativo.
  * ──────────────────────────────────────────────────────────────────── */
-function ModelCard({
-  kind,
+function ConfigBlock({
   label,
-  model,
-  specs,
-  icon,
   tint,
+  infinity,
+  children,
 }: {
-  kind: 'image' | 'video';
   label: string;
-  model: string;
-  specs: string[];
-  icon: string;
   tint: 'violet' | 'cyan';
+  infinity?: boolean;
+  children: ReactNode;
 }) {
-  const tintCls =
-    tint === 'violet'
-      ? {
-          border: 'border-violet/30 hover:border-violet/65',
-          glow: 'rgba(167,139,250,0.45)',
-          accent: 'text-violet',
-          bg: 'from-violet/[0.08] via-transparent to-bg/30',
-        }
-      : {
-          border: 'border-cyan-400/30 hover:border-cyan-400/65',
-          glow: 'rgba(34,211,238,0.45)',
-          accent: 'text-cyan-300',
-          bg: 'from-cyan-400/[0.08] via-transparent to-bg/30',
-        };
+  const rgb = tint === 'cyan' ? '34,211,238' : '167,139,250';
   return (
-    <div
-      className={`group relative overflow-hidden rounded-[16px] border ${tintCls.border} bg-gradient-to-br ${tintCls.bg} p-4 transition-all duration-500 hover:-translate-y-1`}
-      style={{
-        boxShadow: `inset 0 1px 0 rgba(255,255,255,0.05), 0 14px 32px -16px ${tintCls.glow}, 0 0 0 0 ${tintCls.glow}`,
-        transformStyle: 'preserve-3d',
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.08), 0 24px 48px -16px ${tintCls.glow}, 0 0 60px -12px ${tintCls.glow}`;
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.05), 0 14px 32px -16px ${tintCls.glow}, 0 0 0 0 ${tintCls.glow}`;
-      }}
-    >
-      {/* Border shine animation */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 rounded-[16px] opacity-0 transition-opacity duration-500 group-hover:opacity-100"
-        style={{
-          background:
-            'linear-gradient(120deg, transparent 30%, rgba(255,255,255,0.06) 50%, transparent 70%)',
-          backgroundSize: '200% 100%',
-          animation: 'modelShine 2.5s ease-in-out infinite',
-        }}
-      />
-      <div className="relative flex items-start gap-3">
-        <div
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] border ${tintCls.border} bg-bg-soft/50 text-xl transition-transform duration-500 group-hover:scale-110 group-hover:rotate-[-6deg]`}
+    <div>
+      <div className="mb-2.5 flex items-center gap-2.5">
+        <span
+          className="text-[10px] font-bold uppercase tracking-[0.22em]"
+          style={{ color: `rgb(${rgb})`, fontFamily: 'var(--font-label)' }}
         >
-          {icon}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span
-              className={`label-tech text-[9px] font-bold uppercase tracking-[0.22em] ${tintCls.accent}`}
-              style={{ fontFamily: 'var(--font-tech)' }}
-            >
-              {label}
-            </span>
-            <span
-              className="label-tech inline-flex items-center gap-1 rounded-full border border-lime/45 bg-lime/10 px-1.5 py-0 text-[8.5px] font-bold uppercase tracking-[0.14em] text-lime"
-              style={{ fontFamily: 'var(--font-tech)' }}
-            >
-              ∞ unlimited
-            </span>
-          </div>
-          <div
-            className="mt-0.5 truncate text-[16px] font-extrabold text-white"
-            style={{ fontFamily: 'var(--font-tech)', letterSpacing: '0.01em' }}
+          {label}
+        </span>
+        <span aria-hidden className="h-px flex-1" style={{ background: `linear-gradient(90deg, rgba(${rgb},0.30), transparent)` }} />
+        {infinity ? (
+          <span
+            className="flex h-4 items-center rounded-full border px-1.5 text-[12px] leading-none"
+            style={{ borderColor: 'rgba(200,232,124,0.35)', color: 'rgb(200,232,124)', background: 'rgba(200,232,124,0.08)' }}
+            title="Ilimitado — não gasta crédito"
           >
-            {model}
-          </div>
-          <div className="mt-1 flex flex-wrap gap-1">
-            {specs.map((s) => (
-              <span
-                key={s}
-                className="mono rounded border border-line/80 bg-bg/40 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-widest text-text-muted"
-                style={{ fontFamily: 'var(--font-tech)' }}
-              >
-                {s}
-              </span>
-            ))}
-          </div>
-          <div className="mono mt-2 text-[10px] text-text-dim" style={{ fontFamily: 'var(--font-tech)' }}>
-            Zero crédito · qualidade trava
-          </div>
-        </div>
+            ∞
+          </span>
+        ) : null}
       </div>
-      <style jsx>{`
-        @keyframes modelShine {
-          0% { background-position: 200% 0; }
-          100% { background-position: -200% 0; }
-        }
-      `}</style>
+      {children}
     </div>
+  );
+}
+
+function PickCard({
+  active,
+  onClick,
+  disabled,
+  tint,
+  icon,
+  title,
+  desc,
+  badge,
+}: {
+  active: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+  tint: 'violet' | 'cyan';
+  icon: ReactNode;
+  title: string;
+  desc: string;
+  badge?: string;
+}) {
+  const rgb = tint === 'cyan' ? '34,211,238' : '167,139,250';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={
+        'group relative flex items-center gap-3 overflow-hidden rounded-[14px] border px-3.5 py-3 text-left transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed ' +
+        (active ? '' : 'border-line/70 bg-bg/30 hover:-translate-y-[1px]')
+      }
+      style={
+        active
+          ? {
+              borderColor: `rgba(${rgb},0.9)`,
+              background: `linear-gradient(180deg, rgba(${rgb},0.14), rgba(${rgb},0.035))`,
+              boxShadow: `inset 0 1px 0 rgba(255,255,255,0.12), 0 0 0 1px rgba(${rgb},0.4), 0 12px 28px -16px rgba(${rgb},0.75)`,
+            }
+          : undefined
+      }
+    >
+      {/* sheen no hover (sutil) */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+        style={{ background: `radial-gradient(90% 130% at 12% -10%, rgba(${rgb},0.12), transparent 55%)` }}
+      />
+      <span
+        className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-[11px] border transition-transform duration-300 group-hover:scale-[1.06] group-hover:-rotate-3"
+        style={{
+          borderColor: `rgba(${rgb},${active ? 0.55 : 0.28})`,
+          background: `linear-gradient(160deg, rgba(${rgb},${active ? 0.22 : 0.12}), rgba(0,0,0,0.35))`,
+          color: `rgb(${rgb})`,
+          boxShadow: active
+            ? `0 0 18px -4px rgba(${rgb},0.7), inset 0 1px 0 rgba(255,255,255,0.12)`
+            : 'inset 0 1px 0 rgba(255,255,255,0.06)',
+        }}
+      >
+        {icon}
+      </span>
+      <span className="relative min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span className="truncate text-[13.5px] font-bold tracking-tight text-white" style={{ fontFamily: 'var(--font-tech)' }}>{title}</span>
+          {badge ? (
+            <span className="shrink-0 rounded-md border border-line/70 bg-bg/50 px-1.5 py-0.5 text-[9px] font-semibold tracking-wider text-text-muted" style={{ fontFamily: 'var(--font-mono)' }}>{badge}</span>
+          ) : null}
+        </span>
+        <span className="mt-0.5 block truncate text-[10.5px] text-text-muted" style={{ fontFamily: 'var(--font-label)' }}>{desc}</span>
+      </span>
+      <span className="relative shrink-0">
+        {active ? (
+          <span
+            className="flex h-[19px] w-[19px] items-center justify-center rounded-full"
+            style={{ background: `rgb(${rgb})`, boxShadow: `0 0 12px rgba(${rgb},0.85)` }}
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#0a0a0f" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12l4 4L19 7" /></svg>
+          </span>
+        ) : (
+          <span className="block h-[19px] w-[19px] rounded-full border-2 border-line/60" />
+        )}
+      </span>
+    </button>
+  );
+}
+
+/* Anel de progresso do Histórico (done/total) — lime quando completo. */
+function HistRing({ done, total, complete }: { done: number; total: number; complete: boolean }) {
+  const pct = total > 0 ? Math.min(1, done / total) : 0;
+  const r = 14.5;
+  const circ = 2 * Math.PI * r;
+  const col = complete ? 'rgb(200,232,124)' : done > 0 ? 'rgb(34,211,238)' : 'rgb(120,120,130)';
+  return (
+    <span className="relative flex h-[38px] w-[38px] shrink-0 items-center justify-center">
+      <svg width="38" height="38" viewBox="0 0 38 38" className="-rotate-90">
+        <circle cx="19" cy="19" r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="3" />
+        <circle
+          cx="19"
+          cy="19"
+          r={r}
+          fill="none"
+          stroke={col}
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeDasharray={circ}
+          strokeDashoffset={circ * (1 - pct)}
+          style={{ transition: 'stroke-dashoffset .6s cubic-bezier(.22,1,.36,1)', filter: `drop-shadow(0 0 5px ${col})` }}
+        />
+      </svg>
+      <span className="absolute flex items-center justify-center" style={{ color: col }}>
+        {complete ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12l4 4L19 7" /></svg>
+        ) : (
+          <span className="text-[8.5px] font-bold tabular-nums" style={{ fontFamily: 'var(--font-mono)' }}>{Math.round(pct * 100)}</span>
+        )}
+      </span>
+    </span>
+  );
+}
+
+/* ── Ícones SVG (substituem os emojis vibe-code) ── */
+function IconSpark() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" strokeLinecap="round">
+      <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8z" />
+    </svg>
+  );
+}
+function IconBloom() {
+  return (
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round">
+      <path d="M12 3l1.9 5.6L19.6 10l-5.7 1.4L12 17l-1.9-5.6L4.4 10l5.7-1.4z" />
+      <path d="M18.6 16.4l.6 1.7 1.7.6-1.7.6-.6 1.7-.6-1.7-1.7-.6 1.7-.6z" opacity="0.85" />
+    </svg>
+  );
+}
+function IconFrameV() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round">
+      <rect x="8" y="3" width="8" height="18" rx="2.5" />
+    </svg>
+  );
+}
+function IconFrameH() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round">
+      <rect x="3" y="7.5" width="18" height="9" rx="2.5" />
+    </svg>
+  );
+}
+function IconClapper() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="9" width="18" height="11" rx="2" />
+      <path d="M3 9l2.2-4 3 1.5M8.6 5.2l3 1.5M14.2 4.4l3 1.5" />
+    </svg>
+  );
+}
+function IconLock() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4.5" y="10.5" width="15" height="10" rx="2.4" />
+      <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+    </svg>
   );
 }
 
