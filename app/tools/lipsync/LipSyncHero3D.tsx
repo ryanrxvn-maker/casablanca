@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { ToolHeroVideo } from '@/components/ToolHeroVideo';
 
 /**
  * LipSyncHero3D — hero cinematografico EXCLUSIVO da ferramenta LipSync.
@@ -9,10 +10,8 @@ import { useEffect, useRef, useState } from 'react';
  *   - Grid + corner cuts + particulas voadoras
  *   - LADO ESQUERDO: eyebrow ULTRA ADMIN, titulo gradient enorme com
  *     shine, pipeline de etapas, 3 metricas premium
- *   - LADO DIREITO: o MESMO enquadramento CIRCULAR premium de antes (anel
- *     arco-íris conic rotativo + rings + HUD + waveform), agora com os 3
- *     vídeos do avatar virando cyborg em carrossel (auto-avança no fim de
- *     cada um + troca no hover).
+ *   - LADO DIREITO: painel de vídeo 16:9 premium (ToolHeroVideo) com o
+ *     lipsync.mp4 do card em loop, anel conic rotativo, aura e cantos HUD.
  */
 export function LipSyncHero3D() {
   const heroRef = useRef<HTMLDivElement | null>(null);
@@ -149,8 +148,14 @@ export function LipSyncHero3D() {
           </div>
         </div>
 
-        {/* LADO DIREITO — carrossel circular dos 3 vídeos cyborg */}
-        <CyborgCarousel tiltX={tiltX} tiltY={tiltY} />
+        {/* LADO DIREITO — painel de vídeo 16:9 do card */}
+        <ToolHeroVideo
+          src="/cards/lipsync.mp4"
+          poster="/cards/lipsync.jpg"
+          glow="rgba(232,121,249,0.5)"
+          tiltX={tiltX}
+          tiltY={tiltY}
+        />
       </div>
 
       <style jsx>{`
@@ -165,318 +170,6 @@ export function LipSyncHero3D() {
         @keyframes lipShine {
           0%, 100% { background-position: 0% 50%; }
           50% { background-position: 100% 50%; }
-        }
-      `}</style>
-    </div>
-  );
-}
-
-/* ---- CyborgCarousel — MESMO círculo premium de antes, com os 3 vídeos.
- *
- * Enquadramento idêntico ao da loira: vídeo CIRCULAR (object-cover preenchendo
- * o círculo) + anel arco-íris conic rotativo + rings + HUD SVG + waveform +
- * badges + respiração. Trocamos a loira pelos 3 vídeos cyborg em carrossel:
- * auto-avança quando o vídeo termina (fade limpo) e troca na hora no hover.
- *
- * IMPORTANTE (bug do branco resolvido): NÃO há mais overlay de "flash" branco
- * que voltava pra opacity 1 e cobria o vídeo. A transição é só um fade do
- * próprio vídeo (termina visível). Autoplay blindado (toca quando a aba está
- * visível, retoma no visibilitychange) → nunca fica parado/branco.
- */
-const HERO_VIDEOS = ['/lipsync-hero/1.mp4', '/lipsync-hero/2.mp4', '/lipsync-hero/3.mp4'];
-
-// Enquadramento do rosto por vídeo (object-position Y). Calibrado vendo o
-// recorte circular real de cada um: rosto na parte superior-central do
-// círculo (mais pra cima), cabeça inteira, sem cortar.
-const OBJECT_POS = ['center 30%', 'center 30%', 'center 28%'];
-
-function CyborgCarousel({ tiltX, tiltY }: { tiltX: number; tiltY: number }) {
-  const [index, setIndex] = useState(0);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const lastSwitch = useRef(0);
-
-  function advance() {
-    setIndex((i) => (i + 1) % HERO_VIDEOS.length);
-  }
-
-  function onEnter() {
-    const now = Date.now();
-    if (now - lastSwitch.current < 380) return; // anti-spam de hover
-    lastSwitch.current = now;
-    advance();
-  }
-
-  // Autoplay BLINDADO: o navegador pausa vídeo com a aba em segundo plano,
-  // então tocamos sempre que a aba está visível — ao montar, a cada troca e
-  // quando a aba volta a ficar visível.
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    const tryPlay = () => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-      const p = v.play();
-      if (p && typeof p.catch === 'function') p.catch(() => {});
-    };
-    tryPlay();
-    const t = setTimeout(tryPlay, 140);
-    document.addEventListener('visibilitychange', tryPlay);
-    return () => {
-      clearTimeout(t);
-      document.removeEventListener('visibilitychange', tryPlay);
-    };
-  }, [index]);
-
-  return (
-    <div
-      className="relative mx-auto h-[400px] w-[330px] md:h-[460px] md:w-[400px]"
-      onMouseEnter={onEnter}
-    >
-      {/* Aura */}
-      <div
-        aria-hidden
-        className="absolute inset-[-10%] rounded-full blur-3xl"
-        style={{
-          background: 'radial-gradient(circle, rgba(232,121,249,0.5), rgba(167,139,250,0.2) 50%, transparent 80%)',
-          animation: 'ccAura 5s ease-in-out infinite',
-        }}
-      />
-
-      {/* Rings rotativos */}
-      <div aria-hidden className="absolute inset-0 rounded-full border border-fuchsia-400/30" style={{ animation: 'ccSpin 24s linear infinite' }} />
-      <div aria-hidden className="absolute inset-[-12px] rounded-full border border-violet/25" style={{ animation: 'ccSpin 36s linear infinite reverse' }} />
-      <div aria-hidden className="absolute inset-[-26px] rounded-full border border-cyan-400/20 border-dashed" style={{ animation: 'ccSpin 60s linear infinite' }} />
-
-      {/* Wrapper parallax 3D */}
-      <div
-        className="relative h-full w-full"
-        style={{
-          transformStyle: 'preserve-3d',
-          transform: `perspective(1200px) rotateX(${tiltX}deg) rotateY(${tiltY}deg)`,
-          transition: 'transform 0.6s cubic-bezier(.2,.8,.2,1)',
-        }}
-      >
-        {/* Float */}
-        <div className="relative h-full w-full" style={{ animation: 'ccFloat 6s ease-in-out infinite' }}>
-          {/* CÍRCULO do vídeo (igual ao da loira) */}
-          <div
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
-            style={{ width: '86%', aspectRatio: '1', animation: 'ccBreath 4.5s ease-in-out infinite' }}
-          >
-            {/* Anel arco-íris conic rotativo */}
-            <div
-              aria-hidden
-              className="absolute inset-[-6px] rounded-full"
-              style={{
-                background: 'conic-gradient(from 0deg, #e879f9, #a78bfa, #67e8f9, #c2cf86, #e879f9)',
-                animation: 'ccSpin 9s linear infinite',
-                filter: 'blur(2px)',
-                opacity: 0.9,
-              }}
-            />
-            {/* Rim escuro */}
-            <div
-              aria-hidden
-              className="absolute inset-[-2px] rounded-full"
-              style={{ background: 'radial-gradient(circle, transparent 92%, rgba(0,0,0,0.6) 100%)', zIndex: 2 }}
-            />
-
-            {/* VÍDEO circular — preenche o círculo (object-cover), key força o fade */}
-            <div
-              className="absolute inset-0 rounded-full overflow-hidden"
-              style={{ boxShadow: 'inset 0 0 0 2px rgba(255,255,255,0.08), 0 20px 60px rgba(232,121,249,0.45), 0 0 0 1px rgba(0,0,0,0.4)', background: '#05050a' }}
-            >
-              <video
-                key={index}
-                ref={videoRef}
-                src={HERO_VIDEOS[index]}
-                autoPlay
-                muted
-                playsInline
-                preload="auto"
-                onEnded={advance}
-                className="absolute inset-0 h-full w-full object-cover"
-                style={{ filter: 'saturate(1.08) contrast(1.04)', objectPosition: OBJECT_POS[index], animation: 'ccReveal 0.72s cubic-bezier(.2,.8,.2,1)' }}
-              />
-              {/* TRANSIÇÃO: scanline cyan varre na troca (key força o replay).
-                  opacity base 0 inline → some depois (NUNCA cobre o vídeo). */}
-              <div
-                key={`sw${index}`}
-                aria-hidden
-                className="pointer-events-none absolute inset-x-0 top-0 h-[22%]"
-                style={{ opacity: 0, background: 'linear-gradient(180deg, transparent, rgba(103,232,249,0.85), transparent)', filter: 'blur(3px)', mixBlendMode: 'screen', animation: 'ccSweep 0.72s ease-out' }}
-              />
-              {/* color overlay sutil */}
-              <div
-                aria-hidden
-                className="absolute inset-0"
-                style={{ background: 'radial-gradient(120% 80% at 30% 20%, rgba(232,121,249,0.15), transparent 60%), radial-gradient(120% 80% at 80% 80%, rgba(103,232,249,0.12), transparent 60%)', mixBlendMode: 'overlay' }}
-              />
-              {/* top rim light */}
-              <div
-                aria-hidden
-                className="absolute inset-x-0 top-0 h-1/3"
-                style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.18), transparent 100%)', mixBlendMode: 'soft-light' }}
-              />
-              {/* vinheta */}
-              <div aria-hidden className="absolute inset-0 rounded-full" style={{ boxShadow: 'inset 0 -40px 60px -20px rgba(0,0,0,0.55)' }} />
-            </div>
-
-            {/* audio bars — à direita */}
-            <div className="absolute z-30 pointer-events-none flex items-end gap-[2px]" style={{ right: '-14%', top: '60%', height: 28 }}>
-              {Array.from({ length: 5 }).map((_, i) => (
-                <span
-                  key={i}
-                  className="block w-[3px] rounded-full bg-gradient-to-t from-fuchsia-500 to-fuchsia-200"
-                  style={{ height: '100%', animation: `ccBars 0.5s ease-in-out ${i * 0.08}s infinite alternate`, transformOrigin: 'bottom', filter: 'drop-shadow(0 0 4px rgba(232,121,249,0.7))' }}
-                />
-              ))}
-            </div>
-          </div>
-
-          {/* SVG overlay HUD/waveform — por cima */}
-          <svg
-            viewBox="0 0 400 400"
-            width="100%"
-            height="100%"
-            className="relative drop-shadow-[0_30px_60px_rgba(232,121,249,0.4)]"
-            style={{ overflow: 'visible', pointerEvents: 'none' }}
-          >
-            <defs>
-              <radialGradient id="cc-bg" cx="50%" cy="55%" r="60%">
-                <stop offset="0%" stopColor="rgba(232,121,249,0.26)" />
-                <stop offset="60%" stopColor="rgba(167,139,250,0.16)" />
-                <stop offset="100%" stopColor="transparent" />
-              </radialGradient>
-            </defs>
-
-            {/* Backdrop atras do circulo */}
-            <circle cx="200" cy="200" r="188" fill="url(#cc-bg)" />
-
-            {/* Halo HUD rotativo (dashes) */}
-            <circle
-              cx="200"
-              cy="200"
-              r="182"
-              fill="none"
-              stroke="rgba(232,121,249,0.4)"
-              strokeWidth="1"
-              strokeDasharray="2 18"
-              style={{ animation: 'ccSpin 30s linear infinite', transformOrigin: '200px 200px' }}
-            />
-            {/* ticks cardeais */}
-            {[0, 90, 180, 270].map((deg) => (
-              <line key={deg} x1="200" y1="12" x2="200" y2="20" stroke="rgba(103,232,249,0.8)" strokeWidth="2" transform={`rotate(${deg} 200 200)`} />
-            ))}
-
-            {/* HUD brackets em volta do circulo */}
-            <g stroke="rgba(232,121,249,0.75)" strokeWidth="1.5" fill="none">
-              <path d="M 58 132 L 58 110 L 80 110" />
-              <path d="M 342 110 L 320 110 L 320 132" />
-              <path d="M 58 268 L 58 290 L 80 290" />
-              <path d="M 342 290 L 320 290 L 320 268" />
-            </g>
-
-            {/* Waveform embaixo */}
-            <g transform="translate(200 372)" style={{ animation: 'ccWaveOp 2s ease-in-out infinite' }}>
-              {Array.from({ length: 15 }).map((_, i) => {
-                const offset = i - 7;
-                return (
-                  <rect
-                    key={i}
-                    x={offset * 9 - 1.5}
-                    y="-8"
-                    width="3"
-                    height="16"
-                    rx="1.5"
-                    fill="#e879f9"
-                    style={{ animation: `ccWave 0.6s ease-in-out ${i * 0.07}s infinite alternate`, transformOrigin: 'center', filter: 'drop-shadow(0 0 4px rgba(232,121,249,0.6))' }}
-                  />
-                );
-              })}
-            </g>
-
-            {/* HUD txt */}
-            <g fontFamily="monospace" fontSize="8" fill="rgba(232,121,249,0.75)">
-              <text x="52" y="386">[ LIP · SYNC ]</text>
-              <text x="52" y="396">READY TO TALK</text>
-            </g>
-            <g fontFamily="monospace" fontSize="8" fill="rgba(103,232,249,0.75)">
-              <text x="262" y="386">[ HD · NATURAL ]</text>
-              <text x="262" y="396">SYNC LOCKED</text>
-            </g>
-          </svg>
-        </div>
-      </div>
-
-      {/* Índice 1·2·3 + hint */}
-      <div className="pointer-events-none absolute bottom-0 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-1.5">
-        <div className="flex items-center gap-1.5">
-          {HERO_VIDEOS.map((_, i) => (
-            <span
-              key={i}
-              className="h-1.5 rounded-full transition-all duration-300"
-              style={{
-                width: i === index ? 18 : 6,
-                background: i === index ? 'linear-gradient(90deg,#e879f9,#67e8f9)' : 'rgba(255,255,255,0.25)',
-                boxShadow: i === index ? '0 0 10px rgba(232,121,249,0.7)' : 'none',
-              }}
-            />
-          ))}
-        </div>
-        <span className="mono text-[8.5px] uppercase tracking-[0.18em] text-text-dim" style={{ fontFamily: 'var(--font-tech)' }}>
-          passe o mouse pra trocar
-        </span>
-      </div>
-
-      <style jsx>{`
-        @keyframes ccAura {
-          0%, 100% { transform: scale(1); opacity: 0.6; }
-          50% { transform: scale(1.18); opacity: 1; }
-        }
-        @keyframes ccSpin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-        @keyframes ccFloat {
-          0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(-10px); }
-        }
-        @keyframes ccBreath {
-          0%, 100% { transform: translate(-50%, -50%) scale(1); }
-          50% { transform: translate(-50%, -50%) scale(1.025); }
-        }
-        /* TRANSIÇÃO do vídeo na troca — wipe (cima→baixo) + zoom + glow +
-           de-blur. TERMINA visível (opacity 1, sem clip) = sem bug de branco. */
-        @keyframes ccReveal {
-          0% { opacity: 0; transform: scale(1.12); filter: brightness(1.9) saturate(1.6) blur(7px); clip-path: inset(0 0 100% 0); }
-          30% { opacity: 1; clip-path: inset(0 0 0 0); }
-          100% { opacity: 1; transform: scale(1); filter: brightness(1) saturate(1.08) blur(0); clip-path: inset(0 0 0 0); }
-        }
-        /* scanline da troca — base opacity 0 (inline), some no fim */
-        @keyframes ccSweep {
-          0% { opacity: 0; transform: translateY(-120%); }
-          15% { opacity: 1; }
-          100% { opacity: 0; transform: translateY(380%); }
-        }
-        @keyframes ccBadge {
-          0%, 100% { transform: translateY(0); opacity: 0.95; }
-          50% { transform: translateY(-3px); opacity: 1; }
-        }
-        @keyframes ccBars {
-          from { transform: scaleY(0.2); }
-          to { transform: scaleY(1.3); }
-        }
-        @keyframes ccBlink {
-          0%, 100% { opacity: 0.45; }
-          50% { opacity: 1; }
-        }
-        @keyframes ccWave {
-          from { transform: scaleY(0.3); }
-          to { transform: scaleY(1.4); }
-        }
-        @keyframes ccWaveOp {
-          0%, 100% { opacity: 0.55; }
-          50% { opacity: 1; }
         }
       `}</style>
     </div>

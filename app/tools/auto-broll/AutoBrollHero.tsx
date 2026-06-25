@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { ToolHeroVideo } from '@/components/ToolHeroVideo';
 
 /**
  * AutoBrollHero — cinematic header for /tools/auto-broll.
@@ -171,54 +172,14 @@ export function AutoBrollHero() {
           </div>
         </div>
 
-        {/* RIGHT — bunny mascote 3D */}
-        <div
-          className="relative hidden h-[280px] w-[280px] shrink-0 md:block"
-          style={{
-            transformStyle: 'preserve-3d',
-            transform: `perspective(1200px) rotateX(${tiltX}deg) rotateY(${tiltY}deg)`,
-            transition: 'transform 0.6s cubic-bezier(.2,.8,.2,1)',
-          }}
-        >
-          {/* Aura glow */}
-          <div
-            aria-hidden
-            className="absolute inset-0 rounded-full blur-3xl"
-            style={{
-              background:
-                'radial-gradient(circle, rgba(167,139,250,0.35), rgba(200,232,124,0.15) 50%, transparent 70%)',
-              animation: 'auraPulse 4s ease-in-out infinite',
-            }}
-          />
-          {/* Floating bunny */}
-          <div
-            className="relative flex h-full w-full items-center justify-center"
-            style={{
-              animation: 'bunnyFloat 5s ease-in-out infinite',
-            }}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/auto-edit-logo@256.png"
-              alt="Auto Edit"
-              width={220}
-              height={220}
-              className="drop-shadow-[0_30px_60px_rgba(167,139,250,0.5)]"
-              style={{
-                filter: 'drop-shadow(0 0 30px rgba(200,232,124,0.4))',
-              }}
-            />
-          </div>
-          {/* Orbital ring */}
-          <div
-            aria-hidden
-            className="absolute inset-0 rounded-full border border-violet/30"
-            style={{ animation: 'ringSpin 30s linear infinite' }}
-          />
-          <div
-            aria-hidden
-            className="absolute inset-[-10px] rounded-full border border-lime/15"
-            style={{ animation: 'ringSpin 45s linear infinite reverse' }}
+        {/* RIGHT — painel de vídeo 16:9 */}
+        <div className="relative hidden w-[320px] shrink-0 md:block lg:w-[400px] xl:w-[460px]">
+          <ToolHeroVideo
+            src="/cards/auto-broll.mp4"
+            poster="/cards/auto-broll.jpg"
+            glow="rgba(167,139,250,0.45)"
+            tiltX={tiltX}
+            tiltY={tiltY}
           />
         </div>
       </div>

@@ -202,6 +202,8 @@ export default function CopySrtPage() {
           </>
         }
         tint="amber"
+        video="/cards/gerador-srt.mp4"
+        videoPoster="/cards/gerador-srt.jpg"
         pipeline={[
           { icon: '🎙', label: 'Áudio', sub: 'Voz da VSL', tone: 'text-text-muted' },
           { icon: '📝', label: 'Copy', sub: 'O texto exato', tone: 'text-amber-300' },

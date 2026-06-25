@@ -1806,6 +1806,8 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
             </>
           }
           tint="cyan"
+          video="/cards/hey-auto.mp4"
+          videoPoster="/cards/hey-auto.jpg"
           pipeline={[
             { icon: '📜', label: 'Roteiro', sub: 'Texto ou áudios', tone: 'text-text-muted' },
             { icon: '🤖', label: 'Avatar', sub: 'Da sua biblioteca', tone: 'text-cyan-300' },

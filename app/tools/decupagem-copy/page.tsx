@@ -556,6 +556,8 @@ function DecupagemCopyInner() {
           </>
         }
         tint="fuchsia"
+        video="/cards/decupagem-inteligente.mp4"
+        videoPoster="/cards/decupagem-inteligente.jpg"
         pipeline={[
           { icon: '🎞', label: 'Vídeo bruto', sub: 'Todas as takes', tone: 'text-text-muted' },
           { icon: '📝', label: 'Copy final', sub: 'O texto certo', tone: 'text-fuchsia-300' },

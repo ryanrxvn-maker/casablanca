@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { ToolHeroVideo } from '@/components/ToolHeroVideo';
 
 /**
  * ToolHero3D — shared cinematic hero for AI suite tool pages.
@@ -39,6 +40,13 @@ export type ToolHero3DProps = {
   illustration?: React.ReactNode;
   /** Hide bunny entirely (rare — only if illustration is dominant) */
   hideBunny?: boolean;
+  /**
+   * Vídeo 16:9 do card (em /public/cards/). Quando definido, o lado direito
+   * mostra o painel de vídeo premium (ToolHeroVideo) no lugar do coelho.
+   */
+  video?: string;
+  /** Poster (primeiro frame) do vídeo acima */
+  videoPoster?: string;
 };
 
 const TINT_MAP = {
@@ -127,6 +135,8 @@ export function ToolHero3D({
   stats,
   illustration,
   hideBunny = false,
+  video,
+  videoPoster,
 }: ToolHero3DProps) {
   const heroRef = useRef<HTMLDivElement | null>(null);
   const [mouse, setMouse] = useState({ x: 0.5, y: 0.5 });
@@ -273,7 +283,18 @@ export function ToolHero3D({
           </div>
         </div>
 
-        {/* RIGHT — illustration + bunny */}
+        {/* RIGHT — painel de vídeo 16:9 (quando há vídeo) OU illustration + bunny */}
+        {video ? (
+          <div className="relative hidden w-[320px] shrink-0 md:block lg:w-[400px] xl:w-[460px]">
+            <ToolHeroVideo
+              src={video}
+              poster={videoPoster}
+              glow={t.glow}
+              tiltX={tiltX}
+              tiltY={tiltY}
+            />
+          </div>
+        ) : (
         <div className="relative hidden h-[280px] w-[280px] shrink-0 md:block">
           {illustration && (
             <div className="absolute inset-0 z-10">{illustration}</div>
@@ -327,6 +348,7 @@ export function ToolHero3D({
             </div>
           )}
         </div>
+        )}
       </div>
 
       <style jsx>{`
