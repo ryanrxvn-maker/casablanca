@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ToolHero3D } from '@/components/ToolHero3D';
+import { ToolHeroVideo } from '@/components/ToolHeroVideo';
 import { DocImport3DButton } from '@/components/DocImport3DButton';
 import { Toggle3DIcon } from '@/components/Toggle3DIcon';
 import { CancelButton } from '@/components/CancelButton';
@@ -1795,30 +1795,9 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
   return (
     <>
       <div className="mx-auto w-full max-w-[1200px] px-5 pt-6 md:px-8 md:pt-8">
-        <ToolHero3D
-          eyebrow="HEYGEN · LIPSYNC EM SÉRIE"
-          eyebrow2="DISPARA · DORME · ACORDA PRONTO"
-          title="Hey Auto"
-          subtitle={
-            <>
-              Cola roteiro ou áudios.{' '}
-              <span className="font-semibold text-white">Seu avatar fala tudo na ordem certa</span>, sem você abrir o HeyGen pra clicar &ldquo;Generate&rdquo; cinquenta vezes.
-            </>
-          }
-          tint="cyan"
-          video="/cards/hey-auto.mp4"
-          videoPoster="/cards/hey-auto.jpg"
-          pipeline={[
-            { icon: '📜', label: 'Roteiro', sub: 'Texto ou áudios', tone: 'text-text-muted' },
-            { icon: '🤖', label: 'Avatar', sub: 'Da sua biblioteca', tone: 'text-cyan-300' },
-            { icon: '🎙', label: 'Lipsync', sub: 'HeyGen em fila', tone: 'text-violet' },
-            { icon: '🎞', label: 'MP4 final', sub: 'Pronto pra edição', tone: 'text-lime' },
-          ]}
-          stats={[
-            { value: '2×', label: 'em paralelo' },
-            { value: 'Fila', label: 'recupera após queda' },
-            { value: 'ZIP', label: 'entrega organizada' },
-          ]}
+        <ToolHeroVideo
+          src="/cards/hey-auto.mp4"
+          poster="/cards/hey-auto.jpg"
         />
         <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
           {/* Status da extensao */}

@@ -3,7 +3,7 @@
 import { useEffect, useMemo } from 'react';
 import { keepSegmentsFromRemovals } from '@/lib/decupagem-matcher';
 import { ToolShell } from '@/components/ToolShell';
-import { ToolHero3D } from '@/components/ToolHero3D';
+import { ToolHeroVideo } from '@/components/ToolHeroVideo';
 import { FileUpload } from '@/components/FileUpload';
 import { CostHint } from '@/components/CostHint';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
@@ -545,30 +545,9 @@ function DecupagemCopyInner() {
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-5 pt-6 md:px-8 md:pt-8">
-      <ToolHero3D
-        eyebrow="WHISPER · DECUPAGEM INTELIGENTE"
-        eyebrow2="A IA MONTA POR VOCÊ"
-        title="Decupagem Inteligente"
-        subtitle={
-          <>
-            Manda o vídeo bruto + a copy final.{' '}
-            <span className="font-semibold text-white">A IA escolhe a melhor take de cada frase</span> e monta tudo na ordem certa — você só revisa e exporta.
-          </>
-        }
-        tint="fuchsia"
-        video="/cards/decupagem-inteligente.mp4"
-        videoPoster="/cards/decupagem-inteligente.jpg"
-        pipeline={[
-          { icon: '🎞', label: 'Vídeo bruto', sub: 'Todas as takes', tone: 'text-text-muted' },
-          { icon: '📝', label: 'Copy final', sub: 'O texto certo', tone: 'text-fuchsia-300' },
-          { icon: '🧠', label: 'Transcrição + IA', sub: 'Match por frase', tone: 'text-violet' },
-          { icon: '✂', label: 'Timeline', sub: 'Cortes prontos', tone: 'text-lime' },
-        ]}
-        stats={[
-          { value: '~2min', label: 'pra processar' },
-          { value: 'XML', label: 'pro Premiere' },
-          { value: 'MP4', label: 'pré-cortado' },
-        ]}
+      <ToolHeroVideo
+        src="/cards/decupagem-inteligente.mp4"
+        poster="/cards/decupagem-inteligente.jpg"
       />
       <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
       <div className="flex flex-col gap-5">

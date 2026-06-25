@@ -80,7 +80,7 @@ import { ToolStep } from '@/components/tool-kit';
 import { IconStepPlug, IconStepSliders, IconStepPipeline } from '@/components/ToolIcons';
 import { TierGate } from '@/components/TierGate';
 import { TakeCard } from './TakeCard';
-import { AutoBrollHero } from './AutoBrollHero';
+import { ToolHeroVideo } from '@/components/ToolHeroVideo';
 
 const HUE = 'rgba(240,171,252,0.45)';
 
@@ -629,7 +629,10 @@ function AutoBrollInner() {
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-5 pt-6 md:px-8 md:pt-8">
-      <AutoBrollHero />
+      <ToolHeroVideo
+        src="/cards/auto-broll.mp4"
+        poster="/cards/auto-broll.jpg"
+      />
       <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
       <div className="grid gap-5">
         <ToolStep n={1} icon={<IconStepPlug size={18} />} title="Extensão Magnific" hint="Conecta à sua conta Premium+ — gera sem gastar crédito" hue={HUE}>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { LipSyncHero3D } from '@/app/tools/lipsync/LipSyncHero3D';
+import { ToolHeroVideo } from '@/components/ToolHeroVideo';
 import { createClient } from '@/lib/supabase/client';
 import { LipsyncPreviewCard, type LipsyncTake } from '@/components/LipsyncPreviewCard';
 
@@ -692,7 +692,10 @@ export default function LipSyncTool() {
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 md:px-8 space-y-7">
-      <LipSyncHero3D />
+      <ToolHeroVideo
+        src="/cards/lipsync.mp4"
+        poster="/cards/lipsync.jpg"
+      />
 
       {/* WORKSPACE — 3 colunas */}
       <div className="grid gap-4 lg:grid-cols-[210px_1fr_360px]">

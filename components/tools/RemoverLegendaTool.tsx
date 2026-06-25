@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ToolHero3D } from '@/components/ToolHero3D';
+import { ToolHeroVideo } from '@/components/ToolHeroVideo';
 
 /**
  * RemoverLegendaTool — remoção de legenda/marca d'água via vmake Smart.
@@ -332,30 +332,9 @@ export default function RemoverLegendaTool() {
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 md:px-8 space-y-7">
-      <ToolHero3D
-        eyebrow="VMAKE · SMART REMOVER"
-        eyebrow2="NUVEM · QUALQUER TAMANHO"
-        title="Removedor de Legenda"
-        subtitle={
-          <>
-            A IA detecta a legenda/marca queimada e reconstrói o fundo, frame a frame.{' '}
-            <span className="font-semibold text-white">Sobe o vídeo, aguarda e baixa o MP4 limpo.</span>
-          </>
-        }
-        tint="pink"
-        video="/cards/removedor-legenda.mp4"
-        videoPoster="/cards/removedor-legenda.jpg"
-        pipeline={[
-          { icon: '🎬', label: 'Vídeo', sub: 'Legenda queimada', tone: 'text-text-muted' },
-          { icon: '🧠', label: 'IA detecta', sub: 'Acha a marca', tone: 'text-pink-300' },
-          { icon: '🪄', label: 'Reconstrói', sub: 'Fundo frame a frame', tone: 'text-violet' },
-          { icon: '🎞', label: 'MP4 limpo', sub: 'Pronto pra usar', tone: 'text-lime' },
-        ]}
-        stats={[
-          { value: 'Nuvem', label: 'processa pesado' },
-          { value: 'Auto', label: 'detecção smart' },
-          { value: 'MP4', label: 'sem marca' },
-        ]}
+      <ToolHeroVideo
+        src="/cards/removedor-legenda.mp4"
+        poster="/cards/removedor-legenda.jpg"
       />
 
       <div className="grid gap-4 lg:grid-cols-[210px_1fr_300px]">

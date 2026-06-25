@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef } from 'react';
 import { ToolShell } from '@/components/ToolShell';
-import { ToolHero3D } from '@/components/ToolHero3D';
+import { ToolHeroVideo } from '@/components/ToolHeroVideo';
 import { CancelButton } from '@/components/CancelButton';
 import { CostHint } from '@/components/CostHint';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
@@ -191,30 +191,9 @@ export default function CopySrtPage() {
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-5 pt-6 md:px-8 md:pt-8">
-      <ToolHero3D
-        eyebrow="LEGENDA · ALINHAMENTO IA"
-        eyebrow2="QUEBRA INTELIGENTE · 42/CPS17"
-        title="Gerador de SRT"
-        subtitle={
-          <>
-            Manda áudio + sua copy.{' '}
-            <span className="font-semibold text-white">Sai legenda alinhada palavra-a-palavra</span>, com quebra inteligente pronta pra qualquer editor.
-          </>
-        }
-        tint="amber"
-        video="/cards/gerador-srt.mp4"
-        videoPoster="/cards/gerador-srt.jpg"
-        pipeline={[
-          { icon: '🎙', label: 'Áudio', sub: 'Voz da VSL', tone: 'text-text-muted' },
-          { icon: '📝', label: 'Copy', sub: 'O texto exato', tone: 'text-amber-300' },
-          { icon: '🧠', label: 'Alinhamento', sub: 'Palavra-a-palavra', tone: 'text-violet' },
-          { icon: '📄', label: '.SRT / .VTT', sub: 'Pronto pro editor', tone: 'text-lime' },
-        ]}
-        stats={[
-          { value: '42', label: 'chars / linha' },
-          { value: '17', label: 'CPS máx' },
-          { value: 'SRT', label: 'Premiere · CapCut · DR' },
-        ]}
+      <ToolHeroVideo
+        src="/cards/gerador-srt.mp4"
+        poster="/cards/gerador-srt.jpg"
       />
       <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
       <div className="flex flex-col gap-5">
