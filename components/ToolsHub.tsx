@@ -92,14 +92,14 @@ const BASE: ToolEntry[] = [
   {
     href: '/tools/decupagem',
     label: 'Decupagem',
-    description: 'Corta os silêncios do vídeo ou áudio.',
+    description: 'Silêncio detectado. Corte feito.',
     icon: <IconDecupagem size={26} />,
     hue: 'rgba(163, 230, 53, 0.4)',
   },
   {
     href: '/tools/camuflagem',
     label: 'Camuflagem',
-    description: 'Disfarça o áudio pra escapar dos detectores.',
+    description: 'Áudio de IA. Detectores não veem nada.',
     icon: <IconCamuflagem size={26} />,
     hue: 'rgba(45, 212, 191, 0.4)',
   },
@@ -151,50 +151,62 @@ const AI: ToolEntry[] = [
   {
     href: '/tools/lipsync',
     label: 'Criar um Avatar',
-    description: 'Sobe o rosto e o áudio: lipsync realista do avatar falando o que você quiser.',
+    description: 'Vídeo entra. Áudio encaixa. Boca fala.',
     icon: <IconLipsync size={26} />,
     hue: 'rgba(232, 121, 249, 0.42)',
     badge: 'IA',
+    video: '/cards/lipsync.mp4',
+    poster: '/cards/lipsync.jpg',
   },
   {
     href: '/tools/auto-broll',
     label: 'Auto B-roll',
-    description: 'Gera B-rolls em massa pelo JSON.',
+    description: 'Uma lista. Um clique. Dezenas de vídeos.',
     icon: <IconAutoBroll size={26} />,
     hue: 'rgba(240, 171, 252, 0.42)',
     badge: 'IA',
+    video: '/cards/auto-broll.mp4',
+    poster: '/cards/auto-broll.jpg',
   },
   {
     href: '/tools/remover-elementos',
     label: 'Remover Legenda/Marca d’Água',
-    description: 'Remove legenda e marca d’água.',
+    description: 'Legenda queimada. IA remove. MP4 limpo.',
     icon: <IconRemoverElementos size={26} />,
     hue: 'rgba(244, 114, 182, 0.42)',
     badge: 'IA',
+    video: '/cards/removedor-legenda.mp4',
+    poster: '/cards/removedor-legenda.jpg',
   },
   {
     href: '/tools/decupagem-copy',
     label: 'Decupagem Inteligente',
-    description: 'Decupa o vídeo seguindo a sua copy.',
+    description: 'IA lê a copy. Escolhe o take certo.',
     icon: <IconDecupageCopy size={26} />,
     hue: 'rgba(232, 121, 249, 0.42)',
     badge: 'IA',
+    video: '/cards/decupagem-inteligente.mp4',
+    poster: '/cards/decupagem-inteligente.jpg',
   },
   {
     href: '/tools/copy-srt',
     label: 'Gerador de SRT',
-    description: 'Gera legendas prontas no tempo do seu áudio pra importar no editor.',
+    description: 'Áudio + copy. Legenda alinhada palavra a palavra.',
     icon: <IconCopySRT size={26} />,
     hue: 'rgba(196, 181, 253, 0.42)',
     badge: 'IA',
+    video: '/cards/gerador-srt.mp4',
+    poster: '/cards/gerador-srt.jpg',
   },
   {
     href: '/tools/heygen-auto',
     label: 'Hey Auto',
-    description: 'Gera o vídeo do seu avatar falando o roteiro.',
+    description: 'Avatar fala tudo. Você não abre o HeyGen.',
     icon: <IconHeyGenAuto size={26} />,
     hue: 'rgba(103, 232, 249, 0.42)',
     badge: 'IA',
+    video: '/cards/hey-auto.mp4',
+    poster: '/cards/hey-auto.jpg',
   },
 ];
 
@@ -1274,6 +1286,140 @@ function ToolCard({
 }) {
   const isBlocked = maint === 'blocked';
   const nonClickable = locked || isBlocked;
+
+  // ───────── Variante VÍDEO ─────────
+  // Cards que têm um .mp4 (suíte IA) viram "video-forward": o vídeo roda em
+  // loop como fundo (object-cover), o título ganha o tratamento premium (Inter
+  // 700, fade-in-up) e a copy curta fica num rodapé escuro sempre legível.
+  // Preserva borda, hover-lift, click (Link) e os estados locked/manutenção.
+  if (entry.video) {
+    const vcls =
+      'tool-card group relative block overflow-hidden rounded-[16px] border border-line/70 transition-all duration-300 ' +
+      (nonClickable
+        ? 'cursor-not-allowed'
+        : 'hover:-translate-y-[2px] hover:border-violet/45');
+    const vstyle: React.CSSProperties = {
+      animationDelay: `${delay}ms`,
+      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
+    };
+    const vbody = (
+      <>
+        {/* Área do vídeo — full-bleed, object-cover */}
+        <div className="relative aspect-video w-full overflow-hidden">
+          {/* Fallback (gradiente do hue) caso o vídeo/poster não carregue */}
+          <div
+            aria-hidden
+            className="absolute inset-0 -z-10"
+            style={{
+              background: `radial-gradient(130% 80% at 50% 8%, ${entry.hue}, transparent 60%), linear-gradient(180deg, rgb(var(--bg-softer)), #050507)`,
+            }}
+          />
+          <video
+            src={entry.video}
+            poster={entry.poster}
+            autoPlay
+            loop
+            muted
+            playsInline
+            preload="auto"
+            className="absolute inset-0 h-full w-full object-cover"
+            style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}
+          />
+          {/* Glow do hue acende no hover */}
+          <div
+            aria-hidden
+            className="hub-glow pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full opacity-0 blur-2xl transition-opacity duration-500 group-hover:opacity-80"
+            style={{ background: entry.hue }}
+          />
+          {/* Máscara escura embaixo — legibilidade do título sobre o vídeo */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background:
+                'linear-gradient(to top, rgba(4,4,6,0.92) 4%, rgba(4,4,6,0.25) 42%, transparent 66%)',
+            }}
+          />
+          {/* Ícone + badge no topo */}
+          <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between p-3">
+            <span
+              className="flex h-10 w-10 items-center justify-center rounded-[12px] border border-white/12 bg-black/45 backdrop-blur-md transition-transform duration-500 group-hover:scale-110"
+              style={{ boxShadow: `0 0 24px -4px ${entry.hue}` }}
+            >
+              {entry.icon}
+            </span>
+            {entry.badge ? (
+              <span
+                className="rounded-full border border-violet/35 bg-black/45 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.20em] text-violet backdrop-blur-md"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                {entry.badge}
+              </span>
+            ) : null}
+          </div>
+          {/* Título — tratamento premium: Inter 700, dominante, fade-in-up */}
+          <h3
+            className="fade-in-up absolute bottom-0 left-0 z-10 px-4 pb-2.5 text-[20px] font-extrabold leading-tight tracking-tight text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)] transition-transform duration-300 group-hover:-translate-y-0.5"
+            style={{
+              fontFamily: 'var(--font-label)',
+              fontWeight: 700,
+              letterSpacing: '-0.02em',
+              animationDelay: `${delay + 120}ms`,
+            }}
+          >
+            {entry.label}
+          </h3>
+        </div>
+
+        {/* Rodapé — copy curta sempre visível, fundo escuro (legível nos 2 temas) */}
+        <div className="relative px-4 pb-3.5 pt-2.5" style={{ background: '#0b0b0f' }}>
+          <p className="text-[12.5px] leading-snug text-white/75">
+            {entry.description}
+          </p>
+        </div>
+
+        {/* Overlay de bloqueio (tier) — cobre o card todo */}
+        {locked ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center backdrop-blur-[2px]"
+            style={{ background: 'rgba(7,7,8,0.55)' }}
+          >
+            <span
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-black/60 backdrop-blur-md"
+              style={{ boxShadow: '0 0 18px -6px rgba(167,139,250,0.55)' }}
+            >
+              <LockIcon size={14} />
+            </span>
+          </div>
+        ) : null}
+      </>
+    );
+
+    const vcard = nonClickable ? (
+      <div
+        className={vcls}
+        style={vstyle}
+        aria-disabled
+        title={isBlocked ? 'Em manutenção' : 'Disponível só pra contas Beta'}
+      >
+        {vbody}
+      </div>
+    ) : (
+      <Link href={entry.href} className={vcls} style={vstyle}>
+        {vbody}
+      </Link>
+    );
+
+    if (!maint) return vcard;
+    return (
+      <div className="relative">
+        {vcard}
+        <MaintenanceBadge mode={maint} className="right-3 top-3" />
+      </div>
+    );
+  }
+
   const cls =
     'tool-card group relative block overflow-hidden rounded-[16px] border border-line/70 p-4 transition-all duration-300 md:p-5 ' +
     (nonClickable
