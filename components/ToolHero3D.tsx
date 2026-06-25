@@ -162,7 +162,7 @@ export function ToolHero3D({
   return (
     <div
       ref={heroRef}
-      className="relative isolate overflow-hidden rounded-[24px] border border-line/60 bg-bg-soft/30 px-6 py-12 md:px-10 md:py-16"
+      className="dark-island relative isolate overflow-hidden rounded-[24px] border border-line/60 bg-bg-soft/30 px-6 py-12 md:px-10 md:py-16"
       style={{
         backgroundImage: `radial-gradient(40% 60% at 20% 30%, ${t.primary.replace('0.45', '0.18').replace('0.55', '0.18').replace('0.50', '0.18').replace('0.40', '0.18')}, transparent 60%), radial-gradient(50% 50% at 80% 70%, ${t.secondary}, transparent 60%), radial-gradient(30% 40% at 50% 90%, rgba(34,211,238,0.10), transparent 60%)`,
       }}

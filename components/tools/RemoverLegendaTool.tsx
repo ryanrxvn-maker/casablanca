@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { ToolHero3D } from '@/components/ToolHero3D';
 
 /**
  * RemoverLegendaTool — remoção de legenda/marca d'água via vmake Smart.
@@ -331,18 +332,31 @@ export default function RemoverLegendaTool() {
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 md:px-8 space-y-7">
-      <header className="pt-2">
-        <div className="label-tech text-[10px] font-bold tracking-[0.22em] text-fuchsia-300">
-          VÍDEO LIMPO · IA SMART · NUVEM · QUALQUER TAMANHO
-        </div>
-        <h1 className="mt-1 text-[28px] md:text-[34px] font-extrabold tracking-tight text-white" style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}>
-          Removedor de Legenda / Marca d&apos;Água
-        </h1>
-        <p className="mt-1 text-[13px] text-text-muted max-w-[620px]">
-          IA detecta a legenda/marca queimada e reconstrói o fundo, frame a frame.{' '}
-          <span className="text-white font-semibold">Sobe o vídeo, aguarda e baixa o MP4 limpo.</span>
-        </p>
-      </header>
+      <ToolHero3D
+        eyebrow="VMAKE · SMART REMOVER"
+        eyebrow2="NUVEM · QUALQUER TAMANHO"
+        title="Removedor de Legenda"
+        subtitle={
+          <>
+            A IA detecta a legenda/marca queimada e reconstrói o fundo, frame a frame.{' '}
+            <span className="font-semibold text-white">Sobe o vídeo, aguarda e baixa o MP4 limpo.</span>
+          </>
+        }
+        tint="pink"
+        video="/cards/removedor-legenda.mp4"
+        videoPoster="/cards/removedor-legenda.jpg"
+        pipeline={[
+          { icon: '🎬', label: 'Vídeo', sub: 'Legenda queimada', tone: 'text-text-muted' },
+          { icon: '🧠', label: 'IA detecta', sub: 'Acha a marca', tone: 'text-pink-300' },
+          { icon: '🪄', label: 'Reconstrói', sub: 'Fundo frame a frame', tone: 'text-violet' },
+          { icon: '🎞', label: 'MP4 limpo', sub: 'Pronto pra usar', tone: 'text-lime' },
+        ]}
+        stats={[
+          { value: 'Nuvem', label: 'processa pesado' },
+          { value: 'Auto', label: 'detecção smart' },
+          { value: 'MP4', label: 'sem marca' },
+        ]}
+      />
 
       <div className="grid gap-4 lg:grid-cols-[210px_1fr_300px]">
         {/* BIBLIOTECA */}

@@ -38,7 +38,7 @@ export function AutoBrollHero() {
   return (
     <div
       ref={heroRef}
-      className="relative isolate overflow-hidden rounded-[24px] border border-line/60 bg-bg-soft/30 px-6 py-12 md:px-10 md:py-16"
+      className="dark-island relative isolate overflow-hidden rounded-[24px] border border-line/60 bg-bg-soft/30 px-6 py-12 md:px-10 md:py-16"
       style={{
         backgroundImage:
           'radial-gradient(40% 60% at 20% 30%, rgba(167,139,250,0.18), transparent 60%), radial-gradient(50% 50% at 80% 70%, rgba(200,232,124,0.10), transparent 60%), radial-gradient(30% 40% at 50% 90%, rgba(34,211,238,0.10), transparent 60%)',

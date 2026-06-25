@@ -155,6 +155,8 @@ const AI: ToolEntry[] = [
     icon: <IconLipsync size={26} />,
     hue: 'rgba(232, 121, 249, 0.42)',
     badge: 'IA',
+    video: '/cards/lipsync.mp4',
+    poster: '/cards/lipsync.jpg',
   },
   {
     href: '/tools/auto-broll',
@@ -163,6 +165,8 @@ const AI: ToolEntry[] = [
     icon: <IconAutoBroll size={26} />,
     hue: 'rgba(240, 171, 252, 0.42)',
     badge: 'IA',
+    video: '/cards/auto-broll.mp4',
+    poster: '/cards/auto-broll.jpg',
   },
   {
     href: '/tools/remover-elementos',
@@ -171,6 +175,8 @@ const AI: ToolEntry[] = [
     icon: <IconRemoverElementos size={26} />,
     hue: 'rgba(244, 114, 182, 0.42)',
     badge: 'IA',
+    video: '/cards/removedor-legenda.mp4',
+    poster: '/cards/removedor-legenda.jpg',
   },
   {
     href: '/tools/decupagem-copy',
@@ -179,6 +185,8 @@ const AI: ToolEntry[] = [
     icon: <IconDecupageCopy size={26} />,
     hue: 'rgba(232, 121, 249, 0.42)',
     badge: 'IA',
+    video: '/cards/decupagem-inteligente.mp4',
+    poster: '/cards/decupagem-inteligente.jpg',
   },
   {
     href: '/tools/copy-srt',
@@ -187,6 +195,8 @@ const AI: ToolEntry[] = [
     icon: <IconCopySRT size={26} />,
     hue: 'rgba(196, 181, 253, 0.42)',
     badge: 'IA',
+    video: '/cards/gerador-srt.mp4',
+    poster: '/cards/gerador-srt.jpg',
   },
   {
     href: '/tools/heygen-auto',
@@ -195,6 +205,8 @@ const AI: ToolEntry[] = [
     icon: <IconHeyGenAuto size={26} />,
     hue: 'rgba(103, 232, 249, 0.42)',
     badge: 'IA',
+    video: '/cards/hey-auto.mp4',
+    poster: '/cards/hey-auto.jpg',
   },
 ];
 
@@ -1274,6 +1286,168 @@ function ToolCard({
 }) {
   const isBlocked = maint === 'blocked';
   const nonClickable = locked || isBlocked;
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Cards de vídeo: o .mp4 fica PARADO no poster e só roda enquanto o mouse
+  // está em cima (igual aos cards de Destaque). Ao tirar, pausa e volta ao 1º
+  // frame. Só o HERO da ferramenta roda em loop o tempo todo.
+  function playCardVideo() {
+    const v = videoRef.current;
+    if (!v) return;
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+    const p = v.play();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  }
+  function stopCardVideo() {
+    const v = videoRef.current;
+    if (!v) return;
+    try {
+      v.pause();
+      v.currentTime = 0;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // ───────── Variante VÍDEO (suíte IA) ─────────
+  // `.dark-island` mantém as vars do tema escuro mesmo no modo claro → o texto
+  // branco sobre o vídeo/rodapé escuro continua legível nos 2 temas (sem o
+  // override global de .text-white deixar o texto escuro e sumir no escuro).
+  if (entry.video) {
+    const vcls =
+      'tool-card dark-island group relative block overflow-hidden rounded-[16px] border border-line/70 transition-all duration-300 ' +
+      (nonClickable
+        ? 'cursor-not-allowed'
+        : 'hover:-translate-y-[2px] hover:border-violet/45');
+    const vstyle: React.CSSProperties = {
+      animationDelay: `${delay}ms`,
+      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
+    };
+    const vbody = (
+      <>
+        <div className="relative aspect-video w-full overflow-hidden">
+          <div
+            aria-hidden
+            className="absolute inset-0 -z-10"
+            style={{
+              background: `radial-gradient(130% 80% at 50% 8%, ${entry.hue}, transparent 60%), linear-gradient(180deg, rgb(var(--bg-softer)), #050507)`,
+            }}
+          />
+          {/* Vídeo — parado no poster; toca só no hover (preload leve) */}
+          <video
+            ref={videoRef}
+            src={entry.video}
+            poster={entry.poster}
+            muted
+            loop
+            playsInline
+            preload="metadata"
+            className="absolute inset-0 h-full w-full object-cover"
+            style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}
+          />
+          {/* Poster por cima — some no hover revelando o vídeo (sem flash preto) */}
+          {entry.poster ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={entry.poster}
+              alt=""
+              aria-hidden
+              className="absolute inset-0 h-full w-full object-cover opacity-100 transition-opacity duration-500 ease-out group-hover:opacity-0"
+              style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}
+            />
+          ) : null}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0"
+            style={{
+              background:
+                'linear-gradient(to top, rgba(4,4,6,0.92) 4%, rgba(4,4,6,0.25) 42%, transparent 66%)',
+            }}
+          />
+          <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between p-3">
+            <span
+              className="flex h-10 w-10 items-center justify-center rounded-[12px] border border-white/12 bg-black/45 backdrop-blur-md transition-transform duration-500 group-hover:scale-110"
+              style={{ boxShadow: `0 0 24px -4px ${entry.hue}` }}
+            >
+              {entry.icon}
+            </span>
+            {entry.badge ? (
+              <span
+                className="rounded-full border border-violet/35 bg-black/45 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.20em] text-violet backdrop-blur-md"
+                style={{ fontFamily: 'var(--font-tech)' }}
+              >
+                {entry.badge}
+              </span>
+            ) : null}
+          </div>
+          <h3
+            className="fade-in-up absolute bottom-0 left-0 z-10 px-4 pb-2.5 text-[20px] font-extrabold leading-tight tracking-tight text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)] transition-transform duration-300 group-hover:-translate-y-0.5"
+            style={{
+              fontFamily: 'var(--font-label)',
+              fontWeight: 700,
+              letterSpacing: '-0.02em',
+              animationDelay: `${delay + 120}ms`,
+            }}
+          >
+            {entry.label}
+          </h3>
+        </div>
+
+        <div className="relative px-4 pb-3.5 pt-2.5" style={{ background: '#0b0b0f' }}>
+          <p className="text-[12.5px] leading-snug text-white/75">
+            {entry.description}
+          </p>
+        </div>
+
+        {locked ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center backdrop-blur-[2px]"
+            style={{ background: 'rgba(7,7,8,0.55)' }}
+          >
+            <span
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-black/60 backdrop-blur-md"
+              style={{ boxShadow: '0 0 18px -6px rgba(167,139,250,0.55)' }}
+            >
+              <LockIcon size={14} />
+            </span>
+          </div>
+        ) : null}
+      </>
+    );
+
+    const vcard = nonClickable ? (
+      <div
+        className={vcls}
+        style={vstyle}
+        aria-disabled
+        title={isBlocked ? 'Em manutenção' : 'Disponível só pra contas Beta'}
+        onMouseEnter={playCardVideo}
+        onMouseLeave={stopCardVideo}
+      >
+        {vbody}
+      </div>
+    ) : (
+      <Link
+        href={entry.href}
+        className={vcls}
+        style={vstyle}
+        onMouseEnter={playCardVideo}
+        onMouseLeave={stopCardVideo}
+      >
+        {vbody}
+      </Link>
+    );
+
+    if (!maint) return vcard;
+    return (
+      <div className="relative">
+        {vcard}
+        <MaintenanceBadge mode={maint} className="right-3 top-3" />
+      </div>
+    );
+  }
+
   const cls =
     'tool-card group relative block overflow-hidden rounded-[16px] border border-line/70 p-4 transition-all duration-300 md:p-5 ' +
     (nonClickable
