@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { createClient as createServiceClient, type SupabaseClient } from '@supabase/supabase-js';
 import { decryptSecret } from '@/lib/secrets';
+import { cliMachineIdentity } from '@/lib/cli-auth';
 
 /**
  * Resolve a chave de IA do usuario CHAMADOR pra um servico especifico.
@@ -41,28 +43,58 @@ const LABEL_BY_SERVICE: Record<Service, string> = {
   groq: 'Groq (Whisper)',
 };
 
+/**
+ * Client service-role (bypassa RLS) pra ler a chave de um user_id específico
+ * quando o caller é a MÁQUINA (CLI/MCP) — que não tem cookie de sessão.
+ */
+function serviceDb(): SupabaseClient {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error('SUPABASE_SERVICE_ROLE_KEY ausente.');
+  return createServiceClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+}
+
 export async function getUserKey(
   service: Service,
 ): Promise<{ key: string } | { response: NextResponse }> {
   try {
-    const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      return {
-        response: NextResponse.json(
-          { error: 'Nao autenticado.' },
-          { status: 401 },
-        ),
-      };
+    // Identidade: a MÁQUINA (CLI/MCP via AUTOEDIT_CLI_KEY → AUTOEDIT_CLI_USER_ID)
+    // lê a chave do user configurado via service-role; o BROWSER usa o cookie.
+    // Inerte pra browser: cliMachineIdentity() só resolve com o header secreto.
+    const machine = cliMachineIdentity();
+    let userId: string;
+    let db: SupabaseClient;
+    if (machine) {
+      userId = machine.userId;
+      try {
+        db = serviceDb();
+      } catch (e) {
+        return {
+          response: NextResponse.json(
+            { error: 'Storage não configurado (SUPABASE_SERVICE_ROLE_KEY).', detail: e instanceof Error ? e.message : String(e) },
+            { status: 500 },
+          ),
+        };
+      }
+    } else {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        return {
+          response: NextResponse.json({ error: 'Nao autenticado.' }, { status: 401 }),
+        };
+      }
+      userId = user.id;
+      db = supabase as unknown as SupabaseClient;
     }
 
     const col = COLUMN_BY_SERVICE[service];
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from('user_api_keys')
       .select(col)
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .maybeSingle();
 
     if (error) {
