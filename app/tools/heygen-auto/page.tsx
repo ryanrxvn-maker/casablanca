@@ -304,6 +304,8 @@ function HeyGenAutoInner() {
     motor: Motor;
     decupagem: boolean;
     source: 'manual' | 'doc';
+    /** Nome da voz (override) pra exibir no card da fila — null = voz padrao do avatar. */
+    voiceName?: string | null;
     unmatched?: string[];
     status: 'pending' | 'running' | 'done' | 'failed';
     message?: string;
@@ -1416,6 +1418,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
         motor: motorConfig.kind === 'global' ? motorConfig.motor : motor,
         decupagem: decupagemEnabled,
         source: 'manual',
+        voiceName: overrideVoice && selectedVoice ? selectedVoice.name : null,
         status: 'pending',
       },
     ]);
@@ -2509,9 +2512,35 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                     const sym =
                       item.status === 'done' ? '✓' : item.status === 'running' ? '◷' : item.status === 'failed' ? '✗' : '•';
                     const missingAvatar = item.parts.some((p) => !p.avatarId);
+                    // Material visual do card (igual analise do ClickUp Pilot):
+                    // thumb do avatar (resolvido por id na library), nome do avatar,
+                    // voz e a 1a linha do hook.
+                    const headPart = item.parts[0];
+                    const headAv = headPart?.avatarId ? avatarById.get(headPart.avatarId) : null;
+                    const headThumb = headAv?.thumb || null;
+                    const avatarLabel = headAv?.groupName || headPart?.avatarName || headAv?.name || '—';
+                    const lookLabel = headPart?.avatarName || headAv?.name || null;
+                    const hookText = (item.parts.find((p) => /^HOOK/i.test(p.label))?.text || '').trim();
+                    const voiceLabel = item.voiceName || null;
                     return (
                       <div key={item.id} className={'rounded-[12px] border px-3 py-2.5 ' + tone}>
-                        <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          {/* Thumbnail do avatar */}
+                          <div className="relative h-[60px] w-[46px] shrink-0 overflow-hidden rounded-[8px] border border-line-strong bg-bg">
+                            {headThumb ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={headThumb}
+                                alt={avatarLabel}
+                                className="absolute inset-0 h-full w-full object-cover"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-[18px] text-text-muted">
+                                🧑
+                              </div>
+                            )}
+                          </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
                               <span className="mono text-sm text-white">
@@ -2530,7 +2559,28 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                                 </span>
                               )}
                             </div>
-                            <div className="mt-1 text-[11px] text-text-muted">
+                            {/* Avatar + voz */}
+                            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-text-muted">
+                              <span>
+                                🧑 <span className="text-white">{avatarLabel}</span>
+                                {lookLabel && lookLabel !== avatarLabel ? (
+                                  <span className="text-text-muted"> · {lookLabel}</span>
+                                ) : null}
+                              </span>
+                              <span>
+                                🎙️{' '}
+                                <span className={voiceLabel ? 'text-white' : 'text-text-muted'}>
+                                  {voiceLabel || 'voz do avatar'}
+                                </span>
+                              </span>
+                            </div>
+                            {/* Preview do hook */}
+                            {hookText ? (
+                              <div className="mt-1 line-clamp-2 text-[11px] italic text-text-muted">
+                                “{hookText}”
+                              </div>
+                            ) : null}
+                            <div className="mono mt-1 text-[10px] uppercase tracking-wide text-text-muted/70">
                               {item.parts.length} parte{item.parts.length === 1 ? '' : 's'}:{' '}
                               {item.parts.map((p) => p.label).join(', ')}
                             </div>
