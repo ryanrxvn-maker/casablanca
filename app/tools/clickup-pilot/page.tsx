@@ -1183,8 +1183,8 @@ function ClickUpPilotInner() {
         if (!acked) finish({ ok: false, transient: true, error: 'Extensao nao respondeu em 30s — recarregue esta pagina (F5). Se persistir, baixe a extensao atual em /api/extension/download e recarregue em chrome://extensions.' });
       }, 30000));
       timers.push(setTimeout(() => {
-        finish({ ok: false, transient: true, error: 'Timeout 90s lendo o doc (Google lento ou doc gigante) — tente analisar de novo.' });
-      }, 90000));
+        finish({ ok: false, transient: true, error: 'Timeout 110s lendo o doc (Google lento ou doc gigante) — tente analisar de novo.' });
+      }, 110000));
     });
   }
 

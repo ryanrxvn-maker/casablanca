@@ -1630,12 +1630,19 @@ async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
     let html = null;
     let exportErr = null;
     for (let attempt = 1; attempt <= 2 && !html; attempt++) {
+      const tStart = Date.now();
       try {
+        // 75s: doc GRANDE (ex 24MB com 30 imagens base64) leva ~30s+ pro Google
+        // gerar o export. Com 12s o export SEMPRE estourava e caía no fallback
+        // mobilebasic — que inclui COMENTÁRIOS do Docs (vazavam na fala, ex
+        // "Cinemática"/"Vermes - 340") e fundia linhas (cortava 1a fala do
+        // avatar). O export NÃO tem comentário → é o caminho limpo (user
+        // reportou 2026-06-24).
         const r = await fetchWithTimeout(exportUrl, {
           method: 'GET',
           credentials: 'include',
           redirect: 'follow',
-        }, 12000);
+        }, 75000);
         if (r.ok) {
           html = await r.text();
           const head = html.slice(0, 5000);
@@ -1658,9 +1665,15 @@ async function handleFetchDoc(requestId, docUrl, bridgeTabId) {
       }
       // Erros definitivos (permissao/inexistente) nao melhoram com retry
       if (!html && /^doc_/.test(exportErr || '') && exportErr !== 'doc_privado_login_necessario') break;
-      if (!html && attempt < 2) {
-        console.warn('[DARKO LAB BG] export tentativa', attempt, 'falhou (', exportErr, ') — retry');
+      // Retry SÓ se a 1a falhou RÁPIDO (glitch de rede transitório). Se DEMOROU
+      // (timeout de doc grande/lento), retry só repetiria o timeout — vai direto
+      // pro fallback (mantém o tempo total dentro da janela de 110s da page).
+      if (!html && attempt < 2 && (Date.now() - tStart) < 20000) {
+        console.warn('[DARKO LAB BG] export tentativa', attempt, 'falhou rapido (', exportErr, ') — retry');
         await new Promise((r) => setTimeout(r, 800));
+      } else if (!html && attempt < 2) {
+        console.warn('[DARKO LAB BG] export tentativa', attempt, 'demorou/timeout (', exportErr, ') — sem retry, vai pro fallback');
+        break;
       }
     }
 

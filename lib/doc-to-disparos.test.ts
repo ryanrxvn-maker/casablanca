@@ -1144,6 +1144,15 @@ console.log('\navatar "Avatar N:" inline no corpo (print + .mp4):');
   assert(!/avatar\s*1/i.test(sanitizeSpokenCopy('Avatar 1: Voce conhece alguem?', kr)), 'sanitize: "Avatar 1" NUNCA sobra na fala');
   assert(sanitizeSpokenCopy('Eu disse: oi pra ela.', kr) === 'Eu disse: oi pra ela.', 'sanitize: fala normal com ":" NÃO é cortada (head não é role)');
 
+  // COMENTÁRIOS / INSTRUÇÕES de edição NÃO vazam pra fala (doc grande com
+  // comentários do Docs no corpo — ex AD46).
+  assert(sanitizeSpokenCopy('[bn]Fazer com o nosso avatar segurando esse relatorio igual ao video referencia.', kr) === '', 'sanitize: corpo de comentário "[xx]..." some');
+  assert(sanitizeSpokenCopy('Vai aparecer Vermes - 340', kr) === '', 'sanitize: nota de gráfico "Vai aparecer X - NNN" some');
+  assert(sanitizeSpokenCopy('Edição: Cinemáticas somente nas partes mencionadas.', kr) === '', 'sanitize: "Edição:" some');
+  // CTA REAL com "vai aparecer" NÃO pode ser cortada (não termina em "- NNN")
+  const cta = sanitizeSpokenCopy('Se voce quiser aprender, vai aparecer um botao na sua tela pra clicar ai embaixo.', kr);
+  assert(/bot[aã]o na sua tela/i.test(cta), `sanitize: CTA real "vai aparecer um botão" é PRESERVADA (got "${cta}")`);
+
   // ROTEAMENTO: corpo com Avatar 1 E Avatar 2 → cada fala vai pro SEU avatar
   // (antes "Avatar 1:" e "Avatar 2:" viravam o mesmo speaker "Avatar" e tudo caía
   // no Avatar 1; Avatar 2 ficava com 0 partes).

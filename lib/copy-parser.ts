@@ -1289,12 +1289,22 @@ export function sanitizeSpokenCopy(raw: string, knownRoles: string[] = [], dropE
       if (/(https?:\/\/|\bwww\.[a-z0-9-]+\.|drive\.google\.com|tiktok\.com)/i.test(t)) return null;
       // Markers
       if (/Tela\s*dividida/i.test(t)) return null;
+      // CORPO DE COMENTÁRIO do Google Docs: o export traz cada comentário como
+      // uma linha que COMEÇA com a âncora "[xx]" (ex "[bn]Fazer com o nosso
+      // avatar segurando esse relatório igual ao vídeo referência..."). NUNCA é
+      // fala — descarta a linha inteira. (Âncora no FIM de uma fala é só limpa,
+      // mantendo a fala; só a âncora no INÍCIO marca um corpo de comentário.)
+      if (/^\[[a-zà-ÿ]{1,4}\]/i.test(t)) return null;
+      // Nota de gráfico/cinemática on-screen ("Vai aparecer Vermes - 340",
+      // "Microplásticos - 340") — instrução de edição, não fala. Ancorada no
+      // "- NNN" final pra NÃO pegar a CTA real "vai aparecer um botão na tela...".
+      if (/vai aparecer\b[^.!?]*[-–]\s*\d{2,4}\s*["'”]?\s*$/i.test(t)) return null;
       // Marcador de imagem embutida ([[DOCIMG:N]]) — referencia de avatar por
       // print, NUNCA e fala (so aparece se uma imagem estiver no meio da copy).
       if (/^\[\[DOCIMG:\d+\]\]$/i.test(t)) return null;
       if (/^(Link\s+do\s+avatar|Instru[cç][õo]es)\s*[:\-]/i.test(t)) return null;
       // Metadata prefixes — entire line out
-      if (/^(Voz(?:\s+(?:do|da|de|off|over)\s+\w+)?|Refer[eê]ncia|Aten[cç][aã]o(?:\s+\w+)?|Observa[cç][aã]o|Obs|Nota)\s*[:\-]/i.test(t)) return null;
+      if (/^(Voz(?:\s+(?:do|da|de|off|over)\s+\w+)?|Refer[eê]ncia|Aten[cç][aã]o(?:\s+\w+)?|Observa[cç][aã]o|Obs|Nota|Edi[cç][aã]o)\s*[:\-]/i.test(t)) return null;
       // "Caixinha de perguntas: ..." (entire line — texto duplica em "Avatar fala:")
       if (/^Caixinha\s+de\s+perguntas\s*[:\-]/i.test(t)) return null;
       // "Avatar fala: <texto>" — STRIP PREFIX, mantem texto
