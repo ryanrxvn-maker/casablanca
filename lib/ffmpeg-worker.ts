@@ -1773,6 +1773,43 @@ export async function concatAvatarParts(
 }
 
 /**
+ * Re-encoda UMA parte pros params UNIFORMES da montagem (1080x1920@30, yuv420p,
+ * aac 48k stereo). Usado pra normalizar cada parte INDIVIDUALMENTE antes de um
+ * fast-concat (copy) — evita o concatAvatarParts monolitico (N inputs num
+ * filter_complex de uma vez) que ESTOURA a memoria do ffmpeg-wasm em montagem
+ * grande/multi-avatar (user reportou AD46: 13 partes, Avatar 1 + Avatar 2 com
+ * codecs diferentes, concat falhava → "INCOMPLETO 0 montagens"). Memoria por
+ * chamada = 1 parte pequena, nunca estoura.
+ */
+export async function normalizeForConcat(file: Blob, opts: RunOptions = {}): Promise<Blob> {
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const { fetchFile } = await import('@ffmpeg/util');
+  const inputName = 'norm_in.' + guessExt(file, 'mp4');
+  const outputName = 'norm_out.mp4';
+  const progressHandler = wireProgress(ff, opts.onProgress);
+  try {
+    await ff.writeFile(inputName, await fetchFile(file));
+    await ff.exec([
+      '-i', inputName,
+      '-vf', 'scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,format=yuv420p,setpts=PTS-STARTPTS',
+      '-af', 'aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,aresample=async=1:first_pts=0,asetpts=PTS-STARTPTS',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'fastdecode', '-crf', '22',
+      '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
+      '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-b:a', '256k', '-ar', '48000', '-ac', '2',
+      '-movflags', '+faststart',
+      outputName,
+    ]);
+    const data = await ff.readFile(outputName);
+    return toBlob(data, 'video/mp4');
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    await safeDelete(ff, inputName);
+    await safeDelete(ff, outputName);
+  }
+}
+
+/**
  * Concat rapido sem re-encode (concat demuxer). 5-10x mais rapido que
  * concatAvatarParts pra videos do mesmo codec/resolucao (caso comum: todos
  * vindos do HeyGen com mesmo avatar). Se os videos divergem em codec/

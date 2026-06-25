@@ -19,7 +19,7 @@
  */
 
 import { decodeAudioRobust, detectSilences } from './audio-engine';
-import { concatAvatarParts, concatVideosFast, cutVideoSegments, muxAudioIntoVideo, extractAudio, prepareVoiceForDecupagem, cancelFFmpeg } from './ffmpeg-worker';
+import { concatAvatarParts, concatVideosFast, cutVideoSegments, muxAudioIntoVideo, extractAudio, prepareVoiceForDecupagem, cancelFFmpeg, normalizeForConcat } from './ffmpeg-worker';
 import { camuflar } from './camuflagem';
 
 export type AssembledPart = {
@@ -211,6 +211,34 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     throw lastErr instanceof Error ? lastErr : new Error(`${label}: esgotou ${tries} tentativas`);
   };
 
+  // Concat ROBUSTO p/ montagem (multi-avatar / códecs diferentes): re-encoda
+  // cada parte pros params UNIFORMES INDIVIDUALMENTE (memória pequena por
+  // chamada, sem OOM do ffmpeg-wasm) e depois fast-concat (copy, sem re-encode).
+  // Evita o concatAvatarParts MONOLÍTICO (N inputs num filter_complex de uma vez)
+  // que ESTOURA a memória do wasm em montagem grande/multi-avatar (AD46: 13
+  // partes Avatar 1+2 → concat falhava → "INCOMPLETO 0 montagens"). Se a
+  // normalização de uma parte falhar, usa a original (o fast-concat tenta; e há
+  // o fallback monolítico no fim).
+  const concatRobust = async (blobs: Blob[], label: string): Promise<Blob> => {
+    if (blobs.length === 1) return blobs[0];
+    const normalized: Blob[] = [];
+    for (let i = 0; i < blobs.length; i++) {
+      try {
+        normalized.push(await retryFFmpeg(() => normalizeForConcat(blobs[i]), 120_000, `norm ${label} p${i + 1}/${blobs.length}`, 2));
+      } catch {
+        console.warn(`[clickup-pilot-pipeline] norm ${label} p${i + 1}: falhou — usando parte original`);
+        normalized.push(blobs[i]);
+      }
+    }
+    // partes agora uniformes → fast concat (copy, sem re-encode = sem OOM).
+    try {
+      return await withTimeout(concatVideosFast(normalized), concatTimeoutMs(normalized, false), `concat-norm ${label}`);
+    } catch {
+      // último recurso: concat monolítico com retry (raro chegar aqui).
+      return await retryFFmpeg(() => concatAvatarParts(normalized), concatTimeoutMs(normalized, true), `concat-mono ${label}`, 2);
+    }
+  };
+
   // Regula a voz de UM clipe a -16 LUFS: denoise (limpa hiss/ruído) +
   // nivelamento transparente (loudnorm linear, perfil 'natural' SEM speechnorm
   // → sem robótico) + true-peak -1.5 (anti-clipping). NUNCA lança: se
@@ -341,10 +369,12 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         usedFastPath = true;
         console.log(`[clickup-pilot-pipeline] assemble ${filename}: FAST OK ${(assembled.size/(1024*1024)).toFixed(1)}MB em ${((Date.now()-tFast)/1000).toFixed(1)}s`);
       } catch (fastErr) {
-        console.warn(`[clickup-pilot-pipeline] assemble ${filename}: fast FALHOU (${(fastErr as Error)?.message?.slice(0,80)}), tentando re-encode...`);
+        console.warn(`[clickup-pilot-pipeline] assemble ${filename}: fast FALHOU (${(fastErr as Error)?.message?.slice(0,80)}), normalizando parte-a-parte (anti-OOM)...`);
         const tSlow = Date.now();
-        assembled = await withTimeout(concatAvatarParts(leveledBlobs), concatTimeoutMs(leveledBlobs, true), `concat-slow ${filename}`);
-        console.log(`[clickup-pilot-pipeline] assemble ${filename}: SLOW OK ${(assembled.size/(1024*1024)).toFixed(1)}MB em ${((Date.now()-tSlow)/1000).toFixed(1)}s`);
+        // ROBUSTO: normaliza cada parte individualmente + fast-concat — NÃO o
+        // concat monolítico (que estoura memória em montagem multi-avatar).
+        assembled = await concatRobust(leveledBlobs, filename);
+        console.log(`[clickup-pilot-pipeline] assemble ${filename}: ROBUST OK ${(assembled.size/(1024*1024)).toFixed(1)}MB em ${((Date.now()-tSlow)/1000).toFixed(1)}s`);
       }
     } catch (e) {
       console.error(`[clickup-pilot-pipeline] assemble ${filename}: FAIL (ambos paths)`, e);
@@ -467,10 +497,12 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       if (decupadoParts.length === 1) {
         dec = decupadoParts[0];
       } else if (cutCount === leveled.length) {
+        // todas cortadas com params idênticos → fast concat; se falhar, robusto.
         try { dec = await withTimeout(concatVideosFast(decupadoParts), concatTimeoutMs(decupadoParts, false), `decup-concat-fast ${item.filename}`); }
-        catch { dec = await withTimeout(concatAvatarParts(decupadoParts), concatTimeoutMs(decupadoParts, true), `decup-concat-slow ${item.filename}`); }
+        catch { dec = await concatRobust(decupadoParts, `decup ${item.filename}`); }
       } else {
-        dec = await withTimeout(concatAvatarParts(decupadoParts), concatTimeoutMs(decupadoParts, true), `decup-concat ${item.filename}`);
+        // MISTURA (parte cortada + original) → códecs divergem → robusto (anti-OOM).
+        dec = await concatRobust(decupadoParts, `decup ${item.filename}`);
       }
       item.decupado = dec;
       console.log(`[clickup-pilot-pipeline] decup ${item.filename}: OK ${cutCount}/${leveled.length} partes cortadas · ${(dec.size / (1024 * 1024)).toFixed(1)}MB`);
