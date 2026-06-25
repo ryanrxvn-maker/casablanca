@@ -1801,6 +1801,10 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
         <ToolHeroVideo
           src="/cards/hey-auto.mp4"
           poster="/cards/hey-auto.jpg"
+          eyebrow="HeyGen em série"
+          title="Hey Auto"
+          subtitle="Avatar fala tudo. Você não abre o HeyGen."
+          glow="rgba(34,211,238,0.5)"
         />
         <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
           {/* Status da extensao */}

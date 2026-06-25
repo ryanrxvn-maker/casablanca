@@ -695,6 +695,10 @@ export default function LipSyncTool() {
       <ToolHeroVideo
         src="/cards/lipsync.mp4"
         poster="/cards/lipsync.jpg"
+        eyebrow="Criar um avatar"
+        title="Lipsync"
+        subtitle="Vídeo entra. Áudio encaixa. Boca fala."
+        glow="rgba(232,121,249,0.55)"
       />
 
       {/* WORKSPACE — 3 colunas */}

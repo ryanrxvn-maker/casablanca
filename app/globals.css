@@ -1399,6 +1399,23 @@ html[data-theme='light'] .hero-light-veil {
   .hero-sweep { animation: none; }
 }
 
+/* ───── Hero das FERRAMENTAS — tilt 3D + lettering ───── */
+.hero-tool-perspective {
+  perspective: 1400px;
+}
+.hero-tool-card {
+  transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transform-style: preserve-3d;
+  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.hero-tool-title {
+  animation: kinetic-in 0.7s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-tool-card { transition: none; transform: none !important; }
+  .hero-tool-title { animation: none; }
+}
+
 /* Kinetic-in pra textos editoriais */
 @keyframes kinetic-in {
   0% { opacity: 0; transform: translateY(22px) rotateX(-30deg); }

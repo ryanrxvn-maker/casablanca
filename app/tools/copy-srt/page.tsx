@@ -194,6 +194,10 @@ export default function CopySrtPage() {
       <ToolHeroVideo
         src="/cards/gerador-srt.mp4"
         poster="/cards/gerador-srt.jpg"
+        eyebrow="Legenda alinhada"
+        title="Gerador de SRT"
+        subtitle="Áudio + copy. Palavra a palavra."
+        glow="rgba(251,191,36,0.5)"
       />
       <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
       <div className="flex flex-col gap-5">

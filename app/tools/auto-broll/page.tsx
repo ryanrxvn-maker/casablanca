@@ -632,6 +632,10 @@ function AutoBrollInner() {
       <ToolHeroVideo
         src="/cards/auto-broll.mp4"
         poster="/cards/auto-broll.jpg"
+        eyebrow="Magnific · em série"
+        title="Auto B-roll"
+        subtitle="Uma lista. Um clique. Dezenas de vídeos."
+        glow="rgba(167,139,250,0.5)"
       />
       <div className="mt-6 rounded-[20px] border border-line/60 bg-bg-soft/40 p-5 backdrop-blur-sm md:p-7">
       <div className="grid gap-5">

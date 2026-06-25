@@ -335,6 +335,10 @@ export default function RemoverLegendaTool() {
       <ToolHeroVideo
         src="/cards/removedor-legenda.mp4"
         poster="/cards/removedor-legenda.jpg"
+        eyebrow="Smart Remover"
+        title="Removedor de Legenda"
+        subtitle="Legenda queimada. IA remove. MP4 limpo."
+        glow="rgba(244,114,182,0.5)"
       />
 
       <div className="grid gap-4 lg:grid-cols-[210px_1fr_300px]">
