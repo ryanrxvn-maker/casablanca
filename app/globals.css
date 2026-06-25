@@ -1350,8 +1350,53 @@ html[data-theme='light'] .hero-light-veil {
   0% { transform: scale(1.1) translateX(-2%); }
   100% { transform: scale(1.1) translateX(2%); }
 }
+
+/* "Vida" da imagem — mix-blend screen só ADICIONA luz (acende os detalhes). */
+.hero-bloom {
+  pointer-events: none;
+  mix-blend-mode: screen;
+  background: radial-gradient(
+    45% 65% at 84% 50%,
+    rgba(232, 121, 249, 0.55),
+    rgba(192, 132, 252, 0.2) 45%,
+    transparent 72%
+  );
+  opacity: 0.5;
+  animation: heroBloom 4.5s ease-in-out infinite;
+}
+@keyframes heroBloom {
+  0%, 100% { opacity: 0.32; }
+  50% { opacity: 0.85; }
+}
+.hero-sweep-wrap { pointer-events: none; }
+.hero-sweep {
+  position: absolute;
+  top: -20%;
+  bottom: -20%;
+  left: -60%;
+  width: 45%;
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.1) 35%,
+    rgba(232, 121, 249, 0.2) 50%,
+    rgba(255, 255, 255, 0.1) 65%,
+    transparent 100%
+  );
+  mix-blend-mode: screen;
+  transform: skewX(-12deg);
+  will-change: transform;
+  animation: heroSweep 7s ease-in-out infinite;
+}
+@keyframes heroSweep {
+  0% { transform: translateX(0) skewX(-12deg); }
+  55%, 100% { transform: translateX(360%) skewX(-12deg); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hero-vignette { animation: none; opacity: 0.3; }
+  .hero-bloom { animation: none; opacity: 0.45; }
+  .hero-sweep { animation: none; }
 }
 
 /* Kinetic-in pra textos editoriais */

@@ -567,17 +567,6 @@ function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
         }}
       />
 
-      {/* Linhas tech decorativas no fundo (grid sutil) */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-[0.06]"
-        style={{
-          backgroundImage:
-            'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)',
-          backgroundSize: '40px 40px',
-        }}
-      />
-
       {/* Sparkles flutuantes */}
       <Sparkle className="absolute top-6 right-[30%]" delay={0} />
       <Sparkle className="absolute top-[60%] right-[18%]" delay={800} />
@@ -733,16 +722,6 @@ function AutoBrollSlide({ canStartAutomation }: { canStartAutomation: boolean })
           background:
             'radial-gradient(60% 90% at 100% 50%, rgba(200,232,124,0.22), transparent 60%)',
           animation: 'promo-pulse-2 7s ease-in-out infinite',
-        }}
-      />
-      {/* Grid */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 opacity-[0.06]"
-        style={{
-          backgroundImage:
-            'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)',
-          backgroundSize: '40px 40px',
         }}
       />
       {/* Sparkles */}

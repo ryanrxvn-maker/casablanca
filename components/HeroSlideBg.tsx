@@ -154,7 +154,7 @@ export function HeroSlideBg({ image }: { image: string }) {
     <div
       ref={rootRef}
       aria-hidden
-      className="pointer-events-none absolute inset-0 overflow-hidden"
+      className="pointer-events-none absolute inset-0 overflow-hidden isolate"
     >
       {/* 1. Imagem com parallax */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -170,6 +170,13 @@ export function HeroSlideBg({ image }: { image: string }) {
           willChange: 'transform',
         }}
       />
+      {/* 1b. "Vida" da imagem — blend screen acende os detalhes (circuito/nós).
+             Bloom que respira na direita + feixe de luz que cruza devagar. */}
+      <div className="hero-bloom absolute inset-0" />
+      <div className="hero-sweep-wrap absolute inset-0 overflow-hidden">
+        <div className="hero-sweep" />
+      </div>
+
       {/* 2. Véu branco (só modo claro) */}
       <div className="hero-light-veil absolute inset-0" />
       {/* 3. Vinheta que respira */}
