@@ -1171,11 +1171,14 @@ console.log('\navatar "Avatar N:" inline no corpo (print + .mp4):');
     'Ai eu parei com a finasterida e fui pesquisar sobre o acafrao.',
   ].join('\n');
   const bf48 = parseDarkoBriefing(DOC_ROUTE, 'AD48GL', null, [{ text: '[[DOCIMG:1]]', fileId: null, url: 'data:image/png;base64,AV2', isImage: true }]);
-  const roles48 = (bf48?.bodySegments || []).map((s) => s.role);
-  assert(roles48.some((r) => /avatar\s*1/i.test(r || '')), `roteamento: existe segmento do Avatar 1 (got ${JSON.stringify(roles48)})`);
-  assert(roles48.some((r) => /avatar\s*2/i.test(r || '')), `roteamento: existe segmento do Avatar 2 — NÃO cai tudo no 1 (got ${JSON.stringify(roles48)})`);
-  const segA2 = (bf48?.bodySegments || []).find((s) => /avatar\s*2/i.test(s.role || ''));
-  assert(/finasterida/i.test(segA2?.text || ''), 'roteamento: a fala do Avatar 2 é a parte certa (finasterida)');
+  const segs48 = bf48?.bodySegments || [];
+  // Avatar 1 = "Ratinho 1.mp4" → boundary por USERNAME (role null) OU role "Avatar 1";
+  // Avatar 2 = print → role "Avatar 2". Ambos têm que existir (não cai tudo num só).
+  const seg48A1 = segs48.find((s) => /avatar\s*1/i.test(s.role || '') || normAvatarKeyT(s.username) === 'ratinho1');
+  const seg48A2 = segs48.find((s) => /avatar\s*2/i.test(s.role || ''));
+  assert(!!seg48A1, `roteamento: existe segmento do Avatar 1 (role OU username Ratinho) (got ${JSON.stringify(segs48.map((s) => ({ r: s.role, u: s.username })))})`);
+  assert(!!seg48A2, `roteamento: existe segmento do Avatar 2 — NÃO cai tudo no 1 (got ${JSON.stringify(segs48.map((s) => s.role))})`);
+  assert(/finasterida/i.test(seg48A2?.text || ''), 'roteamento: a fala do Avatar 2 é a parte certa (finasterida)');
 
   // INLINE: label + marcador + 1a FALA na MESMA linha ("Avatar 2: [[DOCIMG]] Aí
   // eu parei...") — caso do fallback mobilebasic que FUNDE as linhas. A 1a fala
@@ -1193,7 +1196,34 @@ console.log('\navatar "Avatar N:" inline no corpo (print + .mp4):');
   assert(/parei com a finasterida/i.test(a2txt), `inline: 1a fala do Avatar 2 ("Aí eu parei") NÃO é engolida (got "${a2txt.slice(0, 50)}")`);
   // e o label NÃO vaza junto
   assert(!/avatar\s*2\s*:/i.test(a2txt) && !/DOCIMG/.test(a2txt), 'inline: label/marcador não vazam na fala do Avatar 2');
+
+  // ROTEAMENTO com username COM ESPAÇO ("Martina 1.mp4", "Alexandre Frota 1.mp4")
+  // — o corpo TEM que separar por locutor. Antes o detectAvatarFilenameLine não
+  // aceitava espaço no filename → não casava o avatar → tudo caía num avatar só
+  // (depoimento ficava com 0 partes). AD166 real.
+  const DOC_SPACE = [
+    'AD166GL - VFPB04', 'INSTRUCOES PARA EDICAO:', 'Manter a voz.', '',
+    'AD166G1GL-VFPB04',
+    'Gancho: voce sabia que existe um jeito de durar mais na cama?',
+    'Body',
+    'depoimento: Martina 1.mp4',
+    'Todos os caras que me assistem tao fazendo o Viagra de Pobre.',
+    'Um me disse que nunca foi tao duro na cama quanto agora.',
+    'Ator porno: Alexandre Frota 1.mp4',
+    'Eu vou te mostrar passo a passo em um video de um minuto.',
+    'Toque no botao abaixo e assista agora mesmo.',
+  ].join('\n');
+  const bf166 = parseDarkoBriefing(DOC_SPACE, 'AD166GL', null, []);
+  const segMartina = (bf166?.bodySegments || []).find((s) => normAvatarKeyT(s.username) === 'martina1');
+  const segAlex = (bf166?.bodySegments || []).find((s) => normAvatarKeyT(s.username) === 'alexandrefrota1');
+  assert(!!segMartina, `AD166: corpo separa o locutor Martina (username c/ espaço) (segs=${JSON.stringify((bf166?.bodySegments||[]).map(s=>s.username))})`);
+  assert(!!segAlex, 'AD166: corpo separa o locutor Alexandre Frota');
+  assert(/viagra de pobre/i.test(segMartina?.text || ''), 'AD166: fala da Martina vai pro segmento dela (não some)');
+  assert(/passo a passo/i.test(segAlex?.text || ''), 'AD166: fala do Alexandre vai pro segmento dele');
 }
+
+// helper local (normAvatarKey não é exportado no escopo do teste)
+function normAvatarKeyT(s: string | null | undefined): string { return (s || '').toLowerCase().replace(/^@/, '').replace(/\.(mp4|mov)$/i, '').replace(/[^a-z0-9]/g, ''); }
 
 console.log('');
 if (failures > 0) {

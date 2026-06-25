@@ -1545,6 +1545,21 @@ function detectAvatarFilenameLine(line: string, avatarKeys: Map<string, string>)
   // locutor do depoimento chega como "Depoimento com avatar 7508....mp4". Pega
   // o ARQUIVO no fim da linha; so vira boundary se ele casar um avatar
   // DECLARADO (avatarKeys) — narrativa nunca termina num filename declarado.
+  // "label: <arquivo>.mp4" — pega o VALOR depois do ÚLTIMO ":" (que PODE ter
+  // espaço: "depoimento: Martina 1.mp4", "Ator porno: Alexandre Frota 1.mp4").
+  // Sem isso o corpo não separava por locutor quando o username tem espaço
+  // (depoimento ficava com 0 partes). Só vira boundary se casar avatar DECLARADO.
+  const ci = t.lastIndexOf(':');
+  if (ci >= 0) {
+    const fm = t.slice(ci + 1).trim().match(/^@?(.+?)\.(?:mp4|mov)\s*$/i);
+    if (fm) {
+      const keyC = normAvatarKey(fm[1]);
+      if (keyC && avatarKeys.has(keyC)) return avatarKeys.get(keyC)!;
+    }
+  }
+  // FALLBACK sem ":" (export comeu o ":" antes do smart-chip) — pega o ARQUIVO no
+  // FIM da linha (token único, SEM espaço, pra não engolir "Depoimento com avatar
+  // 7508...mp4" inteiro). Só vira boundary se casar avatar DECLARADO.
   const m2 = t.match(/@?([A-Za-zÀ-ÿ0-9][\wÀ-ÿ.-]*?)\.(?:mp4|mov)\s*$/i);
   if (m2) {
     const key2 = normAvatarKey(m2[1]);
