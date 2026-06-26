@@ -2638,6 +2638,26 @@ function ClickUpPilotInner() {
         console.warn('[batch] falha salvando ZIP takes em IndexedDB:', e);
       }
 
+      // GATE DE COMPLETUDE (fix 2026-06-26): NUNCA montar com partes ESPERADAS
+      // faltando. Montar parcial = vídeo truncado + barra "MONTANDO" enganosa. O
+      // certo é completar TODAS as partes antes de montar. Se ainda faltam (típico:
+      // 429 limite diário do HeyGen), para em INCOMPLETO e deixa o user RETOMAR.
+      {
+        const miss = expectedMissing();
+        if (miss.length > 0) {
+          setBatchStates((prev) => {
+            const cur = prev[taskId];
+            const labels = miss.map((i) => cur?.parts?.[i]?.label || plan!.parts[i]?.label).filter(Boolean);
+            const is429 = miss.some((i) => /429|daily limit|exceeded the maximum|quota/i.test(cur?.parts?.[i]?.error || ''));
+            const msg = is429
+              ? `⏳ Limite diário do HeyGen — faltam ${miss.length} parte(s). NÃO montei (evita vídeo incompleto). Retome após o reset (~24h): ${labels.join(', ')}`
+              : `Incompleto — faltam ${miss.length} parte(s) que o HeyGen não gerou (${labels.join(', ')}). NÃO montei. Clica RETOMAR pra tentar essas.`;
+            return { ...prev, [taskId]: { ...cur, phase: 'done', message: msg, finishedAt: Date.now(), zipBlobUrl: takesUrl, zipFilename: takesFilename, montadoZipUrl: undefined, montadoZipName: undefined, pipeStats: undefined } };
+          });
+          return;
+        }
+      }
+
       // === Stage 4: PIPELINE pos-producao (concat + decupagem [+ camuflagem]) ===
       setBatchStates((prev) => ({
         ...prev,
@@ -3131,6 +3151,28 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         await saveZip(`batch:${taskId}:takes`, takesBlob, takesFilename);
       } catch (e) {
         console.warn('[batch resume] falha salvando ZIP takes em IndexedDB:', e);
+      }
+
+      // GATE DE COMPLETUDE (fix 2026-06-26): igual ao disparo inicial — não montar
+      // com partes ESPERADAS faltando (ex 429 limite diário). Para em INCOMPLETO e
+      // deixa o user RETOMAR quando o HeyGen liberar (em vez de montar truncado).
+      {
+        const miss = partBlobs
+          .map((pb, i) => ({ pb, i }))
+          .filter(({ pb }) => pb.expected && (!pb.blob || pb.blob.size <= 1024))
+          .map(({ i }) => i);
+        if (miss.length > 0) {
+          setBatchStates((prev) => {
+            const cur = prev[taskId];
+            const labels = miss.map((i) => cur?.parts?.[i]?.label || state.parts[i]?.label).filter(Boolean);
+            const is429 = miss.some((i) => /429|daily limit|exceeded the maximum|quota/i.test(cur?.parts?.[i]?.error || state.parts[i]?.error || ''));
+            const msg = is429
+              ? `⏳ Limite diário do HeyGen — faltam ${miss.length} parte(s). NÃO montei (evita vídeo incompleto). Retome após o reset (~24h): ${labels.join(', ')}`
+              : `Incompleto — faltam ${miss.length} parte(s) que o HeyGen não gerou (${labels.join(', ')}). NÃO montei. Clica RETOMAR pra tentar essas.`;
+            return { ...prev, [taskId]: { ...cur, phase: 'done', message: msg, finishedAt: Date.now(), zipBlobUrl: takesUrl, zipFilename: takesFilename, montadoZipUrl: undefined, montadoZipName: undefined, pipeStats: undefined } };
+          });
+          return;
+        }
       }
 
       // === PIPELINE pos-producao (concat + decupagem [+ camuflagem]) ===
