@@ -841,7 +841,7 @@ export function parseGlobalAvatarLink(section: string): { role: string; username
  *  generico — o user pode renomear pelo UI se quiser, ou o splitter
  *  associa pela ordem dos labels no body.
  */
-export function parseGlobalAvatarLinks(section: string): Array<{ role: string; username: string }> {
+export function parseGlobalAvatarLinks(section: string, links: DocLink[] = []): Array<{ role: string; username: string; youtubeUrl?: string | null; thumbUrl?: string | null; videoFileId?: string | null }> {
   const lines = section.split(/\r?\n/);
 
   // Filename de avatar: @opcional + chars (incluindo acentos + espacos)
@@ -885,6 +885,32 @@ export function parseGlobalAvatarLinks(section: string): Array<{ role: string; u
       const sizeBefore = out.length;
       collect(next, out);
       if (out.length === sizeBefore) break; // linha sem filename — para
+    }
+    // FALLBACK por LINK (sem .mp4): "Link do avatar: <youtube/drive>  (Nome)".
+    // Cobre avatar declarado SO por link de YouTube (clone de voz, ex "Carlos
+    // Alberto") ou chip de Drive sem .mp4 visivel. So roda se nenhum .mp4 casou.
+    // A URL costuma ser o TEXTO do hyperlink (export mantem inner-text = URL);
+    // o nome do avatar vem entre parenteses na mesma/proxima linha.
+    if (out.length === 0) {
+      const scan: string[] = restOfLine ? [restOfLine] : [];
+      for (let j = i + 1; j <= Math.min(i + 3, lines.length - 1); j++) {
+        const nx = lines[j].trim();
+        if (!nx) continue;
+        if (/^(instru[cç][oõ]es|aten[cç][aã]o|observa[cç][aã]o|caixinha|gancho|hook|body|roteiro)/i.test(nx)) break;
+        scan.push(nx);
+      }
+      let nome = '';
+      for (const s of scan) {
+        const pm = s.match(/\(\s*([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ .'-]{1,38})\s*\)/);
+        if (pm) { nome = pm[1].trim(); break; }
+      }
+      for (const s of scan) {
+        const r = resolveLinkAvatar(s, links);
+        if (r && (r.youtubeUrl || r.fileId)) {
+          const uname = (nome || r.username || 'avatar').trim();
+          return [{ role: 'Avatar', username: uname, youtubeUrl: r.youtubeUrl, thumbUrl: r.thumbUrl, videoFileId: r.fileId }];
+        }
+      }
     }
     if (out.length > 0) {
       // Se 1 unico avatar, mantem role 'Avatar' (compat com parseGlobalAvatarLink).
@@ -1731,12 +1757,15 @@ export function parseDarkoBriefing(fullDocText: string, baseAdId: string, varian
   //   → 2 slots (Avatar 1, Avatar 2). Body com labels Mulher/Doutor
   //   vira 2 segmentos no splitBySpeaker — user atribui avatar por slot.
   if (avatars.length === 0) {
-    const globals = parseGlobalAvatarLinks(declBlock);
+    const globals = parseGlobalAvatarLinks(declBlock, links);
     if (globals.length > 0) {
       avatars = globals.map((g) => ({
         role: g.role,
         username: g.username,
-        raw: `Link do avatar: ${g.username}.mp4`,
+        raw: g.youtubeUrl ? `Link do avatar: ${g.youtubeUrl}` : `Link do avatar: ${g.username}.mp4`,
+        youtubeUrl: g.youtubeUrl ?? null,
+        thumbUrl: g.thumbUrl ?? null,
+        videoFileId: g.videoFileId ?? null,
       }));
     }
   }

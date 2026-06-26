@@ -1225,6 +1225,34 @@ console.log('\navatar "Avatar N:" inline no corpo (print + .mp4):');
 // helper local (normAvatarKey não é exportado no escopo do teste)
 function normAvatarKeyT(s: string | null | undefined): string { return (s || '').toLowerCase().replace(/^@/, '').replace(/\.(mp4|mov)$/i, '').replace(/[^a-z0-9]/g, ''); }
 
+// AD12 — avatar declarado SO por LINK de YouTube em "Link do avatar:" + nome (Carlos Alberto)
+{
+  const DOC_YT_LINK = [
+    'AD12G1VN-PRPB07 - Só meta',
+    'Link do avatar: https://www.youtube.com/watch?v=cQ4ArBE62uI&t=1646s',
+    '(Carlos Alberto)',
+    'Instruções para edição: Estilo de edição mais dinâmico.',
+    'GANCHO',
+    'A melhor coisa que você pode comer para sua próstata é o quiabo.',
+    'BODY',
+    'No dia 10 de maio de 2026, eu recebi o encaminhamento de uma cirurgia.',
+    'Tomou finasterida? Vira broxa.',
+    'É só clicar no botão que diz Saiba Mais aqui embaixo.',
+  ].join('\n');
+  const YTL = [{ text: 'https://www.youtube.com/watch?v=cQ4ArBE62uI&t=1646s', fileId: null, url: 'https://www.youtube.com/watch?v=cQ4ArBE62uI&t=1646s' }];
+  const bf12 = parseDarkoBriefing(DOC_YT_LINK, 'AD12G1VN', null, YTL);
+  assert(!!bf12 && bf12.avatars.length === 1, `AD12: 1 avatar identificado pelo link YouTube (got ${bf12?.avatars.length})`);
+  assert(!!bf12?.avatars[0]?.youtubeUrl?.includes('cQ4ArBE62uI'), 'AD12: avatar tem youtubeUrl do link');
+  assert(!!bf12?.avatars[0]?.thumbUrl?.includes('cQ4ArBE62uI'), 'AD12: avatar tem thumb do YouTube');
+  assert(bf12?.avatars[0]?.username === 'Carlos Alberto', `AD12: nome "Carlos Alberto" capturado (got "${bf12?.avatars[0]?.username}")`);
+  const spoken12 = (bf12?.hooks || []).map((h) => h.text).join(' ') + ' ' + (bf12?.bodySegments || []).map((s) => s.text).join(' ');
+  assert(/quiabo/i.test(spoken12), 'AD12: GANCHO presente na fala');
+  assert(!/youtube\.com|Link do avatar|cQ4ArBE62uI/i.test(spoken12), 'AD12: link/label NÃO vaza na fala');
+  // robustez: mesmo SEM links capturados (URL só no texto do hyperlink), tem que pegar
+  const bf12b = parseDarkoBriefing(DOC_YT_LINK, 'AD12G1VN', null, []);
+  assert(!!bf12b?.avatars[0]?.youtubeUrl?.includes('cQ4ArBE62uI'), 'AD12: pega YouTube da URL no texto mesmo sem links');
+}
+
 console.log('');
 if (failures > 0) {
   console.error(`✗ ${failures} assert(s) falharam`);
