@@ -176,19 +176,33 @@ function runPostPipelineSerial(
 /** Hooks de cache de clips intermediários (leveled/decupado) por parte, em
  *  IndexedDB. Acelera RETOMAR/Atualizar montagem: o pipeline reusa o que já foi
  *  nivelado/decupado em vez de refazer tudo no ffmpeg-wasm (era o que fazia o
- *  RETOMAR levar ~100min). Chave: pilot:<taskId>:<kind>:<label>. */
-function makeClipCacheHooks(taskId: string) {
+ *  RETOMAR levar ~100min). Chave: pilot:<taskId>:<kind>:<label>.
+ *
+ *  FIDELIDADE DA INTENSIDADE: o clip 'decupado' depende do keepSilence usado no
+ *  corte. O 'leveled' NÃO (nivelamento é igual pra qualquer intensidade). Por
+ *  isso a chave do 'decupado' carrega a intensidade (`@k<sec>`): mudar a
+ *  intensidade = chave diferente = recorta de verdade no novo valor (não reusa
+ *  o corte antigo); voltar pra intensidade anterior reusa o que já existe. */
+function makeClipCacheHooks(taskId: string, keepSilenceSec: number = 0.12) {
+  const kTag = (Math.round(keepSilenceSec * 100) / 100).toFixed(2);
+  // Intensidade vai no FIM da chave do 'decupado' (`...:<label>@k<sec>`) pra que
+  // a invalidação por parte (deletePrefix `...:decupado:<label>@k`) atinja todas
+  // as intensidades daquela parte sem tocar nas outras partes.
+  const keyFor = (kind: 'leveled' | 'decupado', label: string) =>
+    kind === 'decupado'
+      ? `pilot:${taskId}:decupado:${label}@k${kTag}`
+      : `pilot:${taskId}:${kind}:${label}`;
   return {
     loadCachedClip: async (kind: 'leveled' | 'decupado', label: string): Promise<Blob | null> => {
       try {
         const { loadBlob } = await import('@/lib/zip-store');
-        return await loadBlob(`pilot:${taskId}:${kind}:${label}`, 'video/mp4');
+        return await loadBlob(keyFor(kind, label), 'video/mp4');
       } catch { return null; }
     },
     saveCachedClip: async (kind: 'leveled' | 'decupado', label: string, blob: Blob): Promise<void> => {
       try {
         const { saveBlob } = await import('@/lib/zip-store');
-        await saveBlob(`pilot:${taskId}:${kind}:${label}`, blob, 'video/mp4');
+        await saveBlob(keyFor(kind, label), blob, 'video/mp4');
       } catch {}
     },
   };
@@ -945,6 +959,35 @@ function ClickUpPilotInner() {
       return next;
     });
   };
+
+  // INTENSIDADE da decupagem (keepSilence em segundos) — por task, persistida.
+  // É o MESMO parâmetro da ferramenta /decupagem: quanto de silêncio manter nas
+  // bordas da fala. Menor = corte mais agressivo. O valor escolhido é repassado
+  // FIELMENTE pro pipeline (keepSilenceSec → computeSpeechSegments): se o user
+  // põe 0.05, o corte usa 0.05. Default 0.12 = comportamento histórico (pausa
+  // natural entre takes, feedback 12/05/2026) — não muda nada de quem não toca.
+  const DECUP_INTENSITY_KEY = 'darkolab:clickup-pilot:decupIntensity';
+  const DEFAULT_KEEP_SILENCE = 0.12;
+  const [decupIntensity, setDecupIntensity] = useState<Record<string, number>>(() => {
+    if (typeof window === 'undefined') return {};
+    try { return JSON.parse(localStorage.getItem(DECUP_INTENSITY_KEY) || '{}'); } catch { return {}; }
+  });
+  const getDecupIntensity = (taskId: string) => {
+    const v = decupIntensity[taskId];
+    return typeof v === 'number' && isFinite(v) ? v : DEFAULT_KEEP_SILENCE;
+  };
+  const setDecupIntensityFor = (taskId: string, sec: number) => {
+    // Clamp pros mesmos limites da ferramenta /decupagem (0.01..0.50s).
+    const clamped = Math.min(0.5, Math.max(0.01, Math.round(sec * 100) / 100));
+    setDecupIntensity((prev) => {
+      const next = { ...prev, [taskId]: clamped };
+      try { localStorage.setItem(DECUP_INTENSITY_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+  // Popover de intensidade aberto por task (UI).
+  const [decupPopoverOpen, setDecupPopoverOpen] = useState<Record<string, boolean>>({});
+
   const [analyzing, setAnalyzing] = useState(false);
 
   function toggleTaskSelected(id: string) {
@@ -2677,13 +2720,14 @@ function ClickUpPilotInner() {
           baseAdId: rBaseAdId,
           parts: partBlobs,
           decupagem: isDecupagemEnabled(taskId),
+          keepSilenceSec: getDecupIntensity(taskId),
           camuflagem: _tc.camuflagem,
           whiteAudio: _tc.whiteAudio,
           camuflagemVolume: _tc.camuflagemVolume,
           // Fresh dispatch: NÃO lê cache (conteúdo novo) mas ESCREVE (popula
           // pro próximo RETOMAR pular nivelamento/decupagem).
           readClipCache: false,
-          ...makeClipCacheHooks(taskId),
+          ...makeClipCacheHooks(taskId, getDecupIntensity(taskId)),
           onProgress: (p) => {
             setBatchStates((prev) => ({
               ...prev,
@@ -3194,13 +3238,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           baseAdId: state.baseAdId,
           parts: partBlobs,
           decupagem: isDecupagemEnabled(taskId),
+          keepSilenceSec: getDecupIntensity(taskId),
           camuflagem: _tc.camuflagem,
           whiteAudio: _tc.whiteAudio,
           camuflagemVolume: _tc.camuflagemVolume,
           // RETOMAR: mesmo conteúdo → LÊ o cache (pula nivelamento/decupagem já
           // feitos). Era isso que fazia o RETOMAR refazer tudo e levar ~100min.
           readClipCache: true,
-          ...makeClipCacheHooks(taskId),
+          ...makeClipCacheHooks(taskId, getDecupIntensity(taskId)),
           onProgress: (p) => {
             setBatchStates((prev) => ({
               ...prev,
@@ -4242,13 +4287,16 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const bytes = await downloadVideoBytes(st.videoUrl);
       const partBlob = new Blob([bytes as BlobPart], { type: 'video/mp4' });
       try {
-        const { saveBlob, deleteZip } = await import('@/lib/zip-store');
+        const { saveBlob, deleteZip, deletePrefix } = await import('@/lib/zip-store');
         await saveBlob(`pilot:${taskId}:part:${label}`, partBlob, 'video/mp4');
         // Parte MUDOU → invalida os clips derivados (leveled/decupado) dela, pra
         // o rebuild ("Atualizar montagem") recomputar SÓ essa parte e não reusar
-        // cache stale. As outras partes seguem cacheadas (rebuild rápido).
+        // cache stale. As outras partes seguem cacheadas (rebuild rápido). O
+        // decupado é por intensidade (`...:<label>@k<sec>`) → deletePrefix limpa
+        // TODAS as intensidades dessa parte de uma vez.
         await deleteZip(`pilot:${taskId}:leveled:${label}`).catch(() => {});
-        await deleteZip(`pilot:${taskId}:decupado:${label}`).catch(() => {});
+        await deletePrefix(`pilot:${taskId}:decupado:${label}@k`).catch(() => {});
+        await deleteZip(`pilot:${taskId}:decupado:${label}`).catch(() => {}); // legado (chave antiga sem intensidade)
       } catch (e) { console.warn('[edit-part] save blob IDB falhou:', e); }
 
       // 6) Atualiza state final com URL pronta + marca como dirty (montagem
@@ -4316,13 +4364,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         baseAdId: b.baseAdId,
         parts: partBlobs,
         decupagem: isDecupagemEnabled(taskId),
+        keepSilenceSec: getDecupIntensity(taskId),
         camuflagem: _tc.camuflagem,
         whiteAudio: _tc.whiteAudio,
         camuflagemVolume: _tc.camuflagemVolume,
         // Atualizar montagem: reusa cache das partes NÃO editadas; as editadas
         // tiveram o cache invalidado na hora da edição (regen) → recomputam só elas.
         readClipCache: true,
-        ...makeClipCacheHooks(taskId),
+        ...makeClipCacheHooks(taskId, getDecupIntensity(taskId)),
         onProgress: (p) => {
           setBatchStates((prev) => ({
             ...prev,
@@ -7827,14 +7876,92 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 ) : !a.trocaBriefing && (a.status === 'ready' || a.status === 'partial') ? (
                                   // ═══ ACTION BAR 3D — botoes icon-only ═══
                                   <div className="flex flex-wrap items-center gap-1.5 shrink-0">
-                                    {/* Tesoura (decupagem) toggle */}
-                                    <PilotBtn3D
-                                      icon={<PilotIconScissors size={16} />}
-                                      color={isDecupagemEnabled(a.taskId) ? 'lime' : 'neutral'}
-                                      active={isDecupagemEnabled(a.taskId)}
-                                      title={isDecupagemEnabled(a.taskId) ? 'Decupagem ON' : 'Decupagem OFF'}
-                                      onClick={() => setDecupagemFor(a.taskId, !isDecupagemEnabled(a.taskId))}
-                                    />
+                                    {/* Tesoura (decupagem) toggle + INTENSIDADE.
+                                        Tesoura liga/desliga (igual antes). Quando
+                                        ON, aparece o chip com o valor do corte —
+                                        clica e abre o slider (mesmo parâmetro da
+                                        ferramenta /decupagem). O valor é fiel: o
+                                        que está aqui é o keepSilence do corte. */}
+                                    <div className="relative inline-flex items-center gap-1">
+                                      <PilotBtn3D
+                                        icon={<PilotIconScissors size={16} />}
+                                        color={isDecupagemEnabled(a.taskId) ? 'lime' : 'neutral'}
+                                        active={isDecupagemEnabled(a.taskId)}
+                                        title={isDecupagemEnabled(a.taskId) ? 'Decupagem ON' : 'Decupagem OFF'}
+                                        onClick={() => setDecupagemFor(a.taskId, !isDecupagemEnabled(a.taskId))}
+                                      />
+                                      {isDecupagemEnabled(a.taskId) ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => setDecupPopoverOpen((p) => ({ ...p, [a.taskId]: !p[a.taskId] }))}
+                                          title="Intensidade do corte — quanto de silêncio manter nas bordas da fala. Menor = mais agressivo. O valor é fiel ao corte."
+                                          aria-expanded={!!decupPopoverOpen[a.taskId]}
+                                          className="mono shrink-0 rounded-full border border-lime/45 bg-lime/10 px-2 py-1 text-[10px] font-bold leading-none text-lime transition hover:bg-lime/20"
+                                        >
+                                          {getDecupIntensity(a.taskId).toFixed(2)}s
+                                        </button>
+                                      ) : null}
+                                      {isDecupagemEnabled(a.taskId) && decupPopoverOpen[a.taskId] ? (
+                                        <>
+                                          {/* clique-fora fecha */}
+                                          <div
+                                            className="fixed inset-0 z-30"
+                                            onClick={() => setDecupPopoverOpen((p) => ({ ...p, [a.taskId]: false }))}
+                                            aria-hidden
+                                          />
+                                          <div className="absolute left-0 top-full z-40 mt-2 w-[264px] rounded-[14px] border border-lime/30 bg-bg/95 p-3.5 shadow-[0_18px_40px_-12px_rgba(0,0,0,0.7)] backdrop-blur">
+                                            <div className="mb-2.5 flex items-center justify-between">
+                                              <span className="label-tech text-[10px] uppercase tracking-[0.16em] text-lime">
+                                                Intensidade do corte
+                                              </span>
+                                              <span className="mono text-[12.5px] font-bold text-lime">
+                                                {getDecupIntensity(a.taskId).toFixed(2)}s
+                                              </span>
+                                            </div>
+                                            <input
+                                              type="range"
+                                              min={0.01}
+                                              max={0.5}
+                                              step={0.01}
+                                              value={getDecupIntensity(a.taskId)}
+                                              onChange={(e) => setDecupIntensityFor(a.taskId, parseFloat(e.target.value))}
+                                              className="w-full accent-lime"
+                                            />
+                                            <div className="mt-1 flex justify-between text-[9px] text-text-muted">
+                                              <span>agressivo</span>
+                                              <span>fala respira</span>
+                                            </div>
+                                            <div className="mt-2.5 flex flex-wrap gap-1.5">
+                                              {[
+                                                { v: 0.05, l: 'Agressivo' },
+                                                { v: 0.12, l: 'Padrão' },
+                                                { v: 0.2, l: 'Suave' },
+                                              ].map((preset) => {
+                                                const on = Math.abs(getDecupIntensity(a.taskId) - preset.v) < 0.005;
+                                                return (
+                                                  <button
+                                                    key={preset.v}
+                                                    type="button"
+                                                    onClick={() => setDecupIntensityFor(a.taskId, preset.v)}
+                                                    className={
+                                                      'mono rounded-full border px-2 py-1 text-[9.5px] font-bold transition ' +
+                                                      (on
+                                                        ? 'border-lime/60 bg-lime/20 text-lime'
+                                                        : 'border-line bg-bg-soft/50 text-text-muted hover:border-lime/40 hover:text-lime')
+                                                    }
+                                                  >
+                                                    {preset.l} · {preset.v.toFixed(2)}s
+                                                  </button>
+                                                );
+                                              })}
+                                            </div>
+                                            <p className="mt-2.5 text-[10px] leading-snug text-text-muted">
+                                              Silêncio mantido nas bordas de cada fala. O valor é aplicado <span className="text-lime">fielmente</span> no corte (vale pro disparo e pro RETOMAR).
+                                            </p>
+                                          </div>
+                                        </>
+                                      ) : null}
+                                    </div>
                                     {/* Camuflagem toggle (per-task) */}
                                     <PilotBtn3D
                                       icon={<IconCamuflagem size={16} />}

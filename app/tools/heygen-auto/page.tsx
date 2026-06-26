@@ -208,6 +208,16 @@ function HeyGenAutoInner() {
     'hgauto:decupagem',
     true,
   );
+  /** INTENSIDADE do corte (keepSilence em s) — MESMO parâmetro da ferramenta
+   *  /decupagem. Menor = mais agressivo. Repassado FIEL ao pipeline. Default
+   *  0.12 = comportamento histórico (não muda nada de quem não toca). */
+  const DEFAULT_KEEP_SILENCE = 0.12;
+  const [decupIntensity, setDecupIntensityRaw] = useToolState<number>(
+    'hgauto:decupIntensity',
+    DEFAULT_KEEP_SILENCE,
+  );
+  const setDecupIntensity = (sec: number) =>
+    setDecupIntensityRaw(Math.min(0.5, Math.max(0.01, Math.round(sec * 100) / 100)));
 
   /* --------------- Modo Camuflagem (3a pasta com audio camuflado) --------- */
   const [camuflagemMode, setCamuflagemMode] = useToolState<boolean>(
@@ -321,6 +331,9 @@ function HeyGenAutoInner() {
     parts: QueuePart[];
     motor: Motor;
     decupagem: boolean;
+    /** Intensidade do corte (keepSilence em s) capturada quando o item entrou
+     *  na fila. Repassada FIELMENTE ao pipeline (keepSilenceSec). Default 0.12. */
+    decupIntensity: number;
     source: 'manual' | 'doc';
     /** Nome da voz (override) pra exibir no card da fila — null = voz padrao do avatar. */
     voiceName?: string | null;
@@ -642,6 +655,7 @@ function HeyGenAutoInner() {
         baseAdId: safeName,
         parts: partBlobs,
         decupagem: decupagemEnabled,
+        keepSilenceSec: decupIntensity,
         camuflagem: camuActive,
         whiteAudio: whiteForPipe,
         camuflagemVolume,
@@ -1332,6 +1346,7 @@ function HeyGenAutoInner() {
         }),
         motor: motorConfig.kind === 'global' ? motorConfig.motor : motor,
         decupagem: decupagemEnabled,
+        decupIntensity,
         source: 'doc',
         unmatched: d.unmatchedAvatars,
         status: 'pending',
@@ -1428,6 +1443,7 @@ function HeyGenAutoInner() {
         parts: qparts,
         motor: motorConfig.kind === 'global' ? motorConfig.motor : motor,
         decupagem: decupagemEnabled,
+        decupIntensity,
         source: 'manual',
         voiceName: overrideVoice && selectedVoice ? selectedVoice.name : null,
         status: 'pending',
@@ -1645,6 +1661,7 @@ function HeyGenAutoInner() {
           baseAdId: safe,
           parts: partBlobs,
           decupagem: item.decupagem,
+          keepSilenceSec: item.decupIntensity ?? DEFAULT_KEEP_SILENCE,
           camuflagem: false,
           onProgress: (p) => stage(`${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}`, 92 + Math.round((5 * p.doneCount) / Math.max(1, p.totalCount))),
         });
@@ -2271,6 +2288,61 @@ function HeyGenAutoInner() {
                   icon={<span className="text-base">✂️</span>}
                 />
               </div>
+              {/* INTENSIDADE do corte — mesmo parâmetro da ferramenta /decupagem.
+                  O valor é aplicado FIEL no corte. Capturado por item ao entrar
+                  na fila (cada disparo carrega a intensidade que estava setada). */}
+              {decupagemEnabled ? (
+                <div className="mb-3 rounded-[12px] border border-cyan-400/30 bg-cyan-400/5 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="label-tech text-[10px] uppercase tracking-[0.16em] text-cyan-200">
+                      Intensidade do corte — silêncio mantido nas bordas da fala
+                    </span>
+                    <span className="mono text-[12.5px] font-bold text-cyan-200">
+                      {decupIntensity.toFixed(2)}s
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0.01}
+                    max={0.5}
+                    step={0.01}
+                    value={decupIntensity}
+                    onChange={(e) => setDecupIntensity(parseFloat(e.target.value))}
+                    className="w-full accent-cyan-400"
+                  />
+                  <div className="mt-1 flex justify-between text-[9.5px] text-text-muted">
+                    <span>0.01s · corte agressivo</span>
+                    <span>fala respira · 0.50s</span>
+                  </div>
+                  <div className="mt-2.5 flex flex-wrap gap-1.5">
+                    {[
+                      { v: 0.05, l: 'Agressivo' },
+                      { v: 0.12, l: 'Padrão' },
+                      { v: 0.2, l: 'Suave' },
+                    ].map((preset) => {
+                      const on = Math.abs(decupIntensity - preset.v) < 0.005;
+                      return (
+                        <button
+                          key={preset.v}
+                          type="button"
+                          onClick={() => setDecupIntensity(preset.v)}
+                          className={
+                            'mono rounded-full border px-2.5 py-1 text-[10px] font-bold transition ' +
+                            (on
+                              ? 'border-cyan-400/60 bg-cyan-400/20 text-cyan-100'
+                              : 'border-line bg-bg-soft/50 text-text-muted hover:border-cyan-400/40 hover:text-cyan-200')
+                          }
+                        >
+                          {preset.l} · {preset.v.toFixed(2)}s
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-2.5 text-[10px] leading-snug text-text-muted">
+                    O valor é aplicado <span className="text-cyan-200">fielmente</span> no corte. Se você põe 0.05, o corte usa 0.05.
+                  </p>
+                </div>
+              ) : null}
               <Toggle3D
                 on={camuflagemMode}
                 onChange={setCamuflagemMode}
@@ -2566,7 +2638,7 @@ function HeyGenAutoInner() {
                               </span>
                               {item.decupagem ? (
                                 <span className="label-tech rounded-full bg-cyan-400/15 px-2 py-0.5 text-[9px] uppercase tracking-widest text-cyan-300">
-                                  ✂️ decupa
+                                  ✂️ decupa · {(item.decupIntensity ?? DEFAULT_KEEP_SILENCE).toFixed(2)}s
                                 </span>
                               ) : (
                                 <span className="label-tech rounded-full bg-bg px-2 py-0.5 text-[9px] uppercase tracking-widest text-text-muted">
