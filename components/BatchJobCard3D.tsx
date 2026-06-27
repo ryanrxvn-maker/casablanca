@@ -58,6 +58,11 @@ export type BatchJob3DProps = {
   onPausar: () => void;
   onDebug: () => void;
   onRemove: () => void;
+  /** Download custom (opcional): quando presente, o botao de download chama
+   *  ISSO em vez do fluxo baseado em montadoUrl/camufladoUrl. Usado pelo Hey
+   *  Auto (dispensa direta), que dispara o pipeline+download on-click em vez
+   *  de ter um blob URL pronto. O ClickUp Pilot nao passa — segue por URL. */
+  onDownload?: () => void;
   /** Status flags pra disabled */
   isRunning: boolean;
   isQueued: boolean;
@@ -368,6 +373,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     onPausar,
     onDebug,
     onRemove,
+    onDownload,
     isRunning,
     isQueued,
     children,
@@ -597,7 +603,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                   pulse={!isRebuilding}
                 />
               ) : null}
-              {(montadoUrl || camufladoUrl) ? (() => {
+              {(montadoUrl || camufladoUrl || onDownload) ? (() => {
                 // DOWNLOAD = so o(s) MP4 final(is). Entrega o montado/decupado e,
                 // se houver, o camuflado — SEMPRE como .mp4 solto. Nunca o
                 // takes.zip, nunca .zip. Fontes que ja sao .mp4 (TROCA) baixam
@@ -675,7 +681,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                     color={downloadBlocked ? 'neutral' : 'lime'}
                     title={tooltip}
                     disabled={downloadBlocked}
-                    onClick={downloadBlocked ? undefined : () => void handleDownloadAll()}
+                    onClick={downloadBlocked ? undefined : (onDownload ? onDownload : () => void handleDownloadAll())}
                   />
                 );
               })() : null}

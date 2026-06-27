@@ -49,6 +49,7 @@ import {
   type ClonedVoice,
 } from '@/components/HeyGenVoicePicker';
 import { TierGate } from '@/components/TierGate';
+import { BatchJobCard3D, type BatchJob3DPhase } from '@/components/BatchJobCard3D';
 
 /**
  * Hey Auto Avatar — automacao do HeyGen sem API.
@@ -236,6 +237,8 @@ function HeyGenAutoInner() {
   // bypassa o auto-split. Reset via "Limpar override" ou troca de copy/mode.
   const [forcedParts, setForcedParts] = useState<{ label: string; text: string }[] | null>(null);
   const [results, setResults] = useState<PartResult[]>([]);
+  /** Início do disparo direto (pra elapsed no card estilo ClickUp Pilot). */
+  const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
   const [processing, setProcessing] = useState(false);
   const [stage, setStage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -888,6 +891,7 @@ function HeyGenAutoInner() {
     cancelRef.current = false;
     setError(null);
     setResults([]);
+    setRunStartedAt(Date.now());
     setProcessing(true);
 
     // Espelho no store compartilhado (lipsync-history/background/painel)
@@ -2792,33 +2796,18 @@ function HeyGenAutoInner() {
                   Gerar todas as partes via HeyGen
                 </button>
               )}
+              {/* Download e cancelar-download agora vivem no card (BatchJobCard3D):
+               *  botão ⬇ = baixar montado (+ camuflado); ⏸ Pausar = cancela.
+               *  Aqui fica só o atalho pro HeyGen Projects. */}
               {results.length > 0 && !processing ? (
-                <>
-                  {downloading ? (
-                    <CancelButton onClick={cancelDownload} label="Cancelar download" />
-                  ) : (
-                    <button
-                      onClick={downloadAllAsZip}
-                      className="btn-primary"
-                      disabled={results.filter((r) => r.videoId).length === 0}
-                      title={
-                        camuflagemMode
-                          ? 'Renderiza, monta HOOK+BODY decupado e baixa o MP4 montado + o camuflado'
-                          : 'Renderiza, monta HOOK+BODY decupado e baixa o MP4 montado'
-                      }
-                    >
-                      ⬇ Baixar montado{camuflagemMode ? ' + camuflado' : ''} (MP4)
-                    </button>
-                  )}
-                  <a
-                    href="https://app.heygen.com/projects"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="rounded-[12px] border border-line-strong px-4 py-2.5 text-sm text-text-muted transition hover:border-lime hover:text-lime"
-                  >
-                    Abrir HeyGen Projects
-                  </a>
-                </>
+                <a
+                  href="https://app.heygen.com/projects"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-[12px] border border-line-strong px-4 py-2.5 text-sm text-text-muted transition hover:border-lime hover:text-lime"
+                >
+                  Abrir HeyGen Projects
+                </a>
               ) : null}
             </div>
 
@@ -2850,64 +2839,91 @@ function HeyGenAutoInner() {
                   </span>
                   <span className="mono uppercase tracking-widest">{downloadStage}</span>
                 </div>
-                {Object.keys(downloadStatuses).length > 0 ? (
-                  <ul className="mt-2 grid gap-0.5 text-[10px] text-fuchsia-200/70">
-                    {results.filter((r) => r.videoId).map((r) => {
-                      const s = downloadStatuses[r.videoId!];
-                      const sym =
-                        s?.status === 'completed' ? '✓' :
-                        s?.status === 'failed' ? '✗' :
-                        s?.status === 'pending' ? '◷' : '?';
-                      return (
-                        <li key={r.label} className="mono">
-                          {sym} {r.label} — {s?.status ?? 'unknown'}
-                          {s?.error ? ` (${s.error.slice(0,80)})` : ''}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                ) : null}
+                {/* Status por take agora vive dentro do card (BatchJobCard3D) —
+                 *  expanda o card pra ver cada parte. */}
               </div>
             ) : null}
 
-            {/* Resultados parciais — modo dispatch only */}
-            {results.length > 0 ? (
-              <div className="fade-in-up mt-2 rounded-[12px] border border-lime/30 bg-lime/5 p-4">
-                <h3 className="mb-2 text-sm font-semibold uppercase tracking-widest text-lime">
-                  {results.filter((r) => r.error == null).length}/{results.length}{' '}
-                  parte{results.length === 1 ? '' : 's'} disparada
-                  {results.length === 1 ? '' : 's'} no HeyGen
-                </h3>
-                <p className="mb-2 text-[11px] text-text-muted">
-                  A geracao roda na fila do HeyGen. Acompanhe na sua pagina
-                  Projects e baixe quando ficar pronto.
-                </p>
-                <ul className="grid gap-1 text-xs">
-                  {results.map((r) => (
-                    <li
-                      key={r.label}
-                      className="flex items-center justify-between rounded-md border border-line bg-bg px-3 py-2"
-                    >
-                      <span>
-                        <span className="mono text-lime">{r.label}</span>
-                        {r.videoId ? (
-                          <span className="ml-2 text-text-muted">
-                            id: {r.videoId.slice(0, 12)}...
-                          </span>
-                        ) : null}
-                      </span>
-                      {r.error ? (
-                        <span className="text-[11px] text-red-300">
-                          ✗ {r.error}
-                        </span>
-                      ) : (
-                        <span className="text-[11px] text-lime">✓ disparado</span>
-                      )}
-                    </li>
-                  ))}
+            {/* Resultados — MESMO card do ClickUp Pilot (BatchJobCard3D): fase
+             *  pill, barra de carregamento animada, Retomar/Pausar/Debug/Remover
+             *  + Download. As filas/estados do Hey Auto e do ClickUp Pilot
+             *  seguem SEPARADOS — só o componente visual é compartilhado. O
+             *  botão de Docs NÃO aparece (dispensa manual não tem doc). */}
+            {results.length > 0 || processing ? (() => {
+              const dispatchedCount = results.filter((r) => r.videoId).length;
+              const renderedCount = Object.values(downloadStatuses).filter((s) => s.status === 'completed').length;
+              const montadoDone = !!pipelineZips.montadoName && !downloading;
+              const isRunning = processing || downloading;
+              let phase: BatchJob3DPhase;
+              if (processing) phase = 'dispatching';
+              else if (downloading) {
+                const s = (downloadStage || '').toLowerCase();
+                if (/montando|montagem|pipeline|decup|assembl/.test(s)) phase = 'post';
+                else if (/baixando|zipando|salvando/.test(s)) phase = 'downloading';
+                else phase = 'rendering';
+              } else if (error && dispatchedCount === 0) phase = 'failed';
+              else if (montadoDone) phase = 'done';
+              else phase = 'rendering'; // disparado → HeyGen renderizando; clique Baixar
+              const total = results.length;
+              return (
+                <ul className="fade-in-up mt-2 grid gap-2">
+                  <BatchJobCard3D
+                    taskId={runBatchIdRef.current || safeName}
+                    taskName={adName.trim() || safeName}
+                    phase={phase}
+                    partsTotal={total}
+                    partsDispatched={dispatchedCount}
+                    partsRendered={renderedCount}
+                    message={downloadStage || error || undefined}
+                    elapsedMs={runStartedAt ? Date.now() - runStartedAt : 0}
+                    allOk={total > 0 && dispatchedCount === total}
+                    isPartialDone={phase === 'done' && dispatchedCount < total}
+                    onRetomar={() => void downloadAllAsZip()}
+                    onPausar={() => { if (processing) cancel(); else if (downloading) cancelDownload(); }}
+                    onDebug={() => void run()}
+                    onRemove={() => { setResults([]); setError(null); setDownloadStage(null); setDownloadStatuses({}); setRunStartedAt(null); }}
+                    onDownload={dispatchedCount > 0 ? (() => void downloadAllAsZip()) : undefined}
+                    isRunning={isRunning}
+                    isQueued={false}
+                  >
+                    <div>
+                      <div className="label-tech mb-1.5 text-[9px] uppercase tracking-widest text-text-muted">
+                        Takes ({dispatchedCount}/{total} disparados no HeyGen)
+                      </div>
+                      <ul className="grid gap-1 text-xs">
+                        {results.map((r) => {
+                          const st = r.videoId ? downloadStatuses[r.videoId] : undefined;
+                          return (
+                            <li
+                              key={r.label}
+                              className="flex items-center justify-between rounded-md border border-line bg-bg px-3 py-2"
+                            >
+                              <span>
+                                <span className="mono text-lime">{r.label}</span>
+                                {r.videoId ? (
+                                  <span className="ml-2 text-text-muted">id: {r.videoId.slice(0, 12)}…</span>
+                                ) : null}
+                              </span>
+                              {r.error ? (
+                                <span className="text-[11px] text-red-300">✗ {r.error}</span>
+                              ) : st?.status === 'completed' ? (
+                                <span className="text-[11px] text-lime">✓ renderizado</span>
+                              ) : st?.status === 'failed' ? (
+                                <span className="text-[11px] text-red-300">✗ render falhou</span>
+                              ) : st ? (
+                                <span className="text-[11px] text-cyan-300">◷ {st.status}</span>
+                              ) : (
+                                <span className="text-[11px] text-lime">✓ disparado</span>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  </BatchJobCard3D>
                 </ul>
-              </div>
-            ) : null}
+              );
+            })() : null}
           </div>
         </div>
       </div>
