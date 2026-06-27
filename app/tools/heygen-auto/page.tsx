@@ -119,19 +119,6 @@ function HeyGenAutoInner() {
   // Avatar First toggle (avatar nao existe na biblioteca, cria via foto+audio)
   const [avatarFirstEnabled, setAvatarFirstEnabled] = useState(false);
 
-  // Calcula duracoes reais dos audios em paralelo
-  useEffect(() => {
-    let cancelled = false;
-    if (audioParts.length === 0) {
-      setAudioPartsSeconds([]);
-      return;
-    }
-    Promise.all(audioParts.map((f) => estimateSecondsFromAudio(f))).then((durs) => {
-      if (!cancelled) setAudioPartsSeconds(durs);
-    });
-    return () => { cancelled = true; };
-  }, [audioParts]);
-
   /* ----- Inputs estruturados (multi-hook + body) — feature parity com clickup-pilot ----- */
   /** SEMPRE ativo. Inputs separados pra cada HOOK (1-10) + 1 BODY opcional.
    *  Cada hook vira 1 take. Body e splitado em ~20s pra cada take.
@@ -152,6 +139,34 @@ function HeyGenAutoInner() {
     text: '',
     audios: [],
   });
+
+  /** Áudios REAIS do modo estruturado (hooks + body), na mesma ordem que o
+   *  run() monta os jobs. O `audioParts` legacy nunca é populado pelo UI
+   *  estruturado — então o gate do botão e a prévia do motor TÊM que olhar
+   *  aqui, senão `audioParts.length === 0` trava o disparo pra sempre. */
+  const structuredAudioFiles = useMemo<File[]>(() => {
+    const hookFiles = structuredHooks
+      .map((h) => h.audio)
+      .filter((f): f is File => !!f);
+    const bodyFiles = structuredBody.enabled ? structuredBody.audios : [];
+    return [...hookFiles, ...bodyFiles];
+  }, [structuredHooks, structuredBody]);
+
+  // Calcula duracoes reais dos audios em paralelo (prévia do motor). Usa os
+  // áudios estruturados (hooks+body) que o run() realmente dispara; cai pro
+  // audioParts legacy só se não houver estruturados.
+  useEffect(() => {
+    let cancelled = false;
+    const files = structuredAudioFiles.length > 0 ? structuredAudioFiles : audioParts;
+    if (files.length === 0) {
+      setAudioPartsSeconds([]);
+      return;
+    }
+    Promise.all(files.map((f) => estimateSecondsFromAudio(f))).then((durs) => {
+      if (!cancelled) setAudioPartsSeconds(durs);
+    });
+    return () => { cancelled = true; };
+  }, [audioParts, structuredAudioFiles]);
 
   /**
    * Ordena uma lista de Files por nome detectando "parte1, parte2, ..." ou
@@ -1916,9 +1931,9 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
               <MotorConfigPicker
                 config={motorConfig}
                 setConfig={setMotorConfig}
-                takeCount={mode === 'audio' ? audioParts.length : parts.length}
+                takeCount={mode === 'audio' ? structuredAudioFiles.length : parts.length}
                 slotIds={mode === 'audio'
-                  ? audioParts.map((_, i) => `HOOK${i + 1}`)
+                  ? structuredAudioFiles.map((_, i) => `HOOK${i + 1}`)
                   : parts.map((_, i) => `PART${i + 1}`)
                 }
                 takeSeconds={mode === 'copy'
@@ -2779,7 +2794,7 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                     !extStatus.connected ||
                     !selectedAvatar ||
                     (mode === 'copy' && parts.length === 0) ||
-                    (mode === 'audio' && audioParts.length === 0)
+                    (mode === 'audio' && structuredAudioFiles.length === 0)
                   }
                 >
                   Gerar todas as partes via HeyGen
