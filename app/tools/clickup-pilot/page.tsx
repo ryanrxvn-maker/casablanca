@@ -461,6 +461,16 @@ type BatchTaskState = {
     expectedDecupagem: boolean;
     expectedCamuflagem: boolean;
   };
+  /** VA: quantos avatares saíram montados vs esperados. BLINDAGEM: o card só
+   *  mostra "PRONTO" verde quando okAvas === expectedAvas. Se faltou avatar
+   *  (ex: 1/2 — mount morreu, cota, etc.), o card vira AVISO (não verde) com a
+   *  contagem, em vez de mentir "pronto" e o user descobrir só ao baixar 1. O
+   *  download do que existe segue liberado; failedAvas guia o RETOMAR. */
+  vaStats?: {
+    okAvas: number;
+    expectedAvas: number;
+    failedAvas?: string[];
+  };
   /** Plano serializavel pra RE-DISPARAR sem depender de taskAnalyses
    *  (que NAO sobrevive reload/navegacao). Sem isto, Retomar/Debug de
    *  uma task que falhou com 0 videoIds (ex: cota HeyGen) nao fazia
@@ -6150,9 +6160,19 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
 
       // ZIP do VA entra no slot "montado" → botao de download unico do card
       // funciona igual task normal.
+      const okAvas = pipeRes.items.filter((it: any) => it.blob).length;
+      const expectedAvas = pipeRes.items.length;
+      const failedAvas = pipeRes.items
+        .map((it: any, i: number) => (it.blob ? null : (va.avatares[i]?.avaCode || `AVA${i + 1}`)))
+        .filter(Boolean) as string[];
+      const vaPartial = okAvas < expectedAvas;
       patchVA({
         phase: 'done',
-        message: `Pronto: ${pipeRes.summary}`,
+        message: vaPartial
+          ? `⚠ INCOMPLETO: ${okAvas}/${expectedAvas} avatares — falta ${failedAvas.join('/')}. Clica RETOMAR pra gerar o que faltou.`
+          : `Pronto: ${pipeRes.summary}`,
+        // BLINDAGEM: o card lê isto pra NÃO mostrar verde quando faltou avatar.
+        vaStats: { okAvas, expectedAvas, failedAvas },
         montadoZipUrl: zipUrl, montadoZipName: zipName,
         finishedAt: Date.now(),
       });
@@ -6394,13 +6414,17 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
         await saveZip(`va:${taskId}:zip`, zipBlob, zipName);
       } catch (e) { console.warn('[va-texto] save zip IDB:', e); }
 
+      const failedAvas = items.filter((i) => !i.blob).map((i) => i.avaCode);
+      const partial = okCount < items.length;
       patchVA({
         phase: 'done',
         message: okCount === 0 && hitQuota
           ? `⚠ HeyGen no LIMITE DIÁRIO de geração — aguarde o reset (~24h) ou troque de conta. NÃO é bug; re-disparar agora vai falhar igual.`
-          : hitQuota
-            ? `Pronto (texto): ${okCount}/${items.length} AVAs — resto bateu no LIMITE DIÁRIO do HeyGen (espere o reset)`
+          : partial
+            ? `⚠ INCOMPLETO: ${okCount}/${items.length} avatares — falta ${failedAvas.join('/')}.${hitQuota ? ' Bateu no LIMITE DIÁRIO do HeyGen (espere o reset).' : ' Clica RETOMAR pra gerar o que faltou.'}`
             : `Pronto (texto): ${okCount}/${items.length} AVA${items.length === 1 ? '' : 's'}`,
+        // BLINDAGEM: o card lê isto pra NÃO mostrar verde quando faltou avatar.
+        vaStats: { okAvas: okCount, expectedAvas: items.length, failedAvas },
         montadoZipUrl: zipUrl, montadoZipName: zipName,
         finishedAt: Date.now(),
       });
@@ -7511,7 +7535,14 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                             // PRONTA piscar "INCOMPLETO" enquanto a re-hidratação
                             // assíncrona do montadoZipUrl (do IDB) não termina.
                             : (b.phase === 'done' && (!!b.montadoZipUrl || !!b.montadoZipName));
-                          const allOk = dispatchOk && renderOk && pipeOk;
+                          // BLINDAGEM VA: o pipeOk da VA só checa "o zip existe" —
+                          // NÃO sabe se vieram os 2 avatares. Sem isto, uma VA 1/2
+                          // mostrava PRONTO verde e o user só descobria ao baixar 1.
+                          // vaStats (okAvas/expectedAvas) é a verdade: se faltou
+                          // avatar, NÃO é "tudo OK" → card vira AVISO. Download segue
+                          // liberado (montagemContentOk só exige o zip).
+                          const vaOk = !b.isVA || !b.vaStats || (b.vaStats.expectedAvas > 0 && b.vaStats.okAvas >= b.vaStats.expectedAvas);
+                          const allOk = dispatchOk && renderOk && pipeOk && vaOk;
                           const isPartialDone = b.phase === 'done' && !allOk;
                           // CONTEÚDO do montado completo = todas as partes/texto
                           // presentes. Decupagem e camuflagem são pós-processos
