@@ -6301,9 +6301,20 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
     });
 
     try {
-      const { processJob, downloadVideoBytes, isQuotaError } = await import('@/lib/heygen-api-direct');
+      const { processJob, downloadVideoBytes, isQuotaError, findCompletedVideosByName } = await import('@/lib/heygen-api-direct');
       const { concatAvatarParts } = await import('@/lib/ffmpeg-worker');
       const items: Array<{ avaCode: string; filename: string; blob: Blob | null; error?: string }> = [];
+
+      // RECUPERAÇÃO: lista as partes JÁ RENDERIZADAS deste AD no HeyGen (de runs
+      // anteriores). No RETOMAR, partes que ficaram prontas no HeyGen mas o app
+      // não capturou (poll estourou / cota voltou DEPOIS do vídeo pronto) são
+      // REUSADAS daqui — sem re-gerar, sem gastar cota. 1 query (não por parte).
+      let heygenDone = new Map<string, string>();
+      try {
+        patchVA({ phase: 'rendering', message: 'Checando partes já prontas no HeyGen...' });
+        heygenDone = await findCompletedVideosByName(adNameClean);
+        if (heygenDone.size > 0) console.log(`[VA-texto] ${heygenDone.size} parte(s) já prontas no HeyGen — vão ser reusadas sem re-gerar`);
+      } catch { /* best-effort → render normal */ }
 
       for (const av of va.avatares) {
         if (batchCancelRef.current[taskId]) throw new Error('cancelado');
@@ -6333,7 +6344,24 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                 upsertPart(label, { videoId: `cached:${label}`, videoStatus: 'completed', videoUrl: url, error: null });
                 patchVA({ phase: 'rendering', message: `${av.avaCode}: ${part.label} reusado (já gerado, sem re-gerar)` });
               }
-            } catch { /* cache miss/erro → renderiza normal */ }
+            } catch { /* cache miss/erro → tenta HeyGen/renderiza */ }
+
+            // 2) RECUPERAÇÃO do HeyGen: a parte já renderizou antes mas não foi
+            // capturada? Reusa o vídeo pronto (baixa, sem re-gerar = sem cota).
+            if (!partBytes) {
+              const doneUrl = heygenDone.get(`${adNameClean}_${av.avaCode}_${part.label}`);
+              if (doneUrl) {
+                try {
+                  patchVA({ phase: 'rendering', message: `${av.avaCode}: ${part.label} recuperado do HeyGen (já estava pronto)` });
+                  partBytes = await downloadVideoBytes(doneUrl);
+                  upsertPart(label, { videoId: `heygen:${label}`, videoStatus: 'completed', videoUrl: doneUrl, error: null });
+                  try {
+                    const { saveBlob } = await import('@/lib/zip-store');
+                    await saveBlob(partCacheKey, new Blob([partBytes as BlobPart], { type: 'video/mp4' }), 'video/mp4');
+                  } catch { /* best-effort */ }
+                } catch { partBytes = null; /* download falhou → renderiza */ }
+              }
+            }
 
             if (!partBytes) {
               upsertPart(label, { videoId: null, videoStatus: 'pending', error: null });

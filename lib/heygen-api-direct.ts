@@ -825,6 +825,46 @@ export async function listMyVideos(opts: {
 }
 
 /**
+ * RECUPERAÇÃO por TÍTULO: lista os vídeos JÁ RENDERIZADOS (completed) no HeyGen
+ * cujo título contém `namePrefix`, e devolve um mapa título → video_url (a cópia
+ * MAIS RECENTE de cada título vence). Serve pra reusar partes que renderizaram no
+ * HeyGen mas o app não capturou (poll estourou, cota voltou numa re-tentativa
+ * DEPOIS do vídeo já ter ficado pronto, etc.) — assim o RETOMAR monta SEM
+ * re-gerar (não gasta cota). Best-effort: erro/timeout → mapa vazio (cai no
+ * caminho normal de render).
+ */
+export async function findCompletedVideosByName(
+  namePrefix: string,
+  opts: { maxPages?: number } = {},
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const maxPages = opts.maxPages ?? 6;
+  // NÃO usa name_filter: nesse endpoint ele volta os itens com TÍTULO VAZIO (não
+  // dá pra saber qual parte é cada vídeo). Lista normal (com títulos) + filtro por
+  // título no cliente — comprovado funcionando.
+  for (let page = 1; page <= maxPages; page++) {
+    const path = `/v1/project/items?limit=100&page=${page}&item_types=heygen_video&sort_key=created_ts&sort_order=desc`;
+    const r = await jsonCall('GET', path).catch(() => null);
+    if (!r || !r.ok) break;
+    const data = r.body?.data;
+    const list: any[] = data?.list || data?.items || data?.videos || (Array.isArray(data) ? data : []);
+    if (!Array.isArray(list) || list.length === 0) break;
+    for (const it of list) {
+      const title = String(it.video_title || it.title || it.name || '');
+      if (!title.includes(namePrefix)) continue;
+      if (map.has(title)) continue; // já temos a cópia mais recente desse título
+      const st = String(it.status || it.state || '').toLowerCase();
+      const url = it.video_url || it.url;
+      if ((st === 'completed' || st === 'done' || st === 'success') && url) {
+        map.set(title, String(url));
+      }
+    }
+    if (list.length < 100) break; // última página
+  }
+  return map;
+}
+
+/**
  * Polla repetidamente ate todos os videoIds estarem 'completed' ou 'failed'
  * ou ate timeout. Chama onStatus a cada poll.
  *
