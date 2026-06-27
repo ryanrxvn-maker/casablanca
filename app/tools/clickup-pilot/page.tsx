@@ -233,6 +233,15 @@ function persistBatchStates(states: Record<string, unknown>) {
       };
       sanitized[k] = rest;
     }
+    // PRESERVA as entradas do Hey Auto ('heygenauto:*'): elas vivem na MESMA
+    // chave mas são geridas/exibidas SÓ pelo Hey Auto. Sem isso, o persist do
+    // Pilot apagaria a fila do Hey Auto (cada tool tem a sua lista própria).
+    try {
+      const existing = JSON.parse(localStorage.getItem(BATCH_STATE_KEY) || '{}') as Record<string, unknown>;
+      for (const [k, v] of Object.entries(existing)) {
+        if (k.startsWith('heygenauto:') && !(k in sanitized)) sanitized[k] = v;
+      }
+    } catch {}
     localStorage.setItem(BATCH_STATE_KEY, JSON.stringify(sanitized));
   } catch {}
 }
@@ -2093,6 +2102,9 @@ function ClickUpPilotInner() {
     let interruptedCount = 0;
     const doneTaskIds: string[] = [];
     for (const [taskId, state] of Object.entries(persisted)) {
+      // Fila do Hey Auto vive na mesma chave — o Pilot NÃO exibe nem processa
+      // os disparos do Hey Auto ('heygenauto:*'). Cada tool tem sua lista.
+      if (taskId.startsWith('heygenauto:')) continue;
       const wasInterrupted = state.phase !== 'done' && state.phase !== 'failed';
       if (wasInterrupted && state.kind === 'troca') {
         // TROCA: o WHITE foi salvo no IndexedDB + driveId no proprio state —
