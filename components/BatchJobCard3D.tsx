@@ -624,7 +624,10 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                 };
 
                 const handleDownloadAll = async () => {
-                  const out: Array<{ url: string; name: string; revoke?: boolean }> = [];
+                  // 1) Junta TODOS os MP4 finais: .mp4 solto (TROCA) entra direto;
+                  //    .zip (lipsync/VA) tem os .mp4 extraidos de dentro. Pode dar
+                  //    1 (single avatar) ou N (VA com 2+ avatares, montado+camuflado).
+                  const out: Array<{ blob?: Blob; url: string; name: string; revoke?: boolean }> = [];
                   for (const src of sources) {
                     const fname = src.name || 'video.mp4';
                     if (/\.mp4$/i.test(fname)) {
@@ -649,23 +652,51 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                       for (const e of entries as any[]) {
                         const b = await e.async('blob');
                         const mp4 = new Blob([b], { type: 'video/mp4' });
-                        const u = URL.createObjectURL(mp4);
                         const base = (e.name.split('/').pop() || e.name) as string;
-                        out.push({ url: u, name: base, revoke: true });
+                        out.push({ blob: mp4, url: URL.createObjectURL(mp4), name: base, revoke: true });
                       }
                     } catch {
                       // Nao era zip valido (ou fetch falhou) — baixa o que tem.
                       out.push({ url: src.url, name: fname });
                     }
                   }
-                  out.forEach((m, i) => {
-                    setTimeout(() => {
-                      triggerDownload(m.url, m.name);
-                      if (m.revoke) {
-                        setTimeout(() => { try { URL.revokeObjectURL(m.url); } catch {} }, 60_000);
-                      }
-                    }, i * 250); // 250ms entre disparos = Chrome aceita sem prompt
-                  });
+                  if (out.length === 0) return;
+
+                  // 2) UM arquivo → baixa solto (.mp4), rapido e sem zip.
+                  if (out.length === 1) {
+                    const m = out[0];
+                    triggerDownload(m.url, m.name);
+                    if (m.revoke) setTimeout(() => { try { URL.revokeObjectURL(m.url); } catch {} }, 60_000);
+                    return;
+                  }
+
+                  // 3) DOIS OU MAIS (ex: VA com 2 avatares) → o Chrome BLOQUEIA
+                  //    downloads multiplos automaticos: so o 1o passava e o resto
+                  //    sumia (bug "so baixou 1 avatar"). Entrega GARANTIDA = UM zip
+                  //    so, com os MP4 limpos dentro. Um clique, TODOS os videos.
+                  try {
+                    const JSZip = (await import('jszip')).default;
+                    const bundle = new JSZip();
+                    const used = new Set<string>();
+                    for (const m of out) {
+                      const blob: Blob = m.blob ? m.blob : await fetch(m.url).then((r) => r.blob());
+                      let name = m.name;
+                      let i = 2;
+                      while (used.has(name)) name = m.name.replace(/\.mp4$/i, `_${i++}.mp4`);
+                      used.add(name);
+                      bundle.file(name, blob);
+                    }
+                    // STORE (sem compressao): MP4 ja e comprimido — so empacota, rapido.
+                    const zipBlob = await bundle.generateAsync({ type: 'blob', compression: 'STORE' });
+                    const base = (montadoFilename || 'videos').replace(/\.(zip|mp4)$/i, '');
+                    const zipName = `${base}_${out.length}_videos.zip`;
+                    const zurl = URL.createObjectURL(zipBlob);
+                    triggerDownload(zurl, zipName);
+                    setTimeout(() => { try { URL.revokeObjectURL(zurl); } catch {} }, 60_000);
+                  } finally {
+                    // Limpa os Object URLs temporarios das extracoes.
+                    for (const m of out) if (m.revoke) setTimeout(() => { try { URL.revokeObjectURL(m.url); } catch {} }, 60_000);
+                  }
                 };
 
                 // TRAVA o download quando a entrega NÃO está 100% (falta
