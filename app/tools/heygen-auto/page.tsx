@@ -314,6 +314,8 @@ function HeyGenAutoInner() {
     avatarId?: string | null;
     avatarName?: string | null;
     voiceId?: string | null;
+    /** Modo audio: espelhar a voz (trocar a voz do audio pela voiceId via STS). */
+    voiceMirror?: boolean;
   };
   type QueueItem = {
     id: string;
@@ -996,10 +998,16 @@ function HeyGenAutoInner() {
         parallel: 3,
         mode,
         avatarId: selectedAvatar.id,
+        // copy: voz do TTS (escolhida ou default do avatar).
+        // audio: SÓ manda voiceId quando o user escolheu uma voz → aí espelha
+        // (sts_pending); sem escolha, o audio vai com a voz original.
         voiceId:
-          mode === 'copy' && selectedVoice
-            ? selectedVoice.id
-            : (selectedAvatar.voiceId || undefined),
+          mode === 'copy'
+            ? (selectedVoice?.id || selectedAvatar.voiceId || undefined)
+            : (selectedVoice?.id || undefined),
+        // Espelhamento de Voz no modo audio = trocar a voz do audio pela
+        // escolhida (igual VA do ClickUp Pilot). Só quando há voz escolhida.
+        voiceMirroring: mode === 'audio' && !!selectedVoice,
         motor: motorConfig.kind === 'global' ? motorConfig.motor : motor, // fallback per-job vence
         adNameSafe: safeName,
         isCancelled: () => cancelRef.current,
@@ -1532,12 +1540,17 @@ function HeyGenAutoInner() {
         setError('Faça upload de pelo menos 1 áudio pra adicionar à fila.');
         return;
       }
+      // Modo audio: se o user escolheu uma voz, espelha (troca a voz do audio).
+      const audioVoiceId = selectedVoice?.id ?? null;
+      const audioMirror = !!selectedVoice;
       hookFiles.forEach((file, i) =>
         qparts.push({
           label: `HOOK ${i + 1}`,
           audio: file,
           avatarId: selectedAvatar.id,
           avatarName: selectedAvatar.name,
+          voiceId: audioVoiceId,
+          voiceMirror: audioMirror,
         }),
       );
       bodyFiles.forEach((file, i) =>
@@ -1546,6 +1559,8 @@ function HeyGenAutoInner() {
           audio: file,
           avatarId: selectedAvatar.id,
           avatarName: selectedAvatar.name,
+          voiceId: audioVoiceId,
+          voiceMirror: audioMirror,
         }),
       );
     }
@@ -1623,6 +1638,8 @@ function HeyGenAutoInner() {
       audio: item.mode === 'audio' ? p.audio : undefined,
       avatarId: p.avatarId || undefined,
       voiceId: p.voiceId || undefined,
+      // Modo audio: espelha a voz quando a parte foi enfileirada com voz escolhida.
+      voiceMirroring: item.mode === 'audio' ? !!p.voiceMirror : undefined,
       motor: item.motor,
     }));
 
@@ -2089,30 +2106,28 @@ function HeyGenAutoInner() {
               </p>
             </section>
 
-            {mode === 'copy' ? (
-              <section className="border-t border-line pt-6">
-                <h2 className="label-field !mb-1">Voz</h2>
-                <p className="mb-3 text-[11px] text-text-muted">
-                  Escolha a voz que o avatar vai falar. Sem escolher, usa a voz
-                  padrão do avatar.
-                </p>
-                <CompactVoiceSelector
-                  selected={selectedVoice ? { id: selectedVoice.id, name: selectedVoice.name } : null}
-                  setSelected={(v) =>
-                    setSelectedVoice(
-                      v ? { id: v.id, name: v.name, gender: null, language: null, previewAudio: null } : null,
-                    )
-                  }
-                />
-              </section>
-            ) : (
-              <section className="border-t border-line pt-6">
-                <div className="rounded-[12px] border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-xs text-blue-300">
-                  ℹ Modo audio: a voz vem do proprio audio enviado (lipsync).
-                  Voice picker desativado.
+            <section className="border-t border-line pt-6">
+              <h2 className="label-field !mb-1">Voz</h2>
+              <p className="mb-3 text-[11px] text-text-muted">
+                {mode === 'copy'
+                  ? 'Escolha a voz que o avatar vai falar. Sem escolher, usa a voz padrão do avatar.'
+                  : 'Escolha uma voz pra TROCAR a voz do áudio (Espelhamento de Voz — mantém o timing/conteúdo do áudio, só muda a voz). Sem escolher, mantém a voz original do áudio.'}
+              </p>
+              <CompactVoiceSelector
+                selected={selectedVoice ? { id: selectedVoice.id, name: selectedVoice.name } : null}
+                setSelected={(v) =>
+                  setSelectedVoice(
+                    v ? { id: v.id, name: v.name, gender: null, language: null, previewAudio: null } : null,
+                  )
+                }
+              />
+              {mode === 'audio' && selectedVoice ? (
+                <div className="mt-2 rounded-[10px] border border-fuchsia-500/30 bg-fuchsia-500/5 px-3 py-2 text-[11px] text-fuchsia-200">
+                  🎙️ Espelhamento de Voz ativo: cada take vai sair com a voz{' '}
+                  <span className="font-semibold text-white">{selectedVoice.name}</span> no lugar da voz do áudio.
                 </div>
-              </section>
-            )}
+              ) : null}
+            </section>
 
             {/* Modo: copy ou audio */}
             <section className="border-t border-line pt-6">

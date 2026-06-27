@@ -19,6 +19,10 @@ export type RunnerJob = {
   /** Override de motor por job — vence opts.motor. Permite mix de
    *  III/IV/V dentro do mesmo batch (config 'percent' ou 'individual'). */
   motor?: 'III' | 'IV' | 'V';
+  /** Espelhamento de Voz por job (modo audio): re-sintetiza o audio na voz
+   *  alvo (voiceId) via STS. Vence opts.voiceMirroring. Usado pela FILA, que
+   *  define o flag por parte. */
+  voiceMirroring?: boolean;
 };
 
 export type RunnerResult = {
@@ -33,6 +37,11 @@ export type RunnerOptions = {
   mode: 'copy' | 'audio';
   avatarId: string;
   voiceId?: string;
+  /** Espelhamento de Voz (modo audio): quando true E houver voiceId, o HeyGen
+   *  re-sintetiza o audio enviado na voz alvo (STS / sts_pending) — mesma coisa
+   *  do VA no ClickUp Pilot. Sem isso (ou sem voiceId), o audio vai como está
+   *  (voz original). Só vale pra mode 'audio'. */
+  voiceMirroring?: boolean;
   motor: 'III' | 'IV' | 'V';
   adNameSafe: string;
   isCancelled: () => boolean;
@@ -68,13 +77,24 @@ export async function runHeyGenJobs(
         opts.onProgress(`Disparando ${label} (${idx + 1}/${jobs.length})...`);
         // Per-job override (modo dinamico) > opts global > undefined (lookup auto)
         const effectiveAvatarId = job.avatarId || opts.avatarId;
-        const effectiveVoiceId =
-          opts.mode === 'copy' ? (job.voiceId || opts.voiceId) : undefined;
+        const effectiveVoiceId = job.voiceId || opts.voiceId;
         const effectiveMotor = job.motor || opts.motor;
+        // ESPELHAMENTO DE VOZ (modo audio): liga SÓ quando pedido E há voz alvo.
+        // Sem isso o audio vai como está (voz original). Em copy o voiceId é a
+        // voz do TTS (sem mirror).
+        const mirror =
+          opts.mode === 'audio' &&
+          !!(job.voiceMirroring ?? opts.voiceMirroring) &&
+          !!effectiveVoiceId;
         const input: ProcessJobInput = {
           file: opts.mode === 'audio' ? job.audio : undefined,
           text: opts.mode === 'copy' ? job.copy : undefined,
-          voiceId: effectiveVoiceId,
+          // copy: voz do TTS; audio: só passa voiceId quando vai espelhar.
+          voiceId:
+            opts.mode === 'copy'
+              ? effectiveVoiceId
+              : (mirror ? effectiveVoiceId : undefined),
+          voiceMirroring: mirror || undefined,
           title: `${opts.adNameSafe}_${label}`,
           avatarId: effectiveAvatarId,
           engine: motorToEngine(effectiveMotor),
