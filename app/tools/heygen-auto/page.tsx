@@ -834,6 +834,79 @@ function HeyGenAutoInner() {
     });
   }
 
+  type JobEntry = {
+    label: string;
+    copy?: string;
+    audio?: File;
+    avatarId?: string;
+    voiceId?: string;
+  };
+
+  /** Label coerente (HOOK 1, BODY, BODY 2...) pro pipeline pos-prod saber
+   *  quem é hook vs body. Extraído pra ser reusado pelo Retomar. */
+  function makeStructuredLabel(idx: number): string {
+    if (forcedParts && forcedParts.length > 0 && forcedParts[idx]) {
+      return forcedParts[idx].label;
+    }
+    const hookCount = structuredHooks.filter((h) => (mode === 'copy' ? h.text.trim() : !!h.audio)).length;
+    if (idx < hookCount) return `HOOK ${idx + 1}`;
+    const bodyIdx = idx - hookCount;
+    const bodyTotal = parts.length - hookCount;
+    if (bodyTotal === 1) return 'BODY';
+    return `BODY ${bodyIdx + 1}`;
+  }
+
+  /** Monta a lista de jobs (copy ou audio) — MESMA lógica do disparo. Extraída
+   *  pra o Retomar re-disparar SÓ as partes que falharam (cota/limite HeyGen),
+   *  reaproveitando os mesmos labels/inputs. */
+  function buildDispatchJobs(): { jobs: JobEntry[] } | { error: string } {
+    if (mode === 'copy') {
+      if (parts.length === 0) return { error: 'Preenche pelo menos 1 HOOK.' };
+      return {
+        jobs: parts.map((p, i) => {
+          const partAvatar = dynamicMode ? partAvatars[i] : null;
+          const effectiveAvatar = partAvatar || selectedAvatar;
+          return {
+            label: makeStructuredLabel(i),
+            copy: p,
+            avatarId: dynamicMode ? effectiveAvatar?.id : undefined,
+            voiceId: dynamicMode
+              ? (selectedVoice?.id || effectiveAvatar?.voiceId || undefined)
+              : undefined,
+          };
+        }),
+      };
+    }
+    const hookFiles = structuredHooks.map((h) => h.audio).filter((f): f is File => !!f);
+    const bodyFiles = structuredBody.enabled ? structuredBody.audios : [];
+    if (hookFiles.length === 0 && bodyFiles.length === 0) {
+      return { error: 'Faça upload de pelo menos 1 áudio (hook ou body).' };
+    }
+    const jobs: JobEntry[] = [];
+    hookFiles.forEach((file, i) => {
+      jobs.push({ label: `HOOK ${i + 1}`, audio: file, avatarId: dynamicMode ? selectedAvatar?.id : undefined });
+    });
+    bodyFiles.forEach((file, partIdx) => {
+      const label = bodyFiles.length === 1 ? 'BODY' : `BODY · parte ${partIdx + 1}`;
+      jobs.push({ label, audio: file, avatarId: dynamicMode ? selectedAvatar?.id : undefined });
+    });
+    return { jobs };
+  }
+
+  /** Opções do runHeyGenJobs comuns ao disparo e ao Retomar (voz/espelhamento
+   *  /motor/avatar). selectedAvatar tem que estar definido (checado antes). */
+  function runnerVoiceOpts() {
+    return {
+      avatarId: selectedAvatar!.id,
+      voiceId:
+        mode === 'copy'
+          ? (selectedVoice?.id || selectedAvatar!.voiceId || undefined)
+          : (selectedVoice?.id || undefined),
+      voiceMirroring: mode === 'audio' && !!selectedVoice,
+      motor: (motorConfig.kind === 'global' ? motorConfig.motor : motor) as 'III' | 'IV' | 'V',
+    };
+  }
+
   async function run() {
     if (!extStatus.connected) {
       setError(
@@ -879,82 +952,12 @@ function HeyGenAutoInner() {
     }
     setStage(null);
 
-    type JobEntry = {
-      label: string;
-      copy?: string;
-      audio?: File;
-      avatarId?: string;
-      voiceId?: string;
-    };
-    let jobs: JobEntry[] = [];
-    // Labels coerentes (HOOK 1, HOOK 2, BODY 1, ...) pra que o pipeline
-    // pos-prod (runPostPipeline) saiba quem e hook vs body
-    function makeStructuredLabel(idx: number): string {
-      // Se handoff do clickup-pilot, ja vem labelado em forcedParts
-      if (forcedParts && forcedParts.length > 0 && forcedParts[idx]) {
-        return forcedParts[idx].label;
-      }
-      const hookCount = structuredHooks.filter((h) => mode === 'copy' ? h.text.trim() : !!h.audio).length;
-      if (idx < hookCount) return `HOOK ${idx + 1}`;
-      const bodyIdx = idx - hookCount;
-      const totalParts = parts.length;
-      const bodyTotal = totalParts - hookCount;
-      if (bodyTotal === 1) return 'BODY';
-      return `BODY ${bodyIdx + 1}`;
+    const built = buildDispatchJobs();
+    if ('error' in built) {
+      setError(built.error);
+      return;
     }
-    if (mode === 'copy') {
-      if (parts.length === 0) {
-        setError('Preenche pelo menos 1 HOOK.');
-        return;
-      }
-      // Voz: usa a voz escolhida (selectedVoice) se houver; senão a voz padrão
-      // do avatar. Sem toggle de "substituir" — é sempre escolher avatar + voz.
-      jobs = parts.map((p, i) => {
-        const partAvatar = dynamicMode ? partAvatars[i] : null;
-        const effectiveAvatar = partAvatar || selectedAvatar;
-        return {
-          label: makeStructuredLabel(i),
-          copy: p,
-          // Modo dinamico: cada parte usa seu avatar (com voiceId predefinido),
-          // a menos que uma voz global tenha sido escolhida (vale pra todas).
-          avatarId: dynamicMode ? effectiveAvatar?.id : undefined,
-          voiceId: dynamicMode
-            ? (selectedVoice?.id || effectiveAvatar?.voiceId || undefined)
-            : undefined,
-        };
-      });
-    } else {
-      // Modo audio: cada hook = 1 audio; body = múltiplos audios em ordem
-      const hookFiles = structuredHooks
-        .map((h) => h.audio)
-        .filter((f): f is File => !!f);
-      const bodyFiles = structuredBody.enabled ? structuredBody.audios : [];
-      if (hookFiles.length === 0 && bodyFiles.length === 0) {
-        setError('Faça upload de pelo menos 1 áudio (hook ou body).');
-        return;
-      }
-
-      jobs = [];
-      // Hooks: 1 audio = 1 take "HOOK N" (igual ao comportamento original)
-      hookFiles.forEach((file, i) => {
-        jobs.push({
-          label: `HOOK ${i + 1}`,
-          audio: file,
-          avatarId: dynamicMode ? selectedAvatar?.id : undefined,
-        });
-      });
-      // Body: múltiplos audios em ordem; cada um vira "BODY · parte N"
-      // (ou só "BODY" se for 1)
-      bodyFiles.forEach((file, partIdx) => {
-        const label =
-          bodyFiles.length === 1 ? 'BODY' : `BODY · parte ${partIdx + 1}`;
-        jobs.push({
-          label,
-          audio: file,
-          avatarId: dynamicMode ? selectedAvatar?.id : undefined,
-        });
-      });
-    }
+    const jobs = built.jobs;
 
     cancelRef.current = false;
     setError(null);
@@ -997,18 +1000,9 @@ function HeyGenAutoInner() {
       const finalResults = await runHeyGenJobs(jobsWithMotor, {
         parallel: 3,
         mode,
-        avatarId: selectedAvatar.id,
-        // copy: voz do TTS (escolhida ou default do avatar).
-        // audio: SÓ manda voiceId quando o user escolheu uma voz → aí espelha
-        // (sts_pending); sem escolha, o audio vai com a voz original.
-        voiceId:
-          mode === 'copy'
-            ? (selectedVoice?.id || selectedAvatar.voiceId || undefined)
-            : (selectedVoice?.id || undefined),
-        // Espelhamento de Voz no modo audio = trocar a voz do audio pela
-        // escolhida (igual VA do ClickUp Pilot). Só quando há voz escolhida.
-        voiceMirroring: mode === 'audio' && !!selectedVoice,
-        motor: motorConfig.kind === 'global' ? motorConfig.motor : motor, // fallback per-job vence
+        // avatar + voz + espelhamento (copy=TTS / audio=mirror só com voz escolhida)
+        // — fonte única, compartilhada com o Retomar (runnerVoiceOpts).
+        ...runnerVoiceOpts(),
         adNameSafe: safeName,
         isCancelled: () => cancelRef.current,
         onProgress: (msg) => setStage(msg),
@@ -1038,6 +1032,112 @@ function HeyGenAutoInner() {
         message: (e as Error).message ?? 'Falha desconhecida.',
         finishedAt: Date.now(),
       });
+    } finally {
+      setProcessing(false);
+      cancelRef.current = false;
+    }
+  }
+
+  /* --------- Retomar: re-dispara SÓ as partes que falharam (cota/limite
+   *  HeyGen), igual à auto-cura do ClickUp Pilot. Mantém os takes que já foram
+   *  (videoId), re-dispara os que não têm videoId ou cujo render falhou, e
+   *  mescla os novos videoIds no results. Depois o auto-poll repega. --------- */
+  function partIsBad(r: PartResult): boolean {
+    if (!r.videoId) return true; // não disparou (cota/limite)
+    return downloadStatuses[r.videoId]?.status === 'failed'; // render falhou
+  }
+
+  async function retryFailedParts() {
+    if (!extStatus.connected) {
+      setError('Extensão Hey Auto não detectada.');
+      return;
+    }
+    if (!selectedAvatar) {
+      setError('Selecione um avatar primeiro.');
+      return;
+    }
+    const badLabels = new Set(results.filter(partIsBad).map((r) => r.label));
+    if (badLabels.size === 0) {
+      // Nada pra re-disparar → segue pro download/poll normal.
+      void downloadAllAsZip();
+      return;
+    }
+    const built = buildDispatchJobs();
+    if ('error' in built) {
+      setError(built.error);
+      return;
+    }
+    const allJobs = built.jobs;
+    const motorsPerPart = resolveMotors(motorConfig, allJobs.length, {
+      slotIds: allJobs.map((j) => j.label),
+      seed: safeName,
+    });
+    const retryJobs = allJobs
+      .map((j, i) => ({ ...j, motor: motorsPerPart[i] }))
+      .filter((j) => badLabels.has(j.label));
+    if (retryJobs.length === 0) {
+      void downloadAllAsZip();
+      return;
+    }
+
+    const batchId = runBatchIdRef.current || `heygenauto:${safeName}:${Date.now()}`;
+    runBatchIdRef.current = batchId;
+    cancelRef.current = false;
+    setError(null);
+    setProcessing(true);
+    setStage(`Re-disparando ${retryJobs.length} parte(s) que falharam...`);
+
+    // Aplica o resultado de UM job de volta no results, casando pelo label.
+    const applyResult = (label: string, videoId: string | null, err: string | null) => {
+      setResults((prev) =>
+        prev.map((p) =>
+          p.label === label
+            ? { ...p, videoId: videoId ?? p.videoId, error: videoId ? null : (err ?? p.error) }
+            : p,
+        ),
+      );
+    };
+
+    try {
+      const opts = runnerVoiceOpts();
+      const finalResults = await runHeyGenJobs(retryJobs, {
+        parallel: 2,
+        mode,
+        ...opts,
+        adNameSafe: safeName,
+        isCancelled: () => cancelRef.current,
+        onProgress: (m) => setStage(m),
+        onResult: (rr) => {
+          const lbl = retryJobs[rr.index - 1]?.label;
+          if (lbl) applyResult(lbl, rr.videoId, rr.error);
+        },
+      });
+      finalResults.forEach((rr) => {
+        const lbl = retryJobs[rr.index - 1]?.label;
+        if (lbl) applyResult(lbl, rr.videoId, rr.error);
+      });
+      setStage(null);
+      // Espelha no store (parts atualizadas) — usa o results mais recente.
+      setResults((prev) => {
+        const okCount = prev.filter((r) => r.videoId).length;
+        upsertSharedBatch(batchId, {
+          phase: okCount > 0 ? 'rendering' : 'failed',
+          parts: prev.map((r) => ({
+            label: r.label,
+            videoId: r.videoId,
+            error: r.error,
+            renamedTo: `${r.label}.mp4`,
+          })),
+          message:
+            prev.every((r) => r.videoId)
+              ? `Todas as ${prev.length} partes disparadas — renderizando, clique Baixar quando quiser.`
+              : `${okCount}/${prev.length} disparados — ainda faltam ${prev.length - okCount} (cota/limite?). Retomar de novo depois.`,
+        });
+        return prev;
+      });
+    } catch (e) {
+      setError((e as Error).message ?? 'Falha ao re-disparar.');
+      setStage(null);
     } finally {
       setProcessing(false);
       cancelRef.current = false;
@@ -3057,6 +3157,20 @@ function HeyGenAutoInner() {
               const renderedCount = Object.values(downloadStatuses).filter((s) => s.status === 'completed').length;
               const montadoDone = !!pipelineZips.montadoName && !downloading;
               const isRunning = processing || downloading;
+              const total = results.length;
+              // ===== Detecção de FALHA (igual ClickUp Pilot) =====
+              // dispatchFailed = parte sem videoId (cota/limite estourou no disparo).
+              // renderFailed = vídeo disparou mas o HeyGen marcou 'failed' no render.
+              const dispatchFailed = results.filter((r) => !r.videoId).length;
+              const renderFailed = results.filter(
+                (r) => r.videoId && downloadStatuses[r.videoId]?.status === 'failed',
+              ).length;
+              const anyFailed = dispatchFailed > 0 || renderFailed > 0;
+              const pendingRender = results.some((r) => {
+                if (!r.videoId) return false;
+                const s = downloadStatuses[r.videoId]?.status;
+                return s !== 'completed' && s !== 'failed';
+              });
               let phase: BatchJob3DPhase;
               if (processing) phase = 'dispatching';
               else if (downloading) {
@@ -3064,10 +3178,14 @@ function HeyGenAutoInner() {
                 if (/montando|montagem|pipeline|decup|assembl/.test(s)) phase = 'post';
                 else if (/baixando|zipando|salvando/.test(s)) phase = 'downloading';
                 else phase = 'rendering';
-              } else if (error && dispatchedCount === 0) phase = 'failed';
+              } else if (dispatchedCount === 0) phase = 'failed';
+              else if (anyFailed && !pendingRender) phase = 'failed'; // tudo assentou e sobrou falha
               else if (montadoDone) phase = 'done';
               else phase = 'rendering'; // disparado → HeyGen renderizando; clique Baixar
-              const total = results.length;
+              // Mensagem de falha clara: avisa quantas faltaram + que é só Retomar.
+              const failMsg = anyFailed
+                ? `${dispatchFailed + renderFailed} de ${total} falharam (cota/limite do HeyGen?) — clique Retomar pra re-disparar as que faltam`
+                : null;
               // Previews por take (loading → vídeo jogável), igual ClickUp Pilot.
               const previewIdxs: number[] = [];
               const previews: LipsyncTake[] = results.map((r, idx) => {
@@ -3095,11 +3213,16 @@ function HeyGenAutoInner() {
                     partsTotal={total}
                     partsDispatched={dispatchedCount}
                     partsRendered={renderedCount}
-                    message={downloadStage || error || undefined}
+                    message={downloadStage || failMsg || error || undefined}
                     elapsedMs={runStartedAt ? Date.now() - runStartedAt : 0}
                     allOk={total > 0 && dispatchedCount === total}
-                    isPartialDone={phase === 'done' && dispatchedCount < total}
-                    onRetomar={() => void downloadAllAsZip()}
+                    isPartialDone={anyFailed}
+                    // Falha = entrega incompleta: trava o download (não baixa
+                    // montagem furada) e o pill vira "Incompleto — clica Retomar".
+                    downloadBlocked={anyFailed}
+                    // Retomar: se tem parte falha, RE-DISPARA só as que faltam
+                    // (cota/limite); senão segue pro download normal.
+                    onRetomar={() => (anyFailed ? void retryFailedParts() : void downloadAllAsZip())}
                     onPausar={() => { if (processing) cancel(); else if (downloading) cancelDownload(); }}
                     onDebug={() => void run()}
                     onRemove={() => {
