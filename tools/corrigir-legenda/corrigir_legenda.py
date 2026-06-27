@@ -32,19 +32,44 @@ import sys
 import time
 import unicodedata
 
-CAPCUT_DRAFTS = os.path.join(
-    os.environ.get("LOCALAPPDATA", ""),
-    "CapCut", "User Data", "Projects", "com.lveditor.draft",
-)
+_OVERRIDE_ROOT: str | None = None
+
+
+def _candidate_roots():
+    """Locais onde o CapCut guarda os projetos, por sistema operacional.
+    Pode ser sobrescrito por --drafts-root ou pela variavel CAPCUT_DRAFTS."""
+    if _OVERRIDE_ROOT:
+        yield _OVERRIDE_ROOT
+    env = os.environ.get("CAPCUT_DRAFTS")
+    if env:
+        yield env
+    home = os.path.expanduser("~")
+    leaf = ("User Data", "Projects", "com.lveditor.draft")
+    if sys.platform == "darwin":  # macOS
+        yield os.path.join(home, "Movies", "CapCut", *leaf)
+        yield os.path.join(home, "Library", "Application Support", "CapCut", *leaf)
+        yield os.path.join(home, "Movies", "JianyingPro", *leaf)
+    elif os.name == "nt":  # Windows
+        la = os.environ.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
+        yield os.path.join(la, "CapCut", *leaf)
+    else:  # Linux / outros
+        yield os.path.join(home, "CapCut", *leaf)
 
 
 def _root() -> str:
-    if not os.path.isdir(CAPCUT_DRAFTS):
-        raise FileNotFoundError(
-            f"drafts do CapCut nao encontrados: {CAPCUT_DRAFTS}\n"
-            "Abra o CapCut ao menos uma vez para criar a pasta de projetos."
-        )
-    return CAPCUT_DRAFTS
+    tried = []
+    for c in _candidate_roots():
+        if not c:
+            continue
+        tried.append(c)
+        if os.path.isdir(c):
+            return c
+    raise FileNotFoundError(
+        "pasta de projetos do CapCut nao encontrada. Tentei:\n  "
+        + "\n  ".join(tried)
+        + "\nAbra o CapCut ao menos uma vez, ou aponte a pasta certa com "
+        "--drafts-root \"<caminho>\" (ou a variavel CAPCUT_DRAFTS)."
+    )
 
 
 def read_copy(path: str) -> str:
@@ -260,18 +285,26 @@ def main(argv: list[str] | None = None) -> int:
         description="Corrige a grafia da auto-legenda do CapCut pela copy.txt.")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("list", help="lista os projetos do CapCut")
+    for s in (sub.add_parser("list", help="lista os projetos do CapCut"),):
+        s.add_argument("--drafts-root", default=None,
+                       help="apontar manualmente a pasta de projetos do CapCut")
 
     pi = sub.add_parser("inspect", help="mostra a legenda atual do projeto")
     pi.add_argument("--draft", required=True)
+    pi.add_argument("--drafts-root", default=None,
+                    help="apontar manualmente a pasta de projetos do CapCut")
 
     pc = sub.add_parser("corrigir", help="corrige a legenda pela copy.txt")
     pc.add_argument("--draft", required=True)
     pc.add_argument("--copy", required=True, help="caminho do copy.txt")
     pc.add_argument("--out-name", default=None,
                     help="nome do projeto de saida (default: '<draft> - LEGENDA OK')")
+    pc.add_argument("--drafts-root", default=None,
+                    help="apontar manualmente a pasta de projetos do CapCut")
 
     args = p.parse_args(argv)
+    global _OVERRIDE_ROOT
+    _OVERRIDE_ROOT = getattr(args, "drafts_root", None)
     try:
         if args.cmd == "list":
             _emit(list_drafts())

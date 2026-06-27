@@ -5,38 +5,36 @@ Corrige a **grafia** da auto-legenda do CapCut pela `copy.txt`, mantendo o
 todos" continuam funcionando). O original nunca é alterado.
 
 - **Sem VectCutAPI, sem ffmpeg, sem pip, sem venv.** Só Python (stdlib).
-- Lê os projetos do CapCut direto de `%LOCALAPPDATA%\CapCut\...`.
+- **Cross-platform** (Windows e macOS): acha a pasta de projetos do CapCut
+  sozinho. Se não achar, aponte com `--drafts-root "<caminho>"`.
 
-## Setup no outro PC (só tem Claude Code)
+## Setup — macOS
 
-Cole isto no terminal (PowerShell). Instala o Python se faltar e baixa o
-script:
+O Python 3 já costuma vir no Mac. Se faltar: `brew install python` (ou
+`xcode-select --install`). Salve o `corrigir_legenda.py` (ex.: na Mesa).
+
+```bash
+# rodar (ajuste o caminho do arquivo)
+python3 ~/Desktop/corrigir_legenda.py list
+python3 ~/Desktop/corrigir_legenda.py corrigir --draft "NOME DO PROJETO" --copy "/caminho/copy.txt"
+```
+
+Pasta de projetos do CapCut no Mac (o script tenta automaticamente):
+`~/Movies/CapCut/User Data/Projects/com.lveditor.draft`
+
+## Setup — Windows
 
 ```powershell
-# 1) Python (se não tiver)
+# Python (se não tiver)
 if (-not (Get-Command python -ErrorAction SilentlyContinue)) {
   winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements
 }
-
-# 2) Baixar o script
-$dst = "$env:USERPROFILE\corrigir_legenda.py"
-irm "https://raw.githubusercontent.com/ryanrxvn-maker/casablanca/main/tools/corrigir-legenda/corrigir_legenda.py" -OutFile $dst
-Write-Host "Pronto: $dst"
 ```
 
-Depois disso o PC está pronto pra disparar correção de legenda.
-
-## Uso
-
 ```powershell
-# Listar os projetos do CapCut (pra achar o nome exato)
-python $env:USERPROFILE\corrigir_legenda.py list
-
-# Ver a legenda atual de um projeto
-python $env:USERPROFILE\corrigir_legenda.py inspect --draft "NOME DO PROJETO"
-
-# Corrigir a legenda pela copy.txt  (CapCut FECHADO)
-python $env:USERPROFILE\corrigir_legenda.py corrigir --draft "NOME DO PROJETO" --copy "C:\caminho\copy.txt"
+# Uso (CapCut FECHADO)
+python $env:USERPROFILE\Desktop\corrigir_legenda.py list
+python $env:USERPROFILE\Desktop\corrigir_legenda.py corrigir --draft "NOME DO PROJETO" --copy "C:\caminho\copy.txt"
 ```
 
 Saída: duplica o projeto em **`<NOME> - LEGENDA OK`** com o texto corrigido.
