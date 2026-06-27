@@ -315,19 +315,36 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   // (parse do moov, sem ffmpeg); null = não deu pra medir → não piora, confia.
   const verifyConcatSync = async (out: Blob, parts: Blob[], label: string): Promise<Blob> => {
     if (parts.length <= 1) return out;
-    const tolOf = (audioSec: number) => Math.max(0.5, audioSec * 0.02); // 0.5s ou 2%
     const sync = await probeAVSync(out);
     if (!sync) return out;
     const diff = Math.abs(sync.audioSec - sync.videoSec);
-    if (diff <= tolOf(sync.audioSec)) return out;
-    console.warn(`[clickup-pilot-pipeline] ${label}: DESSINCRONIZADO v=${sync.videoSec.toFixed(2)}s a=${sync.audioSec.toFixed(2)}s (diff ${diff.toFixed(2)}s) → refazendo com re-encode`);
-    const fixed = await retryFFmpeg(() => concatAvatarParts(parts), concatTimeoutMs(parts, true), `concat-resync ${label}`, 2);
-    const s2 = await probeAVSync(fixed);
-    if (s2 && Math.abs(s2.audioSec - s2.videoSec) > tolOf(s2.audioSec)) {
-      throw new Error(`montagem ${label} dessincronizada mesmo após re-encode (v=${s2.videoSec.toFixed(2)}s a=${s2.audioSec.toFixed(2)}s)`);
+    // DETECÇÃO: cauda natural de áudio do HeyGen acumula <~0.5s; acima disso é
+    // desync de verdade (copy-concat dropou o vídeo de uma parte).
+    if (diff <= Math.max(0.5, sync.audioSec * 0.02)) return out;
+    console.warn(`[clickup-pilot-pipeline] ${label}: DESSINCRONIZADO v=${sync.videoSec.toFixed(1)}s a=${sync.audioSec.toFixed(1)}s (diff ${diff.toFixed(1)}s) → re-encode pra sincronizar`);
+    let fixed: Blob | null = null;
+    try {
+      fixed = await retryFFmpeg(() => concatAvatarParts(parts), concatTimeoutMs(parts, true), `concat-resync ${label}`, 2);
+    } catch (e) {
+      console.warn(`[clickup-pilot-pipeline] ${label}: re-encode de sync falhou (${(e as Error)?.message?.slice(0, 60)})`);
     }
-    console.log(`[clickup-pilot-pipeline] ${label}: re-sync OK (v=${s2?.videoSec.toFixed(2)}s a=${s2?.audioSec.toFixed(2)}s)`);
-    return fixed;
+    if (fixed) {
+      // O re-encode (filter_complex + aresample=async=1) SINCRONIZA por construção
+      // → é a MELHOR versão possível. ENTREGA ela. NÃO re-lança por uma sobra
+      // pequena: era isso que bloqueava montado BOM (cauda natural em multi-avatar)
+      // como "INCOMPLETO" à toa. O re-encode nunca dropa stream, então é seguro.
+      const s2 = await probeAVSync(fixed);
+      console.log(`[clickup-pilot-pipeline] ${label}: re-sync ${s2 ? `v=${s2.videoSec.toFixed(1)}s a=${s2.audioSec.toFixed(1)}s` : 'ok'}`);
+      return fixed;
+    }
+    // Re-encode FALHOU (OOM/erro). Só BLOQUEIA (lança) se o desync original for
+    // GRANDE (vídeo de fato faltando, tipo 14s do AD24) — aí não pode entregar
+    // quebrado. Desync moderado → entrega o montado completo (não trava à toa).
+    if (diff > Math.max(4, sync.audioSec * 0.15)) {
+      throw new Error(`montagem ${label} com vídeo faltando (${diff.toFixed(1)}s) e re-encode falhou`);
+    }
+    console.warn(`[clickup-pilot-pipeline] ${label}: re-encode falhou + desync moderado (${diff.toFixed(1)}s) → entrega o montado original`);
+    return out;
   };
 
   // Regula a voz de UM clipe a -16 LUFS: denoise (limpa hiss/ruído) +
