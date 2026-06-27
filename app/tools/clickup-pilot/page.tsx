@@ -6327,11 +6327,15 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
           for (const part of partPlan) {
             if (batchCancelRef.current[taskId]) throw new Error('cancelado');
             const label = `${av.avaCode}·${part.label}`;
-            // CACHE por CONTEÚDO: chave = task+label+hash(texto|avatar|voz). No
-            // RETOMAR, se nada disso mudou, reusa a parte JÁ renderizada do IDB em
-            // vez de re-gerar no HeyGen (não desperdiça geração nem tempo). Se a
-            // copy/avatar/voz mudou, o hash muda → re-gera (cache não fica stale).
-            const partCacheKey = `va:${taskId}:part:${label}@${shortHash(`${part.text}|${choice.id}|${voiceId || ''}`)}`;
+            // IDENTIDADE DA PARTE POR CONTEÚDO (avatar+voz+texto). Esse hash entra
+            // em 3 lugares: (1) chave do cache IDB, (2) chave de RECUPERAÇÃO do
+            // HeyGen, (3) TÍTULO do vídeo no HeyGen. Assim, reuso (cache ou HeyGen)
+            // só acontece pra MESMO avatar/voz/texto. Disparo com AVATAR DIFERENTE
+            // = hash diferente = título diferente = NÃO casa com o antigo = gera o
+            // novo. Cada disparo fica isolado, sem misturar avatares de runs antigas.
+            const partHash = shortHash(`${part.text}|${choice.id}|${voiceId || ''}`);
+            const heygenTitle = `${adNameClean}_${av.avaCode}_${part.label}_${partHash}`;
+            const partCacheKey = `va:${taskId}:part:${label}@${partHash}`;
             let partBytes: Uint8Array | null = null;
             try {
               const { loadBlob } = await import('@/lib/zip-store');
@@ -6346,10 +6350,12 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
               }
             } catch { /* cache miss/erro → tenta HeyGen/renderiza */ }
 
-            // 2) RECUPERAÇÃO do HeyGen: a parte já renderizou antes mas não foi
-            // capturada? Reusa o vídeo pronto (baixa, sem re-gerar = sem cota).
+            // 2) RECUPERAÇÃO do HeyGen: a parte já renderizou antes (MESMO
+            // avatar/voz/texto) mas não foi capturada? Reusa o vídeo pronto
+            // (baixa, sem re-gerar = sem cota). Casa pelo TÍTULO COM HASH → nunca
+            // pega vídeo de um avatar diferente de outro disparo.
             if (!partBytes) {
-              const doneUrl = heygenDone.get(`${adNameClean}_${av.avaCode}_${part.label}`);
+              const doneUrl = heygenDone.get(heygenTitle);
               if (doneUrl) {
                 try {
                   patchVA({ phase: 'rendering', message: `${av.avaCode}: ${part.label} recuperado do HeyGen (já estava pronto)` });
@@ -6379,7 +6385,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                     text: part.text,
                     avatarId: choice.id,
                     voiceId,
-                    title: `${adNameClean}_${av.avaCode}_${part.label}`,
+                    title: heygenTitle,
                     engine: 'iii', orientation: 'portrait',
                   }, { onProgress: (stage: string) => console.log(`[VA-texto ${label} t${attempt}] ${stage}`) });
                   if (!job.videoId) throw new Error('processJob nao retornou videoId');
