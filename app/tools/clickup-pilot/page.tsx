@@ -2111,13 +2111,17 @@ function ClickUpPilotInner() {
       console.info(`[batch restore] ${interruptedCount} batch(es) interrompidos — re-enfileirados pro promoter.`);
     }
 
-    // REIDRATAÇÃO VA (resume após RESTART do PC): pra cada task VA reenfileirada,
-    // carrega o snapshot persistido no disparo e repõe o estado que o runner
-    // precisa (vaBriefing em taskAnalyses + escolhas avatar/voz + adUrl +
-    // transcript/roleText + roteamento). Roda no MESMO tick do setBatchStates →
-    // quando o promoter pega a 'queued' e chama runVAPipelineForTask, tudo já
-    // está no lugar e ela re-roda do certo, em vez de morrer em "briefing nao
-    // sobrevive reload". Sem snapshot (task antiga) → comportamento de antes.
+    // REIDRATAÇÃO VA (sobrevive RELOAD/RESTART do PC): pra CADA task VA que tem
+    // snapshot persistido (do disparo), repõe o estado que o runner precisa
+    // (vaBriefing em taskAnalyses + escolhas avatar/voz + adUrl + transcript/
+    // roleText + roteamento). Cobre TODAS as fases — não só as reenfileiradas:
+    // uma VA 'done'/'failed' também precisa do briefing de volta pra o RETOMAR
+    // funcionar (sem isto, RETOMAR após um hard-refresh morria em "briefing nao
+    // sobrevive reload", justamente quando o user atualiza a página pra pegar
+    // código novo). Roda no MESMO tick do setBatchStates → quando o RETOMAR/
+    // promoter chama runVAPipelineForTask, tudo já está no lugar. Sem snapshot
+    // (task antiga) → comportamento de antes. NÃO auto-dispara: o dispatch exige
+    // seleção do user; aqui só repomos o que sumiu pra o RETOMAR não falhar.
     {
       const taPatch: Record<string, any> = {};
       const avChoices: Record<string, unknown> = {};
@@ -2128,7 +2132,7 @@ function ClickUpPilotInner() {
       const teOverride: Record<string, boolean> = {};
       let vaRehydrated = 0;
       for (const [taskId, st] of Object.entries(restored)) {
-        if (st.phase !== 'queued' || !st.isVA) continue;
+        if (!st.isVA) continue;
         const snap = loadVAResumeSnapshot(taskId);
         if (!snap?.vaBriefing) continue;
         taPatch[taskId] = {
