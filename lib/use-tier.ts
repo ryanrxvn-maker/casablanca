@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { withRetry } from '@/lib/retry';
 
 export type Tier = 'free' | 'basic' | 'pro' | 'admin';
 
@@ -53,60 +54,78 @@ export function useTier(): Tier | null {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const supabase = createClient();
-        const { data: u } = await supabase.auth.getUser();
-        const uid = u.user?.id;
-        if (!uid) {
-          if (!cancelled) setTier('free');
-          return;
-        }
-        // Tenta select com tier; se coluna faltar, cai pro básico (compat
-        // com schema antes da migration 015/016).
-        type RowShape = {
-          tier?: string | null;
-          is_admin?: boolean | null;
-          is_active?: boolean | null;
-        };
-        let data: RowShape | null = null;
-        const full = await supabase
+
+    type RowShape = {
+      tier?: string | null;
+      is_admin?: boolean | null;
+      is_active?: boolean | null;
+    };
+
+    // Resolve o tier real. LANÇA em falha transitória (rede/cold-start) pra que
+    // o withRetry re-tente — sem isso, a 1ª falha grudava a UI em free até F5.
+    async function resolveTier(): Promise<Tier> {
+      const supabase = createClient();
+      const { data: u, error: uErr } = await supabase.auth.getUser();
+      if (uErr) throw uErr;
+      const uid = u.user?.id;
+      // Sem uid = genuinamente deslogado (não é erro) → free, sem re-tentar.
+      if (!uid) return 'free';
+
+      // Tenta select com tier; se a coluna faltar (compat schema antigo), cai
+      // pro básico. Só LANÇA se o básico também falhar (erro real de rede).
+      let data: RowShape | null = null;
+      const full = await supabase
+        .from('profiles')
+        .select('tier, is_admin, is_active')
+        .eq('id', uid)
+        .maybeSingle();
+      if (full.error) {
+        const basic = await supabase
           .from('profiles')
-          .select('tier, is_admin, is_active')
+          .select('is_admin, is_active')
           .eq('id', uid)
           .maybeSingle();
-        if (full.error) {
-          const basic = await supabase
-            .from('profiles')
-            .select('is_admin, is_active')
-            .eq('id', uid)
-            .maybeSingle();
-          data = (basic.data ?? null) as unknown as RowShape | null;
-        } else {
-          data = (full.data ?? null) as unknown as RowShape | null;
-        }
-        if (cancelled) return;
-        const raw = (data?.tier ?? '').toString();
-        let resolved: Tier;
-        // PRIORIDADE: is_admin sempre ganha — mesmo se tier for outro
-        if (data?.is_admin) {
-          resolved = 'admin';
-        } else if (raw === 'pro' || raw === 'beta') {
-          resolved = 'pro';
-        } else if (raw === 'basic') {
-          resolved = 'basic';
-        } else if (raw === 'free') {
-          resolved = 'free';
-        } else {
-          // Sem coluna tier: usuário com is_active=true e sem tier era beta
-          // (legado fechado). Vira pro pra preservar acesso.
-          resolved = data?.is_active ? 'pro' : 'free';
-        }
-        setTier(resolved);
-      } catch {
-        if (!cancelled) setTier('free');
+        if (basic.error) throw basic.error;
+        data = (basic.data ?? null) as unknown as RowShape | null;
+      } else {
+        data = (full.data ?? null) as unknown as RowShape | null;
       }
-    })();
+
+      const raw = (data?.tier ?? '').toString();
+      // PRIORIDADE: is_admin sempre ganha — mesmo se tier for outro
+      if (data?.is_admin) return 'admin';
+      if (raw === 'pro' || raw === 'beta') return 'pro';
+      if (raw === 'basic') return 'basic';
+      if (raw === 'free') return 'free';
+      // Sem coluna tier: usuário com is_active=true e sem tier era beta
+      // (legado fechado). Vira pro pra preservar acesso.
+      return data?.is_active ? 'pro' : 'free';
+    }
+
+    function load() {
+      withRetry(resolveTier, { tries: 4, baseMs: 400 })
+        .then((resolved) => {
+          if (!cancelled) setTier(resolved);
+        })
+        .catch(() => {
+          // Esgotou as tentativas → free por segurança (fail-closed).
+          if (!cancelled) setTier('free');
+        });
+    }
+
+    load();
+
+    // Recarrega quando o auth muda (login, refresh de token expirado) — cura o
+    // caso em que o token estava vencendo e a 1ª resolução pegou free.
+    const supabase = createClient();
+    const { data: sub } = supabase.auth.onAuthStateChange(() => {
+      if (!cancelled) load();
+    });
+
+    return () => {
+      cancelled = true;
+      sub.subscription.unsubscribe();
+    };
   }, []);
 
   return tier;

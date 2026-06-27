@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { withRetry } from '@/lib/retry';
 import { DarkoLogo } from './DarkoLogo';
 
 type Profile = {
@@ -56,11 +57,18 @@ export function Sidebar() {
 
   useEffect(() => {
     let cancelled = false;
-    async function fetchProfile() {
+
+    // Resolve o profile real. LANÇA em falha transitória (rede/cold-start/token
+    // expirando) pra que o withRetry re-tente — sem isso, a 1ª falha deixava
+    // `profile` null pra sempre e o selo grudava em FREE até o usuário dar F5.
+    async function resolveProfile(): Promise<Profile> {
       const supabase = createClient();
-      const { data: userData } = await supabase.auth.getUser();
+      const { data: userData, error: uErr } = await supabase.auth.getUser();
+      if (uErr) throw uErr;
       const uid = userData.user?.id;
-      if (!uid) return;
+      // Sem uid pode ser o token renovando — lança pra re-tentar.
+      if (!uid) throw new Error('sem sessão (uid ausente)');
+
       // Tenta select com tier; se a coluna não existir, cai pro select básico.
       type RowShape = {
         name?: string | null;
@@ -80,36 +88,57 @@ export function Sidebar() {
           .select('name, avatar_url, is_admin')
           .eq('id', uid)
           .maybeSingle();
+        if (basic.error) throw basic.error;
         row = (basic.data ?? null) as unknown as RowShape | null;
       } else {
         row = (full.data ?? null) as unknown as RowShape | null;
       }
-      const data = row;
-      if (!cancelled) {
-        const rawTier = (data?.tier ?? '') as string;
-        let resolvedTier: 'free' | 'basic' | 'pro' | 'admin' = 'free';
-        // PRIORIDADE: is_admin sempre ganha
-        if (data?.is_admin) resolvedTier = 'admin';
-        else if (rawTier === 'pro' || rawTier === 'beta') resolvedTier = 'pro';
-        else if (rawTier === 'basic') resolvedTier = 'basic';
-        else if (rawTier === 'free') resolvedTier = 'free';
-        setProfile({
-          name: data?.name ?? null,
-          avatar_url: data?.avatar_url ?? null,
-          is_admin: !!data?.is_admin,
-          tier: resolvedTier,
-        });
-        setAvatarBroken(false);
-      }
+
+      const rawTier = (row?.tier ?? '') as string;
+      let resolvedTier: 'free' | 'basic' | 'pro' | 'admin' = 'free';
+      // PRIORIDADE: is_admin sempre ganha
+      if (row?.is_admin) resolvedTier = 'admin';
+      else if (rawTier === 'pro' || rawTier === 'beta') resolvedTier = 'pro';
+      else if (rawTier === 'basic') resolvedTier = 'basic';
+      else if (rawTier === 'free') resolvedTier = 'free';
+      return {
+        name: row?.name ?? null,
+        avatar_url: row?.avatar_url ?? null,
+        is_admin: !!row?.is_admin,
+        tier: resolvedTier,
+      };
     }
+
+    function fetchProfile() {
+      withRetry(resolveProfile, { tries: 4, baseMs: 400 })
+        .then((p) => {
+          if (cancelled) return;
+          setProfile(p);
+          setAvatarBroken(false);
+        })
+        .catch(() => {
+          // Esgotou as tentativas — mantém `profile` como está (selo neutro,
+          // nunca "FREE" falso). O listener de auth abaixo recupera no próximo
+          // evento de sessão.
+        });
+    }
+
     fetchProfile();
     function onUpd() {
       fetchProfile();
     }
     window.addEventListener('darko:profile-updated', onUpd);
+
+    // Recarrega quando o auth muda (login, refresh de token expirado).
+    const supabase = createClient();
+    const { data: sub } = supabase.auth.onAuthStateChange(() => {
+      if (!cancelled) fetchProfile();
+    });
+
     return () => {
       cancelled = true;
       window.removeEventListener('darko:profile-updated', onUpd);
+      sub.subscription.unsubscribe();
     };
   }, []);
 
@@ -302,18 +331,33 @@ export function Sidebar() {
               initial={initial}
               active={accountOpen}
             />
-            {/* Pill do tier embaixo */}
-            <span
-              className="mt-1 rounded-full px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-[0.18em]"
-              style={{
-                fontFamily: 'var(--font-tech)',
-                color: tierColorOf(profile?.tier ?? 'free'),
-                background: tierBgOf(profile?.tier ?? 'free'),
-                border: `1px solid ${tierBorderOf(profile?.tier ?? 'free')}`,
-              }}
-            >
-              {tierLabelOf(profile?.tier ?? 'free')}
-            </span>
+            {/* Pill do tier embaixo. Enquanto o profile não resolveu, mostra
+                neutro (•••) — NUNCA "FREE" falso, que assustava conta paga. */}
+            {profile ? (
+              <span
+                className="mt-1 rounded-full px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-[0.18em]"
+                style={{
+                  fontFamily: 'var(--font-tech)',
+                  color: tierColorOf(profile.tier ?? 'free'),
+                  background: tierBgOf(profile.tier ?? 'free'),
+                  border: `1px solid ${tierBorderOf(profile.tier ?? 'free')}`,
+                }}
+              >
+                {tierLabelOf(profile.tier ?? 'free')}
+              </span>
+            ) : (
+              <span
+                className="mt-1 rounded-full px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-[0.18em] opacity-60"
+                style={{
+                  fontFamily: 'var(--font-tech)',
+                  color: 'rgb(var(--text-muted))',
+                  background: 'rgb(var(--text-muted) / 0.10)',
+                  border: '1px solid rgb(var(--text-muted) / 0.25)',
+                }}
+              >
+                •••
+              </span>
+            )}
           </button>
 
           {accountOpen ? (
