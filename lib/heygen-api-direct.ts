@@ -533,6 +533,27 @@ export type CreateVideoParams = {
   voiceId?: string;
 };
 
+/** Converte erro de submit do HeyGen em mensagem CLARA e acionável quando
+ *  reconhece o caso. Hoje cobre o erro de WORKSPACE/SPACE: o avatar pertence a
+ *  OUTRO space do HeyGen (acontece em conta com Teams/múltiplos spaces, quando
+ *  o space ATIVO na sessão não é o dono do avatar — típico no Retomar, em que o
+ *  avatar foi salvo num space e a sessão agora está noutro). Pra qualquer outro
+ *  erro, devolve o texto original + "(status N)" — PRESERVANDO o que o
+ *  withRetry/isQuotaError já classificam (não muda comportamento, só o texto). */
+function describeSubmitError(status: number, rawMsg: string): string {
+  const raw = rawMsg || '?';
+  const m = raw.toLowerCase();
+  if (m.includes('not accessible in space') || (m.includes('avatar group') && m.includes('not accessible'))) {
+    return (
+      'O avatar dessa parte está em OUTRO workspace (space) do HeyGen — por isso ' +
+      'o disparo falhou. No HeyGen, troque o workspace ATIVO (seletor no topo) pro ' +
+      'dono desse avatar, recarregue a biblioteca de avatares e clique Retomar. ' +
+      `[HeyGen status ${status}: ${raw}]`
+    );
+  }
+  return `${raw} (status ${status})`;
+}
+
 export async function createVideo(params: CreateVideoParams): Promise<{ video_id: string; avatar_id: string }> {
   const { title, avatarId, engine, audio, orientation = 'portrait', resolution, motionPrompt, voiceMirroring, voiceId } = params;
   const eng = ENGINES[engine];
@@ -576,8 +597,8 @@ export async function createVideo(params: CreateVideoParams): Promise<{ video_id
     };
     const rm = await jsonCall('POST', '/v2/avatar/shortcut/submit', mirrorBody);
     if (!rm.ok) {
-      // status SEMPRE embutido → withRetry consegue classificar transitorio (429/5xx/0).
-      throw new Error(`Falha ao criar video (Espelhamento de Voz, status ${rm.status}): ${rm.body?.message || rm.body?.msg || '?'}`);
+      // status SEMPRE embutido (via describeSubmitError) → withRetry classifica transitorio (429/5xx/0).
+      throw new Error('Falha ao criar video (Espelhamento de Voz): ' + describeSubmitError(rm.status, rm.body?.message || rm.body?.msg || '?'));
     }
     return rm.body.data;
   }
@@ -613,8 +634,8 @@ export async function createVideo(params: CreateVideoParams): Promise<{ video_id
   };
   const r = await jsonCall('POST', '/v2/avatar/shortcut/submit', body);
   if (!r.ok) {
-    // status SEMPRE embutido → withRetry consegue classificar transitorio (429/5xx/0).
-    throw new Error(`Falha ao criar video (status ${r.status}): ${r.body?.message || r.body?.msg || '?'}`);
+    // status SEMPRE embutido (via describeSubmitError) → withRetry classifica transitorio (429/5xx/0).
+    throw new Error('Falha ao criar video: ' + describeSubmitError(r.status, r.body?.message || r.body?.msg || '?'));
   }
   return r.body.data;
 }
@@ -686,7 +707,7 @@ export async function createVideoWithText(
     return r.body.data;
   }
   const msg = r.body?.message ?? r.body?.msg ?? r.body?._text?.slice(0, 200) ?? '?';
-  throw new Error(`createVideoWithText falhou (tts_pending, status ${r.status}): ${msg}`);
+  throw new Error('createVideoWithText falhou (tts_pending): ' + describeSubmitError(r.status, msg));
 }
 
 /* ============= Polling + download de videos prontos ============= */
