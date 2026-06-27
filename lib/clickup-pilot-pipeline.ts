@@ -124,6 +124,62 @@ export type PipelineResult = {
   };
 };
 
+/** Lê as durações das faixas de VÍDEO e ÁUDIO de um MP4 parseando o `moov` (puro
+ *  JS, sem ffmpeg → rápido e sem tocar o singleton). Serve pra DETECTAR montagem
+ *  dessincronizada: o concat por cópia (-c:v copy) com uma parte de params
+ *  divergentes dropa o vídeo dela mas mantém o áudio → faixa de vídeo fica bem
+ *  mais curta que a de áudio. Retorna null se não conseguir medir (aí o caller
+ *  confia no resultado, pra não piorar). */
+async function probeAVSync(blob: Blob): Promise<{ videoSec: number; audioSec: number } | null> {
+  try {
+    const u8 = new Uint8Array(await blob.arrayBuffer());
+    if (u8.length < 16) return null;
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    const fourcc = (p: number) => String.fromCharCode(u8[p], u8[p + 1], u8[p + 2], u8[p + 3]);
+    const boxes = (start: number, end: number, cb: (type: string, contentStart: number, boxEnd: number) => void) => {
+      let p = start;
+      while (p + 8 <= end) {
+        let size = dv.getUint32(p);
+        const type = fourcc(p + 4);
+        let hdr = 8;
+        if (size === 1) { size = Number(dv.getBigUint64(p + 8)); hdr = 16; }
+        else if (size === 0) { size = end - p; }
+        if (size < hdr || p + size > end) break;
+        cb(type, p + hdr, p + size);
+        p += size;
+      }
+    };
+    let videoSec = 0, audioSec = 0;
+    boxes(0, u8.length, (t, cs, be) => {
+      if (t !== 'moov') return;
+      boxes(cs, be, (t2, cs2, be2) => {
+        if (t2 !== 'trak') return;
+        let hdlr: string | null = null;
+        let dur = 0;
+        (function descend(s: number, e: number) {
+          boxes(s, e, (t3, cs3, be3) => {
+            if (t3 === 'mdia') descend(cs3, be3);
+            else if (t3 === 'hdlr') hdlr = fourcc(cs3 + 8);
+            else if (t3 === 'mdhd') {
+              const ver = u8[cs3];
+              const o = ver === 1 ? cs3 + 20 : cs3 + 12;
+              const ts = dv.getUint32(o);
+              const du = ver === 1 ? Number(dv.getBigUint64(o + 4)) : dv.getUint32(o + 4);
+              if (ts > 0) dur = du / ts;
+            }
+          });
+        })(cs2, be2);
+        if (hdlr === 'vide') videoSec = Math.max(videoSec, dur);
+        else if (hdlr === 'soun') audioSec = Math.max(audioSec, dur);
+      });
+    });
+    if (videoSec <= 0 || audioSec <= 0) return null;
+    return { videoSec, audioSec };
+  } catch {
+    return null;
+  }
+}
+
 /** Roda pipeline completa. SEMPRE retorna info diagnostica — mesmo quando
  *  nao consegue produzir nada, explica por que. */
 export async function runPostPipeline(input: PipelineInputs): Promise<PipelineResult> {
@@ -222,21 +278,56 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   const concatRobust = async (blobs: Blob[], label: string): Promise<Blob> => {
     if (blobs.length === 1) return blobs[0];
     const normalized: Blob[] = [];
+    let allNormalized = true;
     for (let i = 0; i < blobs.length; i++) {
       try {
         normalized.push(await retryFFmpeg(() => normalizeForConcat(blobs[i]), 120_000, `norm ${label} p${i + 1}/${blobs.length}`, 2));
       } catch {
-        console.warn(`[clickup-pilot-pipeline] norm ${label} p${i + 1}: falhou — usando parte original`);
+        console.warn(`[clickup-pilot-pipeline] norm ${label} p${i + 1}: falhou — parte fica com params ORIGINAIS (não-uniformes)`);
         normalized.push(blobs[i]);
+        allNormalized = false;
       }
     }
-    // partes agora uniformes → fast concat (copy, sem re-encode = sem OOM).
-    try {
-      return await withTimeout(concatVideosFast(normalized), concatTimeoutMs(normalized, false), `concat-norm ${label}`);
-    } catch {
-      // último recurso: concat monolítico com retry (raro chegar aqui).
-      return await retryFFmpeg(() => concatAvatarParts(normalized), concatTimeoutMs(normalized, true), `concat-mono ${label}`, 2);
+    // CRÍTICO: o fast-concat (concatVideosFast) usa -c:v copy. Ele SÓ é seguro se
+    // TODAS as partes têm params de vídeo idênticos. Se UMA parte não normalizou
+    // (ficou com params originais divergentes), o copy-concat DROPA o vídeo dela
+    // mantendo o áudio → montagem dessincronizada (vídeo curto, áudio longo) SEM
+    // erro. Por isso: só usa fast-concat quando TODAS normalizaram; se alguma
+    // falhou, vai direto pro re-encode monolítico (filter_complex força uniforme,
+    // nunca dropa stream). O gate de sync abaixo (verifyConcatSync) é a rede final.
+    if (allNormalized) {
+      try {
+        return await withTimeout(concatVideosFast(normalized), concatTimeoutMs(normalized, false), `concat-norm ${label}`);
+      } catch {
+        return await retryFFmpeg(() => concatAvatarParts(normalized), concatTimeoutMs(normalized, true), `concat-mono ${label}`, 2);
+      }
     }
+    // alguma parte NÃO normalizou → re-encode monolítico direto (não arrisca copy)
+    return await retryFFmpeg(() => concatAvatarParts(normalized), concatTimeoutMs(normalized, true), `concat-mono ${label}`, 2);
+  };
+
+  // ── GATE DE SINCRONIA (rede final) ────────────────────────────────────────
+  // Mede a duração das faixas de VÍDEO e ÁUDIO do resultado de um concat. Se
+  // divergirem além da tolerância, o concat dropou/truncou vídeo (bug do
+  // copy-concat com parte divergente) → REFAZ com re-encode (concatAvatarParts,
+  // que sincroniza por construção). Se MESMO ASSIM ficar fora de sync, LANÇA —
+  // melhor falhar do que entregar um AD com lip-sync quebrado. probeAVSync é puro
+  // (parse do moov, sem ffmpeg); null = não deu pra medir → não piora, confia.
+  const verifyConcatSync = async (out: Blob, parts: Blob[], label: string): Promise<Blob> => {
+    if (parts.length <= 1) return out;
+    const tolOf = (audioSec: number) => Math.max(0.5, audioSec * 0.02); // 0.5s ou 2%
+    const sync = await probeAVSync(out);
+    if (!sync) return out;
+    const diff = Math.abs(sync.audioSec - sync.videoSec);
+    if (diff <= tolOf(sync.audioSec)) return out;
+    console.warn(`[clickup-pilot-pipeline] ${label}: DESSINCRONIZADO v=${sync.videoSec.toFixed(2)}s a=${sync.audioSec.toFixed(2)}s (diff ${diff.toFixed(2)}s) → refazendo com re-encode`);
+    const fixed = await retryFFmpeg(() => concatAvatarParts(parts), concatTimeoutMs(parts, true), `concat-resync ${label}`, 2);
+    const s2 = await probeAVSync(fixed);
+    if (s2 && Math.abs(s2.audioSec - s2.videoSec) > tolOf(s2.audioSec)) {
+      throw new Error(`montagem ${label} dessincronizada mesmo após re-encode (v=${s2.videoSec.toFixed(2)}s a=${s2.audioSec.toFixed(2)}s)`);
+    }
+    console.log(`[clickup-pilot-pipeline] ${label}: re-sync OK (v=${s2?.videoSec.toFixed(2)}s a=${s2?.audioSec.toFixed(2)}s)`);
+    return fixed;
   };
 
   // Regula a voz de UM clipe a -16 LUFS: denoise (limpa hiss/ruído) +
@@ -376,6 +467,10 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         assembled = await concatRobust(leveledBlobs, filename);
         console.log(`[clickup-pilot-pipeline] assemble ${filename}: ROBUST OK ${(assembled.size/(1024*1024)).toFixed(1)}MB em ${((Date.now()-tSlow)/1000).toFixed(1)}s`);
       }
+      // GATE: garante que o montado não saiu dessincronizado (vídeo curto/áudio
+      // longo do copy-concat). Se saiu, refaz com re-encode; se nem assim, lança
+      // → cai no catch abaixo (assemble error) e NÃO entrega versão quebrada.
+      assembled = await verifyConcatSync(assembled, leveledBlobs, `assemble ${filename}`);
     } catch (e) {
       console.error(`[clickup-pilot-pipeline] assemble ${filename}: FAIL (ambos paths)`, e);
       out.push({ filename, rawAssembled: new Blob(), errors: { assemble: (e as Error)?.message || 'falha no concat' } });
@@ -504,6 +599,12 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         // MISTURA (parte cortada + original) → códecs divergem → robusto (anti-OOM).
         dec = await concatRobust(decupadoParts, `decup ${item.filename}`);
       }
+      // GATE: o caso MISTO (alguma parte caiu no leveled original) é justamente o
+      // que dropava o vídeo de UMA parte no copy-concat (AD24: BODY 1.1 sumiu do
+      // vídeo, áudio ficou → 13s de dessync). Verifica e, se preciso, refaz com
+      // re-encode. Se nem assim sincronizar, lança → vira erro de decupagem (cai
+      // no montado completo já verificado), nunca entrega decupado quebrado.
+      dec = await verifyConcatSync(dec, decupadoParts, `decup ${item.filename}`);
       item.decupado = dec;
       console.log(`[clickup-pilot-pipeline] decup ${item.filename}: OK ${cutCount}/${leveled.length} partes cortadas · ${(dec.size / (1024 * 1024)).toFixed(1)}MB`);
     } catch (e) {
