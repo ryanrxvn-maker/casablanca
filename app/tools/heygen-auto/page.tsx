@@ -50,6 +50,7 @@ import {
 } from '@/components/HeyGenVoicePicker';
 import { TierGate } from '@/components/TierGate';
 import { BatchJobCard3D, type BatchJob3DPhase } from '@/components/BatchJobCard3D';
+import { EditPartModal } from '@/components/EditPartModal';
 
 /**
  * Hey Auto Avatar — automacao do HeyGen sem API.
@@ -249,6 +250,10 @@ function HeyGenAutoInner() {
   const [results, setResults] = useState<PartResult[]>([]);
   /** Início do disparo direto (pra elapsed no card estilo ClickUp Pilot). */
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
+  /** Edição de 1 parte (modo copy) — re-gera só aquele take, igual ClickUp Pilot. */
+  const [editPart, setEditPart] = useState<{ idx: number; label: string; text: string } | null>(null);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [stage, setStage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -546,6 +551,36 @@ function HeyGenAutoInner() {
       return prev;
     });
   }, [mode, parts.length, audioParts.length]);
+
+  /* --------- Auto-poll pós-disparo: os cards de preview preenchem sozinhos
+   *  (igual ClickUp Pilot — você vê cada parte ficar pronta) sem precisar
+   *  clicar Baixar. Só lê status (GET leve), não baixa nada. Para sozinho
+   *  quando todos completam/falham, ou quando o download assume o poll. */
+  useEffect(() => {
+    if (processing || downloading) return;
+    const ids = results.filter((r) => r.videoId).map((r) => r.videoId!);
+    if (ids.length === 0) return;
+    const pending = ids.filter((id) => {
+      const s = downloadStatuses[id]?.status;
+      return s !== 'completed' && s !== 'failed';
+    });
+    if (pending.length === 0) return;
+    let cancelled = false;
+    pollVideosUntilReady(ids, {
+      intervalMs: 8000,
+      timeoutMs: 30 * 60 * 1000,
+      isCancelled: () => cancelled,
+      onStatus: (st) => {
+        if (!cancelled) setDownloadStatuses((prev) => ({ ...prev, ...st }));
+      },
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // downloadStatuses fora das deps de proposito: o poll se atualiza sozinho
+    // via onStatus; incluir reiniciaria o poll a cada tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [results, processing, downloading]);
 
   function cancel() {
     cancelRef.current = true;
@@ -981,6 +1016,69 @@ function HeyGenAutoInner() {
     } finally {
       setProcessing(false);
       cancelRef.current = false;
+    }
+  }
+
+  /* --------- Editar/re-gerar 1 parte (modo copy), igual ClickUp Pilot --------- */
+  function openEditPart(idx: number) {
+    setEditPart({
+      idx,
+      label: results[idx]?.label || `parte${idx + 1}`,
+      text: parts[idx] ?? '',
+    });
+    setEditError(null);
+  }
+
+  /** Re-dispara SÓ a parte editada no HeyGen (mantém o label/posição), troca o
+   *  videoId no results e invalida o montado — o próximo Baixar re-monta com o
+   *  take novo. Avatar/voz seguem os mesmos da parte (não muda continuidade). */
+  async function regeneratePart(newText: string) {
+    if (!editPart) return;
+    const idx = editPart.idx;
+    const av = (dynamicMode ? partAvatars[idx] : null) || selectedAvatar;
+    if (!av) {
+      setEditError('Selecione um avatar antes.');
+      return;
+    }
+    setEditBusy(true);
+    setEditError(null);
+    try {
+      const motorsPerPart = resolveMotors(motorConfig, results.length, {
+        slotIds: results.map((r) => r.label),
+        seed: safeName,
+      });
+      const voiceId = overrideVoice && selectedVoice ? selectedVoice.id : av.voiceId || undefined;
+      const res = await runHeyGenJobs(
+        [{ label: editPart.label, copy: newText, avatarId: av.id, voiceId, motor: motorsPerPart[idx] || motor }],
+        {
+          parallel: 1,
+          mode: 'copy',
+          avatarId: av.id,
+          voiceId,
+          motor: motorConfig.kind === 'global' ? motorConfig.motor : motor,
+          adNameSafe: safeName,
+          isCancelled: () => false,
+          onProgress: () => {},
+          onResult: () => {},
+        },
+      );
+      const r0 = res[0];
+      if (!r0?.videoId) throw new Error(r0?.error || 'Falha ao re-gerar a parte no HeyGen.');
+      const oldId = results[idx]?.videoId;
+      setResults((prev) => prev.map((r, i) => (i === idx ? { ...r, videoId: r0.videoId, error: null } : r)));
+      if (oldId) {
+        setDownloadStatuses((prev) => {
+          const { [oldId]: _drop, ...rest } = prev;
+          return rest;
+        });
+      }
+      // Montado vira stale: força re-montagem no próximo Baixar.
+      setPipelineZips((prev) => ({ ...prev, montadoName: undefined }));
+      setEditPart(null);
+    } catch (e) {
+      setEditError((e as Error)?.message || 'Falha ao re-gerar.');
+    } finally {
+      setEditBusy(false);
     }
   }
 
@@ -2937,6 +3035,24 @@ function HeyGenAutoInner() {
               else if (montadoDone) phase = 'done';
               else phase = 'rendering'; // disparado → HeyGen renderizando; clique Baixar
               const total = results.length;
+              // Previews por take (loading → vídeo jogável), igual ClickUp Pilot.
+              const previewIdxs: number[] = [];
+              const previews: LipsyncTake[] = results.map((r, idx) => {
+                previewIdxs.push(idx);
+                const st = r.videoId ? downloadStatuses[r.videoId] : undefined;
+                const status: LipsyncTake['status'] = r.error
+                  ? 'failed'
+                  : !r.videoId
+                    ? 'pending'
+                    : (st?.status || 'processing');
+                return {
+                  label: r.label,
+                  status,
+                  videoUrl: st?.videoUrl ?? null,
+                  error: r.error ?? st?.error ?? null,
+                };
+              });
+              const pct = total > 0 ? Math.round((100 * renderedCount) / total) : 0;
               return (
                 <ul className="fade-in-up mt-2 grid gap-2">
                   <BatchJobCard3D
@@ -2960,37 +3076,26 @@ function HeyGenAutoInner() {
                   >
                     <div>
                       <div className="label-tech mb-1.5 text-[9px] uppercase tracking-widest text-text-muted">
-                        Takes ({dispatchedCount}/{total} disparados no HeyGen)
+                        Takes ({renderedCount}/{total} prontos)
                       </div>
-                      <ul className="grid gap-1 text-xs">
-                        {results.map((r) => {
-                          const st = r.videoId ? downloadStatuses[r.videoId] : undefined;
-                          return (
-                            <li
-                              key={r.label}
-                              className="flex items-center justify-between rounded-md border border-line bg-bg px-3 py-2"
-                            >
-                              <span>
-                                <span className="mono text-lime">{r.label}</span>
-                                {r.videoId ? (
-                                  <span className="ml-2 text-text-muted">id: {r.videoId.slice(0, 12)}…</span>
-                                ) : null}
-                              </span>
-                              {r.error ? (
-                                <span className="text-[11px] text-red-300">✗ {r.error}</span>
-                              ) : st?.status === 'completed' ? (
-                                <span className="text-[11px] text-lime">✓ renderizado</span>
-                              ) : st?.status === 'failed' ? (
-                                <span className="text-[11px] text-red-300">✗ render falhou</span>
-                              ) : st ? (
-                                <span className="text-[11px] text-cyan-300">◷ {st.status}</span>
-                              ) : (
-                                <span className="text-[11px] text-lime">✓ disparado</span>
-                              )}
-                            </li>
-                          );
-                        })}
-                      </ul>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+                        {previews.map((t, ti) => (
+                          <LipsyncPreviewCard
+                            key={ti}
+                            take={t}
+                            position={ti + 1}
+                            total={previews.length}
+                            percent={pct}
+                            fileBase={safeName}
+                            isRegenerating={editBusy && editPart?.idx === previewIdxs[ti]}
+                            onEdit={
+                              mode === 'copy' && t.status === 'completed'
+                                ? () => openEditPart(previewIdxs[ti])
+                                : undefined
+                            }
+                          />
+                        ))}
+                      </div>
                     </div>
                   </BatchJobCard3D>
                 </ul>
@@ -2999,6 +3104,24 @@ function HeyGenAutoInner() {
           </div>
         </div>
       </div>
+
+      {/* ===================== Modal: editar/re-gerar 1 parte ===================== */}
+      {editPart ? (
+        <EditPartModal
+          input={{
+            label: editPart.label,
+            text: editPart.text,
+            avatarName:
+              ((dynamicMode ? partAvatars[editPart.idx] : null) || selectedAvatar)?.name || undefined,
+          }}
+          onClose={() => {
+            if (!editBusy) setEditPart(null);
+          }}
+          onRegenerate={(t) => void regeneratePart(t)}
+          busy={editBusy}
+          errorMsg={editError}
+        />
+      ) : null}
 
       {/* ===================== Modal: importar copy do Google Docs ===================== */}
       {docModalOpen ? (
