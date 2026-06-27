@@ -315,6 +315,15 @@ function clearVAResumeSnapshot(taskId: string) {
   try { localStorage.removeItem(VA_RESUME_PREFIX + taskId); } catch { /* ignora */ }
 }
 
+/** Hash curto/estável (djb2) de uma string → chave de cache. Usado pra cachear
+ *  partes renderizadas da VA-texto por conteúdo: se texto/avatar/voz não mudaram,
+ *  o RETOMAR reusa a parte do IDB em vez de re-gerar no HeyGen. */
+function shortHash(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+
 /** ============= CANAL (plataforma/distribuicao) =============
  *  Le o custom field "CANAL" da task do ClickUp (dropdown) e resolve
  *  label + cor. Cor primaria = a propria cor da opcao no ClickUp (match
@@ -6307,45 +6316,70 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
           for (const part of partPlan) {
             if (batchCancelRef.current[taskId]) throw new Error('cancelado');
             const label = `${av.avaCode}·${part.label}`;
-            upsertPart(label, { videoId: null, videoStatus: 'pending', error: null });
-            // ASSERTIVIDADE: o render HeyGen zombia/falha de forma INTERMITENTE.
-            // Antes, 1 parte que falhava matava o AVATAR inteiro (= "1/2 AVAs",
-            // user reportou 2026-06-23). Agora RE-DISPARA a parte até 3x (cada
-            // tentativa = novo videoId) antes de desistir — transiente se cura
-            // sozinho, sem o user ter que clicar Retomar.
+            // CACHE por CONTEÚDO: chave = task+label+hash(texto|avatar|voz). No
+            // RETOMAR, se nada disso mudou, reusa a parte JÁ renderizada do IDB em
+            // vez de re-gerar no HeyGen (não desperdiça geração nem tempo). Se a
+            // copy/avatar/voz mudou, o hash muda → re-gera (cache não fica stale).
+            const partCacheKey = `va:${taskId}:part:${label}@${shortHash(`${part.text}|${choice.id}|${voiceId || ''}`)}`;
             let partBytes: Uint8Array | null = null;
-            let lastErr = '';
-            for (let attempt = 1; attempt <= 3 && !partBytes; attempt++) {
-              if (batchCancelRef.current[taskId]) throw new Error('cancelado');
-              patchVA({ phase: 'rendering', message: `${av.avaCode}: gerando ${part.label} por texto${attempt > 1 ? ` (tentativa ${attempt})` : ''}...` });
-              try {
-                const job = await processJob({
-                  text: part.text,
-                  avatarId: choice.id,
-                  voiceId,
-                  title: `${adNameClean}_${av.avaCode}_${part.label}`,
-                  engine: 'iii', orientation: 'portrait',
-                }, { onProgress: (stage: string) => console.log(`[VA-texto ${label} t${attempt}] ${stage}`) });
-                if (!job.videoId) throw new Error('processJob nao retornou videoId');
-                upsertPart(label, { videoId: job.videoId, videoStatus: 'pending', error: null });
-                const statuses = await pollVideosUntilReady([job.videoId], { intervalMs: 8000, timeoutMs: 30 * 60 * 1000, maxPendingMsPerId: 15 * 60 * 1000 });
-                const st = statuses[job.videoId];
-                if (!st || st.status !== 'completed' || !st.videoUrl) {
-                  throw new Error(`nao renderizou (status=${st?.status}): ${st?.error || 'sem detalhes'}`);
-                }
-                upsertPart(label, { videoStatus: 'completed', videoUrl: st.videoUrl, error: null });
-                partBytes = await downloadVideoBytes(st.videoUrl);
-              } catch (e) {
-                lastErr = (e as Error)?.message || 'falha';
-                upsertPart(label, { error: lastErr });
-                // COTA/limite diário do HeyGen = TERMINAL: re-tentar não cura
-                // (só o reset diário/outra conta), então PARA na hora — não
-                // desperdiça as 3 tentativas nem o tempo do user.
-                if (isQuotaError(lastErr)) break;
-                if (attempt < 3) console.warn(`[VA-texto ${label}] t${attempt} falhou (${lastErr}) — re-dispara`);
+            try {
+              const { loadBlob } = await import('@/lib/zip-store');
+              const cached = await loadBlob(partCacheKey, 'video/mp4');
+              if (cached && cached.size > 1024) {
+                partBytes = new Uint8Array(await cached.arrayBuffer());
+                // videoId sentinela + object URL → a parte reusada aparece no
+                // preview e conta no "Takes (x/y)" (senão pareceria que sumiu).
+                const url = URL.createObjectURL(cached);
+                upsertPart(label, { videoId: `cached:${label}`, videoStatus: 'completed', videoUrl: url, error: null });
+                patchVA({ phase: 'rendering', message: `${av.avaCode}: ${part.label} reusado (já gerado, sem re-gerar)` });
               }
+            } catch { /* cache miss/erro → renderiza normal */ }
+
+            if (!partBytes) {
+              upsertPart(label, { videoId: null, videoStatus: 'pending', error: null });
+              // ASSERTIVIDADE: o render HeyGen zombia/falha de forma INTERMITENTE.
+              // Antes, 1 parte que falhava matava o AVATAR inteiro (= "1/2 AVAs",
+              // user reportou 2026-06-23). Agora RE-DISPARA a parte até 3x (cada
+              // tentativa = novo videoId) antes de desistir — transiente se cura
+              // sozinho, sem o user ter que clicar Retomar.
+              let lastErr = '';
+              for (let attempt = 1; attempt <= 3 && !partBytes; attempt++) {
+                if (batchCancelRef.current[taskId]) throw new Error('cancelado');
+                patchVA({ phase: 'rendering', message: `${av.avaCode}: gerando ${part.label} por texto${attempt > 1 ? ` (tentativa ${attempt})` : ''}...` });
+                try {
+                  const job = await processJob({
+                    text: part.text,
+                    avatarId: choice.id,
+                    voiceId,
+                    title: `${adNameClean}_${av.avaCode}_${part.label}`,
+                    engine: 'iii', orientation: 'portrait',
+                  }, { onProgress: (stage: string) => console.log(`[VA-texto ${label} t${attempt}] ${stage}`) });
+                  if (!job.videoId) throw new Error('processJob nao retornou videoId');
+                  upsertPart(label, { videoId: job.videoId, videoStatus: 'pending', error: null });
+                  const statuses = await pollVideosUntilReady([job.videoId], { intervalMs: 8000, timeoutMs: 30 * 60 * 1000, maxPendingMsPerId: 15 * 60 * 1000 });
+                  const st = statuses[job.videoId];
+                  if (!st || st.status !== 'completed' || !st.videoUrl) {
+                    throw new Error(`nao renderizou (status=${st?.status}): ${st?.error || 'sem detalhes'}`);
+                  }
+                  upsertPart(label, { videoStatus: 'completed', videoUrl: st.videoUrl, error: null });
+                  partBytes = await downloadVideoBytes(st.videoUrl);
+                } catch (e) {
+                  lastErr = (e as Error)?.message || 'falha';
+                  upsertPart(label, { error: lastErr });
+                  // COTA/limite diário do HeyGen = TERMINAL: re-tentar não cura
+                  // (só o reset diário/outra conta), então PARA na hora — não
+                  // desperdiça as 3 tentativas nem o tempo do user.
+                  if (isQuotaError(lastErr)) break;
+                  if (attempt < 3) console.warn(`[VA-texto ${label}] t${attempt} falhou (${lastErr}) — re-dispara`);
+                }
+              }
+              if (!partBytes) throw new Error(`${label} falhou após 3 tentativas: ${lastErr}`);
+              // SALVA no cache → próximo RETOMAR pula o HeyGen pra esta parte.
+              try {
+                const { saveBlob } = await import('@/lib/zip-store');
+                await saveBlob(partCacheKey, new Blob([partBytes as BlobPart], { type: 'video/mp4' }), 'video/mp4');
+              } catch { /* best-effort */ }
             }
-            if (!partBytes) throw new Error(`${label} falhou após 3 tentativas: ${lastErr}`);
             partBlobs.push(new Blob([partBytes as BlobPart], { type: 'video/mp4' }));
           }
         } catch (e) {
@@ -7742,6 +7776,16 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                 if (b.kind === 'troca') {
                                   void import('@/lib/zip-store')
                                     .then((m) => m.deletePrefix('troca:white:' + b.taskId))
+                                    .catch(() => {});
+                                }
+                                // VA: limpa o cache de partes renderizadas + o zip
+                                // do IDB (evita acúmulo ao remover a task).
+                                if (b.isVA) {
+                                  void import('@/lib/zip-store')
+                                    .then((m) => Promise.all([
+                                      m.deletePrefix('va:' + b.taskId + ':part:'),
+                                      m.deletePrefix('va:' + b.taskId + ':zip'),
+                                    ]))
                                     .catch(() => {});
                                 }
                                 setBatchStates((prev) => {
