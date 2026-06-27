@@ -43,11 +43,7 @@ import { CompactAvatarPicker } from '@/components/CompactAvatarPicker';
 import { CompactVoiceSelector } from '@/components/CompactVoiceSelector';
 import { LipsyncPreviewCard, type LipsyncTake } from '@/components/LipsyncPreviewCard';
 import { getLibrarySnapshot, reloadLibrary, subscribeLibrary } from '@/lib/heygen-library-cache';
-import {
-  HeyGenVoicePicker,
-  type VoiceOption,
-  type ClonedVoice,
-} from '@/components/HeyGenVoicePicker';
+import { type VoiceOption } from '@/components/HeyGenVoicePicker';
 import { TierGate } from '@/components/TierGate';
 import { BatchJobCard3D, type BatchJob3DPhase } from '@/components/BatchJobCard3D';
 import { EditPartModal } from '@/components/EditPartModal';
@@ -104,14 +100,9 @@ function HeyGenAutoInner() {
     'hgauto:avatar',
     null,
   );
-  const [voiceQuery, setVoiceQuery] = useToolState<string>('hgauto:voiceQuery', '');
   const [selectedVoice, setSelectedVoice] = useToolState<VoiceOption | null>(
     'hgauto:voice',
     null,
-  );
-  const [overrideVoice, setOverrideVoice] = useToolState<boolean>(
-    'hgauto:overrideVoice',
-    false,
   );
 
   const [copy, setCopy] = useToolState<string>('hgauto:copy', '');
@@ -237,10 +228,6 @@ function HeyGenAutoInner() {
   // do upload; audioOrder vira a permutacao de indices). Default = identidade.
   const [audioOrder, setAudioOrder] = useState<number[]>([]);
 
-  const [clonedVoices, setClonedVoices] = useToolState<ClonedVoice[]>(
-    'hgauto:clonedVoices',
-    [],
-  );
   const [sessionTest, setSessionTest] = useState<SessionTest>({ state: 'idle' });
 
   const [parts, setParts] = useState<string[]>([]);
@@ -274,9 +261,9 @@ function HeyGenAutoInner() {
   const [librarySnap, setLibrarySnap] = useState(() => getLibrarySnapshot());
   useEffect(() => {
     const unsub = subscribeLibrary(() => setLibrarySnap({ ...getLibrarySnapshot() }));
-    if (librarySnap.groups.length === 0 && !librarySnap.loading) {
-      reloadLibrary(false);
-    }
+    // Sempre revalida no mount: se já tem cache (localStorage), mostra na hora
+    // e atualiza em background (stale-while-revalidate); se vazio, busca.
+    reloadLibrary(false);
     return unsub;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -918,26 +905,20 @@ function HeyGenAutoInner() {
         setError('Preenche pelo menos 1 HOOK.');
         return;
       }
-      // Voz default = a voz original do avatar (lookup automatico no
-      // processJob). So passamos voiceId quando o user marcou "substituir".
-      if (overrideVoice && !selectedVoice) {
-        setError(
-          'Voce marcou "substituir voz" mas nao escolheu uma voz. Escolhe uma ou desmarca.',
-        );
-        return;
-      }
+      // Voz: usa a voz escolhida (selectedVoice) se houver; senão a voz padrão
+      // do avatar. Sem toggle de "substituir" — é sempre escolher avatar + voz.
       jobs = parts.map((p, i) => {
         const partAvatar = dynamicMode ? partAvatars[i] : null;
         const effectiveAvatar = partAvatar || selectedAvatar;
         return {
           label: makeStructuredLabel(i),
           copy: p,
-          // Modo dinamico: cada parte usa seu avatar (com voiceId predefinido)
+          // Modo dinamico: cada parte usa seu avatar (com voiceId predefinido),
+          // a menos que uma voz global tenha sido escolhida (vale pra todas).
           avatarId: dynamicMode ? effectiveAvatar?.id : undefined,
-          voiceId:
-            dynamicMode && !overrideVoice
-              ? (effectiveAvatar?.voiceId || undefined)
-              : undefined,
+          voiceId: dynamicMode
+            ? (selectedVoice?.id || effectiveAvatar?.voiceId || undefined)
+            : undefined,
         };
       });
     } else {
@@ -1016,7 +997,7 @@ function HeyGenAutoInner() {
         mode,
         avatarId: selectedAvatar.id,
         voiceId:
-          mode === 'copy' && overrideVoice && selectedVoice
+          mode === 'copy' && selectedVoice
             ? selectedVoice.id
             : (selectedAvatar.voiceId || undefined),
         motor: motorConfig.kind === 'global' ? motorConfig.motor : motor, // fallback per-job vence
@@ -1083,7 +1064,7 @@ function HeyGenAutoInner() {
         slotIds: results.map((r) => r.label),
         seed: safeName,
       });
-      const voiceId = overrideVoice && selectedVoice ? selectedVoice.id : av.voiceId || undefined;
+      const voiceId = selectedVoice ? selectedVoice.id : av.voiceId || undefined;
       const res = await runHeyGenJobs(
         [{ label: editPart.label, copy: newText, avatarId: av.id, voiceId, motor: motorsPerPart[idx] || motor }],
         {
@@ -1532,7 +1513,7 @@ function HeyGenAutoInner() {
           ? forcedParts.filter((p) => /^HOOK/i.test(p.label)).length
           : structuredHooks.filter((h) => h.text.trim()).length;
       const fixedVoice =
-        overrideVoice && selectedVoice ? selectedVoice.id : selectedAvatar.voiceId || null;
+        selectedVoice ? selectedVoice.id : selectedAvatar.voiceId || null;
       parts.forEach((text, i) => {
         const av = dynamicMode ? partAvatars[i] || selectedAvatar : selectedAvatar;
         qparts.push({
@@ -1540,7 +1521,8 @@ function HeyGenAutoInner() {
           text,
           avatarId: av?.id || selectedAvatar.id,
           avatarName: av?.name || selectedAvatar.name,
-          voiceId: dynamicMode && !overrideVoice ? av?.voiceId || null : fixedVoice,
+          // Voz escolhida (global) vale pra todas; senão a voz do avatar da parte.
+          voiceId: dynamicMode && !selectedVoice ? av?.voiceId || null : fixedVoice,
         });
       });
     } else {
@@ -1579,7 +1561,7 @@ function HeyGenAutoInner() {
         decupagem: decupagemEnabled,
         decupIntensity,
         source: 'manual',
-        voiceName: overrideVoice && selectedVoice ? selectedVoice.name : null,
+        voiceName: selectedVoice ? selectedVoice.name : null,
         status: 'pending',
       },
     ]);
@@ -2109,16 +2091,18 @@ function HeyGenAutoInner() {
 
             {mode === 'copy' ? (
               <section className="border-t border-line pt-6">
-                <HeyGenVoicePicker
-                  override={overrideVoice}
-                  setOverride={setOverrideVoice}
-                  query={voiceQuery}
-                  setQuery={setVoiceQuery}
-                  selected={selectedVoice}
-                  setSelected={setSelectedVoice}
-                  clonedVoices={clonedVoices}
-                  setClonedVoices={setClonedVoices}
-                  disabled={processing}
+                <h2 className="label-field !mb-1">Voz</h2>
+                <p className="mb-3 text-[11px] text-text-muted">
+                  Escolha a voz que o avatar vai falar. Sem escolher, usa a voz
+                  padrão do avatar.
+                </p>
+                <CompactVoiceSelector
+                  selected={selectedVoice ? { id: selectedVoice.id, name: selectedVoice.name } : null}
+                  setSelected={(v) =>
+                    setSelectedVoice(
+                      v ? { id: v.id, name: v.name, gender: null, language: null, previewAudio: null } : null,
+                    )
+                  }
                 />
               </section>
             ) : (
@@ -2543,10 +2527,8 @@ function HeyGenAutoInner() {
                   </div>
                   <div className="mt-1 text-[11px] text-text-muted">
                     Cada parte (texto OU audio) usa um avatar diferente. Voz de
-                    cada parte = a voz predefinida daquele avatar (a menos que
-                    voce marque{' '}
-                    <span className="text-lime/80">substituir voz</span> pra
-                    forcar uma voz fixa em todas).
+                    cada parte = a voz predefinida daquele avatar. Se você
+                    escolher uma voz acima, ela vale pra todas as partes.
                   </div>
                 </div>
               </label>
