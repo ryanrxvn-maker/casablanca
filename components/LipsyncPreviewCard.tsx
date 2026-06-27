@@ -3,6 +3,21 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+/** Re-gerando overlay (shimmer + spinner) — reutilizado nos estados ready E
+ *  failed, pra dar feedback enquanto a parte re-renderiza (texto ou áudio). */
+function RegenOverlay({ label = 'Re-gerando…' }: { label?: string }) {
+  return (
+    <div className="pointer-events-auto absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-black/70 backdrop-blur-sm">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="animate-spin text-cyan-300" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
+        <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
+        <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
+      </svg>
+      <span className="mono text-[9px] uppercase tracking-widest text-cyan-200">{label}</span>
+    </div>
+  );
+}
+
 /**
  * LipsyncPreviewCard — card de preview de UM take de lipsync (HeyGen),
  * espelhado no TakeCard do Auto B-roll.
@@ -29,6 +44,7 @@ export function LipsyncPreviewCard({
   fileBase = 'take',
   onEdit,
   onRetry,
+  onUploadAudio,
   isRegenerating = false,
 }: {
   take: LipsyncTake;
@@ -42,11 +58,15 @@ export function LipsyncPreviewCard({
   onEdit?: () => void;
   /** Se fornecido e o card FALHOU, mostra "Tentar de novo" (re-roda o mesmo disparo). */
   onRetry?: () => void;
+  /** Se fornecido, mostra "Usar áudio" no card FALHO — sobe um áudio e o avatar
+   *  faz lipsync nele (contorna a falha de TTS do HeyGen naquela parte). */
+  onUploadAudio?: (file: File) => void;
   /** Marca esse card como "re-gerando agora" — overlay shimmer + bloqueia clicks. */
   isRegenerating?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
+  const audioInputRef = useRef<HTMLInputElement | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -203,23 +223,71 @@ export function LipsyncPreviewCard({
               </button>
             </div>
             {/* Overlay quando essa parte esta sendo re-gerada — bloqueia clicks e mostra status */}
-            {isRegenerating ? (
-              <div className="pointer-events-auto absolute inset-0 z-30 flex flex-col items-center justify-center gap-2 bg-black/70 backdrop-blur-sm">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" className="animate-spin text-cyan-300" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
-                  <path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" />
-                  <path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
-                </svg>
-                <span className="mono text-[9px] uppercase tracking-widest text-cyan-200">Re-gerando…</span>
-              </div>
-            ) : null}
+            {isRegenerating ? <RegenOverlay /> : null}
           </>
         ) : failed ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center">
-            <span className="text-3xl">⚠</span>
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-3 text-center">
+            <span className="text-2xl">⚠</span>
             <span className="label-tech text-[10px] font-bold uppercase tracking-widest text-red-300">Falha</span>
-            <p className="line-clamp-3 text-[10px] leading-relaxed text-red-300/80">{take.error || 'erro na renderização'}</p>
-            {onRetry ? (
+            <p className="line-clamp-2 text-[10px] leading-relaxed text-red-300/80">{take.error || 'erro na renderização'}</p>
+            {/* Contorno da falha: o HeyGen não gerou essa parte. Dá 2 saídas pra
+                completar o AD sem refazer tudo:
+                 1) Editar o texto e re-gerar SÓ essa parte (mexe no script/voz)
+                 2) Subir um áudio → o avatar faz lipsync nele (pula o TTS) */}
+            {(onEdit || onUploadAudio) ? (
+              <div className="mt-1 flex flex-col items-stretch gap-1.5">
+                {onEdit ? (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onEdit(); }}
+                    title="Editar o texto e re-gerar só essa parte"
+                    className="label-tech inline-flex items-center justify-center gap-1.5 rounded-full border border-cyan-400/60 bg-cyan-500/15 px-3 py-1.5 text-[9px] uppercase tracking-widest text-cyan-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition-all hover:-translate-y-[1px] hover:border-cyan-400/80 hover:bg-cyan-500/25 active:scale-95"
+                  >
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" />
+                    </svg>
+                    Editar texto
+                  </button>
+                ) : null}
+                {onUploadAudio ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); audioInputRef.current?.click(); }}
+                      title="Subir um áudio — o avatar faz lipsync nele (sem TTS)"
+                      className="label-tech inline-flex items-center justify-center gap-1.5 rounded-full border border-emerald-500/60 bg-emerald-500/15 px-3 py-1.5 text-[9px] uppercase tracking-widest text-emerald-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition-all hover:-translate-y-[1px] hover:border-emerald-500/80 hover:bg-emerald-500/25 active:scale-95"
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+                        <path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v4M8 22h8" />
+                      </svg>
+                      Usar áudio
+                    </button>
+                    <input
+                      ref={audioInputRef}
+                      type="file"
+                      accept="audio/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        // Limpa o value pra permitir re-selecionar o MESMO arquivo depois.
+                        e.target.value = '';
+                        if (f) onUploadAudio(f);
+                      }}
+                    />
+                  </>
+                ) : null}
+                {onRetry ? (
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onRetry(); }}
+                    className="label-tech rounded-full border border-violet/55 bg-violet/15 px-3 py-1 text-[9px] uppercase tracking-widest text-violet-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] transition-all hover:-translate-y-[1px] hover:border-violet/75 hover:bg-violet/25 active:scale-95"
+                  >
+                    ↻ Tentar de novo
+                  </button>
+                ) : null}
+              </div>
+            ) : onRetry ? (
               <button
                 type="button"
                 onClick={onRetry}
@@ -228,6 +296,8 @@ export function LipsyncPreviewCard({
                 ↻ Tentar de novo
               </button>
             ) : null}
+            {/* Mesmo overlay de re-geração quando essa parte falha está re-rodando */}
+            {isRegenerating ? <RegenOverlay /> : null}
           </div>
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gradient-to-br from-violet/[0.08] via-bg-soft to-bg">

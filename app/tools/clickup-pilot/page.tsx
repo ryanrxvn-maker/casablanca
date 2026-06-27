@@ -4322,6 +4322,138 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     }
   }
 
+  /** Contorna a falha de UMA parte subindo um ÁUDIO no lugar do texto: faz upload
+   *  do áudio pro HeyGen e o avatar dá lipsync nele (audio_type 'uploaded'),
+   *  pulando o TTS que quebrou. Espelha regenerateSinglePart (mesma máquina
+   *  provada: dispara → poll → baixa → salva blob no IDB → marca dirty), mas a
+   *  fonte é o áudio do user, não o script. NÃO mexe no texto do replan (o áudio
+   *  manda no MP4 final); se ESTE disparo falhar, a parte volta a 'failed' com o
+   *  erro no card e o RETOMAR ainda pode tentar pelo texto. */
+  async function regenerateSinglePartFromAudio(taskId: string, partIdx: number, file: File) {
+    const b = batchStates[taskId];
+    const part = b?.parts[partIdx];
+    const replanPart = b?.replan?.parts[partIdx];
+    if (!b || !part || !replanPart) {
+      setError('Sem dados de replan dessa parte — refaz a análise da task.');
+      return;
+    }
+    const label = part.label;
+    const effectiveAvatarId = replanPart.avatarId;
+    if (!effectiveAvatarId) {
+      setError(`Parte ${label}: sem avatar no plano — não dá pra disparar com áudio.`);
+      return;
+    }
+    if (!file || file.size < 1024) {
+      setError(`Áudio inválido pra parte ${label}.`);
+      return;
+    }
+
+    // Marca a parte como "re-gerando agora" (overlay no card) + reseta erro.
+    setRegeneratingPart({ taskId, label });
+    setBatchStates((prev) => {
+      const cur = prev[taskId];
+      if (!cur) return prev;
+      return {
+        ...prev,
+        [taskId]: {
+          ...cur,
+          parts: cur.parts.map((p, i) => i === partIdx
+            ? { ...p, videoStatus: 'pending' as const, videoUrl: null, error: null }
+            : p),
+        },
+      };
+    });
+
+    try {
+      const { processJob } = await import('@/lib/heygen-api-direct');
+      const adNameSafe = b.baseAdId.replace(/[^A-Z0-9]/gi, '_');
+      // MODO ÁUDIO: processJob com `file` → uploadAudio + createVideo
+      // (audio_type 'uploaded'); o avatar faz lipsync no áudio enviado.
+      const job = await processJob({
+        file,
+        title: `${adNameSafe}_${label}_audio`,
+        avatarId: effectiveAvatarId,
+        engine: 'iii',
+        orientation: 'portrait',
+      });
+      if (!job.videoId) throw new Error('processJob (áudio) não retornou videoId.');
+
+      // Guarda o videoId novo (overwrite o que falhou).
+      setBatchStates((prev) => {
+        const cur = prev[taskId];
+        if (!cur) return prev;
+        return {
+          ...prev,
+          [taskId]: {
+            ...cur,
+            parts: cur.parts.map((p, i) => i === partIdx
+              ? { ...p, videoId: job.videoId, videoStatus: 'pending' as const, videoUrl: null, error: null }
+              : p),
+          },
+        };
+      });
+
+      const statuses = await pollVideosUntilReady([job.videoId], {
+        intervalMs: 8000,
+        timeoutMs: 25 * 60 * 1000,
+        maxPendingMsPerId: 15 * 60 * 1000,
+      });
+      const st = statuses[job.videoId];
+      if (!st || st.status !== 'completed' || !st.videoUrl) {
+        throw new Error(`Render do áudio falhou (status=${st?.status}): ${st?.error || 'sem detalhes'}`);
+      }
+
+      // Baixa o MP4 + salva no IDB (substitui o antigo). Invalida clips derivados
+      // (leveled/decupado, todas as intensidades) pra montagem recomputar SÓ ela.
+      const bytes = await downloadVideoBytes(st.videoUrl);
+      const partBlob = new Blob([bytes as BlobPart], { type: 'video/mp4' });
+      try {
+        const { saveBlob, deleteZip, deletePrefix } = await import('@/lib/zip-store');
+        await saveBlob(`pilot:${taskId}:part:${label}`, partBlob, 'video/mp4');
+        await deleteZip(`pilot:${taskId}:leveled:${label}`).catch(() => {});
+        await deletePrefix(`pilot:${taskId}:decupado:${label}@k`).catch(() => {});
+        await deleteZip(`pilot:${taskId}:decupado:${label}`).catch(() => {});
+      } catch (e) { console.warn('[edit-part-audio] save blob IDB falhou:', e); }
+
+      // Marca completa + dirty → aparece "Atualizar montagem" pra fechar o AD.
+      setBatchStates((prev) => {
+        const cur = prev[taskId];
+        if (!cur) return prev;
+        const dirty = new Set(cur.dirtyParts || []);
+        dirty.add(label);
+        return {
+          ...prev,
+          [taskId]: {
+            ...cur,
+            parts: cur.parts.map((p, i) => i === partIdx
+              ? { ...p, videoUrl: st.videoUrl, videoStatus: 'completed' as const, error: null }
+              : p),
+            dirtyParts: Array.from(dirty),
+          },
+        };
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // Volta a parte pra 'failed' com o erro no card (não trava em "pending").
+      setBatchStates((prev) => {
+        const cur = prev[taskId];
+        if (!cur) return prev;
+        return {
+          ...prev,
+          [taskId]: {
+            ...cur,
+            parts: cur.parts.map((p, i) => i === partIdx
+              ? { ...p, videoStatus: 'failed' as const, error: `áudio: ${msg}` }
+              : p),
+          },
+        };
+      });
+      setError(`Parte ${label} (áudio): ${msg}`);
+    } finally {
+      setRegeneratingPart(null);
+    }
+  }
+
   // ═══════════════════ REBUILD MONTAGE (refazer ZIPs) ═══════════════════
   //
   // Apos editar 1+ takes, user clica "Atualizar montagem" — re-roda
@@ -7493,7 +7625,12 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                         percent={pct}
                                         fileBase={b.baseAdId || b.taskName}
                                         isRegenerating={isRegenThis}
-                                        onEdit={canEdit && t.status === 'completed' ? () => openEditPart(b.taskId, originalIdx) : undefined}
+                                        // Editar texto: nos prontos (trocar script/voz) E nos que
+                                        // FALHARAM (contornar a falha do HeyGen re-gerando a parte).
+                                        onEdit={canEdit && (t.status === 'completed' || t.status === 'failed') ? () => openEditPart(b.taskId, originalIdx) : undefined}
+                                        // Usar áudio: só faz sentido oferecer na parte que FALHOU —
+                                        // sobe um áudio e o avatar dá lipsync (pula o TTS quebrado).
+                                        onUploadAudio={canEdit && t.status === 'failed' ? (file) => void regenerateSinglePartFromAudio(b.taskId, originalIdx, file) : undefined}
                                       />
                                     );
                                   })}
