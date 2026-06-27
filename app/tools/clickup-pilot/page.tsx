@@ -7611,9 +7611,17 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                           // Só trava download quando FALTA conteúdo (parte/texto/
                           // render), nunca por pós-processo opcional. Troca tem
                           // fluxo próprio (prova/transcrição) → nunca trava aqui.
+                          // VA: a entrega é POR AVATAR. Se uma parte falhou (ex:
+                          // cota do HeyGen) o avatar dela não monta, mas os OUTROS
+                          // avatares completos SÃO entregáveis. Então pra VA trava
+                          // só quando NENHUM avatar saiu (okAvas===0 / zip sem mp4);
+                          // com ≥1 avatar, libera o download do que existe (o aviso
+                          // vaStats já deixa claro "x/y"). Normal segue como antes.
                           const downloadBlocked =
                             b.phase === 'done' && b.kind !== 'troca'
-                            && !(dispatchOk && renderOk && montagemContentOk);
+                            && (b.isVA
+                                ? !(b.vaStats ? b.vaStats.okAvas > 0 : (!!b.montadoZipUrl || !!b.montadoZipName))
+                                : !(dispatchOk && renderOk && montagemContentOk));
                           const elapsedMs = (b.finishedAt || nowTick) - b.startedAt;
                           const running = ['dispatching', 'rendering', 'downloading', 'post'].includes(b.phase);
                           const queued = b.phase === 'queued';
