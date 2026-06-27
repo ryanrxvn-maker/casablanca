@@ -60,6 +60,15 @@ function writeAll(map: Record<string, SharedBatchState>) {
   } catch {}
 }
 
+/** Lista todos os batches persistidos (opcionalmente filtrados por prefixo
+ *  de taskId, ex 'heygenauto:' pra pegar SÓ os do Hey Auto). Usado pra
+ *  reidratar o card da dispensa direta após reload (igual ClickUp Pilot). */
+export function listSharedBatches(taskIdPrefix?: string): SharedBatchState[] {
+  const all = Object.values(readAll());
+  const filtered = taskIdPrefix ? all.filter((b) => b.taskId.startsWith(taskIdPrefix)) : all;
+  return filtered.sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+}
+
 /** Cria/atualiza a entrada desse taskId (merge raso) sem tocar nas
  *  demais. Dispara 'storage' implicito pras telas que escutam. */
 export function upsertSharedBatch(

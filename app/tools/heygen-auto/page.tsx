@@ -8,7 +8,7 @@ import { CancelButton } from '@/components/CancelButton';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { Toggle3D } from '@/components/Toggle3D';
-import { upsertSharedBatch } from '@/lib/heygen-batch-store';
+import { upsertSharedBatch, listSharedBatches, removeSharedBatch } from '@/lib/heygen-batch-store';
 import { extractAudio, muxAudioIntoVideo } from '@/lib/ffmpeg-worker';
 import { camuflar } from '@/lib/camuflagem';
 import {
@@ -551,6 +551,42 @@ function HeyGenAutoInner() {
       return prev;
     });
   }, [mode, parts.length, audioParts.length]);
+
+  /* --------- Reidrata o card da dispensa direta após reload (igual ClickUp
+   *  Pilot): lê o batch persistido mais recente do Hey Auto (heygenauto:*) e
+   *  restaura results + batchId + início. O auto-poll re-busca os vídeos →
+   *  os previews voltam a preencher. Filtra SÓ 'heygenauto:' — nunca mistura
+   *  com a fila do ClickUp Pilot. */
+  const rehydratedRef = useRef(false);
+  useEffect(() => {
+    if (rehydratedRef.current) return;
+    rehydratedRef.current = true;
+    if (results.length > 0 || processing) return;
+    // Veio de um handoff do ClickUp Pilot? Aí é disparo NOVO — não restaura.
+    if (typeof window !== 'undefined') {
+      try {
+        if (new URL(window.location.href).searchParams.get('from') === 'clickup-pilot') return;
+      } catch {}
+    }
+    try {
+      const mine = listSharedBatches('heygenauto:');
+      const latest = mine.find((b) => (b.parts || []).some((p) => p.videoId));
+      if (!latest) return;
+      runBatchIdRef.current = latest.taskId;
+      setRunStartedAt(latest.startedAt || Date.now());
+      setResults(
+        (latest.parts || []).map((p, i) => ({
+          index: i + 1,
+          label: p.label,
+          videoId: p.videoId,
+          error: p.error ?? null,
+        })),
+      );
+    } catch (e) {
+      console.warn('[heygen-auto] reidratar batch falhou:', e);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* --------- Auto-poll pós-disparo: os cards de preview preenchem sozinhos
    *  (igual ClickUp Pilot — você vê cada parte ficar pronta) sem precisar
@@ -3069,7 +3105,12 @@ function HeyGenAutoInner() {
                     onRetomar={() => void downloadAllAsZip()}
                     onPausar={() => { if (processing) cancel(); else if (downloading) cancelDownload(); }}
                     onDebug={() => void run()}
-                    onRemove={() => { setResults([]); setError(null); setDownloadStage(null); setDownloadStatuses({}); setRunStartedAt(null); }}
+                    onRemove={() => {
+                      // Remove tb do store persistido (senão volta no reload).
+                      if (runBatchIdRef.current) removeSharedBatch(runBatchIdRef.current);
+                      runBatchIdRef.current = null;
+                      setResults([]); setError(null); setDownloadStage(null); setDownloadStatuses({}); setRunStartedAt(null);
+                    }}
                     onDownload={dispatchedCount > 0 ? (() => void downloadAllAsZip()) : undefined}
                     isRunning={isRunning}
                     isQueued={false}
