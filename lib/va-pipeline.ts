@@ -21,6 +21,7 @@
 import { decodeAudioRobust, detectSilences } from './audio-engine';
 import { resolveVaSpeakers } from './resolve-va-speakers';
 import { extractAudio, concatAvatarParts, concatVideosFast, cutVideoSegments, overlaySegmentsOnVideo, cancelFFmpeg } from './ffmpeg-worker';
+import { runFfmpegExclusive } from './ffmpeg-serial';
 import { isolateVoice, type VoiceIsolatorMode } from './voice-isolator';
 import { isolateVoiceNeural } from './voice-isolator-neural';
 import { detectFacePresence, type SegmentFaceResult } from './face-detector';
@@ -373,20 +374,27 @@ function sliceAudioBufferToWAV(audioBuffer: AudioBuffer, startSec: number, endSe
  *  pra sempre (user reportou 2026-06-23: VA presa em "Extraindo audio" /
  *  "montando"). Recuperação RÁPIDA (o watchdog do exec é só backstop de 25min). */
 async function vaFFmpegRetry<T>(fn: () => Promise<T>, ms: number, label: string, tries = 3): Promise<T> {
-  let lastErr: unknown = null;
-  for (let attempt = 1; attempt <= tries; attempt++) {
-    try {
-      return await Promise.race([
-        fn(),
-        new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`${label} timeout ${Math.round(ms / 1000)}s`)), ms)),
-      ]);
-    } catch (e) {
-      lastErr = e;
-      try { cancelFFmpeg(); } catch { /* ignora */ }
-      if (attempt < tries) console.warn(`[va-pipeline] ${label}: t${attempt} falhou (${(e as Error)?.message?.slice(0, 70)}) — reset+retry`);
+  // SERIAL GLOBAL: o retry INTEIRO (todas as tentativas + os cancelFFmpeg entre
+  // elas) roda dentro de UM slot da fila global de ffmpeg. Assim nenhuma outra
+  // task toca a instância singleton enquanto este op do VA processa — nada
+  // termina o nosso ffmpeg no meio (era o "called FFmpeg.terminate()" que perdia
+  // avatar) e o nosso cancelFFmpeg entre tentativas não atropela op de outra task.
+  return runFfmpegExclusive(async () => {
+    let lastErr: unknown = null;
+    for (let attempt = 1; attempt <= tries; attempt++) {
+      try {
+        return await Promise.race([
+          fn(),
+          new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`${label} timeout ${Math.round(ms / 1000)}s`)), ms)),
+        ]);
+      } catch (e) {
+        lastErr = e;
+        try { cancelFFmpeg(); } catch { /* ignora */ }
+        if (attempt < tries) console.warn(`[va-pipeline] ${label}: t${attempt} falhou (${(e as Error)?.message?.slice(0, 70)}) — reset+retry`);
+      }
     }
-  }
-  throw lastErr instanceof Error ? lastErr : new Error(`${label}: esgotou ${tries} tentativas`);
+    throw lastErr instanceof Error ? lastErr : new Error(`${label}: esgotou ${tries} tentativas`);
+  });
 }
 
 export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineResult> {
@@ -475,7 +483,9 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
     });
 
     async function tryFfmpeg(mode: VoiceIsolatorMode): Promise<Blob> {
-      const out = await isolateVoice(rawAudioBlob, {
+      // Serializa na fila global de ffmpeg (mesmo motivo do concat): isolateVoice
+      // usa a instância singleton; sem o lock, uma task paralela podia matá-la.
+      const out = await runFfmpegExclusive(() => isolateVoice(rawAudioBlob, {
         mode,
         format: 'wav',
         onProgress: (p) => {
@@ -485,7 +495,7 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
             percent: 11 + Math.round(p.ratio * 3),
           });
         },
-      });
+      }));
       if (!out || out.size < 1024) {
         throw new Error(`ffmpeg retornou blob inválido (${out?.size ?? 0} bytes)`);
       }

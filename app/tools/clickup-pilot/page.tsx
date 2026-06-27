@@ -77,6 +77,7 @@ import { IconClickUpPilot } from '@/components/ToolIcons';
 import { TierGate } from '@/components/TierGate';
 import { getPilotTeam, setPilotTeam, getPilotEditor, setPilotEditor } from '@/lib/clickup-pilot-config';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
+import { runFfmpegExclusive as runFfmpegSerial } from '@/lib/ffmpeg-serial';
 import { parseMagnificPrompts } from '@/lib/magnific-pipeline';
 import { runMagnificPipelineV2 } from '@/lib/magnific-pipeline-v2';
 import { abortAllMagnific } from '@/lib/magnific-extension-bridge';
@@ -163,14 +164,15 @@ const MAX_HEYGEN_PARALLEL = 2;
  *  conclui e as outras falham na decupagem/regulagem ("1 PRONTO, resto
  *  INCOMPLETO"). Esta fila garante 1 montagem por vez. O HeyGen continua
  *  paralelo (gated por MAX_HEYGEN_PARALLEL) — só a parte ffmpeg serializa. */
-let _postPipelineChain: Promise<unknown> = Promise.resolve();
+/** Serializa o pós-processo de vídeo na MESMA fila global de ffmpeg do app
+ *  (lib/ffmpeg-serial) — agora compartilhada com o concat do VA. O ffmpeg-wasm é
+ *  SINGLETON; rodar 2 ops ao mesmo tempo fazia uma matar a instância da outra
+ *  ("called FFmpeg.terminate()" → AD com 1/2 avatares). `runFfmpegSerial` é o
+ *  alias local pra `runFfmpegExclusive`: 1 operação ffmpeg por vez, app inteiro. */
 function runPostPipelineSerial(
   args: Parameters<typeof runPostPipeline>[0],
 ): ReturnType<typeof runPostPipeline> {
-  const run = _postPipelineChain.then(() => runPostPipeline(args));
-  // A fila SEGUE mesmo se uma montagem falhar (não trava as próximas).
-  _postPipelineChain = run.then(() => undefined, () => undefined);
-  return run;
+  return runFfmpegSerial(() => runPostPipeline(args));
 }
 
 /** Hooks de cache de clips intermediários (leveled/decupado) por parte, em
@@ -6329,21 +6331,29 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
           if (partBlobs.length === 1) {
             mounted = partBlobs[0];
           } else {
-            const { cancelFFmpeg } = await import('@/lib/ffmpeg-worker');
-            let lastErr: unknown = null;
-            for (let attempt = 1; attempt <= 3 && !mounted; attempt++) {
-              try {
-                mounted = await Promise.race([
-                  concatAvatarParts(partBlobs),
-                  new Promise<Blob>((_, rej) => setTimeout(() => rej(new Error('concat timeout 600s')), 600_000)),
-                ]);
-              } catch (e) {
-                lastErr = e;
-                try { cancelFFmpeg(); } catch { /* ignora */ }
-                if (attempt < 3) console.warn(`[VA-texto ${av.avaCode}] montagem t${attempt} falhou (${(e as Error)?.message?.slice(0, 70)}) — reset+retry`);
+            // SERIAL: o concat (+ os cancelFFmpeg entre tentativas) roda dentro de
+            // UM slot da fila de ffmpeg → nenhuma outra task toca a instância
+            // enquanto isso, então NADA termina o nosso concat no meio (era o que
+            // dava "called FFmpeg.terminate()" e perdia o avatar). 1 op por vez.
+            mounted = await runFfmpegSerial(async () => {
+              const { cancelFFmpeg } = await import('@/lib/ffmpeg-worker');
+              let m: Blob | null = null;
+              let lastErr: unknown = null;
+              for (let attempt = 1; attempt <= 3 && !m; attempt++) {
+                try {
+                  m = await Promise.race([
+                    concatAvatarParts(partBlobs),
+                    new Promise<Blob>((_, rej) => setTimeout(() => rej(new Error('concat timeout 600s')), 600_000)),
+                  ]);
+                } catch (e) {
+                  lastErr = e;
+                  try { cancelFFmpeg(); } catch { /* ignora */ }
+                  if (attempt < 3) console.warn(`[VA-texto ${av.avaCode}] montagem t${attempt} falhou (${(e as Error)?.message?.slice(0, 70)}) — reset+retry`);
+                }
               }
-            }
-            if (!mounted) throw lastErr instanceof Error ? lastErr : new Error('concat esgotou 3 tentativas');
+              if (!m) throw lastErr instanceof Error ? lastErr : new Error('concat esgotou 3 tentativas');
+              return m;
+            });
           }
           items.push({ avaCode: av.avaCode, filename, blob: mounted });
         } catch (e) {
