@@ -598,151 +598,143 @@ function HeyGenAutoInner() {
         }
       }
 
-      setDownloadStage('Zipando takes...');
-      const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
-      const filename = `${safeName}_takes.zip`;
+      // === TAKES: salva no IDB (histórico/Retomar) SEM auto-download ===
+      // O user NÃO quer baixar a pasta de takes — só o montado mp4. Mantemos os
+      // takes no disco (histórico + segurança do Retomar), mas não disparamos o
+      // download do browser deles.
+      setDownloadStage('Salvando takes (histórico)...');
+      const takesBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+      const takesName = `${safeName}_takes.zip`;
       if (bId) {
         try {
           const { saveZip } = await import('@/lib/zip-store');
-          await saveZip(`batch:${bId}:takes`, blob, filename);
-          upsertSharedBatch(bId, { zipFilename: filename });
+          await saveZip(`batch:${bId}:takes`, takesBlob, takesName);
+          upsertSharedBatch(bId, { zipFilename: takesName });
         } catch (e) { console.warn('[heygen-auto] save takes IDB:', e); }
       }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
 
-      // === PIPELINE POS-PRODUCAO: gera ZIP montado HOOK[N]+BODY decupados ===
-      // Usa o mesmo runPostPipeline do clickup-pilot.
-      let pipeMontadoUrl: string | undefined;
-      let pipeMontadoName: string | undefined;
-      let pipeDiagnostic: string | undefined;
-      if (partBlobs.some(p => p.blob)) {
-        setDownloadStage('Montando HOOK+BODY decupados (pipeline)...');
-        try {
-          const { runPostPipeline } = await import('@/lib/clickup-pilot-pipeline');
-          const pipeRes = await runPostPipeline({
-            baseAdId: safeName,
-            parts: partBlobs,
-            decupagem: decupagemEnabled,
-            camuflagem: false, // camuflagem fica no zip dedicado abaixo
-            onProgress: (p) => {
-              setDownloadStage(`${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}`);
-            },
-          });
-          pipeDiagnostic = pipeRes.diagnostics.summary;
-          // Monta ZIP com decupados (ou raw assembled se decupagem falhou)
-          const zipMont = new JSZip();
-          for (const item of pipeRes.items) {
-            if (item.decupado) {
-              zipMont.file(item.filename, item.decupado);
-            } else if (item.rawAssembled && item.rawAssembled.size > 0 && !item.errors?.assemble) {
-              zipMont.file(item.filename.replace('.mp4', '_sem_decupagem.mp4'), item.rawAssembled);
-              zipMont.file(`${item.filename.replace('.mp4', '')}_DECUPAGEM_ERRO.txt`, item.errors?.decupagem || 'erro desconhecido');
-            } else {
-              zipMont.file(`${item.filename.replace('.mp4', '')}_ERRO.txt`,
-                `Assemble: ${item.errors?.assemble || 'OK'}\nDecupagem: ${item.errors?.decupagem || 'OK'}`);
-            }
-          }
-          zipMont.file('_DIAGNOSTICO.txt',
-`Pipeline pos-producao - Hey Auto
-====================================
-${pipeRes.diagnostics.summary}
+      // === MONTAGEM (+ camuflagem no MESMO pipeline) ===
+      // Entrega = o montado mp4 (HOOK+BODY concatenado, nivelado e decupado).
+      // Com camuflagem ON, o pipeline também gera item.camuflado (o MONTADO com
+      // áudio camuflado) → baixamos "montado + camuflado", nunca a pasta de takes.
+      if (!partBlobs.some((p) => p.blob)) {
+        setError('Nenhum take baixado com sucesso — nada pra montar.');
+        return;
+      }
 
-Total partes: ${pipeRes.diagnostics.totalParts}
-Hooks identificados: ${pipeRes.diagnostics.hooksFound}
-Bodies identificados: ${pipeRes.diagnostics.bodiesFound}
-Labels nao reconhecidas: ${pipeRes.diagnostics.unrecognizedLabels.join(', ') || 'nenhuma'}
-
-Items finais:
-${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'ERRO ('+it.errors.assemble+')' : 'OK'} | decupagem=${it.errors?.decupagem ? 'ERRO ('+it.errors.decupagem+')' : (it.decupado ? 'OK ('+(it.decupado.size/(1024*1024)).toFixed(1)+'MB)' : '?')}`).join('\n')}`);
-          const blobMont = await zipMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
-          pipeMontadoName = `${safeName}_montado_${decupagemEnabled ? 'decupado' : 'sem_decupagem'}.zip`;
-          if (bId) {
-            try {
-              const { saveZip } = await import('@/lib/zip-store');
-              await saveZip(`batch:${bId}:montado`, blobMont, pipeMontadoName);
-              upsertSharedBatch(bId, { montadoZipName: pipeMontadoName });
-            } catch (e) { console.warn('[heygen-auto] save montado IDB:', e); }
-          }
-          pipeMontadoUrl = URL.createObjectURL(blobMont);
-          // Auto-download
-          const am = document.createElement('a');
-          am.href = pipeMontadoUrl;
-          am.download = pipeMontadoName;
-          document.body.appendChild(am);
-          am.click();
-          document.body.removeChild(am);
-          setPipelineZips((prev) => ({
-            ...prev,
-            takesUrl: url,
-            takesName: filename,
-            montadoUrl: pipeMontadoUrl,
-            montadoName: pipeMontadoName,
-            diagnosticMsg: pipeDiagnostic,
-          }));
-        } catch (e) {
-          console.error('[hgauto pipeline] falhou:', e);
-          setError(`Takes OK · pipeline montagem FALHOU: ${(e as Error)?.message}`);
+      // White pra camuflagem (extrai áudio se for vídeo). Sem white, camuflagem
+      // fica OFF e baixa só o montado.
+      const camuActive = camuflagemMode && !!camuflagemWhite;
+      let whiteForPipe: Blob | null = null;
+      if (camuActive && camuflagemWhite) {
+        whiteForPipe = camuflagemWhite;
+        if ((camuflagemWhite.type || '').startsWith('video/') || /\.(mp4|mov|webm|mkv)$/i.test(camuflagemWhite.name)) {
+          try { whiteForPipe = await extractAudio(camuflagemWhite); } catch { whiteForPipe = camuflagemWhite; }
         }
       }
 
-      // === CAMUFLAGEM (modo opcional): gera 3a ZIP com cada take camuflado ===
-      if (camuflagemMode && camuflagemWhite) {
-        setDownloadStage('Aplicando camuflagem em cada take...');
+      setDownloadStage('Montando HOOK+BODY decupado (pipeline)...');
+      const { runPostPipeline } = await import('@/lib/clickup-pilot-pipeline');
+      const pipeRes = await runPostPipeline({
+        baseAdId: safeName,
+        parts: partBlobs,
+        decupagem: decupagemEnabled,
+        camuflagem: camuActive,
+        whiteAudio: whiteForPipe,
+        camuflagemVolume,
+        onProgress: (p) => {
+          setDownloadStage(`${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}`);
+        },
+      });
+
+      // Montados finais: decupado, ou montado completo (decupagem off / sem corte).
+      const montados = pipeRes.items
+        .filter((it) => !it.errors?.assemble)
+        .map((it) => ({ name: it.filename, blob: it.decupado || it.rawAssembled }))
+        .filter((m) => m.blob && m.blob.size > 0);
+      const camuflados = camuActive
+        ? pipeRes.items
+            .filter((it) => it.camuflado && it.camuflado.size > 0)
+            .map((it) => ({ name: it.filename.replace(/\.mp4$/i, '') + '_camuflado.mp4', blob: it.camuflado! }))
+        : [];
+
+      if (montados.length === 0) {
+        setError(`Montagem falhou: ${pipeRes.diagnostics.summary}`);
+        setDownloadStage(null);
+        if (bId) upsertSharedBatch(bId, { phase: 'failed', message: `Montagem falhou: ${pipeRes.diagnostics.summary}`, finishedAt: Date.now() });
+        return;
+      }
+
+      const triggerDownload = (b: Blob, name: string) => {
+        const u = URL.createObjectURL(b);
+        const el = document.createElement('a');
+        el.href = u;
+        el.download = name;
+        document.body.appendChild(el);
+        el.click();
+        document.body.removeChild(el);
+        setTimeout(() => URL.revokeObjectURL(u), 8000);
+      };
+
+      // Salva no IDB (histórico) + registra o nome no batch compartilhado.
+      const persist = async (
+        key: 'montado' | 'camo',
+        b: Blob,
+        name: string,
+        field: 'montadoZipName' | 'camufladoZipName',
+      ) => {
+        if (!bId) return;
         try {
-          // Extrai audio do WHITE (suporta video tambem)
-          let whiteBlob: Blob = camuflagemWhite;
-          if ((camuflagemWhite.type || '').startsWith('video/') || /\.(mp4|mov|webm|mkv)$/i.test(camuflagemWhite.name)) {
-            whiteBlob = await extractAudio(camuflagemWhite);
-          }
-          const zipCamu = new JSZip();
-          let camuOk = 0;
-          for (let i = 0; i < partBlobs.length; i++) {
-            const p = partBlobs[i];
-            if (!p.blob) continue;
-            setDownloadStage(`Camuflando ${i + 1}/${partBlobs.length} (${p.label})...`);
-            try {
-              const blackAudio = await extractAudio(p.blob);
-              const camuWav = await camuflar({ black: blackAudio, white: whiteBlob, volumePercent: camuflagemVolume });
-              const camuVid = await muxAudioIntoVideo(p.blob, camuWav);
-              zipCamu.file(`${p.label}_camuflado.mp4`, camuVid);
-              camuOk++;
-            } catch (e) {
-              zipCamu.file(`${p.label}_CAMUFLAGEM_ERROR.txt`, String((e as Error)?.message || e));
-            }
-          }
-          const blobCamu = await zipCamu.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
-          const filenameCamu = `${safeName}_camuflado.zip`;
-          if (bId) {
-            try {
-              const { saveZip } = await import('@/lib/zip-store');
-              await saveZip(`batch:${bId}:camo`, blobCamu, filenameCamu);
-              upsertSharedBatch(bId, { camufladoZipName: filenameCamu });
-            } catch (e) { console.warn('[heygen-auto] save camo IDB:', e); }
-          }
-          const urlCamu = URL.createObjectURL(blobCamu);
-          const a2 = document.createElement('a');
-          a2.href = urlCamu;
-          a2.download = filenameCamu;
-          document.body.appendChild(a2);
-          a2.click();
-          document.body.removeChild(a2);
-          setTimeout(() => URL.revokeObjectURL(urlCamu), 5000);
-          setDownloadStage(`✓ ZIPs prontos: ${filename} + ${filenameCamu} (${camuOk}/${partBlobs.filter(p => p.blob).length} camuflados)`);
-        } catch (e) {
-          setDownloadStage(`⚠ Takes OK · camuflagem falhou: ${(e as Error)?.message}`);
-        }
+          const { saveZip } = await import('@/lib/zip-store');
+          await saveZip(`batch:${bId}:${key}`, b, name);
+          if (field === 'montadoZipName') upsertSharedBatch(bId, { montadoZipName: name });
+          else upsertSharedBatch(bId, { camufladoZipName: name });
+        } catch (e) { console.warn(`[heygen-auto] save ${key} IDB:`, e); }
+      };
+
+      // 1 montado → mp4 direto; vários hooks → 1 zip só com os montados (sem takes).
+      let savedMsg = '';
+      if (montados.length === 1) {
+        triggerDownload(montados[0].blob, montados[0].name);
+        await persist('montado', montados[0].blob, montados[0].name, 'montadoZipName');
+        savedMsg = montados[0].name;
       } else {
-        setDownloadStage(`✓ ZIP baixado: ${filename} (${(blob.size / (1024 * 1024)).toFixed(1)}MB)`);
+        const zMont = new JSZip();
+        for (const m of montados) zMont.file(m.name, m.blob);
+        const zb = await zMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+        const zn = `${safeName}_montado.zip`;
+        triggerDownload(zb, zn);
+        await persist('montado', zb, zn, 'montadoZipName');
+        savedMsg = zn;
       }
+
+      // Camuflado só sai quando a camuflagem está ligada (montado + camuflado).
+      if (camuActive && camuflados.length > 0) {
+        if (camuflados.length === 1) {
+          triggerDownload(camuflados[0].blob, camuflados[0].name);
+          await persist('camo', camuflados[0].blob, camuflados[0].name, 'camufladoZipName');
+          savedMsg += ` + ${camuflados[0].name}`;
+        } else {
+          const zCamu = new JSZip();
+          for (const c of camuflados) zCamu.file(c.name, c.blob);
+          const zb = await zCamu.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+          const zn = `${safeName}_camuflado.zip`;
+          triggerDownload(zb, zn);
+          await persist('camo', zb, zn, 'camufladoZipName');
+          savedMsg += ` + ${zn}`;
+        }
+      } else if (camuActive && camuflados.length === 0) {
+        savedMsg += ' (camuflagem falhou — veja console)';
+      }
+
+      setPipelineZips((prev) => ({
+        ...prev,
+        montadoName: montados.length === 1 ? montados[0].name : `${safeName}_montado.zip`,
+        diagnosticMsg: pipeRes.diagnostics.summary,
+      }));
+      setDownloadStage(`✓ Baixado: ${savedMsg}`);
       setTimeout(() => setDownloadStage(null), 8000);
-      if (bId) upsertSharedBatch(bId, { phase: 'done', message: 'Pronto — ZIPs no disco (veja lipsync-history)', finishedAt: Date.now() });
+      if (bId) upsertSharedBatch(bId, { phase: 'done', message: `Pronto — ${savedMsg}`, finishedAt: Date.now() });
     } catch (e) {
       setError(`Falha no download: ${(e as Error)?.message || e}`);
       setDownloadStage(null);
@@ -2809,9 +2801,13 @@ ${pipeRes.items.map(it => `- ${it.filename}: assemble=${it.errors?.assemble ? 'E
                       onClick={downloadAllAsZip}
                       className="btn-primary"
                       disabled={results.filter((r) => r.videoId).length === 0}
-                      title={`Aguarda renderizacao + baixa MP4s + zipa em ${safeName}.zip`}
+                      title={
+                        camuflagemMode
+                          ? 'Renderiza, monta HOOK+BODY decupado e baixa o MP4 montado + o camuflado'
+                          : 'Renderiza, monta HOOK+BODY decupado e baixa o MP4 montado'
+                      }
                     >
-                      ⬇ Baixar tudo como ZIP ({safeName}.zip)
+                      ⬇ Baixar montado{camuflagemMode ? ' + camuflado' : ''} (MP4)
                     </button>
                   )}
                   <a
