@@ -6316,6 +6316,12 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
         if (heygenDone.size > 0) console.log(`[VA-texto] ${heygenDone.size} parte(s) já prontas no HeyGen — vão ser reusadas sem re-gerar`);
       } catch { /* best-effort → render normal */ }
 
+      // ═══ FASE 1 — gera/recupera as partes de TODOS os avatares ANTES de montar
+      // qualquer um (a montagem fica na FASE 2). Antes era por-avatar (montava o
+      // AVA01 inteiro pra SÓ DEPOIS tentar o AVA02). Agora o AVA02 é tentado ANTES
+      // de montar, e o montar só roda no fim — com tudo que deu pra gerar/recuperar
+      // já em mãos. (User: "recuperar os mp4 de todas as partes antes de montar".)
+      const pendingMontagem: Array<{ avaCode: string; filename: string; partBlobs: Blob[]; avError: string | null }> = [];
       for (const av of va.avatares) {
         if (batchCancelRef.current[taskId]) throw new Error('cancelado');
         const choice = vaAvatarChoice[`${taskId}:${av.avaCode}`]!;
@@ -6420,16 +6426,23 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
           if ((e as Error)?.message === 'cancelado') throw e;
           avError = (e as Error)?.message || 'falha';
         }
+        // FASE 1: só ACUMULA — a montagem acontece na FASE 2 (abaixo), depois de
+        // TODOS os avatares terem sido gerados/recuperados.
+        pendingMontagem.push({ avaCode: av.avaCode, filename, partBlobs, avError });
+      }
 
+      // ═══ FASE 2 — MONTA cada avatar (só agora, com tudo já gerado/recuperado) ═══
+      for (const { avaCode, filename, partBlobs, avError } of pendingMontagem) {
+        if (batchCancelRef.current[taskId]) throw new Error('cancelado');
         if (avError || partBlobs.length === 0) {
-          items.push({ avaCode: av.avaCode, filename, blob: null, error: avError || 'sem partes geradas' });
+          items.push({ avaCode, filename, blob: null, error: avError || 'sem partes geradas' });
           continue;
         }
         // Concatena as partes (HOOK+BODY...) → 1 video por AVA. RETRY+RESET: o
         // concat (ffmpeg-wasm) trava de forma intermitente — antes a task ficava
         // presa em "montando vídeo final" pra sempre (user reportou 2026-06-23).
         // Agora 3 tentativas matando o worker entre elas (instância limpa).
-        patchVA({ phase: 'post', message: `${av.avaCode}: montando vídeo final...` });
+        patchVA({ phase: 'post', message: `${avaCode}: montando vídeo final...` });
         try {
           let mounted: Blob | null = null;
           if (partBlobs.length === 1) {
@@ -6452,16 +6465,16 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                 } catch (e) {
                   lastErr = e;
                   try { cancelFFmpeg(); } catch { /* ignora */ }
-                  if (attempt < 3) console.warn(`[VA-texto ${av.avaCode}] montagem t${attempt} falhou (${(e as Error)?.message?.slice(0, 70)}) — reset+retry`);
+                  if (attempt < 3) console.warn(`[VA-texto ${avaCode}] montagem t${attempt} falhou (${(e as Error)?.message?.slice(0, 70)}) — reset+retry`);
                 }
               }
               if (!m) throw lastErr instanceof Error ? lastErr : new Error('concat esgotou 3 tentativas');
               return m;
             });
           }
-          items.push({ avaCode: av.avaCode, filename, blob: mounted });
+          items.push({ avaCode, filename, blob: mounted });
         } catch (e) {
-          items.push({ avaCode: av.avaCode, filename, blob: null, error: 'mount: ' + ((e as Error)?.message || '?') });
+          items.push({ avaCode, filename, blob: null, error: 'mount: ' + ((e as Error)?.message || '?') });
         }
       }
 
