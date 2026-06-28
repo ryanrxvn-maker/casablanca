@@ -569,11 +569,23 @@ export type CreateVideoParams = {
 function describeSubmitError(status: number, rawMsg: string): string {
   const raw = rawMsg || '?';
   const m = raw.toLowerCase();
-  if (m.includes('not accessible in space') || (m.includes('avatar group') && m.includes('not accessible'))) {
+  // Mesma raiz (avatar/look de OUTRO workspace que o ativo), em 2 formatos do
+  // HeyGen: "avatar group ... not accessible in space" (grupo) e "avatar look
+  // not found ... space_id ... 404" (a look específica não está no space ativo —
+  // típico de VA com avatares em workspaces diferentes; as 1as partes vêm da
+  // recuperação e só as partes NOVAS batem no 404).
+  const spaceMismatch =
+    m.includes('not accessible in space') ||
+    (m.includes('avatar group') && m.includes('not accessible')) ||
+    m.includes('avatar look not found') ||
+    (m.includes('look not found') && m.includes('space_id')) ||
+    (m.includes('look') && m.includes('not found') && status === 404);
+  if (spaceMismatch) {
     return (
       'O avatar dessa parte está em OUTRO workspace (space) do HeyGen — por isso ' +
-      'o disparo falhou. No HeyGen, troque o workspace ATIVO (seletor no topo) pro ' +
-      'dono desse avatar, recarregue a biblioteca de avatares e clique Retomar. ' +
+      'o disparo falhou. No HeyGen, deixe ATIVO o workspace dono desse avatar (ou ' +
+      'mova o avatar pro mesmo workspace dos outros), recarregue a biblioteca de ' +
+      'avatares e clique Retomar. ' +
       `[HeyGen status ${status}: ${raw}]`
     );
   }
