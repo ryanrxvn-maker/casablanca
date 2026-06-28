@@ -166,6 +166,23 @@ export function isQuotaError(msg?: string): boolean {
   return /quota|insufficient|saldo|cr[eé]ditos?\b|credit|maximum daily|daily limit|daily quota|usage has exceeded|exceeded the maximum|limit reached|usage limit/.test(m);
 }
 
+/** AVATAR/LOOK de OUTRO workspace (space) que o ativo — TERMINAL: re-tentar NÃO
+ *  cura (a look não está no space ativo; só trocar o workspace ativo no HeyGen,
+ *  ou mover o avatar, resolve). Reconhece os 2 formatos do HeyGen: "not
+ *  accessible in space" (grupo) e "avatar look not found ... space_id" (look).
+ *  Usado pra NÃO desperdiçar as 3 tentativas num avatar impossível de gerar no
+ *  space atual e marcar a falha clara na hora (Retomar inteligente). */
+export function isSpaceMismatchError(msg?: string): boolean {
+  const m = (msg || '').toLowerCase();
+  return (
+    m.includes('not accessible in space') ||
+    (m.includes('avatar group') && m.includes('not accessible')) ||
+    m.includes('avatar look not found') ||
+    (m.includes('look not found') && m.includes('space_id')) ||
+    (m.includes('outro workspace') && m.includes('space'))
+  );
+}
+
 export function isTransientFailure(status: number | undefined, msg?: string): boolean {
   // Cota/limite DIÁRIO é TERMINAL mesmo vindo como 429 → checa ANTES da regra
   // "429 = transitório" (senão o limite diário era re-tentado em loop).

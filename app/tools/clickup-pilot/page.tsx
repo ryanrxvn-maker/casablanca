@@ -6301,7 +6301,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
     });
 
     try {
-      const { processJob, downloadVideoBytes, isQuotaError, findCompletedVideosByName } = await import('@/lib/heygen-api-direct');
+      const { processJob, downloadVideoBytes, isQuotaError, isSpaceMismatchError, findCompletedVideosByName } = await import('@/lib/heygen-api-direct');
       const { concatAvatarParts } = await import('@/lib/ffmpeg-worker');
       const items: Array<{ avaCode: string; filename: string; blob: Blob | null; error?: string }> = [];
 
@@ -6406,10 +6406,13 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
                 } catch (e) {
                   lastErr = (e as Error)?.message || 'falha';
                   upsertPart(label, { error: lastErr });
-                  // COTA/limite diário do HeyGen = TERMINAL: re-tentar não cura
-                  // (só o reset diário/outra conta), então PARA na hora — não
-                  // desperdiça as 3 tentativas nem o tempo do user.
-                  if (isQuotaError(lastErr)) break;
+                  // TERMINAL (re-tentar NÃO cura → PARA na hora, sem gastar as 3
+                  // tentativas nem o tempo do user):
+                  //  - COTA/limite diário do HeyGen (só reset/outra conta resolve)
+                  //  - AVATAR/LOOK de OUTRO workspace que o ativo (404 look not
+                  //    found / not accessible in space) — Retomar inteligente: não
+                  //    insiste num avatar impossível de gerar no space atual.
+                  if (isQuotaError(lastErr) || isSpaceMismatchError(lastErr)) break;
                   if (attempt < 3) console.warn(`[VA-texto ${label}] t${attempt} falhou (${lastErr}) — re-dispara`);
                 }
               }
@@ -6490,6 +6493,9 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
       // COTA: se alguma falha foi limite diário do HeyGen, sinaliza CLARO no card
       // (não é bug nem "retomar resolve" — é a conta no teto diário).
       const hitQuota = items.some((i) => !i.blob && isQuotaError(i.error || ''));
+      // WORKSPACE: avatar que falhou é de outro space → Retomar NÃO resolve
+      // sozinho (precisa trocar o workspace ativo / juntar os avatares).
+      const hitSpaceMismatch = items.some((i) => !i.blob && isSpaceMismatchError(i.error || ''));
       zip.file('_DIAGNOSTICO.txt',
 `Pipeline VA (motor TEXTO — canal ${channelLabels.join('/') || 'organico'}) - relatorio
 ============================================================
@@ -6514,7 +6520,13 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
         message: okCount === 0 && hitQuota
           ? `⚠ HeyGen no LIMITE DIÁRIO de geração — aguarde o reset (~24h) ou troque de conta. NÃO é bug; re-disparar agora vai falhar igual.`
           : partial
-            ? `⚠ INCOMPLETO: ${okCount}/${items.length} avatares — falta ${failedAvas.join('/')}.${hitQuota ? ' Bateu no LIMITE DIÁRIO do HeyGen (espere o reset).' : ' Clica RETOMAR pra gerar o que faltou.'}`
+            ? `⚠ INCOMPLETO: ${okCount}/${items.length} avatares — falta ${failedAvas.join('/')}.${
+                hitSpaceMismatch
+                  ? ` ${failedAvas.join('/')} é de OUTRO workspace do HeyGen — deixe ATIVO o workspace dele (ou junte os avatares no mesmo space), Recarregue a biblioteca e Retomar. (Retomar sem trocar vai falhar igual.)`
+                  : hitQuota
+                    ? ' Bateu no LIMITE DIÁRIO do HeyGen (espere o reset).'
+                    : ' Clica RETOMAR pra gerar o que faltou.'
+              }`
             : `Pronto (texto): ${okCount}/${items.length} AVA${items.length === 1 ? '' : 's'}`,
         // BLINDAGEM: o card lê isto pra NÃO mostrar verde quando faltou avatar.
         vaStats: { okAvas: okCount, expectedAvas: items.length, failedAvas },
