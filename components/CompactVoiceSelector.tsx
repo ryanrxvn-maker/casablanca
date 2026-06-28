@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-type VoiceOption = { id: string; name: string; gender?: string | null; language?: string | null };
+type VoiceOption = { id: string; name: string; gender?: string | null; language?: string | null; custom?: boolean };
 
 /**
  * Picker de voz compacto — abre como DROPDOWN ancorado no botao
@@ -20,7 +20,7 @@ export function CompactVoiceSelector({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<VoiceOption[]>([]);
+  const [allVoices, setAllVoices] = useState<VoiceOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number; width: number; maxH: number } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -92,19 +92,47 @@ export function CompactVoiceSelector({
     return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
+  // Carrega as vozes da CONTA ATIVA (sessão), 1x ao abrir. Custom (@username/
+  // clones) vêm da biblioteca de avatares (look.voiceId/voiceName); stock vem
+  // de /v1/voice.list pela sessão. NUNCA do /api/heygen/voices (API key fixa =
+  // conta errada quando o user troca de conta no HeyGen). Filtro é client-side.
   useEffect(() => {
-    if (!open) return;
+    if (!open || allVoices.length > 0) return;
+    let cancelled = false;
     setLoading(true);
-    const t = setTimeout(async () => {
+    (async () => {
+      const list: VoiceOption[] = [];
+      const seen = new Set<string>();
+      // 1) CUSTOM (conta ativa) — vozes anexadas aos avatares da biblioteca
       try {
-        const r = await fetch(`/api/heygen/voices?q=${encodeURIComponent(query.trim())}&lang=pt`);
-        const j = await r.json();
-        if (r.ok && Array.isArray(j.voices)) setResults(j.voices);
+        const { getLibrarySnapshot, reloadLibrary } = await import('@/lib/heygen-library-cache');
+        let snap = getLibrarySnapshot();
+        if (!snap.groups.length) { await reloadLibrary(false); snap = getLibrarySnapshot(); }
+        for (const g of snap.groups) {
+          for (const l of g.looks) {
+            const vid = (l as any).voiceId as string | undefined;
+            const vn = (l as any).voiceName as string | undefined;
+            if (vid && vn && !seen.has(vid)) { seen.add(vid); list.push({ id: vid, name: vn, custom: true }); }
+          }
+        }
       } catch {}
-      setLoading(false);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [query, open]);
+      // 2) STOCK (conta ativa) — catálogo HeyGen via sessão
+      try {
+        const { listStockVoices } = await import('@/lib/heygen-api-direct');
+        for (const v of await listStockVoices()) {
+          if (!seen.has(v.id)) { seen.add(v.id); list.push({ id: v.id, name: v.name, gender: v.gender, language: v.language }); }
+        }
+      } catch {}
+      if (!cancelled) { setAllVoices(list); setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [open, allVoices.length]);
+
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const base = q ? allVoices.filter((v) => v.name.toLowerCase().includes(q)) : allVoices;
+    return base.slice(0, 120);
+  }, [query, allVoices]);
 
   return (
     <>
@@ -169,7 +197,7 @@ export function CompactVoiceSelector({
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Buscar voz HeyGen (pt-BR)..."
+              placeholder="Buscar voz da sua conta HeyGen ativa..."
               className="input-field"
               autoFocus
             />
@@ -189,6 +217,7 @@ export function CompactVoiceSelector({
                 >
                   <span>
                     <span className="text-white">{v.name}</span>
+                    {v.custom ? <span className="ml-2 mono text-[9px] uppercase tracking-widest text-lime">· sua voz</span> : null}
                     {v.gender ? <span className="ml-2 mono text-[10px] uppercase text-text-muted">· {v.gender}</span> : null}
                   </span>
                   {v.language ? <span className="mono text-[10px] uppercase text-text-muted">{v.language}</span> : null}

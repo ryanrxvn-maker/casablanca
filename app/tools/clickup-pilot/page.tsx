@@ -1475,10 +1475,23 @@ function ClickUpPilotInner() {
     //  pareamento previo de memoria — voz vai como override no slot)
     let voiceLibrary: Array<{ id: string; name: string }> = [];
     try {
-      const r = await fetch('/api/heygen/voices?lang=pt');
-      if (r.ok) {
-        const j = await r.json();
-        if (Array.isArray(j.voices)) voiceLibrary = j.voices;
+      // CONTA ATIVA (sessão), NÃO API key do servidor: as vozes custom
+      // (@username/clones) vêm da biblioteca de avatares recém-recarregada
+      // (reloadLibrary(true) acima); stock vem da sessão. Antes usava
+      // /api/heygen/voices (API key fixa) → casava @username com voiceId da
+      // CONTA ERRADA quando o user trocava de conta no HeyGen.
+      const seenV = new Set<string>();
+      const snapV = getLibrarySnapshot();
+      for (const g of snapV.groups) {
+        for (const l of g.looks) {
+          const vid = (l as any).voiceId as string | undefined;
+          const vn = (l as any).voiceName as string | undefined;
+          if (vid && vn && !seenV.has(vid)) { seenV.add(vid); voiceLibrary.push({ id: vid, name: vn }); }
+        }
+      }
+      const { listStockVoices } = await import('@/lib/heygen-api-direct');
+      for (const v of await listStockVoices()) {
+        if (!seenV.has(v.id)) { seenV.add(v.id); voiceLibrary.push({ id: v.id, name: v.name }); }
       }
     } catch {}
     const voiceByNorm = new Map<string, { id: string; name: string }>();

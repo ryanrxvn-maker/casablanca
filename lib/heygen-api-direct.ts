@@ -489,6 +489,44 @@ export async function getAvatarDefaultVoice(
   return null;
 }
 
+/* ============= Vozes da CONTA ATIVA (sessão, não API key) ============= */
+
+export type StockVoice = { id: string; name: string; language: string | null; gender: string | null };
+
+let _stockVoicesCache: { at: number; voices: StockVoice[] } | null = null;
+
+/** Lista as vozes STOCK da HeyGen pela SESSÃO ATIVA do navegador (proxy da
+ *  extensão = mesma conta dos avatares), via /v1/voice.list. Substitui a parte
+ *  stock do /api/heygen/voices, que usava uma API KEY FIXA do servidor → mostrava
+ *  a conta ERRADA quando o user trocava de conta no HeyGen. As vozes CUSTOM
+ *  (@username/clones) vêm da biblioteca de avatares (look.voiceId/voiceName).
+ *  Cache de 5min: a lista stock é a MESMA em qualquer conta (catálogo HeyGen),
+ *  então cachear não causa o problema de conta-errada. */
+export async function listStockVoices(): Promise<StockVoice[]> {
+  if (_stockVoicesCache && Date.now() - _stockVoicesCache.at < 5 * 60 * 1000) {
+    return _stockVoicesCache.voices;
+  }
+  try {
+    const r = await jsonCall('GET', '/v1/voice.list');
+    const arr: any[] = r?.body?.data?.list || r?.body?.data?.voices || [];
+    const out: StockVoice[] = [];
+    for (const v of arr) {
+      const id = v.voice_id || v.id;
+      if (!id) continue;
+      out.push({
+        id: String(id),
+        name: (v.display_name || '').trim() || v.voice_name || String(id),
+        language: v.language ?? null,
+        gender: v.gender ?? null,
+      });
+    }
+    if (out.length > 0) _stockVoicesCache = { at: Date.now(), voices: out };
+    return out;
+  } catch {
+    return _stockVoicesCache?.voices || [];
+  }
+}
+
 /* ============= TTS pra modo TEXTO ============= */
 
 /**
