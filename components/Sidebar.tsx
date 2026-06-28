@@ -63,9 +63,15 @@ export function Sidebar() {
     // `profile` null pra sempre e o selo grudava em FREE até o usuário dar F5.
     async function resolveProfile(): Promise<Profile> {
       const supabase = createClient();
-      const { data: userData, error: uErr } = await supabase.auth.getUser();
-      if (uErr) throw uErr;
-      const uid = userData.user?.id;
+      // uid via sessão LOCAL (instantâneo); getUser() (rede) só de fallback.
+      let uid: string | undefined;
+      const sess = await supabase.auth.getSession();
+      uid = sess.data.session?.user?.id;
+      if (!uid) {
+        const { data: userData, error: uErr } = await supabase.auth.getUser();
+        if (uErr) throw uErr;
+        uid = userData.user?.id;
+      }
       // Sem uid pode ser o token renovando — lança pra re-tentar.
       if (!uid) throw new Error('sem sessão (uid ausente)');
 
