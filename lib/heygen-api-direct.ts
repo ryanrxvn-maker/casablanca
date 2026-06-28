@@ -92,6 +92,32 @@ export function heygenApiFetch(req: ApiReq): Promise<ApiRes> {
   });
 }
 
+/**
+ * Lê o ID do WORKSPACE/SPACE ATIVO da sessão HeyGen (via account.get pelo
+ * proxy). Serve pra deixar o cache de avatares ciente do space — assim a
+ * lista nunca mostra avatar de um workspace que não é o ativo (raiz do erro
+ * "Avatar group not accessible in space"). FAIL-SAFE: qualquer falha (sem
+ * extensão, campo ausente, timeout) → null, e o chamador segue como antes.
+ * Tenta vários nomes de campo porque o shape exato do space_info não é
+ * documentado (descoberto por engenharia-reversa). */
+export async function getActiveSpaceId(): Promise<string | null> {
+  try {
+    const r = await heygenApiFetch({
+      url: 'https://api2.heygen.com/v1/pacific/account.get?include_ff=true',
+      method: 'GET',
+    });
+    if (!r.ok) return null;
+    const d: any = r.body?.data ?? {};
+    const si: any = d.space_info ?? {};
+    const id =
+      si.space_id ?? si.id ?? si.current_space_id ?? si.active_space_id ??
+      d.space_id ?? d.current_space_id ?? d.active_space_id ?? null;
+    return id ? String(id) : null;
+  } catch {
+    return null;
+  }
+}
+
 /* ============= JSON helpers ============= */
 
 async function jsonCall(method: ApiReq['method'], path: string, body?: any): Promise<{ status: number; ok: boolean; body: any }> {
