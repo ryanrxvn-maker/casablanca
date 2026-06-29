@@ -103,17 +103,34 @@ export function CompactVoiceSelector({
     (async () => {
       const list: VoiceOption[] = [];
       const seen = new Set<string>();
-      // 1) CUSTOM (conta ativa) — vozes anexadas aos avatares da biblioteca
+      // 1) CUSTOM (conta ativa) — vozes anexadas aos avatares da biblioteca.
+      //    O look traz voiceId; o voiceName às vezes vem NULL (ex: voz nativa
+      //    @username de um Avatar IV — o look do "Carlos" tinha voiceId mas
+      //    voiceName=null). O filtro antigo exigia voiceId E voiceName e DESCARTAVA
+      //    a voz (bug: @drrafaelsiqueira1 sumia da lista). Agora, quando falta o
+      //    nome, resolvemos o real via getVoiceName() (/v1/voice.get); só cai no
+      //    nome do avatar se nem isso resolver.
       try {
         const { getLibrarySnapshot, reloadLibrary } = await import('@/lib/heygen-library-cache');
         let snap = getLibrarySnapshot();
         if (!snap.groups.length) { await reloadLibrary(false); snap = getLibrarySnapshot(); }
+        const needName: { id: string; fallback: string }[] = [];
         for (const g of snap.groups) {
           for (const l of g.looks) {
             const vid = (l as any).voiceId as string | undefined;
+            if (!vid || seen.has(vid)) continue;
+            seen.add(vid);
             const vn = (l as any).voiceName as string | undefined;
-            if (vid && vn && !seen.has(vid)) { seen.add(vid); list.push({ id: vid, name: vn, custom: true }); }
+            if (vn) list.push({ id: vid, name: vn, custom: true });
+            else needName.push({ id: vid, fallback: g.name || `Voz ${vid.slice(0, 8)}` });
           }
+        }
+        if (needName.length) {
+          const { getVoiceName } = await import('@/lib/heygen-api-direct');
+          const resolved = await Promise.all(
+            needName.map(async (x) => ({ id: x.id, name: (await getVoiceName(x.id)) || x.fallback, custom: true })),
+          );
+          for (const r of resolved) list.push({ id: r.id, name: r.name, custom: true });
         }
       } catch {}
       // 2) CONTA ATIVA (sessão) — STOCK + CUSTOM via /v2/voice.list. Traz de volta

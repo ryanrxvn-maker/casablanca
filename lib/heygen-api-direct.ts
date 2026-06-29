@@ -521,25 +521,24 @@ function parseVoiceRow(v: any): StockVoice | null {
   };
 }
 
-/** Lista as vozes da CONTA ATIVA (sessão) — STOCK **e CUSTOM** (clonadas/@username),
- *  pelo proxy da extensão (mesma conta dos avatares). Usa /v2/voice.list, que
- *  devolve TODAS as vozes da conta (incluindo as clonadas), com fallback pro
- *  /v1/voice.list (só stock) se o v2 não responder. NUNCA usa /api/heygen/voices
- *  (API key FIXA = conta ERRADA quando o user troca de conta no HeyGen).
+/** Lista as vozes STOCK da CONTA ATIVA (sessão) via /v1/voice.list, pelo proxy da
+ *  extensão (mesma conta dos avatares). NUNCA usa /api/heygen/voices (API key FIXA
+ *  = conta ERRADA quando o user troca de conta no HeyGen).
  *
- *  REGRESSÃO CORRIGIDA (29/jun): o fix de 27/jun passou a tirar as custom SÓ dos
- *  looks de avatar (look.voiceId/voiceName). Voz clonada que NÃO está anexada a um
- *  look — típico de @username nativo de um Avatar IV/V (ex: @drrafaelsiqueira1 do
- *  avatar "Carlos") — sumia da lista, mesmo existindo na conta. O /v2/voice.list
- *  pela sessão traz ela de volta, sem reintroduzir o bug da API key fixa.
+ *  As vozes CUSTOM (clonadas/@username) NÃO vêm por voice.list — elas chegam pelos
+ *  looks dos avatares (look.voiceId) e o nome é resolvido por getVoiceName(). Ver
+ *  o CompactVoiceSelector.
  *
- *  Cache de 5min (a lista da conta é estável; o proxy de sessão garante conta certa). */
+ *  Cache de 5min (catálogo stable; o proxy de sessão garante conta certa). */
 export async function listStockVoices(): Promise<StockVoice[]> {
   if (_stockVoicesCache && Date.now() - _stockVoicesCache.at < 5 * 60 * 1000) {
     return _stockVoicesCache.voices;
   }
-  // /v2/voice.list = stock + custom (conta ativa); /v1 = rede de segurança (só stock).
-  const endpoints = ['/v2/voice.list?limit=2000', '/v1/voice.list?limit=2000', '/v1/voice.list'];
+  // /v1/voice.list = catálogo STOCK da conta ativa (~2300). As CUSTOM (clonadas)
+  // NÃO vêm por voice.list (só stock) — elas chegam pelos looks dos avatares
+  // (look.voiceId) + getVoiceName() pra resolver o nome. (api2 /v2/voice.list e
+  // /v2/voices dão 404 — confirmado por probe na sessão.)
+  const endpoints = ['/v1/voice.list?limit=2000', '/v1/voice.list'];
   for (const path of endpoints) {
     try {
       const r = await jsonCall('GET', path);
@@ -563,6 +562,28 @@ export async function listStockVoices(): Promise<StockVoice[]> {
     }
   }
   return _stockVoicesCache?.voices || [];
+}
+
+const _voiceNameCache = new Map<string, string>();
+
+/** Resolve o display_name de uma voz pelo voice_id, via /v1/voice.get pela SESSÃO
+ *  ativa (proxy da extensão). Usado pra nomear vozes CLONADAS que vêm no look do
+ *  avatar SEM voiceName (ex: a voz nativa @username de um Avatar IV — o look traz
+ *  voiceId mas voiceName=null, então o picker descartava a voz). Cache em memória.
+ *  Retorna null se não resolver (o chamador cai num fallback, ex: nome do avatar). */
+export async function getVoiceName(voiceId: string): Promise<string | null> {
+  if (!voiceId) return null;
+  const cached = _voiceNameCache.get(voiceId);
+  if (cached) return cached;
+  try {
+    const r = await jsonCall('GET', `/v1/voice.get?voice_id=${encodeURIComponent(voiceId)}`);
+    const v = r?.body?.data?.voice;
+    const name = (v?.display_name || '').trim() || (v?.voice_name || '').trim() || '';
+    if (name) { _voiceNameCache.set(voiceId, name); return name; }
+  } catch {
+    /* fallback no chamador */
+  }
+  return null;
 }
 
 /* ============= TTS pra modo TEXTO ============= */

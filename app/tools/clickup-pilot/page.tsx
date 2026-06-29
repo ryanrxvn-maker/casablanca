@@ -1482,14 +1482,27 @@ function ClickUpPilotInner() {
       // CONTA ERRADA quando o user trocava de conta no HeyGen.
       const seenV = new Set<string>();
       const snapV = getLibrarySnapshot();
+      // Voz nativa @username de Avatar IV vem com voiceName=null no look — resolve o
+      // nome real via getVoiceName() em vez de descartar (senão o @username do
+      // briefing não casava com a voz, ex: @drrafaelsiqueira1).
+      const needNameV: { id: string; fallback: string }[] = [];
       for (const g of snapV.groups) {
         for (const l of g.looks) {
           const vid = (l as any).voiceId as string | undefined;
+          if (!vid || seenV.has(vid)) continue;
+          seenV.add(vid);
           const vn = (l as any).voiceName as string | undefined;
-          if (vid && vn && !seenV.has(vid)) { seenV.add(vid); voiceLibrary.push({ id: vid, name: vn }); }
+          if (vn) voiceLibrary.push({ id: vid, name: vn });
+          else needNameV.push({ id: vid, fallback: g.name || `Voz ${vid.slice(0, 8)}` });
         }
       }
-      const { listStockVoices } = await import('@/lib/heygen-api-direct');
+      const { listStockVoices, getVoiceName } = await import('@/lib/heygen-api-direct');
+      if (needNameV.length) {
+        const resolvedV = await Promise.all(
+          needNameV.map(async (x) => ({ id: x.id, name: (await getVoiceName(x.id)) || x.fallback })),
+        );
+        for (const r of resolvedV) voiceLibrary.push({ id: r.id, name: r.name });
+      }
       for (const v of await listStockVoices()) {
         if (!seenV.has(v.id)) { seenV.add(v.id); voiceLibrary.push({ id: v.id, name: v.name }); }
       }
