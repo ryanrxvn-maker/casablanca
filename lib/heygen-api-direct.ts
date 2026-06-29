@@ -491,40 +491,78 @@ export async function getAvatarDefaultVoice(
 
 /* ============= Vozes da CONTA ATIVA (sessão, não API key) ============= */
 
-export type StockVoice = { id: string; name: string; language: string | null; gender: string | null };
+export type StockVoice = { id: string; name: string; language: string | null; gender: string | null; custom?: boolean };
 
 let _stockVoicesCache: { at: number; voices: StockVoice[] } | null = null;
 
-/** Lista as vozes STOCK da HeyGen pela SESSÃO ATIVA do navegador (proxy da
- *  extensão = mesma conta dos avatares), via /v1/voice.list. Substitui a parte
- *  stock do /api/heygen/voices, que usava uma API KEY FIXA do servidor → mostrava
- *  a conta ERRADA quando o user trocava de conta no HeyGen. As vozes CUSTOM
- *  (@username/clones) vêm da biblioteca de avatares (look.voiceId/voiceName).
- *  Cache de 5min: a lista stock é a MESMA em qualquer conta (catálogo HeyGen),
- *  então cachear não causa o problema de conta-errada. */
+/** Heurística de voz CUSTOM/clonada (a voz do PRÓPRIO user, ex: @drrafaelsiqueira1,
+ *  voz nativa clonada junto com um Avatar IV/V). A HeyGen varia o shape: cobre as
+ *  flags conhecidas + o padrão "@handle" do nome do clone (material original). */
+function isCustomVoice(v: any, name: string): boolean {
+  return (
+    v?.is_custom === true ||
+    v?.is_clone === true ||
+    v?.custom === true ||
+    /clone|custom|instant/i.test(String(v?.voice_type ?? v?.type ?? '')) ||
+    name.trim().startsWith('@')
+  );
+}
+
+function parseVoiceRow(v: any): StockVoice | null {
+  const id = v?.voice_id || v?.id;
+  if (!id) return null;
+  const name = (v?.display_name || '').trim() || v?.voice_name || v?.name || String(id);
+  return {
+    id: String(id),
+    name,
+    language: v?.language ?? v?.locale ?? null,
+    gender: v?.gender ?? null,
+    custom: isCustomVoice(v, name),
+  };
+}
+
+/** Lista as vozes da CONTA ATIVA (sessão) — STOCK **e CUSTOM** (clonadas/@username),
+ *  pelo proxy da extensão (mesma conta dos avatares). Usa /v2/voice.list, que
+ *  devolve TODAS as vozes da conta (incluindo as clonadas), com fallback pro
+ *  /v1/voice.list (só stock) se o v2 não responder. NUNCA usa /api/heygen/voices
+ *  (API key FIXA = conta ERRADA quando o user troca de conta no HeyGen).
+ *
+ *  REGRESSÃO CORRIGIDA (29/jun): o fix de 27/jun passou a tirar as custom SÓ dos
+ *  looks de avatar (look.voiceId/voiceName). Voz clonada que NÃO está anexada a um
+ *  look — típico de @username nativo de um Avatar IV/V (ex: @drrafaelsiqueira1 do
+ *  avatar "Carlos") — sumia da lista, mesmo existindo na conta. O /v2/voice.list
+ *  pela sessão traz ela de volta, sem reintroduzir o bug da API key fixa.
+ *
+ *  Cache de 5min (a lista da conta é estável; o proxy de sessão garante conta certa). */
 export async function listStockVoices(): Promise<StockVoice[]> {
   if (_stockVoicesCache && Date.now() - _stockVoicesCache.at < 5 * 60 * 1000) {
     return _stockVoicesCache.voices;
   }
-  try {
-    const r = await jsonCall('GET', '/v1/voice.list');
-    const arr: any[] = r?.body?.data?.list || r?.body?.data?.voices || [];
-    const out: StockVoice[] = [];
-    for (const v of arr) {
-      const id = v.voice_id || v.id;
-      if (!id) continue;
-      out.push({
-        id: String(id),
-        name: (v.display_name || '').trim() || v.voice_name || String(id),
-        language: v.language ?? null,
-        gender: v.gender ?? null,
-      });
+  // /v2/voice.list = stock + custom (conta ativa); /v1 = rede de segurança (só stock).
+  const endpoints = ['/v2/voice.list?limit=2000', '/v1/voice.list?limit=2000', '/v1/voice.list'];
+  for (const path of endpoints) {
+    try {
+      const r = await jsonCall('GET', path);
+      const arr: any[] = r?.body?.data?.voices || r?.body?.data?.list || [];
+      if (!Array.isArray(arr) || arr.length === 0) continue;
+      const seen = new Set<string>();
+      const out: StockVoice[] = [];
+      for (const v of arr) {
+        const row = parseVoiceRow(v);
+        if (!row || seen.has(row.id)) continue;
+        seen.add(row.id);
+        out.push(row);
+      }
+      if (out.length === 0) continue;
+      // Custom (a voz do user) primeiro — fica no topo, fácil de achar.
+      out.sort((a, b) => (a.custom === b.custom ? 0 : a.custom ? -1 : 1));
+      _stockVoicesCache = { at: Date.now(), voices: out };
+      return out;
+    } catch {
+      /* tenta o próximo endpoint */
     }
-    if (out.length > 0) _stockVoicesCache = { at: Date.now(), voices: out };
-    return out;
-  } catch {
-    return _stockVoicesCache?.voices || [];
   }
+  return _stockVoicesCache?.voices || [];
 }
 
 /* ============= TTS pra modo TEXTO ============= */

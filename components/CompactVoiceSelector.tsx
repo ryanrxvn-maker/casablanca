@@ -116,11 +116,13 @@ export function CompactVoiceSelector({
           }
         }
       } catch {}
-      // 2) STOCK (conta ativa) — catálogo HeyGen via sessão
+      // 2) CONTA ATIVA (sessão) — STOCK + CUSTOM via /v2/voice.list. Traz de volta
+      //    vozes clonadas que NÃO estão anexadas a um look (ex: @username nativo de
+      //    Avatar IV/V), que o passo (1) não pega. Dedup contra o que já entrou.
       try {
         const { listStockVoices } = await import('@/lib/heygen-api-direct');
         for (const v of await listStockVoices()) {
-          if (!seen.has(v.id)) { seen.add(v.id); list.push({ id: v.id, name: v.name, gender: v.gender, language: v.language }); }
+          if (!seen.has(v.id)) { seen.add(v.id); list.push({ id: v.id, name: v.name, gender: v.gender, language: v.language, custom: v.custom }); }
         }
       } catch {}
       if (!cancelled) { setAllVoices(list); setLoading(false); }
