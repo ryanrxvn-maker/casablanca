@@ -19,6 +19,8 @@
  *   /v1/pacific/video.update        - renomeia video
  */
 
+import { sleepUnthrottled } from './unthrottled-clock';
+
 const API_BASE = 'https://api2.heygen.com';
 
 /** Versao MINIMA do content-script da extensao que essa lib precisa.
@@ -1135,7 +1137,10 @@ export async function pollVideosUntilReady(
       return lastStatuses;
     }
 
-    await new Promise((r) => setTimeout(r, interval));
+    // Espera NÃO-estrangulada (Web Worker): em aba de segundo plano o setTimeout
+    // da janela cai pra ~1x/min e travava o poll (render "RENDERIZANDO" eterno +
+    // contador congelado + montagem que não disparava). Ver [[unthrottled-clock]].
+    await sleepUnthrottled(interval);
   }
 }
 
