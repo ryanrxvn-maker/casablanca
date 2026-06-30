@@ -693,8 +693,15 @@ function HeyGenAutoInner() {
       // Entrega = o montado mp4 (HOOK+BODY concatenado, nivelado e decupado).
       // Com camuflagem ON, o pipeline também gera item.camuflado (o MONTADO com
       // áudio camuflado) → baixamos "montado + camuflado", nunca a pasta de takes.
-      if (!partBlobs.some((p) => p.blob)) {
-        setError('Nenhum take baixado com sucesso — nada pra montar.');
+      // GARANTIA DE VÍDEO COMPLETO: se QUALQUER parte disparada faltou (render
+      // travou no HeyGen / download falhou), NÃO monta pela metade — isso confunde
+      // e entrega trabalho furado. Trava como INCOMPLETO; o user re-dispara só a
+      // parte que faltou (os takes ficam salvos no histórico, nada se perde).
+      const faltaram = partBlobs.filter((p) => !p.blob).map((p) => p.label);
+      if (faltaram.length > 0) {
+        setError(`INCOMPLETO — faltou ${faltaram.join(', ')} (render do HeyGen). Não montei pra não entregar vídeo furado. Re-dispare só essa(s) parte(s).`);
+        setDownloadStage(null);
+        if (bId) upsertSharedBatch(bId, { phase: 'failed', message: `INCOMPLETO — faltou ${faltaram.join(', ')}.`, finishedAt: Date.now() });
         return;
       }
 
@@ -1851,10 +1858,13 @@ function HeyGenAutoInner() {
     const JSZip = (await import('jszip')).default;
     const { saveZip } = await import('@/lib/zip-store');
 
-    // ===== Fase 3: DOWNLOAD takes =====
+    // ===== Fase 3: DOWNLOAD takes (NÃO auto-baixa — só guarda pro botão manual) =====
     cbs.onUpdate({ phase: 'downloading' });
     const zip = new JSZip();
-    const partBlobs: Array<{ label: string; blob: Blob | null }> = [];
+    // expected:true em TODA parte disparada → se faltar blob, o pipeline flagga
+    // missingParts e a entrega TRAVA (nunca montado furado silencioso).
+    const partBlobs: Array<{ label: string; blob: Blob | null; expected: boolean }> = [];
+    const failedParts: string[] = [];
     for (let i = 0; i < ready.length; i++) {
       if (cbs.isCancelled()) throw new Error('Cancelado pelo usuário.');
       const part = ready[i];
@@ -1862,19 +1872,23 @@ function HeyGenAutoInner() {
       stage(`Baixando parte ${i + 1}/${ready.length} (${part.label})...`, 75 + Math.round((15 * (i + 1)) / ready.length));
       if (status?.status !== 'completed' || !status.videoUrl) {
         zip.file(`${part.label}_FAILED.txt`, `Status: ${status?.status || 'unknown'}\nErro: ${status?.error || 'sem video_url'}`);
-        partBlobs.push({ label: part.label, blob: null });
+        partBlobs.push({ label: part.label, blob: null, expected: true });
+        failedParts.push(part.label);
         continue;
       }
       try {
         const bytes = await downloadVideoBytes(status.videoUrl);
         zip.file(`${part.label}.mp4`, bytes);
-        partBlobs.push({ label: part.label, blob: new Blob([bytes as BlobPart], { type: 'video/mp4' }) });
+        partBlobs.push({ label: part.label, blob: new Blob([bytes as BlobPart], { type: 'video/mp4' }), expected: true });
       } catch (e) {
         zip.file(`${part.label}_DOWNLOAD_ERROR.txt`, String((e as Error)?.message || e));
-        partBlobs.push({ label: part.label, blob: null });
+        partBlobs.push({ label: part.label, blob: null, expected: true });
+        failedParts.push(part.label);
       }
     }
-    stage('Zipando takes...', 90, 'post');
+    // Takes vão pro IDB (histórico/Retomar + botão manual no card), SEM auto-download:
+    // o user quer só o MP4 montado decupado, nunca a pasta de takes.
+    stage('Salvando takes (histórico)...', 90, 'post');
     const takesBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
     const takesName = `${safe}_takes.zip`;
     try {
@@ -1882,48 +1896,62 @@ function HeyGenAutoInner() {
       upsertSharedBatch(batchId, { zipFilename: takesName });
     } catch {}
     cbs.onUpdate({ zips: { ...(item.zips || {}), takes: takesName } });
-    const takesUrl = triggerDownload(takesBlob, takesName);
-    setTimeout(() => URL.revokeObjectURL(takesUrl), 5000);
 
-    // ===== Fase 4: MONTADO (HOOK+BODY, com/sem decupagem) =====
-    if (partBlobs.some((p) => p.blob)) {
-      stage(`Montando HOOK+BODY${item.decupagem ? ' + decupagem' : ''}...`, 92, 'post');
-      try {
-        const { runPostPipeline } = await import('@/lib/clickup-pilot-pipeline');
-        const pipeRes = await runPostPipeline({
-          baseAdId: safe,
-          parts: partBlobs,
-          decupagem: item.decupagem,
-          keepSilenceSec: item.decupIntensity ?? DEFAULT_KEEP_SILENCE,
-          camuflagem: false,
-          onProgress: (p) => stage(`${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}`, 92 + Math.round((5 * p.doneCount) / Math.max(1, p.totalCount))),
-        });
-        const zipMont = new JSZip();
-        for (const it of pipeRes.items) {
-          if (it.decupado) {
-            zipMont.file(it.filename, it.decupado);
-          } else if (it.rawAssembled && it.rawAssembled.size > 0 && !it.errors?.assemble) {
-            zipMont.file(it.filename.replace('.mp4', item.decupagem ? '_sem_decupagem.mp4' : '.mp4'), it.rawAssembled);
-            if (item.decupagem) {
-              zipMont.file(`${it.filename.replace('.mp4', '')}_DECUPAGEM_ERRO.txt`, it.errors?.decupagem || 'erro desconhecido');
-            }
-          } else {
-            zipMont.file(`${it.filename.replace('.mp4', '')}_ERRO.txt`, `Assemble: ${it.errors?.assemble || 'OK'}\nDecupagem: ${it.errors?.decupagem || 'OK'}`);
-          }
-        }
-        const blobMont = await zipMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
-        const montName = `${safe}_montado_${item.decupagem ? 'decupado' : 'sem_decupagem'}.zip`;
-        try {
-          await saveZip(`batch:${batchId}:montado`, blobMont, montName);
-          upsertSharedBatch(batchId, { montadoZipName: montName });
-        } catch {}
-        cbs.onUpdate({ zips: { ...(item.zips || {}), takes: takesName, montado: montName } });
-        const montUrl = triggerDownload(blobMont, montName);
-        setTimeout(() => URL.revokeObjectURL(montUrl), 5000);
-      } catch (e) {
-        console.error('[hgauto fila pipeline] falhou:', e);
-      }
+    // GARANTIA DE VÍDEO COMPLETO: se QUALQUER parte disparada faltou (render travou
+    // no HeyGen / download falhou), NÃO monta pela metade — isso confunde e entrega
+    // trabalho furado. TRAVA como INCOMPLETO (card vermelho); o user re-dispara só a
+    // parte que faltou. Os takes ficam salvos, nada se perde.
+    if (failedParts.length > 0) {
+      upsertSharedBatch(batchId, { phase: 'failed', message: `INCOMPLETO — faltou ${failedParts.join(', ')} (render do HeyGen). NÃO montei pra não entregar vídeo furado. Re-dispare só essa(s) parte(s).`, finishedAt: Date.now() });
+      throw new Error(`INCOMPLETO: faltou ${failedParts.join(', ')}. Montado não gerado (garantia de vídeo completo) — re-dispare a parte que faltou.`);
     }
+
+    // ===== Fase 4: MONTADO (HOOK+BODY decupado) — entrega 1 MP4 DIRETO, sem pasta =====
+    stage(`Montando HOOK+BODY${item.decupagem ? ' + decupagem' : ''}...`, 92, 'post');
+    const { runPostPipeline } = await import('@/lib/clickup-pilot-pipeline');
+    const pipeRes = await runPostPipeline({
+      baseAdId: safe,
+      parts: partBlobs,
+      decupagem: item.decupagem,
+      keepSilenceSec: item.decupIntensity ?? DEFAULT_KEEP_SILENCE,
+      camuflagem: false,
+      onProgress: (p) => stage(`${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}`, 92 + Math.round((5 * p.doneCount) / Math.max(1, p.totalCount))),
+    });
+    // Rede final: se MESMO ASSIM o pipeline marcou parte esperada faltando, trava.
+    const incompletas = pipeRes.items.filter((it) => it.missingParts?.length);
+    if (incompletas.length > 0) {
+      const faltou = [...new Set(incompletas.flatMap((it) => it.missingParts || []))];
+      upsertSharedBatch(batchId, { phase: 'failed', message: `INCOMPLETO — faltou ${faltou.join(', ')}. Montado não entregue.`, finishedAt: Date.now() });
+      throw new Error(`INCOMPLETO: faltou ${faltou.join(', ')} — re-dispare a parte que faltou.`);
+    }
+    // Montados finais: decupado (ou rawAssembled se a decupagem em si falhou).
+    const montados = pipeRes.items
+      .filter((it) => !it.errors?.assemble)
+      .map((it) => ({ name: it.filename, blob: it.decupado || it.rawAssembled }))
+      .filter((m): m is { name: string; blob: Blob } => !!m.blob && m.blob.size > 0);
+    if (montados.length === 0) {
+      upsertSharedBatch(batchId, { phase: 'failed', message: `Montagem falhou: ${pipeRes.diagnostics?.summary || 'sem itens'}`, finishedAt: Date.now() });
+      throw new Error(`Montagem não produziu MP4: ${pipeRes.diagnostics?.summary || 'sem itens'}`);
+    }
+    // 1 montado → MP4 DIRETO (sem zip, sem pasta). Vários (multi-hook) → 1 zip só
+    // dos montados (nunca a pasta de takes junto).
+    let montName: string;
+    if (montados.length === 1) {
+      montName = montados[0].name;
+      try { await saveZip(`batch:${batchId}:montado`, montados[0].blob, montName); } catch {}
+      const u = triggerDownload(montados[0].blob, montName);
+      setTimeout(() => URL.revokeObjectURL(u), 5000);
+    } else {
+      const zipMont = new JSZip();
+      for (const m of montados) zipMont.file(m.name, m.blob);
+      const blobMont = await zipMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
+      montName = `${safe}_montado.zip`;
+      try { await saveZip(`batch:${batchId}:montado`, blobMont, montName); } catch {}
+      const u = triggerDownload(blobMont, montName);
+      setTimeout(() => URL.revokeObjectURL(u), 5000);
+    }
+    upsertSharedBatch(batchId, { montadoZipName: montName });
+    cbs.onUpdate({ zips: { ...(item.zips || {}), takes: takesName, montado: montName } });
 
     // ===== Fase 5: CAMUFLADO (opcional) =====
     if (camuflagemMode && camuflagemWhite) {
