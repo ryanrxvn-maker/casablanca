@@ -3615,10 +3615,32 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         const a = taskAnalyses[id];
         if (!a) continue;
         const baseAdId = a.baseAdId || a.taskName;
+        // BLINDAGEM F5 (perda de plano): persiste o PLANO (replan) JÁ ao enfileirar.
+        // Antes o replan só nascia em runTaskInBackground, ao PEGAR VAGA. Uma task
+        // parada em 'queued' (esperando 1 das 2 vagas do HeyGen) que sofria um
+        // simples F5 perdia o plano — taskAnalyses NÃO sobrevive reload — e aí
+        // Retomar/Debug morriam em "Sem plano salvo, analise de novo" (user reportou
+        // 2026-07-01: 4 tasks viraram vermelhas só por atualizar a página). Agora o
+        // replan entra no state → persistBatchStates grava no localStorage no ATO do
+        // enfileiramento → sobrevive reload → a task até AUTO-RETOMA (o promoter
+        // reencontra o plano), sem nem precisar clicar Retomar.
+        const qplan = buildPlan(a);
+        const qreplan: BatchTaskState['replan'] = qplan ? {
+          taskName: a.taskName,
+          baseAdId,
+          parts: qplan.parts.map((p: any) => ({
+            label: p.label,
+            text: p.text,
+            avatarId: p.avatarId ?? null,
+            voiceId: p.voiceId ?? null,
+          })),
+        } : undefined;
         next[id] = {
           ...(next[id] || { taskId: id, taskName: a.taskName, baseAdId, parts: [], startedAt: Date.now(), phase: 'queued' as const }),
           phase: 'queued',
           message: 'Na fila — aguardando vaga...',
+          // não sobrescreve um replan já bom se buildPlan falhar por algum motivo
+          replan: qreplan || next[id]?.replan,
           finishedAt: undefined,
         } as BatchTaskState;
       }
