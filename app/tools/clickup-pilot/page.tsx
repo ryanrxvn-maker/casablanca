@@ -78,6 +78,8 @@ import { TierGate } from '@/components/TierGate';
 import { getPilotTeam, setPilotTeam, getPilotEditor, setPilotEditor } from '@/lib/clickup-pilot-config';
 import { runPostPipeline } from '@/lib/clickup-pilot-pipeline';
 import { runFfmpegExclusive as runFfmpegSerial } from '@/lib/ffmpeg-serial';
+import { sleepUnthrottled } from '@/lib/unthrottled-clock';
+import { acquireKeepAlive, releaseKeepAlive } from '@/lib/tab-keepalive';
 import { parseMagnificPrompts } from '@/lib/magnific-pipeline';
 import { runMagnificPipelineV2 } from '@/lib/magnific-pipeline-v2';
 import { abortAllMagnific } from '@/lib/magnific-extension-bridge';
@@ -169,10 +171,27 @@ const MAX_HEYGEN_PARALLEL = 2;
  *  SINGLETON; rodar 2 ops ao mesmo tempo fazia uma matar a instância da outra
  *  ("called FFmpeg.terminate()" → AD com 1/2 avatares). `runFfmpegSerial` é o
  *  alias local pra `runFfmpegExclusive`: 1 operação ffmpeg por vez, app inteiro. */
+// Task dona ATUAL do ffmpeg-wasm singleton — setada DENTRO do lock serial (quando a
+// op de fato EXECUTA), nunca ao só enfileirar. O Pausar (pausarTaskBatch) usa isto
+// pra só matar o exec (cancelFFmpeg é GLOBAL) quando a task pausada é a que ESTÁ
+// montando — nunca a que apenas espera na fila (senão pausar a que espera matava o
+// exec da que trabalha). Módulo-level porque o singleton ffmpeg é global ao app.
+// Fallback do gate: se estiver null (caminho sem dono conhecido), o Pausar CAI no
+// comportamento atual (cancelFFmpeg) pra não regredir. Ver rank 5 da auditoria.
+let _ffmpegOwnerTaskId: string | null = null;
+
 function runPostPipelineSerial(
   args: Parameters<typeof runPostPipeline>[0],
+  ownerTaskId?: string,
 ): ReturnType<typeof runPostPipeline> {
-  return runFfmpegSerial(() => runPostPipeline(args));
+  return runFfmpegSerial(async () => {
+    if (ownerTaskId) _ffmpegOwnerTaskId = ownerTaskId;
+    try {
+      return await runPostPipeline(args);
+    } finally {
+      if (ownerTaskId && _ffmpegOwnerTaskId === ownerTaskId) _ffmpegOwnerTaskId = null;
+    }
+  });
 }
 
 /** Hooks de cache de clips intermediários (leveled/decupado) por parte, em
@@ -2118,6 +2137,10 @@ function ClickUpPilotInner() {
   /** Dedup de wrappers gated por taskId. Se ja ha um wrapper esperando
    *  vaga pra essa task, segundo clique e no-op (idempotente). */
   const heygenPendingRef = useRef<Record<string, 'run' | 'resume'>>({});
+  // rank 17: se o user clica Retomar enquanto o run ANTERIOR ainda está encerrando
+  // (heygenPendingRef preso), o clique era descartado em silêncio (Retomar "não fazia
+  // nada"). Aqui guardamos a intenção; o finally do run que está saindo re-dispara.
+  const pendingRetomarRef = useRef<Record<string, 'run' | 'resume'>>({});
 
   /** Restore persisted batch states no mount. Tudo que estava ATIVO
    *  (dispatching/rendering/downloading/post) OU ja em 'queued' antes
@@ -2217,6 +2240,52 @@ function ClickUpPilotInner() {
         setVaTextEngineOverride((prev) => ({ ...teOverride, ...prev }));
         console.info(`[batch restore] ${vaRehydrated} task(s) VA reidratada(s) do snapshot — resume após restart OK.`);
       }
+    }
+
+    // REIDRATAÇÃO TROCA (rank 18 + rank 9): o pipeline da troca já sobrevive ao F5
+    // (lê driveId/volume do batchState persistido + WHITE do IDB), MAS o painel de
+    // config da troca lê a.trocaBriefing de taskAnalyses (que some no reload) → o user
+    // não conseguia reajustar volume/link antes de Retomar. Repõe um taskAnalyses
+    // mínimo com o trocaBriefing reconstruído dos campos persistidos. E torna a
+    // mensagem do card HONESTA: se o WHITE não está no IDB, pede pra re-subir em vez
+    // de prometer "áudio preservado" (que era mentira quando o upload não persistiu).
+    {
+      const taPatchTroca: Record<string, any> = {};
+      for (const [taskId, st] of Object.entries(restored)) {
+        if (st.kind !== 'troca') continue;
+        taPatchTroca[taskId] = {
+          taskId, taskName: st.taskName, baseAdId: st.baseAdId,
+          taskUrl: st.taskUrl ?? undefined, status: 'partial',
+          trocaBriefing: {
+            baseAdId: st.baseAdId,
+            driveId: st.trocaDriveId,
+            driveFolderUrl: st.trocaOutputFolderUrl,
+          },
+        };
+      }
+      if (Object.keys(taPatchTroca).length > 0) {
+        // prev tem prioridade (não sobrescreve análise fresca do user).
+        setTaskAnalyses((prev) => ({ ...taPatchTroca, ...prev }) as typeof prev);
+      }
+      // Mensagem honesta: checa o WHITE no IDB (async) e corrige o card das trocas
+      // interrompidas que NÃO têm mais o áudio.
+      void (async () => {
+        try {
+          const { loadBlob } = await import('@/lib/zip-store');
+          for (const [taskId, st] of Object.entries(restored)) {
+            if (st.kind !== 'troca' || st.phase !== 'failed') continue;
+            let w: Blob | null = null;
+            try { w = await loadBlob('troca:white:' + taskId, st.trocaWhiteMime || 'audio/wav'); } catch {}
+            if (!w) {
+              setBatchStates((prev) => {
+                const cur = prev[taskId];
+                if (!cur || cur.phase !== 'failed') return prev;
+                return { ...prev, [taskId]: { ...cur, message: 'Recarregou a página — re-suba o áudio WHITE dessa task e clique Retomar.' } };
+              });
+            }
+          }
+        } catch { /* best-effort */ }
+      })();
     }
 
     // HIDRATAÇÃO BLOB URLs (fix 2026-05-30):
@@ -2797,7 +2866,7 @@ function ClickUpPilotInner() {
               [taskId]: { ...prev[taskId], message: `${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}` },
             }));
           },
-        });
+        }, taskId);
       } catch (e) {
         // Pipeline jogou — quase nunca deve acontecer (catch interno em cada stage)
         console.error('[clickup-pilot] pipeline threw:', e);
@@ -3315,7 +3384,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
               [taskId]: { ...prev[taskId], message: `${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}` },
             }));
           },
-        });
+        }, taskId);
       } catch (e) {
         console.error('[clickup-pilot resume] pipeline threw:', e);
         setBatchStates((prev) => ({
@@ -3680,6 +3749,37 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         }
         return next;
       });
+      // BLINDAGEM F5 (VA): persiste o snapshot de resume JÁ no enqueue — não só
+      // quando pega vaga (o runner re-grava com dados frescos em ~L6004). Sem isto,
+      // uma VA parada em 'queued' (esperando vaga) que sofre F5 perdia o vaBriefing
+      // inteiro (taskAnalyses não sobrevive reload) → "briefing nao sobrevive reload"
+      // → failed sem recuperação. Espelha EXATAMENTE o objeto do runner. Best-effort.
+      for (const id of vaReady) {
+        try {
+          const a = taskAnalyses[id];
+          const va = a?.vaBriefing;
+          if (!va) continue;
+          const fileId = va.linkAdFileId || extractDriveFileId(vaAdUrl[id] || '') || null;
+          const pick = (obj: Record<string, unknown>, pref: string) =>
+            Object.fromEntries(Object.entries(obj).filter(([k]) => k.startsWith(pref)));
+          persistVAResumeSnapshot(id, {
+            vaBriefing: { ...va, candidateLinks: undefined },
+            taskName: a.taskName,
+            baseAdId: va.baseAdId,
+            docUrl: batchStates[id]?.docUrl || a.docUrl || null,
+            taskUrl: batchStates[id]?.taskUrl || a.taskUrl || null,
+            adUrl: vaAdUrl[id] || null,
+            usesTextEngine: vaUsesTextEngine(id),
+            avatarChoices: pick(vaAvatarChoice as Record<string, unknown>, `${id}:`),
+            voiceChoices: pick(vaVoiceChoice as Record<string, unknown>, `${id}:`),
+            fileId,
+            transcript: fileId ? vaTranscript[fileId] : undefined,
+            roleTexts: fileId
+              ? Object.fromEntries(Object.entries(vaRoleText).filter(([k]) => k.startsWith(`${fileId}:`)))
+              : {},
+          });
+        } catch { /* best-effort */ }
+      }
       for (const taskId of vaReady) {
         void runHeyGenGated(taskId, 'run');
       }
@@ -3713,7 +3813,25 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       void (async () => {
         for (const taskId of trocaTasks) {
           if (batchCancelRef.current[taskId]) continue;
-          await runTrocaAudioPipelineForTask(taskId);
+          try {
+            await runTrocaAudioPipelineForTask(taskId);
+          } catch (e) {
+            // ISOLA a falha por item: uma troca que estoura no SETUP (antes do
+            // try/catch interno do runner) não pode abortar a IIFE e deixar TODAS as
+            // trocas seguintes presas em 'queued' com Retomar E Debug desabilitados.
+            // Marca 'failed' recuperável e segue pra próxima.
+            console.error('[troca] runner lançou fora do try interno:', e);
+            setBatchStates((prev) => ({
+              ...prev,
+              [taskId]: {
+                ...(prev[taskId] || { taskId, taskName: taskId, baseAdId: taskId, parts: [], startedAt: Date.now() }),
+                kind: 'troca',
+                phase: 'failed',
+                message: 'Falha ao iniciar a troca — clique Retomar',
+                finishedAt: Date.now(),
+              } as BatchTaskState,
+            }));
+          }
         }
       })();
     }
@@ -3966,7 +4084,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    */
   async function runHeyGenGated(taskId: string, kind: 'run' | 'resume') {
     if (heygenPendingRef.current[taskId]) {
-      // Ja ha wrapper esperando ou rodando — clique extra ignorado.
+      // Já há wrapper vivo. NÃO descarta o clique em silêncio (era o "Retomar não faz
+      // nada" durante um Pausar→Retomar rápido, com o run anterior ainda encerrando):
+      // registra a intenção; o finally do run que está saindo re-dispara assim que o
+      // pending liberar. Não empilha (sobrescreve com o último kind pedido).
+      pendingRetomarRef.current[taskId] = kind;
       return;
     }
     heygenPendingRef.current[taskId] = kind;
@@ -3991,9 +4113,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           if (!cur) return prev; // sem entrada — promoter cria, nao aqui
           return { ...prev, [taskId]: { ...cur, phase: 'queued', message: `Aguardando vaga (${heygenSlotsRef.current}/${MAX_HEYGEN_PARALLEL} ocupados)...`, finishedAt: undefined } };
         });
-        await new Promise((r) => setTimeout(r, 1000));
+        await sleepUnthrottled(1000); // não-estrangulado: a fila escoa mesmo com a aba em segundo plano
       }
       heygenSlotsRef.current++;
+      acquireKeepAlive(); // mantém a aba viva (anti-freeze) por TODO o run desta task (dispatch→render→download→montagem)
       // Marca fase ATIVA imediatamente ao pegar o slot — fecha o gap entre
       // acquire e o runTaskInBackground setar 'dispatching'. Sem isso, o
       // watchdog poderia ver counter>active nesse intervalo e "curar" cedo
@@ -4031,9 +4154,22 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         });
       } finally {
         heygenSlotsRef.current = Math.max(0, heygenSlotsRef.current - 1);
+        releaseKeepAlive();
       }
     } finally {
       delete heygenPendingRef.current[taskId];
+      // rank 17: consome uma intenção de Retomar que chegou enquanto ESTE run ainda
+      // segurava o pending (Pausar→Retomar rápido). Re-dispara no próximo tick, mas SÓ
+      // se a task não concluiu (não re-roda um 'done', não gasta cota) e não voltou a
+      // uma fase ativa. O guard heygenPendingRef (agora livre) dedupa o resto.
+      const pend = pendingRetomarRef.current[taskId];
+      if (pend) {
+        delete pendingRetomarRef.current[taskId];
+        const ph = batchStatesRef.current[taskId]?.phase;
+        if (ph !== 'done' && !ACTIVE_BATCH_PHASES.includes(ph as BatchTaskState['phase'])) {
+          setTimeout(() => { void runHeyGenGated(taskId, pend); }, 0);
+        }
+      }
     }
   }
 
@@ -4595,7 +4731,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             [taskId]: { ...prev[taskId], message: `${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}` },
           }));
         },
-      });
+      }, taskId);
 
       // Reconstroi os ZIPs (montado + camo) — mesmo pattern do resumeTaskBatch
       const JSZip = (await import('jszip')).default;
@@ -4694,9 +4830,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     // só dispara quando ESTA task está de fato montando; uma op saudável
     // concorrente no máximo sofre 1 retry (a MESMA recuperação já usada pros hangs
     // intermitentes do wasm) — não quebra nada que já funciona.
-    if (batchStatesRef.current[taskId]?.phase === 'post') {
-      // Import DINÂMICO (mesma estratégia do resto da página — não puxa o wasm pro
-      // bundle inicial). Fire-and-forget: o setState de 'failed' abaixo roda já.
+    if (batchStatesRef.current[taskId]?.phase === 'post'
+        && (_ffmpegOwnerTaskId === taskId || _ffmpegOwnerTaskId === null)) {
+      // Só mata o ffmpeg quando ESTA task é a que está de fato montando (dona do
+      // singleton) OU quando o dono é desconhecido (null → fallback ao comportamento
+      // atual, pra não regredir o pause). Com 2 montagens em 'post' ao mesmo tempo,
+      // pausar a que só ESPERA na fila serial não pode matar o exec da que TRABALHA.
+      // Import DINÂMICO (não puxa o wasm pro bundle). Fire-and-forget: o setState de
+      // 'failed' abaixo roda já.
       void import('@/lib/ffmpeg-worker')
         .then(({ cancelFFmpeg }) => { try { cancelFFmpeg(); } catch { /* ignora */ } })
         .catch(() => { /* ignora */ });
@@ -6524,23 +6665,28 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
             // enquanto isso, então NADA termina o nosso concat no meio (era o que
             // dava "called FFmpeg.terminate()" e perdia o avatar). 1 op por vez.
             mounted = await runFfmpegSerial(async () => {
-              const { cancelFFmpeg } = await import('@/lib/ffmpeg-worker');
-              let m: Blob | null = null;
-              let lastErr: unknown = null;
-              for (let attempt = 1; attempt <= 3 && !m; attempt++) {
-                try {
-                  m = await Promise.race([
-                    concatAvatarParts(partBlobs),
-                    new Promise<Blob>((_, rej) => setTimeout(() => rej(new Error('concat timeout 600s')), 600_000)),
-                  ]);
-                } catch (e) {
-                  lastErr = e;
-                  try { cancelFFmpeg(); } catch { /* ignora */ }
-                  if (attempt < 3) console.warn(`[VA-texto ${avaCode}] montagem t${attempt} falhou (${(e as Error)?.message?.slice(0, 70)}) — reset+retry`);
+              _ffmpegOwnerTaskId = taskId; // rank 5: dona atual do singleton
+              try {
+                const { cancelFFmpeg } = await import('@/lib/ffmpeg-worker');
+                let m: Blob | null = null;
+                let lastErr: unknown = null;
+                for (let attempt = 1; attempt <= 3 && !m; attempt++) {
+                  try {
+                    m = await Promise.race([
+                      concatAvatarParts(partBlobs),
+                      new Promise<Blob>((_, rej) => setTimeout(() => rej(new Error('concat timeout 600s')), 600_000)),
+                    ]);
+                  } catch (e) {
+                    lastErr = e;
+                    try { cancelFFmpeg(); } catch { /* ignora */ }
+                    if (attempt < 3) console.warn(`[VA-texto ${avaCode}] montagem t${attempt} falhou (${(e as Error)?.message?.slice(0, 70)}) — reset+retry`);
+                  }
                 }
+                if (!m) throw lastErr instanceof Error ? lastErr : new Error('concat esgotou 3 tentativas');
+                return m;
+              } finally {
+                if (_ffmpegOwnerTaskId === taskId) _ffmpegOwnerTaskId = null;
               }
-              if (!m) throw lastErr instanceof Error ? lastErr : new Error('concat esgotou 3 tentativas');
-              return m;
             });
           }
           items.push({ avaCode, filename, blob: mounted });
@@ -6700,6 +6846,11 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
     const startedAt = Date.now();
     const renamedTo = `${adNameClean}_TROCA.mp4`;
     const setStage = (phase: BatchTaskState['phase'], message: string, done = false) => {
+      // GUARD anti-cancel: depois que o user Pausa (batchCancelRef=true + phase→'failed'),
+      // o onProgress do download e os estágios da troca NÃO podem reescrever a fase de
+      // volta pra 'downloading'/'post' — era isso que "des-pausava" e re-desabilitava o
+      // Retomar durante o download. batchCancelRef é a fonte de verdade do cancel.
+      if (batchCancelRef.current[taskId]) return;
       setBatchStates((prev) => ({
         ...prev,
         [taskId]: {
@@ -6783,46 +6934,69 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
       if (!dl.ok) throw new Error('Drive download: ' + dl.error);
       const adBlob = new Blob([dl.bytes as BlobPart], { type: 'video/mp4' });
 
-      // 2. Descamufla: recupera o BLACK (audio publico) tirando o WHITE antigo.
+      // 2+3+4. TUDO que toca o ffmpeg-wasm singleton (descamufla + recamufla + mux +
+      // verify) roda dentro do MESMO lock serial (runFfmpegSerial) da montagem normal.
+      // Sem isto, uma troca concorrente com uma montagem 'post' colidia no singleton
+      // (o cancelFFmpeg de retry de uma matava o exec da outra: "FFmpeg.terminate()" —
+      // o bug histórico que o ffmpeg-serial existe pra eliminar). O keep-alive segura a
+      // aba viva no processamento pesado (anti-freeze em segundo plano). O owner marca
+      // esta task como dona atual do singleton (o Pausar não mata o exec de OUTRA task).
       setStage('post', 'Tirando o áudio WHITE antigo...');
       const { descamuflar, camuflar, verifyCamouflage } = await import('@/lib/camuflagem');
-      const { wav: blackWav } = await descamuflar({ file: adBlob, layer: 'public' });
       const { muxAudioIntoVideo } = await import('@/lib/ffmpeg-worker');
+      const { acquireKeepAlive, releaseKeepAlive } = await import('@/lib/tab-keepalive');
 
-      // 3+4. GARANTIA: recamufla com o novo WHITE, muxa no video e VERIFICA
-      // sobre o MP4 REAL que os downmixes de plataforma (soma L+R e média —
-      // como TikTok/Kwai/YouTube fazem) realmente escutam o NOVO white. Se o
-      // AAC do mux degradar a fase, sobe o ganho e re-tenta ate passar ou
-      // bater o teto. Assim o resultado e ASSERTIVO, nao "torcer pra dar".
       let finalBlob: Blob | null = null;
       let platformOk = false;
       let platformWhite: number | undefined;
       let platformBlack: number | undefined;
-      let gainBoost = 1;
-      const MAX_ATTEMPTS = 3;
-      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-        if (batchCancelRef.current[taskId]) throw new Error('Cancelado pelo usuario.');
-        setStage('post', attempt === 1 ? 'Embutindo o novo áudio WHITE...' : `Reforçando o WHITE (tentativa ${attempt}/${MAX_ATTEMPTS})...`);
-        const camWav = await camuflar({ black: blackWav, white, volumePercent: volume, gainBoost });
-        setStage('post', 'Montando o vídeo final...');
-        const muxed = await muxAudioIntoVideo(adBlob, camWav, {
-          onStage: (s) => setStage('post', s),
-        }, true);
-        finalBlob = muxed;
-        setStage('post', 'Verificando o que a IA escuta...');
-        try {
-          const v = await verifyCamouflage({ result: muxed, white, black: blackWav });
-          // So os downmixes que as plataformas usam (somam/mediam os canais).
-          const rel = v.downmixes.filter((d) => d.kind === 'sum' || d.kind === 'avg');
-          platformOk = rel.length > 0 && rel.every((d) => d.hears === 'white');
-          platformWhite = rel.length ? Math.min(...rel.map((d) => d.whiteScore)) : undefined;
-          platformBlack = rel.length ? Math.max(...rel.map((d) => d.blackScore)) : undefined;
-        } catch {
-          // Verify falhou tecnicamente — nao bloqueia a entrega do arquivo.
-          platformOk = true;
-        }
-        if (platformOk) break;
-        gainBoost *= 1.8;
+      acquireKeepAlive();
+      try {
+        const res = await runFfmpegSerial(async () => {
+          _ffmpegOwnerTaskId = taskId;
+          try {
+            // Descamufla: recupera o BLACK (audio publico) tirando o WHITE antigo.
+            const { wav: blackWav } = await descamuflar({ file: adBlob, layer: 'public' });
+            // GARANTIA: recamufla com o novo WHITE, muxa e VERIFICA sobre o MP4 REAL
+            // que os downmixes de plataforma (soma/média L+R) escutam o NOVO white; se
+            // o AAC degradar a fase, sobe o ganho e re-tenta até passar ou bater o teto.
+            let blob: Blob | null = null;
+            let ok = false;
+            let whiteScore: number | undefined;
+            let blackScore: number | undefined;
+            let gainBoost = 1;
+            const MAX_ATTEMPTS = 3;
+            for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+              if (batchCancelRef.current[taskId]) throw new Error('Cancelado pelo usuario.');
+              setStage('post', attempt === 1 ? 'Embutindo o novo áudio WHITE...' : `Reforçando o WHITE (tentativa ${attempt}/${MAX_ATTEMPTS})...`);
+              const camWav = await camuflar({ black: blackWav, white, volumePercent: volume, gainBoost });
+              setStage('post', 'Montando o vídeo final...');
+              const muxed = await muxAudioIntoVideo(adBlob, camWav, { onStage: (s) => setStage('post', s) }, true);
+              blob = muxed;
+              setStage('post', 'Verificando o que a IA escuta...');
+              try {
+                const v = await verifyCamouflage({ result: muxed, white, black: blackWav });
+                const rel = v.downmixes.filter((d) => d.kind === 'sum' || d.kind === 'avg');
+                ok = rel.length > 0 && rel.every((d) => d.hears === 'white');
+                whiteScore = rel.length ? Math.min(...rel.map((d) => d.whiteScore)) : undefined;
+                blackScore = rel.length ? Math.max(...rel.map((d) => d.blackScore)) : undefined;
+              } catch {
+                ok = true; // verify falhou tecnicamente — não bloqueia a entrega
+              }
+              if (ok) break;
+              gainBoost *= 1.8;
+            }
+            return { blob, ok, whiteScore, blackScore };
+          } finally {
+            if (_ffmpegOwnerTaskId === taskId) _ffmpegOwnerTaskId = null;
+          }
+        });
+        finalBlob = res.blob;
+        platformOk = res.ok;
+        platformWhite = res.whiteScore;
+        platformBlack = res.blackScore;
+      } finally {
+        releaseKeepAlive();
       }
       if (!finalBlob) throw new Error('Falha ao montar o vídeo final.');
       const sizeMb = (finalBlob.size / (1024 * 1024)).toFixed(1);
@@ -7899,6 +8073,9 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               camufladoFilename={b.camufladoZipName}
                               isRunning={running}
                               isQueued={queued}
+                              // TROCA em 'queued' tem driver próprio (não é dirigida pelo promoter):
+                              // libera Retomar/Debug pra nunca ficar sem botão útil se o loop serial cair.
+                              queuedRecoverable={b.kind === 'troca'}
                               onRetomar={() => retomarTaskBatch(b.taskId)}
                               onPausar={() => pausarTaskBatch(b.taskId)}
                               onDebug={() => debugTaskBatch(b.taskId)}
@@ -8559,7 +8736,13 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                           e.preventDefault();
                                           setTrocaDragOver((p) => ({ ...p, [a.taskId]: false }));
                                           const f = e.dataTransfer?.files?.[0] || null;
-                                          if (f) setTrocaWhite((prev) => ({ ...prev, [a.taskId]: f }));
+                                          if (f) {
+                                            setTrocaWhite((prev) => ({ ...prev, [a.taskId]: f }));
+                                            // BLINDAGEM F5: grava o WHITE no IDB JÁ no upload (não só quando o
+                                            // runner roda). Sem isto, trocas em fila perdiam o áudio no reload e o
+                                            // Retomar falhava com "Suba o novo áudio WHITE". Best-effort.
+                                            void import('@/lib/zip-store').then(({ saveBlob }) => saveBlob('troca:white:' + a.taskId, f, f.type || 'audio/wav')).catch(() => {});
+                                          }
                                         }}
                                         className={'mono flex cursor-pointer items-center justify-between gap-2 rounded-[8px] border px-3 py-2 text-[11px] transition ' + (trocaDragOver[a.taskId] ? 'border-teal-300 bg-teal-500/20 text-teal-100 ring-2 ring-teal-400/50' : whiteFile ? 'border-teal-400/60 bg-teal-500/10 text-teal-100' : 'border-line border-dashed bg-bg/60 text-text-muted hover:border-teal-400/40')}>
                                         <span className="truncate">{trocaDragOver[a.taskId] ? '⬇ Solte o áudio aqui' : whiteFile ? `🎵 ${whiteFile.name}` : 'Clica ou ARRASTA o áudio WHITE (.mp3/.wav/vídeo)'}</span>
@@ -8571,13 +8754,19 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                           onChange={(e) => {
                                             const f = e.target.files?.[0] || null;
                                             setTrocaWhite((prev) => ({ ...prev, [a.taskId]: f }));
+                                            // BLINDAGEM F5: grava o WHITE no IDB já no upload (ver comentário no drop).
+                                            if (f) void import('@/lib/zip-store').then(({ saveBlob }) => saveBlob('troca:white:' + a.taskId, f, f.type || 'audio/wav')).catch(() => {});
                                           }}
                                         />
                                       </label>
                                       {whiteFile ? (
                                         <button
                                           type="button"
-                                          onClick={() => setTrocaWhite((prev) => ({ ...prev, [a.taskId]: null }))}
+                                          onClick={() => {
+                                            setTrocaWhite((prev) => ({ ...prev, [a.taskId]: null }));
+                                            // some do IDB também, senão um F5 revivia o WHITE removido
+                                            void import('@/lib/zip-store').then(({ deletePrefix }) => deletePrefix('troca:white:' + a.taskId)).catch(() => {});
+                                          }}
                                           className="mono mt-1 text-[9px] uppercase tracking-widest text-text-muted hover:text-red-300"
                                         >
                                           remover

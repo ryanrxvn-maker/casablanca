@@ -66,6 +66,11 @@ export type BatchJob3DProps = {
   /** Status flags pra disabled */
   isRunning: boolean;
   isQueued: boolean;
+  /** Quando a task em 'queued' tem um driver próprio de recuperação (ex TROCA, que
+   *  NÃO é dirigida pelo promoter): libera Retomar/Debug mesmo em 'queued' pra ela
+   *  nunca ficar sem botão útil se o loop serial morrer. Default false → NORMAL/VA
+   *  (dirigidas pelo promoter) seguem com Retomar/Debug travados em 'queued'. */
+  queuedRecoverable?: boolean;
   /** Children: preview grid abaixo do card (renderizado fora pra nao limitar layout) */
   children?: React.ReactNode;
   /** Quando >0, mostra botao "Atualizar montagem" (parts foram re-geradas
@@ -376,6 +381,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     onDownload,
     isRunning,
     isQueued,
+    queuedRecoverable = false,
     children,
     dirtyPartsCount = 0,
     onRebuild,
@@ -721,7 +727,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                 color="cyan"
                 title="Retomar"
                 onClick={onRetomar}
-                disabled={isRunning || isQueued}
+                disabled={isRunning || (isQueued && !queuedRecoverable)}
               />
               <Btn3D
                 icon={<IconPause size={14} />}
@@ -736,7 +742,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                 color="fuchsia"
                 title="Reiniciar do zero"
                 onClick={onDebug}
-                disabled={isQueued}
+                disabled={isQueued && !queuedRecoverable}
               />
               {!isRunning ? (
                 <Btn3D icon={<IconX size={14} />} color="neutral" title="Remover" onClick={onRemove} />
