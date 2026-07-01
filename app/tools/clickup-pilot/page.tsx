@@ -4664,10 +4664,30 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  re-checa/baixa o que ja renderizou ou re-roda do zero. */
   function pausarTaskBatch(taskId: string) {
     batchCancelRef.current[taskId] = true;
+    // MONTAGEM (phase 'post' = ffmpeg-wasm client-side): o flag de cancel NÃO é
+    // checado DENTRO de um exec travado → sem isto o pause não solta a montagem.
+    // Mata o worker na hora: o pipeline cai no catch/retry e ENCERRA o run, o que
+    // libera o heygenPendingRef → o Retomar seguinte funciona (antes ficava no-op
+    // porque o run antigo seguia "vivo" pendurado). cancelFFmpeg é GLOBAL, então
+    // só dispara quando ESTA task está de fato montando; uma op saudável
+    // concorrente no máximo sofre 1 retry (a MESMA recuperação já usada pros hangs
+    // intermitentes do wasm) — não quebra nada que já funciona.
+    if (batchStatesRef.current[taskId]?.phase === 'post') {
+      // Import DINÂMICO (mesma estratégia do resto da página — não puxa o wasm pro
+      // bundle inicial). Fire-and-forget: o setState de 'failed' abaixo roda já.
+      void import('@/lib/ffmpeg-worker')
+        .then(({ cancelFFmpeg }) => { try { cancelFFmpeg(); } catch { /* ignora */ } })
+        .catch(() => { /* ignora */ });
+    }
     setBatchStates((prev) => {
       const cur = prev[taskId];
       if (!cur || cur.phase === 'done' || cur.phase === 'failed') return prev;
-      return { ...prev, [taskId]: { ...cur, message: '⏸ Pausado pelo user — clique Retomar' } };
+      // CRÍTICO: SAI das fases ativas (phase→'failed') pra isRunning virar false e
+      // o botão Retomar HABILITAR. Antes só trocava a message e mantinha a phase
+      // ('post'/'rendering'/...), então o card seguia "rodando" e o Retomar ficava
+      // desabilitado pra sempre (user reportou 2026-07-01: "clico e nem libera o
+      // retomar"). O Retomar reconstrói do cache (IDB), sem re-render no HeyGen.
+      return { ...prev, [taskId]: { ...cur, phase: 'failed', message: '⏸ Pausado pelo user — clique Retomar', finishedAt: Date.now() } };
     });
   }
 
