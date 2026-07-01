@@ -29,10 +29,24 @@ export async function decodeAudio(file: Blob): Promise<AudioBuffer> {
   const AC =
     (window as any).AudioContext || (window as any).webkitAudioContext;
   const ctx: AudioContext = new AC({ sampleRate: SAMPLE_RATE });
-  const arrayBuffer = await file.arrayBuffer();
-  const buffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
-  await ctx.close();
-  return buffer;
+  // TETO + cleanup garantido: decodeAudioData NÃO é abortável e, num arquivo
+  // patológico (ex WHITE em codec exótico/corrompido), pendura pra sempre e vaza
+  // o AudioContext. Em escala (camuflagem de 50 disparos com WHITE ruim) isso
+  // esgota os AudioContexts do Chrome e trava o decode de OUTRAS tasks. 60s é
+  // folgado pra decodificar o áudio de um AD; no estouro OU numa falha nativa,
+  // o finally FECHA o ctx (antes, a falha nativa nem fechava = leak) e rejeita →
+  // decodeAudioRobust cai no fallback FFmpeg.
+  let to: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    return await new Promise<AudioBuffer>((resolve, reject) => {
+      to = setTimeout(() => reject(new Error('decodeAudio timeout 60s')), 60_000);
+      ctx.decodeAudioData(arrayBuffer.slice(0)).then(resolve, reject);
+    });
+  } finally {
+    if (to) clearTimeout(to);
+    try { await ctx.close(); } catch { /* ignora */ }
+  }
 }
 
 /**

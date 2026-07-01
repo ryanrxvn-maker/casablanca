@@ -132,7 +132,17 @@ export type PipelineResult = {
  *  confia no resultado, pra não piorar). */
 async function probeAVSync(blob: Blob): Promise<{ videoSec: number; audioSec: number } | null> {
   try {
-    const u8 = new Uint8Array(await blob.arrayBuffer());
+    // Lê só um PREFIXO quando o blob é grande. Materializar 181MB inteiros logo
+    // após um concat que já estressou a memória podia lançar RangeError/OOM → o
+    // catch retornava null → o gate de sync se AUTO-DESLIGAVA justo na montagem
+    // gigante (onde o desync é mais provável). Como TODO output da montagem grava
+    // com +faststart (moov no INÍCIO — confirmado em concatAvatarParts/
+    // normalizeForConcat/concatVideosFast/cutVideoSegments/muxAudioIntoVideo), 32MB
+    // de prefixo bastam pra ler as durações das faixas. Se por acaso o moov não
+    // estiver no prefixo, videoSec/audioSec saem 0 → null (fallback seguro atual).
+    const CAP = 32 * 1024 * 1024;
+    const head = blob.size > CAP ? blob.slice(0, CAP) : blob;
+    const u8 = new Uint8Array(await head.arrayBuffer());
     if (u8.length < 16) return null;
     const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
     const fourcc = (p: number) => String.fromCharCode(u8[p], u8[p + 1], u8[p + 2], u8[p + 3]);
@@ -340,10 +350,17 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     // Re-encode FALHOU (OOM/erro). Só BLOQUEIA (lança) se o desync original for
     // GRANDE (vídeo de fato faltando, tipo 14s do AD24) — aí não pode entregar
     // quebrado. Desync moderado → entrega o montado completo (não trava à toa).
-    if (diff > Math.max(4, sync.audioSec * 0.15)) {
-      throw new Error(`montagem ${label} com vídeo faltando (${diff.toFixed(1)}s) e re-encode falhou`);
+    // Só BLOQUEIA (lança) quando o VÍDEO está de fato TRUNCADO — faixa de vídeo bem
+    // mais curta que a de áudio (o copy-concat dropou o vídeo de uma parte, ex AD24).
+    // Uma `diff` grande TAMBÉM aparece por CAUDA DE ÁUDIO legítima em multi-avatar
+    // (aresample=async=1 estica o áudio alguns segundos) com o vídeo ÍNTEGRO — nesse
+    // caso jogar fora o montado bom era um beco sem saída. Checamos o LADO do vídeo,
+    // com a MESMA margem de antes, pra manter o bloqueio real e parar de descartar bom.
+    const videoTruncado = sync.videoSec < sync.audioSec - Math.max(4, sync.audioSec * 0.15);
+    if (videoTruncado) {
+      throw new Error(`montagem ${label} com vídeo faltando (v=${sync.videoSec.toFixed(1)}s a=${sync.audioSec.toFixed(1)}s) e re-encode falhou`);
     }
-    console.warn(`[clickup-pilot-pipeline] ${label}: re-encode falhou + desync moderado (${diff.toFixed(1)}s) → entrega o montado original`);
+    console.warn(`[clickup-pilot-pipeline] ${label}: re-encode falhou mas VÍDEO ÍNTEGRO (v=${sync.videoSec.toFixed(1)}s a=${sync.audioSec.toFixed(1)}s — cauda de áudio) → entrega o montado original`);
     return out;
   };
 

@@ -126,6 +126,14 @@ async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
     let lastBeat = Date.now();
     const onBeat = () => { lastBeat = Date.now(); };
     ff.on('progress', onBeat);
+    // TAMBÉM carimba no evento 'log': nem todo exec emite 'progress' denso — um
+    // stream-copy (-c copy) na junção de lotes ou um scan (-f null) do loudnorm
+    // pode ficar longos trechos SEM 'progress' num arquivo grande e cruzar os 3min
+    // do EXEC_STALL_MS → seria morto no meio de um encode VÁLIDO. O 'log' sai
+    // continuamente em QUALQUER exec vivo (é o pulso mais confiável). O teto
+    // absoluto de 25min segue como backstop, então um exec que trava mas ainda
+    // cospe log não fica pendurado pra sempre.
+    ff.on('log', onBeat);
 
     let poll: ReturnType<typeof setInterval> | undefined;
     let hardTo: ReturnType<typeof setTimeout> | undefined;
@@ -151,6 +159,7 @@ async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
       if (poll) clearInterval(poll);
       if (hardTo) clearTimeout(hardTo);
       try { ff.off('progress', onBeat); } catch { /* ignora */ }
+      try { ff.off('log', onBeat); } catch { /* ignora */ }
     });
   };
   (ff as unknown as { exec: unknown }).exec = wrappedExec;
@@ -1358,12 +1367,23 @@ function buildPrefilter(denoise: string, level: string): string {
  */
 async function loadDenoiseModel(ff: FFmpeg): Promise<string | null> {
   try {
-    const res = await fetch('/models/denoise.rnnn');
-    if (!res.ok) return null;
-    const buf = new Uint8Array(await res.arrayBuffer());
-    if (buf.length < 1024) return null; // arquivo vazio/erro de rota
-    await ff.writeFile('denoise.rnnn', buf);
-    return DENOISE_ARNNDN;
+    // TIMEOUT curto (8s): sem teto, se o Service Worker/rede travar (típico quando a
+    // aba volta do background e o SW re-registra) este fetch consumia os 150s do
+    // withTimeout do leveling da PARTE → a parte saía SEM nivelamento (volumes
+    // desiguais) sem erro visível, multiplicando por N partes. 8s é folgado pra um
+    // arquivo estático local; ao estourar, cai no DENOISE_AFFTDN (não precisa modelo).
+    const ac = new AbortController();
+    const to = setTimeout(() => ac.abort(), 8_000);
+    try {
+      const res = await fetch('/models/denoise.rnnn', { signal: ac.signal });
+      if (!res.ok) return null;
+      const buf = new Uint8Array(await res.arrayBuffer());
+      if (buf.length < 1024) return null; // arquivo vazio/erro de rota
+      await ff.writeFile('denoise.rnnn', buf);
+      return DENOISE_ARNNDN;
+    } finally {
+      clearTimeout(to);
+    }
   } catch {
     return null;
   }

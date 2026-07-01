@@ -1154,14 +1154,27 @@ export async function downloadVideoBytes(videoUrl: string): Promise<Uint8Array> 
   // INCOMPLETA). Tenta direct fetch primeiro; se falhar, routeia via proxy.
   return withRetry(async () => {
     try {
-      const r = await fetch(videoUrl);
-      if (r.ok) {
-        const buf = await r.arrayBuffer();
-        const u8 = new Uint8Array(buf);
-        if (u8.byteLength > 1024) return u8; // sanity: <1KB = corpo de erro, nao MP4
+      // TIMEOUT no fetch DIRETO: fetch do browser não tem teto default. Se o CDN
+      // aceita a conexão mas para de mandar bytes (socket estagnado — comum em aba
+      // de fundo throttlada/rede móvel), o arrayBuffer() ficava pendurado PRA SEMPRE
+      // e o withRetry (que só re-tenta em REJEIÇÃO) nunca disparava → run preso em
+      // 'downloading', slot HeyGen nunca liberava, fila congelava. Agora um hang
+      // vira AbortError → cai pro proxy (que já tem seu próprio timeout de 90s) e,
+      // se ambos falharem, o withRetry re-tenta. (proxy = heygenApiFetch, L90-93.)
+      const ac = new AbortController();
+      const to = setTimeout(() => ac.abort(), 120_000);
+      try {
+        const r = await fetch(videoUrl, { signal: ac.signal });
+        if (r.ok) {
+          const buf = await r.arrayBuffer();
+          const u8 = new Uint8Array(buf);
+          if (u8.byteLength > 1024) return u8; // sanity: <1KB = corpo de erro, nao MP4
+        }
+      } finally {
+        clearTimeout(to);
       }
     } catch {
-      /* cai pro proxy */
+      /* timeout/CORS/erro → cai pro proxy */
     }
     const r = await heygenApiFetch({ url: videoUrl, method: 'GET' });
     if (!r.ok) throw new Error(`Falha download (status ${r.status}): ${r.body?.message || r.body?._text?.slice(0, 100) || '?'}`);
