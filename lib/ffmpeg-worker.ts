@@ -37,6 +37,17 @@ const LOAD_TIMEOUT_MS = 90_000; // 90s total pra carregar core + wasm
 // que querem recuperação RÁPIDA põem timeouts menores por cima (e o exec aqui só
 // garante que NADA fica pendurado pra sempre). 25min.
 const EXEC_WATCHDOG_MS = 25 * 60 * 1000;
+// WATCHDOG POR BATIMENTO (a rede REAL de recuperação rápida): o ffmpeg-wasm emite
+// evento `progress` continuamente durante QUALQUER exec de verdade (a cada ~1-2s
+// num encode). Se ficar STALL_MS INTEIROS sem NENHUM progresso, o worker morreu
+// (hang/poison) — matamos na hora, sem esperar os 25min do teto absoluto. Nunca
+// mata encode legítimo: por mais LONGO que seja (montagem grande, re-encode de
+// sync), ele continua batendo progresso → nunca cruza o silêncio de 3min. Só um
+// hang de verdade fica 3min mudo. Era ISSO que deixava a task "MONTANDO/decupando"
+// pendurada 18-25min (user reportou 2026-07-01: 2 tasks travadas em decupagem) —
+// o teto de 25min era o único gatilho. Agora cai em ~3min → retry/fallback do
+// pipeline conclui rápido, sem precisar de RETOMAR manual.
+const EXEC_STALL_MS = 3 * 60 * 1000;
 
 /**
  * Carrega (se necessario) e retorna a instancia singleton do FFmpeg.
@@ -105,17 +116,42 @@ async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
   // O exec nativo perdedor da corrida tem .catch no-op pra não virar unhandled.
   const _origExec = ff.exec.bind(ff) as (...x: unknown[]) => Promise<number>;
   const wrappedExec = (...a: unknown[]): Promise<number> => {
-    let to: ReturnType<typeof setTimeout> | undefined;
     const real = _origExec(...a);
     real.catch(() => { /* swallow late rejection se o watchdog ganhou */ });
+
+    // BATIMENTO: cada evento `progress` do exec vivo carimba lastBeat. É um
+    // listener PRÓPRIO do watchdog — coexiste com o do helper (wireProgress),
+    // porque ff.on('progress') empilha callbacks (não sobrescreve). Assim o
+    // progresso da UI segue intacto e o watchdog tem seu próprio pulso.
+    let lastBeat = Date.now();
+    const onBeat = () => { lastBeat = Date.now(); };
+    ff.on('progress', onBeat);
+
+    let poll: ReturnType<typeof setInterval> | undefined;
+    let hardTo: ReturnType<typeof setTimeout> | undefined;
+    const kill = (rej: (e: Error) => void, msg: string) => {
+      try { ff.terminate(); } catch { /* ignora */ }
+      if (instance === ff) instance = null; // força reinit limpo no próximo getFFmpeg
+      rej(new Error(msg));
+    };
     const watchdog = new Promise<number>((_, rej) => {
-      to = setTimeout(() => {
-        try { ff.terminate(); } catch { /* ignora */ }
-        if (instance === ff) instance = null; // força reinit limpo no próximo getFFmpeg
-        rej(new Error(`ffmpeg exec travou (watchdog ${EXEC_WATCHDOG_MS / 60000}min) — instância reiniciada`));
+      // Gatilho PRIMÁRIO: silêncio total de progresso = worker travado → mata rápido.
+      poll = setInterval(() => {
+        if (Date.now() - lastBeat >= EXEC_STALL_MS) {
+          kill(rej, `ffmpeg exec travado (${EXEC_STALL_MS / 1000}s sem progresso) — instância reiniciada`);
+        }
+      }, 15_000);
+      // Backstop ABSOLUTO (rede final): mesmo que algo emita progresso fantasma pra
+      // sempre, o teto de 25min garante que NADA fica pendurado eternamente.
+      hardTo = setTimeout(() => {
+        kill(rej, `ffmpeg exec travou (watchdog ${EXEC_WATCHDOG_MS / 60000}min) — instância reiniciada`);
       }, EXEC_WATCHDOG_MS);
     });
-    return Promise.race([real, watchdog]).finally(() => { if (to) clearTimeout(to); });
+    return Promise.race([real, watchdog]).finally(() => {
+      if (poll) clearInterval(poll);
+      if (hardTo) clearTimeout(hardTo);
+      try { ff.off('progress', onBeat); } catch { /* ignora */ }
+    });
   };
   (ff as unknown as { exec: unknown }).exec = wrappedExec;
 
