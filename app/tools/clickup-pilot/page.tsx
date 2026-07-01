@@ -2145,6 +2145,33 @@ function ClickUpPilotInner() {
   // de uma troca ainda enfileirada na fila serial pode ser clicado enquanto o loop
   // ainda vai chegar nela → 2 runs concorrentes do MESMO taskId. Este ref impede.
   const runningTrocaRef = useRef<Record<string, boolean>>({});
+  // AUTO-CURA de "done mas INCOMPLETO": a montagem (ffmpeg-wasm no navegador) falha de
+  // forma INTERMITENTE — a task chega em 'done' mas o gate segura como incompleta
+  // (okMontagens<esperado). Antes o user clicava Retomar 3x na mão ("morre no done").
+  // Aqui re-tentamos AUTOMÁTICO até 2x: o resume reaproveita o cache do IDB (partes que
+  // já deram certo) e refaz só o que faltou, então cada tentativa tende a passar. Cap
+  // rígido por task; se esgotar (falha determinística), para e deixa pro user decidir.
+  const autoResumeCountRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    for (const b of Object.values(batchStates)) {
+      if (b.phase !== 'done' || b.kind === 'troca' || b.isVA) continue; // VA/troca têm completion própria
+      const ps = b.pipeStats;
+      if (!ps) continue;
+      // MESMA lógica do pipeOk do card (não re-tentar quando está completo de verdade).
+      const pipeOk = ps.expectedMontagens > 0
+        && ps.okMontagens === ps.expectedMontagens
+        && (!ps.expectedDecupagem || ps.okDecupados === ps.expectedMontagens)
+        && (!ps.expectedCamuflagem || ps.okCamuflados === ps.expectedMontagens);
+      if (pipeOk) { if (autoResumeCountRef.current[b.taskId]) autoResumeCountRef.current[b.taskId] = 0; continue; }
+      const n = autoResumeCountRef.current[b.taskId] || 0;
+      if (n >= 2) continue;                                   // esgotou as auto-tentativas → deixa pro user
+      if (heygenPendingRef.current[b.taskId]) continue;       // já rodando/enfileirado
+      autoResumeCountRef.current[b.taskId] = n + 1;
+      console.warn(`[auto-cura] ${b.taskId}: 'done' incompleto → auto-Retomar (${n + 1}/2, reaproveita cache IDB)`);
+      retomarTaskBatch(b.taskId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batchStates]);
 
   /** Restore persisted batch states no mount. Tudo que estava ATIVO
    *  (dispatching/rendering/downloading/post) OU ja em 'queued' antes
