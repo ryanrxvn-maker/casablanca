@@ -2141,6 +2141,10 @@ function ClickUpPilotInner() {
   // (heygenPendingRef preso), o clique era descartado em silêncio (Retomar "não fazia
   // nada"). Aqui guardamos a intenção; o finally do run que está saindo re-dispara.
   const pendingRetomarRef = useRef<Record<string, 'run' | 'resume'>>({});
+  // Guard de reentrância do pipeline de TROCA: com queuedRecoverable, o Retomar/Debug
+  // de uma troca ainda enfileirada na fila serial pode ser clicado enquanto o loop
+  // ainda vai chegar nela → 2 runs concorrentes do MESMO taskId. Este ref impede.
+  const runningTrocaRef = useRef<Record<string, boolean>>({});
 
   /** Restore persisted batch states no mount. Tudo que estava ATIVO
    *  (dispatching/rendering/downloading/post) OU ja em 'queued' antes
@@ -6898,6 +6902,17 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
       }));
     };
 
+    // GUARD DE REENTRÂNCIA: se ESTA troca já está rodando (ex: o loop serial disparou
+    // E o user clicou Retomar/Debug no card 'queued' — liberado pelo queuedRecoverable),
+    // ignora o disparo extra. Sem isto, rodavam 2 pipelines do MESMO taskId em paralelo
+    // (2x download do Drive + colisão no _ffmpegOwnerTaskId + Object URL órfão). Setado
+    // aqui (após a validação barata de driveId/WHITE) e limpo no finally do try abaixo.
+    if (runningTrocaRef.current[taskId]) {
+      console.warn('[troca] já rodando, ignora disparo extra:', taskId);
+      return;
+    }
+    runningTrocaRef.current[taskId] = true;
+
     setStage('downloading', driveId ? 'Baixando o criativo original do Drive...' : 'Procurando o vídeo na pasta do Drive...');
 
     try {
@@ -7062,6 +7077,8 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
     } catch (e) {
       console.error('[troca-audio]', e);
       fail((e as Error)?.message || String(e));
+    } finally {
+      runningTrocaRef.current[taskId] = false; // libera a reentrância (sucesso, erro ou cancel)
     }
   }
 
