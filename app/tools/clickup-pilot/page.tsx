@@ -4446,6 +4446,12 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     }
     setRegeneratingPart({ taskId, label });
     setRegenError(null);
+    // FECHA O MODAL NA HORA: a re-geração (dispatch + poll de até 25min + download)
+    // roda em BACKGROUND — o card já mostra o progresso da parte (isRegenThis) e, se
+    // falhar (ex: HeyGen rejeitou o texto por moderação), o erro aparece NO CARD, não
+    // num modal travado na frente do user. Tudo que o resto precisa (taskId/partIdx/
+    // label/avatar/voz) já foi capturado acima. (User reportou 2026-07-01: modal preso.)
+    setEditingPart(null);
 
     try {
       // 1) Atualiza replan local com novo texto + novo avatar + nova voz
@@ -4533,11 +4539,26 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         return { ...prev, [taskId]: { ...cur, parts: newParts, dirtyParts: Array.from(dirty) } };
       });
 
-      // Fecha modal
-      setEditingPart(null);
+      // (modal já foi fechado no início — a re-geração rodou em background)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      setRegenError(msg);
+      setRegenError(msg); // caso o modal tenha sido reaberto no meio-tempo
+      // Modal já fechado → mostra o erro NO CARD: a parte volta a 'failed' com a
+      // mensagem, e o user pode clicar EDIT de novo pra ajustar o texto (ex: o HeyGen
+      // rejeitou por moderação) ou subir um áudio no lugar — sem ficar preso na tela.
+      setBatchStates((prev) => {
+        const cur = prev[taskId];
+        if (!cur) return prev;
+        return {
+          ...prev,
+          [taskId]: {
+            ...cur,
+            parts: cur.parts.map((p, i) => i === partIdx
+              ? { ...p, videoStatus: 'failed' as const, error: `Re-gerar falhou: ${msg}` }
+              : p),
+          },
+        };
+      });
     } finally {
       setRegeneratingPart(null);
     }
@@ -9882,12 +9903,13 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
           busy={!!regeneratingPart}
           errorMsg={regenError}
           onClose={() => {
-            if (!regeneratingPart) {
-              setEditingPart(null);
-              setEditAvatar(null);
-              setEditVoice(null);
-              setRegenError(null);
-            }
+            // Fechar SEMPRE liberado — a re-geração roda em BACKGROUND (o card mostra o
+            // progresso da parte). Antes, enquanto 'busy', o fechar era no-op e o modal
+            // ficava PRESO na tela até o poll de 25min terminar (user reportou 2026-07-01).
+            setEditingPart(null);
+            setEditAvatar(null);
+            setEditVoice(null);
+            setRegenError(null);
           }}
           onRegenerate={(newText) => void regenerateSinglePart(newText)}
           avatarPicker={
