@@ -9,6 +9,7 @@ import {
   isPaidTier,
   isBilling,
 } from '@/lib/plan-prices';
+import { rateLimit } from '@/lib/rate-limit';
 
 /**
  * POST /api/billing/checkout
@@ -32,6 +33,16 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { error: 'Faça login pra assinar.', need: 'login' },
         { status: 401 },
+      );
+    }
+
+    // Anti-abuso: cada checkout cria/toca objetos no Stripe. Sem teto, um logado
+    // podia floodar customers.create/sessions.create. 8/min por usuário é folga
+    // total pro fluxo real (clicar "assinar" umas poucas vezes).
+    if (!rateLimit(`checkout:${user.id}`, 8, 60_000)) {
+      return NextResponse.json(
+        { error: 'Muitas tentativas. Espere um minuto e tente de novo.' },
+        { status: 429 },
       );
     }
 

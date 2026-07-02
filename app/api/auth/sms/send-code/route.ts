@@ -139,8 +139,10 @@ export async function POST(req: Request) {
 
     const body = `Auto Edit · Seu código: ${code}. Vale por 10 min.`;
     const sent = await sendTwilio(normalizedPhone, body);
-    if (!sent) {
-      // Dev mode: loga no servidor pra você ver
+    if (!sent && process.env.NODE_ENV !== 'production') {
+      // Dev mode: loga no servidor pra você ver. NUNCA em produção — um OTP em
+      // texto claro no log de produção deixaria quem tem acesso ao log burlar a
+      // verificação de telefone de um alvo.
       console.log('[sms-otp] (dev) phone=' + phone + ' code=' + code);
     }
 

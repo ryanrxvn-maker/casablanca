@@ -254,17 +254,29 @@ def web():
         vol.commit()
         return {"id": f"{fid}.{ext}", "size_mb": round(total / 1024 / 1024, 2)}
 
+    # id sempre nasce como `uuid4().hex[:12] + "." + ext` (em /up e no worker).
+    # Fixar esse formato barra path traversal: sem esse gate, `id=../proc/self/environ`
+    # vazaria os segredos do container (DECUP_KEY/DECUP_UPLOAD_SECRET) e `id=../<outro>`
+    # leria o vídeo de outro tenant. O /file é público (sem ticket/key), então a
+    # validação do NOME é a única barreira.
+    _ID_RE = re.compile(r"^[0-9a-f]{6,32}\.(mp4|mov|webm|mkv|m4a|mp3|wav)$")
+
     @api.get("/file")
     async def file(id: str = Query(...), dl: str = Query(None)):
+        if not _ID_RE.fullmatch(id or ""):
+            raise HTTPException(400, "id inválido")
         vol.reload()
-        path = Path(f"/work/{id}")
-        if not path.exists():
+        # Defesa em profundidade: resolve e confina a /work (nunca escapa a pasta).
+        path = (Path("/work") / id).resolve()
+        if path.parent != Path("/work").resolve() or not path.is_file():
             raise HTTPException(404, "Arquivo não encontrado")
         media = "video/mp4" if id.endswith(".mp4") else (
             "audio/mpeg" if id.endswith(".mp3") else "application/octet-stream")
         headers = {}
         if dl:
-            headers["Content-Disposition"] = f'attachment; filename="{dl}"'
+            # Sanitiza o filename (sem aspas/CR/LF) pra não injetar no header.
+            safe_dl = re.sub(r'[^\w.\- ]+', "_", dl)[:120] or "download"
+            headers["Content-Disposition"] = f'attachment; filename="{safe_dl}"'
         return FileResponse(str(path), media_type=media, headers=headers)
 
     @api.post("/decupar")

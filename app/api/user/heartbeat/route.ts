@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { rateLimit } from '@/lib/rate-limit';
 
 /**
  * POST /api/user/heartbeat
@@ -21,6 +22,13 @@ export async function POST(req: Request) {
     } = await supabase.auth.getUser();
     if (!user) {
       return NextResponse.json({ error: 'Nao autenticado.' }, { status: 401 });
+    }
+
+    // Throttle silencioso: cliente pinga a cada 20s (~3/min). Teto de 6/min por
+    // usuário corta amplificação de write sem quebrar o front (heartbeat é
+    // best-effort — ao exceder só pulamos o write e devolvemos ok).
+    if (!rateLimit(`hb:${user.id}`, 6, 60_000)) {
+      return NextResponse.json({ ok: true, throttled: true });
     }
 
     let body: {

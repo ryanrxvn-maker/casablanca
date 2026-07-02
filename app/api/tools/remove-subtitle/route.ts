@@ -26,6 +26,7 @@ import {
 } from '@/lib/vmake-api';
 import { runOnVmakeQueue } from '@/lib/vmake-queue';
 import { decryptSecret } from '@/lib/secrets';
+import { signVmakeJob } from '@/lib/vmake-job-token';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -82,7 +83,12 @@ export async function POST(req: Request) {
       const sourceUrl = await completeMultipart(session, parts);
       return processFromSourceUrl(sourceUrl, mode, body.title || 'video.mp4');
     });
-    return NextResponse.json({ success: true, record_id: recordId, task_id: taskId });
+    // Amarra o record_id ao dono num token assinado. O cliente ecoa esse token
+    // como "record_id" em /status e /download; o servidor confere userId lá e
+    // barra IDOR (uma conta não baixa o vídeo de outra). O taskId cru fica só
+    // pra telemetria interna.
+    const record_id = signVmakeJob({ recordId, userId: guard.userId });
+    return NextResponse.json({ success: true, record_id, task_id: taskId });
   } catch (err) {
     const { status, message, code, detail } = vmakeErrorToHttp(err);
     console.error('[remove-subtitle finish]', code, detail);

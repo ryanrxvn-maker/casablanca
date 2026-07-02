@@ -353,7 +353,26 @@ function checkOrigin(request: NextRequest): NextResponse | null {
   const proto = request.headers.get('x-forwarded-proto') || 'https';
   const selfOrigin = host ? `${proto}://${host}` : null;
 
-  if (!origin && !referer) return null;
+  // Sem Origin NEM Referer: same-origin GETs, navegações diretas e clientes
+  // server-to-server (webhook do Stripe, CLI). Fail-OPEN é seguro pra métodos
+  // SAFE. Pra métodos que MUTAM estado, fail-CLOSED — exceto os callers sem
+  // browser reconhecidos por header próprio (assinatura do Stripe / chave do
+  // CLI). Browser sempre manda Origin em POST/PUT/PATCH/DELETE, então usuário
+  // legítimo não é afetado; isso só fecha o CSRF fail-open (defesa a mais além
+  // do SameSite=Lax do cookie do Supabase).
+  if (!origin && !referer) {
+    const method = request.method.toUpperCase();
+    const isSafe = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
+    if (isSafe) return null;
+    const isTrustedMachine =
+      !!request.headers.get('stripe-signature') ||
+      !!request.headers.get('x-autoedit-key');
+    if (isTrustedMachine) return null;
+    return new NextResponse(
+      JSON.stringify({ error: 'Origin ausente em requisição de escrita.' }),
+      { status: 403, headers: { 'content-type': 'application/json' } },
+    );
+  }
 
   const candidate = origin || (referer ? new URL(referer).origin : null);
   if (!candidate) return null;

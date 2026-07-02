@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/app/api/admin/_helpers';
+import { createClient } from '@/lib/supabase/server';
+import { assertPublicHttpUrl } from '@/lib/safe-fetch';
 import {
   processDownload,
   classify,
@@ -23,6 +25,16 @@ export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
+  // Exige sessão: /api/* fica fora do gate do middleware, então sem isto a rota
+  // era chamável anonimamente (abuso de recurso). A página /tools/downloader já
+  // é login-only, então usuário legítimo sempre traz o cookie de sessão.
+  const {
+    data: { user },
+  } = await createClient().auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: 'Não autenticado.' }, { status: 401 });
+  }
+
   let body: {
     url?: string;
     mode?: Mode;
@@ -77,6 +89,10 @@ export async function POST(req: NextRequest) {
   // TikTok video: streama direto do CDN (sem disco, latencia minima).
   if (result.kind === 'remote') {
     try {
+      // A URL vem da resposta do resolver (tikwm), não direto do usuário —
+      // mas validamos contra destino interno (anti-SSRF de 2ª ordem) antes de
+      // buscar/streamar de volta pro cliente.
+      await assertPublicHttpUrl(result.url);
       const upstream = await fetch(result.url, { headers: result.headers });
       if (!upstream.ok || !upstream.body) {
         await result.dispose();

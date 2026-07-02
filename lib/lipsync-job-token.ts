@@ -41,11 +41,14 @@ function secret(): string {
     process.env.LIPSYNC_JOB_SECRET?.trim() ||
     process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ||
     process.env.DREAMFACE_USER_ID?.trim();
-  if (!s) {
-    // Em dev sem nenhum segredo: usa um fixo (só afeta ambiente local).
-    return 'autoedit-lipsync-dev-secret';
+  if (s) return s;
+  // Em produção NUNCA cai no literal: chave de assinatura pública = qualquer um
+  // forja token de job. Sem segredo → hard fail em vez de assinar com constante.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('LIPSYNC_JOB_SECRET/SERVICE_ROLE_KEY ausente — recusando assinar/verificar token.');
   }
-  return s;
+  // Em dev sem nenhum segredo: usa um fixo (só afeta ambiente local).
+  return 'autoedit-lipsync-dev-secret';
 }
 
 function b64url(buf: Buffer): string {

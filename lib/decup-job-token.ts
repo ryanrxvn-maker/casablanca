@@ -29,8 +29,14 @@ function secret(): string {
   const s =
     process.env.DECUP_JOB_SECRET?.trim() ||
     process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  if (!s) return 'autoedit-decup-dev-secret';
-  return s;
+  if (s) return s;
+  // Em produção NUNCA cai no literal: uma chave de assinatura pública deixaria
+  // qualquer um forjar tokens de job. Sem segredo → recusa (hard fail) em vez de
+  // assinar com constante. Em dev, o literal mantém a ergonomia local.
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('DECUP_JOB_SECRET/SERVICE_ROLE_KEY ausente — recusando assinar/verificar token.');
+  }
+  return 'autoedit-decup-dev-secret';
 }
 
 function b64url(buf: Buffer): string {

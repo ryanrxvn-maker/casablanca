@@ -14,6 +14,7 @@
 import { NextResponse } from 'next/server';
 import { requirePro } from '@/app/api/admin/_helpers';
 import { pollRecord, VMAKE_EFFECT, vmakeErrorToHttp, type VmakeMode } from '@/lib/vmake-api';
+import { verifyVmakeJob } from '@/lib/vmake-job-token';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -25,13 +26,19 @@ export async function GET(req: Request) {
   if (!guard.ok) return guard.response;
 
   const url = new URL(req.url);
-  const recordId = url.searchParams.get('record_id');
+  const token = url.searchParams.get('record_id');
   const modeParam = url.searchParams.get('mode') || 'smart';
   const mode: VmakeMode = VALID_MODES.has(modeParam) ? (modeParam as VmakeMode) : 'smart';
 
-  if (!recordId) {
+  if (!token) {
     return NextResponse.json({ error: 'record_id é obrigatório.' }, { status: 400 });
   }
+  // record_id é um token assinado que embute o dono — barra IDOR entre contas.
+  const job = verifyVmakeJob(token);
+  if (!job || job.userId !== guard.userId) {
+    return NextResponse.json({ error: 'Job inválido ou de outra conta.' }, { status: 403 });
+  }
+  const recordId = job.recordId;
 
   try {
     const result = await pollRecord(recordId, VMAKE_EFFECT[mode]);

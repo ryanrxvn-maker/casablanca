@@ -12,6 +12,7 @@
  * → { ok, status, text, title? }
  */
 import { NextResponse } from 'next/server';
+import { safeFetch } from '@/lib/safe-fetch';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -38,8 +39,12 @@ export async function GET(req: Request) {
     let parsed: URL;
     try { parsed = new URL(target); } catch { return jsonError('URL invalida.'); }
 
-    // Suporta apenas Google Docs por ora (formato confiavel)
-    const docId = parsed.host.endsWith('docs.google.com') ? extractGoogleDocId(parsed.pathname) : null;
+    // Suporta apenas Google Docs por ora (formato confiavel). Host EXATO —
+    // `endsWith` casava domínios do atacante (evildocs.google.com).
+    const docId =
+      parsed.host === 'docs.google.com' || parsed.host.endsWith('.docs.google.com')
+        ? extractGoogleDocId(parsed.pathname)
+        : null;
     if (!docId) {
       return jsonError(
         'Apenas Google Docs suportado por enquanto. URL precisa ser docs.google.com/document/d/<ID>/...',
@@ -48,7 +53,9 @@ export async function GET(req: Request) {
     }
 
     const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=txt`;
-    const upstream = await fetch(exportUrl, { redirect: 'follow' });
+    // safeFetch revalida cada redirect contra destino interno (o export do
+    // Google redireciona pra googleusercontent.com — host público, passa).
+    const upstream = await safeFetch(exportUrl);
 
     if (!upstream.ok) {
       // 401/403 = doc privado. 404 = nao existe.

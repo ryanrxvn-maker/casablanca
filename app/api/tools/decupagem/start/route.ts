@@ -35,7 +35,10 @@ export async function POST(req: Request) {
   }
 
   const inputId = (body.input_id || '').trim();
-  if (!inputId || !/^[\w.-]+$/.test(inputId)) {
+  // Formato exato do id do Modal /up (uuid.ext) — o `[\w.-]+` antigo aceitava
+  // `..`, então travar aqui é defesa em profundidade contra path traversal no
+  // /file do worker (que também valida do lado dele).
+  if (!inputId || !/^[0-9a-f]{6,32}\.(mp4|mov|webm|mkv|m4a|mp3|wav)$/.test(inputId)) {
     return NextResponse.json({ error: 'input_id inválido.' }, { status: 400 });
   }
   const outputKind: 'video' | 'audio' = body.outputKind === 'audio' ? 'audio' : 'video';
