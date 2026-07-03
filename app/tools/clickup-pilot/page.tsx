@@ -2329,31 +2329,40 @@ function ClickUpPilotInner() {
       void (async () => {
         try {
           const { loadZip } = await import('@/lib/zip-store');
+          // RETRY (fix 2026-07-03): o IDB pode estar TRAVADO por outra aba no
+          // 1º instante do load — loadZip volta null/lança e, sem re-tentar, a
+          // URL blob ficava pra sempre sem hidratar → task PRONTA sem botão de
+          // download (bug AD44GL). Re-tenta poucas vezes com gap curto; só paga
+          // o custo a chave que de fato falhou (o caso normal acerta de 1ª).
+          // O botão de download AINDA funciona sem isto (loadDeliverables lê o
+          // IDB no clique) — este retry é pra o botão/preview voltarem sozinhos.
+          const loadZipRetry = async (key: string, tries = 3) => {
+            for (let i = 1; i <= tries; i++) {
+              try {
+                const z = await loadZip(key);
+                if (z) return z;
+              } catch (e) { if (i === tries) console.warn('[batch restore]', key, e); }
+              if (i < tries) await new Promise((r) => setTimeout(r, 300 * i));
+            }
+            return null;
+          };
           for (const taskId of doneTaskIds) {
             const updates: Partial<BatchTaskState> = {};
-            try {
-              const t = await loadZip(`batch:${taskId}:takes`);
-              if (t) { updates.zipBlobUrl = t.blobUrl; updates.zipFilename = t.filename; }
-            } catch {}
-            try {
-              const m = await loadZip(`batch:${taskId}:montado`);
-              if (m) { updates.montadoZipUrl = m.blobUrl; updates.montadoZipName = m.filename; }
-            } catch {}
+            const t = await loadZipRetry(`batch:${taskId}:takes`);
+            if (t) { updates.zipBlobUrl = t.blobUrl; updates.zipFilename = t.filename; }
+            const m = await loadZipRetry(`batch:${taskId}:montado`);
+            if (m) { updates.montadoZipUrl = m.blobUrl; updates.montadoZipName = m.filename; }
             // VA (texto E lipsync) salva o resultado em `va:<taskId>:zip` (chave
             // diferente do batch normal). Sem re-hidratar isso, uma VA PRONTA
             // perdia o montadoZipUrl no F5 → o card caía em "INCOMPLETO" (o
             // pipeOk da VA é phase==='done' && !!montadoZipUrl). Fallback só se o
             // batch:montado não veio (não sobrescreve o normal).
             if (!updates.montadoZipUrl) {
-              try {
-                const v = await loadZip(`va:${taskId}:zip`);
-                if (v) { updates.montadoZipUrl = v.blobUrl; updates.montadoZipName = v.filename; }
-              } catch {}
+              const v = await loadZipRetry(`va:${taskId}:zip`);
+              if (v) { updates.montadoZipUrl = v.blobUrl; updates.montadoZipName = v.filename; }
             }
-            try {
-              const c = await loadZip(`batch:${taskId}:camo`);
-              if (c) { updates.camufladoZipUrl = c.blobUrl; updates.camufladoZipName = c.filename; }
-            } catch {}
+            const c = await loadZipRetry(`batch:${taskId}:camo`);
+            if (c) { updates.camufladoZipUrl = c.blobUrl; updates.camufladoZipName = c.filename; }
             if (Object.keys(updates).length === 0) continue;
             setBatchStates((prev) => {
               const cur = prev[taskId];
@@ -8136,6 +8145,33 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                               montadoFilename={b.montadoZipName}
                               camufladoUrl={b.camufladoZipUrl}
                               camufladoFilename={b.camufladoZipName}
+                              // GARANTIA DE ENTREGA (fix 2026-07-03): as URLs blob
+                              // acima são efêmeras. Quando a task está PRONTA mas o
+                              // reload/persist descartou a URL e a re-hidratação do
+                              // IDB falhou (IDB travado por outra aba), o botão de
+                              // download sumia (bug AD44GL). Este loader lê os ZIPs
+                              // DIRETO do IndexedDB por taskId no clique → a entrega
+                              // nunca depende da URL viva. Só passa quando a task
+                              // TEM entrega completa (não mostra botão em incompleta).
+                              loadDeliverables={
+                                b.phase === 'done'
+                                && (montagemContentOk || b.kind === 'troca' || !!b.camufladoZipName || !!b.camufladoZipUrl)
+                                  ? async () => {
+                                      const { loadZip } = await import('@/lib/zip-store');
+                                      const keys = b.isVA
+                                        ? [`va:${b.taskId}:zip`]
+                                        : [`batch:${b.taskId}:montado`, `batch:${b.taskId}:camo`];
+                                      const out: Array<{ url: string; name?: string; revoke?: boolean }> = [];
+                                      for (const k of keys) {
+                                        try {
+                                          const z = await loadZip(k);
+                                          if (z?.blobUrl) out.push({ url: z.blobUrl, name: z.filename, revoke: true });
+                                        } catch (e) { console.warn('[pilot] loadDeliverables', k, e); }
+                                      }
+                                      return out;
+                                    }
+                                  : undefined
+                              }
                               isRunning={running}
                               isQueued={queued}
                               // TROCA em 'queued' tem driver próprio (não é dirigida pelo promoter):

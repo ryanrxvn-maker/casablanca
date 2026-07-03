@@ -63,6 +63,16 @@ export type BatchJob3DProps = {
    *  Auto (dispensa direta), que dispara o pipeline+download on-click em vez
    *  de ter um blob URL pronto. O ClickUp Pilot nao passa — segue por URL. */
   onDownload?: () => void;
+  /** GARANTIA DE ENTREGA (fix 2026-07-03): as URLs blob (montadoUrl/camufladoUrl)
+   *  são EFÊMERAS — o persist as descarta e o reload precisa re-hidratá-las do
+   *  IndexedDB. Se essa re-hidratação falha/timeouta (IDB travado por outra aba),
+   *  a task fica PRONTA (montadoFilename sobrevive) mas SEM URL → o botão de
+   *  download SUMIA (bug AD44GL: card verde, zero botão de baixar). Este loader
+   *  lê os ZIPs direto do IDB por taskId SOB DEMANDA no clique — a entrega NUNCA
+   *  depende de a URL viva ter sobrevivido. Retorna as fontes (montado + camo)
+   *  já com URLs frescas; [] só se o disco estiver realmente vazio. O parent
+   *  passa isto sempre que a task tem entrega (nome persistido ou URL viva). */
+  loadDeliverables?: () => Promise<Array<{ url: string; name?: string; revoke?: boolean }>>;
   /** Status flags pra disabled */
   isRunning: boolean;
   isQueued: boolean;
@@ -374,6 +384,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     montadoFilename,
     camufladoUrl,
     camufladoFilename,
+    loadDeliverables,
     onRetomar,
     onPausar,
     onDebug,
@@ -609,7 +620,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                   pulse={!isRebuilding}
                 />
               ) : null}
-              {(montadoUrl || camufladoUrl || onDownload) ? (() => {
+              {(montadoUrl || camufladoUrl || onDownload || loadDeliverables) ? (() => {
                 // DOWNLOAD = so o(s) MP4 final(is). Entrega o montado/decupado e,
                 // se houver, o camuflado — SEMPRE como .mp4 solto. Nunca o
                 // takes.zip, nunca .zip. Fontes que ja sao .mp4 (TROCA) baixam
@@ -617,7 +628,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                 const sources = [
                   montadoUrl ? { url: montadoUrl, name: montadoFilename } : null,
                   camufladoUrl ? { url: camufladoUrl, name: camufladoFilename } : null,
-                ].filter(Boolean) as Array<{ url: string; name?: string }>;
+                ].filter(Boolean) as Array<{ url: string; name?: string; revoke?: boolean }>;
 
                 const triggerDownload = (url: string, name: string) => {
                   const a = document.createElement('a');
@@ -630,11 +641,30 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                 };
 
                 const handleDownloadAll = async () => {
+                  // GARANTIA (fix 2026-07-03): se as URLs vivas sumiram (persist/
+                  // reload descartou e a re-hidratacao do IDB falhou), busca as
+                  // fontes DIRETO do IndexedDB por taskId agora. Sem isto, uma task
+                  // PRONTA com o blob salvo no disco ficava com botao mudo/ausente.
+                  let effSources = sources;
+                  if (effSources.length === 0 && loadDeliverables) {
+                    try {
+                      const lazy = await loadDeliverables();
+                      effSources = (lazy || []).filter((s) => s && s.url);
+                    } catch (e) {
+                      console.warn('[card] loadDeliverables falhou:', e);
+                    }
+                    if (effSources.length === 0) {
+                      // Disco realmente vazio (raro/destrutivo) — nunca silencioso:
+                      // avisa e manda regerar. Melhor mensagem clara que botao morto.
+                      alert('O vídeo pronto não está mais no cache do navegador (pode ter sido limpo). Clique em Retomar pra regerar a entrega.');
+                      return;
+                    }
+                  }
                   // 1) Junta TODOS os MP4 finais: .mp4 solto (TROCA) entra direto;
                   //    .zip (lipsync/VA) tem os .mp4 extraidos de dentro. Pode dar
                   //    1 (single avatar) ou N (VA com 2+ avatares, montado+camuflado).
                   const out: Array<{ blob?: Blob; url: string; name: string; revoke?: boolean }> = [];
-                  for (const src of sources) {
+                  for (const src of effSources) {
                     const fname = src.name || 'video.mp4';
                     if (/\.mp4$/i.test(fname)) {
                       // Ja e MP4 direto (ex: TROCA) — baixa como esta.
