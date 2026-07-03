@@ -4,6 +4,7 @@
  */
 import {
   processJob,
+  isQuotaError,
   type EngineKey,
   type ProcessJobInput,
 } from './heygen-api-direct';
@@ -61,9 +62,16 @@ export async function runHeyGenJobs(
 ): Promise<RunnerResult[]> {
   const results: RunnerResult[] = new Array(jobs.length);
   let cursor = 0;
+  // FAIL-FAST DE COTA (fix 2026-07-03): quando o HeyGen devolve limite DIÁRIO
+  // (429/quota — isQuotaError), todos os jobs restantes vão falhar igual. Sem
+  // isto, os 3 workers submetiam os N jobs inteiros contra a cota morta (AD45GL:
+  // 10 submits em 1s) — barulho, rate-limit e nenhum ganho. Ao detectar cota,
+  // pickNext para de entregar jobs; os não-disparados são marcados com o MESMO
+  // erro de cota (não podem ficar undefined — o caller faz results.filter(r=>...)).
+  let quotaHit = false;
 
   function pickNext(): number {
-    if (opts.isCancelled()) return -1;
+    if (opts.isCancelled() || quotaHit) return -1;
     return cursor < jobs.length ? cursor++ : -1;
   }
 
@@ -111,6 +119,9 @@ export async function runHeyGenJobs(
         };
       } catch (e) {
         const msg = (e as Error)?.message || String(e);
+        // Cota diária estourada → sinaliza pros outros workers pararem de pegar
+        // jobs novos (fail-fast). O erro deste job segue registrado normalmente.
+        if (isQuotaError(msg)) quotaHit = true;
         results[idx] = {
           index: idx + 1,
           label,
@@ -128,5 +139,15 @@ export async function runHeyGenJobs(
     workers.push(worker());
   }
   await Promise.all(workers);
+  // Preenche jobs NÃO-disparados (cortados pelo fail-fast de cota) com o mesmo
+  // erro — nunca deixa entrada undefined (o caller faz results.filter(r=>r.error)).
+  if (quotaHit) {
+    for (let i = 0; i < jobs.length; i++) {
+      if (!results[i]) {
+        results[i] = { index: i + 1, label: jobs[i].label, videoId: null, error: 'Limite diário do HeyGen atingido (não disparado — cota esgotada)' };
+        opts.onResult(results[i]);
+      }
+    }
+  }
   return results;
 }

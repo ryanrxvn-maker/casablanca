@@ -42,6 +42,7 @@ import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
 import {
   pollVideosUntilReady,
   downloadVideoBytes,
+  isQuotaError,
   type VideoStatus,
 } from '@/lib/heygen-api-direct';
 import {
@@ -2626,7 +2627,16 @@ function ClickUpPilotInner() {
       const failed = results.filter((r) => r.error);
       const validIds = results.filter((r) => r.videoId).map((r) => r.videoId!);
       if (validIds.length === 0) {
-        setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: `Todos disparos falharam: ${failed[0]?.error || '?'}`, finishedAt: Date.now() } }));
+        // MENSAGEM HONESTA (fix 2026-07-03): quando TUDO falhou por LIMITE DIÁRIO
+        // do HeyGen (isQuotaError), não é bug do fluxo — é cota externa. Em vez do
+        // alarmante "Todos disparos falharam: ...(status 429)", explica que é o
+        // limite e que o RETOMAR (após o reset ~24h) re-dispara sozinho. O replan
+        // já foi persistido no enfileirar → RETOMAR funciona sem reabrir a task.
+        const allQuota = failed.length > 0 && failed.every((r) => isQuotaError(r.error || ''));
+        const msg = allQuota
+          ? `⏳ Limite diário do HeyGen atingido — nenhum take disparou. Não é erro do fluxo: a cota diária zerou. Clica RETOMAR após o reset (~24h) que eu re-disparo tudo sozinho.`
+          : `Todos disparos falharam: ${failed[0]?.error || '?'}`;
+        setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: msg, finishedAt: Date.now() } }));
         return;
       }
 
@@ -2772,6 +2782,10 @@ function ClickUpPilotInner() {
             const st = vid ? finalStatuses[vid] : null;
             const neverDispatched = !vid;
             const renderFailed = st?.status === 'failed' || st?.status === 'unknown' || (st?.status === 'completed' && !st.videoUrl);
+            // COTA (fix 2026-07-03): não re-dispara parte que falhou por LIMITE
+            // DIÁRIO — a cota continua morta, só queimaria as 2 rodadas em segundos
+            // (AD47GL). O gate de completude abaixo já monta a msg ⏳ certa.
+            if (isQuotaError(results[i]?.error || '')) return false;
             return (neverDispatched || renderFailed) && !!plan!.parts[i].avatarId;
           });
           if (redispatchIdxs.length === 0) break;
