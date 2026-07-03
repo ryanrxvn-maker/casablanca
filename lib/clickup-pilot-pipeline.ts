@@ -121,6 +121,10 @@ export type PipelineResult = {
     unrecognizedLabels: string[];
     /** Mensagem-resumo amigavel pra mostrar no UI */
     summary: string;
+    /** Montagens REAIS (sem erro de assemble + com bytes). Opcional: só o
+     *  caminho DONE principal preenche; caminhos de erro precoce omitem. */
+    okMontagens?: number;
+    failMontagens?: number;
   };
 };
 
@@ -727,9 +731,17 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   const incompletoStr = incompletas.length
     ? ` · ⚠ ${incompletas.length} INCOMPLETA(s) [${incompletas.map(i=>`${i.filename}: faltou ${i.missingParts!.join('/')}`).join('; ')}]`
     : '';
-  const summary = `${out.length} montagens · ${decupCount} decupados${camuflagem ? ` · ${camuCount} camuflados` : ''}${incompletoStr}`;
+  // HONESTIDADE (fix 2026-07-03): `out` inclui itens FALHADOS (empurrados com
+  // errors.assemble + rawAssembled vazio nas linhas 471/510). Contar out.length
+  // como "montagens" gerava o mentiroso "Pronto: 1 montagens · 0 decupados ·
+  // 0.0MB". okMont = montagem REAL (sem erro de assemble E com bytes). O summary
+  // mostra ok/total só quando algo falhou (mantém o formato quando 100% OK).
+  const okMont = out.filter(i => !i.errors?.assemble && (i.decupado || (i.rawAssembled && i.rawAssembled.size > 0)));
+  const failMont = out.length - okMont.length;
+  const montStr = failMont > 0 ? `${okMont.length}/${out.length} montagens (${failMont} falhou)` : `${out.length} montagens`;
+  const summary = `${montStr} · ${decupCount} decupados${camuflagem ? ` · ${camuCount} camuflados` : ''}${incompletoStr}`;
   console.log('[clickup-pilot-pipeline] DONE', summary);
-  return { items: out, diagnostics: { totalParts: parts.length, hooksFound: hooks.length, bodiesFound: bodies.length, unrecognizedLabels: unrecognized, summary } };
+  return { items: out, diagnostics: { totalParts: parts.length, hooksFound: hooks.length, bodiesFound: bodies.length, unrecognizedLabels: unrecognized, summary, okMontagens: okMont.length, failMontagens: failMont } };
 }
 
 /** Helper local — derivado de app/tools/decupagem/page.tsx pra evitar import

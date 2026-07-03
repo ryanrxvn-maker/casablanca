@@ -498,6 +498,12 @@ type BatchTaskState = {
     expectedDecupagem: boolean;
     expectedCamuflagem: boolean;
   };
+  /** ENTREGA de verdade (fix 2026-07-03): true só quando a montagem final saiu
+   *  (okMontagens === esperado, >0). Sobrevive ao persist (é campo simples).
+   *  Um 'done' com deliveryOk:false = "takes prontos mas vídeo não montou" →
+   *  a auto-cura re-tenta e o card não mente "Pronto". Ausente em batches
+   *  antigos (undefined) → tratado como legado, não força aviso. */
+  deliveryOk?: boolean;
   /** VA: quantos avatares saíram montados vs esperados. BLINDAGEM: o card só
    *  mostra "PRONTO" verde quando okAvas === expectedAvas. Se faltou avatar
    *  (ex: 1/2 — mount morreu, cota, etc.), o card vira AVISO (não verde) com a
@@ -2961,11 +2967,20 @@ Se a pasta estiver vazia ou so com _DIAGNOSTICO.txt, ABRA O CONSOLE DO BROWSER (
 pra ver os erros detalhados [clickup-pilot-pipeline].`);
         const blob2 = await zipMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
         montadoName = `${adNameClean}_${isDecupagemEnabled(taskId) ? 'montado_decupado' : 'montado'}.zip`;
-        montadoUrl = URL.createObjectURL(blob2);
-        try {
-          const { saveZip } = await import('@/lib/zip-store');
-          await saveZip(`batch:${taskId}:montado`, blob2, montadoName);
-        } catch (e) { console.warn('[batch] save montado IDB:', e); }
+        // GUARD (fix 2026-07-03): só persiste o montado se tiver VÍDEO real dentro.
+        // Um zip só com _ERRO.txt/_DIAGNOSTICO.txt (montagem falhou) NÃO pode
+        // sobrescrever um montado BOM salvo antes (auto-cura destrutiva). Sem
+        // vídeo, mantém o artefato anterior no IDB e não oferece download novo.
+        const temVideo = assembled.some((it) => it.decupado || (it.rawAssembled && it.rawAssembled.size > 0 && !it.errors?.assemble));
+        if (temVideo) {
+          montadoUrl = URL.createObjectURL(blob2);
+          try {
+            const { saveZip } = await import('@/lib/zip-store');
+            await saveZip(`batch:${taskId}:montado`, blob2, montadoName);
+          } catch (e) { console.warn('[batch] save montado IDB:', e); }
+        } else {
+          montadoName = undefined; // sem vídeo → não anuncia entrega falsa
+        }
       }
 
       // ZIP 3 — versoes camufladas. Cria sempre que modo ON (mesmo se 0
@@ -3012,12 +3027,22 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         expectedDecupagem: decupagemOn,
         expectedCamuflagem: camuflagemMode,
       };
+      // HONESTIDADE (fix 2026-07-03): só diz "Pronto" quando ENTREGOU de verdade
+      // — montagem real (okMontagens === esperado, >0). Antes a msg "Pronto: ..."
+      // saía incondicional mesmo com okMontagens=0 (montagem falhou no ffmpeg),
+      // e o card ficava verde. Agora, sem entrega, a msg avisa e deliveryOk:false
+      // deixa o rastro pra auto-cura/card (sobrevive ao persist).
+      const entregou = pipeStats.expectedMontagens > 0 && pipeStats.okMontagens === pipeStats.expectedMontagens;
+      const doneMsg = entregou
+        ? `Pronto: ${downloaded} takes · ${pipeRes.diagnostics.summary} · ${(totalSize / (1024 * 1024)).toFixed(1)}MB`
+        : `⚠ Montagem falhou (${pipeStats.okMontagens}/${pipeStats.expectedMontagens}) — takes prontos, mas o vídeo final não montou. Clica RETOMAR. [${pipeRes.diagnostics.summary}]`;
       setBatchStates((prev) => ({
         ...prev,
         [taskId]: {
           ...prev[taskId],
           phase: 'done',
-          message: `Pronto: ${downloaded} takes · ${pipeRes.diagnostics.summary} · ${(totalSize / (1024 * 1024)).toFixed(1)}MB`,
+          message: doneMsg,
+          deliveryOk: entregou,
           finishedAt: Date.now(),
           zipBlobUrl: takesUrl,
           zipFilename: takesFilename,
@@ -3475,11 +3500,19 @@ Se a pasta estiver vazia ou so com _DIAGNOSTICO.txt, ABRA O CONSOLE DO BROWSER (
 pra ver os erros detalhados [clickup-pilot-pipeline].`);
         const blob2 = await zipMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
         montadoName = `${adNameClean}_${isDecupagemEnabled(taskId) ? 'montado_decupado' : 'montado'}.zip`;
-        montadoUrl = URL.createObjectURL(blob2);
-        try {
-          const { saveZip } = await import('@/lib/zip-store');
-          await saveZip(`batch:${taskId}:montado`, blob2, montadoName);
-        } catch (e) { console.warn('[batch resume] save montado IDB:', e); }
+        // GUARD (fix 2026-07-03): no RETOMAR isto é CRÍTICO — um resume que
+        // re-falha a montagem NÃO pode sobrescrever o montado BOM da tentativa
+        // anterior com um zip só-de-erro. Só persiste/anuncia se tiver vídeo real.
+        const temVideo = assembled.some((it) => it.decupado || (it.rawAssembled && it.rawAssembled.size > 0 && !it.errors?.assemble));
+        if (temVideo) {
+          montadoUrl = URL.createObjectURL(blob2);
+          try {
+            const { saveZip } = await import('@/lib/zip-store');
+            await saveZip(`batch:${taskId}:montado`, blob2, montadoName);
+          } catch (e) { console.warn('[batch resume] save montado IDB:', e); }
+        } else {
+          montadoName = undefined;
+        }
       }
 
       // ZIP 3 — versoes camufladas (so se modo ON)
@@ -3525,12 +3558,20 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         expectedDecupagem: decupagemOn,
         expectedCamuflagem: camuflagemMode,
       };
+      // HONESTIDADE (fix 2026-07-03): mesmo gate do run fresh — RETOMAR que não
+      // remonta o vídeo não pode re-declarar "Pronto". deliveryOk:false mantém a
+      // task elegível pra auto-cura em vez de estacionar verde+incompleta.
+      const entregou = pipeStats.expectedMontagens > 0 && pipeStats.okMontagens === pipeStats.expectedMontagens;
+      const doneMsg = entregou
+        ? `Pronto: ${downloaded} takes · ${pipeRes.diagnostics.summary} · ${(totalSize / (1024 * 1024)).toFixed(1)}MB`
+        : `⚠ Montagem falhou (${pipeStats.okMontagens}/${pipeStats.expectedMontagens}) — takes prontos, mas o vídeo final não montou. Clica RETOMAR. [${pipeRes.diagnostics.summary}]`;
       setBatchStates((prev) => ({
         ...prev,
         [taskId]: {
           ...prev[taskId],
           phase: 'done',
-          message: `Pronto: ${downloaded} takes · ${pipeRes.diagnostics.summary} · ${(totalSize / (1024 * 1024)).toFixed(1)}MB`,
+          message: doneMsg,
+          deliveryOk: entregou,
           finishedAt: Date.now(),
           zipBlobUrl: takesUrl,
           zipFilename: takesFilename,
