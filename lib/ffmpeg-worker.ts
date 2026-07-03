@@ -139,7 +139,17 @@ async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
     let hardTo: ReturnType<typeof setTimeout> | undefined;
     const kill = (rej: (e: Error) => void, msg: string) => {
       try { ff.terminate(); } catch { /* ignora */ }
-      if (instance === ff) instance = null; // força reinit limpo no próximo getFFmpeg
+      if (instance === ff) {
+        instance = null; // força reinit limpo no próximo getFFmpeg
+        // CRÍTICO (fix 2026-07-03): zerar TAMBÉM o loadingPromise. Sem isto,
+        // getFFmpeg (63) cai em `if (loadingPromise) return loadingPromise` e
+        // devolve a promise RESOLVIDA que aponta pra ESTA instância JÁ TERMINADA
+        // (zumbi) — todo exec seguinte "resolve" mas não produz nada → montado
+        // 1KB / takes 0KB persistidos como sucesso, em TODAS as tasks seguintes
+        // do mesmo tab (foi a raiz do lote 02.07 com 4 montados 1KB em série).
+        // cancelFFmpeg (91) já zera os dois; o kill do watchdog não zerava.
+        loadingPromise = null;
+      }
       rej(new Error(msg));
     };
     const watchdog = new Promise<number>((_, rej) => {
@@ -1820,6 +1830,12 @@ export async function concatAvatarParts(
       outputName,
     ]);
     const data = await ff.readFile(outputName);
+    // GARANTIA (fix 2026-07-03): valida a saída ANTES de devolver. Se a instância
+    // ffmpeg estava zumbi/travou, o readFile pode voltar vazio/parcial — sem isto
+    // um concat de 0/1KB virava "montagem OK" e era persistido. assertValidMp4
+    // exige ≥4KB + ftyp + moov (toda montagem real tem) → o erro sobe pro catch
+    // do pipeline, que marca errors.assemble e NÃO conta como okMontagens.
+    assertValidMp4(data as Uint8Array, 'montagem do avatar');
     return toBlob(data, 'video/mp4');
   } finally {
     if (progressHandler) ff.off('progress', progressHandler);
@@ -1857,6 +1873,9 @@ export async function normalizeForConcat(file: Blob, opts: RunOptions = {}): Pro
       outputName,
     ]);
     const data = await ff.readFile(outputName);
+    // GARANTIA (fix 2026-07-03): saída de instância zumbi vira erro, não parte
+    // fantasma que corrompe o fast-concat seguinte (que copia sem re-encodar).
+    assertValidMp4(data as Uint8Array, 'parte normalizada');
     return toBlob(data, 'video/mp4');
   } finally {
     if (progressHandler) ff.off('progress', progressHandler);
@@ -1932,6 +1951,10 @@ export async function concatVideosFast(
       outputName,
     ]);
     const data = await ff.readFile(outputName);
+    // GARANTIA (fix 2026-07-03): o fast-concat (-c:v copy) sobre instância zumbi
+    // podia produzir MP4 sem moov/vazio e devolver "sucesso" → validamos aqui.
+    // O caller (concatRobust/pipeline) cai no re-encode se isto lançar.
+    assertValidMp4(data as Uint8Array, 'montagem (concat rápido)');
     return toBlob(data, 'video/mp4');
   } finally {
     if (progressHandler) ff.off('progress', progressHandler);

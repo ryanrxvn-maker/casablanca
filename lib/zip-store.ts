@@ -102,16 +102,48 @@ function runTx<T>(
   });
 }
 
+/** Piso de bytes pra um ZIP de entrega ser considerado real. Um zip do JSZip
+ *  VAZIO tem ~22 bytes; um montado só com _ERRO.txt/_DIAGNOSTICO.txt tem ~1KB.
+ *  Um zip com ≥1 MP4 real é SEMPRE muito maior. Persistir um zip abaixo disso
+ *  sobrescreveria o artefato BOM anterior sob a mesma chave (auto-cura
+ *  destrutiva). Guard aditivo: recusa gravar → o IDB preserva o que já tinha. */
+const MIN_ZIP_BYTES = 1024;
+
+/** Escrita de IDB com RETRY + reabertura do DB (fix 2026-07-03). Um bloqueio de
+ *  outra aba faz openDB/runTx rejeitar em 15s; sem retry isso virava PERDA TOTAL
+ *  de persistência do run (AD47GL terminou com ZERO chaves no IDB). O bloqueio é
+ *  quase sempre TRANSITÓRIO (a outra aba solta a conexão), então re-tentar com
+ *  gap curto recupera. Cada tentativa reabre o DB (a conexão anterior já fechou).
+ *  Lança só se TODAS falharem — aí o caller sabe de verdade que não persistiu. */
+async function writeWithRetry(rec: ZipRecord, tries = 3): Promise<void> {
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= tries; attempt++) {
+    try {
+      const db = await openDB();
+      await runTx<void>(db, 'readwrite', (store, resolve, reject) => {
+        const tx = store.transaction;
+        store.put(rec);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+      return;
+    } catch (e) {
+      lastErr = e;
+      if (attempt < tries) await new Promise((r) => setTimeout(r, 1500 * attempt));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('IDB write falhou após retries');
+}
+
 export async function saveZip(key: string, blob: Blob, filename: string): Promise<void> {
   const bytes = new Uint8Array(await blob.arrayBuffer());
+  // GUARD: zip suspeito de vazio NÃO sobrescreve o bom anterior. Lança pro caller
+  // saber (o caller trata: mantém o artefato + sinaliza no card).
+  if (bytes.length < MIN_ZIP_BYTES) {
+    throw new Error(`zip '${key}' suspeito de vazio (${bytes.length}B) — não persisto pra não apagar o bom anterior`);
+  }
   const rec: ZipRecord = { key, filename, bytes, size: bytes.length, createdAt: Date.now() };
-  const db = await openDB();
-  return runTx<void>(db, 'readwrite', (store, resolve, reject) => {
-    const tx = store.transaction;
-    store.put(rec);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+  await writeWithRetry(rec);
 }
 
 export async function loadZip(key: string): Promise<{ blobUrl: string; filename: string; size: number } | null> {
@@ -171,14 +203,11 @@ export async function getStorageEstimate(): Promise<{ usage: number; quota: numb
 
 export async function saveBlob(key: string, blob: Blob, mime = 'video/mp4'): Promise<void> {
   const bytes = new Uint8Array(await blob.arrayBuffer());
+  // Sem guard de tamanho aqui (áudio white/clipe derivado pode ser pequeno e
+  // legítimo), mas COM retry+reabertura: bloqueio transitório de outra aba não
+  // vira mais perda silenciosa da parte baixada (fix 2026-07-03).
   const rec: ZipRecord = { key, filename: key.replace(/[^a-z0-9._-]/gi, '_') + '.bin', bytes, size: bytes.length, createdAt: Date.now() };
-  const db = await openDB();
-  return runTx<void>(db, 'readwrite', (store, resolve, reject) => {
-    const tx = store.transaction;
-    store.put(rec);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+  await writeWithRetry(rec);
 }
 
 export async function loadBlob(key: string, mime = 'video/mp4'): Promise<Blob | null> {
