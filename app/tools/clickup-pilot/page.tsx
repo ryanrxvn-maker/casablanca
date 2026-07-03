@@ -2159,26 +2159,71 @@ function ClickUpPilotInner() {
   // já deram certo) e refaz só o que faltou, então cada tentativa tende a passar. Cap
   // rígido por task; se esgotar (falha determinística), para e deixa pro user decidir.
   const autoResumeCountRef = useRef<Record<string, number>>({});
+  // Timestamp da última auto-tentativa por task (fix 2026-07-03): habilita o
+  // RE-ARME por tempo — em vez de estacionar pra sempre após 2 tentativas, dá
+  // novas chances espaçadas (backoff) até um teto maior. Assim uma causa
+  // AMBIENTAL transitória (IDB travado por outra aba que depois solta) se cura
+  // sozinha, sem o user clicar. Causa determinística ainda para (teto global).
+  const autoResumeLastRef = useRef<Record<string, number>>({});
+  // TICKER do backoff (fix 2026-07-03): o nowTick só vive com task RODANDO — uma
+  // 'done' incompleta parada sozinha não o manteria, e o tail com backoff nunca
+  // re-avaliaria. Este pulso de 20s vive ENQUANTO houver 'done' não-entregue
+  // (fora cota) → garante que a re-tentativa espaçada dispara mesmo com a aba
+  // ociosa. Para sozinho quando nada mais precisa curar (sem re-render à toa).
+  const [healTick, setHealTick] = useState(0);
   useEffect(() => {
+    const hasHealPending = Object.values(batchStates).some((b) =>
+      b.phase === 'done' && b.kind !== 'troca' && !b.isVA && b.deliveryOk !== true
+      && !/limite di[aá]rio|daily limit|quota|usage.*exceeded/i.test(b.message || ''));
+    if (!hasHealPending) return;
+    const id = setInterval(() => setHealTick((t) => t + 1), 20_000);
+    return () => clearInterval(id);
+  }, [batchStates]);
+  useEffect(() => {
+    const now = Date.now();
     for (const b of Object.values(batchStates)) {
       if (b.phase !== 'done' || b.kind === 'troca' || b.isVA) continue; // VA/troca têm completion própria
       const ps = b.pipeStats;
-      if (!ps) continue;
-      // MESMA lógica do pipeOk do card (não re-tentar quando está completo de verdade).
-      const pipeOk = ps.expectedMontagens > 0
-        && ps.okMontagens === ps.expectedMontagens
-        && (!ps.expectedDecupagem || ps.okDecupados === ps.expectedMontagens)
-        && (!ps.expectedCamuflagem || ps.okCamuflados === ps.expectedMontagens);
-      if (pipeOk) { if (autoResumeCountRef.current[b.taskId]) autoResumeCountRef.current[b.taskId] = 0; continue; }
-      const n = autoResumeCountRef.current[b.taskId] || 0;
-      if (n >= 2) continue;                                   // esgotou as auto-tentativas → deixa pro user
+      // COTA: 'done' esperando reset diário do HeyGen NÃO é curável agora (a cota
+      // segue morta) — só o RETOMAR manual/restore pós-reset re-dispara. Pula.
+      const isQuotaWait = /limite di[aá]rio|daily limit|daily quota|quota|usage.*exceeded/i.test(b.message || '');
+      if (isQuotaWait) continue;
+      // ELEGÍVEL pra cura = 'done' que NÃO entregou de verdade. Dois casos:
+      //  (a) tem pipeStats mas pipeOk=false (montagem/decup/camo incompleta);
+      //  (b) NÃO tem pipeStats — gate incompleto (não-cota) ou 'pipeline FATAL'
+      //      (antes ERAM invisíveis à auto-cura → estacionavam). deliveryOk===true
+      //      nunca cai aqui (entrega confirmada).
+      let needsHeal: boolean;
+      if (ps) {
+        const pipeOk = ps.expectedMontagens > 0
+          && ps.okMontagens === ps.expectedMontagens
+          && (!ps.expectedDecupagem || ps.okDecupados === ps.expectedMontagens)
+          && (!ps.expectedCamuflagem || ps.okCamuflados === ps.expectedMontagens);
+        if (pipeOk) { if (autoResumeCountRef.current[b.taskId]) autoResumeCountRef.current[b.taskId] = 0; continue; }
+        needsHeal = true;
+      } else {
+        needsHeal = b.deliveryOk !== true; // sem pipeStats: cura salvo se já confirmada
+      }
+      if (!needsHeal) continue;
       if (heygenPendingRef.current[b.taskId]) continue;       // já rodando/enfileirado
+      const n = autoResumeCountRef.current[b.taskId] || 0;
+      const FAST_TRIES = 2;   // 1ªs tentativas imediatas (reaproveitam cache IDB, tendem a passar)
+      const MAX_TRIES = 6;    // teto global — causa determinística não loopa infinito
+      if (n >= MAX_TRIES) continue;
+      // Após as tentativas rápidas, ESPAÇA com backoff (5min, 10, 20, 40… teto 30min).
+      if (n >= FAST_TRIES) {
+        const last = autoResumeLastRef.current[b.taskId] || 0;
+        const wait = Math.min(30 * 60_000, 5 * 60_000 * Math.pow(2, n - FAST_TRIES));
+        if (now - last < wait) continue;
+      }
       autoResumeCountRef.current[b.taskId] = n + 1;
-      console.warn(`[auto-cura] ${b.taskId}: 'done' incompleto → auto-Retomar (${n + 1}/2, reaproveita cache IDB)`);
+      autoResumeLastRef.current[b.taskId] = now;
+      console.warn(`[auto-cura] ${b.taskId}: 'done' incompleto → auto-Retomar (${n + 1}/${MAX_TRIES}${n >= FAST_TRIES ? ', backoff' : ''}, reaproveita cache IDB)`);
       retomarTaskBatch(b.taskId);
     }
+    // healTick força re-avaliação periódica pro backoff disparar com aba ociosa.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batchStates]);
+  }, [batchStates, healTick]);
 
   /** Restore persisted batch states no mount. Tudo que estava ATIVO
    *  (dispatching/rendering/downloading/post) OU ja em 'queued' antes
@@ -2936,6 +2981,10 @@ function ClickUpPilotInner() {
             ...prev[taskId],
             phase: 'done',
             message: `Takes OK · pipeline FATAL: ${(e as Error)?.message || 'erro desconhecido'} (ver console F12)`,
+            // fix 2026-07-03: FATAL não entregou → deliveryOk:false + limpa
+            // pipeStats stale pra a auto-cura ENXERGAR (antes ficava invisível).
+            deliveryOk: false,
+            pipeStats: undefined,
             finishedAt: Date.now(),
           },
         }));
@@ -3472,6 +3521,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             ...prev[taskId],
             phase: 'done',
             message: `Takes OK · pipeline FATAL: ${(e as Error)?.message || 'erro desconhecido'} (ver console F12)`,
+            // fix 2026-07-03: CRÍTICO no resume — o spread herdava pipeStats BOM
+            // de uma tentativa anterior e a auto-cura via pipeOk=true e NÃO curava.
+            // deliveryOk:false + pipeStats:undefined tornam a falha visível.
+            deliveryOk: false,
+            pipeStats: undefined,
             finishedAt: Date.now(),
           },
         }));
