@@ -26,11 +26,24 @@ async function storageSet(v) {
   return new Promise((r) => chrome.storage.local.set(v, r));
 }
 
+// TODAS as portas em que o motor pode subir. server.cjs sobe em 47923 e,
+// se ocupada, cai pra proxima ate 8 tentativas (47923..47930). Varremos
+// 47923..47931 pra cobrir TODO o range com folga — se a lista ficar
+// curta, a extensao "nao acha" um motor vivo numa porta alta.
+const ENGINE_PORTS = [47923, 47924, 47925, 47926, 47927, 47928, 47929, 47930, 47931];
+
 // fetch com timeout DURO — NUNCA pendura. Uma porta zumbi (socket
 // meio-aberto, antivirus/firewall segurando, motor travado) nao pode mais
 // congelar a conexao: o AbortSignal aborta em `ms` e a promise rejeita.
+// Fallback pra AbortController onde AbortSignal.timeout nao existir —
+// blindagem: fetch de localhost NUNCA sem timeout, em qualquer engine.
 function tfetch(url, ms) {
-  return fetch(url, { signal: AbortSignal.timeout(ms) });
+  if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+    return fetch(url, { signal: AbortSignal.timeout(ms) });
+  }
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), ms);
+  return fetch(url, { signal: ac.signal }).finally(() => clearTimeout(t));
 }
 
 // Testa UMA porta: /health tem que responder com o app certo, dai /pair
@@ -54,7 +67,7 @@ async function probePort(p) {
 // pra sempre numa porta meio-morta -> popup eterno em "Conectando".)
 // Nunca usa token cacheado stale — sempre pega o /pair atual do motor.
 async function refreshPair() {
-  const tries = [state.port, 47923, 47924, 47925, 47926, 47927, 47928].filter(
+  const tries = [state.port, ...ENGINE_PORTS].filter(
     (v, i, a) => v && a.indexOf(v) === i,
   );
   try {
@@ -83,6 +96,21 @@ async function refresh() {
   const lbl = $('engineLabel');
   if (lbl) lbl.textContent = 'Conectando';
   $('engineDot').className = 'dot off';
+  // WATCHDOG (cinto-e-suspensorio): cada fetch ja tem timeout de 1.4s e o
+  // Promise.any resolve em ~1.5s, entao refresh NUNCA deveria passar disso.
+  // Mesmo assim, se por qualquer bug futuro travar, em 8s forcamos estado
+  // terminal — a UI JAMAIS fica presa em "Conectando".
+  const watchdog = setTimeout(() => {
+    if (!refreshing) return;
+    const box = $('appBox');
+    const connected = box && !box.classList.contains('hidden');
+    if (!connected) {
+      $('engineDot').className = 'dot off';
+      if (lbl) lbl.textContent = 'Offline';
+      show('noEngine');
+    }
+    refreshing = false;
+  }, 8000);
   try {
     const cfg = await storageGet();
     state.token = cfg.token || '';
@@ -105,6 +133,7 @@ async function refresh() {
     if (lbl) lbl.textContent = 'Offline';
     show('noEngine');
   } finally {
+    clearTimeout(watchdog);
     refreshing = false;
   }
 }

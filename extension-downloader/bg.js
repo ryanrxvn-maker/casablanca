@@ -89,12 +89,22 @@ function getCfg() {
   );
 }
 
+// TODAS as portas em que o motor pode subir (47923..47930 no server.cjs);
+// varremos ate 47931 com folga pra nunca "nao achar" um motor vivo.
+const ENGINE_PORTS = [47923, 47924, 47925, 47926, 47927, 47928, 47929, 47930, 47931];
+
 // fetch com timeout DURO — NUNCA pendura. Uma porta zumbi (socket
 // meio-aberto, antivirus/firewall segurando, motor travado) nao pode mais
 // congelar a descoberta. Sem isso, o service worker ficava preso numa
 // promise pendente e a pagina via "desconectado" com o motor vivo.
+// Fallback pra AbortController onde AbortSignal.timeout nao existir.
 function tfetch(url, ms) {
-  return fetch(url, { signal: AbortSignal.timeout(ms) });
+  if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+    return fetch(url, { signal: AbortSignal.timeout(ms) });
+  }
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), ms);
+  return fetch(url, { signal: ac.signal }).finally(() => clearTimeout(t));
 }
 
 // Testa UMA porta: /health precisa responder com o app certo, dai /pair
@@ -117,7 +127,7 @@ async function probePort(p) {
 // atrasa nem trava. (O loop serial-sem-timeout antigo pendurava o SW pra
 // sempre numa porta meio-morta.) Acaba o pareamento manual e o 401 stale.
 async function discoverEngine(preferred) {
-  const tries = [preferred, 47923, 47924, 47925, 47926, 47927, 47928].filter(
+  const tries = [preferred, ...ENGINE_PORTS].filter(
     (v, i, a) => v && a.indexOf(v) === i,
   );
   try {
