@@ -12,6 +12,7 @@ import { RippleRoot } from '@/components/RippleRoot';
 import { FloatingOrbs } from '@/components/FloatingOrbs';
 import { WhatsAppFab } from '@/components/WhatsAppFab';
 import { ThemeManager } from '@/components/ThemeManager';
+import { ChunkGuard } from '@/components/ChunkGuard';
 import './globals.css';
 
 /**
@@ -231,6 +232,7 @@ export default function RootLayout({
           // JSON estático do app (sem input de usuário) — seguro.
           dangerouslySetInnerHTML={{ __html: JSON.stringify(JSON_LD) }}
         />
+        <ChunkGuard />
         <ThemeManager />
         <FloatingOrbs />
         <MouseGlow />

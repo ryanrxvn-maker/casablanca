@@ -45,6 +45,7 @@ import {
   isQuotaError,
   type VideoStatus,
 } from '@/lib/heygen-api-direct';
+import { isChunkLoadError, reloadOnceForChunk } from '@/lib/chunk-guard';
 import {
   getLibrarySnapshot,
   reloadLibrary,
@@ -3117,6 +3118,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         },
       }));
     } catch (e) {
+      if (isChunkLoadError(e)) {
+        setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: '⚠ Saiu uma versão nova do app durante o processamento — recarregando pra atualizar. Seus takes estão salvos; depois clique Retomar.', finishedAt: Date.now() } }));
+        reloadOnceForChunk();
+        return;
+      }
       setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: (e as Error)?.message || 'erro', finishedAt: Date.now() } }));
     }
   }
@@ -3651,6 +3657,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         },
       }));
     } catch (e) {
+      if (isChunkLoadError(e)) {
+        setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: '⚠ Saiu uma versão nova do app — recarregando pra atualizar. Seus takes estão salvos; depois clique Retomar.', finishedAt: Date.now() } }));
+        reloadOnceForChunk();
+        return;
+      }
       setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: `Retomar falhou: ${(e as Error)?.message || 'erro'}`, finishedAt: Date.now() } }));
     }
   }
@@ -4296,11 +4307,17 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         // qualquer throw vira 'failed' com erro claro + botao Retomar.
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[runHeyGenGated] ${taskId} estourou:`, err);
+        // CHUNK: deploy novo invalidou os chunks → recarrega (estado persiste,
+        // Retomar reaproveita). Guard geral que cobre run + resume.
+        const chunkMsg = isChunkLoadError(err)
+          ? '⚠ Saiu uma versão nova do app durante o processamento — recarregando pra atualizar. Seus takes estão salvos; depois clique Retomar.'
+          : null;
         setBatchStates((prev) => {
           const cur = prev[taskId];
           if (!cur || cur.phase === 'done') return prev;
-          return { ...prev, [taskId]: { ...cur, phase: 'failed', message: `Falhou no disparo: ${msg}`, finishedAt: Date.now() } };
+          return { ...prev, [taskId]: { ...cur, phase: 'failed', message: chunkMsg || `Falhou no disparo: ${msg}`, finishedAt: Date.now() } };
         });
+        if (chunkMsg) reloadOnceForChunk();
       } finally {
         heygenSlotsRef.current = Math.max(0, heygenSlotsRef.current - 1);
         releaseKeepAlive();
@@ -6593,6 +6610,11 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
         localStorage.setItem(VA_KEY, JSON.stringify(hist.slice(-200)));
       } catch {}
     } catch (e) {
+      if (isChunkLoadError(e)) {
+        patchVA({ phase: 'failed', message: '⚠ Saiu uma versão nova do app durante o processamento — recarregando pra atualizar. Seus takes estão salvos; depois clique Retomar.', finishedAt: Date.now() });
+        reloadOnceForChunk();
+        return;
+      }
       patchVA({ phase: 'failed', message: (e as Error)?.message || String(e), finishedAt: Date.now() });
       try {
         const VA_KEY = 'darkolab:va-pipeline:history';
@@ -6965,6 +6987,13 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
     } catch (e) {
       if ((e as Error)?.message === 'cancelado') {
         patchVA({ phase: 'failed', message: 'Cancelado.', finishedAt: Date.now() });
+        return;
+      }
+      // CHUNK: deploy novo invalidou os chunks da página aberta → recarrega pra
+      // pegar a versão nova (takes salvos; Retomar reaproveita). Ver [[chunk-guard]].
+      if (isChunkLoadError(e)) {
+        patchVA({ phase: 'failed', message: '⚠ Saiu uma versão nova do app durante o processamento — recarregando pra atualizar. Seus takes estão salvos; depois clique Retomar.', finishedAt: Date.now() });
+        reloadOnceForChunk();
         return;
       }
       patchVA({ phase: 'failed', message: (e as Error)?.message || String(e), finishedAt: Date.now() });
