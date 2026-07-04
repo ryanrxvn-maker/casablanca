@@ -6681,7 +6681,35 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
 
     try {
       const { processJob, downloadVideoBytes, isQuotaError, isSpaceMismatchError, findCompletedVideosByName } = await import('@/lib/heygen-api-direct');
-      const { concatAvatarParts } = await import('@/lib/ffmpeg-worker');
+      const { concatAvatarParts, concatVideosFast, normalizeForConcat, cancelFFmpeg } = await import('@/lib/ffmpeg-worker');
+      // MONTAGEM À PROVA DE OOM (fix 2026-07-04): as partes de UM avatar (mesmo
+      // HeyGen, mesmo codec) concatenam com -c:v copy (rápido, baixa memória).
+      // O concatAvatarParts MONOLÍTICO (re-encode de tudo num filter_complex só)
+      // ESTOURA a memória do ffmpeg-wasm em vídeo grande (ex 132MB, 9 partes) →
+      // o watchdog matava o exec ("called FFmpeg.terminate()") e o avatar falhava
+      // (era o "AVA02 falha na montagem sempre"). Mesma estratégia do pipeline
+      // normal (concatRobust): fast-copy → normaliza-cada+fast → monolítico.
+      // concatVideosFast/normalizeForConcat já validam a saída (assertValidMp4).
+      const mountAvatarParts = async (parts: Blob[]): Promise<Blob> => {
+        if (parts.length === 1) return parts[0];
+        try {
+          return await concatVideosFast(parts); // -c:v copy — leve, sem OOM
+        } catch {
+          const normalized: Blob[] = [];
+          let allNorm = true;
+          for (const p of parts) {
+            try { normalized.push(await normalizeForConcat(p)); }
+            catch { normalized.push(p); allNorm = false; }
+          }
+          // fast-concat SÓ é seguro se TODAS normalizaram (senão -c copy dropa
+          // vídeo divergente → desync). Se alguma falhou, vai pro monolítico.
+          if (allNorm) {
+            try { return await concatVideosFast(normalized); }
+            catch { return await concatAvatarParts(normalized); }
+          }
+          return await concatAvatarParts(normalized);
+        }
+      };
       const items: Array<{ avaCode: string; filename: string; blob: Blob | null; error?: string }> = [];
 
       // RECUPERAÇÃO: lista as partes JÁ RENDERIZADAS deste AD no HeyGen (de runs
@@ -6837,13 +6865,18 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
             mounted = await runFfmpegSerial(async () => {
               _ffmpegOwnerTaskId = taskId; // rank 5: dona atual do singleton
               try {
-                const { cancelFFmpeg } = await import('@/lib/ffmpeg-worker');
+                // FRESH START (fix 2026-07-04): instância LIMPA antes de montar
+                // ESTE avatar — o anterior (ex AVA01 132MB) deixa a instância
+                // pesada e o AVA02 herdava o estado → travava. cancelFFmpeg zera
+                // e o getFFmpeg reinicializa fresco na 1ª chamada. Dentro do slot
+                // serial → não atropela ffmpeg de outra task.
+                try { cancelFFmpeg(); } catch { /* ignora */ }
                 let m: Blob | null = null;
                 let lastErr: unknown = null;
                 for (let attempt = 1; attempt <= 3 && !m; attempt++) {
                   try {
                     m = await Promise.race([
-                      concatAvatarParts(partBlobs),
+                      mountAvatarParts(partBlobs),
                       new Promise<Blob>((_, rej) => setTimeout(() => rej(new Error('concat timeout 600s')), 600_000)),
                     ]);
                   } catch (e) {
