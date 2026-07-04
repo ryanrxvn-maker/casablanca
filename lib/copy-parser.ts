@@ -100,23 +100,37 @@ function adIdChars(s: string): Map<string, number> {
   return m;
 }
 
-/** Extrai o número do AD (ex "AD23VN" → "23", "AD234ABC" → "234").
- *  Crítico pra distinguir AD23 de AD234 — chars containment não basta. */
+/** Remove o zero-padding do número do AD logo após "AD" (fix 2026-07-03):
+ *  "AD06GL" → "AD6GL", "AD023VN" → "AD23VN". No-op quando já sem zero ("AD6GL").
+ *  NUNCA toca zeros que não sejam de padding ("AD60" continua "AD60"; "AD106"
+ *  continua "AD106"). Necessário porque a task do ClickUp costuma vir PADDED
+ *  (AD06/AD07/AD08) enquanto o copywriter escreve o doc SEM zero (AD6/AD7/AD8) —
+ *  sem normalizar, o parser não achava a seção ("nao achou hooks nem body"). */
+function unpadAdNum(s: string): string {
+  return s.replace(/^(AD)0+(\d)/i, '$1$2');
+}
+
+/** Extrai o número do AD (ex "AD23VN" → "23", "AD234ABC" → "234"), SEM
+ *  zero-padding ("AD06" → "6"). Crítico pra distinguir AD23 de AD234 — chars
+ *  containment não basta — e pra casar task padded (AD06) com heading sem zero (AD6). */
 function extractAdNumber(s: string): string | null {
-  const m = s.toUpperCase().match(/^AD(\d+)/);
+  const m = s.toUpperCase().match(/^AD0*(\d+)/);
   return m ? m[1] : null;
 }
 
 /** Heading match fuzzy: mesmos chars + mesmo número de AD.
  *  Ex válido:    "AD23VN" ↔ "AD23G1VN-RIPSZ"  (chars task ⊆ chars heading, mesmo AD23)
+ *  Ex válido:    "AD08GL" ↔ "AD8G1GL-RIPVTPB" (zero-padding normalizado, AD8=AD08)
  *  Ex inválido:  "AD23"   ↔ "AD234ABCDE"       (AD23 ≠ AD234, mesmo containment)
  *  Ex inválido:  "AD23VN" ↔ "AD23QR-XYZ"      (sem V e N no heading)  */
 function headingMatchesTaskFuzzy(heading: string, taskId: string): boolean {
   const taskNum = extractAdNumber(taskId);
   const headNum = extractAdNumber(heading);
   if (!taskNum || !headNum || taskNum !== headNum) return false;
-  const taskChars = adIdChars(taskId);
-  const headChars = adIdChars(heading);
+  // Compara chars SEM o zero de padding (senão o '0' do "AD08" não existe no
+  // heading "AD8..." e o containment falharia de novo).
+  const taskChars = adIdChars(unpadAdNum(taskId));
+  const headChars = adIdChars(unpadAdNum(heading));
   for (const [c, n] of taskChars) {
     if ((headChars.get(c) || 0) < n) return false;
   }
@@ -177,6 +191,10 @@ export function findAdSection(text: string, adIdOrPrefix: string, variant?: stri
   if (!text) return null;
   const lines = text.split(/\r?\n/);
   const targetUp = adIdOrPrefix.toUpperCase().trim();
+  // Zero-padding: task do ClickUp vem PADDED (AD08GL) e o doc costuma escrever
+  // SEM zero (AD8GL). Normaliza o alvo pro exact/startsWith casar. A fuzzy já
+  // normaliza internamente. (fix 2026-07-03)
+  const targetUnpad = unpadAdNum(targetUp);
 
   // Coleta TODOS os candidatos com score + tamanho da section + presença
   // de copy. Em empate de score, prefere quem tem hook/body real.
@@ -189,10 +207,11 @@ export function findAdSection(text: string, adIdOrPrefix: string, variant?: stri
     // — so casa headings da variante pedida. Sem variant = sem filtro. Isso
     // impede o merge de poçar avatares/copy de variantes diferentes.
     if (!headingHasVariant(line, variant)) continue;
+    const lineUnpad = unpadAdNum(line);
     let score = 0;
-    if (line === targetUp) {
+    if (line === targetUp || lineUnpad === targetUnpad) {
       score = 100;
-    } else if (line.startsWith(targetUp + ' ') || line.startsWith(targetUp + '-')) {
+    } else if (lineUnpad.startsWith(targetUnpad + ' ') || lineUnpad.startsWith(targetUnpad + '-')) {
       score = 90;
     } else if (headingMatchesTaskFuzzy(line, targetUp)) {
       // Mesmo AD número + chars task ⊆ chars heading. Cobre o caso onde o
@@ -962,16 +981,19 @@ export function findGSiblings(fullDocText: string, baseAdId: string, variant?: s
   //   "AD139GL"      → num "AD139", suffix "GL"   (sufixo colado)
   //   "AD01 - PV"    → num "AD01",  suffix "PV"   (sufixo apos " - ")
   const norm = baseAdId.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const m = norm.match(/^(AD\d+)([A-Z]+)$/);
+  const m = norm.match(/^AD(\d+)([A-Z]+)$/);
   if (!m) return [];
-  const numPart = m[1]; // "AD139" | "AD01"
+  // Número do AD SEM zero-padding + regex que aceita zero-padding OPCIONAL no
+  // doc (AD0*<n>) — a task vem PADDED (AD08GL) mas o copywriter escreve AD8G1GL
+  // (fix 2026-07-03). `AD0*8` casa "AD8G1GL" E "AD08G1GL".
+  const numDigits = m[1].replace(/^0+/, '') || '0'; // "08" → "8", "139" → "139"
   const suffix = m[2]; // "GL" | "PV"
   // Procura headings de sibling em AMBAS as convencoes:
   //   "AD139G1GL-XXX"  (sufixo colado no G)
   //   "AD01G1-PV"      (sufixo apos traco/espaco depois do G<N>)
   // O separador [-\s]? entre G<N> e o sufixo e OPCIONAL.
   const lines = fullDocText.split(/\r?\n/);
-  const re = new RegExp(`^${numPart}G(\\d+)[-\\s]?${suffix}\\b`, 'i');
+  const re = new RegExp(`^AD0*${numDigits}G(\\d+)[-\\s]?${suffix}\\b`, 'i');
   const found: Array<{ gNum: number; lineStart: number; heading: string }> = [];
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim();

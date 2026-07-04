@@ -1253,6 +1253,54 @@ function normAvatarKeyT(s: string | null | undefined): string { return (s || '')
   assert(!!bf12b?.avatars[0]?.youtubeUrl?.includes('cQ4ArBE62uI'), 'AD12: pega YouTube da URL no texto mesmo sem links');
 }
 
+// ── ZERO-PADDING: task AD06/07/08GL ↔ doc AD6GL/AD8G1GL (fix 2026-07-03) ──
+// Task do ClickUp vem PADDED (AD08GL); copywriter escreve o doc SEM zero
+// (AD8GL/AD8G1GL). Antes o parser não achava a seção ("nao achou hooks nem
+// body pra AD08GL"). Estrutura idêntica ao doc real (RIPVTPB, guia AD6 à 8).
+console.log('\nzero-padding (AD08GL ↔ AD8G1GL):');
+{
+  const DOC_PAD = `AD6GL - RIPVTPB
+Avatar e Vozes:
+Mulher: Emme White 1.mp4
+
+AD6G1GL - RIPVTPB
+Eu dormi com mais de mil homens e sempre usei esse Coquetel do Salomao neles.
+
+Body
+
+Isso vai me complicar, mas eu vou contar.
+
+AD7GL - RIPVTPB
+Mulher: Emme White 1.mp4
+
+AD7G1GL - RIPVTPB
+Segundo gancho aqui pro AD sete.
+
+Body
+
+Corpo do AD sete.
+
+AD8GL - RIPVTPB
+UGC: monetzamoraa.mp4
+
+AD8G1GL-VFPB04
+Terceiro gancho, esse eh do AD oito.
+
+Body
+
+Corpo do AD oito.
+`;
+  const p6 = parseDarkoBriefing(DOC_PAD, 'AD06GL');
+  assert((p6?.hooks.length || 0) > 0 || !!p6?.body, 'AD06GL (padded) acha copy no AD6G1GL');
+  assert(/mil homens/.test((p6?.hooks || []).map((h) => h.text).join(' ')), 'AD06GL: gancho certo');
+  const p7 = parseDarkoBriefing(DOC_PAD, 'AD07GL');
+  assert(/Segundo gancho/.test((p7?.hooks || []).map((h) => h.text).join(' ')), 'AD07GL: gancho certo');
+  const p8 = parseDarkoBriefing(DOC_PAD, 'AD08GL');
+  assert(/Terceiro gancho/.test((p8?.hooks || []).map((h) => h.text).join(' ')), 'AD08GL: gancho certo (não vaza do AD6)');
+  const p6b = parseDarkoBriefing(DOC_PAD, 'AD6GL'); // NÃO-REGRESSÃO: sem padding segue OK
+  assert((p6b?.hooks.length || 0) > 0, 'AD6GL (sem pad) segue funcionando');
+}
+
 console.log('');
 if (failures > 0) {
   console.error(`✗ ${failures} assert(s) falharam`);
