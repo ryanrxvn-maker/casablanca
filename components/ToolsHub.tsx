@@ -935,7 +935,11 @@ function FeaturedVideoCard({
           style={{ background: `radial-gradient(130% 80% at 50% 8%, ${entry.hue}, transparent 60%), linear-gradient(180deg, rgb(var(--bg-softer)), #050507)` }}
         />
         {/* VÍDEO — roda no hover. SEM zoom/scale (era o que tremia); fica
-            firme e em qualidade cheia. GPU layer pra não bruxulear. */}
+            firme e em qualidade cheia. GPU layer pra não bruxulear.
+            preload="none": o poster JÁ é a capa; o .mp4 (10-20MB cada) só
+            baixa no hover (quando play() dispara). Antes ("auto") os 3
+            destaques baixavam ~49MB juntos no LOAD da página, sufocando a
+            banda e atrasando as thumbs de todos os cards. */}
         <video
           ref={videoRef}
           src={entry.video}
@@ -943,11 +947,11 @@ function FeaturedVideoCard({
           muted
           loop
           playsInline
-          preload="auto"
+          preload="none"
           className="absolute inset-0 h-full w-full object-cover"
           style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden', willChange: 'opacity' }}
         />
-        {/* THUMB 4K — imagem fica como capa o tempo todo; some no hover (revela
+        {/* THUMB — imagem fica como capa o tempo todo; some no hover (revela
             o vídeo). Só fade de opacidade (sem scale) → zero tremor. */}
         {entry.poster ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -955,6 +959,7 @@ function FeaturedVideoCard({
             src={entry.poster}
             alt=""
             aria-hidden
+            decoding="async"
             className="absolute inset-0 h-full w-full object-cover opacity-100 transition-opacity duration-500 ease-out group-hover:opacity-0"
             style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden', willChange: 'opacity' }}
           />
@@ -1290,7 +1295,9 @@ function ToolCard({
               background: `radial-gradient(130% 80% at 50% 8%, ${entry.hue}, transparent 60%), linear-gradient(180deg, rgb(var(--bg-softer)), #050507)`,
             }}
           />
-          {/* Vídeo — parado no poster; toca só no hover (preload leve) */}
+          {/* Vídeo — parado no poster; toca só no hover. preload="none": nem
+              os metadados baixam no load (poster cobre a capa) → nada de mp4
+              competindo com as thumbs. Baixa sob demanda quando play() roda. */}
           <video
             ref={videoRef}
             src={entry.video}
@@ -1298,17 +1305,21 @@ function ToolCard({
             muted
             loop
             playsInline
-            preload="metadata"
+            preload="none"
             className="absolute inset-0 h-full w-full object-cover"
             style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}
           />
-          {/* Poster por cima — some no hover revelando o vídeo (sem flash preto) */}
+          {/* Poster por cima — some no hover revelando o vídeo (sem flash preto).
+              lazy+async: como estes cards ficam abaixo da dobra, a thumb só
+              carrega quando chega perto da viewport → load inicial enxuto. */}
           {entry.poster ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={entry.poster}
               alt=""
               aria-hidden
+              loading="lazy"
+              decoding="async"
               className="absolute inset-0 h-full w-full object-cover opacity-100 transition-opacity duration-500 ease-out group-hover:opacity-0"
               style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}
             />
