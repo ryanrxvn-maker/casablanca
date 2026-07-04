@@ -26,34 +26,46 @@ async function storageSet(v) {
   return new Promise((r) => chrome.storage.local.set(v, r));
 }
 
-// AUTO-PAIR DEFINITIVO: a cada chamada, varre as portas conhecidas, acha
-// o motor vivo e PEGA o token atual via /pair. Nunca usa token cacheado
-// stale. Acaba o cenario "atualizei o motor e a extensao ficou com token
-// velho -> 401 Token invalido". Devolve true se conseguiu pareamento.
+// fetch com timeout DURO — NUNCA pendura. Uma porta zumbi (socket
+// meio-aberto, antivirus/firewall segurando, motor travado) nao pode mais
+// congelar a conexao: o AbortSignal aborta em `ms` e a promise rejeita.
+function tfetch(url, ms) {
+  return fetch(url, { signal: AbortSignal.timeout(ms) });
+}
+
+// Testa UMA porta: /health tem que responder com o app certo, dai /pair
+// devolve o token. Resolve com o engine ou LANCA (pra Promise.any pular
+// pra proxima). Timeout curto (1.4s) por chamada.
+async function probePort(p) {
+  const h = await tfetch(`http://127.0.0.1:${p}/health`, 1400);
+  if (!h.ok) throw 0;
+  const j = await h.json();
+  if (!j || j.app !== 'darkolab-downloader-engine') throw 0;
+  const pr = await tfetch(`http://127.0.0.1:${p}/pair`, 1400);
+  if (!pr.ok) throw 0;
+  const pj = await pr.json();
+  if (!pj || !pj.token) throw 0;
+  return { port: p, token: pj.token, allowAdult: pj.allowAdult === true };
+}
+
+// AUTO-PAIR DEFINITIVO: varre TODAS as portas EM PARALELO com timeout. A
+// primeira que tiver o motor vivo ganha; porta lenta/zumbi nao atrasa as
+// outras NEM trava a funcao. (O loop serial-sem-timeout antigo pendurava
+// pra sempre numa porta meio-morta -> popup eterno em "Conectando".)
+// Nunca usa token cacheado stale — sempre pega o /pair atual do motor.
 async function refreshPair() {
   const tries = [state.port, 47923, 47924, 47925, 47926, 47927, 47928].filter(
     (v, i, a) => v && a.indexOf(v) === i,
   );
-  for (const p of tries) {
-    try {
-      const h = await fetch(`http://127.0.0.1:${p}/health`);
-      if (!h.ok) continue;
-      const j = await h.json();
-      if (!j || j.app !== 'darkolab-downloader-engine') continue;
-      const pr = await fetch(`http://127.0.0.1:${p}/pair`);
-      if (!pr.ok) continue;
-      const pj = await pr.json();
-      if (pj && pj.token) {
-        state.token = pj.token;
-        state.port = p;
-        await storageSet({ token: pj.token, port: p });
-        return { allowAdult: pj.allowAdult === true };
-      }
-    } catch {
-      /* tenta proxima */
-    }
+  try {
+    const eng = await Promise.any(tries.map(probePort));
+    state.token = eng.token;
+    state.port = eng.port;
+    await storageSet({ token: eng.token, port: eng.port });
+    return { allowAdult: eng.allowAdult };
+  } catch {
+    return null; // nenhuma porta respondeu a tempo
   }
-  return null;
 }
 
 function show(boxId) {
@@ -61,27 +73,97 @@ function show(boxId) {
     $(id).classList.toggle('hidden', id !== boxId);
 }
 
+// Guarda anti-reentrancia: se ja estamos varrendo, nao dispara outra —
+// evita duas varreduras concorrentes pisando no state.
+let refreshing = false;
+
 async function refresh() {
-  const cfg = await storageGet();
-  state.token = cfg.token || '';
-  state.port = cfg.port || 47923;
-
-  const eng = await refreshPair();
-  $('engineDot').className = 'dot ' + (eng ? 'on' : 'off');
+  if (refreshing) return;
+  refreshing = true;
   const lbl = $('engineLabel');
-  if (lbl) lbl.textContent = eng ? 'Online' : 'Conectando';
+  if (lbl) lbl.textContent = 'Conectando';
+  $('engineDot').className = 'dot off';
+  try {
+    const cfg = await storageGet();
+    state.token = cfg.token || '';
+    state.port = cfg.port || 47923;
 
-  if (!eng) return show('noEngine');
+    const eng = await refreshPair();
+    $('engineDot').className = 'dot ' + (eng ? 'on' : 'off');
+    if (lbl) lbl.textContent = eng ? 'Online' : 'Offline';
 
-  show('appBox');
-  // +18 liberado pra todos
-  $('adultBtn').classList.remove('hidden');
+    if (!eng) {
+      show('noEngine');
+      return;
+    }
+    show('appBox');
+    // +18 liberado pra todos
+    $('adultBtn').classList.remove('hidden');
+  } catch {
+    // Qualquer erro inesperado -> estado terminal claro, NUNCA limbo.
+    $('engineDot').className = 'dot off';
+    if (lbl) lbl.textContent = 'Offline';
+    show('noEngine');
+  } finally {
+    refreshing = false;
+  }
 }
 
-$('retry').addEventListener('click', (e) => {
-  e.preventDefault();
-  refresh();
-});
+// HARD REFRESH: reconexao limpa e forcada. Apaga token/porta/cache stale,
+// pede pro service worker redescobrir do zero e revarre as portas. Para o
+// usuario nunca ter que "ficar esperando" quando algo trava — 1 clique
+// resolve. (Botao ↻ no header.)
+async function hardRefresh() {
+  const btn = $('hardRefresh');
+  if (btn) btn.classList.add('spin');
+  const lbl = $('engineLabel');
+  if (lbl) lbl.textContent = 'Reconectando';
+  try {
+    await new Promise((r) =>
+      chrome.storage.local.remove(
+        ['token', 'port', 'engineUp', 'enginePortCache', 'engineCheckedAt'],
+        () => r(),
+      ),
+    );
+    state.token = '';
+    state.port = 47923;
+    // limpa tambem o cache do background (fire-and-forget)
+    try {
+      chrome.runtime.sendMessage({ type: 'darko-force-rediscover' }, () => {
+        void chrome.runtime.lastError;
+      });
+    } catch {
+      /* SW pode estar acordando */
+    }
+  } catch {
+    /* segue pro refresh de qualquer jeito */
+  }
+  await refresh();
+  if (btn) btn.classList.remove('spin');
+}
+
+const retryLink = $('retry');
+if (retryLink)
+  retryLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    refresh();
+  });
+
+const hardBtn = $('hardRefresh');
+if (hardBtn) hardBtn.addEventListener('click', hardRefresh);
+
+// Ultimo recurso: recarrega a extensao inteira — mata service worker
+// zumbi/travado e reinicia tudo do zero. (Fecha o popup.)
+const reloadLink = $('reloadExt');
+if (reloadLink)
+  reloadLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    try {
+      chrome.runtime.reload();
+    } catch {
+      /* ignore */
+    }
+  });
 
 // ---- chips ----
 function wireChips(containerId, key) {
@@ -215,10 +297,12 @@ $('go').addEventListener('click', async () => {
 
 refresh();
 // Pos-restart do PC: motor pode demorar uns segs pra subir. Reconecta
-// sozinho enquanto o popup esta aberto.
+// sozinho enquanto o popup esta aberto — SEMPRE que nao estiver conectado
+// (appBox escondido), nao so no card de erro. Cobre inclusive o estado
+// inicial em que os dois boxes ainda estao ocultos.
 setInterval(() => {
-  const noEng = document.getElementById('noEngine');
-  if (noEng && !noEng.classList.contains('hidden')) {
-    refresh();
-  }
+  if (refreshing) return;
+  const appBox = document.getElementById('appBox');
+  const connected = appBox && !appBox.classList.contains('hidden');
+  if (!connected) refresh();
 }, 2500);

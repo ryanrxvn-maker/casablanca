@@ -134,6 +134,42 @@ body > *:not(.bg-mesh):not(.bg-grid) {
   50% { opacity: 0.5; }
 }
 
+/* Botao de reconectar / hard-refresh no header */
+.reconnect-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-left: 2px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+.reconnect-btn svg {
+  width: 13px;
+  height: 13px;
+}
+.reconnect-btn:hover {
+  border-color: var(--violet);
+  color: var(--violet-light);
+  background: rgba(167, 139, 250, 0.1);
+  box-shadow: 0 0 12px -4px rgba(167, 139, 250, 0.6);
+}
+.reconnect-btn:active {
+  transform: scale(0.92);
+}
+.reconnect-btn.spin svg {
+  animation: reconnect-spin 0.7s linear infinite;
+}
+@keyframes reconnect-spin {
+  to { transform: rotate(360deg); }
+}
+
 /* ─── Labels e inputs ─── */
 .lbl {
   display: block;

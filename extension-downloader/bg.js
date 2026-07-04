@@ -89,31 +89,42 @@ function getCfg() {
   );
 }
 
-// Descobre a porta E pareia automaticamente (pega o token do motor
-// vivo). Acaba o pareamento manual e o 401 por token desatualizado.
+// fetch com timeout DURO — NUNCA pendura. Uma porta zumbi (socket
+// meio-aberto, antivirus/firewall segurando, motor travado) nao pode mais
+// congelar a descoberta. Sem isso, o service worker ficava preso numa
+// promise pendente e a pagina via "desconectado" com o motor vivo.
+function tfetch(url, ms) {
+  return fetch(url, { signal: AbortSignal.timeout(ms) });
+}
+
+// Testa UMA porta: /health precisa responder com o app certo, dai /pair
+// devolve o token. Resolve com o engine ou LANCA (pra Promise.any pular).
+async function probePort(p) {
+  const h = await tfetch(`http://127.0.0.1:${p}/health`, 1400);
+  if (!h.ok) throw 0;
+  const j = await h.json();
+  if (!j || j.app !== 'darkolab-downloader-engine') throw 0;
+  const pr = await tfetch(`http://127.0.0.1:${p}/pair`, 1400);
+  if (!pr.ok) throw 0;
+  const pj = await pr.json();
+  if (!pj || !pj.token) throw 0;
+  chrome.storage.local.set({ token: pj.token, port: p });
+  return { port: p, token: pj.token, allowAdult: pj.allowAdult === true };
+}
+
+// Descobre a porta E pareia automaticamente (pega o token do motor vivo).
+// Varre TODAS as portas EM PARALELO com timeout: porta lenta/zumbi nao
+// atrasa nem trava. (O loop serial-sem-timeout antigo pendurava o SW pra
+// sempre numa porta meio-morta.) Acaba o pareamento manual e o 401 stale.
 async function discoverEngine(preferred) {
   const tries = [preferred, 47923, 47924, 47925, 47926, 47927, 47928].filter(
     (v, i, a) => v && a.indexOf(v) === i,
   );
-  for (const p of tries) {
-    try {
-      const h = await fetch(`http://127.0.0.1:${p}/health`);
-      if (!h.ok) continue;
-      const j = await h.json();
-      if (!j || j.app !== 'darkolab-downloader-engine') continue;
-      // auto-pair: pega o token REAL desse motor
-      const pr = await fetch(`http://127.0.0.1:${p}/pair`);
-      if (!pr.ok) continue;
-      const pj = await pr.json();
-      if (pj && pj.token) {
-        chrome.storage.local.set({ token: pj.token, port: p });
-        return { port: p, token: pj.token, allowAdult: pj.allowAdult === true };
-      }
-    } catch {
-      /* tenta proxima */
-    }
+  try {
+    return await Promise.any(tries.map(probePort));
+  } catch {
+    return null; // nenhuma porta respondeu a tempo
   }
-  return null;
 }
 
 function sendProgress(tabId, payload) {
@@ -254,6 +265,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const tabId = sender && sender.tab && sender.tab.id;
     startDownload({ ...msg, tabId }).then(sendResponse);
     return true; // resposta assíncrona
+  }
+  if (msg && msg.type === 'darko-force-rediscover') {
+    // Hard-refresh do popup: apaga cache/token stale e redescobre do zero.
+    (async () => {
+      try {
+        await new Promise((r) =>
+          chrome.storage.local.remove(
+            ['token', 'engineUp', 'enginePortCache', 'engineCheckedAt'],
+            () => r(),
+          ),
+        );
+      } catch {
+        /* segue */
+      }
+      const eng = await recheckEngine();
+      sendResponse({ connected: !!eng, port: eng ? eng.port : 47923 });
+    })();
+    return true;
   }
   if (msg && msg.type === 'darko-ping-engine') {
     (async () => {

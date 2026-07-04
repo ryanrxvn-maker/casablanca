@@ -82,6 +82,10 @@
   }
 
   let btn, toastEl;
+  // Marca que o download REALMENTE comecou: o background so emite
+  // 'darko-dl-progress' depois de chamar chrome.downloads.download. Sem
+  // isso nao afirmamos "iniciou" (era a mentira do toast otimista).
+  let gotProgress = false;
 
   // SVG do ícone de download (seta pra baixo) — gradient violet
   const DOWNLOAD_SVG = `
@@ -173,11 +177,13 @@
       if (!m || m.type !== 'darko-dl-progress') return;
       const pct = typeof m.pct === 'number' ? m.pct : -1;
       if (m.state === 'complete') {
+        gotProgress = true;
         setProgress(100);
         setTimeout(clearProgress, 1200);
       } else if (m.state === 'interrupted') {
         clearProgress();
       } else {
+        gotProgress = true; // download registrou de verdade
         setProgress(pct);
       }
     });
@@ -229,13 +235,26 @@
     setBtn('loading');
     setProgress(-1); // anel indeterminado ate chegar % real
     toast('Enviando…', '');
+    gotProgress = false;
     let done = false;
+    // Fallback de UI: o background so responde quando o download TERMINA
+    // (pode levar minutos), entao damos feedback antes. Mas so afirmamos
+    // "iniciou" se recebemos progresso REAL — se nada chegou, o motor
+    // provavelmente esta fora e o texto e honesto (nao mente mais).
     const timeout = setTimeout(() => {
       if (done) return;
       done = true;
-      setBtn('ok');
-      toast('Download iniciado. Veja a barra de downloads.', 'ok');
-    }, 4000);
+      if (gotProgress) {
+        setBtn('ok');
+        toast('Baixando… veja a barra de downloads.', 'ok');
+      } else {
+        setBtn('idle');
+        toast(
+          'Ainda processando… se não baixar, clique em ↻ na extensão.',
+          '',
+        );
+      }
+    }, 6000);
     chrome.runtime.sendMessage(
       {
         type: 'darko-download',

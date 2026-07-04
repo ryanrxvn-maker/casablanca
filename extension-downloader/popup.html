@@ -25,6 +25,18 @@
       <div class="status">
         <span id="engineDot" class="dot off" title="Motor"></span>
         <span id="engineLabel">Conectando</span>
+        <button
+          id="hardRefresh"
+          class="reconnect-btn"
+          type="button"
+          title="Reconectar (força reconexão limpa)"
+          aria-label="Reconectar"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+            <path d="M21 3v6h-6" />
+          </svg>
+        </button>
       </div>
     </header>
 
@@ -92,8 +104,9 @@ https://instagram.com/reel/..."
           <b>Conectando ao motor…</b><br />
           O Auto Edit Downloader sobe junto com o Windows e a extensão
           se conecta sozinha — sem pareamento manual. Se não subir,
-          abra <b>AutoEditDownloader.cmd</b> ou
-          <a id="retry" href="#">tente de novo</a>.
+          abra <b>AutoEditDownloader.cmd</b>,
+          <a id="retry" href="#">tente de novo</a>
+          ou <a id="reloadExt" href="#">recarregue a extensão</a>.
         </p>
       </section>
     </main>
