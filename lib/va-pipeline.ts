@@ -373,13 +373,20 @@ function sliceAudioBufferToWAV(audioBuffer: AudioBuffer, startSec: number, endSe
  *  INTERMITENTE; sem isso, extractAudio/concat/overlay do VA ficavam pendurados
  *  pra sempre (user reportou 2026-06-23: VA presa em "Extraindo audio" /
  *  "montando"). Recuperação RÁPIDA (o watchdog do exec é só backstop de 25min). */
-async function vaFFmpegRetry<T>(fn: () => Promise<T>, ms: number, label: string, tries = 3): Promise<T> {
+async function vaFFmpegRetry<T>(fn: () => Promise<T>, ms: number, label: string, tries = 3, freshStart = false): Promise<T> {
   // SERIAL GLOBAL: o retry INTEIRO (todas as tentativas + os cancelFFmpeg entre
   // elas) roda dentro de UM slot da fila global de ffmpeg. Assim nenhuma outra
   // task toca a instância singleton enquanto este op do VA processa — nada
   // termina o nosso ffmpeg no meio (era o "called FFmpeg.terminate()" que perdia
   // avatar) e o nosso cancelFFmpeg entre tentativas não atropela op de outra task.
   return runFfmpegExclusive(async () => {
+    // freshStart (fix 2026-07-03): garante instância LIMPA antes da 1ª tentativa.
+    // Usado na MONTAGEM de cada avatar: o AVA02 NUNCA herda a instância que o
+    // AVA01 deixou (mesmo já reinicializando o zumbi na raiz via ffmpeg-worker,
+    // isto torna a contaminação entre avatares estruturalmente IMPOSSÍVEL — era
+    // o "AVA01 ok, AVA02 falha na montagem SEMPRE"). Roda DENTRO do slot serial,
+    // então não atropela ffmpeg de outra task. getFFmpeg reinit ~1-3s (cache).
+    if (freshStart) { try { cancelFFmpeg(); } catch { /* ignora */ } }
     let lastErr: unknown = null;
     for (let attempt = 1; attempt <= tries; attempt++) {
       try {
@@ -840,7 +847,7 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
           end: b.end,
           video: videoBlobs[idx] as Blob,
         }));
-        const finalVideo = await vaFFmpegRetry(() => overlaySegmentsOnVideo(adVideoBlob, overlays), 900_000, `overlay ${av.avaCode}`, 2);
+        const finalVideo = await vaFFmpegRetry(() => overlaySegmentsOnVideo(adVideoBlob, overlays), 900_000, `overlay ${av.avaCode}`, 2, true);
         items.push({ avaCode: av.avaCode, filename: smartFilename, blob: finalVideo });
       } catch (e) {
         items.push({
@@ -863,11 +870,13 @@ export async function runVAPipeline(input: VAPipelineInput): Promise<VAPipelineR
     try {
       let mounted: Blob;
       try {
-        // fast = remux rápido; timeout+reset, sem retry (o fallback slow É a recuperação)
-        mounted = await vaFFmpegRetry(() => concatVideosFast(videoBlobs as Blob[]), 300_000, `concat-fast ${av.avaCode}`, 1);
+        // fast = remux rápido; timeout+reset, sem retry (o fallback slow É a recuperação).
+        // freshStart=true → cada avatar concatena numa instância LIMPA (nunca herda
+        // o estado do avatar anterior). Raiz do "AVA02 falha na montagem sempre".
+        mounted = await vaFFmpegRetry(() => concatVideosFast(videoBlobs as Blob[]), 300_000, `concat-fast ${av.avaCode}`, 1, true);
       } catch {
         // Fast falhou → fallback slow re-encode (com retry+reset; pega hang intermitente)
-        mounted = await vaFFmpegRetry(() => concatAvatarParts(videoBlobs as Blob[]), 900_000, `concat-slow ${av.avaCode}`, 2);
+        mounted = await vaFFmpegRetry(() => concatAvatarParts(videoBlobs as Blob[]), 900_000, `concat-slow ${av.avaCode}`, 2, true);
       }
       items.push({ avaCode: av.avaCode, filename, blob: mounted });
     } catch (e) {
