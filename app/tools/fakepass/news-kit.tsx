@@ -126,13 +126,17 @@ export function NewsStage({ bg, children }: { bg: NewsBg; children: ReactNode })
         <div style={{ position: 'absolute', inset: 0, background: boxBg(box1, fill) }} />
       )}
 
-      {/* PiP (janelinha do repórter) sobre a cena */}
+      {/* CHYRON (leve lift no 9:16) */}
+      <div style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: lift }}>{children}</div>
+
+      {/* PiP (janelinha do repórter): desenhada POR CIMA do chyron e ACIMA dele,
+          então fica 100% VERDE (chroma) — dá pra encaixar o repórter sem cortar. */}
       {layout === 'pip' ? (
         <div
           style={{
             position: 'absolute',
             right: Math.round(W * 0.035),
-            bottom: lift + Math.round(H * 0.23),
+            bottom: Math.round(H * 0.34) + lift,
             width: pipW,
             height: Math.round((pipW * 9) / 16),
             borderRadius: Math.round(W * 0.012),
@@ -143,9 +147,6 @@ export function NewsStage({ bg, children }: { bg: NewsBg; children: ReactNode })
           }}
         />
       ) : null}
-
-      {/* CHYRON por cima (leve lift no 9:16) */}
-      <div style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: lift }}>{children}</div>
     </div>
   );
 }
