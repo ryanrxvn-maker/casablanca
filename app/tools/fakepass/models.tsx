@@ -19,6 +19,17 @@ import TWEET from './model-tweet';
 import COMMENTS from './model-comments';
 import NOTIF from './model-notif';
 import NEWS_CNN from './model-news-cnn';
+import NEWS_CNNBR from './model-news-cnnbr';
+import NEWS_BBC from './model-news-bbc';
+import NEWS_FOX from './model-news-fox';
+import NEWS_MSNBC from './model-news-msnbc';
+import NEWS_CNBC from './model-news-cnbc';
+import NEWS_GLOBAL from './model-news-global';
+import NEWS_NNN from './model-news-nnn';
+import NEWS_GLOBONEWS from './model-news-globonews';
+import NEWS_BANDNEWS from './model-news-bandnews';
+import NEWS_RECORD from './model-news-record';
+import NEWS_TIMES from './model-news-times';
 
 export const CATEGORIES: { id: string; label: string }[] = [
   { id: 'story', label: 'Stickers de Story' },
@@ -42,5 +53,18 @@ export const MODELS: FakeModel[] = [
   // Notificações
   ...NOTIF,
   // Notícias (telejornais) — agrupados por emissora
+  // Internacionais
   ...NEWS_CNN,
+  ...NEWS_BBC,
+  ...NEWS_FOX,
+  ...NEWS_MSNBC,
+  ...NEWS_CNBC,
+  ...NEWS_GLOBAL,
+  ...NEWS_NNN,
+  // Brasil
+  ...NEWS_CNNBR,
+  ...NEWS_GLOBONEWS,
+  ...NEWS_BANDNEWS,
+  ...NEWS_RECORD,
+  ...NEWS_TIMES,
 ];

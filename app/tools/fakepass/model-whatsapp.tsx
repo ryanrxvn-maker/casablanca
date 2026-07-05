@@ -66,7 +66,7 @@ function doodleSvgMarkup(dark: boolean): string {
   const stroke = dark ? '#8696a0' : '#54656f';
   // viewBox 140, exibido a 360 → mesma densidade de antes.
   return `<svg xmlns='http://www.w3.org/2000/svg' width='360' height='360' viewBox='0 0 140 140'>
-    <g fill='none' stroke='${stroke}' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round' opacity='0.5'>
+    <g fill='none' stroke='${stroke}' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round' opacity='0.34'>
       <path d='M16 22c4-6 12-6 16 0s12 6 16 0'/>
       <circle cx='104' cy='24' r='9'/>
       <path d='M100 24h8M104 20v8'/>
