@@ -23,6 +23,7 @@ import {
   type CSSProperties,
 } from 'react';
 import { Inter } from 'next/font/google';
+import { EmojiPickerButton } from './emoji-picker';
 
 // Fonte base dos prints — Inter (réplica fiel do SF Pro do iOS/Instagram),
 // carregada local. Em Apple o sistema entrega SF Pro nativo pela stack abaixo.
@@ -433,26 +434,46 @@ export function Field({
   );
 }
 
+/** Botãozinho 😊 que abre o seletor de emoji e insere no fim do valor. */
+function EmojiInsert({ value, onChange, top }: { value: string; onChange: (v: string) => void; top?: boolean }) {
+  return (
+    <span className={'absolute right-1.5 ' + (top ? 'top-1.5' : 'top-1/2 -translate-y-1/2')}>
+      <EmojiPickerButton align="right" onPick={(e) => onChange(value + e)} className="flex h-6 w-6 items-center justify-center rounded-md text-text-dim transition hover:bg-white/10 hover:text-white">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><circle cx="12" cy="12" r="9" /><path d="M8.5 14a4 4 0 0 0 7 0" /><path d="M9 9.5h.01M15 9.5h.01" /></svg>
+      </EmojiPickerButton>
+    </span>
+  );
+}
+
 export function TextField({
   value,
   onChange,
   placeholder,
   maxLength,
+  withEmoji,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   maxLength?: number;
+  withEmoji?: boolean;
 }) {
-  return (
+  const input = (
     <input
       type="text"
-      className="input-field"
+      className={'input-field' + (withEmoji ? ' !pr-9' : '')}
       value={value}
       placeholder={placeholder}
       maxLength={maxLength}
       onChange={(e) => onChange(e.target.value)}
     />
+  );
+  if (!withEmoji) return input;
+  return (
+    <div className="relative">
+      {input}
+      <EmojiInsert value={value} onChange={onChange} />
+    </div>
   );
 }
 
@@ -462,22 +483,31 @@ export function TextArea({
   placeholder,
   maxLength,
   rows = 3,
+  withEmoji,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   maxLength?: number;
   rows?: number;
+  withEmoji?: boolean;
 }) {
-  return (
+  const area = (
     <textarea
-      className="input-field resize-y leading-relaxed"
+      className={'input-field resize-y leading-relaxed' + (withEmoji ? ' !pr-9' : '')}
       value={value}
       placeholder={placeholder}
       maxLength={maxLength}
       rows={rows}
       onChange={(e) => onChange(e.target.value)}
     />
+  );
+  if (!withEmoji) return area;
+  return (
+    <div className="relative">
+      {area}
+      <EmojiInsert value={value} onChange={onChange} top />
+    </div>
   );
 }
 

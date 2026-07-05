@@ -8,6 +8,7 @@
 
 import { FitText, Field, TextField, TextArea, Segmented, RangeField, emojify, FONT_STACK, type FakeModel } from './shared';
 import { STORY_W, STORY_RATIO, STORY_BGS, StoryStage, BgControls } from './story-kit';
+import { EmojiPickerButton } from './emoji-picker';
 
 const AP = 'apple' as const; // stickers de story = sempre emoji do iPhone
 
@@ -35,7 +36,7 @@ const IG_QUESTION: FakeModel<QuestionState> = {
   Controls: ({ s, set }) => (
     <div className="flex flex-col gap-4">
       <Field label="Pergunta do topo"><TextField value={s.header} onChange={(v) => set({ header: v })} placeholder="Faça uma pergunta" maxLength={80} /></Field>
-      <Field label="A pergunta / mensagem"><TextArea value={s.pergunta} onChange={(v) => set({ pergunta: v })} placeholder="Escreve a pergunta…" maxLength={280} rows={3} /></Field>
+      <Field label="A pergunta / mensagem"><TextArea value={s.pergunta} onChange={(v) => set({ pergunta: v })} placeholder="Escreve a pergunta…" maxLength={280} rows={3} withEmoji /></Field>
       <BgControls bg={s.bg} set={set} />
     </div>
   ),
@@ -121,7 +122,7 @@ const IG_QUIZ: FakeModel<QuizState> = {
     const filled = s.ops.map((o, i) => ({ o, i })).filter((x) => x.o.trim() !== '');
     return (
       <div className="flex flex-col gap-4">
-        <Field label="Pergunta"><TextField value={s.pergunta} onChange={(v) => set({ pergunta: v })} placeholder="Sua pergunta" maxLength={120} /></Field>
+        <Field label="Pergunta"><TextField value={s.pergunta} onChange={(v) => set({ pergunta: v })} placeholder="Sua pergunta" maxLength={120} withEmoji /></Field>
         <div className="grid grid-cols-2 gap-3">
           {[0, 1, 2, 3].map((i) => (
             <Field key={i} label={`Opção ${i + 1}`}>
@@ -165,13 +166,16 @@ const IG_SLIDER: FakeModel<SliderState> = {
   defaultState: { pergunta: 'O quanto você curtiu?', emoji: '😍', valor: 70, bg: STORY_BGS[2].css },
   Controls: ({ s, set }) => (
     <div className="flex flex-col gap-4">
-      <Field label="Pergunta"><TextField value={s.pergunta} onChange={(v) => set({ pergunta: v })} placeholder="Sua pergunta" maxLength={120} /></Field>
+      <Field label="Pergunta"><TextField value={s.pergunta} onChange={(v) => set({ pergunta: v })} placeholder="Sua pergunta" maxLength={120} withEmoji /></Field>
       <Field label="Emoji">
         <div className="flex flex-wrap items-center gap-2">
           {EMOJIS.map((e) => (
             <button key={e} type="button" onClick={() => set({ emoji: e })} className={'flex h-9 w-9 items-center justify-center rounded-full border transition ' + (s.emoji === e ? 'border-violet/70 bg-violet/15' : 'border-line-strong hover:border-violet/50')} style={{ fontSize: 20, lineHeight: 1 }}>{emojify(e, 'apple')}</button>
           ))}
-          <input type="text" value={s.emoji} onChange={(e) => set({ emoji: e.target.value.slice(0, 2) })} className="input-field !w-16 text-center" maxLength={2} />
+          <EmojiPickerButton onPick={(e) => set({ emoji: e })} className="flex h-9 items-center gap-1.5 rounded-full border border-line-strong px-3 text-[12px] font-semibold text-text-muted transition hover:border-violet/50 hover:text-white">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="9" /><path d="M8.5 14a4 4 0 0 0 7 0" /><path d="M9 9.5h.01M15 9.5h.01" /></svg>
+            Todos
+          </EmojiPickerButton>
         </div>
       </Field>
       <RangeField label="Posição" value={s.valor} min={0} max={100} onChange={(v) => set({ valor: v })} display={(v) => v + '%'} />

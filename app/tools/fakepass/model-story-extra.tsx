@@ -66,7 +66,7 @@ const IG_COUNTDOWN: FakeModel<CountdownState> = {
   defaultState: { titulo: 'LANÇAMENTO 🤩', horas: '22', minutos: '33', segundos: '13', bg: STORY_BGS[3].css },
   Controls: ({ s, set }) => (
     <div className="flex flex-col gap-4">
-      <Field label="Título"><TextField value={s.titulo} onChange={(v) => set({ titulo: v })} placeholder="LANÇAMENTO 🤩" maxLength={40} /></Field>
+      <Field label="Título"><TextField value={s.titulo} onChange={(v) => set({ titulo: v })} placeholder="LANÇAMENTO 🤩" maxLength={40} withEmoji /></Field>
       <div className="grid grid-cols-3 gap-3">
         <Field label="Horas"><TextField value={s.horas} onChange={(v) => set({ horas: v })} placeholder="22" maxLength={2} /></Field>
         <Field label="Minutos"><TextField value={s.minutos} onChange={(v) => set({ minutos: v })} placeholder="33" maxLength={2} /></Field>
