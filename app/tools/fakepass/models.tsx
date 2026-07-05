@@ -47,8 +47,8 @@ export const CATEGORIES: { id: string; label: string }[] = [
   { id: 'chat', label: 'Conversas' },
   { id: 'post', label: 'Posts' },
   { id: 'notif', label: 'Notificações' },
-  { id: 'news', label: 'Notícias' },
-  { id: 'sites', label: 'Sites de Notícia' },
+  { id: 'news', label: 'Telejornais' },
+  { id: 'sites', label: 'Sites de notícia' },
 ];
 
 export const MODELS: FakeModel[] = [

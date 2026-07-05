@@ -18,6 +18,32 @@ import { MODELS, CATEGORIES } from './models';
 
 const HUE = 'rgba(167,139,250,0.42)';
 
+// Categorias agrupadas em seções (organização premium do seletor).
+const SECTIONS: { label: string; ids: string[] }[] = [
+  { label: 'Redes sociais', ids: ['story', 'chat', 'post', 'notif'] },
+  { label: 'Notícias & TV', ids: ['news', 'sites'] },
+];
+
+function CatIcon({ id }: { id: string }) {
+  const p = { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.9, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
+  switch (id) {
+    case 'story':
+      return (<svg {...p}><rect x="4" y="3" width="16" height="18" rx="3" /><circle cx="12" cy="10" r="3" /><path d="M8 17h8" /></svg>);
+    case 'chat':
+      return (<svg {...p}><path d="M21 12a8 8 0 0 1-11.5 7.2L4 21l1.8-5.5A8 8 0 1 1 21 12z" /></svg>);
+    case 'post':
+      return (<svg {...p}><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M3 15l4-4 5 5" /><circle cx="15" cy="9" r="1.4" /></svg>);
+    case 'notif':
+      return (<svg {...p}><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>);
+    case 'news':
+      return (<svg {...p}><rect x="2.5" y="7" width="19" height="13" rx="2" /><path d="M8 7l4-4 4 4" /></svg>);
+    case 'sites':
+      return (<svg {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 8h18" /><circle cx="6" cy="6" r="0.6" fill="currentColor" /><circle cx="8.4" cy="6" r="0.6" fill="currentColor" /></svg>);
+    default:
+      return null;
+  }
+}
+
 export default function FakePassPage() {
   const [modelId, setModelId] = useToolState<string>('fakepass:model', MODELS[0].id);
   const [cat, setCat] = useToolState<string>('fakepass:cat', 'story');
@@ -43,15 +69,6 @@ export default function FakePassPage() {
   const dims = model.dims ? model.dims(s) : { stageW: model.stageW, ratio: model.ratio, exportW: model.exportW };
 
   const modelsInCat = MODELS.filter((m) => m.category === cat);
-  // Sub-agrupamento por emissora/grupo (Notícias). Mantém a ordem de inserção.
-  const groupsInCat: { group: string | null; models: typeof MODELS }[] = [];
-  for (const m of modelsInCat) {
-    const g = m.group ?? null;
-    const last = groupsInCat[groupsInCat.length - 1];
-    if (last && last.group === g) last.models.push(m);
-    else groupsInCat.push({ group: g, models: [m] });
-  }
-  const hasGroups = groupsInCat.some((g) => g.group !== null);
 
   // Auto-scale da prévia: se o palco for mais largo que a área disponível,
   // encolhe VISUALMENTE pra caber. O PNG continua em alta porque o export usa
@@ -91,83 +108,71 @@ export default function FakePassPage() {
       hue={HUE}
       icon={<IconFakePass size={56} />}
     >
-      {/* ─── Seletor de modelo (categorias + modelos) ─── */}
-      <div className="mb-6">
-        <div className="flex flex-wrap gap-1.5">
-          {CATEGORIES.map((c) => {
-            const count = MODELS.filter((m) => m.category === c.id).length;
-            const active = c.id === cat;
-            return (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => setCat(c.id)}
-                className={
-                  'rounded-full border px-3.5 py-1.5 text-[12.5px] font-semibold transition-all duration-200 ' +
-                  (active
-                    ? 'border-violet/65 bg-violet/15 text-white'
-                    : 'border-line-strong text-text-muted hover:border-violet hover:text-white')
-                }
-              >
-                {c.label}
-                <span className="ml-1.5 opacity-50">{count || '·'}</span>
-              </button>
-            );
-          })}
+      {/* ─── Seletor: seções de categoria + grade de cards ─── */}
+      <div className="mb-7 flex flex-col gap-4">
+        {/* categorias agrupadas em seções */}
+        <div className="flex flex-col gap-2.5">
+          {SECTIONS.map((sec) => (
+            <div key={sec.label} className="flex flex-wrap items-center gap-2">
+              <span className="mr-1 text-[9.5px] font-bold uppercase tracking-[0.2em] text-text-dim" style={{ fontFamily: 'var(--font-tech)' }}>
+                {sec.label}
+              </span>
+              {CATEGORIES.filter((c) => sec.ids.includes(c.id)).map((c) => {
+                const count = MODELS.filter((m) => m.category === c.id).length;
+                const active = c.id === cat;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setCat(c.id)}
+                    className={
+                      'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12.5px] font-semibold transition-all duration-200 ' +
+                      (active
+                        ? 'border-violet/60 bg-gradient-to-b from-violet/25 to-violet/10 text-white shadow-[0_0_18px_-8px_rgba(167,139,250,0.9)]'
+                        : 'border-line-strong/70 text-text-muted hover:border-violet/50 hover:text-white')
+                    }
+                  >
+                    <CatIcon id={c.id} />
+                    {c.label}
+                    <span className={'ml-0.5 rounded-full px-1.5 py-px text-[10px] font-bold ' + (active ? 'bg-white/15 text-white' : 'bg-white/[0.05] text-text-dim')}>{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </div>
 
+        {/* grade de modelos (cards premium) */}
         {modelsInCat.length === 0 ? (
-          <p className="mt-3 text-[13px] text-text-dim">Em breve nesta categoria. 🚧</p>
-        ) : hasGroups ? (
-          // Sub-agrupado por emissora (Notícias): cada grupo com seu cabeçalho.
-          <div className="mt-3 flex flex-col gap-3">
-            {groupsInCat.map((grp) => (
-              <div key={grp.group ?? '_'}>
-                {grp.group ? (
-                  <p className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.16em] text-text-dim" style={{ fontFamily: 'var(--font-tech)' }}>
-                    {grp.group}
-                  </p>
-                ) : null}
-                <div className="flex flex-wrap gap-2">
-                  {grp.models.map((m) => {
-                    const active = m.id === modelId;
-                    return (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={() => setModelId(m.id)}
-                        className={
-                          'rounded-[12px] border px-3.5 py-2 text-[13px] font-semibold transition-all duration-200 active:scale-[0.98] ' +
-                          (active
-                            ? 'border-violet/70 bg-violet/12 text-white shadow-[0_0_20px_-6px_rgba(167,139,250,0.7)]'
-                            : 'border-line-strong text-text-muted hover:border-violet/50 hover:text-white')
-                        }
-                      >
-                        {m.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
+          <p className="text-[13px] text-text-dim">Em breve nesta categoria. 🚧</p>
         ) : (
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
             {modelsInCat.map((m) => {
               const active = m.id === modelId;
+              const primary = m.group ?? m.label;
+              const secondary = m.group ? m.label : '';
               return (
                 <button
                   key={m.id}
                   type="button"
                   onClick={() => setModelId(m.id)}
                   className={
-                    'rounded-[12px] border px-3.5 py-2 text-[13px] font-semibold transition-all duration-200 active:scale-[0.98] ' +
+                    'group flex items-center gap-2.5 rounded-[13px] border p-2.5 text-left transition-all duration-200 active:scale-[0.98] ' +
                     (active
-                      ? 'border-violet/70 bg-violet/12 text-white shadow-[0_0_20px_-6px_rgba(167,139,250,0.7)]'
-                      : 'border-line-strong text-text-muted hover:border-violet/50 hover:text-white')
+                      ? 'border-violet/70 bg-violet/12 shadow-[0_0_22px_-9px_rgba(167,139,250,0.9)]'
+                      : 'border-line-strong/60 bg-bg-soft/20 hover:border-violet/45 hover:bg-bg-soft/40')
                   }
                 >
-                  {m.label}
+                  <span
+                    className="h-8 w-1.5 flex-shrink-0 rounded-full"
+                    style={{ background: m.hue, boxShadow: active ? `0 0 10px -1px ${m.hue}` : 'none' }}
+                  />
+                  <span className="flex min-w-0 flex-col">
+                    <span className={'truncate text-[13px] font-semibold leading-tight ' + (active ? 'text-white' : 'text-text-muted group-hover:text-white')}>
+                      {primary}
+                    </span>
+                    {secondary ? <span className="truncate text-[10.5px] leading-tight text-text-dim">{secondary}</span> : null}
+                  </span>
                 </button>
               );
             })}
