@@ -15,6 +15,7 @@ import {
   type StatusCfg,
 } from './shared';
 import { MODELS, CATEGORIES } from './models';
+import { BrandMark, brandForModel } from './brand-logos';
 
 const HUE = 'rgba(167,139,250,0.42)';
 
@@ -163,10 +164,7 @@ export default function FakePassPage() {
                       : 'border-line-strong/60 bg-bg-soft/20 hover:border-violet/45 hover:bg-bg-soft/40')
                   }
                 >
-                  <span
-                    className="h-8 w-1.5 flex-shrink-0 rounded-full"
-                    style={{ background: m.hue, boxShadow: active ? `0 0 10px -1px ${m.hue}` : 'none' }}
-                  />
+                  <BrandMark brand={brandForModel(m)} size={26} />
                   <span className="flex min-w-0 flex-col">
                     <span className={'truncate text-[13px] font-semibold leading-tight ' + (active ? 'text-white' : 'text-text-muted group-hover:text-white')}>
                       {primary}
