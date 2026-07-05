@@ -14,6 +14,7 @@ import {
   Toggle,
   FONT_STACK,
   type FakeModel,
+  emojify,
 } from './shared';
 
 /* ─────────────────────────── Tipos / parse ─────────────────────────── */
@@ -145,7 +146,7 @@ function CommentsCard({ s }: { s: S }) {
                 {c.user ? (
                   <span style={{ fontWeight: 600 }}>{c.user} </span>
                 ) : null}
-                <span style={{ fontWeight: 400 }}>{c.texto}</span>
+                <span style={{ fontWeight: 400 }}>{emojify(c.texto, 'apple')}</span>
               </div>
 
               {/* meta */}

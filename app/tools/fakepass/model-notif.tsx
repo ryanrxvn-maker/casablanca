@@ -16,6 +16,7 @@ import {
   FONT_STACK,
   type FakeModel,
   type StatusCfg,
+  emojify,
 } from './shared';
 
 type S = {
@@ -156,7 +157,7 @@ function IosCard({ s }: { s: S }) {
             wordBreak: 'break-word',
           }}
         >
-          {s.texto}
+          {emojify(s.texto, s.os === 'android' ? 'google' : 'apple')}
         </div>
       ) : null}
     </div>
@@ -223,7 +224,7 @@ function AndroidCard({ s }: { s: S }) {
             wordBreak: 'break-word',
           }}
         >
-          {s.texto}
+          {emojify(s.texto, s.os === 'android' ? 'google' : 'apple')}
         </div>
       ) : null}
     </div>

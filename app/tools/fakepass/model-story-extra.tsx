@@ -2,11 +2,10 @@
 
 /**
  * FakePass — stickers EXTRAS de STORY.
- * Contagem Regressiva, Localização e Menção. Todos sobre o StoryStage
- * (fundo colorido) e com fundo personalizável via BgControls.
+ * Contagem Regressiva, Localização (com temas fiéis ao Instagram) e Menção.
  */
 
-import { FitText, Field, TextField, ImageUpload, FONT_STACK, type FakeModel } from './shared';
+import { FitText, Field, TextField, Segmented, FONT_STACK, type FakeModel } from './shared';
 import { STORY_W, STORY_RATIO, STORY_BGS, StoryStage, BgControls } from './story-kit';
 
 /* ═══════════════════ Contagem Regressiva ═══════════════════ */
@@ -28,17 +27,7 @@ function CountdownBlock({ num, label }: { num: string; label: string }) {
 
 function CountdownSticker({ titulo, dias, horas, min }: { titulo: string; dias: string; horas: string; min: string }) {
   return (
-    <div
-      style={{
-        width: STORY_W * 0.78,
-        borderRadius: 16,
-        background: 'rgba(255,255,255,0.9)',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.16)',
-        WebkitFontSmoothing: 'antialiased',
-        fontFamily: FONT_STACK,
-        padding: 16,
-      }}
-    >
+    <div style={{ width: STORY_W * 0.78, borderRadius: 16, background: 'rgba(255,255,255,0.9)', boxShadow: '0 8px 24px rgba(0,0,0,0.16)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK, padding: 16 }}>
       <FitText maxPx={16} minPx={11} maxHeight={STORY_W * 0.22} style={{ color: '#262626', textAlign: 'center', fontWeight: 600, lineHeight: 1.25, letterSpacing: '0.02em', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
         {titulo}
       </FitText>
@@ -73,49 +62,58 @@ const IG_COUNTDOWN: FakeModel<CountdownState> = {
   ),
 };
 
-/* ═══════════════════ Localização ═══════════════════ */
+/* ═══════════════════ Localização (temas fiéis) ═══════════════════ */
 
-type LocationState = { local: string; bg: string };
+type LocationState = { local: string; tema: string; bg: string };
 
-function PinIcon() {
+// Temas conforme as variações reais do sticker de localização do Instagram.
+const LOC_THEMES: Record<string, { pill: string; pin: string; text: string; upper: boolean; rainbow: boolean }> = {
+  preto:     { pill: '#ffffff', pin: '#262626', text: '#262626', upper: true,  rainbow: false },
+  roxo:      { pill: '#ffffff', pin: '#8b3dff', text: '#8b3dff', upper: true,  rainbow: false },
+  gradiente: { pill: '#ffffff', pin: 'grad',    text: '#262626', upper: true,  rainbow: false },
+  escuro:    { pill: '#2b2b2b', pin: '#ffffff', text: '#ffffff', upper: false, rainbow: false },
+  colorido:  { pill: '#ffffff', pin: '#ed4956', text: '#262626', upper: false, rainbow: true },
+};
+const LOC_ORDER = ['preto', 'roxo', 'gradiente', 'escuro', 'colorido'];
+const LOC_LABEL: Record<string, string> = { preto: 'Preto', roxo: 'Roxo', gradiente: 'Gradiente', escuro: 'Escuro', colorido: 'Colorido' };
+const RAINBOW = ['#ed4956', '#f7773a', '#fcaf45', '#4caf50', '#35b8e0', '#8b3dff'];
+
+function rainbowText(text: string) {
+  let ci = 0;
+  return [...text].map((ch, i) =>
+    ch === ' ' ? (
+      <span key={i}>&nbsp;</span>
+    ) : (
+      <span key={i} style={{ color: RAINBOW[ci++ % RAINBOW.length] }}>{ch}</span>
+    ),
+  );
+}
+
+function Pin({ color, inner }: { color: string; inner: string }) {
+  const fill = color === 'grad' ? 'url(#fp-loc-grad)' : color;
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden style={{ flexShrink: 0 }}>
-      <defs>
-        <linearGradient id="fp-loc-grad" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#feda75" />
-          <stop offset="35%" stopColor="#fa7e1e" />
-          <stop offset="70%" stopColor="#d62976" />
-          <stop offset="100%" stopColor="#962fbf" />
-        </linearGradient>
-      </defs>
-      <path
-        d="M12 2c-3.87 0-7 3.13-7 7 0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z"
-        fill="url(#fp-loc-grad)"
-      />
-      <circle cx="12" cy="9" r="2.6" fill="#fff" />
+      {color === 'grad' ? (
+        <defs>
+          <linearGradient id="fp-loc-grad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#feda75" /><stop offset="35%" stopColor="#fa7e1e" /><stop offset="70%" stopColor="#d62976" /><stop offset="100%" stopColor="#962fbf" />
+          </linearGradient>
+        </defs>
+      ) : null}
+      <path d="M12 2c-3.87 0-7 3.13-7 7 0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" fill={fill} />
+      <circle cx="12" cy="9" r="2.6" fill={inner} />
     </svg>
   );
 }
 
-function LocationSticker({ local }: { local: string }) {
+function LocationSticker({ local, tema }: { local: string; tema: string }) {
+  const t = LOC_THEMES[tema] ?? LOC_THEMES.preto;
+  const txt = (t.upper ? (local || '').toUpperCase() : local || '') || ' ';
   return (
-    <div
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 7,
-        maxWidth: STORY_W * 0.86,
-        background: '#fff',
-        borderRadius: 999,
-        padding: '8px 14px',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.16)',
-        WebkitFontSmoothing: 'antialiased',
-        fontFamily: FONT_STACK,
-      }}
-    >
-      <PinIcon />
-      <span style={{ fontSize: 16, fontWeight: 600, color: '#262626', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-        {local || ' '}
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, maxWidth: STORY_W * 0.86, background: t.pill, borderRadius: 999, padding: '9px 16px', boxShadow: '0 8px 24px rgba(0,0,0,0.16)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK }}>
+      <Pin color={t.pin} inner={t.pill} />
+      <span style={{ fontSize: 16, fontWeight: 600, color: t.rainbow ? undefined : t.text, lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', letterSpacing: t.upper ? '0.02em' : 0 }}>
+        {t.rainbow ? rainbowText(txt) : txt}
       </span>
     </div>
   );
@@ -124,56 +122,32 @@ function LocationSticker({ local }: { local: string }) {
 const IG_LOCATION: FakeModel<LocationState> = {
   id: 'ig-location', label: 'Localização', category: 'story', hue: 'rgba(80,180,255,0.42)',
   stageW: STORY_W, ratio: STORY_RATIO, exportW: 1080, usesPhone: false,
-  defaultState: { local: 'São Paulo, Brasil', bg: STORY_BGS[1].css },
+  defaultState: { local: 'São Paulo, Brasil', tema: 'gradiente', bg: STORY_BGS[5].css },
   Controls: ({ s, set }) => (
     <div className="flex flex-col gap-4">
       <Field label="Localização"><TextField value={s.local} onChange={(v) => set({ local: v })} placeholder="São Paulo, Brasil" maxLength={60} /></Field>
+      <Field label="Estilo"><Segmented value={s.tema} options={LOC_ORDER.map((k) => ({ value: k, label: LOC_LABEL[k] }))} onChange={(v) => set({ tema: v })} /></Field>
       <BgControls bg={s.bg} set={set} />
     </div>
   ),
   Preview: ({ s }) => (
     <StoryStage bg={s.bg}>
-      <LocationSticker local={s.local} />
+      <LocationSticker local={s.local} tema={s.tema} />
     </StoryStage>
   ),
 };
 
-/* ═══════════════════ Menção ═══════════════════ */
+/* ═══════════════════ Menção (sem avatar, @ colorido) ═══════════════════ */
 
-type MentionState = { usuario: string; avatar: string; bg: string };
+type MentionState = { usuario: string; bg: string };
 
-function MentionSticker({ usuario, avatar }: { usuario: string; avatar: string }) {
-  const handle = '@' + (usuario || '').replace(/^@+/, '');
+function MentionSticker({ usuario }: { usuario: string }) {
+  const h = (usuario || '').replace(/^@+/, '') || 'usuario';
   return (
-    <div
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 8,
-        maxWidth: STORY_W * 0.86,
-        background: '#fff',
-        borderRadius: 12,
-        padding: '6px 12px 6px 6px',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.16)',
-        WebkitFontSmoothing: 'antialiased',
-        fontFamily: FONT_STACK,
-      }}
-    >
-      <div
-        style={{
-          width: 30,
-          height: 30,
-          borderRadius: '50%',
-          overflow: 'hidden',
-          flexShrink: 0,
-          background: '#dbdbdb',
-          backgroundImage: avatar ? `url(${avatar})` : undefined,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-        }}
-      />
-      <span style={{ fontSize: 16, fontWeight: 600, color: '#262626', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-        {handle}
+    <div style={{ display: 'inline-flex', alignItems: 'center', maxWidth: STORY_W * 0.86, background: '#ffffff', borderRadius: 8, padding: '9px 18px', boxShadow: '0 8px 24px rgba(0,0,0,0.16)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK }}>
+      <span style={{ fontSize: 17, fontWeight: 600, lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <span style={{ color: '#fa7e1e' }}>@</span>
+        <span style={{ color: '#262626' }}>{h}</span>
       </span>
     </div>
   );
@@ -182,17 +156,16 @@ function MentionSticker({ usuario, avatar }: { usuario: string; avatar: string }
 const IG_MENTION: FakeModel<MentionState> = {
   id: 'ig-mention', label: 'Menção', category: 'story', hue: 'rgba(250,126,30,0.42)',
   stageW: STORY_W, ratio: STORY_RATIO, exportW: 1080, usesPhone: false,
-  defaultState: { usuario: 'seu_user', avatar: '', bg: STORY_BGS[5].css },
+  defaultState: { usuario: 'seu_user', bg: STORY_BGS[5].css },
   Controls: ({ s, set }) => (
     <div className="flex flex-col gap-4">
       <Field label="Usuário" hint="O @ é adicionado automaticamente."><TextField value={s.usuario} onChange={(v) => set({ usuario: v })} placeholder="seu_user" maxLength={30} /></Field>
-      <Field label="Foto do perfil"><ImageUpload value={s.avatar} onChange={(v) => set({ avatar: v })} label="foto" round /></Field>
       <BgControls bg={s.bg} set={set} />
     </div>
   ),
   Preview: ({ s }) => (
     <StoryStage bg={s.bg}>
-      <MentionSticker usuario={s.usuario} avatar={s.avatar} />
+      <MentionSticker usuario={s.usuario} />
     </StoryStage>
   ),
 };

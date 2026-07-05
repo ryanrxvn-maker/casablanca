@@ -17,6 +17,7 @@ import {
   FONT_STACK,
   type FakeModel,
   type StatusCfg,
+  emojify,
 } from './shared';
 
 type S = {
@@ -240,6 +241,7 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
   const pillBorder = s.dark ? '#363636' : '#dbdbdb';
   const pillBg = s.dark ? '#000000' : '#ffffff';
   const rodapeCircleBg = s.dark ? '#3797f0' : '#3797f0';
+  const emojiSet = status.os === 'android' ? 'google' : 'apple';
 
   const msgs = parseMsgs(s.conversa);
   // índice da última mensagem enviada (pra âncora do "Visto")
@@ -360,7 +362,7 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
                     color: m.me ? '#ffffff' : recvFg,
                   }}
                 >
-                  {m.t}
+                  {emojify(m.t, emojiSet)}
                 </div>
               </div>
               {showVisto ? (

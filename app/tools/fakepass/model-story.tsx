@@ -3,11 +3,13 @@
 /**
  * FakePass — modelos de STICKER DE STORY.
  * Caixinha de Pergunta, Enquete, Quiz e Slider de Emoji. Todos sobre o
- * StoryStage (fundo colorido) e com fundo personalizável via BgControls.
+ * StoryStage (fundo colorido). Emojis renderizados como Apple (iPhone).
  */
 
-import { FitText, Field, TextField, TextArea, Segmented, RangeField, FONT_STACK, type FakeModel } from './shared';
+import { FitText, Field, TextField, TextArea, Segmented, RangeField, emojify, FONT_STACK, type FakeModel } from './shared';
 import { STORY_W, STORY_RATIO, STORY_BGS, StoryStage, BgControls } from './story-kit';
+
+const AP = 'apple' as const; // stickers de story = sempre emoji do iPhone
 
 /* ═══════════════════ Caixinha de Pergunta ═══════════════════ */
 
@@ -17,10 +19,10 @@ function QuestionSticker({ header, pergunta }: { header: string; pergunta: strin
   return (
     <div style={{ width: STORY_W * 0.8, borderRadius: 11, overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,0.16)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK }}>
       <FitText maxPx={15} minPx={11} maxHeight={STORY_W * 0.2} style={{ background: '#262626', color: '#fff', padding: '13px 20px', textAlign: 'center', fontWeight: 400, lineHeight: 1.3, letterSpacing: '-0.01em', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-        {header}
+        {emojify(header, AP)}
       </FitText>
       <FitText maxPx={21} minPx={13} maxHeight={STORY_W * 0.5} style={{ background: '#fff', color: '#454545', padding: '24px 22px', textAlign: 'center', fontWeight: 400, lineHeight: 1.32, letterSpacing: '-0.015em', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-        {pergunta}
+        {emojify(pergunta, AP)}
       </FitText>
     </div>
   );
@@ -40,20 +42,29 @@ const IG_QUESTION: FakeModel<QuestionState> = {
   Preview: ({ s }) => <StoryStage bg={s.bg}><QuestionSticker header={s.header} pergunta={s.pergunta} /></StoryStage>,
 };
 
-/* ═══════════════════ Enquete ═══════════════════ */
+/* ═══════════════════ Enquete (header preto + empilhada) ═══════════════════ */
 
 type PollState = { pergunta: string; opA: string; opB: string; bg: string };
 
-function PollSticker({ pergunta, opA, opB }: { pergunta: string; opA: string; opB: string }) {
-  const cell: React.CSSProperties = { flex: 1, padding: '14px 10px', textAlign: 'center', fontSize: 18, fontWeight: 700, color: '#262626', lineHeight: 1.25, whiteSpace: 'pre-wrap', wordBreak: 'break-word' };
+function PollOption({ text }: { text: string }) {
   return (
-    <div style={{ width: STORY_W * 0.82, borderRadius: 14, overflow: 'hidden', background: 'rgba(255,255,255,0.92)', boxShadow: '0 8px 24px rgba(0,0,0,0.16)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK }}>
-      <FitText maxPx={19} minPx={13} maxHeight={STORY_W * 0.36} style={{ color: '#262626', padding: '18px 18px 14px', textAlign: 'center', fontWeight: 500, lineHeight: 1.3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-        {pergunta}
-      </FitText>
-      <div style={{ display: 'flex', borderTop: '1px solid rgba(0,0,0,0.08)' }}>
-        <div style={cell}>{opA || ' '}</div>
-        <div style={{ ...cell, borderLeft: '1px solid rgba(0,0,0,0.08)' }}>{opB || ' '}</div>
+    <div style={{ background: '#efefef', borderRadius: 10, padding: '13px 15px', fontSize: 15, fontWeight: 500, color: '#262626', lineHeight: 1.25, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+      {emojify(text || ' ', AP)}
+    </div>
+  );
+}
+
+function PollSticker({ pergunta, opA, opB }: { pergunta: string; opA: string; opB: string }) {
+  return (
+    <div style={{ width: STORY_W * 0.82, borderRadius: 16, overflow: 'hidden', background: '#fff', boxShadow: '0 8px 24px rgba(0,0,0,0.16)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK }}>
+      <div style={{ background: '#1c1c1c', padding: '13px 16px' }}>
+        <FitText maxPx={14} minPx={11} maxHeight={STORY_W * 0.24} style={{ color: '#fff', textAlign: 'center', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', lineHeight: 1.25, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {emojify(pergunta, AP)}
+        </FitText>
+      </div>
+      <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <PollOption text={opA} />
+        <PollOption text={opB} />
       </div>
     </div>
   );
@@ -67,8 +78,8 @@ const IG_POLL: FakeModel<PollState> = {
     <div className="flex flex-col gap-4">
       <Field label="Pergunta"><TextField value={s.pergunta} onChange={(v) => set({ pergunta: v })} placeholder="Qual é melhor?" maxLength={120} /></Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Opção A"><TextField value={s.opA} onChange={(v) => set({ opA: v })} placeholder="Sim" maxLength={40} /></Field>
-        <Field label="Opção B"><TextField value={s.opB} onChange={(v) => set({ opB: v })} placeholder="Não" maxLength={40} /></Field>
+        <Field label="Opção A"><TextField value={s.opA} onChange={(v) => set({ opA: v })} placeholder="Esse" maxLength={40} /></Field>
+        <Field label="Opção B"><TextField value={s.opB} onChange={(v) => set({ opB: v })} placeholder="Aquele" maxLength={40} /></Field>
       </div>
       <BgControls bg={s.bg} set={set} />
     </div>
@@ -85,14 +96,14 @@ function QuizSticker({ pergunta, ops, correta }: { pergunta: string; ops: string
   return (
     <div style={{ width: STORY_W * 0.82, borderRadius: 16, background: 'rgba(255,255,255,0.96)', boxShadow: '0 8px 24px rgba(0,0,0,0.16)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK, padding: '16px 14px' }}>
       <FitText maxPx={18} minPx={13} maxHeight={STORY_W * 0.3} style={{ color: '#262626', padding: '2px 6px 12px', textAlign: 'center', fontWeight: 600, lineHeight: 1.3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-        {pergunta}
+        {emojify(pergunta, AP)}
       </FitText>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {items.map(({ o, i }) => {
           const ok = i === correta;
           return (
             <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '11px 12px', borderRadius: 11, fontSize: 15, fontWeight: 600, background: ok ? '#e6f8ef' : '#f2f2f2', color: ok ? '#12885a' : '#333333', border: ok ? '1.5px solid #37c98a' : '1.5px solid transparent' }}>
-              <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center' }}>{o}</span>
+              <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center' }}>{emojify(o, AP)}</span>
               {ok ? <span style={{ fontSize: 15 }}>✓</span> : null}
             </div>
           );
@@ -136,11 +147,13 @@ function SliderSticker({ pergunta, emoji, valor }: { pergunta: string; emoji: st
   return (
     <div style={{ width: STORY_W * 0.82, borderRadius: 16, background: 'rgba(255,255,255,0.96)', boxShadow: '0 8px 24px rgba(0,0,0,0.16)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK, padding: '18px 22px 30px' }}>
       <FitText maxPx={18} minPx={13} maxHeight={STORY_W * 0.3} style={{ color: '#262626', padding: '0 0 20px', textAlign: 'center', fontWeight: 500, lineHeight: 1.3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-        {pergunta}
+        {emojify(pergunta, AP)}
       </FitText>
       <div style={{ position: 'relative', height: 12, borderRadius: 6, background: '#ededed' }}>
         <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${v}%`, borderRadius: 6, background: 'linear-gradient(90deg,#ffd54a,#ff5e8a)' }} />
-        <div style={{ position: 'absolute', left: `${v}%`, top: '50%', transform: 'translate(-50%,-50%)', fontSize: 32, lineHeight: 1, filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.25))' }}>{emoji || '😍'}</div>
+        <div style={{ position: 'absolute', left: `${v}%`, top: '50%', transform: 'translate(-50%,-50%)', fontSize: 28, lineHeight: 1, filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.25))' }}>
+          {emojify(emoji || '😍', AP)}
+        </div>
       </div>
     </div>
   );

@@ -86,6 +86,55 @@ export type FakeModel<S = any> = {
 
 /* ─────────────────────────── FitText ─────────────────────────── */
 
+/* ─────────────────────── Emojis (Apple / Google) ─────────────────────── */
+// Emojis do texto viram <img> do CDN: Apple por padrão (= iPhone) e Google
+// quando o celular está em Android. Assim o print sai com o emoji CERTO em
+// qualquer máquina, e o html2canvas rasteriza as imagens (CORS liberado no
+// jsdelivr). O nome do arquivo é o codepoint em hex (com hífen p/ sequências).
+const EMOJI_RE =
+  /(\p{Regional_Indicator}\p{Regional_Indicator}|\p{Extended_Pictographic}(?:️|‍\p{Extended_Pictographic})*)/gu;
+
+export type EmojiSet = 'apple' | 'google';
+
+function toUnified(emoji: string) {
+  return [...emoji].map((c) => c.codePointAt(0)!.toString(16)).join('-');
+}
+
+/** String → nodes, trocando cada emoji por <img> Apple/Google. */
+export function emojify(text: string, set: EmojiSet = 'apple'): ReactNode {
+  if (!text) return text;
+  const re = new RegExp(EMOJI_RE);
+  const out: ReactNode[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let k = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index === re.lastIndex) re.lastIndex += 1;
+    if (m.index > last) out.push(text.slice(last, m.index));
+    const emoji = m[0];
+    out.push(
+      <img
+        key={`e${k}`}
+        src={`https://cdn.jsdelivr.net/npm/emoji-datasource-${set}/img/${set}/64/${toUnified(emoji)}.png`}
+        alt={emoji}
+        crossOrigin="anonymous"
+        draggable={false}
+        style={{ width: '1.15em', height: '1.15em', display: 'inline-block', verticalAlign: '-0.22em', objectFit: 'contain', margin: '0 0.02em' }}
+      />,
+    );
+    k += 1;
+    last = m.index + emoji.length;
+  }
+  if (out.length === 0) return text;
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
+/** Texto com emojis renderizados (Apple padrão; Google se set='google'). */
+export function Emo({ t, set = 'apple' }: { t: string; set?: EmojiSet }) {
+  return <>{emojify(t, set)}</>;
+}
+
 const useIsoLayoutEffect =
   typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
@@ -101,7 +150,7 @@ export function FitText({
   maxHeight,
   style,
 }: {
-  children: string;
+  children: ReactNode;
   maxPx: number;
   minPx: number;
   maxHeight: number;
@@ -143,6 +192,17 @@ export async function downloadNodeAsPng(
   refW?: number,
 ) {
   if (document.fonts?.ready) await document.fonts.ready;
+  // Espera imagens (emojis, avatares, fotos) carregarem — senão saem em branco.
+  await Promise.all(
+    Array.from(node.querySelectorAll('img')).map((img) =>
+      img.complete
+        ? Promise.resolve()
+        : new Promise<void>((res) => {
+            img.addEventListener('load', () => res(), { once: true });
+            img.addEventListener('error', () => res(), { once: true });
+          }),
+    ),
+  );
   await new Promise((r) => setTimeout(r, 60));
   const { default: html2canvas } = await import('html2canvas');
   // Largura de referência = a largura de LAYOUT do palco (stageW). Passar

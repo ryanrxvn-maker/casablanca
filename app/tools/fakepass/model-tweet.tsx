@@ -15,6 +15,7 @@ import {
   ImageUpload,
   FONT_STACK,
   type FakeModel,
+  emojify,
 } from './shared';
 
 /* ─────────────────────────── Tipos ─────────────────────────── */
@@ -229,7 +230,7 @@ function TweetCard({ s }: { s: S }) {
           wordBreak: 'break-word',
         }}
       >
-        {s.texto || ' '}
+        {emojify(s.texto, 'apple')}
       </div>
 
       {/* Data + hora */}
