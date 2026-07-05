@@ -180,7 +180,7 @@ function NavProfile({ color }: { color: string }) {
 
 /* ─────────────────────────── Preview ─────────────────────────── */
 
-const RATIO = 1.92;
+const RATIO = 2.05;
 
 function Screen({ s, status }: { s: S; status: StatusCfg }) {
   const W = 320;
@@ -445,7 +445,7 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
       </div>
 
       {/* CURTIDAS + LEGENDA + COMENTÁRIOS + TEMPO */}
-      <div style={{ padding: '0 12px', display: 'flex', flexDirection: 'column', gap: 5, flex: 1, minHeight: 0 }}>
+      <div style={{ padding: '0 12px', display: 'flex', flexDirection: 'column', gap: 5, flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: fg, lineHeight: 1.2 }}>
           {(s.curtidas || '0')} curtidas
         </div>
