@@ -64,33 +64,54 @@ function parseMsgs(txt: string): Msg[] {
 // background-size/repeat direitinho, e o download fica igual à prévia.
 function doodleSvgMarkup(dark: boolean): string {
   const stroke = dark ? '#8696a0' : '#54656f';
-  // viewBox 140, exibido a 360 → mesma densidade de antes.
-  return `<svg xmlns='http://www.w3.org/2000/svg' width='360' height='360' viewBox='0 0 140 140'>
-    <g fill='none' stroke='${stroke}' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round' opacity='0.34'>
-      <path d='M16 22c4-6 12-6 16 0s12 6 16 0'/>
-      <circle cx='104' cy='24' r='9'/>
-      <path d='M100 24h8M104 20v8'/>
-      <path d='M20 70l6 6 12-12'/>
-      <path d='M60 54c0-5 4-9 9-9s9 4 9 9c0 6-9 12-9 12s-9-6-9-12z'/>
-      <path d='M112 62h18M112 68h12'/>
-      <path d='M30 108a10 10 0 1 1 14 9l-3 6-4-5a10 10 0 0 1-7-10z'/>
-      <path d='M92 100l5 5 5-5 5 5'/>
-      <circle cx='120' cy='112' r='7'/>
-      <path d='M74 118h16'/>
-      <path d='M8 46c5 2 5 8 0 10'/>
+  // Padrão de rabiscos estilo WhatsApp (recriação própria): ícones variados,
+  // opacidade 50%. viewBox 360 = tamanho de exibição (o bake sai a 360px, então
+  // o tamanho intrínseco bate com background-size:360px e o export NÃO escala
+  // errado no html2canvas).
+  return `<svg xmlns='http://www.w3.org/2000/svg' width='360' height='360' viewBox='0 0 360 360'>
+    <g fill='none' stroke='${stroke}' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' opacity='0.5'>
+      <path d='M40 48c-3-6-13-4-13 3 0 6 13 14 13 14s13-8 13-14c0-7-10-9-13-3z'/>
+      <path d='M120 46h5l3-4h10l3 4h5a4 4 0 0 1 4 4v14a4 4 0 0 1-4 4h-26a4 4 0 0 1-4-4V50a4 4 0 0 1 4-4z'/>
+      <circle cx='135' cy='57' r='6'/>
+      <path d='M223 40h36a5 5 0 0 1 5 5v16a5 5 0 0 1-5 5h-22l-9 8v-8h-5a5 5 0 0 1-5-5V45a5 5 0 0 1 5-5z'/>
+      <path d='M316 66V44l16-4v18'/>
+      <circle cx='312' cy='66' r='4'/>
+      <circle cx='328' cy='62' r='4'/>
+      <path d='M48 130h20v10a10 10 0 0 1-20 0z'/>
+      <path d='M68 132h4a4 4 0 0 1 0 9h-4'/>
+      <path d='M53 124c0-3 3-3 3-6M62 124c0-3 3-3 3-6'/>
+      <circle cx='168' cy='132' r='8'/>
+      <path d='M168 118v-5M168 151v-5M150 132h-5M191 132h-5M156 120l-3-3M183 147l-3-3M156 144l-3 3M183 120l-3 3'/>
+      <path d='M263 130l33 11-33 11 6-11z'/>
+      <circle cx='45' cy='225' r='13'/>
+      <circle cx='40' cy='221' r='1.3'/>
+      <circle cx='50' cy='221' r='1.3'/>
+      <path d='M39 228a8 8 0 0 0 12 0'/>
+      <rect x='137' y='220' width='26' height='18' rx='2'/>
+      <path d='M137 227h26M150 220v18'/>
+      <path d='M150 220c-5-6-12-1-6 3M150 220c5-6 12-1 6 3'/>
+      <rect x='247' y='211' width='17' height='28' rx='3'/>
+      <path d='M253 234h5'/>
+      <path d='M332 214l3 8 9 1-7 6 2 9-8-5-8 5 2-9-7-6 9-1z'/>
+      <path d='M60 314a9 9 0 0 1 0-18 11 11 0 0 1 21-3 8 8 0 0 1 2 21z'/>
+      <path d='M172 314c-2-14 8-22 22-20 1 14-9 22-22 20z'/>
+      <path d='M174 312c5-5 11-8 18-10'/>
+      <rect x='277' y='297' width='29' height='19' rx='2'/>
+      <path d='M277 299l14.5 10 14.5-10'/>
     </g>
   </svg>`;
 }
 
-// Assa o SVG do doodle num PNG data-uri (1080px = 3× de 360, nítido no export).
-// Devolve '' enquanto não pronto; o baking é síncrono-rápido (poucos ms) e roda
-// no mount, então já está pronto muito antes de o usuário clicar em baixar.
+// Assa o SVG do doodle num PNG data-uri no TAMANHO DE EXIBIÇÃO (360px). Assim o
+// tamanho intrínseco do PNG = background-size:360px, e o html2canvas (que ignora
+// background-size e usa o intrínseco) tila IGUAL ao navegador → download = preview.
+// Devolve '' enquanto não pronto; o baking roda no mount, pronto antes do clique.
 function useDoodlePng(dark: boolean): string {
   const [png, setPng] = useState('');
   useEffect(() => {
     let alive = true;
     setPng('');
-    const RES = 1080;
+    const RES = 360;
     const img = new Image();
     img.onload = () => {
       if (!alive) return;
@@ -495,13 +516,16 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
           <span style={{ fontSize: 13, fontWeight: 500, color: unreadColor, marginRight: 3 }}>8</span>
         </div>
         <Avatar src={s.avatar} size={38} nome={s.nome} />
-        <div style={{ flex: 1, minWidth: 0, marginLeft: 9, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        {/* bloco do nome: SEM flex-coluna (o html2canvas erra justifyContent
+            center e corta o "online"); a própria linha (alignItems center) já
+            centraliza verticalmente. */}
+        <div style={{ flex: 1, minWidth: 0, marginLeft: 9 }}>
           <div
             style={{
               fontSize: 16.5,
               fontWeight: 600,
               color: headerText,
-              lineHeight: 1.2,
+              lineHeight: 1.25,
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -514,7 +538,7 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
               style={{
                 fontSize: 12.5,
                 color: headerSub,
-                lineHeight: 1.25,
+                lineHeight: 1.3,
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
