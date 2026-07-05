@@ -169,7 +169,7 @@ const IG_SLIDER: FakeModel<SliderState> = {
       <Field label="Emoji">
         <div className="flex flex-wrap items-center gap-2">
           {EMOJIS.map((e) => (
-            <button key={e} type="button" onClick={() => set({ emoji: e })} className={'flex h-9 w-9 items-center justify-center rounded-full border text-[18px] transition ' + (s.emoji === e ? 'border-violet/70 bg-violet/15' : 'border-line-strong hover:border-violet/50')}>{e}</button>
+            <button key={e} type="button" onClick={() => set({ emoji: e })} className={'flex h-9 w-9 items-center justify-center rounded-full border transition ' + (s.emoji === e ? 'border-violet/70 bg-violet/15' : 'border-line-strong hover:border-violet/50')} style={{ fontSize: 20, lineHeight: 1 }}>{emojify(e, 'apple')}</button>
           ))}
           <input type="text" value={s.emoji} onChange={(e) => set({ emoji: e.target.value.slice(0, 2) })} className="input-field !w-16 text-center" maxLength={2} />
         </div>

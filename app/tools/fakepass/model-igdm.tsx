@@ -138,6 +138,24 @@ function Avatar({
 
 /* ─────────────────────── Ícones (linha, ~22px) ─────────────────────── */
 
+function VideoIcon({ color }: { color: string }) {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="2" y="6.5" width="14" height="11" rx="3.5" />
+      <path d="M16 10l5-2.8v9.6L16 14z" />
+    </svg>
+  );
+}
+
+function TagIcon({ color }: { color: string }) {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M20.6 13.4l-7.1 7.1a2 2 0 0 1-2.8 0l-7.2-7.2A2 2 0 0 1 3 11.9V4.5a1.5 1.5 0 0 1 1.5-1.5h7.4a2 2 0 0 1 1.4.6l7.3 7.3a1.7 1.7 0 0 1 0 2.5z" />
+      <circle cx="7.7" cy="7.7" r="1.3" fill={color} stroke="none" />
+    </svg>
+  );
+}
+
 function BackIcon({ color }: { color: string }) {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -165,19 +183,6 @@ function PhoneIcon({ color }: { color: string }) {
   );
 }
 
-function CameraIcon({ color }: { color: string }) {
-  return (
-    <svg width="23" height="23" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M3.5 8.5a2 2 0 0 1 2-2h1.3l.9-1.4a1.4 1.4 0 0 1 1.2-.6h4.2c.5 0 .9.2 1.2.6l.9 1.4h1.1a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-7Z"
-        stroke={color}
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-      <circle cx="12" cy="12" r="3.2" stroke={color} strokeWidth="1.6" />
-    </svg>
-  );
-}
 
 /* Rodapé */
 
@@ -348,9 +353,10 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
             </div>
           ) : null}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 15, flexShrink: 0 }}>
+          <VideoIcon color={fg} />
           <PhoneIcon color={fg} />
-          <CameraIcon color={fg} />
+          <TagIcon color={fg} />
         </div>
       </div>
 

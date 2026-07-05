@@ -89,7 +89,7 @@ function AppIcon({
         overflow: 'hidden',
       }}
     >
-      {glyph}
+      {emojify(glyph, 'apple')}
     </div>
   );
 }
