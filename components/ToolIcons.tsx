@@ -173,6 +173,45 @@ export function IconNormalizador(p: IconProps) {
   );
 }
 
+/** Caixinha de Pergunta — balão de pergunta do Instagram, gradient azul */
+export function IconCaixinhaPergunta(p: IconProps) {
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
+  const url = `url(#${id})`;
+  return (
+    <svg
+      width={p.size ?? 22}
+      height={p.size ?? 22}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+      className={p.className}
+    >
+      <defs>
+        <linearGradient id={id} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#67b8ff" />
+          <stop offset="100%" stopColor="#2f7fd0" />
+        </linearGradient>
+      </defs>
+      {/* Balão de fala arredondado com a "cauda" embaixo à esquerda */}
+      <path
+        d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8A2.5 2.5 0 0 1 17.5 16H13l-4 4v-4H6.5A2.5 2.5 0 0 1 4 13.5v-8z"
+        stroke={url}
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      {/* Ponto de interrogação */}
+      <path
+        d="M9.4 8.6a2.6 2.6 0 0 1 5 .9c0 1.7-2.4 2-2.4 3.4"
+        stroke={url}
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <circle cx="12" cy="15.1" r="0.9" fill={url} />
+    </svg>
+  );
+}
+
 /** Separador de Áudio — 3 ondas separadas (voz/SFX/instrumental), gradient violet/teal */
 export function IconSeparadorAudio(p: IconProps) {
   const raw = useId();

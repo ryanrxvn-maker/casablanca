@@ -8,10 +8,15 @@ export type Tier = 'free' | 'basic' | 'pro' | 'admin';
 
 /** Conjunto de ferramentas (paths) liberadas por tier. */
 const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
-  free: new Set(['/tools/decupagem', '/tools/downloader']),
+  free: new Set([
+    '/tools/decupagem',
+    '/tools/downloader',
+    '/tools/caixinha-pergunta',
+  ]),
   basic: new Set([
     '/tools/decupagem',
     '/tools/downloader',
+    '/tools/caixinha-pergunta',
     '/tools/camuflagem',
     '/tools/compressor',
     '/tools/audio-split',
@@ -25,6 +30,7 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     // pro = tudo
     '/tools/decupagem',
     '/tools/downloader',
+    '/tools/caixinha-pergunta',
     '/tools/camuflagem',
     '/tools/compressor',
     '/tools/audio-split',
