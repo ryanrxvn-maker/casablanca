@@ -18,12 +18,14 @@ import IGPOST from './model-igpost';
 import TWEET from './model-tweet';
 import COMMENTS from './model-comments';
 import NOTIF from './model-notif';
+import NEWS_CNN from './model-news-cnn';
 
 export const CATEGORIES: { id: string; label: string }[] = [
   { id: 'story', label: 'Stickers de Story' },
   { id: 'chat', label: 'Conversas' },
   { id: 'post', label: 'Posts' },
   { id: 'notif', label: 'Notificações' },
+  { id: 'news', label: 'Notícias' },
 ];
 
 export const MODELS: FakeModel[] = [
@@ -39,4 +41,6 @@ export const MODELS: FakeModel[] = [
   ...COMMENTS,
   // Notificações
   ...NOTIF,
+  // Notícias (telejornais) — agrupados por emissora
+  ...NEWS_CNN,
 ];

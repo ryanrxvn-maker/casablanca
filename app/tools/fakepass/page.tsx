@@ -38,30 +38,43 @@ export default function FakePassPage() {
     setStates((prev) => ({ ...prev, [model.id]: { ...prev[model.id], ...patch } }));
   const setStatusCfg = (patch: Partial<StatusCfg>) => setStatus((p) => ({ ...p, ...patch }));
 
-  const modelsInCat = MODELS.filter((m) => m.category === cat);
+  // Dimensões efetivas do palco: dinâmicas (dims(s), ex.: orientação 16:9↔9:16)
+  // ou as fixas do modelo. O shell usa ISTO pra escalar e exportar.
+  const dims = model.dims ? model.dims(s) : { stageW: model.stageW, ratio: model.ratio, exportW: model.exportW };
 
-  // Auto-scale da prévia: se o palco do modelo for mais largo que a área
-  // disponível, encolhe VISUALMENTE pra caber. O PNG continua em alta porque o
-  // export usa model.stageW como referência, não o tamanho escalado.
+  const modelsInCat = MODELS.filter((m) => m.category === cat);
+  // Sub-agrupamento por emissora/grupo (Notícias). Mantém a ordem de inserção.
+  const groupsInCat: { group: string | null; models: typeof MODELS }[] = [];
+  for (const m of modelsInCat) {
+    const g = m.group ?? null;
+    const last = groupsInCat[groupsInCat.length - 1];
+    if (last && last.group === g) last.models.push(m);
+    else groupsInCat.push({ group: g, models: [m] });
+  }
+  const hasGroups = groupsInCat.some((g) => g.group !== null);
+
+  // Auto-scale da prévia: se o palco for mais largo que a área disponível,
+  // encolhe VISUALMENTE pra caber. O PNG continua em alta porque o export usa
+  // dims.stageW como referência, não o tamanho escalado.
   useEffect(() => {
     const box = previewBoxRef.current;
     if (!box) return;
     const compute = () => {
       const avail = box.clientWidth;
-      setPscale(avail > 0 ? Math.min(1, avail / model.stageW) : 1);
+      setPscale(avail > 0 ? Math.min(1, avail / dims.stageW) : 1);
     };
     compute();
     const ro = new ResizeObserver(compute);
     ro.observe(box);
     return () => ro.disconnect();
-  }, [model.stageW, model.id]);
+  }, [dims.stageW, model.id]);
 
   const baixar = async () => {
     const node = stageRef.current;
     if (!node || gerando) return;
     setGerando(true);
     try {
-      await downloadNodeAsPng(node, `fakepass-${model.id}.png`, model.exportW, model.stageW);
+      await downloadNodeAsPng(node, `fakepass-${model.id}.png`, dims.exportW, dims.stageW);
     } catch (err) {
       console.error('[fakepass] export falhou', err);
       alert('Não consegui gerar a imagem agora. Tenta de novo em instantes.');
@@ -103,11 +116,44 @@ export default function FakePassPage() {
           })}
         </div>
 
-        <div className="mt-3 flex flex-wrap gap-2">
-          {modelsInCat.length === 0 ? (
-            <p className="text-[13px] text-text-dim">Em breve nesta categoria. 🚧</p>
-          ) : (
-            modelsInCat.map((m) => {
+        {modelsInCat.length === 0 ? (
+          <p className="mt-3 text-[13px] text-text-dim">Em breve nesta categoria. 🚧</p>
+        ) : hasGroups ? (
+          // Sub-agrupado por emissora (Notícias): cada grupo com seu cabeçalho.
+          <div className="mt-3 flex flex-col gap-3">
+            {groupsInCat.map((grp) => (
+              <div key={grp.group ?? '_'}>
+                {grp.group ? (
+                  <p className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.16em] text-text-dim" style={{ fontFamily: 'var(--font-tech)' }}>
+                    {grp.group}
+                  </p>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  {grp.models.map((m) => {
+                    const active = m.id === modelId;
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setModelId(m.id)}
+                        className={
+                          'rounded-[12px] border px-3.5 py-2 text-[13px] font-semibold transition-all duration-200 active:scale-[0.98] ' +
+                          (active
+                            ? 'border-violet/70 bg-violet/12 text-white shadow-[0_0_20px_-6px_rgba(167,139,250,0.7)]'
+                            : 'border-line-strong text-text-muted hover:border-violet/50 hover:text-white')
+                        }
+                      >
+                        {m.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {modelsInCat.map((m) => {
               const active = m.id === modelId;
               return (
                 <button
@@ -124,9 +170,9 @@ export default function FakePassPage() {
                   {m.label}
                 </button>
               );
-            })
-          )}
-        </div>
+            })}
+          </div>
+        )}
       </div>
 
       {/* ─── Controles + Preview ─── */}
@@ -177,7 +223,7 @@ export default function FakePassPage() {
                 Prévia
               </span>
               <span className="text-[11px] text-text-dim" style={{ fontFamily: 'var(--font-mono)' }}>
-                {model.exportW}×{Math.round(model.exportW * model.ratio)}
+                {dims.exportW}×{Math.round(dims.exportW * dims.ratio)}
               </span>
             </div>
 

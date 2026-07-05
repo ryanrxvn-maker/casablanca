@@ -63,7 +63,10 @@ export const defaultStatus: StatusCfg = {
   airplane: false,
 };
 
-export type ModelCategory = 'story' | 'chat' | 'post' | 'notif';
+export type ModelCategory = 'story' | 'chat' | 'post' | 'notif' | 'news';
+
+/** Dimensões do palco (usadas pelo shell pra escalar preview e exportar). */
+export type StageDims = { stageW: number; ratio: number; exportW: number };
 
 export type FakeModel<S = any> = {
   id: string;
@@ -78,6 +81,11 @@ export type FakeModel<S = any> = {
   exportW: number;
   /** Mostra a barra de status do celular no topo do palco? */
   usesPhone: boolean;
+  /** Sub-grupo dentro da categoria (ex.: nome da emissora nas Notícias). */
+  group?: string;
+  /** Dimensões DINÂMICAS: quando presente, o shell usa isto no lugar de
+   *  stageW/ratio/exportW fixos (ex.: alternar 16:9 ↔ 9:16 pelo estado). */
+  dims?: (s: S) => StageDims;
   defaultState: S;
   Controls: (p: { s: S; set: (patch: Partial<S>) => void }) => ReactNode;
   /** Renderiza o conteúdo do print. `status` só vem quando usesPhone. */
