@@ -337,10 +337,10 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
           <BackIcon color={fg} />
         </div>
         <Avatar src={s.avatar} nome={s.nome} size={34} dark={s.dark} />
-        {/* bloco do nome SEM flex-coluna: o html2canvas erra justifyContent
-            center e corta o nome/username. A linha (alignItems center) já
-            centraliza verticalmente. */}
-        <div style={{ flex: 1, minWidth: 0, lineHeight: 1.15 }}>
+        {/* bloco do nome SEM flex-coluna (html2canvas errava justifyContent
+            center). line-height FOLGADO (1.4): com overflow:hidden + line-height
+            apertado o html2canvas corta o TOPO das letras no export. */}
+        <div style={{ flex: 1, minWidth: 0, lineHeight: 1.4 }}>
           <div
             style={{
               fontSize: 15,

@@ -45,7 +45,7 @@ function CountdownSticker({ titulo, horas, minutos, segundos }: { titulo: string
   return (
     <div style={{ width: STORY_W * 0.92, borderRadius: 22, background: '#ffffff', boxShadow: '0 8px 26px rgba(0,0,0,0.18)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK, padding: '18px 18px 20px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 16 }}>
-        <div style={{ fontSize: 23, fontWeight: 800, color: '#1a1a1a', lineHeight: 1.1, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 7 }}>
+        <div style={{ fontSize: 23, fontWeight: 800, color: '#1a1a1a', lineHeight: 1.35, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 7 }}>
           {emojify(titulo, 'apple')}
         </div>
         <div style={{ width: 34, height: 34, borderRadius: '50%', border: '1.5px solid #c7c7c7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -134,7 +134,7 @@ function LocationSticker({ local, tema }: { local: string; tema: string }) {
   return (
     <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, maxWidth: STORY_W * 0.86, background: t.pill, borderRadius: 999, padding: '9px 16px', boxShadow: '0 8px 24px rgba(0,0,0,0.16)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK }}>
       <Pin color={t.pin} inner={t.pill} />
-      <span style={{ fontSize: 16, fontWeight: 600, color: t.rainbow ? undefined : t.text, lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', letterSpacing: t.upper ? '0.02em' : 0 }}>
+      <span style={{ fontSize: 16, fontWeight: 600, color: t.rainbow ? undefined : t.text, lineHeight: 1.4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', letterSpacing: t.upper ? '0.02em' : 0 }}>
         {t.rainbow ? rainbowText(txt) : txt}
       </span>
     </div>
@@ -167,7 +167,7 @@ function MentionSticker({ usuario }: { usuario: string }) {
   const h = (usuario || '').replace(/^@+/, '') || 'usuario';
   return (
     <div style={{ display: 'inline-flex', alignItems: 'center', maxWidth: STORY_W * 0.86, background: '#ffffff', borderRadius: 8, padding: '9px 18px', boxShadow: '0 8px 24px rgba(0,0,0,0.16)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK }}>
-      <span style={{ fontSize: 17, fontWeight: 600, lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+      <span style={{ fontSize: 17, fontWeight: 600, lineHeight: 1.4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
         <span style={{ color: '#fa7e1e' }}>@</span>
         <span style={{ color: '#262626' }}>{h}</span>
       </span>

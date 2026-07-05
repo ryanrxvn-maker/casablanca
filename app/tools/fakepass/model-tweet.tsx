@@ -190,6 +190,7 @@ function TweetCard({ s }: { s: S }) {
                 fontSize: 15,
                 fontWeight: 700,
                 color: c.text,
+                lineHeight: 1.4,
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -204,6 +205,7 @@ function TweetCard({ s }: { s: S }) {
             style={{
               fontSize: 15,
               color: c.gray,
+              lineHeight: 1.4,
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
