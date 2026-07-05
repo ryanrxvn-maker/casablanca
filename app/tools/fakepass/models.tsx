@@ -31,6 +31,16 @@ import NEWS_BANDNEWS from './model-news-bandnews';
 import NEWS_RECORD from './model-news-record';
 import NEWS_TIMES from './model-news-times';
 import SITE_BBC from './model-site-bbc';
+import SITE_REUTERS from './model-site-reuters';
+import SITE_AP from './model-site-ap';
+import SITE_CNN from './model-site-cnn';
+import SITE_GUARDIAN from './model-site-guardian';
+import SITE_ALJAZEERA from './model-site-aljazeera';
+import SITE_G1 from './model-site-g1';
+import SITE_FOLHA from './model-site-folha';
+import SITE_UOL from './model-site-uol';
+import SITE_ESTADAO from './model-site-estadao';
+import SITE_OGLOBO from './model-site-oglobo';
 
 export const CATEGORIES: { id: string; label: string }[] = [
   { id: 'story', label: 'Stickers de Story' },
@@ -70,5 +80,17 @@ export const MODELS: FakeModel[] = [
   ...NEWS_RECORD,
   ...NEWS_TIMES,
   // Sites de Notícia (páginas de portal)
+  // Internacionais
   ...SITE_BBC,
+  ...SITE_REUTERS,
+  ...SITE_AP,
+  ...SITE_CNN,
+  ...SITE_GUARDIAN,
+  ...SITE_ALJAZEERA,
+  // Brasil
+  ...SITE_G1,
+  ...SITE_FOLHA,
+  ...SITE_UOL,
+  ...SITE_ESTADAO,
+  ...SITE_OGLOBO,
 ];
