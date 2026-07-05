@@ -176,7 +176,7 @@ export default function FakePassPage() {
       </div>
 
       {/* ─── Controles + Preview ─── */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
+      <div className={'grid grid-cols-1 gap-6 ' + (dims.ratio < 1 ? 'lg:grid-cols-[1fr_560px]' : 'lg:grid-cols-[1fr_360px]')}>
         <div className="flex flex-col gap-5">
           {model.Controls({ s, set })}
 

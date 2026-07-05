@@ -22,6 +22,8 @@ import { Field, Segmented, ImageUpload, Swatches, FONT_STACK, type StageDims } f
 
 export type NewsOrient = 'landscape' | 'portrait';
 export type NewsBgMode = 'image' | 'solid' | 'green';
+/** Arranjo da CENA atrás do chyron: 1 quadro cheio, 2/3 quadros, ou PiP. */
+export type NewsLayout = 'single' | 'duplo' | 'triplo' | 'pip';
 
 /** Verde de chroma key (broadcast). */
 export const NEWS_GREEN = '#00b140';
@@ -29,14 +31,20 @@ export const NEWS_GREEN = '#00b140';
 export const NEWS_FONT = FONT_STACK;
 /** Largura de referência do design landscape — tudo escala a partir daqui. */
 export const NEWS_REF_W = 640;
+/** No 9:16 o chyron precisa ser MAIOR/mais evidente: referência menor => k maior. */
+export const NEWS_REF_W_PORTRAIT = 384;
 
-/** Campos de fundo/orientação que TODO template de notícia carrega no estado. */
+/** Campos de fundo/orientação/cena que TODO template de notícia carrega. */
 export type NewsBg = {
   orient: NewsOrient;
   bgMode: NewsBgMode;
-  bgImage: string; // dataURL
+  bgImage: string; // dataURL (quadro 1)
   bgColor: string;
   green: string;
+  layout: NewsLayout;
+  box2: string; // dataURL (quadro 2)
+  box3: string; // dataURL (quadro 3)
+  pip: string; // dataURL (janelinha do repórter)
 };
 
 export const defaultNewsBg: NewsBg = {
@@ -45,21 +53,26 @@ export const defaultNewsBg: NewsBg = {
   bgImage: '',
   bgColor: '#0c1a2b',
   green: NEWS_GREEN,
+  layout: 'single',
+  box2: '',
+  box3: '',
+  pip: '',
 };
 
 /** Dimensões do palco por orientação. 16:9 → 1920×1080; 9:16 → 1080×1920. */
 export function newsDims(orient: NewsOrient): StageDims {
   return orient === 'portrait'
-    ? { stageW: 338, ratio: 16 / 9, exportW: 1080 }
+    ? { stageW: 360, ratio: 16 / 9, exportW: 1080 }
     : { stageW: 640, ratio: 9 / 16, exportW: 1920 };
 }
 
-/** Ajuda o template: largura/altura reais + fator de escala k. */
+/** Ajuda o template: largura/altura reais + fator de escala k (maior no 9:16). */
 export function stageMetrics(orient: NewsOrient) {
   const d = newsDims(orient);
   const W = d.stageW;
   const H = Math.round(W * d.ratio);
-  return { W, H, k: W / NEWS_REF_W, orient };
+  const ref = orient === 'portrait' ? NEWS_REF_W_PORTRAIT : NEWS_REF_W;
+  return { W, H, k: W / ref, orient };
 }
 
 /* ─────────────────────────────── Palco ─────────────────────────────── */
@@ -69,13 +82,21 @@ export function stageMetrics(orient: NewsOrient) {
  * (children) fica por cima. Fundo = imagem enviada (cover), cor sólida, ou
  * TELA VERDE. Imagem via CSS background raster (cover) — suportado no export.
  */
+/** Fundo de um quadro: imagem (cover) ou a cor de preenchimento (verde/cor). */
+function boxBg(img: string, fill: string): string {
+  return img ? `url("${img}") center/cover no-repeat, ${fill}` : fill;
+}
+
 export function NewsStage({ bg, children }: { bg: NewsBg; children: ReactNode }) {
-  const { W, H } = stageMetrics(bg.orient);
-  const solid = bg.bgMode === 'green' ? bg.green : bg.bgMode === 'solid' ? bg.bgColor : '#0e1216';
-  const withImg =
-    bg.bgMode === 'image' && bg.bgImage
-      ? `url("${bg.bgImage}") center/cover no-repeat`
-      : '';
+  const { W, H, orient } = stageMetrics(bg.orient);
+  // fill = fundo dos quadros SEM imagem (verde de chroma por padrão, ou cor).
+  const fill = bg.bgMode === 'solid' ? bg.bgColor : bg.green;
+  const box1 = bg.bgMode === 'image' ? bg.bgImage : '';
+  const layout = bg.layout ?? 'single';
+  // No 9:16 sobe o chyron um tico pra não ficar colado na base.
+  const lift = orient === 'portrait' ? Math.round(H * 0.05) : 0;
+  const divider = Math.max(2, Math.round(W * 0.006));
+  const pipW = Math.round(W * 0.3);
   return (
     <div
       style={{
@@ -83,14 +104,48 @@ export function NewsStage({ bg, children }: { bg: NewsBg; children: ReactNode })
         width: W,
         height: H,
         overflow: 'hidden',
-        background: withImg ? `${withImg}, ${solid}` : solid,
-        backgroundColor: solid,
+        background: fill,
         fontFamily: NEWS_FONT,
         WebkitFontSmoothing: 'antialiased',
         color: '#fff',
       }}
     >
-      {children}
+      {/* CENA (atrás do chyron) */}
+      {layout === 'duplo' ? (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', gap: divider, background: '#000' }}>
+          <div style={{ flex: 1, background: boxBg(box1, fill) }} />
+          <div style={{ flex: 1, background: boxBg(bg.box2, fill) }} />
+        </div>
+      ) : layout === 'triplo' ? (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', gap: divider, background: '#000' }}>
+          <div style={{ flex: 1, background: boxBg(box1, fill) }} />
+          <div style={{ flex: 1, background: boxBg(bg.box2, fill) }} />
+          <div style={{ flex: 1, background: boxBg(bg.box3, fill) }} />
+        </div>
+      ) : (
+        <div style={{ position: 'absolute', inset: 0, background: boxBg(box1, fill) }} />
+      )}
+
+      {/* PiP (janelinha do repórter) sobre a cena */}
+      {layout === 'pip' ? (
+        <div
+          style={{
+            position: 'absolute',
+            right: Math.round(W * 0.035),
+            bottom: lift + Math.round(H * 0.23),
+            width: pipW,
+            height: Math.round((pipW * 9) / 16),
+            borderRadius: Math.round(W * 0.012),
+            overflow: 'hidden',
+            border: `${Math.max(1, Math.round(W * 0.004))}px solid #ffffff`,
+            background: boxBg(bg.pip, fill),
+            boxShadow: '0 2px 10px rgba(0,0,0,0.4)',
+          }}
+        />
+      ) : null}
+
+      {/* CHYRON por cima (leve lift no 9:16) */}
+      <div style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: lift }}>{children}</div>
     </div>
   );
 }
@@ -106,8 +161,10 @@ function ColorInput({ value, onChange }: { value: string; onChange: (v: string) 
   );
 }
 
-/** Bloco de controles de fundo + orientação, reusado por todos os templates. */
+/** Bloco de controles de fundo + orientação + cena, reusado por todos. */
 export function NewsBgControls({ bg, set }: { bg: NewsBg; set: (p: any) => void }) {
+  const layout = bg.layout ?? 'single';
+  const multi = layout === 'duplo' || layout === 'triplo';
   return (
     <div className="flex flex-col gap-4">
       <Field label="Formato" hint="Ambos exportam em alta, sem distorcer.">
@@ -120,7 +177,19 @@ export function NewsBgControls({ bg, set }: { bg: NewsBg; set: (p: any) => void 
           onChange={(v) => set({ orient: v })}
         />
       </Field>
-      <Field label="Fundo (a cena atrás dos gráficos)">
+      <Field label="Layout da cena" hint="Quantos quadros/janelas atrás do chyron.">
+        <Segmented
+          value={layout}
+          options={[
+            { value: 'single', label: '1 quadro' },
+            { value: 'duplo', label: '2 quadros' },
+            { value: 'triplo', label: '3 quadros' },
+            { value: 'pip', label: 'Repórter' },
+          ]}
+          onChange={(v) => set({ layout: v })}
+        />
+      </Field>
+      <Field label={multi ? 'Fundo do quadro 1' : 'Fundo (a cena atrás dos gráficos)'}>
         <Segmented
           value={bg.bgMode}
           options={[
@@ -132,7 +201,7 @@ export function NewsBgControls({ bg, set }: { bg: NewsBg; set: (p: any) => void 
         />
       </Field>
       {bg.bgMode === 'image' ? (
-        <Field label="Imagem de fundo" hint="Sua foto/cena atrás do chyron.">
+        <Field label={multi ? 'Imagem do quadro 1' : 'Imagem de fundo'} hint="Sua foto/cena atrás do chyron.">
           <ImageUpload value={bg.bgImage} onChange={(v) => set({ bgImage: v })} label="imagem" />
         </Field>
       ) : null}
@@ -147,6 +216,22 @@ export function NewsBgControls({ bg, set }: { bg: NewsBg; set: (p: any) => void 
       {bg.bgMode === 'green' ? (
         <Field label="Tom do verde" hint="Padrão de chroma key broadcast.">
           <Swatches value={bg.green} colors={[NEWS_GREEN, '#00ff00', '#009e3a', '#3cb043']} onChange={(v) => set({ green: v })} />
+        </Field>
+      ) : null}
+      {/* Uploads dos quadros extras — vazio = tela verde (dá pra chroma). */}
+      {layout === 'duplo' || layout === 'triplo' ? (
+        <Field label="Imagem do quadro 2" hint="Vazio = verde (pra encaixar outro vídeo).">
+          <ImageUpload value={bg.box2} onChange={(v) => set({ box2: v })} label="quadro 2" />
+        </Field>
+      ) : null}
+      {layout === 'triplo' ? (
+        <Field label="Imagem do quadro 3" hint="Vazio = verde.">
+          <ImageUpload value={bg.box3} onChange={(v) => set({ box3: v })} label="quadro 3" />
+        </Field>
+      ) : null}
+      {layout === 'pip' ? (
+        <Field label="Imagem do repórter (PiP)" hint="Vazio = verde na janelinha.">
+          <ImageUpload value={bg.pip} onChange={(v) => set({ pip: v })} label="repórter" />
         </Field>
       ) : null}
     </div>
