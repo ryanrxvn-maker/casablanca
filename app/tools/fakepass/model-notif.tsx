@@ -233,11 +233,21 @@ function AndroidCard({ s }: { s: S }) {
 
 /* ───────────────────────────── Lockscreen ───────────────────────────── */
 
+function LockCircleBtn({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(40,40,40,0.55)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      {children}
+    </div>
+  );
+}
+
 function LockScreen({ s, status }: { s: S; status: StatusCfg }) {
   const ios = s.os !== 'android';
+  // Wallpaper PRETO por padrão (como o print). Se o user envia uma imagem,
+  // fica cover perfeito.
   const bg = s.wallpaper
     ? `url(${s.wallpaper}) center/cover no-repeat`
-    : 'linear-gradient(160deg,#2b2b3a,#0e0e16)';
+    : '#000000';
 
   const clock = (
     <div
@@ -313,8 +323,18 @@ function LockScreen({ s, status }: { s: S; status: StatusCfg }) {
       {/* Empurra o card pra parte de baixo — a maior parte é wallpaper. */}
       <div style={{ flex: 1 }} />
 
-      <div style={{ position: 'relative', paddingBottom: 26 }}>
+      <div style={{ position: 'relative', paddingBottom: 78 }}>
         {ios ? <IosCard s={s} /> : <AndroidCard s={s} />}
+      </div>
+
+      {/* Lanterna + Câmera nos cantos inferiores (estilo iPhone) */}
+      <div style={{ position: 'absolute', bottom: 22, left: 0, right: 0, display: 'flex', justifyContent: 'space-between', padding: '0 30px' }}>
+        <LockCircleBtn>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="#fff" aria-hidden><path d="M9 2h6l-.8 5H9.8L9 2zm.9 6h4.2l-.3 2.2A2 2 0 0 1 11.8 12h-.6A2 2 0 0 1 9.2 10.2L8.9 8zM11 13h2v9h-2z" /></svg>
+        </LockCircleBtn>
+        <LockCircleBtn>
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3l2-3h8l2 3h3a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="3.5" /></svg>
+        </LockCircleBtn>
       </div>
     </div>
   );

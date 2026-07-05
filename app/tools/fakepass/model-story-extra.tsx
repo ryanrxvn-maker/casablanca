@@ -2,39 +2,59 @@
 
 /**
  * FakePass — stickers EXTRAS de STORY.
- * Contagem Regressiva, Localização (com temas fiéis ao Instagram) e Menção.
+ * Contagem Regressiva (dígitos em quadradinhos, fiel ao Instagram), Localização
+ * (com temas) e Menção. Emojis renderizados como Apple.
  */
 
-import { FitText, Field, TextField, Segmented, FONT_STACK, type FakeModel } from './shared';
+import { Field, TextField, Segmented, emojify, FONT_STACK, type FakeModel } from './shared';
 import { STORY_W, STORY_RATIO, STORY_BGS, StoryStage, BgControls } from './story-kit';
 
 /* ═══════════════════ Contagem Regressiva ═══════════════════ */
 
-type CountdownState = { titulo: string; dias: string; horas: string; min: string; bg: string };
+type CountdownState = { titulo: string; horas: string; minutos: string; segundos: string; bg: string };
 
-function CountdownBlock({ num, label }: { num: string; label: string }) {
+function DigitBox({ d }: { d: string }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
-      <span style={{ fontSize: 30, fontWeight: 700, color: '#262626', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
-        {num || '00'}
-      </span>
-      <span style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#8e8e8e', marginTop: 6 }}>
-        {label}
-      </span>
+    <div style={{ width: 38, height: 54, borderRadius: 9, background: '#eef0f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36, fontWeight: 700, color: '#2a2a2a', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+      {d}
     </div>
   );
 }
 
-function CountdownSticker({ titulo, dias, horas, min }: { titulo: string; dias: string; horas: string; min: string }) {
+function DigitGroup({ value, label }: { value: string; label: string }) {
+  const s = (value || '0').replace(/\D/g, '').padStart(2, '0').slice(-2);
   return (
-    <div style={{ width: STORY_W * 0.78, borderRadius: 16, background: 'rgba(255,255,255,0.9)', boxShadow: '0 8px 24px rgba(0,0,0,0.16)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK, padding: 16 }}>
-      <FitText maxPx={16} minPx={11} maxHeight={STORY_W * 0.22} style={{ color: '#262626', textAlign: 'center', fontWeight: 600, lineHeight: 1.25, letterSpacing: '0.02em', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-        {titulo}
-      </FitText>
-      <div style={{ display: 'flex', alignItems: 'flex-start', marginTop: 14 }}>
-        <CountdownBlock num={dias} label="Dias" />
-        <CountdownBlock num={horas} label="Horas" />
-        <CountdownBlock num={min} label="Min" />
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 4 }}>
+        <DigitBox d={s[0]} />
+        <DigitBox d={s[1]} />
+      </div>
+      <span style={{ fontSize: 14, color: '#3a3a3a', fontWeight: 400 }}>{label}</span>
+    </div>
+  );
+}
+
+function Colon() {
+  return <div style={{ fontSize: 30, fontWeight: 700, color: '#2a2a2a', alignSelf: 'flex-start', marginTop: 11, padding: '0 1px' }}>:</div>;
+}
+
+function CountdownSticker({ titulo, horas, minutos, segundos }: { titulo: string; horas: string; minutos: string; segundos: string }) {
+  return (
+    <div style={{ width: STORY_W * 0.9, borderRadius: 18, background: '#ffffff', boxShadow: '0 8px 24px rgba(0,0,0,0.16)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK, padding: '16px 16px 18px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 14 }}>
+        <div style={{ fontSize: 19, fontWeight: 700, color: '#262626', lineHeight: 1.15, letterSpacing: '0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
+          {emojify(titulo, 'apple')}
+        </div>
+        <div style={{ width: 30, height: 30, borderRadius: '50%', border: '1.5px solid #c7c7c7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8e8e8e" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', gap: 3 }}>
+        <DigitGroup value={horas} label="horas" />
+        <Colon />
+        <DigitGroup value={minutos} label="minutos" />
+        <Colon />
+        <DigitGroup value={segundos} label="segundos" />
       </div>
     </div>
   );
@@ -43,21 +63,21 @@ function CountdownSticker({ titulo, dias, horas, min }: { titulo: string; dias: 
 const IG_COUNTDOWN: FakeModel<CountdownState> = {
   id: 'ig-countdown', label: 'Contagem Regressiva', category: 'story', hue: 'rgba(120,80,220,0.42)',
   stageW: STORY_W, ratio: STORY_RATIO, exportW: 1080, usesPhone: false,
-  defaultState: { titulo: 'LANÇAMENTO', dias: '02', horas: '14', min: '30', bg: STORY_BGS[3].css },
+  defaultState: { titulo: 'LANÇAMENTO 🤩', horas: '22', minutos: '33', segundos: '13', bg: STORY_BGS[3].css },
   Controls: ({ s, set }) => (
     <div className="flex flex-col gap-4">
-      <Field label="Título"><TextField value={s.titulo} onChange={(v) => set({ titulo: v })} placeholder="LANÇAMENTO" maxLength={40} /></Field>
+      <Field label="Título"><TextField value={s.titulo} onChange={(v) => set({ titulo: v })} placeholder="LANÇAMENTO 🤩" maxLength={40} /></Field>
       <div className="grid grid-cols-3 gap-3">
-        <Field label="Dias"><TextField value={s.dias} onChange={(v) => set({ dias: v })} placeholder="02" maxLength={3} /></Field>
-        <Field label="Horas"><TextField value={s.horas} onChange={(v) => set({ horas: v })} placeholder="14" maxLength={3} /></Field>
-        <Field label="Min"><TextField value={s.min} onChange={(v) => set({ min: v })} placeholder="30" maxLength={3} /></Field>
+        <Field label="Horas"><TextField value={s.horas} onChange={(v) => set({ horas: v })} placeholder="22" maxLength={2} /></Field>
+        <Field label="Minutos"><TextField value={s.minutos} onChange={(v) => set({ minutos: v })} placeholder="33" maxLength={2} /></Field>
+        <Field label="Segundos"><TextField value={s.segundos} onChange={(v) => set({ segundos: v })} placeholder="13" maxLength={2} /></Field>
       </div>
       <BgControls bg={s.bg} set={set} />
     </div>
   ),
   Preview: ({ s }) => (
     <StoryStage bg={s.bg}>
-      <CountdownSticker titulo={s.titulo} dias={s.dias} horas={s.horas} min={s.min} />
+      <CountdownSticker titulo={s.titulo} horas={s.horas} minutos={s.minutos} segundos={s.segundos} />
     </StoryStage>
   ),
 };
@@ -66,7 +86,6 @@ const IG_COUNTDOWN: FakeModel<CountdownState> = {
 
 type LocationState = { local: string; tema: string; bg: string };
 
-// Temas conforme as variações reais do sticker de localização do Instagram.
 const LOC_THEMES: Record<string, { pill: string; pin: string; text: string; upper: boolean; rainbow: boolean }> = {
   preto:     { pill: '#ffffff', pin: '#262626', text: '#262626', upper: true,  rainbow: false },
   roxo:      { pill: '#ffffff', pin: '#8b3dff', text: '#8b3dff', upper: true,  rainbow: false },

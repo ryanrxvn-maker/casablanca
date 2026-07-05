@@ -22,23 +22,55 @@ import {
 
 type S = {
   nome: string;
-  status: string;
+  username: string;
   conversa: string;
   dark: boolean;
   avatar: string;
   visto: boolean;
 };
 
-type Msg = { t: string; me: boolean };
+type Msg = { kind: 'text'; t: string; me: boolean } | { kind: 'audio'; dur: string; me: boolean };
 
-const IG_GRADIENT = 'linear-gradient(135deg,#4f5bd5,#962fbf,#d62976,#fa7e1e)';
+const AUDIO_RE = /^(?:áudio|audio)\s+(\d+:\d{2})$/i;
+
+// Mensagens enviadas do Instagram DM = gradiente ROXO→AZUL (não o colorido).
+const IG_GRADIENT = 'linear-gradient(155deg,#bd3be0 0%,#8a45f0 48%,#5b6ef0 100%)';
 
 function parseMsgs(txt: string): Msg[] {
   return txt
     .split('\n')
     .map((l) => l.replace(/\r$/, ''))
     .filter((l) => l.trim() !== '')
-    .map((l) => (l.startsWith('> ') ? { t: l.slice(2), me: true } : { t: l, me: false }));
+    .map((l): Msg => {
+      const me = l.startsWith('> ');
+      const body = me ? l.slice(2) : l;
+      const a = body.match(AUDIO_RE);
+      if (a) return { kind: 'audio', dur: a[1], me };
+      return { kind: 'text', t: body, me };
+    });
+}
+
+/** Balão de áudio do Instagram DM: play + waveform + tempo + "Ver transcrição". */
+function IgAudioBubble({ dur, me, dark, radius }: { dur: string; me: boolean; dark: boolean; radius: string }) {
+  const bg = me ? IG_GRADIENT : dark ? '#262626' : '#efefef';
+  const fg = me ? '#ffffff' : dark ? '#ffffff' : '#000000';
+  const wave = me ? 'rgba(255,255,255,0.7)' : dark ? '#6e6e6e' : '#b0b0b0';
+  const meta = me ? 'rgba(255,255,255,0.85)' : '#8e8e8e';
+  const bars = [7, 13, 20, 11, 24, 15, 9, 22, 13, 18, 10, 26, 14, 8, 21, 12, 17, 9, 23, 14, 10, 19, 8, 16, 21, 11, 15];
+  return (
+    <div style={{ maxWidth: '80%', padding: '10px 12px', borderRadius: radius, background: bg }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+        <svg width="13" height="15" viewBox="0 0 16 18" fill={fg} aria-hidden><path d="M2 1l13 8-13 8z" /></svg>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2, height: 26, flex: 1 }}>
+          {bars.map((h, i) => (
+            <span key={i} style={{ width: 2, height: h, borderRadius: 2, background: wave, flexShrink: 0 }} />
+          ))}
+        </div>
+        <span style={{ fontSize: 11, color: meta, fontVariantNumeric: 'tabular-nums' }}>{dur}</span>
+      </div>
+      <div style={{ fontSize: 12, color: meta, marginTop: 5 }}>Ver transcrição</div>
+    </div>
+  );
 }
 
 /** Cantos do balão colados quando o próximo/anterior é do mesmo lado. */
@@ -240,7 +272,7 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
   const recvFg = s.dark ? '#ffffff' : '#000000';
   const pillBorder = s.dark ? '#363636' : '#dbdbdb';
   const pillBg = s.dark ? '#000000' : '#ffffff';
-  const rodapeCircleBg = s.dark ? '#3797f0' : '#3797f0';
+  const rodapeCircleBg = '#8a45f0';
   const emojiSet = status.os === 'android' ? 'google' : 'apple';
 
   const msgs = parseMsgs(s.conversa);
@@ -302,7 +334,7 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
           >
             {s.nome || ' '}
           </div>
-          {s.status.trim() ? (
+          {s.username.trim() ? (
             <div
               style={{
                 fontSize: 12,
@@ -312,7 +344,7 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
                 textOverflow: 'ellipsis',
               }}
             >
-              {s.status}
+              {'@' + s.username.replace(/^@+/, '')}
             </div>
           ) : null}
         </div>
@@ -348,22 +380,26 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
                   justifyContent: m.me ? 'flex-end' : 'flex-start',
                 }}
               >
-                <div
-                  style={{
-                    maxWidth: '72%',
-                    padding: '8px 12px',
-                    borderRadius: bubbleRadius(m.me, firstOfRun, lastOfRun),
-                    fontSize: 14.5,
-                    lineHeight: 1.32,
-                    letterSpacing: '-0.01em',
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                    background: m.me ? IG_GRADIENT : recvBg,
-                    color: m.me ? '#ffffff' : recvFg,
-                  }}
-                >
-                  {emojify(m.t, emojiSet)}
-                </div>
+                {m.kind === 'audio' ? (
+                  <IgAudioBubble dur={m.dur} me={m.me} dark={s.dark} radius={bubbleRadius(m.me, firstOfRun, lastOfRun)} />
+                ) : (
+                  <div
+                    style={{
+                      maxWidth: '72%',
+                      padding: '8px 12px',
+                      borderRadius: bubbleRadius(m.me, firstOfRun, lastOfRun),
+                      fontSize: 14.5,
+                      lineHeight: 1.32,
+                      letterSpacing: '-0.01em',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      background: m.me ? IG_GRADIENT : recvBg,
+                      color: m.me ? '#ffffff' : recvFg,
+                    }}
+                  >
+                    {emojify(m.t, emojiSet)}
+                  </div>
+                )}
               </div>
               {showVisto ? (
                 <div
@@ -430,8 +466,8 @@ const MODEL: FakeModel<S> = {
   usesPhone: true,
   defaultState: {
     nome: 'ana.souza',
-    status: 'Ativo(a) agora',
-    conversa: 'oii tudo bem?\nvi que você entrou no grupo\n> oi! tudo sim 😄\n> acabei de entrar mesmo\nque bom! qualquer dúvida chama',
+    username: 'ana.souza',
+    conversa: 'oii tudo bem?\nvi que você entrou no grupo\n> oi! tudo sim 😄\n> acabei de entrar mesmo\naudio 0:16\nque bom! qualquer dúvida chama',
     dark: false,
     avatar: '',
     visto: true,
@@ -446,11 +482,11 @@ const MODEL: FakeModel<S> = {
           maxLength={40}
         />
       </Field>
-      <Field label="Status" hint="Ex.: Ativo(a) agora, Ativo(a) há 5 min">
+      <Field label="Usuário (@)" hint="O @ do perfil (sem digitar o @)">
         <TextField
-          value={s.status}
-          onChange={(v) => set({ status: v })}
-          placeholder="Ativo(a) agora"
+          value={s.username}
+          onChange={(v) => set({ username: v })}
+          placeholder="ana.souza"
           maxLength={40}
         />
       </Field>
