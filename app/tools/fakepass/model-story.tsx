@@ -151,7 +151,7 @@ function SliderSticker({ pergunta, emoji, valor }: { pergunta: string; emoji: st
       </FitText>
       <div style={{ position: 'relative', height: 12, borderRadius: 6, background: '#ededed' }}>
         <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${v}%`, borderRadius: 6, background: 'linear-gradient(90deg,#ffd54a,#ff5e8a)' }} />
-        <div style={{ position: 'absolute', left: `${v}%`, top: '50%', transform: 'translate(-50%,-50%)', fontSize: 28, lineHeight: 1, filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.25))' }}>
+        <div style={{ position: 'absolute', left: `${v}%`, top: '50%', transform: 'translate(-50%,-50%)', fontSize: 28, lineHeight: 1 }}>
           {emojify(emoji || '😍', AP)}
         </div>
       </div>

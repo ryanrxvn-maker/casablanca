@@ -102,9 +102,10 @@ function IosCard({ s }: { s: S }) {
       style={{
         margin: '0 12px',
         borderRadius: 18,
+        // Vidro fosco iOS. O html2canvas ignora backdrop-filter — como o
+        // wallpaper padrão é preto, o blur não muda nada, então removemos pra o
+        // download sair IGUAL à prévia (sem depender de um filtro não suportado).
         background: 'rgba(245,245,245,0.22)',
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
         padding: '12px 14px',
         boxShadow: '0 1px 8px rgba(0,0,0,0.14)',
       }}
@@ -235,7 +236,7 @@ function AndroidCard({ s }: { s: S }) {
 
 function LockCircleBtn({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(40,40,40,0.55)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+    <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(40,40,40,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
       {children}
     </div>
   );

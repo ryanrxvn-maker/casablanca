@@ -192,30 +192,41 @@ export async function downloadNodeAsPng(
   refW?: number,
 ) {
   if (document.fonts?.ready) await document.fonts.ready;
-  // Espera imagens (emojis, avatares, fotos) carregarem — senão saem em branco.
-  await Promise.all(
-    Array.from(node.querySelectorAll('img')).map((img) =>
-      img.complete
-        ? Promise.resolve()
-        : new Promise<void>((res) => {
-            img.addEventListener('load', () => res(), { once: true });
-            img.addEventListener('error', () => res(), { once: true });
-          }),
-    ),
-  );
-  await new Promise((r) => setTimeout(r, 60));
-  const { default: html2canvas } = await import('html2canvas');
-  // Largura de referência = a largura de LAYOUT do palco (stageW). Passar
-  // refW evita medir o rect visual (que pode estar escalado no preview) — o
-  // PNG sempre sai na resolução cheia, independente do zoom da prévia.
-  const baseW = refW ?? node.getBoundingClientRect().width;
-  const scale = targetW / baseW;
-  const canvas: HTMLCanvasElement = await html2canvas(node, {
-    scale,
-    backgroundColor: null,
-    useCORS: true,
-    logging: false,
-  });
+  // A prévia é encolhida com CSS `zoom` num wrapper [data-fp-zoom]. Durante a
+  // captura, zeramos esse zoom (→ 1) pra o nó voltar ao tamanho natural: o PNG
+  // sai SEMPRE na resolução cheia e imune a qualquer medição do html2canvas
+  // dentro de um ancestral escalado. Restauramos no finally.
+  const zoomEl = node.closest('[data-fp-zoom]') as HTMLElement | null;
+  const prevZoom = zoomEl ? zoomEl.style.zoom : '';
+  if (zoomEl) zoomEl.style.zoom = '1';
+  let canvas: HTMLCanvasElement;
+  try {
+    // Espera imagens (emojis, avatares, fotos) carregarem — senão saem em branco.
+    await Promise.all(
+      Array.from(node.querySelectorAll('img')).map((img) =>
+        img.complete
+          ? Promise.resolve()
+          : new Promise<void>((res) => {
+              img.addEventListener('load', () => res(), { once: true });
+              img.addEventListener('error', () => res(), { once: true });
+            }),
+      ),
+    );
+    await new Promise((r) => setTimeout(r, 60));
+    const { default: html2canvas } = await import('html2canvas');
+    // Largura de referência = a largura de LAYOUT do palco (stageW). Passar
+    // refW evita medir o rect visual — o PNG sempre sai na resolução cheia.
+    const baseW = refW ?? node.getBoundingClientRect().width;
+    const scale = targetW / baseW;
+    canvas = await html2canvas(node, {
+      scale,
+      backgroundColor: null,
+      useCORS: true,
+      logging: false,
+    });
+  } finally {
+    if (zoomEl) zoomEl.style.zoom = prevZoom;
+  }
   const blob: Blob | null = await new Promise((res) =>
     canvas.toBlob((b: Blob | null) => res(b), 'image/png'),
   );

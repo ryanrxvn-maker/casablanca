@@ -13,6 +13,7 @@
  * (waveform + play + tempo + microfone) e rodapé de input realista.
  */
 
+import { useState, useEffect } from 'react';
 import {
   StatusBar,
   Field,
@@ -56,11 +57,15 @@ function parseMsgs(txt: string): Msg[] {
 }
 
 /* ─────────────────────── Fundo (doodle pattern) ─────────────────────── */
-// Padrão de rabiscos/símbolos repetidos, sutil, embutido como data-uri SVG.
-// Cor do traço muda conforme o tema; opacity baixa mantém discreto.
-function doodleBg(dark: boolean): string {
+// Padrão de rabiscos do WhatsApp. IMPORTANTE: o html2canvas (export) NÃO honra
+// `background-size` em data-uri SVG — ele rasteriza o SVG no tamanho intrínseco
+// e o padrão sai em escala errada (bug de "download bugado"). Solução: assar o
+// SVG num <canvas> pra PNG data-uri (raster) — aí o html2canvas respeita
+// background-size/repeat direitinho, e o download fica igual à prévia.
+function doodleSvgMarkup(dark: boolean): string {
   const stroke = dark ? '#8696a0' : '#54656f';
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140' viewBox='0 0 140 140'>
+  // viewBox 140, exibido a 360 → mesma densidade de antes.
+  return `<svg xmlns='http://www.w3.org/2000/svg' width='360' height='360' viewBox='0 0 140 140'>
     <g fill='none' stroke='${stroke}' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round' opacity='0.5'>
       <path d='M16 22c4-6 12-6 16 0s12 6 16 0'/>
       <circle cx='104' cy='24' r='9'/>
@@ -75,7 +80,39 @@ function doodleBg(dark: boolean): string {
       <path d='M8 46c5 2 5 8 0 10'/>
     </g>
   </svg>`;
-  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+}
+
+// Assa o SVG do doodle num PNG data-uri (1080px = 3× de 360, nítido no export).
+// Devolve '' enquanto não pronto; o baking é síncrono-rápido (poucos ms) e roda
+// no mount, então já está pronto muito antes de o usuário clicar em baixar.
+function useDoodlePng(dark: boolean): string {
+  const [png, setPng] = useState('');
+  useEffect(() => {
+    let alive = true;
+    setPng('');
+    const RES = 1080;
+    const img = new Image();
+    img.onload = () => {
+      if (!alive) return;
+      try {
+        const c = document.createElement('canvas');
+        c.width = RES;
+        c.height = RES;
+        const ctx = c.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, RES, RES);
+          setPng(c.toDataURL('image/png'));
+        }
+      } catch {
+        /* se falhar, fica sem doodle (fundo sólido) — nunca quebra o export */
+      }
+    };
+    img.src = 'data:image/svg+xml,' + encodeURIComponent(doodleSvgMarkup(dark));
+    return () => {
+      alive = false;
+    };
+  }, [dark]);
+  return png;
 }
 
 /* ─────────────────────────── Ícones ─────────────────────────── */
@@ -224,6 +261,27 @@ function Avatar({ src, size, nome }: { src: string; size: number; nome: string }
   );
 }
 
+/* ─────────────────────────── Rabinho do balão ─────────────────────────── */
+// Rabinho (tail) do WhatsApp na PRIMEIRA bolha de cada sequência: canto superior
+// esquerdo no recebido, direito no enviado. SVG inline (renderiza no export).
+function Tail({ me, color }: { me: boolean; color: string }) {
+  return (
+    <svg
+      width="8"
+      height="13"
+      viewBox="0 0 8 13"
+      aria-hidden
+      style={{ position: 'absolute', top: 0, [me ? 'right' : 'left']: -6, display: 'block' }}
+    >
+      {me ? (
+        <path d="M0 0 L0 12 L8 0 Z" fill={color} />
+      ) : (
+        <path d="M8 0 L8 12 L0 0 Z" fill={color} />
+      )}
+    </svg>
+  );
+}
+
 /* ─────────────────────────── Waveform (áudio) ─────────────────────────── */
 
 const WAVE_HEIGHTS = [
@@ -254,7 +312,7 @@ function Waveform({ played, dim }: { played: string; dim: string }) {
 
 /* ─────────────────────────── Balão de áudio ─────────────────────────── */
 
-function AudioBubble({ m, hora, dark }: { m: Extract<Msg, { kind: 'audio' }>; hora: string; dark: boolean }) {
+function AudioBubble({ m, hora, dark, tail }: { m: Extract<Msg, { kind: 'audio' }>; hora: string; dark: boolean; tail: boolean }) {
   const bg = m.me ? (dark ? '#005c4b' : '#d9fdd3') : dark ? '#202c33' : '#ffffff';
   const metaColor = dark ? '#8696a0' : '#667781';
   const waveDim = dark ? '#54656f' : '#c9d0d3';
@@ -264,13 +322,15 @@ function AudioBubble({ m, hora, dark }: { m: Extract<Msg, { kind: 'audio' }>; ho
   const micColor = m.me ? '#25d366' : '#53bdeb';
 
   return (
-    <div style={{ display: 'flex', justifyContent: m.me ? 'flex-end' : 'flex-start' }}>
+    <div style={{ display: 'flex', justifyContent: m.me ? 'flex-end' : 'flex-start', marginTop: tail ? 4 : 0 }}>
       <div
         style={{
           position: 'relative',
           maxWidth: '78%',
           background: bg,
           borderRadius: 7.5,
+          borderTopLeftRadius: tail && !m.me ? 0 : 7.5,
+          borderTopRightRadius: tail && m.me ? 0 : 7.5,
           padding: '8px 10px 8px 8px',
           boxShadow: dark ? '0 1px 0.5px rgba(0,0,0,0.28)' : '0 1px 0.5px rgba(0,0,0,0.13)',
           display: 'flex',
@@ -279,6 +339,7 @@ function AudioBubble({ m, hora, dark }: { m: Extract<Msg, { kind: 'audio' }>; ho
           width: 200,
         }}
       >
+        {tail ? <Tail me={m.me} color={bg} /> : null}
         {/* botão play */}
         <div
           style={{
@@ -320,17 +381,19 @@ function TextBubble({
   hora,
   dark,
   emojiSet,
+  tail,
 }: {
   m: Extract<Msg, { kind: 'text' }>;
   hora: string;
   dark: boolean;
   emojiSet: 'apple' | 'google';
+  tail: boolean;
 }) {
   const bg = m.me ? (dark ? '#005c4b' : '#d9fdd3') : dark ? '#202c33' : '#ffffff';
   const color = dark ? '#e9edef' : '#111b21';
   const metaColor = dark ? '#8696a0' : '#667781';
   return (
-    <div style={{ display: 'flex', justifyContent: m.me ? 'flex-end' : 'flex-start' }}>
+    <div style={{ display: 'flex', justifyContent: m.me ? 'flex-end' : 'flex-start', marginTop: tail ? 4 : 0 }}>
       <div
         style={{
           position: 'relative',
@@ -338,6 +401,8 @@ function TextBubble({
           background: bg,
           color,
           borderRadius: 7.5,
+          borderTopLeftRadius: tail && !m.me ? 0 : 7.5,
+          borderTopRightRadius: tail && m.me ? 0 : 7.5,
           padding: '6px 9px 8px',
           fontSize: 14.2,
           lineHeight: 1.32,
@@ -346,6 +411,7 @@ function TextBubble({
           whiteSpace: 'pre-wrap',
         }}
       >
+        {tail ? <Tail me={m.me} color={bg} /> : null}
         <span>
           <Emo t={m.t} set={emojiSet} />
         </span>
@@ -392,6 +458,7 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
 
   const emojiSet = status.os === 'android' ? 'google' : 'apple';
   const msgs = parseMsgs(s.conversa);
+  const doodlePng = useDoodlePng(dark);
 
   return (
     <div
@@ -475,18 +542,19 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
           gap: 3,
           padding: 10,
           backgroundColor: chatBg,
-          backgroundImage: doodleBg(dark),
+          backgroundImage: doodlePng ? `url("${doodlePng}")` : 'none',
           backgroundRepeat: 'repeat',
           backgroundSize: '360px',
         }}
       >
-        {msgs.map((m, i) =>
-          m.kind === 'audio' ? (
-            <AudioBubble key={i} m={m} hora={s.hora} dark={dark} />
+        {msgs.map((m, i) => {
+          const tail = i === 0 || msgs[i - 1].me !== m.me;
+          return m.kind === 'audio' ? (
+            <AudioBubble key={i} m={m} hora={s.hora} dark={dark} tail={tail} />
           ) : (
-            <TextBubble key={i} m={m} hora={s.hora} dark={dark} emojiSet={emojiSet} />
-          ),
-        )}
+            <TextBubble key={i} m={m} hora={s.hora} dark={dark} emojiSet={emojiSet} tail={tail} />
+          );
+        })}
       </div>
 
       {/* RODAPÉ */}

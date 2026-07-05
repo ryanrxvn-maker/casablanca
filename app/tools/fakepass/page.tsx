@@ -31,7 +31,6 @@ export default function FakePassPage() {
   const stageRef = useRef<HTMLDivElement | null>(null);
   const previewBoxRef = useRef<HTMLDivElement | null>(null);
   const [pscale, setPscale] = useState(1);
-  const [stageH, setStageH] = useState(0);
 
   const model = MODELS.find((m) => m.id === modelId) ?? MODELS[0];
   const s = states[model.id];
@@ -50,13 +49,10 @@ export default function FakePassPage() {
     const compute = () => {
       const avail = box.clientWidth;
       setPscale(avail > 0 ? Math.min(1, avail / model.stageW) : 1);
-      const stage = stageRef.current;
-      if (stage) setStageH(stage.offsetHeight);
     };
     compute();
     const ro = new ResizeObserver(compute);
     ro.observe(box);
-    if (stageRef.current) ro.observe(stageRef.current);
     return () => ro.disconnect();
   }, [model.stageW, model.id]);
 
@@ -186,13 +182,13 @@ export default function FakePassPage() {
             </div>
 
             <div ref={previewBoxRef} className="flex justify-center overflow-hidden">
-              {/* reserva o espaço do palco JÁ escalado; o transform fica no
-                  wrapper acima do stageRef (que segue no tamanho real). */}
-              <div style={{ width: Math.round(model.stageW * pscale), height: Math.round(stageH * pscale), flex: '0 0 auto' }}>
-                <div style={{ transform: `scale(${pscale})`, transformOrigin: 'top left' }}>
-                  <div ref={stageRef} className={uiFont.variable} style={{ display: 'inline-block', lineHeight: 0 }}>
-                    {model.Preview({ s, status })}
-                  </div>
+              {/* zoom (não transform:scale) reflui o palco no tamanho reduzido
+                  com texto/vetores NÍTIDOS — sem a rasterização borrada do
+                  scale. No export, downloadNodeAsPng zera este zoom pela marca
+                  data-fp-zoom, então o PNG sai em alta e imune ao encolhimento. */}
+              <div data-fp-zoom style={{ zoom: pscale }}>
+                <div ref={stageRef} className={uiFont.variable} style={{ display: 'inline-block', lineHeight: 0 }}>
+                  {model.Preview({ s, status })}
                 </div>
               </div>
             </div>
