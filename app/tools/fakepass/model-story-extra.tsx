@@ -13,9 +13,11 @@ import { STORY_W, STORY_RATIO, STORY_BGS, StoryStage, BgControls } from './story
 
 type CountdownState = { titulo: string; horas: string; minutos: string; segundos: string; bg: string };
 
+const BOX_H = 55;
+
 function DigitBox({ d }: { d: string }) {
   return (
-    <div style={{ width: 38, height: 54, borderRadius: 9, background: '#eef0f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 36, fontWeight: 700, color: '#2a2a2a', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+    <div style={{ width: 38, height: BOX_H, borderRadius: 10, background: '#eef0f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 38, fontWeight: 700, color: '#2b2b2b', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
       {d}
     </div>
   );
@@ -24,32 +26,33 @@ function DigitBox({ d }: { d: string }) {
 function DigitGroup({ value, label }: { value: string; label: string }) {
   const s = (value || '0').replace(/\D/g, '').padStart(2, '0').slice(-2);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 9 }}>
       <div style={{ display: 'flex', gap: 4 }}>
         <DigitBox d={s[0]} />
         <DigitBox d={s[1]} />
       </div>
-      <span style={{ fontSize: 14, color: '#3a3a3a', fontWeight: 400 }}>{label}</span>
+      <span style={{ fontSize: 15, color: '#3a3a3a', fontWeight: 400, lineHeight: 1 }}>{label}</span>
     </div>
   );
 }
 
+// Colon com a MESMA altura das caixas → centraliza junto dos dígitos (não sobe).
 function Colon() {
-  return <div style={{ fontSize: 30, fontWeight: 700, color: '#2a2a2a', alignSelf: 'flex-start', marginTop: 11, padding: '0 1px' }}>:</div>;
+  return <div style={{ height: BOX_H, display: 'flex', alignItems: 'center', fontSize: 30, fontWeight: 700, color: '#2b2b2b', padding: '0 1px' }}>:</div>;
 }
 
 function CountdownSticker({ titulo, horas, minutos, segundos }: { titulo: string; horas: string; minutos: string; segundos: string }) {
   return (
-    <div style={{ width: STORY_W * 0.9, borderRadius: 18, background: '#ffffff', boxShadow: '0 8px 24px rgba(0,0,0,0.16)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK, padding: '16px 16px 18px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 14 }}>
-        <div style={{ fontSize: 19, fontWeight: 700, color: '#262626', lineHeight: 1.15, letterSpacing: '0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6 }}>
+    <div style={{ width: STORY_W * 0.92, borderRadius: 22, background: '#ffffff', boxShadow: '0 8px 26px rgba(0,0,0,0.18)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK, padding: '18px 18px 20px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 16 }}>
+        <div style={{ fontSize: 23, fontWeight: 800, color: '#1a1a1a', lineHeight: 1.1, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 7 }}>
           {emojify(titulo, 'apple')}
         </div>
-        <div style={{ width: 30, height: 30, borderRadius: '50%', border: '1.5px solid #c7c7c7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8e8e8e" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+        <div style={{ width: 34, height: 34, borderRadius: '50%', border: '1.5px solid #c7c7c7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9a9a9a" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
         </div>
       </div>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', gap: 3 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'center', gap: 4 }}>
         <DigitGroup value={horas} label="horas" />
         <Colon />
         <DigitGroup value={minutos} label="minutos" />
