@@ -36,6 +36,20 @@ const AUDIO_RE = /^(?:áudio|audio)\s+(\d+:\d{2})$/i;
 // Mensagens enviadas do Instagram DM = gradiente ROXO→AZUL (não o colorido).
 const IG_GRADIENT = 'linear-gradient(155deg,#bd3be0 0%,#8a45f0 48%,#5b6ef0 100%)';
 
+// O Instagram aplica UM gradiente global (rosa/magenta no topo → azul/roxo na base)
+// ao longo de toda a conversa: cada bolha enviada mostra a fatia da cor correspondente
+// à sua posição vertical. Interpolamos por posição pra reproduzir esse efeito.
+const IG_TOP: [number, number, number] = [0xc7, 0x3c, 0xd8]; // magenta-roxo (topo)
+const IG_BOT: [number, number, number] = [0x6a, 0x50, 0xf2]; // azul-roxo (base)
+function meBubbleBg(t: number): string {
+  const k = Math.max(0, Math.min(1, t));
+  const mix = (a: number, b: number) => Math.round(a + (b - a) * k);
+  const c = `rgb(${mix(IG_TOP[0], IG_BOT[0])},${mix(IG_TOP[1], IG_BOT[1])},${mix(IG_TOP[2], IG_BOT[2])})`;
+  // leve gradiente vertical na própria bolha pra manter o brilho do original
+  const lighter = `rgb(${Math.min(255, mix(IG_TOP[0], IG_BOT[0]) + 14)},${Math.min(255, mix(IG_TOP[1], IG_BOT[1]) + 10)},${Math.min(255, mix(IG_TOP[2], IG_BOT[2]) + 14)})`;
+  return `linear-gradient(160deg,${lighter} 0%,${c} 100%)`;
+}
+
 function parseMsgs(txt: string): Msg[] {
   return txt
     .split('\n')
@@ -138,11 +152,17 @@ function Avatar({
 
 /* ─────────────────────── Ícones (linha, ~22px) ─────────────────────── */
 
-function VideoIcon({ color }: { color: string }) {
+function StickerPlusIcon({ color }: { color: string }) {
+  // Dois círculos sobrepostos: carinha (esq/baixo) + círculo com "+" (dir/cima) — igual ao IG DM
   return (
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <rect x="2" y="6.5" width="14" height="11" rx="3.5" />
-      <path d="M16 10l5-2.8v9.6L16 14z" />
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="9.4" cy="14.2" r="6.4" />
+      <circle cx="8" cy="13.4" r="0.35" fill={color} stroke={color} strokeWidth="1.1" />
+      <circle cx="11" cy="13.4" r="0.35" fill={color} stroke={color} strokeWidth="1.1" />
+      <path d="M7.3 16.1c.55.7 1.3 1.05 2.1 1.05s1.55-.35 2.1-1.05" />
+      <circle cx="17.2" cy="6.8" r="3.9" fill="#000" fillOpacity="0" />
+      <circle cx="17.2" cy="6.8" r="3.9" />
+      <path d="M17.2 5.2v3.2M15.6 6.8h3.2" />
     </svg>
   );
 }
@@ -349,12 +369,12 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
                 textOverflow: 'ellipsis',
               }}
             >
-              {'@' + s.username.replace(/^@+/, '')}
+              {s.username.replace(/^@+/, '')}
             </div>
           ) : null}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 15, flexShrink: 0 }}>
-          <VideoIcon color={fg} />
+          <StickerPlusIcon color={fg} />
           <PhoneIcon color={fg} />
           <TagIcon color={fg} />
         </div>
@@ -399,7 +419,7 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
                       letterSpacing: '-0.01em',
                       whiteSpace: 'pre-wrap',
                       wordBreak: 'break-word',
-                      background: m.me ? IG_GRADIENT : recvBg,
+                      background: m.me ? meBubbleBg(msgs.length > 1 ? i / (msgs.length - 1) : 0.5) : recvBg,
                       color: m.me ? '#ffffff' : recvFg,
                     }}
                   >

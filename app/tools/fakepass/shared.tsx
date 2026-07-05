@@ -313,10 +313,14 @@ export function StatusBar({
   cfg,
   tone = 'dark',
   scale = 1,
+  leftOverride,
 }: {
   cfg: StatusCfg;
   tone?: 'dark' | 'light';
   scale?: number;
+  /** Sobrescreve o texto à esquerda (ex.: operadora no lockscreen, onde a hora
+   *  já aparece no relógio grande). */
+  leftOverride?: string;
 }) {
   const color = tone === 'light' ? '#ffffff' : '#000000';
   const ios = cfg.os === 'ios';
@@ -374,7 +378,7 @@ export function StatusBar({
           fontVariantNumeric: 'tabular-nums',
         }}
       >
-        {ios ? cfg.time : `${cfg.carrier ? cfg.carrier + '  ' : ''}${cfg.time}`}
+        {leftOverride !== undefined ? leftOverride : ios ? cfg.time : `${cfg.carrier ? cfg.carrier + '  ' : ''}${cfg.time}`}
       </div>
       {right}
     </div>

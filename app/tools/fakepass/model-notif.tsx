@@ -252,11 +252,11 @@ function LockScreen({ s, status }: { s: S; status: StatusCfg }) {
   const clock = (
     <div
       style={{
-        fontSize: ios ? 68 : 64,
-        fontWeight: ios ? 700 : 300,
+        fontSize: ios ? 84 : 64,
+        fontWeight: ios ? 300 : 300,
         color: '#ffffff',
         lineHeight: 1,
-        letterSpacing: ios ? '-0.02em' : '-0.01em',
+        letterSpacing: ios ? '-0.01em' : '-0.01em',
         fontVariantNumeric: 'tabular-nums',
         textShadow: '0 1px 12px rgba(0,0,0,0.28)',
       }}
@@ -302,7 +302,8 @@ function LockScreen({ s, status }: { s: S; status: StatusCfg }) {
           pointerEvents: 'none',
         }}
       />
-      <StatusBar cfg={status} tone="light" />
+      {/* No lockscreen a hora fica no relógio grande → a status bar mostra a operadora */}
+      <StatusBar cfg={status} tone="light" leftOverride={status.carrier || ''} />
 
       {/* Relógio grande centralizado. iOS: data em cima, hora embaixo. */}
       <div

@@ -29,7 +29,8 @@ type Comentario = { user: string; verificado: boolean; texto: string };
 // igual entre renders.
 const TEMPOS = ['2 h', '5 h', '7 h', '9 h', '11 h', '6 h'];
 const RESPOSTAS = [57, 35, 8, 7, 12, 4];
-const CURTIDAS = ['9.361', '35', '14,9 mil', '16', '723', '48'];
+// vazio = comentário sem curtidas (só o coração, como no Instagram real)
+const CURTIDAS = ['9.361', '', '14,9 mil', '16', '', '48'];
 
 function parseComentarios(txt: string): Comentario[] {
   return txt
@@ -325,9 +326,11 @@ function CommentsCard({ s }: { s: S }) {
                 }}
               >
                 <Heart size={17} color={heartColor} />
-                <span style={{ fontSize: 11, color: cinza }}>
-                  {CURTIDAS[i % CURTIDAS.length]}
-                </span>
+                {CURTIDAS[i % CURTIDAS.length] ? (
+                  <span style={{ fontSize: 11, color: cinza }}>
+                    {CURTIDAS[i % CURTIDAS.length]}
+                  </span>
+                ) : null}
               </div>
             </div>
           );
