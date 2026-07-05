@@ -47,6 +47,7 @@ const FREE_ALLOWED_TOOLS = [
   '/tools/decupagem',
   '/tools/downloader',
   '/tools/caixinha-pergunta',
+  '/tools/fakepass',
 ];
 // Outras rotas (não-/tools) que free pode ver (educacionais/comerciais)
 const FREE_EXTRA_OK_PREFIXES = ['/pilot', '/planos'];

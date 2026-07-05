@@ -31,6 +31,34 @@ function baseProps(p: IconProps, fallbackStroke: string) {
   };
 }
 
+/** FakePass — smartphone com print/sticker, gradient violet */
+export function IconFakePass(p: IconProps) {
+  const raw = useId();
+  const id = `g-${raw.replace(/:/g, '')}`;
+  const url = `url(#${id})`;
+  return (
+    <svg
+      width={p.size ?? 22}
+      height={p.size ?? 22}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+      className={p.className}
+    >
+      <defs>
+        <linearGradient id={id} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#c4b5fd" />
+          <stop offset="100%" stopColor="#6d4ee8" />
+        </linearGradient>
+      </defs>
+      <rect x="6" y="2.5" width="12" height="19" rx="2.6" stroke={url} strokeWidth="1.7" />
+      <path d="M9.5 5.4h5" stroke={url} strokeWidth="1.5" strokeLinecap="round" />
+      <rect x="8.4" y="8.6" width="7.2" height="4.6" rx="1.2" fill={url} />
+      <path d="M9 16h6M9 18.2h3.6" stroke={url} strokeWidth="1.4" strokeLinecap="round" opacity="0.55" />
+    </svg>
+  );
+}
+
 /* ------------------------------ BASE ------------------------------ */
 
 /** Decupagem — corte fino, gradient verde/lime */

@@ -1,0 +1,221 @@
+'use client';
+
+import { useRef, useState } from 'react';
+import { ToolShell } from '@/components/ToolShell';
+import { useToolState } from '@/components/ToolsStateProvider';
+import {
+  uiFont,
+  downloadNodeAsPng,
+  Segmented,
+  Toggle,
+  RangeField,
+  TextField,
+  Field,
+  defaultStatus,
+  type StatusCfg,
+} from './shared';
+import { MODELS, CATEGORIES } from './models';
+
+const HUE = 'rgba(167,139,250,0.42)';
+
+export default function FakePassPage() {
+  const [modelId, setModelId] = useToolState<string>('fakepass:model', MODELS[0].id);
+  const [cat, setCat] = useToolState<string>('fakepass:cat', 'story');
+  const [status, setStatus] = useState<StatusCfg>(defaultStatus);
+  // Estado de cada modelo, isolado por id (trocar de modelo não perde o que
+  // você digitou no anterior).
+  const [states, setStates] = useState<Record<string, any>>(() =>
+    Object.fromEntries(MODELS.map((m) => [m.id, m.defaultState])),
+  );
+  const [gerando, setGerando] = useState(false);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+
+  const model = MODELS.find((m) => m.id === modelId) ?? MODELS[0];
+  const s = states[model.id];
+  const set = (patch: any) =>
+    setStates((prev) => ({ ...prev, [model.id]: { ...prev[model.id], ...patch } }));
+  const setStatusCfg = (patch: Partial<StatusCfg>) => setStatus((p) => ({ ...p, ...patch }));
+
+  const modelsInCat = MODELS.filter((m) => m.category === cat);
+
+  const baixar = async () => {
+    const node = stageRef.current;
+    if (!node || gerando) return;
+    setGerando(true);
+    try {
+      await downloadNodeAsPng(node, `fakepass-${model.id}.png`, model.exportW);
+    } catch (err) {
+      console.error('[fakepass] export falhou', err);
+      alert('Não consegui gerar a imagem agora. Tenta de novo em instantes.');
+    } finally {
+      setGerando(false);
+    }
+  };
+
+  return (
+    <ToolShell
+      title="FakePass"
+      eyebrow="GERADOR DE PRINTS"
+      description="Crie prints e stickers de redes sociais idênticos ao original — caixinha de pergunta, enquete, conversa, post e mais. Personaliza e baixa em alta."
+      hue={HUE}
+      icon={<IconFakePass size={56} />}
+    >
+      {/* ─── Seletor de modelo (categorias + modelos) ─── */}
+      <div className="mb-6">
+        <div className="flex flex-wrap gap-1.5">
+          {CATEGORIES.map((c) => {
+            const count = MODELS.filter((m) => m.category === c.id).length;
+            const active = c.id === cat;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => setCat(c.id)}
+                className={
+                  'rounded-full border px-3.5 py-1.5 text-[12.5px] font-semibold transition-all duration-200 ' +
+                  (active
+                    ? 'border-violet/65 bg-violet/15 text-white'
+                    : 'border-line-strong text-text-muted hover:border-violet hover:text-white')
+                }
+              >
+                {c.label}
+                <span className="ml-1.5 opacity-50">{count || '·'}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          {modelsInCat.length === 0 ? (
+            <p className="text-[13px] text-text-dim">Em breve nesta categoria. 🚧</p>
+          ) : (
+            modelsInCat.map((m) => {
+              const active = m.id === modelId;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => setModelId(m.id)}
+                  className={
+                    'rounded-[12px] border px-3.5 py-2 text-[13px] font-semibold transition-all duration-200 active:scale-[0.98] ' +
+                    (active
+                      ? 'border-violet/70 bg-violet/12 text-white shadow-[0_0_20px_-6px_rgba(167,139,250,0.7)]'
+                      : 'border-line-strong text-text-muted hover:border-violet/50 hover:text-white')
+                  }
+                >
+                  {m.label}
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* ─── Controles + Preview ─── */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
+        <div className="flex flex-col gap-5">
+          {model.Controls({ s, set })}
+
+          {model.usesPhone ? (
+            <div className="rounded-[16px] border border-line/60 bg-bg-soft/30 p-4">
+              <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.16em] text-text-muted" style={{ fontFamily: 'var(--font-tech)' }}>
+                Barra de status do celular
+              </p>
+              <div className="flex flex-col gap-3.5">
+                <Segmented
+                  value={status.os}
+                  options={[{ value: 'ios', label: 'iPhone' }, { value: 'android', label: 'Android' }]}
+                  onChange={(v) => setStatusCfg({ os: v })}
+                />
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Hora">
+                    <TextField value={status.time} onChange={(v) => setStatusCfg({ time: v })} placeholder="9:41" maxLength={8} />
+                  </Field>
+                  <Field label="Operadora">
+                    <TextField value={status.carrier} onChange={(v) => setStatusCfg({ carrier: v })} placeholder="Vivo" maxLength={16} />
+                  </Field>
+                </div>
+                <RangeField label="Bateria" value={status.battery} min={0} max={100} onChange={(v) => setStatusCfg({ battery: v })} display={(v) => v + '%'} />
+                <RangeField label="Sinal" value={status.signal} min={0} max={4} onChange={(v) => setStatusCfg({ signal: v })} />
+                <Segmented
+                  value={status.network}
+                  options={[{ value: '5G', label: '5G' }, { value: '4G', label: '4G' }, { value: 'LTE', label: 'LTE' }, { value: '', label: '—' }]}
+                  onChange={(v) => setStatusCfg({ network: v })}
+                />
+                <div className="grid grid-cols-2 gap-2">
+                  <Toggle on={status.wifi} onChange={(v) => setStatusCfg({ wifi: v })} label="Wi-Fi" />
+                  <Toggle on={status.charging} onChange={(v) => setStatusCfg({ charging: v })} label="Carregando" />
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        {/* Preview + export */}
+        <div className="lg:sticky lg:top-6 lg:self-start">
+          <div className="rounded-[20px] border border-line/60 bg-bg-soft/40 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-text-muted" style={{ fontFamily: 'var(--font-tech)' }}>
+                Prévia
+              </span>
+              <span className="text-[11px] text-text-dim" style={{ fontFamily: 'var(--font-mono)' }}>
+                {model.exportW}×{Math.round(model.exportW * model.ratio)}
+              </span>
+            </div>
+
+            <div className="flex justify-center overflow-auto">
+              {/* uiFont.variable injeta --font-fp no escopo pra os previews */}
+              <div ref={stageRef} className={uiFont.variable} style={{ display: 'inline-block', lineHeight: 0 }}>
+                {model.Preview({ s, status })}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={baixar}
+              disabled={gerando}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-[14px] border border-white/15 px-5 py-3.5 text-[14px] font-bold text-white transition-all duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+              style={{
+                fontFamily: 'var(--font-tech)',
+                background: 'linear-gradient(180deg,#a78bfa 0%,#6d4ee8 100%)',
+                boxShadow: '0 8px 22px -8px rgba(167,139,250,0.7), inset 0 1px 0 rgba(255,255,255,0.3)',
+              }}
+            >
+              {gerando ? (
+                <>
+                  <svg className="animate-spin" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M12 3a9 9 0 1 0 9 9" /></svg>
+                  Gerando…
+                </>
+              ) : (
+                <>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="M7 10l5 5 5-5" /><path d="M12 15V3" /></svg>
+                  Baixar PNG
+                </>
+              )}
+            </button>
+            <p className="mt-2 text-center text-[11px] text-text-muted">
+              Imagem em alta ({model.exportW}px) — pronta pra postar.
+            </p>
+          </div>
+        </div>
+      </div>
+    </ToolShell>
+  );
+}
+
+function IconFakePass({ size = 56 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden>
+      <defs>
+        <linearGradient id="fp-hero" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#c4b5fd" />
+          <stop offset="100%" stopColor="#6d4ee8" />
+        </linearGradient>
+      </defs>
+      <rect x="6" y="2.5" width="12" height="19" rx="2.6" stroke="url(#fp-hero)" strokeWidth="1.7" />
+      <path d="M9 6h6" stroke="url(#fp-hero)" strokeWidth="1.6" strokeLinecap="round" />
+      <rect x="8.4" y="9" width="7.2" height="4.4" rx="1.2" fill="url(#fp-hero)" opacity="0.9" />
+      <path d="M9 16h6M9 18h3.5" stroke="url(#fp-hero)" strokeWidth="1.5" strokeLinecap="round" opacity="0.6" />
+    </svg>
+  );
+}

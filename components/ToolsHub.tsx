@@ -15,7 +15,7 @@ import {
   IconAcelerador,
   IconAudioSplit,
   IconAutoBroll,
-  IconCaixinhaPergunta,
+  IconFakePass,
   IconCamuflagem,
   IconClickUpPilot,
   IconCompressor,
@@ -92,11 +92,11 @@ const FEATURED: ToolEntry[] = [
 
 const BASE: ToolEntry[] = [
   {
-    href: '/tools/caixinha-pergunta',
-    label: 'Caixinha de Pergunta',
-    description: 'A caixinha de perguntas do Instagram, do seu jeito.',
-    icon: <IconCaixinhaPergunta size={26} />,
-    hue: 'rgba(74, 160, 230, 0.4)',
+    href: '/tools/fakepass',
+    label: 'FakePass',
+    description: 'Prints e stickers de redes sociais idênticos ao original.',
+    icon: <IconFakePass size={26} />,
+    hue: 'rgba(167, 139, 250, 0.4)',
   },
   {
     href: '/tools/decupagem',
