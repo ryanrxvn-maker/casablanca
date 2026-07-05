@@ -30,6 +30,7 @@ import NEWS_GLOBONEWS from './model-news-globonews';
 import NEWS_BANDNEWS from './model-news-bandnews';
 import NEWS_RECORD from './model-news-record';
 import NEWS_TIMES from './model-news-times';
+import SITE_BBC from './model-site-bbc';
 
 export const CATEGORIES: { id: string; label: string }[] = [
   { id: 'story', label: 'Stickers de Story' },
@@ -37,6 +38,7 @@ export const CATEGORIES: { id: string; label: string }[] = [
   { id: 'post', label: 'Posts' },
   { id: 'notif', label: 'Notificações' },
   { id: 'news', label: 'Notícias' },
+  { id: 'sites', label: 'Sites de Notícia' },
 ];
 
 export const MODELS: FakeModel[] = [
@@ -67,4 +69,6 @@ export const MODELS: FakeModel[] = [
   ...NEWS_BANDNEWS,
   ...NEWS_RECORD,
   ...NEWS_TIMES,
+  // Sites de Notícia (páginas de portal)
+  ...SITE_BBC,
 ];

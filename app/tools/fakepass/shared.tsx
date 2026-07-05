@@ -63,7 +63,7 @@ export const defaultStatus: StatusCfg = {
   airplane: false,
 };
 
-export type ModelCategory = 'story' | 'chat' | 'post' | 'notif' | 'news';
+export type ModelCategory = 'story' | 'chat' | 'post' | 'notif' | 'news' | 'sites';
 
 /** Dimensões do palco (usadas pelo shell pra escalar preview e exportar). */
 export type StageDims = { stageW: number; ratio: number; exportW: number };
