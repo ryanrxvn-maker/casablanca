@@ -259,8 +259,8 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
           </div>
         </div>
 
-        {/* Nome + música / sugestão */}
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        {/* Nome + música / sugestão — SEM flex-coluna (html2canvas corta) */}
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span
               style={{
