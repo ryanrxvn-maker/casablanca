@@ -54,10 +54,10 @@ function CountdownSticker({ titulo, dias, horas, min }: { titulo: string; dias: 
 const IG_COUNTDOWN: FakeModel<CountdownState> = {
   id: 'ig-countdown', label: 'Contagem Regressiva', category: 'story', hue: 'rgba(120,80,220,0.42)',
   stageW: STORY_W, ratio: STORY_RATIO, exportW: 1080, usesPhone: false,
-  defaultState: { titulo: 'LANCAMENTO', dias: '02', horas: '14', min: '30', bg: STORY_BGS[3].css },
+  defaultState: { titulo: 'LANÇAMENTO', dias: '02', horas: '14', min: '30', bg: STORY_BGS[3].css },
   Controls: ({ s, set }) => (
     <div className="flex flex-col gap-4">
-      <Field label="Título"><TextField value={s.titulo} onChange={(v) => set({ titulo: v })} placeholder="LANCAMENTO" maxLength={40} /></Field>
+      <Field label="Título"><TextField value={s.titulo} onChange={(v) => set({ titulo: v })} placeholder="LANÇAMENTO" maxLength={40} /></Field>
       <div className="grid grid-cols-3 gap-3">
         <Field label="Dias"><TextField value={s.dias} onChange={(v) => set({ dias: v })} placeholder="02" maxLength={3} /></Field>
         <Field label="Horas"><TextField value={s.horas} onChange={(v) => set({ horas: v })} placeholder="14" maxLength={3} /></Field>
@@ -122,12 +122,12 @@ function LocationSticker({ local }: { local: string }) {
 }
 
 const IG_LOCATION: FakeModel<LocationState> = {
-  id: 'ig-location', label: 'Localizacao', category: 'story', hue: 'rgba(80,180,255,0.42)',
+  id: 'ig-location', label: 'Localização', category: 'story', hue: 'rgba(80,180,255,0.42)',
   stageW: STORY_W, ratio: STORY_RATIO, exportW: 1080, usesPhone: false,
-  defaultState: { local: 'Sao Paulo, Brasil', bg: STORY_BGS[1].css },
+  defaultState: { local: 'São Paulo, Brasil', bg: STORY_BGS[1].css },
   Controls: ({ s, set }) => (
     <div className="flex flex-col gap-4">
-      <Field label="Localização"><TextField value={s.local} onChange={(v) => set({ local: v })} placeholder="Sao Paulo, Brasil" maxLength={60} /></Field>
+      <Field label="Localização"><TextField value={s.local} onChange={(v) => set({ local: v })} placeholder="São Paulo, Brasil" maxLength={60} /></Field>
       <BgControls bg={s.bg} set={set} />
     </div>
   ),
@@ -180,7 +180,7 @@ function MentionSticker({ usuario, avatar }: { usuario: string; avatar: string }
 }
 
 const IG_MENTION: FakeModel<MentionState> = {
-  id: 'ig-mention', label: 'Mencao', category: 'story', hue: 'rgba(250,126,30,0.42)',
+  id: 'ig-mention', label: 'Menção', category: 'story', hue: 'rgba(250,126,30,0.42)',
   stageW: STORY_W, ratio: STORY_RATIO, exportW: 1080, usesPhone: false,
   defaultState: { usuario: 'seu_user', avatar: '', bg: STORY_BGS[5].css },
   Controls: ({ s, set }) => (

@@ -140,12 +140,16 @@ export async function downloadNodeAsPng(
   node: HTMLElement,
   filename: string,
   targetW: number,
+  refW?: number,
 ) {
   if (document.fonts?.ready) await document.fonts.ready;
   await new Promise((r) => setTimeout(r, 60));
   const { default: html2canvas } = await import('html2canvas');
-  const rect = node.getBoundingClientRect();
-  const scale = targetW / rect.width;
+  // Largura de referência = a largura de LAYOUT do palco (stageW). Passar
+  // refW evita medir o rect visual (que pode estar escalado no preview) — o
+  // PNG sempre sai na resolução cheia, independente do zoom da prévia.
+  const baseW = refW ?? node.getBoundingClientRect().width;
+  const scale = targetW / baseW;
   const canvas: HTMLCanvasElement = await html2canvas(node, {
     scale,
     backgroundColor: null,

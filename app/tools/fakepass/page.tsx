@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
 import {
@@ -29,6 +29,9 @@ export default function FakePassPage() {
   );
   const [gerando, setGerando] = useState(false);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const previewBoxRef = useRef<HTMLDivElement | null>(null);
+  const [pscale, setPscale] = useState(1);
+  const [stageH, setStageH] = useState(0);
 
   const model = MODELS.find((m) => m.id === modelId) ?? MODELS[0];
   const s = states[model.id];
@@ -38,12 +41,31 @@ export default function FakePassPage() {
 
   const modelsInCat = MODELS.filter((m) => m.category === cat);
 
+  // Auto-scale da prévia: se o palco do modelo for mais largo que a área
+  // disponível, encolhe VISUALMENTE pra caber. O PNG continua em alta porque o
+  // export usa model.stageW como referência, não o tamanho escalado.
+  useEffect(() => {
+    const box = previewBoxRef.current;
+    if (!box) return;
+    const compute = () => {
+      const avail = box.clientWidth;
+      setPscale(avail > 0 ? Math.min(1, avail / model.stageW) : 1);
+      const stage = stageRef.current;
+      if (stage) setStageH(stage.offsetHeight);
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(box);
+    if (stageRef.current) ro.observe(stageRef.current);
+    return () => ro.disconnect();
+  }, [model.stageW, model.id]);
+
   const baixar = async () => {
     const node = stageRef.current;
     if (!node || gerando) return;
     setGerando(true);
     try {
-      await downloadNodeAsPng(node, `fakepass-${model.id}.png`, model.exportW);
+      await downloadNodeAsPng(node, `fakepass-${model.id}.png`, model.exportW, model.stageW);
     } catch (err) {
       console.error('[fakepass] export falhou', err);
       alert('Não consegui gerar a imagem agora. Tenta de novo em instantes.');
@@ -163,10 +185,15 @@ export default function FakePassPage() {
               </span>
             </div>
 
-            <div className="flex justify-center overflow-auto">
-              {/* uiFont.variable injeta --font-fp no escopo pra os previews */}
-              <div ref={stageRef} className={uiFont.variable} style={{ display: 'inline-block', lineHeight: 0 }}>
-                {model.Preview({ s, status })}
+            <div ref={previewBoxRef} className="flex justify-center overflow-hidden">
+              {/* reserva o espaço do palco JÁ escalado; o transform fica no
+                  wrapper acima do stageRef (que segue no tamanho real). */}
+              <div style={{ width: Math.round(model.stageW * pscale), height: Math.round(stageH * pscale), flex: '0 0 auto' }}>
+                <div style={{ transform: `scale(${pscale})`, transformOrigin: 'top left' }}>
+                  <div ref={stageRef} className={uiFont.variable} style={{ display: 'inline-block', lineHeight: 0 }}>
+                    {model.Preview({ s, status })}
+                  </div>
+                </div>
               </div>
             </div>
 

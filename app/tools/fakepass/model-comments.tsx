@@ -3,7 +3,7 @@
 /**
  * FakePass — bloco de COMENTÁRIOS (Instagram / TikTok).
  * Card de altura automática (não usa telefone/StatusBar). Cada linha do estado
- * é um comentário no formato 'usuario: texto'. Exporta como PNG com a altura
+ * é um comentário no formato 'usuário: texto'. Exporta como PNG com a altura
  * real do card.
  */
 
@@ -224,12 +224,12 @@ const COMMENTS: FakeModel<S> = {
     <div className="flex flex-col gap-4">
       <Field
         label="Comentários"
-        hint="Uma linha por comentário, formato usuario: texto"
+        hint="Uma linha por comentário, formato usuário: texto"
       >
         <TextArea
           value={s.comentarios}
           onChange={(v) => set({ comentarios: v })}
-          placeholder={'usuario: comentário aqui'}
+          placeholder={'usuário: comentário aqui'}
           rows={6}
         />
       </Field>
