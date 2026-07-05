@@ -15,6 +15,8 @@ import {
   TextField,
   TextArea,
   Swatches,
+  Segmented,
+  RangeField,
   type FakeModel,
   FONT_STACK,
 } from './shared';
@@ -218,6 +220,133 @@ const IG_POLL: FakeModel<PollState> = {
   ),
 };
 
+/* ═══════════════════════════ MODELO 3 — Quiz ═══════════════════════════ */
+
+type QuizState = { pergunta: string; ops: string[]; correta: number; bg: string };
+
+function QuizSticker({ pergunta, ops, correta }: { pergunta: string; ops: string[]; correta: number }) {
+  const items = ops.map((o, i) => ({ o, i })).filter((x) => x.o.trim() !== '');
+  return (
+    <div style={{ width: STORY_W * 0.82, borderRadius: 16, background: 'rgba(255,255,255,0.96)', boxShadow: '0 8px 24px rgba(0,0,0,0.16)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK, padding: '16px 14px' }}>
+      <FitText maxPx={18} minPx={13} maxHeight={STORY_W * 0.3} style={{ color: '#262626', padding: '2px 6px 12px', textAlign: 'center', fontWeight: 600, lineHeight: 1.3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        {pergunta}
+      </FitText>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {items.map(({ o, i }) => {
+          const ok = i === correta;
+          return (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '11px 12px', borderRadius: 11, fontSize: 15, fontWeight: 600, background: ok ? '#e6f8ef' : '#f2f2f2', color: ok ? '#12885a' : '#333333', border: ok ? '1.5px solid #37c98a' : '1.5px solid transparent' }}>
+              <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center' }}>{o}</span>
+              {ok ? <span style={{ fontSize: 15 }}>✓</span> : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const IG_QUIZ: FakeModel<QuizState> = {
+  id: 'ig-quiz',
+  label: 'Quiz',
+  category: 'story',
+  hue: 'rgba(52,201,138,0.42)',
+  stageW: STORY_W,
+  ratio: STORY_RATIO,
+  exportW: 1080,
+  usesPhone: false,
+  defaultState: { pergunta: 'Qual a capital do Brasil?', ops: ['Brasília', 'São Paulo', 'Rio', ''], correta: 0, bg: STORY_BGS[3].css },
+  Controls: ({ s, set }) => {
+    const filled = s.ops.map((o, i) => ({ o, i })).filter((x) => x.o.trim() !== '');
+    return (
+      <div className="flex flex-col gap-4">
+        <Field label="Pergunta">
+          <TextField value={s.pergunta} onChange={(v) => set({ pergunta: v })} placeholder="Sua pergunta" maxLength={120} />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          {[0, 1, 2, 3].map((i) => (
+            <Field key={i} label={`Opção ${i + 1}`}>
+              <TextField value={s.ops[i]} onChange={(v) => { const ops = [...s.ops]; ops[i] = v; set({ ops }); }} placeholder={i < 2 ? 'Obrigatória' : 'Opcional'} maxLength={40} />
+            </Field>
+          ))}
+        </div>
+        <Field label="Resposta certa">
+          <Segmented value={String(s.correta)} options={filled.map((x) => ({ value: String(x.i), label: `Opção ${x.i + 1}` }))} onChange={(v) => set({ correta: parseInt(v, 10) })} />
+        </Field>
+        <BgControls bg={s.bg} set={set} />
+      </div>
+    );
+  },
+  Preview: ({ s }) => (
+    <StoryStage bg={s.bg}>
+      <QuizSticker pergunta={s.pergunta} ops={s.ops} correta={s.correta} />
+    </StoryStage>
+  ),
+};
+
+/* ═══════════════════════ MODELO 4 — Slider de Emoji ═══════════════════════ */
+
+type SliderState = { pergunta: string; emoji: string; valor: number; bg: string };
+const EMOJIS = ['😍', '🔥', '😂', '😮', '❤️', '👏', '🥵', '💯'];
+
+function SliderSticker({ pergunta, emoji, valor }: { pergunta: string; emoji: string; valor: number }) {
+  const v = Math.max(0, Math.min(100, valor));
+  return (
+    <div style={{ width: STORY_W * 0.82, borderRadius: 16, background: 'rgba(255,255,255,0.96)', boxShadow: '0 8px 24px rgba(0,0,0,0.16)', WebkitFontSmoothing: 'antialiased', fontFamily: FONT_STACK, padding: '18px 22px 30px' }}>
+      <FitText maxPx={18} minPx={13} maxHeight={STORY_W * 0.3} style={{ color: '#262626', padding: '0 0 20px', textAlign: 'center', fontWeight: 500, lineHeight: 1.3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        {pergunta}
+      </FitText>
+      <div style={{ position: 'relative', height: 12, borderRadius: 6, background: '#ededed' }}>
+        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${v}%`, borderRadius: 6, background: 'linear-gradient(90deg,#ffd54a,#ff5e8a)' }} />
+        <div style={{ position: 'absolute', left: `${v}%`, top: '50%', transform: 'translate(-50%,-50%)', fontSize: 32, lineHeight: 1, filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.25))' }}>
+          {emoji || '😍'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const IG_SLIDER: FakeModel<SliderState> = {
+  id: 'ig-slider',
+  label: 'Slider de Emoji',
+  category: 'story',
+  hue: 'rgba(255,94,138,0.42)',
+  stageW: STORY_W,
+  ratio: STORY_RATIO,
+  exportW: 1080,
+  usesPhone: false,
+  defaultState: { pergunta: 'O quanto você curtiu?', emoji: '😍', valor: 70, bg: STORY_BGS[2].css },
+  Controls: ({ s, set }) => (
+    <div className="flex flex-col gap-4">
+      <Field label="Pergunta">
+        <TextField value={s.pergunta} onChange={(v) => set({ pergunta: v })} placeholder="Sua pergunta" maxLength={120} />
+      </Field>
+      <Field label="Emoji">
+        <div className="flex flex-wrap items-center gap-2">
+          {EMOJIS.map((e) => (
+            <button
+              key={e}
+              type="button"
+              onClick={() => set({ emoji: e })}
+              className={'flex h-9 w-9 items-center justify-center rounded-full border text-[18px] transition ' + (s.emoji === e ? 'border-violet/70 bg-violet/15' : 'border-line-strong hover:border-violet/50')}
+            >
+              {e}
+            </button>
+          ))}
+          <input type="text" value={s.emoji} onChange={(e) => set({ emoji: e.target.value.slice(0, 2) })} className="input-field !w-16 text-center" maxLength={2} />
+        </div>
+      </Field>
+      <RangeField label="Posição" value={s.valor} min={0} max={100} onChange={(v) => set({ valor: v })} display={(v) => v + '%'} />
+      <BgControls bg={s.bg} set={set} />
+    </div>
+  ),
+  Preview: ({ s }) => (
+    <StoryStage bg={s.bg}>
+      <SliderSticker pergunta={s.pergunta} emoji={s.emoji} valor={s.valor} />
+    </StoryStage>
+  ),
+};
+
 /* ─────────────── util: className da fonte (var --font-fp) ─────────────── */
 // A fonte Inter local injeta a var no escopo via className; como os stickers
 // usam FONT_STACK (que referencia var(--font-fp)), precisamos que a var exista
@@ -235,4 +364,4 @@ export const CATEGORIES: { id: string; label: string }[] = [
   { id: 'notif', label: 'Notificações' },
 ];
 
-export const MODELS: FakeModel[] = [IG_QUESTION, IG_POLL];
+export const MODELS: FakeModel[] = [IG_QUESTION, IG_POLL, IG_QUIZ, IG_SLIDER];
