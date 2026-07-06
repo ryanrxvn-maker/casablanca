@@ -190,6 +190,94 @@ export function FitText({
 /* ───────────────────────── Export (PNG) ───────────────────────── */
 
 /**
+ * Embute a fonte WEB (Inter do next/font) usada no nó como @font-face com o
+ * woff2 em BASE64 — pro <foreignObject> renderizar com a MESMA fonte da prévia.
+ *
+ * Por que precisa: o foreignObject roda num contexto ISOLADO. Fontes de SISTEMA
+ * (Segoe UI, Arial…) já estão no SO e aparecem, mas WEB FONTS só aparecem se o
+ * @font-face estiver embutido NO SVG. O auto-embed do modern-screenshot não
+ * cravava a Inter real — o export caía no fallback (Arial + size-adjust, ~1px
+ * mais largo), que quebrava as linhas diferente da prévia ("oii tudo bem?" em 2
+ * linhas no download e 1 na tela). Aqui embutimos a Inter REAL das famílias
+ * next/font (__…) usadas no nó e PULAMOS os fallbacks `local()`, então no SVG a
+ * primeira família disponível é a Inter de verdade = download === preview.
+ */
+const _fontCssCache = new Map<string, string>();
+
+function abToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(
+      null,
+      Array.from(bytes.subarray(i, i + CHUNK)) as unknown as number[],
+    );
+  }
+  return btoa(bin);
+}
+
+async function buildFontEmbedCss(node: HTMLElement): Promise<string> {
+  // 1) famílias next/font (__…) realmente usadas no nó
+  const used = new Set<string>();
+  const els: HTMLElement[] = [
+    node,
+    ...(Array.from(node.querySelectorAll('*')) as HTMLElement[]),
+  ];
+  for (const el of els) {
+    const ff = getComputedStyle(el).fontFamily || '';
+    for (const raw of ff.split(',')) {
+      const name = raw.trim().replace(/^["']|["']$/g, '');
+      if (name.startsWith('__')) used.add(name);
+    }
+  }
+  if (used.size === 0) return '';
+  const cacheKey = [...used].sort().join('|');
+  const cached = _fontCssCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  // 2) @font-face dessas famílias → embute o woff2 em base64 (pula local())
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const ss of Array.from(document.styleSheets)) {
+    let rules: CSSRuleList | null = null;
+    try {
+      rules = ss.cssRules;
+    } catch {
+      continue; // folha cross-origin — inacessível
+    }
+    if (!rules) continue;
+    for (const r of Array.from(rules)) {
+      if ((r as CSSRule).type !== 5 /* CSSRule.FONT_FACE_RULE */) continue;
+      const fr = r as CSSFontFaceRule;
+      const fam = fr.style
+        .getPropertyValue('font-family')
+        .replace(/^["']|["']$/g, '');
+      if (!used.has(fam)) continue;
+      const src = fr.style.getPropertyValue('src');
+      const m = src.match(/url\(["']?([^"')]+)["']?\)/);
+      if (!m) continue; // face só-local() (fallback Arial+size-adjust) → pula
+      const dedupe =
+        fam + '|' + fr.style.getPropertyValue('font-weight') + '|' + m[1];
+      if (seen.has(dedupe)) continue;
+      seen.add(dedupe);
+      try {
+        const buf = await fetch(m[1]).then((res) => res.arrayBuffer());
+        const data = `data:font/woff2;base64,${abToBase64(buf)}`;
+        out.push(
+          fr.cssText.replace(/url\(["']?[^"')]+["']?\)/, `url(${data})`),
+        );
+      } catch {
+        /* face que não baixou — ignora, as outras cobrem */
+      }
+    }
+  }
+  const css = out.join('\n');
+  _fontCssCache.set(cacheKey, css);
+  return css;
+}
+
+/**
  * Rasteriza um nó do DOM em PNG NÍTIDO e IDÊNTICO À PRÉVIA.
  *
  * Motor: `modern-screenshot` (SVG <foreignObject>). Diferença fundamental pro
@@ -247,6 +335,14 @@ export async function downloadNodeAsPng(
     const baseW = refW ?? node.getBoundingClientRect().width;
     const scale = targetW / baseW;
 
+    // Embute a Inter real (base64) pra o export usar a MESMA fonte da prévia.
+    let fontCss = '';
+    try {
+      fontCss = await buildFontEmbedCss(node);
+    } catch {
+      /* segue sem — cai no auto-embed do modern-screenshot */
+    }
+
     try {
       const { domToBlob } = await import('modern-screenshot');
       blob = await domToBlob(node, {
@@ -256,6 +352,8 @@ export async function downloadNodeAsPng(
         backgroundColor: null,
         // busca as imagens externas (emoji CDN) com CORS e sem cache quebrado.
         fetch: { requestInit: { cache: 'no-cache', mode: 'cors' } },
+        // fonte real embutida (Inter) → texto idêntico à prévia, sem fallback.
+        ...(fontCss ? { font: { cssText: fontCss } } : {}),
       });
     } catch (err) {
       // Fallback só pra navegadores que bloqueiam foreignObject — nunca falha.
