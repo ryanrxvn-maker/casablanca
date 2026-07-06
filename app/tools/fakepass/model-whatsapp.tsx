@@ -129,28 +129,46 @@ function doodleSvgMarkup(dark: boolean): string {
   </svg>`;
 }
 
-// Assa o SVG do doodle num PNG data-uri no TAMANHO DE EXIBIÇÃO (280px). Assim o
-// tamanho intrínseco do PNG = background-size:280px, e o html2canvas (que ignora
-// background-size e usa o intrínseco) tila IGUAL ao navegador → download = preview.
-// Devolve '' enquanto não pronto; o baking roda no mount, pronto antes do clique.
+// Assa o doodle num PNG data-uri já TILADO na ÁREA INTEIRA do chat (320×920) e a
+// tela usa esse PNG como <img> (não como background-size).
+//
+// POR QUÊ: o html2canvas NÃO escala `background-size` direito no export (com o
+// zoom/scale do download o padrão saía GRANDE e espaçado, diferente da prévia).
+// Já um <img> ele desenha FIEL, escalando a imagem inteira pelo scale do export.
+// Então pré-tilamos o padrão (tile de 280px) numa imagem grande e mandamos como
+// <img width:100%> — aí prévia e download ficam IDÊNTICOS. Devolve '' enquanto
+// não pronto; o baking roda no mount, pronto antes do clique.
 function useDoodlePng(dark: boolean): string {
   const [png, setPng] = useState('');
   useEffect(() => {
     let alive = true;
     setPng('');
-    const RES = 280;
+    const TILE = 280; // densidade do padrão (tamanho do tile)
+    const W = 320; // largura da área de chat
+    const H = 920; // altura generosa — cobre qualquer conversa; sobra é clipada
     const img = new Image();
     img.onload = () => {
       if (!alive) return;
       try {
+        // 1) tile do doodle num canvas TILE×TILE
+        const tc = document.createElement('canvas');
+        tc.width = TILE;
+        tc.height = TILE;
+        const tctx = tc.getContext('2d');
+        if (!tctx) return;
+        tctx.drawImage(img, 0, 0, TILE, TILE);
+        // 2) tila esse tile numa imagem GRANDE (a área toda do chat)
         const c = document.createElement('canvas');
-        c.width = RES;
-        c.height = RES;
+        c.width = W;
+        c.height = H;
         const ctx = c.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, RES, RES);
-          setPng(c.toDataURL('image/png'));
+        if (!ctx) return;
+        const pat = ctx.createPattern(tc, 'repeat');
+        if (pat) {
+          ctx.fillStyle = pat;
+          ctx.fillRect(0, 0, W, H);
         }
+        setPng(c.toDataURL('image/png'));
       } catch {
         /* se falhar, fica sem doodle (fundo sólido) — nunca quebra o export */
       }
@@ -582,30 +600,56 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
         </div>
       </div>
 
-      {/* MENSAGENS — fundo bege/escuro + padrão de doodles */}
+      {/* MENSAGENS — fundo bege/escuro + doodle como <img> (não background-size,
+          que o html2canvas escala errado no export). O <img> fica ATRÁS (zIndex 0)
+          e as mensagens num wrapper na frente (zIndex 1). */}
       <div
         style={{
           flex: 1,
           overflow: 'hidden',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'flex-end',
-          gap: 3,
-          padding: 10,
+          position: 'relative',
           backgroundColor: chatBg,
-          backgroundImage: doodlePng ? `url("${doodlePng}")` : 'none',
-          backgroundRepeat: 'repeat',
-          backgroundSize: '280px',
         }}
       >
-        {msgs.map((m, i) => {
-          const tail = i === 0 || msgs[i - 1].me !== m.me;
-          return m.kind === 'audio' ? (
-            <AudioBubble key={i} m={m} hora={s.hora} dark={dark} tail={tail} />
-          ) : (
-            <TextBubble key={i} m={m} hora={s.hora} dark={dark} emojiSet={emojiSet} tail={tail} />
-          );
-        })}
+        {doodlePng ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={doodlePng}
+            alt=""
+            aria-hidden
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: 'auto',
+              zIndex: 0,
+              pointerEvents: 'none',
+              userSelect: 'none',
+            }}
+          />
+        ) : null}
+        <div
+          style={{
+            position: 'relative',
+            zIndex: 1,
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'flex-end',
+            gap: 3,
+            padding: 10,
+          }}
+        >
+          {msgs.map((m, i) => {
+            const tail = i === 0 || msgs[i - 1].me !== m.me;
+            return m.kind === 'audio' ? (
+              <AudioBubble key={i} m={m} hora={s.hora} dark={dark} tail={tail} />
+            ) : (
+              <TextBubble key={i} m={m} hora={s.hora} dark={dark} emojiSet={emojiSet} tail={tail} />
+            );
+          })}
+        </div>
       </div>
 
       {/* RODAPÉ */}
