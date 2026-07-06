@@ -76,10 +76,20 @@ function BemEstarStage({ s }: { s: S }) {
   const H = 640; // 9:16 no palco (exporta 1080×1920)
   const k = 1;
   const green = s.green || CHROMA;
-  const mid = Math.round(H / 2);
-  const seam = 2 * k; // linha branca entre os quadros
+
+  // Quadros REDUZIDOS e centralizados (não borda a borda): margem em volta + cantos
+  // arredondados. Fundo branco da marca; os avatares ficam em duas janelas verdes.
+  const M = 13 * k; // margem lateral e do topo
+  const BM = 48 * k; // margem inferior (onda)
+  const G = 9 * k; // vão entre os dois quadros
+  const rad = 16 * k;
+  const panelW = W - 2 * M;
+  const panelH = (H - M - BM - G) / 2;
+  const topY = M;
+  const botY = M + panelH + G;
+  const seamY = M + panelH + G / 2; // centro do vão
   const barW = 11 * k;
-  const barH = 46 * k;
+  const barH = 44 * k;
 
   return (
     <div
@@ -88,38 +98,36 @@ function BemEstarStage({ s }: { s: S }) {
         width: W,
         height: H,
         overflow: 'hidden',
-        background: '#0e0e0e',
+        background: '#ffffff',
         fontFamily: FONT_STACK,
         WebkitFontSmoothing: 'antialiased',
       }}
     >
       {/* ── Quadro de cima (avatar 1) ── */}
-      <div style={{ position: 'absolute', top: 0, left: 0, width: W, height: mid - seam / 2, background: panelBg(s.topImg, green) }} />
+      <div style={{ position: 'absolute', left: M, top: topY, width: panelW, height: panelH, background: panelBg(s.topImg, green), borderRadius: rad }} />
       {/* ── Quadro de baixo (avatar 2) ── */}
-      <div style={{ position: 'absolute', top: mid + seam / 2, left: 0, width: W, height: H - mid - seam / 2, background: panelBg(s.bottomImg, green) }} />
-      {/* emenda branca */}
-      <div style={{ position: 'absolute', top: mid - seam / 2, left: 0, width: W, height: seam, background: '#ffffff' }} />
+      <div style={{ position: 'absolute', left: M, top: botY, width: panelW, height: panelH, background: panelBg(s.bottomImg, green), borderRadius: rad }} />
 
-      {/* ── Acentos coloridos da marca na emenda ── */}
+      {/* ── Acentos coloridos da marca no vão, colados nas bordas ── */}
       {/* esquerda: verde (em cima) + amarelo (embaixo) */}
-      <div style={{ position: 'absolute', left: 0, top: mid - barH - 2 * k, width: barW, height: barH, background: A_GREEN, borderRadius: `0 ${4 * k}px ${4 * k}px 0` }} />
-      <div style={{ position: 'absolute', left: 0, top: mid + 2 * k, width: barW, height: barH, background: A_YELLOW, borderRadius: `0 ${4 * k}px ${4 * k}px 0` }} />
+      <div style={{ position: 'absolute', left: 0, top: seamY - barH - 1 * k, width: barW, height: barH, background: A_GREEN, borderRadius: `0 ${4 * k}px ${4 * k}px 0` }} />
+      <div style={{ position: 'absolute', left: 0, top: seamY + 1 * k, width: barW, height: barH, background: A_YELLOW, borderRadius: `0 ${4 * k}px ${4 * k}px 0` }} />
       {/* direita: teal (em cima) + laranja (embaixo) */}
-      <div style={{ position: 'absolute', right: 0, top: mid - barH - 2 * k, width: barW, height: barH, background: A_TEAL, borderRadius: `${4 * k}px 0 0 ${4 * k}px` }} />
-      <div style={{ position: 'absolute', right: 0, top: mid + 2 * k, width: barW, height: barH, background: A_ORANGE, borderRadius: `${4 * k}px 0 0 ${4 * k}px` }} />
+      <div style={{ position: 'absolute', right: 0, top: seamY - barH - 1 * k, width: barW, height: barH, background: A_TEAL, borderRadius: `${4 * k}px 0 0 ${4 * k}px` }} />
+      <div style={{ position: 'absolute', right: 0, top: seamY + 1 * k, width: barW, height: barH, background: A_ORANGE, borderRadius: `${4 * k}px 0 0 ${4 * k}px` }} />
 
       {/* ── Onda verde no rodapé ── */}
       <svg
         width={W}
-        height={72 * k}
-        viewBox={`0 0 ${W} 72`}
+        height={54 * k}
+        viewBox={`0 0 ${W} 54`}
         preserveAspectRatio="none"
         style={{ position: 'absolute', left: 0, bottom: 0, display: 'block' }}
       >
-        <path d={`M0,72 L0,34 Q${W * 0.32},2 ${W * 0.6},26 T${W},20 L${W},72 Z`} fill={A_GREEN} />
+        <path d={`M0,54 L0,26 Q${W * 0.3},0 ${W * 0.58},20 T${W},14 L${W},54 Z`} fill={A_GREEN} />
       </svg>
 
-      {/* ── Selo bem estar + g1 ── */}
+      {/* ── Selo bem estar + g1 (sobre o quadro de cima) ── */}
       <BemEstarMark k={k} />
     </div>
   );
