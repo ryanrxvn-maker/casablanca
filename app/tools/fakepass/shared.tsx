@@ -270,6 +270,7 @@ export async function downloadNodeAsPng(
   };
 
   let blob: Blob | null = null;
+  let vcompCleanup: (() => void) | null = null;
   try {
     // Espera imagens (emojis do CDN, avatares, fotos) carregarem — senão saem
     // em branco no canvas.
@@ -286,6 +287,42 @@ export async function downloadNodeAsPng(
     await new Promise((r) => setTimeout(r, 60));
 
     applyCropGuards();
+
+    // ── Compensação do bug de CENTRALIZAÇÃO VERTICAL do html2canvas ──
+    // O html2canvas ANCORA o glifo no FUNDO da caixa de conteúdo. Resultado: texto de
+    // UMA linha centralizado numa caixa MAIS ALTA que o glifo (via flex
+    // `align-items:center` OU `line-height`) sai BAIXO no PNG — no navegador fica no
+    // centro. (Bolha de chat NÃO sofre: o texto flui do topo, caixa = conteúdo.)
+    // Correção: medimos, por FOLHA de texto, o vão vazio ABAIXO do glifo no navegador
+    // (onde está certo) e — SÓ no clone do html2canvas (via `onclone`; a PRÉVIA não
+    // muda) — somamos isso ao padding-bottom. A âncora-de-fundo sobe e o glifo cai
+    // exatamente onde o navegador o tem. Marcamos aqui com data-attr (inerte: não
+    // reflui a prévia) o padding-bottom-alvo; o onclone aplica no clone.
+    const vcompEls: HTMLElement[] = [];
+    node.querySelectorAll<HTMLElement>('*').forEach((el) => {
+      const kids = Array.from(el.childNodes);
+      if (kids.some((n) => n.nodeType === 1)) return; // só FOLHAS (sem filho elemento)
+      if (!kids.some((n) => n.nodeType === 3 && (n.textContent || '').trim())) return;
+      const cs = getComputedStyle(el);
+      const fs = parseFloat(cs.fontSize) || 0;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const gr = range.getBoundingClientRect();
+      const er = el.getBoundingClientRect();
+      if (!gr.height || !er.height) return;
+      if (gr.height > fs * 1.6) return; // uma linha só (multi-linha flui do topo, já bate)
+      const padT = parseFloat(cs.paddingTop) || 0;
+      const padB = parseFloat(cs.paddingBottom) || 0;
+      const bT = parseFloat(cs.borderTopWidth) || 0;
+      const bB = parseFloat(cs.borderBottomWidth) || 0;
+      const gapAbove = gr.top - (er.top + bT + padT);
+      const gapBelow = er.bottom - bB - padB - gr.bottom;
+      // só quando CENTRALIZADO (folga dos DOIS lados). Alinhado no topo → não mexer.
+      if (gapAbove <= 1.5 || gapBelow <= 1.5) return;
+      el.dataset.fpPadb = String(Math.round((padB + gapBelow) * 100) / 100);
+      vcompEls.push(el);
+    });
+    vcompCleanup = () => vcompEls.forEach((el) => delete el.dataset.fpPadb);
 
     // Largura de referência = a largura de LAYOUT do palco (stageW). Passar refW
     // evita medir o rect visual — o PNG sempre sai na resolução cheia.
@@ -304,12 +341,23 @@ export async function downloadNodeAsPng(
       useCORS: true, // emojis do CDN
       logging: false,
       imageTimeout: 20000,
+      // Aplica a compensação de centralização vertical (ver acima) SÓ no clone que o
+      // html2canvas rasteriza — a prévia real fica intocada.
+      onclone: (_doc: Document, clonedRoot: HTMLElement) => {
+        clonedRoot.querySelectorAll<HTMLElement>('[data-fp-padb]').forEach((el) => {
+          const pb = parseFloat(el.dataset.fpPadb || '');
+          if (!Number.isFinite(pb)) return;
+          el.style.boxSizing = 'border-box';
+          el.style.paddingBottom = pb + 'px';
+        });
+      },
     });
     blob = await new Promise<Blob | null>((res) =>
       canvas.toBlob((b: Blob | null) => res(b), 'image/png'),
     );
   } finally {
     cropGuards.forEach((restore) => restore());
+    if (vcompCleanup) vcompCleanup();
     if (zoomEl) zoomEl.style.zoom = prevZoom;
   }
 
