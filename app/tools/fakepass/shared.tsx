@@ -323,11 +323,14 @@ export async function downloadNodeAsPng(
           (/(^|\s)(inline-)?(flex|grid)(\s|$)/.test(cs.display) && cs.alignItems === 'center') ||
           cs.justifyContent === 'center';
         if (!centers) continue;
+        // Caixa de BORDA (não conteúdo): o glifo multi-linha (manchete) pode ser um
+        // tico MAIOR que o content-box e MENOR que a borda — a borda é o "trilho" real
+        // onde o html2canvas ancora. Só a subtraímos a borda em si.
         const ar = a.getBoundingClientRect();
-        const cTop = ar.top + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.paddingTop) || 0);
-        const cBot = ar.bottom - (parseFloat(cs.borderBottomWidth) || 0) - (parseFloat(cs.paddingBottom) || 0);
-        if (cBot - cTop - gr.height > 3) {
-          band = { top: cTop, bottom: cBot };
+        const bTop = ar.top + (parseFloat(cs.borderTopWidth) || 0);
+        const bBot = ar.bottom - (parseFloat(cs.borderBottomWidth) || 0);
+        if (bBot - bTop - gr.height > 3) {
+          band = { top: bTop, bottom: bBot };
           break;
         }
       }
