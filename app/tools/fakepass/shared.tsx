@@ -33,13 +33,12 @@ export const uiFont = Inter({
   display: 'swap',
   variable: '--font-fp',
 });
-// SEM a Inter (web font): usamos a fonte de SISTEMA (SF Pro no iOS/Mac, Segoe no
-// Windows, Roboto no Android) — que é o que WhatsApp/Instagram REAIS usam. Motivo
-// técnico: o export (snapdom/foreignObject) desenha via navegador SEM embutir web
-// font (embutir woff2 no SVG levava 42s+); a fonte de sistema já está no SO e sai
-// idêntica na prévia e no download. Assim download === prévia PIXEL A PIXEL.
+// A Inter (réplica fiel do SF Pro do iPhone/Instagram) vem PRIMEIRO — em Apple o
+// próprio -apple-system entrega SF Pro nativo; nas demais plataformas a Inter
+// mantém o mesmo desenho. O export é html2canvas, que desenha com a fonte JÁ
+// CARREGADA na página, então a MESMA fonte da prévia sai no download.
 export const FONT_STACK =
-  "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+  "var(--font-fp), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
 
 /* ────────────────────────────── Tipos ────────────────────────────── */
 
@@ -195,80 +194,14 @@ export function FitText({
 /* ───────────────────────── Export (PNG) ───────────────────────── */
 
 /**
- * Junta a Inter (next/font, famílias __…) usada no nó como `localFonts` do snapdom:
- * cada woff2 vira um data-uri base64. Assim o snapdom embute SÓ a Inter (rápido) em
- * vez de VARRER todo o CSS do app pra achar @font-face (o Tailwind gigante fazia o
- * export levar 45s+). Dedup por URL. Se falhar, devolve [] (cai na fonte de sistema).
- */
-async function buildLocalFonts(
-  node: HTMLElement,
-): Promise<Array<{ family: string; src: string; weight?: string; style?: string }>> {
-  const used = new Set<string>();
-  for (const el of [node, ...Array.from(node.querySelectorAll('*'))]) {
-    const ff = getComputedStyle(el as HTMLElement).fontFamily || '';
-    for (const raw of ff.split(',')) {
-      const n = raw.trim().replace(/^["']|["']$/g, '');
-      if (n.startsWith('__')) used.add(n);
-    }
-  }
-  if (used.size === 0) return [];
-  const out: Array<{ family: string; src: string; weight?: string; style?: string }> = [];
-  const seen = new Set<string>();
-  const cache = new Map<string, string>(); // url -> dataUrl
-  for (const ss of Array.from(document.styleSheets)) {
-    let rules: CSSRuleList | null = null;
-    try {
-      rules = ss.cssRules;
-    } catch {
-      continue;
-    }
-    if (!rules) continue;
-    for (const r of Array.from(rules)) {
-      if ((r as CSSRule).type !== 5 /* FONT_FACE_RULE */) continue;
-      const fr = r as CSSFontFaceRule;
-      const fam = fr.style.getPropertyValue('font-family').replace(/^["']|["']$/g, '');
-      if (!used.has(fam)) continue;
-      const m = fr.style.getPropertyValue('src').match(/url\(["']?([^"')]+)["']?\)/);
-      if (!m) continue;
-      const url = m[1];
-      const weight = fr.style.getPropertyValue('font-weight') || '400';
-      const style = fr.style.getPropertyValue('font-style') || 'normal';
-      const key = fam + '|' + weight + '|' + style + '|' + url;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      let dataUrl = cache.get(url);
-      if (dataUrl === undefined) {
-        try {
-          const buf = await fetch(url).then((res) => res.arrayBuffer());
-          const bytes = new Uint8Array(buf);
-          let bin = '';
-          for (let i = 0; i < bytes.length; i += 0x8000) {
-            bin += String.fromCharCode.apply(
-              null,
-              Array.from(bytes.subarray(i, i + 0x8000)) as unknown as number[],
-            );
-          }
-          dataUrl = `data:font/woff2;base64,${btoa(bin)}`;
-          cache.set(url, dataUrl);
-        } catch {
-          continue;
-        }
-      }
-      out.push({ family: fam, src: dataUrl, weight, style });
-    }
-  }
-  return out;
-}
-
-/**
- * Rasteriza um nó do DOM em PNG NÍTIDO e IDÊNTICO À PRÉVIA.
+ * Rasteriza um nó do DOM em PNG NÍTIDO e fiel à prévia.
  *
- * Motor: `snapdom` (SVG <foreignObject>). Quem desenha o PNG é o PRÓPRIO NAVEGADOR
- * — a MESMA engine da prévia — então NÃO há o "drift" vertical do html2canvas (que
- * reimplementa o layout e sai ~0.5px diferente por texto, acumulando de cima pra
- * baixo). A fonte Inter é embutida via `localFonts` (ver buildLocalFonts) pra não
- * varrer o CSS do app (que fazia o export levar 45s+); com isso o export fica em
- * ~4s E o texto sai na Inter real = download === prévia PIXEL A PIXEL.
+ * Motor: `html2canvas` — RÁPIDO (~3s, previsível) e desenha com a fonte JÁ
+ * CARREGADA na página, então a MESMA fonte da prévia (Inter) sai no download. Os
+ * motores foreignObject (snapdom/modern-screenshot) sairiam pixel-a-pixel porque
+ * quem desenha é o próprio navegador, mas no CACHE FRIO (o 1º export do usuário)
+ * levam 40-77s — inviável. O html2canvas tem um pequeno drift vertical sub-pixel,
+ * mitigado pelo crop-guard (abaixo) e por line-heights explícitos nos textos-chave.
  *
  * `targetW` = largura final do PNG; scale = targetW/refW (stageW). Download por
  * Object URL (data URL trunca arquivo grande).
@@ -359,24 +292,22 @@ export async function downloadNodeAsPng(
     const baseW = refW ?? node.getBoundingClientRect().width;
     const scale = targetW / baseW;
 
-    // MOTOR: snapdom (SVG <foreignObject>). Quem desenha o PNG é o PRÓPRIO
-    // NAVEGADOR — a MESMA engine da prévia — então NÃO há o "drift" vertical que
-    // o html2canvas causa (ele reimplementa o layout e a altura de cada texto sai
-    // ~0.5px diferente, acumulando de cima pra baixo). Download === prévia por
-    // construção. `embedFonts:false` = NÃO embute web font (embutir woff2 no SVG
-    // deixava o export em 42s+); o texto usa a fonte de SISTEMA (SF Pro no iOS/Mac,
-    // Segoe no Windows, Roboto no Android) — a MESMA que a prévia resolve (a
-    // FONT_STACK começa por `-apple-system`, sem Inter) → download === prévia, e é
-    // a fonte que o WhatsApp/Instagram REAIS usam. `fast` pula esperas ociosas.
-    const { snapdom } = await import('@zumer/snapdom');
-    blob = await snapdom.toBlob(node, {
-      type: 'png',
+    // MOTOR: html2canvas — RÁPIDO (~3s) e usa a fonte JÁ CARREGADA na página, então
+    // a fonte bate com a prévia. Os motores foreignObject (snapdom/modern-screenshot)
+    // sairiam PIXEL A PIXEL (o navegador desenha), mas no CACHE FRIO (1º export do
+    // user) levam 40-77s — inviável. O html2canvas tem um drift vertical sub-pixel
+    // (mitigado pelo crop-guard e line-heights inteiros dos textos-chave).
+    const { default: html2canvas } = await import('html2canvas');
+    const canvas = await html2canvas(node, {
       scale,
-      dpr: 1, // usa só o `scale`; não dobra pela densidade da tela
-      backgroundColor: 'transparent', // stickers; modelos opacos pintam o próprio
-      embedFonts: false, // fonte de sistema (rápido); a prévia usa a mesma
-      fast: true,
+      backgroundColor: null, // transparente (stickers); modelos opacos pintam o próprio
+      useCORS: true, // emojis do CDN
+      logging: false,
+      imageTimeout: 20000,
     });
+    blob = await new Promise<Blob | null>((res) =>
+      canvas.toBlob((b: Blob | null) => res(b), 'image/png'),
+    );
   } finally {
     cropGuards.forEach((restore) => restore());
     if (zoomEl) zoomEl.style.zoom = prevZoom;
