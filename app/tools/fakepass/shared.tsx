@@ -268,7 +268,7 @@ export async function downloadNodeAsPng(
     });
   };
 
-  let canvas: HTMLCanvasElement;
+  let blob: Blob | null = null;
   try {
     // Espera imagens (emojis do CDN, avatares, fotos) carregarem — senão saem
     // em branco no canvas.
@@ -291,22 +291,24 @@ export async function downloadNodeAsPng(
     const baseW = refW ?? node.getBoundingClientRect().width;
     const scale = targetW / baseW;
 
-    const { default: html2canvas } = await import('html2canvas');
-    canvas = await html2canvas(node, {
+    // MOTOR: snapdom (SVG <foreignObject>). Quem desenha o PNG é o PRÓPRIO
+    // NAVEGADOR — a MESMA engine da prévia — então NÃO há o "drift" vertical que
+    // o html2canvas causa (ele reimplementa o layout e a altura de cada texto sai
+    // ~0.5px diferente, acumulando de cima pra baixo). Download === prévia por
+    // construção. `fast` pula esperas ociosas; `embedFonts` embute a Inter.
+    const { snapdom } = await import('@zumer/snapdom');
+    blob = await snapdom.toBlob(node, {
+      type: 'png',
       scale,
-      backgroundColor: null, // transparente (stickers); modelos opacos pintam o próprio
-      useCORS: true, // emojis do CDN
-      logging: false,
-      imageTimeout: 20000,
+      dpr: 1, // usa só o `scale`; não dobra pela densidade da tela
+      backgroundColor: 'transparent', // stickers; modelos opacos pintam o próprio
+      embedFonts: true, // embute a Inter usada no nó
+      fast: true,
     });
   } finally {
     cropGuards.forEach((restore) => restore());
     if (zoomEl) zoomEl.style.zoom = prevZoom;
   }
-
-  const blob: Blob | null = await new Promise((res) =>
-    canvas.toBlob((b: Blob | null) => res(b), 'image/png'),
-  );
 
   if (!blob) throw new Error('export vazio');
   const url = URL.createObjectURL(blob);
