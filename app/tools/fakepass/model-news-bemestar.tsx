@@ -101,6 +101,11 @@ function BemEstarStage({ s }: { s: S }) {
         background: '#ffffff',
         fontFamily: FONT_STACK,
         WebkitFontSmoothing: 'antialiased',
+        // borda GERAL do card levemente arredondada + linha fina (não confundir com
+        // o arredondado dos quadros verdes).
+        borderRadius: 26 * k,
+        border: `${1.5 * k}px solid #e8e8e8`,
+        boxSizing: 'border-box',
       }}
     >
       {/* ── Quadro de cima (avatar 1) ── */}

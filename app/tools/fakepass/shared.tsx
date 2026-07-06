@@ -368,7 +368,16 @@ export async function downloadNodeAsPng(
         const gapAbove = gr.top - band.top;
         const gapBelow = band.bottom - gr.bottom;
         if (gapAbove <= 1 || gapBelow <= 1) continue; // centralizado dos DOIS lados
-        el.dataset.fpVshift = String(Math.round(gapBelow * 100) / 100);
+        // CALIBRAÇÃO do shift (medido empiricamente por varredura de pixel):
+        // • 1 linha: o html2canvas ancora o glifo no fundo da caixa → precisa subir
+        //   gapBelow; o wrap inline-block entrega ~80% → multiplico por 1.25.
+        // • multi-linha (manchete FitText): o html2canvas joga o bloco BEM mais pra
+        //   baixo (mistura ancoragem + line-spacing), erro ≈ folga TOTAL, não só
+        //   gapBelow → uso (gapAbove+gapBelow) × 1.1.
+        const fs = parseFloat(getComputedStyle(el).fontSize) || 14;
+        const multiline = gr.height > fs * 1.6;
+        const shift = multiline ? (gapAbove + gapBelow) * 1.1 : gapBelow * 1.25;
+        el.dataset.fpVshift = String(Math.round(shift * 100) / 100);
         vcompEls.push(el);
       }
     }
