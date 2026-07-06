@@ -190,9 +190,21 @@ export function FitText({
 /* ───────────────────────── Export (PNG) ───────────────────────── */
 
 /**
- * Rasteriza um nó do DOM em PNG nítido. `targetW` define a largura final; o
- * scale é derivado da largura real do nó, então funciona pra qualquer palco.
- * Download por Object URL (nunca base64 — data URL trunca arquivo grande).
+ * Rasteriza um nó do DOM em PNG NÍTIDO e IDÊNTICO À PRÉVIA.
+ *
+ * Motor: `modern-screenshot` (SVG <foreignObject>). Diferença fundamental pro
+ * html2canvas: quem desenha o PNG é o PRÓPRIO NAVEGADOR (a mesma engine que
+ * pinta a prévia), não uma reimplementação. Então texto, line-height, overflow,
+ * elipse (…), flexbox, gradiente e sombra saem PIXEL A PIXEL como na tela —
+ * acabou o "download bugado/cortado/desalinhado" que o html2canvas causava por
+ * recalcular o layout por conta própria.
+ *
+ * `targetW` = largura final do PNG; o scale vem de refW (largura de LAYOUT do
+ * palco = stageW), então o PNG sempre sai na resolução cheia. Download por
+ * Object URL (nunca base64 — data URL trunca arquivo grande).
+ *
+ * Fallback: se o navegador bloquear foreignObject (raro — ex.: Safari antigo),
+ * cai no html2canvas pra nunca falhar de vez.
  */
 export async function downloadNodeAsPng(
   node: HTMLElement,
@@ -200,20 +212,27 @@ export async function downloadNodeAsPng(
   targetW: number,
   refW?: number,
 ) {
+  // Fontes prontas ANTES de capturar: o foreignObject embute o @font-face no
+  // SVG; se a fonte não terminou de carregar, o texto sai numa fonte de
+  // fallback com métrica diferente = desalinhado. `document.fonts.ready` garante
+  // que a prévia e o export usam exatamente a mesma fonte.
   if (document.fonts?.ready) await document.fonts.ready;
+
   // A prévia é encolhida com CSS `zoom` num wrapper [data-fp-zoom]. Durante a
-  // captura, zeramos esse zoom (→ 1) pra o nó voltar ao tamanho natural: o PNG
-  // sai SEMPRE na resolução cheia e imune a qualquer medição do html2canvas
-  // dentro de um ancestral escalado. Restauramos no finally.
+  // captura, zeramos esse zoom (→ 1) pra o nó voltar ao tamanho natural (stageW):
+  // o PNG sai SEMPRE na resolução cheia e imune a qualquer medição dentro de um
+  // ancestral escalado. Restauramos no finally.
   const zoomEl = node.closest('[data-fp-zoom]') as HTMLElement | null;
   const prevZoom = zoomEl ? zoomEl.style.zoom : '';
   if (zoomEl) zoomEl.style.zoom = '1';
-  let canvas: HTMLCanvasElement;
+
+  let blob: Blob | null = null;
   try {
-    // Espera imagens (emojis, avatares, fotos) carregarem — senão saem em branco.
+    // Espera imagens (emojis do CDN, avatares, fotos) carregarem — o export
+    // inlina cada uma; se não carregou, sai em branco.
     await Promise.all(
       Array.from(node.querySelectorAll('img')).map((img) =>
-        img.complete
+        img.complete && img.naturalWidth > 0
           ? Promise.resolve()
           : new Promise<void>((res) => {
               img.addEventListener('load', () => res(), { once: true });
@@ -222,24 +241,41 @@ export async function downloadNodeAsPng(
       ),
     );
     await new Promise((r) => setTimeout(r, 60));
-    const { default: html2canvas } = await import('html2canvas');
-    // Largura de referência = a largura de LAYOUT do palco (stageW). Passar
-    // refW evita medir o rect visual — o PNG sempre sai na resolução cheia.
+
+    // Largura de referência = a largura de LAYOUT do palco (stageW). Passar refW
+    // evita medir o rect visual — o PNG sempre sai na resolução cheia.
     const baseW = refW ?? node.getBoundingClientRect().width;
     const scale = targetW / baseW;
-    canvas = await html2canvas(node, {
-      scale,
-      backgroundColor: null,
-      useCORS: true,
-      logging: false,
-    });
+
+    try {
+      const { domToBlob } = await import('modern-screenshot');
+      blob = await domToBlob(node, {
+        type: 'image/png',
+        scale,
+        // fundo transparente (stickers de story); modelos opacos pintam o próprio.
+        backgroundColor: null,
+        // busca as imagens externas (emoji CDN) com CORS e sem cache quebrado.
+        fetch: { requestInit: { cache: 'no-cache', mode: 'cors' } },
+      });
+    } catch (err) {
+      // Fallback só pra navegadores que bloqueiam foreignObject — nunca falha.
+      console.warn('[fakepass] foreignObject indisponível, caindo no html2canvas', err);
+      const { default: html2canvas } = await import('html2canvas');
+      const canvas = await html2canvas(node, {
+        scale,
+        backgroundColor: null,
+        useCORS: true,
+        logging: false,
+      });
+      blob = await new Promise<Blob | null>((res) =>
+        canvas.toBlob((b: Blob | null) => res(b), 'image/png'),
+      );
+    }
   } finally {
     if (zoomEl) zoomEl.style.zoom = prevZoom;
   }
-  const blob: Blob | null = await new Promise((res) =>
-    canvas.toBlob((b: Blob | null) => res(b), 'image/png'),
-  );
-  if (!blob) throw new Error('toBlob vazio');
+
+  if (!blob) throw new Error('export vazio');
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
