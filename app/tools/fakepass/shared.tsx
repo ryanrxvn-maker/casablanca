@@ -223,6 +223,46 @@ export async function downloadNodeAsPng(
   const prevZoom = zoomEl ? zoomEl.style.zoom : '';
   if (zoomEl) zoomEl.style.zoom = '1';
 
+  // ── Crop-guard do html2canvas ──
+  // O html2canvas sobe o texto ~1-2px na hora de desenhar; em textos truncados de
+  // 1 linha (nome do header, @usuário, etc.) o `overflow:hidden` que faz o "…"
+  // acaba cortando o TOPO das letras no PNG. Damos folga vertical LAYOUT-NEUTRA:
+  // padding-block +3px cresce a caixa (dá espaço pro clip), margin-block -3px
+  // cancela o crescimento (o texto fica na MESMA posição). Assim a prévia e o
+  // download continuam idênticos, só que o export não corta mais. Restauramos no
+  // finally.
+  const cropGuards: Array<() => void> = [];
+  const applyCropGuards = () => {
+    node.querySelectorAll<HTMLElement>('*').forEach((el) => {
+      const cs = getComputedStyle(el);
+      if (cs.textOverflow !== 'ellipsis' || cs.whiteSpace !== 'nowrap') return;
+      const st = el.style;
+      const prev = {
+        pt: st.paddingTop,
+        pb: st.paddingBottom,
+        mt: st.marginTop,
+        mb: st.marginBottom,
+        bs: st.boxSizing,
+      };
+      const pt = parseFloat(cs.paddingTop) || 0;
+      const pb = parseFloat(cs.paddingBottom) || 0;
+      const mt = parseFloat(cs.marginTop) || 0;
+      const mb = parseFloat(cs.marginBottom) || 0;
+      st.boxSizing = 'content-box';
+      st.paddingTop = `${pt + 3}px`;
+      st.paddingBottom = `${pb + 3}px`;
+      st.marginTop = `${mt - 3}px`;
+      st.marginBottom = `${mb - 3}px`;
+      cropGuards.push(() => {
+        st.paddingTop = prev.pt;
+        st.paddingBottom = prev.pb;
+        st.marginTop = prev.mt;
+        st.marginBottom = prev.mb;
+        st.boxSizing = prev.bs;
+      });
+    });
+  };
+
   let canvas: HTMLCanvasElement;
   try {
     // Espera imagens (emojis do CDN, avatares, fotos) carregarem — senão saem
@@ -239,6 +279,8 @@ export async function downloadNodeAsPng(
     );
     await new Promise((r) => setTimeout(r, 60));
 
+    applyCropGuards();
+
     // Largura de referência = a largura de LAYOUT do palco (stageW). Passar refW
     // evita medir o rect visual — o PNG sempre sai na resolução cheia.
     const baseW = refW ?? node.getBoundingClientRect().width;
@@ -253,6 +295,7 @@ export async function downloadNodeAsPng(
       imageTimeout: 20000,
     });
   } finally {
+    cropGuards.forEach((restore) => restore());
     if (zoomEl) zoomEl.style.zoom = prevZoom;
   }
 
