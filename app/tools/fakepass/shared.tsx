@@ -190,20 +190,83 @@ export function FitText({
 /* ───────────────────────── Export (PNG) ───────────────────────── */
 
 /**
+ * Junta a Inter (next/font, famílias __…) usada no nó como `localFonts` do snapdom:
+ * cada woff2 vira um data-uri base64. Assim o snapdom embute SÓ a Inter (rápido) em
+ * vez de VARRER todo o CSS do app pra achar @font-face (o Tailwind gigante fazia o
+ * export levar 45s+). Dedup por URL. Se falhar, devolve [] (cai na fonte de sistema).
+ */
+async function buildLocalFonts(
+  node: HTMLElement,
+): Promise<Array<{ family: string; src: string; weight?: string; style?: string }>> {
+  const used = new Set<string>();
+  for (const el of [node, ...Array.from(node.querySelectorAll('*'))]) {
+    const ff = getComputedStyle(el as HTMLElement).fontFamily || '';
+    for (const raw of ff.split(',')) {
+      const n = raw.trim().replace(/^["']|["']$/g, '');
+      if (n.startsWith('__')) used.add(n);
+    }
+  }
+  if (used.size === 0) return [];
+  const out: Array<{ family: string; src: string; weight?: string; style?: string }> = [];
+  const seen = new Set<string>();
+  const cache = new Map<string, string>(); // url -> dataUrl
+  for (const ss of Array.from(document.styleSheets)) {
+    let rules: CSSRuleList | null = null;
+    try {
+      rules = ss.cssRules;
+    } catch {
+      continue;
+    }
+    if (!rules) continue;
+    for (const r of Array.from(rules)) {
+      if ((r as CSSRule).type !== 5 /* FONT_FACE_RULE */) continue;
+      const fr = r as CSSFontFaceRule;
+      const fam = fr.style.getPropertyValue('font-family').replace(/^["']|["']$/g, '');
+      if (!used.has(fam)) continue;
+      const m = fr.style.getPropertyValue('src').match(/url\(["']?([^"')]+)["']?\)/);
+      if (!m) continue;
+      const url = m[1];
+      const weight = fr.style.getPropertyValue('font-weight') || '400';
+      const style = fr.style.getPropertyValue('font-style') || 'normal';
+      const key = fam + '|' + weight + '|' + style + '|' + url;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      let dataUrl = cache.get(url);
+      if (dataUrl === undefined) {
+        try {
+          const buf = await fetch(url).then((res) => res.arrayBuffer());
+          const bytes = new Uint8Array(buf);
+          let bin = '';
+          for (let i = 0; i < bytes.length; i += 0x8000) {
+            bin += String.fromCharCode.apply(
+              null,
+              Array.from(bytes.subarray(i, i + 0x8000)) as unknown as number[],
+            );
+          }
+          dataUrl = `data:font/woff2;base64,${btoa(bin)}`;
+          cache.set(url, dataUrl);
+        } catch {
+          continue;
+        }
+      }
+      out.push({ family: fam, src: dataUrl, weight, style });
+    }
+  }
+  return out;
+}
+
+/**
  * Rasteriza um nó do DOM em PNG NÍTIDO e IDÊNTICO À PRÉVIA.
  *
- * Motor: `html2canvas`. Diferente dos motores de foreignObject (modern-screenshot,
- * snapdom), o html2canvas desenha DIRETO no canvas com a fonte JÁ CARREGADA na
- * página (a Inter real) — então o texto quebra IGUAL à prévia (mesma fonte, mesma
- * métrica) e não há o "fallback de fonte" que os foreignObject sofrem no contexto
- * isolado do SVG. E é RÁPIDO: os motores foreignObject travavam 30-60s nos modelos
- * de chat porque iteram o computed-style inteiro (centenas de props + CSS vars do
- * design system) por elemento; o html2canvas lê só o que precisa.
+ * Motor: `snapdom` (SVG <foreignObject>). Quem desenha o PNG é o PRÓPRIO NAVEGADOR
+ * — a MESMA engine da prévia — então NÃO há o "drift" vertical do html2canvas (que
+ * reimplementa o layout e sai ~0.5px diferente por texto, acumulando de cima pra
+ * baixo). A fonte Inter é embutida via `localFonts` (ver buildLocalFonts) pra não
+ * varrer o CSS do app (que fazia o export levar 45s+); com isso o export fica em
+ * ~4s E o texto sai na Inter real = download === prévia PIXEL A PIXEL.
  *
- * `targetW` = largura final do PNG; scale = targetW/refW (stageW), então o PNG sai
- * na resolução cheia. Download por Object URL (data URL trunca arquivo grande).
- * As correções de layout que o html2canvas precisa (line-height folgado, sem
- * flex-coluna nos headers) ficam na MARCAÇÃO de cada modelo.
+ * `targetW` = largura final do PNG; scale = targetW/refW (stageW). Download por
+ * Object URL (data URL trunca arquivo grande).
  */
 export async function downloadNodeAsPng(
   node: HTMLElement,
@@ -291,11 +354,19 @@ export async function downloadNodeAsPng(
     const baseW = refW ?? node.getBoundingClientRect().width;
     const scale = targetW / baseW;
 
+    // Inter embutida via localFonts (NÃO varrer o CSS do app — Tailwind = 45s+).
+    let localFonts: Array<{ family: string; src: string; weight?: string; style?: string }> = [];
+    try {
+      localFonts = await buildLocalFonts(node);
+    } catch {
+      /* segue sem — cai na fonte de sistema (Segoe/SF Pro) */
+    }
+
     // MOTOR: snapdom (SVG <foreignObject>). Quem desenha o PNG é o PRÓPRIO
     // NAVEGADOR — a MESMA engine da prévia — então NÃO há o "drift" vertical que
     // o html2canvas causa (ele reimplementa o layout e a altura de cada texto sai
     // ~0.5px diferente, acumulando de cima pra baixo). Download === prévia por
-    // construção. `fast` pula esperas ociosas; `embedFonts` embute a Inter.
+    // construção. `fast` pula esperas ociosas.
     const { snapdom } = await import('@zumer/snapdom');
     blob = await snapdom.toBlob(node, {
       type: 'png',
@@ -303,6 +374,7 @@ export async function downloadNodeAsPng(
       dpr: 1, // usa só o `scale`; não dobra pela densidade da tela
       backgroundColor: 'transparent', // stickers; modelos opacos pintam o próprio
       embedFonts: false, // NÃO varrer o CSS do app (Tailwind gigante = 45s+)
+      ...(localFonts.length ? { localFonts } : {}),
       fast: true,
     });
   } finally {
