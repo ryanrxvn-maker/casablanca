@@ -33,8 +33,13 @@ export const uiFont = Inter({
   display: 'swap',
   variable: '--font-fp',
 });
+// SEM a Inter (web font): usamos a fonte de SISTEMA (SF Pro no iOS/Mac, Segoe no
+// Windows, Roboto no Android) — que é o que WhatsApp/Instagram REAIS usam. Motivo
+// técnico: o export (snapdom/foreignObject) desenha via navegador SEM embutir web
+// font (embutir woff2 no SVG levava 42s+); a fonte de sistema já está no SO e sai
+// idêntica na prévia e no download. Assim download === prévia PIXEL A PIXEL.
 export const FONT_STACK =
-  "-apple-system, BlinkMacSystemFont, var(--font-fp), 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+  "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
 
 /* ────────────────────────────── Tipos ────────────────────────────── */
 
@@ -354,27 +359,22 @@ export async function downloadNodeAsPng(
     const baseW = refW ?? node.getBoundingClientRect().width;
     const scale = targetW / baseW;
 
-    // Inter embutida via localFonts (NÃO varrer o CSS do app — Tailwind = 45s+).
-    let localFonts: Array<{ family: string; src: string; weight?: string; style?: string }> = [];
-    try {
-      localFonts = await buildLocalFonts(node);
-    } catch {
-      /* segue sem — cai na fonte de sistema (Segoe/SF Pro) */
-    }
-
     // MOTOR: snapdom (SVG <foreignObject>). Quem desenha o PNG é o PRÓPRIO
     // NAVEGADOR — a MESMA engine da prévia — então NÃO há o "drift" vertical que
     // o html2canvas causa (ele reimplementa o layout e a altura de cada texto sai
     // ~0.5px diferente, acumulando de cima pra baixo). Download === prévia por
-    // construção. `fast` pula esperas ociosas.
+    // construção. `embedFonts:false` = NÃO embute web font (embutir woff2 no SVG
+    // deixava o export em 42s+); o texto usa a fonte de SISTEMA (SF Pro no iOS/Mac,
+    // Segoe no Windows, Roboto no Android) — a MESMA que a prévia resolve (a
+    // FONT_STACK começa por `-apple-system`, sem Inter) → download === prévia, e é
+    // a fonte que o WhatsApp/Instagram REAIS usam. `fast` pula esperas ociosas.
     const { snapdom } = await import('@zumer/snapdom');
     blob = await snapdom.toBlob(node, {
       type: 'png',
       scale,
       dpr: 1, // usa só o `scale`; não dobra pela densidade da tela
       backgroundColor: 'transparent', // stickers; modelos opacos pintam o próprio
-      embedFonts: false, // NÃO varrer o CSS do app (Tailwind gigante = 45s+)
-      ...(localFonts.length ? { localFonts } : {}),
+      embedFonts: false, // fonte de sistema (rápido); a prévia usa a mesma
       fast: true,
     });
   } finally {
