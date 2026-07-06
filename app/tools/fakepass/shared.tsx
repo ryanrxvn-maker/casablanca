@@ -185,7 +185,7 @@ export function FitText({
     setPx(size);
   }, [children, maxPx, minPx, maxHeight]);
   return (
-    <div ref={ref} style={{ ...style, fontSize: px }}>
+    <div ref={ref} data-fp-fit="" style={{ ...style, fontSize: px }}>
       {children || ' '}
     </div>
   );
@@ -368,26 +368,50 @@ export async function downloadNodeAsPng(
         const gapAbove = gr.top - band.top;
         const gapBelow = band.bottom - gr.bottom;
         if (gapAbove <= 1 || gapBelow <= 1) continue; // centralizado dos DOIS lados
-        // CALIBRAÇÃO do shift (medido empiricamente por varredura de pixel):
-        // • 1 linha: o html2canvas ancora o glifo no fundo da caixa → precisa subir
-        //   gapBelow; o wrap inline-block entrega ~80% → multiplico por 1.25.
-        // • multi-linha (manchete FitText): o html2canvas joga o bloco BEM mais pra
-        //   baixo (mistura ancoragem + line-spacing), erro ≈ folga TOTAL, não só
-        //   gapBelow → uso (gapAbove+gapBelow) × 1.1.
         const fs = parseFloat(getComputedStyle(el).fontSize) || 14;
-        const multiline = gr.height > fs * 1.6;
-        // O wrap inline-block ENTREGA o translateY em proporção que varia com a FONTE
-        // (fonte pequena ~0.79×, grande ~1.13× — medido). Compenso o shift por 1/ratio
-        // pra o glifo cair no centro. (1 linha: precisa subir gapBelow; multi-linha o
-        // html2canvas joga pro fundo → folga TOTAL.)
-        const ratio = 0.79 + 0.036 * (fs - 12.5);
-        const factor = Math.max(0.75, Math.min(1.35, 1 / ratio));
-        const shift = multiline ? (gapAbove + gapBelow) * 0.88 : gapBelow * factor;
-        el.dataset.fpVshift = String(Math.round(shift * 100) / 100);
+        // MULTI-LINHA (manchete FitText) → tratada no PASSO 3 (calibração exata por
+        // render), pois o erro do html2canvas varia demais por modelo pra fórmula
+        // pegar. Aqui só CHIPS de 1 linha (tag/programa/ticker/LIVE/hora).
+        if (gr.height > fs * 1.6) continue;
+        // 1 linha: o html2canvas ancora o glifo no fundo da caixa → precisa subir
+        // gapBelow; mas o wrap inline-block ENTREGA em proporção que varia com a FONTE
+        // (pequena ~0.79×, grande ~1.13× — medido) → compenso por 1/ratio.
+        const factor = Math.max(0.75, Math.min(1.35, 1 / (0.79 + 0.036 * (fs - 12.5))));
+        el.dataset.fpVshift = String(Math.round(gapBelow * factor * 100) / 100);
         vcompEls.push(el);
       }
     }
-    vcompCleanup = () => vcompEls.forEach((el) => delete el.dataset.fpVshift);
+    // PASSO 3 — MANCHETES (FitText MULTI-LINHA): o erro vertical do html2canvas nelas
+    // varia demais por modelo (flex-center, coluna, block; tamanhos diferentes) pra
+    // fórmula geométrica pegar. Coletamos aqui e MEDIMOS o erro REAL num render de
+    // calibração (mais abaixo), aplicando translateY EXATO. Só FitText (data-fp-fit),
+    // sem fundo próprio (o translateY não pode mexer o fundo).
+    const nodeRect = node.getBoundingClientRect();
+    const headlines: { el: HTMLElement; cy: number; x0: number; x1: number; dark: boolean }[] = [];
+    node.querySelectorAll<HTMLElement>('[data-fp-fit]').forEach((el) => {
+      const cs = getComputedStyle(el);
+      if (cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent') return;
+      if (cs.writingMode !== 'horizontal-tb' || (cs.transform && cs.transform !== 'none')) return;
+      const fs = parseFloat(cs.fontSize) || 14;
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const gr = range.getBoundingClientRect();
+      if (!gr.height || gr.height <= fs * 1.6) return; // só multi-linha
+      const m = cs.color.match(/(\d+),\s*(\d+),\s*(\d+)/);
+      const dark = !!m && parseInt(m[1], 10) + parseInt(m[2], 10) + parseInt(m[3], 10) < 380;
+      headlines.push({
+        el,
+        cy: (gr.top + gr.bottom) / 2 - nodeRect.top,
+        x0: gr.left - nodeRect.left,
+        x1: gr.right - nodeRect.left,
+        dark,
+      });
+    });
+
+    vcompCleanup = () => {
+      vcompEls.forEach((el) => delete el.dataset.fpVshift);
+      headlines.forEach((h) => delete h.el.dataset.fpVcal);
+    };
 
     // Largura de referência = a largura de LAYOUT do palco (stageW). Passar refW
     // evita medir o rect visual — o PNG sempre sai na resolução cheia.
@@ -400,27 +424,70 @@ export async function downloadNodeAsPng(
     // user) levam 40-77s — inviável. O html2canvas tem um drift vertical sub-pixel
     // (mitigado pelo crop-guard e line-heights inteiros dos textos-chave).
     const { default: html2canvas } = await import('html2canvas');
+    // Compensação aplicada SÓ no clone que o html2canvas rasteriza (a prévia não muda):
+    //  • CHIPS [data-fp-vshift]: envolve o texto num <span> inline-block com
+    //    translateY(-vão) — sobe só o glifo, o fundo (na caixa-pai) fica.
+    //  • MANCHETES [data-fp-vcal]: translateY DIRETO no FitText (sem fundo → EXATO).
+    const onclone = (doc: Document, clonedRoot: HTMLElement) => {
+      clonedRoot.querySelectorAll<HTMLElement>('[data-fp-vshift]').forEach((el) => {
+        const dy = parseFloat(el.dataset.fpVshift || '');
+        if (!Number.isFinite(dy) || dy === 0) return;
+        const span = doc.createElement('span');
+        span.style.display = 'inline-block';
+        span.style.transform = `translateY(${-dy}px)`;
+        while (el.firstChild) span.appendChild(el.firstChild);
+        el.appendChild(span);
+      });
+      clonedRoot.querySelectorAll<HTMLElement>('[data-fp-vcal]').forEach((el) => {
+        const dy = parseFloat(el.dataset.fpVcal || '');
+        if (Number.isFinite(dy) && dy !== 0) el.style.transform = `translateY(${-dy}px)`;
+      });
+    };
+
+    // CALIBRAÇÃO das manchetes: se há alguma, um 1º render SEM compensação mede ONDE o
+    // html2canvas de fato ancorou cada manchete vs ONDE o navegador a tem, e grava o
+    // erro em data-fp-vcal. O render final aplica o translateY exato. Só telejornais
+    // (com manchete multi-linha) pagam esse 2º render (~+3s); o resto pula.
+    if (headlines.length) {
+      const cal = await html2canvas(node, { scale, backgroundColor: null, useCORS: true, logging: false, imageTimeout: 20000 });
+      const cctx = cal.getContext('2d');
+      if (cctx) {
+        for (const h of headlines) {
+          const x0 = Math.max(0, Math.round(h.x0 * scale + 2));
+          const x1 = Math.min(cal.width, Math.round(h.x1 * scale - 2));
+          const cyPx = h.cy * scale;
+          const win = Math.round(30 * scale);
+          const y0 = Math.max(0, Math.round(cyPx - win));
+          const y1 = Math.min(cal.height, Math.round(cyPx + win));
+          if (x1 - x0 < 4 || y1 - y0 < 4) continue;
+          const cols = x1 - x0;
+          const data = cctx.getImageData(x0, y0, cols, y1 - y0).data;
+          const rows: number[] = [];
+          for (let y = 0; y < y1 - y0; y++) {
+            let cnt = 0;
+            for (let x = 0; x < cols; x++) {
+              const i = (y * cols + x) * 4;
+              const r = data[i], g = data[i + 1], b = data[i + 2];
+              const hit = h.dark ? r < 90 && g < 90 && b < 90 : r > 215 && g > 215 && b > 215;
+              if (hit) cnt++;
+            }
+            if (cnt >= 6) rows.push(y);
+          }
+          if (rows.length < 2) continue;
+          const actual = y0 + (Math.min(...rows) + Math.max(...rows)) / 2;
+          const err = (actual - cyPx) / scale; // stage units; + = html2canvas baixo demais
+          if (Math.abs(err) > 0.4 && Math.abs(err) < 40) h.el.dataset.fpVcal = String(Math.round(err * 100) / 100);
+        }
+      }
+    }
+
     const canvas = await html2canvas(node, {
       scale,
       backgroundColor: null, // transparente (stickers); modelos opacos pintam o próprio
       useCORS: true, // emojis do CDN
       logging: false,
       imageTimeout: 20000,
-      // Aplica a compensação de centralização vertical (ver acima) SÓ no clone que o
-      // html2canvas rasteriza — a prévia real fica intocada. Envolve o texto num
-      // <span> inline-block com translateY(-vão): sobe SÓ o glifo, o fundo (na
-      // caixa-pai) não se mexe.
-      onclone: (doc: Document, clonedRoot: HTMLElement) => {
-        clonedRoot.querySelectorAll<HTMLElement>('[data-fp-vshift]').forEach((el) => {
-          const dy = parseFloat(el.dataset.fpVshift || '');
-          if (!Number.isFinite(dy) || dy === 0) return;
-          const span = doc.createElement('span');
-          span.style.display = 'inline-block';
-          span.style.transform = `translateY(${-dy}px)`;
-          while (el.firstChild) span.appendChild(el.firstChild);
-          el.appendChild(span);
-        });
-      },
+      onclone,
     });
     blob = await new Promise<Blob | null>((res) =>
       canvas.toBlob((b: Blob | null) => res(b), 'image/png'),
