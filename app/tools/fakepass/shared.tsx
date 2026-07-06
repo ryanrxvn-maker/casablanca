@@ -294,10 +294,12 @@ export async function downloadNodeAsPng(
     // `align-items:center` OU `line-height`) sai BAIXO no PNG — no navegador fica no
     // centro. (Bolha de chat NÃO sofre: o texto flui do topo, caixa = conteúdo.)
     // Correção: medimos, por FOLHA de texto, o vão vazio ABAIXO do glifo no navegador
-    // (onde está certo) e — SÓ no clone do html2canvas (via `onclone`; a PRÉVIA não
-    // muda) — somamos isso ao padding-bottom. A âncora-de-fundo sobe e o glifo cai
-    // exatamente onde o navegador o tem. Marcamos aqui com data-attr (inerte: não
-    // reflui a prévia) o padding-bottom-alvo; o onclone aplica no clone.
+    // (= exatamente o quanto o html2canvas erra pra baixo). No clone do html2canvas
+    // (via `onclone`; a PRÉVIA não muda) envolvemos o texto num <span> com
+    // `translateY(-vão)`: o transform é PÓS-layout, então sobe o glifo pelo valor
+    // exato, imune ao flex-center interno (que "engolia" metade de um padding). O
+    // fundo (na caixa-pai) não se mexe. Marcamos aqui com data-attr (inerte: não
+    // reflui a prévia) o deslocamento; o onclone aplica no clone.
     const vcompEls: HTMLElement[] = [];
     node.querySelectorAll<HTMLElement>('*').forEach((el) => {
       const kids = Array.from(el.childNodes);
@@ -319,10 +321,10 @@ export async function downloadNodeAsPng(
       const gapBelow = er.bottom - bB - padB - gr.bottom;
       // só quando CENTRALIZADO (folga dos DOIS lados). Alinhado no topo → não mexer.
       if (gapAbove <= 1.5 || gapBelow <= 1.5) return;
-      el.dataset.fpPadb = String(Math.round((padB + gapBelow) * 100) / 100);
+      el.dataset.fpVshift = String(Math.round(gapBelow * 100) / 100);
       vcompEls.push(el);
     });
-    vcompCleanup = () => vcompEls.forEach((el) => delete el.dataset.fpPadb);
+    vcompCleanup = () => vcompEls.forEach((el) => delete el.dataset.fpVshift);
 
     // Largura de referência = a largura de LAYOUT do palco (stageW). Passar refW
     // evita medir o rect visual — o PNG sempre sai na resolução cheia.
@@ -342,13 +344,18 @@ export async function downloadNodeAsPng(
       logging: false,
       imageTimeout: 20000,
       // Aplica a compensação de centralização vertical (ver acima) SÓ no clone que o
-      // html2canvas rasteriza — a prévia real fica intocada.
-      onclone: (_doc: Document, clonedRoot: HTMLElement) => {
-        clonedRoot.querySelectorAll<HTMLElement>('[data-fp-padb]').forEach((el) => {
-          const pb = parseFloat(el.dataset.fpPadb || '');
-          if (!Number.isFinite(pb)) return;
-          el.style.boxSizing = 'border-box';
-          el.style.paddingBottom = pb + 'px';
+      // html2canvas rasteriza — a prévia real fica intocada. Envolve o texto num
+      // <span> inline-block com translateY(-vão): sobe SÓ o glifo, o fundo (na
+      // caixa-pai) não se mexe.
+      onclone: (doc: Document, clonedRoot: HTMLElement) => {
+        clonedRoot.querySelectorAll<HTMLElement>('[data-fp-vshift]').forEach((el) => {
+          const dy = parseFloat(el.dataset.fpVshift || '');
+          if (!Number.isFinite(dy) || dy === 0) return;
+          const span = doc.createElement('span');
+          span.style.display = 'inline-block';
+          span.style.transform = `translateY(${-dy}px)`;
+          while (el.firstChild) span.appendChild(el.firstChild);
+          el.appendChild(span);
         });
       },
     });
