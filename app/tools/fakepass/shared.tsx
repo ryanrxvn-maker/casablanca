@@ -236,9 +236,14 @@ async function buildFontEmbedCss(node: HTMLElement): Promise<string> {
   const cached = _fontCssCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
-  // 2) @font-face dessas famílias → embute o woff2 em base64 (pula local())
-  const seen = new Set<string>();
-  const out: string[] = [];
+  // 2) AGRUPA as @font-face dessas famílias POR URL do woff2. As fontes do
+  //    next/font são variáveis: o MESMO arquivo aparece em várias regras (uma
+  //    por peso), então embutir por regra repetia o base64 dezenas de vezes
+  //    (SVG de 1.4MB → travava o export). Aqui embutimos cada woff2 UMA vez,
+  //    com o range de peso que ele cobre. Pula faces só-`local()` (o fallback
+  //    Arial+size-adjust, que distorce a métrica).
+  type FaceGroup = { rule: CSSFontFaceRule; weights: Set<string> };
+  const byUrl = new Map<string, FaceGroup>();
   for (const ss of Array.from(document.styleSheets)) {
     let rules: CSSRuleList | null = null;
     try {
@@ -256,20 +261,36 @@ async function buildFontEmbedCss(node: HTMLElement): Promise<string> {
       if (!used.has(fam)) continue;
       const src = fr.style.getPropertyValue('src');
       const m = src.match(/url\(["']?([^"')]+)["']?\)/);
-      if (!m) continue; // face só-local() (fallback Arial+size-adjust) → pula
-      const dedupe =
-        fam + '|' + fr.style.getPropertyValue('font-weight') + '|' + m[1];
-      if (seen.has(dedupe)) continue;
-      seen.add(dedupe);
-      try {
-        const buf = await fetch(m[1]).then((res) => res.arrayBuffer());
-        const data = `data:font/woff2;base64,${abToBase64(buf)}`;
-        out.push(
-          fr.cssText.replace(/url\(["']?[^"')]+["']?\)/, `url(${data})`),
-        );
-      } catch {
-        /* face que não baixou — ignora, as outras cobrem */
+      if (!m) continue; // face só-local() → pula
+      const url = m[1];
+      const w = fr.style.getPropertyValue('font-weight') || '400';
+      let g = byUrl.get(url);
+      if (!g) {
+        g = { rule: fr, weights: new Set() };
+        byUrl.set(url, g);
       }
+      w.split(/\s+/).forEach((x) => g!.weights.add(x));
+    }
+  }
+
+  // 3) baixa cada woff2 único → base64 → @font-face com o range de peso
+  const out: string[] = [];
+  for (const [url, g] of byUrl) {
+    try {
+      const buf = await fetch(url).then((res) => res.arrayBuffer());
+      const data = `data:font/woff2;base64,${abToBase64(buf)}`;
+      const nums = [...g.weights].map(Number).filter((n) => !Number.isNaN(n));
+      const weightDecl = nums.length
+        ? `${Math.min(...nums)} ${Math.max(...nums)}`
+        : g.rule.style.getPropertyValue('font-weight') || '400';
+      let css = g.rule.cssText.replace(
+        /url\(["']?[^"')]+["']?\)/,
+        `url(${data})`,
+      );
+      css = css.replace(/font-weight:\s*[^;}]+;?/i, `font-weight: ${weightDecl};`);
+      out.push(css);
+    } catch {
+      /* woff2 que não baixou — ignora */
     }
   }
   const css = out.join('\n');
