@@ -235,17 +235,14 @@ export default function FakePassPage() {
                   com texto/vetores NÍTIDOS — sem a rasterização borrada do
                   scale. No export, downloadNodeAsPng zera este zoom pela marca
                   data-fp-zoom, então o PNG sai em alta e imune ao encolhimento. */}
-              <div data-fp-zoom style={{ zoom: pscale, lineHeight: 0 }}>
-                {/* `vertical-align: top` tira o vão do descender do inline-block
-                    (o motivo do antigo `line-height: 0` no PALCO). Colocar o
-                    line-height:0 no WRAPPER (não no palco) evita "envenenar" o
-                    texto dos filhos: a barra de status, timestamps etc. voltam a
-                    ter altura de linha NORMAL e alinham certo com os ícones. */}
-                <div
-                  ref={stageRef}
-                  className={uiFont.variable}
-                  style={{ display: 'inline-block', verticalAlign: 'top', lineHeight: 'normal' }}
-                >
+              <div data-fp-zoom style={{ zoom: pscale }}>
+                {/* `line-height: 0` no palco tira o vão do descender do inline-block
+                    E — crucial — faz o texto SEM line-height próprio ter altura de
+                    linha 0 IGUAL no navegador e no html2canvas (o `normal` os dois
+                    renderiam com altura DIFERENTE → drift vertical que acumula no
+                    download). Cada texto que precisa de altura (barra de status,
+                    bolhas multi-linha) seta o SEU line-height. */}
+                <div ref={stageRef} className={uiFont.variable} style={{ display: 'inline-block', lineHeight: 0 }}>
                   {model.Preview({ s, status })}
                 </div>
               </div>

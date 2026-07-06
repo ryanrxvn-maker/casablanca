@@ -457,6 +457,10 @@ export function StatusBar({
         fontFamily: FONT_STACK,
         WebkitFontSmoothing: 'antialiased',
         flexShrink: 0,
+        // line-height 1 (o palco é line-height:0): dá ALTURA ao texto (hora, 5G, %)
+        // pra centralizar com os ícones. A barra tem altura FIXA, então isso NÃO
+        // empurra o conteúdo abaixo — zero drift no download.
+        lineHeight: 1,
       }}
     >
       <div
