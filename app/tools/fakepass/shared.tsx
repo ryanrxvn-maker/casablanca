@@ -376,7 +376,7 @@ export async function downloadNodeAsPng(
         //   gapBelow → uso (gapAbove+gapBelow) × 1.1.
         const fs = parseFloat(getComputedStyle(el).fontSize) || 14;
         const multiline = gr.height > fs * 1.6;
-        const shift = multiline ? (gapAbove + gapBelow) * 1.1 : gapBelow * 1.25;
+        const shift = multiline ? (gapAbove + gapBelow) * 0.88 : gapBelow * 1.25;
         el.dataset.fpVshift = String(Math.round(shift * 100) / 100);
         vcompEls.push(el);
       }
