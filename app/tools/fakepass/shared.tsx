@@ -305,22 +305,36 @@ export async function downloadNodeAsPng(
       const kids = Array.from(el.childNodes);
       if (kids.some((n) => n.nodeType === 1)) return; // só FOLHAS (sem filho elemento)
       if (!kids.some((n) => n.nodeType === 3 && (n.textContent || '').trim())) return;
-      const cs = getComputedStyle(el);
-      const fs = parseFloat(cs.fontSize) || 0;
       const range = document.createRange();
       range.selectNodeContents(el);
-      const gr = range.getBoundingClientRect();
-      const er = el.getBoundingClientRect();
-      if (!gr.height || !er.height) return;
-      if (gr.height > fs * 1.6) return; // uma linha só (multi-linha flui do topo, já bate)
-      const padT = parseFloat(cs.paddingTop) || 0;
-      const padB = parseFloat(cs.paddingBottom) || 0;
-      const bT = parseFloat(cs.borderTopWidth) || 0;
-      const bB = parseFloat(cs.borderBottomWidth) || 0;
-      const gapAbove = gr.top - (er.top + bT + padT);
-      const gapBelow = er.bottom - bB - padB - gr.bottom;
-      // só quando CENTRALIZADO (folga dos DOIS lados). Alinhado no topo → não mexer.
-      if (gapAbove <= 1.5 || gapBelow <= 1.5) return;
+      const gr = range.getBoundingClientRect(); // caixa REAL dos glifos
+      if (!gr.height) return;
+      // Sobe até achar o ancestral que cria a "banda": um flex/grid com
+      // `align-items:center` (OU line-height) que é MAIS ALTO que o glifo. É ELE que
+      // centraliza o texto — e é o que o html2canvas erra (ancora no fundo). Assim
+      // pegamos também texto ANINHADO (ticker) e MULTI-LINHA (manchete), que o leaf
+      // sozinho não revelava. Bolha de chat NÃO tem esse ancestral (fluxo normal do
+      // topo), então não é tocada.
+      let band: { top: number; bottom: number } | null = null;
+      let a: HTMLElement | null = el;
+      for (let i = 0; i < 6 && a && a !== node.parentElement; i++, a = a.parentElement) {
+        const cs = getComputedStyle(a);
+        const centers =
+          (/(^|\s)(inline-)?(flex|grid)(\s|$)/.test(cs.display) && cs.alignItems === 'center') ||
+          cs.justifyContent === 'center';
+        if (!centers) continue;
+        const ar = a.getBoundingClientRect();
+        const cTop = ar.top + (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.paddingTop) || 0);
+        const cBot = ar.bottom - (parseFloat(cs.borderBottomWidth) || 0) - (parseFloat(cs.paddingBottom) || 0);
+        if (cBot - cTop - gr.height > 3) {
+          band = { top: cTop, bottom: cBot };
+          break;
+        }
+      }
+      if (!band) return;
+      const gapAbove = gr.top - band.top;
+      const gapBelow = band.bottom - gr.bottom;
+      if (gapAbove <= 1 || gapBelow <= 1) return; // centralizado dos DOIS lados
       el.dataset.fpVshift = String(Math.round(gapBelow * 100) / 100);
       vcompEls.push(el);
     });
