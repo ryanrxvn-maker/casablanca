@@ -301,46 +301,55 @@ export async function downloadNodeAsPng(
     // fundo (na caixa-pai) não se mexe. Marcamos aqui com data-attr (inerte: não
     // reflui a prévia) o deslocamento; o onclone aplica no clone.
     const vcompEls: HTMLElement[] = [];
-    node.querySelectorAll<HTMLElement>('*').forEach((el) => {
-      const kids = Array.from(el.childNodes);
-      if (kids.some((n) => n.nodeType === 1)) return; // só FOLHAS (sem filho elemento)
-      if (!kids.some((n) => n.nodeType === 3 && (n.textContent || '').trim())) return;
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      const gr = range.getBoundingClientRect(); // caixa REAL dos glifos
-      if (!gr.height) return;
-      // Sobe até achar o ancestral que cria a "banda": um flex/grid com
-      // `align-items:center` (OU line-height) que é MAIS ALTO que o glifo. É ELE que
-      // centraliza o texto — e é o que o html2canvas erra (ancora no fundo). Assim
-      // pegamos também texto ANINHADO (ticker) e MULTI-LINHA (manchete), que o leaf
-      // sozinho não revelava. Bolha de chat NÃO tem esse ancestral (fluxo normal do
-      // topo), então não é tocada.
-      let band: { top: number; bottom: number } | null = null;
-      let a: HTMLElement | null = el;
-      for (let i = 0; i < 6 && a && a !== node.parentElement; i++, a = a.parentElement) {
-        const cs = getComputedStyle(a);
-        const centers =
-          (/(^|\s)(inline-)?(flex|grid)(\s|$)/.test(cs.display) && cs.alignItems === 'center') ||
-          cs.justifyContent === 'center';
-        if (!centers) continue;
-        // Caixa de BORDA (não conteúdo): o glifo multi-linha (manchete) pode ser um
-        // tico MAIOR que o content-box e MENOR que a borda — a borda é o "trilho" real
-        // onde o html2canvas ancora. Só a subtraímos a borda em si.
-        const ar = a.getBoundingClientRect();
-        const bTop = ar.top + (parseFloat(cs.borderTopWidth) || 0);
-        const bBot = ar.bottom - (parseFloat(cs.borderBottomWidth) || 0);
-        if (bBot - bTop - gr.height > 3) {
-          band = { top: bTop, bottom: bBot };
-          break;
+    const all = Array.from(node.querySelectorAll<HTMLElement>('*'));
+    // PASSO 1 — mapa das "bandas": elementos flex/grid que CENTRALIZAM o conteúdo (é
+    // o que o html2canvas erra, ancorando o glifo no fundo). 1 getComputedStyle por
+    // elemento (mesma ordem que o próprio html2canvas já faz). Guardamos a caixa de
+    // BORDA (trilho real onde o html2canvas ancora; glifo multi-linha pode passar do
+    // content-box).
+    const bands = new Map<HTMLElement, { top: number; bottom: number }>();
+    for (const a of all) {
+      const cs = getComputedStyle(a);
+      const centers =
+        ((cs.display.includes('flex') || cs.display.includes('grid')) && cs.alignItems === 'center') ||
+        cs.justifyContent === 'center';
+      if (!centers) continue;
+      const ar = a.getBoundingClientRect();
+      bands.set(a, {
+        top: ar.top + (parseFloat(cs.borderTopWidth) || 0),
+        bottom: ar.bottom - (parseFloat(cs.borderBottomWidth) || 0),
+      });
+    }
+    // PASSO 2 — só FOLHAS de texto que têm banda-ancestral (checagem BARATA via Map,
+    // sem getComputedStyle). Só aí medimos o Range (glifo) — assim artigos (muito
+    // texto, ZERO banda) não pagam nada. Pega tag, ticker (aninhado) e manchete
+    // (multi-linha). Bolha de chat NÃO tem banda-ancestral → intocada.
+    if (bands.size) {
+      for (const el of all) {
+        const kids = Array.from(el.childNodes);
+        if (kids.some((n) => n.nodeType === 1)) continue; // só FOLHAS
+        if (!kids.some((n) => n.nodeType === 3 && (n.textContent || '').trim())) continue;
+        let band: { top: number; bottom: number } | undefined;
+        let a: HTMLElement | null = el;
+        for (let i = 0; i < 6 && a; i++, a = a.parentElement) {
+          const b = bands.get(a);
+          if (b) {
+            band = b;
+            break;
+          }
         }
+        if (!band) continue;
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const gr = range.getBoundingClientRect(); // caixa REAL dos glifos
+        if (!gr.height || band.bottom - band.top - gr.height <= 3) continue;
+        const gapAbove = gr.top - band.top;
+        const gapBelow = band.bottom - gr.bottom;
+        if (gapAbove <= 1 || gapBelow <= 1) continue; // centralizado dos DOIS lados
+        el.dataset.fpVshift = String(Math.round(gapBelow * 100) / 100);
+        vcompEls.push(el);
       }
-      if (!band) return;
-      const gapAbove = gr.top - band.top;
-      const gapBelow = band.bottom - gr.bottom;
-      if (gapAbove <= 1 || gapBelow <= 1) return; // centralizado dos DOIS lados
-      el.dataset.fpVshift = String(Math.round(gapBelow * 100) / 100);
-      vcompEls.push(el);
-    });
+    }
     vcompCleanup = () => vcompEls.forEach((el) => delete el.dataset.fpVshift);
 
     // Largura de referência = a largura de LAYOUT do palco (stageW). Passar refW
