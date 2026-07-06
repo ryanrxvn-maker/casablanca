@@ -64,46 +64,73 @@ function parseMsgs(txt: string): Msg[] {
 // background-size/repeat direitinho, e o download fica igual à prévia.
 function doodleSvgMarkup(dark: boolean): string {
   const stroke = dark ? '#8696a0' : '#54656f';
-  // Padrão de rabiscos estilo WhatsApp (recriação própria): ícones variados,
-  // opacidade 50%. viewBox 360 = tamanho de exibição (o bake sai a 360px, então
-  // o tamanho intrínseco bate com background-size:360px e o export NÃO escala
-  // errado no html2canvas).
-  return `<svg xmlns='http://www.w3.org/2000/svg' width='360' height='360' viewBox='0 0 360 360'>
-    <g fill='none' stroke='${stroke}' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' opacity='0.5'>
-      <path d='M40 48c-3-6-13-4-13 3 0 6 13 14 13 14s13-8 13-14c0-7-10-9-13-3z'/>
-      <path d='M120 46h5l3-4h10l3 4h5a4 4 0 0 1 4 4v14a4 4 0 0 1-4 4h-26a4 4 0 0 1-4-4V50a4 4 0 0 1 4-4z'/>
-      <circle cx='135' cy='57' r='6'/>
-      <path d='M223 40h36a5 5 0 0 1 5 5v16a5 5 0 0 1-5 5h-22l-9 8v-8h-5a5 5 0 0 1-5-5V45a5 5 0 0 1 5-5z'/>
-      <path d='M316 66V44l16-4v18'/>
-      <circle cx='312' cy='66' r='4'/>
-      <circle cx='328' cy='62' r='4'/>
-      <path d='M48 130h20v10a10 10 0 0 1-20 0z'/>
-      <path d='M68 132h4a4 4 0 0 1 0 9h-4'/>
-      <path d='M53 124c0-3 3-3 3-6M62 124c0-3 3-3 3-6'/>
-      <circle cx='168' cy='132' r='8'/>
-      <path d='M168 118v-5M168 151v-5M150 132h-5M191 132h-5M156 120l-3-3M183 147l-3-3M156 144l-3 3M183 120l-3 3'/>
-      <path d='M263 130l33 11-33 11 6-11z'/>
-      <circle cx='45' cy='225' r='13'/>
-      <circle cx='40' cy='221' r='1.3'/>
-      <circle cx='50' cy='221' r='1.3'/>
-      <path d='M39 228a8 8 0 0 0 12 0'/>
-      <rect x='137' y='220' width='26' height='18' rx='2'/>
-      <path d='M137 227h26M150 220v18'/>
-      <path d='M150 220c-5-6-12-1-6 3M150 220c5-6 12-1 6 3'/>
-      <rect x='247' y='211' width='17' height='28' rx='3'/>
-      <path d='M253 234h5'/>
-      <path d='M332 214l3 8 9 1-7 6 2 9-8-5-8 5 2-9-7-6 9-1z'/>
-      <path d='M60 314a9 9 0 0 1 0-18 11 11 0 0 1 21-3 8 8 0 0 1 2 21z'/>
-      <path d='M172 314c-2-14 8-22 22-20 1 14-9 22-22 20z'/>
-      <path d='M174 312c5-5 11-8 18-10'/>
-      <rect x='277' y='297' width='29' height='19' rx='2'/>
-      <path d='M277 299l14.5 10 14.5-10'/>
+  // Padrão de rabiscos estilo WhatsApp (recriação própria) — DENSO, pequeno e
+  // SUTIL (como o fundo real do WhatsApp): ~30 ícones num tile de 300, opacidade
+  // baixa (0.13). viewBox 300 = coords de design; o bake sai a 200px (ver RES em
+  // useDoodlePng), então o tamanho intrínseco bate com background-size:200px e o
+  // html2canvas (que ignora background-size e usa o intrínseco) tila IGUAL à
+  // prévia — download = preview. Ícones espalhados em grade escalonada pra o
+  // repeat não deixar "buracos" visíveis.
+  const icons = [
+    // linha 1
+    `<path d='M22 20c-2.5-4-9-2.5-9 2 0 4.2 9 9.5 9 9.5s9-5.3 9-9.5c0-4.5-6.5-6-9-2z'/>`, // coração
+    `<circle cx='68' cy='22' r='9'/><path d='M63 25a4 4 0 0 0 10 0'/><circle cx='65' cy='19' r='.9'/><circle cx='71' cy='19' r='.9'/>`, // carinha
+    `<path d='M108 15h4l2-3h8l2 3h4a3 3 0 0 1 3 3v11a3 3 0 0 1-3 3h-20a3 3 0 0 1-3-3V18a3 3 0 0 1 3-3z'/><circle cx='120' cy='24' r='5'/>`, // câmera
+    `<path d='M156 12h20a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4h-12l-6 5v-5h-2a4 4 0 0 1-4-4V16a4 4 0 0 1 4-4z'/>`, // balão de fala
+    `<path d='M206 30V13l11-2.5v14'/><circle cx='203' cy='30' r='3.4'/><circle cx='214' cy='24.5' r='3.4'/>`, // nota musical
+    `<circle cx='258' cy='21' r='7.5'/><path d='M258 8v-4M258 42v-4M245 21h-4M279 21h-4M249 12l-3-3M270 33l-3-3M249 30l-3 3M270 12l-3 3'/>`, // sol
+    // linha 2
+    `<path d='M20 62l2 5 5.5.4-4.2 3.6 1.3 5.4-4.6-3-4.6 3 1.3-5.4-4.2-3.6 5.5-.4z'/>`, // estrela
+    `<rect x='58' y='58' width='22' height='16' rx='2'/><path d='M58 64h22M69 58v16'/><path d='M69 58c-4-5-10-1-5 3M69 58c4-5 10-1 5 3'/>`, // presente
+    `<path d='M104 74h18v9a9 9 0 0 1-18 0z'/><path d='M122 76h3a3.5 3.5 0 0 1 0 8h-3'/><path d='M108 68c0-2.5 2.5-2.5 2.5-5M116 68c0-2.5 2.5-2.5 2.5-5'/>`, // xícara de café
+    `<path d='M150 78a6 6 0 0 1 0-11 8 8 0 0 1 15-2 5 5 0 0 1 1 13z'/>`, // nuvem
+    `<circle cx='205' cy='68' r='8'/><path d='M200 71a4 4 0 0 0 10 0'/><circle cx='202' cy='65' r='.9'/><circle cx='208' cy='65' r='.9'/>`, // carinha 2
+    `<path d='M250 58l3 7 8 .5-6 4.6 2 8-7-4.6-7 4.6 2-8-6-4.6 8-.5z'/>`, // estrela 2
+    // linha 3
+    `<circle cx='24' cy='112' r='11'/><circle cx='20' cy='109' r='1.1'/><circle cx='28' cy='109' r='1.1'/><path d='M19 115a7 7 0 0 0 10 0'/>`, // carinha grande
+    `<path d='M60 100h20a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H68l-6 5v-5a4 4 0 0 1-4-4v-10a4 4 0 0 1 4-4z' transform='translate(0,0)'/>`, // chat
+    `<path d='M104 118V101l11-2.5v14'/><circle cx='101' cy='118' r='3.4'/><circle cx='112' cy='112.5' r='3.4'/>`, // nota
+    `<rect x='148' y='100' width='15' height='24' rx='3'/><path d='M153 120h5'/>`, // celular
+    `<path d='M206 102c-2.5-4-9-2.5-9 2 0 4.2 9 9.5 9 9.5s9-5.3 9-9.5c0-4.5-6.5-6-9-2z'/>`, // coração 2
+    `<path d='M252 122a6 6 0 0 1 0-11 8 8 0 0 1 15-2 5 5 0 0 1 1 13z'/>`, // nuvem 2
+    // linha 4
+    `<circle cx='22' cy='160' r='7.5'/><path d='M22 147v-4M22 181v-4M9 160H5M43 160h-4M13 151l-3-3M34 173l-3-3M13 169l-3 3M34 151l-3 3'/>`, // sol 2
+    `<path d='M62 168l3 7 8 .5-6 4.6 2 8-7-4.6-7 4.6 2-8-6-4.6 8-.5z'/>`, // estrela 3
+    `<path d='M104 150h18v9a9 9 0 0 1-18 0z'/><path d='M122 152h3a3.5 3.5 0 0 1 0 8h-3'/>`, // café 2
+    `<rect x='148' y='148' width='22' height='16' rx='2'/><path d='M148 154h22M159 148v16'/>`, // presente 2
+    `<circle cx='208' cy='160' r='9'/><path d='M203 163a4 4 0 0 0 10 0'/><circle cx='205' cy='157' r='.9'/><circle cx='211' cy='157' r='.9'/>`, // carinha 3
+    `<path d='M250 150c-2.5-4-9-2.5-9 2 0 4.2 9 9.5 9 9.5s9-5.3 9-9.5c0-4.5-6.5-6-9-2z'/>`, // coração 3
+    // linha 5
+    `<path d='M20 200l2 5 5.5.4-4.2 3.6 1.3 5.4-4.6-3-4.6 3 1.3-5.4-4.2-3.6 5.5-.4z'/>`, // estrela 4
+    `<path d='M60 195h20a4 4 0 0 1 4 4v10a4 4 0 0 1-4 4H68l-6 5v-5a4 4 0 0 1-4-4v-10a4 4 0 0 1 4-4z'/>`, // chat 2
+    `<path d='M108 190h4l2-3h8l2 3h4a3 3 0 0 1 3 3v11a3 3 0 0 1-3 3h-20a3 3 0 0 1-3-3v-11a3 3 0 0 1 3-3z'/><circle cx='120' cy='199' r='5'/>`, // câmera 2
+    `<path d='M156 208a6 6 0 0 1 0-11 8 8 0 0 1 15-2 5 5 0 0 1 1 13z'/>`, // nuvem 3
+    `<path d='M206 205V188l11-2.5v14'/><circle cx='203' cy='205' r='3.4'/><circle cx='214' cy='199.5' r='3.4'/>`, // nota 2
+    `<circle cx='258' cy='198' r='7.5'/><path d='M258 185v-4M258 219v-4M245 198h-4M279 198h-4'/>`, // sol 3
+    // linha 6
+    `<circle cx='26' cy='250' r='9'/><path d='M21 253a4 4 0 0 0 10 0'/><circle cx='23' cy='247' r='.9'/><circle cx='29' cy='247' r='.9'/>`, // carinha 4
+    `<path d='M64 240l3 7 8 .5-6 4.6 2 8-7-4.6-7 4.6 2-8-6-4.6 8-.5z'/>`, // estrela 5
+    `<path d='M104 240h18v9a9 9 0 0 1-18 0z'/><path d='M122 242h3a3.5 3.5 0 0 1 0 8h-3'/>`, // café 3
+    `<path d='M152 242c-2.5-4-9-2.5-9 2 0 4.2 9 9.5 9 9.5s9-5.3 9-9.5c0-4.5-6.5-6-9-2z'/>`, // coração 4
+    `<rect x='200' y='240' width='22' height='16' rx='2'/><path d='M200 246h22M211 240v16'/>`, // presente 3
+    `<path d='M252 250a6 6 0 0 1 0-11 8 8 0 0 1 15-2 5 5 0 0 1 1 13z'/>`, // nuvem 4
+    // linha 7 (base, pra fechar o repeat)
+    `<path d='M22 285l2 5 5.5.4-4.2 3.6 1.3 5.4-4.6-3-4.6 3 1.3-5.4-4.2-3.6 5.5-.4z'/>`, // estrela 6
+    `<circle cx='70' cy='288' r='8'/><path d='M65 291a4 4 0 0 0 10 0'/><circle cx='67' cy='285' r='.9'/><circle cx='73' cy='285' r='.9'/>`, // carinha 5
+    `<path d='M108 280h4l2-3h8l2 3h4a3 3 0 0 1 3 3v11a3 3 0 0 1-3 3h-20a3 3 0 0 1-3-3v-11a3 3 0 0 1 3-3z'/><circle cx='120' cy='289' r='5'/>`, // câmera 3
+    `<path d='M156 296a6 6 0 0 1 0-11 8 8 0 0 1 15-2 5 5 0 0 1 1 13z'/>`, // nuvem 5
+    `<path d='M206 282c-2.5-4-9-2.5-9 2 0 4.2 9 9.5 9 9.5s9-5.3 9-9.5c0-4.5-6.5-6-9-2z'/>`, // coração 5
+    `<path d='M250 280l3 7 8 .5-6 4.6 2 8-7-4.6-7 4.6 2-8-6-4.6 8-.5z'/>`, // estrela 7
+  ];
+  return `<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300' viewBox='0 0 300 300'>
+    <g fill='none' stroke='${stroke}' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' opacity='0.13'>
+      ${icons.join('')}
     </g>
   </svg>`;
 }
 
-// Assa o SVG do doodle num PNG data-uri no TAMANHO DE EXIBIÇÃO (360px). Assim o
-// tamanho intrínseco do PNG = background-size:360px, e o html2canvas (que ignora
+// Assa o SVG do doodle num PNG data-uri no TAMANHO DE EXIBIÇÃO (280px). Assim o
+// tamanho intrínseco do PNG = background-size:280px, e o html2canvas (que ignora
 // background-size e usa o intrínseco) tila IGUAL ao navegador → download = preview.
 // Devolve '' enquanto não pronto; o baking roda no mount, pronto antes do clique.
 function useDoodlePng(dark: boolean): string {
@@ -111,7 +138,7 @@ function useDoodlePng(dark: boolean): string {
   useEffect(() => {
     let alive = true;
     setPng('');
-    const RES = 360;
+    const RES = 280;
     const img = new Image();
     img.onload = () => {
       if (!alive) return;
@@ -568,7 +595,7 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
           backgroundColor: chatBg,
           backgroundImage: doodlePng ? `url("${doodlePng}")` : 'none',
           backgroundRepeat: 'repeat',
-          backgroundSize: '360px',
+          backgroundSize: '280px',
         }}
       >
         {msgs.map((m, i) => {
