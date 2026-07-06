@@ -302,7 +302,7 @@ export async function downloadNodeAsPng(
       scale,
       dpr: 1, // usa só o `scale`; não dobra pela densidade da tela
       backgroundColor: 'transparent', // stickers; modelos opacos pintam o próprio
-      embedFonts: true, // embute a Inter usada no nó
+      embedFonts: false, // NÃO varrer o CSS do app (Tailwind gigante = 45s+)
       fast: true,
     });
   } finally {
