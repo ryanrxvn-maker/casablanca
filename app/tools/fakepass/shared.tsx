@@ -190,130 +190,23 @@ export function FitText({
 /* ───────────────────────── Export (PNG) ───────────────────────── */
 
 /**
- * Embute a fonte WEB (Inter do next/font) usada no nó como @font-face com o
- * woff2 em BASE64 — pro <foreignObject> renderizar com a MESMA fonte da prévia.
- *
- * Por que precisa: o foreignObject roda num contexto ISOLADO. Fontes de SISTEMA
- * (Segoe UI, Arial…) já estão no SO e aparecem, mas WEB FONTS só aparecem se o
- * @font-face estiver embutido NO SVG. O auto-embed do modern-screenshot não
- * cravava a Inter real — o export caía no fallback (Arial + size-adjust, ~1px
- * mais largo), que quebrava as linhas diferente da prévia ("oii tudo bem?" em 2
- * linhas no download e 1 na tela). Aqui embutimos a Inter REAL das famílias
- * next/font (__…) usadas no nó e PULAMOS os fallbacks `local()`, então no SVG a
- * primeira família disponível é a Inter de verdade = download === preview.
- */
-const _fontCssCache = new Map<string, string>();
-
-function abToBase64(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf);
-  let bin = '';
-  const CHUNK = 0x8000;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    bin += String.fromCharCode.apply(
-      null,
-      Array.from(bytes.subarray(i, i + CHUNK)) as unknown as number[],
-    );
-  }
-  return btoa(bin);
-}
-
-async function buildFontEmbedCss(node: HTMLElement): Promise<string> {
-  // 1) famílias next/font (__…) realmente usadas no nó
-  const used = new Set<string>();
-  const els: HTMLElement[] = [
-    node,
-    ...(Array.from(node.querySelectorAll('*')) as HTMLElement[]),
-  ];
-  for (const el of els) {
-    const ff = getComputedStyle(el).fontFamily || '';
-    for (const raw of ff.split(',')) {
-      const name = raw.trim().replace(/^["']|["']$/g, '');
-      if (name.startsWith('__')) used.add(name);
-    }
-  }
-  if (used.size === 0) return '';
-  const cacheKey = [...used].sort().join('|');
-  const cached = _fontCssCache.get(cacheKey);
-  if (cached !== undefined) return cached;
-
-  // 2) AGRUPA as @font-face dessas famílias POR URL do woff2. As fontes do
-  //    next/font são variáveis: o MESMO arquivo aparece em várias regras (uma
-  //    por peso), então embutir por regra repetia o base64 dezenas de vezes
-  //    (SVG de 1.4MB → travava o export). Aqui embutimos cada woff2 UMA vez,
-  //    com o range de peso que ele cobre. Pula faces só-`local()` (o fallback
-  //    Arial+size-adjust, que distorce a métrica).
-  type FaceGroup = { rule: CSSFontFaceRule; weights: Set<string> };
-  const byUrl = new Map<string, FaceGroup>();
-  for (const ss of Array.from(document.styleSheets)) {
-    let rules: CSSRuleList | null = null;
-    try {
-      rules = ss.cssRules;
-    } catch {
-      continue; // folha cross-origin — inacessível
-    }
-    if (!rules) continue;
-    for (const r of Array.from(rules)) {
-      if ((r as CSSRule).type !== 5 /* CSSRule.FONT_FACE_RULE */) continue;
-      const fr = r as CSSFontFaceRule;
-      const fam = fr.style
-        .getPropertyValue('font-family')
-        .replace(/^["']|["']$/g, '');
-      if (!used.has(fam)) continue;
-      const src = fr.style.getPropertyValue('src');
-      const m = src.match(/url\(["']?([^"')]+)["']?\)/);
-      if (!m) continue; // face só-local() → pula
-      const url = m[1];
-      const w = fr.style.getPropertyValue('font-weight') || '400';
-      let g = byUrl.get(url);
-      if (!g) {
-        g = { rule: fr, weights: new Set() };
-        byUrl.set(url, g);
-      }
-      w.split(/\s+/).forEach((x) => g!.weights.add(x));
-    }
-  }
-
-  // 3) baixa cada woff2 único → base64 → @font-face com o range de peso
-  const out: string[] = [];
-  for (const [url, g] of byUrl) {
-    try {
-      const buf = await fetch(url).then((res) => res.arrayBuffer());
-      const data = `data:font/woff2;base64,${abToBase64(buf)}`;
-      const nums = [...g.weights].map(Number).filter((n) => !Number.isNaN(n));
-      const weightDecl = nums.length
-        ? `${Math.min(...nums)} ${Math.max(...nums)}`
-        : g.rule.style.getPropertyValue('font-weight') || '400';
-      let css = g.rule.cssText.replace(
-        /url\(["']?[^"')]+["']?\)/,
-        `url(${data})`,
-      );
-      css = css.replace(/font-weight:\s*[^;}]+;?/i, `font-weight: ${weightDecl};`);
-      out.push(css);
-    } catch {
-      /* woff2 que não baixou — ignora */
-    }
-  }
-  const css = out.join('\n');
-  _fontCssCache.set(cacheKey, css);
-  return css;
-}
-
-/**
  * Rasteriza um nó do DOM em PNG NÍTIDO e IDÊNTICO À PRÉVIA.
  *
- * Motor: `modern-screenshot` (SVG <foreignObject>). Diferença fundamental pro
- * html2canvas: quem desenha o PNG é o PRÓPRIO NAVEGADOR (a mesma engine que
- * pinta a prévia), não uma reimplementação. Então texto, line-height, overflow,
- * elipse (…), flexbox, gradiente e sombra saem PIXEL A PIXEL como na tela —
- * acabou o "download bugado/cortado/desalinhado" que o html2canvas causava por
- * recalcular o layout por conta própria.
+ * Motor: `snapdom` (SVG <foreignObject>, porém otimizado). Diferença fundamental
+ * pro html2canvas: quem desenha o PNG é o PRÓPRIO NAVEGADOR (a mesma engine que
+ * pinta a prévia), não uma reimplementação — texto, line-height, overflow,
+ * elipse (…), flexbox, gradiente e sombra saem como na tela (acabou o "download
+ * cortado/desalinhado" que o html2canvas causava por recalcular o layout).
  *
- * `targetW` = largura final do PNG; o scale vem de refW (largura de LAYOUT do
- * palco = stageW), então o PNG sempre sai na resolução cheia. Download por
- * Object URL (nunca base64 — data URL trunca arquivo grande).
+ * Por que snapdom e não modern-screenshot (que também é foreignObject): o
+ * modern-screenshot levava 30s+ e travava a aba em modelos de chat (compara
+ * estilo-a-estilo contra um iframe-sandbox por elemento). O snapdom faz o mesmo
+ * em ~1-2s. `embedFonts` embute a Inter usada no nó, então o texto sai idêntico.
  *
- * Fallback: se o navegador bloquear foreignObject (raro — ex.: Safari antigo),
- * cai no html2canvas pra nunca falhar de vez.
+ * `targetW` = largura final do PNG; scale = targetW/refW (stageW), então o PNG
+ * sai na resolução cheia. `dpr:1` evita dobrar pela densidade da tela. Download
+ * por Object URL (data URL trunca arquivo grande). Fallback pro html2canvas se
+ * o snapdom falhar — nunca quebra de vez.
  */
 export async function downloadNodeAsPng(
   node: HTMLElement,
@@ -321,10 +214,10 @@ export async function downloadNodeAsPng(
   targetW: number,
   refW?: number,
 ) {
-  // Fontes prontas ANTES de capturar: o foreignObject embute o @font-face no
-  // SVG; se a fonte não terminou de carregar, o texto sai numa fonte de
-  // fallback com métrica diferente = desalinhado. `document.fonts.ready` garante
-  // que a prévia e o export usam exatamente a mesma fonte.
+  // Fontes prontas ANTES de capturar: o export embute o @font-face no SVG; se a
+  // fonte não terminou de carregar, o texto cai numa fonte de fallback com
+  // métrica diferente = desalinhado. `document.fonts.ready` garante que prévia e
+  // export usam exatamente a mesma fonte.
   if (document.fonts?.ready) await document.fonts.ready;
 
   // A prévia é encolhida com CSS `zoom` num wrapper [data-fp-zoom]. Durante a
@@ -356,29 +249,19 @@ export async function downloadNodeAsPng(
     const baseW = refW ?? node.getBoundingClientRect().width;
     const scale = targetW / baseW;
 
-    // Embute a Inter real (base64) pra o export usar a MESMA fonte da prévia.
-    let fontCss = '';
     try {
-      fontCss = await buildFontEmbedCss(node);
-    } catch {
-      /* segue sem — cai no auto-embed do modern-screenshot */
-    }
-
-    try {
-      const { domToBlob } = await import('modern-screenshot');
-      blob = await domToBlob(node, {
-        type: 'image/png',
+      const { snapdom } = await import('@zumer/snapdom');
+      blob = await snapdom.toBlob(node, {
+        type: 'png',
         scale,
-        // fundo transparente (stickers de story); modelos opacos pintam o próprio.
-        backgroundColor: null,
-        // busca as imagens externas (emoji CDN) com CORS e sem cache quebrado.
-        fetch: { requestInit: { cache: 'no-cache', mode: 'cors' } },
-        // fonte real embutida (Inter) → texto idêntico à prévia, sem fallback.
-        ...(fontCss ? { font: { cssText: fontCss } } : {}),
+        dpr: 1, // usa só o `scale`; não dobra pela densidade da tela
+        backgroundColor: 'transparent', // stickers de story; modelos opacos pintam o próprio
+        embedFonts: true, // embute a Inter usada no nó → texto igual à prévia
+        fast: true,
       });
     } catch (err) {
       // Fallback só pra navegadores que bloqueiam foreignObject — nunca falha.
-      console.warn('[fakepass] foreignObject indisponível, caindo no html2canvas', err);
+      console.warn('[fakepass] snapdom indisponível, caindo no html2canvas', err);
       const { default: html2canvas } = await import('html2canvas');
       const canvas = await html2canvas(node, {
         scale,
