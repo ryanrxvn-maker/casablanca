@@ -307,13 +307,23 @@ export async function downloadNodeAsPng(
     // elemento (mesma ordem que o próprio html2canvas já faz). Guardamos a caixa de
     // BORDA (trilho real onde o html2canvas ancora; glifo multi-linha pode passar do
     // content-box).
+    // `bands` = flex/grid ROW com align-items:center (centralização VERTICAL de 1
+    // linha — o que o html2canvas erra). `stops` = contextos onde NÃO se pode
+    // compensar via translateY vertical: flex-COLUNA (texto empilhado, ex.: LIVE+hora
+    // — centralizar cada item colapsa a coluna), writing-mode VERTICAL (GloboNews) e
+    // qualquer TRANSFORM (skew/rotate — o translateY sairia no eixo errado).
     const bands = new Map<HTMLElement, { top: number; bottom: number }>();
+    const stops = new Set<HTMLElement>();
     for (const a of all) {
       const cs = getComputedStyle(a);
-      const centers =
-        ((cs.display.includes('flex') || cs.display.includes('grid')) && cs.alignItems === 'center') ||
-        cs.justifyContent === 'center';
-      if (!centers) continue;
+      const isFlex = cs.display.includes('flex');
+      const isCol = isFlex && (cs.flexDirection === 'column' || cs.flexDirection === 'column-reverse');
+      const vertical = cs.writingMode !== 'horizontal-tb';
+      const transformed = cs.transform && cs.transform !== 'none';
+      if (isCol || vertical || transformed) stops.add(a);
+      if (vertical) continue; // banda vertical não conta
+      const rowCenter = (isFlex || cs.display.includes('grid')) && !isCol && cs.alignItems === 'center';
+      if (!rowCenter) continue;
       const ar = a.getBoundingClientRect();
       bands.set(a, {
         top: ar.top + (parseFloat(cs.borderTopWidth) || 0),
@@ -323,29 +333,31 @@ export async function downloadNodeAsPng(
     // PASSO 2 — só FOLHAS de texto que têm banda-ancestral (checagem BARATA via Map,
     // sem getComputedStyle). Só aí medimos o Range (glifo) — assim artigos (muito
     // texto, ZERO banda) não pagam nada. Pega tag, ticker (aninhado) e manchete
-    // (multi-linha). Bolha de chat NÃO tem banda-ancestral → intocada.
+    // (multi-linha). Bolha de chat / coluna empilhada / texto vertical → intocados.
     if (bands.size) {
       for (const el of all) {
         const kids = Array.from(el.childNodes);
         if (kids.some((n) => n.nodeType === 1)) continue; // só FOLHAS
         if (!kids.some((n) => n.nodeType === 3 && (n.textContent || '').trim())) continue;
-        // barato: tem ALGUMA banda-ancestral? (senão nem mede o Range)
-        let hasBand = false;
+        // barato: tem banda-ancestral SEM cruzar um `stop`? (senão nem mede o Range)
+        let reachable = false;
         for (let i = 0, a: HTMLElement | null = el; i < 6 && a; i++, a = a.parentElement) {
+          if (i > 0 && stops.has(a)) break; // cruzou coluna/vertical/transform → aborta
           if (bands.has(a)) {
-            hasBand = true;
+            reachable = true;
             break;
           }
         }
-        if (!hasBand) continue;
+        if (!reachable) continue;
         const range = document.createRange();
         range.selectNodeContents(el);
         const gr = range.getBoundingClientRect(); // caixa REAL dos glifos
         if (!gr.height) continue;
-        // acha a banda mais próxima COM FOLGA (o span aninhado do ticker é APERTADO —
-        // pula ele até o container que realmente centraliza).
+        // acha a banda mais próxima COM FOLGA (pula o span aninhado apertado do
+        // ticker; aborta se cruzar um `stop` antes).
         let band: { top: number; bottom: number } | undefined;
         for (let i = 0, a: HTMLElement | null = el; i < 6 && a; i++, a = a.parentElement) {
+          if (i > 0 && stops.has(a)) break;
           const b = bands.get(a);
           if (b && b.bottom - b.top - gr.height > 3) {
             band = b;

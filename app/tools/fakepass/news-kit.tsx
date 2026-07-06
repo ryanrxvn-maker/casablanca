@@ -108,6 +108,11 @@ export function NewsStage({ bg, children }: { bg: NewsBg; children: ReactNode })
         fontFamily: NEWS_FONT,
         WebkitFontSmoothing: 'antialiased',
         color: '#fff',
+        // line-height REAL (não herda o 0 do palco): sem isso, os textos sem
+        // line-height próprio ficam com caixa de altura 0 e as COLUNAS (LIVE+hora,
+        // AO VIVO+cidade) COLAPSAM/sobrepõem já no navegador. Cada texto que precisa
+        // de altura específica sobrescreve o seu.
+        lineHeight: 1.1,
       }}
     >
       {/* CENA (atrás do chyron) */}
