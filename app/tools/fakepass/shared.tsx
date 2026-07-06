@@ -376,7 +376,13 @@ export async function downloadNodeAsPng(
         //   gapBelow → uso (gapAbove+gapBelow) × 1.1.
         const fs = parseFloat(getComputedStyle(el).fontSize) || 14;
         const multiline = gr.height > fs * 1.6;
-        const shift = multiline ? (gapAbove + gapBelow) * 0.88 : gapBelow * 1.25;
+        // O wrap inline-block ENTREGA o translateY em proporção que varia com a FONTE
+        // (fonte pequena ~0.79×, grande ~1.13× — medido). Compenso o shift por 1/ratio
+        // pra o glifo cair no centro. (1 linha: precisa subir gapBelow; multi-linha o
+        // html2canvas joga pro fundo → folga TOTAL.)
+        const ratio = 0.79 + 0.036 * (fs - 12.5);
+        const factor = Math.max(0.75, Math.min(1.35, 1 / ratio));
+        const shift = multiline ? (gapAbove + gapBelow) * 0.88 : gapBelow * factor;
         el.dataset.fpVshift = String(Math.round(shift * 100) / 100);
         vcompEls.push(el);
       }
