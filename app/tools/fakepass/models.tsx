@@ -30,6 +30,7 @@ import NEWS_GLOBONEWS from './model-news-globonews';
 import NEWS_BANDNEWS from './model-news-bandnews';
 import NEWS_RECORD from './model-news-record';
 import NEWS_TIMES from './model-news-times';
+import NEWS_BEMESTAR from './model-news-bemestar';
 import SITE_BBC from './model-site-bbc';
 import SITE_REUTERS from './model-site-reuters';
 import SITE_AP from './model-site-ap';
@@ -79,6 +80,7 @@ export const MODELS: FakeModel[] = [
   ...NEWS_BANDNEWS,
   ...NEWS_RECORD,
   ...NEWS_TIMES,
+  ...NEWS_BEMESTAR,
   // Sites de Notícia (páginas de portal)
   // Internacionais
   ...SITE_BBC,
