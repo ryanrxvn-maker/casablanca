@@ -225,14 +225,14 @@ export async function downloadNodeAsPng(
 
   // ── Crop-guard do html2canvas ──
   // O html2canvas erra a posição vertical do texto por ~1-2px na hora de desenhar;
-  // em QUALQUER texto TRUNCADO (`overflow:hidden`/`clip`) isso acaba cortando as
-  // letras no PNG — o topo (1 linha, nome do header/@usuário/chyron do telejornal,
-  // com "…" OU corte seco) ou a base (várias linhas com `-webkit-line-clamp`, ex.:
-  // mensagem da notificação). Cobrimos TODO elemento com TEXTO DIRETO cujo overflow
-  // corta (qualquer eixo): damos folga vertical LAYOUT-NEUTRA — padding-block +3px
-  // cresce a caixa (dá espaço pro clip), margin-block -3px cancela o crescimento
-  // (o texto fica na MESMA posição). Assim a prévia e o download continuam idênticos,
-  // só que o export não corta mais. Restauramos no finally.
+  // em texto com `overflow:hidden`/`clip` isso corta as letras no PNG (topo do nome
+  // do header/@usuário/chyron; base da última linha do line-clamp). A correção mais
+  // ROBUSTA: pro texto que CABE (não estoura a caixa), simplesmente REMOVEMOS o clip
+  // (`overflow: visible`) durante a captura — como não há nada pra cortar, o
+  // resultado é IDÊNTICO à prévia, só que sem o corte-fantasma do html2canvas. Pro
+  // texto que REALMENTE estoura (nome enorme etc.), deixamos o clip (mantém o "…";
+  // caso raro). NÃO mexemos em padding/margin — o html2canvas não honra margem
+  // negativa direito e isso desalinhava o texto. Restauramos no finally.
   const cropGuards: Array<() => void> = [];
   const applyCropGuards = () => {
     node.querySelectorAll<HTMLElement>('*').forEach((el) => {
@@ -243,35 +243,27 @@ export async function downloadNodeAsPng(
         cs.overflowY === 'hidden' ||
         cs.overflowY === 'clip';
       if (!clips) return;
-      // só elementos que têm TEXTO direto (evita mexer em containers de ícone/foto
-      // que cortam por outros motivos — avatar redondo, etc.)
+      // só elementos com TEXTO direto (não mexe em containers de ícone/foto — avatar
+      // redondo, etc. — que cortam de propósito)
       const hasDirectText = Array.from(el.childNodes).some(
         (n) => n.nodeType === 3 && (n.textContent || '').trim() !== '',
       );
       if (!hasDirectText) return;
+      // o texto CABE? (nada a cortar) → seguro remover o clip. Se estoura de verdade,
+      // deixa como está (mantém o "…"/clamp).
+      const fits =
+        el.scrollWidth <= el.clientWidth + 1 &&
+        el.scrollHeight <= el.clientHeight + 1;
+      if (!fits) return;
       const st = el.style;
-      const prev = {
-        pt: st.paddingTop,
-        pb: st.paddingBottom,
-        mt: st.marginTop,
-        mb: st.marginBottom,
-        bs: st.boxSizing,
-      };
-      const pt = parseFloat(cs.paddingTop) || 0;
-      const pb = parseFloat(cs.paddingBottom) || 0;
-      const mt = parseFloat(cs.marginTop) || 0;
-      const mb = parseFloat(cs.marginBottom) || 0;
-      st.boxSizing = 'content-box';
-      st.paddingTop = `${pt + 3}px`;
-      st.paddingBottom = `${pb + 3}px`;
-      st.marginTop = `${mt - 3}px`;
-      st.marginBottom = `${mb - 3}px`;
+      const prev = { o: st.overflow, ox: st.overflowX, oy: st.overflowY };
+      st.overflow = 'visible';
+      st.overflowX = 'visible';
+      st.overflowY = 'visible';
       cropGuards.push(() => {
-        st.paddingTop = prev.pt;
-        st.paddingBottom = prev.pb;
-        st.marginTop = prev.mt;
-        st.marginBottom = prev.mb;
-        st.boxSizing = prev.bs;
+        st.overflow = prev.o;
+        st.overflowX = prev.ox;
+        st.overflowY = prev.oy;
       });
     });
   };

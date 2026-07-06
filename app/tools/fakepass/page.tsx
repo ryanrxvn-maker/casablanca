@@ -235,8 +235,17 @@ export default function FakePassPage() {
                   com texto/vetores NÍTIDOS — sem a rasterização borrada do
                   scale. No export, downloadNodeAsPng zera este zoom pela marca
                   data-fp-zoom, então o PNG sai em alta e imune ao encolhimento. */}
-              <div data-fp-zoom style={{ zoom: pscale }}>
-                <div ref={stageRef} className={uiFont.variable} style={{ display: 'inline-block', lineHeight: 0 }}>
+              <div data-fp-zoom style={{ zoom: pscale, lineHeight: 0 }}>
+                {/* `vertical-align: top` tira o vão do descender do inline-block
+                    (o motivo do antigo `line-height: 0` no PALCO). Colocar o
+                    line-height:0 no WRAPPER (não no palco) evita "envenenar" o
+                    texto dos filhos: a barra de status, timestamps etc. voltam a
+                    ter altura de linha NORMAL e alinham certo com os ícones. */}
+                <div
+                  ref={stageRef}
+                  className={uiFont.variable}
+                  style={{ display: 'inline-block', verticalAlign: 'top', lineHeight: 'normal' }}
+                >
                   {model.Preview({ s, status })}
                 </div>
               </div>
