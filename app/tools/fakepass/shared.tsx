@@ -192,21 +192,18 @@ export function FitText({
 /**
  * Rasteriza um nó do DOM em PNG NÍTIDO e IDÊNTICO À PRÉVIA.
  *
- * Motor: `snapdom` (SVG <foreignObject>, porém otimizado). Diferença fundamental
- * pro html2canvas: quem desenha o PNG é o PRÓPRIO NAVEGADOR (a mesma engine que
- * pinta a prévia), não uma reimplementação — texto, line-height, overflow,
- * elipse (…), flexbox, gradiente e sombra saem como na tela (acabou o "download
- * cortado/desalinhado" que o html2canvas causava por recalcular o layout).
+ * Motor: `html2canvas`. Diferente dos motores de foreignObject (modern-screenshot,
+ * snapdom), o html2canvas desenha DIRETO no canvas com a fonte JÁ CARREGADA na
+ * página (a Inter real) — então o texto quebra IGUAL à prévia (mesma fonte, mesma
+ * métrica) e não há o "fallback de fonte" que os foreignObject sofrem no contexto
+ * isolado do SVG. E é RÁPIDO: os motores foreignObject travavam 30-60s nos modelos
+ * de chat porque iteram o computed-style inteiro (centenas de props + CSS vars do
+ * design system) por elemento; o html2canvas lê só o que precisa.
  *
- * Por que snapdom e não modern-screenshot (que também é foreignObject): o
- * modern-screenshot levava 30s+ e travava a aba em modelos de chat (compara
- * estilo-a-estilo contra um iframe-sandbox por elemento). O snapdom faz o mesmo
- * em ~1-2s. `embedFonts` embute a Inter usada no nó, então o texto sai idêntico.
- *
- * `targetW` = largura final do PNG; scale = targetW/refW (stageW), então o PNG
- * sai na resolução cheia. `dpr:1` evita dobrar pela densidade da tela. Download
- * por Object URL (data URL trunca arquivo grande). Fallback pro html2canvas se
- * o snapdom falhar — nunca quebra de vez.
+ * `targetW` = largura final do PNG; scale = targetW/refW (stageW), então o PNG sai
+ * na resolução cheia. Download por Object URL (data URL trunca arquivo grande).
+ * As correções de layout que o html2canvas precisa (line-height folgado, sem
+ * flex-coluna nos headers) ficam na MARCAÇÃO de cada modelo.
  */
 export async function downloadNodeAsPng(
   node: HTMLElement,
@@ -214,10 +211,8 @@ export async function downloadNodeAsPng(
   targetW: number,
   refW?: number,
 ) {
-  // Fontes prontas ANTES de capturar: o export embute o @font-face no SVG; se a
-  // fonte não terminou de carregar, o texto cai numa fonte de fallback com
-  // métrica diferente = desalinhado. `document.fonts.ready` garante que prévia e
-  // export usam exatamente a mesma fonte.
+  // Fontes prontas ANTES de capturar: se a Inter não terminou de carregar, o
+  // texto sai numa fonte de fallback com métrica diferente = desalinhado.
   if (document.fonts?.ready) await document.fonts.ready;
 
   // A prévia é encolhida com CSS `zoom` num wrapper [data-fp-zoom]. Durante a
@@ -228,10 +223,10 @@ export async function downloadNodeAsPng(
   const prevZoom = zoomEl ? zoomEl.style.zoom : '';
   if (zoomEl) zoomEl.style.zoom = '1';
 
-  let blob: Blob | null = null;
+  let canvas: HTMLCanvasElement;
   try {
-    // Espera imagens (emojis do CDN, avatares, fotos) carregarem — o export
-    // inlina cada uma; se não carregou, sai em branco.
+    // Espera imagens (emojis do CDN, avatares, fotos) carregarem — senão saem
+    // em branco no canvas.
     await Promise.all(
       Array.from(node.querySelectorAll('img')).map((img) =>
         img.complete && img.naturalWidth > 0
@@ -249,33 +244,21 @@ export async function downloadNodeAsPng(
     const baseW = refW ?? node.getBoundingClientRect().width;
     const scale = targetW / baseW;
 
-    try {
-      const { snapdom } = await import('@zumer/snapdom');
-      blob = await snapdom.toBlob(node, {
-        type: 'png',
-        scale,
-        dpr: 1, // usa só o `scale`; não dobra pela densidade da tela
-        backgroundColor: 'transparent', // stickers de story; modelos opacos pintam o próprio
-        embedFonts: true, // embute a Inter usada no nó → texto igual à prévia
-        fast: true,
-      });
-    } catch (err) {
-      // Fallback só pra navegadores que bloqueiam foreignObject — nunca falha.
-      console.warn('[fakepass] snapdom indisponível, caindo no html2canvas', err);
-      const { default: html2canvas } = await import('html2canvas');
-      const canvas = await html2canvas(node, {
-        scale,
-        backgroundColor: null,
-        useCORS: true,
-        logging: false,
-      });
-      blob = await new Promise<Blob | null>((res) =>
-        canvas.toBlob((b: Blob | null) => res(b), 'image/png'),
-      );
-    }
+    const { default: html2canvas } = await import('html2canvas');
+    canvas = await html2canvas(node, {
+      scale,
+      backgroundColor: null, // transparente (stickers); modelos opacos pintam o próprio
+      useCORS: true, // emojis do CDN
+      logging: false,
+      imageTimeout: 20000,
+    });
   } finally {
     if (zoomEl) zoomEl.style.zoom = prevZoom;
   }
+
+  const blob: Blob | null = await new Promise((res) =>
+    canvas.toBlob((b: Blob | null) => res(b), 'image/png'),
+  );
 
   if (!blob) throw new Error('export vazio');
   const url = URL.createObjectURL(blob);
