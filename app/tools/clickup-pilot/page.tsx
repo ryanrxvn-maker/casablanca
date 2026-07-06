@@ -1523,12 +1523,18 @@ function ClickUpPilotInner() {
           else needNameV.push({ id: vid, fallback: g.name || `Voz ${vid.slice(0, 8)}` });
         }
       }
-      const { listStockVoices, getVoiceName } = await import('@/lib/heygen-api-direct');
+      const { listStockVoices, listMyClonedVoices, getVoiceName } = await import('@/lib/heygen-api-direct');
       if (needNameV.length) {
         const resolvedV = await Promise.all(
           needNameV.map(async (x) => ({ id: x.id, name: (await getVoiceName(x.id)) || x.fallback })),
         );
         for (const r of resolvedV) voiceLibrary.push({ id: r.id, name: r.name });
+      }
+      // Vozes CLONADAS do user (voice_clone/voice.list) — clone referenciado por
+      // @nome no briefing (ex: @tony) que não está anexado a nenhum avatar só casa
+      // se vier daqui; /v1/voice.list (stock) não traz o grosso dos clones.
+      for (const v of await listMyClonedVoices()) {
+        if (!seenV.has(v.id)) { seenV.add(v.id); voiceLibrary.push({ id: v.id, name: v.name }); }
       }
       for (const v of await listStockVoices()) {
         if (!seenV.has(v.id)) { seenV.add(v.id); voiceLibrary.push({ id: v.id, name: v.name }); }

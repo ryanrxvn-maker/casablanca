@@ -92,10 +92,12 @@ export function CompactVoiceSelector({
     return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
-  // Carrega as vozes da CONTA ATIVA (sessão), 1x ao abrir. Custom (@username/
-  // clones) vêm da biblioteca de avatares (look.voiceId/voiceName); stock vem
-  // de /v1/voice.list pela sessão. NUNCA do /api/heygen/voices (API key fixa =
-  // conta errada quando o user troca de conta no HeyGen). Filtro é client-side.
+  // Carrega as vozes da CONTA ATIVA (sessão), 1x ao abrir, de TRÊS fontes que se
+  // complementam: (1) vozes anexadas aos avatares da biblioteca (look.voiceId),
+  // (2) TODAS as vozes clonadas do user via voice_clone/voice.list — inclusive as
+  // que não estão em nenhum avatar (ex: "tony voice ra"), (3) o catálogo STOCK via
+  // /v1/voice.list. NUNCA usa /api/heygen/voices (API key fixa = conta errada
+  // quando o user troca de conta no HeyGen). Filtro é client-side.
   useEffect(() => {
     if (!open || allVoices.length > 0) return;
     let cancelled = false;
@@ -133,9 +135,20 @@ export function CompactVoiceSelector({
           for (const r of resolved) list.push({ id: r.id, name: r.name, custom: true });
         }
       } catch {}
-      // 2) CONTA ATIVA (sessão) — STOCK + CUSTOM via /v2/voice.list. Traz de volta
-      //    vozes clonadas que NÃO estão anexadas a um look (ex: @username nativo de
-      //    Avatar IV/V), que o passo (1) não pega. Dedup contra o que já entrou.
+      // 2) CLONADAS (conta ativa) — as vozes que o USER clonou no HeyGen (Instant
+      //    Voice Clone/ElevenLabs, ex: "tony voice ra"). Vivem em
+      //    /v1/pacific/voice_clone/voice.list (mesmo endpoint da tela de vozes do
+      //    HeyGen), NÃO em /v1/voice.list (só stock) NEM nos looks quando a voz não
+      //    está anexada a nenhum avatar. É a fonte que faltava — sem ela o clone
+      //    sumia da busca. Entram como "sua voz" e ficam no topo. Dedup.
+      try {
+        const { listMyClonedVoices } = await import('@/lib/heygen-api-direct');
+        for (const v of await listMyClonedVoices()) {
+          if (!seen.has(v.id)) { seen.add(v.id); list.push({ id: v.id, name: v.name, custom: true }); }
+        }
+      } catch {}
+      // 3) CONTA ATIVA (sessão) — STOCK via /v1/voice.list (~2330 do catálogo).
+      //    Dedup contra o que já entrou (custom vem primeiro).
       try {
         const { listStockVoices } = await import('@/lib/heygen-api-direct');
         for (const v of await listStockVoices()) {

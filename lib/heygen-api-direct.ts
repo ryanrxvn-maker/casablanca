@@ -566,6 +566,65 @@ export async function listStockVoices(): Promise<StockVoice[]> {
   return _stockVoicesCache?.voices || [];
 }
 
+let _clonedVoicesCache: { at: number; voices: StockVoice[] } | null = null;
+
+/** Lista as vozes CLONADAS da PRÓPRIA conta ativa (Instant Voice Clone / ElevenLabs)
+ *  via `/v1/pacific/voice_clone/voice.list` — o MESMO endpoint que a tela de vozes
+ *  do HeyGen usa pra mostrar "suas vozes". É AQUI que vivem as vozes que o user
+ *  clonou (ex: "tony voice ra"): confirmado por engenharia-reversa na sessão
+ *  (code 100, `data.list[{voice_id, display_name}]` + `total` + `last_timestamp`).
+ *
+ *  CRÍTICO — por que precisa dessa fonte separada: uma voz clonada que NÃO está
+ *  anexada a nenhum avatar NÃO aparece em lugar nenhum das outras fontes:
+ *    - `/v1/voice.list` (o catálogo ~2330) só traz STOCK + pouquíssimas promovidas
+ *      (`is_customer:true` = 2 na conta sondada), NUNCA o grosso dos clones;
+ *    - os looks dos avatares só têm a voz que está anexada a um avatar.
+ *  Sem consultar voice_clone/voice.list, a busca do picker não achava o clone e o
+ *  auto-resolve de @username não casava. Session/cookies → conta ativa (igual
+ *  avatares), então nunca mostra voz de conta errada.
+ *
+ *  Cache 5min (igual [[listStockVoices]]). Best-effort: qualquer falha → [] e o
+ *  chamador segue com as outras fontes (sem regressão). */
+export async function listMyClonedVoices(): Promise<StockVoice[]> {
+  if (_clonedVoicesCache && Date.now() - _clonedVoicesCache.at < 5 * 60 * 1000) {
+    return _clonedVoicesCache.voices;
+  }
+  const out: StockVoice[] = [];
+  const seen = new Set<string>();
+  try {
+    // Paginação DEFENSIVA por cursor `last_timestamp` (a conta sondada trazia tudo
+    // numa página com last_timestamp=null; contas maiores podem cursorizar). O
+    // guard `added===0` corta o loop mesmo se o nome do param de cursor mudar —
+    // nunca vira loop infinito, no pior caso pega só a 1ª página (= sem regressão).
+    let cursor: string | number | null = null;
+    for (let page = 0; page < 15; page++) {
+      const qs = `?limit=500${cursor != null ? `&timestamp=${encodeURIComponent(String(cursor))}` : ''}`;
+      const r = await jsonCall('GET', `/v1/pacific/voice_clone/voice.list${qs}`);
+      if (!r.ok) break;
+      const d = r.body?.data;
+      const arr: any[] = d?.list || d?.voices || [];
+      if (!Array.isArray(arr) || arr.length === 0) break;
+      let added = 0;
+      for (const v of arr) {
+        const id = v?.voice_id || v?.id || v?.user_voice_clone_id;
+        if (!id || seen.has(String(id))) continue;
+        seen.add(String(id));
+        const name = (v?.display_name || '').trim() || (v?.voice_name || v?.name || '').trim() || String(id);
+        out.push({ id: String(id), name, language: null, gender: null, custom: true });
+        added++;
+      }
+      cursor = d?.last_timestamp ?? null;
+      if (cursor == null || added === 0) break;
+    }
+  } catch {
+    /* best-effort — cai nas outras fontes */
+  }
+  // Só cacheia quando achou algo: [] pode ser "sem clones" OU "extensão caiu" —
+  // cachear vazio esconderia a extensão que conectar depois (mesmo racional do stock).
+  if (out.length > 0) _clonedVoicesCache = { at: Date.now(), voices: out };
+  return out;
+}
+
 const _voiceNameCache = new Map<string, string>();
 
 /** Resolve o display_name de uma voz pelo voice_id, via /v1/voice.get pela SESSÃO
