@@ -329,20 +329,30 @@ export async function downloadNodeAsPng(
         const kids = Array.from(el.childNodes);
         if (kids.some((n) => n.nodeType === 1)) continue; // só FOLHAS
         if (!kids.some((n) => n.nodeType === 3 && (n.textContent || '').trim())) continue;
+        // barato: tem ALGUMA banda-ancestral? (senão nem mede o Range)
+        let hasBand = false;
+        for (let i = 0, a: HTMLElement | null = el; i < 6 && a; i++, a = a.parentElement) {
+          if (bands.has(a)) {
+            hasBand = true;
+            break;
+          }
+        }
+        if (!hasBand) continue;
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const gr = range.getBoundingClientRect(); // caixa REAL dos glifos
+        if (!gr.height) continue;
+        // acha a banda mais próxima COM FOLGA (o span aninhado do ticker é APERTADO —
+        // pula ele até o container que realmente centraliza).
         let band: { top: number; bottom: number } | undefined;
-        let a: HTMLElement | null = el;
-        for (let i = 0; i < 6 && a; i++, a = a.parentElement) {
+        for (let i = 0, a: HTMLElement | null = el; i < 6 && a; i++, a = a.parentElement) {
           const b = bands.get(a);
-          if (b) {
+          if (b && b.bottom - b.top - gr.height > 3) {
             band = b;
             break;
           }
         }
         if (!band) continue;
-        const range = document.createRange();
-        range.selectNodeContents(el);
-        const gr = range.getBoundingClientRect(); // caixa REAL dos glifos
-        if (!gr.height || band.bottom - band.top - gr.height <= 3) continue;
         const gapAbove = gr.top - band.top;
         const gapBelow = band.bottom - gr.bottom;
         if (gapAbove <= 1 || gapBelow <= 1) continue; // centralizado dos DOIS lados
