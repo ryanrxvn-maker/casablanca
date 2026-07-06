@@ -225,22 +225,30 @@ export async function downloadNodeAsPng(
 
   // ── Crop-guard do html2canvas ──
   // O html2canvas erra a posição vertical do texto por ~1-2px na hora de desenhar;
-  // em textos TRUNCADOS o `overflow:hidden` acaba cortando as letras no PNG. Dois
-  // casos: (1) 1 linha com "…" (nome do header, @usuário) corta o TOPO; (2) várias
-  // linhas com `-webkit-line-clamp` (mensagem da notificação) corta a BASE da
-  // última linha. Damos folga vertical LAYOUT-NEUTRA nesses elementos: padding-block
-  // +3px cresce a caixa (dá espaço pro clip), margin-block -3px cancela o crescimento
+  // em QUALQUER texto TRUNCADO (`overflow:hidden`/`clip`) isso acaba cortando as
+  // letras no PNG — o topo (1 linha, nome do header/@usuário/chyron do telejornal,
+  // com "…" OU corte seco) ou a base (várias linhas com `-webkit-line-clamp`, ex.:
+  // mensagem da notificação). Cobrimos TODO elemento com TEXTO DIRETO cujo overflow
+  // corta (qualquer eixo): damos folga vertical LAYOUT-NEUTRA — padding-block +3px
+  // cresce a caixa (dá espaço pro clip), margin-block -3px cancela o crescimento
   // (o texto fica na MESMA posição). Assim a prévia e o download continuam idênticos,
   // só que o export não corta mais. Restauramos no finally.
   const cropGuards: Array<() => void> = [];
   const applyCropGuards = () => {
     node.querySelectorAll<HTMLElement>('*').forEach((el) => {
       const cs = getComputedStyle(el);
-      const isEllipsisLine =
-        cs.textOverflow === 'ellipsis' && cs.whiteSpace === 'nowrap';
-      const clamp = cs.webkitLineClamp;
-      const isLineClamp = !!clamp && clamp !== 'none';
-      if (!isEllipsisLine && !isLineClamp) return;
+      const clips =
+        cs.overflowX === 'hidden' ||
+        cs.overflowX === 'clip' ||
+        cs.overflowY === 'hidden' ||
+        cs.overflowY === 'clip';
+      if (!clips) return;
+      // só elementos que têm TEXTO direto (evita mexer em containers de ícone/foto
+      // que cortam por outros motivos — avatar redondo, etc.)
+      const hasDirectText = Array.from(el.childNodes).some(
+        (n) => n.nodeType === 3 && (n.textContent || '').trim() !== '',
+      );
+      if (!hasDirectText) return;
       const st = el.style;
       const prev = {
         pt: st.paddingTop,
