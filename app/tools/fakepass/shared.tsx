@@ -206,12 +206,11 @@ export function FitText({
  * `targetW` = largura final do PNG; scale = targetW/refW (stageW). Download por
  * Object URL (data URL trunca arquivo grande).
  */
-export async function downloadNodeAsPng(
+export async function renderNodeToCanvas(
   node: HTMLElement,
-  filename: string,
   targetW: number,
   refW?: number,
-) {
+): Promise<HTMLCanvasElement> {
   // Fontes prontas ANTES de capturar: se a Inter não terminou de carregar, o
   // texto sai numa fonte de fallback com métrica diferente = desalinhado.
   if (document.fonts?.ready) await document.fonts.ready;
@@ -235,6 +234,26 @@ export async function downloadNodeAsPng(
   // caso raro). NÃO mexemos em padding/margin — o html2canvas não honra margem
   // negativa direito e isso desalinhava o texto. Restauramos no finally.
   const cropGuards: Array<() => void> = [];
+  // Text-nodes SOLTOS de containers MISTOS (elemento + texto, ex.: "● LIVE") não são
+  // folhas puras, então a coleta de alvos os pularia. Aqui os envolvemos num <span>
+  // inline (layout-neutro) pra virarem folhas compensáveis; desfazemos no finally.
+  const textUnwrap: Array<() => void> = [];
+  const wrapMixedText = () => {
+    node.querySelectorAll<HTMLElement>('*').forEach((el) => {
+      const kids = Array.from(el.childNodes);
+      if (!kids.some((n) => n.nodeType === 1)) return; // folha pura: já é tratada
+      if (getComputedStyle(el).writingMode !== 'horizontal-tb') return;
+      for (const n of kids) {
+        if (n.nodeType !== 3 || !(n.textContent || '').trim()) continue;
+        const span = el.ownerDocument.createElement('span');
+        el.replaceChild(span, n);
+        span.appendChild(n);
+        textUnwrap.push(() => {
+          if (span.parentNode === el) el.replaceChild(n, span);
+        });
+      }
+    });
+  };
   const applyCropGuards = () => {
     node.querySelectorAll<HTMLElement>('*').forEach((el) => {
       const cs = getComputedStyle(el);
@@ -269,7 +288,7 @@ export async function downloadNodeAsPng(
     });
   };
 
-  let blob: Blob | null = null;
+  let canvas: HTMLCanvasElement | null = null;
   let vcompCleanup: (() => void) | null = null;
   try {
     // Espera imagens (emojis do CDN, avatares, fotos) carregarem — senão saem
@@ -287,217 +306,303 @@ export async function downloadNodeAsPng(
     await new Promise((r) => setTimeout(r, 60));
 
     applyCropGuards();
+    wrapMixedText();
 
     // ── Compensação do bug de CENTRALIZAÇÃO VERTICAL do html2canvas ──
-    // O html2canvas ANCORA o glifo no FUNDO da caixa de conteúdo. Resultado: texto de
-    // UMA linha centralizado numa caixa MAIS ALTA que o glifo (via flex
-    // `align-items:center` OU `line-height`) sai BAIXO no PNG — no navegador fica no
-    // centro. (Bolha de chat NÃO sofre: o texto flui do topo, caixa = conteúdo.)
-    // Correção: medimos, por FOLHA de texto, o vão vazio ABAIXO do glifo no navegador
-    // (= exatamente o quanto o html2canvas erra pra baixo). No clone do html2canvas
-    // (via `onclone`; a PRÉVIA não muda) envolvemos o texto num <span> com
-    // `translateY(-vão)`: o transform é PÓS-layout, então sobe o glifo pelo valor
-    // exato, imune ao flex-center interno (que "engolia" metade de um padding). O
-    // fundo (na caixa-pai) não se mexe. Marcamos aqui com data-attr (inerte: não
-    // reflui a prévia) o deslocamento; o onclone aplica no clone.
-    const vcompEls: HTMLElement[] = [];
-    const all = Array.from(node.querySelectorAll<HTMLElement>('*'));
-    // PASSO 1 — mapa das "bandas": elementos flex/grid que CENTRALIZAM o conteúdo (é
-    // o que o html2canvas erra, ancorando o glifo no fundo). 1 getComputedStyle por
-    // elemento (mesma ordem que o próprio html2canvas já faz). Guardamos a caixa de
-    // BORDA (trilho real onde o html2canvas ancora; glifo multi-linha pode passar do
-    // content-box).
-    // `bands` = flex/grid ROW com align-items:center (centralização VERTICAL de 1
-    // linha — o que o html2canvas erra). `stops` = contextos onde NÃO se pode
-    // compensar via translateY vertical: flex-COLUNA (texto empilhado, ex.: LIVE+hora
-    // — centralizar cada item colapsa a coluna), writing-mode VERTICAL (GloboNews) e
-    // qualquer TRANSFORM (skew/rotate — o translateY sairia no eixo errado).
-    const bands = new Map<HTMLElement, { top: number; bottom: number }>();
+    // O html2canvas desenha TEXTO verticalmente centralizado BAIXO demais (ancora o
+    // glifo perto do fundo da caixa): chip de 1 linha centralizado por flex
+    // `align-items:center` OU manchete multi-linha (FitText) sai deslocado pra baixo
+    // no PNG — no navegador fica no centro. (Bolha de chat NÃO sofre: flui do topo.)
+    // O erro é grande (medido: +6 a +13px) e cresce com a fonte, então NÃO dá pra
+    // acertar por fórmula.
+    //
+    // Correção por CALIBRAÇÃO MEDIDA (zero número mágico): 2 renders de sondagem —
+    // A (cru) e B (mesma árvore com a TINTA escondida, `color:transparent`). O DIFF
+    // A−B ISOLA a tinta de cada alvo e CANCELA os fundos, inclusive uma banda de MESMA
+    // cor que o texto (ex.: ticker preto embaixo de manchete preta — que enganava o
+    // scan antigo). Medimos onde a tinta de CADA alvo caiu vs onde o navegador a
+    // centraliza, gravamos o erro exato em data-fp-vcal, e o render FINAL sobe o glifo
+    // por translateY(−erro), só no clone (a prévia não muda). Texto que o html2canvas
+    // já acerta mede ~0 → não é tocado (auto-limitado). Em fonte maiúscula o
+    // centro-da-tinta ≈ centro-do-range (δ≈0 pela métrica da Inter), então alvejar o
+    // centro do range casa com a prévia.
+    const baseW = refW ?? node.getBoundingClientRect().width;
+    const scale = targetW / baseW;
+    const nodeRect = node.getBoundingClientRect();
+
+    // ALVOS = folhas de texto horizontais e não-transformadas. `stops` = contextos
+    // onde o translateY vertical não vale (writing-mode VERTICAL ou TRANSFORM — eixo
+    // errado). Coluna flex NÃO é stop: o wrap num <span> inline-block move só o glifo,
+    // não colapsa a coluna. `mode` decide como o render final sobe o glifo:
+    //  • 'fit'    → manchete FitText: translateY DIRETO (sem fundo, não re-quebra);
+    //  • 'block'  → multi-linha comum: <span> display:block (preserva a quebra);
+    //  • 'inline' → chip de 1 linha: <span> inline-block (fundo/pílula fica no lugar).
+    // `suspicious` (multi-linha, banda align-center, ou line-box folgado) decide se
+    // vale a pena pagar a sondagem; medimos TODOS os alvos, mas texto que o html2canvas
+    // já acerta mede ~0 e não é tocado.
+    type VMode = 'fit' | 'block' | 'inline';
+    type VTarget = { el: HTMLElement; cx0: number; cx1: number; cy: number; half: number; up: number; down: number; multi: boolean; mode: VMode };
+    const targets: VTarget[] = [];
+    let anySuspicious = false;
+    const allEls = Array.from(node.querySelectorAll<HTMLElement>('*'));
+    const bands = new Set<HTMLElement>();
     const stops = new Set<HTMLElement>();
-    for (const a of all) {
+    // Um transform SÓ atrapalha a compensação vertical se mexe no eixo Y do glifo —
+    // rotação, skewY ou flip (matriz com b≠0 ou d≠1). skewX/translate/scaleX preservam
+    // o eixo vertical: o translateY(−erro) continua subindo reto (num par
+    // skewX(-θ)/skewX(θ) — banner paralelogramo — os cisalhamentos ainda se cancelam).
+    const axisUnsafeTf = (tf: string): boolean => {
+      if (!tf || tf === 'none') return false;
+      const mm = /matrix\(([^)]+)\)/.exec(tf);
+      if (!mm) return true; // matrix3d/desconhecido → não arrisca
+      const p = mm[1].split(',').map((v) => parseFloat(v));
+      return Math.abs(p[1]) > 0.02 || Math.abs(p[3] - 1) > 0.02;
+    };
+    for (const a of allEls) {
       const cs = getComputedStyle(a);
       const isFlex = cs.display.includes('flex');
       const isCol = isFlex && (cs.flexDirection === 'column' || cs.flexDirection === 'column-reverse');
       const vertical = cs.writingMode !== 'horizontal-tb';
-      const transformed = cs.transform && cs.transform !== 'none';
-      if (isCol || vertical || transformed) stops.add(a);
-      if (vertical) continue; // banda vertical não conta
-      const rowCenter = (isFlex || cs.display.includes('grid')) && !isCol && cs.alignItems === 'center';
-      if (!rowCenter) continue;
-      const ar = a.getBoundingClientRect();
-      bands.set(a, {
-        top: ar.top + (parseFloat(cs.borderTopWidth) || 0),
-        bottom: ar.bottom - (parseFloat(cs.borderBottomWidth) || 0),
-      });
+      if (vertical || axisUnsafeTf(cs.transform)) stops.add(a);
+      if (vertical) continue;
+      if ((isFlex || cs.display.includes('grid')) && !isCol && cs.alignItems === 'center') bands.add(a);
     }
-    // PASSO 2 — só FOLHAS de texto que têm banda-ancestral (checagem BARATA via Map,
-    // sem getComputedStyle). Só aí medimos o Range (glifo) — assim artigos (muito
-    // texto, ZERO banda) não pagam nada. Pega tag, ticker (aninhado) e manchete
-    // (multi-linha). Bolha de chat / coluna empilhada / texto vertical → intocados.
-    if (bands.size) {
-      for (const el of all) {
-        const kids = Array.from(el.childNodes);
-        if (kids.some((n) => n.nodeType === 1)) continue; // só FOLHAS
-        if (!kids.some((n) => n.nodeType === 3 && (n.textContent || '').trim())) continue;
-        // barato: tem banda-ancestral SEM cruzar um `stop`? (senão nem mede o Range)
-        let reachable = false;
-        for (let i = 0, a: HTMLElement | null = el; i < 6 && a; i++, a = a.parentElement) {
-          if (i > 0 && stops.has(a)) break; // cruzou coluna/vertical/transform → aborta
-          if (bands.has(a)) {
-            reachable = true;
-            break;
-          }
-        }
-        if (!reachable) continue;
-        const range = document.createRange();
-        range.selectNodeContents(el);
-        const gr = range.getBoundingClientRect(); // caixa REAL dos glifos
-        if (!gr.height) continue;
-        // acha a banda mais próxima COM FOLGA (pula o span aninhado apertado do
-        // ticker; aborta se cruzar um `stop` antes).
-        let band: { top: number; bottom: number } | undefined;
-        for (let i = 0, a: HTMLElement | null = el; i < 6 && a; i++, a = a.parentElement) {
-          if (i > 0 && stops.has(a)) break;
-          const b = bands.get(a);
-          if (b && b.bottom - b.top - gr.height > 3) {
-            band = b;
-            break;
-          }
-        }
-        if (!band) continue;
-        const gapAbove = gr.top - band.top;
-        const gapBelow = band.bottom - gr.bottom;
-        if (gapAbove <= 1 || gapBelow <= 1) continue; // centralizado dos DOIS lados
-        const fs = parseFloat(getComputedStyle(el).fontSize) || 14;
-        // MULTI-LINHA (manchete FitText) → tratada no PASSO 3 (calibração exata por
-        // render), pois o erro do html2canvas varia demais por modelo pra fórmula
-        // pegar. Aqui só CHIPS de 1 linha (tag/programa/ticker/LIVE/hora).
-        if (gr.height > fs * 1.6) continue;
-        // 1 linha: o html2canvas ancora o glifo no fundo da caixa → precisa subir
-        // gapBelow; mas o wrap inline-block ENTREGA em proporção que varia com a FONTE
-        // (pequena ~0.79×, grande ~1.13× — medido) → compenso por 1/ratio.
-        const factor = Math.max(0.75, Math.min(1.35, 1 / (0.79 + 0.036 * (fs - 12.5))));
-        el.dataset.fpVshift = String(Math.round(gapBelow * factor * 100) / 100);
-        vcompEls.push(el);
-      }
-    }
-    // PASSO 3 — MANCHETES (FitText MULTI-LINHA): o erro vertical do html2canvas nelas
-    // varia demais por modelo (flex-center, coluna, block; tamanhos diferentes) pra
-    // fórmula geométrica pegar. Coletamos aqui e MEDIMOS o erro REAL num render de
-    // calibração (mais abaixo), aplicando translateY EXATO. Só FitText (data-fp-fit),
-    // sem fundo próprio (o translateY não pode mexer o fundo).
-    const nodeRect = node.getBoundingClientRect();
-    const headlines: { el: HTMLElement; cy: number; x0: number; x1: number; dark: boolean }[] = [];
-    node.querySelectorAll<HTMLElement>('[data-fp-fit]').forEach((el) => {
+    for (const el of allEls) {
+      const kids = Array.from(el.childNodes);
+      if (kids.some((n) => n.nodeType === 1)) continue; // só FOLHAS
+      if (!kids.some((n) => n.nodeType === 3 && (n.textContent || '').trim())) continue;
       const cs = getComputedStyle(el);
-      if (cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent') return;
-      if (cs.writingMode !== 'horizontal-tb' || (cs.transform && cs.transform !== 'none')) return;
-      const fs = parseFloat(cs.fontSize) || 14;
+      if (cs.writingMode !== 'horizontal-tb') continue;
+      if (axisUnsafeTf(cs.transform)) continue;
+      // dentro de um stop (vertical/rotação/skewY)? → eixo errado, pula.
+      let inStop = false;
+      for (let a: HTMLElement | null = el.parentElement; a && a !== node.parentElement; a = a.parentElement) {
+        if (stops.has(a)) { inStop = true; break; }
+      }
+      if (inStop) continue;
       const range = document.createRange();
       range.selectNodeContents(el);
       const gr = range.getBoundingClientRect();
-      if (!gr.height || gr.height <= fs * 1.6) return; // só multi-linha
-      const m = cs.color.match(/(\d+),\s*(\d+),\s*(\d+)/);
-      const dark = !!m && parseInt(m[1], 10) + parseInt(m[2], 10) + parseInt(m[3], 10) < 380;
-      headlines.push({
+      if (!gr.height || gr.width < 3) continue;
+      const fs = parseFloat(cs.fontSize) || 14;
+      const multi = gr.height > fs * 1.6;
+      const fit = el.hasAttribute('data-fp-fit');
+      let band = false;
+      for (let i = 0, a: HTMLElement | null = el; i < 6 && a; i++, a = a.parentElement) {
+        if (bands.has(a) && a.getBoundingClientRect().height - gr.height > 3) { band = true; break; }
+      }
+      const slack = gr.height > fs * 1.2; // line-box mais alto que o glifo → centraliza
+      const suspicious = multi || band || slack;
+      if (suspicious) anySuspicious = true;
+      const mode: VMode = fit ? 'fit' : multi ? 'block' : 'inline';
+      // Janela de medição ASSIMÉTRICA: o erro do html2canvas é sempre pra BAIXO, então
+      // sobra pouca margem pra cima (evita capturar a tinta do alvo de cima) e mais
+      // pra baixo (cobre o deslocamento). Multi-linha cobre a caixa inteira (rh/2);
+      // chip de 1 linha usa ±22 (não alcança vizinho empilhado ~24px).
+      const half = gr.height / 2;
+      targets.push({
         el,
-        cy: (gr.top + gr.bottom) / 2 - nodeRect.top,
-        x0: gr.left - nodeRect.left,
-        x1: gr.right - nodeRect.left,
-        dark,
+        cx0: (gr.left - nodeRect.left) * scale,
+        cx1: (gr.right - nodeRect.left) * scale,
+        cy: ((gr.top + gr.bottom) / 2 - nodeRect.top) * scale,
+        half: half * scale,
+        up: Math.round((multi ? half + 6 : 22) * scale),
+        down: Math.round((multi ? half + 22 : 22) * scale),
+        multi,
+        mode,
       });
+    }
+
+    // Aperta a janela de cada alvo nos VIZINHOS que sobrepõem em X (empilhados):
+    // a tinta de um não pode invadir a caixa do outro (ex.: sub-linha logo abaixo da
+    // manchete; "bem"/"estar" empilhados de um logo). Como o erro é pra baixo, deixo
+    // pouca folga pra CIMA (perto do vizinho de cima) e cubro o deslocamento pra baixo.
+    for (const t of targets) {
+      let above = -Infinity;
+      let below = Infinity;
+      for (const o of targets) {
+        if (o === t) continue;
+        if (o.cx1 <= t.cx0 + 2 || o.cx0 >= t.cx1 - 2) continue; // sem sobreposição em X
+        if (o.cy < t.cy) above = Math.max(above, o.cy + o.half * 0.5);
+        else if (o.cy > t.cy) below = Math.min(below, o.cy - o.half * 0.5);
+      }
+      const m = 3 * scale;
+      if (above > -Infinity) t.up = Math.min(t.up, Math.max(4 * scale, t.cy - above - m));
+      if (below < Infinity) t.down = Math.min(t.down, Math.max(t.half + 4 * scale, below - t.cy - m));
+    }
+
+    vcompCleanup = () => targets.forEach((t) => {
+      delete t.el.dataset.fpVcal;
+      delete t.el.dataset.fpVmode;
+      delete t.el.dataset.fpCal0;
+      delete t.el.dataset.fpCal1;
     });
 
-    vcompCleanup = () => {
-      vcompEls.forEach((el) => delete el.dataset.fpVshift);
-      headlines.forEach((h) => delete h.el.dataset.fpVcal);
-    };
-
-    // Largura de referência = a largura de LAYOUT do palco (stageW). Passar refW
-    // evita medir o rect visual — o PNG sempre sai na resolução cheia.
-    const baseW = refW ?? node.getBoundingClientRect().width;
-    const scale = targetW / baseW;
-
-    // MOTOR: html2canvas — RÁPIDO (~3s) e usa a fonte JÁ CARREGADA na página, então
-    // a fonte bate com a prévia. Os motores foreignObject (snapdom/modern-screenshot)
-    // sairiam PIXEL A PIXEL (o navegador desenha), mas no CACHE FRIO (1º export do
-    // user) levam 40-77s — inviável. O html2canvas tem um drift vertical sub-pixel
-    // (mitigado pelo crop-guard e line-heights inteiros dos textos-chave).
+    // MOTOR: html2canvas — RÁPIDO e usa a fonte JÁ CARREGADA na página, então a fonte
+    // bate com a prévia. Os motores foreignObject (snapdom) sairiam pixel-a-pixel mas
+    // no cache frio levam 40-77s — inviável. O erro de centralização é corrigido pela
+    // calibração medida abaixo.
     const { default: html2canvas } = await import('html2canvas');
-    // Compensação aplicada SÓ no clone que o html2canvas rasteriza (a prévia não muda):
-    //  • CHIPS [data-fp-vshift]: envolve o texto num <span> inline-block com
-    //    translateY(-vão) — sobe só o glifo, o fundo (na caixa-pai) fica.
-    //  • MANCHETES [data-fp-vcal]: translateY DIRETO no FitText (sem fundo → EXATO).
-    const onclone = (doc: Document, clonedRoot: HTMLElement) => {
-      clonedRoot.querySelectorAll<HTMLElement>('[data-fp-vshift]').forEach((el) => {
-        const dy = parseFloat(el.dataset.fpVshift || '');
-        if (!Number.isFinite(dy) || dy === 0) return;
-        const span = doc.createElement('span');
-        span.style.display = 'inline-block';
-        span.style.transform = `translateY(${-dy}px)`;
-        while (el.firstChild) span.appendChild(el.firstChild);
-        el.appendChild(span);
-      });
-      clonedRoot.querySelectorAll<HTMLElement>('[data-fp-vcal]').forEach((el) => {
-        const dy = parseFloat(el.dataset.fpVcal || '');
-        if (Number.isFinite(dy) && dy !== 0) el.style.transform = `translateY(${-dy}px)`;
-      });
+    const h2cOpts = {
+      scale,
+      backgroundColor: null as string | null,
+      useCORS: true,
+      logging: false,
+      imageTimeout: 20000,
     };
 
-    // CALIBRAÇÃO das manchetes: se há alguma, um 1º render SEM compensação mede ONDE o
-    // html2canvas de fato ancorou cada manchete vs ONDE o navegador a tem, e grava o
-    // erro em data-fp-vcal. O render final aplica o translateY exato. Só telejornais
-    // (com manchete multi-linha) pagam esse 2º render (~+3s); o resto pula.
-    if (headlines.length) {
-      const cal = await html2canvas(node, { scale, backgroundColor: null, useCORS: true, logging: false, imageTimeout: 20000 });
-      const cctx = cal.getContext('2d');
-      if (cctx) {
-        for (const h of headlines) {
-          const x0 = Math.max(0, Math.round(h.x0 * scale + 2));
-          const x1 = Math.min(cal.width, Math.round(h.x1 * scale - 2));
-          const cyPx = h.cy * scale;
-          const win = Math.round(30 * scale);
-          const y0 = Math.max(0, Math.round(cyPx - win));
-          const y1 = Math.min(cal.height, Math.round(cyPx + win));
-          if (x1 - x0 < 4 || y1 - y0 < 4) continue;
+    // SONDAGEM (só se há alvo SUSPEITO). XADREZ por cy: ordenamos os alvos pela altura
+    // e damos PARIDADE alternada (0,1,0,1…). Renders:
+    //  • rawCanvas = tudo visível (posição CRUA do html2canvas);
+    //  • hid0/hid1 = escondem a tinta dos alvos de paridade 0 / 1.
+    // Cada alvo é medido contra o render que esconde a SUA paridade → ele aparece no
+    // diff, mas os VIZINHOS verticais (paridade oposta) ficam visíveis e CANCELAM. Isola
+    // até alvos empilhados e de tinta contígua (ex.: "bem"/"estar" de um logo; sub-linha
+    // colada na manchete) que uma janela não separaria. Sequencial (o html2canvas clona
+    // o nó num iframe — evita corrida entre clones simultâneos).
+    if (targets.length && anySuspicious) {
+      const byCy = [...targets].sort((a, b) => a.cy - b.cy);
+      const par = new Map<VTarget, number>();
+      byCy.forEach((t, i) => par.set(t, i % 2));
+      targets.forEach((t) => { t.el.dataset[par.get(t) === 0 ? 'fpCal0' : 'fpCal1'] = '1'; });
+      const hideSel = (sel: string) => (_doc: Document, root: HTMLElement) => {
+        root.querySelectorAll<HTMLElement>(sel).forEach((el) => {
+          el.style.color = 'transparent';
+          el.style.textShadow = 'none';
+          el.style.setProperty('-webkit-text-fill-color', 'transparent');
+        });
+      };
+      const rawCanvas = await html2canvas(node, h2cOpts);
+      const hid0Canvas = await html2canvas(node, { ...h2cOpts, onclone: hideSel('[data-fp-cal0]') });
+      const hid1Canvas = await html2canvas(node, { ...h2cOpts, onclone: hideSel('[data-fp-cal1]') });
+      targets.forEach((t) => { delete t.el.dataset.fpCal0; delete t.el.dataset.fpCal1; });
+      const ra = rawCanvas.getContext('2d');
+      const c0 = hid0Canvas.getContext('2d');
+      const c1 = hid1Canvas.getContext('2d');
+      if (ra && c0 && c1) {
+        const CW = rawCanvas.width;
+        const CH = rawCanvas.height;
+        for (const t of targets) {
+          const hb = par.get(t) === 0 ? c0 : c1;
+          const x0 = Math.max(0, Math.round(t.cx0 + 1));
+          const x1 = Math.min(CW, Math.round(t.cx1 - 1));
+          if (x1 - x0 < 3) continue;
+          const y0 = Math.max(0, Math.round(t.cy - t.up));
+          const y1 = Math.min(CH, Math.round(t.cy + t.down));
+          if (y1 - y0 < 3) continue;
           const cols = x1 - x0;
-          const data = cctx.getImageData(x0, y0, cols, y1 - y0).data;
-          const rows: number[] = [];
-          for (let y = 0; y < y1 - y0; y++) {
+          const rows = y1 - y0;
+          const A = ra.getImageData(x0, y0, cols, rows).data;
+          const B = hb.getImageData(x0, y0, cols, rows).data;
+          const thr = Math.max(2, cols * 0.05);
+          // hit[y] = a linha y tem tinta (A difere de B = fundo)?
+          const on: boolean[] = new Array(rows);
+          for (let y = 0; y < rows; y++) {
             let cnt = 0;
             for (let x = 0; x < cols; x++) {
               const i = (y * cols + x) * 4;
-              const r = data[i], g = data[i + 1], b = data[i + 2];
-              const hit = h.dark ? r < 90 && g < 90 && b < 90 : r > 215 && g > 215 && b > 215;
-              if (hit) cnt++;
+              const d = Math.max(
+                Math.abs(A[i] - B[i]),
+                Math.abs(A[i + 1] - B[i + 1]),
+                Math.abs(A[i + 2] - B[i + 2]),
+              );
+              if (d > 40) cnt++;
             }
-            if (cnt >= 6) rows.push(y);
+            on[y] = cnt >= thr;
           }
-          if (rows.length < 2) continue;
-          const actual = y0 + (Math.min(...rows) + Math.max(...rows)) / 2;
-          const err = (actual - cyPx) / scale; // stage units; + = html2canvas baixo demais
-          if (Math.abs(err) > 0.4 && Math.abs(err) < 40) h.el.dataset.fpVcal = String(Math.round(err * 100) / 100);
+          let mid: number | null = null;
+          if (t.multi) {
+            // MULTI-LINHA: a caixa de tinta INTEIRA (1ª→última linha com tinta) — o
+            // centro do bloco de N linhas. A janela assimétrica já exclui o alvo de
+            // cima; vizinho NÃO-alvo cancela no diff (só alvos são escondidos em B).
+            let minY = -1;
+            let maxY = -1;
+            for (let y = 0; y < rows; y++) if (on[y]) { if (minY < 0) minY = y; maxY = y; }
+            if (minY >= 0) mid = y0 + (minY + maxY) / 2;
+          } else {
+            // CHIP 1 LINHA: a BANDA contígua de tinta mais PERTO do centro esperado
+            // (a própria tinta do alvo — todos deslocam pra baixo de forma parecida,
+            // então a própria fica mais perto que qualquer vizinha).
+            let best: { mid: number; dist: number } | null = null;
+            let s = -1;
+            for (let y = 0; y <= rows; y++) {
+              const hit = y < rows && on[y];
+              if (hit && s < 0) s = y;
+              if (!hit && s >= 0) {
+                const m = y0 + (s + y - 1) / 2;
+                const dist = Math.abs(m - t.cy);
+                if (!best || dist < best.dist) best = { mid: m, dist };
+                s = -1;
+              }
+            }
+            if (best) mid = best.mid;
+          }
+          if (mid == null) continue;
+          const err = (mid - t.cy) / scale; // + = html2canvas baixo demais
+          if (Math.abs(err) > 0.3 && Math.abs(err) < 60) {
+            t.el.dataset.fpVcal = String(Math.round(err * 100) / 100);
+            t.el.dataset.fpVmode = t.mode;
+          }
         }
       }
     }
 
-    const canvas = await html2canvas(node, {
-      scale,
-      backgroundColor: null, // transparente (stickers); modelos opacos pintam o próprio
-      useCORS: true, // emojis do CDN
-      logging: false,
-      imageTimeout: 20000,
-      onclone,
+    // RENDER FINAL — sobe o glifo de cada alvo por translateY(−erro), só no clone
+    // (a prévia não muda). Por modo:
+    //  • 'fit'    → translateY DIRETO no FitText (sem fundo próprio, não re-quebra);
+    //  • 'block'  → <span> display:block com translateY (multi-linha comum: preserva
+    //               a quebra e mantém o fundo do pai);
+    //  • 'inline' → <span> inline-block com translateY (chip 1 linha: pílula/fundo
+    //               próprio fica onde o html2canvas já acerta, sobe só o glifo).
+    canvas = await html2canvas(node, {
+      ...h2cOpts,
+      onclone: (doc: Document, root: HTMLElement) => {
+        root.querySelectorAll<HTMLElement>('[data-fp-vcal]').forEach((el) => {
+          const dy = parseFloat(el.dataset.fpVcal || '');
+          if (!Number.isFinite(dy) || dy === 0) return;
+          const mode = el.dataset.fpVmode || 'inline';
+          if (mode === 'fit' || mode === 'block') {
+            // multi-linha / FitText (manchete de telejornal, caixinha "Faça uma
+            // pergunta") → translateY DIRETO no elemento: não re-quebra o texto. Envolver
+            // num <span> block quebrava o layout (a caixinha subia inteira).
+            el.style.transform = `translateY(${-dy}px)`;
+            return;
+          }
+          // chip de 1 linha (tag/LIVE/hora) → envolve só o TEXTO num <span> inline-block
+          // e sobe o glifo; a pílula/fundo do elemento fica onde o html2canvas já acerta.
+          const span = doc.createElement('span');
+          span.style.display = 'inline-block';
+          span.style.transform = `translateY(${-dy}px)`;
+          while (el.firstChild) span.appendChild(el.firstChild);
+          el.appendChild(span);
+        });
+      },
     });
-    blob = await new Promise<Blob | null>((res) =>
-      canvas.toBlob((b: Blob | null) => res(b), 'image/png'),
-    );
   } finally {
     cropGuards.forEach((restore) => restore());
     if (vcompCleanup) vcompCleanup();
+    textUnwrap.forEach((restore) => restore());
     if (zoomEl) zoomEl.style.zoom = prevZoom;
   }
 
+  if (!canvas) throw new Error('export vazio');
+  return canvas;
+}
+
+/**
+ * Rasteriza um nó em PNG e dispara o download. Fino wrapper sobre
+ * `renderNodeToCanvas`; usa Object URL (data URL trunca arquivo grande).
+ */
+export async function downloadNodeAsPng(
+  node: HTMLElement,
+  filename: string,
+  targetW: number,
+  refW?: number,
+) {
+  const canvas = await renderNodeToCanvas(node, targetW, refW);
+  const blob = await new Promise<Blob | null>((res) =>
+    canvas.toBlob((b: Blob | null) => res(b), 'image/png'),
+  );
   if (!blob) throw new Error('export vazio');
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
