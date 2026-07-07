@@ -234,6 +234,44 @@ export async function renderNodeToCanvas(
   // caso raro). NÃO mexemos em padding/margin — o html2canvas não honra margem
   // negativa direito e isso desalinhava o texto. Restauramos no finally.
   const cropGuards: Array<() => void> = [];
+  // ── Gap-shim do html2canvas ──
+  // O html2canvas 1.4.1 IGNORA `gap`/`column-gap`/`row-gap` de flex → os filhos saem
+  // GRUDADOS no PNG (ex.: os itens do menu dos sites viram "g1GloboPolítica…"), enquanto
+  // na prévia o navegador respeita o gap. Correção: em cada flex COM gap, ZERAMOS o gap e
+  // passamos o MESMO espaçamento pra MARGEM dos filhos (margin-right em linha,
+  // margin-bottom em coluna) — que o html2canvas honra. O navegador renderiza igualzinho
+  // (margem = gap), então prévia e download batem. Desfazemos tudo no finally.
+  const gapShims: Array<() => void> = [];
+  const applyGapShims = () => {
+    node.querySelectorAll<HTMLElement>('*').forEach((el) => {
+      const cs = getComputedStyle(el);
+      if (cs.display !== 'flex' && cs.display !== 'inline-flex') return;
+      // space-between/around DISTRIBUI a folga: aí a margem duplicaria o espaçamento.
+      // -reverse inverteria o lado da margem — casos raros aqui, então pulamos.
+      if (cs.justifyContent.startsWith('space-')) return;
+      if (cs.flexDirection.endsWith('reverse')) return;
+      const col = cs.flexDirection === 'column';
+      const gap = parseFloat(col ? cs.rowGap : cs.columnGap) || 0;
+      if (gap <= 0) return;
+      const kids = Array.from(el.children).filter(
+        (k) => getComputedStyle(k as HTMLElement).display !== 'none',
+      ) as HTMLElement[];
+      if (kids.length < 2) return;
+      const est = el.style;
+      const prevG = { g: est.gap, cg: est.columnGap, rg: est.rowGap };
+      if (col) est.rowGap = '0px';
+      else est.columnGap = '0px';
+      gapShims.push(() => { est.gap = prevG.g; est.columnGap = prevG.cg; est.rowGap = prevG.rg; });
+      const prop = col ? 'marginBottom' : 'marginRight';
+      kids.forEach((kid, i) => {
+        if (i === kids.length - 1) return; // último não recebe (não altera a largura total)
+        const cur = parseFloat(getComputedStyle(kid)[prop as any]) || 0;
+        const prev = kid.style[prop as any];
+        (kid.style as any)[prop] = `${cur + gap}px`;
+        gapShims.push(() => { (kid.style as any)[prop] = prev; });
+      });
+    });
+  };
   // Text-nodes SOLTOS de containers MISTOS (elemento + texto, ex.: "● LIVE") não são
   // folhas puras, então a coleta de alvos os pularia. Aqui os envolvemos num <span>
   // inline (layout-neutro) pra virarem folhas compensáveis; desfazemos no finally.
@@ -306,6 +344,7 @@ export async function renderNodeToCanvas(
     await new Promise((r) => setTimeout(r, 60));
 
     applyCropGuards();
+    applyGapShims();
     wrapMixedText();
 
     // ── Compensação do bug de CENTRALIZAÇÃO VERTICAL do html2canvas ──
@@ -580,6 +619,7 @@ export async function renderNodeToCanvas(
     });
   } finally {
     cropGuards.forEach((restore) => restore());
+    gapShims.forEach((restore) => restore());
     if (vcompCleanup) vcompCleanup();
     textUnwrap.forEach((restore) => restore());
     if (zoomEl) zoomEl.style.zoom = prevZoom;

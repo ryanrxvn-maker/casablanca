@@ -130,9 +130,9 @@ export function SiteNav({
     >
       {logo}
       {items && items.length ? (
-        <div style={{ display: 'flex', gap: 16, fontSize: fontSize ?? 13.5, fontWeight: 700, marginLeft: 6, overflow: 'hidden', whiteSpace: 'nowrap' }}>
+        <div style={{ display: 'flex', gap: 16, fontSize: fontSize ?? 13.5, fontWeight: 700, lineHeight: 1, marginLeft: 6, overflow: 'hidden', whiteSpace: 'nowrap' }}>
           {items.map((it, i) => (
-            <span key={i}>{it}</span>
+            <span key={i} style={{ lineHeight: 1 }}>{it}</span>
           ))}
         </div>
       ) : null}
