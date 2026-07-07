@@ -93,7 +93,7 @@ const FEATURED: ToolEntry[] = [
 const BASE: ToolEntry[] = [
   {
     href: '/tools/fakepass',
-    label: 'FakePass',
+    label: 'FakePrint',
     description: 'Prints e stickers de redes sociais idênticos ao original.',
     icon: <IconFakePass size={26} />,
     hue: 'rgba(167, 139, 250, 0.4)',

@@ -34,6 +34,7 @@ import {
   IconDecupageCopy,
   IconDecupagem,
   IconDownloader,
+  IconFakePass,
   IconHeyGenAuto,
   IconNormalizador,
   IconRemoverElementos,
@@ -57,6 +58,7 @@ type Entry = {
 /** Banco fixo — sempre em sincronia com o resto do app. */
 const ENTRIES: Entry[] = [
   // Ferramentas Base
+  { id: 'fakepass', group: 'Ferramentas', label: 'FakePrint', hint: 'Prints e stickers de redes sociais idênticos ao original', href: '/tools/fakepass', icon: <IconFakePass size={20} />, keywords: ['fakeprint', 'fakepass', 'print', 'prints', 'sticker', 'fake', 'story', 'stories', 'dm', 'whatsapp', 'tweet', 'post', 'notificacao', 'notificação', 'noticia', 'notícia', 'telejornal', 'comentario', 'comentário', 'instagram', 'redes sociais'] },
   { id: 'decupagem', group: 'Ferramentas', label: 'Decupagem', hint: 'Corta silêncios de vídeo/áudio', href: '/tools/decupagem', icon: <IconDecupagem size={20} />, keywords: ['silencio', 'silêncio', 'cortar', 'pausa'] },
   { id: 'camuflagem', group: 'Ferramentas', label: 'Camuflagem', hint: 'Disfarça áudio dos detectores', href: '/tools/camuflagem', icon: <IconCamuflagem size={20} />, keywords: ['anti detector', 'meta', 'ia', 'whisper'] },
   { id: 'downloader', group: 'Ferramentas', label: 'Downloader', hint: 'Baixa de YouTube, TikTok, Insta e Pinterest', href: '/tools/downloader', icon: <IconDownloader size={20} />, keywords: ['youtube', 'tiktok', 'instagram', 'pinterest', 'baixar', 'download'] },

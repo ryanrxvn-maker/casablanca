@@ -103,7 +103,7 @@ export default function FakePassPage() {
 
   return (
     <ToolShell
-      title="FakePass"
+      title="FakePrint"
       eyebrow="GERADOR DE PRINTS"
       description="Crie prints e stickers de redes sociais idênticos ao original — caixinha de pergunta, enquete, conversa, post e mais. Personaliza e baixa em alta."
       hue={HUE}

@@ -15,6 +15,7 @@ import {
   IconDecupageCopy,
   IconDecupagem,
   IconDownloader,
+  IconFakePass,
   IconHeyGenAuto,
   IconLipsync,
   IconNormalizador,
@@ -31,6 +32,7 @@ type Item = {
 };
 
 const BASE_ITEMS: Item[] = [
+  { href: '/tools/fakepass', label: 'FakePrint', icon: <IconFakePass size={20} />, hue: 'rgba(167,139,250,0.4)' },
   { href: '/tools/decupagem', label: 'Decupagem', icon: <IconDecupagem size={20} />, hue: 'rgba(163,230,53,0.4)' },
   { href: '/tools/camuflagem', label: 'Camuflagem', icon: <IconCamuflagem size={20} />, hue: 'rgba(45,212,191,0.4)' },
   { href: '/tools/downloader', label: 'Downloader', icon: <IconDownloader size={20} />, hue: 'rgba(96,165,250,0.4)' },
