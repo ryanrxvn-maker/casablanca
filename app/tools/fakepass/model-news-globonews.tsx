@@ -103,32 +103,36 @@ function GloboNewsChyron({ s }: { s: S }) {
         ) : null}
       </div>
 
-      {/* Rótulo VERTICAL vermelho à esquerda */}
+      {/* Rótulo VERTICAL vermelho à esquerda — texto HORIZONTAL rotacionado −90° em vez
+          de writing-mode:vertical: o html2canvas EMBARALHA as letras em writing-mode
+          vertical no export, mas desenha horizontal+rotate certinho. Âncora: o canto
+          top-left do rótulo fica em (left:0, bottom:92k) via wrapper de altura 0, e o
+          rotate(-90°) em torno de 'left top' o sobe reto pela borda esquerda. */}
       {hasLeft ? (
-        <div
-          style={{
-            position: 'absolute',
-            left: 0,
-            bottom: 92 * k,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6 * k,
-            background: RED,
-            color: '#fff',
-            padding: `${8 * k}px ${5 * k}px`,
-            writingMode: 'vertical-rl',
-            transform: 'rotate(180deg)',
-            lineHeight: 1,
-          }}
-        >
-          {s.leftLabel.trim() ? (
-            <span style={{ fontWeight: 800, fontSize: 12 * k, letterSpacing: 0.5 * k }}>{s.leftLabel}</span>
-          ) : null}
-          {(s.date.trim() || s.time.trim()) ? (
-            <span style={{ fontWeight: 600, fontSize: 10.5 * k, opacity: 0.92, fontVariantNumeric: 'tabular-nums', letterSpacing: 0.3 * k }}>
-              {[s.date.trim(), s.time.trim()].filter(Boolean).join('  ')}
-            </span>
-          ) : null}
+        <div style={{ position: 'absolute', left: 0, bottom: 92 * k, height: 0 }}>
+          <div
+            style={{
+              transformOrigin: 'left top',
+              transform: 'rotate(-90deg)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6 * k,
+              background: RED,
+              color: '#fff',
+              padding: `${5 * k}px ${8 * k}px`,
+              lineHeight: 1,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {s.leftLabel.trim() ? (
+              <span style={{ fontWeight: 800, fontSize: 12 * k, letterSpacing: 0.5 * k }}>{s.leftLabel}</span>
+            ) : null}
+            {(s.date.trim() || s.time.trim()) ? (
+              <span style={{ fontWeight: 600, fontSize: 10.5 * k, opacity: 0.92, fontVariantNumeric: 'tabular-nums', letterSpacing: 0.3 * k }}>
+                {[s.date.trim(), s.time.trim()].filter(Boolean).join('  ')}
+              </span>
+            ) : null}
+          </div>
         </div>
       ) : null}
 
