@@ -633,6 +633,122 @@ async function fetchAdult(
   };
 }
 
+function isInstagramHost(host: string): boolean {
+  const h = host.replace(/^www\./, '').toLowerCase();
+  return (
+    h === 'instagram.com' ||
+    h.endsWith('.instagram.com') ||
+    h === 'instagr.am'
+  );
+}
+
+// Instagram: a API JSON do yt-dlp voltou a devolver "empty media
+// response" (anti-bot). Rota confiavel = Chromium real carrega o
+// reel/post publico e traz o `video_versions` (mp4 progressivo muxado).
+async function fetchInstagram(
+  url: string,
+  mode: Mode,
+  quality: Quality,
+  workDir: string,
+): Promise<Built> {
+  const title =
+    new URL(url).pathname.split('/').filter(Boolean).pop() || 'instagram';
+  try {
+    const { grabInstagram } = await import('./headless-grab');
+    const grab = await Promise.race([
+      grabInstagram(url),
+      new Promise<null>((r) => setTimeout(() => r(null), 60_000)),
+    ]);
+    if (grab && 'buffer' in grab) {
+      if (mode === 'video') {
+        const name = safeName(title, 'mp4');
+        const fp = path.join(workDir, name);
+        await writeFile(fp, grab.buffer);
+        return { file: fp, name };
+      }
+      const src = path.join(workDir, 'ig-src.mp4');
+      await writeFile(src, grab.buffer);
+      const ext = mode === 'audio-wav' ? 'wav' : 'mp3';
+      const outP = path.join(workDir, `ig-out.${ext}`);
+      const ff =
+        mode === 'audio-wav'
+          ? ['-y', '-i', src, '-vn', outP]
+          : ['-y', '-i', src, '-vn', '-b:a', '192k', outP];
+      const { code } = await run(await resolveFfmpeg(), ff, workDir);
+      if (code === 0) return { file: outP, name: safeName(title, ext) };
+    }
+  } catch {
+    /* headless indisponivel — cai no yt-dlp */
+  }
+  // fallback: yt-dlp nativo (posts publicos raros / imagens de galeria)
+  const yt = await fetchYtDlp(url, mode, quality, 'generic', workDir);
+  if (!('error' in yt)) return yt;
+  return {
+    error:
+      'Instagram exige login pra este post (privado), ou o navegador ' +
+      `interno nao esta instalado. [${yt.error}]`,
+  };
+}
+
+// Expande pin.it -> pinterest.com/pin/<id> seguindo o redirect.
+async function resolvePinIt(url: string): Promise<string> {
+  let host = '';
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return url;
+  }
+  if (host !== 'pin.it' && !host.endsWith('.pin.it')) return url;
+  try {
+    const r = await fetch(url, {
+      headers: { 'user-agent': UA },
+      redirect: 'follow',
+      signal: AbortSignal.timeout(15_000),
+    });
+    return r.url || url;
+  } catch {
+    return url;
+  }
+}
+
+// Pinterest: video pin serve HLS pelo v1.pinimg.com. Tenta o extractor
+// nativo; se falhar, Chromium real captura o master .m3u8 e o yt-dlp muxa.
+async function fetchPinterest(
+  url: string,
+  mode: Mode,
+  quality: Quality,
+  workDir: string,
+): Promise<Built> {
+  const full = await resolvePinIt(url);
+  const native = await fetchYtDlp(full, mode, quality, 'pinterest', workDir);
+  if (!('error' in native)) return native;
+  try {
+    const { grabPinterest } = await import('./headless-grab');
+    const grab = await Promise.race([
+      grabPinterest(full),
+      new Promise<null>((r) => setTimeout(() => r(null), 60_000)),
+    ]);
+    if (grab && 'm3u8' in grab) {
+      const viaHls = await fetchYtDlp(
+        grab.m3u8,
+        mode,
+        quality,
+        'pinterest',
+        workDir,
+        grab.referer,
+      );
+      if (!('error' in viaHls)) return viaHls;
+    }
+  } catch {
+    /* headless ausente */
+  }
+  return {
+    error:
+      'Pinterest: nao foi possivel baixar (o pin pode ser so imagem, ' +
+      `privado, ou o navegador interno nao esta instalado). [${native.error}]`,
+  };
+}
+
 // --------------------------- API publica ---------------------------
 
 export type DownloadInput = {
@@ -717,7 +833,12 @@ export async function processDownload(
       }
     } else if (provider === 'adult') {
       built = await fetchAdult(url, mode, quality, workDir);
+    } else if (provider === 'pinterest') {
+      built = await fetchPinterest(url, mode, quality, workDir);
+    } else if (isInstagramHost(host)) {
+      built = await fetchInstagram(url, mode, quality, workDir);
     } else {
+      // youtube e afins
       built = await fetchYtDlp(url, mode, quality, provider, workDir);
     }
 
