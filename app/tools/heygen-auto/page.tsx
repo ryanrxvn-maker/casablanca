@@ -8,7 +8,15 @@ import { CancelButton } from '@/components/CancelButton';
 import { MissingKeyBanner } from '@/components/MissingKeyBanner';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { Toggle3D } from '@/components/Toggle3D';
-import { upsertSharedBatch, listSharedBatches, removeSharedBatch } from '@/lib/heygen-batch-store';
+import {
+  upsertSharedBatch,
+  listSharedBatches,
+  removeSharedBatch,
+  getOwnedBatchId,
+  setOwnedBatchId,
+  newBatchId,
+  selectOwnBatch,
+} from '@/lib/heygen-batch-store';
 import { extractAudio, muxAudioIntoVideo } from '@/lib/ffmpeg-worker';
 import { camuflar } from '@/lib/camuflagem';
 import {
@@ -33,6 +41,7 @@ import {
   REQUIRED_EXT_VERSION,
   pollVideosUntilReady,
   downloadVideoBytes,
+  isQuotaError,
   type VideoStatus,
 } from '@/lib/heygen-api-direct';
 import {
@@ -541,11 +550,12 @@ function HeyGenAutoInner() {
     });
   }, [mode, parts.length, audioParts.length]);
 
-  /* --------- Reidrata o card da dispensa direta após reload (igual ClickUp
-   *  Pilot): lê o batch persistido mais recente do Hey Auto (heygenauto:*) e
-   *  restaura results + batchId + início. O auto-poll re-busca os vídeos →
-   *  os previews voltam a preencher. Filtra SÓ 'heygenauto:' — nunca mistura
-   *  com a fila do ClickUp Pilot. */
+  /* --------- Reidrata o card da dispensa direta após reload — com ISOLAÇÃO
+   *  ESTRITA por aba. Cada aba só restaura O SEU disparo (o id guardado no
+   *  sessionStorage por-aba). NUNCA adota o disparo de outra aba nem de um
+   *  disparo anterior — é isso que garante "cada disparo tem a sua própria
+   *  memória, não se mistura". Filtra SÓ 'heygenauto:' (jamais toca na fila do
+   *  ClickUp Pilot). */
   const rehydratedRef = useRef(false);
   useEffect(() => {
     if (rehydratedRef.current) return;
@@ -558,9 +568,13 @@ function HeyGenAutoInner() {
       } catch {}
     }
     try {
+      // Só o disparo que ESTA aba é dona (sessionStorage). Aba que nunca
+      // disparou (owned=null) começa VAZIA — não herda card de ninguém.
+      const owned = getOwnedBatchId();
+      if (!owned) return;
       const mine = listSharedBatches('heygenauto:');
-      const latest = mine.find((b) => (b.parts || []).some((p) => p.videoId));
-      if (!latest) return;
+      const latest = selectOwnBatch(mine, owned);
+      if (!latest) return; // o batch desta aba sumiu → não adota estranho
       runBatchIdRef.current = latest.taskId;
       setRunStartedAt(latest.startedAt || Date.now());
       setResults(
@@ -971,9 +985,22 @@ function HeyGenAutoInner() {
     setResults([]);
     setRunStartedAt(Date.now());
     setProcessing(true);
+    // ISOLAÇÃO: um disparo novo NÃO herda nada do anterior desta aba. Zera o
+    // estado por-disparo que vivia em memória (senão o 2º disparo mostraria
+    // "prontos"/montado do 1º — os downloadStatuses são keyados por videoId e
+    // renderedCount conta TODOS eles). Ver [[feedback_blindagem_fluxos]].
+    setDownloadStatuses({});
+    setDownloadStage(null);
+    setPipelineZips({});
 
-    // Espelho no store compartilhado (lipsync-history/background/painel)
-    const batchId = `heygenauto:${safeName}:${Date.now()}`;
+    // Cada disparo é uma MEMÓRIA independente: id único (nome+ms+nonce) que
+    // nunca colide, marcado como "posse desta aba" no sessionStorage. A posse
+    // passa a apontar SÓ pra este disparo — a aba nunca mais reidrata o
+    // anterior. NÃO removemos o disparo anterior do store: ele continua no
+    // histórico (lipsync-history/background); a isolação é garantida pela posse
+    // + selectOwnBatch, não por apagar.
+    const batchId = newBatchId(safeName);
+    setOwnedBatchId(batchId);
     runBatchIdRef.current = batchId;
     const mirrorParts = (collected: PartResult[]) =>
       jobs.map((j, i) => {
@@ -1087,8 +1114,11 @@ function HeyGenAutoInner() {
       return;
     }
 
-    const batchId = runBatchIdRef.current || `heygenauto:${safeName}:${Date.now()}`;
+    // Retomar continua no MESMO disparo (mesma memória/posse desta aba); só
+    // cria id novo se, por algum motivo, a aba não tiver um (defensivo).
+    const batchId = runBatchIdRef.current || newBatchId(safeName);
     runBatchIdRef.current = batchId;
+    setOwnedBatchId(batchId);
     cancelRef.current = false;
     setError(null);
     setProcessing(true);
@@ -1127,6 +1157,7 @@ function HeyGenAutoInner() {
       // Espelha no store (parts atualizadas) — usa o results mais recente.
       setResults((prev) => {
         const okCount = prev.filter((r) => r.videoId).length;
+        const stillQuota = prev.some((r) => !r.videoId && isQuotaError(r.error || ''));
         upsertSharedBatch(batchId, {
           phase: okCount > 0 ? 'rendering' : 'failed',
           parts: prev.map((r) => ({
@@ -1138,7 +1169,9 @@ function HeyGenAutoInner() {
           message:
             prev.every((r) => r.videoId)
               ? `Todas as ${prev.length} partes disparadas — renderizando, clique Baixar quando quiser.`
-              : `${okCount}/${prev.length} disparados — ainda faltam ${prev.length - okCount} (cota/limite?). Retomar de novo depois.`,
+              : stillQuota
+                ? `${okCount}/${prev.length} disparados — HeyGen no LIMITE DIÁRIO. As ${prev.length - okCount} restantes só saem após o reset (~24h) ou em outra conta.`
+                : `${okCount}/${prev.length} disparados — ainda faltam ${prev.length - okCount}. Clique Retomar de novo.`,
         });
         return prev;
       });
@@ -3210,9 +3243,21 @@ function HeyGenAutoInner() {
               else if (anyFailed && !pendingRender) phase = 'failed'; // tudo assentou e sobrou falha
               else if (montadoDone) phase = 'done';
               else phase = 'rendering'; // disparado → HeyGen renderizando; clique Baixar
-              // Mensagem de falha clara: avisa quantas faltaram + que é só Retomar.
+              // Mensagem de falha HONESTA: distingue LIMITE DIÁRIO do HeyGen
+              // (terminal — Retomar NÃO cura até o reset ~24h ou outra conta)
+              // de falha transitória (Retomar re-dispara só as que faltam e
+              // costuma passar). Sem isto, o card mandava "clique Retomar" num
+              // limite diário → o user clicava em loop achando que é bug.
+              const quotaHit = results.some(
+                (r) =>
+                  isQuotaError(r.error || '') ||
+                  (r.videoId ? isQuotaError(downloadStatuses[r.videoId]?.error || '') : false),
+              );
+              const failCount = dispatchFailed + renderFailed;
               const failMsg = anyFailed
-                ? `${dispatchFailed + renderFailed} de ${total} falharam (cota/limite do HeyGen?) — clique Retomar pra re-disparar as que faltam`
+                ? quotaHit
+                  ? `⚠ HeyGen no LIMITE DIÁRIO de geração — as ${failCount} parte(s) que faltam só saem após o reset (~24h) ou em OUTRA conta. NÃO é bug do app. Os ${dispatchedCount} vídeo(s) já disparados seguem rodando.`
+                  : `${failCount} de ${total} falharam — clique Retomar pra re-disparar só as que faltam.`
                 : null;
               // Previews por take (loading → vídeo jogável), igual ClickUp Pilot.
               const previewIdxs: number[] = [];
@@ -3254,10 +3299,12 @@ function HeyGenAutoInner() {
                     onPausar={() => { if (processing) cancel(); else if (downloading) cancelDownload(); }}
                     onDebug={() => void run()}
                     onRemove={() => {
-                      // Remove tb do store persistido (senão volta no reload).
+                      // Remove do store persistido + solta a POSSE desta aba
+                      // (senão o reload reidrataria o card removido).
                       if (runBatchIdRef.current) removeSharedBatch(runBatchIdRef.current);
+                      setOwnedBatchId(null);
                       runBatchIdRef.current = null;
-                      setResults([]); setError(null); setDownloadStage(null); setDownloadStatuses({}); setRunStartedAt(null);
+                      setResults([]); setError(null); setDownloadStage(null); setDownloadStatuses({}); setRunStartedAt(null); setPipelineZips({});
                     }}
                     onDownload={dispatchedCount > 0 ? (() => void downloadAllAsZip()) : undefined}
                     isRunning={isRunning}
