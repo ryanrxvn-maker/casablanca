@@ -101,7 +101,7 @@ const BASE: ToolEntry[] = [
   {
     href: '/tools/decupagem',
     label: 'Decupagem',
-    description: 'Silêncio detectado. Corte feito.',
+    description: 'Vídeo ou áudio: o silêncio some, a fala fica. Corte limpo.',
     icon: <IconDecupagem size={26} />,
     hue: 'rgba(163, 230, 53, 0.4)',
   },
@@ -146,6 +146,7 @@ const BASE: ToolEntry[] = [
     description: 'Iguala o volume de vários arquivos.',
     icon: <IconNormalizador size={26} />,
     hue: 'rgba(94, 234, 212, 0.4)',
+    adminOnly: true,
   },
   {
     href: '/tools/separador-audio',
@@ -153,6 +154,7 @@ const BASE: ToolEntry[] = [
     description: 'Separa voz, instrumental e SFX em trilhas independentes.',
     icon: <IconSeparadorAudio size={26} />,
     hue: 'rgba(167, 139, 250, 0.45)',
+    adminOnly: true,
   },
 ];
 
@@ -186,6 +188,7 @@ const AI: ToolEntry[] = [
     badge: 'IA',
     video: '/cards/removedor-legenda.mp4',
     poster: '/cards/removedor-legenda.jpg',
+    adminOnly: true,
   },
   {
     href: '/tools/decupagem-copy',
@@ -210,7 +213,7 @@ const AI: ToolEntry[] = [
   {
     href: '/tools/heygen-auto',
     label: 'Hey Auto',
-    description: 'Avatar fala tudo. Você não abre o HeyGen.',
+    description: 'Lipsync no HeyGen em lote, num clique. Você nunca mais abre o HeyGen.',
     icon: <IconHeyGenAuto size={26} />,
     hue: 'rgba(103, 232, 249, 0.42)',
     badge: 'IA',

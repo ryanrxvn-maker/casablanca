@@ -39,14 +39,14 @@ const BASE_ITEMS: Item[] = [
   { href: '/tools/compressor', label: 'Compressor', icon: <IconCompressor size={20} />, hue: 'rgba(129,140,248,0.4)' },
   { href: '/tools/audio-split', label: 'Dividir áudios', icon: <IconAudioSplit size={20} />, hue: 'rgba(34,211,238,0.4)' },
   { href: '/tools/acelerador', label: 'Mixer de Velocidade', icon: <IconAcelerador size={20} />, hue: 'rgba(251,191,36,0.4)' },
-  { href: '/tools/normalizador', label: 'Normalizador', icon: <IconNormalizador size={20} />, hue: 'rgba(94,234,212,0.4)' },
-  { href: '/tools/separador-audio', label: 'Separador de Áudio', icon: <IconSeparadorAudio size={20} />, hue: 'rgba(167,139,250,0.45)' },
+  { href: '/tools/normalizador', label: 'Normalizador', icon: <IconNormalizador size={20} />, hue: 'rgba(94,234,212,0.4)', adminOnly: true },
+  { href: '/tools/separador-audio', label: 'Separador de Áudio', icon: <IconSeparadorAudio size={20} />, hue: 'rgba(167,139,250,0.45)', adminOnly: true },
 ];
 
 const AI_ITEMS: Item[] = [
   { href: '/tools/lipsync', label: 'Lipsync Video to Video', icon: <IconLipsync size={20} />, hue: 'rgba(232,121,249,0.45)' },
   { href: '/tools/auto-broll', label: 'Auto B-roll', icon: <IconAutoBroll size={20} />, hue: 'rgba(240,171,252,0.45)' },
-  { href: '/tools/remover-elementos', label: 'Remover Legenda', icon: <IconRemoverElementos size={20} />, hue: 'rgba(244,114,182,0.45)' },
+  { href: '/tools/remover-elementos', label: 'Remover Legenda', icon: <IconRemoverElementos size={20} />, hue: 'rgba(244,114,182,0.45)', adminOnly: true },
   { href: '/tools/decupagem-copy', label: 'Decupagem Inteligente', icon: <IconDecupageCopy size={20} />, hue: 'rgba(232,121,249,0.45)' },
   { href: '/tools/copy-srt', label: 'Gerador de SRT', icon: <IconCopySRT size={20} />, hue: 'rgba(196,181,253,0.45)' },
   { href: '/tools/heygen-auto', label: 'Hey Auto', icon: <IconHeyGenAuto size={20} />, hue: 'rgba(103,232,249,0.45)' },

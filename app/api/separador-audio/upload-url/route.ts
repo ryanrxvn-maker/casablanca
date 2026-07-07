@@ -25,7 +25,7 @@ export const maxDuration = 30;
 const BUCKET = 'separador-uploads';
 
 export async function POST(req: Request) {
-  const gate = await requireTier('pro');
+  const gate = await requireTier('admin');
   if (!gate.ok) return gate.response;
 
   let body: { ext?: string };

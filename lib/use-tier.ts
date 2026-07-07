@@ -13,6 +13,7 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/downloader',
     '/tools/caixinha-pergunta',
     '/tools/fakepass',
+    '/tools/compressor',
   ]),
   basic: new Set([
     '/tools/decupagem',
@@ -23,13 +24,12 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/compressor',
     '/tools/audio-split',
     '/tools/acelerador',
-    '/tools/normalizador',
     '/tools/calculadora',
     '/tools/copy-srt',
-    // ⚠ NÃO inclui: auto-broll, heygen-auto, decupagem-copy (smart decup), remover-elementos (smart remover), ltx-video, clickup-pilot
+    // ⚠ NÃO inclui: auto-broll, heygen-auto, decupagem-copy (smart decup), remover-elementos (smart remover), normalizador (admin-only), separador-audio (admin-only), ltx-video, clickup-pilot
   ]),
   pro: new Set([
-    // pro = tudo
+    // pro = tudo, EXCETO ferramentas admin-only (normalizador, separador-audio, remover-elementos)
     '/tools/decupagem',
     '/tools/downloader',
     '/tools/caixinha-pergunta',
@@ -38,15 +38,12 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/compressor',
     '/tools/audio-split',
     '/tools/acelerador',
-    '/tools/normalizador',
     '/tools/calculadora',
-    '/tools/remover-elementos',
     '/tools/copy-srt',
     '/tools/auto-broll',
     '/tools/heygen-auto',
     '/tools/decupagem-copy',
     '/tools/clickup-pilot',
-    '/tools/separador-audio',
     '/tools/lipsync',
   ]),
   admin: new Set([]), // admin é tratado por bypass (allow tudo)

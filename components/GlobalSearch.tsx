@@ -42,6 +42,7 @@ import {
   IconSearch,
   IconStepGear,
 } from './ToolIcons';
+import { createClient } from '@/lib/supabase/client';
 
 type Entry = {
   id: string;
@@ -53,6 +54,8 @@ type Entry = {
   icon: ReactNode;
   /** Categoria pra exibir em grupos */
   group: 'Ferramentas' | 'IA' | 'Atalhos' | 'Configurações' | 'Conta';
+  /** Só aparece pra admin (ferramenta de uso interno) */
+  adminOnly?: boolean;
 };
 
 /** Banco fixo — sempre em sincronia com o resto do app. */
@@ -65,13 +68,13 @@ const ENTRIES: Entry[] = [
   { id: 'compressor', group: 'Ferramentas', label: 'Compressor', hint: 'Reduz peso do arquivo', href: '/tools/compressor', icon: <IconCompressor size={20} />, keywords: ['comprimir', 'reduzir', 'tamanho'] },
   { id: 'audio-split', group: 'Ferramentas', label: 'Dividir áudios', hint: 'Divide pelo silêncio', href: '/tools/audio-split', icon: <IconAudioSplit size={20} />, keywords: ['split', 'dividir', 'separar'] },
   { id: 'acelerador', group: 'Ferramentas', label: 'Mixer de Velocidade', hint: 'Acelera/desacelera sem ficar robótico', href: '/tools/acelerador', icon: <IconAcelerador size={20} />, keywords: ['velocidade', 'speed', 'rápido', 'lento'] },
-  { id: 'normalizador', group: 'Ferramentas', label: 'Normalizador', hint: 'Iguala volume de vários arquivos', href: '/tools/normalizador', icon: <IconNormalizador size={20} />, keywords: ['volume', 'loudness', 'lufs', 'normalizar'] },
-  { id: 'separador-audio', group: 'IA', label: 'Separador de Áudio', hint: 'Separa voz, instrumental e SFX', href: '/tools/separador-audio', icon: <IconSeparadorAudio size={20} />, keywords: ['stem', 'spleeter', 'demucs', 'voz', 'instrumental', 'sfx', 'karaoke'] },
+  { id: 'normalizador', group: 'Ferramentas', label: 'Normalizador', hint: 'Iguala volume de vários arquivos', href: '/tools/normalizador', icon: <IconNormalizador size={20} />, keywords: ['volume', 'loudness', 'lufs', 'normalizar'], adminOnly: true },
+  { id: 'separador-audio', group: 'IA', label: 'Separador de Áudio', hint: 'Separa voz, instrumental e SFX', href: '/tools/separador-audio', icon: <IconSeparadorAudio size={20} />, keywords: ['stem', 'spleeter', 'demucs', 'voz', 'instrumental', 'sfx', 'karaoke'], adminOnly: true },
   { id: 'calculadora', group: 'Ferramentas', label: 'Calculadora', hint: 'Cálculo de preço por minuto', href: '/tools/calculadora', icon: <IconCalculadora size={20} />, keywords: ['valor', 'preço', 'orçamento'] },
 
   // IA
   { id: 'auto-broll', group: 'IA', label: 'Auto B-roll', hint: 'Gera B-rolls em massa pelo JSON', href: '/tools/auto-broll', icon: <IconAutoBroll size={20} />, keywords: ['broll', 'b-roll', 'magnific'] },
-  { id: 'remover', group: 'IA', label: 'Remover Legenda/Marca d’Água', hint: 'Remove legenda e marca d’água', href: '/tools/remover-elementos', icon: <IconRemoverElementos size={20} />, keywords: ['smart remover', 'watermark', 'marca', 'logo', 'inpaint'] },
+  { id: 'remover', group: 'IA', label: 'Remover Legenda/Marca d’Água', hint: 'Remove legenda e marca d’água', href: '/tools/remover-elementos', icon: <IconRemoverElementos size={20} />, keywords: ['smart remover', 'watermark', 'marca', 'logo', 'inpaint'], adminOnly: true },
   { id: 'decupagem-copy', group: 'IA', label: 'Decupagem Inteligente', hint: 'Decupa seguindo sua copy', href: '/tools/decupagem-copy', icon: <IconDecupageCopy size={20} />, keywords: ['smart decup', 'script', 'roteiro'] },
   { id: 'copy-srt', group: 'IA', label: 'Gerador de SRT', hint: 'Legendas no tempo do seu áudio', href: '/tools/copy-srt', icon: <IconCopySRT size={20} />, keywords: ['srt generator', 'legenda', 'subtitle'] },
   { id: 'heygen-auto', group: 'IA', label: 'Hey Auto', hint: 'Lipsync automático em lote', href: '/tools/heygen-auto', icon: <IconHeyGenAuto size={20} />, keywords: ['avatar', 'lipsync', 'falar'] },
@@ -471,6 +474,7 @@ function SearchModal({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const [q, setQ] = useState('');
   const [active, setActive] = useState(0);
+  const [isAdmin, setIsAdmin] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   // Foca o input ao abrir
@@ -481,6 +485,33 @@ function SearchModal({ onClose }: { onClose: () => void }) {
       document.body.style.overflow = '';
     };
   }, []);
+
+  // Ferramentas adminOnly (uso interno) só aparecem pra admin.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const supabase = createClient();
+        const { data: u } = await supabase.auth.getUser();
+        const uid = u.user?.id;
+        if (!uid) return;
+        const { data } = await supabase
+          .from('profiles')
+          .select('is_admin')
+          .eq('id', uid)
+          .maybeSingle();
+        if (!cancelled) setIsAdmin(!!data?.is_admin);
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const visibleEntries = useMemo(
+    () => ENTRIES.filter((e) => !e.adminOnly || isAdmin),
+    [isAdmin],
+  );
 
   // Destaques sempre no topo. Sem query → todos. Com query → só os
   // que batem (consistência com o resto da lista; evita ruído visual
@@ -496,14 +527,14 @@ function SearchModal({ onClose }: { onClose: () => void }) {
   // Resultados regulares — exclui IDs que já estão nos destaques
   // pra não duplicar entre os cards 3D e a lista de baixo.
   const results = useMemo(() => {
-    const scored = ENTRIES
+    const scored = visibleEntries
       .filter((e) => !FEATURED_ID_SET.has(e.id))
       .map((e) => ({ e, s: score(q, e) }))
       .filter((it) => it.s > 0)
       .sort((a, b) => b.s - a.s)
       .slice(0, 24);
     return scored.map((it) => it.e);
-  }, [q]);
+  }, [q, visibleEntries]);
 
   // Lista única pra keyboard nav: destaques primeiro, depois o resto.
   // Ordem aqui = ordem visual → setActive(idx) corresponde 1:1.
