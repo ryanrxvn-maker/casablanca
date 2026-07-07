@@ -56,14 +56,6 @@ const META: Array<{
     usedBy: 'Seletor de avatares e vozes · Clonagem de voz (HeyGen)',
   },
   {
-    id: 'replicate',
-    label: 'Replicate',
-    helper:
-      'API token (formato r8_...). Opcional — o Separador de Áudio já roda no servidor da plataforma, sua chave não é necessária. Crie em replicate.com → Account → API tokens.',
-    link: 'https://replicate.com/account/api-tokens',
-    usedBy: 'Separador de Áudio · Isolamento de Voz (opcional)',
-  },
-  {
     id: 'groq',
     label: 'Groq (Whisper barato)',
     helper:
