@@ -66,12 +66,21 @@ type RunnerResultV2 = {
 // podemos empurrar mais forte sem risco de falha: se o cap server-side for
 // menor, alguns takes só esperam vaga e re-submetem — nunca falham.
 //   - Imagem (Nano Banana, rápida): 6 simultâneas
-//   - Vídeo (Kling, lento): 3 simultâneos
+//   - Vídeo (Kling, lento): 2 simultâneos
 // Ganho real sob relaxed mode: TODOS os takes entram na fila do Magnific
 // muito mais rápido (intervalo de disparo curto), então o Magnific
 // processa continuamente em vez de receber a conta-gotas.
+//
+// AJUSTE 2026-07-07: o Freepik/Magnific baixou o cap de Kling 2.5 no
+// Unlimited de ~6 pra 2 simultâneos. Com o teto de disparo em 3, o 3º
+// vídeo batia "exceeded concurrent" TODA vez → backoff + cooldown global
+// (pausava até a geração de imagem à toa). O auto-tuning já impedia FALHA
+// (o take só re-submetia), mas gerava churn e lentidão desnecessária.
+// Alinhar o teto ao cap real (2) elimina o rebote: dispara na medida certa,
+// zero cooldown desperdiçado. Se o Freepik voltar a subir o cap, é só
+// aumentar aqui (ou passar videoConcurrency no cfg).
 const DEFAULT_IMAGE_CONC = 6;
-const DEFAULT_VIDEO_CONC = 3;
+const DEFAULT_VIDEO_CONC = 2;
 
 // Throttle de DISPARO (não de concurrência): intervalo mínimo entre dois
 // acquire() — só evita burst instantâneo. Reduzido p/ 600/1200ms: 45 takes

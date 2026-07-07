@@ -145,13 +145,17 @@ export default function ConfiguracoesPage() {
     );
   }
 
-  const sections = [
-    { id: 'assinatura', label: 'Assinatura' },
-    { id: 'apis', label: 'Chaves IA' },
-    { id: 'magnific', label: 'Magnific' },
+  // Cada item da sidebar leva pro SEU destino certo:
+  //  - `href`  → seção com PÁGINA própria (navega direto, não só rola)
+  //  - sem href → seção INLINE nesta página (âncora, rola suave)
+  // Sessão (logout) sai da lista de propósito — o card continua no fim
+  // da página, mas não polui o índice de navegação.
+  const sections: Array<{ id: string; label: string; href?: string }> = [
+    { id: 'assinatura', label: 'Assinatura', href: '/configuracoes/assinatura' },
+    { id: 'apis', label: 'Chaves IA', href: '/configuracoes/api' },
+    { id: 'magnific', label: 'Magnific', href: '/configuracoes/magnific' },
     { id: 'email', label: 'Email' },
     { id: 'senha', label: 'Senha' },
-    { id: 'sessao', label: 'Sessão' },
     { id: 'clickup', label: 'ClickUp' },
     { id: 'zona-perigo', label: 'Zona de perigo' },
   ];
@@ -183,11 +187,13 @@ export default function ConfiguracoesPage() {
               {sections.map((s) => (
                 <a
                   key={s.id}
-                  href={`#${s.id}`}
-                  className="flex items-center justify-between rounded-[10px] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted transition hover:bg-bg hover:text-white"
+                  href={s.href ?? `#${s.id}`}
+                  className="group flex items-center justify-between rounded-[10px] px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-text-muted transition hover:bg-bg hover:text-white"
                 >
                   <span>{s.label}</span>
-                  <span className="text-text-dim transition group-hover:text-violet">·</span>
+                  <span className="text-text-dim transition group-hover:text-violet">
+                    {s.href ? '→' : '·'}
+                  </span>
                 </a>
               ))}
             </nav>
