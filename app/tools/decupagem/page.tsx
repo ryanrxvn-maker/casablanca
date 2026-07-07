@@ -513,7 +513,7 @@ export default function DecupagemPage() {
           n={1}
           icon={<IconStepUpload size={18} />}
           title={`Solta os arquivos (até ${MAX_QUEUE})`}
-          hint={`MP3, WAV, MP4, WEBM ou MOV — vários de uma vez · até ${(MAX_FILE_MB / 1024).toFixed(1).replace('.0', '')} GB cada`}
+          hint={`MP3, WAV, MP4, WEBM ou MOV — vários de uma vez · até 300 MB cada`}
           hue="rgba(163,230,53,0.4)"
         >
           <ToolDropzone

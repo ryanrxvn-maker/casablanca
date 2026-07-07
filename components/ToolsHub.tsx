@@ -81,7 +81,7 @@ const FEATURED: ToolEntry[] = [
   {
     href: '/tools/auto-broll',
     label: 'Tenha b-rolls infinitos',
-    description: 'Cole a lista de prompts em JSON e a IA gera b-roll cinematográfico pra cada frase. Inserts prontos, no clima certo, enquanto você dorme.',
+    description: 'Cole a lista de prompts em JSON e a IA gera b-roll cinematográfico. Inserts prontos, no clima certo, enquanto você dorme.',
     icon: <IconAutoBroll size={28} />,
     hue: 'rgba(103, 232, 249, 0.45)',
     badge: 'IA',
