@@ -28,6 +28,9 @@ const ESTADAO_BLUE = '#0a2b5e';
 
 /** Wordmark "Estadão" recriado aproximado em azul-marinho. */
 function EstadaoWordmark() {
+  // O "ã" é o caractere PRECOMPOSTO (U+00E3) — o serif desenha o til grudado e
+  // certo (na prévia E no html2canvas). NÃO montar o til à mão com um `˜` absoluto:
+  // sai desgrudado ("Estada˜o", parecendo palavra comida) no download.
   return (
     <span
       style={{
@@ -39,24 +42,7 @@ function EstadaoWordmark() {
         color: ESTADAO_BLUE,
       }}
     >
-      Estad
-      <span style={{ position: 'relative' }}>
-        a
-        {/* til aproximado do "ã" */}
-        <span
-          style={{
-            position: 'absolute',
-            top: -6,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            fontSize: 15,
-            lineHeight: 1,
-          }}
-        >
-          ˜
-        </span>
-      </span>
-      o
+      Estadão
     </span>
   );
 }
