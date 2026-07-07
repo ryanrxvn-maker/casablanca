@@ -45,7 +45,7 @@ const META: Array<{
     helper:
       'Chave alfanumerica longa. Pega em assemblyai.com (dashboard, sidebar).',
     link: 'https://www.assemblyai.com/app/account',
-    usedBy: 'Decupagem por Copy · Camuflagem · Gerador de SRT',
+    usedBy: 'Decupagem por Copy · Camuflagem · Gerador de SRT · Diarização de vozes (VA)',
   },
   {
     id: 'heygen',
@@ -53,15 +53,15 @@ const META: Array<{
     helper:
       'API key de avatares. Crie em app.heygen.com → API Keys.',
     link: 'https://app.heygen.com/settings?tab=api',
-    usedBy: 'Mind Ads Suite (admin)',
+    usedBy: 'Seletor de avatares e vozes · Clonagem de voz (HeyGen)',
   },
   {
     id: 'replicate',
     label: 'Replicate',
     helper:
-      'API token (formato r8_...). Crie em replicate.com → Account → API tokens.',
+      'API token (formato r8_...). Opcional — o Separador de Áudio já roda no servidor da plataforma, sua chave não é necessária. Crie em replicate.com → Account → API tokens.',
     link: 'https://replicate.com/account/api-tokens',
-    usedBy: 'Mind Ads Suite (admin)',
+    usedBy: 'Separador de Áudio · Isolamento de Voz (opcional)',
   },
   {
     id: 'groq',
@@ -69,7 +69,7 @@ const META: Array<{
     helper:
       'Token gsk_... — Whisper-large-v3 a ~$0.04/h (vs $0.45 AssemblyAI). Crie em console.groq.com → API Keys.',
     link: 'https://console.groq.com/keys',
-    usedBy: 'Mind Ads Suite (tier eco/padrao)',
+    usedBy: 'Decupagem por Copy — transcrição barata (fallback do AssemblyAI)',
   },
 ];
 
