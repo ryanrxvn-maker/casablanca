@@ -59,7 +59,7 @@ const PRO_ONLY_TOOLS = [
   '/tools/decupagem-copy',     // Smart Decup
   '/tools/clickup-pilot',
   '/tools/remover-elementos',  // Smart Remover (legenda + marca d'água)
-  '/tools/lipsync',            // Criar um avatar (lipsync) — Pro-only
+  '/tools/lipsync',            // Lipsync Video to Video — Pro-only
 ];
 
 // Rotas exclusivamente do admin (mesmo beta não acessa)

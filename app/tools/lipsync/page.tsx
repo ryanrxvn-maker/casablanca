@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import LipSyncTool from '@/components/tools/LipSyncTool';
 
 /**
- * /tools/lipsync — Ferramenta Pro (Criar um avatar / lipsync).
+ * /tools/lipsync — Ferramenta Pro (Lipsync Video to Video).
  *
  * Liberada pra Pro + Admin (profiles.tier = 'pro'/'beta' OU is_admin).
  * O bloqueio real é em camadas: middleware (PRO_ONLY_TOOLS) +

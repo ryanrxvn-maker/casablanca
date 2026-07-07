@@ -60,7 +60,7 @@ type ToolEntry = {
 const FEATURED: ToolEntry[] = [
   {
     href: '/tools/lipsync',
-    label: 'Criar um avatar',
+    label: 'Lipsync Video to Video',
     description: 'Sobe o rosto, sobe o áudio e o lipsync sai perfeito — avatar realista falando exatamente o que você quiser, em minutos. Ilimitado.',
     icon: <IconHeyGenAuto size={28} />,
     hue: 'rgba(232, 121, 249, 0.45)',
@@ -71,7 +71,7 @@ const FEATURED: ToolEntry[] = [
   {
     href: '/tools/clickup-pilot',
     label: 'Seu fluxo automático',
-    description: 'Conecta no seu ClickUp, lê os briefings e dispara os vídeos sozinho. Você só revisa — o estúdio entrega no automático.',
+    description: 'Conecta no seu ClickUp, lê os briefings de cada task e dispara os lipsync de cada task em fila. Você só revisa — o estúdio entrega no automático.',
     icon: <IconAutoBroll size={28} />,
     hue: 'rgba(167, 139, 250, 0.45)',
     badge: 'IA',
@@ -81,7 +81,7 @@ const FEATURED: ToolEntry[] = [
   {
     href: '/tools/auto-broll',
     label: 'Tenha b-rolls infinitos',
-    description: 'Cola o roteiro e a IA gera b-roll cinematográfico pra cada frase. Cortes prontos, no clima certo, enquanto você dorme.',
+    description: 'Cole a lista de prompts em JSON e a IA gera b-roll cinematográfico pra cada frase. Inserts prontos, no clima certo, enquanto você dorme.',
     icon: <IconAutoBroll size={28} />,
     hue: 'rgba(103, 232, 249, 0.45)',
     badge: 'IA',
@@ -159,7 +159,7 @@ const BASE: ToolEntry[] = [
 const AI: ToolEntry[] = [
   {
     href: '/tools/lipsync',
-    label: 'Criar um Avatar',
+    label: 'Lipsync Video to Video',
     description: 'Vídeo entra. Áudio encaixa. Boca fala.',
     icon: <IconLipsync size={26} />,
     hue: 'rgba(232, 121, 249, 0.42)',
@@ -613,8 +613,8 @@ function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
             </span>
           </h3>
           <p className="mt-3 max-w-[480px] text-[14.5px] leading-relaxed text-white/80">
-            Conecta no seu ClickUp, lê os briefings e dispara os avatares
-            sozinho. Você só revisa.
+            Conecta no seu ClickUp, lê os briefings de cada task e dispara
+            os lipsync de cada task em fila. Você só revisa.
           </p>
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
@@ -750,8 +750,9 @@ function AutoBrollSlide({ canStartAutomation }: { canStartAutomation: boolean })
             </span>
           </h3>
           <p className="mt-3 max-w-[480px] text-[14.5px] leading-relaxed text-white/80">
-            Cole a lista de prompts e aperte o play. Qualidade Magnific
-            travada, zero crédito gasto, ZIP cai pronto.
+            Cole a lista de prompts e aperte o play. Dispara na sua conta
+            Magnific no modo Unlimited, zero crédito gasto, ZIP cai pronto
+            com B-rolls renomeados por palavra-chave.
           </p>
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
