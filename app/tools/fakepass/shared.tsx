@@ -301,18 +301,28 @@ export async function renderNodeToCanvas(
         cs.overflowY === 'hidden' ||
         cs.overflowY === 'clip';
       if (!clips) return;
-      // só elementos com TEXTO direto (não mexe em containers de ícone/foto — avatar
-      // redondo, etc. — que cortam de propósito)
-      const hasDirectText = Array.from(el.childNodes).some(
-        (n) => n.nodeType === 3 && (n.textContent || '').trim() !== '',
-      );
-      if (!hasDirectText) return;
-      // o texto CABE? (nada a cortar) → seguro remover o clip. Se estoura de verdade,
-      // deixa como está (mantém o "…"/clamp).
+      // O conteúdo CABE no layout? (scroll<=client) → o clip não corta NADA de layout.
+      // Mesmo assim o html2canvas pode comer TINTA: a compensação vertical empurra o
+      // glifo pra CIMA e, num container overflow:hidden de line-box justa (ex.: a faixa
+      // de itens do menu dos sites), o TOPO das letras/acentos sai da caixa e é CORTADO
+      // no PNG — "palavra comida" que não existe na prévia (que não tem a compensação).
+      // Como cabe, overflow:visible é visualmente idêntico à prévia, só que sem o corte
+      // do topo do glifo. Se ESTOURA de verdade (line-clamp/"…"/nome enorme), mantém o
+      // clip. Vale pra QUALQUER container (texto direto OU filhos), não só folhas.
       const fits =
         el.scrollWidth <= el.clientWidth + 1 &&
         el.scrollHeight <= el.clientHeight + 1;
       if (!fits) return;
+      // Máscara DELIBERADA de forma (avatar redondo, pílula, thumb arredondado) usa
+      // border-radius grande pra recortar as QUINAS de uma mídia/fundo — desfazer o clip
+      // revelaria os cantos. border-radius desprezível (≤2px) = clip incidental → seguro.
+      const br = Math.max(
+        parseFloat(cs.borderTopLeftRadius) || 0,
+        parseFloat(cs.borderTopRightRadius) || 0,
+        parseFloat(cs.borderBottomLeftRadius) || 0,
+        parseFloat(cs.borderBottomRightRadius) || 0,
+      );
+      if (br > 2) return;
       const st = el.style;
       const prev = { o: st.overflow, ox: st.overflowX, oy: st.overflowY };
       st.overflow = 'visible';
