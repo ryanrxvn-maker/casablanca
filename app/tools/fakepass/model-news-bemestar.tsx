@@ -131,8 +131,11 @@ function BemEstarStage({ s }: { s: S }) {
 
   // Quadros REDUZIDOS e centralizados (não borda a borda). Fundo branco da marca.
   const M = 12 * k; // margem lateral/topo
-  const BM = 44 * k; // margem inferior (espaço da onda)
-  const waveH = 54 * k;
+  const waveH = 50 * k; // altura da onda do rodapé
+  // Margem inferior = espaço da onda + folga: garante que a onda fica ABAIXO do
+  // quadro verde (chroma), sem sobrepor (BM >= waveH mantém a CAIXA da onda inteira
+  // abaixo do quadro, com ~7px de respiro branco).
+  const BM = waveH + 7 * k;
   const rad = 16 * k;
   const panelW = W - 2 * M;
 
