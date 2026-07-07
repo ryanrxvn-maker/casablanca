@@ -10,6 +10,7 @@
  * Recria o GRÁFICO do telejornal; todo texto é editável (placeholder fake).
  */
 
+import { useState, useEffect, useRef } from 'react';
 import { Field, TextField, TextArea, FitText, type FakeModel } from './shared';
 import {
   NewsStage,
@@ -22,6 +23,86 @@ import {
 } from './news-kit';
 
 const RED = '#e30613';
+
+/**
+ * Rótulo VERTICAL vermelho da esquerda ("Conexão GloboNews · data · hora").
+ *
+ * O html2canvas EMBARALHA texto em `writing-mode: vertical` e renderiza texto
+ * rotacionado com MÉTRICA errada (~0.84×) — ou seja, download ≠ prévia de
+ * qualquer jeito com CSS. Solução à prova de bala (mesmo padrão do doodle do
+ * WhatsApp): assamos o rótulo (fundo vermelho + texto BRANCO rotacionado −90°,
+ * lendo de baixo pra cima) num `<canvas>` e renderizamos como `<img>` — o
+ * html2canvas desenha `<img>` FIEL, então PRÉVIA === DOWNLOAD, pixel a pixel.
+ * Usa a MESMA fonte carregada na página (pega a família resolvida de um probe).
+ */
+function GloboSideLabel({ label, dateTime, k }: { label: string; dateTime: string; k: number }) {
+  const probe = useRef<HTMLSpanElement | null>(null);
+  const [img, setImg] = useState<{ url: string; w: number; h: number } | null>(null);
+  useEffect(() => {
+    const el = probe.current;
+    if (!el || typeof document === 'undefined') return;
+    const family = getComputedStyle(el).fontFamily;
+    const dpr = 3; // superamostragem p/ nitidez no export (que roda a ~3×)
+    const padH = 8 * k;
+    const padV = 5 * k;
+    const gap = 6 * k;
+    const fsA = 12 * k;
+    const fsB = 10.5 * k;
+    const lsA = 0.5 * k;
+    const lsB = 0.3 * k;
+    const mc = document.createElement('canvas').getContext('2d');
+    if (!mc) return;
+    const measure = (txt: string, fs: number, weight: number, ls: number) => {
+      mc.font = `${weight} ${fs}px ${family}`;
+      (mc as unknown as { letterSpacing: string }).letterSpacing = `${ls}px`;
+      return mc.measureText(txt).width;
+    };
+    const wA = label ? measure(label, fsA, 800, lsA) : 0;
+    const wB = dateTime ? measure(dateTime, fsB, 600, lsB) : 0;
+    const inner = wA + (wA && wB ? gap : 0) + wB;
+    const L = padH * 2 + inner; // comprimento → vira a ALTURA da barra vertical
+    const T = padV * 2 + fsA; // espessura → vira a LARGURA da barra
+    const cv = document.createElement('canvas');
+    cv.width = Math.ceil(T * dpr);
+    cv.height = Math.ceil(L * dpr);
+    const ctx = cv.getContext('2d');
+    if (!ctx) return;
+    ctx.scale(dpr, dpr);
+    // rotaciona −90° (leitura de baixo pra cima, glifos tombados p/ a esquerda)
+    ctx.translate(0, L);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillStyle = RED;
+    ctx.fillRect(0, 0, L, T);
+    ctx.fillStyle = '#fff';
+    ctx.textBaseline = 'middle';
+    let x = padH;
+    if (label) {
+      ctx.font = `800 ${fsA}px ${family}`;
+      (ctx as unknown as { letterSpacing: string }).letterSpacing = `${lsA}px`;
+      ctx.fillText(label, x, T / 2);
+      x += wA + gap;
+    }
+    if (dateTime) {
+      ctx.font = `600 ${fsB}px ${family}`;
+      (ctx as unknown as { letterSpacing: string }).letterSpacing = `${lsB}px`;
+      ctx.globalAlpha = 0.92;
+      ctx.fillText(dateTime, x, T / 2);
+      ctx.globalAlpha = 1;
+    }
+    setImg({ url: cv.toDataURL('image/png'), w: T, h: L });
+  }, [label, dateTime, k]);
+  return (
+    <>
+      {/* probe invisível: só pra ler a família da fonte JÁ resolvida (Inter) */}
+      <span ref={probe} aria-hidden style={{ position: 'absolute', visibility: 'hidden', fontSize: 0, lineHeight: 0 }}>
+        .
+      </span>
+      {img ? (
+        <img src={img.url} alt="" style={{ position: 'absolute', left: 0, bottom: 92 * k, width: img.w, height: img.h }} />
+      ) : null}
+    </>
+  );
+}
 
 type S = NewsBg & {
   topTag: string;
@@ -103,37 +184,15 @@ function GloboNewsChyron({ s }: { s: S }) {
         ) : null}
       </div>
 
-      {/* Rótulo VERTICAL vermelho à esquerda — texto HORIZONTAL rotacionado −90° em vez
-          de writing-mode:vertical: o html2canvas EMBARALHA as letras em writing-mode
-          vertical no export, mas desenha horizontal+rotate certinho. Âncora: o canto
-          top-left do rótulo fica em (left:0, bottom:92k) via wrapper de altura 0, e o
-          rotate(-90°) em torno de 'left top' o sobe reto pela borda esquerda. */}
+      {/* Rótulo VERTICAL vermelho à esquerda — ASSADO como <img> (ver GloboSideLabel):
+          o html2canvas não desenha writing-mode:vertical nem texto rotacionado fiel,
+          então prévia === download só com imagem. */}
       {hasLeft ? (
-        <div style={{ position: 'absolute', left: 0, bottom: 92 * k, height: 0 }}>
-          <div
-            style={{
-              transformOrigin: 'left top',
-              transform: 'rotate(-90deg)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6 * k,
-              background: RED,
-              color: '#fff',
-              padding: `${5 * k}px ${8 * k}px`,
-              lineHeight: 1,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {s.leftLabel.trim() ? (
-              <span style={{ fontWeight: 800, fontSize: 12 * k, letterSpacing: 0.5 * k }}>{s.leftLabel}</span>
-            ) : null}
-            {(s.date.trim() || s.time.trim()) ? (
-              <span style={{ fontWeight: 600, fontSize: 10.5 * k, opacity: 0.92, fontVariantNumeric: 'tabular-nums', letterSpacing: 0.3 * k }}>
-                {[s.date.trim(), s.time.trim()].filter(Boolean).join('  ')}
-              </span>
-            ) : null}
-          </div>
-        </div>
+        <GloboSideLabel
+          label={s.leftLabel.trim()}
+          dateTime={[s.date.trim(), s.time.trim()].filter(Boolean).join('  ')}
+          k={k}
+        />
       ) : null}
 
       {/* Chyron inferior */}
