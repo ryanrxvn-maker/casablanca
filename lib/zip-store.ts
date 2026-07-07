@@ -21,6 +21,12 @@ const DB_NAME = 'darkolab-zip-store';
 const DB_VERSION = 1;
 const STORE = 'zips';
 const DB_OP_TIMEOUT_MS = 15_000; // teto por operação de IDB (open/tx). Generoso pra write real, curto pra hang.
+// Write de ENTREGA grande (montado/camo/va zip pode ter 50-150 MB) serializa
+// atrás do write de outra aba → 15s NÃO basta e o save estourava o timeout,
+// falhando em silêncio (task PRONTO sem arquivo no IDB → botão morto no F5).
+// Um teto bem maior pro write real, ainda curto o bastante pra não pendurar
+// pra sempre. Ver [[project_disparo_raiz_montado_1kb]] / [[feedback_blindagem_fluxos]].
+const DB_WRITE_TIMEOUT_MS = 90_000;
 
 type ZipRecord = {
   key: string;          // chave unica (ex 'batch:<taskId>:takes' / ':montado' / ':camo' / 'va:<taskId>:zip')
@@ -71,6 +77,7 @@ function runTx<T>(
   db: IDBDatabase,
   mode: IDBTransactionMode,
   body: (store: IDBObjectStore, resolve: (v: T) => void, reject: (e: unknown) => void) => void,
+  timeoutMs: number = DB_OP_TIMEOUT_MS,
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     let settled = false;
@@ -83,7 +90,7 @@ function runTx<T>(
     };
     const to = setTimeout(
       () => finish(() => reject(new Error('IndexedDB transação timeout (possível bloqueio por outra aba)'))),
-      DB_OP_TIMEOUT_MS,
+      timeoutMs,
     );
     let tx: IDBTransaction;
     try {
@@ -115,7 +122,7 @@ const MIN_ZIP_BYTES = 1024;
  *  quase sempre TRANSITÓRIO (a outra aba solta a conexão), então re-tentar com
  *  gap curto recupera. Cada tentativa reabre o DB (a conexão anterior já fechou).
  *  Lança só se TODAS falharem — aí o caller sabe de verdade que não persistiu. */
-async function writeWithRetry(rec: ZipRecord, tries = 3): Promise<void> {
+async function writeWithRetry(rec: ZipRecord, tries = 5): Promise<void> {
   let lastErr: unknown = null;
   for (let attempt = 1; attempt <= tries; attempt++) {
     try {
@@ -125,11 +132,14 @@ async function writeWithRetry(rec: ZipRecord, tries = 3): Promise<void> {
         store.put(rec);
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
-      });
+      }, DB_WRITE_TIMEOUT_MS);
       return;
     } catch (e) {
       lastErr = e;
-      if (attempt < tries) await new Promise((r) => setTimeout(r, 1500 * attempt));
+      // Backoff crescente, tetado em 4s — o bloqueio por outra aba é transitório
+      // (a outra tx completa e libera). 5 tentativas × (write 90s + gap) dá uma
+      // janela ampla o bastante pra sobreviver a uma aba escrevendo um zip enorme.
+      if (attempt < tries) await new Promise((r) => setTimeout(r, Math.min(1500 * attempt, 4000)));
     }
   }
   throw lastErr instanceof Error ? lastErr : new Error('IDB write falhou após retries');

@@ -106,6 +106,53 @@ import {
   type JobCommand,
 } from '@/lib/job-commands';
 
+/** Dispara o download de um blob pro disco do user AGORA (Object URL — nunca
+ *  base64, ver [[project_downloadblob_objecturl]]). Usado como RESGATE quando a
+ *  persistência durável (IndexedDB) da entrega falha: os bytes vão pro disco na
+ *  hora em vez de sumirem no próximo reload. */
+function rescueDownloadToDisk(blob: Blob, filename: string): void {
+  try {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename || 'entrega.zip';
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // Revoga depois — o browser precisa da URL viva durante o download.
+    setTimeout(() => { try { URL.revokeObjectURL(url); } catch { /* noop */ } }, 60_000);
+  } catch (e) {
+    console.error('[pilot] rescueDownloadToDisk falhou:', e);
+  }
+}
+
+/** Persiste uma ENTREGA final (montado/camo/va zip) no IndexedDB com GARANTIA:
+ *  se o IDB falhar (travado por outra aba, quota, etc), NÃO perde o arquivo —
+ *  baixa pro disco na hora. Retorna { persisted, rescued } pra que o caller
+ *  possa avisar o user honestamente (nunca marca "PRONTO" mudo). Ver
+ *  [[feedback_blindagem_fluxos]]: sempre terminar+entregar, nenhum botão morto. */
+async function persistDeliverableOrRescue(
+  key: string,
+  blob: Blob,
+  filename: string,
+): Promise<{ persisted: boolean; rescued: boolean }> {
+  try {
+    const { saveZip } = await import('@/lib/zip-store');
+    await saveZip(key, blob, filename);
+    return { persisted: true, rescued: false };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    // O guard "zip suspeito de vazio" (<1KB) é uma RECUSA intencional do
+    // zip-store (montagem falhou, só _ERRO.txt/_DIAGNOSTICO.txt) — NÃO é falha
+    // de IDB. Não resgata lixo pro disco; preserva o artefato bom anterior.
+    if (/suspeito de vazio/i.test(msg)) return { persisted: false, rescued: false };
+    console.warn(`[pilot] persist '${key}' falhou no IDB — resgatando via download:`, e);
+    rescueDownloadToDisk(blob, filename);
+    return { persisted: false, rescued: true };
+  }
+}
+
 /**
  * ClickUp Pilot — cerebro de automacao
  *
@@ -3005,6 +3052,10 @@ function ClickUpPilotInner() {
       // tem botao pra clicar + entende o que aconteceu.
       let montadoUrl: string | undefined;
       let montadoName: string | undefined;
+      // GARANTIA (fix 2026-07-07): true se a persistência durável da entrega
+      // falhou e tivemos que RESGATAR baixando pro disco na hora. Vira aviso
+      // honesto no card — nunca um "PRONTO" mudo que perde o arquivo no F5.
+      let deliveryRescued = false;
       {
         const zipMont = new JSZip();
         for (const item of assembled) {
@@ -3044,10 +3095,8 @@ pra ver os erros detalhados [clickup-pilot-pipeline].`);
         const temVideo = assembled.some((it) => it.decupado || (it.rawAssembled && it.rawAssembled.size > 0 && !it.errors?.assemble));
         if (temVideo) {
           montadoUrl = URL.createObjectURL(blob2);
-          try {
-            const { saveZip } = await import('@/lib/zip-store');
-            await saveZip(`batch:${taskId}:montado`, blob2, montadoName);
-          } catch (e) { console.warn('[batch] save montado IDB:', e); }
+          const rMont = await persistDeliverableOrRescue(`batch:${taskId}:montado`, blob2, montadoName);
+          if (rMont.rescued) deliveryRescued = true;
         } else {
           montadoName = undefined; // sem vídeo → não anuncia entrega falsa
         }
@@ -3077,10 +3126,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         const blob3 = await zipCamu.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
         camuName = `${adNameClean}_camuflado.zip`;
         camuUrl = URL.createObjectURL(blob3);
-        try {
-          const { saveZip } = await import('@/lib/zip-store');
-          await saveZip(`batch:${taskId}:camo`, blob3, camuName);
-        } catch (e) { console.warn('[batch] save camo IDB:', e); }
+        const rCamo = await persistDeliverableOrRescue(`batch:${taskId}:camo`, blob3, camuName);
+        if (rCamo.rescued) deliveryRescued = true;
       }
 
       const totalSize = takesBlob.size + (montadoUrl ? assembled.reduce((n, it) => n + (it.decupado?.size || it.rawAssembled?.size || 0), 0) : 0);
@@ -3104,7 +3151,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       // deixa o rastro pra auto-cura/card (sobrevive ao persist).
       const entregou = pipeStats.expectedMontagens > 0 && pipeStats.okMontagens === pipeStats.expectedMontagens;
       const doneMsg = entregou
-        ? `Pronto: ${downloaded} takes · ${pipeRes.diagnostics.summary} · ${(totalSize / (1024 * 1024)).toFixed(1)}MB`
+        ? (deliveryRescued
+            ? `Pronto e BAIXADO automaticamente pro seu PC (não deu pra salvar no cache do navegador — feche abas extras do Pilot). Confira a pasta Downloads. · ${(totalSize / (1024 * 1024)).toFixed(1)}MB`
+            : `Pronto: ${downloaded} takes · ${pipeRes.diagnostics.summary} · ${(totalSize / (1024 * 1024)).toFixed(1)}MB`)
         : `⚠ Montagem falhou (${pipeStats.okMontagens}/${pipeStats.expectedMontagens}) — takes prontos, mas o vídeo final não montou. Clica RETOMAR. [${pipeRes.diagnostics.summary}]`;
       setBatchStates((prev) => ({
         ...prev,
@@ -3549,6 +3598,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       // assembled — entrega _DIAGNOSTICO.txt explicando o motivo)
       let montadoUrl: string | undefined;
       let montadoName: string | undefined;
+      let deliveryRescued = false; // fix 2026-07-07: resgatou a entrega via download?
       {
         const zipMont = new JSZip();
         for (const item of assembled) {
@@ -3586,10 +3636,8 @@ pra ver os erros detalhados [clickup-pilot-pipeline].`);
         const temVideo = assembled.some((it) => it.decupado || (it.rawAssembled && it.rawAssembled.size > 0 && !it.errors?.assemble));
         if (temVideo) {
           montadoUrl = URL.createObjectURL(blob2);
-          try {
-            const { saveZip } = await import('@/lib/zip-store');
-            await saveZip(`batch:${taskId}:montado`, blob2, montadoName);
-          } catch (e) { console.warn('[batch resume] save montado IDB:', e); }
+          const rMont = await persistDeliverableOrRescue(`batch:${taskId}:montado`, blob2, montadoName);
+          if (rMont.rescued) deliveryRescued = true;
         } else {
           montadoName = undefined;
         }
@@ -3618,10 +3666,8 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         const blob3 = await zipCamu.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
         camuName = `${adNameClean}_camuflado.zip`;
         camuUrl = URL.createObjectURL(blob3);
-        try {
-          const { saveZip } = await import('@/lib/zip-store');
-          await saveZip(`batch:${taskId}:camo`, blob3, camuName);
-        } catch (e) { console.warn('[batch resume] save camo IDB:', e); }
+        const rCamo = await persistDeliverableOrRescue(`batch:${taskId}:camo`, blob3, camuName);
+        if (rCamo.rescued) deliveryRescued = true;
       }
 
       const totalSize = takesBlob.size + (montadoUrl ? assembled.reduce((n, it) => n + (it.decupado?.size || it.rawAssembled?.size || 0), 0) : 0);
@@ -3643,7 +3689,9 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       // task elegível pra auto-cura em vez de estacionar verde+incompleta.
       const entregou = pipeStats.expectedMontagens > 0 && pipeStats.okMontagens === pipeStats.expectedMontagens;
       const doneMsg = entregou
-        ? `Pronto: ${downloaded} takes · ${pipeRes.diagnostics.summary} · ${(totalSize / (1024 * 1024)).toFixed(1)}MB`
+        ? (deliveryRescued
+            ? `Pronto e BAIXADO automaticamente pro seu PC (não deu pra salvar no cache do navegador — feche abas extras do Pilot). Confira a pasta Downloads. · ${(totalSize / (1024 * 1024)).toFixed(1)}MB`
+            : `Pronto: ${downloaded} takes · ${pipeRes.diagnostics.summary} · ${(totalSize / (1024 * 1024)).toFixed(1)}MB`)
         : `⚠ Montagem falhou (${pipeStats.okMontagens}/${pipeStats.expectedMontagens}) — takes prontos, mas o vídeo final não montou. Clica RETOMAR. [${pipeRes.diagnostics.summary}]`;
       setBatchStates((prev) => ({
         ...prev,
@@ -4879,7 +4927,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     if (!b) return;
     setRebuildingTaskId(taskId);
     try {
-      const { loadBlob, saveZip } = await import('@/lib/zip-store');
+      const { loadBlob } = await import('@/lib/zip-store');
       // Hidrata blobs do IDB (todos, fresh — incluindo os editados)
       // expected:true = parte COM conteúdo (texto no plano) → DEVE ter blob.
       // Texto do replan, NÃO videoId: parte com texto que falhou dispatch segue
@@ -4948,7 +4996,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const montBlob = await zipMont.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
       const montadoName = `${adNameClean}_${isDecupagemEnabled(taskId) ? 'montado_decupado' : 'montado'}.zip`;
       const montadoUrl = URL.createObjectURL(montBlob);
-      try { await saveZip(`batch:${taskId}:montado`, montBlob, montadoName); } catch {}
+      await persistDeliverableOrRescue(`batch:${taskId}:montado`, montBlob, montadoName);
 
       // ZIP camo (se modo ON)
       let camuUrl: string | undefined;
@@ -4962,7 +5010,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         const camuBlob = await zipCamu.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
         camuName = `${adNameClean}_camuflado.zip`;
         camuUrl = URL.createObjectURL(camuBlob);
-        try { await saveZip(`batch:${taskId}:camo`, camuBlob, camuName); } catch {}
+        await persistDeliverableOrRescue(`batch:${taskId}:camo`, camuBlob, camuName);
       }
 
       const decupagemOn = isDecupagemEnabled(taskId);
@@ -6576,10 +6624,7 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
       const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
       const zipName = `${adNameClean}_VA.zip`;
       const zipUrl = URL.createObjectURL(zipBlob);
-      try {
-        const { saveZip } = await import('@/lib/zip-store');
-        await saveZip(`va:${taskId}:zip`, zipBlob, zipName);
-      } catch (e) { console.warn('[va] save zip IDB:', e); }
+      await persistDeliverableOrRescue(`va:${taskId}:zip`, zipBlob, zipName);
 
       // ZIP do VA entra no slot "montado" → botao de download unico do card
       // funciona igual task normal.
@@ -6953,10 +6998,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
       const zipBlob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
       const zipName = `${adNameClean}_VA.zip`;
       const zipUrl = URL.createObjectURL(zipBlob);
-      try {
-        const { saveZip } = await import('@/lib/zip-store');
-        await saveZip(`va:${taskId}:zip`, zipBlob, zipName);
-      } catch (e) { console.warn('[va-texto] save zip IDB:', e); }
+      await persistDeliverableOrRescue(`va:${taskId}:zip`, zipBlob, zipName);
 
       const failedAvas = items.filter((i) => !i.blob).map((i) => i.avaCode);
       const partial = okCount < items.length;
