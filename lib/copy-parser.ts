@@ -280,6 +280,9 @@ const NON_AVATAR_PREFIXES = [
   /^caixinha\b/i,                         // "Caixinha de perguntas:"
   /^avatar fala\b/i,                      // "Avatar fala:"
   /^instru[cç][oõ]es?\b/i,                // "Instruções para edição:"
+  /^briefing\b/i,                         // "BRIEFING: Adaptação do criativo X.mp4..."
+                                          // — descrição do criativo (contém .mp4 no
+                                          // meio da frase), NUNCA um avatar.
   /^observa[cç][oõ]es?\b/i,               // "Observação:" / "Observações:"
   /^nota\b/i,                             // "Nota:"
   /^obs\b/i,                              // "OBS:"
@@ -1040,6 +1043,15 @@ const KNOWN_ROLES_RE = /^(Mulher|Homem|Doutor[a]?|Voz|Narrador[a]?|Avatar|Locuto
  */
 function detectRoleFromLine(line: string): string | null {
   const t = line.trim();
+  // "Avatar N" NUMERADO é um speaker DISTINTO (Avatar 1 ≠ Avatar 2). O regex
+  // geral abaixo captura só o head alpha "Avatar" e PERDE o número — então o
+  // hook ("avatar 1:") e o 1o bloco do body ("avatar 2:") viravam ambos o role
+  // genérico "avatar", que no fuzzy-match do dispatch cai SEMPRE no 1o slot
+  // ("avatar 1") → a fala do Avatar 2 colapsava no Avatar 1 (diálogo inteiro
+  // num avatar só). Mesma detecção explícita do detectSpeakerLabelLine — mantém
+  // os dois detectores consistentes.
+  const avN = t.match(/^avatar\s*(\d+)\s*(?:[:\-]|$)/i);
+  if (avN) return `Avatar ${avN[1]}`;
   // Captura "Palavra" inicial (head do role — o nome principal). Apos isso
   // pode vir QUALQUER coisa antes do ":" enquanto for label de briefing:
   //   parens "(Homem depoimento)", trace " - Ator pornô", palavras extras.

@@ -11,6 +11,7 @@
 import {
   buildDisparosFromDoc,
   buildDisparosFromNomenclatures,
+  buildDisparoForNomenclature,
   extractAdIds,
   discoverBaseAdIds,
   toBaseAdId,
@@ -1196,6 +1197,181 @@ console.log('\navatar "Avatar N:" inline no corpo (print + .mp4):');
   assert(/parei com a finasterida/i.test(a2txt), `inline: 1a fala do Avatar 2 ("Aí eu parei") NÃO é engolida (got "${a2txt.slice(0, 50)}")`);
   // e o label NÃO vaza junto
   assert(!/avatar\s*2\s*:/i.test(a2txt) && !/DOCIMG/.test(a2txt), 'inline: label/marcador não vazam na fala do Avatar 2');
+
+  // ROTEAMENTO 'avatar N:' declarado só UMA vez no bloco de briefing (Meta Ads)
+  // + corpo em DIÁLOGO ('avatar 1:' pergunta / 'avatar 2:' responde). AD08 real
+  // (RIPCFPB): o hook e o 1o bloco do body ('avatar 2: Açafrão...') ganhavam o
+  // role genérico "avatar" (detectRoleFromLine perdia o número) → no fuzzy-match
+  // caíam TODOS no 1o slot "avatar 1" → o diálogo inteiro colapsava no Avatar 1.
+  // Também: "BRIEFING: ...mp4" NÃO pode virar avatar.
+  // Copy REAL completa (AD08 RIPCFPB, 10 turnos de diálogo). Garante que CADA
+  // fala é atribuída ao locutor EXATO do doc — nada de embaralhar quem fala o quê.
+  const DOC_AD08 = `AD08GL - RIPCFPB
+
+BRIEFING: Adaptação do criativo RIP-06-ME-ESCALADO.mp4 para o Truque do Mel.
+
+INSTRUÇÕES PARA EDIÇÃO:
+Avatar e Vozes:
+Meta Ads
+avatar 1: Roberto Carlos fala sobre assédio e manias.mp4
+avatar 2: Roberto Carlos fala sobre assédio e manias.mp4
+
+Youtube Ads
+Entrevistador: Entrevista com um senhor de 95 anos 👴🏼 #entrevista.mp4
+Entrevistado: Entrevista com um senhor de 95 anos 👴🏼 #entrevista.mp4
+
+Observações:
+
+AD08G1GL - RIPCFPB
+
+avatar 1:
+
+3 alimentos que acabam o esquecimento.
+
+Body
+
+avatar 2:
+Açafrão com ovo, do jeito certo não precisa nem de donepezila mais.
+
+Com a falta de memória, o pessoal acha que é fim. Mas o que realmente está acontecendo é o seu cérebro morrendo de fome.
+
+avatar 1:
+
+É aquele alimento Roberto que você comentou que elimina a causa raiz do esquecimento.
+
+avatar 2:
+
+Vou ensinar, leva só 3 minutinhos. E já dá pra fazer em casa hoje mesmo.
+
+Tem médico aí recebendo gente de 60, 70, 80 anos e dizendo que não tem mais jeito.
+
+Seu cérebro é que nem uma lâmpada precisa de energia pra acender direito.
+
+E um tempero que colocamos na preparação dos alimentos dá uma espécie de ferrugem no cérebro.
+
+avatar 1:
+
+E faz o que para limpar essa ferrugem, Roberto?
+
+avatar 2:
+
+Uma bebida natural com três ingredientes que você tem na geladeira. Um deles é mel.
+
+A solução que fez a ilha de Okinawa ter as menores taxas de confusão mental do mundo.
+
+E o melhor, com aprovação.
+
+avatar 1:
+
+Mas Roberto, como assim ferrugem?
+
+avatar 2:
+
+Talvez seu neurologista nem saiba. Ele nunca deixaria de lucrar pra te explicar isso.
+
+avatar 1:
+
+Isso é impressionante. Ensina pra gente.
+
+Os estudiosos examinaram 5.672 pessoas diagnosticadas com demência.
+
+Olha, eu compartilhei um vídeo curtinho de quatro minutos. Você consegue colocar esse vídeo aí para o pessoal?
+
+avatar 1:
+
+Produção, coloca o link do vídeo aí embaixo. Clique em Saiba Mais e assista o vídeo.
+
+avatar 2:
+
+No 1 minuto e 47 segundos, o Dr. Takashi Yamamoto conta uma informação que seu médico nunca contou.
+
+São 3 minutinhos que podem blindar seus próximos 30 anos.`;
+  const bf08 = parseDarkoBriefing(DOC_AD08, 'AD08GL', null, []);
+  // "BRIEFING:" nunca é avatar
+  assert(!(bf08?.avatars || []).some((a) => /^briefing/i.test(a.role)), `AD08: "BRIEFING:" NÃO vira avatar (got ${JSON.stringify((bf08?.avatars||[]).map(a=>a.role))})`);
+  // hook do avatar 1 mantém o NÚMERO no role (não vira "avatar" genérico)
+  assert(/avatar\s*1/i.test(bf08?.hooks?.[0]?.role || ''), `AD08: HOOK role = "Avatar 1" com número (got "${bf08?.hooks?.[0]?.role}")`);
+  const seg08 = bf08?.bodySegments || [];
+  const seq08 = seg08.map((s) => (String(s.role || '').match(/avatar\s*(\d)/i) || [])[1] || '?').join('');
+  // Sequência EXATA de locutores do diálogo (10 turnos): A2 A1 A2 A1 A2 A1 A2 A1 A1 A2
+  assert(seq08 === '2121212112', `AD08: sequência de locutores do diálogo EXATA (esperado 2121212112, got ${seq08} :: ${JSON.stringify(seg08.map(s=>({r:s.role,t:s.text.slice(0,22)})))})`);
+  // Cada fala-chave no locutor CERTO (verdade-base do doc) — nada embaralhado.
+  const roleOfPhrase08 = (re: RegExp): string => {
+    const s = seg08.find((x) => re.test(x.text));
+    return (String(s?.role || '').match(/avatar\s*(\d)/i) || [])[1] || '(SUMIU)';
+  };
+  const truth08: Array<[RegExp, string]> = [
+    [/a[çc]afr[ãa]o com ovo/i, '2'],
+    [/aquele alimento Roberto/i, '1'],
+    [/Vou ensinar/i, '2'],
+    [/l[âa]mpada precisa de energia/i, '2'],
+    [/limpar essa ferrugem, Roberto/i, '1'],
+    [/ilha de Okinawa/i, '2'],
+    [/Mas Roberto, como assim ferrugem/i, '1'],
+    [/Talvez seu neurologista/i, '2'],
+    [/Isso [ée] impressionante/i, '1'],
+    [/5\.672 pessoas/i, '1'],
+    [/Produ[çc][ãa]o, coloca o link/i, '1'],
+    [/1 minuto e 47 segundos/i, '2'],
+    [/blindar seus pr[óo]ximos 30 anos/i, '2'],
+  ];
+  for (const [re, want] of truth08) {
+    assert(roleOfPhrase08(re) === want, `AD08 diálogo: "${re.source.slice(0, 30)}" tem que ser do Avatar ${want} (got ${roleOfPhrase08(re)})`);
+  }
+
+  // MULTI-AVATAR: diálogo com até 10 locutores (Avatar 1..Avatar 10), FORA de
+  // ordem e com número de 2 dígitos (Avatar 10). Cada fala tem que ir pro SEU
+  // avatar — o roteamento não pode assumir só 2. (avN usa \d+, cobre N.)
+  const declN = [];
+  for (let i = 1; i <= 10; i++) declN.push(`avatar ${i}: locutor${i}.mp4`);
+  const DOC_MULTI = `AD70GL - VRWA02
+
+INSTRUÇÕES PARA EDIÇÃO:
+Avatar e Vozes:
+${declN.join('\n')}
+
+AD70G1GL - VRWA02
+
+avatar 1:
+
+Tres alimentos que acabam o esquecimento.
+
+Body
+
+avatar 3:
+Fala do terceiro avatar aqui, bloco inteiro.
+
+avatar 10:
+Agora o decimo avatar fala essa parte com dois digitos.
+
+avatar 2:
+Segundo avatar responde.
+
+avatar 7:
+Setimo avatar entra no meio da conversa.
+
+avatar 1:
+Primeiro avatar volta pra fechar.`;
+  const bfN = parseDarkoBriefing(DOC_MULTI, 'AD70GL', null, [])!;
+  assert((bfN.avatars || []).length === 10, `MULTI: 10 avatares declarados (got ${bfN.avatars.length})`);
+  assert(/avatar\s*1\b/i.test(bfN.hooks?.[0]?.role || ''), `MULTI: hook = Avatar 1 (got "${bfN.hooks?.[0]?.role}")`);
+  const seqN = bfN.bodySegments.map((s) => (String(s.role || '').match(/avatar\s*(\d+)/i) || [])[1] || '?').join(',');
+  assert(seqN === '3,10,2,7,1', `MULTI: sequência do diálogo = 3,10,2,7,1 (got ${seqN})`);
+  const dN = buildDisparoForNomenclature(DOC_MULTI, 'AD70GL - VRWA02 - G1', [])!;
+  const roleOfN = (re: RegExp): string => {
+    const p = dN.parts.find((x) => re.test(x.text));
+    return (String(p?.role || '').match(/avatar\s*(\d+)/i) || [])[1] || '(SUMIU)';
+  };
+  const truthN: Array<[RegExp, string]> = [
+    [/decimo avatar fala/i, '10'],     // 2 dígitos não pode virar "1"
+    [/S[eé]timo avatar entra/i, '7'],
+    [/terceiro avatar aqui/i, '3'],
+    [/Segundo avatar responde/i, '2'],
+    [/Primeiro avatar volta/i, '1'],
+  ];
+  for (const [re, want] of truthN) {
+    assert(roleOfN(re) === want, `MULTI: "${re.source.slice(0, 24)}" = Avatar ${want} (got ${roleOfN(re)})`);
+  }
 
   // ROTEAMENTO com username COM ESPAÇO ("Martina 1.mp4", "Alexandre Frota 1.mp4")
   // — o corpo TEM que separar por locutor. Antes o detectAvatarFilenameLine não
