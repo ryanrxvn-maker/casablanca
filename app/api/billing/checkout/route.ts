@@ -10,6 +10,7 @@ import {
   isBilling,
 } from '@/lib/plan-prices';
 import { rateLimit } from '@/lib/rate-limit';
+import { PRO_LAUNCH_OPEN } from '@/lib/launch-flags';
 
 /**
  * POST /api/billing/checkout
@@ -56,6 +57,22 @@ export async function POST(req: Request) {
       return NextResponse.json(
         { error: 'Plano ou ciclo inválido.' },
         { status: 400 },
+      );
+    }
+
+    // ─── Trava de lançamento do Pro ───────────────────────────────────────
+    // Enquanto o Pro está fechado, NINGUÉM inicia checkout de Pro — nem pela UI
+    // (o /planos já mostra "em breve"), nem por curl/DevTools batendo direto
+    // aqui. Assinaturas Pro já existentes seguem intocadas (nada disto mexe no
+    // Stripe). Basic continua liberado normalmente.
+    if (!PRO_LAUNCH_OPEN && plan === 'pro') {
+      return NextResponse.json(
+        {
+          error:
+            'O plano Pro está em fase de lançamento e abre em breve. Por enquanto, aproveite o plano Basic.',
+          code: 'pro_coming_soon',
+        },
+        { status: 403 },
       );
     }
 

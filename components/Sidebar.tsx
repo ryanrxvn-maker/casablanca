@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { withRetry } from '@/lib/retry';
+import { displayTierOf } from '@/lib/launch-flags';
 import { DarkoLogo } from './DarkoLogo';
 
 type Profile = {
@@ -329,7 +330,7 @@ export function Sidebar() {
             title={displayName}
           >
             <TierAvatar
-              tier={profile?.tier ?? 'free'}
+              tier={displayTierOf(profile?.tier ?? 'free')}
               avatarUrl={profile?.avatar_url}
               avatarBroken={avatarBroken}
               onAvatarError={() => setAvatarBroken(true)}
@@ -338,18 +339,19 @@ export function Sidebar() {
               active={accountOpen}
             />
             {/* Pill do tier embaixo. Enquanto o profile não resolveu, mostra
-                neutro (•••) — NUNCA "FREE" falso, que assustava conta paga. */}
+                neutro (•••) — NUNCA "FREE" falso, que assustava conta paga.
+                Pro vira BETA PRO enquanto o lançamento está fechado. */}
             {profile ? (
               <span
                 className="mt-1 rounded-full px-1.5 py-0.5 text-[8.5px] font-bold uppercase tracking-[0.18em]"
                 style={{
                   fontFamily: 'var(--font-tech)',
-                  color: tierColorOf(profile.tier ?? 'free'),
-                  background: tierBgOf(profile.tier ?? 'free'),
-                  border: `1px solid ${tierBorderOf(profile.tier ?? 'free')}`,
+                  color: tierColorOf(displayTierOf(profile.tier ?? 'free')),
+                  background: tierBgOf(displayTierOf(profile.tier ?? 'free')),
+                  border: `1px solid ${tierBorderOf(displayTierOf(profile.tier ?? 'free'))}`,
                 }}
               >
-                {tierLabelOf(profile.tier ?? 'free')}
+                {tierLabelOf(displayTierOf(profile.tier ?? 'free'))}
               </span>
             ) : (
               <span
@@ -560,38 +562,54 @@ function IconTrophy() {
 
 /* ─── TierAvatar — moldura do avatar muda conforme tier ─── */
 
-type AvatarTier = 'free' | 'basic' | 'pro' | 'admin';
+// 'beta' = Pro exibido como BETA PRO enquanto o lançamento do Pro está fechado.
+type AvatarTier = 'free' | 'basic' | 'pro' | 'admin' | 'beta';
 
 // Cores de tier via CSS vars → tema-aware (no claro viram escuras e legíveis).
+// BETA PRO usa o ciano (--cyan), distinto de Pro (violet)/Basic (pink)/Admin (lime).
 function tierColorOf(t: AvatarTier): string {
   return t === 'admin'
     ? 'rgb(var(--lime))'
-    : t === 'pro'
-      ? 'rgb(var(--violet))'
-      : t === 'basic'
-        ? 'rgb(var(--pink))'
-        : 'rgb(var(--text-muted))';
+    : t === 'beta'
+      ? 'rgb(var(--cyan))'
+      : t === 'pro'
+        ? 'rgb(var(--violet))'
+        : t === 'basic'
+          ? 'rgb(var(--pink))'
+          : 'rgb(var(--text-muted))';
 }
 function tierBgOf(t: AvatarTier): string {
   return t === 'admin'
     ? 'rgb(var(--lime) / 0.12)'
-    : t === 'pro'
-      ? 'rgb(var(--violet) / 0.14)'
-      : t === 'basic'
-        ? 'rgb(var(--pink) / 0.12)'
-        : 'rgb(var(--text-muted) / 0.10)';
+    : t === 'beta'
+      ? 'rgb(var(--cyan) / 0.14)'
+      : t === 'pro'
+        ? 'rgb(var(--violet) / 0.14)'
+        : t === 'basic'
+          ? 'rgb(var(--pink) / 0.12)'
+          : 'rgb(var(--text-muted) / 0.10)';
 }
 function tierBorderOf(t: AvatarTier): string {
   return t === 'admin'
     ? 'rgb(var(--lime) / 0.45)'
-    : t === 'pro'
-      ? 'rgb(var(--violet) / 0.45)'
-      : t === 'basic'
-        ? 'rgb(var(--pink) / 0.45)'
-        : 'rgb(var(--text-muted) / 0.35)';
+    : t === 'beta'
+      ? 'rgb(var(--cyan) / 0.5)'
+      : t === 'pro'
+        ? 'rgb(var(--violet) / 0.45)'
+        : t === 'basic'
+          ? 'rgb(var(--pink) / 0.45)'
+          : 'rgb(var(--text-muted) / 0.35)';
 }
 function tierLabelOf(t: AvatarTier): string {
-  return t === 'admin' ? 'ADMIN' : t === 'pro' ? 'PRO' : t === 'basic' ? 'BASIC' : 'FREE';
+  return t === 'admin'
+    ? 'ADMIN'
+    : t === 'beta'
+      ? 'BETA PRO'
+      : t === 'pro'
+        ? 'PRO'
+        : t === 'basic'
+          ? 'BASIC'
+          : 'FREE';
 }
 
 function TierAvatar({
@@ -612,12 +630,13 @@ function TierAvatar({
   active: boolean;
 }) {
   const color = tierColorOf(tier);
-  const isPremium = tier === 'pro' || tier === 'admin';
+  const isPremium = tier === 'pro' || tier === 'admin' || tier === 'beta';
   const isAdmin = tier === 'admin';
 
   // Moldura conforme tier:
   //  free → borda simples cinza
   //  basic → gradient rosa
+  //  beta → gradient ciano/aqua giratório (BETA PRO — early-access exclusivo)
   //  pro → gradient violet com glow + ring extra
   //  admin → gradient lime + sparkles flutuantes
   const ringStyle: React.CSSProperties = (() => {
@@ -630,6 +649,13 @@ function TierAvatar({
       return {
         background:
           'conic-gradient(from 0deg, #f472b6, #ec4899, #f472b6, #f9a8d4, #f472b6)',
+      };
+    }
+    if (tier === 'beta') {
+      return {
+        background:
+          'conic-gradient(from 0deg, #22d3ee, #38bdf8, #2dd4bf, #67e8f9, #22d3ee)',
+        animation: 'tier-ring-spin 5s linear infinite',
       };
     }
     if (tier === 'pro') {
@@ -723,6 +749,40 @@ function TierAvatar({
             <path d="M5 0l1 4 4 1-4 1-1 4-1-4-4-1 4-1z" fill="#c084fc" />
           </svg>
         </span>
+      ) : null}
+
+      {/* Selo "β" BETA PRO — bolinha ciano com beta, canto superior direito.
+          Marca o early-access de forma inconfundível e diferente do Pro. */}
+      {tier === 'beta' ? (
+        <>
+          <span
+            aria-hidden
+            className="absolute -right-1.5 -top-1.5 flex h-[15px] w-[15px] items-center justify-center rounded-full"
+            style={{
+              background:
+                'linear-gradient(135deg, #22d3ee, #2dd4bf)',
+              boxShadow:
+                '0 0 8px rgba(34,211,238,0.9), 0 0 2px rgba(0,0,0,0.6)',
+              border: '1px solid rgba(255,255,255,0.55)',
+            }}
+          >
+            <span
+              className="text-[8px] font-black leading-none text-[#08333a]"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              β
+            </span>
+          </span>
+          <span
+            aria-hidden
+            className="absolute -left-1 top-1"
+            style={{ animation: 'tier-spark 2.6s ease-in-out infinite' }}
+          >
+            <svg width="8" height="8" viewBox="0 0 10 10" fill="none">
+              <path d="M5 0l1 4 4 1-4 1-1 4-1-4-4-1 4-1z" fill="#67e8f9" />
+            </svg>
+          </span>
+        </>
       ) : null}
 
       {/* Outline de active (hover/open) */}

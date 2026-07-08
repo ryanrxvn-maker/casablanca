@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { CardUpdate } from '@/components/CardUpdate';
+import { displayTierOf, type AccessTier } from '@/lib/launch-flags';
 
 /**
  * /configuracoes/assinatura — gestão de assinatura 100% nativa (sem portal
@@ -118,7 +119,20 @@ export default function AssinaturaPage() {
   }
 
   const sub = data?.subscription ?? null;
-  const hue = sub?.plan ? PLAN_HUE[sub.plan] ?? '#a78bfa' : '#a78bfa';
+  // Rótulo/cor de exibição: um Pro vira BETA PRO (ciano) enquanto o lançamento
+  // do Pro está fechado. Valor, status e cobrança seguem 100% reais do Stripe.
+  const isBetaPlan = displayTierOf((sub?.plan as AccessTier | null) ?? null) === 'beta';
+  const planLabel = isBetaPlan ? 'Beta Pro' : sub?.plan ?? '';
+  const hue = isBetaPlan
+    ? '#22d3ee'
+    : sub?.plan
+      ? PLAN_HUE[sub.plan] ?? '#a78bfa'
+      : '#a78bfa';
+  const courtesyTier = data?.tier ?? 'free';
+  const courtesyLabel =
+    displayTierOf(courtesyTier as AccessTier) === 'beta'
+      ? 'BETA PRO'
+      : courtesyTier.toUpperCase();
 
   return (
     <div className="mx-auto w-full max-w-[760px] px-5 md:px-8">
@@ -143,7 +157,7 @@ export default function AssinaturaPage() {
         >
           <div className="text-[16px] font-bold text-white" style={{ fontFamily: 'var(--font-tech)' }}>
             {data?.tier && data.tier !== 'free'
-              ? `Você está no plano ${data.tier.toUpperCase()} (cortesia)`
+              ? `Você está no plano ${courtesyLabel} (cortesia)`
               : 'Você ainda não tem uma assinatura'}
           </div>
           <p className="mx-auto mt-2 max-w-[420px] text-[13.5px] text-text-muted">
@@ -177,7 +191,7 @@ export default function AssinaturaPage() {
                   className="text-[11px] font-bold uppercase tracking-[0.2em]"
                   style={{ fontFamily: 'var(--font-tech)', color: hue }}
                 >
-                  Plano {sub.plan ?? ''}
+                  Plano {planLabel}
                 </div>
                 <div className="mt-1 flex items-baseline gap-1">
                   <span

@@ -8,6 +8,7 @@ import {
 } from 'react';
 import { Brand } from './Brand';
 import { SmokeText } from './SmokeText';
+import { PRO_LOCKED } from '@/lib/launch-flags';
 
 /**
  * Plans v3 — vitrine pública /planos.
@@ -229,8 +230,17 @@ export function Plans() {
           </span>
         </h1>
         <p className="mx-auto mt-5 max-w-[560px] text-[15px] leading-relaxed text-text-muted">
-          Comece grátis hoje. Quando estiver pronto pra automatizar o dia
-          inteiro, sobe pro Basic ou Pro.
+          {PRO_LOCKED ? (
+            <>
+              Comece grátis hoje. Assine o Basic e automatize o dia inteiro — o
+              plano Pro chega em breve.
+            </>
+          ) : (
+            <>
+              Comece grátis hoje. Quando estiver pronto pra automatizar o dia
+              inteiro, sobe pro Basic ou Pro.
+            </>
+          )}
         </p>
 
         {/* Toggle Mensal/Anual */}
@@ -395,7 +405,9 @@ function PlanCard({
   const unlocked = UNLOCKED[plan.id];
   const pricing = plan.pricing[billing];
   const isFree = plan.id === 'free';
-  const hasSale = !!pricing.original && plan.id === 'pro';
+  // Pro travado no pré-lançamento → card vira "Em breve" (sem oferta/checkout).
+  const comingSoon = plan.id === 'pro' && PRO_LOCKED;
+  const hasSale = !!pricing.original && plan.id === 'pro' && !comingSoon;
 
   // Separa as ferramentas: featured primeiro (cards 3D), resto como linhas
   const featuredTools = useMemo(
@@ -409,6 +421,7 @@ function PlanCard({
 
   return (
     <div
+      id={`plan-${plan.id}`}
       className={
         'plan-card relative fade-in-up ' +
         (plan.highlight ? 'plan-highlight' : '')
@@ -416,6 +429,7 @@ function PlanCard({
       style={{
         animationDelay: `${delay}ms`,
         perspective: '1200px',
+        scrollMarginTop: '96px',
       }}
     >
       <div
@@ -470,21 +484,28 @@ function PlanCard({
               'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.20)), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep))',
           }}
         >
-          {/* Badges no topo — pode ter "MAIS POPULAR" + "OFERTA" */}
+          {/* Badges no topo — "MAIS POPULAR" + "OFERTA", ou "EM BREVE" no Pro
+              travado (que substitui qualquer oferta). */}
           <div className="flex flex-wrap items-center justify-center gap-2">
-            {plan.highlight ? (
-              <span
-                className="-mt-3 rounded-full border border-white/20 bg-black/70 px-3 py-1 text-[9.5px] font-bold uppercase tracking-[0.22em] backdrop-blur-md"
-                style={{
-                  fontFamily: 'var(--font-tech)',
-                  color: plan.rabbitHue,
-                  boxShadow: `0 0 18px -4px ${plan.glowHue}`,
-                }}
-              >
-                ★ MAIS POPULAR
-              </span>
-            ) : null}
-            {hasSale ? <SaleBadge pct={PRO_SALE_PCT} /> : null}
+            {comingSoon ? (
+              <ComingSoonSeal />
+            ) : (
+              <>
+                {plan.highlight ? (
+                  <span
+                    className="-mt-3 rounded-full border border-white/20 bg-black/70 px-3 py-1 text-[9.5px] font-bold uppercase tracking-[0.22em] backdrop-blur-md"
+                    style={{
+                      fontFamily: 'var(--font-tech)',
+                      color: plan.rabbitHue,
+                      boxShadow: `0 0 18px -4px ${plan.glowHue}`,
+                    }}
+                  >
+                    ★ MAIS POPULAR
+                  </span>
+                ) : null}
+                {hasSale ? <SaleBadge pct={PRO_SALE_PCT} /> : null}
+              </>
+            )}
           </div>
 
           {/* Nome + preço */}
@@ -501,7 +522,11 @@ function PlanCard({
 
             {/* Preço — Mensal: R$ X/mês · Anual: R$ X*12/ano + "12x de R$ X"
                 Pro com sale: original riscado em cima (também anualizado se anual).
-                v3.1: sale e parcelado com muito mais peso visual. */}
+                v3.1: sale e parcelado com muito mais peso visual.
+                Pro travado: troca o preço inteiro pelo lockup "Em breve". */}
+            {comingSoon ? (
+              <ComingSoonPrice />
+            ) : (
             <div className="mt-3 flex flex-col items-center justify-center gap-1.5">
               {hasSale && pricing.original ? (
                 <span
@@ -607,6 +632,7 @@ function PlanCard({
                 </div>
               ) : null}
             </div>
+            )}
           </div>
 
           {/* Coelho com aura tier */}
@@ -701,9 +727,14 @@ function PlanCard({
             })}
           </ul>
 
-          {/* CTA — Free → cadastro · Basic/Pro → checkout Stripe */}
+          {/* CTA — Free → cadastro · Basic/Pro → checkout Stripe · Pro travado
+              → botão "Lançamento em breve" + atalho pro Basic. */}
           <div className="mt-8">
-            <PlanCTA plan={plan} billing={billing} />
+            {comingSoon ? (
+              <ComingSoonCTA />
+            ) : (
+              <PlanCTA plan={plan} billing={billing} />
+            )}
           </div>
         </div>
       </div>
@@ -842,6 +873,207 @@ function SaleBadge({ pct }: { pct: number }) {
         }
       `}</style>
     </span>
+  );
+}
+
+/* ─────────────────────── Pro "Em breve" (pré-lançamento) ─────────────────────── */
+/**
+ * Trio de peças que transformam o card Pro em "Lançamento em breve" enquanto o
+ * Pro está travado (lib/launch-flags). Zero checkout, muito hype — fonte premium
+ * (var(--font-tech)), brilho controlado, sem botão morto (o atalho leva ao Basic).
+ */
+
+/** Selo neon "EM BREVE" que substitui MAIS POPULAR/OFERTA no topo do card. */
+function ComingSoonSeal() {
+  return (
+    <span
+      className="coming-seal -mt-3 inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] backdrop-blur-md"
+      style={{
+        fontFamily: 'var(--font-tech)',
+        color: '#e9d5ff',
+        borderColor: 'rgba(192,132,252,0.65)',
+        background:
+          'linear-gradient(135deg, rgba(103,232,249,0.22), rgba(192,132,252,0.28))',
+        boxShadow:
+          '0 0 22px -4px rgba(192,132,252,0.75), 0 0 40px -10px rgba(103,232,249,0.5), inset 0 1px 0 rgba(255,255,255,0.2)',
+      }}
+    >
+      <span
+        aria-hidden
+        className="inline-block h-1.5 w-1.5 rounded-full bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.95)]"
+        style={{ animation: 'coming-dot 1.6s ease-in-out infinite' }}
+      />
+      Em breve
+      <style jsx>{`
+        .coming-seal {
+          animation: coming-seal 2.8s ease-in-out infinite;
+        }
+        @keyframes coming-seal {
+          0%,
+          100% {
+            box-shadow:
+              0 0 22px -4px rgba(192, 132, 252, 0.75),
+              0 0 40px -10px rgba(103, 232, 249, 0.5),
+              inset 0 1px 0 rgba(255, 255, 255, 0.2);
+          }
+          50% {
+            box-shadow:
+              0 0 30px -2px rgba(192, 132, 252, 0.95),
+              0 0 56px -6px rgba(103, 232, 249, 0.7),
+              inset 0 1px 0 rgba(255, 255, 255, 0.3);
+          }
+        }
+        @keyframes coming-dot {
+          0%,
+          100% {
+            opacity: 0.55;
+            transform: scale(0.85);
+          }
+          50% {
+            opacity: 1;
+            transform: scale(1.15);
+          }
+        }
+      `}</style>
+    </span>
+  );
+}
+
+/** Lockup de preço "Em breve" — substitui o preço enquanto o Pro está travado. */
+function ComingSoonPrice() {
+  return (
+    <div className="mt-3 flex flex-col items-center justify-center gap-2.5">
+      <div
+        className="coming-word text-[42px] font-extrabold leading-none tracking-tight md:text-[48px]"
+        style={{
+          fontFamily: 'var(--font-tech)',
+          letterSpacing: '-0.03em',
+          background:
+            'linear-gradient(135deg, #fff 0%, #d8b4fe 55%, #67e8f9 100%)',
+          WebkitBackgroundClip: 'text',
+          WebkitTextFillColor: 'transparent',
+          filter: 'drop-shadow(0 0 22px rgba(192,132,252,0.35))',
+        }}
+      >
+        Em breve
+      </div>
+      <span
+        className="inline-flex items-center gap-1.5 rounded-full border border-violet/40 bg-violet/[0.08] px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.16em] text-violet"
+        style={{ fontFamily: 'var(--font-tech)' }}
+      >
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3 2" />
+        </svg>
+        Lançamento em breve
+      </span>
+      <p className="max-w-[220px] text-[12px] leading-relaxed text-text-muted">
+        Estamos finalizando o Pro. Por enquanto, aproveite o plano{' '}
+        <span className="font-semibold text-white">Basic</span>.
+      </p>
+      <style jsx>{`
+        .coming-word {
+          animation: coming-word 3.6s ease-in-out infinite;
+        }
+        @keyframes coming-word {
+          0%,
+          100% {
+            filter: drop-shadow(0 0 22px rgba(192, 132, 252, 0.3));
+          }
+          50% {
+            filter: drop-shadow(0 0 30px rgba(103, 232, 249, 0.5));
+          }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/** CTA do Pro travado — botão "Lançamento em breve" (inerte) + atalho pro Basic. */
+function ComingSoonCTA() {
+  const goToBasic = () => {
+    const el = document.getElementById('plan-basic');
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('tool-info-highlight');
+    setTimeout(() => el.classList.remove('tool-info-highlight'), 2200);
+  };
+
+  return (
+    <div className="flex flex-col items-stretch gap-3">
+      <div
+        aria-disabled="true"
+        className="coming-cta relative block w-full overflow-hidden rounded-full border px-5 py-3.5 text-center text-[13.5px] font-bold"
+        style={{
+          fontFamily: 'var(--font-tech)',
+          borderColor: 'rgba(192,132,252,0.55)',
+          color: '#fff',
+          cursor: 'default',
+          letterSpacing: '0.02em',
+          background:
+            'linear-gradient(135deg, rgba(192,132,252,0.28), rgba(103,232,249,0.14) 70%), rgba(0,0,0,0.4)',
+          boxShadow: '0 12px 28px -12px rgba(192,132,252,0.6)',
+        }}
+      >
+        <span className="relative z-10 inline-flex items-center justify-center gap-2 uppercase tracking-[0.12em]">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <rect x="4" y="11" width="16" height="10" rx="2" />
+            <path d="M8 11V7a4 4 0 018 0v4" />
+          </svg>
+          Lançamento em breve
+        </span>
+        {/* Sheen infinito sutil */}
+        <span
+          aria-hidden
+          className="coming-sheen absolute inset-0 -translate-x-[120%] bg-gradient-to-r from-transparent via-white/25 to-transparent"
+        />
+      </div>
+
+      <button
+        type="button"
+        onClick={goToBasic}
+        className="group inline-flex items-center justify-center gap-1.5 text-[12.5px] font-bold uppercase tracking-[0.14em] text-lime transition hover:text-white"
+        style={{ fontFamily: 'var(--font-tech)' }}
+      >
+        Aproveite o plano Basic
+        <span className="transition-transform group-hover:translate-x-1">→</span>
+      </button>
+
+      <style jsx>{`
+        .coming-sheen {
+          animation: coming-sheen 3.2s ease-in-out infinite;
+        }
+        @keyframes coming-sheen {
+          0% {
+            transform: translateX(-120%);
+          }
+          55%,
+          100% {
+            transform: translateX(120%);
+          }
+        }
+      `}</style>
+    </div>
   );
 }
 
