@@ -203,6 +203,11 @@ function CommentsCard({ s }: { s: S }) {
         WebkitFontSmoothing: 'antialiased',
         boxSizing: 'border-box',
         overflow: 'hidden',
+        // line-height REAL: o palco herda `line-height:0` (ver [[project_fakepass]]) e
+        // o username/tempo/"Responder"/título NÃO setam o seu → colapsavam pra altura 0
+        // e o html2canvas EMBOLAVA as linhas no download. Dando altura de linha real,
+        // prévia e download batem. (A linha do texto do comentário já tem 1.35 próprio.)
+        lineHeight: 1.35,
       }}
     >
       {/* HEADER: grabber + título + share */}

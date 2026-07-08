@@ -19,12 +19,17 @@ import { Field, ImageUpload, Swatches, Segmented, FONT_STACK, type FakeModel } f
 
 /** Verde de chroma key (broadcast). */
 const CHROMA = '#00b140';
-/** Cores da marca Bem Estar. */
-const TEAL = '#15b3a6'; // caixa do logo
+/** Cores da marca Bem Estar.
+ *  ⚠️ A caixa do logo e o acento "teal" ANTES eram verde-azulados (#15b3a6/#2bbdb2):
+ *  perto DEMAIS do VERDE do chroma → sumiam junto com o fundo quando o cliente fazia o
+ *  chroma key. Trocados por um AZUL claro (hue ~205°, longe de qualquer verde de chroma
+ *  #00b140/#00ff00/#009e3a/#3cb043) — parecido com o teal mas SEGURO: nenhum chroma key
+ *  de verde o remove. */
+const TEAL = '#1488c9'; // caixa do logo (azul seguro contra chroma)
 const A_GREEN = '#8cc63f';
 const A_YELLOW = '#ffc20e';
 const A_ORANGE = '#f5821f';
-const A_TEAL = '#2bbdb2';
+const A_TEAL = '#2597d4'; // acento (azul seguro contra chroma)
 
 type S = {
   layout: 'single' | 'double'; // 1 pessoa (1 tela) ou 2 pessoas (2 telas)

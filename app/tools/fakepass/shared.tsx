@@ -434,6 +434,27 @@ export async function renderNodeToCanvas(
       const gr = range.getBoundingClientRect();
       if (!gr.height || gr.width < 3) continue;
       const fs = parseFloat(cs.fontSize) || 14;
+      // FLUXO INLINE MISTO que quebra em VÁRIAS linhas (comentário do IG com @menção/
+      // #hashtag/emoji no meio; legenda de post): o pai tem 2+ pedaços de texto inline
+      // FLUINDO e quebrando de linha. Deslocar cada pedaço por conta própria (cada um
+      // com um erro medido diferente) EMBARALHA o texto no PNG (foi o bug dos
+      // Comentários). É texto de FLUXO (não centralizado) — o html2canvas já acerta →
+      // NÃO compensa. Fluxo de 1 linha (ex.: "● LIVE", chip misto) segue compensável.
+      const par = el.parentElement;
+      if (par) {
+        let inlinePieces = 0;
+        for (const n of Array.from(par.childNodes)) {
+          if (n.nodeType === 3) { if ((n.textContent || '').trim()) inlinePieces++; }
+          else if (n.nodeType === 1) {
+            const dd = getComputedStyle(n as HTMLElement).display;
+            if (dd.startsWith('inline') && (n.textContent || '').trim()) inlinePieces++;
+          }
+        }
+        if (inlinePieces >= 2) {
+          const plh = parseFloat(getComputedStyle(par).lineHeight) || fs * 1.35;
+          if (par.getBoundingClientRect().height > plh * 1.6) continue;
+        }
+      }
       const multi = gr.height > fs * 1.6;
       const fit = el.hasAttribute('data-fp-fit');
       let band = false;
