@@ -436,10 +436,10 @@ export async function renderNodeToCanvas(
       const fs = parseFloat(cs.fontSize) || 14;
       // FLUXO INLINE MISTO que quebra em VÁRIAS linhas (comentário do IG com @menção/
       // #hashtag/emoji no meio; legenda de post): o pai tem 2+ pedaços de texto inline
-      // FLUINDO e quebrando de linha. Deslocar cada pedaço por conta própria (cada um
-      // com um erro medido diferente) EMBARALHA o texto no PNG (foi o bug dos
-      // Comentários). É texto de FLUXO (não centralizado) — o html2canvas já acerta →
-      // NÃO compensa. Fluxo de 1 linha (ex.: "● LIVE", chip misto) segue compensável.
+      // FLUINDO e quebrando de linha. Deslocar cada pedaço por conta própria (cada um com
+      // erro medido diferente) EMBARALHA o texto no PNG. É texto de FLUXO — o html2canvas
+      // desenha ~1 linha baixo, uniforme e imperceptível; compensar embaralharia. NÃO
+      // compensa. Chip de 1 linha ("● LIVE") e bloco de 1 peça seguem compensáveis.
       const par = el.parentElement;
       if (par) {
         let inlinePieces = 0;
@@ -506,6 +506,9 @@ export async function renderNodeToCanvas(
       delete t.el.dataset.fpVmode;
       delete t.el.dataset.fpCal0;
       delete t.el.dataset.fpCal1;
+      delete t.el.dataset.fpBg;
+      delete t.el.dataset.fpPt;
+      delete t.el.dataset.fpPb;
     });
 
     // MOTOR: html2canvas — RÁPIDO e usa a fonte JÁ CARREGADA na página, então a fonte
@@ -612,6 +615,20 @@ export async function renderNodeToCanvas(
           if (Math.abs(err) > 0.3 && Math.abs(err) < 60) {
             t.el.dataset.fpVcal = String(Math.round(err * 100) / 100);
             t.el.dataset.fpVmode = t.mode;
+            // Elemento com FUNDO PRÓPRIO (caixa da caixinha "Faça uma pergunta", balão
+            // multi-linha)? Guardamos o padding: no render final subimos o TEXTO
+            // redistribuindo o padding (caixa+fundo ficam), em vez de mover o elemento
+            // inteiro (que deslocaria o fundo e, num overflow:hidden, encurtaria a caixa).
+            const csb = getComputedStyle(t.el);
+            const bgc = csb.backgroundColor;
+            const bm = bgc.match(/rgba?\(([^)]+)\)/);
+            const bgOpaque = !!bgc && bgc !== 'transparent' && (!bm || bm[1].split(',').length < 4 || parseFloat(bm[1].split(',')[3]) > 0.05);
+            const bgImg = csb.backgroundImage && csb.backgroundImage !== 'none';
+            if (bgOpaque || bgImg) {
+              t.el.dataset.fpBg = '1';
+              t.el.dataset.fpPt = String(parseFloat(csb.paddingTop) || 0);
+              t.el.dataset.fpPb = String(parseFloat(csb.paddingBottom) || 0);
+            }
           }
         }
       }
@@ -632,9 +649,24 @@ export async function renderNodeToCanvas(
           if (!Number.isFinite(dy) || dy === 0) return;
           const mode = el.dataset.fpVmode || 'inline';
           if (mode === 'fit' || mode === 'block') {
-            // multi-linha / FitText (manchete de telejornal, caixinha "Faça uma
-            // pergunta") → translateY DIRETO no elemento: não re-quebra o texto. Envolver
-            // num <span> block quebrava o layout (a caixinha subia inteira).
+            // ELEMENTO COM FUNDO PRÓPRIO (caixa da caixinha "Faça uma pergunta"/caixa
+            // branca, balão multi-linha): NÃO move o elemento (deslocaria o fundo — que o
+            // html2canvas já desenha certo — e num overflow:hidden o corte ENCURTA a
+            // caixa; foi o bug da Caixinha). REDISTRIBUI o padding vertical: sobe o TEXTO
+            // `dy` mantendo a MESMA altura de caixa e o fundo no lugar. Sem re-quebra
+            // (padding não muda a largura). Só quando dy>0 (subir) e o paddingTop absorve.
+            if (el.dataset.fpBg === '1' && dy > 0) {
+              const pt = parseFloat(el.dataset.fpPt || '0');
+              const pb = parseFloat(el.dataset.fpPb || '0');
+              const shift = Math.min(pt, dy);
+              el.style.paddingTop = `${pt - shift}px`;
+              el.style.paddingBottom = `${pb + shift}px`;
+              // resto raríssimo (dy > paddingTop) → o pouco que sobra via translateY
+              if (dy - shift > 0.3) el.style.transform = `translateY(${-(dy - shift)}px)`;
+              return;
+            }
+            // sem fundo próprio (manchete de telejornal etc.) → translateY DIRETO no
+            // elemento: não re-quebra o texto e não há fundo pra deslocar.
             el.style.transform = `translateY(${-dy}px)`;
             return;
           }
