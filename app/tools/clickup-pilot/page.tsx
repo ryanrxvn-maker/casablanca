@@ -37,6 +37,7 @@ import {
   type ParsedVABriefing,
 } from '@/lib/copy-parser';
 import { alignEditedToWords } from '@/lib/edited-text-align';
+import { newPilotGenId, pilotGenPrefix, pilotPartKey } from '@/lib/pilot-gen-isolation';
 import { splitCopyIntoParts, cloneVoiceViaExtension, detectExtension } from '@/lib/heygen-extension-bridge';
 import { runHeyGenJobs, type RunnerResult } from '@/lib/heygen-job-runner';
 import {
@@ -253,15 +254,16 @@ function runPostPipelineSerial(
  *  isso a chave do 'decupado' carrega a intensidade (`@k<sec>`): mudar a
  *  intensidade = chave diferente = recorta de verdade no novo valor (não reusa
  *  o corte antigo); voltar pra intensidade anterior reusa o que já existe. */
-function makeClipCacheHooks(taskId: string, keepSilenceSec: number = 0.12) {
+function makeClipCacheHooks(taskId: string, keepSilenceSec: number = 0.12, genId?: string | null) {
   const kTag = (Math.round(keepSilenceSec * 100) / 100).toFixed(2);
+  const pfx = pilotGenPrefix(taskId, genId);
   // Intensidade vai no FIM da chave do 'decupado' (`...:<label>@k<sec>`) pra que
   // a invalidação por parte (deletePrefix `...:decupado:<label>@k`) atinja todas
   // as intensidades daquela parte sem tocar nas outras partes.
   const keyFor = (kind: 'leveled' | 'decupado', label: string) =>
     kind === 'decupado'
-      ? `pilot:${taskId}:decupado:${label}@k${kTag}`
-      : `pilot:${taskId}:${kind}:${label}`;
+      ? `${pfx}decupado:${label}@k${kTag}`
+      : `${pfx}${kind}:${label}`;
   return {
     loadCachedClip: async (kind: 'leveled' | 'decupado', label: string): Promise<Blob | null> => {
       try {
@@ -499,6 +501,13 @@ type BatchTaskState = {
   taskId: string;
   taskName: string;
   baseAdId: string;
+  /** ISOLAÇÃO POR GERAÇÃO (fix 2026-07-08): id único do disparo/re-disparo DO
+   *  ZERO que produziu os videoIds atuais. Namespaceia os artefatos por-parte
+   *  no IDB (`pilot:<taskId>:g:<genId>:...`) pra que um RETOMAR NUNCA hidrate um
+   *  take de uma geração anterior (avatar antigo) → nunca embaralha avatares.
+   *  Sobrevive F5 (campo simples, não é stripado no persist). Ausente em batches
+   *  legados → cai na chave antiga (sem regressão). */
+  genId?: string;
   /** 'troca' = pipeline de TROCA DE ÁUDIO (sem HeyGen). Ausente = fluxo normal. */
   kind?: 'troca';
   /** TROCA: dados serializaveis pra RETOMAR sobreviver reload. O novo WHITE
@@ -2652,11 +2661,26 @@ function ClickUpPilotInner() {
     // Limpa flag de cancel de runs anteriores
     batchCancelRef.current[taskId] = false;
 
+    // ═══ ISOLAÇÃO POR GERAÇÃO (fix 2026-07-08) ═══════════════════════════════
+    // Disparo/re-disparo DO ZERO = geração NOVA. Cunha um genId único e LIMPA do
+    // IDB TODOS os artefatos por-parte (blobs de take + clips leveled/decupado)
+    // de gerações anteriores DESTA task. Sem isso, um RETOMAR após F5 podia ler
+    // take de avatar antigo sob a chave compartilhada → montagem embaralhada
+    // (caso AD13). A geração nova grava tudo sob `pilot:<taskId>:g:<genId>:...`,
+    // então nunca mais mistura. Ver [[project_disparo_genid_isolacao]].
+    const genId = newPilotGenId();
+    try {
+      const { deletePrefix } = await import('@/lib/zip-store');
+      const purged = await deletePrefix(`pilot:${taskId}:`);
+      if (purged > 0) console.log(`[clickup-pilot] geração nova ${genId} (task=${taskId}): limpei ${purged} artefato(s) por-parte de gerações anteriores (isolação de avatar)`);
+    } catch (e) { console.warn('[clickup-pilot] purge de geração anterior falhou (segue mesmo assim — a geração nova escreve em namespace próprio):', e); }
+
     const aForUrl = taskAnalyses[taskId];
     setBatchStates((prev) => ({
       ...prev,
       [taskId]: {
         taskId, taskName: rTaskName, baseAdId: rBaseAdId,
+        genId,
         phase: 'dispatching',
         parts: plan!.parts.map((p: any) => ({ label: p.label, videoId: null, renamedTo: labelToFilename(p.label) })),
         startedAt: Date.now(),
@@ -2801,7 +2825,7 @@ function ClickUpPilotInner() {
           // Resume hidrata daqui sem precisar re-baixar do HeyGen (URLs expiram).
           try {
             const { saveBlob } = await import('@/lib/zip-store');
-            await saveBlob(`pilot:${taskId}:part:${part.label}`, partBlob, 'video/mp4');
+            await saveBlob(pilotPartKey(taskId, genId, part.label), partBlob, 'video/mp4');
           } catch (e) { console.warn('[pilot] persist part blob falhou:', e); }
           downloaded++;
           setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], message: `Baixando: ${downloaded}/${validIds.length}` } }));
@@ -2863,7 +2887,7 @@ function ClickUpPilotInner() {
               partBlobs[i] = { label: part.label, blob: partBlob, expected: partBlobs[i].expected };
               try {
                 const { saveBlob } = await import('@/lib/zip-store');
-                await saveBlob(`pilot:${taskId}:part:${part.label}`, partBlob, 'video/mp4');
+                await saveBlob(pilotPartKey(taskId, genId, part.label), partBlob, 'video/mp4');
               } catch {}
             } catch (e) { console.warn(`[clickup-pilot] auto-cura re-download ${plan!.parts[i].label} falhou:`, (e as Error)?.message); }
           }
@@ -2946,7 +2970,7 @@ function ClickUpPilotInner() {
               partBlobs[i] = { label: part.label, blob: partBlob, expected: partBlobs[i].expected };
               try {
                 const { saveBlob } = await import('@/lib/zip-store');
-                await saveBlob(`pilot:${taskId}:part:${part.label}`, partBlob, 'video/mp4');
+                await saveBlob(pilotPartKey(taskId, genId, part.label), partBlob, 'video/mp4');
               } catch {}
             } catch (e) { console.warn(`[clickup-pilot] auto-cura download ${plan!.parts[i].label} falhou:`, (e as Error)?.message); }
           }
@@ -3018,7 +3042,7 @@ function ClickUpPilotInner() {
           // Fresh dispatch: NÃO lê cache (conteúdo novo) mas ESCREVE (popula
           // pro próximo RETOMAR pular nivelamento/decupagem).
           readClipCache: false,
-          ...makeClipCacheHooks(taskId, getDecupIntensity(taskId)),
+          ...makeClipCacheHooks(taskId, getDecupIntensity(taskId), genId),
           onProgress: (p) => {
             setBatchStates((prev) => ({
               ...prev,
@@ -3194,6 +3218,13 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       await runVAPipelineForTask(taskId);
       return;
     }
+    // ISOLAÇÃO POR GERAÇÃO: o resume SÓ enxerga os takes/clips desta MESMA
+    // geração (o genId que o disparo do zero gravou no state, sobrevive F5). Se
+    // uma parte não estiver cacheada sob este genId (ex: save falhou / F5 antes
+    // de baixá-la), ela some do cache e é re-baixada do HeyGen pelo videoId ATUAL
+    // — jamais puxa o take de uma geração anterior (avatar antigo). Legado
+    // (genId undefined) cai na chave antiga: sem regressão.
+    const genId = state.genId;
     const validParts = state.parts.filter((p) => p.videoId);
     if (validParts.length === 0) {
       setError('Sem videoIds salvos pra retomar — task tem que ser disparada do zero.');
@@ -3221,7 +3252,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       let cachedCount = 0;
       for (const p of validParts) {
         try {
-          const b = await loadBlob(`pilot:${taskId}:part:${p.label}`, 'video/mp4');
+          const b = await loadBlob(pilotPartKey(taskId, genId, p.label), 'video/mp4');
           if (b && b.size > 1024) cachedCount++;
         } catch {}
       }
@@ -3240,7 +3271,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         if (!p.videoId) continue;
         try {
           const { loadBlob } = await import('@/lib/zip-store');
-          const b = await loadBlob(`pilot:${taskId}:part:${p.label}`, 'video/mp4');
+          const b = await loadBlob(pilotPartKey(taskId, genId, p.label), 'video/mp4');
           if (b && b.size > 1024) cachedIdxs.add(i);
         } catch {}
       }
@@ -3444,7 +3475,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             continue;
           }
           try {
-            const blob = await loadBlob(`pilot:${taskId}:part:${p.label}`, 'video/mp4');
+            const blob = await loadBlob(pilotPartKey(taskId, genId, p.label), 'video/mp4');
             if (blob && blob.size > 1024) {
               partBlobs[i] = { label: p.label, blob };
               zip.file(p.renamedTo, new Uint8Array(await blob.arrayBuffer()));
@@ -3487,7 +3518,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           // Persist no IDB pra próximo RETOMAR
           try {
             const { saveBlob } = await import('@/lib/zip-store');
-            await saveBlob(`pilot:${taskId}:part:${part.label}`, partBlob, 'video/mp4');
+            await saveBlob(pilotPartKey(taskId, genId, part.label), partBlob, 'video/mp4');
           } catch {}
           downloaded++;
           setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], message: `Baixando: ${downloaded}/${validIds.length}` } }));
@@ -3566,7 +3597,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           // RETOMAR: mesmo conteúdo → LÊ o cache (pula nivelamento/decupagem já
           // feitos). Era isso que fazia o RETOMAR refazer tudo e levar ~100min.
           readClipCache: true,
-          ...makeClipCacheHooks(taskId, getDecupIntensity(taskId)),
+          ...makeClipCacheHooks(taskId, getDecupIntensity(taskId), genId),
           onProgress: (p) => {
             setBatchStates((prev) => ({
               ...prev,
@@ -4647,6 +4678,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     if (!editingPart) return;
     const { taskId, partIdx, label } = editingPart;
     const b = batchStates[taskId];
+    const genId = b?.genId; // isolação por geração: grava/invalida na geração atual
     const replanPart = b?.replan?.parts[partIdx];
     if (!b || !replanPart) {
       setRegenError('Sem dados de replan — refaz a analise da task.');
@@ -4735,15 +4767,15 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const partBlob = new Blob([bytes as BlobPart], { type: 'video/mp4' });
       try {
         const { saveBlob, deleteZip, deletePrefix } = await import('@/lib/zip-store');
-        await saveBlob(`pilot:${taskId}:part:${label}`, partBlob, 'video/mp4');
+        await saveBlob(pilotPartKey(taskId, genId, label), partBlob, 'video/mp4');
         // Parte MUDOU → invalida os clips derivados (leveled/decupado) dela, pra
         // o rebuild ("Atualizar montagem") recomputar SÓ essa parte e não reusar
         // cache stale. As outras partes seguem cacheadas (rebuild rápido). O
         // decupado é por intensidade (`...:<label>@k<sec>`) → deletePrefix limpa
         // TODAS as intensidades dessa parte de uma vez.
-        await deleteZip(`pilot:${taskId}:leveled:${label}`).catch(() => {});
-        await deletePrefix(`pilot:${taskId}:decupado:${label}@k`).catch(() => {});
-        await deleteZip(`pilot:${taskId}:decupado:${label}`).catch(() => {}); // legado (chave antiga sem intensidade)
+        await deleteZip(`${pilotGenPrefix(taskId, genId)}leveled:${label}`).catch(() => {});
+        await deletePrefix(`${pilotGenPrefix(taskId, genId)}decupado:${label}@k`).catch(() => {});
+        await deleteZip(`${pilotGenPrefix(taskId, genId)}decupado:${label}`).catch(() => {}); // legado (chave antiga sem intensidade)
       } catch (e) { console.warn('[edit-part] save blob IDB falhou:', e); }
 
       // 6) Atualiza state final com URL pronta + marca como dirty (montagem
@@ -4793,6 +4825,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
    *  erro no card e o RETOMAR ainda pode tentar pelo texto. */
   async function regenerateSinglePartFromAudio(taskId: string, partIdx: number, file: File) {
     const b = batchStates[taskId];
+    const genId = b?.genId; // isolação por geração: grava/invalida na geração atual
     const part = b?.parts[partIdx];
     const replanPart = b?.replan?.parts[partIdx];
     if (!b || !part || !replanPart) {
@@ -4871,10 +4904,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const partBlob = new Blob([bytes as BlobPart], { type: 'video/mp4' });
       try {
         const { saveBlob, deleteZip, deletePrefix } = await import('@/lib/zip-store');
-        await saveBlob(`pilot:${taskId}:part:${label}`, partBlob, 'video/mp4');
-        await deleteZip(`pilot:${taskId}:leveled:${label}`).catch(() => {});
-        await deletePrefix(`pilot:${taskId}:decupado:${label}@k`).catch(() => {});
-        await deleteZip(`pilot:${taskId}:decupado:${label}`).catch(() => {});
+        await saveBlob(pilotPartKey(taskId, genId, label), partBlob, 'video/mp4');
+        await deleteZip(`${pilotGenPrefix(taskId, genId)}leveled:${label}`).catch(() => {});
+        await deletePrefix(`${pilotGenPrefix(taskId, genId)}decupado:${label}@k`).catch(() => {});
+        await deleteZip(`${pilotGenPrefix(taskId, genId)}decupado:${label}`).catch(() => {});
       } catch (e) { console.warn('[edit-part-audio] save blob IDB falhou:', e); }
 
       // Marca completa + dirty → aparece "Atualizar montagem" pra fechar o AD.
@@ -4925,6 +4958,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
   async function rebuildMontage(taskId: string) {
     const b = batchStates[taskId];
     if (!b) return;
+    const genId = b.genId; // isolação por geração: hidrata só os takes DESTA geração
     setRebuildingTaskId(taskId);
     try {
       const { loadBlob } = await import('@/lib/zip-store');
@@ -4942,7 +4976,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           const expected = rbExpected(i, p);
           if (!p.videoId) return { label: p.label, blob: null, expected };
           try {
-            const blob = await loadBlob(`pilot:${taskId}:part:${p.label}`, 'video/mp4');
+            const blob = await loadBlob(pilotPartKey(taskId, genId, p.label), 'video/mp4');
             return { label: p.label, blob: blob && blob.size > 1024 ? blob : null, expected };
           } catch { return { label: p.label, blob: null, expected }; }
         }),
@@ -4965,7 +4999,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         // Atualizar montagem: reusa cache das partes NÃO editadas; as editadas
         // tiveram o cache invalidado na hora da edição (regen) → recomputam só elas.
         readClipCache: true,
-        ...makeClipCacheHooks(taskId, getDecupIntensity(taskId)),
+        ...makeClipCacheHooks(taskId, getDecupIntensity(taskId), genId),
         onProgress: (p) => {
           setBatchStates((prev) => ({
             ...prev,
