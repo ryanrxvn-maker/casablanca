@@ -66,35 +66,34 @@ const ALL_TOOLS: Tool[] = [
     featuredHue: 'rgba(240,171,252,0.55)',
   },
   // ─── Lista comum ───
+  // ⚠ SÓ ferramentas REAIS e acessíveis ao cliente. Espelha o acesso de
+  // lib/use-tier.ts. NÃO listar admin-only (Normalizador, Separador de Áudio,
+  // Removedor de Legenda) nem tools inexistentes — isso vira propaganda enganosa.
   { key: 'lipsync', label: 'Lipsync Video to Video' },
-  { key: 'downloader', label: 'Downloader' },
-  { key: 'decupagem-audio', label: 'Decupagem de áudio' },
-  { key: 'decupagem-video', label: 'Decupagem de vídeo' },
-  { key: 'removedor-legenda', label: 'Removedor de Legenda/Marca d’Água' },
+  { key: 'decupagem-inteligente', label: 'Decupagem Inteligente' },
+  { key: 'decupagem', label: 'Decupagem' },
+  { key: 'camuflagem', label: 'Camuflagem' },
   { key: 'gerador-srt', label: 'Gerador de SRT' },
   { key: 'mixer-velocidade', label: 'Mixer de Velocidade' },
-  { key: 'normalizador', label: 'Normalizador de Volume' },
   { key: 'separar-audios', label: 'Dividir áudios' },
   { key: 'compressor', label: 'Compressor' },
-  { key: 'camuflagem', label: 'Camuflagem' },
-  { key: 'decupagem-inteligente', label: 'Decupagem Inteligente' },
-  { key: 'separador-audio', label: 'Separador de Áudio (voz/SFX/inst)' },
+  { key: 'downloader', label: 'Downloader' },
+  { key: 'fakepass', label: 'FakePrint' },
 ];
 
-/** Quais ferramentas cada plano libera (por `key` da ALL_TOOLS). */
+/** Quais ferramentas cada plano libera (por `key` da ALL_TOOLS).
+ *  Espelha EXATAMENTE o acesso real de lib/use-tier.ts (TIER_PATHS). */
 const UNLOCKED: Record<'free' | 'basic' | 'pro', Set<string>> = {
-  free: new Set(['downloader', 'decupagem-audio']),
+  free: new Set(['decupagem', 'downloader', 'fakepass', 'compressor']),
   basic: new Set([
+    'decupagem',
     'downloader',
-    'decupagem-audio',
-    'decupagem-video',
-    'removedor-legenda',
-    'gerador-srt',
-    'mixer-velocidade',
-    'normalizador',
-    'separar-audios',
+    'fakepass',
     'compressor',
     'camuflagem',
+    'separar-audios',
+    'mixer-velocidade',
+    'gerador-srt',
   ]),
   pro: new Set(ALL_TOOLS.map((t) => t.key)),
 };
@@ -1650,6 +1649,22 @@ const TOOL_DETAILS: ToolInfo[] = [
   },
   // ─── Demais ───
   {
+    key: 'lipsync',
+    name: 'Lipsync Video to Video',
+    cat: 'IA',
+    hue: 'rgba(232,121,249,0.5)',
+    desc: 'Sobe o rosto, sobe o áudio e a boca fala exatamente o que você quiser.',
+    win: 'Avatar realista falando sua copy, em minutos. Ilimitado.',
+  },
+  {
+    key: 'decupagem',
+    name: 'Decupagem',
+    cat: 'Vídeo',
+    hue: 'rgba(163,230,53,0.5)',
+    desc: 'Vídeo ou áudio: remove o silêncio mantendo o ritmo natural da fala.',
+    win: 'O que demorava 1h vira 30 segundos. Corte limpo, já pronto pra timeline.',
+  },
+  {
     key: 'downloader',
     name: 'Downloader',
     cat: 'Web',
@@ -1658,28 +1673,12 @@ const TOOL_DETAILS: ToolInfo[] = [
     win: 'Cola o link, recebe o arquivo. Sem código, sem servidor.',
   },
   {
-    key: 'decupagem-audio',
-    name: 'Decupagem de áudio',
-    cat: 'Áudio',
-    hue: 'rgba(34,211,238,0.5)',
-    desc: 'Remove silêncios do áudio mantendo o ritmo natural da fala.',
-    win: 'O que demorava 1h vira 30 segundos. Direto.',
-  },
-  {
-    key: 'decupagem-video',
-    name: 'Decupagem de vídeo',
-    cat: 'Vídeo',
-    hue: 'rgba(163,230,53,0.5)',
-    desc: 'Mesma decupagem, agora cortando o vídeo junto com o áudio.',
-    win: 'Vídeo já sai pronto pra entrar na linha do tempo.',
-  },
-  {
-    key: 'removedor-legenda',
-    name: 'Removedor de Legenda/Marca d’Água',
-    cat: 'IA',
-    hue: 'rgba(244,114,182,0.55)',
-    desc: 'Apaga legenda gravada e marca d’água de vídeos.',
-    win: 'A IA reconstrói o fundo. Resultado limpo, profissional.',
+    key: 'fakepass',
+    name: 'FakePrint',
+    cat: 'Web',
+    hue: 'rgba(167,139,250,0.5)',
+    desc: 'Gera prints e stickers de redes sociais idênticos ao original.',
+    win: 'Prova social na hora, sem Photoshop. Sai igualzinho.',
   },
   {
     key: 'gerador-srt',
@@ -1696,14 +1695,6 @@ const TOOL_DETAILS: ToolInfo[] = [
     hue: 'rgba(251,191,36,0.5)',
     desc: 'Acelera ou desacelera vídeo e áudio sem ficar com voz robotizada.',
     win: 'Mantém o tom natural mesmo em 1.5×. O ouvido nem percebe.',
-  },
-  {
-    key: 'normalizador',
-    name: 'Normalizador de Volume',
-    cat: 'Áudio',
-    hue: 'rgba(94,234,212,0.5)',
-    desc: 'Iguala o volume de vários arquivos em um nível confortável.',
-    win: 'Cliente nunca mais reclama de "tá baixo". Tudo sai padronizado.',
   },
   {
     key: 'separar-audios',
@@ -1736,14 +1727,6 @@ const TOOL_DETAILS: ToolInfo[] = [
     hue: 'rgba(232,121,249,0.55)',
     desc: 'A IA decupa o vídeo seguindo a copy do roteiro com precisão.',
     win: 'Diz o que tem que ser dito, a IA escolhe a melhor take e monta.',
-  },
-  {
-    key: 'separador-audio',
-    name: 'Separador de Áudio',
-    cat: 'IA',
-    hue: 'rgba(167,139,250,0.55)',
-    desc: 'Separa voz, instrumental e SFX em 3 trilhas com modelo Demucs v4.',
-    win: 'Refaz mixagem, reusa só a voz, isola o beat. Qualidade absurda.',
   },
 ];
 
