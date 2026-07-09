@@ -211,9 +211,9 @@ export default function NormalizadorPage() {
               if (!disabled && !processing) setOutput(v as NormalizeOutFormat);
             }}
             options={[
-              { value: 'mp4', label: 'MP4', sub: 'vídeo' },
-              { value: 'mp3', label: 'MP3', sub: 'áudio' },
-              { value: 'wav', label: 'WAV', sub: 'áudio' },
+              { value: 'mp4', label: 'MP4' },
+              { value: 'mp3', label: 'MP3' },
+              { value: 'wav', label: 'WAV' },
             ]}
             disabled={processing}
             hue={HUE}

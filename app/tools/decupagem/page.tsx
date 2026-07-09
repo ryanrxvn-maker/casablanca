@@ -493,8 +493,8 @@ export default function DecupagemPage() {
   // Só os processados no navegador entram no ZIP (servidor baixa individual).
   const zippableCount = queue.filter((q) => q.result && q.result.kind !== 'server').length;
   const audioOptions = [
-    { value: 'mp3' as const, label: 'MP3', sub: 'menor' },
-    { value: 'wav' as const, label: 'WAV', sub: 'qualidade máx' },
+    { value: 'mp3' as const, label: 'MP3' },
+    { value: 'wav' as const, label: 'WAV' },
   ];
 
   return (
@@ -627,8 +627,8 @@ export default function DecupagemPage() {
                 setOutputKind(v);
               }}
               options={[
-                { value: 'video' as const, label: 'Vídeo', sub: 'mp4' },
-                { value: 'audio' as const, label: 'Áudio', sub: 'só som' },
+                { value: 'video' as const, label: 'Vídeo' },
+                { value: 'audio' as const, label: 'Áudio' },
               ]}
               disabled={processing}
             />

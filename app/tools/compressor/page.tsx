@@ -446,10 +446,10 @@ export default function CompressorPage() {
             value={resolution}
             onChange={(v) => !processing && setResolution(v as Resolution)}
             options={[
-              { value: 'original', label: 'Original', sub: 'mantém' },
-              { value: '1080', label: '1080p', sub: 'Full HD' },
-              { value: '720', label: '720p', sub: 'HD' },
-              { value: '480', label: '480p', sub: 'leve' },
+              { value: 'original', label: 'Original' },
+              { value: '1080', label: '1080p' },
+              { value: '720', label: '720p' },
+              { value: '480', label: '480p' },
             ]}
             disabled={processing}
             hue={HUE}

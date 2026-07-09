@@ -130,9 +130,9 @@ export default function CamuflagemPage() {
     'camuflagem:format',
     'wav',
   );
-  // Alvo fixo: TikTok/Kwai/YouTube. A camuflagem por inversão de fase só faz
-  // sentido contra plataformas que somam/mediam L+R, então o alvo é sempre
-  // 'platforms' — sem card de escolha.
+  // Alvo fixo: TikTok/Kwai/YouTube/Meta (Facebook/Instagram). A camuflagem por
+  // inversão de fase só faz sentido contra plataformas que somam/mediam L+R,
+  // então o alvo é sempre 'platforms' — sem card de escolha.
   const target = 'platforms' as Target;
   const [processingAll, setProcessingAll] = useToolState<boolean>(
     'camuflagem:processingAll',
@@ -588,7 +588,7 @@ export default function CamuflagemPage() {
     <ToolShell
       title="Camuflagem"
       eyebrow="ÁUDIO"
-      description="Esconde o áudio que a IA lê do TikTok/Kwai/YouTube. O selo só fica verde se realmente camuflar."
+      description="Esconde o áudio que a IA lê do TikTok/Kwai/YouTube/Meta (Facebook e Instagram). O selo só fica verde se realmente camuflar."
       hue={HUE}
       icon={<IconCamuflagem size={56} />}
     >
@@ -781,8 +781,8 @@ export default function CamuflagemPage() {
                           <div className="mb-1.5 font-semibold">
                             {ok ? (
                               <>
-                                MUDO PRA TIKTOK / KWAI / YOUTUBE — a soma dos
-                                canais zera, a IA nao escuta nada
+                                MUDO PRA TIKTOK / KWAI / YOUTUBE / META — a soma
+                                dos canais zera, a IA nao escuta nada
                               </>
                             ) : (
                               <>
@@ -852,7 +852,7 @@ export default function CamuflagemPage() {
                       const relevant = TARGET_KINDS[target];
                       const targetLabel =
                         target === 'platforms'
-                          ? 'TikTok / Kwai / YouTube'
+                          ? 'TikTok / Kwai / YouTube / Meta'
                           : target === 'single'
                             ? 'ASR de canal unico'
                             : 'qualquer IA';
@@ -923,9 +923,10 @@ export default function CamuflagemPage() {
                           {ok && target === 'platforms' ? (
                             <div className="mt-2 border-t border-lime/30 pt-2 text-[11px] text-lime/80">
                               YouTube Content ID faz a media dos canais
-                              (comprovado); TikTok/Kwai sao da mesma familia. A
-                              prova final e empirica: suba 1 video teste e veja
-                              a legenda automatica / se a moderacao pega o WHITE.
+                              (comprovado); TikTok/Kwai/Meta (Facebook/Instagram)
+                              sao da mesma familia de match por mono. A prova
+                              final e empirica: suba 1 video teste e veja a
+                              legenda automatica / se a moderacao pega o WHITE.
                             </div>
                           ) : !ok ? (
                             <div className="mt-2 border-t border-red-500/30 pt-2 text-[11px] text-red-300/90">
@@ -994,7 +995,7 @@ export default function CamuflagemPage() {
                     <div className="rounded-[8px] border border-lime/30 bg-bg-soft/50 px-3 py-2">
                       <div className="label-tech mb-1 text-[10px] text-text-muted">
                         {target === 'platforms'
-                          ? 'O que TikTok/Kwai/YouTube escutariam (mono-media L+R do arquivo real)'
+                          ? 'O que TikTok/Kwai/YouTube/Meta escutariam (mono-media L+R do arquivo real)'
                           : 'O que um ASR de canal unico escuta (estereo cru do arquivo real)'}
                       </div>
                       <p className="whitespace-pre-wrap text-xs leading-relaxed text-white">
@@ -1318,7 +1319,7 @@ export default function CamuflagemPage() {
                           }
                         >
                           {ok
-                            ? 'NOVO WHITE EMBUTIDO — TikTok/Kwai/YouTube escutam o WHITE novo; o antigo foi removido.'
+                            ? 'NOVO WHITE EMBUTIDO — TikTok/Kwai/YouTube/Meta escutam o WHITE novo; o antigo foi removido.'
                             : 'O novo WHITE não segurou na soma mono — confira intensidade/arquivo e tente de novo.'}
                         </div>
                       );

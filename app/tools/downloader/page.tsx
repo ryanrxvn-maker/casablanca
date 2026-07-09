@@ -23,17 +23,17 @@ type Job = {
 
 const HUE = 'rgba(96,165,250,0.4)';
 
-const MODES: { value: Mode; label: string; sub: string }[] = [
-  { value: 'video', label: 'Vídeo', sub: 'MP4' },
-  { value: 'audio-mp3', label: 'Áudio', sub: 'MP3' },
-  { value: 'audio-wav', label: 'Áudio', sub: 'WAV' },
+const MODES: { value: Mode; label: string }[] = [
+  { value: 'video', label: 'Vídeo' },
+  { value: 'audio-mp3', label: 'Áudio MP3' },
+  { value: 'audio-wav', label: 'Áudio WAV' },
 ];
 
-const QUALITIES: { value: Quality; label: string; sub: string }[] = [
-  { value: '1080', label: '1080p', sub: 'Full HD' },
-  { value: '720', label: '720p', sub: 'HD' },
-  { value: '480', label: '480p', sub: 'Padrão' },
-  { value: 'best', label: 'Máxima', sub: 'Original' },
+const QUALITIES: { value: Quality; label: string }[] = [
+  { value: '1080', label: '1080p' },
+  { value: '720', label: '720p' },
+  { value: '480', label: '480p' },
+  { value: 'best', label: 'Máxima' },
 ];
 
 const ADULT_SITES = [
