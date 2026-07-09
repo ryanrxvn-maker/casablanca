@@ -10,9 +10,12 @@ import {
   camuflar,
   descamuflar,
   verifyCamouflage,
+  verifyMute,
   buildPlatformMonoWav,
+  MUTE_SILENT_DB,
   type VerifyVerdict,
   type DownmixResult,
+  type MuteDownmix,
   type DescamuflarLayer,
 } from '@/lib/camuflagem';
 import { downloadBlob } from '@/lib/audio-engine';
@@ -75,6 +78,9 @@ type Pair = {
   transcribing?: boolean;
   transcript?: string;
   transcriptErr?: string;
+  // MODO MUDO: quando o par foi processado sem WHITE (só silêncio pra IA),
+  // o veredito usa este campo no lugar de `downmixes`.
+  muteDownmixes?: MuteDownmix[];
 };
 
 function newPair(): Pair {
@@ -132,6 +138,12 @@ export default function CamuflagemPage() {
     'camuflagem:processingAll',
     false,
   );
+  // MODO MUDO: liga a camuflagem SEM WHITE — o BLACK vira silêncio pra IA que
+  // soma os canais, sem precisar de nenhuma trilha por baixo.
+  const [muteMode, setMuteMode] = useToolState<boolean>(
+    'camuflagem:muteMode',
+    false,
+  );
   const [mode, setMode] = useToolState<Mode>('camuflagem:mode', 'camuflar');
   const [decloakItems, setDecloakItems] = useToolState<DecloakItem[]>(
     'camuflagem:decloak',
@@ -174,7 +186,10 @@ export default function CamuflagemPage() {
   }
 
   async function processAll() {
-    const ready = pairs.filter((p) => p.black && p.white);
+    // No modo mudo o WHITE não é necessário: basta o BLACK.
+    const ready = pairs.filter((p) =>
+      muteMode ? p.black : p.black && p.white,
+    );
     if (ready.length === 0) return;
     setProcessingAll(true);
 
@@ -183,10 +198,12 @@ export default function CamuflagemPage() {
         updatePair(pair.id, {
           status: 'processing',
           errorMsg: undefined,
-          stage: 'Camuflando audio...',
+          stage: muteMode ? 'Silenciando pra IA...' : 'Camuflando audio...',
           guard: undefined,
           whiteScore: undefined,
           blackScore: undefined,
+          downmixes: undefined,
+          muteDownmixes: undefined,
           transcript: undefined,
           transcriptErr: undefined,
         });
@@ -198,11 +215,14 @@ export default function CamuflagemPage() {
 
         // Camufla -> codifica no formato pedido (MP3/MP4 com settings
         // robustos pra inversão de fase sobreviver ao codec lossy).
-        updatePair(pair.id, { stage: 'Camuflando audio...' });
+        updatePair(pair.id, {
+          stage: muteMode ? 'Silenciando pra IA...' : 'Camuflando audio...',
+        });
         const wav = await camuflar({
           black: pair.black!,
-          white: pair.white!,
+          white: muteMode ? undefined : pair.white!,
           volumePercent: volume,
+          mute: muteMode,
         });
 
         let out: Blob;
@@ -227,30 +247,43 @@ export default function CamuflagemPage() {
         }
 
         // GARANTIA HONESTA: decodifica o ARQUIVO REAL e mede o que CADA
-        // tipo de IA escuta — soma L+R, média E canal isolado (que é como
-        // AssemblyAI/Whisper padrão fazem). Só fica verde se o PIOR caso
-        // ainda escutar o WHITE. Nunca mais "camuflado" mentiroso.
+        // tipo de IA escuta. No modo mudo confere se a soma/média zerou
+        // (silêncio); no modo normal, se o PIOR caso ainda escuta o WHITE.
         updatePair(pair.id, {
-          stage: `Verificando o que cada IA escuta no ${format.toUpperCase()} real...`,
+          stage: muteMode
+            ? `Verificando se a IA escuta silencio no ${format.toUpperCase()} real...`
+            : `Verificando o que cada IA escuta no ${format.toUpperCase()} real...`,
           guard: 'checking',
-        });
-        const v = await verifyCamouflage({
-          result: out,
-          white: pair.white!,
-          black: pair.black!,
         });
 
         const url = URL.createObjectURL(out);
-        updatePair(pair.id, {
-          status: 'done',
-          resultBlob: out,
-          resultUrl: url,
-          stage: undefined,
-          guard: v.verdict,
-          whiteScore: v.whiteScore,
-          blackScore: v.blackScore,
-          downmixes: v.downmixes,
-        });
+        if (muteMode) {
+          const vm = await verifyMute({ result: out });
+          updatePair(pair.id, {
+            status: 'done',
+            resultBlob: out,
+            resultUrl: url,
+            stage: undefined,
+            guard: vm.verdict,
+            muteDownmixes: vm.downmixes,
+          });
+        } else {
+          const v = await verifyCamouflage({
+            result: out,
+            white: pair.white!,
+            black: pair.black!,
+          });
+          updatePair(pair.id, {
+            status: 'done',
+            resultBlob: out,
+            resultUrl: url,
+            stage: undefined,
+            guard: v.verdict,
+            whiteScore: v.whiteScore,
+            blackScore: v.blackScore,
+            downmixes: v.downmixes,
+          });
+        }
       } catch (e) {
         console.error(e);
         if (isCancellationError(e)) {
@@ -542,6 +575,72 @@ export default function CamuflagemPage() {
 
         {mode === 'camuflar' ? (
         <>
+        {/* Botão 3D (só ícone): liga o MODO MUDO — camufla sem WHITE,
+            transformando o BLACK em silêncio pra IA que soma os canais. */}
+        <div className="flex items-center gap-4 rounded-[12px] border border-line bg-bg p-4">
+          <div style={{ perspective: '650px' }}>
+            <button
+              type="button"
+              onClick={() => !processingAll && setMuteMode((v) => !v)}
+              aria-pressed={muteMode}
+              aria-label="Modo mudo"
+              title="Modo mudo: camufla sem WHITE — o BLACK vira silêncio pra IA"
+              disabled={processingAll}
+              className={
+                'transform-gpu flex h-12 w-12 items-center justify-center rounded-2xl border-2 transition-all duration-300 ease-[cubic-bezier(.4,1.4,.6,1)] hover:[transform:translateY(-3px)_rotateX(20deg)] active:[transform:translateY(0)_rotateX(0deg)_scale(.93)] active:duration-75 disabled:cursor-not-allowed disabled:opacity-50 ' +
+                (muteMode
+                  ? 'border-lime bg-lime/15 text-lime'
+                  : 'border-line bg-bg-soft/80 text-text-muted hover:border-lime hover:text-lime')
+              }
+              style={{
+                transformStyle: 'preserve-3d',
+                boxShadow: muteMode
+                  ? 'inset 0 1px 0 rgba(255,255,255,0.14), inset 0 -3px 0 rgba(0,0,0,0.55), 0 0 24px -4px rgba(200,232,124,0.7), 0 6px 14px -6px rgba(0,0,0,0.8)'
+                  : 'inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -3px 0 rgba(0,0,0,0.5), 0 4px 10px -4px rgba(0,0,0,0.7)',
+              }}
+            >
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                {muteMode ? (
+                  <>
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                    <line x1="23" y1="9" x2="17" y2="15" />
+                    <line x1="17" y1="9" x2="23" y2="15" />
+                  </>
+                ) : (
+                  <>
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" />
+                  </>
+                )}
+              </svg>
+            </button>
+          </div>
+          <div className="text-xs leading-relaxed text-text-muted">
+            <span
+              className={
+                'font-semibold ' + (muteMode ? 'text-lime' : 'text-white')
+              }
+            >
+              Modo mudo {muteMode ? '· LIGADO' : '· desligado'}
+            </span>
+            <br />
+            {muteMode
+              ? 'Sem WHITE: mando só o BLACK e transformo ele em silêncio pra IA que soma os canais (TikTok/Kwai/YouTube). O humano continua ouvindo o BLACK normal.'
+              : 'Ligue pra camuflar SEM precisar de uma trilha WHITE por baixo — o BLACK vira mudo só pra IA.'}
+          </div>
+        </div>
+
+        {!muteMode ? (
         <ToolStep n={1} icon={<IconStepSliders size={18} />} title="Intensidade" hint="Quanto maior, mais difícil de detectar" hue={HUE}>
           <ToolSlider
             label="Volume da camuflagem"
@@ -554,8 +653,9 @@ export default function CamuflagemPage() {
             disabled={processingAll}
           />
         </ToolStep>
+        ) : null}
 
-        <ToolStep n={2} icon={<IconStepFormat size={18} />} title="Formato de saída" hue={HUE}>
+        <ToolStep n={muteMode ? 1 : 2} icon={<IconStepFormat size={18} />} title="Formato de saída" hue={HUE}>
           <ToolChoice
             value={format}
             onChange={(v) => {
@@ -577,7 +677,7 @@ export default function CamuflagemPage() {
           ) : null}
         </ToolStep>
 
-        <ToolStep n={3} icon={<IconStepFiles size={18} />} title="Pares BLACK + WHITE" hint="BLACK = público · WHITE = IA escuta" hue={HUE}>
+        <ToolStep n={muteMode ? 2 : 3} icon={<IconStepFiles size={18} />} title={muteMode ? 'Áudio BLACK' : 'Pares BLACK + WHITE'} hint={muteMode ? 'BLACK = público · a IA escuta SILÊNCIO' : 'BLACK = público · WHITE = IA escuta'} hue={HUE}>
         <div className="flex flex-col gap-4">
           {pairs.map((pair, i) => (
             <div
@@ -618,7 +718,7 @@ export default function CamuflagemPage() {
                   </button>
                 ) : null}
               </div>
-              <div className="grid gap-3 md:grid-cols-2">
+              <div className={muteMode ? '' : 'grid gap-3 md:grid-cols-2'}>
                 <div>
                   <label className="label-field">BLACK (publico)</label>
                   <FileUpload
@@ -628,7 +728,14 @@ export default function CamuflagemPage() {
                       updatePair(pair.id, { black: f, status: 'idle' })
                     }
                   />
+                  {muteMode ? (
+                    <p className="mt-1 text-[11px] text-text-muted">
+                      Sem WHITE: o BLACK vira silêncio pra IA que soma os
+                      canais. O humano continua ouvindo o BLACK normalmente.
+                    </p>
+                  ) : null}
                 </div>
+                {!muteMode ? (
                 <div>
                   <label className="label-field">WHITE (IA)</label>
                   <FileUpload
@@ -643,6 +750,7 @@ export default function CamuflagemPage() {
                     duracao do BLACK, e a IA segue sem identificar a trilha.
                   </p>
                 </div>
+                ) : null}
               </div>
 
               {pair.errorMsg ? (
@@ -671,8 +779,96 @@ export default function CamuflagemPage() {
                   {pair.guard === 'checking' ? (
                     <div className="flex items-center gap-2 rounded-[10px] border border-line bg-bg-soft/40 px-3 py-2 text-xs text-text-muted">
                       <span className="h-3 w-3 animate-spin rounded-full border-2 border-lime border-t-transparent" />
-                      Verificando o que cada IA escuta no arquivo real...
+                      {pair.muteDownmixes || muteMode
+                        ? 'Verificando se a IA escuta silencio no arquivo real...'
+                        : 'Verificando o que cada IA escuta no arquivo real...'}
                     </div>
+                  ) : pair.muteDownmixes &&
+                    (pair.guard === 'ok' || pair.guard === 'fail') ? (
+                    (() => {
+                      // MODO MUDO: OK só se a SOMA e a MÉDIA zeraram.
+                      const platform = (pair.muteDownmixes ?? []).filter(
+                        (d) => d.kind === 'sum' || d.kind === 'avg',
+                      );
+                      const ok =
+                        platform.length > 0 && platform.every((d) => d.silent);
+                      return (
+                        <div
+                          role={ok ? undefined : 'alert'}
+                          className={
+                            'rounded-[10px] border px-3 py-2 text-xs ' +
+                            (ok
+                              ? 'border-lime/50 bg-lime/10 text-lime shadow-[0_0_22px_-8px_rgba(200,232,124,0.6)]'
+                              : 'error-shake border-red-500/50 bg-red-500/10 text-red-300 shadow-[0_0_22px_-8px_rgba(248,113,113,0.6)]')
+                          }
+                        >
+                          <div className="mb-1.5 font-semibold">
+                            {ok ? (
+                              <>
+                                MUDO PRA TIKTOK / KWAI / YOUTUBE — a soma dos
+                                canais zera, a IA nao escuta nada
+                              </>
+                            ) : (
+                              <>
+                                NAO ZEROU — a soma dos canais ainda tem audio; a
+                                IA de plataforma pode escutar o BLACK
+                              </>
+                            )}
+                          </div>
+                          <div className="flex flex-col gap-1">
+                            {(pair.muteDownmixes ?? []).map((d) => {
+                              const used =
+                                d.kind === 'sum' || d.kind === 'avg';
+                              return (
+                                <div
+                                  key={d.kind}
+                                  className={
+                                    'flex items-center justify-between gap-2 ' +
+                                    (used ? '' : 'opacity-40')
+                                  }
+                                >
+                                  <span className="text-text-muted">
+                                    {used ? '▸ ' : ''}
+                                    {d.label}
+                                  </span>
+                                  <span className="flex items-center gap-2">
+                                    <span className="mono text-[10px] text-text-muted">
+                                      {d.residualDb <= -99
+                                        ? '−∞ dB'
+                                        : d.residualDb.toFixed(1) + ' dB'}
+                                    </span>
+                                    <span
+                                      className={
+                                        'rounded px-1.5 py-0.5 text-[10px] font-semibold ' +
+                                        (d.silent
+                                          ? 'bg-lime/20 text-lime'
+                                          : 'bg-red-500/25 text-red-300')
+                                      }
+                                    >
+                                      {d.silent ? 'MUDO' : 'BLACK'}
+                                    </span>
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {ok ? (
+                            <div className="mt-2 border-t border-lime/30 pt-2 text-[11px] text-lime/80">
+                              A soma L+R cai {Math.abs(MUTE_SILENT_DB)}+ dB abaixo
+                              do BLACK — inaudivel pra IA que soma/media os canais.
+                              Canal unico (AssemblyAI/Whisper) ainda ouve o BLACK
+                              cheio: a inversao de fase so engana quem SOMA. A
+                              prova final e a legenda automatica da plataforma.
+                            </div>
+                          ) : (
+                            <div className="mt-2 border-t border-red-500/30 pt-2 text-[11px] text-red-300/90">
+                              A soma nao zerou o suficiente (codec lossy pode ter
+                              vazado). Tente sair em WAV — o cancelamento e exato.
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()
                   ) : pair.guard === 'ok' || pair.guard === 'fail' ? (
                     (() => {
                       const ev = effectiveVerdict(pair.downmixes, target);
@@ -829,19 +1025,33 @@ export default function CamuflagemPage() {
                         {pair.transcript}
                       </p>
                       <p className="mt-2 text-[10px] text-text-muted">
-                        Esse texto tem que ser o roteiro do <strong>WHITE</strong>.
-                        {target === 'platforms' ? (
+                        {pair.muteDownmixes ? (
                           <>
-                            {' '}
-                            Reproducao fiel do pipeline mono dessas plataformas
-                            — mas a certeza ABSOLUTA so vem da legenda
-                            automatica da propria plataforma no video publicado.
+                            No modo mudo isso tem que vir{' '}
+                            <strong>vazio / silêncio</strong> — se aparecer o
+                            roteiro do BLACK, a soma não zerou pra esse tipo de
+                            IA. A certeza ABSOLUTA vem da legenda automática da
+                            plataforma no vídeo publicado.
                           </>
                         ) : (
                           <>
-                            {' '}
-                            Se aparecer o roteiro do BLACK, a camuflagem nao
-                            segurou pra esse tipo de IA.
+                            Esse texto tem que ser o roteiro do{' '}
+                            <strong>WHITE</strong>.
+                            {target === 'platforms' ? (
+                              <>
+                                {' '}
+                                Reproducao fiel do pipeline mono dessas
+                                plataformas — mas a certeza ABSOLUTA so vem da
+                                legenda automatica da propria plataforma no
+                                video publicado.
+                              </>
+                            ) : (
+                              <>
+                                {' '}
+                                Se aparecer o roteiro do BLACK, a camuflagem nao
+                                segurou pra esse tipo de IA.
+                              </>
+                            )}
                           </>
                         )}
                       </p>
@@ -866,7 +1076,11 @@ export default function CamuflagemPage() {
             ) : (
               <ToolAction
                 onClick={processAll}
-                disabled={!pairs.some((p) => p.black && p.white)}
+                disabled={
+                  !pairs.some((p) =>
+                    muteMode ? p.black : p.black && p.white,
+                  )
+                }
               >
                 Processar tudo
               </ToolAction>

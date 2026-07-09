@@ -38,7 +38,11 @@ import { decodeAudioRobust, encodeWAV } from './audio-engine';
 
 export type CamuflagemInput = {
   black: Blob;
-  white: Blob;
+  /**
+   * Trilha escondida que a IA vai ler. Opcional só no MODO MUDO (`mute`),
+   * onde não existe WHITE — o BLACK vira silêncio pra IA que soma os canais.
+   */
+  white?: Blob;
   volumePercent: number; // 5..100
   /**
    * Reforço de ganho do WHITE (>=1). Usado pelo loop de garantia: se o
@@ -48,6 +52,14 @@ export type CamuflagemInput = {
    * continua matematicamente exato em qualquer valor.
    */
   gainBoost?: number;
+  /**
+   * MODO MUDO: não embute NENHUM WHITE. Monta L = black, R = -black, então
+   * a soma mono L + R = 0 — a IA que soma/media os canais (TikTok/Kwai/
+   * YouTube) escuta SILÊNCIO, enquanto o humano continua ouvindo o BLACK
+   * (o componente fora de fase). Ignora `white`, `volumePercent` e
+   * `gainBoost`. Serve pra camuflar sem precisar de uma trilha por baixo.
+   */
+  mute?: boolean;
 };
 
 export const BASE_GAIN_MAX = 0.05;
@@ -70,11 +82,34 @@ export async function camuflar({
   white,
   volumePercent,
   gainBoost = 1,
+  mute = false,
 }: CamuflagemInput): Promise<Blob> {
-  const [blackBuf, whiteBuf] = await Promise.all([
-    decodeAudioRobust(black),
-    decodeAudioRobust(white),
-  ]);
+  const blackBuf = await decodeAudioRobust(black);
+
+  // MODO MUDO: sem WHITE. L = black, R = -black. A soma mono L + R zera
+  // EXATAMENTE (sem clamp: |b| <= 1 por construção), então a IA que soma/
+  // media os canais escuta silêncio; o humano ouve o BLACK normalmente.
+  if (mute) {
+    const sampleRate = blackBuf.sampleRate;
+    const length = blackBuf.length;
+    const blackMono = toMono(blackBuf);
+    const bScale = 1 / Math.max(1, peakAbs(blackMono));
+
+    const stereo = new ChannelMock(sampleRate, length, 2);
+    const L = stereo.getChannelData(0);
+    const R = stereo.getChannelData(1);
+    for (let i = 0; i < length; i++) {
+      const b = (blackMono[i] ?? 0) * bScale;
+      L[i] = clamp(b);
+      R[i] = clamp(-b);
+    }
+    return encodeWAV(stereo as unknown as AudioBuffer);
+  }
+
+  if (!white) {
+    throw new Error('WHITE ausente — obrigatório fora do modo mudo.');
+  }
+  const whiteBuf = await decodeAudioRobust(white);
 
   const baseGain =
     (Math.max(5, Math.min(100, volumePercent)) / 100) * BASE_GAIN_MAX;
@@ -467,6 +502,89 @@ export async function verifyCamouflage(args: {
     blackScore: worstBlack,
     downmixes,
   };
+}
+
+// ---------------------------------------------------------------------------
+// VERIFICAÇÃO DO MODO MUDO — "a IA escuta silêncio?"
+//
+// No modo mudo não há WHITE: a prova é que a soma/média dos canais ZERA. Em
+// vez de comparar com uma trilha escondida, medimos o quanto CADA downmix
+// sobrou em relação ao BLACK audível (o canal esquerdo do arquivo real). Se a
+// soma L+R está muito abaixo do BLACK, a IA que soma os canais não escuta
+// nada. Canal único (AssemblyAI/Whisper) carrega o BLACK cheio — reportamos
+// isso honestamente, como no resto da ferramenta.
+// ---------------------------------------------------------------------------
+
+/** Downmix pra IA no modo mudo: quão baixo ficou vs. o BLACK audível. */
+export type MuteDownmix = {
+  kind: DownmixKind;
+  label: string;
+  /** Nível deste downmix relativo ao BLACK do canal esquerdo, em dB (<=0). */
+  residualDb: number;
+  /** true se ficou suficientemente abaixo do BLACK pra ser inaudível. */
+  silent: boolean;
+};
+
+export type VerifyMuteResult = {
+  // OK se a SOMA e a MÉDIA (o que TikTok/Kwai/YouTube alimentam no ASR)
+  // ficaram mudas. Canal isolado não conta pro veredito de plataformas.
+  verdict: VerifyVerdict;
+  downmixes: MuteDownmix[];
+};
+
+/** ≤ este nível (dB abaixo do BLACK) a soma é considerada muda/inaudível. */
+export const MUTE_SILENT_DB = -20;
+
+function rms(data: Float32Array): number {
+  if (data.length === 0) return 0;
+  let acc = 0;
+  for (let i = 0; i < data.length; i++) acc += data[i] * data[i];
+  return Math.sqrt(acc / data.length);
+}
+
+/**
+ * Verifica, sobre o artefato FINAL do MODO MUDO, se a soma/média dos canais
+ * realmente zerou (a IA de plataforma escuta silêncio). Reporta também os
+ * canais isolados — que, por design da inversão de fase, seguem com o BLACK
+ * cheio (limite conhecido: engine de canal único ouve o público).
+ */
+export async function verifyMute(args: {
+  result: Blob;
+}): Promise<VerifyMuteResult> {
+  const resBuf = await decodeAudioRobust(args.result);
+
+  const L = singleChannel(resBuf, 0);
+  const R = singleChannel(resBuf, 1);
+  const sum = monoSum(resBuf);
+  const avg = new Float32Array(sum.length);
+  for (let i = 0; i < sum.length; i++) avg[i] = sum[i] / 2;
+
+  // Referência = o BLACK no nível do arquivo real (canal esquerdo).
+  const ref = Math.max(1e-9, rms(L));
+  const toDb = (v: number) => 20 * Math.log10(Math.max(1e-9, v) / ref);
+
+  const sources: Array<{ kind: DownmixKind; label: string; data: Float32Array }> = [
+    { kind: 'sum', label: 'Soma L+R', data: sum },
+    { kind: 'avg', label: 'Media (L+R)/2', data: avg },
+    { kind: 'left', label: 'Canal unico (AssemblyAI/Whisper)', data: L },
+    { kind: 'right', label: 'Canal direito', data: R },
+  ];
+
+  const downmixes: MuteDownmix[] = sources.map((s) => {
+    const residualDb = toDb(rms(s.data));
+    return {
+      kind: s.kind,
+      label: s.label,
+      residualDb,
+      silent: residualDb <= MUTE_SILENT_DB,
+    };
+  });
+
+  // Alvo plataformas: OK só se a SOMA e a MÉDIA zeraram.
+  const platform = downmixes.filter((d) => d.kind === 'sum' || d.kind === 'avg');
+  const verdict: VerifyVerdict = platform.every((d) => d.silent) ? 'ok' : 'fail';
+
+  return { verdict, downmixes };
 }
 
 // AudioBuffer stub compatível com encodeWAV (mesmo padrão do audio-engine).
