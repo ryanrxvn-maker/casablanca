@@ -3222,15 +3222,39 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     // geração (o genId que o disparo do zero gravou no state, sobrevive F5). Se
     // uma parte não estiver cacheada sob este genId (ex: save falhou / F5 antes
     // de baixá-la), ela some do cache e é re-baixada do HeyGen pelo videoId ATUAL
-    // — jamais puxa o take de uma geração anterior (avatar antigo). Legado
-    // (genId undefined) cai na chave antiga: sem regressão.
-    const genId = state.genId;
+    // — jamais puxa o take de uma geração anterior (avatar antigo).
+    let genId = state.genId;
     const validParts = state.parts.filter((p) => p.videoId);
     if (validParts.length === 0) {
       setError('Sem videoIds salvos pra retomar — task tem que ser disparada do zero.');
       return;
     }
     batchCancelRef.current[taskId] = false;
+
+    // ═══ UPGRADE RETROATIVO DE BATCH LEGADO (fix 2026-07-08 #2) ══════════════
+    // Batch criado ANTES da isolação por geração não tem genId. O cache por-parte
+    // dele pode estar CONTAMINADO com takes de gerações anteriores (avatares
+    // antigos) sob a chave compartilhada `pilot:<taskId>:part:<label>` — foi
+    // EXATAMENTE o que fez o RETOMAR do AD13 continuar embaralhando mesmo após o
+    // fix #1. NÃO dá pra confiar nesse cache. Mas os videoIds no state são SEMPRE
+    // do ÚLTIMO disparo (avatar CERTO) — a contaminação nunca esteve neles. Então:
+    // cunha um genId agora, PURGA o cache velho e força re-download do HeyGen sob
+    // o namespace novo. A partir daqui o batch fica isolado (RETOMARs futuros já
+    // são limpos). Ver [[project_disparo_genid_isolacao]].
+    if (!genId) {
+      genId = newPilotGenId();
+      try {
+        const { deletePrefix } = await import('@/lib/zip-store');
+        const purged = await deletePrefix(`pilot:${taskId}:`);
+        console.warn(`[pilot resume] batch LEGADO sem genId — purguei ${purged} artefato(s) por-parte possivelmente contaminado(s) e vou RE-BAIXAR do HeyGen pelos videoIds atuais (avatar certo) sob genId ${genId}`);
+      } catch (e) { console.warn('[pilot resume] purge do cache legado falhou (segue re-baixando do HeyGen mesmo assim):', e); }
+      // Grava o genId no state pra sobreviver F5 e blindar os próximos RETOMAR.
+      setBatchStates((prev) => {
+        const cur = prev[taskId];
+        if (!cur) return prev;
+        return { ...prev, [taskId]: { ...cur, genId } };
+      });
+    }
     const adNameClean = state.baseAdId.replace(/[^A-Z0-9]/gi, '_');
     const validIds = validParts.map((p) => p.videoId!);
 
