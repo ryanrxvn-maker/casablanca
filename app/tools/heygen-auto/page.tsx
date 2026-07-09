@@ -591,6 +591,38 @@ function HeyGenAutoInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** FAXINA do IndexedDB (LRU por disparo) — o `darkolab-zip-store` acumulava
+   *  montado+takes+partes de TODO disparo sem nunca purgar → no Chrome (banco
+   *  por-origem, nunca some) virava 1,58 GB e o boot da página levava 70s. Roda
+   *  UMA vez, ~10s após montar (fora do caminho crítico). Protege qualquer
+   *  disparo não-final (Hey Auto + Pilot) via `protect`, além dos guardas de
+   *  recência/últimos-N embutidos. Ver lib/zip-store-prune.ts. */
+  useEffect(() => {
+    const t = setTimeout(() => {
+      void (async () => {
+        try {
+          const protect = listSharedBatches()
+            .filter((b) => b.phase !== 'done' && b.phase !== 'failed')
+            .map((b) => b.taskId);
+          const owned = getOwnedBatchId();
+          if (owned && !protect.includes(owned)) protect.push(owned);
+          const { pruneZipStore } = await import('@/lib/zip-store');
+          const r = await pruneZipStore({ protect });
+          if (r && r.evicted > 0) {
+            console.info(
+              `[zip-store] faxina: ${r.evicted} blob(s) de disparo antigo removidos ` +
+              `(~${(r.freedBytes / 1048576).toFixed(0)} MB liberados), ${r.keptGroups} disparo(s) preservados.`,
+            );
+          }
+        } catch (e) {
+          console.warn('[zip-store] faxina ignorada:', e);
+        }
+      })();
+    }, 10_000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /* --------- Auto-poll pós-disparo: os cards de preview preenchem sozinhos
    *  (igual ClickUp Pilot — você vê cada parte ficar pronta) sem precisar
    *  clicar Baixar. Só lê status (GET leve), não baixa nada. Para sozinho

@@ -2492,6 +2492,37 @@ function ClickUpPilotInner() {
     }
   }, []);
 
+  /** FAXINA do IndexedDB (LRU por disparo) — sem isto o `darkolab-zip-store`
+   *  cresce sem teto e trava o Chrome com o tempo (medido: 223 blobs / 1,58 GB →
+   *  boot de 70s; o Firefox mascarava por ter banco separado por origem). Roda UMA
+   *  vez, ~10s após montar (fora do caminho crítico do boot/entrega). Protege o
+   *  disparo ATIVO (qualquer phase != done/failed) + tudo recente/últimos N — só
+   *  remove disparo VELHO e concluído. Ver [[project_disco_c_limpeza]] /
+   *  lib/zip-store-prune.ts. */
+  useEffect(() => {
+    const t = setTimeout(() => {
+      void (async () => {
+        try {
+          const persisted = loadPersistedBatchStates() as Record<string, BatchTaskState>;
+          const protect = Object.entries(persisted)
+            .filter(([, s]) => s.phase !== 'done' && s.phase !== 'failed')
+            .map(([id]) => id);
+          const { pruneZipStore } = await import('@/lib/zip-store');
+          const r = await pruneZipStore({ protect });
+          if (r && r.evicted > 0) {
+            console.info(
+              `[zip-store] faxina: ${r.evicted} blob(s) de disparo antigo removidos ` +
+              `(~${(r.freedBytes / 1048576).toFixed(0)} MB liberados), ${r.keptGroups} disparo(s) preservados.`,
+            );
+          }
+        } catch (e) {
+          console.warn('[zip-store] faxina ignorada:', e);
+        }
+      })();
+    }, 10_000);
+    return () => clearTimeout(t);
+  }, []);
+
   /** Persist batchStates a cada mudanca pra sobreviver reload. */
   useEffect(() => {
     persistBatchStates(batchStates);

@@ -233,6 +233,62 @@ export async function loadBlob(key: string, mime = 'video/mp4'): Promise<Blob | 
   });
 }
 
+/**
+ * FAXINA AUTOMÁTICA (LRU por disparo) — evita o store crescer sem teto.
+ *
+ * MOTIVO (medido em prod 2026-07-09): o IndexedDB acumulava montado+takes+partes
+ * de TODO disparo e nada purgava. No Chrome (banco por-origem, nunca some sozinho)
+ * chegou a 223 blobs / 1,58 GB → o BOOT da página levava 70s. Firefox mascarava
+ * (banco separado por origem). Ver [[project_disco_c_limpeza]].
+ *
+ * Best-effort e idempotente: lê só metadados (key/size/createdAt, sem reter
+ * bytes), decide via `planZipEviction` (puro/testado) e apaga só o que é VELHO,
+ * concluído e além da janela — NUNCA o disparo ativo (`protect`), o recente
+ * (< minAgeMs) nem os `keepGroups` mais novos. Qualquer erro é engolido pra
+ * nunca atrapalhar o boot/entrega. Ver lib/zip-store-prune.ts.
+ */
+export async function pruneZipStore(opts: {
+  protect?: Iterable<string>;
+  keepGroups?: number;
+  minAgeMs?: number;
+  maxBytes?: number;
+} = {}): Promise<{ evicted: number; freedBytes: number; keptGroups: number } | null> {
+  try {
+    const { planZipEviction } = await import('./zip-store-prune');
+    // listZipKeys lê via cursor SEM reter bytes (só key/size/createdAt) — pico de
+    // memória é ~1 registro por vez, não o store inteiro.
+    const metas = await listZipKeys();
+    if (metas.length === 0) return { evicted: 0, freedBytes: 0, keptGroups: 0 };
+    const plan = planZipEviction(
+      metas.map((m) => ({ key: m.key, size: m.size, createdAt: m.createdAt })),
+      opts,
+    );
+    if (plan.evictKeys.length === 0) {
+      return { evicted: 0, freedBytes: 0, keptGroups: plan.stats.keptGroups };
+    }
+    const evictSet = new Set(plan.evictKeys);
+    const db = await openDB();
+    await runTx<void>(db, 'readwrite', (store, resolve, reject) => {
+      const tx = store.transaction;
+      const cur = store.openKeyCursor();
+      cur.onsuccess = (e: Event) => {
+        const c = (e.target as IDBRequest).result as IDBCursor | null;
+        if (c) {
+          if (evictSet.has(c.primaryKey as string)) store.delete(c.primaryKey);
+          c.continue();
+        }
+      };
+      cur.onerror = () => reject(cur.error);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    }, DB_WRITE_TIMEOUT_MS);
+    return { evicted: plan.evictKeys.length, freedBytes: plan.stats.freedBytes, keptGroups: plan.stats.keptGroups };
+  } catch (e) {
+    console.warn('[zip-store prune] faxina falhou (ignorado):', e);
+    return null;
+  }
+}
+
 /** Limpa todos os blobs de um taskId (cleanup após batch completar). */
 export async function deletePrefix(prefix: string): Promise<number> {
   const db = await openDB();
