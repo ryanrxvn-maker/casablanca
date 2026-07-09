@@ -566,8 +566,8 @@ export default function CamuflagemPage() {
             setMode(v as Mode);
           }}
           options={[
-            { value: 'camuflar', label: 'Camuflar', sub: 'esconder áudio' },
-            { value: 'descamuflar', label: 'Descamuflar', sub: 'recuperar áudio' },
+            { value: 'camuflar', label: 'Camuflar' },
+            { value: 'descamuflar', label: 'Descamuflar' },
           ]}
           disabled={processingAll || decloaking}
           hue={HUE}
@@ -575,70 +575,8 @@ export default function CamuflagemPage() {
 
         {mode === 'camuflar' ? (
         <>
-        {/* Botão 3D (só ícone): liga o MODO MUDO — camufla sem WHITE,
-            transformando o BLACK em silêncio pra IA que soma os canais. */}
-        <div className="flex items-center gap-4 rounded-[12px] border border-line bg-bg p-4">
-          <div style={{ perspective: '650px' }}>
-            <button
-              type="button"
-              onClick={() => !processingAll && setMuteMode((v) => !v)}
-              aria-pressed={muteMode}
-              aria-label="Modo mudo"
-              title="Modo mudo: camufla sem WHITE — o BLACK vira silêncio pra IA"
-              disabled={processingAll}
-              className={
-                'transform-gpu flex h-12 w-12 items-center justify-center rounded-2xl border-2 transition-all duration-300 ease-[cubic-bezier(.4,1.4,.6,1)] hover:[transform:translateY(-3px)_rotateX(20deg)] active:[transform:translateY(0)_rotateX(0deg)_scale(.93)] active:duration-75 disabled:cursor-not-allowed disabled:opacity-50 ' +
-                (muteMode
-                  ? 'border-lime bg-lime/15 text-lime'
-                  : 'border-line bg-bg-soft/80 text-text-muted hover:border-lime hover:text-lime')
-              }
-              style={{
-                transformStyle: 'preserve-3d',
-                boxShadow: muteMode
-                  ? 'inset 0 1px 0 rgba(255,255,255,0.14), inset 0 -3px 0 rgba(0,0,0,0.55), 0 0 24px -4px rgba(200,232,124,0.7), 0 6px 14px -6px rgba(0,0,0,0.8)'
-                  : 'inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -3px 0 rgba(0,0,0,0.5), 0 4px 10px -4px rgba(0,0,0,0.7)',
-              }}
-            >
-              <svg
-                width="22"
-                height="22"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                {muteMode ? (
-                  <>
-                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                    <line x1="23" y1="9" x2="17" y2="15" />
-                    <line x1="17" y1="9" x2="23" y2="15" />
-                  </>
-                ) : (
-                  <>
-                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" />
-                  </>
-                )}
-              </svg>
-            </button>
-          </div>
-          <div className="text-xs leading-relaxed text-text-muted">
-            <span
-              className={
-                'font-semibold ' + (muteMode ? 'text-lime' : 'text-white')
-              }
-            >
-              Modo mudo {muteMode ? '· LIGADO' : '· desligado'}
-            </span>
-            <br />
-            {muteMode
-              ? 'Sem WHITE: mando só o BLACK e transformo ele em silêncio pra IA que soma os canais (TikTok/Kwai/YouTube). O humano continua ouvindo o BLACK normal.'
-              : 'Ligue pra camuflar SEM precisar de uma trilha WHITE por baixo — o BLACK vira mudo só pra IA.'}
-          </div>
-        </div>
+        {/* O botão do MODO MUDO é flutuante (só ícone, luz roxa) — renderizado
+            fora do fluxo, no canto direito (ver bloco fixed no fim do return). */}
 
         {!muteMode ? (
         <ToolStep n={1} icon={<IconStepSliders size={18} />} title="Intensidade" hint="Quanto maior, mais difícil de detectar" hue={HUE}>
@@ -663,9 +601,9 @@ export default function CamuflagemPage() {
               if (!disabled && !processingAll) setFormat(v as OutFormat);
             }}
             options={[
-              { value: 'mp4', label: 'MP4', sub: 'vídeo + áudio' },
-              { value: 'mp3', label: 'MP3', sub: 'áudio' },
-              { value: 'wav', label: 'WAV', sub: 'áudio' },
+              { value: 'mp4', label: 'MP4' },
+              { value: 'mp3', label: 'MP3' },
+              { value: 'wav', label: 'WAV' },
             ]}
             disabled={processingAll}
             hue={HUE}
@@ -1175,8 +1113,8 @@ export default function CamuflagemPage() {
               value={decloakLayer}
               onChange={(v) => !decloaking && setDecloakLayer(v as DescamuflarLayer)}
               options={[
-                { value: 'public', label: 'Áudio público', sub: 'o que o humano ouve' },
-                { value: 'hidden', label: 'Trilha escondida', sub: 'o que a IA lê' },
+                { value: 'public', label: 'Áudio público' },
+                { value: 'hidden', label: 'Trilha escondida' },
               ]}
               disabled={decloaking}
               hue={HUE}
@@ -1197,9 +1135,9 @@ export default function CamuflagemPage() {
               if (!disabled && !decloaking) setDecloakFormat(v as OutFormat);
             }}
             options={[
-              { value: 'mp4', label: 'MP4', sub: 'vídeo + áudio' },
-              { value: 'mp3', label: 'MP3', sub: 'áudio' },
-              { value: 'wav', label: 'WAV', sub: 'áudio' },
+              { value: 'mp4', label: 'MP4' },
+              { value: 'mp3', label: 'MP3' },
+              { value: 'wav', label: 'WAV' },
             ]}
             disabled={decloaking}
             hue={HUE}
@@ -1390,6 +1328,50 @@ export default function CamuflagemPage() {
         </>
         )}
       </div>
+
+      {/* MODO MUDO — botão flutuante só-ícone, 3D, luz ROXA que acende ao
+          ligar. Fica no canto direito, fora do fluxo. Só na aba Camuflar. */}
+      {mode === 'camuflar' ? (
+        <div className="mute-fab fixed right-6 top-1/2 z-40 -translate-y-1/2">
+          <button
+            type="button"
+            onClick={() => !processingAll && setMuteMode((v) => !v)}
+            data-on={muteMode ? 'true' : 'false'}
+            aria-pressed={muteMode}
+            aria-label={muteMode ? 'Modo mudo ligado' : 'Modo mudo desligado'}
+            title={
+              muteMode
+                ? 'Modo mudo LIGADO — camufla sem WHITE (BLACK vira silêncio pra IA)'
+                : 'Modo mudo — camuflar sem WHITE'
+            }
+            disabled={processingAll}
+            className="mute-fab__btn disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <svg
+              width="30"
+              height="30"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+              <path
+                className="mute-wave mute-wave--1"
+                d="M15.54 8.46a5 5 0 0 1 0 7.07"
+              />
+              <path
+                className="mute-wave mute-wave--2"
+                d="M19.07 4.93a10 10 0 0 1 0 14.14"
+              />
+            </svg>
+          </button>
+          <span className="mute-fab__halo" data-on={muteMode ? 'true' : 'false'} aria-hidden />
+        </div>
+      ) : null}
     </ToolShell>
   );
 }
