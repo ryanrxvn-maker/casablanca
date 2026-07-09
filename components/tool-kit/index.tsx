@@ -125,6 +125,7 @@ export function ToolStep({
   hint,
   hue = 'rgba(167,139,250,0.45)',
   icon,
+  action,
   children,
 }: {
   /** Mantido só pra compat — não é mais renderizado. */
@@ -133,6 +134,8 @@ export function ToolStep({
   hint?: string;
   hue?: string;
   icon?: ReactNode;
+  /** Elemento opcional alinhado à direita do header (ex.: um toggle). */
+  action?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -186,6 +189,7 @@ export function ToolStep({
               <p className="mt-0.5 text-[12px] text-text-muted">{hint}</p>
             ) : null}
           </div>
+          {action ? <div className="shrink-0">{action}</div> : null}
         </div>
         <div>{children}</div>
       </div>

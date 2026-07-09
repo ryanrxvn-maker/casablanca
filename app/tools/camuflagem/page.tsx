@@ -546,6 +546,44 @@ export default function CamuflagemPage() {
     (it) => it.file && !isVideoFile(it.file),
   );
 
+  // MODO MUDO — botão só-ícone, 3D, luz ROXA que acende ao ligar. Fica no
+  // header do card dos áudios (passado como `action` do ToolStep).
+  const muteFab = (
+    <div className="mute-fab">
+      <button
+        type="button"
+        onClick={() => !processingAll && setMuteMode((v) => !v)}
+        data-on={muteMode ? 'true' : 'false'}
+        aria-pressed={muteMode}
+        aria-label={muteMode ? 'Modo mudo ligado' : 'Modo mudo desligado'}
+        title={
+          muteMode
+            ? 'Modo mudo LIGADO — camufla sem WHITE (BLACK vira silêncio pra IA)'
+            : 'Modo mudo — camuflar sem WHITE (o BLACK vira silêncio pra IA)'
+        }
+        disabled={processingAll}
+        className="mute-fab__btn disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <svg
+          width="28"
+          height="28"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+          <path className="mute-wave mute-wave--1" d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+          <path className="mute-wave mute-wave--2" d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+        </svg>
+      </button>
+      <span className="mute-fab__halo" data-on={muteMode ? 'true' : 'false'} aria-hidden />
+    </div>
+  );
+
   return (
     <ToolShell
       title="Camuflagem"
@@ -615,7 +653,7 @@ export default function CamuflagemPage() {
           ) : null}
         </ToolStep>
 
-        <ToolStep n={muteMode ? 2 : 3} icon={<IconStepFiles size={18} />} title={muteMode ? 'Áudio BLACK' : 'Pares BLACK + WHITE'} hint={muteMode ? 'BLACK = público · a IA escuta SILÊNCIO' : 'BLACK = público · WHITE = IA escuta'} hue={HUE}>
+        <ToolStep n={muteMode ? 2 : 3} icon={<IconStepFiles size={18} />} title={muteMode ? 'Áudio BLACK' : 'Pares BLACK + WHITE'} hint={muteMode ? 'BLACK = público · a IA escuta SILÊNCIO' : 'BLACK = público · WHITE = IA escuta'} hue={HUE} action={muteFab}>
         <div className="flex flex-col gap-4">
           {pairs.map((pair, i) => (
             <div
@@ -1328,50 +1366,6 @@ export default function CamuflagemPage() {
         </>
         )}
       </div>
-
-      {/* MODO MUDO — botão flutuante só-ícone, 3D, luz ROXA que acende ao
-          ligar. Fica no canto direito, fora do fluxo. Só na aba Camuflar. */}
-      {mode === 'camuflar' ? (
-        <div className="mute-fab fixed right-6 top-1/2 z-40 -translate-y-1/2">
-          <button
-            type="button"
-            onClick={() => !processingAll && setMuteMode((v) => !v)}
-            data-on={muteMode ? 'true' : 'false'}
-            aria-pressed={muteMode}
-            aria-label={muteMode ? 'Modo mudo ligado' : 'Modo mudo desligado'}
-            title={
-              muteMode
-                ? 'Modo mudo LIGADO — camufla sem WHITE (BLACK vira silêncio pra IA)'
-                : 'Modo mudo — camuflar sem WHITE'
-            }
-            disabled={processingAll}
-            className="mute-fab__btn disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <svg
-              width="30"
-              height="30"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-              <path
-                className="mute-wave mute-wave--1"
-                d="M15.54 8.46a5 5 0 0 1 0 7.07"
-              />
-              <path
-                className="mute-wave mute-wave--2"
-                d="M19.07 4.93a10 10 0 0 1 0 14.14"
-              />
-            </svg>
-          </button>
-          <span className="mute-fab__halo" data-on={muteMode ? 'true' : 'false'} aria-hidden />
-        </div>
-      ) : null}
     </ToolShell>
   );
 }
