@@ -25,7 +25,7 @@ export async function GET() {
     const full = await svc
       .from('profiles')
       .select(
-        'id, name, is_admin, is_active, activated_at, created_at, must_change_password, last_seen_at, last_ip, last_tool, last_tool_at, tier, phone, phone_verified, phone_verified_at, legacy_no_phone',
+        'id, name, email, is_admin, is_active, activated_at, created_at, must_change_password, last_seen_at, last_ip, last_tool, last_tool_at, tier, phone, phone_verified, phone_verified_at, legacy_no_phone',
       )
       .eq('is_admin', false)
       .order('created_at', { ascending: false });
@@ -34,7 +34,7 @@ export async function GET() {
       const basic = await svc
         .from('profiles')
         .select(
-          'id, name, is_admin, is_active, activated_at, created_at, must_change_password, last_seen_at, last_ip, last_tool, last_tool_at',
+          'id, name, email, is_admin, is_active, activated_at, created_at, must_change_password, last_seen_at, last_ip, last_tool, last_tool_at',
         )
         .eq('is_admin', false)
         .order('created_at', { ascending: false });
@@ -46,22 +46,11 @@ export async function GET() {
       profiles = (full.data ?? null) as Array<Record<string, unknown>> | null;
     }
 
-    // Cruza com auth.users pra pegar email
-    const ids = (profiles ?? []).map((p) => p.id as string);
-    const emails: Record<string, string> = {};
-    if (ids.length > 0) {
-      const { data: usersList } = await svc.auth.admin.listUsers({
-        page: 1,
-        perPage: 200,
-      });
-      for (const u of usersList?.users ?? []) {
-        if (u.email) emails[u.id] = u.email;
-      }
-    }
-
+    // Email vem direto do profiles (populado no signup) — sem o teto de 200
+    // do admin.listUsers, que sumia com o email das contas > 200º.
     const enriched = (profiles ?? []).map((p) => ({
       ...p,
-      email: emails[p.id as string] ?? null,
+      email: (p.email as string | null) ?? null,
     }));
 
     return NextResponse.json({ users: enriched });

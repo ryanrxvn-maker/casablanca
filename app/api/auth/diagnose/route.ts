@@ -87,17 +87,10 @@ export async function POST(req: Request) {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
-    // 1) Procura o user no auth.users via listUsers filtrando email.
-    //    listUsers não tem filtro direto, então usamos getUserByEmail
-    //    via PostgREST admin (auth schema é restrito; usamos rpc/list).
-    //    No SSR/SDK v2, admin.listUsers paginado é o caminho — mas
-    //    pesado pra base grande. Alternativa: query direta via service
-    //    role no public.profiles JOIN auth.users (não viável sem RPC).
-    //
-    //    Solução robusta: tentar admin.generateLink({type:'recovery'})
-    //    — ele falha com 'User not found' se o user não existir, e
-    //    sucesso se existir. Mas isso CRIA um link de recovery (efeito
-    //    colateral). Melhor: admin.listUsers com email filter no v2.
+    // 1) Resolve o id pelo public.profiles.email (indexável, SEM o teto de
+    //    200 do admin.listUsers — que passava a dar 'not_found' pra contas
+    //    reais além do 200º usuário). Só depois busca os campos de auth
+    //    (email_confirmed_at/banned_until) desse id específico.
     let userRow: {
       id: string;
       email_confirmed_at: string | null;
@@ -105,21 +98,25 @@ export async function POST(req: Request) {
     } | null = null;
 
     try {
-      // Supabase JS v2: listUsers aceita { email } como filtro server-side
-      // se a service_role tiver acesso. Se não suportar, paginamos.
-      const { data } = await admin.auth.admin.listUsers({ perPage: 200 });
-      const found = (data?.users || []).find(
-        (u) => (u.email || '').toLowerCase() === cleanEmail,
-      );
-      if (found) {
-        userRow = {
-          id: found.id,
-          email_confirmed_at: (found.email_confirmed_at as string | null) || null,
-          banned_until: (found.banned_until as string | null) || null,
-        };
+      const { data: profs } = await admin
+        .from('profiles')
+        .select('id')
+        .ilike('email', cleanEmail)
+        .limit(1);
+      const pid = (profs?.[0]?.id as string | undefined) ?? undefined;
+      if (pid) {
+        const { data: got } = await admin.auth.admin.getUserById(pid);
+        const u = got?.user;
+        if (u) {
+          userRow = {
+            id: u.id,
+            email_confirmed_at: (u.email_confirmed_at as string | null) || null,
+            banned_until: (u.banned_until as string | null) || null,
+          };
+        }
       }
     } catch {
-      // se listUsers falhar (rate limit / role), cai pro unknown
+      // se a busca falhar (rate limit / role), cai pro not_found/unknown
     }
 
     if (!userRow) {

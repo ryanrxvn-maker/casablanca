@@ -95,6 +95,13 @@ async function download(
     throw new Error(`Falha ao baixar o ${label} (${e instanceof Error ? e.message : 'rede'}).`);
   }
   if (!res.ok) throw new Error(`Falha ao baixar o ${label} (HTTP ${res.status}).`);
+  // Rejeita por Content-Length ANTES de bufferizar — evita OOM na lambda
+  // quando a URL aponta pra um arquivo gigante (a safeFetch é anti-SSRF, não
+  // anti-tamanho). Se o header faltar/mentir menor, o teto pós-arrayBuffer pega.
+  const declaredLen = parseInt(res.headers.get('content-length') || '', 10);
+  if (Number.isFinite(declaredLen) && declaredLen > maxBytes) {
+    throw new Error(`O ${label} é grande demais (${(declaredLen / 1024 / 1024).toFixed(0)}MB).`);
+  }
   const ab = await res.arrayBuffer();
   if (ab.byteLength > maxBytes) {
     throw new Error(`O ${label} é grande demais (${(ab.byteLength / 1024 / 1024).toFixed(0)}MB).`);

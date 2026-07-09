@@ -184,6 +184,31 @@ export async function reconcileUserBilling(
     .filter((s) => s.mode === 'payment' && s.payment_status === 'paid')
     .sort((a, b) => (b.created ?? 0) - (a.created ?? 0))[0];
   if (paid) {
+    // Não reconcilia sobre um pagamento único REEMBOLSADO — o Stripe mantém
+    // payment_status='paid' na session mesmo após reembolso, então sem isto o
+    // cron re-promoveria todo dia um anual reembolsado (admin rebaixa e volta).
+    const piRef =
+      typeof paid.payment_intent === 'string'
+        ? paid.payment_intent
+        : (paid.payment_intent as { id?: string } | null)?.id ?? null;
+    if (piRef) {
+      try {
+        const pi = await stripe.paymentIntents.retrieve(piRef, {
+          expand: ['latest_charge'],
+        });
+        const charge = pi.latest_charge as Stripe.Charge | null;
+        if (charge?.refunded) {
+          return {
+            applied: false,
+            tier: currentTier,
+            reason: 'pagamento único reembolsado',
+            source: 'none',
+          };
+        }
+      } catch {
+        /* sem info de reembolso agora — não bloqueia o fluxo normal */
+      }
+    }
     const metaPlan = (paid.metadata?.plan ?? '') as string;
     const plan = isPaidTier(metaPlan) ? metaPlan : planFromAmount(paid.amount_total);
     const billing: Billing =

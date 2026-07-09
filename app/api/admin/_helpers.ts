@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { createClient as createServerClient } from '@/lib/supabase/server';
 import { cliMachineIdentity } from '@/lib/cli-auth';
+import { requireTier } from '@/lib/require-tier';
 
 /**
  * Helpers compartilhados pelas rotas /api/admin/*.
@@ -22,56 +23,20 @@ export function jsonError(message: string, status = 500, detail?: string) {
 
 /**
  * Garante que o caller é Pro OU Admin (tiers que pagam pelas
- * ferramentas de IA pesada, como Smart Remover).
- * Beta legado também é tratado como Pro.
+ * ferramentas de IA pesada, como Smart Remover). Beta legado também
+ * é tratado como Pro.
+ *
+ * Delega pro requireTier('pro') canônico pra herdar a EXPIRAÇÃO de acesso
+ * pago (isPaidExpired) — antes esta função checava só `tier==='pro'`, então
+ * um plano ANUAL vencido continuava usando as tools (queimando conta vmake).
+ * O retorno é superset-compatível ({ userId, isAdmin } preservados).
  */
 export async function requirePro(): Promise<
   { ok: true; userId: string; isAdmin: boolean } | { ok: false; response: NextResponse }
 > {
-  // Auth de máquina (CLI/MCP) → admin. Inerte sem AUTOEDIT_CLI_KEY.
-  const machine = cliMachineIdentity();
-  if (machine) return { ok: true, userId: machine.userId, isAdmin: true };
-
-  try {
-    const supabase = createServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return { ok: false, response: jsonError('Não autenticado.', 401) };
-    }
-    const { data: profile, error } = await supabase
-      .from('profiles')
-      .select('is_admin, is_active, tier')
-      .eq('id', user.id)
-      .maybeSingle();
-    if (error) {
-      return { ok: false, response: jsonError('Falha ao validar tier.', 500, error.message) };
-    }
-    if (!profile?.is_active) {
-      return { ok: false, response: jsonError('Conta inativa.', 403) };
-    }
-    const isAdmin = profile?.is_admin === true;
-    const rawTier = (profile as { tier?: string } | null)?.tier ?? '';
-    const isPro = rawTier === 'pro' || rawTier === 'beta';
-    if (!isAdmin && !isPro) {
-      return {
-        ok: false,
-        response: jsonError(
-          'Recurso disponível só pra contas Pro. Ver /planos.',
-          403,
-        ),
-      };
-    }
-    return { ok: true, userId: user.id, isAdmin };
-  } catch (e) {
-    return {
-      ok: false,
-      response: jsonError(
-        'Erro ao validar tier.',
-        500,
-        e instanceof Error ? e.message : String(e),
-      ),
-    };
-  }
+  const gate = await requireTier('pro');
+  if (!gate.ok) return gate;
+  return { ok: true, userId: gate.userId, isAdmin: gate.isAdmin };
 }
 
 /**

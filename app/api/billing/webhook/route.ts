@@ -23,6 +23,8 @@ import {
  *  • invoice.paid                     → cobrança (1a + renovações) → renova + grava comprovante
  *  • customer.subscription.updated    → active/trialing=concede · terminal=free · transitório=preserva
  *  • customer.subscription.deleted    → free
+ *  • charge.refunded                  → reembolso total → free (se nada mais sustenta) + comprovante 'refunded'
+ *  • charge.dispute.created           → chargeback → free + comprovante 'disputed' + alerta ao dono
  *
  * Garantias:
  *  - Falha de escrita no banco LANÇA → HTTP 500 → o Stripe re-tenta com backoff
@@ -419,6 +421,88 @@ export async function POST(req: Request) {
             `<b>Plano:</b> ${sub.metadata?.plan ?? '—'}<br>` +
             `<b>Customer:</b> ${customerId ?? '—'}</p>`,
         );
+        break;
+      }
+      case 'charge.refunded': {
+        // Reembolso TOTAL → revoga acesso se nada mais o sustenta + marca o
+        // comprovante. Parcial (amount_refunded < amount) NÃO mexe no tier —
+        // pode ser cortesia. Só rebaixa se não houver assinatura ativa (o
+        // reembolso de 1 fatura não cancela a assinatura recorrente).
+        const charge = event.data.object as Stripe.Charge;
+        if (!charge.refunded) break;
+        const customerId =
+          typeof charge.customer === 'string' ? charge.customer : charge.customer?.id;
+        const piId =
+          typeof charge.payment_intent === 'string'
+            ? charge.payment_intent
+            : charge.payment_intent?.id ?? null;
+        const svc = serviceClient();
+        if (piId) {
+          await svc.from('payments').update({ status: 'refunded' }).eq('stripe_payment_intent', piId);
+        }
+        if (customerId) {
+          const subs = await stripe.subscriptions.list({
+            customer: customerId,
+            status: 'all',
+            limit: 10,
+          });
+          const hasActive = subs.data.some(
+            (s) => s.status === 'active' || s.status === 'trialing',
+          );
+          if (!hasActive) {
+            const { error } = await svc
+              .from('profiles')
+              .update({ subscription_status: 'refunded', subscription_plan: null, tier: 'free' })
+              .eq('stripe_customer_id', customerId);
+            if (error) throw new Error(`refund downgrade failed: ${error.message}`);
+          }
+        }
+        await notifyOwner(
+          `↩️ Reembolso · ${brlFromCents(charge.amount_refunded ?? 0)}`,
+          `<p>Um pagamento foi reembolsado.<br>` +
+            `<b>Valor:</b> ${brlFromCents(charge.amount_refunded ?? 0)}<br>` +
+            `<b>Customer:</b> ${customerId ?? '—'}</p>`,
+        ).catch(() => {});
+        break;
+      }
+      case 'charge.dispute.created': {
+        // Chargeback → revoga acesso (prática padrão anti-fraude) + marca o
+        // comprovante. O dono é avisado pra decidir se contesta.
+        const dispute = event.data.object as Stripe.Dispute;
+        const chargeId =
+          typeof dispute.charge === 'string' ? dispute.charge : dispute.charge?.id;
+        let customerId: string | undefined;
+        let piId: string | null = null;
+        if (chargeId) {
+          try {
+            const ch = await stripe.charges.retrieve(chargeId);
+            customerId =
+              typeof ch.customer === 'string' ? ch.customer : ch.customer?.id ?? undefined;
+            piId =
+              typeof ch.payment_intent === 'string'
+                ? ch.payment_intent
+                : ch.payment_intent?.id ?? null;
+          } catch {
+            /* sem detalhe do charge agora */
+          }
+        }
+        const svc = serviceClient();
+        if (piId) {
+          await svc.from('payments').update({ status: 'disputed' }).eq('stripe_payment_intent', piId);
+        }
+        if (customerId) {
+          const { error } = await svc
+            .from('profiles')
+            .update({ subscription_status: 'disputed', subscription_plan: null, tier: 'free' })
+            .eq('stripe_customer_id', customerId);
+          if (error) throw new Error(`dispute downgrade failed: ${error.message}`);
+        }
+        await notifyOwner(
+          '⚠️ Chargeback aberto',
+          `<p>Um cliente abriu disputa (chargeback). Acesso revogado.<br>` +
+            `<b>Customer:</b> ${customerId ?? '—'}<br>` +
+            `<b>Dispute:</b> ${dispute.id}</p>`,
+        ).catch(() => {});
         break;
       }
       default:

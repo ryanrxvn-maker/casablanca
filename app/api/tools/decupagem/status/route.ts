@@ -50,9 +50,11 @@ export async function GET(req: Request) {
       size_mb: st.size_mb,
     });
   } catch (e) {
-    return NextResponse.json(
-      { status: 'failed', error: e instanceof Error ? e.message : String(e) },
-      { status: 502 },
-    );
+    // Erro TRANSITÓRIO contatando o Modal (rede/timeout) NÃO mata o job — o
+    // Modal segue processando. Devolve 'processing' pra UI continuar pollando
+    // (o TTL do token limita a espera). Mesma política do lipsync/status. Só
+    // o 'failed' explícito do Modal (acima) encerra de verdade.
+    console.error('[decupagem/status] transient', e);
+    return NextResponse.json({ status: 'processing' });
   }
 }
