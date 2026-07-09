@@ -9,7 +9,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { requirePro } from '@/app/api/admin/_helpers';
+import { requireAdmin } from '@/app/api/admin/_helpers';
 import { checkHealth, isVmakeConfigured } from '@/lib/vmake-api';
 import { vmakeQueueStats } from '@/lib/vmake-queue';
 
@@ -17,7 +17,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 30;
 
 export async function GET() {
-  const guard = await requirePro();
+  const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
   const configured = isVmakeConfigured();

@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { createClient as createServerClient } from '@/lib/supabase/server';
 import { cliMachineIdentity } from '@/lib/cli-auth';
-import { requireTier } from '@/lib/require-tier';
 
 /**
  * Helpers compartilhados pelas rotas /api/admin/*.
@@ -19,24 +18,6 @@ export function jsonError(message: string, status = 500, detail?: string) {
       : { error: message },
     { status },
   );
-}
-
-/**
- * Garante que o caller é Pro OU Admin (tiers que pagam pelas
- * ferramentas de IA pesada, como Smart Remover). Beta legado também
- * é tratado como Pro.
- *
- * Delega pro requireTier('pro') canônico pra herdar a EXPIRAÇÃO de acesso
- * pago (isPaidExpired) — antes esta função checava só `tier==='pro'`, então
- * um plano ANUAL vencido continuava usando as tools (queimando conta vmake).
- * O retorno é superset-compatível ({ userId, isAdmin } preservados).
- */
-export async function requirePro(): Promise<
-  { ok: true; userId: string; isAdmin: boolean } | { ok: false; response: NextResponse }
-> {
-  const gate = await requireTier('pro');
-  if (!gate.ok) return gate;
-  return { ok: true, userId: gate.userId, isAdmin: gate.isAdmin };
 }
 
 /**
