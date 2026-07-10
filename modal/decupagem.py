@@ -25,6 +25,7 @@ Pipeline (1 passada de ffmpeg, frame-accurate):
 
 import re
 import subprocess
+import time
 import urllib.request
 import uuid
 from pathlib import Path
@@ -60,6 +61,30 @@ NOISE_FLOOR_MAX_DB = -26.0
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True)
+
+
+PRUNE_MAX_AGE_S = 24 * 3600  # 24h: todo fluxo real (upload→decupar→baixar) leva minutos
+
+
+def _prune_old_files() -> None:
+    """Faxina do volume: sem isso, /work acumula uploads e saídas de 1.5GB pra
+    SEMPRE — até o volume encher e o /up passar a falhar pra todo mundo. Apaga
+    o que tem mais de 24h (o download expira de fato em 1h pelo token de job).
+    Nunca lança: faxina falhar não pode derrubar um upload."""
+    try:
+        now = time.time()
+        removed = False
+        for p in Path("/work").iterdir():
+            try:
+                if p.is_file() and now - p.stat().st_mtime > PRUNE_MAX_AGE_S:
+                    p.unlink(missing_ok=True)
+                    removed = True
+            except OSError:
+                pass
+        if removed:
+            vol.commit()
+    except OSError:
+        pass
 
 
 def _download(url: str, dest: Path) -> None:
@@ -237,6 +262,10 @@ def web():
     @api.post("/up")
     async def up(request: Request, ext: str = Query("mp4"), x_decup_ticket: str = Header(None)):
         _verify_ticket(x_decup_ticket)
+        # Faxina preguiçosa a cada upload (sem vol.reload(): reload falha com
+        # arquivo aberto por um download concorrente, e a faxina não precisa de
+        # visão fresca — o que este container não vê agora, outro vê depois).
+        _prune_old_files()
         if ext not in ("mp4", "mov", "webm", "mkv", "m4a", "mp3", "wav"):
             ext = "mp4"
         fid = uuid.uuid4().hex[:12]

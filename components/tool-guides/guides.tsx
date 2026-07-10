@@ -49,7 +49,7 @@ export const GUIDES: Record<string, ToolGuide> = {
     steps: [
       {
         title: 'Solte os arquivos na área de upload',
-        text: 'Arraste até 10 vídeos ou áudios de uma vez — ou clique na área pra abrir o seletor. Pode misturar formatos (MP4 com MP3, por exemplo): cada arquivo vira um card na fila e é processado um por vez, na ordem em que entrou. Se soltar mais de 10, os excedentes ficam de fora e você adiciona depois.',
+        text: 'Arraste até 10 vídeos ou áudios de uma vez — ou clique na área pra abrir o seletor. Pode misturar formatos (MP4 com MP3, por exemplo): cada arquivo vira um card na fila e é processado um por vez, na ordem em que entrou. Cada arquivo pode ter até 1,5 GB. Se soltar mais de 10, os excedentes ficam de fora e você adiciona depois.',
         visual: (
           <Shot label="Decupagem · fila">
             <MStack>
@@ -87,7 +87,7 @@ export const GUIDES: Record<string, ToolGuide> = {
     tips: [
       'O volume da voz é nivelado automaticamente antes do corte — dois locutores em volumes diferentes saem no mesmo patamar.',
       'O corte protege o ataque das palavras: nenhuma sílaba é comida no início ou no fim das frases.',
-      'Tudo roda no seu navegador — os arquivos não sobem pra nenhum servidor.',
+      'Arquivos até 200 MB são processados direto no seu navegador. Acima disso, nas contas pagas, o processamento vai pra um servidor dedicado — aguenta vídeos de até 1,5 GB e devolve o arquivo pronto pra baixar.',
     ],
   },
 

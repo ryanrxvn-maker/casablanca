@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { logHistory } from '@/lib/history';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import {
@@ -75,13 +75,22 @@ const MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024;
 // (instantâneo e sem custo). Só pra contas pagas (servidor tem custo).
 const SERVER_THRESHOLD_BYTES = 200 * 1024 * 1024; // 200 MB
 
+const MAX_FILE_LABEL = `${(MAX_FILE_MB / 1024).toFixed(1).replace('.0', '').replace('.', ',')} GB`;
+
 const TOO_BIG_MSG =
-  `Esse vídeo é muito pesado pra processar aqui no navegador (máx ${(MAX_FILE_MB / 1024).toFixed(1).replace('.0', '')} GB). ` +
+  `Esse vídeo é muito pesado pra processar aqui no navegador (máx ${MAX_FILE_LABEL}). ` +
   `Reduz o peso na ferramenta Compressor primeiro e tenta de novo.`;
+
+const BAD_TYPE_MSG = 'Formato não suportado. Manda MP3, WAV, MP4, WEBM ou MOV.';
 
 // Traduz falhas técnicas do ffmpeg/navegador num recado que o cliente entende.
 function friendlyError(e: unknown): string {
   const raw = (e as Error)?.message || '';
+  // Watchdog do ffmpeg-wasm matou um exec pendurado (hang) — não é arquivo
+  // pesado: a instância já reiniciou limpa, re-tentar costuma resolver.
+  if (/travad|reiniciada/i.test(raw)) {
+    return 'O processamento travou no meio e já foi reiniciado. Clica em "Continuar fila" pra tentar esse arquivo de novo.';
+  }
   if (/could not be read|out of memory|memory|allocation|RangeError|Aborted|Maximum call/i.test(raw)) {
     return TOO_BIG_MSG;
   }
@@ -91,6 +100,14 @@ function friendlyError(e: unknown): string {
 function isVideoFile(file: File): boolean {
   if (file.type.startsWith('video/')) return true;
   return /\.(mp4|webm|mov|mkv|avi)$/i.test(file.name);
+}
+
+// Drag & drop NÃO passa pelo `accept` do input — qualquer arquivo cai aqui
+// (PDF, PNG, ZIP...). Valida por MIME + extensão pra virar erro claro na
+// hora, em vez de minutos de ffmpeg pra falhar com mensagem técnica.
+function isAcceptedMedia(file: File): boolean {
+  if (file.type.startsWith('audio/') || file.type.startsWith('video/')) return true;
+  return /\.(mp3|wav|m4a|aac|ogg|opus|flac|mp4|webm|mov|mkv|avi)$/i.test(file.name);
 }
 
 function baseName(name?: string | null) {
@@ -136,7 +153,14 @@ function uploadToModal(
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${base}/up?ext=${encodeURIComponent(ext)}`);
     xhr.setRequestHeader('X-Decup-Ticket', ticket);
+    // Watchdog de STALL: XHR não tem timeout de inatividade — numa conexão que
+    // morre em silêncio o envio ficava pendurado pra sempre. Sem progresso por
+    // 90s = rede caiu → aborta com erro PRÓPRIO (não confundir com cancelamento
+    // do user) e o retry de 3 tentativas do caller cobre.
+    let lastActivity = Date.now();
+    let stalled = false;
     xhr.upload.onprogress = (e) => {
+      lastActivity = Date.now();
       if (e.lengthComputable) onProgress(e.loaded / e.total);
     };
     xhr.onload = () => {
@@ -153,10 +177,17 @@ function uploadToModal(
       }
     };
     xhr.onerror = () => reject(new Error('Falha de rede no envio pro servidor.'));
-    xhr.onabort = () => reject(new Error('CANCELLED_BY_USER'));
-    // Cancelamento cooperativo.
+    xhr.onabort = () =>
+      reject(new Error(stalled ? 'O envio parou no meio (rede instável).' : 'CANCELLED_BY_USER'));
+    // Cancelamento cooperativo + detector de stall.
     const timer = setInterval(() => {
       if (isCancelled()) {
+        clearInterval(timer);
+        try { xhr.abort(); } catch { /* noop */ }
+        return;
+      }
+      if (Date.now() - lastActivity > 90_000) {
+        stalled = true;
         clearInterval(timer);
         try { xhr.abort(); } catch { /* noop */ }
       }
@@ -181,6 +212,24 @@ export default function DecupagemPage() {
   const [outputKind, setOutputKind] = useToolState<OutputKind>('decupagem:outputKind', 'video');
   const [audioFormat, setAudioFormat] = useToolState<AudioFmt>('decupagem:audioFormat', 'mp3');
   const [processing, setProcessing] = useState(false);
+  // Guard SÍNCRONO contra duplo disparo: `processing` (state) só atualiza no
+  // re-render — dois cliques rápidos entravam juntos e processavam a fila 2x
+  // em paralelo (colisão de nomes no FS do ffmpeg-wasm = saída corrompida).
+  const processingRef = useRef(false);
+
+  // Espelho da fila pra revogar os Object URLs no unmount. Navegação SPA não
+  // descarrega o documento — sem isso, cada visita à ferramenta vazava os
+  // blobs dos resultados prontos (centenas de MB presos até fechar a aba).
+  const queueRef = useRef<QueueItem[]>(queue);
+  queueRef.current = queue;
+  useEffect(
+    () => () => {
+      queueRef.current.forEach((q) => {
+        if (q.result && 'url' in q.result) URL.revokeObjectURL(q.result.url);
+      });
+    },
+    [],
+  );
 
   // Free é forçado a 'audio'. Vídeo só pra pagos.
   const queueHasVideo = queue.some((q) => isVideoFile(q.file));
@@ -195,11 +244,12 @@ export default function DecupagemPage() {
       if (room <= 0) return prev;
       const accepted = files.slice(0, room).map((f) => {
         const tooBig = f.size > MAX_FILE_BYTES;
+        const badType = !isAcceptedMedia(f);
         return {
           id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           file: f,
-          status: (tooBig ? 'error' : 'pending') as QueueStatus,
-          error: tooBig ? TOO_BIG_MSG : undefined,
+          status: (tooBig || badType ? 'error' : 'pending') as QueueStatus,
+          error: badType ? BAD_TYPE_MSG : tooBig ? TOO_BIG_MSG : undefined,
         };
       });
       return [...prev, ...accepted];
@@ -299,8 +349,16 @@ export default function DecupagemPage() {
     for (let i = 0; i < 600; i++) {
       if (cancelRef.current) throw new Error('CANCELLED_BY_USER');
       await sleep(5000);
-      const st = await fetch(`/api/tools/decupagem/status?job=${encodeURIComponent(job)}`);
-      const j = await st.json().catch(() => null);
+      // Fetch BLINDADO: um blip de rede no meio de um poll de vários minutos
+      // não pode matar o job — o servidor segue processando. Falhou? Só tenta
+      // de novo no próximo ciclo (o teto de 50min segue valendo).
+      let j: { status?: string; download_url?: string; original_dur?: unknown; new_dur?: unknown; error?: string } | null = null;
+      try {
+        const st = await fetch(`/api/tools/decupagem/status?job=${encodeURIComponent(job)}`);
+        j = await st.json().catch(() => null);
+      } catch {
+        continue;
+      }
       if (!j) continue;
       if (j.status === 'done') {
         return {
@@ -358,7 +416,9 @@ export default function DecupagemPage() {
         const wav = encodeWAV(trimmed);
         blob = await extractAudioAs(wav, 'mp3', {
           onStage: () => onStage('Gerando arquivo...'),
-          onProgress: ({ ratio }) => onProgress(ratio),
+          // Nivelamento ocupou 0→0.5 da barra; o encode MP3 fecha 0.5→1
+          // (sem isso a barra voltava pro zero no meio do processo).
+          onProgress: ({ ratio }) => onProgress(0.5 + ratio * 0.5),
         });
       }
       return {
@@ -405,13 +465,23 @@ export default function DecupagemPage() {
 
   // Processa a FILA — 1 por vez (sequencial).
   async function processQueue() {
-    if (processing) return;
+    if (processingRef.current) return;
+    // Tier ainda resolvendo (1º load da sessão): não dispara — sem isso um
+    // free entrava no caminho pago (vídeo/servidor) e vice-versa. O botão já
+    // fica desabilitado; este é o cinto de segurança.
+    if (tier === null) return;
+    processingRef.current = true;
     cancelRef.current = false;
     setProcessing(true);
     try {
       for (const item of queue) {
         if (cancelRef.current) break;
         if (item.status === 'done') continue; // já processado, pula
+        if (!isAcceptedMedia(item.file)) {
+          // Formato inválido é permanente — nunca re-tenta.
+          patchItem(item.id, { status: 'error', error: BAD_TYPE_MSG, stage: undefined, progress: null });
+          continue;
+        }
         if (item.file.size > MAX_FILE_BYTES) {
           // Arquivo grande demais pro navegador — nem tenta carregar.
           patchItem(item.id, { status: 'error', error: TOO_BIG_MSG, stage: undefined, progress: null });
@@ -434,7 +504,11 @@ export default function DecupagemPage() {
                 : undefined,
           });
         } catch (e) {
-          if (isCancellationError(e)) {
+          // Só trata como cancelamento se o USER cancelou de fato. Um crash
+          // do wasm (OOM/watchdog) também rejeita com "abort"/"terminate" —
+          // sem checar cancelRef, o erro sumia em silêncio: o item voltava
+          // pra 'pending' e a fila parava sem mostrar nada.
+          if (isCancellationError(e) && cancelRef.current) {
             patchItem(item.id, { status: 'pending', stage: undefined, progress: null });
             break;
           }
@@ -447,6 +521,7 @@ export default function DecupagemPage() {
         }
       }
     } finally {
+      processingRef.current = false;
       setProcessing(false);
     }
   }
@@ -492,7 +567,9 @@ export default function DecupagemPage() {
       let i = 2;
       while (used.has(name)) { name = `${baseName(q.file.name)}_decupado_${i++}.${ext}`; }
       used.add(name);
-      zip.file(name, r.blob);
+      // MP4/MP3 já são comprimidos — DEFLATE neles só queima CPU pra ganhar
+      // ~0%. STORE junta direto; WAV (PCM cru) segue no DEFLATE global.
+      zip.file(name, r.blob, ext === 'wav' ? undefined : { compression: 'STORE' });
     }
     const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
     await downloadBlob(blob, `decupagem_${done.length}_arquivos.zip`);
@@ -522,7 +599,7 @@ export default function DecupagemPage() {
           n={1}
           icon={<IconStepUpload size={18} />}
           title={`Solta os arquivos (até ${MAX_QUEUE})`}
-          hint={`MP3, WAV, MP4, WEBM ou MOV — vários de uma vez · até 300 MB cada`}
+          hint={`MP3, WAV, MP4, WEBM ou MOV — vários de uma vez · até ${MAX_FILE_LABEL} cada`}
           hue="rgba(163,230,53,0.4)"
         >
           <ToolDropzone
@@ -682,10 +759,12 @@ export default function DecupagemPage() {
           {processing ? (
             <CancelButton onClick={cancelAll} label="Cancelar fila" />
           ) : (
-            <ToolAction onClick={processQueue} disabled={queue.length === 0} variant="lime">
-              {doneCount > 0 && doneCount < queue.length
-                ? `Continuar fila (${queue.length - doneCount} restantes)`
-                : `Decupar fila (${queue.length})`}
+            <ToolAction onClick={processQueue} disabled={queue.length === 0 || tier === null} variant="lime">
+              {tier === null && queue.length > 0
+                ? 'Verificando conta...'
+                : doneCount > 0 && doneCount < queue.length
+                  ? `Continuar fila (${queue.length - doneCount} restantes)`
+                  : `Decupar fila (${queue.length})`}
             </ToolAction>
           )}
           {zippableCount >= 2 ? (
