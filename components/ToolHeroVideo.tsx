@@ -171,6 +171,18 @@ export function ToolHeroVideo({
             </p>
           ) : null}
         </div>
+
+        {/* Relevo: highlight no topo + hairline de acento na base */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 z-[3] h-px"
+          style={{ background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.22), transparent)' }}
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-[3] h-px"
+          style={{ background: `linear-gradient(90deg, transparent, ${glow}, transparent)` }}
+        />
       </div>
     </div>
   );

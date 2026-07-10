@@ -96,16 +96,35 @@ export function GuidePanel({
 
         {/* Passos */}
         <div className="guide-card__scroll px-6 pt-5 md:px-7">
-          <ol className="flex flex-col gap-6">
+          <ol className="flex flex-col gap-7">
             {guide.steps.map((step, i) => (
               <li key={i} className="flex gap-4">
-                <span
-                  className="mono mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-violet/40 bg-violet/10 text-[12px] font-bold text-violet"
-                  aria-hidden
-                >
-                  {i + 1}
-                </span>
-                <div className="min-w-0 flex-1">
+                {/* Trilho: número + linha conectando ao próximo passo */}
+                <div className="flex shrink-0 flex-col items-center">
+                  <span
+                    className="mono flex h-7 w-7 items-center justify-center rounded-full border border-violet/45 text-[12px] font-bold text-violet"
+                    style={{
+                      background:
+                        'linear-gradient(160deg, rgba(167,139,250,0.18), rgba(124,58,237,0.05)), rgb(var(--bg-elev))',
+                      boxShadow:
+                        'inset 0 1px 0 rgba(255,255,255,0.08), 0 0 14px -5px rgba(139,92,246,0.7)',
+                    }}
+                    aria-hidden
+                  >
+                    {i + 1}
+                  </span>
+                  {i < guide.steps.length - 1 ? (
+                    <span
+                      aria-hidden
+                      className="mt-2 w-px flex-1"
+                      style={{
+                        background:
+                          'linear-gradient(180deg, rgba(167,139,250,0.4), rgba(167,139,250,0.06))',
+                      }}
+                    />
+                  ) : null}
+                </div>
+                <div className="min-w-0 flex-1 pb-1">
                   <h3
                     className="text-[14.5px] font-bold text-text"
                     style={{ fontFamily: 'var(--font-tech)' }}

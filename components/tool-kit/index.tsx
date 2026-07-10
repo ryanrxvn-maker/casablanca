@@ -16,8 +16,8 @@ import { ReactNode, useRef } from 'react';
 
 /* ─────────────────── ToolHero ─────────────────── */
 /**
- * Header da ferramenta — substitui o ToolShell antigo com algo mais
- * cinematográfico. Eyebrow + título + sub + ícone gigante decorativo.
+ * Header da ferramenta — eyebrow + título + sub + ícone em tile 3D.
+ * Cantos "tech" + hairline de gradiente na base + sheen que varre 1x.
  */
 export function ToolHero({
   title,
@@ -33,11 +33,16 @@ export function ToolHero({
   icon?: ReactNode;
 }) {
   return (
-    <header className="tool-hero relative overflow-hidden rounded-[24px] border border-line/60">
-      {/* Glow ambient */}
+    <header className="tool-hero relative overflow-hidden rounded-[24px] border border-line/60 shadow-depth-2">
+      {/* Glow ambient duplo */}
       <div
         aria-hidden
-        className="pointer-events-none absolute -right-12 -top-12 h-56 w-56 rounded-full opacity-60 blur-3xl"
+        className="pointer-events-none absolute -right-16 -top-16 h-64 w-64 rounded-full opacity-55 blur-3xl"
+        style={{ background: hue }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -bottom-24 -left-16 h-56 w-56 rounded-full opacity-25 blur-3xl"
         style={{ background: hue }}
       />
       {/* Grid sutil */}
@@ -48,20 +53,25 @@ export function ToolHero({
           backgroundImage:
             'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)',
           backgroundSize: '40px 40px',
+          maskImage: 'radial-gradient(80% 100% at 70% 0%, #000, transparent 85%)',
+          WebkitMaskImage:
+            'radial-gradient(80% 100% at 70% 0%, #000, transparent 85%)',
         }}
       />
+      {/* Sheen que varre uma vez ao montar */}
+      <div aria-hidden className="tool-hero-sheen pointer-events-none absolute inset-0" />
 
       <div
-        className="relative flex flex-col gap-3 px-6 py-8 md:flex-row md:items-center md:justify-between md:px-8 md:py-10"
+        className="relative flex flex-col gap-4 px-6 py-8 md:flex-row md:items-center md:justify-between md:px-9 md:py-10"
         style={{
           background:
-            'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
+            'linear-gradient(180deg, rgba(255,255,255,0.03), rgba(0,0,0,0.2)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
         }}
       >
         <div className="flex-1">
           {eyebrow ? (
             <div
-              className="mb-2 inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.22em] text-text-muted"
+              className="mb-2.5 inline-flex items-center gap-2 rounded-full border border-line/80 bg-bg/50 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-text-muted backdrop-blur-sm"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
               <span
@@ -72,28 +82,46 @@ export function ToolHero({
             </div>
           ) : null}
           <h1
-            className="text-[32px] font-extrabold leading-[1] tracking-tight text-white md:text-[42px]"
+            className="text-[32px] font-extrabold leading-[1.02] tracking-tight text-text md:text-[42px]"
             style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.025em' }}
           >
             {title}
           </h1>
           {subtitle ? (
-            <p className="mt-2 max-w-[560px] text-[14.5px] leading-relaxed text-text-muted">
+            <p className="mt-2.5 max-w-[580px] text-[14.5px] leading-relaxed text-text-muted">
               {subtitle}
             </p>
           ) : null}
         </div>
         {icon ? (
-          <div
-            className="hidden md:block tool-hero-icon"
-            style={{
-              filter: `drop-shadow(0 0 32px ${hue})`,
-            }}
-          >
-            {icon}
+          <div className="tool-hero-icon relative hidden md:block">
+            <span
+              aria-hidden
+              className="absolute inset-0 -m-6 rounded-full opacity-70 blur-2xl"
+              style={{ background: `radial-gradient(circle, ${hue}, transparent 70%)` }}
+            />
+            <span
+              className="relative flex h-[88px] w-[88px] items-center justify-center rounded-[22px] border border-white/10"
+              style={{
+                background:
+                  'linear-gradient(160deg, rgba(255,255,255,0.06), transparent 45%), rgba(0,0,0,0.45)',
+                boxShadow: `inset 0 1px 0 rgba(255,255,255,0.12), inset 0 -6px 12px rgba(0,0,0,0.5), 0 18px 36px -14px rgba(0,0,0,0.7), 0 0 34px -8px ${hue}`,
+              }}
+            >
+              {icon}
+            </span>
           </div>
         ) : null}
       </div>
+
+      {/* Hairline de acento na base */}
+      <div
+        aria-hidden
+        className="absolute inset-x-0 bottom-0 h-px"
+        style={{
+          background: `linear-gradient(90deg, transparent, ${hue}, transparent)`,
+        }}
+      />
 
       <style jsx>{`
         .tool-hero-icon {
@@ -101,7 +129,26 @@ export function ToolHero({
         }
         @keyframes tool-hero-float {
           0%, 100% { transform: translateY(0) rotate(0); }
-          50% { transform: translateY(-6px) rotate(-3deg); }
+          50% { transform: translateY(-6px) rotate(-2deg); }
+        }
+        .tool-hero-sheen {
+          background: linear-gradient(
+            105deg,
+            transparent 40%,
+            rgba(255, 255, 255, 0.06) 50%,
+            transparent 60%
+          );
+          transform: translateX(-120%);
+          animation: tool-hero-sweep 1.4s ease-out 0.35s 1 both;
+        }
+        @keyframes tool-hero-sweep {
+          to { transform: translateX(120%); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .tool-hero-icon,
+          .tool-hero-sheen {
+            animation: none !important;
+          }
         }
       `}</style>
     </header>
@@ -110,14 +157,11 @@ export function ToolHero({
 
 /* ─────────────────── ToolStep ─────────────────── */
 /**
- * Bloco de passo. Visual de cartão tipo HeyGen com badge (ícone),
- * título e conteúdo.
+ * Bloco de passo. Cartão com badge de ícone 3D, título e conteúdo.
  *
  * IMPORTANTE: o badge SEMPRE mostra um ícone — números (01/02/03) foram
  * removidos por completo do design. A prop `n` ainda existe pra
  * compatibilidade com a ordem dos steps no JSX, mas nunca é renderizada.
- * Se nenhum `icon` for passado, cai num bullet genérico (•) — mas o
- * correto é cada step passar um ícone simbólico do que faz.
  */
 export function ToolStep({
   n: _n,
@@ -140,44 +184,48 @@ export function ToolStep({
 }) {
   return (
     <section
-      className="tool-step relative overflow-hidden rounded-[20px] border border-line/60 p-5 transition-colors duration-300 hover:border-violet/30 md:p-7"
+      className="tool-step group relative overflow-hidden rounded-[20px] border border-line/60 p-5 shadow-depth-1 transition-all duration-300 hover:-translate-y-[2px] hover:border-violet/35 hover:shadow-depth-2 md:p-7"
       style={{
         background:
-          'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.16)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
+          'linear-gradient(180deg, rgba(255,255,255,0.028), rgba(0,0,0,0.16)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
       }}
     >
       {/* Glow do passo */}
       <div
         aria-hidden
-        className="pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full opacity-30 blur-3xl"
+        className="pointer-events-none absolute -right-12 -top-12 h-36 w-36 rounded-full opacity-30 blur-3xl transition-opacity duration-500 group-hover:opacity-60"
         style={{ background: hue }}
+      />
+      {/* Barra de acento à esquerda — acende no hover */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-y-4 left-0 w-[3px] rounded-r-full opacity-0 transition-opacity duration-400 group-hover:opacity-100"
+        style={{ background: `linear-gradient(180deg, transparent, ${hue}, transparent)` }}
       />
 
       <div className="relative">
-        <div className="mb-4 flex items-center gap-3">
+        <div className="mb-4 flex items-center gap-3.5">
           <span
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] border transition-transform duration-300 group-hover:scale-[1.06] group-hover:-rotate-3"
             style={{
               color: '#fff',
               borderColor: hue,
-              background: `linear-gradient(135deg, ${hue}, transparent 70%), rgba(0,0,0,0.5)`,
-              boxShadow: `0 0 18px -4px ${hue}`,
+              background: `linear-gradient(150deg, ${hue}, transparent 65%), linear-gradient(180deg, rgba(255,255,255,0.05), transparent 40%), rgba(0,0,0,0.5)`,
+              boxShadow: `inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -3px 6px rgba(0,0,0,0.4), 0 0 20px -4px ${hue}`,
             }}
           >
             {icon ? (
               icon
             ) : (
               // Fallback: bullet genérico (NUNCA mostra número).
-              // Significa "esqueci de passar icon" — visualmente neutro
-              // até alguém adicionar o ícone real.
               <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
                 <circle cx="5" cy="5" r="3" fill="currentColor" opacity="0.85" />
               </svg>
             )}
           </span>
-          <div className="flex-1">
+          <div className="min-w-0 flex-1">
             <h3
-              className="text-[15px] font-bold tracking-tight text-white md:text-[16.5px]"
+              className="text-[15px] font-bold tracking-tight text-text md:text-[16.5px]"
               style={{
                 fontFamily: 'var(--font-tech)',
                 letterSpacing: '-0.015em',
@@ -186,11 +234,12 @@ export function ToolStep({
               {title}
             </h3>
             {hint ? (
-              <p className="mt-0.5 text-[12px] text-text-muted">{hint}</p>
+              <p className="mt-0.5 text-[12px] leading-snug text-text-muted">{hint}</p>
             ) : null}
           </div>
           {action ? <div className="shrink-0">{action}</div> : null}
         </div>
+        <div className="divider-grad mb-4 -mt-1 opacity-70" aria-hidden />
         <div>{children}</div>
       </div>
 
@@ -202,6 +251,11 @@ export function ToolStep({
           0% { opacity: 0; transform: translateY(8px); }
           100% { opacity: 1; transform: translateY(0); }
         }
+        @media (prefers-reduced-motion: reduce) {
+          .tool-step {
+            animation: none !important;
+          }
+        }
       `}</style>
     </section>
   );
@@ -209,8 +263,8 @@ export function ToolStep({
 
 /* ─────────────────── ToolDropzone ─────────────────── */
 /**
- * Área de upload visual. Drag-and-drop + click. Mostra estado vazio
- * elegante com ícone gigante, ou o arquivo selecionado.
+ * Área de upload visual. Drag-and-drop + click. Estado vazio com moldura
+ * tech + anel pulsante; arquivo carregado ganha selo de ok.
  */
 export function ToolDropzone({
   accept,
@@ -295,22 +349,35 @@ export function ToolDropzone({
       />
 
       {!file ? (
-        <div className="relative flex flex-col items-center justify-center gap-3 px-6 py-12 text-center">
-          {icon ? (
-            <div
-              className="dropzone-icon flex h-16 w-16 items-center justify-center rounded-2xl border border-white/8 bg-black/40"
-              style={{
-                boxShadow: `0 0 24px -6px ${hue}, inset 0 1px 0 rgba(255,255,255,0.1)`,
-              }}
-            >
-              {icon}
-            </div>
-          ) : (
-            <DefaultUploadIcon />
-          )}
+        <div className="relative flex flex-col items-center justify-center gap-3.5 px-6 py-12 text-center">
+          {/* Cantos tech da área de drop */}
+          <span aria-hidden className="dz-corner dz-corner--tl" />
+          <span aria-hidden className="dz-corner dz-corner--tr" />
+          <span aria-hidden className="dz-corner dz-corner--bl" />
+          <span aria-hidden className="dz-corner dz-corner--br" />
+
+          <div className="relative">
+            <span
+              aria-hidden
+              className="dz-ring absolute inset-0 -m-2 rounded-[20px]"
+              style={{ border: `1.5px solid ${hue}` }}
+            />
+            {icon ? (
+              <div
+                className="dropzone-icon relative flex h-16 w-16 items-center justify-center rounded-2xl border border-white/8 bg-black/40"
+                style={{
+                  boxShadow: `inset 0 1px 0 rgba(255,255,255,0.1), 0 0 24px -6px ${hue}`,
+                }}
+              >
+                {icon}
+              </div>
+            ) : (
+              <DefaultUploadIcon />
+            )}
+          </div>
           <div>
             <div
-              className="text-[13.5px] font-bold uppercase tracking-[0.16em] text-white"
+              className="text-[13.5px] font-bold uppercase tracking-[0.16em] text-text"
               style={{ fontFamily: 'var(--font-tech)' }}
             >
               Arraste ou clique pra subir
@@ -323,16 +390,31 @@ export function ToolDropzone({
       ) : (
         <div className="relative flex items-center gap-3 px-5 py-4">
           <span
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[12px] border border-violet/45 bg-violet/10"
-            style={{ boxShadow: `0 0 20px -4px ${hue}` }}
+            className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-[12px] border border-violet/45 bg-violet/10"
+            style={{ boxShadow: `inset 0 1px 0 rgba(255,255,255,0.1), 0 0 20px -4px ${hue}` }}
           >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#c084fc" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
               <path d="M14 2v6h6" />
             </svg>
+            {/* Selo ok */}
+            <span
+              aria-hidden
+              className="absolute -right-1.5 -top-1.5 flex items-center justify-center rounded-full"
+              style={{
+                height: 18,
+                width: 18,
+                background: 'linear-gradient(150deg, #d3e39a, #aab868)',
+                boxShadow: '0 0 0 2px rgba(10,10,12,0.8), 0 3px 8px -2px rgba(170,190,90,0.7)',
+              }}
+            >
+              <svg width="9" height="9" viewBox="0 0 12 12" fill="none">
+                <path d="M2.5 6.5l2.5 2.5 5-5.5" stroke="#141408" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
           </span>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[13.5px] font-semibold text-white">
+            <div className="truncate text-[13.5px] font-semibold text-text">
               {file.name}
             </div>
             <div className="mono text-[11px] text-text-muted">
@@ -365,6 +447,35 @@ export function ToolDropzone({
         .tool-dropzone:hover .dropzone-icon {
           transform: scale(1.08) rotate(-6deg);
         }
+        .dz-ring {
+          opacity: 0;
+          animation: dz-pulse 2.6s ease-out infinite;
+        }
+        @keyframes dz-pulse {
+          0% { opacity: 0.55; transform: scale(0.92); }
+          70%, 100% { opacity: 0; transform: scale(1.25); }
+        }
+        .dz-corner {
+          position: absolute;
+          width: 14px;
+          height: 14px;
+          border-color: rgba(167, 139, 250, 0.4);
+          border-style: solid;
+          border-width: 0;
+          transition: border-color 0.3s ease;
+        }
+        .tool-dropzone:hover .dz-corner {
+          border-color: rgba(196, 181, 253, 0.75);
+        }
+        .dz-corner--tl { top: 10px; left: 10px; border-top-width: 2px; border-left-width: 2px; border-top-left-radius: 6px; }
+        .dz-corner--tr { top: 10px; right: 10px; border-top-width: 2px; border-right-width: 2px; border-top-right-radius: 6px; }
+        .dz-corner--bl { bottom: 10px; left: 10px; border-bottom-width: 2px; border-left-width: 2px; border-bottom-left-radius: 6px; }
+        .dz-corner--br { bottom: 10px; right: 10px; border-bottom-width: 2px; border-right-width: 2px; border-bottom-right-radius: 6px; }
+        @media (prefers-reduced-motion: reduce) {
+          .dz-ring {
+            animation: none !important;
+          }
+        }
       `}</style>
     </div>
   );
@@ -373,10 +484,10 @@ export function ToolDropzone({
 function DefaultUploadIcon() {
   return (
     <div
-      className="flex h-16 w-16 items-center justify-center rounded-2xl border border-white/8 bg-black/40"
+      className="dropzone-icon relative flex h-16 w-16 items-center justify-center rounded-2xl border border-white/8 bg-black/40"
       style={{
         boxShadow:
-          '0 0 24px -6px rgba(167,139,250,0.55), inset 0 1px 0 rgba(255,255,255,0.1)',
+          'inset 0 1px 0 rgba(255,255,255,0.1), 0 0 24px -6px rgba(167,139,250,0.55)',
       }}
     >
       <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
@@ -396,8 +507,8 @@ function DefaultUploadIcon() {
 
 /* ─────────────────── ToolChoice ─────────────────── */
 /**
- * Grid de escolhas (chip de tab). Visual maior e mais "premium" que
- * o chip antigo. Use pra escolher formato, modo, qualidade, etc.
+ * Grid de escolhas. Ativa = preenchimento em gradiente + check no canto;
+ * inativas levantam no hover. Press com escala rápida.
  */
 export function ToolChoice<T extends string>({
   value,
@@ -423,24 +534,27 @@ export function ToolChoice<T extends string>({
             onClick={() => !disabled && onChange(opt.value)}
             disabled={disabled}
             className={
-              'group relative overflow-hidden rounded-[14px] border px-3.5 py-3 text-left transition-all duration-300 ' +
+              'group relative overflow-hidden rounded-[14px] border px-3.5 py-3 text-left transition-all duration-300 active:scale-[0.97] ' +
               (active
-                ? 'border-violet/65 bg-violet/12'
-                : 'border-line-strong bg-bg-soft/60 hover:border-violet/45 hover:-translate-y-[1px]')
+                ? 'border-violet/70'
+                : 'border-line-strong bg-bg-soft/60 hover:-translate-y-[1px] hover:border-violet/45')
             }
             style={
               active
-                ? { boxShadow: `0 0 22px -6px ${hue}` }
+                ? {
+                    background:
+                      'linear-gradient(160deg, rgba(167,139,250,0.2), rgba(124,58,237,0.08) 60%), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
+                    boxShadow: `inset 0 1px 0 rgba(255,255,255,0.1), 0 0 24px -6px ${hue}`,
+                  }
                 : undefined
             }
           >
-            {opt.icon ? (
-              <div className="mb-1.5">
-                {opt.icon}
-              </div>
-            ) : null}
+            {opt.icon ? <div className="mb-1.5">{opt.icon}</div> : null}
             <div
-              className="text-[12.5px] font-bold tracking-tight text-white"
+              className={
+                'text-[12.5px] font-bold tracking-tight transition-colors ' +
+                (active ? 'text-text' : 'text-text-muted group-hover:text-text')
+              }
               style={{ fontFamily: 'var(--font-tech)' }}
             >
               {opt.label}
@@ -454,12 +568,22 @@ export function ToolChoice<T extends string>({
             {active ? (
               <span
                 aria-hidden
-                className="absolute right-2 top-2 inline-block h-2 w-2 rounded-full"
+                className="absolute right-2 top-2 flex h-4 w-4 items-center justify-center rounded-full"
                 style={{
-                  background: '#c084fc',
-                  boxShadow: '0 0 10px rgba(192,132,252,0.85)',
+                  background: 'linear-gradient(150deg, #c4b5fd, #7c3aed)',
+                  boxShadow: '0 0 10px rgba(167,139,250,0.7)',
                 }}
-              />
+              >
+                <svg width="8" height="8" viewBox="0 0 12 12" fill="none">
+                  <path
+                    d="M2.5 6.5l2.5 2.5 5-5.5"
+                    stroke="#120b22"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </span>
             ) : null}
           </button>
         );
@@ -470,8 +594,8 @@ export function ToolChoice<T extends string>({
 
 /* ─────────────────── ToolSlider ─────────────────── */
 /**
- * Slider estilizado pra valores numéricos (volume, tolerância, etc).
- * Mostra label + valor em mono.
+ * Slider estilizado. O preenchimento de progresso da trilha vem de
+ * `--range-fill` (consumido pelo CSS global do input[type=range]).
  */
 export function ToolSlider({
   label,
@@ -492,9 +616,10 @@ export function ToolSlider({
   display?: (v: number) => string;
   disabled?: boolean;
 }) {
+  const pct = max > min ? ((value - min) / (max - min)) * 100 : 0;
   return (
     <div>
-      <div className="mb-2 flex items-center justify-between">
+      <div className="mb-1.5 flex items-center justify-between">
         <label
           className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
           style={{ fontFamily: 'var(--font-tech)' }}
@@ -502,7 +627,7 @@ export function ToolSlider({
           {label}
         </label>
         <span
-          className="mono text-[12.5px] text-violet"
+          className="mono rounded-[8px] border border-violet/30 bg-violet/10 px-2 py-0.5 text-[11.5px] font-semibold text-violet"
           style={{ fontFamily: 'var(--font-mono)' }}
         >
           {display ? display(value) : value}
@@ -517,6 +642,7 @@ export function ToolSlider({
         onChange={(e) => onChange(parseFloat(e.target.value))}
         disabled={disabled}
         className="w-full"
+        style={{ ['--range-fill' as string]: `${pct}%` }}
       />
     </div>
   );
@@ -524,7 +650,7 @@ export function ToolSlider({
 
 /* ─────────────────── ToolAction ─────────────────── */
 /**
- * Botão de ação principal grande. Suporta loading state e ícone.
+ * Botão de ação principal grande. Loading com spinner de anel.
  */
 export function ToolAction({
   children,
@@ -559,7 +685,10 @@ export function ToolAction({
       }
     >
       {loading ? (
-        <span className="loading-dots">Processando</span>
+        <span className="inline-flex items-center gap-2.5">
+          <span className="ta-spinner" aria-hidden />
+          <span>Processando…</span>
+        </span>
       ) : (
         <>
           {icon ? <span className="shrink-0">{icon}</span> : null}
@@ -569,6 +698,20 @@ export function ToolAction({
           </span>
         </>
       )}
+      <style jsx>{`
+        .ta-spinner {
+          display: inline-block;
+          height: 15px;
+          width: 15px;
+          border-radius: 999px;
+          border: 2px solid rgba(255, 255, 255, 0.35);
+          border-top-color: rgba(255, 255, 255, 0.95);
+          animation: ta-spin 0.7s linear infinite;
+        }
+        @keyframes ta-spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </button>
   );
 }
@@ -576,7 +719,7 @@ export function ToolAction({
 /* ─────────────────── ToolResultCard ─────────────────── */
 /**
  * Card pra mostrar resultado da ferramenta (vídeo/áudio gerado).
- * Suporta player + download.
+ * Hairline lime no topo + selo PRONTO com dot.
  */
 export function ToolResultCard({
   title,
@@ -591,7 +734,7 @@ export function ToolResultCard({
 }) {
   return (
     <div
-      className="result-card relative overflow-hidden rounded-[18px] border p-5 md:p-6"
+      className="result-card relative overflow-hidden rounded-[18px] border p-5 shadow-depth-1 md:p-6"
       style={{
         background:
           'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.18)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
@@ -603,24 +746,42 @@ export function ToolResultCard({
         className="pointer-events-none absolute -right-12 -top-12 h-44 w-44 rounded-full opacity-70 blur-3xl"
         style={{ background: hue }}
       />
+      {/* Hairline de sucesso no topo */}
+      <div
+        aria-hidden
+        className="absolute inset-x-0 top-0 h-px"
+        style={{
+          background: `linear-gradient(90deg, transparent, ${hue}, transparent)`,
+        }}
+      />
       <div className="relative">
         <div className="mb-3 flex items-baseline justify-between gap-3">
           <div>
             <div
-              className="text-[10.5px] font-bold uppercase tracking-[0.22em] text-lime"
-              style={{ fontFamily: 'var(--font-tech)' }}
+              className="inline-flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.22em]"
+              style={{ fontFamily: 'var(--font-tech)', color: 'rgb(var(--lime))' }}
             >
+              <span
+                aria-hidden
+                className="inline-block h-1.5 w-1.5 rounded-full"
+                style={{
+                  background: 'rgb(var(--lime))',
+                  boxShadow: '0 0 8px rgba(200,232,124,0.8)',
+                }}
+              />
               PRONTO
             </div>
             <h3
-              className="mt-1 text-[18px] font-extrabold tracking-tight text-white"
+              className="mt-1 text-[18px] font-extrabold tracking-tight text-text"
               style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.015em' }}
             >
               {title}
             </h3>
           </div>
           {meta ? (
-            <span className="mono text-[11px] text-text-muted">{meta}</span>
+            <span className="mono rounded-[8px] border border-line bg-bg/50 px-2 py-0.5 text-[10.5px] text-text-muted">
+              {meta}
+            </span>
           ) : null}
         </div>
         {children}
@@ -652,7 +813,7 @@ export function ToolMetric({
         ? 'rgb(var(--pink))'
         : 'rgb(var(--violet))';
   return (
-    <div className="rounded-[14px] border border-line bg-bg-soft/50 px-4 py-3.5">
+    <div className="rounded-[14px] border border-line bg-bg-soft/50 px-4 py-3.5 shadow-depth-1 transition-transform duration-300 hover:-translate-y-[1px]">
       <div
         className="text-[22px] font-extrabold leading-none tracking-tight md:text-[26px]"
         style={{

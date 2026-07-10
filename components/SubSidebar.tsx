@@ -148,12 +148,12 @@ export function SubSidebar() {
             const inMaint = isToolInMaintenance(it.href);
             const blocked = inMaint && !isAdmin; // não-admin não acessa
             const rowCls =
-              'group relative flex items-center gap-3 rounded-[12px] px-3 py-2.5 transition-all duration-300 ' +
+              'group relative flex items-center gap-3 rounded-[12px] border px-3 py-2.5 transition-all duration-300 ' +
               (blocked
-                ? 'cursor-not-allowed text-text-dim'
+                ? 'cursor-not-allowed border-transparent text-text-dim'
                 : active
-                  ? 'bg-violet/12 text-white'
-                  : 'text-text-muted hover:bg-bg/60 hover:text-white');
+                  ? 'ssb-active border-violet/30 text-white'
+                  : 'border-transparent text-text-muted hover:border-line/70 hover:bg-bg/60 hover:text-white');
             const inner = (
               <>
                 {/* Indicador vertical ativo */}
@@ -232,6 +232,14 @@ export function SubSidebar() {
         @keyframes ssi-in {
           0% { opacity: 0; transform: translateX(-12px); }
           100% { opacity: 1; transform: translateX(0); }
+        }
+        .sub-sidebar-item :global(.ssb-active) {
+          background:
+            linear-gradient(160deg, rgba(167, 139, 250, 0.16), rgba(124, 58, 237, 0.05)),
+            rgba(0, 0, 0, 0.18);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.07),
+            0 10px 22px -14px rgba(124, 58, 237, 0.7);
         }
       `}</style>
     </aside>

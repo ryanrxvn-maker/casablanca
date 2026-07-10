@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 
 import {
-  Mark,
   MBtn,
   MChip,
   MDrop,
@@ -51,9 +50,8 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Arraste até 10 vídeos ou áudios pra fila. Pode misturar formatos — cada um é processado na ordem.',
         visual: (
           <Shot label="Decupagem · fila">
-            <Mark n={1} x="50%" y="38%" />
             <MStack>
-              <MDrop label="Solta os arquivos aqui" sub="até 10 por vez · vídeo ou áudio" />
+              <MDrop mark={1} label="Solta os arquivos aqui" sub="até 10 por vez · vídeo ou áudio" />
             </MStack>
           </Shot>
         ),
@@ -67,8 +65,7 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'O controle "Quanto de silêncio manter?" define o ritmo: mais à esquerda fica seco e acelerado, mais à direita preserva pausas naturais.',
         visual: (
           <Shot label="Decupagem · ajuste">
-            <Mark n={1} x="86%" y="40%" />
-            <MSlider label="Quanto de silêncio manter?" pct={35} val="curto" />
+            <MSlider mark={3} label="Quanto de silêncio manter?" pct={35} val="curto" />
           </Shot>
         ),
       },
@@ -101,8 +98,7 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Comece no valor sugerido. Intensidade maior engana melhor a transcrição, mas pode deixar rastros audíveis em fones — valide sempre no passo 4.',
         visual: (
           <Shot label="Camuflagem · intensidade">
-            <Mark n={1} x="86%" y="40%" />
-            <MSlider label="Intensidade" pct={55} val="média" />
+            <MSlider mark={1} label="Intensidade" pct={55} val="média" />
           </Shot>
         ),
       },
@@ -115,8 +111,6 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'No card "Original + escondido": o ORIGINAL é o que a pessoa ouve; o ESCONDIDO é o que a transcrição da plataforma vai ler no lugar.',
         visual: (
           <Shot label="Camuflagem · arquivos">
-            <Mark n={1} x="28%" y="46%" />
-            <Mark n={2} x="78%" y="46%" />
             <MRow>
               <div className="flex-1">
                 <MDrop label="Original" sub="o que toca no vídeo" />
@@ -133,9 +127,8 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Depois de processar, clique em "Transcrever": a ferramenta escuta o resultado como uma IA de plataforma escutaria. O selo só fica verde quando a transcrição devolve o áudio escondido — se ficar vermelho, ajuste a intensidade e rode de novo.',
         visual: (
           <Shot label="Camuflagem · validação">
-            <Mark n={1} x="24%" y="50%" />
             <MRow>
-              <MBtn tone="primary">Transcrever</MBtn>
+              <MBtn mark={4} tone="primary">Transcrever</MBtn>
               <MChip tone="lime">SELO · CAMUFLADO ✓</MChip>
             </MRow>
           </Shot>
@@ -158,11 +151,10 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'O primeiro card instala a extensão do Chrome e o motor local. Siga as "Instruções detalhadas" — o Windows pode pedir confirmação pra rodar o instalador. Quando os dois indicadores ficam verdes, nunca mais repete isso.',
         visual: (
           <Shot label="Downloader · setup">
-            <Mark n={1} x="30%" y="48%" />
             <MRow>
               <MChip tone="lime">EXTENSÃO ✓</MChip>
               <MChip tone="lime">MOTOR ✓</MChip>
-              <MBtn tone="ghost">Instruções detalhadas</MBtn>
+              <MBtn mark={1} tone="ghost">Instruções detalhadas</MBtn>
             </MRow>
           </Shot>
         ),
@@ -172,9 +164,8 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Um link por linha. Pode misturar plataformas — YouTube, Instagram, TikTok e Pinterest na mesma fila.',
         visual: (
           <Shot label="Downloader · links">
-            <Mark n={1} x="88%" y="42%" />
             <MStack>
-              <MField value="https://youtube.com/watch?v=..." />
+              <MField mark={2} value="https://youtube.com/watch?v=..." />
               <MField value="https://www.instagram.com/reel/..." />
               <MField value="https://pin.it/..." />
             </MStack>
@@ -205,8 +196,7 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Até 5 comprimem em paralelo. Os demais aguardam na fila.',
         visual: (
           <Shot label="Compressor · fila">
-            <Mark n={1} x="50%" y="40%" />
-            <MDrop label="Solta os vídeos" sub="até 5 em paralelo" />
+            <MDrop mark={1} label="Solta os vídeos" sub="até 5 em paralelo" />
           </Shot>
         ),
       },
@@ -215,8 +205,7 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'O controle mostra uma estimativa do tamanho final antes de você processar — dá pra calibrar sem tentativa e erro.',
         visual: (
           <Shot label="Compressor · qualidade">
-            <Mark n={1} x="86%" y="40%" />
-            <MSlider label="Qualidade" pct={70} val="~24 MB" />
+            <MSlider mark={2} label="Qualidade" pct={70} val="~24 MB" />
           </Shot>
         ),
       },
@@ -246,8 +235,7 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Aceita áudio ou vídeo — de vídeo, aproveitamos só a trilha de áudio.',
         visual: (
           <Shot label="Dividir áudios">
-            <Mark n={1} x="50%" y="40%" />
-            <MDrop label="Áudio ou vídeo" />
+            <MDrop mark={1} label="Áudio ou vídeo" />
           </Shot>
         ),
       },
@@ -264,7 +252,7 @@ export const GUIDES: Record<string, ToolGuide> = {
               <MQueueItem name="parte-01.mp3 · 0:19" status="pronta" pct={100} tone="lime" />
               <MQueueItem name="parte-02.mp3 · 0:22" status="pronta" pct={100} tone="lime" />
               <MRow>
-                <MBtn tone="lime">Baixar ZIP</MBtn>
+                <MBtn mark={3} tone="lime">Baixar ZIP</MBtn>
               </MRow>
             </MStack>
           </Shot>
@@ -286,10 +274,8 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Arraste o controle (0.5× a 3×) ou toque num dos atalhos prontos — 0.75, 1.25, 1.5, 2.0. O tom da voz é corrigido automaticamente: nada de efeito robô.',
         visual: (
           <Shot label="Mixer · velocidade">
-            <Mark n={1} x="86%" y="34%" />
-            <Mark n={2} x="30%" y="76%" />
             <MStack>
-              <MSlider label="Velocidade" pct={50} val="1.5×" />
+              <MSlider mark={2} label="Velocidade" pct={50} val="1.5×" />
               <MRow>
                 <MChip tone="dim">0.75×</MChip>
                 <MChip tone="violet">1.25×</MChip>
@@ -320,9 +306,8 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Navegue pelas seções — Redes sociais e Notícias & TV — e toque no modelo que quer recriar (story, DM, post, tweet, comentário, notificação, telejornal).',
         visual: (
           <Shot label="FakePrint · modelos">
-            <Mark n={1} x="22%" y="46%" />
             <MRow>
-              <MChip tone="violet">STORY</MChip>
+              <MChip mark={1} tone="violet">STORY</MChip>
               <MChip tone="dim">DM</MChip>
               <MChip tone="dim">POST</MChip>
               <MChip tone="dim">TWEET</MChip>
@@ -340,7 +325,6 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'iPhone ou Android, hora, operadora, Wi-Fi e bateria — os detalhes que fazem o print parecer real.',
         visual: (
           <Shot label="FakePrint · barra de status">
-            <Mark n={1} x="14%" y="46%" />
             <MRow>
               <MChip tone="violet">IPHONE</MChip>
               <MField label="Hora" value="21:47" />
@@ -354,9 +338,8 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Confira a prévia e clique em "Baixar PNG" — o export sai em alta resolução, nítido pra usar em qualquer criativo.',
         visual: (
           <Shot label="FakePrint · export">
-            <Mark n={1} x="26%" y="50%" />
             <MRow>
-              <MBtn tone="lime">Baixar PNG</MBtn>
+              <MBtn mark={4} tone="lime">Baixar PNG</MBtn>
               <MChip tone="dim">1080px · nítido</MChip>
             </MRow>
           </Shot>
@@ -374,9 +357,8 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'A pergunta do topo e a resposta/mensagem do corpo. O tamanho da fonte se ajusta sozinho pra caber como no Instagram.',
         visual: (
           <Shot label="Caixinha · textos">
-            <Mark n={1} x="88%" y="30%" />
             <MStack>
-              <MField label="Pergunta" value="me pergunta qualquer coisa 👀" />
+              <MField mark={1} label="Pergunta" value="me pergunta qualquer coisa 👀" />
               <MField label="Mensagem" value="pode mandar, respondo tudo" />
             </MStack>
           </Shot>
@@ -410,10 +392,9 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Uma linha por AD, com a duração em mm:ss. Use + e − pra incluir ou remover linhas.',
         visual: (
           <Shot label="Calculadora · ADs">
-            <Mark n={1} x="88%" y="38%" />
             <MStack>
               <MRow>
-                <MField label="AD 01" value="01:30" />
+                <MField mark={2} label="AD 01" value="01:30" />
                 <MField label="AD 02" value="00:45" />
                 <MField label="AD 03" value="02:10" />
               </MRow>
@@ -432,7 +413,7 @@ export const GUIDES: Record<string, ToolGuide> = {
           <Shot label="Calculadora · orçamento">
             <MRow>
               <MChip tone="lime">TOTAL · R$ 870,00</MChip>
-              <MBtn tone="primary">Gerar relatório</MBtn>
+              <MBtn mark={4} tone="primary">Gerar relatório</MBtn>
             </MRow>
           </Shot>
         ),
@@ -451,8 +432,7 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Até 800MB ou 60 minutos. A página mostra duração e tamanho assim que o upload termina.',
         visual: (
           <Shot label="Gerador de SRT · arquivo">
-            <Mark n={1} x="50%" y="40%" />
-            <MDrop label="Áudio ou vídeo" sub="até 800MB · 60min" />
+            <MDrop mark={1} label="Áudio ou vídeo" sub="até 800MB · 60min" />
           </Shot>
         ),
       },
@@ -465,9 +445,8 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Clique em "Gerar SRT". O alinhamento é palavra por palavra — cada bloco de legenda nasce no tempo certo da fala.',
         visual: (
           <Shot label="Gerador de SRT · resultado">
-            <Mark n={1} x="24%" y="50%" />
             <MRow>
-              <MBtn tone="primary">Gerar SRT</MBtn>
+              <MBtn mark={3} tone="primary">Gerar SRT</MBtn>
               <MChip tone="lime">ALINHADO · PALAVRA A PALAVRA</MChip>
             </MRow>
           </Shot>
@@ -493,9 +472,8 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Cada linha vira uma frase que a IA vai procurar no vídeo. Se o locutor gravou a mesma frase 3 vezes, ela escolhe a melhor tomada.',
         visual: (
           <Shot label="Decupagem Inteligente · copy">
-            <Mark n={1} x="88%" y="34%" />
             <MStack>
-              <MField value="Você já tentou de tudo pra dormir melhor?" />
+              <MField mark={2} value="Você já tentou de tudo pra dormir melhor?" />
               <MField value="Então presta atenção nos próximos 30 segundos." />
             </MStack>
           </Shot>
@@ -529,8 +507,6 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Um take com o rosto visível e estável funciona melhor — evite cortes bruscos e mãos na frente da boca.',
         visual: (
           <Shot label="Lipsync · entrada">
-            <Mark n={1} x="28%" y="46%" />
-            <Mark n={2} x="78%" y="46%" />
             <MRow>
               <div className="flex-1">
                 <MDrop label="Vídeo" sub="rosto visível" />
@@ -571,8 +547,7 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Escreva o prompt do que acontece no vídeo. Prompts em inglês tendem a render melhor.',
         visual: (
           <Shot label="Vídeo do zero · prompt">
-            <Mark n={1} x="88%" y="40%" />
-            <MField value="cinematic shot of rain falling on a neon city street..." />
+            <MField mark={1} value="cinematic shot of rain falling on a neon city street..." />
           </Shot>
         ),
       },
@@ -605,8 +580,7 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Clique em "Separar voz, trilha sonora e SFX" e aguarde — a separação roda em nuvem.',
         visual: (
           <Shot label="Separador · ação">
-            <Mark n={1} x="34%" y="50%" />
-            <MBtn tone="primary">Separar voz, trilha sonora e SFX</MBtn>
+            <MBtn mark={2} tone="primary">Separar voz, trilha sonora e SFX</MBtn>
           </Shot>
         ),
       },
@@ -639,9 +613,8 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'O modo AUTO resolve a maioria dos casos. Os demais (center, bandpass, aggressive) são variações pra áudios difíceis.',
         visual: (
           <Shot label="Isolar voz · modo">
-            <Mark n={1} x="14%" y="46%" />
             <MRow>
-              <MChip tone="violet">AUTO</MChip>
+              <MChip mark={2} tone="violet">AUTO</MChip>
               <MChip tone="dim">CENTER</MChip>
               <MChip tone="dim">BANDPASS</MChip>
               <MChip tone="dim">AGGRESSIVE</MChip>
@@ -728,11 +701,10 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Os ZIPs de takes, montado e camuflado continuam disponíveis mesmo depois de fechar a página.',
         visual: (
           <Shot label="Histórico · lote">
-            <Mark n={1} x="80%" y="52%" />
             <MStack>
               <MQueueItem name="AD22 · 6 partes" status="concluído" pct={100} tone="lime" />
               <MRow>
-                <MBtn tone="ghost">Baixar ZIP</MBtn>
+                <MBtn mark={2} tone="ghost">Baixar ZIP</MBtn>
                 <MBtn tone="dark">Retomar</MBtn>
               </MRow>
             </MStack>
@@ -804,9 +776,8 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Instale a extensão DARKO LAB no Chrome — o bloco "Como instalar (passo a passo)" na página mostra cada clique. Depois, deixe uma aba logada no HeyGen. O disparo usa a sua assinatura normal do HeyGen, não a API.',
         visual: (
           <Shot label="Hey Auto · setup">
-            <Mark n={1} x="26%" y="48%" />
             <MRow>
-              <MChip tone="lime">EXTENSÃO CONECTADA ✓</MChip>
+              <MChip mark={1} tone="lime">EXTENSÃO CONECTADA ✓</MChip>
               <MChip tone="dim">HEYGEN LOGADO</MChip>
             </MRow>
           </Shot>
@@ -821,9 +792,6 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'O seletor busca na sua biblioteca do HeyGen com preview. A voz pode seguir o padrão do avatar ou ser trocada; o motor define o estilo de render.',
         visual: (
           <Shot label="Hey Auto · avatar e voz">
-            <Mark n={1} x="16%" y="46%" />
-            <Mark n={2} x="52%" y="46%" />
-            <Mark n={3} x="84%" y="46%" />
             <MRow>
               <MField label="Avatar" value="Ana — Studio" grow />
               <MField label="Voz" value="padrão do avatar" grow />
@@ -841,8 +809,6 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Cada HOOK vira um take separado; o BODY é opcional e pode ter vários blocos — o app divide em partes de ~20 segundos automaticamente, do jeito que o HeyGen rende melhor.',
         visual: (
           <Shot label="Hey Auto · estrutura">
-            <Mark n={1} x="88%" y="26%" />
-            <Mark n={2} x="88%" y="66%" />
             <MStack>
               <MField label="Hook 1" value="Você já tentou de tudo pra..." />
               <MField label="Hook 2" value="O que ninguém te contou sobre..." />
@@ -860,9 +826,8 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Clique em "▶ Processar fila". Cada item dispara no HeyGen, renderiza, baixa e — se você marcou — passa por decupagem e camuflagem sozinho.',
         visual: (
           <Shot label="Hey Auto · fila rodando">
-            <Mark n={1} x="30%" y="24%" />
             <MStack>
-              <MBtn tone="primary">▶ Processar fila (3)</MBtn>
+              <MBtn mark={7} tone="primary">▶ Processar fila (3)</MBtn>
               <MQueueItem name="AD07 · 4 partes" status="renderizando 2/4" pct={45} />
               <MQueueItem name="AD08 · 3 partes" status="na fila" pct={0} />
             </MStack>
@@ -902,10 +867,8 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Cole seu token pessoal do ClickUp — ele fica salvo só no seu navegador. Depois escolha o Time e o Editor que você quer operar.',
         visual: (
           <Shot label="Pilot · conexão">
-            <Mark n={1} x="88%" y="30%" />
-            <Mark n={2} x="30%" y="72%" />
             <MStack>
-              <MField label="Token ClickUp" value="pk_••••••••••••" />
+              <MField mark={1} label="Token ClickUp" value="pk_••••••••••••" />
               <MRow>
                 <MField label="Time" value="Estúdio" grow />
                 <MField label="Editor" value="João" grow />
@@ -919,7 +882,6 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'O Pilot lista as tasks da data escolhida. Marque as que entram no disparo — uma, algumas ou todas.',
         visual: (
           <Shot label="Pilot · seleção">
-            <Mark n={1} x="10%" y="34%" />
             <MStack>
               <MQueueItem name="☑ AD15VN_PRPB06" status="selecionada" pct={100} tone="violet" />
               <MQueueItem name="☑ AD16VN_PRPB07" status="selecionada" pct={100} tone="violet" />
@@ -937,12 +899,11 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'O Pilot interpreta o briefing: identifica o avatar, a voz, separa hook e body e divide a copy em partes. Task com status "pronto" pode disparar; "parcial" pede um ajuste — geralmente escolher o avatar à mão.',
         visual: (
           <Shot label="Pilot · análise">
-            <Mark n={1} x="82%" y="30%" />
             <MStack>
               <MRow>
                 <MField label="Avatar" value="identificado ✓" grow />
                 <MField label="Voz" value="memorizada ✓" grow />
-                <MChip tone="lime">PRONTO</MChip>
+                <MChip mark={4} tone="lime">PRONTO</MChip>
               </MRow>
               <MRow>
                 <MField label="Copy" value="1 hook + 3 partes de body" grow />
@@ -969,9 +930,8 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Clique em "▶ Iniciar N tasks em background". O Pilot dispara parte por parte no HeyGen, renderiza, baixa e monta — respeitando a fila e se auto-recuperando de partes travadas.',
         visual: (
           <Shot label="Pilot · disparo">
-            <Mark n={1} x="34%" y="26%" />
             <MStack>
-              <MBtn tone="primary">▶ Iniciar 2 tasks em background</MBtn>
+              <MBtn mark={6} tone="primary">▶ Iniciar 2 tasks em background</MBtn>
               <MQueueItem name="AD15VN · parte 2/4" status="renderizando" pct={38} />
               <MQueueItem name="AD16VN" status="na fila" pct={0} />
             </MStack>
@@ -1016,9 +976,8 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Clique em "⬇ Baixar Extensão" e siga o passo a passo. O indicador do primeiro card precisa ficar verde. Se aparecer "reinstalar", baixe a versão nova — leva menos de um minuto.',
         visual: (
           <Shot label="Auto B-roll · extensão">
-            <Mark n={1} x="24%" y="48%" />
             <MRow>
-              <MBtn tone="primary">⬇ Baixar Extensão</MBtn>
+              <MBtn mark={1} tone="primary">⬇ Baixar Extensão</MBtn>
               <MChip tone="lime">PRONTO ✓</MChip>
             </MRow>
           </Shot>
@@ -1046,9 +1005,8 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Cole a lista (texto ou JSON) — o app conta na hora quantos takes vai gerar. Dá pra colar direto da área de transferência ou puxar o JSON pronto.',
         visual: (
           <Shot label="Auto B-roll · job">
-            <Mark n={1} x="88%" y="36%" />
             <MStack>
-              <MField value='[{"take": 1, "imagePrompt": "...", "videoPrompt": "..."}]' />
+              <MField mark={4} value='[{"take": 1, "imagePrompt": "...", "videoPrompt": "..."}]' />
               <MRow>
                 <MChip tone="lime">12 TAKES DETECTADOS</MChip>
               </MRow>
@@ -1078,9 +1036,8 @@ export const GUIDES: Record<string, ToolGuide> = {
         text: 'Quando o último take termina, sai um ZIP nomeado com todos os MP4s na ordem — direto pra timeline, sem renomear nada. O histórico guarda os lotes anteriores pra re-baixar.',
         visual: (
           <Shot label="Auto B-roll · entrega">
-            <Mark n={1} x="22%" y="50%" />
             <MRow>
-              <MBtn tone="lime">Baixar ZIP (12)</MBtn>
+              <MBtn mark={7} tone="lime">Baixar ZIP (12)</MBtn>
               <MChip tone="dim">HISTÓRICO · 4 LOTES</MChip>
             </MRow>
           </Shot>
