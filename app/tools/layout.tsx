@@ -4,6 +4,7 @@ import { Heartbeat } from '@/components/Heartbeat';
 import { RouteLoader } from '@/components/RouteLoader';
 import { Sidebar } from '@/components/Sidebar';
 import { SubSidebar, useSubSidebarActive } from '@/components/SubSidebar';
+import { ToolGuideFab } from '@/components/ToolGuideFab';
 import { TopBar } from '@/components/TopBar';
 import { ToolsStateProvider } from '@/components/ToolsStateProvider';
 
@@ -28,6 +29,7 @@ export default function ToolsLayout({
       <Sidebar />
       <SubSidebar />
       <ContentWrap>{children}</ContentWrap>
+      <ToolGuideFab />
       <RouteLoader />
     </ToolsStateProvider>
   );
