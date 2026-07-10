@@ -24,6 +24,7 @@ export const GUIDE_PATHS = new Set<string>([
   '/tools/downloader',
   '/tools/fakepass',
   '/tools/heygen-auto',
+  '/tools/historico',
   '/tools/lipsync',
   '/tools/lipsync-history',
   '/tools/ltx-video',

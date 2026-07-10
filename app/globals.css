@@ -1875,9 +1875,10 @@ html[data-theme='light'] {
 }
 
 /* ─────────────────── Guia da ferramenta (FAB 3D + card flutuante) ───────────
-   FAB fixo acima do WhatsApp, mesmo vocabulário 3D do .mute-fab: bevel triplo,
-   perspective, lift no hover, press rápido. O card abre em overlay central. */
-/* ⚠ NÃO declarar position/display aqui: o componente usa `fixed bottom/right`
+   FAB fixo no canto superior direito (abaixo da TopBar), mesmo vocabulário 3D
+   do .mute-fab: bevel triplo, perspective, lift no hover, press rápido.
+   O card abre em overlay central. */
+/* ⚠ NÃO declarar position/display aqui: o componente usa `fixed top/right`
    do Tailwind e este bloco vem DEPOIS das utilities no cascade — um
    position:relative aqui já jogou o FAB pro fluxo da página (canto esquerdo). */
 .guide-fab {
@@ -1889,9 +1890,9 @@ html[data-theme='light'] {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 66px;
-  width: 66px;
-  border-radius: 20px;
+  height: 78px;
+  width: 78px;
+  border-radius: 23px;
   border: 2px solid rgba(167, 139, 250, 0.38);
   background:
     radial-gradient(120% 120% at 50% 12%, rgba(167, 139, 250, 0.22), transparent 60%),
@@ -1924,12 +1925,12 @@ html[data-theme='light'] {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 22px;
-  width: 22px;
+  height: 24px;
+  width: 24px;
   border-radius: 999px;
   background: linear-gradient(150deg, #c4b5fd, #8b5cf6);
   color: #17102a;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 800;
   line-height: 1;
   box-shadow:
@@ -1940,7 +1941,7 @@ html[data-theme='light'] {
 /* Lettering "Como usar" — gradiente varrido em loop lento + flutuação. */
 .guide-fab__label {
   font-family: var(--font-tech);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 800;
   letter-spacing: 0.14em;
   text-transform: uppercase;
