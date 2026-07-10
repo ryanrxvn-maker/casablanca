@@ -209,7 +209,7 @@ export default function CamuflagemPage() {
         });
         if (format === 'mp4' && !isVideoFile(pair.black)) {
           throw new Error(
-            'Para sair em MP4, o BLACK precisa ser um arquivo de video.',
+            'Para sair em MP4, o áudio original precisa ser um arquivo de vídeo.',
           );
         }
 
@@ -419,7 +419,7 @@ export default function CamuflagemPage() {
         // MODO TROCAR WHITE: recupera o BLACK por baixo, remove o WHITE antigo
         // e re-camufla o BLACK com o novo WHITE enviado.
         if (decloakSwapWhite) {
-          updateDecloak(it.id, { stage: 'Recuperando o BLACK original...' });
+          updateDecloak(it.id, { stage: 'Recuperando o áudio original...' });
           const { wav: blackWav } = await descamuflar({
             file: it.file!,
             layer: 'public',
@@ -558,8 +558,8 @@ export default function CamuflagemPage() {
         aria-label={muteMode ? 'Modo mudo ligado' : 'Modo mudo desligado'}
         title={
           muteMode
-            ? 'Modo mudo LIGADO — camufla sem WHITE (BLACK vira silêncio pra IA)'
-            : 'Modo mudo — camuflar sem WHITE (o BLACK vira silêncio pra IA)'
+            ? 'Modo mudo LIGADO — camufla sem áudio escondido (o original vira silêncio pra IA)'
+            : 'Modo mudo — camuflar sem áudio escondido (o original vira silêncio pra IA)'
         }
         disabled={processingAll}
         className="mute-fab__btn disabled:cursor-not-allowed disabled:opacity-50"
@@ -695,12 +695,12 @@ export default function CamuflagemPage() {
           />
           {format === 'mp4' ? (
             <p className="mt-2 text-[11px] text-text-muted">
-              O BLACK mantém o vídeo; só a trilha de áudio é substituída pela versão camuflada.
+              O vídeo original é mantido; só a trilha de áudio vira a versão camuflada.
             </p>
           ) : null}
         </ToolStep>
 
-        <ToolStep n={muteMode ? 2 : 3} icon={<IconStepFiles size={18} />} title={muteMode ? 'Áudio BLACK' : 'Pares BLACK + WHITE'} hint={muteMode ? 'BLACK = público · a IA escuta SILÊNCIO' : 'BLACK = público · WHITE = IA escuta'} hue={HUE} action={muteFab}>
+        <ToolStep n={muteMode ? 2 : 3} icon={<IconStepFiles size={18} />} title={muteMode ? 'Áudio original' : 'Original + escondido'} hint={muteMode ? 'Original = o que toca · a IA escuta SILÊNCIO' : 'Original = o que toca · escondido = a IA lê'} hue={HUE} action={muteFab}>
         <div className="flex flex-col gap-4">
           {pairs.map((pair, i) => (
             <div
@@ -743,7 +743,7 @@ export default function CamuflagemPage() {
               </div>
               <div className={muteMode ? '' : 'grid gap-3 md:grid-cols-2'}>
                 <div>
-                  <label className="label-field">BLACK (publico)</label>
+                  <label className="label-field">Áudio original</label>
                   <FileUpload
                     accept="audio/*,video/mp4,video/webm,video/quicktime"
                     value={pair.black}
@@ -753,14 +753,15 @@ export default function CamuflagemPage() {
                   />
                   {muteMode ? (
                     <p className="mt-1 text-[11px] text-text-muted">
-                      Sem WHITE: o BLACK vira silêncio pra IA que soma os
-                      canais. O humano continua ouvindo o BLACK normalmente.
+                      Sem áudio escondido: o original vira silêncio pra IA que
+                      soma os canais. O humano continua ouvindo o original
+                      normalmente.
                     </p>
                   ) : null}
                 </div>
                 {!muteMode ? (
                 <div>
-                  <label className="label-field">WHITE (IA)</label>
+                  <label className="label-field">Áudio escondido</label>
                   <FileUpload
                     accept="audio/*,video/mp4,video/webm,video/quicktime"
                     value={pair.white}
@@ -769,8 +770,8 @@ export default function CamuflagemPage() {
                     }
                   />
                   <p className="mt-1 text-[11px] text-text-muted">
-                    Pode ser mais curto que o BLACK — o output fica com a
-                    duracao do BLACK, e a IA segue sem identificar a trilha.
+                    Pode ser mais curto que o original — o resultado fica com a
+                    duração do original, e a IA segue sem identificar a trilha.
                   </p>
                 </div>
                 ) : null}
@@ -834,7 +835,7 @@ export default function CamuflagemPage() {
                             ) : (
                               <>
                                 NAO ZEROU — a soma dos canais ainda tem audio; a
-                                IA de plataforma pode escutar o BLACK
+                                IA de plataforma pode escutar o áudio original
                               </>
                             )}
                           </div>
@@ -868,7 +869,7 @@ export default function CamuflagemPage() {
                                           : 'bg-red-500/25 text-red-300')
                                       }
                                     >
-                                      {d.silent ? 'MUDO' : 'BLACK'}
+                                      {d.silent ? 'MUDO' : 'ORIGINAL'}
                                     </span>
                                   </span>
                                 </div>
@@ -878,9 +879,10 @@ export default function CamuflagemPage() {
                           {ok ? (
                             <div className="mt-2 border-t border-lime/30 pt-2 text-[11px] text-lime/80">
                               A soma L+R cai {Math.abs(MUTE_SILENT_DB)}+ dB abaixo
-                              do BLACK — inaudivel pra IA que soma/media os canais.
-                              Canal unico (AssemblyAI/Whisper) ainda ouve o BLACK
-                              cheio: a inversao de fase so engana quem SOMA. A
+                              do original — inaudivel pra IA que soma/media os
+                              canais. Canal unico (AssemblyAI/Whisper) ainda ouve
+                              o original cheio: a inversao de fase so engana quem
+                              SOMA. A
                               prova final e a legenda automatica da plataforma.
                             </div>
                           ) : (
@@ -917,12 +919,12 @@ export default function CamuflagemPage() {
                             {ok ? (
                               <>
                                 CAMUFLADO PRA {targetLabel.toUpperCase()} — essa
-                                IA escuta o WHITE
+                                IA escuta o áudio escondido
                               </>
                             ) : (
                               <>
                                 NAO CAMUFLADO PRA {targetLabel.toUpperCase()} —
-                                essa IA escuta o BLACK
+                                essa IA escuta o áudio original
                               </>
                             )}
                           </div>
@@ -943,7 +945,7 @@ export default function CamuflagemPage() {
                                   </span>
                                   <span className="flex items-center gap-2">
                                     <span className="mono text-[10px] text-text-muted">
-                                      w {d.whiteScore.toFixed(2)} · b{' '}
+                                      esc {d.whiteScore.toFixed(2)} · orig{' '}
                                       {d.blackScore.toFixed(2)}
                                     </span>
                                     <span
@@ -957,9 +959,9 @@ export default function CamuflagemPage() {
                                       }
                                     >
                                       {d.hears === 'white'
-                                        ? 'WHITE'
+                                        ? 'ESCONDIDO'
                                         : d.hears === 'black'
-                                          ? 'BLACK'
+                                          ? 'ORIGINAL'
                                           : '???'}
                                     </span>
                                   </span>
@@ -973,14 +975,14 @@ export default function CamuflagemPage() {
                               (comprovado); TikTok/Kwai/Meta (Facebook/Instagram)
                               sao da mesma familia de match por mono. A prova
                               final e empirica: suba 1 video teste e veja a
-                              legenda automatica / se a moderacao pega o WHITE.
+                              legenda automatica / se a moderacao pega o escondido.
                             </div>
                           ) : !ok ? (
                             <div className="mt-2 border-t border-red-500/30 pt-2 text-[11px] text-red-300/90">
                               A inversao de fase so engana quem SOMA/media L+R.
-                              Engine de canal unico escuta o BLACK cheio — sem
-                              correcao possivel sem o publico ouvir o WHITE.
-                              Confirme no botao TRANSCREVER.
+                              Engine de canal unico escuta o áudio original cheio
+                              — sem correcao possivel sem o publico ouvir o
+                              escondido. Confirme no botao TRANSCREVER.
                             </div>
                           ) : null}
                         </div>
@@ -1053,14 +1055,14 @@ export default function CamuflagemPage() {
                           <>
                             No modo mudo isso tem que vir{' '}
                             <strong>vazio / silêncio</strong> — se aparecer o
-                            roteiro do BLACK, a soma não zerou pra esse tipo de
-                            IA. A certeza ABSOLUTA vem da legenda automática da
-                            plataforma no vídeo publicado.
+                            roteiro do original, a soma não zerou pra esse tipo
+                            de IA. A certeza ABSOLUTA vem da legenda automática
+                            da plataforma no vídeo publicado.
                           </>
                         ) : (
                           <>
                             Esse texto tem que ser o roteiro do{' '}
-                            <strong>WHITE</strong>.
+                            <strong>áudio escondido</strong>.
                             {target === 'platforms' ? (
                               <>
                                 {' '}
@@ -1072,8 +1074,8 @@ export default function CamuflagemPage() {
                             ) : (
                               <>
                                 {' '}
-                                Se aparecer o roteiro do BLACK, a camuflagem nao
-                                segurou pra esse tipo de IA.
+                                Se aparecer o roteiro do original, a camuflagem
+                                nao segurou pra esse tipo de IA.
                               </>
                             )}
                           </>
