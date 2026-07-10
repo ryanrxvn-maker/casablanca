@@ -18,6 +18,17 @@ import {
   newBatchId,
   selectOwnBatch,
 } from '@/lib/heygen-batch-store';
+import {
+  getQueueOwnerId,
+  ensureQueueOwnerId,
+  savePersistedQueue,
+  loadPersistedQueue,
+  setPersistedRunMode,
+  queueAudioKey,
+  recoverFromMirror,
+  planQueueRehydration,
+  type PersistedQueueItem,
+} from '@/lib/heygen-queue-store';
 import { extractAudio, muxAudioIntoVideo } from '@/lib/ffmpeg-worker';
 import { camuflar } from '@/lib/camuflagem';
 import {
@@ -368,6 +379,12 @@ function HeyGenAutoInner() {
   const queueBusyRef = useRef(false);
   /** Debug aberto por item (UI). */
   const [queueDebugOpen, setQueueDebugOpen] = useState<Record<string, boolean>>({});
+  /** Persistência da fila: só grava DEPOIS da re-hidratação (senão o efeito
+   *  de persistir rodava com [] no mount e apagava a fila salva). */
+  const queuePersistReadyRef = useRef(false);
+  /** Plano de auto-retomada montado na re-hidratação (ids a retomar + se a
+   *  fila estava em "Processar fila" e deve continuar os pendentes). */
+  const queueAutoResumeRef = useRef<{ ids: string[]; continueQueue: boolean } | null>(null);
 
   /* ===================== Modal de importar copy do Docs ===================== */
   const [docModalOpen, setDocModalOpen] = useState(false);
@@ -618,6 +635,190 @@ function HeyGenAutoInner() {
     window.addEventListener('beforeunload', h);
     return () => window.removeEventListener('beforeunload', h);
   }, [processing, downloading, queueRunning]);
+
+  /* --------- PERSISTÊNCIA + AUTO-RETOMADA da fila (F5 não perde a fila) ---------
+   * A fila era useState puro — o beforeunload acima só AVISA; F5/queda de aba/
+   * auto-reload do chunk-guard perdia a fila INTEIRA. Agora: metadados no
+   * localStorage com posse POR-ABA via sessionStorage (mesmo modelo do
+   * heygen-batch-store — nunca mistura com outra aba nem com a fila do ClickUp
+   * Pilot) + áudios (File) no IndexedDB (zip-store) sob hgaq:<itemId>:audio:<n>.
+   * Ver lib/heygen-queue-store.ts. */
+
+  /** QueueItem → forma serializável (File vira referência ao IndexedDB). */
+  function toPersistedQueueItem(item: QueueItem): PersistedQueueItem {
+    return {
+      ...item,
+      parts: item.parts.map((p, i) => {
+        const { audio, ...rest } = p;
+        return audio
+          ? { ...rest, audioKey: queueAudioKey(item.id, i), audioName: audio.name, audioType: audio.type || 'audio/mpeg' }
+          : rest;
+      }),
+    };
+  }
+
+  /** Persistido → QueueItem vivo (re-hidrata os File de áudio do IndexedDB).
+   *  audioMissing=true quando alguma parte tinha áudio e os bytes sumiram. */
+  async function fromPersistedQueueItem(
+    p: PersistedQueueItem,
+    loadBlob: (key: string, mime?: string) => Promise<Blob | null>,
+  ): Promise<{ item: QueueItem; audioMissing: boolean }> {
+    let audioMissing = false;
+    const parts: QueuePart[] = [];
+    for (const pp of p.parts) {
+      const { audioKey, audioName, audioType, ...rest } = pp;
+      let audio: File | undefined;
+      if (audioKey) {
+        const blob = await loadBlob(audioKey, audioType || 'audio/mpeg').catch(() => null);
+        if (blob) audio = new File([blob], audioName || 'audio.mp3', { type: audioType || 'audio/mpeg' });
+        else audioMissing = true;
+      }
+      parts.push({ ...rest, ...(audio ? { audio } : {}) });
+    }
+    const item: QueueItem = {
+      ...p,
+      mode: p.mode as Mode,
+      motor: p.motor as Motor,
+      phase: p.phase as QueueItem['phase'],
+      parts,
+      takePreviews: p.takePreviews as LipsyncTake[] | undefined,
+    };
+    return { item, audioMissing };
+  }
+
+  /** Salva os áudios (File) de um item JÁ no enfileirar (persistir cedo) —
+   *  o F5 re-hidrata de lá. Falha NÃO trava o item (ele roda normal nesta
+   *  sessão); só avisa que um reload perderia o áudio. */
+  async function persistQueueItemAudios(item: QueueItem) {
+    const failures: string[] = [];
+    try {
+      const { saveBlob } = await import('@/lib/zip-store');
+      for (let i = 0; i < item.parts.length; i++) {
+        const f = item.parts[i].audio;
+        if (!f) continue;
+        try {
+          await saveBlob(queueAudioKey(item.id, i), f, f.type || 'audio/mpeg');
+        } catch (e) {
+          failures.push(item.parts[i].label);
+          console.warn('[heygen-auto] salvar áudio da fila no IDB falhou:', e);
+        }
+      }
+    } catch (e) {
+      failures.push('todas as partes');
+      console.warn('[heygen-auto] salvar áudios da fila falhou:', e);
+    }
+    if (failures.length > 0) {
+      setQueue((prev) =>
+        prev.map((q) =>
+          q.id === item.id && q.status === 'pending'
+            ? { ...q, message: `⚠ Áudio não persistiu (${failures.join(', ')}) — se a página recarregar, remova e adicione de novo.` }
+            : q,
+        ),
+      );
+    }
+  }
+
+  /** Re-hidrata a fila desta aba no mount (posse via sessionStorage — aba nova
+   *  começa vazia, NUNCA adota fila de outra aba). Itens que estavam rodando
+   *  com videoIds voltam retomáveis; interrompido no MEIO do dispatch vira
+   *  failed honesto (anti-duplicação de submit no HeyGen). */
+  const queueRehydratedRef = useRef(false);
+  useEffect(() => {
+    if (queueRehydratedRef.current) return;
+    queueRehydratedRef.current = true;
+    void (async () => {
+      try {
+        const owned = getQueueOwnerId();
+        const saved = owned ? loadPersistedQueue(owned) : null;
+        if (!saved || saved.items.length === 0) return;
+        // Recupera videoIds do espelho compartilhado quando o reload comeu o
+        // onUpdate do fim do dispatch (o mirror recebe cada videoId ao vivo).
+        const mirrors = listSharedBatches('heygenauto:');
+        const enriched = saved.items.map((it) =>
+          recoverFromMirror(it, it.batchId ? mirrors.find((b) => b.taskId === it.batchId)?.parts : null),
+        );
+        const plan = planQueueRehydration(enriched, saved.runMode);
+        const { loadBlob } = await import('@/lib/zip-store');
+        const items: QueueItem[] = [];
+        for (const p of plan.items) {
+          const { item, audioMissing } = await fromPersistedQueueItem(p, loadBlob);
+          // Áudio sumiu (faxina/limpeza do navegador) e o item ainda PRECISA
+          // dele (não entregue, sem videoIds pra retomar) → failed honesto,
+          // nunca botão que dispara sem áudio.
+          if (audioMissing && item.status !== 'done' && !(item.videoIds && item.videoIds.length > 0)) {
+            item.status = 'failed';
+            item.message = '⚠ O áudio deste item não sobreviveu ao reload (limpeza do navegador) — remova e adicione de novo.';
+          }
+          items.push(item);
+        }
+        let adopted = false;
+        setQueue((prev) => {
+          if (prev.length > 0) return prev; // user já enfileirou algo → não sobrescreve
+          adopted = true;
+          return items;
+        });
+        if (adopted) {
+          const ids = plan.autoResumeIds.filter((id) => items.find((i) => i.id === id)?.status === 'pending');
+          queueAutoResumeRef.current = { ids, continueQueue: plan.continueQueue };
+        }
+      } catch (e) {
+        console.warn('[heygen-auto] re-hidratar fila falhou:', e);
+      } finally {
+        queuePersistReadyRef.current = true;
+        // Se o user enfileirou algo ANTES da re-hidratação terminar (janela de
+        // ms), o persist ainda estava travado — dá um tick pra gravar agora.
+        setQueue((prev) => (prev.length > 0 ? [...prev] : prev));
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Persiste a fila a cada mudança (metadados são pequenos; os bytes de áudio
+   *  já foram pro IDB no enfileirar). Fila vazia = remove a entrada. */
+  useEffect(() => {
+    if (!queuePersistReadyRef.current) return;
+    try {
+      if (queue.length === 0) {
+        const owned = getQueueOwnerId();
+        if (owned) savePersistedQueue(owned, []);
+        return;
+      }
+      savePersistedQueue(ensureQueueOwnerId(), queue.map(toPersistedQueueItem));
+    } catch (e) {
+      console.warn('[heygen-auto] persistir fila falhou:', e);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue]);
+
+  /** AUTO-RETOMADA pós-reload: retoma (re-poll+download, SEM re-disparar) os
+   *  itens interrompidos e — se "Processar fila" estava em andamento — continua
+   *  os pendentes (fila de madrugada termina sozinha). Guards: queueBusyRef
+   *  (atômico) + queueRunning/processing/downloading — nunca roda em dobro; e
+   *  só quando a extensão conectar. Cada retomada dispara este efeito de novo
+   *  ao terminar (queueRunning volta a false) → segue o próximo do plano. */
+  useEffect(() => {
+    const plan = queueAutoResumeRef.current;
+    if (!plan) return;
+    if (extLoading || !extStatus.connected) return;
+    if (queueBusyRef.current || queueRunning || processing || downloading) return;
+    while (plan.ids.length > 0) {
+      const id = plan.ids.shift()!;
+      const item = queue.find((q) => q.id === id);
+      // Só retoma quem continua elegível (pending + videoIds) — retomar NUNCA
+      // re-dispara, então não há custo/submit duplicado no HeyGen.
+      if (item && item.status === 'pending' && item.videoIds && item.videoIds.length > 0) {
+        void resumeQueueItem(id);
+        return;
+      }
+    }
+    queueAutoResumeRef.current = null;
+    if (plan.continueQueue && queue.some((q) => q.status === 'pending')) {
+      // skipFailed: itens que o plano marcou como failed (dispatch pela metade
+      // ou áudio perdido) NÃO entram — re-disparo é decisão do user.
+      void processQueue({ skipFailed: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extLoading, extStatus.connected, queueRunning, processing, downloading, queue]);
 
   /** FAXINA do IndexedDB (LRU por disparo) — o `darkolab-zip-store` acumulava
    *  montado+takes+partes de TODO disparo sem nunca purgar → no Chrome (banco
@@ -1819,34 +2020,55 @@ function HeyGenAutoInner() {
         }),
       );
     }
-    setQueue((prev) => [
-      ...prev,
-      {
-        id: `manual:${safeName}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`,
-        adName: adName.trim() || safeName,
-        safeName,
-        mode,
-        parts: qparts,
-        motor: motorConfig.kind === 'global' ? motorConfig.motor : motor,
-        decupagem: decupagemEnabled,
-        decupIntensity,
-        source: 'manual',
-        voiceName: selectedVoice ? selectedVoice.name : null,
+    const newItem: QueueItem = {
+      id: `manual:${safeName}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`,
+      adName: adName.trim() || safeName,
+      safeName,
+      mode,
+      parts: qparts,
+      motor: motorConfig.kind === 'global' ? motorConfig.motor : motor,
+      decupagem: decupagemEnabled,
+      decupIntensity,
+      source: 'manual',
+      voiceName: selectedVoice ? selectedVoice.name : null,
+      status: 'pending',
+      // Placeholders de preview já na fila (mesma estrutura do Pilot).
+      takePreviews: qparts.map((p) => ({
+        label: p.label,
         status: 'pending',
-        // Placeholders de preview já na fila (mesma estrutura do Pilot).
-        takePreviews: qparts.map((p) => ({
-          label: p.label,
-          status: 'pending',
-          videoUrl: null,
-          error: null,
-        })),
-      },
-    ]);
+        videoUrl: null,
+        error: null,
+      })),
+    };
+    setQueue((prev) => [...prev, newItem]);
+    // Áudio (File) não serializa no localStorage — os bytes vão pro IndexedDB
+    // JÁ no enfileirar (persistir cedo): o F5 re-hidrata de lá.
+    if (mode === 'audio') void persistQueueItemAudios(newItem);
     setError(null);
   }
 
   function removeFromQueue(id: string) {
     setQueue((prev) => prev.filter((q) => q.id !== id));
+    // Faxina dos áudios persistidos desse item (best-effort; os ZIPs de entrega
+    // ficam — vivem sob batch:<batchId>: e seguem o LRU normal).
+    void (async () => {
+      try {
+        const { deletePrefix } = await import('@/lib/zip-store');
+        await deletePrefix(`hgaq:${id}:`);
+      } catch {}
+    })();
+  }
+
+  /** Limpar fila: remove os itens E os áudios persistidos deles no IDB. */
+  function clearQueue() {
+    const ids = queue.map((q) => q.id);
+    setQueue([]);
+    void (async () => {
+      try {
+        const { deletePrefix } = await import('@/lib/zip-store');
+        for (const id of ids) await deletePrefix(`hgaq:${id}:`);
+      } catch {}
+    })();
   }
 
   function cancelQueue() {
@@ -2202,6 +2424,9 @@ function HeyGenAutoInner() {
     queueBusyRef.current = true;
     setQueueRunning(true);
     queueCancelRef.current = false;
+    // Grava O QUE está rodando: se a aba cair no meio, o reload sabe que era um
+    // RETOMAR avulso ('single') — ou parte da auto-retomada da fila ('queue').
+    try { setPersistedRunMode(getQueueOwnerId(), queueAutoResumeRef.current?.continueQueue ? 'queue' : 'single'); } catch {}
     setQueue((prev) => prev.map((q) => (q.id === id ? { ...q, status: 'running', message: 'Retomando...' } : q)));
     const patch = (p: Partial<QueueItem>) => setQueue((prev) => prev.map((q) => (q.id === id ? { ...q, ...p } : q)));
     try {
@@ -2229,11 +2454,15 @@ function HeyGenAutoInner() {
       queueBusyRef.current = false;
       setQueueRunning(false);
       queueCancelRef.current = false;
+      try { setPersistedRunMode(getQueueOwnerId(), null); } catch {}
     }
   }
 
-  /** Processa a fila inteira em sequencia (1 disparo por vez). */
-  async function processQueue() {
+  /** Processa a fila inteira em sequencia (1 disparo por vez).
+   *  skipFailed: usado SÓ pela auto-retomada pós-reload — item 'failed' não
+   *  re-dispara sozinho (re-disparo é decisão do user). O clique manual segue
+   *  reprocessando faileds como sempre. */
+  async function processQueue(opts?: { skipFailed?: boolean }) {
     if (queueBusyRef.current) return;
     if (!extStatus.connected) {
       setError('Extensão Hey Auto não detectada. Instale primeiro.');
@@ -2241,12 +2470,17 @@ function HeyGenAutoInner() {
     }
     // 'running' fica FORA do snapshot: se algo já roda (RETOMAR avulso), o
     // clique na fila não pode disparar o mesmo item de novo.
-    const snapshot = queue.filter((q) => q.status !== 'done' && q.status !== 'running');
+    const snapshot = queue.filter(
+      (q) => q.status !== 'done' && q.status !== 'running' && !(opts?.skipFailed && q.status === 'failed'),
+    );
     if (snapshot.length === 0) return;
     setError(null);
     queueBusyRef.current = true;
     setQueueRunning(true);
     queueCancelRef.current = false;
+    // Grava que a FILA está em andamento — se a aba cair no meio, o reload
+    // retoma o item interrompido e CONTINUA os pendentes.
+    try { setPersistedRunMode(getQueueOwnerId(), 'queue'); } catch {}
     for (const item of snapshot) {
       if (queueCancelRef.current) break;
       setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: 'running', message: 'Iniciando...', progress: 0, phase: 'dispatching' } : q)));
@@ -2255,6 +2489,9 @@ function HeyGenAutoInner() {
           onStage: () => {},
           onUpdate: (patch) => setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, ...patch } : q))),
           isCancelled: () => queueCancelRef.current,
+          // Item que JÁ disparou (pausado / re-hidratado com videoIds) RETOMA
+          // em vez de re-disparar — nunca duplica submit/custo no HeyGen.
+          resumeVideoIds: item.videoIds && item.videoIds.length > 0 ? item.videoIds : undefined,
         });
         setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: 'done', message: '✓ ZIPs baixados', progress: 100, phase: 'done' } : q)));
         logHistory({
@@ -2281,6 +2518,9 @@ function HeyGenAutoInner() {
     queueBusyRef.current = false;
     setQueueRunning(false);
     queueCancelRef.current = false;
+    // Fila terminou (ou foi pausada de propósito) — solta o modo persistido:
+    // o próximo reload NÃO deve auto-continuar uma fila que o user pausou.
+    try { setPersistedRunMode(getQueueOwnerId(), null); } catch {}
   }
 
   return (
@@ -3034,7 +3274,7 @@ function HeyGenAutoInner() {
                 {queue.length > 0 ? (
                   <button
                     type="button"
-                    onClick={() => setQueue([])}
+                    onClick={clearQueue}
                     disabled={queueRunning}
                     className="rounded-[10px] border border-line-strong px-3 py-2 text-xs text-text-muted transition hover:border-red-500/60 hover:text-red-300 disabled:opacity-40"
                   >
@@ -3291,7 +3531,7 @@ function HeyGenAutoInner() {
                     ) : (
                       <button
                         type="button"
-                        onClick={processQueue}
+                        onClick={() => processQueue()}
                         disabled={!extStatus.connected || queue.filter((q) => q.status !== 'done').length === 0}
                         className="btn-primary"
                       >

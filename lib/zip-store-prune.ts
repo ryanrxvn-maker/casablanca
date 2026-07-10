@@ -42,6 +42,11 @@ export function zipGroupId(key: string): string {
   if (m) return m[1];
   m = /^va:(.+):(?:zip|part(?::.*)?)$/.exec(key);
   if (m) return m[1];
+  // Fila do Hey Auto: áudio persistido de item enfileirado (modo audio) —
+  // `hgaq:<itemId>:audio:<idx>`. Agrupa pelo itemId pra o item ser mantido/
+  // removido como unidade e protegível (via protect) enquanto não entregue.
+  m = /^hgaq:(.+):audio:\d+$/.exec(key);
+  if (m) return m[1];
   // pilot:<taskId>[:g:<genId>]:(part|leveled|decupado):<label>[@k<sec>]
   m = /^pilot:(.+?):(?:g:[^:]+:)?(?:part|leveled|decupado):/.exec(key);
   if (m) return m[1];

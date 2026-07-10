@@ -255,13 +255,20 @@ export async function pruneZipStore(opts: {
 } = {}): Promise<{ evicted: number; freedBytes: number; keptGroups: number } | null> {
   try {
     const { planZipEviction } = await import('./zip-store-prune');
+    // Áudios de itens de FILA do Hey Auto ainda não entregues são protegidos
+    // AQUI (não só no protect do caller): a faxina também roda no boot do
+    // Pilot/Auto B-roll, que não conhecem a fila — sem isto uma fila pendente
+    // de madrugada (>12h) perdia os áudios pra faxina de outra ferramenta.
+    const { listQueueAudioProtectIds } = await import('./heygen-queue-store');
+    const protect = new Set<string>(opts.protect ? Array.from(opts.protect) : []);
+    for (const id of listQueueAudioProtectIds()) protect.add(id);
     // listZipKeys lê via cursor SEM reter bytes (só key/size/createdAt) — pico de
     // memória é ~1 registro por vez, não o store inteiro.
     const metas = await listZipKeys();
     if (metas.length === 0) return { evicted: 0, freedBytes: 0, keptGroups: 0 };
     const plan = planZipEviction(
       metas.map((m) => ({ key: m.key, size: m.size, createdAt: m.createdAt })),
-      opts,
+      { ...opts, protect },
     );
     if (plan.evictKeys.length === 0) {
       return { evicted: 0, freedBytes: 0, keptGroups: plan.stats.keptGroups };
