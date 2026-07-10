@@ -190,12 +190,14 @@ async function transcribeViaAssemblyAI(audio: File): Promise<Word[]> {
     await new Promise((r) => setTimeout(r, 2500));
     const poll = await fetch(`${AAI_BASE}/transcript/${transcriptId}`, {
       headers: { authorization: apiKey },
-    });
-    const body = (await poll.json()) as {
+    }).catch(() => null);
+    if (!poll || !poll.ok) continue; // blip transitório → tenta de novo até o deadline
+    const body = (await poll.json().catch(() => null)) as {
       status: 'queued' | 'processing' | 'completed' | 'error';
       words?: Word[];
       error?: string;
-    };
+    } | null;
+    if (!body) continue; // resposta não-JSON (502 HTML) → tenta de novo
     if (body.status === 'completed') {
       return (body.words ?? []) as Word[];
     }
