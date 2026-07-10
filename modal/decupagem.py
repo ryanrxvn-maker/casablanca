@@ -201,7 +201,10 @@ def run_decupagem(video_url: str, keep_silence: float, output_kind: str) -> dict
     }
 
 
-@app.function(timeout=1800, memory=2048, volumes={"/work": vol}, max_containers=20, secrets=[decup_secret])
+# timeout=3600: um upload de 1.5GB numa conexão de ~5Mbps leva ~40min — com o
+# teto antigo de 30min o request morria NO MEIO do envio (e o retry recomeçava
+# do zero, pra morrer de novo). 1h cobre qualquer uplink realista.
+@app.function(timeout=3600, memory=2048, volumes={"/work": vol}, max_containers=20, secrets=[decup_secret])
 @modal.asgi_app()
 def web():
     import hashlib

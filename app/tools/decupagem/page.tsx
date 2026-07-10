@@ -231,6 +231,20 @@ export default function DecupagemPage() {
     [],
   );
 
+  // Fila NÃO sobrevive a F5 (File não serializa — e persistir 10×1,5GB no IDB
+  // travaria o Chrome, ver lição do zip-store). Então enquanto PROCESSA, um
+  // fechar/recarregar acidental pede confirmação — uma fila de horas não pode
+  // morrer num Ctrl+R sem querer.
+  useEffect(() => {
+    if (!processing) return;
+    const h = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', h);
+    return () => window.removeEventListener('beforeunload', h);
+  }, [processing]);
+
   // Free é forçado a 'audio'. Vídeo só pra pagos.
   const queueHasVideo = queue.some((q) => isVideoFile(q.file));
 
