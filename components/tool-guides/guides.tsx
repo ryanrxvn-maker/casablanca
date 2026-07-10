@@ -623,7 +623,7 @@ export const GUIDES: Record<string, ToolGuide> = {
       },
       {
         title: 'Adicione os ADs',
-        text: 'Uma linha por AD, com a duração em minutos e segundos — pode digitar com dois-pontos, vírgula ou ponto (06:19, 6,19 e 6.19 valem o mesmo). Use "Adicionar AD" pra incluir linhas e o "×" pra remover. O valor de cada AD e a "Duração total" recalculam a cada tecla.',
+        text: 'Uma linha por AD. Você só digita os números da duração e ela vira tempo sozinha — sem precisar de dois-pontos, vírgula ou ponto (digitou 619, virou 6:19; digitou 45, virou 0:45). Use "Adicionar AD" pra incluir linhas e o "×" pra remover. O valor de cada AD e a "Duração total" recalculam a cada tecla.',
         visual: (
           <Shot label="Calculadora · ADs">
             <MRow>

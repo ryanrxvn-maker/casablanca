@@ -2,7 +2,7 @@
  * Gerador do relatório de ORÇAMENTO em PDF com DOWNLOAD AUTOMÁTICO.
  *
  * Clicou → baixa o arquivo. Sem diálogo de impressão. Renderiza um nó DOM
- * A4 (branco, identidade Auto Edit) fora da tela, captura com html2canvas
+ * A4 (branco, só a logo — sem nome/domínio) fora da tela, captura com html2canvas
  * e empacota num PDF via jsPDF — tudo no client, sem backend.
  *
  * jspdf/html2canvas são importados dinamicamente só quando o botão é
@@ -65,7 +65,8 @@ const REPORT_CSS = `
     background-image:linear-gradient(90deg,#8b6cf6,#6d4ee8 45%,#bcc98c); }
   .ae-report .head{ display:flex; justify-content:space-between; align-items:flex-start; padding:16mm 18mm 0; }
   .ae-report .brand{ display:flex; align-items:center; gap:13px; }
-  .ae-report .brand img{ width:50px; height:50px; object-fit:contain; }
+  .ae-report .brand img{ width:58px; height:58px; object-fit:contain; }
+  .ae-report .foot-logo{ width:26px; height:26px; object-fit:contain; opacity:.7; }
   .ae-report .wm{ font-family:'Fraunces',serif; font-weight:700; font-size:25px; letter-spacing:-.01em; line-height:1; color:var(--ink); }
   .ae-report .tag{ margin-top:5px; font-size:8.5px; font-weight:700; letter-spacing:.22em; text-transform:uppercase; color:var(--faint); }
   .ae-report .doc{ text-align:right; }
@@ -152,11 +153,7 @@ function reportMarkup(d: BudgetReportData, pixCardHtml: string): string {
     <div class="topbar"></div>
     <div class="head">
       <div class="brand">
-        <img src="${esc(d.logoUrl)}" alt="Auto Edit" crossorigin="anonymous" />
-        <div>
-          <div class="wm">Auto Edit</div>
-          <div class="tag">Automação de edição de vídeo</div>
-        </div>
+        <img src="${esc(d.logoUrl)}" alt="" crossorigin="anonymous" />
       </div>
       <div class="doc">
         <div class="kicker">Orçamento</div>
@@ -171,12 +168,6 @@ function reportMarkup(d: BudgetReportData, pixCardHtml: string): string {
     <div class="rule"></div>
     <div class="parties">
       ${clienteBlock}
-      <div class="from">
-        <div class="lbl">Emitido por</div>
-        <div class="from-name">Auto Edit</div>
-        <div class="from-line">Automação de edição de vídeo</div>
-        <div class="from-line">darkoautoedit.com</div>
-      </div>
     </div>
     <div class="section-label">Itens do orçamento · ${adsTxt}</div>
     <table>
@@ -205,7 +196,7 @@ function reportMarkup(d: BudgetReportData, pixCardHtml: string): string {
       </ul>
     </div>
     <div class="footer">
-      <div class="fb"><b>Auto Edit</b> · Automação de edição de vídeo · darkoautoedit.com</div>
+      <img class="foot-logo" src="${esc(d.logoUrl)}" alt="" crossorigin="anonymous" />
       <div class="fnum">${esc(d.docNumber)}</div>
     </div>
   `;
@@ -400,7 +391,7 @@ export async function downloadBudgetReport(d: BudgetReportData): Promise<void> {
     }
 
     const nome = d.cliente ? slug(d.cliente) : d.docNumber;
-    pdf.save(`Orcamento-Auto-Edit-${nome}.pdf`);
+    pdf.save(`Orcamento-${nome}.pdf`);
   } finally {
     document.body.removeChild(wrap);
   }
