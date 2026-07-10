@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef } from 'react';
+import { logHistory } from '@/lib/history';
 import { ToolShell } from '@/components/ToolShell';
 import { ToolHeroVideo } from '@/components/ToolHeroVideo';
 import { CancelButton } from '@/components/CancelButton';
@@ -157,6 +158,7 @@ export default function CopySrtPage() {
       }
 
       setSrt(json.srt);
+      logHistory({ tool: 'copy-srt', title: `SRT gerado de ${file.name}` });
       setStage(null);
       setProgress(null);
     } catch (e) {

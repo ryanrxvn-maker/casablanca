@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
+import { logHistory } from '@/lib/history';
 import { createClient } from '@/lib/supabase/client';
 import { ToolStep, ToolChoice, ToolAction } from '@/components/tool-kit';
 import { IconDownloader, IconStepPlug, IconStepLink, IconStepFormat, IconStepDownload } from '@/components/ToolIcons';
@@ -347,6 +348,7 @@ export default function DownloaderPage() {
             : j,
         ),
       );
+      logHistory({ tool: 'downloader', kind: 'download', title: `${filename} baixado` });
     } catch (e) {
       setJobs((prev) =>
         prev.map((j, i) =>

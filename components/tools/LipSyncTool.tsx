@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { logHistory } from '@/lib/history';
 import { ToolHeroVideo } from '@/components/ToolHeroVideo';
 import { createClient } from '@/lib/supabase/client';
 import { LipsyncPreviewCard, type LipsyncTake } from '@/components/LipsyncPreviewCard';
@@ -541,6 +542,7 @@ export default function LipSyncTool() {
       }
 
       patchJob(id, { status: 'done', percent: 100, videoUrl: URL.createObjectURL(finalBlob) });
+      logHistory({ tool: 'lipsync', title: `${faceFile.name} — lipsync pronto` });
     } catch (err) {
       // AUTO-RETRY 1x se a falha foi TRANSITÓRIA (rede/upload/storage) e mesmo
       // assim furou todas as tentativas internas — o card volta pra "na fila" e

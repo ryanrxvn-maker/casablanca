@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo } from 'react';
+import { logHistory } from '@/lib/history';
 import { ToolShell } from '@/components/ToolShell';
 import { BatchFileUpload } from '@/components/BatchFileUpload';
 import { useToolState } from '@/components/ToolsStateProvider';
@@ -133,6 +134,11 @@ export default function AceleradorPage() {
       progress: 100,
       resultBlob: blob,
       resultUrl: url,
+    });
+    logHistory({
+      tool: 'acelerador',
+      title: `${job.file.name} processado`,
+      meta: `${speed}× · ${format.toUpperCase()}`,
     });
   }
 

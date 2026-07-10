@@ -1,6 +1,7 @@
 'use client';
 
 import { ToolShell } from '@/components/ToolShell';
+import { logHistory } from '@/lib/history';
 import { IconCamuflagem, IconStepTarget, IconStepSliders, IconStepFormat, IconStepFiles } from '@/components/ToolIcons';
 import { FileUpload } from '@/components/FileUpload';
 import { AudioPlayer } from '@/components/AudioPlayer';
@@ -284,6 +285,7 @@ export default function CamuflagemPage() {
             downmixes: v.downmixes,
           });
         }
+        logHistory({ tool: 'camuflagem', title: `${pair.black?.name ?? 'áudio'} camuflado` });
       } catch (e) {
         console.error(e);
         if (isCancellationError(e)) {
@@ -473,6 +475,7 @@ export default function CamuflagemPage() {
             guard: v.verdict,
             downmixes: v.downmixes,
           });
+          logHistory({ tool: 'camuflagem', title: `${it.file?.name ?? 'áudio'} descamuflado` });
           continue;
         }
 
@@ -508,6 +511,7 @@ export default function CamuflagemPage() {
           stage: undefined,
           wasStereo,
         });
+        logHistory({ tool: 'camuflagem', title: `${it.file?.name ?? 'áudio'} descamuflado` });
       } catch (e) {
         console.error(e);
         if (isCancellationError(e)) {

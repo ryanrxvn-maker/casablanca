@@ -9,6 +9,7 @@
  */
 
 import { useState, useRef } from 'react';
+import { logHistory } from '@/lib/history';
 import { ToolShell } from '@/components/ToolShell';
 import {
   isolateVoice,
@@ -88,6 +89,7 @@ export default function VoiceTestPage() {
         elapsedMs,
       });
       setProgress(`Concluido em ${(elapsedMs / 1000).toFixed(1)}s`);
+      logHistory({ tool: 'voice-test', title: `${file.name} — voz isolada` });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

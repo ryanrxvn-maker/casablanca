@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { logHistory } from '@/lib/history';
 import { FileUpload } from '@/components/FileUpload';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
@@ -298,6 +299,7 @@ export default function LtxVideoPage() {
       };
       setResult(item);
       setGallery((g) => [item, ...g].slice(0, 8));
+      logHistory({ tool: 'ltx-video', title: `Vídeo gerado — ${item.meta}` });
       setPhase('');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

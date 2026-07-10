@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef } from 'react';
+import { logHistory } from '@/lib/history';
 import { ToolHero, ToolStep, ToolChoice, ToolSlider, ToolAction, ToolMetric } from '@/components/tool-kit';
 import { IconCompressor, IconStepUpload, IconStepSliders, IconStepFormat } from '@/components/ToolIcons';
 
@@ -246,6 +247,11 @@ export default function CompressorPage() {
         resultUrl: url,
         resultSize: blob.size,
         elapsedMs,
+      });
+      logHistory({
+        tool: 'compressor',
+        title: `${job.file.name} comprimido`,
+        meta: `${(job.file.size / 1048576).toFixed(1)}MB → ${(blob.size / 1048576).toFixed(1)}MB`,
       });
       // Recalibra pelo PRIMEIRO job concluído (mais robusto que média).
       if (job.estimatedSize > 0) {

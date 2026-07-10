@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { logHistory } from '@/lib/history';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import {
   ToolHero,
@@ -424,6 +425,14 @@ export default function DecupagemPage() {
             (r) => patchItem(item.id, { progress: r }),
           );
           patchItem(item.id, { status: 'done', result, stage: undefined, progress: null });
+          logHistory({
+            tool: 'decupagem',
+            title: `${item.file.name} decupado`,
+            meta:
+              result.originalDur > 0
+                ? `${Math.round((1 - result.newDur / result.originalDur) * 100)}% menor`
+                : undefined,
+          });
         } catch (e) {
           if (isCancellationError(e)) {
             patchItem(item.id, { status: 'pending', stage: undefined, progress: null });

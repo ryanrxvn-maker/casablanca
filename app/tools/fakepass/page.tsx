@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
+import { logHistory } from '@/lib/history';
 import {
   uiFont,
   downloadNodeAsPng,
@@ -93,6 +94,7 @@ export default function FakePassPage() {
     setGerando(true);
     try {
       await downloadNodeAsPng(node, `fakepass-${model.id}.png`, dims.exportW, dims.stageW);
+      logHistory({ tool: 'fakepass', kind: 'export', title: `Print ${model.id} exportado` });
     } catch (err) {
       console.error('[fakepass] export falhou', err);
       alert('Não consegui gerar a imagem agora. Tenta de novo em instantes.');

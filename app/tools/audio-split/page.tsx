@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef } from 'react';
+import { logHistory } from '@/lib/history';
 import { ToolShell } from '@/components/ToolShell';
 import { FileUpload } from '@/components/FileUpload';
 import { AudioPlayer } from '@/components/AudioPlayer';
@@ -85,6 +86,11 @@ export default function AudioSplitPage() {
         };
       });
       setParts(out);
+      logHistory({
+        tool: 'audio-split',
+        title: `${file.name} dividido`,
+        meta: `${out.length} partes`,
+      });
       setStatus(null);
     } catch (e) {
       console.error(e);

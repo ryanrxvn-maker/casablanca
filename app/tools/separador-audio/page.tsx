@@ -17,6 +17,7 @@
  */
 
 import { useState } from 'react';
+import { logHistory } from '@/lib/history';
 import { ToolShell } from '@/components/ToolShell';
 import { ToolStep, ToolDropzone, ToolAction } from '@/components/tool-kit';
 import {
@@ -262,6 +263,7 @@ export default function SeparadorAudioPage() {
       setResults(built);
       setStage('done');
       setStageMsg('Pronto.');
+      logHistory({ tool: 'separador-audio', title: `${file.name} separado`, meta: 'voz · trilha · sfx' });
     } catch (e) {
       if ((e as { name?: string })?.name === 'AbortError') return;
       setErrorMsg(errMsg(e));

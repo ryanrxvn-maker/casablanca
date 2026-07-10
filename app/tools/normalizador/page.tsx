@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo } from 'react';
+import { logHistory } from '@/lib/history';
 import { ToolShell } from '@/components/ToolShell';
 import { BatchFileUpload } from '@/components/BatchFileUpload';
 import { AudioPlayer } from '@/components/AudioPlayer';
@@ -137,6 +138,7 @@ export default function NormalizadorPage() {
             resultBlob: blob,
             resultUrl: url,
           });
+          logHistory({ tool: 'normalizador', title: `${job.file.name} normalizado` });
         } catch (e) {
           console.error('[normalizador]', job.file.name, e);
           if (isCancellationError(e)) {

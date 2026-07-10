@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { logHistory } from '@/lib/history';
 import { Inter } from 'next/font/google';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
@@ -115,6 +116,7 @@ export default function CaixinhaPerguntaPage() {
       document.body.appendChild(a);
       a.click();
       a.remove();
+      logHistory({ tool: 'caixinha-pergunta', kind: 'export', title: `Caixinha exportada (${formato.id})` });
       setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (err) {
       console.error('[caixinha-pergunta] falha ao exportar', err);

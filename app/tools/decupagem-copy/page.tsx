@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo } from 'react';
+import { logHistory } from '@/lib/history';
 import { keepSegmentsFromRemovals } from '@/lib/decupagem-matcher';
 import { ToolShell } from '@/components/ToolShell';
 import { ToolHeroVideo } from '@/components/ToolHeroVideo';
@@ -513,6 +514,7 @@ function DecupagemCopyInner() {
 
       const url = URL.createObjectURL(out);
       setResultUrl(url);
+      logHistory({ tool: 'decupagem-copy', title: `${file.name} decupado pela copy` });
       setStage(null);
       setProgress(null);
     } catch (e) {
