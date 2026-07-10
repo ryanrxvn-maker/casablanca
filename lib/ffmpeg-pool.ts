@@ -15,6 +15,7 @@
  */
 
 import type { FFmpeg } from '@ffmpeg/ffmpeg';
+import { attachExecWatchdog } from './ffmpeg-worker';
 
 type Slot = { ff: FFmpeg; busy: boolean };
 
@@ -52,9 +53,9 @@ async function loadCoreURLs(): Promise<{ coreURL: string; wasmURL: string }> {
       console.warn(`[ffmpeg-pool] CDN falhou ${baseURL}:`, e);
     }
   }
+  console.warn('[ffmpeg-pool] todos os CDNs falharam:', lastErr);
   throw new Error(
-    'FFmpeg core CDN failed: ' +
-      (lastErr instanceof Error ? lastErr.message : String(lastErr)),
+    'Não consegui iniciar o motor de compressão. Confira sua internet e tente de novo.',
   );
 }
 
@@ -92,12 +93,28 @@ export class FFmpegPool {
       const { coreURL, wasmURL } = await loadCoreURLs();
       const ff = new FFmpeg();
       await ff.load({ coreURL, wasmURL });
+      // MESMO watchdog por batimento do singleton (3min de silêncio mata a
+      // instância; teto 25min como backstop). Sem isto, um hang do wasm num
+      // job do Compressor ficava "running" pra sempre. O slot morto sai do
+      // pool na hora — a próxima acquire cria instância limpa.
+      attachExecWatchdog(ff, () => this.evict(ff));
       const slot: Slot = { ff, busy: true };
       this.slots.push(slot);
       return ff;
     }
     // 3) limite atingido — espera alguém liberar
     return new Promise<FFmpeg>((resolve) => this.waiters.push(resolve));
+  }
+
+  /** Remove um slot cuja instância morreu (watchdog). Se alguém esperava vaga,
+   *  repõe criando instância nova — senão o waiter dormiria pra sempre. */
+  private evict(ff: FFmpeg): void {
+    const i = this.slots.findIndex((s) => s.ff === ff);
+    if (i >= 0) this.slots.splice(i, 1);
+    const waiter = this.waiters.shift();
+    if (waiter) {
+      void this.acquire().then(waiter).catch(() => this.waiters.unshift(waiter));
+    }
   }
 
   release(ff: FFmpeg): void {
@@ -146,7 +163,13 @@ export function getFFmpegPool(maxSize?: number): FFmpegPool {
 /**
  * Decide tamanho default baseado em pistas do ambiente. Mobile/RAM
  * baixa → 2. Desktop com 8+ cores → 5. Default → 3.
+ * Exportado: o Compressor usa como TETO real (5 fixos estouravam RAM
+ * em máquina fraca — 5×30MB de heap + input+output no memfs).
  */
+export function recommendedPoolSize(): number {
+  return defaultPoolSize();
+}
+
 function defaultPoolSize(): number {
   if (typeof navigator === 'undefined') return 3;
   // @ts-expect-error — deviceMemory é Chrome-only mas é o sinal mais

@@ -51,6 +51,24 @@ console.log('\nGARANTIA — faxina do zip-store (nunca apaga disparo ativo/recen
   ok(zipGroupId('batch:AAA:montado') !== zipGroupId('batch:BBB:montado'), 'taskIds distintos → grupos distintos');
 }
 
+// (E4) Auto B-roll: ZIP do pack + MP4s individuais dos takes = 1 grupo só.
+// Sem isto cada take virava grupo "misc" próprio e a faxina (disparada pelo
+// boot do Pilot/Hey Auto no MESMO DB) roía os packs antigos take a take —
+// preview do histórico ficava cinza. Ver fix 2026-07-10.
+{
+  const zipKey = 'broll:1751234567890:1751234567999:zip';
+  const keys = [
+    zipKey,                    // o ZIP pré-salvo do batch (chave = a própria zipKey)
+    `brollvid:${zipKey}:0`,    // MP4 individual do take 0
+    `brollvid:${zipKey}:17`,
+    `brollvid:${zipKey}:299`,  // pack de 300
+  ];
+  const ids = new Set(keys.map(zipGroupId));
+  ok(ids.size === 1 && ids.has(zipKey), 'E4: zip do pack + brollvid dos takes → 1 grupo (a zipKey)');
+  ok(zipGroupId(`brollvid:broll:AAA:1:zip:3`) !== zipGroupId(`brollvid:broll:BBB:2:zip:3`), 'E4: packs distintos → grupos distintos');
+  ok(!zipGroupId(`brollvid:${zipKey}:12`).startsWith(' misc'), 'E4: brollvid não cai mais no fallback misc');
+}
+
 // helper: monta metas de N disparos, cada um com montado+takes, idade crescente
 function mkStore(specs: Array<{ id: string; ageH: number; sizeMB?: number }>): ZipMeta[] {
   const out: ZipMeta[] = [];

@@ -16,7 +16,8 @@ import {
   probeVideoMetadata,
   type FFProgress,
 } from '@/lib/ffmpeg-worker';
-import { destroyFFmpegPool, getFFmpegPool } from '@/lib/ffmpeg-pool';
+import { destroyFFmpegPool, getFFmpegPool, recommendedPoolSize } from '@/lib/ffmpeg-pool';
+import { toFriendlyMessage } from '@/lib/friendly-error';
 import { CancelButton } from '@/components/CancelButton';
 import { buildZip } from '@/lib/zip-builder';
 import { formatBytes } from '@/lib/utils';
@@ -44,11 +45,20 @@ type Job = {
   error: string | null;
   /** ms tomados pelo job (medido client-side) */
   elapsedMs?: number;
+  /** Snapshot dos parâmetros NO PROCESSAMENTO — o download usa isto no nome.
+   *  Sem o snapshot, mexer no CRF depois do lote renomeava um resultado
+   *  crf23 como "_crf30" (nome mentindo sobre o conteúdo). */
+  crf?: number;
+  resolution?: Resolution;
 };
 
-/** Capacidade de processamento simultâneo. O pool decide o real
- *  baseado em RAM/CPU; aqui é só o teto pedido. */
+/** TETO de processamento simultâneo (UI mostra "até 5"). O tamanho REAL do
+ *  pool respeita a RAM/CPU da máquina (recommendedPoolSize) — 5 fixos
+ *  estouravam memória em notebook fraco. */
 const POOL_SIZE = 5;
+function effectivePoolSize(): number {
+  return Math.min(POOL_SIZE, recommendedPoolSize());
+}
 const MAX_BATCH = 20;
 
 function baseName(name: string) {
@@ -132,6 +142,13 @@ export default function CompressorPage() {
           });
         }),
       );
+      // Cap do cache (module-scope, viveria a sessão inteira): mantém os
+      // ~60 mais recentes — Map preserva ordem de inserção.
+      while (metaCache.size > 60) {
+        const oldest = metaCache.keys().next().value;
+        if (oldest === undefined) break;
+        metaCache.delete(oldest);
+      }
       if (!cancelled) setMetaTick((t) => t + 1);
     })();
     return () => {
@@ -221,7 +238,17 @@ export default function CompressorPage() {
 
   /* Roda 1 job: pega instância do pool, processa, libera. */
   async function runJob(job: Job, batchIdx: number, batchTotal: number) {
-    const pool = getFFmpegPool(POOL_SIZE);
+    // Arquivo SÓ de áudio (tem duração mas altura 0): o encode de vídeo
+    // falharia com erro técnico em inglês. Recusa com aviso claro.
+    const meta = metaCache.get(metaKey(job.file));
+    if (meta && meta.durationSec > 0 && meta.height === 0) {
+      updateJob(job.id, {
+        state: 'error',
+        error: 'Esse arquivo não tem vídeo (parece ser só áudio). O Compressor trabalha com vídeos MP4, WEBM ou MOV.',
+      });
+      return;
+    }
+    const pool = getFFmpegPool(effectivePoolSize());
     const t0 = performance.now();
     updateJob(job.id, { state: 'running', progress: 0 });
     const ff = await pool.acquire();
@@ -247,6 +274,8 @@ export default function CompressorPage() {
         resultUrl: url,
         resultSize: blob.size,
         elapsedMs,
+        crf,
+        resolution,
       });
       logHistory({
         tool: 'compressor',
@@ -264,13 +293,13 @@ export default function CompressorPage() {
       }
     } catch (e) {
       if (isCancellationError(e) || cancelledRef.current) {
-        updateJob(job.id, { state: 'error', error: 'Cancelado pelo usuario.' });
+        updateJob(job.id, { state: 'error', error: 'Cancelado por você.' });
       } else {
         // eslint-disable-next-line no-console
         console.error('[compressor]', job.file.name, e);
         updateJob(job.id, {
           state: 'error',
-          error: (e as Error).message ?? 'Falha.',
+          error: toFriendlyMessage(e, 'Não consegui comprimir esse vídeo. Tente de novo — arquivos muito pesados podem estourar a memória do navegador.'),
         });
       }
     } finally {
@@ -282,7 +311,7 @@ export default function CompressorPage() {
     if (files.length === 0 || processing) return;
     cancelledRef.current = false;
     setProcessing(true);
-    setStageMsg(`Aquecendo motor (até ${POOL_SIZE} simultâneos)…`);
+    setStageMsg(`Aquecendo motor (até ${effectivePoolSize()} simultâneos)…`);
 
     // Limpa URLs antigas
     jobs.forEach((j) => j.resultUrl && URL.revokeObjectURL(j.resultUrl));
@@ -308,9 +337,9 @@ export default function CompressorPage() {
       }
     };
 
-    // Spawna POOL_SIZE workers competindo pelos jobs.
+    // Spawna workers competindo pelos jobs (teto respeita a RAM da máquina).
     const workers = Array.from(
-      { length: Math.min(POOL_SIZE, initial.length) },
+      { length: Math.min(effectivePoolSize(), initial.length) },
       () => worker(),
     );
 
@@ -329,13 +358,28 @@ export default function CompressorPage() {
     };
   }, []);
 
+  // F5/fechar aba no meio do lote perdia TUDO em silêncio (estado é em
+  // memória). O navegador mostra o "sair mesmo?" enquanto comprime.
+  useEffect(() => {
+    if (!processing) return;
+    const h = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', h);
+    return () => window.removeEventListener('beforeunload', h);
+  }, [processing]);
+
+  /** Sufixo do nome vem do SNAPSHOT do job (os sliders podem ter mudado
+   *  depois do lote — o nome não pode mentir sobre o conteúdo). */
+  function jobSuffix(j: Job): string {
+    const jCrf = j.crf ?? crf;
+    const jRes = j.resolution ?? resolution;
+    return jRes === 'original' ? 'crf' + jCrf : jRes + 'p_crf' + jCrf;
+  }
+
   async function downloadOne(job: Job) {
     if (!job.resultBlob) return;
-    const suffix =
-      resolution === 'original' ? 'crf' + crf : resolution + 'p_crf' + crf;
     await downloadBlob(
       job.resultBlob,
-      baseName(job.file.name) + '_' + suffix + '.mp4',
+      baseName(job.file.name) + '_' + jobSuffix(job) + '.mp4',
     );
   }
 
@@ -344,15 +388,13 @@ export default function CompressorPage() {
     if (done.length === 0) return;
     setZipping(true);
     try {
-      const suffix =
-        resolution === 'original' ? 'crf' + crf : resolution + 'p_crf' + crf;
       const zip = await buildZip(
         done.map((j) => ({
-          name: baseName(j.file.name) + '_' + suffix + '.mp4',
+          name: baseName(j.file.name) + '_' + jobSuffix(j) + '.mp4',
           data: j.resultBlob!,
         })),
       );
-      await downloadBlob(zip, 'compressor_' + suffix + '.zip');
+      await downloadBlob(zip, 'compressor_' + jobSuffix(done[0]) + '.zip');
     } finally {
       setZipping(false);
     }
@@ -499,7 +541,7 @@ export default function CompressorPage() {
               queued={queuedJobs.length}
               done={doneJobs.length}
               total={jobs.length}
-              maxParallel={POOL_SIZE}
+              maxParallel={effectivePoolSize()}
             />
           ) : null}
         </ToolStep>

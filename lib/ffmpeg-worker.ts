@@ -102,18 +102,18 @@ export function isCancellationError(err: unknown): boolean {
   return /terminat|abort|cancel|destroyed/i.test(msg) || msg === CANCELLED_ERROR;
 }
 
-async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
-  onStage?.('Preparando...');
-  const { FFmpeg } = await import('@ffmpeg/ffmpeg');
-
-  const ff = new FFmpeg();
-  if (onLog) ff.on('log', ({ message }) => onLog(message));
-
-  // WATCHDOG no exec: envolve o exec nativo. Se um exec travar (hang infinito do
-  // wasm), depois de EXEC_WATCHDOG_MS matamos a instância (terminate) e zeramos o
-  // singleton → a PRÓXIMA getFFmpeg reinicia limpa, em vez de a instância poisoned
-  // travar TODA operação seguinte. Backstop universal (todo helper passa por aqui).
-  // O exec nativo perdedor da corrida tem .catch no-op pra não virar unhandled.
+/**
+ * WATCHDOG no exec: envolve o exec nativo de UMA instância. Se um exec travar
+ * (hang infinito do wasm), matamos a instância (terminate) e avisamos o dono
+ * via `onKilled` — o singleton zera instance/loadingPromise, o pool remove o
+ * slot morto. Backstop universal (todo helper passa por aqui). O exec nativo
+ * perdedor da corrida tem .catch no-op pra não virar unhandled rejection.
+ *
+ * Usado pelo singleton (loadCore) E pelo pool (lib/ffmpeg-pool.ts) — antes o
+ * pool rodava SEM watchdog e um hang num job do Compressor ficava pendurado
+ * pra sempre (job "running" eterno).
+ */
+export function attachExecWatchdog(ff: FFmpeg, onKilled?: () => void): void {
   const _origExec = ff.exec.bind(ff) as (...x: unknown[]) => Promise<number>;
   const wrappedExec = (...a: unknown[]): Promise<number> => {
     const real = _origExec(...a);
@@ -139,17 +139,7 @@ async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
     let hardTo: ReturnType<typeof setTimeout> | undefined;
     const kill = (rej: (e: Error) => void, msg: string) => {
       try { ff.terminate(); } catch { /* ignora */ }
-      if (instance === ff) {
-        instance = null; // força reinit limpo no próximo getFFmpeg
-        // CRÍTICO (fix 2026-07-03): zerar TAMBÉM o loadingPromise. Sem isto,
-        // getFFmpeg (63) cai em `if (loadingPromise) return loadingPromise` e
-        // devolve a promise RESOLVIDA que aponta pra ESTA instância JÁ TERMINADA
-        // (zumbi) — todo exec seguinte "resolve" mas não produz nada → montado
-        // 1KB / takes 0KB persistidos como sucesso, em TODAS as tasks seguintes
-        // do mesmo tab (foi a raiz do lote 02.07 com 4 montados 1KB em série).
-        // cancelFFmpeg (91) já zera os dois; o kill do watchdog não zerava.
-        loadingPromise = null;
-      }
+      onKilled?.();
       rej(new Error(msg));
     };
     const watchdog = new Promise<number>((_, rej) => {
@@ -173,6 +163,28 @@ async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
     });
   };
   (ff as unknown as { exec: unknown }).exec = wrappedExec;
+}
+
+async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
+  onStage?.('Preparando...');
+  const { FFmpeg } = await import('@ffmpeg/ffmpeg');
+
+  const ff = new FFmpeg();
+  if (onLog) ff.on('log', ({ message }) => onLog(message));
+
+  attachExecWatchdog(ff, () => {
+    if (instance === ff) {
+      instance = null; // força reinit limpo no próximo getFFmpeg
+      // CRÍTICO (fix 2026-07-03): zerar TAMBÉM o loadingPromise. Sem isto,
+      // getFFmpeg cai em `if (loadingPromise) return loadingPromise` e devolve
+      // a promise RESOLVIDA que aponta pra ESTA instância JÁ TERMINADA (zumbi)
+      // — todo exec seguinte "resolve" mas não produz nada → montado 1KB /
+      // takes 0KB persistidos como sucesso, em TODAS as tasks seguintes do
+      // mesmo tab (foi a raiz do lote 02.07 com 4 montados 1KB em série).
+      // cancelFFmpeg já zera os dois; o kill do watchdog não zerava.
+      loadingPromise = null;
+    }
+  });
 
   let lastErr: unknown = null;
   for (let i = 0; i < CDNS.length; i++) {
@@ -194,7 +206,7 @@ async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
     }
   }
   throw new Error(
-    'Erro ao carregar',
+    'Não consegui carregar o motor de vídeo. Confira sua internet e recarregue a página.',
   );
 }
 
@@ -239,23 +251,38 @@ export async function speedUpVideo(
     // Mesma estrategia do Compressor: ultrafast + x264-params agressivos.
     // Aceleracao ja descarta frames implicitamente (PTS/speed), entao a perda
     // de eficiencia do encoder importa pouco e o ganho de tempo e enorme.
-    await ff.exec([
+    const encodeArgs = (withAudio: boolean) => [
       '-i', inputName,
       '-filter:v', `setpts=PTS/${speed}`,
-      '-filter:a', atempoChain(speed),
+      ...(withAudio
+        ? ['-filter:a', atempoChain(speed), '-c:a', 'aac', '-b:a', '128k']
+        : ['-an']),
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
       '-tune', 'fastdecode',
       '-crf', '23',
       '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
       '-pix_fmt', 'yuv420p',
-      '-c:a', 'aac',
-      '-b:a', '128k',
       '-movflags', '+faststart',
       outputName,
-    ]);
-    const data = await ff.readFile(outputName);
-    return toBlob(data, 'video/mp4');
+    ];
+    try {
+      await ff.exec(encodeArgs(true));
+      const data = await ff.readFile(outputName);
+      assertValidMp4(data as Uint8Array, 'vídeo acelerado');
+      return toBlob(data, 'video/mp4');
+    } catch (e) {
+      // Cancelamento/watchdog (instância morta) não tem retry que salve.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/terminat|abort|cancel|travad|travou/i.test(msg)) throw e;
+      // Vídeo SEM trilha de áudio: o -filter:a derruba o exec inteiro. Uma
+      // re-tentativa sem áudio salva o job em vez de falhar com erro cru.
+      await safeDelete(ff, outputName);
+      await ff.exec(encodeArgs(false));
+      const data = await ff.readFile(outputName);
+      assertValidMp4(data as Uint8Array, 'vídeo acelerado');
+      return toBlob(data, 'video/mp4');
+    }
   } finally {
     if (progressHandler) ff.off('progress', progressHandler);
     await safeDelete(ff, inputName);
@@ -398,6 +425,9 @@ export async function compressVideoOn(
     );
     await ff.exec(args);
     const data = await ff.readFile(outputName);
+    // Sem isto, um encode que estourou a memória do wasm entregava MP4
+    // truncado (sem moov) como job "done" — o cliente baixava arquivo morto.
+    assertValidMp4(data as Uint8Array, 'vídeo comprimido');
     return toBlob(data, 'video/mp4');
   } finally {
     if (progressHandler) ff.off('progress', progressHandler);

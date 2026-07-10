@@ -232,9 +232,11 @@ function AutoBrollInner() {
     detectMagnificExtension().then((s) => {
       if (!cancelled) setExtStatus(s);
     });
-    // Re-check a cada 3s enquanto não conectado — pra detectar a extensão
-    // Freepik Sync sincronizando os cookies sem precisar dar refresh.
+    // Re-check periódico — pra detectar a extensão Freepik Sync sincronizando
+    // os cookies sem precisar dar refresh. Aba em segundo plano NÃO gasta
+    // rede: pula o check e re-checa na volta do foco.
     const poll = setInterval(() => {
+      if (document.hidden) return;
       detectMagnificExtension().then((s) => {
         if (cancelled) return;
         setExtStatus((prev) => {
@@ -243,7 +245,7 @@ function AutoBrollInner() {
           return s;
         });
       });
-    }, 3000);
+    }, 8000);
     try {
       const raw = sessionStorage.getItem('darkolab:auto-broll:handoff');
       if (raw) {
@@ -273,6 +275,35 @@ function AutoBrollInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** FAXINA do IndexedDB (LRU por pack) — mesma do Pilot/Hey Auto, mas rodando
+   *  também aqui: quem só usa o Auto B-roll não pode depender de abrir outra
+   *  ferramenta pra faxina acontecer. Com o zipGroupId reconhecendo
+   *  broll:/brollvid:, cada pack é mantido/removido INTEIRO (nunca meio pack).
+   *  Protege packs em voo (disparo/RETOMAR vivos) via heartbeat. */
+  useEffect(() => {
+    const t = setTimeout(() => {
+      void (async () => {
+        try {
+          const raw = localStorage.getItem('darkolab:auto-broll:history');
+          const hist: HistEntry[] = raw ? JSON.parse(raw) : [];
+          const protect = hist.filter((h) => isEntryLive(h)).map((h) => h.zipKey);
+          const { pruneZipStore } = await import('@/lib/zip-store');
+          const r = await pruneZipStore({ protect });
+          if (r && r.evicted > 0) {
+            console.info(
+              `[auto-broll] faxina: ${r.evicted} blob(s) de pack antigo removidos ` +
+              `(~${(r.freedBytes / 1048576).toFixed(0)} MB liberados), ${r.keptGroups} grupo(s) preservados.`,
+            );
+          }
+        } catch (e) {
+          console.warn('[auto-broll] faxina ignorada:', e);
+        }
+      })();
+    }, 10_000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const patchJob = (id: string, patch: Partial<Job>) =>
     setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)));
 
@@ -298,7 +329,7 @@ function AutoBrollInner() {
   async function runJob(job: Job) {
     if (!extStatus.connected) {
       patchJob(job.id, {
-        error: 'Magnific não conectado. Configure os cookies em /configuracoes/magnific.',
+        error: 'A extensão Magnific não está conectada. Confira o painel "Extensão Magnific" no topo da página e tente de novo.',
       });
       return;
     }
@@ -573,11 +604,16 @@ function AutoBrollInner() {
       } else {
         patchJob(job.id, {
           status: 'error',
-          error: `Finalizou sem MP4s (sucesso=${r.successCount}/falhas=${r.failedCount}).`,
+          error: 'Nenhum vídeo ficou pronto desta vez. O plano ficou salvo no Histórico — clique RETOMAR pra re-disparar sem perder nada.',
         });
       }
     } catch (e) {
-      patchJob(job.id, { status: 'error', error: (e as Error).message });
+      console.warn('[auto-broll] run falhou (erro cru):', e);
+      const { toFriendlyMessage } = await import('@/lib/friendly-error');
+      patchJob(job.id, {
+        status: 'error',
+        error: toFriendlyMessage(e, 'O disparo caiu no meio do caminho. O que já rendeu está salvo — clique RETOMAR no Histórico pra continuar de onde parou.'),
+      });
       // Marca entry como nao-em-vôo (originalJson + takes ja estao salvos
       // do pre-save) pra RETOMAR funcionar imediato.
       try {
@@ -1287,34 +1323,126 @@ async function streamZipFromEntryToDisk(
   return { n, faltam };
 }
 
+/** Heurística de expiração SEM rede: as URLs do CDN do Magnific/Freepik levam
+ *  o vencimento embutido (`exp=<unix>` / `Expires=<unix>`). Detectar aqui evita
+ *  montar um player numa URL comprovadamente morta (pack antigo). */
+function urlLooksExpired(url: string | null): boolean {
+  if (!url) return false;
+  const m = /[?&~](?:exp|Expires)=(\d{10})(?:\D|$)/.exec(url);
+  if (!m) return false;
+  return Number(m[1]) * 1000 < Date.now();
+}
+
+/** Renova os LINKS de preview de um pack direto do acervo do Magnific: lista
+ *  as creations da MESMA family e re-aponta videoUrl/imageUrl de cada take pro
+ *  link fresco. Não baixa nada — só atualiza os links (o RETOMAR continua sendo
+ *  o caminho pra re-gerar). Retorna quantos takes foram renovados. */
+async function refreshPreviewUrlsFromMagnific(item: HistEntry): Promise<number> {
+  let family: string | null = null;
+  for (const t of item.takeUrls || []) {
+    const url = t.videoUrl || t.imageUrl;
+    if (!url) continue;
+    const m = url.match(/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/);
+    if (m) { family = m[1]; break; }
+  }
+  if (!family) return 0;
+  const { magnificFetch } = await import('@/lib/magnific-bridge');
+  const r = await magnificFetch(`/app/api/creations?limit=500`);
+  if (!r.ok) throw new Error('acervo indisponível (' + r.status + ')');
+  const body = r.json() as {
+    data?: Array<{ family?: string; tool?: string; url?: string | null; metadata?: { url?: string; index?: unknown; image_index?: unknown; position?: unknown } }>;
+  };
+  const matching = (body.data || []).filter((c) => c.family === family);
+  if (matching.length === 0) return 0;
+  // VIDEOS: url real fica em metadata.url; IMAGES: url no top-level (ver
+  // lib/magnific-api-client.ts). Primeiro hit por idx vence (mais recente).
+  const vidByIdx = new Map<number, string>();
+  const imgByIdx = new Map<number, string>();
+  for (const c of matching) {
+    const idx = Number(c.metadata?.index ?? c.metadata?.image_index ?? c.metadata?.position ?? NaN);
+    if (!Number.isFinite(idx)) continue;
+    const url = c.url || c.metadata?.url;
+    if (!url) continue;
+    const tool = String(c.tool || '').toLowerCase();
+    if (tool.includes('video')) { if (!vidByIdx.has(idx)) vidByIdx.set(idx, url); }
+    else if (tool.includes('image')) { if (!imgByIdx.has(idx)) imgByIdx.set(idx, url); }
+  }
+  if (vidByIdx.size === 0 && imgByIdx.size === 0) return 0;
+  let renewed = 0;
+  const tu = (item.takeUrls || []).map((t) => {
+    const v = vidByIdx.get(t.idx);
+    const im = imgByIdx.get(t.idx);
+    if (!v && !im) return t;
+    renewed++;
+    // Se o Magnific tem o vídeo, ele renderizou de verdade → status ready.
+    return { ...t, videoUrl: v || t.videoUrl, imageUrl: im || t.imageUrl, status: v || t.videoUrl ? 'ready' : t.status };
+  });
+  if (renewed > 0) patchHistEntry(item.zipKey, { takeUrls: tu });
+  return renewed;
+}
+
 /** Grid de preview de UM batch do histórico: cada take com vídeo embutido
- *  (player nativo) + rótulo. Prefere o MP4 salvo no IDB (offline); se não
- *  houver, usa a URL Magnific; se expirou, mostra o poster da imagem.
- *  Takes que falharam viram placeholder. */
-function HistoryPreviewCell({ zipKey, idx, videoUrl, imageUrl, label, status, live }: {
+ *  (player nativo) + rótulo. LAZY por viewport: uma célula só lê o MP4 do IDB
+ *  e monta o <video> quando está perto da tela — expandir um pack de 300 NÃO
+ *  dispara 300 leituras de IDB + 300 players de uma vez (o Chrome trava com
+ *  >~75 <video> montados e o pack inteiro em RAM passa de 1GB). Prefere o MP4
+ *  do IDB (offline); senão a URL Magnific com preload="none" (só busca no
+ *  play); expirou → poster; poster morto → placeholder honesto + RENOVAR. */
+function HistoryPreviewCell({ zipKey, idx, videoUrl, imageUrl, label, status, live, onExpired }: {
   zipKey: string; idx: number; videoUrl: string | null; imageUrl: string | null; label: string; status: string; live?: TakeState | null;
+  onExpired?: (idx: number) => void;
 }) {
-  // Prefere o MP4 salvo no IDB (offline-proof). Senão usa a URL Magnific.
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  // LAZY: hidrata perto do viewport; saiu de perto → desidrata (revoga o
+  // Object URL) — memória fica do tamanho da tela, não do pack.
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const [near, setNear] = useState(false);
   useEffect(() => {
+    const el = hostRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') { setNear(true); return; }
+    const io = new IntersectionObserver(
+      (entries) => { for (const en of entries) setNear(en.isIntersecting); },
+      { rootMargin: '600px 0px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  // true SÓ depois da leitura do IDB confirmar que não há MP4 local — evita
+  // acusar "vencido" no intervalo em que o blob ainda está carregando.
+  const [blobMissing, setBlobMissing] = useState(false);
+  const [remoteDead, setRemoteDead] = useState(() => urlLooksExpired(videoUrl));
+  const [posterDead, setPosterDead] = useState(() => urlLooksExpired(imageUrl));
+  useEffect(() => {
+    if (!near) { setBlobUrl(null); setBlobMissing(false); return; }
     let alive = true; let created: string | null = null;
     (async () => {
       try {
         const { loadBlob } = await import('@/lib/zip-store');
         const blob = await loadBlob(takeVideoKey(zipKey, idx), 'video/mp4');
-        if (blob && alive) { created = URL.createObjectURL(blob); setBlobUrl(created); }
-      } catch {}
+        if (!alive) return;
+        if (blob) { created = URL.createObjectURL(blob); setBlobUrl(created); }
+        else setBlobMissing(true);
+      } catch { if (alive) setBlobMissing(true); }
     })();
     return () => { alive = false; if (created) URL.revokeObjectURL(created); };
-  }, [zipKey, idx]);
+  }, [zipKey, idx, near]);
+  // Sinaliza pro grid que este take precisa de link novo (mostra o RENOVAR).
+  // Só conta quando NÃO há MP4 local — com blob o preview funciona offline.
+  useEffect(() => {
+    if (near && remoteDead && blobMissing) onExpired?.(idx);
+  }, [near, remoteDead, blobMissing, idx, onExpired]);
   // Estado AO VIVO (retomada): em geração mostra coelho + barra; recém-pronto
   // toca a URL nova na hora (antes do MP4 cair no IDB).
   const liveInProgress = !!live && (live.status === 'idle' || live.status === 'running' || live.status === 'image-done');
   const livePercent = live && live.status === 'running' ? live.percent : live && live.status === 'image-done' ? 50 : 0;
   const liveVideoUrl = live && (live.status === 'video-done' || live.status === 'ready') ? live.videoUrl : null;
-  const src = blobUrl || liveVideoUrl || videoUrl;
+  const remoteUrl = remoteDead ? null : videoUrl;
+  const src = blobUrl || liveVideoUrl || remoteUrl;
+  const isLocal = !!(blobUrl || liveVideoUrl);
+  const poster = !posterDead && imageUrl ? imageUrl : undefined;
   return (
-    <div className="overflow-hidden rounded-[10px] border border-line/60 bg-bg/50">
+    <div ref={hostRef} className="overflow-hidden rounded-[10px] border border-line/60 bg-bg/50">
       <div className="relative aspect-[9/16] bg-black/40">
         {liveInProgress ? (
           // EM GERAÇÃO AO VIVO — coelho saltitante + shimmer + barra (igual
@@ -1328,11 +1456,32 @@ function HistoryPreviewCell({ zipKey, idx, videoUrl, imageUrl, label, status, li
               <div className="h-full bg-gradient-to-r from-violet via-violet-deep to-cyan-400 transition-all duration-500" style={{ width: `${Math.max(livePercent, 6)}%`, boxShadow: '0 0 8px rgba(167,139,250,0.6)' }} />
             </div>
           </div>
+        ) : !near ? (
+          // Fora do viewport: caixa leve (zero IDB, zero <video>) — hidrata
+          // sozinha quando o scroll aproxima (IntersectionObserver acima).
+          <div className="absolute inset-0 bg-gradient-to-br from-bg-soft/60 to-bg" />
         ) : src ? (
-          <video src={src} poster={imageUrl || undefined} controls playsInline muted preload="metadata" className="h-full w-full object-cover" />
-        ) : imageUrl ? (
+          <video
+            src={src}
+            poster={poster}
+            controls
+            playsInline
+            muted
+            // MP4 local (IDB/recém-gerado) carrega metadata na hora; URL
+            // remota só busca no PLAY — senão um pack grande abre dezenas de
+            // conexões pro CDN de uma vez e nada carrega.
+            preload={isLocal ? 'metadata' : 'none'}
+            onError={() => { if (!isLocal) setRemoteDead(true); }}
+            className="h-full w-full object-cover"
+          />
+        ) : poster ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={imageUrl} alt={label} className="h-full w-full object-cover opacity-60" />
+          <img src={poster} alt={label} onError={() => setPosterDead(true)} className="h-full w-full object-cover opacity-60" />
+        ) : status === 'ready' || videoUrl ? (
+          <div className="flex h-full w-full flex-col items-center justify-center gap-1 px-2 text-center">
+            <span className="text-[10px] font-bold text-text-dim">Preview vencido</span>
+            <span className="text-[8.5px] leading-tight text-text-muted">O vídeo está no seu ZIP (BAIXAR). Pra rever aqui, clique RENOVAR acima.</span>
+          </div>
         ) : (
           <div className="flex h-full w-full items-center justify-center text-[10px] text-text-muted">
             {status === 'failed' ? 'falhou' : status}
@@ -1362,6 +1511,34 @@ function HistoryPreviewGrid({ item, live }: { item: HistEntry; live?: Record<num
   const takes = [...(item.takeUrls || [])].sort((a, b) => a.idx - b.idx);
   const readyCount = takes.filter((t) => t.status === 'ready' || t.videoUrl).length;
   const liveOn = !!live;
+  // Takes com link vencido reportados pelas células → mostra o RENOVAR.
+  const expiredIdxs = useRef<Set<number>>(new Set());
+  const [expiredCount, setExpiredCount] = useState(0);
+  const onExpired = useRef((idx: number) => {
+    if (expiredIdxs.current.has(idx)) return;
+    expiredIdxs.current.add(idx);
+    setExpiredCount(expiredIdxs.current.size);
+  }).current;
+  const [renewing, setRenewing] = useState(false);
+  const [renewMsg, setRenewMsg] = useState('');
+  async function renew() {
+    setRenewing(true);
+    setRenewMsg('');
+    try {
+      const n = await refreshPreviewUrlsFromMagnific(item);
+      if (n > 0) {
+        expiredIdxs.current.clear();
+        setExpiredCount(0);
+        setRenewMsg(`${n} preview(s) renovado(s)!`);
+      } else {
+        setRenewMsg('O acervo do Magnific não guarda mais esses vídeos. Se você já baixou o ZIP, está tudo salvo com você — pra rever aqui, use RETOMAR.');
+      }
+    } catch {
+      setRenewMsg('Não deu pra renovar agora — confira se a extensão Magnific está conectada e tente de novo.');
+    } finally {
+      setRenewing(false);
+    }
+  }
   return (
     <div className={'rounded-[12px] border bg-bg-soft/30 p-3 ' + (liveOn ? 'border-cyan-400/40' : 'border-violet/40')}>
       {/* Keyframes globais (1x) referenciados pelas células em geração ao vivo. */}
@@ -1371,15 +1548,38 @@ function HistoryPreviewGrid({ item, live }: { item: HistEntry; live?: Record<num
           @keyframes abShimmer { 0%,100%{transform:translateX(-100%)} 50%{transform:translateX(100%)} }
         `}</style>
       ) : null}
-      <div className={'mono mb-2 text-[10px] uppercase tracking-widest ' + (liveOn ? 'text-cyan-300' : 'text-violet')}>
-        {liveOn ? 'Retomando ao vivo' : 'Preview'} · {readyCount}/{takes.length} prontos
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className={'mono text-[10px] uppercase tracking-widest ' + (liveOn ? 'text-cyan-300' : 'text-violet')}>
+          {liveOn ? 'Retomando ao vivo' : 'Preview'} · {readyCount}/{takes.length} prontos
+        </div>
+        {!liveOn && expiredCount > 0 ? (
+          <button
+            type="button"
+            onClick={() => void renew()}
+            disabled={renewing}
+            className="inline-flex items-center gap-1.5 rounded-[8px] border border-violet/50 px-2 py-1 text-[9.5px] font-bold uppercase tracking-wider text-violet transition-colors hover:border-violet/80 disabled:opacity-50"
+            style={{ background: 'linear-gradient(180deg, rgba(167,139,250,0.12), rgba(167,139,250,0.03))' }}
+            title="Alguns previews venceram — busca links novos no acervo do Magnific (não gasta crédito)"
+          >
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={renewing ? 'animate-spin' : ''}>
+              <path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" /><path d="M3 12a9 9 0 0 1 15.4-6.4L21 8" /><path d="M21 3v5h-5" /><path d="M3 21v-5h5" />
+            </svg>
+            {renewing ? 'Renovando…' : `Renovar previews (${expiredCount})`}
+          </button>
+        ) : null}
       </div>
+      {renewMsg ? (
+        <div className="mb-2 rounded-[8px] border border-line/50 bg-bg/40 px-2.5 py-1.5 text-[9.5px] leading-snug text-text-dim">
+          {renewMsg}
+        </div>
+      ) : null}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5">
         {takes.map((t) => {
           const label = labels[t.idx] || `Take ${String(t.idx).padStart(2, '0')}`;
           return (
             <HistoryPreviewCell
-              key={t.idx}
+              // URL renovada → remonta a célula (zera o estado de "vencido").
+              key={`${t.idx}:${t.videoUrl || ''}`}
               zipKey={item.zipKey}
               idx={t.idx}
               videoUrl={t.videoUrl}
@@ -1387,6 +1587,7 @@ function HistoryPreviewGrid({ item, live }: { item: HistEntry; live?: Record<num
               label={label}
               status={t.status}
               live={live ? live[t.idx] || null : null}
+              onExpired={onExpired}
             />
           );
         })}
@@ -1577,7 +1778,9 @@ function BrollHistorySection() {
         alert(`Baixado ZIP com ${n} take(s). ${faltam} não estavam mais acessíveis. Use RETOMAR pra completar.`);
       }
     } catch (e) {
-      alert('Erro: ' + ((e as Error)?.message || String(e)));
+      console.warn('[auto-broll] download falhou (erro cru):', e);
+      const { toFriendlyMessage } = await import('@/lib/friendly-error');
+      alert(toFriendlyMessage(e, 'Não consegui preparar o download agora. Tente de novo — se repetir, use RETOMAR pra regerar os vídeos.'));
     } finally {
       setLoading(null);
       setDlPacking(null);
@@ -1746,7 +1949,8 @@ function BrollHistorySection() {
         );
       }
     } catch (e) {
-      alert('Falha buscando no Magnific: ' + ((e as Error)?.message || String(e)) + '\nCola o JSON manualmente.');
+      console.warn('[auto-broll] busca no Magnific falhou (erro cru):', e);
+      alert('Não consegui buscar no acervo do Magnific agora (confira a extensão). Se você tiver o JSON original, cola ele manualmente.');
     } finally {
       setRetrying(null);
       setRetryMsg('');
@@ -1982,7 +2186,9 @@ function BrollHistorySection() {
           : `Retomar parou: ${successCount}/${item.totalTakes} prontos · ${stillMissing} seguem travadas após ${MAX_ROUNDS} rodadas (provável prompt vetado por política ou sessão Magnific). ZIP atualizado com o que deu certo — pode clicar RETOMAR de novo mais tarde.`
       );
     } catch (e) {
-      alert('RETOMAR falhou: ' + ((e as Error)?.message || String(e)));
+      console.warn('[auto-broll] retomar falhou (erro cru):', e);
+      const { toFriendlyMessage } = await import('@/lib/friendly-error');
+      alert(toFriendlyMessage(e, 'O RETOMAR caiu no meio do caminho — nada foi perdido. Clique RETOMAR de novo pra continuar de onde parou.'));
     } finally {
       if (retomarBeat) clearInterval(retomarBeat);
       if (elapsedTimer) clearInterval(elapsedTimer);
@@ -2000,8 +2206,11 @@ function BrollHistorySection() {
   async function remove(item: typeof hist[number]) {
     if (!confirm(`Remover "${item.spaceName}" do histórico?`)) return;
     try {
-      const { deleteZip } = await import('@/lib/zip-store');
+      const { deleteZip, deletePrefix } = await import('@/lib/zip-store');
       await deleteZip(item.zipKey);
+      // MP4s individuais dos takes saem junto — sem isto ficavam órfãos
+      // pra sempre no IndexedDB (leak de storage por pack removido).
+      await deletePrefix(`brollvid:${item.zipKey}:`);
     } catch {}
     const next = hist.filter((h) => h.zipKey !== item.zipKey);
     localStorage.setItem('darkolab:auto-broll:history', JSON.stringify(next));

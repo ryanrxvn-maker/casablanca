@@ -35,6 +35,7 @@ import {
   type DisparoAvatar,
 } from '@/lib/doc-to-disparos';
 import type { DocLink } from '@/lib/copy-parser';
+import { toFriendlyMessage } from '@/lib/friendly-error';
 import { MotorConfigPicker } from '@/components/MotorConfigPicker';
 import { defaultMotorConfig, resolveMotors, estimateSecondsFromText, estimateSecondsFromAudio, type MotorConfig } from '@/lib/motor-config';
 import {
@@ -361,6 +362,10 @@ function HeyGenAutoInner() {
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [queueRunning, setQueueRunning] = useState(false);
   const queueCancelRef = useRef(false);
+  // Guard ATÔMICO da fila (ref, síncrono): impede processQueue×resumeQueueItem
+  // (ou 2 cliques rápidos) de rodarem o MESMO item em paralelo — o state
+  // queueRunning só atualiza no próximo render e não segura a corrida.
+  const queueBusyRef = useRef(false);
   /** Debug aberto por item (UI). */
   const [queueDebugOpen, setQueueDebugOpen] = useState<Record<string, boolean>>({});
 
@@ -586,11 +591,33 @@ function HeyGenAutoInner() {
           error: p.error ?? null,
         })),
       );
+      // Disparo JÁ ENTREGUE (montado no disco): restaura o DONE. Sem isto, o
+      // F5 pós-entrega voltava o card pra "RENDERIZANDO" e o Download
+      // re-pollava + re-baixava + re-montava TUDO do zero (re-batia na cota
+      // do HeyGen à toa) — o arquivo já estava salvo no IndexedDB.
+      if (latest.phase === 'done' && latest.montadoZipName) {
+        setPipelineZips((prev) => ({
+          ...prev,
+          montadoName: latest.montadoZipName,
+          ...(latest.camufladoZipName ? { camufladoName: latest.camufladoZipName } : {}),
+        }));
+      }
     } catch (e) {
       console.warn('[heygen-auto] reidratar batch falhou:', e);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** F5/fechar aba com trabalho vivo: a FILA é em memória — fechar sem querer
+   *  perdia a fila inteira em silêncio. O navegador pergunta antes de sair
+   *  enquanto houver disparo/download/fila rodando. */
+  useEffect(() => {
+    const busy = processing || downloading || queueRunning;
+    if (!busy) return;
+    const h = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', h);
+    return () => window.removeEventListener('beforeunload', h);
+  }, [processing, downloading, queueRunning]);
 
   /** FAXINA do IndexedDB (LRU por disparo) — o `darkolab-zip-store` acumulava
    *  montado+takes+partes de TODO disparo sem nunca purgar → no Chrome (banco
@@ -668,6 +695,25 @@ function HeyGenAutoInner() {
     // Reentrância: se o auto-encadeamento já está rodando, um clique manual
     // em "Baixar tudo" não pode disparar um segundo poll/pipeline em cima.
     if (downloading) return;
+    // ENTREGA JÁ PRONTA (montado salvo no disco): serve o arquivo NA HORA em
+    // vez de re-poll + re-download + re-montagem do zero — era o que
+    // acontecia após F5 num disparo já entregue (re-batia na cota à toa).
+    if (!partsOverride && pipelineZips.montadoName && runBatchIdRef.current) {
+      try {
+        const { loadZip } = await import('@/lib/zip-store');
+        const z = await loadZip(`batch:${runBatchIdRef.current}:montado`);
+        if (z) {
+          const a = document.createElement('a');
+          a.href = z.blobUrl;
+          a.download = z.filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(z.blobUrl), 10000);
+          return;
+        }
+      } catch { /* sumiu do disco → segue o fluxo completo abaixo */ }
+    }
     // partsOverride: o auto-encadeamento do run() passa os resultados FRESCOS
     // (o state `results` deste render ainda é o antigo — closure).
     const source = partsOverride ?? results;
@@ -877,9 +923,11 @@ function HeyGenAutoInner() {
       setTimeout(() => setDownloadStage(null), 8000);
       if (bId) upsertSharedBatch(bId, { phase: 'done', message: `Pronto — ${savedMsg}`, finishedAt: Date.now() });
     } catch (e) {
-      setError(`Falha no download: ${(e as Error)?.message || e}`);
+      console.warn('[heygen-auto] download falhou (erro cru):', e);
+      const friendly = queueFailMessage(e);
+      setError(friendly);
       setDownloadStage(null);
-      if (bId) upsertSharedBatch(bId, { phase: 'failed', message: `Falha no download: ${(e as Error)?.message || e}`, finishedAt: Date.now() });
+      if (bId) upsertSharedBatch(bId, { phase: 'failed', message: friendly, finishedAt: Date.now() });
     } finally {
       setDownloading(false);
       if (bId && downloadCancelRef.current) {
@@ -972,6 +1020,10 @@ function HeyGenAutoInner() {
   }
 
   async function run() {
+    // Guard de reentrância: com um disparo/download em andamento, um clique a
+    // mais no card NÃO pode zerar o estado e abandonar o trabalho atual
+    // (setResults([]) + batchId novo = disparo duplicado no HeyGen).
+    if (processing || downloading) return;
     if (!extStatus.connected) {
       setError(
         'Extensão Hey Auto não detectada. Instale primeiro (instrucoes abaixo).',
@@ -992,7 +1044,7 @@ function HeyGenAutoInner() {
     const detected = ping.body?._extVersion as string | undefined;
     if (!detected) {
       setError(
-        `Extensao com proxy desatualizado (sem _extVersion). RECARREGUE a extensao em chrome://extensions (botão reload no card Hey Auto) e de refresh na aba do HeyGen. Versao requerida: ${REQUIRED_EXT_VERSION}.`,
+        `A extensão Hey Auto precisa ser atualizada pra disparar. Abra chrome://extensions, clique no botão ↻ (recarregar) no card da Hey Auto e recarregue a aba do HeyGen. Depois é só disparar de novo.`,
       );
       setStage(null);
       return;
@@ -1009,7 +1061,7 @@ function HeyGenAutoInner() {
     }
     if (!ok) {
       setError(
-        `Extensao desatualizada: detectada v${detected}, requer >= v${REQUIRED_EXT_VERSION}. RECARREGUE em chrome://extensions e de refresh na aba do HeyGen.`,
+        `Sua extensão Hey Auto está na versão v${detected} e o app precisa da v${REQUIRED_EXT_VERSION} ou mais nova. Abra chrome://extensions, clique no ↻ (recarregar) no card da Hey Auto e recarregue a aba do HeyGen.`,
       );
       setStage(null);
       return;
@@ -1110,11 +1162,13 @@ function HeyGenAutoInner() {
         void downloadAllAsZip(finalResults);
       }
     } catch (e) {
-      setError((e as Error).message ?? 'Falha desconhecida.');
+      console.warn('[heygen-auto] run falhou (erro cru):', e);
+      const friendly = queueFailMessage(e);
+      setError(friendly);
       setStage(null);
       upsertSharedBatch(batchId, {
         phase: 'failed',
-        message: (e as Error).message ?? 'Falha desconhecida.',
+        message: friendly,
         finishedAt: Date.now(),
       });
     } finally {
@@ -1227,7 +1281,8 @@ function HeyGenAutoInner() {
         return prev;
       });
     } catch (e) {
-      setError((e as Error).message ?? 'Falha ao re-disparar.');
+      console.warn('[heygen-auto] retry falhou (erro cru):', e);
+      setError(queueFailMessage(e));
       setStage(null);
     } finally {
       setProcessing(false);
@@ -1292,7 +1347,8 @@ function HeyGenAutoInner() {
       setPipelineZips((prev) => ({ ...prev, montadoName: undefined }));
       setEditPart(null);
     } catch (e) {
-      setEditError((e as Error)?.message || 'Falha ao re-gerar.');
+      console.warn('[heygen-auto] re-gerar parte falhou (erro cru):', e);
+      setEditError(toFriendlyMessage(e, 'Não consegui re-gerar essa parte agora. Tente de novo em instantes.'));
     } finally {
       setEditBusy(false);
     }
@@ -1826,7 +1882,9 @@ function HeyGenAutoInner() {
     },
   ): Promise<void> {
     const safe = item.safeName;
-    const batchId = item.batchId || `heygenauto:${safe}:${Date.now()}`;
+    // newBatchId (nome+ms+nonce) — o fallback antigo sem nonce podia colidir
+    // a chave IDB de dois itens de mesmo nome no mesmo milissegundo.
+    const batchId = item.batchId || newBatchId(safe);
     const resuming = !!(cbs.resumeVideoIds && cbs.resumeVideoIds.length > 0);
     const stage = (m: string, progress?: number, phase?: QueueItem['phase']) => {
       cbs.onStage(m);
@@ -2112,19 +2170,37 @@ function HeyGenAutoInner() {
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(z.blobUrl), 10000);
     } catch (e) {
-      setError(`Falha ao baixar do disco: ${(e as Error)?.message}`);
+      console.warn('[heygen-auto] baixar do disco falhou (erro cru):', e);
+      setError('Não consegui abrir o arquivo salvo. Clique Retomar no item pra regerar a entrega.');
     }
+  }
+
+  /** Mensagem terminal HONESTA (mesma régua do card da dispensa direta):
+   *  limite diário do HeyGen NÃO é bug do app — o cliente precisa saber que a
+   *  causa é externa e o que fazer. Qualquer outro erro vira copy amigável. */
+  function queueFailMessage(e: unknown): string {
+    const raw = e instanceof Error ? e.message : String(e ?? '');
+    if (isQuotaError(raw)) {
+      return '⚠ HeyGen no LIMITE DIÁRIO da sua conta — NÃO é erro do app. O limite renova em até 24h; clique Retomar depois que ele continua de onde parou.';
+    }
+    return toFriendlyMessage(e, 'Falhou nesse AD. Clique Retomar — ele continua de onde parou, sem re-gerar o que já ficou pronto.');
   }
 
   /** Retoma UM item (re-poll + re-download dos videoIds, sem re-disparar se já
    *  disparou). Roda fora da fila sequencial — pode rodar avulso. */
   async function resumeQueueItem(id: string) {
+    // Guard ATÔMICO (ref, não state): sem ele, RETOMAR + "Processar fila" (ou
+    // dois RETOMAR rápidos) rodavam o MESMO item em dobro — submit duplicado
+    // no HeyGen, custo real duplicado, e o Pausar de um cancelava o outro.
+    if (queueBusyRef.current) return;
     const item = queue.find((q) => q.id === id);
-    if (!item) return;
+    if (!item || item.status === 'running') return;
     if (!extStatus.connected) {
       setError('Extensão Hey Auto não detectada.');
       return;
     }
+    queueBusyRef.current = true;
+    setQueueRunning(true);
     queueCancelRef.current = false;
     setQueue((prev) => prev.map((q) => (q.id === id ? { ...q, status: 'running', message: 'Retomando...' } : q)));
     const patch = (p: Partial<QueueItem>) => setQueue((prev) => prev.map((q) => (q.id === id ? { ...q, ...p } : q)));
@@ -2142,24 +2218,33 @@ function HeyGenAutoInner() {
         meta: `takes · montado${item.decupagem ? ' · decupado' : ''}`,
       });
     } catch (e) {
+      console.warn('[heygen-auto] retomar da fila falhou (erro cru):', e);
       const canceled = queueCancelRef.current;
       patch({
         status: canceled ? 'pending' : 'failed',
         phase: canceled ? undefined : 'failed',
-        message: canceled ? 'Pausado — retome quando quiser.' : (e as Error)?.message || 'Falha.',
+        message: canceled ? 'Pausado — retome quando quiser.' : queueFailMessage(e),
       });
+    } finally {
+      queueBusyRef.current = false;
+      setQueueRunning(false);
+      queueCancelRef.current = false;
     }
   }
 
   /** Processa a fila inteira em sequencia (1 disparo por vez). */
   async function processQueue() {
+    if (queueBusyRef.current) return;
     if (!extStatus.connected) {
       setError('Extensão Hey Auto não detectada. Instale primeiro.');
       return;
     }
-    const snapshot = queue.filter((q) => q.status !== 'done');
+    // 'running' fica FORA do snapshot: se algo já roda (RETOMAR avulso), o
+    // clique na fila não pode disparar o mesmo item de novo.
+    const snapshot = queue.filter((q) => q.status !== 'done' && q.status !== 'running');
     if (snapshot.length === 0) return;
     setError(null);
+    queueBusyRef.current = true;
     setQueueRunning(true);
     queueCancelRef.current = false;
     for (const item of snapshot) {
@@ -2180,10 +2265,11 @@ function HeyGenAutoInner() {
       } catch (e) {
         // Cancelamento intencional NAO e falha — volta o item pra 'pending'
         // pra poder reprocessar depois.
+        console.warn('[heygen-auto] item da fila falhou (erro cru):', e);
         const canceled = queueCancelRef.current;
         const msg = canceled
           ? 'Cancelado — reprocessar quando quiser.'
-          : (e as Error)?.message || 'Falha desconhecida.';
+          : queueFailMessage(e);
         setQueue((prev) =>
           prev.map((q) =>
             q.id === item.id ? { ...q, status: canceled ? 'pending' : 'failed', message: msg } : q,
@@ -2192,6 +2278,7 @@ function HeyGenAutoInner() {
         if (canceled) break;
       }
     }
+    queueBusyRef.current = false;
     setQueueRunning(false);
     queueCancelRef.current = false;
   }

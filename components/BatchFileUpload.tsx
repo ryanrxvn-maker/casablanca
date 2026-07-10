@@ -27,10 +27,28 @@ export function BatchFileUpload({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [dragging, setDragging] = useState(false);
 
+  /** O seletor de arquivos respeita `accept`, mas o DRAG & DROP não — um .txt
+   *  ou arquivo de 0 bytes solto aqui ia direto pro processamento e estourava
+   *  com erro técnico. Filtra na entrada (MIME vazio passa: alguns .mov/.mkv
+   *  chegam sem type no Windows e são legítimos). */
+  function matchesAccept(f: File): boolean {
+    if (f.size === 0) return false;
+    if (!accept) return true;
+    const type = (f.type || '').toLowerCase();
+    const name = f.name.toLowerCase();
+    const specs = accept.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+    return specs.some((spec) => {
+      if (spec.startsWith('.')) return name.endsWith(spec);
+      if (spec.endsWith('/*')) return type.startsWith(spec.slice(0, -1));
+      if (!type) return true;
+      return type === spec;
+    });
+  }
+
   function merge(incoming: File[]) {
     const map = new Map<string, File>();
     for (const f of value) map.set(f.name + ':' + f.size, f);
-    for (const f of incoming) map.set(f.name + ':' + f.size, f);
+    for (const f of incoming) { if (matchesAccept(f)) map.set(f.name + ':' + f.size, f); }
     onChange(Array.from(map.values()).slice(0, max));
   }
 
