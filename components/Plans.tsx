@@ -1566,20 +1566,20 @@ const TOOL_DETAILS: ToolInfo[] = [
       },
       {
         step: 'Lê o briefing',
-        detail: 'Cada task com a tag certa vira um job. O Pilot extrai roteiro, avatar, voz, idioma — sem você abrir nada.',
+        detail: 'Cada task selecionada vira um job. O Pilot extrai roteiro, avatar e voz do briefing — sem você abrir nada.',
       },
       {
         step: 'Dispara o avatar',
-        detail: 'O HeyGen entra automaticamente, gera o lipsync e devolve o link do vídeo direto na task — tudo logado.',
+        detail: 'O HeyGen entra automaticamente e gera o lipsync parte por parte, respeitando a fila — tudo na sua própria conta.',
       },
       {
         step: 'Você só revisa',
-        detail: 'Quando volta no ClickUp, as tasks já estão prontas pra publicar. Sem editor humano no meio.',
+        detail: 'Quando você volta, cada task entrega os ZIPs prontos — takes, montado e camuflado — pra revisar e publicar.',
       },
     ],
     highlights: [
       'Pra equipe que entrega 20+ vídeos por dia',
-      'Roda 24/7 — disparos noturnos, finais de semana',
+      'A fila roda de dia e de noite — disparos noturnos, finais de semana',
       'Cada vídeo nasce com o briefing exato do cliente',
     ],
   },
@@ -1593,26 +1593,26 @@ const TOOL_DETAILS: ToolInfo[] = [
     featured: true,
     howItWorks: [
       {
-        step: 'Cola a lista de roteiros',
-        detail: 'Um por linha ou em CSV. Cada linha vira um job de avatar com voz, idioma e cenário definidos no preset.',
+        step: 'Estrutura hooks e body',
+        detail: 'Cole a copy ou suba os áudios: cada hook vira um take e o body é dividido em partes automaticamente.',
       },
       {
         step: 'Escolhe avatar e voz',
-        detail: 'Avatares clonados ficam na memória — clique e seleciona em segundos. Vozes premium incluídas.',
+        detail: 'Direto da sua biblioteca do HeyGen, com preview — e o app memoriza as combinações que você mais usa.',
       },
       {
         step: 'Dispara em fila',
-        detail: 'Roda em paralelo até o limite da sua conta HeyGen. Pode fechar o navegador — segue no background.',
+        detail: 'Cada AD dispara, renderiza e baixa em sequência. A fila roda em segundo plano e você acompanha tudo ao vivo.',
       },
       {
         step: 'Baixa em ZIP',
-        detail: 'Quando termina, você recebe tudo num único pacote pronto pra revisar e publicar.',
+        detail: 'Cada AD entrega três pacotes — takes na ordem, montado e camuflado — prontos pra revisar e publicar.',
       },
     ],
     highlights: [
-      '50 vídeos saem em 1h de trabalho zero seu',
-      'Pode dormir e acordar com tudo entregue',
-      'Histórico completo — qualquer vídeo refeito em 1 clique',
+      'A fila inteira do dia sai com minutos de preparação',
+      'Deixa a fila rodando e volta com tudo entregue',
+      'Histórico completo — retome qualquer lote de onde parou',
     ],
   },
   {
@@ -1634,16 +1634,16 @@ const TOOL_DETAILS: ToolInfo[] = [
       },
       {
         step: 'Roda enquanto você faz outra coisa',
-        detail: 'Cada job dispara num Space próprio. Pode mandar 30 cenas e o backend distribui pra rodarem em série.',
+        detail: 'Mande a lista inteira: a fila roda em série, take após take, sem você intervir — e dá pra acompanhar ao vivo.',
       },
       {
         step: 'Recebe a pasta pronta',
-        detail: 'Tudo zipado, nomeado pela cena, no formato e duração que você definiu no preset global.',
+        detail: 'Tudo zipado e nomeado pela cena, no padrão 9:16 · 10s · 720p, direto pra timeline.',
       },
     ],
     highlights: [
-      'Funciona com Premium+ — zero custo extra de geração',
-      'Suporta lotes de 50+ cenas sem travamento',
+      'Funciona com Premium+ — sem custo extra de geração',
+      'Feito pra lotes grandes — fila serial e estável',
       'Cada cena vira um arquivo nomeado e pronto pra timeline',
     ],
   },
@@ -1653,8 +1653,8 @@ const TOOL_DETAILS: ToolInfo[] = [
     name: 'Lipsync Video to Video',
     cat: 'IA',
     hue: 'rgba(232,121,249,0.5)',
-    desc: 'Sobe o rosto, sobe o áudio e a boca fala exatamente o que você quiser.',
-    win: 'Avatar realista falando sua copy, em minutos. Ilimitado.',
+    desc: 'Suba o rosto, suba o áudio e a boca fala exatamente o que você quiser.',
+    win: 'Avatar realista falando a sua copy, em minutos.',
   },
   {
     key: 'decupagem',
@@ -1662,7 +1662,7 @@ const TOOL_DETAILS: ToolInfo[] = [
     cat: 'Vídeo',
     hue: 'rgba(163,230,53,0.5)',
     desc: 'Vídeo ou áudio: remove o silêncio mantendo o ritmo natural da fala.',
-    win: 'O que demorava 1h vira 30 segundos. Corte limpo, já pronto pra timeline.',
+    win: 'O que tomava a sua tarde sai em minutos. Corte limpo, pronto pra timeline.',
   },
   {
     key: 'downloader',
@@ -1677,8 +1677,8 @@ const TOOL_DETAILS: ToolInfo[] = [
     name: 'FakePrint',
     cat: 'Web',
     hue: 'rgba(167,139,250,0.5)',
-    desc: 'Gera prints e stickers de redes sociais idênticos ao original.',
-    win: 'Prova social na hora, sem Photoshop. Sai igualzinho.',
+    desc: 'Gera prints e stickers de redes sociais fiéis aos originais.',
+    win: 'Prova social na hora, sem abrir o Photoshop.',
   },
   {
     key: 'gerador-srt',
@@ -1686,7 +1686,7 @@ const TOOL_DETAILS: ToolInfo[] = [
     cat: 'IA',
     hue: 'rgba(196,181,253,0.55)',
     desc: 'Gera arquivo .srt no tempo exato do seu áudio a partir da sua copy.',
-    win: 'Texto exato que você quer, tempos exatos do áudio. Importa no editor e fecha o trampo.',
+    win: 'O texto exato que você quer, nos tempos exatos do áudio. Importa no editor e pronto.',
   },
   {
     key: 'mixer-velocidade',
@@ -1710,7 +1710,7 @@ const TOOL_DETAILS: ToolInfo[] = [
     cat: 'Vídeo',
     hue: 'rgba(129,140,248,0.5)',
     desc: 'Reduz o peso dos vídeos sem perder qualidade visível.',
-    win: 'Vídeo pesado vira leve em um clique. Sobem rápido em qualquer lugar.',
+    win: 'Vídeo pesado vira leve em um clique. Sobe rápido em qualquer lugar.',
   },
   {
     key: 'camuflagem',
@@ -1726,7 +1726,7 @@ const TOOL_DETAILS: ToolInfo[] = [
     cat: 'IA',
     hue: 'rgba(232,121,249,0.55)',
     desc: 'A IA decupa o vídeo seguindo a copy do roteiro com precisão.',
-    win: 'Diz o que tem que ser dito, a IA escolhe a melhor take e monta.',
+    win: 'Você diz o que tem que ser dito, a IA escolhe o melhor take e monta.',
   },
 ];
 
