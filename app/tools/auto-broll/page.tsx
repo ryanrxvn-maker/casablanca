@@ -1328,9 +1328,44 @@ async function streamZipFromEntryToDisk(
  *  montar um player numa URL comprovadamente morta (pack antigo). */
 function urlLooksExpired(url: string | null): boolean {
   if (!url) return false;
-  const m = /[?&~](?:exp|Expires)=(\d{10})(?:\D|$)/.exec(url);
+  // Formatos vistos em produção: `?exp=…`, `&Expires=…` e o do Freepik CDN
+  // `?token=exp=1712345678~hmac=…` (por isso o `=` no conjunto).
+  const m = /[?&~=](?:exp|Expires)=(\d{10})(?:\D|$)/.exec(url);
   if (!m) return false;
   return Number(m[1]) * 1000 < Date.now();
+}
+
+type MagnificCreation = {
+  family?: string;
+  tool?: string;
+  url?: string | null;
+  metadata?: { url?: string; index?: unknown; image_index?: unknown; position?: unknown; inputPrompt?: string; prompt?: string; name?: string };
+};
+
+/** Lista creations do acervo do Magnific PAGINADO. A API limita `limit` a 100
+ *  (fix 2026-07-10: limit=200/500 virou 422 e quebrava a recuperação em
+ *  SILÊNCIO — RETOMAR de batch antigo caía direto no paste manual). Para
+ *  quando acaba (sem next/vazio), quando `enough` diz que já coletou o
+ *  necessário, ou no teto de páginas. */
+async function listMagnificCreations(
+  maxPages: number,
+  enough?: (all: MagnificCreation[]) => boolean,
+): Promise<MagnificCreation[]> {
+  const { magnificFetch } = await import('@/lib/magnific-bridge');
+  const all: MagnificCreation[] = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const r = await magnificFetch(`/app/api/creations?limit=100&page=${page}`);
+    if (!r.ok) {
+      if (page === 1) throw new Error('acervo indisponível (' + r.status + ')');
+      break; // páginas seguintes falharam → usa o que já veio
+    }
+    const body = r.json() as { data?: MagnificCreation[]; links?: { next?: string | null } };
+    const batch = body.data || [];
+    all.push(...batch);
+    if (enough?.(all)) break;
+    if (batch.length === 0 || !body.links?.next) break;
+  }
+  return all;
 }
 
 /** Renova os LINKS de preview de um pack direto do acervo do Magnific: lista
@@ -1346,13 +1381,13 @@ async function refreshPreviewUrlsFromMagnific(item: HistEntry): Promise<number> 
     if (m) { family = m[1]; break; }
   }
   if (!family) return 0;
-  const { magnificFetch } = await import('@/lib/magnific-bridge');
-  const r = await magnificFetch(`/app/api/creations?limit=500`);
-  if (!r.ok) throw new Error('acervo indisponível (' + r.status + ')');
-  const body = r.json() as {
-    data?: Array<{ family?: string; tool?: string; url?: string | null; metadata?: { url?: string; index?: unknown; image_index?: unknown; position?: unknown } }>;
-  };
-  const matching = (body.data || []).filter((c) => c.family === family);
+  // Pack de 300 = ~600 creations (imagem+vídeo) + o que veio depois por cima.
+  // Para cedo quando já achou vídeo pra todos os takes do pack.
+  const want = (item.takeUrls || []).length;
+  const data = await listMagnificCreations(15, (all) =>
+    all.filter((c) => c.family === family && String(c.tool || '').toLowerCase().includes('video')).length >= want,
+  );
+  const matching = data.filter((c) => c.family === family);
   if (matching.length === 0) return 0;
   // VIDEOS: url real fica em metadata.url; IMAGES: url no top-level (ver
   // lib/magnific-api-client.ts). Primeiro hit por idx vence (mais recente).
@@ -1895,14 +1930,16 @@ function BrollHistorySection() {
       if (m) { family = m[1]; break; }
     }
     if (!family) return null;
-    // 2. Fetch creations via bridge
-    const { magnificFetch } = await import('@/lib/magnific-bridge');
-    const r = await magnificFetch(`/app/api/creations?limit=200`);
-    if (!r.ok) throw new Error('Magnific API status ' + r.status);
-    const body = r.json() as { data?: Array<{ family?: string; tool?: string; metadata?: any }> };
-    if (!body.data || body.data.length === 0) return null;
+    // 2. Fetch creations via bridge — PAGINADO (a API limita limit<=100; o
+    //    limit=200 antigo virou 422 e esta recuperação quebrou em silêncio).
+    //    Para cedo quando já cobriu ~imagem+vídeo de todos os takes do pack.
+    const want = (item.takeUrls || []).length * 2;
+    const data = await listMagnificCreations(15, (all) =>
+      all.filter((c) => c.family === family).length >= want,
+    );
+    if (data.length === 0) return null;
     // 3. Filtra por family
-    const matching = body.data.filter((c) => c.family === family);
+    const matching = data.filter((c) => c.family === family);
     if (matching.length === 0) return null;
     // 4. Extrai prompts por idx
     const imageMap = new Map<number, string>();
