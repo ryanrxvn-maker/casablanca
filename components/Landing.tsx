@@ -9,9 +9,9 @@ import { SmokeText } from './SmokeText';
 import {
   IconAutoBroll,
   IconClickUpPilot,
+  IconCopySRT,
   IconDecupagem,
   IconHeyGenAuto,
-  IconRemoverElementos,
 } from './ToolIcons';
 
 /**
@@ -42,6 +42,7 @@ export function Landing() {
       <AutoBrollShowcase />
       <AutoBrollHowItWorks />
       <CapabilitiesSection />
+      <SuiteSection />
       <ShowcaseSection />
       <FaqSection />
       <FinalCTA />
@@ -140,9 +141,9 @@ function HeroSection() {
           <div className="mt-8 flex items-center gap-4 fade-in-up" style={{ animationDelay: '720ms' }}>
             <AvatarStack />
             <p className="text-[12.5px] leading-tight text-text-muted">
-              <span className="font-semibold text-white">Estúdios automatizados</span>
+              <span className="font-semibold text-white">Estúdios e editores</span>
               <br />
-              entregando 20× mais com a mesma equipe.
+              rodando a produção do dia em fila, sem madrugada de edição.
             </p>
           </div>
         </div>
@@ -160,7 +161,7 @@ function HeroVisual() {
         <FloatIcon delay={0} className="absolute left-[8%] top-[12%]" hue="rgba(240,171,252,0.45)" icon={<IconAutoBroll size={28} />} />
         <FloatIcon delay={300} className="absolute right-[6%] top-[20%]" hue="rgba(103,232,249,0.45)" icon={<IconHeyGenAuto size={28} />} />
         <FloatIcon delay={600} className="absolute left-[5%] bottom-[18%]" hue="rgba(163,230,53,0.4)" icon={<IconDecupagem size={28} />} />
-        <FloatIcon delay={1200} className="absolute right-[40%] top-[5%]" hue="rgba(167,139,250,0.45)" icon={<IconRemoverElementos size={28} />} />
+        <FloatIcon delay={1200} className="absolute right-[40%] top-[5%]" hue="rgba(167,139,250,0.45)" icon={<IconClickUpPilot size={28} />} />
       </div>
 
       <div className="hv-mark relative z-10">
@@ -251,10 +252,10 @@ function AvatarStack() {
 
 function StatsRow() {
   const stats = [
-    { value: '20×', label: 'mais rápido que editar à mão' },
-    { value: '90%', label: 'do trabalho repetitivo no automático' },
-    { value: '24/7', label: 'rodando enquanto você dorme' },
-    { value: '1×', label: 'clique pra disparar o dia inteiro' },
+    { value: '1 clique', label: 'dispara a fila do dia inteiro' },
+    { value: '3 ZIPs', label: 'por disparo: takes, montado e camuflado' },
+    { value: '24/7', label: 'a fila segue rodando enquanto você descansa' },
+    { value: '0 crédito', label: 'extra por b-roll — roda na sua conta Magnific' },
   ];
   return (
     <section className="mx-auto mt-24 max-w-[1200px] px-5 md:px-8">
@@ -295,6 +296,31 @@ function PilotShowcase() {
             'linear-gradient(120deg, rgba(200,232,124,0.18) 0%, rgba(167,139,250,0.22) 50%, rgba(34,211,238,0.14) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #08080a)',
         }}
       >
+        {/* Fundo cinematográfico */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/hero/pilot-bg.jpg"
+          alt=""
+          aria-hidden
+          loading="lazy"
+          decoding="async"
+          className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-40"
+          style={{
+            maskImage:
+              'linear-gradient(100deg, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.9) 55%, #000 100%)',
+            WebkitMaskImage:
+              'linear-gradient(100deg, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.9) 55%, #000 100%)',
+          }}
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              'linear-gradient(90deg, rgba(8,8,10,0.92) 0%, rgba(8,8,10,0.55) 45%, rgba(8,8,10,0.25) 100%)',
+          }}
+        />
+
         {/* Pulsos animados — fundo ambient */}
         <div
           aria-hidden
@@ -376,12 +402,12 @@ function PilotShowcase() {
           </h2>
 
           <p className="max-w-[580px] text-[15.5px] leading-relaxed text-white/85">
-            O Pilot lê os briefings no seu ClickUp, identifica avatar e roteiro
-            de cada task, e dispara o lipsync sozinho no HeyGen — parte por
-            parte.
+            O Pilot lê os briefings no seu ClickUp, identifica o avatar e o
+            roteiro de cada task e dispara os lipsyncs no HeyGen — parte por
+            parte, em fila.
             <br />
             <span className="text-white/65">
-              Você dorme. Acorda. Tudo já tá pronto pra revisar.
+              Quando você volta, está tudo pronto pra revisar.
             </span>
           </p>
 
@@ -441,6 +467,31 @@ function AutoBrollShowcase() {
             'linear-gradient(120deg, rgba(167,139,250,0.22) 0%, rgba(240,171,252,0.18) 50%, rgba(200,232,124,0.10) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), #08080a)',
         }}
       >
+        {/* Fundo cinematográfico */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/hero/auto-broll-bg.jpg"
+          alt=""
+          aria-hidden
+          loading="lazy"
+          decoding="async"
+          className="pointer-events-none absolute inset-0 h-full w-full object-cover opacity-40"
+          style={{
+            maskImage:
+              'linear-gradient(260deg, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.9) 55%, #000 100%)',
+            WebkitMaskImage:
+              'linear-gradient(260deg, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.9) 55%, #000 100%)',
+          }}
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              'linear-gradient(270deg, rgba(8,8,10,0.92) 0%, rgba(8,8,10,0.55) 45%, rgba(8,8,10,0.25) 100%)',
+          }}
+        />
+
         {/* Pulsos */}
         <div
           aria-hidden
@@ -496,7 +547,7 @@ function AutoBrollShowcase() {
               VÍDEOS EM ESCALA
             </span>
             <span className="h-px w-10 bg-white/25" />
-            <span className="text-[10.5px] tracking-[0.32em]">002</span>
+            <span className="text-[10.5px] tracking-[0.32em]">003</span>
           </div>
 
           <h2
@@ -513,16 +564,16 @@ function AutoBrollShowcase() {
                 WebkitTextFillColor: 'transparent',
               }}
             >
-              <SmokeText text="10 B-rolls em paralelo." />
+              <SmokeText text="Dezenas de b-rolls prontos." />
             </span>
           </h2>
 
           <p className="max-w-[560px] text-[15.5px] leading-relaxed text-white/85">
-            Cole o JSON. Dispare. Vá fazer outra coisa.
+            Cole a lista. Dispare. Vá fazer outra coisa.
             <br />
             <span className="text-white/65">
-              Cada take é renderizado em Kling 2.5 720p sobre frame Nano Banana 1K
-              — qualidade Magnific, zero crédito.
+              Cada take renderiza em Kling 720p sobre frame Nano Banana 1K,
+              na sua conta Magnific — sem crédito extra por vídeo.
             </span>
           </p>
 
@@ -1070,14 +1121,14 @@ export function PilotHowItWorks() {
       n: '03',
       title: 'Revisa task por task',
       desc:
-        'Preview limpo de cada uma: roteiro + avatar identificado pelo link na copy. Se o avatar já tá na sua biblioteca do HeyGen, o Pilot usa direto.',
+        'Preview limpo de cada uma: roteiro + avatar identificado pelo link na copy. Se o avatar já está na sua biblioteca do HeyGen, o Pilot usa direto.',
       tint: 'rgba(244,114,182,0.45)',
     },
     {
       n: '04',
       title: 'Confirma e desliga o monitor',
       desc:
-        'O Pilot dispara os lipsyncs no HeyGen, parte por parte. Quando você volta, tá tudo montado, pronto pra ir pra edição final.',
+        'O Pilot dispara os lipsyncs no HeyGen, parte por parte. Quando você volta, está tudo montado, pronto pra edição final.',
       tint: 'rgba(103,232,249,0.5)',
     },
   ];
@@ -1099,7 +1150,7 @@ export function PilotHowItWorks() {
             className="text-[10.5px] uppercase tracking-[0.28em] text-violet"
             style={{ fontFamily: 'var(--font-tech)' }}
           >
-            COMO FUNCIONA
+            O PILOT, PASSO A PASSO
           </span>
         </div>
         <h2
@@ -1200,8 +1251,8 @@ export function PilotHowItWorks() {
             </h3>
             <p className="mt-3 max-w-[640px] text-[14.5px] leading-relaxed text-white/85">
               Você recebe um manual simples de como estruturar a copy de cada
-              task no ClickUp. O Pilot só consegue trabalhar com 100% de
-              assertividade quando o briefing segue esse padrão.
+              task no ClickUp. Com o briefing nesse padrão, o Pilot identifica
+              avatar e roteiro com precisão máxima.
               <br />
               <span className="text-white/65">
                 Menos revisão. Menos retrabalho. Mais entrega.
@@ -1243,7 +1294,7 @@ export function PilotHowItWorks() {
               </span>
             </h3>
             <p className="mt-3 text-[14px] leading-relaxed text-white/80">
-              Valida formato full UGC todo dia? Liga o Pilot e ele monta o dia
+              Valida criativos UGC todo dia? Ligue o Pilot e ele monta o dia
               inteiro pra você. Você só aprova.
             </p>
           </div>
@@ -1273,15 +1324,15 @@ export function PilotHowItWorks() {
               className="text-[26px] font-extrabold leading-tight tracking-tight text-white md:text-[32px]"
               style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
             >
-              <SmokeText text="Ele entrega 5× mais." className="block" />
+              <SmokeText text="Ele entrega muito mais." className="block" />
               <span className="block text-violet">
-                <SmokeText text="Sem suar." />
+                <SmokeText text="Sem virar noite." />
               </span>
             </h3>
             <p className="mt-3 text-[14px] leading-relaxed text-white/80">
               O Pilot tira o trabalho repetitivo da frente dele. Sobra tempo
-              pra criatividade, pra polish, pra entregar mais. Sua operação
-              dobra de tamanho com a mesma equipe.
+              pra criatividade, pro acabamento, pra entregar mais — sua
+              operação cresce sem crescer a equipe.
             </p>
           </div>
         </div>
@@ -1295,28 +1346,28 @@ export function AutoBrollHowItWorks() {
   const steps = [
     {
       n: '01',
-      title: 'Cola seu JSON',
+      title: 'Cole sua lista',
       desc:
-        'Cola o JSON e o app já mostra quantos takes vai gerar. Liga a fila e pronto.',
+        'Cole a lista de prompts e o app mostra na hora quantos takes vai gerar. Ligou a fila, pronto.',
       tint: 'rgba(167,139,250,0.5)',
     },
     {
       n: '02',
-      title: 'Aperta o play',
+      title: 'Aperte o play',
       desc:
-        '12 imagens e 6 vídeos em paralelo. Nano Banana compõe o frame inicial, Kling 2.5 renderiza o movimento. Tudo na sua conta Magnific Unlimited.',
+        'Nano Banana compõe o frame inicial, Kling renderiza o movimento — take após take, tudo na sua conta Magnific Unlimited.',
       tint: 'rgba(200,232,124,0.45)',
     },
     {
       n: '03',
-      title: 'Acompanha em tempo real',
+      title: 'Acompanhe em tempo real',
       desc:
-        'Cada take vira um card 9:16 ao vivo: vê o vídeo nascer, expande pra tela cheia, baixa o MP4 individual antes mesmo dos outros terminarem.',
+        'Cada take vira um card 9:16 ao vivo: você vê o vídeo nascer, expande pra tela cheia e baixa o MP4 individual antes mesmo dos outros terminarem.',
       tint: 'rgba(240,171,252,0.45)',
     },
     {
       n: '04',
-      title: 'Pega o ZIP organizado',
+      title: 'Pegue o ZIP organizado',
       desc:
         'Quando o último take termina, sai um ZIP nomeado com todos os MP4s prontos pra timeline. Sem renomear, sem organizar.',
       tint: 'rgba(103,232,249,0.5)',
@@ -1349,7 +1400,7 @@ export function AutoBrollHowItWorks() {
         >
           <SmokeText text="4 passos." className="block" />
           <span className="display-subtle block">
-            <SmokeText text="Do JSON à pasta pronta." />
+            <SmokeText text="Da lista à pasta pronta." />
           </span>
         </h2>
       </div>
@@ -1506,13 +1557,12 @@ export function AutoBrollHowItWorks() {
               <SmokeText text="Cola, dispara, vai fazer outra coisa." />
             </h3>
             <p className="mt-3 max-w-[640px] text-[14.5px] leading-relaxed text-white/85">
-              Qualidade Magnific travada em Nano Banana 1K + Kling 2.5
+              Qualidade travada no ponto certo: Nano Banana 1K + Kling
               720p · 10s · 9:16. Sem configuração, sem janela do Magnific
               aberta, sem clicar &ldquo;Generate&rdquo; um por um.
               <br />
               <span className="text-white/65">
-                Acabou o lote? O ZIP cai pronto, nomeado, pronto pra
-                timeline.
+                Acabou o lote? O ZIP cai nomeado, pronto pra timeline.
               </span>
             </p>
           </div>
@@ -1545,15 +1595,15 @@ export function AutoBrollHowItWorks() {
               className="text-[26px] font-extrabold leading-tight tracking-tight text-white md:text-[32px]"
               style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
             >
-              <SmokeText text="500 B-rolls num dia." className="block" />
+              <SmokeText text="O dia inteiro de b-roll." className="block" />
               <span className="block text-violet">
-                <SmokeText text="Sem abrir Magnific." />
+                <SmokeText text="Sem abrir o Magnific." />
               </span>
             </h3>
             <p className="mt-3 text-[14px] leading-relaxed text-white/80">
-              Cole as listas dos ads do dia inteiro e dispare em lote.
-              Almoça, dorme, treina — quando volta, tá tudo pronto pra timeline.
-              Nunca mais clica em &ldquo;Generate&rdquo; um por um.
+              Cole as listas dos ads do dia inteiro e dispare em lote. Vá
+              almoçar, treinar, viver — quando voltar, está tudo pronto pra
+              timeline, sem clicar em &ldquo;Generate&rdquo; um por um.
             </p>
           </div>
         </div>
@@ -1588,8 +1638,8 @@ export function AutoBrollHowItWorks() {
               </span>
             </h3>
             <p className="mt-3 text-[14px] leading-relaxed text-white/80">
-              Acabou de virar editor de uma operação grande sem editar nada.
-              Cada conta usa seu próprio Freepik — você escala sem
+              A pasta chega organizada, nomeada, pronta pra timeline. Cada
+              conta usa o próprio Freepik — você escala a produção sem
               comprometer qualidade nem inflar custo.
             </p>
           </div>
@@ -1634,19 +1684,19 @@ function CapabilitiesSection() {
       icon: <IconHeyGenAuto size={32} />,
       hue: 'rgba(103,232,249,0.5)',
       title: 'Lipsync do dia em 1 clique',
-      desc: 'Dispara todos os avatares de uma vez. Vá dormir e acorde com os vídeos prontos.',
+      desc: 'Monta a fila, dispara todos os avatares de uma vez e recebe os vídeos prontos.',
     },
     {
-      icon: <IconRemoverElementos size={32} />,
+      icon: <IconCopySRT size={32} />,
       hue: 'rgba(167,139,250,0.5)',
-      title: 'Remover legenda em massa',
-      desc: 'Passa o batch, a IA limpa todas. Marca d’água, legenda gravada — tudo no lixo.',
+      title: 'Legenda alinhada à copy',
+      desc: 'Cole a copy, suba o áudio: o SRT sai alinhado palavra por palavra, pronto pro CapCut.',
     },
     {
       icon: <IconDecupagem size={32} />,
       hue: 'rgba(163,230,53,0.45)',
-      title: 'Decupagem instantânea',
-      desc: 'Silêncios somem sozinhos. O que demorava 1 hora vira 30 segundos.',
+      title: 'Decupagem automática',
+      desc: 'Os silêncios somem sozinhos, em lote — o corte limpo sai em minutos, não em tardes.',
     },
     {
       icon: <IconClickUpPilot size={32} />,
@@ -1727,6 +1777,157 @@ function CapabilityCard({
         </p>
       </div>
     </div>
+  );
+}
+
+/* ────────────────────── A SUÍTE ────────────────────── */
+
+/**
+ * Vitrine da suíte — usa os posters cinematográficos reais das ferramentas
+ * (public/cards). Só ferramentas disponíveis pro cliente entram aqui.
+ */
+function SuiteSection() {
+  const featured = [
+    {
+      img: '/cards/fluxo-automatico.jpg',
+      title: 'ClickUp Pilot',
+      desc: 'Do briefing na task ao vídeo pronto, em fila, sem clique manual.',
+    },
+    {
+      img: '/cards/auto-broll.jpg',
+      title: 'Auto B-roll',
+      desc: 'Sua lista de prompts vira uma pasta de takes cinematográficos.',
+    },
+  ];
+  const tools = [
+    {
+      img: '/cards/hey-auto.jpg',
+      title: 'Hey Auto',
+      desc: 'Lipsync em lote no HeyGen, sem abrir o HeyGen.',
+    },
+    {
+      img: '/cards/lipsync.jpg',
+      title: 'Lipsync Video to Video',
+      desc: 'O rosto do seu vídeo falando qualquer áudio novo.',
+    },
+    {
+      img: '/cards/decupagem-inteligente.jpg',
+      title: 'Decupagem Inteligente',
+      desc: 'A IA lê a copy e escolhe o melhor take de cada frase.',
+    },
+    {
+      img: '/cards/gerador-srt.jpg',
+      title: 'Gerador de SRT',
+      desc: 'Legenda alinhada palavra por palavra, pronta pro CapCut.',
+    },
+  ];
+
+  return (
+    <section className="mx-auto mt-32 max-w-[1200px] px-5 md:px-8">
+      <div className="mb-12 max-w-[720px] fade-in-up">
+        <div
+          className="mb-3 text-[10.5px] font-semibold uppercase tracking-[0.22em] text-text-dim"
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          A SUÍTE
+        </div>
+        <h2 className="section-title text-[36px] md:text-[48px]" style={{ lineHeight: 1.05 }}>
+          <SmokeText text="Uma ferramenta pra cada gargalo." className="block" />
+          <span className="display-subtle block">
+            <SmokeText text="Do avatar ao corte final." />
+          </span>
+        </h2>
+      </div>
+
+      {/* Destaques grandes */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        {featured.map((t, i) => (
+          <SuiteCard key={t.title} {...t} large delay={i * 90} />
+        ))}
+      </div>
+
+      {/* Linha de apoio */}
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {tools.map((t, i) => (
+          <SuiteCard key={t.title} {...t} delay={200 + i * 70} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SuiteCard({
+  img,
+  title,
+  desc,
+  large,
+  delay,
+}: {
+  img: string;
+  title: string;
+  desc: string;
+  large?: boolean;
+  delay: number;
+}) {
+  return (
+    <Link
+      href="/register"
+      className="suite-card group relative block overflow-hidden rounded-[20px] border border-line/60 fade-in-up transition-all duration-500 hover:-translate-y-1 hover:border-violet/45"
+      style={{ animationDelay: `${delay}ms` }}
+    >
+      <div className={'relative overflow-hidden ' + (large ? 'aspect-[16/9]' : 'aspect-[16/10]')}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={img}
+          alt={title}
+          loading="lazy"
+          decoding="async"
+          className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-[1.04]"
+        />
+        <div
+          aria-hidden
+          className="absolute inset-0"
+          style={{
+            background:
+              'linear-gradient(180deg, rgba(7,7,8,0.05) 30%, rgba(7,7,8,0.78) 78%, rgba(7,7,8,0.96) 100%)',
+          }}
+        />
+        <div
+          aria-hidden
+          className="absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100"
+          style={{
+            background:
+              'radial-gradient(60% 50% at 50% 100%, rgba(167,139,250,0.22), transparent 70%)',
+          }}
+        />
+        <div className={'absolute inset-x-0 bottom-0 ' + (large ? 'p-6 md:p-7' : 'p-5')}>
+          <h3
+            className={
+              'font-bold tracking-tight text-white ' +
+              (large ? 'text-[22px] md:text-[24px]' : 'text-[16.5px]')
+            }
+            style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.01em' }}
+          >
+            {title}
+          </h3>
+          <p
+            className={
+              'mt-1 leading-relaxed text-white/70 ' + (large ? 'text-[14px]' : 'text-[12.5px]')
+            }
+          >
+            {desc}
+          </p>
+        </div>
+        <span
+          aria-hidden
+          className="absolute right-4 top-4 grid h-8 w-8 place-items-center rounded-full border border-white/15 bg-black/45 text-white/80 backdrop-blur-md transition-all duration-300 group-hover:border-violet/60 group-hover:text-white"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M7 17L17 7M9 7h8v8" />
+          </svg>
+        </span>
+      </div>
+    </Link>
   );
 }
 
@@ -1822,10 +2023,10 @@ function ShowcaseSection() {
           </p>
           <ul className="mt-7 space-y-3">
             {[
-              'Tudo roda no seu computador. Sem servidor remoto.',
-              'Os arquivos nunca saem da sua máquina.',
-              'Você usa suas próprias chaves de IA, em ambiente seguro.',
-              'Sem assinatura escondida. Sem letra miúda.',
+              'O processamento pesado de vídeo e áudio roda no seu navegador.',
+              'HeyGen e Magnific rodam no seu próprio login — suas contas, suas regras.',
+              'A fila continua em segundo plano e você acompanha tudo em tempo real.',
+              'Sem taxa escondida, sem letra miúda. Cancela quando quiser.',
             ].map((line, i) => (
               <li
                 key={i}
@@ -1964,10 +2165,11 @@ function FinalCTA() {
             <SmokeText text="Pronto pra automatizar?" />
           </h2>
           <p className="mx-auto mt-4 max-w-[540px] text-[15.5px] leading-relaxed text-white/75">
-            Cria a conta, liga a fila e vai viver. Resto é robô.
+            Crie a conta, ligue a primeira fila e veja o dia render sem você
+            no monitor.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-            <Link href="/login" className="btn-primary group text-base">
+            <Link href="/register" className="btn-primary group text-base">
               <span>Começar grátis</span>
               <span className="transition-transform duration-300 group-hover:translate-x-1">→</span>
             </Link>
