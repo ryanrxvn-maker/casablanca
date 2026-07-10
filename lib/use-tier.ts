@@ -14,6 +14,7 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/caixinha-pergunta',
     '/tools/fakepass',
     '/tools/compressor',
+    '/tools/historico',
   ]),
   basic: new Set([
     '/tools/decupagem',
@@ -26,6 +27,7 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/acelerador',
     '/tools/calculadora',
     '/tools/copy-srt',
+    '/tools/historico',
     // ⚠ NÃO inclui: auto-broll, heygen-auto, decupagem-copy (smart decup), remover-elementos (smart remover), normalizador (admin-only), separador-audio (admin-only), ltx-video, clickup-pilot
   ]),
   pro: new Set([
@@ -45,6 +47,7 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/decupagem-copy',
     '/tools/clickup-pilot',
     '/tools/lipsync',
+    '/tools/historico',
   ]),
   admin: new Set([]), // admin é tratado por bypass (allow tudo)
 };

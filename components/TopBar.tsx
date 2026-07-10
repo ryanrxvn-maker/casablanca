@@ -2,21 +2,19 @@
 
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import { BackgroundTasksButton } from './BackgroundTasksButton';
 import { CalculadoraButton } from './CalculadoraButton';
-import { ClickUpPilotButton } from './ClickUpPilotButton';
 import { GlobalSearchButton } from './GlobalSearch';
-import { LipsyncHistoryButton } from './LipsyncHistoryButton';
-import { PointsButton } from './PointsButton';
+import { HistoryButton } from './HistoryButton';
 
 /**
- * TopBar v4 — barra fina com título contextual + cluster de ações.
+ * TopBar v5 — barra fina com título contextual + cluster enxuto.
  *
- *  ┌─ Título da rota ─────────────────────── [Pontos · Bg · ⏱ · Pilot] ─┐
+ *  ┌─ Título da rota ────────────────── [Pesquisar] [Calc · Histórico] ─┐
  *
- * Os 4 ícones agora vivem dentro de um cluster (.topbar-cluster) —
- * pílula com fundo translúcido e divisor entre grupo "do usuário"
- * (Pontos) e grupo "do trabalho" (Bg/Histórico/Pilot).
+ * Só três ações vivem aqui (pedido do dono, 10.07.26): busca global,
+ * calculadora e o Histórico geral. O resto migrou: Pilot pra sidebar,
+ * tarefas ao vivo e ZIPs de avatar são atalhos dentro do Histórico,
+ * Pontos fica na sidebar (atalhos).
  */
 const TITLES: Record<string, string> = {
   '/tools': 'Início',
@@ -36,6 +34,7 @@ const TITLES: Record<string, string> = {
   '/tools/heygen-auto': 'Hey Auto',
   '/tools/points': 'Pontos',
   '/tools/background': 'Tarefas em segundo plano',
+  '/tools/historico': 'Histórico geral',
   '/tools/lipsync-history': 'Histórico de avatares',
   '/tools/clickup-pilot': 'ClickUp Pilot',
   '/tools/voice-test': 'Isolar voz',
@@ -100,10 +99,7 @@ export function TopBar() {
           <div className="topbar-cluster">
             <CalculadoraButton />
             <span aria-hidden className="topbar-divider" />
-            <PointsButton />
-            <BackgroundTasksButton />
-            <LipsyncHistoryButton />
-            <ClickUpPilotButton />
+            <HistoryButton />
           </div>
         </div>
       </div>

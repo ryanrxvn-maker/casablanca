@@ -49,6 +49,7 @@ const FREE_ALLOWED_TOOLS = [
   '/tools/caixinha-pergunta',
   '/tools/fakepass',
   '/tools/compressor',
+  '/tools/historico', // histórico geral — todo tier vê o próprio trabalho
 ];
 // Outras rotas (não-/tools) que free pode ver (educacionais/comerciais)
 const FREE_EXTRA_OK_PREFIXES = ['/pilot', '/planos'];

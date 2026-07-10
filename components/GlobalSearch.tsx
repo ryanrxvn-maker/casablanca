@@ -85,6 +85,7 @@ const ENTRIES: Entry[] = [
   // Mantemos o id e as keywords aqui pra o scoring funcionar igual ao resto da app.
   { id: 'pilot-tool', group: 'Atalhos', label: 'ClickUp Pilot', hint: 'Disparar automação agora', href: '/tools/clickup-pilot', icon: <IconClickUpPilot size={20} />, keywords: ['automatizar', 'rodar', 'automação', 'clickup', 'avatar', 'briefing', 'pilot'] },
   { id: 'background', group: 'Atalhos', label: 'Tarefas em segundo plano', hint: 'Acompanha jobs rodando', href: '/tools/background', icon: <IconStepGear size={20} />, keywords: ['bg', 'fila', 'job', 'running'] },
+  { id: 'historico-geral', group: 'Atalhos', label: 'Histórico geral', hint: 'Tudo que você produziu nos últimos 7 dias', href: '/tools/historico', icon: <IconStepGear size={20} />, keywords: ['historico', 'histórico', 'history', 'registro', 'atividade', 'log', 'trabalho'] },
   { id: 'history', group: 'Atalhos', label: 'Histórico de avatares', hint: 'Lipsyncs anteriores', href: '/tools/lipsync-history', icon: <IconHeyGenAuto size={20} />, keywords: ['history', 'lipsync', 'avatar'] },
 
   // Configurações
