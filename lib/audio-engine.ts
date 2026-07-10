@@ -38,10 +38,13 @@ export async function decodeAudio(file: Blob): Promise<AudioBuffer> {
   // decodeAudioRobust cai no fallback FFmpeg.
   let to: ReturnType<typeof setTimeout> | undefined;
   try {
+    // O buffer vai DIRETO pro decodeAudioData (que o detacha) — sem .slice(0).
+    // A cópia defensiva dobrava o pico de memória (200MB de arquivo = +200MB
+    // só pra jogar fora) e o buffer é local: ninguém o reusa depois daqui.
     const arrayBuffer = await file.arrayBuffer();
     return await new Promise<AudioBuffer>((resolve, reject) => {
       to = setTimeout(() => reject(new Error('decodeAudio timeout 60s')), 60_000);
-      ctx.decodeAudioData(arrayBuffer.slice(0)).then(resolve, reject);
+      ctx.decodeAudioData(arrayBuffer).then(resolve, reject);
     });
   } finally {
     if (to) clearTimeout(to);

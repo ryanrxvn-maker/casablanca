@@ -65,7 +65,12 @@ export async function startDecupar(opts: {
 export async function checkDecupStatus(callId: string): Promise<DecupStatus> {
   const r = await fetch(`${DECUP_BASE}/status?call_id=${encodeURIComponent(callId)}`);
   const j = await r.json().catch(() => null);
-  if (!r.ok || !j) return { status: 'failed', error: `Modal /status HTTP ${r.status}` };
+  // O /status do Modal responde 200 SEMPRE (falha real vem como JSON
+  // {status:'failed'}). Não-2xx/JSON quebrado = blip de infra (gateway/cold
+  // start) → LANÇA pra rota tratar como transitório ('processing'), em vez de
+  // matar um job que segue rodando no worker. O TTL do token (1h) e o teto de
+  // poll do cliente (50min) limitam a espera se o Modal morrer de vez.
+  if (!r.ok || !j) throw new Error(`Modal /status HTTP ${r.status} (transitório)`);
   return j as DecupStatus;
 }
 
