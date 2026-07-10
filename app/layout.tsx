@@ -81,7 +81,6 @@ export const metadata: Metadata = {
     'decupagem automática',
     'gerar b-roll com IA',
     'lipsync em lote',
-    'remover legenda de vídeo',
     'editor de vídeo automático',
     'automação UGC',
     'HeyGen em lote',
@@ -188,8 +187,8 @@ const JSON_LD = {
         'Decupagem automática de vídeo',
         'Geração de B-roll com IA',
         'Lipsync em lote',
-        'Remover legenda gravada e marca d’água',
-        'Legendas automáticas',
+        'Legendas (SRT) alinhadas à copy',
+        'Compressão e ajuste de velocidade em lote',
       ],
       offers: {
         '@type': 'AggregateOffer',

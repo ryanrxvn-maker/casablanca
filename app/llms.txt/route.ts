@@ -13,16 +13,16 @@ const BODY = `# Auto Edit
 
 ## Páginas principais
 - [Início](${SITE}/): O que o Auto Edit automatiza e como funciona a fila.
-- [Planos e preços](${SITE}/planos): Plano grátis, Basic (R$ 57/mês) e Pro (R$ 116/mês). Mensal recorrente ou anual parcelável em até 12×.
+- [Planos e preços](${SITE}/planos): Plano grátis e Basic (R$ 57/mês); o Pro abre em breve. Mensal recorrente ou anual parcelável em até 12×.
 - [Termos de uso](${SITE}/termos): Termos de uso do serviço.
 - [Política de privacidade](${SITE}/politica): Como os dados são tratados.
 
 ## O que o Auto Edit faz
-- Decupagem automática: remove silêncios e cortes mortos; ~1 hora de trabalho vira segundos.
-- Remover legenda gravada e marca d'água em lote.
+- Decupagem automática: remove silêncios e cortes mortos em lote, com volume nivelado.
 - Lipsync em lote (vários avatares de uma vez) — escala de UGC.
-- Geração automática de B-roll a partir de um JSON.
-- Legendas automáticas.
+- Geração automática de B-roll a partir de uma lista de prompts.
+- Legendas (SRT) alinhadas à copy, palavra por palavra.
+- Compressão, ajuste de velocidade e divisão de áudio em lote.
 
 ## Fatos
 - Público: editores de vídeo, criadores e agências no Brasil.

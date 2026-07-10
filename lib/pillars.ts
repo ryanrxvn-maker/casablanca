@@ -90,76 +90,12 @@ export const PILLARS: Pillar[] = [
       },
       {
         q: 'A decupagem automática é gratuita?',
-        a: 'Você pode começar no plano grátis do Auto Edit, sem cartão. Os planos Basic (R$ 57/mês) e Pro (R$ 116/mês) liberam mais volume e ferramentas.',
+        a: 'Você pode começar no plano grátis do Auto Edit, sem cartão. O plano Basic (R$ 57/mês) libera mais volume e ferramentas; o Pro, com as automações completas, abre em breve.',
       },
     ],
     related: [
-      { slug: 'remover-legenda-de-video', label: 'Remover legenda de vídeo' },
+      { slug: 'gerar-legenda-automatica', label: 'Gerar legenda automática' },
       { slug: 'b-roll-automatico', label: 'Gerar B-roll automático' },
-    ],
-  },
-  {
-    slug: 'remover-legenda-de-video',
-    keyword: 'remover legenda de vídeo',
-    title: 'Remover legenda de vídeo gravada (queimada) em lote com IA',
-    description:
-      'Remova legenda gravada e marca d’água de vídeos em lote com IA, sem regravar. Ideal pra reaproveitar criativos de UGC e anúncios. Comece grátis.',
-    kicker: 'Remover legenda',
-    h1: 'Remover legenda de vídeo gravada',
-    intro: [
-      'Remover legenda de vídeo gravada (a famosa legenda "queimada", que faz parte da imagem) sempre foi um problema: como ela não é uma faixa separada, não dá pra simplesmente desligar. O Auto Edit usa IA pra apagar a legenda gravada e a marca d’água direto da imagem, sem você precisar regravar nada.',
-      'E faz isso em lote: você passa um monte de vídeos de uma vez e a IA limpa todos, deixando a imagem pronta pra reaproveitar.',
-    ],
-    blocks: [
-      {
-        h2: 'Como remover legenda gravada de um vídeo?',
-        body: [
-          'Você sobe o vídeo com a legenda queimada e a IA detecta a região da legenda (e da marca d’água) na imagem, reconstruindo o fundo por baixo. O resultado é um vídeo limpo, sem o texto que estava por cima.',
-          'Como o processo é automático e em massa, dá pra limpar dezenas de criativos no mesmo lote.',
-        ],
-      },
-      {
-        h2: 'Para que serve remover a legenda de um vídeo?',
-        body: [
-          'O caso mais comum é reaproveitamento de criativo. Quem trabalha com UGC e anúncios recebe vídeos prontos com legenda e marca d’água — e precisa da imagem limpa pra colocar a própria legenda, traduzir ou adaptar pra outra campanha.',
-        ],
-        list: [
-          'Reaproveitar criativos de UGC sem regravar',
-          'Tirar marca d’água de vídeos de banco',
-          'Limpar a imagem antes de colocar a sua própria legenda',
-          'Adaptar o mesmo vídeo pra várias campanhas',
-        ],
-      },
-      {
-        h2: 'Dá pra remover a marca d’água junto?',
-        body: [
-          'Dá. A mesma ferramenta que apaga a legenda gravada remove marca d’água e outros elementos sobrepostos. Você marca o que precisa sair e a IA reconstrói a imagem por baixo.',
-        ],
-      },
-      {
-        h2: 'Remover legenda de vários vídeos de uma vez',
-        body: [
-          'Em vez de tratar um vídeo por vez, você joga o lote inteiro na fila e a IA limpa todos. É o jeito mais rápido de processar volume.',
-        ],
-      },
-    ],
-    faq: [
-      {
-        q: 'Remover legenda gravada estraga a qualidade do vídeo?',
-        a: 'A IA reconstrói a área por baixo da legenda pra manter a imagem natural. O resultado preserva a qualidade do vídeo na maior parte dos casos; em fundos muito complexos pode haver pequena variação na região tratada.',
-      },
-      {
-        q: 'Funciona com legenda em qualquer posição?',
-        a: 'Sim. Você indica a região onde está a legenda ou marca d’água — embaixo, no topo ou no canto — e a ferramenta trata aquela área.',
-      },
-      {
-        q: 'Consigo remover legenda de vários vídeos no mesmo lote?',
-        a: 'Sim. O Auto Edit é feito pra lote: você sobe vários vídeos e a IA processa todos na fila, sem precisar repetir o passo a passo.',
-      },
-    ],
-    related: [
-      { slug: 'decupagem-automatica', label: 'Decupagem automática' },
-      { slug: 'lipsync-em-lote', label: 'Lipsync em lote' },
     ],
   },
   {
@@ -203,7 +139,7 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Precisa instalar algo para fazer lipsync em lote?',
         body: [
-          'Não. Tudo roda no navegador. Você sobe os áudios, escolhe os avatares, liga a fila e baixa os vídeos prontos. Dá pra testar antes nos planos pagos do Auto Edit (Basic R$ 57/mês e Pro R$ 116/mês).',
+          'Só a extensão do Chrome que conecta a sua conta do HeyGen — instala em um minuto. O resto roda no navegador: você sobe os áudios, escolhe os avatares, liga a fila e baixa os vídeos prontos.',
         ],
       },
     ],
@@ -223,7 +159,7 @@ export const PILLARS: Pillar[] = [
     ],
     related: [
       { slug: 'b-roll-automatico', label: 'Gerar B-roll automático' },
-      { slug: 'remover-legenda-de-video', label: 'Remover legenda de vídeo' },
+      { slug: 'automacao-de-ugc', label: 'Automação de UGC' },
     ],
   },
   {
@@ -267,7 +203,7 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Precisa instalar algo?',
         body: [
-          'Não. O B-roll automático roda no navegador, sem download. Você começa no plano grátis e libera mais volume nos planos Basic (R$ 57/mês) e Pro (R$ 116/mês).',
+          'Não. O B-roll automático roda no navegador, sem download. Você começa no plano grátis e libera mais volume no plano Basic (R$ 57/mês).',
         ],
       },
     ],
@@ -312,8 +248,8 @@ export const PILLARS: Pillar[] = [
           'Decupagem automática — remove silêncios e cortes mortos',
           'B-roll automático — gera cobertura congruente a partir do roteiro',
           'Lipsync em lote — dispara vários avatares de uma vez',
-          'Remover legenda gravada e marca d’água em massa',
-          'Legendas automáticas a partir da fala',
+          'Compressão e ajuste de velocidade em lote',
+          'Legendas automáticas alinhadas à copy',
         ],
       },
       {
@@ -332,7 +268,7 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Precisa instalar algo para automatizar a edição?',
         body: [
-          'Não. Toda a automação roda no navegador, sem download nem plugin. Você começa no plano grátis e libera mais volume nos planos Basic (R$ 57/mês) e Pro (R$ 116/mês).',
+          'Não. Toda a automação roda no navegador, sem download nem plugin. Você começa no plano grátis e libera mais volume no plano Basic (R$ 57/mês).',
         ],
       },
     ],
@@ -446,7 +382,7 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Precisa instalar algo para legendar?',
         body: [
-          'Não. A legenda automática funciona 100% no navegador, sem download. Você começa no plano grátis e amplia o volume nos planos Basic (R$ 57/mês) e Pro (R$ 116/mês).',
+          'Não. A legenda automática funciona 100% no navegador, sem download. Você começa no plano grátis e amplia o volume no plano Basic (R$ 57/mês).',
         ],
       },
     ],
@@ -509,7 +445,7 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Precisa instalar programa pesado?',
         body: [
-          'Não. Tudo roda no navegador, sem download nem máquina parruda. Você começa no plano grátis e libera mais volume nos planos Basic (R$ 57/mês) e Pro (R$ 116/mês).',
+          'Não. Tudo roda no navegador, sem download nem máquina parruda. Você começa no plano grátis e libera mais volume no plano Basic (R$ 57/mês).',
         ],
       },
     ],
@@ -537,12 +473,12 @@ export const PILLARS: Pillar[] = [
     keyword: 'automação de UGC',
     title: 'Automação de UGC: produza criativos em lote sem regravar',
     description:
-      'Automação de UGC pra agências: lipsync em lote e remoção de legenda pra reaproveitar criativos em escala. Comece grátis no Auto Edit.',
+      'Automação de UGC pra agências: lipsync em lote, decupagem e legendas pra multiplicar criativos em escala. Comece grátis no Auto Edit.',
     kicker: 'UGC',
     h1: 'Automação de UGC',
     intro: [
       'Automação de UGC é produzir e adaptar criativos de usuário (user-generated content) em escala, sem regravar e sem montar cada variação na mão. Pra agência, o gargalo nunca é gravar — é multiplicar o mesmo criativo em dezenas de versões.',
-      'O Auto Edit resolve isso com ferramentas em lote: lipsync de vários avatares de uma vez e limpeza de legenda gravada pra reaproveitar o que já existe.',
+      'O Auto Edit resolve isso com ferramentas em lote: lipsync de vários avatares de uma vez, decupagem automática e legenda alinhada pra cada variação.',
     ],
     blocks: [
       {
@@ -552,7 +488,7 @@ export const PILLARS: Pillar[] = [
         ],
         list: [
           'Lipsync em lote — dezenas de variações de avatar de uma vez',
-          'Remover legenda gravada e marca d’água pra reaproveitar criativos',
+          'Decupagem automática pra limpar cada take sem editar na mão',
           'Legenda automática pra cada variação',
         ],
       },
@@ -571,7 +507,7 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Dá para começar de graça?',
         body: [
-          'Dá. O Auto Edit tem plano grátis sem cartão. Os planos Basic (R$ 57/mês) e Pro (R$ 116/mês) liberam mais volume e as ferramentas premium de automação.',
+          'Dá. O Auto Edit tem plano grátis sem cartão. O plano Basic (R$ 57/mês) libera mais volume e ferramentas; o Pro, com as automações completas, abre em breve.',
         ],
       },
     ],
@@ -582,7 +518,7 @@ export const PILLARS: Pillar[] = [
       },
       {
         q: 'Dá para adaptar um criativo para vários clientes?',
-        a: 'Sim. Com a remoção de legenda e o lipsync em lote, dá pra reaproveitar o mesmo criativo aprovado em campanhas e marcas diferentes.',
+        a: 'Sim. Com o lipsync em lote e a legenda automática, dá pra transformar o mesmo criativo aprovado em variações pra campanhas e marcas diferentes.',
       },
       {
         q: 'Funciona para volume de agência?',
@@ -591,63 +527,6 @@ export const PILLARS: Pillar[] = [
     ],
     related: [
       { slug: 'lipsync-em-lote', label: 'Lipsync em lote' },
-    ],
-  },
-  {
-    slug: 'remover-marca-dagua-de-video',
-    keyword: 'remover marca d’água de vídeo',
-    title: 'Remover marca d’água de vídeo em lote com IA, sem regravar',
-    description:
-      'Remova marca d’água de vídeo com IA, em lote, reconstruindo a imagem por baixo. Ideal pra reaproveitar criativos próprios e de banco. Comece grátis.',
-    kicker: 'Marca d’água',
-    h1: 'Remover marca d’água de vídeo',
-    intro: [
-      'Remover marca d’água de vídeo é apagar o logo ou selo sobreposto na imagem sem deixar rastro. Como a marca faz parte do quadro, não dá pra simplesmente desligar — o Auto Edit usa IA pra detectar a região e reconstruir o fundo por baixo.',
-      'E faz isso em lote: você passa vários vídeos de uma vez e a IA limpa todos, deixando a imagem pronta pra reusar.',
-    ],
-    blocks: [
-      {
-        h2: 'Como remover marca d’água de um vídeo?',
-        body: [
-          'Você indica onde está a marca d’água e a IA reconstrói a área por baixo dela, devolvendo o vídeo sem o selo. O mesmo processo remove legenda gravada e outros elementos sobrepostos.',
-        ],
-      },
-      {
-        h2: 'Para que serve remover a marca d’água?',
-        body: [
-          'O uso principal é reaproveitar material que você tem direito de usar — criativos próprios, vídeos de banco licenciados ou criativos de UGC — deixando a imagem limpa pra colocar a sua identidade ou adaptar pra outra campanha.',
-        ],
-      },
-      {
-        h2: 'Remover marca d’água de vários vídeos de uma vez',
-        body: [
-          'Em vez de tratar um por um, você joga o lote inteiro na fila e a IA limpa todos de uma vez.',
-        ],
-      },
-      {
-        h2: 'Como funciona o acesso?',
-        body: [
-          'A remoção roda no seu próprio PC e é sem custo: você instala o motor local (precisa de uma GPU) e processa o lote. As outras ferramentas de automação ficam nos planos Basic (R$ 57/mês) e Pro (R$ 116/mês).',
-        ],
-      },
-    ],
-    faq: [
-      {
-        q: 'Remover a marca d’água estraga a imagem?',
-        a: 'A IA reconstrói a área por baixo da marca pra manter a imagem natural. A qualidade é preservada na maioria dos casos; em fundos muito complexos pode haver pequena variação na região tratada.',
-      },
-      {
-        q: 'Dá para remover marca d’água e legenda juntas?',
-        a: 'Dá. A mesma ferramenta trata marca d’água, legenda gravada e outros elementos sobrepostos na imagem.',
-      },
-      {
-        q: 'Funciona em lote?',
-        a: 'Sim. Você sobe vários vídeos e a IA processa todos na fila, sem repetir o passo a passo.',
-      },
-    ],
-    related: [
-      { slug: 'remover-legenda-de-video', label: 'Remover legenda de vídeo' },
-      { slug: 'automacao-de-ugc', label: 'Automação de UGC' },
     ],
   },
   {
@@ -672,7 +551,7 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Comprimir sem perder qualidade é possível?',
         body: [
-          'Dá pra reduzir bastante o tamanho com perda mínima de qualidade visual, porque boa parte dos arquivos vem com bitrate maior do que precisa. O equilíbrio entre tamanho e qualidade depende do uso — publicar nas redes aceita mais compressão que um arquivo de arquivo-mestre.',
+          'Dá pra reduzir bastante o tamanho com perda mínima de qualidade visual, porque boa parte dos arquivos vem com bitrate maior do que precisa. O equilíbrio entre tamanho e qualidade depende do uso — publicar nas redes aceita mais compressão que um arquivo-mestre.',
         ],
       },
       {
@@ -688,7 +567,7 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Precisa instalar algo para comprimir?',
         body: [
-          'Não. O compressor roda 100% no navegador, sem download. Você pode usar no plano grátis e ampliar o volume nos planos Basic (R$ 57/mês) e Pro (R$ 116/mês).',
+          'Não. O compressor roda 100% no navegador, sem download. Você pode usar no plano grátis e ampliar o volume no plano Basic (R$ 57/mês).',
         ],
       },
     ],
@@ -707,69 +586,8 @@ export const PILLARS: Pillar[] = [
       },
     ],
     related: [
-      { slug: 'separar-audio-do-video', label: 'Separar áudio do vídeo' },
+      { slug: 'decupagem-automatica', label: 'Decupagem automática' },
       { slug: 'editar-video-mais-rapido', label: 'Editar vídeo mais rápido' },
-    ],
-  },
-  {
-    slug: 'separar-audio-do-video',
-    keyword: 'separar áudio do vídeo',
-    title: 'Separar áudio do vídeo: extraia a trilha em segundos online',
-    description:
-      'Separe o áudio do vídeo e extraia a trilha em segundos, direto no navegador e sem instalar nada. Ideal pra transcrição, podcast e edição. Comece grátis.',
-    kicker: 'Separar áudio',
-    h1: 'Separar áudio do vídeo',
-    intro: [
-      'Separar o áudio do vídeo é extrair só a faixa sonora do arquivo, deixando de lado a imagem. Serve pra reaproveitar a fala num podcast, mandar pra transcrição, editar o som à parte ou guardar só o áudio. O Auto Edit faz isso online, em segundos.',
-      'Você sobe o vídeo e recebe o áudio separado, pronto pra baixar.',
-    ],
-    blocks: [
-      {
-        h2: 'Como separar o áudio de um vídeo?',
-        body: [
-          'Você envia o vídeo e a ferramenta extrai a faixa de áudio dele, gerando um arquivo de som independente. Em poucos passos o áudio fica disponível pra download, sem a imagem.',
-        ],
-      },
-      {
-        h2: 'Para que serve extrair o áudio do vídeo?',
-        body: ['Os usos mais comuns:'],
-        list: [
-          'Transformar um vídeo em episódio de podcast',
-          'Mandar só o áudio pra transcrição ou legenda',
-          'Editar a trilha sonora separadamente',
-          'Guardar apenas a fala sem ocupar espaço com vídeo',
-        ],
-      },
-      {
-        h2: 'Separar áudio de vários vídeos',
-        body: [
-          'Como o resto do Auto Edit, dá pra processar em lote: você sobe vários vídeos e extrai o áudio de todos na fila, em vez de um por um.',
-        ],
-      },
-      {
-        h2: 'Precisa instalar algo?',
-        body: [
-          'Não. A extração de áudio roda no navegador, sem download. Comece no plano grátis e amplie o volume nos planos Basic (R$ 57/mês) e Pro (R$ 116/mês).',
-        ],
-      },
-    ],
-    faq: [
-      {
-        q: 'Em que formato o áudio é exportado?',
-        a: 'A ferramenta gera um arquivo de áudio independente a partir da trilha do vídeo, pronto pra baixar e usar em podcast, transcrição ou edição.',
-      },
-      {
-        q: 'A qualidade do áudio é mantida?',
-        a: 'Sim. A extração separa a faixa sonora existente do vídeo, preservando o áudio original.',
-      },
-      {
-        q: 'Dá para separar o áudio de vários vídeos de uma vez?',
-        a: 'Dá. O processamento em lote permite extrair o áudio de vários vídeos na mesma fila.',
-      },
-    ],
-    related: [
-      { slug: 'gerar-legenda-automatica', label: 'Gerar legenda automática' },
-      { slug: 'comprimir-video-online', label: 'Comprimir vídeo online' },
     ],
   },
 ];
