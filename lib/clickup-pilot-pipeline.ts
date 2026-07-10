@@ -739,7 +739,13 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   const okMont = out.filter(i => !i.errors?.assemble && (i.decupado || (i.rawAssembled && i.rawAssembled.size > 0)));
   const failMont = out.length - okMont.length;
   const montStr = failMont > 0 ? `${okMont.length}/${out.length} montagens (${failMont} falhou)` : `${out.length} montagens`;
-  const summary = `${montStr} · ${decupCount} decupados${camuflagem ? ` · ${camuCount} camuflados` : ''}${incompletoStr}`;
+  // Label fora do padrão HOOK/GANCHO/BODY/PARTE ficava de fora da montagem em
+  // SILÊNCIO — o resumo agora acusa, pra ninguém entregar vídeo sem a parte.
+  const ignoradasStr = unrecognized.length > 0
+    ? ` · ⚠ ${unrecognized.length} parte(s) fora da montagem (label não reconhecida: ${unrecognized.join(', ')})`
+    : '';
+  const summary = `${montStr} · ${decupCount} decupados${camuflagem ? ` · ${camuCount} camuflados` : ''}${incompletoStr}${ignoradasStr}`;
+  if (unrecognized.length > 0) console.warn('[clickup-pilot-pipeline] labels ignoradas na montagem:', unrecognized);
   console.log('[clickup-pilot-pipeline] DONE', summary);
   return { items: out, diagnostics: { totalParts: parts.length, hooksFound: hooks.length, bodiesFound: bodies.length, unrecognizedLabels: unrecognized, summary, okMontagens: okMont.length, failMontagens: failMont } };
 }

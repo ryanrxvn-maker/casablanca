@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { logHistory } from '@/lib/history';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
 import {
@@ -3227,6 +3228,13 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           pipeStats,
         },
       }));
+      if (entregou) {
+        logHistory({
+          tool: 'clickup-pilot',
+          title: `${adNameClean} entregue`,
+          meta: `${downloaded} takes · ${(totalSize / 1048576).toFixed(1)}MB`,
+        });
+      }
     } catch (e) {
       if (isChunkLoadError(e)) {
         setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: '⚠ Saiu uma versão nova do app durante o processamento — recarregando pra atualizar. Seus takes estão salvos; depois clique Retomar.', finishedAt: Date.now() } }));
@@ -3796,6 +3804,13 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           pipeStats,
         },
       }));
+      if (entregou) {
+        logHistory({
+          tool: 'clickup-pilot',
+          title: `${adNameClean} entregue`,
+          meta: `${downloaded} takes · ${(totalSize / 1048576).toFixed(1)}MB`,
+        });
+      }
     } catch (e) {
       if (isChunkLoadError(e)) {
         setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'failed', message: '⚠ Saiu uma versão nova do app — recarregando pra atualizar. Seus takes estão salvos; depois clique Retomar.', finishedAt: Date.now() } }));
@@ -6733,6 +6748,13 @@ ${pipeRes.items.map(i => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO ('+(i.error |
         montadoZipUrl: zipUrl, montadoZipName: zipName,
         finishedAt: Date.now(),
       });
+      if (!vaPartial) {
+        logHistory({
+          tool: 'clickup-pilot',
+          title: `${adNameClean} (VA) entregue`,
+          meta: `${okAvas} avatares`,
+        });
+      }
       const siblings = getSiblingTaskIds(taskId);
       for (const sid of siblings) markDispatched(sid);
       try {

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { logHistory } from '@/lib/history';
 import { ToolHeroVideo } from '@/components/ToolHeroVideo';
 import { DocImport3DButton } from '@/components/DocImport3DButton';
 import { Toggle3DIcon } from '@/components/Toggle3DIcon';
@@ -663,8 +664,14 @@ function HeyGenAutoInner() {
     setDownloadStage('Cancelando...');
   }
 
-  async function downloadAllAsZip() {
-    const ready = results.filter((r) => r.videoId);
+  async function downloadAllAsZip(partsOverride?: PartResult[]) {
+    // Reentrância: se o auto-encadeamento já está rodando, um clique manual
+    // em "Baixar tudo" não pode disparar um segundo poll/pipeline em cima.
+    if (downloading) return;
+    // partsOverride: o auto-encadeamento do run() passa os resultados FRESCOS
+    // (o state `results` deste render ainda é o antigo — closure).
+    const source = partsOverride ?? results;
+    const ready = source.filter((r) => r.videoId);
     if (ready.length === 0) {
       setError('Nenhuma parte com videoId. Gere as partes primeiro.');
       return;
@@ -764,7 +771,10 @@ function HeyGenAutoInner() {
 
       setDownloadStage('Montando HOOK+BODY decupado (pipeline)...');
       const { runPostPipeline } = await import('@/lib/clickup-pilot-pipeline');
-      const pipeRes = await runPostPipeline({
+      // ffmpeg-wasm é singleton: serializa com qualquer outra montagem em
+      // andamento (fila/manual) pra não colidir — mesmo padrão do Pilot.
+      const { runFfmpegExclusive } = await import('@/lib/ffmpeg-serial');
+      const pipeRes = await runFfmpegExclusive(() => runPostPipeline({
         baseAdId: safeName,
         parts: partBlobs,
         decupagem: decupagemEnabled,
@@ -775,7 +785,7 @@ function HeyGenAutoInner() {
         onProgress: (p) => {
           setDownloadStage(`${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}`);
         },
-      });
+      }));
 
       // Montados finais: decupado, ou montado completo (decupagem off / sem corte).
       const montados = pipeRes.items
@@ -863,6 +873,7 @@ function HeyGenAutoInner() {
         diagnosticMsg: pipeRes.diagnostics.summary,
       }));
       setDownloadStage(`✓ Baixado: ${savedMsg}`);
+      logHistory({ tool: 'heygen-auto', title: `${safeName} entregue`, meta: savedMsg });
       setTimeout(() => setDownloadStage(null), 8000);
       if (bId) upsertSharedBatch(bId, { phase: 'done', message: `Pronto — ${savedMsg}`, finishedAt: Date.now() });
     } catch (e) {
@@ -1086,10 +1097,18 @@ function HeyGenAutoInner() {
         parts: mirrorParts(finalResults),
         message:
           okCount > 0
-            ? `${okCount}/${finalResults.length} disparados — clique "Baixar tudo" pra renderizar/baixar, ou Retomar depois.`
+            ? `${okCount}/${finalResults.length} disparados — renderizando e baixando sozinho…`
             : 'Todos os disparos falharam (cota/limite HeyGen?). Use Retomar.',
         ...(okCount > 0 ? {} : { finishedAt: Date.now() }),
       });
+      // Paridade com o ClickUp Pilot: depois do disparo, o fluxo segue SOZINHO
+      // (poll de render → download das partes → montagem → entrega). Antes,
+      // o disparo manual parava aqui esperando o clique em "Baixar tudo" —
+      // mesmo encadeamento que o retryFailedParts já fazia. Passa os
+      // resultados frescos: o state `results` deste render ainda é o antigo.
+      if (okCount > 0) {
+        void downloadAllAsZip(finalResults);
+      }
     } catch (e) {
       setError((e as Error).message ?? 'Falha desconhecida.');
       setStage(null);
@@ -1645,6 +1664,14 @@ function HeyGenAutoInner() {
         source: 'doc',
         unmatched: d.unmatchedAvatars,
         status: 'pending',
+        // Preview dos takes já na fila (placeholders), igual ao Pilot: o card
+        // mostra a estrutura do disparo ANTES de disparar.
+        takePreviews: d.parts.map((p) => ({
+          label: p.label,
+          status: 'pending',
+          videoUrl: null,
+          error: null,
+        })),
       });
     }
     if (items.length === 0) {
@@ -1750,6 +1777,13 @@ function HeyGenAutoInner() {
         source: 'manual',
         voiceName: selectedVoice ? selectedVoice.name : null,
         status: 'pending',
+        // Placeholders de preview já na fila (mesma estrutura do Pilot).
+        takePreviews: qparts.map((p) => ({
+          label: p.label,
+          status: 'pending',
+          videoUrl: null,
+          error: null,
+        })),
       },
     ]);
     setError(null);
@@ -1974,14 +2008,17 @@ function HeyGenAutoInner() {
     // ===== Fase 4: MONTADO (HOOK+BODY decupado) — entrega 1 MP4 DIRETO, sem pasta =====
     stage(`Montando HOOK+BODY${item.decupagem ? ' + decupagem' : ''}...`, 92, 'post');
     const { runPostPipeline } = await import('@/lib/clickup-pilot-pipeline');
-    const pipeRes = await runPostPipeline({
+    // Serializa no singleton do ffmpeg-wasm (mesmo padrão do Pilot) — a fila
+    // e um download manual nunca montam ao mesmo tempo.
+    const { runFfmpegExclusive } = await import('@/lib/ffmpeg-serial');
+    const pipeRes = await runFfmpegExclusive(() => runPostPipeline({
       baseAdId: safe,
       parts: partBlobs,
       decupagem: item.decupagem,
       keepSilenceSec: item.decupIntensity ?? DEFAULT_KEEP_SILENCE,
       camuflagem: false,
       onProgress: (p) => stage(`${p.stage} ${p.doneCount}/${p.totalCount}${p.currentFilename ? ` · ${p.currentFilename}` : ''}`, 92 + Math.round((5 * p.doneCount) / Math.max(1, p.totalCount))),
-    });
+    }));
     // Rede final: se MESMO ASSIM o pipeline marcou parte esperada faltando, trava.
     const incompletas = pipeRes.items.filter((it) => it.missingParts?.length);
     if (incompletas.length > 0) {
@@ -2099,6 +2136,11 @@ function HeyGenAutoInner() {
         resumeVideoIds: item.videoIds && item.videoIds.length > 0 ? item.videoIds : undefined,
       });
       patch({ status: 'done', message: '✓ ZIPs baixados' });
+      logHistory({
+        tool: 'heygen-auto',
+        title: `${item.adName} entregue`,
+        meta: `takes · montado${item.decupagem ? ' · decupado' : ''}`,
+      });
     } catch (e) {
       const canceled = queueCancelRef.current;
       patch({
@@ -2130,6 +2172,11 @@ function HeyGenAutoInner() {
           isCancelled: () => queueCancelRef.current,
         });
         setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: 'done', message: '✓ ZIPs baixados', progress: 100, phase: 'done' } : q)));
+        logHistory({
+          tool: 'heygen-auto',
+          title: `${item.adName} entregue`,
+          meta: `takes · montado${item.decupagem ? ' · decupado' : ''}`,
+        });
       } catch (e) {
         // Cancelamento intencional NAO e falha — volta o item pra 'pending'
         // pra poder reprocessar depois.
