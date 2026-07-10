@@ -30,7 +30,6 @@
     "jszip": "^3.10.1",
     "modern-screenshot": "^4.7.0",
     "next": "^14.2.35",
-    "playwright": "^1.60.0",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -47,6 +46,7 @@
     "esbuild": "^0.28.0",
     "eslint": "^8.57.1",
     "eslint-config-next": "14.2.15",
+    "playwright": "^1.60.0",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.13",
     "typescript": "^5.6.2"
