@@ -1384,7 +1384,7 @@ async function refreshPreviewUrlsFromMagnific(item: HistEntry): Promise<number> 
   // Pack de 300 = ~600 creations (imagem+vídeo) + o que veio depois por cima.
   // Para cedo quando já achou vídeo pra todos os takes do pack.
   const want = (item.takeUrls || []).length;
-  const data = await listMagnificCreations(15, (all) =>
+  const data = await listMagnificCreations(30, (all) =>
     all.filter((c) => c.family === family && String(c.tool || '').toLowerCase().includes('video')).length >= want,
   );
   const matching = data.filter((c) => c.family === family);
@@ -1934,7 +1934,7 @@ function BrollHistorySection() {
     //    limit=200 antigo virou 422 e esta recuperação quebrou em silêncio).
     //    Para cedo quando já cobriu ~imagem+vídeo de todos os takes do pack.
     const want = (item.takeUrls || []).length * 2;
-    const data = await listMagnificCreations(15, (all) =>
+    const data = await listMagnificCreations(30, (all) =>
       all.filter((c) => c.family === family).length >= want,
     );
     if (data.length === 0) return null;
