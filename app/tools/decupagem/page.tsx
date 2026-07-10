@@ -37,6 +37,7 @@ import {
 import { CancelButton } from '@/components/CancelButton';
 import { formatTime } from '@/lib/utils';
 import { useTier } from '@/lib/use-tier';
+import { acquireKeepAlive, releaseKeepAlive } from '@/lib/tab-keepalive';
 
 type OutputKind = 'video' | 'audio';
 type AudioFmt = 'wav' | 'mp3';
@@ -199,6 +200,23 @@ function uploadToModal(
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Espera a internet voltar SEM queimar tentativa (fila de madrugada: roteador
+// reinicia às 3h, volta às 3h10 — o item não pode morrer nesse meio tempo).
+// navigator.onLine=false é confiável pra "sem rede"; quando true, a tentativa
+// real confirma. Cancelamento continua respondendo durante a espera.
+async function waitForOnline(
+  isCancelled: () => boolean,
+  onStage?: (s: string) => void,
+): Promise<void> {
+  if (typeof navigator === 'undefined' || navigator.onLine) return;
+  onStage?.('Sem internet — esperando a conexão voltar...');
+  while (!navigator.onLine) {
+    if (isCancelled()) throw new Error('CANCELLED_BY_USER');
+    await sleep(1000);
+  }
+  await sleep(2000); // rede acabou de voltar — respiro pro DNS/socket assentar
+}
+
 export default function DecupagemPage() {
   const tier = useTier();
   const isFree = tier === 'free';
@@ -295,31 +313,36 @@ export default function DecupagemPage() {
     onStage: (s: string) => void,
     onProgress: (r: number | null) => void,
   ): Promise<Result> {
-    onStage('Preparando envio...');
-    const tRes = await fetch('/api/tools/decupagem/ticket', { method: 'POST' });
-    if (!tRes.ok) {
-      const j = await tRes.json().catch(() => null);
-      throw new Error(j?.error || 'Não consegui preparar o envio pro servidor.');
-    }
-    const { base, ticket } = (await tRes.json()) as { base: string; ticket: string };
-
-    // Acorda o container do servidor ANTES de mandar o arquivo grande. Container
-    // frio às vezes redireciona (303) o primeiro request grande; com ele já
-    // quente, o upload entra direto.
-    onStage('Acordando o servidor...');
-    try {
-      await fetch(`${base}/health`, { cache: 'no-store' });
-      await sleep(1500);
-    } catch { /* segue — o retry abaixo cobre */ }
-
-    // Upload com retry: se o container ainda estava frio e derrubou, tenta de
-    // novo (com o servidor já quente da tentativa anterior).
-    onStage('Enviando pro servidor...');
+    // UPLOAD com paciência de madrugada: espera a internet voltar entre as
+    // tentativas (sem queimar tentativa offline) e emite um ticket NOVO a cada
+    // uma — o TTL do ticket é 15min, então numa espera longa por conexão o da
+    // 1ª tentativa já teria expirado e as seguintes bateriam em porta fechada.
+    const BACKOFFS = [2_000, 10_000, 30_000, 60_000, 120_000];
     let inputId = '';
     let lastErr: unknown = null;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt <= BACKOFFS.length; attempt++) {
       if (cancelRef.current) throw new Error('CANCELLED_BY_USER');
       try {
+        await waitForOnline(() => cancelRef.current, onStage);
+        onStage(attempt === 0 ? 'Preparando envio...' : `Tentando o envio de novo (${attempt + 1}ª de ${BACKOFFS.length + 1})...`);
+        const tRes = await fetch('/api/tools/decupagem/ticket', { method: 'POST' });
+        if (!tRes.ok) {
+          const j = await tRes.json().catch(() => null);
+          throw new Error(j?.error || 'Não consegui preparar o envio pro servidor.');
+        }
+        const { base, ticket } = (await tRes.json()) as { base: string; ticket: string };
+
+        if (attempt === 0) {
+          // Acorda o container ANTES de mandar o arquivo grande. Container
+          // frio às vezes redireciona (303) o primeiro request grande.
+          onStage('Acordando o servidor...');
+          try {
+            await fetch(`${base}/health`, { cache: 'no-store' });
+            await sleep(1500);
+          } catch { /* segue — o retry cobre */ }
+        }
+
+        onStage('Enviando pro servidor...');
         inputId = await uploadToModal(
           base,
           ticket,
@@ -331,38 +354,79 @@ export default function DecupagemPage() {
       } catch (e) {
         if ((e as Error)?.message === 'CANCELLED_BY_USER') throw e;
         lastErr = e;
-        await sleep(2000); // deixa o servidor terminar de subir e tenta de novo
+        if (attempt < BACKOFFS.length) await sleep(BACKOFFS[attempt]);
       }
     }
     if (!inputId) {
       throw new Error(
-        'Não consegui enviar o arquivo pro servidor (tentei 3x). Verifica a conexão e tenta de novo.' +
+        `Não consegui enviar o arquivo pro servidor (tentei ${BACKOFFS.length + 1}x). Verifica a conexão e clica em "Continuar fila".` +
           (lastErr ? ` (${(lastErr as Error).message})` : ''),
       );
     }
 
+    // START com retry: depois de um upload de vários minutos, um blip na hora
+    // de iniciar NÃO pode jogar o envio fora. 4xx é permanente (não insiste);
+    // rede/5xx re-tenta com backoff.
     onStage('Decupando no servidor...');
     onProgress(null); // indeterminado durante o processamento
-    const sRes = await fetch('/api/tools/decupagem/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        input_id: inputId,
-        keepSilence,
-        outputKind: outKind,
-        fileName: file.name,
-      }),
-    });
-    if (!sRes.ok) {
-      const j = await sRes.json().catch(() => null);
-      throw new Error(j?.error || 'Falha ao iniciar a decupagem no servidor.');
+    let job = '';
+    let startErr: unknown = null;
+    for (let attempt = 0; attempt < 4 && !job; attempt++) {
+      if (cancelRef.current) throw new Error('CANCELLED_BY_USER');
+      try {
+        await waitForOnline(() => cancelRef.current, onStage);
+        const sRes = await fetch('/api/tools/decupagem/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            input_id: inputId,
+            keepSilence,
+            outputKind: outKind,
+            fileName: file.name,
+          }),
+        });
+        const j = await sRes.json().catch(() => null);
+        if (!sRes.ok) {
+          const msg = (j as { error?: string } | null)?.error || 'Falha ao iniciar a decupagem no servidor.';
+          if (sRes.status >= 400 && sRes.status < 500) {
+            throw Object.assign(new Error(msg), { permanent: true });
+          }
+          throw new Error(msg);
+        }
+        job = (j as { job: string }).job;
+      } catch (e) {
+        if ((e as Error)?.message === 'CANCELLED_BY_USER') throw e;
+        if ((e as { permanent?: boolean })?.permanent) throw e;
+        startErr = e;
+        await sleep(5_000 * (attempt + 1));
+      }
     }
-    const { job } = (await sRes.json()) as { job: string };
+    if (!job) {
+      throw new Error(
+        'Falha ao iniciar a decupagem no servidor.' +
+          (startErr ? ` (${(startErr as Error).message})` : ''),
+      );
+    }
 
-    // Polling até concluir. Vídeo grande pode levar minutos.
+    // Polling até concluir. Vídeo grande pode levar minutos. Sem internet o
+    // ciclo NÃO conta (i--): o servidor segue processando — quando a conexão
+    // voltar, o poll retoma de onde estava (o TTL do token de job é o teto real).
+    let avisouOffline = false;
     for (let i = 0; i < 600; i++) {
       if (cancelRef.current) throw new Error('CANCELLED_BY_USER');
       await sleep(5000);
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        if (!avisouOffline) {
+          avisouOffline = true;
+          onStage('Sem internet — o servidor segue processando; esperando a conexão voltar...');
+        }
+        i--;
+        continue;
+      }
+      if (avisouOffline) {
+        avisouOffline = false;
+        onStage('Decupando no servidor...');
+      }
       // Fetch BLINDADO: um blip de rede no meio de um poll de vários minutos
       // não pode matar o job — o servidor segue processando. Falhou? Só tenta
       // de novo no próximo ciclo (o teto de 50min segue valendo).
@@ -487,6 +551,13 @@ export default function DecupagemPage() {
     processingRef.current = true;
     cancelRef.current = false;
     setProcessing(true);
+    // Aba não congela em background durante a fila (mesmo motor do Pilot) — e a
+    // sessão de áudio ativa segura o Windows acordado numa fila de madrugada.
+    acquireKeepAlive();
+    // Pré-carrega o chunk do JSZip AGORA: um deploy durante a noite invalida os
+    // chunks antigos do CDN — de manhã o "Baixar todos (ZIP)" importaria um
+    // chunk que não existe mais. Importado uma vez, fica cacheado no módulo.
+    import('jszip').catch(() => { /* sem ZIP, downloads individuais seguem */ });
     try {
       for (const item of queue) {
         if (cancelRef.current) break;
@@ -535,6 +606,7 @@ export default function DecupagemPage() {
         }
       }
     } finally {
+      releaseKeepAlive();
       processingRef.current = false;
       setProcessing(false);
     }

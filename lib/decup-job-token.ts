@@ -23,7 +23,11 @@ type JobPayload = {
 
 export type DecupJob = { callId: string; fileName: string; outputKind: string; userId: string };
 
-const MAX_AGE_MS = 60 * 60 * 1000; // 1h — vídeo grande pode demorar a decupar
+// 6h: o worker termina em ≤1h, mas numa fila de MADRUGADA a internet do user
+// pode cair por horas no meio do poll — quando voltar, o token ainda precisa
+// valer pra buscar o resultado que já está pronto, em vez de re-subir 1.5GB.
+// Segurança inalterada: token assinado, amarrado ao userId, só consulta status.
+const MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 function secret(): string {
   const s =
