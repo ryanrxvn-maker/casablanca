@@ -1289,17 +1289,22 @@ function ToolCard({
   // override global de .text-white deixar o texto escuro e sumir no escuro).
   if (entry.video) {
     const vcls =
-      'tool-card dark-island group relative block overflow-hidden rounded-[16px] border border-line/70 transition-all duration-300 ' +
+      'tool-card dark-island group relative flex flex-col overflow-hidden rounded-[16px] border border-line/70 transition-all duration-300 ' +
       (nonClickable
         ? 'cursor-not-allowed'
         : 'hover:-translate-y-[2px] hover:border-violet/45');
     const vstyle: React.CSSProperties = {
       animationDelay: `${delay}ms`,
+      // Fundo próprio (mesmo tom do painel de descrição): quando o grid estica
+      // este card pra igualar a altura de um vizinho com descrição mais longa,
+      // o vão que sobrava embaixo ficava TRANSPARENTE — a borda arredondada
+      // contornava o vazio e parecia "quadrado incompleto". Agora fica sólido.
+      background: '#0b0b0f',
       boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
     };
     const vbody = (
       <>
-        <div className="relative aspect-video w-full overflow-hidden">
+        <div className="relative aspect-video w-full shrink-0 overflow-hidden">
           <div
             aria-hidden
             className="absolute inset-0 -z-10"
