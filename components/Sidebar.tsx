@@ -181,6 +181,12 @@ export function Sidebar() {
           icon: <IconHome />,
           match: (p) => p === '/tools',
         },
+        {
+          href: '/tools/clickup-pilot',
+          label: 'Pilot',
+          icon: <IconPilot />,
+          match: (p) => p.startsWith('/tools/clickup-pilot'),
+        },
       ],
     },
     {
@@ -482,6 +488,34 @@ function IconHome() {
         d="M3 11.5L12 4l9 7.5V20a1 1 0 01-1 1h-5v-6h-6v6H4a1 1 0 01-1-1v-8.5z"
         stroke="url(#sb-home)"
         strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconPilot() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <defs>
+        <linearGradient id="sb-pilot" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#c4b5fd" />
+          <stop offset="100%" stopColor="#6d4ee8" />
+        </linearGradient>
+      </defs>
+      {/* Foguete em diagonal — o Pilot decola sozinho */}
+      <path
+        d="M14.5 3.5c2.8-.6 5.4-.2 6 .4.6.6 1 3.2.4 6-.5 2.4-1.8 4.9-4.2 7.3l-2.4 2.4a1.4 1.4 0 01-2.3-.5l-1-2.7-3.4-3.4-2.7-1a1.4 1.4 0 01-.5-2.3L6.8 7.3c2.4-2.4 5.3-3.3 7.7-3.8z"
+        stroke="url(#sb-pilot)"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <circle cx="15" cy="9" r="1.8" stroke="url(#sb-pilot)" strokeWidth="1.6" />
+      <path
+        d="M7.5 16.5c-1.4.3-2.6 1.5-3 4 2.5-.4 3.7-1.6 4-3"
+        stroke="url(#sb-pilot)"
+        strokeWidth="1.7"
         strokeLinecap="round"
         strokeLinejoin="round"
       />

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { logHistory } from '@/lib/history';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { CancelButton } from '@/components/CancelButton';
 /**
@@ -554,6 +555,11 @@ function AutoBrollInner() {
       } as PipelineProgress;
       if (r.ok && r.complete && r.zipBlob && r.zipName) {
         patchJob(job.id, { status: 'done', zip: { blob: r.zipBlob, name: r.zipName }, progress: finalProgress });
+        logHistory({
+          tool: 'auto-broll',
+          title: `${job.name.trim() || `BROLL_${job.id}`} — lote pronto`,
+          meta: `${r.successCount} takes`,
+        });
       } else if (r.complete === false) {
         const miss = (r.missingIdxs || []).join(', ');
         // Mesmo incompleto, se temos ZIP parcial deixa baixar — user reclamou
@@ -840,74 +846,101 @@ function AutoBrollInner() {
         </ToolStep>
 
         <ToolStep n={2} icon={<IconStepSliders size={18} />} title="Configuração" hue={HUE}>
-          <div className="grid gap-3.5">
-            {/* IMAGEM — modelo escolhível (Nano Banana 2 / Seedream 4.5) */}
-            <ConfigBlock label="Imagem" tint="violet" infinity>
-              <div className="grid grid-cols-2 gap-2.5">
-                {IMAGE_MODELS.map((m) => (
-                  <PickCard
-                    key={m.slug}
-                    active={imageModel === m.slug}
-                    disabled={anyRunning}
-                    onClick={() => setImageModel(m.slug)}
-                    tint="violet"
-                    icon={m.slug === 'seedream-4-5' ? <IconBloom /> : <IconSpark />}
-                    title={m.label}
-                    desc={m.desc}
-                  />
-                ))}
-              </div>
-            </ConfigBlock>
+          <div className="grid gap-4">
+            {/* Console: IMAGEM e FORMATO lado a lado no desktop */}
+            <div className="grid gap-4 lg:grid-cols-2">
+              {/* IMAGEM — modelo escolhível (Nano Banana 2 / Seedream 4.5) */}
+              <ConfigBlock label="Imagem" tint="violet" infinity>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                  {IMAGE_MODELS.map((m) => (
+                    <PickCard
+                      key={m.slug}
+                      active={imageModel === m.slug}
+                      disabled={anyRunning}
+                      onClick={() => setImageModel(m.slug)}
+                      tint="violet"
+                      icon={m.slug === 'seedream-4-5' ? <IconBloom /> : <IconSpark />}
+                      title={m.label}
+                      desc={m.desc}
+                    />
+                  ))}
+                </div>
+              </ConfigBlock>
 
-            {/* FORMATO — vale pra imagem E vídeo (precisam casar) */}
-            <ConfigBlock label="Formato" tint="cyan">
-              <div className="grid grid-cols-2 gap-2.5">
-                {([
-                  { v: '9:16', label: 'Vertical', desc: 'Reels · TikTok · Shorts', icon: <IconFrameV /> },
-                  { v: '16:9', label: 'Horizontal', desc: 'YouTube · VSL', icon: <IconFrameH /> },
-                ] as const).map((a) => (
-                  <PickCard
-                    key={a.v}
-                    active={aspect === a.v}
-                    disabled={anyRunning}
-                    onClick={() => setAspect(a.v)}
-                    tint="cyan"
-                    icon={a.icon}
-                    title={a.label}
-                    desc={a.desc}
-                    badge={a.v}
-                  />
-                ))}
-              </div>
-            </ConfigBlock>
+              {/* FORMATO — vale pra imagem E vídeo (precisam casar) */}
+              <ConfigBlock label="Formato" tint="cyan">
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                  {([
+                    { v: '9:16', label: 'Vertical', desc: 'Reels · TikTok · Shorts', icon: <IconFrameV /> },
+                    { v: '16:9', label: 'Horizontal', desc: 'YouTube · VSL', icon: <IconFrameH /> },
+                  ] as const).map((a) => (
+                    <PickCard
+                      key={a.v}
+                      active={aspect === a.v}
+                      disabled={anyRunning}
+                      onClick={() => setAspect(a.v)}
+                      tint="cyan"
+                      icon={a.icon}
+                      title={a.label}
+                      desc={a.desc}
+                      badge={a.v}
+                    />
+                  ))}
+                </div>
+              </ConfigBlock>
+            </div>
 
-            {/* VÍDEO — travado em Kling 2.5 (sem escolha, sem crédito) */}
+            {/* VÍDEO — placa selada: Kling 2.5 travado no perfil de qualidade */}
             <div
-              className="relative flex items-center gap-3 overflow-hidden rounded-[14px] border border-cyan-400/25 px-3.5 py-2.5"
-              style={{ background: 'linear-gradient(180deg, rgba(34,211,238,0.05), rgba(0,0,0,0.14))' }}
+              className="relative flex items-center gap-3.5 overflow-hidden rounded-[14px] border border-cyan-400/25 px-4 py-3"
+              style={{
+                background:
+                  'linear-gradient(105deg, rgba(34,211,238,0.09) 0%, rgba(34,211,238,0.02) 38%, rgba(0,0,0,0.16) 100%)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)',
+              }}
             >
               <span
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-cyan-400/35 text-cyan-300"
-                style={{ background: 'linear-gradient(160deg, rgba(34,211,238,0.18), rgba(0,0,0,0.35))', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)' }}
+                aria-hidden
+                className="absolute inset-x-0 top-0 h-px"
+                style={{ background: 'linear-gradient(90deg, transparent, rgba(34,211,238,0.55), transparent)' }}
+              />
+              <span
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[11px] border border-cyan-400/35 text-cyan-300"
+                style={{
+                  background: 'linear-gradient(160deg, rgba(34,211,238,0.2), rgba(0,0,0,0.4))',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.1), inset 0 -3px 6px rgba(0,0,0,0.4), 0 0 18px -6px rgba(34,211,238,0.6)',
+                }}
               >
                 <IconClapper />
               </span>
               <div className="min-w-0">
-                <div className="text-[9.5px] font-bold uppercase tracking-[0.2em] text-cyan-300/70" style={{ fontFamily: 'var(--font-label)' }}>Vídeo</div>
-                <div className="text-[14px] font-bold tracking-tight text-white" style={{ fontFamily: 'var(--font-tech)' }}>Kling 2.5</div>
+                <div className="text-[9.5px] font-bold uppercase tracking-[0.2em] text-cyan-300/70" style={{ fontFamily: 'var(--font-label)' }}>
+                  Vídeo · perfil travado
+                </div>
+                <div className="text-[15px] font-bold tracking-tight text-white" style={{ fontFamily: 'var(--font-tech)' }}>
+                  Kling 2.5
+                </div>
               </div>
               <div className="ml-auto flex items-center gap-1.5">
                 {['720p', aspect, '10s'].map((s) => (
-                  <span key={s} className="rounded-md border border-line/70 bg-bg/50 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wider text-text-muted" style={{ fontFamily: 'var(--font-mono)' }}>{s}</span>
+                  <span
+                    key={s}
+                    className="rounded-md border border-cyan-400/20 bg-bg/50 px-2 py-0.5 text-[9.5px] font-semibold uppercase tracking-wider text-cyan-100/70"
+                    style={{ fontFamily: 'var(--font-mono)' }}
+                  >
+                    {s}
+                  </span>
                 ))}
-                <span className="ml-0.5 text-text-dim" title="Modelo de vídeo fixo"><IconLock /></span>
+                <span className="ml-0.5 text-text-dim" title="Perfil de vídeo fixo — calibrado no ponto do Unlimited">
+                  <IconLock />
+                </span>
               </div>
             </div>
 
-            {/* MOVIMENTO — opcional */}
-            <label className="block">
+            {/* MOVIMENTO — opcional, com sugestões de 1 clique */}
+            <div>
               <span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.2em] text-text-muted" style={{ fontFamily: 'var(--font-label)' }}>
-                Movimento <span className="text-text-dim">· opcional</span>
+                Movimento <span className="text-text-dim">· opcional — vale pros takes sem videoPrompt próprio</span>
               </span>
               <input
                 type="text"
@@ -917,7 +950,37 @@ function AutoBrollInner() {
                 className="input-field"
                 disabled={anyRunning}
               />
-            </label>
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                {['slow push-in', 'soft handheld', 'slow orbit', 'static tripod'].map((s) => {
+                  const on = globalMotion === s;
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      disabled={anyRunning}
+                      onClick={() => setGlobalMotion(on ? '' : s)}
+                      className={
+                        'rounded-full border px-2.5 py-1 text-[10.5px] font-semibold transition-all duration-200 active:scale-[0.95] disabled:cursor-not-allowed disabled:opacity-50 ' +
+                        (on
+                          ? 'border-violet/60 text-text'
+                          : 'border-line/70 text-text-muted hover:border-violet/40 hover:text-text')
+                      }
+                      style={{
+                        fontFamily: 'var(--font-mono)',
+                        ...(on
+                          ? {
+                              background: 'linear-gradient(160deg, rgba(167,139,250,0.16), rgba(124,58,237,0.05))',
+                              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)',
+                            }
+                          : {}),
+                      }}
+                    >
+                      {s}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </ToolStep>
 

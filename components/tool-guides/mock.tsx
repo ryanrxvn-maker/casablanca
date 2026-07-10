@@ -4,21 +4,9 @@ import type { ReactNode } from 'react';
  * Primitivos visuais dos guias — "prints" estilizados da UI real.
  *
  * Cada Shot é uma janelinha escura (sempre dark, via .dark-island) que imita
- * o trecho relevante da ferramenta. O marcador numerado NÃO é posicionado em
- * % solto: cada primitivo aceita `mark` e ancora o badge no próprio canto —
- * sempre alinhado, em qualquer largura/tema.
+ * o trecho relevante da ferramenta, com os MESMOS labels da UI. Sem
+ * marcadores sobrepostos: o print fala por si (pedido do dono em 10.07.26).
  */
-
-type Markable = { mark?: number | string };
-
-function MarkBadge({ mark }: Markable) {
-  if (mark === undefined || mark === null) return null;
-  return (
-    <span className="guide-mark" aria-hidden>
-      {mark}
-    </span>
-  );
-}
 
 /* Janela fake de app: header com 3 dots + label, corpo relativo. */
 export function Shot({
@@ -59,11 +47,10 @@ export function MStack({ children }: { children: ReactNode }) {
 export function MBtn({
   children,
   tone = 'primary',
-  mark,
 }: {
   children: ReactNode;
   tone?: 'primary' | 'lime' | 'ghost' | 'dark';
-} & Markable) {
+}) {
   const tones: Record<string, string> = {
     primary:
       'border-violet/60 bg-gradient-to-b from-[#7c5cf0] to-[#5b3fd4] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_6px_14px_-6px_rgba(124,58,237,0.8)]',
@@ -81,7 +68,6 @@ export function MBtn({
       style={{ fontFamily: 'var(--font-tech)' }}
     >
       {children}
-      <MarkBadge mark={mark} />
     </span>
   );
 }
@@ -90,8 +76,7 @@ export function MBtn({
 export function MDrop({
   label,
   sub,
-  mark,
-}: { label: string; sub?: string } & Markable) {
+}: { label: string; sub?: string }) {
   return (
     <div className="relative flex flex-col items-center justify-center gap-1 rounded-[12px] border border-dashed border-violet/40 bg-violet/[0.05] px-4 py-5 text-center">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -105,7 +90,6 @@ export function MDrop({
       </svg>
       <span className="text-[11.5px] font-semibold text-white/80">{label}</span>
       {sub ? <span className="text-[10px] text-white/40">{sub}</span> : null}
-      <MarkBadge mark={mark} />
     </div>
   );
 }
@@ -115,12 +99,11 @@ export function MField({
   label,
   value,
   grow,
-  mark,
 }: {
   label?: string;
   value: string;
   grow?: boolean;
-} & Markable) {
+}) {
   return (
     <div className={'flex flex-col gap-1 ' + (grow ? 'flex-1 min-w-[120px]' : '')}>
       {label ? (
@@ -130,7 +113,6 @@ export function MField({
       ) : null}
       <span className="relative block rounded-[9px] border border-white/10 bg-black/40 px-2.5 py-1.5 text-[11px] text-white/65">
         <span className="block truncate">{value}</span>
-        <MarkBadge mark={mark} />
       </span>
     </div>
   );
@@ -141,8 +123,7 @@ export function MSlider({
   label,
   pct,
   val,
-  mark,
-}: { label: string; pct: number; val: string } & Markable) {
+}: { label: string; pct: number; val: string }) {
   return (
     <div className="flex w-full flex-col gap-1.5 pt-1.5">
       <div className="flex items-center justify-between">
@@ -160,15 +141,6 @@ export function MSlider({
           className="absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-white shadow-[0_2px_6px_rgba(0,0,0,0.5)]"
           style={{ left: `calc(${pct}% - 7px)` }}
         >
-          {mark !== undefined && mark !== null ? (
-            <span
-              className="guide-mark"
-              style={{ top: -24, right: -8 }}
-              aria-hidden
-            >
-              {mark}
-            </span>
-          ) : null}
         </span>
       </div>
     </div>
@@ -179,8 +151,7 @@ export function MSlider({
 export function MToggle({
   on,
   label,
-  mark,
-}: { on: boolean; label: string } & Markable) {
+}: { on: boolean; label: string }) {
   return (
     <span className="relative inline-flex items-center gap-2 rounded-[10px] border border-white/10 bg-white/[0.03] px-2.5 py-1.5">
       <span
@@ -197,7 +168,6 @@ export function MToggle({
         />
       </span>
       <span className="text-[10.5px] font-semibold text-white/65">{label}</span>
-      <MarkBadge mark={mark} />
     </span>
   );
 }
@@ -206,11 +176,10 @@ export function MToggle({
 export function MChip({
   children,
   tone = 'violet',
-  mark,
 }: {
   children: ReactNode;
   tone?: 'violet' | 'lime' | 'amber' | 'dim';
-} & Markable) {
+}) {
   const tones: Record<string, string> = {
     violet: 'border-violet/40 bg-violet/10 text-[#c4b5fd]',
     lime: 'border-lime/40 bg-lime/10 text-[#d3e39a]',
@@ -225,7 +194,6 @@ export function MChip({
       }
     >
       {children}
-      <MarkBadge mark={mark} />
     </span>
   );
 }
@@ -236,13 +204,12 @@ export function MQueueItem({
   status,
   pct,
   tone = 'violet',
-  mark,
 }: {
   name: string;
   status: string;
   pct: number;
   tone?: 'violet' | 'lime' | 'amber';
-} & Markable) {
+}) {
   const bar =
     tone === 'lime'
       ? 'from-[#aab868] to-[#d3e39a]'
@@ -263,7 +230,6 @@ export function MQueueItem({
           style={{ width: `${pct}%` }}
         />
       </div>
-      <MarkBadge mark={mark} />
     </div>
   );
 }

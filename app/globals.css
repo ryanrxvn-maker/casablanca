@@ -1889,9 +1889,9 @@ html[data-theme='light'] {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 54px;
-  width: 54px;
-  border-radius: 17px;
+  height: 66px;
+  width: 66px;
+  border-radius: 20px;
   border: 2px solid rgba(167, 139, 250, 0.38);
   background:
     radial-gradient(120% 120% at 50% 12%, rgba(167, 139, 250, 0.22), transparent 60%),
@@ -1919,22 +1919,56 @@ html[data-theme='light'] {
 /* Badge "?" — pisca devagar pra sinalizar instruções sem irritar. */
 .guide-fab__dot {
   position: absolute;
-  top: -5px;
-  right: -5px;
+  top: -6px;
+  right: -6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 19px;
-  width: 19px;
+  height: 22px;
+  width: 22px;
   border-radius: 999px;
   background: linear-gradient(150deg, #c4b5fd, #8b5cf6);
   color: #17102a;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 800;
   line-height: 1;
   box-shadow:
     0 0 0 2px rgba(20, 16, 31, 0.9),
     0 4px 10px -3px rgba(139, 92, 246, 0.7);
+}
+
+/* Lettering "Como usar" — gradiente varrido em loop lento + flutuação. */
+.guide-fab__label {
+  font-family: var(--font-tech);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  background: linear-gradient(
+    100deg,
+    #b9a7f0 0%,
+    #f6f1ff 28%,
+    #c4b5fd 52%,
+    #8b5cf6 76%,
+    #b9a7f0 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 2px 8px rgba(20, 12, 40, 0.8));
+  animation:
+    guide-label-sheen 3.4s linear infinite,
+    guide-label-float 3.2s ease-in-out infinite;
+}
+@keyframes guide-label-sheen {
+  0% { background-position: 0% 0; }
+  100% { background-position: -220% 0; }
+}
+@keyframes guide-label-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
 }
 @keyframes guide-breathe {
   0%, 100% {
@@ -2035,6 +2069,7 @@ html[data-theme='light'] {
 }
 @media (prefers-reduced-motion: reduce) {
   .guide-fab__btn,
+  .guide-fab__label,
   .guide-mark::after,
   .guide-overlay,
   .guide-card {

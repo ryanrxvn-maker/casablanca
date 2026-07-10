@@ -39,7 +39,7 @@ export function ToolGuideFab() {
     <>
       <div
         className={
-          'guide-fab fixed bottom-[92px] right-5 z-[54] transition-opacity duration-500 ' +
+          'guide-fab fixed bottom-[168px] right-6 z-[54] flex flex-col items-center gap-2 transition-opacity duration-500 ' +
           (mounted ? 'opacity-100' : 'opacity-0')
         }
       >
@@ -50,21 +50,8 @@ export function ToolGuideFab() {
           aria-haspopup="dialog"
           onClick={() => setOpen(true)}
         >
-          {/* Tooltip à esquerda, igual ao padrão do WhatsAppFab */}
-          <span
-            className="pointer-events-none absolute right-[calc(100%+14px)] top-1/2 -translate-y-1/2 whitespace-nowrap rounded-[10px] border border-line bg-bg-soft/95 px-3 py-1.5 text-[11.5px] font-semibold text-white opacity-0 backdrop-blur-md transition-all duration-300 group-hover:opacity-100"
-            style={{
-              fontFamily: 'var(--font-tech)',
-              letterSpacing: '0.04em',
-              boxShadow:
-                '0 8px 24px -12px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.05)',
-            }}
-          >
-            Como usar
-          </span>
-
           {/* Livro aberto */}
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden>
             <path
               d="M12 6.4C10.7 5.1 8.9 4.5 6.9 4.5c-1.1 0-2.2.2-3.1.6v13.1c.9-.4 2-.6 3.1-.6 2 0 3.8.6 5.1 1.9 1.3-1.3 3.1-1.9 5.1-1.9 1.1 0 2.2.2 3.1.6V5.1c-.9-.4-2-.6-3.1-.6-2 0-3.8.6-5.1 1.9Z"
               stroke="currentColor"
@@ -82,6 +69,11 @@ export function ToolGuideFab() {
             ?
           </span>
         </button>
+
+        {/* Lettering premium embaixo do botão */}
+        <span className="guide-fab__label" aria-hidden>
+          Como usar
+        </span>
       </div>
 
       {open ? <GuidePanel path={pathname} onClose={() => setOpen(false)} /> : null}
