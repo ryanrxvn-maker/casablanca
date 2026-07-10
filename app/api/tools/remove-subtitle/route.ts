@@ -15,7 +15,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { requirePro } from '@/app/api/admin/_helpers';
+import { requireAdmin } from '@/app/api/admin/_helpers';
 import {
   completeMultipart,
   processFromSourceUrl,
@@ -41,7 +41,7 @@ interface Body {
 }
 
 export async function POST(req: Request) {
-  const guard = await requirePro();
+  const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
   if (!isVmakeConfigured()) {

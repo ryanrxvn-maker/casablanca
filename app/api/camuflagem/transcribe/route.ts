@@ -108,11 +108,10 @@ export async function POST(req: Request) {
       await new Promise((r) => setTimeout(r, 2500));
       const poll = await fetch(`${AAI_BASE}/transcript/${created.id}`, {
         headers: { authorization: apiKey },
-      });
+      }).catch(() => null);
+      if (!poll || !poll.ok) continue; // blip transitório → tenta de novo até o deadline
       const body = (await poll.json().catch(() => null)) as TranscriptPoll | null;
-      if (!body) {
-        return jsonError('Resposta invalida do AssemblyAI no polling.', 502);
-      }
+      if (!body) continue; // resposta não-JSON (502 HTML) → NÃO aborta mais, tenta de novo
       if (body.status === 'completed') {
         return NextResponse.json({ text: (body.text ?? '').trim() });
       }

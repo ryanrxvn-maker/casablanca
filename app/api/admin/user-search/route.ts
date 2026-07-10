@@ -21,6 +21,7 @@ export const maxDuration = 30;
 type Profile = {
   id: string;
   name: string | null;
+  email: string | null;
   tier: string | null;
   subscription_status: string | null;
   subscription_plan: string | null;
@@ -50,7 +51,7 @@ export async function GET(req: Request) {
     const { data: profData, error } = await svc
       .from('profiles')
       .select(
-        'id, name, tier, subscription_status, subscription_plan, current_period_end, created_at, last_seen_at, last_ip',
+        'id, name, email, tier, subscription_status, subscription_plan, current_period_end, created_at, last_seen_at, last_ip',
       )
       .eq('is_admin', false)
       .order('created_at', { ascending: false })
@@ -58,17 +59,14 @@ export async function GET(req: Request) {
     if (error) return jsonError('Falha ao buscar.', 500, error.message);
     const profiles = (profData ?? []) as Profile[];
 
-    // Emails via auth.users
-    const emails: Record<string, string> = {};
-    const { data: usersList } = await svc.auth.admin.listUsers({ page: 1, perPage: 200 });
-    for (const u of usersList?.users ?? []) if (u.email) emails[u.id] = u.email;
-
+    // Email vem do profiles (sem o teto de 200 do admin.listUsers, que fazia
+    // a busca por email não achar contas mais novas).
     // Filtra por nome/email (se q vazio, traz os mais recentes)
     let matched = profiles;
     if (q) {
       matched = profiles.filter((p) => {
         const name = (p.name ?? '').toLowerCase();
-        const email = (emails[p.id] ?? '').toLowerCase();
+        const email = (p.email ?? '').toLowerCase();
         return name.includes(q) || email.includes(q);
       });
     }
@@ -91,7 +89,7 @@ export async function GET(req: Request) {
     const users = matched.map((p) => ({
       id: p.id,
       name: p.name,
-      email: emails[p.id] ?? null,
+      email: p.email ?? null,
       tier: p.tier ?? 'free',
       subscription_status: p.subscription_status,
       access: accessSource(p),

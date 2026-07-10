@@ -13,6 +13,7 @@
  */
 import { NextResponse } from 'next/server';
 import { safeFetch } from '@/lib/safe-fetch';
+import { requireTier } from '@/lib/require-tier';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -31,6 +32,12 @@ function extractGoogleDocId(rawUrl: string): string | null {
 }
 
 export async function GET(req: Request) {
+  // Exige sessão logada (free basta). Fecha o uso anônimo do servidor como
+  // proxy/anonimizador de leitura de docs. Os únicos callers (páginas do Pilot
+  // e do Hey Auto) chamam de dentro do app logado → cookie de sessão vai junto.
+  const gate = await requireTier('free');
+  if (!gate.ok) return gate.response;
+
   try {
     const { searchParams } = new URL(req.url);
     const target = searchParams.get('url');

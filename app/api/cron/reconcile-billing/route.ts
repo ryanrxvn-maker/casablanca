@@ -13,9 +13,10 @@ import { reconcileUserBilling } from '@/lib/billing-reconcile';
  * rodar todo dia. Pega TODO cenário de borda onde o webhook escapou e o cliente
  * não voltou por /tools?upgraded=1 (aba fechada, outro device, pgto assíncrono).
  *
- * Proteção: se CRON_SECRET estiver setado, exige Authorization: Bearer <secret>
- * (a Vercel injeta esse header automaticamente). Sem CRON_SECRET, roda aberto —
- * o pior caso é conceder um tier legitimamente pago, então o risco é baixo.
+ * Proteção: exige Authorization: Bearer <CRON_SECRET> (a Vercel injeta esse
+ * header automaticamente no cron). Em produção FALHA FECHADO se CRON_SECRET
+ * não estiver setado — senão a rota ficaria aberta e qualquer anônimo
+ * dispararia uma varredura de até 1000 perfis × 2-3 chamadas Stripe cada.
  */
 
 export const runtime = 'nodejs';
@@ -29,6 +30,13 @@ export async function GET(req: Request) {
     if (auth !== `Bearer ${secret}`) {
       return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
     }
+  } else if (process.env.NODE_ENV === 'production') {
+    // Sem secret em produção: não roda aberto. Configure CRON_SECRET nas
+    // Environment Variables da Vercel pra reativar a varredura.
+    return NextResponse.json(
+      { error: 'CRON_SECRET não configurado.' },
+      { status: 401 },
+    );
   }
 
   const svc = serviceClient();

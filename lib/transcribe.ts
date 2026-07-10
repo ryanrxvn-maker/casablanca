@@ -134,12 +134,14 @@ async function transcribeViaAssemblyAI(
     await new Promise((r) => setTimeout(r, 2500));
     const poll = await fetch(`${AAI_BASE}/transcript/${id}`, {
       headers: { authorization: apiKey },
-    });
-    const body = (await poll.json()) as {
+    }).catch(() => null);
+    if (!poll || !poll.ok) continue; // blip transitório (rede/5xx) → tenta de novo até o deadline
+    const body = (await poll.json().catch(() => null)) as {
       status: string;
       words?: Array<{ text: string; start: number; end: number; confidence: number }>;
       error?: string;
-    };
+    } | null;
+    if (!body) continue; // resposta não-JSON (ex.: 502 HTML da AAI) → tenta de novo
     if (body.status === 'completed') {
       return (body.words ?? []).map((w) => ({
         text: w.text,

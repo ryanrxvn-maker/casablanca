@@ -11,7 +11,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { requirePro } from '@/app/api/admin/_helpers';
+import { requireAdmin } from '@/app/api/admin/_helpers';
 import { initMultipart, isVmakeConfigured, vmakeErrorToHttp } from '@/lib/vmake-api';
 import { encryptSecret } from '@/lib/secrets';
 
@@ -19,7 +19,7 @@ export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
-  const guard = await requirePro();
+  const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
   if (!isVmakeConfigured()) {

@@ -15,7 +15,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { requirePro } from '@/app/api/admin/_helpers';
+import { requireAdmin } from '@/app/api/admin/_helpers';
 import { pollRecord, VMAKE_EFFECT, vmakeErrorToHttp, type VmakeMode } from '@/lib/vmake-api';
 import { verifyVmakeJob } from '@/lib/vmake-job-token';
 
@@ -25,7 +25,7 @@ export const maxDuration = 300;
 const VALID_MODES = new Set<string>(['smart', 'subtitle', 'watermark']);
 
 export async function GET(req: Request) {
-  const guard = await requirePro();
+  const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
 
   const url = new URL(req.url);

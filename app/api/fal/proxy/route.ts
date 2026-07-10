@@ -49,6 +49,29 @@ function isAllowedTarget(url: string): boolean {
   }
 }
 
+// A Authorization com a FAL_KEY só pode ir pra hosts do PRÓPRIO Fal. Os
+// uploads signed-url vão pro storage.googleapis.com (permitido acima) e já
+// carregam a assinatura na query — injetar a chave lá vazaria a credencial
+// pra um terceiro (Google) sem necessidade.
+function isFalHost(url: string): boolean {
+  try {
+    const h = new URL(url).hostname;
+    return (
+      h === 'fal.run' ||
+      h === 'queue.fal.run' ||
+      h === 'rest.fal.ai' ||
+      h === 'gateway.fal.ai' ||
+      h === 'fal.media' ||
+      h === 'v3.fal.media' ||
+      h.endsWith('.fal.ai') ||
+      h.endsWith('.fal.run') ||
+      h.endsWith('.fal.media')
+    );
+  } catch {
+    return false;
+  }
+}
+
 async function proxy(req: Request): Promise<Response> {
   const guard = await requireAdmin();
   if (!guard.ok) return guard.response;
@@ -91,7 +114,9 @@ async function proxy(req: Request): Promise<Response> {
     }
     headers.set(key, value);
   });
-  headers.set('Authorization', `Key ${falKey}`);
+  if (isFalHost(targetUrl)) {
+    headers.set('Authorization', `Key ${falKey}`);
+  }
   headers.set('x-fal-client-proxy', 'darko-lab/1.0');
 
   const hasBody = req.method !== 'GET' && req.method !== 'HEAD';

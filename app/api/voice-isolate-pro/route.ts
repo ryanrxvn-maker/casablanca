@@ -250,8 +250,15 @@ export async function POST(req: Request) {
     // baixar via blob() sem CORS issue.
     let vocalsBytes: ArrayBuffer;
     try {
-      const dl = await fetch(vocalsUrl);
+      // Timeout: um socket travado no replicate.delivery seguraria a lambda
+      // até o maxDuration (cobrado). Guard anti-OOM: rejeita WAV absurdamente
+      // grande antes de bufferizar (WAV legítimo de ~3min ≈ 30MB; teto folgado).
+      const dl = await fetch(vocalsUrl, { signal: AbortSignal.timeout(60_000) });
       if (!dl.ok) throw new Error(`HTTP ${dl.status}`);
+      const declaredLen = parseInt(dl.headers.get('content-length') || '', 10);
+      if (Number.isFinite(declaredLen) && declaredLen > 150 * 1024 * 1024) {
+        throw new Error(`vocals.wav grande demais (${(declaredLen / 1024 / 1024).toFixed(0)}MB)`);
+      }
       vocalsBytes = await dl.arrayBuffer();
     } catch (e) {
       return NextResponse.json(

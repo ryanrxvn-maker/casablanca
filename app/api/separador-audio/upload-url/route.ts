@@ -24,6 +24,40 @@ export const maxDuration = 30;
 
 const BUCKET = 'separador-uploads';
 
+/**
+ * Higiene de quota: remove objetos ANTIGOS (>2h) do usuário — origem
+ * (`${userId}/...-src`) e trilhas (`${userId}/stems/...`). Um job dura
+ * minutos, então tudo >2h é órfão e deletar é SEGURO. Impede o bucket de
+ * encher e travar uploads (como já acontecia no lipsync antes da limpeza).
+ * Best-effort: nunca derruba o request.
+ */
+async function cleanupOldUserObjects(
+  sb: ReturnType<typeof serviceClient>,
+  userId: string,
+): Promise<void> {
+  const MAX_AGE_MS = 2 * 60 * 60 * 1000;
+  const now = Date.now();
+  const isOld = (createdAt?: string | null): boolean => {
+    if (!createdAt) return false;
+    const t = new Date(createdAt).getTime();
+    return Number.isFinite(t) && now - t > MAX_AGE_MS;
+  };
+  for (const prefix of [userId, `${userId}/stems`]) {
+    try {
+      const { data } = await sb.storage
+        .from(BUCKET)
+        .list(prefix, { limit: 1000, sortBy: { column: 'created_at', order: 'asc' } });
+      if (!Array.isArray(data)) continue;
+      const stale = data
+        .filter((o) => o?.name && isOld((o as { created_at?: string }).created_at))
+        .map((o) => `${prefix}/${o.name}`);
+      if (stale.length) await sb.storage.from(BUCKET).remove(stale);
+    } catch {
+      /* best-effort — higiene nunca derruba o upload */
+    }
+  }
+}
+
 export async function POST(req: Request) {
   const gate = await requireTier('admin');
   if (!gate.ok) return gate.response;
@@ -81,6 +115,10 @@ export async function POST(req: Request) {
       { status: 502 },
     );
   }
+
+  // Higiene de storage — limpa órfãos >2h pra o bucket nunca encher e travar
+  // uploads. Best-effort, não bloqueia.
+  await cleanupOldUserObjects(sb, gate.userId);
 
   const path = `${gate.userId}/${Date.now()}-${Math.random()
     .toString(36)
