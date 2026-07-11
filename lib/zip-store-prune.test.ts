@@ -51,6 +51,42 @@ console.log('\nGARANTIA — faxina do zip-store (nunca apaga disparo ativo/recen
   ok(zipGroupId('batch:AAA:montado') !== zipGroupId('batch:BBB:montado'), 'taskIds distintos → grupos distintos');
 }
 
+// (E4) Auto B-roll: ZIP do pack + MP4s individuais dos takes = 1 grupo só.
+// Sem isto cada take virava grupo "misc" próprio e a faxina (disparada pelo
+// boot do Pilot/Hey Auto no MESMO DB) roía os packs antigos take a take —
+// preview do histórico ficava cinza. Ver fix 2026-07-10.
+{
+  const zipKey = 'broll:1751234567890:1751234567999:zip';
+  const keys = [
+    zipKey,                    // o ZIP pré-salvo do batch (chave = a própria zipKey)
+    `brollvid:${zipKey}:0`,    // MP4 individual do take 0
+    `brollvid:${zipKey}:17`,
+    `brollvid:${zipKey}:299`,  // pack de 300
+  ];
+  const ids = new Set(keys.map(zipGroupId));
+  ok(ids.size === 1 && ids.has(zipKey), 'E4: zip do pack + brollvid dos takes → 1 grupo (a zipKey)');
+  ok(zipGroupId(`brollvid:broll:AAA:1:zip:3`) !== zipGroupId(`brollvid:broll:BBB:2:zip:3`), 'E4: packs distintos → grupos distintos');
+  ok(!zipGroupId(`brollvid:${zipKey}:12`).startsWith(' misc'), 'E4: brollvid não cai mais no fallback misc');
+}
+
+// (E5) Fila do Hey Auto: áudios persistidos de um item (hgaq:<itemId>:audio:<n>)
+// agrupam pelo itemId — protegíveis via `protect` enquanto o item não foi
+// entregue (fila de madrugada >12h não pode perder o áudio pra faxina).
+{
+  const item = 'manual:meu_ad:1783567871328:ab12'; // itemId contém ':' e agrupa certo
+  ok(zipGroupId(`hgaq:${item}:audio:0`) === item, 'E5: áudio da fila agrupa pelo itemId inteiro');
+  ok(zipGroupId(`hgaq:${item}:audio:0`) === zipGroupId(`hgaq:${item}:audio:3`), 'E5: todos os áudios do item no MESMO grupo');
+  ok(!zipGroupId(`hgaq:${item}:audio:1`).startsWith(' misc'), 'E5: não cai no fallback misc');
+  ok(zipGroupId(`hgaq:AAA:audio:0`) !== zipGroupId(`hgaq:BBB:audio:0`), 'E5: itens distintos → grupos distintos');
+
+  // Funcional: velho + fora da janela, MAS protegido → nunca evictado.
+  const metas: ZipMeta[] = [{ key: `hgaq:${item}:audio:0`, size: 5 * 1024 * 1024, createdAt: NOW - 100 * HOUR }];
+  const kept = planZipEviction(metas, { protect: [item], keepGroups: 0, minAgeMs: HOUR, now: NOW });
+  ok(kept.evictKeys.length === 0, 'E5: áudio de item PROTEGIDO nunca é evictado, mesmo velho');
+  const evicted = planZipEviction(metas, { keepGroups: 0, minAgeMs: HOUR, now: NOW });
+  ok(evicted.evictKeys.length === 1, 'E5: sem protect (item entregue), áudio velho segue o LRU normal');
+}
+
 // helper: monta metas de N disparos, cada um com montado+takes, idade crescente
 function mkStore(specs: Array<{ id: string; ageH: number; sizeMB?: number }>): ZipMeta[] {
   const out: ZipMeta[] = [];

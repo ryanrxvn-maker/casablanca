@@ -102,18 +102,18 @@ export function isCancellationError(err: unknown): boolean {
   return /terminat|abort|cancel|destroyed/i.test(msg) || msg === CANCELLED_ERROR;
 }
 
-async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
-  onStage?.('Preparando...');
-  const { FFmpeg } = await import('@ffmpeg/ffmpeg');
-
-  const ff = new FFmpeg();
-  if (onLog) ff.on('log', ({ message }) => onLog(message));
-
-  // WATCHDOG no exec: envolve o exec nativo. Se um exec travar (hang infinito do
-  // wasm), depois de EXEC_WATCHDOG_MS matamos a instância (terminate) e zeramos o
-  // singleton → a PRÓXIMA getFFmpeg reinicia limpa, em vez de a instância poisoned
-  // travar TODA operação seguinte. Backstop universal (todo helper passa por aqui).
-  // O exec nativo perdedor da corrida tem .catch no-op pra não virar unhandled.
+/**
+ * WATCHDOG no exec: envolve o exec nativo de UMA instância. Se um exec travar
+ * (hang infinito do wasm), matamos a instância (terminate) e avisamos o dono
+ * via `onKilled` — o singleton zera instance/loadingPromise, o pool remove o
+ * slot morto. Backstop universal (todo helper passa por aqui). O exec nativo
+ * perdedor da corrida tem .catch no-op pra não virar unhandled rejection.
+ *
+ * Usado pelo singleton (loadCore) E pelo pool (lib/ffmpeg-pool.ts) — antes o
+ * pool rodava SEM watchdog e um hang num job do Compressor ficava pendurado
+ * pra sempre (job "running" eterno).
+ */
+export function attachExecWatchdog(ff: FFmpeg, onKilled?: () => void): void {
   const _origExec = ff.exec.bind(ff) as (...x: unknown[]) => Promise<number>;
   const wrappedExec = (...a: unknown[]): Promise<number> => {
     const real = _origExec(...a);
@@ -139,17 +139,7 @@ async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
     let hardTo: ReturnType<typeof setTimeout> | undefined;
     const kill = (rej: (e: Error) => void, msg: string) => {
       try { ff.terminate(); } catch { /* ignora */ }
-      if (instance === ff) {
-        instance = null; // força reinit limpo no próximo getFFmpeg
-        // CRÍTICO (fix 2026-07-03): zerar TAMBÉM o loadingPromise. Sem isto,
-        // getFFmpeg (63) cai em `if (loadingPromise) return loadingPromise` e
-        // devolve a promise RESOLVIDA que aponta pra ESTA instância JÁ TERMINADA
-        // (zumbi) — todo exec seguinte "resolve" mas não produz nada → montado
-        // 1KB / takes 0KB persistidos como sucesso, em TODAS as tasks seguintes
-        // do mesmo tab (foi a raiz do lote 02.07 com 4 montados 1KB em série).
-        // cancelFFmpeg (91) já zera os dois; o kill do watchdog não zerava.
-        loadingPromise = null;
-      }
+      onKilled?.();
       rej(new Error(msg));
     };
     const watchdog = new Promise<number>((_, rej) => {
@@ -173,6 +163,28 @@ async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
     });
   };
   (ff as unknown as { exec: unknown }).exec = wrappedExec;
+}
+
+async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
+  onStage?.('Preparando...');
+  const { FFmpeg } = await import('@ffmpeg/ffmpeg');
+
+  const ff = new FFmpeg();
+  if (onLog) ff.on('log', ({ message }) => onLog(message));
+
+  attachExecWatchdog(ff, () => {
+    if (instance === ff) {
+      instance = null; // força reinit limpo no próximo getFFmpeg
+      // CRÍTICO (fix 2026-07-03): zerar TAMBÉM o loadingPromise. Sem isto,
+      // getFFmpeg cai em `if (loadingPromise) return loadingPromise` e devolve
+      // a promise RESOLVIDA que aponta pra ESTA instância JÁ TERMINADA (zumbi)
+      // — todo exec seguinte "resolve" mas não produz nada → montado 1KB /
+      // takes 0KB persistidos como sucesso, em TODAS as tasks seguintes do
+      // mesmo tab (foi a raiz do lote 02.07 com 4 montados 1KB em série).
+      // cancelFFmpeg já zera os dois; o kill do watchdog não zerava.
+      loadingPromise = null;
+    }
+  });
 
   let lastErr: unknown = null;
   for (let i = 0; i < CDNS.length; i++) {
@@ -194,7 +206,7 @@ async function loadCore(onStage?: FFLoadStage, onLog?: FFLog): Promise<FFmpeg> {
     }
   }
   throw new Error(
-    'Erro ao carregar',
+    'Não consegui carregar o motor de vídeo. Confira sua internet e recarregue a página.',
   );
 }
 
@@ -239,23 +251,38 @@ export async function speedUpVideo(
     // Mesma estrategia do Compressor: ultrafast + x264-params agressivos.
     // Aceleracao ja descarta frames implicitamente (PTS/speed), entao a perda
     // de eficiencia do encoder importa pouco e o ganho de tempo e enorme.
-    await ff.exec([
+    const encodeArgs = (withAudio: boolean) => [
       '-i', inputName,
       '-filter:v', `setpts=PTS/${speed}`,
-      '-filter:a', atempoChain(speed),
+      ...(withAudio
+        ? ['-filter:a', atempoChain(speed), '-c:a', 'aac', '-b:a', '128k']
+        : ['-an']),
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
       '-tune', 'fastdecode',
       '-crf', '23',
       '-x264-params', 'bframes=0:ref=1:rc-lookahead=10:aq-mode=1',
       '-pix_fmt', 'yuv420p',
-      '-c:a', 'aac',
-      '-b:a', '128k',
       '-movflags', '+faststart',
       outputName,
-    ]);
-    const data = await ff.readFile(outputName);
-    return toBlob(data, 'video/mp4');
+    ];
+    try {
+      await ff.exec(encodeArgs(true));
+      const data = await ff.readFile(outputName);
+      assertValidMp4(data as Uint8Array, 'vídeo acelerado');
+      return toBlob(data, 'video/mp4');
+    } catch (e) {
+      // Cancelamento/watchdog (instância morta) não tem retry que salve.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/terminat|abort|cancel|travad|travou/i.test(msg)) throw e;
+      // Vídeo SEM trilha de áudio: o -filter:a derruba o exec inteiro. Uma
+      // re-tentativa sem áudio salva o job em vez de falhar com erro cru.
+      await safeDelete(ff, outputName);
+      await ff.exec(encodeArgs(false));
+      const data = await ff.readFile(outputName);
+      assertValidMp4(data as Uint8Array, 'vídeo acelerado');
+      return toBlob(data, 'video/mp4');
+    }
   } finally {
     if (progressHandler) ff.off('progress', progressHandler);
     await safeDelete(ff, inputName);
@@ -398,6 +425,9 @@ export async function compressVideoOn(
     );
     await ff.exec(args);
     const data = await ff.readFile(outputName);
+    // Sem isto, um encode que estourou a memória do wasm entregava MP4
+    // truncado (sem moov) como job "done" — o cliente baixava arquivo morto.
+    assertValidMp4(data as Uint8Array, 'vídeo comprimido');
     return toBlob(data, 'video/mp4');
   } finally {
     if (progressHandler) ff.off('progress', progressHandler);
@@ -691,6 +721,10 @@ export async function cutVideoSegments(
       batchOutputs.push(outName);
     }
 
+    // O input já cumpriu o papel (todos os lotes cortados) — sai do MEMFS
+    // ANTES do concat pra devolver o heap dele (o finally re-deleta sem dor).
+    await safeDelete(ff, inputName);
+
     // Concatena os sub-vídeos via concat demuxer. Como cada batch saiu com
     // codec/SR/dimensões idênticos (mesmo encode), o -c copy junta sem dor.
     const listName = 'cut_concat_list.txt';
@@ -716,6 +750,249 @@ export async function cutVideoSegments(
     if (progressHandler) ff.off('progress', progressHandler);
     await safeDelete(ff, inputName);
     for (const n of batchOutputs) await safeDelete(ff, n);
+  }
+}
+
+// ---------- Decupagem GRANDE sem servidor: dividir → processar → juntar ---
+//
+// Arquivo grande não cabe com folga no ffmpeg-wasm de uma vez (heap ~2GB; o
+// pipeline chega a precisar de ~3× o tamanho do arquivo em memória). Em vez
+// de servidor pago, o arquivo é DIVIDIDO em partes de ~160MB com `-c copy`
+// (segment muxer: sem re-encode, sem perda, cada pacote vai pra EXATAMENTE
+// uma parte — contíguo, sem duplicar nem pular frame), cada parte passa pelo
+// pipeline normal da decupagem e os resultados são JUNTADOS com o mesmo
+// concat demuxer que o cutVideoSegments já usa nos lotes internos.
+//
+// O pulo do gato é o WORKERFS: o arquivo ORIGINAL é MONTADO no FS do wasm e
+// lido por streaming direto do disco do cliente — SEM ocupar o heap. Só as
+// partes de saída ocupam memória. Se o mount não existir no core (raro), cai
+// num fallback via MEMFS com teto de segurança — e acima do teto devolve um
+// erro humano em vez de estourar memória e corromper.
+
+// Alvo de ~160MB por parte: o pipeline (nivelar + cortar) precisa de ~3× a
+// parte em memória → pico ~500MB, folga enorme contra o teto de ~2GB do wasm.
+export const DECUP_CHUNK_TARGET_BYTES = 160 * 1024 * 1024;
+
+// Teto do fallback SEM WORKERFS (arquivo inteiro no MEMFS + partes = 2×).
+const CHUNK_FALLBACK_BYTE_CAP = 420 * 1024 * 1024;
+
+/**
+ * Planeja a divisão: devolve os tempos de corte INTERIORES (segundos,
+ * crescentes). Vazio = arquivo cabe numa parte só. Função PURA (testável):
+ * nº de partes por TAMANHO (teto por parte), cortes por TEMPO proporcional.
+ */
+export function planDecupChunks(sizeBytes: number, durationSec: number): number[] {
+  const count = Math.max(1, Math.ceil(sizeBytes / DECUP_CHUNK_TARGET_BYTES));
+  if (count === 1 || !Number.isFinite(durationSec) || durationSec <= 1) return [];
+  const step = durationSec / count;
+  const times: number[] = [];
+  for (let i = 1; i < count; i++) times.push(Math.round(i * step * 1000) / 1000);
+  return times;
+}
+
+/** Container das partes por extensão do original (sempre `-c copy`). */
+export function chunkContainerFor(srcExt: string): { ext: string; format: string } {
+  const e = (srcExt || '').toLowerCase();
+  if (e === 'mp4' || e === 'mov' || e === 'm4a') return { ext: 'mp4', format: 'mp4' };
+  if (e === 'webm') return { ext: 'webm', format: 'webm' };
+  if (e === 'mkv') return { ext: 'mkv', format: 'matroska' };
+  if (e === 'mp3') return { ext: 'mp3', format: 'mp3' };
+  if (e === 'wav') return { ext: 'wav', format: 'wav' };
+  // Resto (aac/ogg/opus/flac...): matroska aceita qualquer codec em -c copy;
+  // o decodeAudioRobust lê .mka pelo fallback FFmpeg sem drama.
+  return { ext: 'mka', format: 'matroska' };
+}
+
+/** Lê a duração pelo log do ffmpeg (exec sem output imprime "Duration:"). */
+async function readDurationFromLogs(ff: FFmpeg, path: string): Promise<number> {
+  let dur = 0;
+  const h = ({ message }: { message: string }) => {
+    const m = /Duration: (\d+):(\d+):([\d.]+)/.exec(message);
+    if (m) {
+      const d = +m[1] * 3600 + +m[2] * 60 + parseFloat(m[3]);
+      if (d > dur) dur = d;
+    }
+  };
+  ff.on('log', h);
+  try {
+    await ff.exec(['-hide_banner', '-i', path]);
+  } catch { /* exit != 0 é esperado (sem output) — o log já saiu */ } finally {
+    ff.off('log', h);
+  }
+  return dur;
+}
+
+/**
+ * Disponibiliza blobs pro ffmpeg SEM ocupar heap: monta WORKERFS (leitura por
+ * streaming do disco). Fallback = MEMFS com teto (acima do teto: erro humano,
+ * nunca corrupção silenciosa). Retorna o dir e um cleanup idempotente.
+ */
+async function makeInputsAvailable(
+  ff: FFmpeg,
+  entries: Array<{ name: string; data: Blob }>,
+): Promise<{ dir: string; mounted: boolean; cleanup: () => Promise<void> }> {
+  const uniq = `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
+  const mdir = `/decupmnt_${uniq}`;
+  try {
+    await ff.createDir(mdir);
+    await ff.mount(
+      'WORKERFS' as unknown as Parameters<FFmpeg['mount']>[0],
+      { blobs: entries } as Parameters<FFmpeg['mount']>[1],
+      mdir,
+    );
+    console.log('[decup-chunked] WORKERFS montado (input fora do heap).');
+    return {
+      dir: mdir,
+      mounted: true,
+      cleanup: async () => {
+        try { await ff.unmount(mdir); } catch { /* já desmontado */ }
+        try { await ff.deleteDir(mdir); } catch { /* já removido */ }
+      },
+    };
+  } catch (e) {
+    if (isCancellationError(e)) throw e;
+    try { await ff.unmount(mdir); } catch { /* nunca montou */ }
+    try { await ff.deleteDir(mdir); } catch { /* nunca criou */ }
+    console.warn('[decup-chunked] WORKERFS indisponível — fallback MEMFS:', (e as Error)?.message);
+  }
+  const total = entries.reduce((a, x) => a + x.data.size, 0);
+  if (total > CHUNK_FALLBACK_BYTE_CAP) {
+    throw new Error(
+      'Esse arquivo é pesado demais pra preparar no navegador nesse aparelho. Comprime o vídeo no Compressor e tenta de novo.',
+    );
+  }
+  const { fetchFile } = await import('@ffmpeg/util');
+  const wdir = `/decupmem_${uniq}`;
+  await ff.createDir(wdir);
+  for (const e2 of entries) {
+    await ff.writeFile(`${wdir}/${e2.name}`, await fetchFile(e2.data));
+  }
+  return {
+    dir: wdir,
+    mounted: false,
+    cleanup: async () => {
+      for (const e2 of entries) await safeDelete(ff, `${wdir}/${e2.name}`);
+      try { await ff.deleteDir(wdir); } catch { /* ok */ }
+    },
+  };
+}
+
+/**
+ * Divide um arquivo grande em partes de ~160MB SEM re-encode (segment muxer,
+ * corte em keyframe, partes contíguas). Retorna Files nomeados em ordem.
+ */
+export async function splitMediaForChunks(
+  file: Blob,
+  opts: RunOptions = {},
+): Promise<File[]> {
+  const srcExt = guessExt(file, 'mp4');
+  const { ext: chunkExt, format: chunkFormat } = chunkContainerFor(srcExt);
+
+  // Duração: HTMLVideo primeiro (rápido, sem wasm); fallback = log do ffmpeg.
+  let durationSec = (await probeVideoMetadata(file))?.durationSec || 0;
+
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const { dir, cleanup } = await makeInputsAvailable(ff, [{ name: `in.${srcExt}`, data: file }]);
+  const inputPath = `${dir}/in.${srcExt}`;
+  const progressHandler = wireProgress(ff, opts.onProgress);
+  const made: string[] = [];
+  try {
+    if (durationSec <= 0) durationSec = await readDurationFromLogs(ff, inputPath);
+    if (durationSec <= 0) {
+      throw new Error('Não consegui ler a duração do arquivo (arquivo corrompido?).');
+    }
+
+    const times = planDecupChunks(file.size, durationSec);
+    if (times.length === 0) {
+      // Cabe numa parte só — nada a dividir.
+      return [new File([file], `decup_chunk_000.${srcExt}`, { type: file.type || undefined })];
+    }
+
+    opts.onStage?.(`Dividindo em ${times.length + 1} partes (sem re-encode)...`);
+    const rc = await ff.exec([
+      '-i', inputPath,
+      '-map', '0:v?', '-map', '0:a?', '-dn', '-sn',
+      '-c', 'copy',
+      '-f', 'segment',
+      '-segment_times', times.map((t) => t.toFixed(3)).join(','),
+      '-reset_timestamps', '1',
+      '-segment_format', chunkFormat,
+      `decup_chunk_%03d.${chunkExt}`,
+    ]);
+    if (rc !== 0) {
+      throw new Error('Não consegui dividir esse arquivo (formato não suportado pra divisão).');
+    }
+
+    // Lê as partes em ORDEM e apaga cada uma JÁ, liberando o heap aos poucos.
+    const mimeOut = chunkExt === 'mp4' ? 'video/mp4' : chunkExt === 'webm' ? 'video/webm' : chunkExt === 'mp3' ? 'audio/mpeg' : chunkExt === 'wav' ? 'audio/wav' : 'application/octet-stream';
+    const parts: File[] = [];
+    for (let i = 0; ; i++) {
+      const name = `decup_chunk_${String(i).padStart(3, '0')}.${chunkExt}`;
+      let data: Uint8Array | string;
+      try {
+        data = await ff.readFile(name);
+      } catch {
+        break; // primeiro índice ausente = fim das partes
+      }
+      made.push(name);
+      parts.push(new File([toBlob(data, mimeOut)], name, { type: mimeOut }));
+      await safeDelete(ff, name);
+    }
+    if (parts.length === 0) {
+      throw new Error('A divisão do arquivo não produziu partes (arquivo corrompido?).');
+    }
+    return parts;
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    for (const n of made) await safeDelete(ff, n);
+    await cleanup();
+  }
+}
+
+/**
+ * Junta os RESULTADOS decupados das partes num arquivo final, com `-c copy`
+ * (as partes saem do MESMO encode → codecs/params idênticos, mesma técnica
+ * já validada no concat de lotes do cutVideoSegments).
+ */
+export async function concatDecupChunks(
+  parts: Blob[],
+  format: 'mp4' | 'mp3' | 'wav',
+  opts: RunOptions = {},
+): Promise<Blob> {
+  if (parts.length === 0) throw new Error('Nenhuma parte pra juntar.');
+  if (parts.length === 1) return parts[0];
+
+  const ff = await getFFmpeg(opts.onStage, opts.onLog);
+  const entries = parts.map((p, i) => ({
+    name: `part_${String(i).padStart(3, '0')}.${format}`,
+    data: p,
+  }));
+  const { dir, cleanup } = await makeInputsAvailable(ff, entries);
+  const progressHandler = wireProgress(ff, opts.onProgress);
+  const listName = 'decup_join_list.txt';
+  const outName = `decup_join_out.${format}`;
+  try {
+    opts.onStage?.(`Juntando ${parts.length} partes...`);
+    const list = entries.map((e) => `file '${dir}/${e.name}'`).join('\n');
+    await ff.writeFile(listName, new TextEncoder().encode(list));
+    const args: string[] = [];
+    if (format === 'mp4') args.push('-fflags', '+genpts');
+    args.push('-f', 'concat', '-safe', '0', '-i', listName, '-c', 'copy');
+    if (format === 'mp4') args.push('-avoid_negative_ts', 'make_zero', '-movflags', '+faststart');
+    args.push(outName);
+    const rc = await ff.exec(args);
+    if (rc !== 0) throw new Error('Não consegui juntar as partes decupadas.');
+    const data = await ff.readFile(outName);
+    if (format === 'mp4') assertValidMp4(data as Uint8Array, 'vídeo decupado');
+    return toBlob(
+      data,
+      format === 'mp4' ? 'video/mp4' : format === 'mp3' ? 'audio/mpeg' : 'audio/wav',
+    );
+  } finally {
+    if (progressHandler) ff.off('progress', progressHandler);
+    await safeDelete(ff, listName);
+    await safeDelete(ff, outName);
+    await cleanup();
   }
 }
 

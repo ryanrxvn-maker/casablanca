@@ -78,6 +78,23 @@ export function LipsyncPreviewCard({
 
   const safeLabel = take.label.replace(/[^a-z0-9_-]/gi, '_');
 
+  /** O erro do HeyGen chega em inglês técnico ("usage has exceeded the maximum
+   *  daily limit", "avatar look not found ... space_id") — o cliente vê copy
+   *  clara em PT-BR; o texto cru fica no console pra diagnóstico. */
+  function friendlyTakeError(raw: string): string {
+    const m = raw.toLowerCase();
+    if (/quota|daily|usage has exceeded|limit reached|insufficient|credit/.test(m)) {
+      return 'HeyGen no limite diário da conta — renova em até 24h. Não é erro do app.';
+    }
+    if (/not accessible|look not found|space_id|space/.test(m)) {
+      return 'Esse avatar está em OUTRO workspace do HeyGen — troque o workspace ativo lá e re-dispare.';
+    }
+    if (/timeout|network|fetch|proxy/.test(m)) {
+      return 'A conexão com o HeyGen falhou nessa parte. Re-dispare só ela.';
+    }
+    return 'O HeyGen não renderizou essa parte. Re-dispare só ela.';
+  }
+
   function openExpanded() {
     const v = videoRef.current;
     if (v && !v.paused) v.pause();
@@ -88,9 +105,12 @@ export function LipsyncPreviewCard({
     if (!videoUrl || downloading) return;
     setDownloading(true);
     try {
-      const r = await fetch(videoUrl);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const blob = await r.blob();
+      // downloadVideoBytes = retry + fallback pelo proxy da extensão. A URL
+      // assinada do CDN do HeyGen EXPIRA — o fetch direto falhava em silêncio
+      // e o botão ficava mudo (botão morto é proibido).
+      const { downloadVideoBytes } = await import('@/lib/heygen-api-direct');
+      const bytes = await downloadVideoBytes(videoUrl);
+      const blob = new Blob([bytes as BlobPart], { type: 'video/mp4' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -101,6 +121,7 @@ export function LipsyncPreviewCard({
       URL.revokeObjectURL(url);
     } catch (e) {
       console.warn('Download falhou', e);
+      alert('Não consegui baixar esse take agora — o link do HeyGen pode ter vencido. Clique Retomar no card pra renovar e tente de novo.');
     } finally {
       setDownloading(false);
     }
@@ -229,7 +250,9 @@ export function LipsyncPreviewCard({
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-3 text-center">
             <span className="text-2xl">⚠</span>
             <span className="label-tech text-[10px] font-bold uppercase tracking-widest text-red-300">Falha</span>
-            <p className="line-clamp-2 text-[10px] leading-relaxed text-red-300/80">{take.error || 'erro na renderização'}</p>
+            <p className="line-clamp-2 text-[10px] leading-relaxed text-red-300/80" title={take.error || undefined}>
+              {take.error ? friendlyTakeError(take.error) : 'Erro na renderização.'}
+            </p>
             {/* Contorno da falha: o HeyGen não gerou essa parte. Dá 2 saídas pra
                 completar o AD sem refazer tudo:
                  1) Editar o texto e re-gerar SÓ essa parte (mexe no script/voz)

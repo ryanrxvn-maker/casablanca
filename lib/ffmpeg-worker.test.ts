@@ -7,7 +7,7 @@
  * devolver e lança erro CLARO se estiver quebrado — pior caso vira aviso
  * honesto, nunca um arquivo bugado.
  */
-import { assertValidMp4 } from './ffmpeg-worker';
+import { assertValidMp4, planDecupChunks, chunkContainerFor, DECUP_CHUNK_TARGET_BYTES } from './ffmpeg-worker';
 
 let pass = 0;
 let fail = 0;
@@ -96,6 +96,40 @@ throws(
   }
   ok(!threw, 'MP4 grande com moov no fim é aceito (sem falso-positivo)');
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// GARANTIA — planDecupChunks (decupagem de arquivo grande SEM servidor):
+// divide por TAMANHO (alvo ~160MB/parte) em cortes de TEMPO proporcionais.
+console.log('\nGARANTIA — planDecupChunks divide certo e nunca quebra:');
+
+const MB = 1024 * 1024;
+
+// 1. Arquivo pequeno (cabe numa parte) → nada a dividir.
+ok(planDecupChunks(150 * MB, 600).length === 0, '150MB → sem divisão (1 parte)');
+ok(planDecupChunks(DECUP_CHUNK_TARGET_BYTES, 600).length === 0, 'exatamente no alvo → 1 parte');
+
+// 2. 800MB (teto da ferramenta) → 5 partes = 4 cortes interiores, crescentes.
+{
+  const times = planDecupChunks(800 * MB, 1000);
+  ok(times.length === 4, `800MB → 5 partes (4 cortes) — veio ${times.length + 1} partes`);
+  ok(times.every((t, i) => i === 0 || t > times[i - 1]), 'cortes estritamente crescentes');
+  ok(times[0] === 200 && times[3] === 800, `cortes proporcionais ao tempo (200/400/600/800) — veio ${times.join('/')}`);
+  ok(times.every((t) => t > 0 && t < 1000), 'todo corte é interior (0 < t < duração)');
+}
+
+// 3. 201MB (logo acima do gatilho de 200MB da página) → 2 partes.
+ok(planDecupChunks(201 * MB, 300).length === 1, '201MB → 2 partes (1 corte no meio)');
+
+// 4. Duração inválida/curta → NUNCA divide (segue caminho direto, sem crash).
+ok(planDecupChunks(800 * MB, 0).length === 0, 'duração 0 → sem divisão (sem crash)');
+ok(planDecupChunks(800 * MB, NaN).length === 0, 'duração NaN → sem divisão (sem crash)');
+ok(planDecupChunks(800 * MB, 0.5).length === 0, 'duração 0.5s → sem divisão');
+
+// 5. Container das partes por extensão (sempre -c copy, nunca re-encode).
+ok(chunkContainerFor('mp4').format === 'mp4' && chunkContainerFor('mov').format === 'mp4', 'mp4/mov → container mp4');
+ok(chunkContainerFor('webm').format === 'webm', 'webm → container webm');
+ok(chunkContainerFor('mp3').format === 'mp3' && chunkContainerFor('wav').format === 'wav', 'mp3/wav → mesmo container');
+ok(chunkContainerFor('flac').format === 'matroska', 'codec exótico → matroska (aceita qualquer -c copy)');
 
 console.log(`\n${fail === 0 ? '✓' : '✗'} ffmpeg-worker: ${pass} ok, ${fail} fail`);
 if (fail > 0) process.exit(1);

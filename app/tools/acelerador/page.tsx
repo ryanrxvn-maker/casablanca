@@ -14,6 +14,8 @@ import {
   extractAudioAs,
   type FFProgress,
 } from '@/lib/ffmpeg-worker';
+import { runFfmpegExclusive } from '@/lib/ffmpeg-serial';
+import { toFriendlyMessage } from '@/lib/friendly-error';
 import { CancelButton } from '@/components/CancelButton';
 import { buildZip } from '@/lib/zip-builder';
 import { formatBytes } from '@/lib/utils';
@@ -34,6 +36,11 @@ type Job = {
   resultBlob: Blob | null;
   resultUrl: string | null;
   error: string | null;
+  /** Snapshot dos parâmetros NO PROCESSAMENTO — o download usa isto no nome
+   *  do arquivo. Sem o snapshot, mexer no slider depois do lote renomeava um
+   *  resultado 1.5x como "_2x" (nome mentindo sobre o conteúdo). */
+  speed?: number;
+  format?: OutFormat;
 };
 
 const MAX_BATCH = 20;
@@ -134,6 +141,8 @@ export default function AceleradorPage() {
       progress: 100,
       resultBlob: blob,
       resultUrl: url,
+      speed,
+      format,
     });
     logHistory({
       tool: 'acelerador',
@@ -141,6 +150,15 @@ export default function AceleradorPage() {
       meta: `${speed}× · ${format.toUpperCase()}`,
     });
   }
+
+  // F5/fechar aba no meio do lote perdia TUDO em silêncio (estado é em
+  // memória). O navegador mostra o "sair mesmo?" enquanto processa.
+  useEffect(() => {
+    if (!processing) return;
+    const h = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', h);
+    return () => window.removeEventListener('beforeunload', h);
+  }, [processing]);
 
   async function processAll() {
     if (files.length === 0 || processing) return;
@@ -155,19 +173,22 @@ export default function AceleradorPage() {
         const job = initial[i];
         updateJob(job.id, { state: 'running', progress: 0 });
         try {
-          await processOne(job, i, initial.length);
+          // FILA GLOBAL do ffmpeg-wasm: o worker é um singleton compartilhado
+          // com Decupagem/Camuflagem/etc — sem a fila, um cancel/timeout da
+          // outra ferramenta matava ESTE job com "called FFmpeg.terminate()".
+          await runFfmpegExclusive(() => processOne(job, i, initial.length));
         } catch (e) {
           console.error('[acelerador]', job.file.name, e);
           if (isCancellationError(e)) {
-            updateJob(job.id, { state: 'error', error: 'Cancelado pelo usuario.' });
+            updateJob(job.id, { state: 'error', error: 'Cancelado por você.' });
             initial.slice(i + 1).forEach((rest) => {
-              updateJob(rest.id, { state: 'error', error: 'Cancelado pelo usuario.' });
+              updateJob(rest.id, { state: 'error', error: 'Cancelado por você.' });
             });
             break;
           }
           updateJob(job.id, {
             state: 'error',
-            error: (e as Error).message ?? 'Falha.',
+            error: toFriendlyMessage(e, 'Não consegui processar esse arquivo. Tente de novo — se repetir, ele pode estar corrompido ou pesado demais pro navegador.'),
           });
         }
       }
@@ -185,9 +206,10 @@ export default function AceleradorPage() {
 
   async function downloadOne(job: Job) {
     if (!job.resultBlob) return;
+    // Nome vem do SNAPSHOT do job (o slider pode ter mudado depois do lote).
     await downloadBlob(
       job.resultBlob,
-      baseName(job.file.name) + '_' + suffixTag(speed) + '.' + format,
+      baseName(job.file.name) + '_' + suffixTag(job.speed ?? speed) + '.' + (job.format ?? format),
     );
   }
 
@@ -198,11 +220,11 @@ export default function AceleradorPage() {
     try {
       const zip = await buildZip(
         done.map((j) => ({
-          name: baseName(j.file.name) + '_' + suffixTag(speed) + '.' + format,
+          name: baseName(j.file.name) + '_' + suffixTag(j.speed ?? speed) + '.' + (j.format ?? format),
           data: j.resultBlob!,
         })),
       );
-      await downloadBlob(zip, 'mixer_' + suffixTag(speed) + '.zip');
+      await downloadBlob(zip, 'mixer_' + suffixTag(done[0].speed ?? speed) + '.zip');
     } finally {
       setZipping(false);
     }
@@ -335,6 +357,11 @@ export default function AceleradorPage() {
               </button>
             ) : null}
           </div>
+          {!processing && files.length > 0 && speedMode === 'same' ? (
+            <p className="mt-2 text-xs text-text-muted">
+              Em 1.00x o arquivo sai igual ao original — mova o slider de velocidade pra processar.
+            </p>
+          ) : null}
         </ToolStep>
 
         {stageMsg ? (

@@ -29,10 +29,12 @@ import {
 } from '@/lib/audio-engine';
 import {
   cancelFFmpeg,
+  concatDecupChunks,
   cutVideoSegments,
   extractAudioAs,
   isCancellationError,
   prepareVoiceForDecupagem,
+  splitMediaForChunks,
 } from '@/lib/ffmpeg-worker';
 import { CancelButton } from '@/components/CancelButton';
 import { formatTime } from '@/lib/utils';
@@ -44,10 +46,7 @@ type AudioFmt = 'wav' | 'mp3';
 
 type Result =
   | { kind: 'video'; blob: Blob; url: string; originalDur: number; newDur: number }
-  | { kind: 'audio'; blob: Blob; url: string; format: AudioFmt; originalDur: number; newDur: number }
-  // Resultado processado NO SERVIDOR (arquivo grande): não temos o blob, só a
-  // URL de download direto do worker (Content-Disposition força o nome).
-  | { kind: 'server'; downloadUrl: string; outputKind: OutputKind; originalDur: number; newDur: number };
+  | { kind: 'audio'; blob: Blob; url: string; format: AudioFmt; originalDur: number; newDur: number };
 
 type QueueStatus = 'pending' | 'processing' | 'done' | 'error';
 type QueueItem = {
@@ -62,24 +61,22 @@ type QueueItem = {
 
 const MAX_QUEUE = 10;
 
-// Teto de tamanho. A decupagem roda 100% no navegador (ffmpeg.wasm carrega o
-// arquivo inteiro na memória), e o WebAssembly tem um teto rígido (~2 GB num
-// único bloco). Acima de ~1.5 GB o ffmpeg fica sem folga pra trabalhar e
-// estoura no meio. Bloqueamos no upload com recado humano em vez de deixar o
-// cliente descobrir com um "File could not be read! Code=-1".
-const MAX_FILE_MB = 1536; // 1.5 GB
+// Teto de tamanho. A decupagem roda 100% no NAVEGADOR — custo zero de
+// servidor. O ffmpeg-wasm tem heap de ~2GB, então arquivo acima de 200MB é
+// DIVIDIDO em partes de ~160MB (sem re-encode, corte em keyframe), cada parte
+// passa pelo pipeline normal e o resultado é JUNTADO no final. 800MB é o teto
+// honesto: 5 partes com folga enorme de memória em qualquer máquina.
+const MAX_FILE_MB = 800;
 const MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024;
 
-// Acima deste tamanho, o arquivo NÃO é processado no navegador (ffmpeg-wasm
-// estoura a memória). Vai pro SERVIDOR (Modal + ffmpeg nativo), que aguenta até
-// 1.5 GB sempre e devolve um MP4 íntegro. Abaixo disso fica no navegador
-// (instantâneo e sem custo). Só pra contas pagas (servidor tem custo).
-const SERVER_THRESHOLD_BYTES = 200 * 1024 * 1024; // 200 MB
+// Acima disto o arquivo é processado EM PARTES (dividir → decupar → juntar).
+// Abaixo, caminho direto de sempre (1 passada, sem divisão).
+const CHUNK_THRESHOLD_BYTES = 200 * 1024 * 1024; // 200 MB
 
-const MAX_FILE_LABEL = `${(MAX_FILE_MB / 1024).toFixed(1).replace('.0', '').replace('.', ',')} GB`;
+const MAX_FILE_LABEL = `${MAX_FILE_MB} MB`;
 
 const TOO_BIG_MSG =
-  `Esse vídeo é muito pesado pra processar aqui no navegador (máx ${MAX_FILE_LABEL}). ` +
+  `Esse vídeo é muito pesado pra processar aqui (máx ${MAX_FILE_LABEL}). ` +
   `Reduz o peso na ferramenta Compressor primeiro e tenta de novo.`;
 
 const BAD_TYPE_MSG = 'Formato não suportado. Manda MP3, WAV, MP4, WEBM ou MOV.';
@@ -133,88 +130,6 @@ function computeSpeechSegments(
   }
   if (cursor < totalDur) segs.push({ start: cursor, end: totalDur });
   return segs.filter((s) => s.end - s.start > 0.05);
-}
-
-function fileExt(name: string): string {
-  const m = /\.([a-zA-Z0-9]+)$/.exec(name);
-  return (m ? m[1] : 'mp4').toLowerCase();
-}
-
-// Upload direto pro worker Modal com progresso (XHR — fetch não dá progresso de
-// upload). `ticketBase` = { base, ticket } vindos da nossa rota /ticket.
-function uploadToModal(
-  base: string,
-  ticket: string,
-  file: File,
-  onProgress: (ratio: number) => void,
-  isCancelled: () => boolean,
-): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const ext = fileExt(file.name);
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${base}/up?ext=${encodeURIComponent(ext)}`);
-    xhr.setRequestHeader('X-Decup-Ticket', ticket);
-    // Watchdog de STALL: XHR não tem timeout de inatividade — numa conexão que
-    // morre em silêncio o envio ficava pendurado pra sempre. Sem progresso por
-    // 90s = rede caiu → aborta com erro PRÓPRIO (não confundir com cancelamento
-    // do user) e o retry de 3 tentativas do caller cobre.
-    let lastActivity = Date.now();
-    let stalled = false;
-    xhr.upload.onprogress = (e) => {
-      lastActivity = Date.now();
-      if (e.lengthComputable) onProgress(e.loaded / e.total);
-    };
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          const j = JSON.parse(xhr.responseText);
-          if (j?.id) return resolve(j.id as string);
-          reject(new Error('Resposta de upload inválida.'));
-        } catch {
-          reject(new Error('Resposta de upload inválida.'));
-        }
-      } else {
-        reject(new Error(`Falha no envio (HTTP ${xhr.status}).`));
-      }
-    };
-    xhr.onerror = () => reject(new Error('Falha de rede no envio pro servidor.'));
-    xhr.onabort = () =>
-      reject(new Error(stalled ? 'O envio parou no meio (rede instável).' : 'CANCELLED_BY_USER'));
-    // Cancelamento cooperativo + detector de stall.
-    const timer = setInterval(() => {
-      if (isCancelled()) {
-        clearInterval(timer);
-        try { xhr.abort(); } catch { /* noop */ }
-        return;
-      }
-      if (Date.now() - lastActivity > 90_000) {
-        stalled = true;
-        clearInterval(timer);
-        try { xhr.abort(); } catch { /* noop */ }
-      }
-    }, 500);
-    xhr.onloadend = () => clearInterval(timer);
-    xhr.send(file);
-  });
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-// Espera a internet voltar SEM queimar tentativa (fila de madrugada: roteador
-// reinicia às 3h, volta às 3h10 — o item não pode morrer nesse meio tempo).
-// navigator.onLine=false é confiável pra "sem rede"; quando true, a tentativa
-// real confirma. Cancelamento continua respondendo durante a espera.
-async function waitForOnline(
-  isCancelled: () => boolean,
-  onStage?: (s: string) => void,
-): Promise<void> {
-  if (typeof navigator === 'undefined' || navigator.onLine) return;
-  onStage?.('Sem internet — esperando a conexão voltar...');
-  while (!navigator.onLine) {
-    if (isCancelled()) throw new Error('CANCELLED_BY_USER');
-    await sleep(1000);
-  }
-  await sleep(2000); // rede acabou de voltar — respiro pro DNS/socket assentar
 }
 
 export default function DecupagemPage() {
@@ -305,179 +220,23 @@ export default function DecupagemPage() {
     setQueue([]);
   }
 
-  // Processa UM arquivo grande NO SERVIDOR (Modal + ffmpeg nativo). Sobe direto
-  // pro worker (ticket descartável), dispara o job e acompanha por polling.
-  async function processOnServer(
-    file: File,
-    outKind: OutputKind,
+  // Executa o pipeline da decupagem pra UM blob (arquivo inteiro OU uma parte
+  // de arquivo grande). `allowEmpty`: numa PARTE toda-silêncio, devolver
+  // blob=null é legítimo (a parte só não entra na junção); no arquivo inteiro
+  // é erro claro.
+  async function processBrowserBlob(
+    media: Blob,
+    kind: OutputKind,
     onStage: (s: string) => void,
     onProgress: (r: number | null) => void,
-  ): Promise<Result> {
-    // UPLOAD com paciência de madrugada: espera a internet voltar entre as
-    // tentativas (sem queimar tentativa offline) e emite um ticket NOVO a cada
-    // uma — o TTL do ticket é 15min, então numa espera longa por conexão o da
-    // 1ª tentativa já teria expirado e as seguintes bateriam em porta fechada.
-    const BACKOFFS = [2_000, 10_000, 30_000, 60_000, 120_000];
-    let inputId = '';
-    let lastErr: unknown = null;
-    for (let attempt = 0; attempt <= BACKOFFS.length; attempt++) {
-      if (cancelRef.current) throw new Error('CANCELLED_BY_USER');
-      try {
-        await waitForOnline(() => cancelRef.current, onStage);
-        onStage(attempt === 0 ? 'Preparando envio...' : `Tentando o envio de novo (${attempt + 1}ª de ${BACKOFFS.length + 1})...`);
-        const tRes = await fetch('/api/tools/decupagem/ticket', { method: 'POST' });
-        if (!tRes.ok) {
-          const j = await tRes.json().catch(() => null);
-          throw new Error(j?.error || 'Não consegui preparar o envio pro servidor.');
-        }
-        const { base, ticket } = (await tRes.json()) as { base: string; ticket: string };
-
-        if (attempt === 0) {
-          // Acorda o container ANTES de mandar o arquivo grande. Container
-          // frio às vezes redireciona (303) o primeiro request grande.
-          onStage('Acordando o servidor...');
-          try {
-            await fetch(`${base}/health`, { cache: 'no-store' });
-            await sleep(1500);
-          } catch { /* segue — o retry cobre */ }
-        }
-
-        onStage('Enviando pro servidor...');
-        inputId = await uploadToModal(
-          base,
-          ticket,
-          file,
-          (ratio) => onProgress(ratio * 0.5), // upload = primeira metade da barra
-          () => cancelRef.current,
-        );
-        break;
-      } catch (e) {
-        if ((e as Error)?.message === 'CANCELLED_BY_USER') throw e;
-        lastErr = e;
-        if (attempt < BACKOFFS.length) await sleep(BACKOFFS[attempt]);
-      }
-    }
-    if (!inputId) {
-      throw new Error(
-        `Não consegui enviar o arquivo pro servidor (tentei ${BACKOFFS.length + 1}x). Verifica a conexão e clica em "Continuar fila".` +
-          (lastErr ? ` (${(lastErr as Error).message})` : ''),
-      );
-    }
-
-    // START com retry: depois de um upload de vários minutos, um blip na hora
-    // de iniciar NÃO pode jogar o envio fora. 4xx é permanente (não insiste);
-    // rede/5xx re-tenta com backoff.
-    onStage('Decupando no servidor...');
-    onProgress(null); // indeterminado durante o processamento
-    let job = '';
-    let startErr: unknown = null;
-    for (let attempt = 0; attempt < 4 && !job; attempt++) {
-      if (cancelRef.current) throw new Error('CANCELLED_BY_USER');
-      try {
-        await waitForOnline(() => cancelRef.current, onStage);
-        const sRes = await fetch('/api/tools/decupagem/start', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            input_id: inputId,
-            keepSilence,
-            outputKind: outKind,
-            fileName: file.name,
-          }),
-        });
-        const j = await sRes.json().catch(() => null);
-        if (!sRes.ok) {
-          const msg = (j as { error?: string } | null)?.error || 'Falha ao iniciar a decupagem no servidor.';
-          if (sRes.status >= 400 && sRes.status < 500) {
-            throw Object.assign(new Error(msg), { permanent: true });
-          }
-          throw new Error(msg);
-        }
-        job = (j as { job: string }).job;
-      } catch (e) {
-        if ((e as Error)?.message === 'CANCELLED_BY_USER') throw e;
-        if ((e as { permanent?: boolean })?.permanent) throw e;
-        startErr = e;
-        await sleep(5_000 * (attempt + 1));
-      }
-    }
-    if (!job) {
-      throw new Error(
-        'Falha ao iniciar a decupagem no servidor.' +
-          (startErr ? ` (${(startErr as Error).message})` : ''),
-      );
-    }
-
-    // Polling até concluir. Vídeo grande pode levar minutos. Sem internet o
-    // ciclo NÃO conta (i--): o servidor segue processando — quando a conexão
-    // voltar, o poll retoma de onde estava (o TTL do token de job é o teto real).
-    let avisouOffline = false;
-    for (let i = 0; i < 600; i++) {
-      if (cancelRef.current) throw new Error('CANCELLED_BY_USER');
-      await sleep(5000);
-      if (typeof navigator !== 'undefined' && !navigator.onLine) {
-        if (!avisouOffline) {
-          avisouOffline = true;
-          onStage('Sem internet — o servidor segue processando; esperando a conexão voltar...');
-        }
-        i--;
-        continue;
-      }
-      if (avisouOffline) {
-        avisouOffline = false;
-        onStage('Decupando no servidor...');
-      }
-      // Fetch BLINDADO: um blip de rede no meio de um poll de vários minutos
-      // não pode matar o job — o servidor segue processando. Falhou? Só tenta
-      // de novo no próximo ciclo (o teto de 50min segue valendo).
-      let j: { status?: string; download_url?: string; original_dur?: unknown; new_dur?: unknown; error?: string } | null = null;
-      try {
-        const st = await fetch(`/api/tools/decupagem/status?job=${encodeURIComponent(job)}`);
-        j = await st.json().catch(() => null);
-      } catch {
-        continue;
-      }
-      if (!j) continue;
-      if (j.status === 'done') {
-        return {
-          kind: 'server',
-          downloadUrl: j.download_url as string,
-          outputKind: outKind,
-          originalDur: Number(j.original_dur) || 0,
-          newDur: Number(j.new_dur) || 0,
-        };
-      }
-      if (j.status === 'failed' || j.status === 'error') {
-        throw new Error(j.error || 'O servidor não conseguiu decupar esse arquivo.');
-      }
-      // 'processing' → segue no loop
-    }
-    throw new Error('O servidor demorou demais. Tenta de novo.');
-  }
-
-  // Processa UM arquivo → retorna Result (não mexe em state global).
-  async function processOne(
-    item: QueueItem,
-    onStage: (s: string) => void,
-    onProgress: (r: number | null) => void,
-  ): Promise<Result> {
-    const file = item.file;
-    const fileIsVideo = isVideoFile(file);
-    const effectiveKind: OutputKind = isFree ? 'audio' : fileIsVideo ? outputKind : 'audio';
-
-    // Arquivo grande → SERVIDOR (ffmpeg nativo, sem teto de memória do navegador).
-    // Só pra contas pagas; conta grátis segue no navegador (e recebe aviso se
-    // passar do limite que o navegador aguenta).
-    if (!isFree && file.size > SERVER_THRESHOLD_BYTES) {
-      return await processOnServer(file, effectiveKind, onStage, onProgress);
-    }
-
-    if (effectiveKind === 'audio') {
+    allowEmpty: boolean,
+  ): Promise<{ blob: Blob | null; originalDur: number; newDur: number }> {
+    if (kind === 'audio') {
       // Regula a voz (nível + limpeza, transparente) ANTES de cortar — voz
       // baixa não vira silêncio e o ruído some sem deixar a voz robótica.
       onStage('Regulando a voz...');
       const leveled = await prepareVoiceForDecupagem(
-        file,
+        media,
         { onStage, onProgress: ({ ratio }) => onProgress(ratio * 0.5) },
         'wav',
       );
@@ -485,6 +244,10 @@ export default function DecupagemPage() {
       const decoded = await decodeAudioRobust(leveled, () => onStage('Carregando...'));
       onStage('Cortando silêncios...');
       const trimmed = trimSilences(decoded, keepSilence);
+      if (trimmed.duration <= 0.05) {
+        if (allowEmpty) return { blob: null, originalDur: decoded.duration, newDur: 0 };
+        throw new Error('Não consegui detectar a fala. Diminui a tolerância de silêncio.');
+      }
       let blob: Blob;
       if (audioFormat === 'wav') {
         onStage('Gerando arquivo...');
@@ -499,14 +262,7 @@ export default function DecupagemPage() {
           onProgress: ({ ratio }) => onProgress(0.5 + ratio * 0.5),
         });
       }
-      return {
-        kind: 'audio',
-        blob,
-        url: URL.createObjectURL(blob),
-        format: audioFormat,
-        originalDur: decoded.duration,
-        newDur: trimmed.duration,
-      };
+      return { blob, originalDur: decoded.duration, newDur: trimmed.duration };
     }
 
     // vídeo
@@ -515,7 +271,7 @@ export default function DecupagemPage() {
     // sobre o arquivo já nivelado → voz baixa não some, sem ruído/robótico.
     onStage('Regulando a voz...');
     const leveled = await prepareVoiceForDecupagem(
-      file,
+      media,
       { onStage, onProgress: ({ ratio }) => onProgress(ratio * 0.4) },
       'mp4',
     );
@@ -524,6 +280,7 @@ export default function DecupagemPage() {
     const silences = detectSilences(decoded);
     const segments = computeSpeechSegments(silences, decoded.duration, keepSilence);
     if (segments.length === 0) {
+      if (allowEmpty) return { blob: null, originalDur: decoded.duration, newDur: 0 };
       throw new Error('Não consegui detectar a fala. Diminui a tolerância de silêncio.');
     }
     const newDur = segments.reduce((a, s) => a + (s.end - s.start), 0);
@@ -532,12 +289,99 @@ export default function DecupagemPage() {
       onStage: (s) => onStage(s),
       onProgress: ({ ratio }) => onProgress(0.4 + ratio * 0.6),
     });
+    return { blob, originalDur: decoded.duration, newDur };
+  }
+
+  // Arquivo GRANDE (>200MB): divide em partes de ~160MB SEM re-encode, roda o
+  // pipeline normal em cada parte (tarefa por tarefa, com progresso próprio) e
+  // junta os resultados com -c copy. 100% no navegador — custo zero, e o pico
+  // de memória fica o de UMA parte, nunca o do arquivo inteiro.
+  async function processChunked(
+    file: File,
+    kind: OutputKind,
+    onStage: (s: string) => void,
+    onProgress: (r: number | null) => void,
+  ): Promise<Result> {
+    onStage('Dividindo o arquivo em partes...');
+    onProgress(null);
+    const chunks: Array<File | null> = await splitMediaForChunks(file, {
+      onStage,
+      onProgress: ({ ratio }) => onProgress(ratio * 0.05),
+    });
+    const n = chunks.length;
+    const outputs: Blob[] = [];
+    let originalDur = 0;
+    let newDur = 0;
+    for (let i = 0; i < n; i++) {
+      if (cancelRef.current) throw new Error('CANCELLED_BY_USER');
+      const prefix = n > 1 ? `Parte ${i + 1}/${n} — ` : '';
+      const base = 0.05 + (i / n) * 0.9;
+      const span = 0.9 / n;
+      const part = await processBrowserBlob(
+        chunks[i]!,
+        kind,
+        (s) => onStage(`${prefix}${s}`),
+        (r) => onProgress(r == null ? null : base + r * span),
+        n > 1, // parte toda-silêncio é legítima quando há outras partes
+      );
+      chunks[i] = null; // solta a parte crua já processada (GC)
+      originalDur += part.originalDur;
+      newDur += part.newDur;
+      if (part.blob) outputs.push(part.blob);
+    }
+    if (outputs.length === 0) {
+      throw new Error('Não consegui detectar a fala. Diminui a tolerância de silêncio.');
+    }
+    const joinFormat = kind === 'video' ? ('mp4' as const) : audioFormat;
+    const joined =
+      outputs.length === 1
+        ? outputs[0]
+        : await concatDecupChunks(outputs, joinFormat, {
+            onStage,
+            onProgress: ({ ratio }) => onProgress(0.95 + ratio * 0.05),
+          });
+    if (kind === 'video') {
+      return { kind: 'video', blob: joined, url: URL.createObjectURL(joined), originalDur, newDur };
+    }
+    return { kind: 'audio', blob: joined, url: URL.createObjectURL(joined), format: audioFormat, originalDur, newDur };
+  }
+
+  // Processa UM arquivo → retorna Result (não mexe em state global).
+  async function processOne(
+    item: QueueItem,
+    onStage: (s: string) => void,
+    onProgress: (r: number | null) => void,
+  ): Promise<Result> {
+    const file = item.file;
+    const fileIsVideo = isVideoFile(file);
+    const effectiveKind: OutputKind = isFree ? 'audio' : fileIsVideo ? outputKind : 'audio';
+
+    // Arquivo grande → dividir/decupar/juntar no próprio navegador.
+    if (file.size > CHUNK_THRESHOLD_BYTES) {
+      return await processChunked(file, effectiveKind, onStage, onProgress);
+    }
+
+    const part = await processBrowserBlob(file, effectiveKind, onStage, onProgress, false);
+    if (!part.blob) {
+      // allowEmpty=false já lança antes — defesa extra pro TS e pra runtime.
+      throw new Error('Não consegui detectar a fala. Diminui a tolerância de silêncio.');
+    }
+    if (effectiveKind === 'video') {
+      return {
+        kind: 'video',
+        blob: part.blob,
+        url: URL.createObjectURL(part.blob),
+        originalDur: part.originalDur,
+        newDur: part.newDur,
+      };
+    }
     return {
-      kind: 'video',
-      blob,
-      url: URL.createObjectURL(blob),
-      originalDur: decoded.duration,
-      newDur,
+      kind: 'audio',
+      blob: part.blob,
+      url: URL.createObjectURL(part.blob),
+      format: audioFormat,
+      originalDur: part.originalDur,
+      newDur: part.newDur,
     };
   }
 
@@ -545,7 +389,7 @@ export default function DecupagemPage() {
   async function processQueue() {
     if (processingRef.current) return;
     // Tier ainda resolvendo (1º load da sessão): não dispara — sem isso um
-    // free entrava no caminho pago (vídeo/servidor) e vice-versa. O botão já
+    // free podia sair com VÍDEO (que é só de pago) e vice-versa. O botão já
     // fica desabilitado; este é o cinto de segurança.
     if (tier === null) return;
     processingRef.current = true;
@@ -620,28 +464,13 @@ export default function DecupagemPage() {
   async function downloadOne(item: QueueItem) {
     if (!item.result) return;
     const r = item.result;
-    // Resultado do servidor: baixa direto do worker (Content-Disposition já
-    // força o nome certo). Navegação simples, sem fetch/CORS.
-    if (r.kind === 'server') {
-      const a = document.createElement('a');
-      a.href = r.downloadUrl;
-      a.rel = 'noopener';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      return;
-    }
     const base = baseName(item.file.name);
     const ext = r.kind === 'video' ? 'mp4' : r.format;
     await downloadBlob(r.blob, `${base}_decupado.${ext}`);
   }
 
   async function downloadAll() {
-    // O ZIP só junta os processados NO NAVEGADOR (têm blob). Os do servidor se
-    // baixam individualmente (são arquivos grandes, fora do ZIP).
-    const done = queue.filter((q) => q.result && q.result.kind !== 'server') as Array<
-      QueueItem & { result: Exclude<Result, { kind: 'server' }> }
-    >;
+    const done = queue.filter((q) => q.result) as Array<QueueItem & { result: Result }>;
     if (done.length === 0) return;
     const JSZip = (await import('jszip')).default;
     const zip = new JSZip();
@@ -662,8 +491,7 @@ export default function DecupagemPage() {
   }
 
   const doneCount = queue.filter((q) => q.status === 'done').length;
-  // Só os processados no navegador entram no ZIP (servidor baixa individual).
-  const zippableCount = queue.filter((q) => q.result && q.result.kind !== 'server').length;
+  const zippableCount = queue.filter((q) => q.result).length;
   const audioOptions = [
     { value: 'mp3' as const, label: 'MP3' },
     { value: 'wav' as const, label: 'WAV' },
@@ -881,11 +709,7 @@ export default function DecupagemPage() {
                       <ToolMetric value={formatTime(r.newDur)} label="Após decupagem" accent="lime" />
                       <ToolMetric value={`–${reduced}%`} label="Redução" accent="lime" />
                     </div>
-                    {r.kind === 'server' ? (
-                      <div className="rounded-[14px] border border-lime/30 bg-lime/[0.05] px-4 py-3 text-[12px] text-text-muted">
-                        ✓ Processado no servidor (arquivo grande). Clica em baixar pra pegar o {r.outputKind === 'audio' ? 'áudio' : 'vídeo'} decupado.
-                      </div>
-                    ) : r.kind === 'video' ? (
+                    {r.kind === 'video' ? (
                       <video
                         src={r.url}
                         controls
@@ -897,7 +721,7 @@ export default function DecupagemPage() {
                     )}
                     <div className="mt-4 flex justify-end">
                       <button onClick={() => downloadOne(item)} className="btn-lime !py-2.5 text-xs">
-                        Baixar {r.kind === 'server' ? (r.outputKind === 'audio' ? 'MP3' : 'MP4') : r.kind === 'video' ? 'MP4' : r.format.toUpperCase()}
+                        Baixar {r.kind === 'video' ? 'MP4' : r.format.toUpperCase()}
                       </button>
                     </div>
                   </ToolResultCard>

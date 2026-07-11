@@ -52,7 +52,7 @@ export const GUIDES: Record<string, ToolGuide> = {
     steps: [
       {
         title: 'Solte os arquivos na fila',
-        text: 'No card "Solta os arquivos (até 10)", arraste seus vídeos ou áudios — ou clique na área pra abrir o seletor. Aceita MP3, WAV, MP4, WEBM e MOV, até 1,5 GB cada, e pode misturar vídeo com áudio na mesma fila. Cada arquivo vira um item numerado com o tamanho e o status "na fila". O contador embaixo da área mostra quantos já entraram (ex.: "3/10 na fila"). Entrou arquivo errado? O "×" ao lado do item tira ele da fila.',
+        text: 'No card "Solta os arquivos (até 10)", arraste seus vídeos ou áudios — ou clique na área pra abrir o seletor. Aceita MP3, WAV, MP4, WEBM e MOV, até 800 MB cada, e pode misturar vídeo com áudio na mesma fila. Cada arquivo vira um item numerado com o tamanho e o status "na fila". O contador embaixo da área mostra quantos já entraram (ex.: "3/10 na fila"). Entrou arquivo errado? O "×" ao lado do item tira ele da fila.',
         visual: (
           <Shot label="Decupagem · fila">
             <MStack>
@@ -130,7 +130,7 @@ export const GUIDES: Record<string, ToolGuide> = {
     tips: [
       'O volume da voz é regulado automaticamente antes do corte ("Regulando a voz") — dois locutores gravados em volumes diferentes saem no mesmo patamar.',
       'O corte protege o ataque das palavras: nenhuma sílaba é comida no início nem no fim das frases.',
-      'Arquivos até 200 MB são processados direto no seu navegador. Acima disso, nas contas pagas, o processamento vai pra um servidor dedicado — aguenta vídeos de até 1,5 GB e devolve o arquivo pronto pra baixar.',
+      'Tudo roda no seu navegador — nada sobe pra servidor. Arquivos grandes (acima de 200 MB) são divididos em partes automaticamente, processados parte a parte ("Parte 2/4 — Cortando silêncios...") e juntados num arquivo só no final.',
       'Apareceu "Não consegui detectar a fala"? Diminua a tolerância de silêncio e rode de novo.',
     ],
   },

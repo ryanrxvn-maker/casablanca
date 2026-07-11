@@ -171,7 +171,9 @@ export function TakeCard({ take, position, total }: Props) {
               ref={videoRef}
               src={videoUrl}
               poster={posterUrl || undefined}
-              preload="auto"
+              // metadata (não "auto"): num pack grande, "auto" bufferizava o
+              // MP4 INTEIRO de cada take pronto de uma vez = GB de rede/RAM.
+              preload="metadata"
               playsInline
               muted
               loop
