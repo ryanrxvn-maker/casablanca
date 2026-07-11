@@ -26,7 +26,6 @@ export type BudgetReportPix = {
 export type BudgetReportData = {
   docNumber: string;
   dateLabel: string;
-  validadeLabel: string;
   cliente: string;
   vpmLabel: string;
   duracaoTotalLabel: string;
@@ -179,7 +178,6 @@ function reportMarkup(d: BudgetReportData, pixCardHtml: string): string {
         <div class="doc-meta">
           <div><span>Nº</span><b>${esc(d.docNumber)}</b></div>
           <div><span>Data</span><b>${esc(d.dateLabel)}</b></div>
-          <div><span>Validade</span><b>${esc(d.validadeLabel)}</b></div>
         </div>
       </div>
     </div>
@@ -215,7 +213,6 @@ function reportMarkup(d: BudgetReportData, pixCardHtml: string): string {
       <div class="nt">Condições</div>
       <ul>
         <li>Precificação por minuto de vídeo entregue. Valores em reais (BRL).</li>
-        <li>Orçamento válido por ${esc(d.validadeLabel)} a partir da data de emissão.</li>
         <li>Prazo e forma de pagamento combinados na aprovação da proposta.</li>
       </ul>
     </div>

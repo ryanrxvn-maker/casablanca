@@ -180,7 +180,6 @@ export default function CalculadoraPage() {
       await downloadBudgetReport({
         docNumber,
         dateLabel,
-        validadeLabel: '7 dias',
         cliente: cliente.trim(),
         vpmLabel: formatBRL(vpm),
         duracaoTotalLabel: fmtDur(totalSeconds),
