@@ -198,6 +198,39 @@ export function MChip({
   );
 }
 
+/* Página fake de Google Docs — mostra o MODELO de briefing que o parser lê.
+ * Papel claro dentro do Shot escuro, uma linha por <MDocL>. */
+export function MDoc({ children }: { children: ReactNode }) {
+  return (
+    <div className="rounded-[10px] border border-white/15 bg-[#fcfcf9] px-4 py-3.5 shadow-[0_8px_20px_-12px_rgba(0,0,0,0.8)]">
+      <div className="flex flex-col gap-[3px]">{children}</div>
+    </div>
+  );
+}
+
+/* Linha do MDoc. k: 'h' nomenclatura (heading do AD) · 'label' rótulo de
+ * locutor/avatar · 'marker' marcador de seção (Body) · 'note' metadado que o
+ * parser ignora · 'text' fala · 'gap' respiro. */
+export function MDocL({
+  k = 'text',
+  children,
+}: {
+  k?: 'h' | 'label' | 'marker' | 'note' | 'text' | 'gap';
+  children?: ReactNode;
+}) {
+  if (k === 'gap') return <span className="block h-2" aria-hidden />;
+  const tones: Record<string, string> = {
+    h: 'font-bold text-[#141414]',
+    label: 'font-semibold text-[#6d28d9]',
+    marker: 'font-bold text-[#141414] underline decoration-[#6d28d9]/50 underline-offset-2',
+    note: 'italic text-[#9a9a92]',
+    text: 'text-[#3c3c38]',
+  };
+  return (
+    <span className={'text-[10.5px] leading-[1.5] ' + tones[k]}>{children}</span>
+  );
+}
+
 /* Item de fila com barra de progresso — imita os cards de job. */
 export function MQueueItem({
   name,

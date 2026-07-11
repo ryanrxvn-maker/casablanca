@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import {
   MBtn,
   MChip,
+  MDoc,
+  MDocL,
   MDrop,
   MField,
   MQueueItem,
@@ -1251,6 +1253,35 @@ export const GUIDES: Record<string, ToolGuide> = {
         ),
       },
       {
+        title: 'Monte o Docs no modelo que a análise lê perfeito',
+        text: 'A análise detecta cada AD pela NOMENCLATURA em linha própria. A capa ("AD01GL - VFPB04") declara os avatares, um por linha, no formato "Papel: @arquivo.mp4" — e o nome do arquivo deve ser o MESMO nome do avatar na sua biblioteca HeyGen, porque é por ele que o casamento automático acontece. Com um avatar só, "Link do avatar: arquivo.mp4" também vale. Cada variação de gancho vive numa seção própria "AD01G1GL - VFPB04": G1 vira o HOOK 1, G2 vira o HOOK 2, e assim por diante. Antes de cada fala, o rótulo do locutor em linha própria ("Mulher:") — ele diz quem fala e NÃO é lido como fala. A palavra "Body" sozinha numa linha marca onde o corpo começa (fica na última seção G); trocou o locutor no meio do corpo, abra um novo rótulo. Regra de ouro: fala é SÓ fala — nada de .mp4, link ou nomenclatura no meio do texto, porque o parser trata referência como fim da fala. Linhas de produção ("Instruções para edição:", "Música:", "Referência:") podem existir — são ignoradas de propósito. E um doc pode ter vários ADs: cada capa nova vira um disparo na análise.',
+        visual: (
+          <Shot label="Google Docs · modelo de briefing">
+            <MDoc>
+              <MDocL k="h">AD01GL - VFPB04</MDocL>
+              <MDocL k="label">Avatar e Vozes:</MDocL>
+              <MDocL k="label">Doutor: @doutorexemplo1.mp4</MDocL>
+              <MDocL k="label">Mulher: @mulherexemplo2.mp4</MDocL>
+              <MDocL k="note">Instruções para edição: edição limpa (ignorado)</MDocL>
+              <MDocL k="gap" />
+              <MDocL k="h">AD01G1GL - VFPB04</MDocL>
+              <MDocL k="label">Mulher:</MDocL>
+              <MDocL>Você sabia que dá pra organizar a semana inteira em dez minutos por dia?</MDocL>
+              <MDocL k="gap" />
+              <MDocL k="h">AD01G2GL - VFPB04</MDocL>
+              <MDocL k="label">Mulher:</MDocL>
+              <MDocL>Eu vivia perdendo prazos — até adotar um hábito simples.</MDocL>
+              <MDocL k="gap" />
+              <MDocL k="marker">Body</MDocL>
+              <MDocL k="label">Doutor:</MDocL>
+              <MDocL>O problema quase nunca é falta de esforço, e sim de um sistema simples...</MDocL>
+              <MDocL k="label">Mulher:</MDocL>
+              <MDocL>Depois que eu testei, minhas manhãs mudaram. Toca no botão e começa hoje.</MDocL>
+            </MDoc>
+          </Shot>
+        ),
+      },
+      {
         title: 'Nomeie o AD e escolha o motor',
         text: 'O campo "Identidade" recebe o nome do AD — ele vira o prefixo dos arquivos finais, então use o código real da sua operação. No "Motor do avatar", escolha entre os motores do HeyGen (III, IV, V) com a previsão de créditos por take na tela: dá pra definir um motor global, misturar por percentual ou escolher parte por parte.',
         visual: (
@@ -1373,6 +1404,35 @@ export const GUIDES: Record<string, ToolGuide> = {
               <MQueueItem name="☑ AD16VN_PRPB07" status="selecionada" pct={100} tone="violet" />
               <MQueueItem name="☐ AD17VN_PRPB08" status="—" pct={0} />
             </MStack>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Monte o Docs no modelo que o parser lê perfeito',
+        text: 'O Start lê o Google Docs vinculado à task — e a leitura sai perfeita quando o doc segue este modelo. A capa abre com a MESMA nomenclatura do nome da task ("AD01GL - VFPB04") e declara os avatares, um por linha, no formato "Papel: @arquivo.mp4" — o nome do arquivo deve ser o MESMO nome do avatar na sua biblioteca HeyGen, porque é por ele que o Pilot casa avatar e voz sozinho. Com um avatar só, "Link do avatar: arquivo.mp4" também vale. Cada variação de gancho vive numa seção própria "AD01G1GL - VFPB04": G1 vira o HOOK 1, G2 vira o HOOK 2, e assim por diante. Antes de cada fala, o rótulo do locutor em linha própria ("Mulher:") — ele diz quem fala e NÃO é lido como fala. A palavra "Body" sozinha numa linha marca onde o corpo começa (fica na última seção G); trocou o locutor no meio do corpo, abra um novo rótulo. Regra de ouro: fala é SÓ fala — nada de .mp4, link ou nomenclatura no meio do texto, porque o parser trata referência como fim da fala. Linhas de produção ("Instruções para edição:", "Música:", "Referência:") podem existir — são ignoradas de propósito. Depoimento entra como "Depoimento com avatar: arquivo.mp4" com o texto dele embaixo.',
+        visual: (
+          <Shot label="Google Docs · modelo de briefing">
+            <MDoc>
+              <MDocL k="h">AD01GL - VFPB04</MDocL>
+              <MDocL k="label">Avatar e Vozes:</MDocL>
+              <MDocL k="label">Doutor: @doutorexemplo1.mp4</MDocL>
+              <MDocL k="label">Mulher: @mulherexemplo2.mp4</MDocL>
+              <MDocL k="note">Instruções para edição: edição limpa (ignorado)</MDocL>
+              <MDocL k="gap" />
+              <MDocL k="h">AD01G1GL - VFPB04</MDocL>
+              <MDocL k="label">Mulher:</MDocL>
+              <MDocL>Você sabia que dá pra organizar a semana inteira em dez minutos por dia?</MDocL>
+              <MDocL k="gap" />
+              <MDocL k="h">AD01G2GL - VFPB04</MDocL>
+              <MDocL k="label">Mulher:</MDocL>
+              <MDocL>Eu vivia perdendo prazos — até adotar um hábito simples.</MDocL>
+              <MDocL k="gap" />
+              <MDocL k="marker">Body</MDocL>
+              <MDocL k="label">Doutor:</MDocL>
+              <MDocL>O problema quase nunca é falta de esforço, e sim de um sistema simples...</MDocL>
+              <MDocL k="label">Mulher:</MDocL>
+              <MDocL>Depois que eu testei, minhas manhãs mudaram. Toca no botão e começa hoje.</MDocL>
+            </MDoc>
           </Shot>
         ),
       },
