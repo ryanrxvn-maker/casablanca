@@ -1262,15 +1262,15 @@ export const GUIDES: Record<string, ToolGuide> = {
               <MDocL k="label">Avatar e Vozes:</MDocL>
               <MDocL k="label">Doutor: @doutorexemplo1.mp4</MDocL>
               <MDocL k="label">Mulher: @mulherexemplo2.mp4</MDocL>
-              <MDocL k="note">Instruções para edição: edição limpa (ignorado)</MDocL>
+              <MDocL k="label">Instruções para edição: <span className="font-normal text-[#3c3c38]">edição limpa (o parser ignora)</span></MDocL>
               <MDocL k="gap" />
               <MDocL k="h">AD01G1GL - VFPB04</MDocL>
               <MDocL k="label">Mulher:</MDocL>
-              <MDocL>Você sabia que dá pra organizar a semana inteira em dez minutos por dia?</MDocL>
+              <MDocL k="hl">Você sabia que dá pra organizar a semana inteira em dez minutos por dia?</MDocL>
               <MDocL k="gap" />
               <MDocL k="h">AD01G2GL - VFPB04</MDocL>
               <MDocL k="label">Mulher:</MDocL>
-              <MDocL>Eu vivia perdendo prazos — até adotar um hábito simples.</MDocL>
+              <MDocL k="hl">Eu vivia perdendo prazos — até adotar um hábito simples.</MDocL>
               <MDocL k="gap" />
               <MDocL k="marker">Body</MDocL>
               <MDocL k="label">Doutor:</MDocL>
@@ -1417,15 +1417,15 @@ export const GUIDES: Record<string, ToolGuide> = {
               <MDocL k="label">Avatar e Vozes:</MDocL>
               <MDocL k="label">Doutor: @doutorexemplo1.mp4</MDocL>
               <MDocL k="label">Mulher: @mulherexemplo2.mp4</MDocL>
-              <MDocL k="note">Instruções para edição: edição limpa (ignorado)</MDocL>
+              <MDocL k="label">Instruções para edição: <span className="font-normal text-[#3c3c38]">edição limpa (o parser ignora)</span></MDocL>
               <MDocL k="gap" />
               <MDocL k="h">AD01G1GL - VFPB04</MDocL>
               <MDocL k="label">Mulher:</MDocL>
-              <MDocL>Você sabia que dá pra organizar a semana inteira em dez minutos por dia?</MDocL>
+              <MDocL k="hl">Você sabia que dá pra organizar a semana inteira em dez minutos por dia?</MDocL>
               <MDocL k="gap" />
               <MDocL k="h">AD01G2GL - VFPB04</MDocL>
               <MDocL k="label">Mulher:</MDocL>
-              <MDocL>Eu vivia perdendo prazos — até adotar um hábito simples.</MDocL>
+              <MDocL k="hl">Eu vivia perdendo prazos — até adotar um hábito simples.</MDocL>
               <MDocL k="gap" />
               <MDocL k="marker">Body</MDocL>
               <MDocL k="label">Doutor:</MDocL>
