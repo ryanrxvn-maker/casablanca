@@ -7567,15 +7567,6 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                     background: setupOK ? 'rgba(200,232,124,0.45)' : 'rgba(232,121,249,0.45)',
                   }}
                 />
-                <div
-                  aria-hidden
-                  className="pointer-events-none absolute inset-0 opacity-[0.04]"
-                  style={{
-                    backgroundImage:
-                      'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)',
-                    backgroundSize: '30px 30px',
-                  }}
-                />
                 <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                   <div className="flex items-center gap-3">
                     <div
