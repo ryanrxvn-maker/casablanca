@@ -8912,30 +8912,6 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                               <span>agressivo</span>
                                               <span>fala respira</span>
                                             </div>
-                                            <div className="mt-2.5 flex flex-wrap gap-1.5">
-                                              {[
-                                                { v: 0.05, l: 'Agressivo' },
-                                                { v: 0.12, l: 'Padrão' },
-                                                { v: 0.2, l: 'Suave' },
-                                              ].map((preset) => {
-                                                const on = Math.abs(getDecupIntensity(a.taskId) - preset.v) < 0.005;
-                                                return (
-                                                  <button
-                                                    key={preset.v}
-                                                    type="button"
-                                                    onClick={() => setDecupIntensityFor(a.taskId, preset.v)}
-                                                    className={
-                                                      'mono rounded-full border px-2 py-1 text-[9.5px] font-bold transition ' +
-                                                      (on
-                                                        ? 'border-lime/60 bg-lime/20 text-lime'
-                                                        : 'border-line bg-bg-soft/50 text-text-muted hover:border-lime/40 hover:text-lime')
-                                                    }
-                                                  >
-                                                    {preset.l} · {preset.v.toFixed(2)}s
-                                                  </button>
-                                                );
-                                              })}
-                                            </div>
                                             <p className="mt-2.5 text-[10px] leading-snug text-text-muted">
                                               Silêncio mantido nas bordas de cada fala. O valor é aplicado <span className="text-lime">fielmente</span> no corte (vale pro disparo e pro RETOMAR).
                                             </p>

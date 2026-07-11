@@ -3014,30 +3014,6 @@ function HeyGenAutoInner() {
                     <span>0.01s · corte agressivo</span>
                     <span>fala respira · 0.50s</span>
                   </div>
-                  <div className="mt-2.5 flex flex-wrap gap-1.5">
-                    {[
-                      { v: 0.05, l: 'Agressivo' },
-                      { v: 0.12, l: 'Padrão' },
-                      { v: 0.2, l: 'Suave' },
-                    ].map((preset) => {
-                      const on = Math.abs(decupIntensity - preset.v) < 0.005;
-                      return (
-                        <button
-                          key={preset.v}
-                          type="button"
-                          onClick={() => setDecupIntensity(preset.v)}
-                          className={
-                            'mono rounded-full border px-2.5 py-1 text-[10px] font-bold transition ' +
-                            (on
-                              ? 'border-cyan-400/60 bg-cyan-400/20 text-cyan-100'
-                              : 'border-line bg-bg-soft/50 text-text-muted hover:border-cyan-400/40 hover:text-cyan-200')
-                          }
-                        >
-                          {preset.l} · {preset.v.toFixed(2)}s
-                        </button>
-                      );
-                    })}
-                  </div>
                   <p className="mt-2.5 text-[10px] leading-snug text-text-muted">
                     O valor é aplicado <span className="text-cyan-200">fielmente</span> no corte. Se você põe 0.05, o corte usa 0.05.
                   </p>
