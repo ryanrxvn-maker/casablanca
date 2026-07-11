@@ -39,24 +39,6 @@ function parseDur(s: string): number {
   return parts[0] * 60 + parts[1]; // minutos : segundos
 }
 
-/**
- * Máscara de TEMPO: o usuário só digita NÚMEROS e vira SEMPRE `MM:SS` completo
- * (com zeros à esquerda), preenchendo da direita. `4` → `00:04`, `45` → `00:45`,
- * `619` → `06:19`, `3333` → `33:33`, `33333` → `03:33:33`. Nunca é preciso
- * digitar `:`, `,` ou `.` — é exatamente formato tempo `00:00`.
- */
-function maskTime(raw: string): string {
-  const digits = (raw || '').replace(/\D/g, '').slice(0, 6); // até HH:MM:SS
-  if (!digits) return '';
-  const sec = digits.slice(-2).padStart(2, '0');
-  const rest = digits.slice(0, -2);
-  if (!rest) return `00:${sec}`; // MM:SS → sempre dois dígitos de minuto
-  const min = rest.slice(-2).padStart(2, '0');
-  const hr = rest.slice(0, -2);
-  if (!hr) return `${min}:${sec}`; // MM:SS
-  return `${hr.padStart(2, '0')}:${min}:${sec}`; // HH:MM:SS
-}
-
 /** Segundos → "MM:SS" (ou "HH:MM:SS" se passar de 1h). */
 function fmtDur(totalSec: number): string {
   const s = Math.round(totalSec);
@@ -65,6 +47,29 @@ function fmtDur(totalSec: number): string {
   const r = s % 60;
   const pad = (n: number) => String(n).padStart(2, '0');
   return h > 0 ? `${h}:${pad(m)}:${pad(r)}` : `${pad(m)}:${pad(r)}`;
+}
+
+/**
+ * Máscara de TEMPO estilo ODÔMETRO: o usuário SÓ digita números e eles entram
+ * pela DIREITA, subindo de segundos → minutos → horas, sempre normalizado pra
+ * fazer sentido (60s vira 1min, 60min vira 1h). Nunca precisa digitar `:`.
+ *
+ *   1 → 00:01   ·   11 → 00:11   ·   111 → 01:11   ·   1111 → 11:11
+ *   5 → 00:05   ·   55 → 00:55   ·   555 → 05:55   ·   5555 → 55:55
+ *   14000 → 1:40:00   (140 min já aparecem como 2h20 — sempre "faz sentido")
+ *
+ * Como `fmtDur` agrupa em HH:MM:SS e este parser lê os dígitos no MESMO
+ * agrupamento (2 seg / 2 min / resto horas), a máscara faz round-trip perfeito:
+ * reprocessar o próprio texto formatado devolve o mesmo tempo.
+ */
+function maskTime(raw: string): string {
+  // Só os dígitos, sem zeros à esquerda inúteis; teto de 6 (até 99:99:99).
+  const digits = (raw || '').replace(/\D/g, '').replace(/^0+/, '').slice(0, 6);
+  if (!digits) return '';
+  const sec = parseInt(digits.slice(-2), 10) || 0;
+  const min = digits.length > 2 ? parseInt(digits.slice(-4, -2), 10) || 0 : 0;
+  const hr = digits.length > 4 ? parseInt(digits.slice(0, -4), 10) || 0 : 0;
+  return fmtDur(hr * 3600 + min * 60 + sec);
 }
 
 export default function CalculadoraPage() {
