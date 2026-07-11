@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
-import { Landing } from '@/components/Landing';
+import { LandingV2 } from '@/components/landing/LandingV2';
 import { FAQ } from '@/lib/faq';
 
 /**
@@ -39,7 +39,7 @@ export default async function HomePage() {
         // JSON estático (sem input de usuário) — seguro.
         dangerouslySetInnerHTML={{ __html: JSON.stringify(FAQ_LD) }}
       />
-      <Landing />
+      <LandingV2 />
     </>
   );
 }
