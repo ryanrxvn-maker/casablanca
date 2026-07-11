@@ -40,21 +40,21 @@ function parseDur(s: string): number {
 }
 
 /**
- * Máscara de TEMPO: o usuário só digita NÚMEROS e os `:` aparecem sozinhos.
- * Preenche da direita — o último par é segundos, o próximo minutos, o resto
- * horas. `619` → `6:19`, `0619` → `06:19`, `45` → `0:45`, `12345` → `1:23:45`.
- * Nunca é preciso digitar `:`, `,` ou `.` — é SEMPRE formato tempo.
+ * Máscara de TEMPO: o usuário só digita NÚMEROS e vira SEMPRE `MM:SS` completo
+ * (com zeros à esquerda), preenchendo da direita. `4` → `00:04`, `45` → `00:45`,
+ * `619` → `06:19`, `3333` → `33:33`, `33333` → `03:33:33`. Nunca é preciso
+ * digitar `:`, `,` ou `.` — é exatamente formato tempo `00:00`.
  */
 function maskTime(raw: string): string {
   const digits = (raw || '').replace(/\D/g, '').slice(0, 6); // até HH:MM:SS
   if (!digits) return '';
-  const sec = digits.slice(-2);
+  const sec = digits.slice(-2).padStart(2, '0');
   const rest = digits.slice(0, -2);
-  if (!rest) return `0:${sec.padStart(2, '0')}`; // só segundos → 0:SS
-  const min = rest.slice(-2);
+  if (!rest) return `00:${sec}`; // MM:SS → sempre dois dígitos de minuto
+  const min = rest.slice(-2).padStart(2, '0');
   const hr = rest.slice(0, -2);
-  if (!hr) return `${min}:${sec.padStart(2, '0')}`; // MM:SS
-  return `${hr}:${min.padStart(2, '0')}:${sec.padStart(2, '0')}`; // HH:MM:SS
+  if (!hr) return `${min}:${sec}`; // MM:SS
+  return `${hr.padStart(2, '0')}:${min}:${sec}`; // HH:MM:SS
 }
 
 /** Segundos → "MM:SS" (ou "HH:MM:SS" se passar de 1h). */
@@ -244,7 +244,7 @@ export default function CalculadoraPage() {
           </div>
         </ToolStep>
 
-        <ToolStep n={2} icon={<IconStepClock size={18} />} title="ADs" hint="Só digitar os números — vira tempo sozinho (ex: 619 → 6:19)" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepClock size={18} />} title="ADs" hint="Só digitar os números — vira tempo sozinho (ex: 619 → 06:19)" hue={HUE}>
           <div className="flex flex-col gap-2">
             {ads.map((ad, i) => {
               const sec = parseDur(ad.time);
