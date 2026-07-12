@@ -202,7 +202,6 @@ export default function CalculadoraPage() {
         descontoPct: desconto,
         descontoLabel: `-${formatBRL(valorDesconto)}`,
         totalLabel: formatBRL(total),
-        logoUrl: `${window.location.origin}/auto-edit-logo@256.png`,
         pix:
           pixOn && pixKey.trim()
             ? { key: pixKey.trim(), name: '', city: '', amount: total }
@@ -261,26 +260,27 @@ export default function CalculadoraPage() {
           </div>
         </ToolStep>
 
-        <ToolStep n={2} icon={<IconStepClock size={18} />} title="ADs" hint="Só digitar os números — vira tempo sozinho (ex: 619 → 06:19)" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepClock size={18} />} title="Serviço" hint="Nomeie cada item (clique no rótulo) e digite os minutos — vira tempo sozinho (ex: 619 → 06:19)" hue={HUE}>
           <div className="flex flex-col gap-2">
             {ads.map((ad, i) => {
               const sec = parseDur(ad.time);
               const valorAd = vpm * (sec / 60);
               return (
                 <div key={ad.id} className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={ad.label ?? ''}
-                    onChange={(e) => renameAd(ad.id, e.target.value)}
-                    placeholder={`AD${i + 1}`}
-                    aria-label={`Nome do AD ${i + 1} — clique pra renomear`}
-                    title="Clique pra renomear este AD"
-                    maxLength={16}
-                    spellCheck={false}
-                    autoComplete="off"
-                    className="mono h-9 w-16 shrink-0 rounded-[10px] border border-line-strong bg-bg-soft/60 px-1 text-center text-[12px] font-bold text-text-muted outline-none transition-colors placeholder:text-text-muted hover:border-violet/40 focus:border-violet/60 focus:bg-violet/10 focus:text-white"
-                    style={{ fontFamily: 'var(--font-tech)' }}
-                  />
+                  <span className="adlabel" data-value={ad.label || `AD${i + 1}`}>
+                    <input
+                      type="text"
+                      value={ad.label ?? ''}
+                      onChange={(e) => renameAd(ad.id, e.target.value)}
+                      placeholder={`AD${i + 1}`}
+                      aria-label={`Nome do item ${i + 1} — clique pra renomear`}
+                      title="Clique pra renomear este item"
+                      maxLength={28}
+                      size={1}
+                      spellCheck={false}
+                      autoComplete="off"
+                    />
+                  </span>
                   <input
                     inputMode="numeric"
                     placeholder="00:00"
@@ -529,6 +529,65 @@ export default function CalculadoraPage() {
       </div>
 
       <style jsx>{`
+        /* Rótulo editável do item (AD1, "upsell ME"…) que CRESCE com o texto.
+           Truque: inline-grid onde o ::after (cópia invisível do texto via
+           data-value) e o input ocupam a MESMA célula — o ::after define a
+           largura, o input preenche. Sem JS, cross-browser. */
+        .adlabel {
+          display: inline-grid;
+          align-items: center;
+          box-sizing: border-box;
+          height: 36px;
+          flex: 0 0 auto;
+          border: 1px solid rgb(var(--line-strong));
+          border-radius: 10px;
+          background: rgb(var(--bg-soft) / 0.6);
+          transition: border-color 0.18s ease, background-color 0.18s ease;
+        }
+        .adlabel::after,
+        .adlabel input {
+          grid-area: 1 / 1 / 2 / 2;
+          min-width: 2.5ch;
+          max-width: 210px;
+          padding: 0 10px;
+          font-family: var(--font-tech);
+          font-weight: 700;
+          font-size: 12px;
+          letter-spacing: 0.01em;
+          text-align: center;
+          white-space: pre;
+          overflow: hidden;
+        }
+        .adlabel::after {
+          content: attr(data-value) ' ';
+          visibility: hidden;
+          height: 0;
+        }
+        .adlabel input {
+          width: 100%;
+          height: 100%;
+          appearance: none;
+          border: 0;
+          outline: 0;
+          background: transparent;
+          color: rgb(var(--text-muted));
+          cursor: text;
+          text-overflow: ellipsis;
+        }
+        .adlabel input::placeholder {
+          color: rgb(var(--text-muted));
+          opacity: 0.7;
+        }
+        .adlabel:hover {
+          border-color: rgb(var(--violet) / 0.4);
+        }
+        .adlabel:focus-within {
+          border-color: rgb(var(--violet) / 0.6);
+          background: rgb(var(--violet) / 0.1);
+        }
+        .adlabel:focus-within input {
+          color: #fff;
+        }
         .report3d {
           position: relative;
           display: flex;

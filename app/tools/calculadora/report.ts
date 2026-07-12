@@ -2,7 +2,7 @@
  * Gerador do relatório de ORÇAMENTO em PDF com DOWNLOAD AUTOMÁTICO.
  *
  * Clicou → baixa o arquivo. Sem diálogo de impressão. Renderiza um nó DOM
- * A4 (branco, só a logo — sem nome/domínio) fora da tela, captura com html2canvas
+ * A4 (branco, sem logo/nome/domínio) fora da tela, captura com html2canvas
  * e empacota num PDF via jsPDF — tudo no client, sem backend.
  *
  * jspdf/html2canvas são importados dinamicamente só quando o botão é
@@ -35,7 +35,6 @@ export type BudgetReportData = {
   descontoPct: number;
   descontoLabel: string;
   totalLabel: string;
-  logoUrl: string;
   /** Quando presente e com chave → renderiza bloco PIX + QR no relatório. */
   pix?: BudgetReportPix;
 };
@@ -65,9 +64,7 @@ const REPORT_CSS = `
     background-image:linear-gradient(90deg,#8b6cf6,#6d4ee8 48%,#b9c78a); }
 
   /* Cabeçalho */
-  .ae-report .head{ display:flex; justify-content:space-between; align-items:flex-start; padding:15mm 16mm 0; }
-  .ae-report .brand{ display:flex; align-items:center; }
-  .ae-report .brand img{ width:62px; height:62px; object-fit:contain; }
+  .ae-report .head{ display:flex; justify-content:flex-end; align-items:flex-start; padding:15mm 16mm 0; }
   .ae-report .doc{ text-align:right; }
   .ae-report .kicker{ font-size:8.5px; font-weight:800; letter-spacing:.32em; text-transform:uppercase; color:var(--violet); }
   .ae-report .doc h1{ margin:3px 0 13px; font-family:'Fraunces',serif; font-weight:600; font-size:36px; letter-spacing:-.02em; color:var(--ink); line-height:1; }
@@ -132,8 +129,7 @@ const REPORT_CSS = `
   .ae-report .notes .nt{ font-size:8px; font-weight:800; letter-spacing:.2em; text-transform:uppercase; color:var(--faint); margin-bottom:8px; }
   .ae-report .notes ul{ padding-left:15px; }
   .ae-report .notes li{ font-size:10px; color:var(--sub); line-height:1.85; }
-  .ae-report .footer{ display:flex; justify-content:space-between; align-items:center; margin:20px 16mm 0; padding-top:13px; border-top:1px solid var(--line); }
-  .ae-report .foot-logo{ width:26px; height:26px; object-fit:contain; opacity:.62; }
+  .ae-report .footer{ display:flex; justify-content:flex-end; align-items:center; margin:20px 16mm 0; padding-top:13px; border-top:1px solid var(--line); }
   .ae-report .fnum{ font-size:8.5px; color:var(--faint); font-family:'JetBrains Mono',ui-monospace,monospace; letter-spacing:.05em; }
 `;
 
@@ -169,9 +165,6 @@ function reportMarkup(d: BudgetReportData, pixCardHtml: string): string {
   return `
     <div class="topbar"></div>
     <div class="head">
-      <div class="brand">
-        <img src="${esc(d.logoUrl)}" alt="" crossorigin="anonymous" />
-      </div>
       <div class="doc">
         <div class="kicker">Orçamento</div>
         <h1>Proposta</h1>
@@ -217,7 +210,6 @@ function reportMarkup(d: BudgetReportData, pixCardHtml: string): string {
       </ul>
     </div>
     <div class="footer">
-      <img class="foot-logo" src="${esc(d.logoUrl)}" alt="" crossorigin="anonymous" />
       <div class="fnum">${esc(d.docNumber)}</div>
     </div>
   `;
