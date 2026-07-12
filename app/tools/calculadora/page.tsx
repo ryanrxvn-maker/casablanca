@@ -12,7 +12,7 @@ const HUE = 'rgba(148,163,184,0.4)';
 
 const VPM_PRESETS = [50, 80, 100, 150, 200, 300] as const;
 
-type AdRow = { id: string; time: string };
+type AdRow = { id: string; time: string; label?: string };
 
 type SavedPix = { id: string; key: string };
 
@@ -22,6 +22,16 @@ let _adSeq = 0;
 function newAd(time = ''): AdRow {
   _adSeq += 1;
   return { id: `ad_${_adSeq}`, time };
+}
+
+/**
+ * Nome exibido de um AD: o apelido que o usuário digitou (se houver) ou o
+ * padrão sequencial `AD1`, `AD2`… baseado na posição. O `sep` controla o
+ * espaço do fallback — sem espaço na UI compacta ("AD1"), com espaço no PDF
+ * ("AD 1"), onde respira melhor.
+ */
+function adLabel(ad: AdRow, i: number, sep = ''): string {
+  return (ad.label || '').trim() || `AD${sep}${i + 1}`;
 }
 
 /**
@@ -101,6 +111,8 @@ export default function CalculadoraPage() {
 
   const updateAd = (id: string, time: string) =>
     setAds((prev) => prev.map((ad) => (ad.id === id ? { ...ad, time } : ad)));
+  const renameAd = (id: string, label: string) =>
+    setAds((prev) => prev.map((ad) => (ad.id === id ? { ...ad, label } : ad)));
   const addAd = () => setAds((prev) => [...prev, newAd()]);
   const removeAd = (id: string) =>
     setAds((prev) => (prev.length > 1 ? prev.filter((ad) => ad.id !== id) : prev));
@@ -164,11 +176,12 @@ export default function CalculadoraPage() {
     });
 
     const items = ads
-      .filter((ad) => parseDur(ad.time) > 0)
-      .map((ad, i) => {
+      .map((ad, i) => ({ ad, i }))
+      .filter(({ ad }) => parseDur(ad.time) > 0)
+      .map(({ ad, i }) => {
         const sec = parseDur(ad.time);
         return {
-          nome: `AD ${i + 1}`,
+          nome: adLabel(ad, i, ' '),
           sub: 'Vídeo editado',
           duracao: fmtDur(sec),
           valor: formatBRL(vpm * (sec / 60)),
@@ -255,12 +268,19 @@ export default function CalculadoraPage() {
               const valorAd = vpm * (sec / 60);
               return (
                 <div key={ad.id} className="flex items-center gap-2">
-                  <span
-                    className="mono flex h-9 w-14 shrink-0 items-center justify-center rounded-[10px] border border-line-strong bg-bg-soft/60 text-[12px] font-bold text-text-muted"
+                  <input
+                    type="text"
+                    value={ad.label ?? ''}
+                    onChange={(e) => renameAd(ad.id, e.target.value)}
+                    placeholder={`AD${i + 1}`}
+                    aria-label={`Nome do AD ${i + 1} — clique pra renomear`}
+                    title="Clique pra renomear este AD"
+                    maxLength={16}
+                    spellCheck={false}
+                    autoComplete="off"
+                    className="mono h-9 w-16 shrink-0 rounded-[10px] border border-line-strong bg-bg-soft/60 px-1 text-center text-[12px] font-bold text-text-muted outline-none transition-colors placeholder:text-text-muted hover:border-violet/40 focus:border-violet/60 focus:bg-violet/10 focus:text-white"
                     style={{ fontFamily: 'var(--font-tech)' }}
-                  >
-                    AD{i + 1}
-                  </span>
+                  />
                   <input
                     inputMode="numeric"
                     placeholder="00:00"
@@ -278,7 +298,7 @@ export default function CalculadoraPage() {
                     type="button"
                     onClick={() => removeAd(ad.id)}
                     disabled={ads.length <= 1}
-                    aria-label={`Remover AD${i + 1}`}
+                    aria-label={`Remover ${adLabel(ad, i)}`}
                     className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] border border-line-strong text-text-muted transition hover:border-red-500/45 hover:text-red-300 active:scale-[0.94] disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:border-line-strong disabled:hover:text-text-muted"
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
