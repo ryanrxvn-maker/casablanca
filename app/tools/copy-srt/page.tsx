@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef } from 'react';
 import { logHistory } from '@/lib/history';
+import { toFriendlyMessage, FriendlyError } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
 import { ToolHeroVideo } from '@/components/ToolHeroVideo';
 import { CancelButton } from '@/components/CancelButton';
@@ -111,7 +112,7 @@ export default function CopySrtPage() {
     reset();
     setProcessing(true);
     try {
-      setStage('Extraindo audio...');
+      setStage('Extraindo áudio...');
       setProgress(0.1);
       const audio = await extractAudioForTranscription(file, {
         onStage: (s) => setStage(s),
@@ -119,8 +120,8 @@ export default function CopySrtPage() {
       });
 
       if (audio.size > 4_400_000) {
-        throw new Error(
-          `Audio extraido tem ${formatBytes(audio.size)} — excede o limite (~4.4MB) do servidor. Use audio mais curto.`,
+        throw new FriendlyError(
+          `O áudio ficou grande demais pra enviar (${formatBytes(audio.size)}). Usa um trecho mais curto e tenta de novo.`,
         );
       }
 
@@ -147,14 +148,14 @@ export default function CopySrtPage() {
       try {
         json = JSON.parse(text);
       } catch {
-        throw new Error(
+        throw new FriendlyError(
           /Request Entity Too Large/i.test(text)
-            ? 'Audio acima do limite do servidor.'
-            : `Resposta nao-JSON (HTTP ${res.status})`,
+            ? 'O áudio ficou grande demais pra enviar. Usa um trecho mais curto e tenta de novo.'
+            : 'O servidor não respondeu como esperado. Tenta de novo em instantes.',
         );
       }
       if (!res.ok || !json.srt) {
-        throw new Error(json.error || 'Falha na geracao do SRT.');
+        throw new FriendlyError(json.error || 'Não consegui gerar o SRT agora. Tenta de novo em instantes.');
       }
 
       setSrt(json.srt);
@@ -164,10 +165,10 @@ export default function CopySrtPage() {
     } catch (e) {
       console.error(e);
       if (isCancellationError(e) || (e as Error)?.name === 'AbortError') {
-        setStage('Cancelado pelo usuario.');
+        setStage('Cancelado por você.');
         setError(null);
       } else {
-        setError((e as Error)?.message ?? 'Falha.');
+        setError(toFriendlyMessage(e, 'Não consegui gerar o SRT agora. Tenta de novo em instantes.'));
         setStage(null);
       }
       setProgress(null);

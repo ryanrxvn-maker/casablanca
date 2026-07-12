@@ -6,7 +6,10 @@ import { Brand } from '@/components/Brand';
  * Pública. Linkada no rodapé da /planos e no checkout/portal.
  */
 export const metadata = {
-  title: 'Política de Assinatura e Cancelamento · Auto Edit',
+  title: 'Política de Assinatura e Cancelamento',
+  description:
+    'Como funcionam assinatura, cancelamento e reembolso no Auto Edit — sem multa e com o caminho de cancelamento explicado.',
+  alternates: { canonical: '/politica' },
 };
 
 const UPDATED = '29/05/2026';

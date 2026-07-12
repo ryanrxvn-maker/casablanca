@@ -8,10 +8,22 @@
  * Uso: `error: toFriendlyMessage(e, 'Não consegui processar. Tente de novo.')`
  * O erro CRU deve continuar indo pro console no call-site (diagnóstico).
  */
+/**
+ * Erro cuja mensagem JÁ é amigável (escrita à mão no call-site) — passa
+ * direto pelo toFriendlyMessage sem cair no fallback genérico.
+ */
+export class FriendlyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'FriendlyError';
+  }
+}
+
 export function toFriendlyMessage(
   err: unknown,
   fallback = 'Algo deu errado aqui. Tente de novo em instantes.',
 ): string {
+  if (err instanceof FriendlyError) return err.message;
   const raw = err instanceof Error ? `${err.name} ${err.message}` : String(err ?? '');
   const m = raw.toLowerCase();
   if (!m.trim()) return fallback;

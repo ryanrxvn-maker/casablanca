@@ -829,7 +829,7 @@ export function LandingFooter() {
           </div>
           <nav className="flex flex-col gap-2.5 text-[13.5px] text-text-muted">
             <Link href="/termos" className="w-fit transition-colors hover:text-white">Termos de uso</Link>
-            <Link href="/politica" className="w-fit transition-colors hover:text-white">Política de privacidade</Link>
+            <Link href="/politica" className="w-fit transition-colors hover:text-white">Política de Assinatura e Cancelamento</Link>
           </nav>
         </div>
       </div>

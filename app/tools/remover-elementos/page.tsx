@@ -84,39 +84,45 @@ export default async function RemoverLegendaPage() {
           <div className="rounded-[16px] border border-red-500/40 bg-red-500/5 p-6 space-y-4">
             <div>
               <div className="label-tech text-[10px] uppercase tracking-widest text-red-300">
-                Acesso negado · /tools/remover-elementos
+                Acesso restrito
               </div>
-              <h1 className="mt-1 text-2xl font-bold text-white">Esta ferramenta é Pro</h1>
+              <h1 className="mt-1 text-2xl font-bold text-white">Esta ferramenta é do plano Pro</h1>
               <p className="mt-1 text-[13px] text-text-muted">
-                Você está logado, mas sua conta não é{' '}
-                <span className="mono text-white">Pro</span> nem{' '}
-                <span className="mono text-white">Admin</span>. Faça upgrade em{' '}
-                <span className="mono text-white">/planos</span>.
+                Você está logado, mas sua conta ainda não tem o{' '}
+                <span className="mono text-white">Pro</span>. Faça o upgrade pra
+                liberar o acesso na hora.
               </p>
             </div>
 
-            <div className="rounded-[10px] border border-line-strong bg-bg-soft/40 p-4 space-y-1 text-[12px]">
-              <div className="label-tech text-[10px] uppercase tracking-widest text-text-muted">Diagnóstico</div>
-              <div className="grid grid-cols-[140px_1fr] gap-x-3 gap-y-1 mt-2">
+            {/* Detalhes técnicos recolhidos — úteis quando o suporte pedir um print. */}
+            <details className="rounded-[10px] border border-line-strong bg-bg-soft/40 p-4 text-[12px]">
+              <summary className="label-tech cursor-pointer text-[10px] uppercase tracking-widest text-text-muted">
+                Detalhes técnicos (pro suporte)
+              </summary>
+              <div className="grid grid-cols-[140px_1fr] gap-x-3 gap-y-1 mt-3">
                 <span className="text-text-muted">Email</span>
                 <span className="mono text-white">{d.email ?? '—'}</span>
-                <span className="text-text-muted">User ID</span>
-                <span className="mono text-white break-all text-[11px]">{d.userId ?? '—'}</span>
-                <span className="text-text-muted">is_admin</span>
-                <span className={`mono ${d.isAdmin ? 'text-lime' : 'text-red-300'}`}>{String(d.isAdmin)}</span>
-                <span className="text-text-muted">is_pro</span>
-                <span className={`mono ${d.isPro ? 'text-lime' : 'text-red-300'}`}>{String(d.isPro)}</span>
-                <span className="text-text-muted">is_active</span>
-                <span className={`mono ${d.isActive ? 'text-lime' : 'text-red-300'}`}>{String(d.isActive)}</span>
+                <span className="text-text-muted">Plano Pro</span>
+                <span className={`mono ${d.isPro ? 'text-lime' : 'text-red-300'}`}>{d.isPro ? 'sim' : 'não'}</span>
+                <span className="text-text-muted">Conta ativa</span>
+                <span className={`mono ${d.isActive ? 'text-lime' : 'text-red-300'}`}>{d.isActive ? 'sim' : 'não'}</span>
               </div>
-            </div>
+            </details>
 
-            <Link
-              href="/tools"
-              className="label-tech inline-block rounded-lg border border-line-strong px-4 py-2 text-[11px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
-            >
-              ← Voltar pras ferramentas
-            </Link>
+            <div className="flex gap-2">
+              <Link
+                href="/planos"
+                className="label-tech rounded-lg border border-lime/60 px-4 py-2 text-[11px] uppercase tracking-widest text-lime hover:bg-lime/10"
+              >
+                Fazer upgrade pra Pro →
+              </Link>
+              <Link
+                href="/tools"
+                className="label-tech inline-block rounded-lg border border-line-strong px-4 py-2 text-[11px] uppercase tracking-widest text-text-muted hover:border-lime hover:text-lime"
+              >
+                ← Voltar pras ferramentas
+              </Link>
+            </div>
           </div>
         </div>
       </main>

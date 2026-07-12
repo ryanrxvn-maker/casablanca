@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { logHistory } from '@/lib/history';
+import { toFriendlyMessage } from '@/lib/friendly-error';
 import { AudioPlayer } from '@/components/AudioPlayer';
 import {
   ToolHero,
@@ -92,7 +93,9 @@ function friendlyError(e: unknown): string {
   if (/could not be read|out of memory|memory|allocation|RangeError|Aborted|Maximum call/i.test(raw)) {
     return TOO_BIG_MSG;
   }
-  return raw || 'Não consegui processar esse arquivo. Tenta de novo.';
+  // Sem padrão local: passa pela lib compartilhada (rede, limite, timeout...)
+  // — nunca devolve o erro técnico cru pro cliente.
+  return toFriendlyMessage(e, 'Não consegui processar esse arquivo. Tenta de novo.');
 }
 
 function isVideoFile(file: File): boolean {

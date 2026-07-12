@@ -6,7 +6,10 @@ import { Brand } from '@/components/Brand';
  * (consentimento obrigatório) e no rodapé.
  */
 export const metadata = {
-  title: 'Termos de Uso · Auto Edit',
+  title: 'Termos de Uso',
+  description:
+    'Termos de Uso do Auto Edit: o que a plataforma oferece, responsabilidades de uso e regras de assinatura.',
+  alternates: { canonical: '/termos' },
 };
 
 const UPDATED = '29/05/2026';

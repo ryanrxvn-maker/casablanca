@@ -64,6 +64,9 @@ export default function PilotPage() {
               }}
             >
               <SmokeText text="Você sai do escritório." className="block" />
+              {/* Texto PURO no gradiente: SmokeText dentro de
+                  background-clip:text SOME (as letras viram camadas próprias
+                  e escapam do clip) — mesmo gotcha já corrigido na landing. */}
               <span
                 className="block"
                 style={{
@@ -73,7 +76,7 @@ export default function PilotPage() {
                   WebkitTextFillColor: 'transparent',
                 }}
               >
-                <SmokeText text="Ele continua editando." />
+                Ele continua editando.
               </span>
             </h1>
             <p className="mt-6 max-w-[560px] text-[16px] leading-relaxed text-white/80">

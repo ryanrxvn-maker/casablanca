@@ -2,6 +2,7 @@
 
 import { ToolShell } from '@/components/ToolShell';
 import { logHistory } from '@/lib/history';
+import { toFriendlyMessage, FriendlyError } from '@/lib/friendly-error';
 import { IconCamuflagem, IconStepTarget, IconStepSliders, IconStepFormat, IconStepFiles } from '@/components/ToolIcons';
 import { FileUpload } from '@/components/FileUpload';
 import { AudioPlayer } from '@/components/AudioPlayer';
@@ -199,7 +200,7 @@ export default function CamuflagemPage() {
         updatePair(pair.id, {
           status: 'processing',
           errorMsg: undefined,
-          stage: muteMode ? 'Silenciando pra IA...' : 'Camuflando audio...',
+          stage: muteMode ? 'Silenciando pra IA...' : 'Camuflando áudio...',
           guard: undefined,
           whiteScore: undefined,
           blackScore: undefined,
@@ -209,7 +210,7 @@ export default function CamuflagemPage() {
           transcriptErr: undefined,
         });
         if (format === 'mp4' && !isVideoFile(pair.black)) {
-          throw new Error(
+          throw new FriendlyError(
             'Para sair em MP4, o áudio original precisa ser um arquivo de vídeo.',
           );
         }
@@ -217,7 +218,7 @@ export default function CamuflagemPage() {
         // Camufla -> codifica no formato pedido (MP3/MP4 com settings
         // robustos pra inversão de fase sobreviver ao codec lossy).
         updatePair(pair.id, {
-          stage: muteMode ? 'Silenciando pra IA...' : 'Camuflando audio...',
+          stage: muteMode ? 'Silenciando pra IA...' : 'Camuflando áudio...',
         });
         const wav = await camuflar({
           black: pair.black!,
@@ -238,7 +239,7 @@ export default function CamuflagemPage() {
             true,
           );
         } else {
-          updatePair(pair.id, { stage: 'Muxando no video (AAC 320k)...' });
+          updatePair(pair.id, { stage: 'Embutindo o áudio no vídeo...' });
           out = await muxAudioIntoVideo(
             pair.black!,
             wav,
@@ -252,7 +253,7 @@ export default function CamuflagemPage() {
         // (silêncio); no modo normal, se o PIOR caso ainda escuta o WHITE.
         updatePair(pair.id, {
           stage: muteMode
-            ? `Verificando se a IA escuta silencio no ${format.toUpperCase()} real...`
+            ? `Verificando se a IA escuta silêncio no ${format.toUpperCase()} real...`
             : `Verificando o que cada IA escuta no ${format.toUpperCase()} real...`,
           guard: 'checking',
         });
@@ -291,14 +292,17 @@ export default function CamuflagemPage() {
         if (isCancellationError(e)) {
           updatePair(pair.id, {
             status: 'error',
-            errorMsg: 'Cancelado pelo usuario.',
+            errorMsg: 'Cancelado por você.',
             stage: undefined,
           });
           break;
         }
         updatePair(pair.id, {
           status: 'error',
-          errorMsg: (e as Error).message ?? 'Falha',
+          errorMsg: toFriendlyMessage(
+            e,
+            'Não consegui camuflar esse arquivo. Tenta de novo — se repetir, ele pode estar corrompido ou pesado demais.',
+          ),
           stage: undefined,
         });
       }
@@ -338,19 +342,20 @@ export default function CamuflagemPage() {
       });
       const data = await res.json().catch(() => null);
       if (!res.ok || !data) {
-        throw new Error(
+        throw new FriendlyError(
           (data && (data.error as string)) ??
-            `Falha na transcricao (HTTP ${res.status}).`,
+            'A transcrição falhou agora. Tenta de novo em instantes.',
         );
       }
       updatePair(pair.id, {
         transcribing: false,
-        transcript: (data.text as string) || '(silencio / nada reconhecido)',
+        transcript: (data.text as string) || '(silêncio / nada reconhecido)',
       });
     } catch (e) {
+      console.error(e);
       updatePair(pair.id, {
         transcribing: false,
-        transcriptErr: (e as Error).message ?? 'Falha na transcricao.',
+        transcriptErr: toFriendlyMessage(e, 'A transcrição falhou agora. Tenta de novo em instantes.'),
       });
     }
   }
@@ -446,7 +451,7 @@ export default function CamuflagemPage() {
               true,
             );
           } else {
-            updateDecloak(it.id, { stage: 'Muxando no video (AAC 320k)...' });
+            updateDecloak(it.id, { stage: 'Embutindo o áudio no vídeo...' });
             out = await muxAudioIntoVideo(
               it.file!,
               camWav,
@@ -494,7 +499,7 @@ export default function CamuflagemPage() {
             true,
           );
         } else if (decloakFormat === 'mp4') {
-          updateDecloak(it.id, { stage: 'Muxando no video (AAC 320k)...' });
+          updateDecloak(it.id, { stage: 'Embutindo o áudio no vídeo...' });
           out = await muxAudioIntoVideo(
             it.file!,
             wav,
@@ -517,14 +522,17 @@ export default function CamuflagemPage() {
         if (isCancellationError(e)) {
           updateDecloak(it.id, {
             status: 'error',
-            errorMsg: 'Cancelado pelo usuario.',
+            errorMsg: 'Cancelado por você.',
             stage: undefined,
           });
           break;
         }
         updateDecloak(it.id, {
           status: 'error',
-          errorMsg: (e as Error).message ?? 'Falha',
+          errorMsg: toFriendlyMessage(
+            e,
+            'Não consegui descamuflar esse arquivo. Tenta de novo — se repetir, ele pode estar corrompido.',
+          ),
           stage: undefined,
         });
       }
@@ -808,7 +816,7 @@ export default function CamuflagemPage() {
                     <div className="flex items-center gap-2 rounded-[10px] border border-line bg-bg-soft/40 px-3 py-2 text-xs text-text-muted">
                       <span className="h-3 w-3 animate-spin rounded-full border-2 border-lime border-t-transparent" />
                       {pair.muteDownmixes || muteMode
-                        ? 'Verificando se a IA escuta silencio no arquivo real...'
+                        ? 'Verificando se a IA escuta silêncio no arquivo real...'
                         : 'Verificando o que cada IA escuta no arquivo real...'}
                     </div>
                   ) : pair.muteDownmixes &&
@@ -834,11 +842,11 @@ export default function CamuflagemPage() {
                             {ok ? (
                               <>
                                 MUDO PRA TIKTOK / KWAI / YOUTUBE / META — a soma
-                                dos canais zera, a IA nao escuta nada
+                                dos canais zera, a IA não escuta nada
                               </>
                             ) : (
                               <>
-                                NAO ZEROU — a soma dos canais ainda tem audio; a
+                                NÃO ZEROU — a soma dos canais ainda tem áudio; a
                                 IA de plataforma pode escutar o áudio original
                               </>
                             )}
@@ -883,16 +891,17 @@ export default function CamuflagemPage() {
                           {ok ? (
                             <div className="mt-2 border-t border-lime/30 pt-2 text-[11px] text-lime/80">
                               A soma L+R cai {Math.abs(MUTE_SILENT_DB)}+ dB abaixo
-                              do original — inaudivel pra IA que soma/media os
-                              canais. Canal unico (AssemblyAI/Whisper) ainda ouve
-                              o original cheio: a inversao de fase so engana quem
+                              do original — inaudível pra IA que soma/faz a média
+                              dos canais. IA que lê 1 canal só ainda ouve
+                              o original cheio: a inversão de fase só engana quem
                               SOMA. A
-                              prova final e a legenda automatica da plataforma.
+                              prova final é a legenda automática da plataforma.
                             </div>
                           ) : (
                             <div className="mt-2 border-t border-red-500/30 pt-2 text-[11px] text-red-300/90">
-                              A soma nao zerou o suficiente (codec lossy pode ter
-                              vazado). Tente sair em WAV — o cancelamento e exato.
+                              A soma não zerou o suficiente (a compressão do
+                              formato pode ter vazado um resto). Tente sair em
+                              WAV — o cancelamento é exato.
                             </div>
                           )}
                         </div>
@@ -907,7 +916,7 @@ export default function CamuflagemPage() {
                         target === 'platforms'
                           ? 'TikTok / Kwai / YouTube / Meta'
                           : target === 'single'
-                            ? 'ASR de canal unico'
+                            ? 'IA de canal único'
                             : 'qualquer IA';
                       return (
                         <div
@@ -927,7 +936,7 @@ export default function CamuflagemPage() {
                               </>
                             ) : (
                               <>
-                                NAO CAMUFLADO PRA {targetLabel.toUpperCase()} —
+                                NÃO CAMUFLADO PRA {targetLabel.toUpperCase()} —
                                 essa IA escuta o áudio original
                               </>
                             )}
@@ -948,7 +957,10 @@ export default function CamuflagemPage() {
                                     {d.label}
                                   </span>
                                   <span className="flex items-center gap-2">
-                                    <span className="mono text-[10px] text-text-muted">
+                                    <span
+                                      className="mono text-[10px] text-text-muted"
+                                      title="esc = quanto essa IA escuta do áudio escondido · orig = quanto escuta do original (0 a 1)"
+                                    >
                                       esc {d.whiteScore.toFixed(2)} · orig{' '}
                                       {d.blackScore.toFixed(2)}
                                     </span>
@@ -975,18 +987,18 @@ export default function CamuflagemPage() {
                           </div>
                           {ok && target === 'platforms' ? (
                             <div className="mt-2 border-t border-lime/30 pt-2 text-[11px] text-lime/80">
-                              YouTube Content ID faz a media dos canais
-                              (comprovado); TikTok/Kwai/Meta (Facebook/Instagram)
-                              sao da mesma familia de match por mono. A prova
-                              final e empirica: suba 1 video teste e veja a
-                              legenda automatica / se a moderacao pega o escondido.
+                              O YouTube faz a média dos canais (comprovado);
+                              TikTok/Kwai/Meta (Facebook/Instagram)
+                              são da mesma família. A prova
+                              final é na prática: suba 1 vídeo teste e veja a
+                              legenda automática / se a moderação pega o escondido.
                             </div>
                           ) : !ok ? (
                             <div className="mt-2 border-t border-red-500/30 pt-2 text-[11px] text-red-300/90">
-                              A inversao de fase so engana quem SOMA/media L+R.
-                              Engine de canal unico escuta o áudio original cheio
-                              — sem correcao possivel sem o publico ouvir o
-                              escondido. Confirme no botao TRANSCREVER.
+                              A inversão de fase só engana quem SOMA/faz a média
+                              de L+R. IA que lê 1 canal só escuta o áudio original
+                              cheio — sem correção possível sem o público ouvir o
+                              escondido. Confirme no botão TRANSCREVER.
                             </div>
                           ) : null}
                         </div>
@@ -1048,8 +1060,8 @@ export default function CamuflagemPage() {
                     <div className="rounded-[8px] border border-lime/30 bg-bg-soft/50 px-3 py-2">
                       <div className="label-tech mb-1 text-[10px] text-text-muted">
                         {target === 'platforms'
-                          ? 'O que TikTok/Kwai/YouTube/Meta escutariam (mono-media L+R do arquivo real)'
-                          : 'O que um ASR de canal unico escuta (estereo cru do arquivo real)'}
+                          ? 'O que TikTok/Kwai/YouTube/Meta escutariam (média L+R do arquivo real)'
+                          : 'O que uma IA de canal único escuta (estéreo cru do arquivo real)'}
                       </div>
                       <p className="whitespace-pre-wrap text-xs leading-relaxed text-white">
                         {pair.transcript}
@@ -1070,16 +1082,16 @@ export default function CamuflagemPage() {
                             {target === 'platforms' ? (
                               <>
                                 {' '}
-                                Reproducao fiel do pipeline mono dessas
-                                plataformas — mas a certeza ABSOLUTA so vem da
-                                legenda automatica da propria plataforma no
-                                video publicado.
+                                Reprodução fiel do que essas plataformas
+                                escutam — mas a certeza ABSOLUTA só vem da
+                                legenda automática da própria plataforma no
+                                vídeo publicado.
                               </>
                             ) : (
                               <>
                                 {' '}
                                 Se aparecer o roteiro do original, a camuflagem
-                                nao segurou pra esse tipo de IA.
+                                não segurou pra esse tipo de IA.
                               </>
                             )}
                           </>

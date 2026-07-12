@@ -199,7 +199,14 @@ const JSON_LD = {
         offers: [
           { '@type': 'Offer', name: 'Free', price: '0', priceCurrency: 'BRL' },
           { '@type': 'Offer', name: 'Basic', price: '57', priceCurrency: 'BRL' },
-          { '@type': 'Offer', name: 'Pro', price: '116', priceCurrency: 'BRL' },
+          // Pro está travado ("em breve") — PreOrder evita anunciar como comprável.
+          {
+            '@type': 'Offer',
+            name: 'Pro',
+            price: '116',
+            priceCurrency: 'BRL',
+            availability: 'https://schema.org/PreOrder',
+          },
         ],
       },
     },

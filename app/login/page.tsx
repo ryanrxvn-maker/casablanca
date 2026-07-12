@@ -192,7 +192,6 @@ function LoginInner() {
             <Link
               href={`/forgot-password${email ? `?email=${encodeURIComponent(email)}` : ''}`}
               className="text-[11px] font-semibold text-violet transition hover:text-white"
-              tabIndex={-1}
             >
               Esqueci a senha
             </Link>

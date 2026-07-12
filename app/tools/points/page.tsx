@@ -138,7 +138,7 @@ export default function PointsPage() {
         allMine = best?.tasks || [];
         console.log('[points] auto-selected team:', best?.team?.name, '(' + allMine.length + ' tasks)');
       }
-      if (!teamId) { setPointsError('Sem teams ClickUp.'); return; }
+      if (!teamId) { setPointsError('Não achei seu espaço no ClickUp. Confira o token no ClickUp Pilot.'); return; }
 
       // ─── ESCOPO (espelha o recorte do dashboard) ────────────────────────
       // O dashboard "Silas | Tarefas time" conta um RECORTE das tasks do user
@@ -365,7 +365,7 @@ export default function PointsPage() {
       setDebugInfo(debug);
       setCurrentPoints(Math.round(total * 100) / 100);
     } catch (e) {
-      setPointsError((e as Error)?.message || 'Erro fetch pontos');
+      setPointsError('Não consegui carregar seus pontos agora. Tenta de novo em instantes.');
     } finally {
       setLoadingPoints(false);
     }
@@ -447,7 +447,7 @@ export default function PointsPage() {
           backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(34,211,238,0.08) 2px, rgba(34,211,238,0.08) 3px)',
         }} />
         <div className="relative z-10">
-          <div className="label-tech text-[10px] uppercase tracking-widest text-cyan-300 opacity-70">// CURRENT MONTH</div>
+          <div className="label-tech text-[10px] uppercase tracking-widest text-cyan-300 opacity-70">ESTE MÊS</div>
           <div className="flex flex-wrap items-baseline gap-4 mt-1">
             <div
               className="font-bold text-[72px] leading-none"
@@ -524,11 +524,11 @@ export default function PointsPage() {
                 onClick={() => setShowDebug((v) => !v)}
                 className="mono text-[10px] uppercase tracking-widest text-text-muted hover:text-cyan-300"
               >
-                {showDebug ? '▼' : '▶'} debug ({debugInfo.totalTasksMine} tasks suas → {debugInfo.scopedTasks} na pasta &quot;{debugInfo.scopeResolved}&quot; · {debugInfo.completedThisMonth} concluídas este mes · {debugInfo.countedTasks} com PESO · atrasadas: {debugInfo.overdueTasks} = {debugInfo.overdueSum}pts)
+                {showDebug ? '▼' : '▶'} detalhes da contagem ({debugInfo.totalTasksMine} tasks suas → {debugInfo.scopedTasks} na pasta &quot;{debugInfo.scopeResolved}&quot; · {debugInfo.completedThisMonth} concluídas este mês · {debugInfo.countedTasks} com PESO · atrasadas: {debugInfo.overdueTasks} = {debugInfo.overdueSum}pts)
               </button>
               {showDebug ? (
                 <div className="mt-2 rounded border border-cyan-500/30 bg-cyan-500/5 p-3 text-[11px]">
-                  <div className="label-tech mb-2 text-[10px] uppercase tracking-widest text-cyan-300">// DEBUG SYNC CLICKUP</div>
+                  <div className="label-tech mb-2 text-[10px] uppercase tracking-widest text-cyan-300">SINCRONIZAÇÃO COM O CLICKUP</div>
 
                   {/* Header enxuto: workspace + listas excluidas + atrasadas */}
                   <div className="mb-2 text-[10px] text-text-muted flex flex-wrap gap-x-3 gap-y-1">
@@ -633,7 +633,7 @@ export default function PointsPage() {
                   {/* Erros agregados */}
                   {(debugInfo.errors || []).length > 0 ? (
                     <div className="mt-2 rounded border border-red-500/40 bg-red-500/5 p-2 text-red-300">
-                      <div className="label-tech text-[10px] uppercase tracking-widest mb-1">// ERROS</div>
+                      <div className="label-tech text-[10px] uppercase tracking-widest mb-1">ERROS</div>
                       {debugInfo.errors.map((e: string, i: number) => (
                         <div key={i} className="font-mono text-[10px]">{e}</div>
                       ))}
@@ -643,7 +643,7 @@ export default function PointsPage() {
                   {/* Sample tasks com peso — main info que o user pediu */}
                   {(debugInfo.sampleScoreTasks || []).length > 0 ? (
                     <div className="mt-3">
-                      <div className="label-tech mb-1 text-[10px] uppercase tracking-widest text-cyan-300">// TASKS QUE SOMARAM ({debugInfo.countedTasks})</div>
+                      <div className="label-tech mb-1 text-[10px] uppercase tracking-widest text-cyan-300">TASKS QUE SOMARAM ({debugInfo.countedTasks})</div>
                       <div className="space-y-1">
                         {debugInfo.sampleScoreTasks.map((t: any, i: number) => (
                           <div key={i} className="rounded bg-bg/40 px-2 py-1 text-[11px] flex items-center justify-between gap-2">
@@ -664,7 +664,7 @@ export default function PointsPage() {
 
       {/* === MEDALHAS === */}
       <div className="mb-6">
-        <div className="label-tech mb-4 text-[10px] uppercase tracking-widest text-text-muted">// TIERS</div>
+        <div className="label-tech mb-4 text-[10px] uppercase tracking-widest text-text-muted">METAS</div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 sm:gap-3 py-6">
           {POINTS_TIERS.map((t) => (
             <MedalCard
@@ -682,7 +682,7 @@ export default function PointsPage() {
         <div className="rounded-[16px] border border-amber-400/40 bg-gradient-to-br from-amber-500/5 to-bg/60 p-5">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
-              <div className="label-tech text-[10px] uppercase tracking-widest text-amber-300">// CONFIDENTIAL · ADMIN ONLY</div>
+              <div className="label-tech text-[10px] uppercase tracking-widest text-amber-300">CONFIDENCIAL · SÓ ADMIN</div>
               <h3 className="text-lg font-bold text-white">Modo Financeiro</h3>
               <div className="text-[11px] text-text-muted">Previsibilidade · histórico mensal · gráfico trade</div>
             </div>
@@ -752,17 +752,17 @@ export default function PointsPage() {
               {/* GRAFICO TRADE-STYLE */}
               {chartMode ? (
                 <div className="rounded-[10px] border border-cyan-500/40 bg-bg p-3">
-                  <div className="label-tech mb-2 text-[9px] uppercase tracking-widest text-cyan-200">// MONTHLY EARNINGS · TRADE VIEW</div>
+                  <div className="label-tech mb-2 text-[9px] uppercase tracking-widest text-cyan-200">GANHOS POR MÊS</div>
                   <TradeChart history={filteredHistory} />
                 </div>
               ) : null}
 
               {/* HISTORICO TABELA */}
               <div className="mt-4 rounded-[10px] border border-line bg-bg-soft/30 p-3 max-h-[400px] overflow-y-auto">
-                <div className="label-tech mb-2 text-[9px] uppercase tracking-widest text-text-muted">// HISTORY</div>
+                <div className="label-tech mb-2 text-[9px] uppercase tracking-widest text-text-muted">HISTÓRICO</div>
                 {filteredHistory.length === 0 ? (
                   <div className="text-[11px] text-text-muted text-center py-4">
-                    Sem histórico de meses ainda. Snapshot eh criado ao fechar cada mês.
+                    Sem histórico de meses ainda. O registro é criado ao fechar cada mês.
                   </div>
                 ) : (
                   <div className="grid gap-1">

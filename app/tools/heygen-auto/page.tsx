@@ -920,7 +920,7 @@ function HeyGenAutoInner() {
     const source = partsOverride ?? results;
     const ready = source.filter((r) => r.videoId);
     if (ready.length === 0) {
-      setError('Nenhuma parte com videoId. Gere as partes primeiro.');
+      setError('Nenhum trecho gerado ainda. Gere os trechos primeiro.');
       return;
     }
     setError(null);
@@ -2564,7 +2564,7 @@ function HeyGenAutoInner() {
                 >
                   {sessionTest.state === 'testing'
                     ? 'Testando...'
-                    : 'Testar conexao HeyGen'}
+                    : 'Testar conexão com o HeyGen'}
                 </button>
               </div>
             ) : (
@@ -2575,15 +2575,15 @@ function HeyGenAutoInner() {
                     <strong className="text-yellow-300">
                       Extensão Hey Auto não instalada
                     </strong>
-                    . Voce precisa dela pra gerar avatares (a automacao usa sua
-                    conta HeyGen logada, sem consumir API).
+                    . Você precisa dela pra gerar os avatares (a automação usa sua
+                    conta do HeyGen já logada, sem gastar créditos de API).
                     <div className="mt-3">
                       <a
                         href="/api/extension/download"
                         download
                         className="btn-lime inline-flex items-center gap-2 !px-4 !py-2 text-[12px]"
                       >
-                        ⬇ Baixar extensao (.zip)
+                        ⬇ Baixar extensão (.zip)
                       </a>
                     </div>
                     <details className="mt-3" open>
@@ -2592,8 +2592,8 @@ function HeyGenAutoInner() {
                       </summary>
                       <ol className="mt-2 list-decimal space-y-1 pl-5 text-yellow-300">
                         <li>
-                          Clica no botao{' '}
-                          <strong>&quot;Baixar extensao (.zip)&quot;</strong> acima
+                          Clica no botão{' '}
+                          <strong>&quot;Baixar extensão (.zip)&quot;</strong> acima
                         </li>
                         <li>
                           Descompacta o .zip numa pasta no seu computador
@@ -2605,13 +2605,13 @@ function HeyGenAutoInner() {
                           Liga &quot;Modo de desenvolvedor&quot; (canto superior direito)
                         </li>
                         <li>
-                          Clica &quot;Carregar sem compactacao&quot; e seleciona a pasta
+                          Clica &quot;Carregar sem compactação&quot; e seleciona a pasta
                         </li>
                         <li>
                           Faz login no HeyGen normalmente em outra aba
                         </li>
                         <li>
-                          Volta aqui e atualize a pagina (F5) — a extensao deve
+                          Volta aqui e atualiza a página (F5) — a extensão deve
                           aparecer como conectada
                         </li>
                       </ol>
@@ -2632,7 +2632,7 @@ function HeyGenAutoInner() {
                 type="text"
                 value={adName}
                 onChange={(e) => setAdName(e.target.value)}
-                placeholder="Nome do AD (vai virar prefixo dos arquivos)"
+                placeholder="Nome do AD (vira o começo do nome dos arquivos)"
                 className="input-field"
                 disabled={processing}
               />
@@ -2827,7 +2827,7 @@ function HeyGenAutoInner() {
                           <textarea
                             value={structuredBody.text}
                             onChange={(e) => setStructuredBody((p) => ({ ...p, text: e.target.value }))}
-                            placeholder="Texto do BODY completo. Sera splitado em takes de ~20s sem cortar frase."
+                            placeholder="Texto do BODY completo. Será dividido em trechos de ~20s sem cortar frases."
                             rows={6}
                             className="block w-full resize-y bg-transparent px-3.5 py-2.5 font-mono text-[12px] leading-relaxed text-white placeholder:text-text-dim focus:outline-none disabled:opacity-50"
                             disabled={processing}
@@ -4138,7 +4138,7 @@ function HeyGenAutoInner() {
                                     setDocPreviewOpen((prev) => ({ ...prev, [previewKey]: !prev[previewKey] }))
                                   }
                                   className="ml-auto rounded-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-0.5 text-[11px] text-cyan-200 shadow-[0_2px_0_rgba(0,0,0,0.4),0_0_8px_rgba(34,211,238,0.3)] transition hover:bg-cyan-500/25 active:translate-y-[1px]"
-                                  title="Preview do texto que esse avatar vai falar (editável — corrige leak de indicativo)"
+                                  title="Preview do texto que esse avatar vai falar (editável — corrige se sobrou marcação de fala)"
                                 >
                                   👁
                                 </button>
@@ -4190,7 +4190,7 @@ function HeyGenAutoInner() {
                                             className="mono w-full resize-y rounded border border-line-strong bg-bg/40 px-2 py-1.5 text-[12px] text-text focus:border-cyan-500/60 focus:outline-none"
                                             rows={Math.max(3, Math.min(12, p.text.split('\n').length + 1))}
                                             spellCheck={false}
-                                            placeholder="(vazio — esse part não vai gerar nada)"
+                                            placeholder="(vazio — esse trecho não vai gerar nada)"
                                           />
                                         </div>
                                       ))}

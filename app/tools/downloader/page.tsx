@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
 import { logHistory } from '@/lib/history';
+import { toFriendlyMessage, FriendlyError } from '@/lib/friendly-error';
 import { createClient } from '@/lib/supabase/client';
 import { ToolStep, ToolChoice, ToolAction } from '@/components/tool-kit';
 import { IconDownloader, IconStepPlug, IconStepLink, IconStepFormat, IconStepDownload } from '@/components/ToolIcons';
@@ -273,14 +274,14 @@ export default function DownloaderPage() {
       });
 
       if (!res.ok) {
-        let msg = `HTTP ${res.status}`;
+        let msg = 'O download falhou agora. Tenta de novo em instantes.';
         try {
           const j = await res.json();
           msg = j.error || msg;
         } catch {
           /* binário/sem json */
         }
-        throw new Error(msg);
+        throw new FriendlyError(msg);
       }
 
       const cd = res.headers.get('content-disposition') || '';
@@ -350,13 +351,14 @@ export default function DownloaderPage() {
       );
       logHistory({ tool: 'downloader', kind: 'download', title: `${filename} baixado` });
     } catch (e) {
+      console.error('[downloader]', e);
       setJobs((prev) =>
         prev.map((j, i) =>
           i === idx
             ? {
                 ...j,
                 state: 'error',
-                error: e instanceof Error ? e.message : String(e),
+                error: toFriendlyMessage(e, 'O download falhou agora. Tenta de novo em instantes.'),
                 progress: null,
               }
             : j,
@@ -532,9 +534,9 @@ export default function DownloaderPage() {
                     </a>
                     <span
                       className="mono ml-1 text-[10px] text-text-muted"
-                      title="Verifica a cada 5 segundos enquanto a aba estiver aberta"
+                      title="Verifica a cada 2 segundos enquanto a aba estiver aberta"
                     >
-                      Auto-check: 5s
+                      Auto-check: 2s
                     </span>
                   </div>
                   <details className="mt-3 group">
@@ -924,7 +926,7 @@ export default function DownloaderPage() {
           <span className="text-lime">sem marca d&apos;água em HD</span> ·{' '}
           <span className="text-white">Pinterest</span> mídia direta ·{' '}
           <span className="text-white">YouTube/Instagram</span>.
-          Downloads paralelos (3x) e acelerados (multi-conexão). Links
+          Downloads paralelos (até 6 por vez) e acelerados (multi-conexão). Links
           privados exigem login. Use apenas para conteúdo que você tem
           direito de baixar.
         </p>

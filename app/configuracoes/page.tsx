@@ -119,7 +119,7 @@ export default function ConfiguracoesPage() {
 
   async function handleDeleteAccount() {
     const confirmed = window.confirm(
-      'Tem certeza? A ação é irreversível.',
+      'Tem certeza? Depois que o suporte concluir a exclusão, não tem volta.',
     );
     if (!confirmed) return;
     const typed = window.prompt('Digite "DELETAR" pra confirmar:');
@@ -128,7 +128,7 @@ export default function ConfiguracoesPage() {
     try {
       const supabase = createClient();
       await supabase.auth.signOut();
-      flash('ok', 'Sessão encerrada. Fale com o suporte pra remover do banco.');
+      flash('ok', 'Pedido registrado e sessão encerrada. Confirme a exclusão com o suporte no WhatsApp.');
       setTimeout(() => router.replace('/login'), 2200);
     } finally {
       setDeleteBusy(false);
@@ -477,14 +477,16 @@ export default function ConfiguracoesPage() {
                   ZONA DE PERIGO
                 </div>
                 <p className="text-sm text-text-muted">
-                  Apaga sua conta. Sem volta.
+                  Encerra sua sessão e abre o pedido de exclusão da conta.
+                  A remoção dos dados é concluída pelo suporte — a gente
+                  confirma com você pelo WhatsApp.
                 </p>
                 <button
                   onClick={handleDeleteAccount}
                   className="mt-4 rounded-[12px] border border-red-500/50 px-4 py-2 text-sm font-medium text-red-300 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
                   disabled={deleteBusy}
                 >
-                  {deleteBusy ? <span className="loading-dots">Processando</span> : 'Deletar conta'}
+                  {deleteBusy ? <span className="loading-dots">Processando</span> : 'Solicitar exclusão da conta'}
                 </button>
               </div>
             </section>
@@ -494,7 +496,7 @@ export default function ConfiguracoesPage() {
 
       {toast ? (
         <div
-          role="status"
+          role={toast.kind === 'ok' ? 'status' : 'alert'}
           className={
             'toast-pop fixed bottom-6 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-full border px-5 py-2.5 text-xs font-semibold uppercase tracking-[0.16em] shadow-2xl backdrop-blur-xl ' +
             (toast.kind === 'ok'
@@ -527,13 +529,13 @@ function SectionCard({
       className="card-tool fade-in-up p-5 md:p-6"
       style={{ animationDelay: `${delay}ms` }}
     >
-      <div
+      <h2
         className="mb-4 inline-flex items-center gap-2 text-[10.5px] font-semibold uppercase tracking-[0.20em] text-text-muted"
         style={{ fontFamily: 'var(--font-tech)' }}
       >
         <span className="inline-block h-1.5 w-1.5 rounded-full bg-violet shadow-[0_0_8px_rgba(167,139,250,0.7)]" />
         {label}
-      </div>
+      </h2>
       {children}
     </section>
   );

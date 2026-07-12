@@ -364,7 +364,8 @@ export default function LipSyncTool() {
         return d.publicUrl as string;
       }, { tries: 4 });
     } catch (e) {
-      throw new Error('Falha no upload pro storage: ' + errMsg(e));
+      console.error('[lipsync] upload', e);
+      throw new Error('Não consegui enviar o arquivo. Confira a conexão e tente de novo.');
     }
   }
 

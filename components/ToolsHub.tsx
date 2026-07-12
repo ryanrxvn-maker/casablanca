@@ -1226,7 +1226,7 @@ function FeaturedCard({
           className={cardClass}
           style={cardStyle}
           aria-disabled
-          title={isBlocked ? 'Em manutenção' : 'Disponível só pra contas Beta'}
+          title={isBlocked ? 'Em manutenção' : 'Disponível só no plano Pro'}
         >
           {body}
         </div>
@@ -1406,7 +1406,7 @@ function ToolCard({
         className={vcls}
         style={vstyle}
         aria-disabled
-        title={isBlocked ? 'Em manutenção' : 'Disponível só pra contas Beta'}
+        title={isBlocked ? 'Em manutenção' : 'Disponível só no plano Pro'}
         onMouseEnter={playCardVideo}
         onMouseLeave={stopCardVideo}
       >
@@ -1505,7 +1505,7 @@ function ToolCard({
       className={cls}
       style={style}
       aria-disabled
-      title={isBlocked ? 'Em manutenção' : 'Disponível só pra contas Beta'}
+      title={isBlocked ? 'Em manutenção' : 'Disponível só no plano Pro'}
     >
       {body}
     </div>
@@ -1562,8 +1562,8 @@ const TOOL_LABELS: Record<string, string> = {
   '/tools/calculadora': 'Calculadora',
   '/tools/ltx-video': 'LTX Video',
   '/tools/points': 'Pontos',
-  '/tools/lipsync-history': 'Histórico',
-  '/tools/background': 'Tarefas em background',
+  '/tools/lipsync-history': 'Histórico de avatares',
+  '/tools/background': 'Tarefas em segundo plano',
 };
 
 function LockedFlash({

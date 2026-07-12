@@ -62,7 +62,8 @@ async function downloadMagnificZipBg(job: MagnificJob) {
     document.body.removeChild(a);
     setTimeout(() => { try { URL.revokeObjectURL(rec.blobUrl); } catch {} }, 60000);
   } catch (e) {
-    alert('Falha baixando ZIP Magnific: ' + ((e as Error)?.message || 'erro'));
+    console.error('[background] download zip', e);
+    alert('Não consegui baixar esse pacote agora. Tenta de novo em instantes.');
   }
 }
 
@@ -118,8 +119,8 @@ function phaseLabel(p: BatchTaskState['phase']): string {
     dispatching: 'Disparando',
     rendering: 'Renderizando',
     downloading: 'Baixando',
-    post: 'Pos-prod (concat/decupagem/camo)',
-    done: 'Concluido',
+    post: 'Finalizando (juntando + decupando)',
+    done: 'Concluído',
     failed: 'Falhou',
   };
   return map[p] || p;
@@ -206,7 +207,7 @@ export default function BackgroundTasksPage() {
   }, [sorted]);
 
   function cancelTask(taskId: string) {
-    if (!confirm('Cancelar essa task? Vai parar polling, downloads e pos-producao se aplicavel.')) return;
+    if (!confirm('Cancelar esse item? Vai parar os downloads e a finalização que estiverem em andamento.')) return;
     const map = readCancelMap();
     map[taskId] = Date.now();
     localStorage.setItem(CANCEL_KEY, JSON.stringify(map));
@@ -214,14 +215,14 @@ export default function BackgroundTasksPage() {
     // Tambem marca o batch como failed pra dar feedback imediato
     const current = readBatches();
     if (current[taskId]) {
-      current[taskId] = { ...current[taskId], phase: 'failed', message: 'Cancelado pelo user', finishedAt: Date.now() };
+      current[taskId] = { ...current[taskId], phase: 'failed', message: 'Cancelado por você', finishedAt: Date.now() };
       localStorage.setItem(BATCH_STATE_KEY, JSON.stringify(current));
       setBatches(current);
     }
   }
 
   function removeTask(taskId: string) {
-    if (!confirm('Remover essa task do historico? (Nao apaga ZIPs ja baixados)')) return;
+    if (!confirm('Remover esse item do histórico? (Não apaga os ZIPs que você já baixou)')) return;
     const current = readBatches();
     delete current[taskId];
     localStorage.setItem(BATCH_STATE_KEY, JSON.stringify(current));
@@ -229,7 +230,7 @@ export default function BackgroundTasksPage() {
   }
 
   function clearAllDone() {
-    if (!confirm('Limpar todas tasks concluidas (done) e falhas (failed)?')) return;
+    if (!confirm('Limpar tudo que já concluiu ou falhou?')) return;
     const current = readBatches();
     for (const k of Object.keys(current)) {
       if (current[k].phase === 'done' || current[k].phase === 'failed') {
@@ -257,7 +258,7 @@ export default function BackgroundTasksPage() {
             Na fila: {counts.queued}
           </span>
           <span className="mono rounded-full border border-lime/40 bg-lime/10 px-3 py-1 text-[10px] uppercase tracking-widest text-lime">
-            Concluidos: {counts.done}
+            Concluídos: {counts.done}
           </span>
           <span className="mono rounded-full border border-red-500/40 bg-red-500/10 px-3 py-1 text-[10px] uppercase tracking-widest text-red-300">
             Falhas: {counts.failed}
@@ -275,7 +276,7 @@ export default function BackgroundTasksPage() {
               disabled={counts.done + counts.failed === 0}
               className="label-tech rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300 disabled:opacity-40"
             >
-              Limpar concluidos/falhas
+              Limpar concluídos/falhas
             </button>
           </div>
         </div>
@@ -307,11 +308,11 @@ export default function BackgroundTasksPage() {
         {typeFilter === 'broll' ? null : sorted.length === 0 ? (
           <div className="rounded-[14px] border border-dashed border-line-strong bg-bg-soft/20 p-12 text-center">
             <div className="label-tech text-[11px] uppercase tracking-widest text-text-muted">
-              Nenhuma batch task em andamento
+              Nenhum trabalho em andamento
             </div>
             <div className="mt-3 text-[13px] text-text-muted">
-              Volte pro <Link href="/tools/clickup-pilot" className="text-lime hover:underline">ClickUp Pilot</Link> e clique &quot;Start batch&quot;
-              numa task analisada — ela aparece aqui ao vivo.
+              Volte pro <Link href="/tools/clickup-pilot" className="text-lime hover:underline">ClickUp Pilot</Link> e dispare
+              uma task analisada — ela aparece aqui ao vivo.
             </div>
           </div>
         ) : (
@@ -391,7 +392,7 @@ export default function BackgroundTasksPage() {
                               ↓ takes ({b.zipFilename})
                             </a>
                           ) : b.zipFilename ? (
-                            <span className="mono rounded border border-text-muted/30 bg-bg/30 px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted" title="ZIP foi gerado mas a blob URL nao persiste pos-reload. Re-gere via ClickUp Pilot.">
+                            <span className="mono rounded border border-text-muted/30 bg-bg/30 px-2 py-1 text-[10px] uppercase tracking-widest text-text-muted" title="O ZIP foi gerado, mas o link se perdeu ao recarregar a página. Gere de novo pelo ClickUp Pilot.">
                               takes (perdido no reload)
                             </span>
                           ) : null}
@@ -432,7 +433,7 @@ export default function BackgroundTasksPage() {
                           type="button"
                           onClick={() => cancelTask(b.taskId)}
                           className="label-tech rounded-md border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-red-300 hover:bg-red-500/20"
-                          title="Cancela polling/download/pos-prod"
+                          title="Para os downloads e a finalização desse item"
                         >
                           ✕ Cancelar
                         </button>
@@ -441,13 +442,13 @@ export default function BackgroundTasksPage() {
                         type="button"
                         onClick={() => removeTask(b.taskId)}
                         className="label-tech rounded-md border border-line-strong px-3 py-1.5 text-[10px] uppercase tracking-widest text-text-muted hover:border-red-500/60 hover:text-red-300"
-                        title="Remove essa entrada do historico (nao apaga ZIPs ja baixados)"
+                        title="Remove essa entrada do histórico (não apaga os ZIPs que você já baixou)"
                       >
                         Remover
                       </button>
                       {cancelMap[b.taskId] ? (
                         <span className="label-tech rounded-md border border-yellow-500/40 bg-yellow-500/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-yellow-200 text-center">
-                          cancel solicitado
+                          cancelamento pedido
                         </span>
                       ) : null}
                     </div>
@@ -469,7 +470,7 @@ export default function BackgroundTasksPage() {
                 const stLabel = ({
                   queued: j.gateOnHeyGen ? 'Aguardando HeyGen da task' : 'Na fila',
                   running: 'Gerando B-rolls',
-                  done: 'Concluido',
+                  done: 'Concluído',
                   failed: 'Falhou',
                 })[j.status];
                 const stColor = j.status === 'done' ? 'text-lime border-lime/40 bg-lime/10'
@@ -510,9 +511,9 @@ export default function BackgroundTasksPage() {
               })}
             </div>
             <div className="mono mt-3 text-[10px] text-text-muted leading-relaxed">
-              Magnific roda 1 job por vez (fila serial). MORE: cada job espera o HeyGen
-              daquela task concluir antes de iniciar. O processor vive na aba do ClickUp
-              Pilot — feche-a e a fila pausa; reabra e ela retoma do ponto.
+              Os B-rolls rodam 1 por vez, em fila. Cada item espera os avatares
+              daquela task ficarem prontos antes de começar. A fila vive na aba do ClickUp
+              Pilot — se fechar a aba ela pausa; reabra e ela retoma do ponto.
             </div>
           </div>
         ) : null}
@@ -522,13 +523,14 @@ export default function BackgroundTasksPage() {
             Como funciona
           </div>
           <div className="mt-1 text-[11px] text-text-muted leading-relaxed">
-            Tasks iniciadas no ClickUp Pilot aparecem aqui ao vivo. Estado fica salvo no browser
-            (localStorage) entao sobrevive reload. ZIPs gerados ficam disponiveis na propria aba
-            do ClickUp Pilot (Blob URLs nao persistem entre reloads — re-gere se precisar).
+            Tasks iniciadas no ClickUp Pilot aparecem aqui ao vivo. O andamento fica salvo
+            no seu navegador, então sobrevive se você recarregar a página. Os ZIPs gerados
+            ficam disponíveis na própria aba do ClickUp Pilot (o link de download se perde
+            ao recarregar — gere de novo se precisar).
             <br/><br/>
-            Cancelar marca um flag — se a aba do ClickUp Pilot estiver aberta ela aborta o polling.
-            Se a aba ja foi fechada nao tem mais worker rodando entao &quot;cancelar&quot; so
-            ajusta o estado visual.
+            Cancelar avisa a aba do ClickUp Pilot pra parar aquele item.
+            Se aquela aba já foi fechada, não tem mais nada rodando — aí o &quot;cancelar&quot;
+            só ajusta o estado visual.
           </div>
         </div>
       </div>

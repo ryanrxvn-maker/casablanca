@@ -2,6 +2,7 @@
 
 import { useRef } from 'react';
 import { logHistory } from '@/lib/history';
+import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
 import { FileUpload } from '@/components/FileUpload';
 import { AudioPlayer } from '@/components/AudioPlayer';
@@ -94,7 +95,12 @@ export default function AudioSplitPage() {
       setStatus(null);
     } catch (e) {
       console.error(e);
-      setError((e as Error).message ?? 'Falha ao processar o arquivo.');
+      setError(
+        toFriendlyMessage(
+          e,
+          'Não consegui dividir esse arquivo. Tenta de novo — se repetir, ele pode estar corrompido ou pesado demais.',
+        ),
+      );
       setStatus(null);
     } finally {
       setProcessing(false);

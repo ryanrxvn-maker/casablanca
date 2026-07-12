@@ -95,51 +95,16 @@ export default async function LipSyncPage() {
           <div className="rounded-[16px] border border-red-500/40 bg-red-500/5 p-6 space-y-4">
             <div>
               <div className="label-tech text-[10px] uppercase tracking-widest text-red-300">
-                Acesso negado · /tools/lipsync
+                Acesso restrito
               </div>
               <h1 className="mt-1 text-2xl font-bold text-white">
-                Esta ferramenta eh Pro
+                Esta ferramenta é do plano Pro
               </h1>
               <p className="mt-1 text-[13px] text-text-muted">
-                Voce esta logado, mas sua conta nao eh{' '}
-                <span className="mono text-white">Pro</span> nem{' '}
-                <span className="mono text-white">Admin</span>. Faca upgrade em{' '}
-                <span className="mono text-white">/planos</span>.
+                Você está logado, mas sua conta ainda não tem o{' '}
+                <span className="mono text-white">Pro</span>. Faça o upgrade pra
+                liberar o acesso na hora.
               </p>
-            </div>
-
-            <div className="rounded-[10px] border border-line-strong bg-bg-soft/40 p-4 space-y-1 text-[12px]">
-              <div className="label-tech text-[10px] uppercase tracking-widest text-text-muted">
-                Diagnostico
-              </div>
-              <div className="grid grid-cols-[140px_1fr] gap-x-3 gap-y-1 mt-2">
-                <span className="text-text-muted">Email</span>
-                <span className="mono text-white">{d.email ?? '—'}</span>
-                <span className="text-text-muted">User ID</span>
-                <span className="mono text-white break-all text-[11px]">{d.userId ?? '—'}</span>
-                <span className="text-text-muted">Profile encontrado</span>
-                <span className={`mono ${d.profileFound ? 'text-lime' : 'text-red-300'}`}>
-                  {d.profileFound ? 'sim' : 'NAO'}
-                </span>
-                <span className="text-text-muted">is_admin</span>
-                <span className={`mono ${d.isAdmin ? 'text-lime' : 'text-red-300'}`}>
-                  {String(d.isAdmin)}
-                </span>
-                <span className="text-text-muted">is_pro</span>
-                <span className={`mono ${d.isPro ? 'text-lime' : 'text-red-300'}`}>
-                  {String(d.isPro)}
-                </span>
-                <span className="text-text-muted">is_active</span>
-                <span className={`mono ${d.isActive ? 'text-lime' : 'text-red-300'}`}>
-                  {String(d.isActive)}
-                </span>
-                {d.profileError ? (
-                  <>
-                    <span className="text-text-muted">Erro</span>
-                    <span className="mono text-red-300 text-[11px]">{d.profileError}</span>
-                  </>
-                ) : null}
-              </div>
             </div>
 
             <div className="rounded-[10px] border border-cyan-500/40 bg-cyan-500/5 p-4 space-y-2 text-[12px] text-cyan-100">
@@ -148,11 +113,39 @@ export default async function LipSyncPage() {
               </div>
               <p>
                 A ferramenta de criar avatar (lipsync) faz parte do plano{' '}
-                <span className="mono text-white">Pro</span>. Assine ou faca
-                upgrade em <span className="mono text-white">/planos</span> pra
-                liberar o acesso na hora.
+                <span className="mono text-white">Pro</span>. Assine ou faça
+                upgrade na página de planos pra liberar o acesso na hora.
               </p>
             </div>
+
+            {/* Detalhes técnicos recolhidos — úteis quando o suporte pedir um print. */}
+            <details className="rounded-[10px] border border-line-strong bg-bg-soft/40 p-4 text-[12px]">
+              <summary className="label-tech cursor-pointer text-[10px] uppercase tracking-widest text-text-muted">
+                Detalhes técnicos (pro suporte)
+              </summary>
+              <div className="grid grid-cols-[140px_1fr] gap-x-3 gap-y-1 mt-3">
+                <span className="text-text-muted">Email</span>
+                <span className="mono text-white">{d.email ?? '—'}</span>
+                <span className="text-text-muted">Conta encontrada</span>
+                <span className={`mono ${d.profileFound ? 'text-lime' : 'text-red-300'}`}>
+                  {d.profileFound ? 'sim' : 'NÃO'}
+                </span>
+                <span className="text-text-muted">Plano Pro</span>
+                <span className={`mono ${d.isPro ? 'text-lime' : 'text-red-300'}`}>
+                  {d.isPro ? 'sim' : 'não'}
+                </span>
+                <span className="text-text-muted">Conta ativa</span>
+                <span className={`mono ${d.isActive ? 'text-lime' : 'text-red-300'}`}>
+                  {d.isActive ? 'sim' : 'não'}
+                </span>
+                {d.profileError ? (
+                  <>
+                    <span className="text-text-muted">Erro</span>
+                    <span className="mono text-red-300 text-[11px]">{d.profileError}</span>
+                  </>
+                ) : null}
+              </div>
+            </details>
 
             <div className="flex gap-2">
               <Link

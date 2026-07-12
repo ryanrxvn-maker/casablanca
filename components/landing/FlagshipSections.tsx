@@ -82,6 +82,15 @@ export function ProofStrip() {
             </div>
           ))}
         </div>
+        {/* Honestidade: os números acima vêm da suíte de automação (Pilot /
+            Auto B-roll), que é Pro — e o Pro ainda está travado. Dizer isso
+            aqui evita vender como "de hoje" o que o cliente só usa no Pro. */}
+        <p
+          className="mt-3 text-center text-[10.5px] font-semibold uppercase tracking-[0.2em] text-text-dim"
+          style={{ fontFamily: 'var(--font-tech)' }}
+        >
+          Números da suíte de automação · plano Pro, em breve
+        </p>
       </Reveal>
     </section>
   );

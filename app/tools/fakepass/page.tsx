@@ -147,7 +147,9 @@ export default function FakePassPage() {
 
         {/* grade de modelos (cards premium) */}
         {modelsInCat.length === 0 ? (
-          <p className="text-[13px] text-text-dim">Em breve nesta categoria. 🚧</p>
+          <p className="text-[13px] text-text-dim">
+            Ainda não temos modelos nesta categoria — escolha outra acima. Novos modelos chegam sempre. 🚧
+          </p>
         ) : (
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
             {modelsInCat.map((m) => {

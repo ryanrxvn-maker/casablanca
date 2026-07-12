@@ -721,7 +721,7 @@ function AutoBrollInner() {
                         type="button"
                         onClick={handleRefreshAccount}
                         disabled={refreshingAccount}
-                        title="Trocar conta — re-checa apos logar com outro usuario no magnific.com"
+                        title="Trocar conta — verifica de novo após logar com outro usuário no magnific.com"
                         aria-label="Trocar conta"
                         className="group/sw relative inline-flex h-6 w-6 items-center justify-center rounded-full border border-cyan-400/45 bg-gradient-to-b from-cyan-400/18 via-cyan-400/8 to-transparent text-cyan-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.16),0_2px_8px_-3px_rgba(34,211,238,0.4)] transition-all hover:-translate-y-0.5 hover:scale-110 hover:border-cyan-400/70 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.26),0_8px_18px_-4px_rgba(34,211,238,0.6)] active:scale-95 disabled:opacity-50 disabled:cursor-wait"
                       >
@@ -2000,10 +2000,10 @@ function BrollHistorySection() {
       if (text && text.trim()) {
         setPendingJsonText(text.trim());
       } else {
-        alert('Area de transferencia vazia. Copia o JSON primeiro.');
+        alert('Área de transferência vazia. Copia o JSON primeiro.');
       }
     } catch (e) {
-      alert('Browser bloqueou leitura da area de transferencia. Cola manualmente com Ctrl+V.');
+      alert('O navegador bloqueou a leitura da área de transferência. Cola manualmente com Ctrl+V.');
     }
   }
 
@@ -2028,7 +2028,7 @@ function BrollHistorySection() {
       console.log(`[retomar] JSON persistido pra ${item.zipKey} (${raw.length} chars)`);
     } catch (e) {
       console.error('[retomar] FALHOU persistir JSON:', e);
-      alert('Falha salvando JSON localmente: ' + ((e as Error)?.message || String(e)));
+      alert('Não consegui salvar o JSON no navegador. Tenta de novo — se repetir, feche abas duplicadas do app.');
       return; // nem tenta o retomar se persistencia falhou
     }
     setPendingJsonFor(null);
@@ -2068,7 +2068,7 @@ function BrollHistorySection() {
       const { parseMagnificPrompts } = await import('@/lib/magnific-pipeline');
       const allTakes = parseMagnificPrompts(originalJson);
       if (allTakes.length === 0) {
-        throw new Error('JSON parseou vazio — verifica o formato e cola de novo.');
+        throw new Error('O JSON veio vazio — confere o formato e cola de novo.');
       }
       const readyIdxs = new Set(
         item.takeUrls
@@ -2077,13 +2077,13 @@ function BrollHistorySection() {
       );
       const missingTakes = allTakes.filter((t) => !readyIdxs.has(t.idx));
       if (missingTakes.length === 0) {
-        alert('Nenhum take faltante — todos ja estao prontos. Use BAIXAR pra obter o ZIP.');
+        alert('Nenhum take faltante — todos já estão prontos. Use BAIXAR pra obter o ZIP.');
         return;
       }
       if (!confirm(
         `Retomar: re-disparar ${missingTakes.length} take(s) faltante(s)?\n\n` +
         `(idxs: ${missingTakes.map((t) => t.idx).join(', ')})\n\n` +
-        `Os ${item.successCount} ja prontos serao preservados. ZIP sera atualizado no final.`
+        `Os ${item.successCount} já prontos serão preservados. O ZIP será atualizado no final.`
       )) return;
 
       // Abre o preview deste batch automaticamente: a grade dinâmica (coelho +
@@ -2522,7 +2522,7 @@ function BrollHistorySection() {
                       onClick={handlePasteFromClipboard}
                       disabled={retrying === item.zipKey}
                       className="label-tech inline-flex items-center gap-1 rounded-md border border-violet/45 bg-violet/10 px-2.5 py-1 text-[10px] uppercase tracking-widest text-violet hover:bg-violet/20 hover:border-violet/65 disabled:opacity-40 transition"
-                      title="Colar JSON da area de transferencia (Ctrl+C antes)"
+                      title="Colar JSON da área de transferência (Ctrl+C antes)"
                     >
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />

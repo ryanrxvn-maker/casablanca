@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo } from 'react';
 import { logHistory } from '@/lib/history';
+import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
 import { BatchFileUpload } from '@/components/BatchFileUpload';
 import { AudioPlayer } from '@/components/AudioPlayer';
@@ -142,15 +143,18 @@ export default function NormalizadorPage() {
         } catch (e) {
           console.error('[normalizador]', job.file.name, e);
           if (isCancellationError(e)) {
-            updateJob(job.id, { state: 'error', error: 'Cancelado pelo usuario.' });
+            updateJob(job.id, { state: 'error', error: 'Cancelado por você.' });
             initial.slice(i + 1).forEach((rest) => {
-              updateJob(rest.id, { state: 'error', error: 'Cancelado pelo usuario.' });
+              updateJob(rest.id, { state: 'error', error: 'Cancelado por você.' });
             });
             break;
           }
           updateJob(job.id, {
             state: 'error',
-            error: (e as Error).message ?? 'Falha.',
+            error: toFriendlyMessage(
+              e,
+              'Não consegui normalizar esse arquivo. Tenta de novo — se repetir, ele pode estar corrompido ou muito pesado.',
+            ),
           });
         }
       }

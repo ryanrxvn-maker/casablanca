@@ -112,8 +112,9 @@ export async function POST(req: NextRequest) {
       });
     } catch (e) {
       await result.dispose();
+      console.error('[downloader] CDN stream', e);
       return NextResponse.json(
-        { error: e instanceof Error ? e.message : 'Falha no CDN.' },
+        { error: 'A fonte do vídeo falhou no meio do download. Tenta de novo em instantes.' },
         { status: 502 },
       );
     }
@@ -151,8 +152,9 @@ export async function POST(req: NextRequest) {
     });
   } catch (e) {
     await result.dispose();
+    console.error('[downloader] file stream', e);
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : 'Falha lendo o arquivo.' },
+      { error: 'Não consegui entregar o arquivo baixado. Tenta de novo em instantes.' },
       { status: 500 },
     );
   }

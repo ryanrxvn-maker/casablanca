@@ -76,7 +76,7 @@ export default function VerifyClient() {
       return;
     }
     if (token.length !== 6) {
-      setError('Digite o codigo completo de 6 digitos.');
+      setError('Digite o código completo de 6 dígitos.');
       return;
     }
     setLoading(true);
@@ -167,7 +167,7 @@ export default function VerifyClient() {
   return (
     <AuthShell
       title="Confirme seu email"
-      subtitle="Digite o codigo de 6 digitos que enviamos"
+      subtitle="Digite o código de 6 dígitos que enviamos"
       footer={
         <>
           Email errado?{' '}
@@ -195,7 +195,7 @@ export default function VerifyClient() {
         </div>
 
         <div>
-          <label className="label-field">Codigo</label>
+          <label className="label-field">Código</label>
           <div className="flex justify-between gap-2">
             {digits.map((d, i) => (
               <input
@@ -215,7 +215,7 @@ export default function VerifyClient() {
                     ? 'border-lime/60 text-lime'
                     : 'border-line-strong text-white')
                 }
-                aria-label={'Digito ' + (i + 1)}
+                aria-label={'Dígito ' + (i + 1)}
               />
             ))}
           </div>
@@ -245,7 +245,7 @@ export default function VerifyClient() {
         )}
 
         <button type="submit" className="btn-primary" disabled={loading}>
-          {loading ? 'Validando...' : 'Confirmar'}
+          {loading ? <span className="loading-dots">Validando</span> : 'Confirmar'}
         </button>
 
         <button

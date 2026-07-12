@@ -470,11 +470,11 @@ export default function CompressorPage() {
           n={2}
           icon={<IconStepSliders size={18} />}
           title="Qualidade"
-          hint="CRF mais alto = arquivo menor, mais perda visual"
+          hint="Quanto mais compressão, menor o arquivo (e maior a perda visual)"
           hue={HUE}
         >
           <ToolSlider
-            label="CRF"
+            label="Compressão"
             min={18}
             max={35}
             step={1}

@@ -262,8 +262,9 @@ export function Plans() {
         </div>
 
         <p className="mt-12 text-center text-[13px] text-text-muted">
-          Todos os planos rodam no seu computador. Seus arquivos nunca saem
-          da sua máquina.
+          O processamento pesado de vídeo e áudio roda no seu navegador —
+          seus arquivos ficam na sua máquina. Quando uma ferramenta usa um
+          serviço externo, a gente avisa na própria tela.
         </p>
         <p className="mx-auto mt-3 max-w-[620px] text-center text-[12px] text-text-dim">
           <strong className="text-text-muted">Mensal:</strong> assinatura que renova
@@ -571,7 +572,7 @@ function PlanCard({
                       : `R$ ${pricing.price}`}
                 </span>
                 {isFree ? (
-                  <span className="text-[15px] text-text-muted">/sempre</span>
+                  <span className="text-[15px] text-text-muted">/grátis</span>
                 ) : billing === 'annual' ? (
                   <span className="text-[15px] text-text-muted">/ano</span>
                 ) : (
@@ -759,6 +760,7 @@ function PlanCard({
  */
 function PlanCTA({ plan, billing }: { plan: Plan; billing: Billing }) {
   const [loading, setLoading] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
   const sharedClass =
     'plan-cta group/btn relative block w-full overflow-hidden rounded-full border px-5 py-3.5 text-center text-[13.5px] font-bold transition-all duration-300 hover:-translate-y-[1px] disabled:cursor-wait disabled:opacity-80';
@@ -788,6 +790,7 @@ function PlanCTA({ plan, billing }: { plan: Plan; billing: Billing }) {
 
   const startCheckout = async () => {
     if (loading) return;
+    setCheckoutError(null);
     setLoading(true);
     try {
       const res = await fetch('/api/billing/checkout', {
@@ -808,27 +811,37 @@ function PlanCTA({ plan, billing }: { plan: Plan; billing: Billing }) {
         window.location.href = data.url;
         return;
       }
-      alert(data.error || 'Não foi possível iniciar o checkout. Tente de novo.');
+      setCheckoutError(data.error || 'Não foi possível iniciar o checkout. Tente de novo.');
     } catch {
-      alert('Falha de conexão ao iniciar o checkout.');
+      setCheckoutError('Falha de conexão ao iniciar o checkout. Confira a internet e tente de novo.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <button
-      type="button"
-      onClick={startCheckout}
-      disabled={loading}
-      className={sharedClass}
-      style={sharedStyle}
-    >
-      <span className="relative z-10">
-        {loading ? 'Redirecionando…' : plan.cta}
-      </span>
-      {sheen}
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={startCheckout}
+        disabled={loading}
+        className={sharedClass}
+        style={sharedStyle}
+      >
+        <span className="relative z-10">
+          {loading ? 'Redirecionando…' : plan.cta}
+        </span>
+        {sheen}
+      </button>
+      {checkoutError ? (
+        <div
+          role="alert"
+          className="mt-2 rounded-[10px] border border-red-500/40 bg-red-500/10 px-3 py-2 text-center text-[12px] text-red-300"
+        >
+          {checkoutError}
+        </div>
+      ) : null}
+    </>
   );
 }
 

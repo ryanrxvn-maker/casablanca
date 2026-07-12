@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo } from 'react';
 import { logHistory } from '@/lib/history';
+import { toFriendlyMessage, FriendlyError } from '@/lib/friendly-error';
 import { keepSegmentsFromRemovals } from '@/lib/decupagem-matcher';
 import { ToolShell } from '@/components/ToolShell';
 import { ToolHeroVideo } from '@/components/ToolHeroVideo';
@@ -221,12 +222,13 @@ function DecupagemCopyInner() {
       });
       const json = (await res.json()) as { text?: string; error?: string };
       if (!res.ok || !json.text) {
-        throw new Error(json.error || 'Falha ao transcrever.');
+        throw new FriendlyError(json.error || 'Não consegui transcrever agora. Tenta de novo em instantes.');
       }
       setTranscript(json.text);
     } catch (e) {
+      console.error(e);
       setTranscript(
-        '[erro] ' + ((e as Error)?.message ?? 'Falha ao transcrever o resultado.'),
+        toFriendlyMessage(e, 'Não consegui transcrever o resultado. Tenta de novo em instantes.'),
       );
     } finally {
       setTranscribing(false);
@@ -269,7 +271,7 @@ function DecupagemCopyInner() {
       );
 
       // Step 1: Extract audio
-      setStage('Extraindo audio do video...');
+      setStage('Extraindo áudio do vídeo...');
       setProgress(0.12);
       const audio = await extractAudioForTranscription(
         leveledFile,
@@ -281,8 +283,8 @@ function DecupagemCopyInner() {
       );
 
       if (audio.size > 4_400_000) {
-        throw new Error(
-          `Audio extraido tem ${formatBytes(audio.size)} — excede o limite (~4.4MB) do servidor. Use video mais curto.`,
+        throw new FriendlyError(
+          `O áudio ficou grande demais pra enviar (${formatBytes(audio.size)}). Comprima o vídeo primeiro ou use um trecho mais curto.`,
         );
       }
 
@@ -314,17 +316,17 @@ function DecupagemCopyInner() {
         json = JSON.parse(text);
       } catch {
         if (/Request Entity Too Large/i.test(text)) {
-          throw new Error(
-            'Audio acima do limite do servidor. Comprima o video primeiro.',
+          throw new FriendlyError(
+            'O áudio passou do limite de envio. Comprima o vídeo primeiro e tenta de novo.',
           );
         }
-        throw new Error(
-          `Resposta nao-JSON do servidor (HTTP ${res.status}): ${text.slice(0, 100)}`,
+        throw new FriendlyError(
+          'O servidor não respondeu como esperado. Tenta de novo em instantes.',
         );
       }
 
       if (!res.ok || !json.cuts) {
-        throw new Error(json.error || 'Falha na transcricao/matching.');
+        throw new FriendlyError(json.error || 'Não consegui alinhar a copy com o vídeo. Tenta de novo em instantes.');
       }
 
       setCuts(json.cuts);
@@ -333,7 +335,7 @@ function DecupagemCopyInner() {
         typeof json.avgConfidence === 'number' ? json.avgConfidence : null,
       );
       setStage(
-        `${json.cuts.length} frase(s) alinhada(s) (${json.provider ?? '?'}). Cortando + concatenando...`,
+        `${json.cuts.length} frase(s) alinhada(s). Cortando e juntando...`,
       );
       setProgress(0.5);
 
@@ -498,7 +500,7 @@ function DecupagemCopyInner() {
       // Remove pausas naturais entre frases sem dividir cuts.
       // Limiar FIXO em SILENCE_TOLERANCE (0.10s).
       if (removeSilence) {
-        setStage('Removendo silencios globais do video final...');
+        setStage('Removendo silêncios do vídeo final...');
         setProgress(0.9);
         try {
           out = await removeAvatarSilences(out, SILENCE_TOLERANCE, {
@@ -520,11 +522,11 @@ function DecupagemCopyInner() {
     } catch (e) {
       console.error(e);
       if (isCancellationError(e) || (e as Error)?.name === 'AbortError') {
-        setStage('Cancelado pelo usuario.');
+        setStage('Cancelado por você.');
         setError(null);
       } else {
         setError(
-          (e as Error)?.message ?? 'Falha ao decupar pela copy.',
+          toFriendlyMessage(e, 'Não consegui decupar pela copy. Tenta de novo em instantes.'),
         );
         setStage(null);
       }
@@ -550,7 +552,7 @@ function DecupagemCopyInner() {
       <ToolHeroVideo
         src="/cards/decupagem-inteligente.mp4"
         poster="/cards/decupagem-inteligente.jpg"
-        eyebrow="Whisper + IA"
+        eyebrow="Corte por IA"
         title="Decupagem Inteligente"
         subtitle="IA lê a copy. Escolhe o take certo."
         glow="rgba(232,121,249,0.5)"
@@ -567,7 +569,7 @@ function DecupagemCopyInner() {
               reset();
               setFile(f);
             }}
-            hint="MP4, MOV, WEBM, MKV — ate 800MB e 40min"
+            hint="MP4, MOV, WEBM, MKV — até 800MB e 40min"
           />
           {file ? (
             <div className="mt-3 grid grid-cols-2 gap-2.5 md:grid-cols-3">
@@ -724,9 +726,9 @@ function DecupagemCopyInner() {
                   onClick={transcribeResult}
                   disabled={transcribing}
                   className="btn-secondary !py-2 text-xs"
-                  title="Transcreve o resultado (AssemblyAI) pra você conferir sem subir manualmente"
+                  title="Transcreve o resultado pra você conferir sem subir manualmente"
                 >
-                  {transcribing ? 'Transcrevendo…' : 'Transcrever (AssemblyAI)'}
+                  {transcribing ? 'Transcrevendo…' : 'Transcrever resultado'}
                 </button>
                 <button onClick={download} className="btn-primary !py-2 text-xs">
                   Baixar MP4
@@ -735,8 +737,18 @@ function DecupagemCopyInner() {
             </div>
 
             <div className="mb-4 flex flex-wrap items-center gap-2 text-[11px]">
-              <span className="label-tech rounded-full border border-line bg-bg px-2 py-0.5 tracking-widest text-text-muted">
-                motor: <span className="text-white">{provider ?? '?'}</span>
+              <span
+                className="label-tech rounded-full border border-line bg-bg px-2 py-0.5 tracking-widest text-text-muted"
+                title="Qual motor de transcrição foi usado nesta geração"
+              >
+                motor:{' '}
+                <span className="text-white">
+                  {provider === 'assemblyai'
+                    ? 'alta precisão'
+                    : provider === 'groq'
+                      ? 'turbo'
+                      : provider ?? '?'}
+                </span>
               </span>
               {avgConfidence !== null ? (
                 <span
@@ -753,7 +765,7 @@ function DecupagemCopyInner() {
                 </span>
               ) : (
                 <span className="label-tech rounded-full border border-line bg-bg px-2 py-0.5 tracking-widest text-text-muted">
-                  confiança: indisponível (use AssemblyAI p/ medir)
+                  confiança: indisponível nesta transcrição
                 </span>
               )}
               {auditReport ? (
@@ -798,7 +810,7 @@ function DecupagemCopyInner() {
               <div className="mt-4">
                 <div className="mb-1.5 flex items-center justify-between">
                   <h4 className="text-[11px] uppercase tracking-widest text-text-muted">
-                    Transcrição do resultado (AssemblyAI)
+                    Transcrição do resultado
                   </h4>
                   <button
                     type="button"
@@ -819,7 +831,7 @@ function DecupagemCopyInner() {
 
             <div className="mt-4">
               <h4 className="mb-2 text-[11px] uppercase tracking-widest text-text-muted">
-                Cortes detectados (debug)
+                Detalhamento dos cortes
               </h4>
               <ul className="grid gap-1.5">
                 {cuts.map((c, i) => {

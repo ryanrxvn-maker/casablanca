@@ -87,7 +87,11 @@ export async function DELETE(req: NextRequest) {
     })
     .eq('user_id', userData.user.id);
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500, headers: cors });
+    console.error('[auto-broll-v2/save-creds] clear', error);
+    return NextResponse.json(
+      { error: 'Não consegui limpar a conexão agora. Tenta de novo em instantes.' },
+      { status: 500, headers: cors },
+    );
   }
   return NextResponse.json({ ok: true }, { headers: cors });
 }

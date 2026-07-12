@@ -207,7 +207,7 @@ export default function LipsyncHistoryPage() {
   }, [entries, period, kindFilter, statusFilter, search]);
 
   function removeEntry(e: Entry) {
-    if (!confirm(`Remover "${e.taskName}" do historico?`)) return;
+    if (!confirm(`Remover "${e.taskName}" do histórico?`)) return;
     if (e.kind === 'batch') {
       const cur = readBatches();
       const taskId = (e.raw as BatchTaskState).taskId;
@@ -222,7 +222,7 @@ export default function LipsyncHistoryPage() {
   }
 
   function clearAllFailed() {
-    if (!confirm('Limpar todas entradas com status failed?')) return;
+    if (!confirm('Limpar todas as entradas que falharam?')) return;
     const batches = readBatches();
     for (const k of Object.keys(batches)) {
       if (batches[k].phase === 'failed') delete batches[k];
@@ -245,7 +245,7 @@ export default function LipsyncHistoryPage() {
 
   return (
     <ToolShell
-      title="Histórico"
+      title="Histórico de avatares"
       eyebrow="AVATAR"
       description="Todo avatar gerado por aqui fica aqui. Pra você revisar quando quiser."
       hue="rgba(168,85,247,0.42)"
@@ -258,7 +258,7 @@ export default function LipsyncHistoryPage() {
             <div className="font-bold text-white text-lg">{stats.total}</div>
           </div>
           <div className="rounded-[10px] border border-lime/40 bg-lime/5 px-3 py-2">
-            <div className="label-tech text-[9px] uppercase tracking-widest text-lime">Concluidos</div>
+            <div className="label-tech text-[9px] uppercase tracking-widest text-lime">Concluídos</div>
             <div className="font-bold text-lime text-lg">{stats.done}</div>
           </div>
           <div className="rounded-[10px] border border-cyan-500/40 bg-cyan-500/5 px-3 py-2">
@@ -270,7 +270,7 @@ export default function LipsyncHistoryPage() {
             <div className="font-bold text-red-300 text-lg">{stats.failed}</div>
           </div>
           <div className="rounded-[10px] border border-purple-500/40 bg-purple-500/5 px-3 py-2">
-            <div className="label-tech text-[9px] uppercase tracking-widest text-purple-300">Videos gerados</div>
+            <div className="label-tech text-[9px] uppercase tracking-widest text-purple-300">Vídeos gerados</div>
             <div className="font-bold text-purple-200 text-lg">{stats.videosDone}</div>
           </div>
         </div>
@@ -289,11 +289,11 @@ export default function LipsyncHistoryPage() {
             onChange={(e) => setPeriod(e.target.value as Period)}
             className="input-field text-xs"
           >
-            <option value="all">Todo o periodo</option>
-            <option value="7d">Ultimos 7 dias</option>
-            <option value="30d">Ultimos 30 dias</option>
-            <option value="90d">Ultimos 90 dias</option>
-            <option value="180d">Ultimos 180 dias</option>
+            <option value="all">Todo o período</option>
+            <option value="7d">Últimos 7 dias</option>
+            <option value="30d">Últimos 30 dias</option>
+            <option value="90d">Últimos 90 dias</option>
+            <option value="180d">Últimos 180 dias</option>
           </select>
           <div className="flex gap-1">
             <select
@@ -302,8 +302,8 @@ export default function LipsyncHistoryPage() {
               className="input-field text-xs flex-1"
             >
               <option value="all">Tipo: todos</option>
-              <option value="batch">Batch (ClickUp Pilot)</option>
-              <option value="va">VA (Variacao Avatar)</option>
+              <option value="batch">Lote (ClickUp Pilot)</option>
+              <option value="va">Variação de Avatar</option>
             </select>
             <select
               value={statusFilter}
@@ -311,7 +311,7 @@ export default function LipsyncHistoryPage() {
               className="input-field text-xs flex-1"
             >
               <option value="all">Status: todos</option>
-              <option value="done">Concluido</option>
+              <option value="done">Concluído</option>
               <option value="in_progress">Em andamento</option>
               <option value="failed">Falha</option>
             </select>
@@ -348,7 +348,7 @@ export default function LipsyncHistoryPage() {
         {filtered.length === 0 ? (
           <div className="rounded-[14px] border border-dashed border-line-strong bg-bg-soft/20 p-10 text-center">
             <div className="label-tech text-[11px] uppercase tracking-widest text-text-muted">
-              Nenhum lipsync no historico
+              Nenhum lipsync no histórico
             </div>
             <div className="mt-2 text-[13px] text-text-muted">
               Gere lipsyncs via <Link href="/tools/clickup-pilot" className="text-lime hover:underline">ClickUp Pilot</Link> — eles aparecem aqui automaticamente.
@@ -364,7 +364,7 @@ export default function LipsyncHistoryPage() {
                 e.status === 'failed' ? 'border-red-500/40 bg-red-500/10 text-red-300' :
                 'border-cyan-500/40 bg-cyan-500/10 text-cyan-200';
               const statusLabel =
-                e.status === 'done' ? 'Concluido' :
+                e.status === 'done' ? 'Concluído' :
                 e.status === 'failed' ? 'Falhou' : 'Em andamento';
 
               return (
@@ -422,7 +422,7 @@ export default function LipsyncHistoryPage() {
                                   try {
                                     const rec = await loadZip(idbKey);
                                     if (!rec) {
-                                      alert('ZIP nao encontrado no IndexedDB (gerado em sessao muito antiga ou IDB foi limpo).');
+                                      alert('Esse pacote não está mais salvo no navegador (é muito antigo ou o armazenamento foi limpo).');
                                       return;
                                     }
                                     // Cria <a> temporario pra download
@@ -436,11 +436,12 @@ export default function LipsyncHistoryPage() {
                                       URL.revokeObjectURL(rec.blobUrl);
                                     }, 100);
                                   } catch (err: any) {
-                                    alert('Erro carregando ZIP: ' + (err?.message || err));
+                                    console.error('[lipsync-history] loadZip', err);
+                                    alert('Não consegui carregar esse pacote agora. Tenta de novo em instantes.');
                                   }
                                 }}
                                 className="label-tech rounded border border-cyan-500/40 bg-cyan-500/10 px-2 py-1 text-[10px] uppercase tracking-widest text-cyan-200 hover:bg-cyan-500/20"
-                                title="Carrega ZIP do IndexedDB (persistido entre reloads)"
+                                title="Recupera o ZIP salvo no navegador (sobrevive ao recarregar a página)"
                               >
                                 ↓ {label} (do disco)
                               </button>
@@ -523,11 +524,11 @@ export default function LipsyncHistoryPage() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => { if (confirm(`DEBUG: reiniciar "${e.taskName}" do ZERO? Re-dispara tudo no HeyGen.`)) { sendJobCommand('heygen', (e.raw as BatchTaskState).taskId, 'debug'); navigateToEngine(); } }}
+                            onClick={() => { if (confirm(`Reiniciar "${e.taskName}" do ZERO? Isso re-dispara tudo no HeyGen.`)) { sendJobCommand('heygen', (e.raw as BatchTaskState).taskId, 'debug'); navigateToEngine(); } }}
                             className="label-tech rounded-md border border-fuchsia-500/50 bg-fuchsia-500/10 px-3 py-1.5 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:bg-fuchsia-500/20"
-                            title="DEBUG (reserva p/ bugs): reinicia a geracao de LIPS do zero no motor"
+                            title="Último recurso: reinicia a geração desse lote do zero"
                           >
-                            🐞 Debug
+                            ↺ Reiniciar do zero
                           </button>
                         </>
                       ) : null}
@@ -549,10 +550,10 @@ export default function LipsyncHistoryPage() {
         <div className="rounded-[14px] border border-dashed border-line-strong bg-bg-soft/10 p-3">
           <div className="label-tech text-[10px] uppercase tracking-widest text-text-muted">Notas</div>
           <div className="mt-1 text-[11px] text-text-muted leading-relaxed">
-            • Persistencia local — depende do localStorage do browser. Limpar dados do site apaga tudo.<br/>
-            • ZIPs marcados como &quot;perdido&quot; foram gerados numa sessao anterior; a Blob URL foi
-            descartada no reload. Os videoIds das partes ficam salvos, entao da pra re-gerar o ZIP
-            via &quot;Retomar&quot; no ClickUp Pilot enquanto a retencao HeyGen estiver ativa (60 dias).<br/>
+            • O histórico fica salvo no seu navegador. Limpar os dados do site apaga tudo.<br/>
+            • ZIPs marcados como &quot;perdido&quot; foram gerados numa sessão anterior e o link de
+            download se perdeu. Os vídeos em si ficam salvos, então dá pra re-gerar o ZIP
+            via &quot;Retomar&quot; no ClickUp Pilot por até 60 dias após a geração.<br/>
             • Pra ver status atual ao vivo dos batches rodando, use{' '}
             <Link href="/tools/background" className="text-fuchsia-300 hover:underline">Background</Link>.
           </div>

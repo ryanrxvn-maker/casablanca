@@ -235,7 +235,7 @@ export default function RegisterPage() {
             </Link>{' '}
             e a{' '}
             <Link href="/politica" target="_blank" className="text-violet hover:text-white">
-              Política de Cancelamento
+              Política de Assinatura e Cancelamento
             </Link>
             .
           </span>

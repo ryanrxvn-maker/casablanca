@@ -23,11 +23,11 @@ export default function TrocarSenhaPage() {
     e.preventDefault();
     setError(null);
     if (pw.length < 8) {
-      setError('A senha precisa ter no minimo 8 caracteres.');
+      setError('A senha precisa ter no mínimo 8 caracteres.');
       return;
     }
     if (pw !== pw2) {
-      setError('As senhas nao batem. Confira e tente de novo.');
+      setError('As senhas não batem. Confira e tente de novo.');
       return;
     }
     setLoading(true);
@@ -64,7 +64,7 @@ export default function TrocarSenhaPage() {
   return (
     <AuthShell
       title="Crie sua senha"
-      subtitle="A senha que voce recebeu e provisoria. Defina uma senha so sua agora — depois disso, nem o admin tera acesso a ela."
+      subtitle="A senha que você recebeu é provisória. Defina uma senha só sua agora — depois disso, nem o admin terá acesso a ela."
     >
       <form onSubmit={submit} className="flex flex-col gap-4">
         <div>
@@ -111,11 +111,11 @@ export default function TrocarSenhaPage() {
         )}
 
         <button type="submit" className="btn-primary" disabled={loading}>
-          {loading ? 'Salvando...' : 'Salvar e entrar'}
+          {loading ? <span className="loading-dots">Salvando</span> : 'Salvar e entrar'}
         </button>
 
         <p className="text-center text-[11px] text-text-muted">
-          Sua nova senha fica salva so com voce. Use uma senha forte e nao
+          Sua nova senha fica salva só com você. Use uma senha forte e não
           compartilhe.
         </p>
       </form>

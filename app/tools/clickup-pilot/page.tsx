@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { logHistory } from '@/lib/history';
+import { toFriendlyMessage } from '@/lib/friendly-error';
 import { ToolShell } from '@/components/ToolShell';
 import { useToolState } from '@/components/ToolsStateProvider';
 import {
@@ -973,7 +974,7 @@ function ClickUpPilotInner() {
       }
       // Auto-pick editor handled in separate useEffect (avoid race with state)
     } catch (e) {
-      setError(`Falha ao carregar teams: ${(e as Error)?.message}`);
+      setError(toFriendlyMessage(e, 'Não consegui conectar no seu ClickUp agora. Confira o token e tenta de novo.'));
     } finally {
       setLoadingTeams(false);
     }
@@ -1262,7 +1263,7 @@ function ClickUpPilotInner() {
         }
       }
     } catch (e) {
-      setError(`Falha ao listar tasks: ${(e as Error)?.message}`);
+      setError(toFriendlyMessage(e, 'Não consegui listar suas tasks agora. Tenta de novo em instantes.'));
     } finally {
       setLoadingTasks(false);
     }
@@ -1287,7 +1288,7 @@ function ClickUpPilotInner() {
       const d = await getTask(t.id);
       setTaskDetail(d);
     } catch (e) {
-      setError(`Falha ao carregar task: ${(e as Error)?.message}`);
+      setError(toFriendlyMessage(e, 'Não consegui abrir essa task agora. Tenta de novo em instantes.'));
     }
   }
 
@@ -1716,7 +1717,7 @@ function ClickUpPilotInner() {
             [task.id]: { ...prev[task.id], docUrl: docUrl || undefined, taskUrl: (det as any).url || (task as any).url || undefined },
           }));
           if (!docUrl) {
-            setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: 'Sem doc URL (custom field "DOC DA COPY" vazio + sem link na descricao)' } }));
+            setTaskAnalyses((prev) => ({ ...prev, [task.id]: { ...prev[task.id], status: 'error', error: 'Task sem link de copy: preencha o campo "DOC DA COPY" ou cole o link do doc na descrição.' } }));
             continue;
           }
           // 2. Fetch doc via extensao (sessao Google logada) + Drive links pros videos
@@ -3265,7 +3266,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     let genId = state.genId;
     const validParts = state.parts.filter((p) => p.videoId);
     if (validParts.length === 0) {
-      setError('Sem videoIds salvos pra retomar — task tem que ser disparada do zero.');
+      setError('Não achei os vídeos desse disparo pra retomar — essa task precisa ser disparada do zero.');
       return;
     }
     batchCancelRef.current[taskId] = false;
@@ -3890,7 +3891,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const withJson = cands.filter((id) => (taskMagnificJson[id] || '').trim());
       const missing = cands.filter((id) => !(taskMagnificJson[id] || '').trim());
       if (withJson.length === 0) {
-        setError('Cole o JSON de B-rolls nas tasks (botao "+") antes de iniciar o Only Magnific.');
+        setError('Cole o JSON de B-rolls nas tasks (botão "+") antes de iniciar o Only Magnific.');
         return;
       }
       setError(
@@ -5233,7 +5234,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       const { loadZip } = await import('@/lib/zip-store');
       const rec = await loadZip(job.zipKey);
       if (!rec) {
-        setError('ZIP Magnific nao encontrado no armazenamento local.');
+        setError('Esse pacote de B-rolls não está mais salvo no navegador. Gere de novo pela task.');
         return;
       }
       const a = document.createElement('a');
@@ -5404,7 +5405,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     const a = taskAnalyses[taskId];
     const slot = a?.roleSlots?.[roleIdx];
     if (!slot?.briefingFileId) {
-      setError('Sem fileId do video do briefing — Claude precisa de uma imagem de referencia.');
+      setError('O briefing não tem vídeo anexado — a busca visual precisa de uma imagem de referência.');
       setErrorAction(null);
       return;
     }
@@ -5445,7 +5446,7 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
             setErrorAction({ label: 'Configurar chave', href: '/configuracoes/api' });
             return;
           }
-          setError(`IA Search falhou: ${j?.error || j?.detail || `HTTP ${r.status}`}`);
+          setError(`A busca visual falhou: ${j?.error || 'tenta de novo em instantes.'}`);
           setErrorAction(null);
           return;
         }
@@ -9273,7 +9274,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                           {multiRole ? (
                                             <span
                                               className="mono rounded-full border border-fuchsia-500/40 bg-fuchsia-500/10 px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest text-fuchsia-200"
-                                              title="AD original tem 2+ avatares: a diarização detecta quem fala em cada trecho e manda cada um pro lipsync com o avatar do papel certo"
+                                              title="AD original tem 2+ avatares: a gente identifica quem fala em cada trecho e manda cada um pro lipsync com o avatar do papel certo"
                                             >
                                               {roles.length} locutores · diarização auto
                                             </span>
@@ -10077,7 +10078,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                                     onClick={() => autoFetchDoc(u)}
                                     disabled={fetchingDoc}
                                     className="mono shrink-0 rounded border border-fuchsia-500/40 bg-fuchsia-500/10 px-2 py-0.5 text-[10px] uppercase tracking-widest text-fuchsia-200 hover:border-fuchsia-500 hover:bg-fuchsia-500/20 disabled:opacity-50"
-                                    title="Fetch read-only via Google Docs export. Doc precisa estar 'Qualquer pessoa com link pode ver'."
+                                    title="A gente só lê o doc, nunca edita. Ele precisa estar como 'Qualquer pessoa com o link pode ver'."
                                   >
                                     {fetchingDoc ? 'Buscando...' : '⬇ Buscar automatico'}
                                   </button>
@@ -10100,7 +10101,7 @@ ${items.map((i) => `- ${i.filename}: ${i.blob ? 'OK' : 'ERRO (' + (i.error || 's
                     value={docContent}
                     onChange={(e) => setDocContent(e.target.value)}
                     rows={8}
-                    placeholder="Briefing completo do doc Google. O parser vai achar a secao desse AD pelo nome."
+                    placeholder="Briefing completo do doc Google. A gente acha a seção desse AD pelo nome."
                     className="input-field resize-y font-mono text-xs"
                   />
                   <div className="mt-2 flex flex-wrap gap-2">
