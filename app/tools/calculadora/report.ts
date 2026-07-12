@@ -24,6 +24,7 @@ export type BudgetReportPix = {
 };
 
 export type BudgetReportData = {
+  /** Usado SÓ no nome do arquivo quando não há cliente — não aparece no PDF. */
   docNumber: string;
   dateLabel: string;
   cliente: string;
@@ -63,15 +64,11 @@ const REPORT_CSS = `
   .ae-report .topbar{ height:6px; background:#6d4ee8;
     background-image:linear-gradient(90deg,#8b6cf6,#6d4ee8 48%,#b9c78a); }
 
-  /* Cabeçalho */
-  .ae-report .head{ display:flex; justify-content:flex-end; align-items:flex-start; padding:15mm 16mm 0; }
-  .ae-report .doc{ text-align:right; }
-  .ae-report .kicker{ font-size:8.5px; font-weight:800; letter-spacing:.32em; text-transform:uppercase; color:var(--violet); }
-  .ae-report .doc h1{ margin:3px 0 13px; font-family:'Fraunces',serif; font-weight:600; font-size:36px; letter-spacing:-.02em; color:var(--ink); line-height:1; }
-  .ae-report .doc-meta{ display:flex; gap:20px; justify-content:flex-end; }
-  .ae-report .doc-meta > div{ display:flex; flex-direction:column; align-items:flex-end; }
-  .ae-report .doc-meta span{ font-size:7.5px; font-weight:800; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); }
-  .ae-report .doc-meta b{ font-size:11px; font-weight:700; color:var(--ink); margin-top:3px; }
+  /* Cabeçalho — sem logo, a TIPOGRAFIA é a identidade: data pequena em
+     violeta (kicker) e um "Orçamento" grande em serifa logo abaixo. */
+  .ae-report .head{ padding:17mm 16mm 0; }
+  .ae-report .kicker{ font-size:9px; font-weight:800; letter-spacing:.34em; text-transform:uppercase; color:var(--violet); }
+  .ae-report .head h1{ margin-top:8px; font-family:'Fraunces',serif; font-weight:600; font-size:46px; letter-spacing:-.025em; color:var(--ink); line-height:1; }
 
   .ae-report .rule{ height:1px; background:var(--line); margin:16px 16mm 0; }
 
@@ -124,13 +121,8 @@ const REPORT_CSS = `
   .ae-report .pix-cc-lbl{ font-size:7.5px; font-weight:800; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); margin:8px 0 3px; }
   .ae-report .pix-cc{ font-size:7.5px; line-height:1.5; color:var(--sub); word-break:break-all; background:#fff; border:1px solid var(--line); border-radius:9px; padding:7px 9px; }
 
-  /* Condições + rodapé */
-  .ae-report .notes{ margin:20px 16mm 0; padding:15px 17px; border:1px solid var(--line); border-radius:14px; background:var(--soft); }
-  .ae-report .notes .nt{ font-size:8px; font-weight:800; letter-spacing:.2em; text-transform:uppercase; color:var(--faint); margin-bottom:8px; }
-  .ae-report .notes ul{ padding-left:15px; }
-  .ae-report .notes li{ font-size:10px; color:var(--sub); line-height:1.85; }
-  .ae-report .footer{ display:flex; justify-content:flex-end; align-items:center; margin:20px 16mm 0; padding-top:13px; border-top:1px solid var(--line); }
-  .ae-report .fnum{ font-size:8.5px; color:var(--faint); font-family:'JetBrains Mono',ui-monospace,monospace; letter-spacing:.05em; }
+  /* Nota de rodapé — única linha discreta, sem box nem numeração */
+  .ae-report .footnote{ margin:26px 16mm 0; padding-top:13px; border-top:1px solid var(--line); font-size:9.5px; letter-spacing:.03em; color:var(--faint); text-align:center; }
 `;
 
 function reportMarkup(d: BudgetReportData, pixCardHtml: string): string {
@@ -160,19 +152,13 @@ function reportMarkup(d: BudgetReportData, pixCardHtml: string): string {
       ? `<div class="sum-row"><span>Desconto <span class="sum-tag">${d.descontoPct}%</span></span><span class="mono sum-neg">${esc(d.descontoLabel)}</span></div>`
       : '';
 
-  const adsTxt = `${d.qtdAds} AD${d.qtdAds === 1 ? '' : 's'}`;
+  const adsTxt = `${d.qtdAds} ${d.qtdAds === 1 ? 'item' : 'itens'}`;
 
   return `
     <div class="topbar"></div>
     <div class="head">
-      <div class="doc">
-        <div class="kicker">Orçamento</div>
-        <h1>Proposta</h1>
-        <div class="doc-meta">
-          <div><span>Nº</span><b>${esc(d.docNumber)}</b></div>
-          <div><span>Data</span><b>${esc(d.dateLabel)}</b></div>
-        </div>
-      </div>
+      <div class="kicker">${esc(d.dateLabel)}</div>
+      <h1>Orçamento</h1>
     </div>
     <div class="rule"></div>
     <div class="parties">
@@ -181,12 +167,12 @@ function reportMarkup(d: BudgetReportData, pixCardHtml: string): string {
         <div class="party-name">${clienteName}</div>
       </div>
       <div class="quickstats">
-        <div class="qs"><span>ADs</span><b>${d.qtdAds}</b></div>
+        <div class="qs"><span>Itens</span><b>${d.qtdAds}</b></div>
         <div class="qs"><span>Duração</span><b>${esc(d.duracaoTotalLabel)}</b></div>
         <div class="qs"><span>Valor / min</span><b>${esc(d.vpmLabel)}</b></div>
       </div>
     </div>
-    <div class="section-label">Itens do orçamento · ${adsTxt}</div>
+    <div class="section-label">Itens do orçamento</div>
     <table>
       <thead><tr><th>Item</th><th class="r">Duração</th><th class="r">Valor</th></tr></thead>
       <tbody>${rows}</tbody>
@@ -202,16 +188,7 @@ function reportMarkup(d: BudgetReportData, pixCardHtml: string): string {
       </div>
     </div>
     ${pixCardHtml}
-    <div class="notes">
-      <div class="nt">Condições</div>
-      <ul>
-        <li>Precificação por minuto de vídeo entregue. Valores em reais (BRL).</li>
-        <li>Prazo e forma de pagamento combinados na aprovação da proposta.</li>
-      </ul>
-    </div>
-    <div class="footer">
-      <div class="fnum">${esc(d.docNumber)}</div>
-    </div>
+    <div class="footnote">Precificação por minuto de vídeo entregue · Valores em reais (BRL)</div>
   `;
 }
 
