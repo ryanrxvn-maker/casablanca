@@ -29,7 +29,8 @@ import { EmojiPickerButton } from './emoji-picker';
 // carregada local. Em Apple o sistema entrega SF Pro nativo pela stack abaixo.
 export const uiFont = Inter({
   subsets: ['latin'],
-  weight: ['400', '500', '600', '700'],
+  // o 800 é usado pelos selos LIVE/AO VIVO das lives (desenhados em canvas)
+  weight: ['400', '500', '600', '700', '800'],
   display: 'swap',
   variable: '--font-fp',
 });
@@ -68,7 +69,7 @@ export const defaultStatus: StatusCfg = {
   airplane: false,
 };
 
-export type ModelCategory = 'story' | 'chat' | 'post' | 'notif' | 'news' | 'sites';
+export type ModelCategory = 'story' | 'chat' | 'post' | 'notif' | 'live' | 'news' | 'sites';
 
 /** Dimensões do palco (usadas pelo shell pra escalar preview e exportar). */
 export type StageDims = { stageW: number; ratio: number; exportW: number };
@@ -104,12 +105,12 @@ export type FakeModel<S = any> = {
 // quando o celular está em Android. Assim o print sai com o emoji CERTO em
 // qualquer máquina, e o html2canvas rasteriza as imagens (CORS liberado no
 // jsdelivr). O nome do arquivo é o codepoint em hex (com hífen p/ sequências).
-const EMOJI_RE =
+export const EMOJI_RE =
   /(\p{Regional_Indicator}\p{Regional_Indicator}|\p{Extended_Pictographic}(?:️|‍\p{Extended_Pictographic})*)/gu;
 
 export type EmojiSet = 'apple' | 'google';
 
-function toUnified(emoji: string) {
+export function toUnified(emoji: string) {
   return [...emoji].map((c) => c.codePointAt(0)!.toString(16)).join('-');
 }
 
@@ -292,6 +293,51 @@ export async function renderNodeToCanvas(
       }
     });
   };
+  // ── Ellipsis-shim do html2canvas ──
+  // O html2canvas NÃO desenha o "…" do `text-overflow: ellipsis`: texto de 1
+  // linha que ESTOURA a caixa sai FATIADO no limite (letra cortada ao meio) no
+  // PNG, enquanto a prévia termina em reticências — "texto comido" no download.
+  // Correção: pro texto PURO (sem filhos-elemento) com nowrap+ellipsis que
+  // realmente estoura, calculamos AQUI a substring que cabe com "…" (medida com
+  // a MESMA fonte via canvas) e trocamos o texto SÓ NO CLONE de cada render —
+  // o PNG sai com as mesmas reticências da prévia e nenhuma letra fatiada.
+  const ellipEls: HTMLElement[] = [];
+  const computeEllipsisShims = () => {
+    const meas = document.createElement('canvas').getContext('2d');
+    if (!meas) return;
+    node.querySelectorAll<HTMLElement>('*').forEach((el) => {
+      const kids = Array.from(el.childNodes);
+      if (kids.some((n) => n.nodeType === 1)) return; // misto (emoji <img> etc.): fora
+      const text = el.textContent || '';
+      if (!text.trim()) return;
+      const cs = getComputedStyle(el);
+      if (cs.whiteSpace !== 'nowrap' || cs.textOverflow !== 'ellipsis') return;
+      if (cs.overflowX !== 'hidden' && cs.overflowX !== 'clip') return;
+      if (el.scrollWidth <= el.clientWidth + 1) return;
+      meas.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+      if (cs.letterSpacing !== 'normal') (meas as any).letterSpacing = cs.letterSpacing;
+      const avail =
+        el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+      const chars = Array.from(text); // por code point (não fatia emoji/acento)
+      let lo = 0;
+      let hi = chars.length;
+      while (lo < hi) {
+        const mid = Math.ceil((lo + hi) / 2);
+        const w = meas.measureText(chars.slice(0, mid).join('').replace(/\s+$/, '') + '…').width;
+        if (w <= avail) lo = mid;
+        else hi = mid - 1;
+      }
+      if (lo <= 0 || lo >= chars.length) return;
+      el.dataset.fpEllip = chars.slice(0, lo).join('').replace(/\s+$/, '') + '…';
+      ellipEls.push(el);
+    });
+  };
+  const applyEllipsisInClone = (root: HTMLElement) => {
+    root.querySelectorAll<HTMLElement>('[data-fp-ellip]').forEach((el) => {
+      el.textContent = el.dataset.fpEllip || el.textContent;
+    });
+  };
+
   const applyCropGuards = () => {
     node.querySelectorAll<HTMLElement>('*').forEach((el) => {
       const cs = getComputedStyle(el);
@@ -353,6 +399,7 @@ export async function renderNodeToCanvas(
     );
     await new Promise((r) => setTimeout(r, 60));
 
+    computeEllipsisShims();
     applyCropGuards();
     applyGapShims();
     wrapMixedText();
@@ -392,6 +439,9 @@ export async function renderNodeToCanvas(
     type VMode = 'fit' | 'block' | 'inline';
     type VTarget = { el: HTMLElement; cx0: number; cx1: number; cy: number; half: number; up: number; down: number; multi: boolean; mode: VMode };
     const targets: VTarget[] = [];
+    // pais de FLUXO INLINE MISTO multi-linha — compensados como BLOCO (ver abaixo)
+    const flowParents = new Set<HTMLElement>();
+    const flowTargets: VTarget[] = [];
     let anySuspicious = false;
     const allEls = Array.from(node.querySelectorAll<HTMLElement>('*'));
     const bands = new Set<HTMLElement>();
@@ -437,9 +487,12 @@ export async function renderNodeToCanvas(
       // FLUXO INLINE MISTO que quebra em VÁRIAS linhas (comentário do IG com @menção/
       // #hashtag/emoji no meio; legenda de post): o pai tem 2+ pedaços de texto inline
       // FLUINDO e quebrando de linha. Deslocar cada pedaço por conta própria (cada um com
-      // erro medido diferente) EMBARALHA o texto no PNG. É texto de FLUXO — o html2canvas
-      // desenha ~1 linha baixo, uniforme e imperceptível; compensar embaralharia. NÃO
-      // compensa. Chip de 1 linha ("● LIVE") e bloco de 1 peça seguem compensáveis.
+      // erro medido diferente) EMBARALHA o texto no PNG. A peça NÃO vira alvo — em vez
+      // disso o PAI vira um alvo de BLOCO (flow-block, abaixo): o html2canvas desenha o
+      // fluxo inteiro ~8px BAIXO como unidade (medido no bloco de Comentários — o corpo
+      // descia e "colava" na linha do Responder), então medimos a tinta do BLOCO inteiro
+      // com um render de sonda DEDICADO (sem paridade compartilhada — foi a poluição que
+      // inviabilizou compensar por peça) e subimos o PAI inteiro: nada embaralha.
       const par = el.parentElement;
       if (par) {
         let inlinePieces = 0;
@@ -452,7 +505,7 @@ export async function renderNodeToCanvas(
         }
         if (inlinePieces >= 2) {
           const plh = parseFloat(getComputedStyle(par).lineHeight) || fs * 1.35;
-          if (par.getBoundingClientRect().height > plh * 1.6) continue;
+          if (par.getBoundingClientRect().height > plh * 1.6) { flowParents.add(par); continue; }
         }
       }
       const multi = gr.height > fs * 1.6;
@@ -483,14 +536,47 @@ export async function renderNodeToCanvas(
       });
     }
 
+    // ALVOS DE BLOCO (flow-block): o pai do fluxo misto vira UM alvo — a tinta do
+    // bloco inteiro é medida contra um render que esconde SÓ os flow-blocks (tudo o
+    // mais aparece nos dois renders e se CANCELA no diff, inclusive a linha do
+    // username logo acima — a poluição que estragava a medição por peça). O erro vale
+    // pro bloco todo, então subir o PAI preserva quebra, espaçamento e emojis.
+    for (const par of flowParents) {
+      const csP = getComputedStyle(par);
+      if (csP.writingMode !== 'horizontal-tb' || axisUnsafeTf(csP.transform)) continue;
+      let inStop = false;
+      for (let a: HTMLElement | null = par.parentElement; a && a !== node.parentElement; a = a.parentElement) {
+        if (stops.has(a)) { inStop = true; break; }
+      }
+      if (inStop) continue;
+      const range = document.createRange();
+      range.selectNodeContents(par);
+      const gr = range.getBoundingClientRect();
+      if (!gr.height || gr.width < 3) continue;
+      par.dataset.fpFlow = '1';
+      const half = gr.height / 2;
+      flowTargets.push({
+        el: par,
+        cx0: (gr.left - nodeRect.left) * scale,
+        cx1: (gr.right - nodeRect.left) * scale,
+        cy: ((gr.top + gr.bottom) / 2 - nodeRect.top) * scale,
+        half: half * scale,
+        up: Math.round((half + 6) * scale),
+        down: Math.round((half + 22) * scale),
+        multi: true,
+        mode: 'fit',
+      });
+    }
+
     // Aperta a janela de cada alvo nos VIZINHOS que sobrepõem em X (empilhados):
     // a tinta de um não pode invadir a caixa do outro (ex.: sub-linha logo abaixo da
     // manchete; "bem"/"estar" empilhados de um logo). Como o erro é pra baixo, deixo
     // pouca folga pra CIMA (perto do vizinho de cima) e cubro o deslocamento pra baixo.
-    for (const t of targets) {
+    const allTargets = [...targets, ...flowTargets];
+    for (const t of allTargets) {
       let above = -Infinity;
       let below = Infinity;
-      for (const o of targets) {
+      for (const o of allTargets) {
         if (o === t) continue;
         if (o.cx1 <= t.cx0 + 2 || o.cx0 >= t.cx1 - 2) continue; // sem sobreposição em X
         if (o.cy < t.cy) above = Math.max(above, o.cy + o.half * 0.5);
@@ -501,7 +587,7 @@ export async function renderNodeToCanvas(
       if (below < Infinity) t.down = Math.min(t.down, Math.max(t.half + 4 * scale, below - t.cy - m));
     }
 
-    vcompCleanup = () => targets.forEach((t) => {
+    vcompCleanup = () => [...targets, ...flowTargets].forEach((t) => {
       delete t.el.dataset.fpVcal;
       delete t.el.dataset.fpVmode;
       delete t.el.dataset.fpCal0;
@@ -509,6 +595,7 @@ export async function renderNodeToCanvas(
       delete t.el.dataset.fpBg;
       delete t.el.dataset.fpPt;
       delete t.el.dataset.fpPb;
+      delete t.el.dataset.fpFlow;
     });
 
     // MOTOR: html2canvas — RÁPIDO e usa a fonte JÁ CARREGADA na página, então a fonte
@@ -533,7 +620,8 @@ export async function renderNodeToCanvas(
     // até alvos empilhados e de tinta contígua (ex.: "bem"/"estar" de um logo; sub-linha
     // colada na manchete) que uma janela não separaria. Sequencial (o html2canvas clona
     // o nó num iframe — evita corrida entre clones simultâneos).
-    if (targets.length && anySuspicious) {
+    const needLeafProbe = targets.length > 0 && anySuspicious;
+    if (needLeafProbe || flowTargets.length) {
       const byCy = [...targets].sort((a, b) => a.cy - b.cy);
       const par = new Map<VTarget, number>();
       byCy.forEach((t, i) => par.set(t, i % 2));
@@ -545,13 +633,29 @@ export async function renderNodeToCanvas(
           el.style.setProperty('-webkit-text-fill-color', 'transparent');
         });
       };
-      const rawCanvas = await html2canvas(node, h2cOpts);
-      const hid0Canvas = await html2canvas(node, { ...h2cOpts, onclone: hideSel('[data-fp-cal0]') });
-      const hid1Canvas = await html2canvas(node, { ...h2cOpts, onclone: hideSel('[data-fp-cal1]') });
+      const rawCanvas = await html2canvas(node, {
+        ...h2cOpts,
+        onclone: (_d: Document, root: HTMLElement) => applyEllipsisInClone(root),
+      });
+      const hid0Canvas = needLeafProbe ? await html2canvas(node, {
+        ...h2cOpts,
+        onclone: (d: Document, root: HTMLElement) => { applyEllipsisInClone(root); hideSel('[data-fp-cal0]')(d, root); },
+      }) : null;
+      const hid1Canvas = needLeafProbe ? await html2canvas(node, {
+        ...h2cOpts,
+        onclone: (d: Document, root: HTMLElement) => { applyEllipsisInClone(root); hideSel('[data-fp-cal1]')(d, root); },
+      }) : null;
+      // render dedicado dos FLOW-BLOCKS: esconde só eles (e seus pedaços coloridos);
+      // todo o resto aparece igual nos dois renders e se cancela no diff.
+      const hidFlowCanvas = flowTargets.length ? await html2canvas(node, {
+        ...h2cOpts,
+        onclone: (d: Document, root: HTMLElement) => { applyEllipsisInClone(root); hideSel('[data-fp-flow], [data-fp-flow] *')(d, root); },
+      }) : null;
       targets.forEach((t) => { delete t.el.dataset.fpCal0; delete t.el.dataset.fpCal1; });
       const ra = rawCanvas.getContext('2d');
-      const c0 = hid0Canvas.getContext('2d');
-      const c1 = hid1Canvas.getContext('2d');
+      const c0 = hid0Canvas ? hid0Canvas.getContext('2d') : null;
+      const c1 = hid1Canvas ? hid1Canvas.getContext('2d') : null;
+      const cf = hidFlowCanvas ? hidFlowCanvas.getContext('2d') : null;
       if (ra && c0 && c1) {
         const CW = rawCanvas.width;
         const CH = rawCanvas.height;
@@ -632,6 +736,63 @@ export async function renderNodeToCanvas(
           }
         }
       }
+
+      // FLOW-BLOCKS: mede a caixa de tinta do bloco INTEIRO (1ª→última linha) contra
+      // o render que esconde só os flow-blocks; o erro sobe o PAI como unidade.
+      if (ra && cf) {
+        const CW = rawCanvas.width;
+        const CH = rawCanvas.height;
+        for (const t of flowTargets) {
+          const x0 = Math.max(0, Math.round(t.cx0 + 1));
+          const x1 = Math.min(CW, Math.round(t.cx1 - 1));
+          if (x1 - x0 < 3) continue;
+          const y0 = Math.max(0, Math.round(t.cy - t.up));
+          const y1 = Math.min(CH, Math.round(t.cy + t.down));
+          if (y1 - y0 < 3) continue;
+          const cols = x1 - x0;
+          const rows = y1 - y0;
+          const A = ra.getImageData(x0, y0, cols, rows).data;
+          const B = cf.getImageData(x0, y0, cols, rows).data;
+          // 3% (não 5%): a última linha do fluxo costuma ser curta em relação à
+          // largura do bloco e ainda precisa contar como tinta.
+          const thr = Math.max(2, cols * 0.03);
+          let minY = -1;
+          let maxY = -1;
+          for (let y = 0; y < rows; y++) {
+            let cnt = 0;
+            for (let x = 0; x < cols; x++) {
+              const i = (y * cols + x) * 4;
+              const d = Math.max(
+                Math.abs(A[i] - B[i]),
+                Math.abs(A[i + 1] - B[i + 1]),
+                Math.abs(A[i + 2] - B[i + 2]),
+              );
+              if (d > 40) cnt++;
+            }
+            if (cnt >= thr) {
+              if (minY < 0) minY = y;
+              maxY = y;
+            }
+          }
+          if (minY < 0) continue;
+          const err = (y0 + (minY + maxY) / 2 - t.cy) / scale; // + = fluxo baixo demais
+          // Piso de 2.5px: a assimetria natural ascendente/descendente da tinta multi-
+          // linha (~1-2px) não é erro do html2canvas — só o desvio GRANDE do fluxo
+          // (medido ~8px no bloco de Comentários) merece correção.
+          if (Math.abs(err) > 2.5 && Math.abs(err) < 60) {
+            // FUNDO próprio no bloco de fluxo: mover o pai deslocaria o fundo (e o
+            // contra-shift das imagens não cobre isso) — caso raro, fica como está.
+            const csb = getComputedStyle(t.el);
+            const bgc = csb.backgroundColor;
+            const bm = bgc.match(/rgba?\(([^)]+)\)/);
+            const bgOpaque = !!bgc && bgc !== 'transparent' && (!bm || bm[1].split(',').length < 4 || parseFloat(bm[1].split(',')[3]) > 0.05);
+            const bgImg = csb.backgroundImage && csb.backgroundImage !== 'none';
+            if (bgOpaque || bgImg) continue;
+            t.el.dataset.fpVcal = String(Math.round(err * 100) / 100);
+            t.el.dataset.fpVmode = 'fit';
+          }
+        }
+      }
     }
 
     // RENDER FINAL — sobe o glifo de cada alvo por translateY(−erro), só no clone
@@ -644,10 +805,21 @@ export async function renderNodeToCanvas(
     canvas = await html2canvas(node, {
       ...h2cOpts,
       onclone: (doc: Document, root: HTMLElement) => {
+        applyEllipsisInClone(root);
         root.querySelectorAll<HTMLElement>('[data-fp-vcal]').forEach((el) => {
           const dy = parseFloat(el.dataset.fpVcal || '');
           if (!Number.isFinite(dy) || dy === 0) return;
           const mode = el.dataset.fpVmode || 'inline';
+          // FLOW-BLOCK (fluxo inline misto multi-linha): o TEXTO do fluxo é que sai
+          // baixo — as IMAGENS (emojis) o html2canvas já posiciona certo. Sobe o PAI
+          // inteiro (texto+quebra preservados) e CONTRA-DESLOCA as imagens de volta.
+          if (el.dataset.fpFlow === '1') {
+            el.style.transform = `translateY(${-dy}px)`;
+            el.querySelectorAll<HTMLElement>('img, svg').forEach((im) => {
+              im.style.transform = `translateY(${dy}px)`;
+            });
+            return;
+          }
           if (mode === 'fit' || mode === 'block') {
             // ELEMENTO COM FUNDO PRÓPRIO (caixa da caixinha "Faça uma pergunta"/caixa
             // branca, balão multi-linha): NÃO move o elemento (deslocaria o fundo — que o
@@ -685,6 +857,7 @@ export async function renderNodeToCanvas(
     gapShims.forEach((restore) => restore());
     if (vcompCleanup) vcompCleanup();
     textUnwrap.forEach((restore) => restore());
+    ellipEls.forEach((el) => { delete el.dataset.fpEllip; });
     if (zoomEl) zoomEl.style.zoom = prevZoom;
   }
 

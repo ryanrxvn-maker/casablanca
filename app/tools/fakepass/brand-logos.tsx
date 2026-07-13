@@ -103,6 +103,20 @@ function WaMark({ size }: { size: number }) {
   );
 }
 
+function TikTokMark({ size }: { size: number }) {
+  const note =
+    'M16.6 5.8c-1-.7-1.7-1.9-1.8-3.3h-3v12.9a2.7 2.7 0 1 1-2.7-2.7c.3 0 .6 0 .8.1V9.7a5.8 5.8 0 1 0 5 5.7V9.3c1 .7 2.2 1.1 3.5 1.1v-3c-.7 0-1.3-.2-1.8-.6z';
+  return (
+    <div style={{ width: size, height: size, borderRadius: size * 0.24, background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <svg width={size * 0.62} height={size * 0.62} viewBox="0 0 24 24" aria-hidden>
+        <path d={note} fill="#25F4EE" transform="translate(-0.9,0.5)" />
+        <path d={note} fill="#FE2C55" transform="translate(0.9,-0.4)" />
+        <path d={note} fill="#fff" />
+      </svg>
+    </div>
+  );
+}
+
 function XMark({ size }: { size: number }) {
   return (
     <div style={{ width: size, height: size, borderRadius: size * 0.24, background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -168,6 +182,8 @@ export function BrandMark({ brand, size = 26 }: { brand: string; size?: number }
       return <IgMark size={size} />;
     case 'whatsapp':
       return <WaMark size={size} />;
+    case 'tiktok':
+      return <TikTokMark size={size} />;
     case 'x':
       return <XMark size={size} />;
     case 'notif':
@@ -247,6 +263,7 @@ export function brandForModel(m: FakeModel): string {
   if (m.id === 'whatsapp') return 'whatsapp';
   if (m.id === 'tweet') return 'x';
   if (m.id === 'notif') return 'notif';
-  if (m.id.startsWith('ig-') || m.id === 'comments') return 'instagram';
+  if (m.id === 'live-tiktok') return 'tiktok';
+  if (m.id.startsWith('ig-') || m.id === 'comments' || m.id === 'live-instagram') return 'instagram';
   return '';
 }

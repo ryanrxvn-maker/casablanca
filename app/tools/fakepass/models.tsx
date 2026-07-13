@@ -18,6 +18,7 @@ import IGPOST from './model-igpost';
 import TWEET from './model-tweet';
 import COMMENTS from './model-comments';
 import NOTIF from './model-notif';
+import LIVE from './model-live';
 import NEWS_CNN from './model-news-cnn';
 import NEWS_CNNBR from './model-news-cnnbr';
 import NEWS_BBC from './model-news-bbc';
@@ -48,6 +49,7 @@ export const CATEGORIES: { id: string; label: string }[] = [
   { id: 'chat', label: 'Conversas' },
   { id: 'post', label: 'Posts' },
   { id: 'notif', label: 'Notificações' },
+  { id: 'live', label: 'Lives' },
   { id: 'news', label: 'Telejornais' },
   { id: 'sites', label: 'Sites de notícia' },
 ];
@@ -65,6 +67,8 @@ export const MODELS: FakeModel[] = [
   ...COMMENTS,
   // Notificações
   ...NOTIF,
+  // Lives (TikTok / Instagram)
+  ...LIVE,
   // Notícias (telejornais) — agrupados por emissora
   // Internacionais
   ...NEWS_CNN,

@@ -485,7 +485,7 @@ export const GUIDES: Record<string, ToolGuide> = {
     steps: [
       {
         title: 'Escolha o modelo',
-        text: 'Os modelos ficam em dois grupos. "Redes sociais": Stickers de Story (Caixinha de Pergunta, Enquete, Quiz, Slider de Emoji, Contagem Regressiva, Localização, Menção), Conversas (Instagram DM e WhatsApp), Posts (Post do Instagram, Tweet / X, Comentários) e Notificações (tela de bloqueio iPhone/Android). "Notícias & TV": Telejornais por emissora (CNN, BBC, Fox News, GloboNews, CNN Brasil, Record News e outras) e Sites de notícia (G1, Folha, UOL, BBC, Reuters e mais). Clique no card do modelo pra abrir os controles dele.',
+        text: 'Os modelos ficam em dois grupos. "Redes sociais": Stickers de Story (Caixinha de Pergunta, Enquete, Quiz, Slider de Emoji, Contagem Regressiva, Localização, Menção), Conversas (Instagram DM e WhatsApp), Posts (Post do Instagram, Tweet / X, Comentários), Notificações (tela de bloqueio iPhone/Android) e Lives (Live do TikTok e Live do Instagram, com comentários e reações animadas). "Notícias & TV": Telejornais por emissora (CNN, BBC, Fox News, GloboNews, CNN Brasil, Record News e outras) e Sites de notícia (G1, Folha, UOL, BBC, Reuters e mais). Clique no card do modelo pra abrir os controles dele.',
         visual: (
           <Shot label="FakePrint · categorias">
             <MRow>
@@ -493,6 +493,7 @@ export const GUIDES: Record<string, ToolGuide> = {
               <MChip tone="dim">CONVERSAS</MChip>
               <MChip tone="dim">POSTS</MChip>
               <MChip tone="dim">NOTIFICAÇÕES</MChip>
+              <MChip tone="dim">LIVES</MChip>
               <MChip tone="dim">TELEJORNAIS</MChip>
               <MChip tone="dim">SITES DE NOTÍCIA</MChip>
             </MRow>
@@ -534,6 +535,19 @@ export const GUIDES: Record<string, ToolGuide> = {
               <MChip tone="dim">16:9 (TV)</MChip>
               <MChip tone="violet">9:16 (REELS)</MChip>
               <MChip tone="lime">TELA VERDE</MChip>
+            </MRow>
+          </Shot>
+        ),
+      },
+      {
+        title: 'Live? Dá pra exportar em vídeo',
+        text: 'Nas Lives (TikTok e Instagram) a prévia é animada: as reações sobem e os comentários rolam sozinhos. Preencha as visualizações, os comentários (um por linha, "usuário: mensagem"), a foto de perfil e a cor do selo. Além do PNG, o botão "Exportar vídeo (.webm)" grava a animação (escolha de 3 a 15 segundos) — e com o "Fundo verde (chroma key)" ligado é só sobrepor no editor e remover o verde: a live anima por cima do seu criativo.',
+        visual: (
+          <Shot label="FakePrint · live">
+            <MRow>
+              <MChip tone="violet">LIVE DO TIKTOK</MChip>
+              <MChip tone="dim">LIVE DO INSTAGRAM</MChip>
+              <MChip tone="lime">EXPORTAR VÍDEO (.WEBM)</MChip>
             </MRow>
           </Shot>
         ),

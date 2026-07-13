@@ -22,7 +22,7 @@ const HUE = 'rgba(167,139,250,0.42)';
 
 // Categorias agrupadas em seções (organização premium do seletor).
 const SECTIONS: { label: string; ids: string[] }[] = [
-  { label: 'Redes sociais', ids: ['story', 'chat', 'post', 'notif'] },
+  { label: 'Redes sociais', ids: ['story', 'chat', 'post', 'notif', 'live'] },
   { label: 'Notícias & TV', ids: ['news', 'sites'] },
 ];
 
@@ -37,6 +37,8 @@ function CatIcon({ id }: { id: string }) {
       return (<svg {...p}><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M3 15l4-4 5 5" /><circle cx="15" cy="9" r="1.4" /></svg>);
     case 'notif':
       return (<svg {...p}><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>);
+    case 'live':
+      return (<svg {...p}><circle cx="12" cy="12" r="2.2" /><path d="M8.5 15.5a5 5 0 0 1 0-7M15.5 8.5a5 5 0 0 1 0 7" /><path d="M5.6 18.4a9 9 0 0 1 0-12.8M18.4 5.6a9 9 0 0 1 0 12.8" /></svg>);
     case 'news':
       return (<svg {...p}><rect x="2.5" y="7" width="19" height="13" rx="2" /><path d="M8 7l4-4 4 4" /></svg>);
     case 'sites':
