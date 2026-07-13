@@ -38,6 +38,10 @@ export function toFriendlyMessage(
   if (/(exceeded concurrent|too many request|429|rate.?limit)/.test(m)) {
     return 'O serviço de geração está lotado neste momento. Aguarde alguns minutos e tente de novo — não é um erro do app.';
   }
+  // Avatar em OUTRO workspace do HeyGen (space mismatch).
+  if (/(not accessible in space|avatar look not found|outro workspace)/.test(m)) {
+    return 'O avatar está em outro workspace do HeyGen. Ative lá o workspace dono do avatar e clique Retomar.';
+  }
   // Política de conteúdo do gerador.
   if (/(nsfw|img_denied|content.?policy|pol[ií]tica de conte|recusad|denied|blocked)/.test(m)) {
     return 'O gerador recusou esse conteúdo por política própria. Ajuste o texto/prompt desse item e tente de novo.';

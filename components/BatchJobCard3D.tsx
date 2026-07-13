@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { toFriendlyMessage } from '@/lib/friendly-error';
 
 /**
  * BatchJobCard3D — card 3D ultra-pro pro painel de batch do ClickUp Pilot.
@@ -364,6 +365,48 @@ function humanizeMessage(raw: string | undefined, phase: BatchJob3DPhase): strin
   return t.slice(0, 76).trim() + '…';
 }
 
+const IconHourglass = ({ size = 13 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M6 2h12M6 22h12" />
+    <path d="M7 2c0 6 5 6 5 10s-5 4-5 10" />
+    <path d="M17 2c0 6-5 6-5 10s5 4 5 10" />
+  </svg>
+);
+
+type MsgBanner = { kind: 'quota' | 'fail'; title: string; hint?: string };
+
+/** Mensagem ESPECIAL com visual próprio (banner no card): limite diário do
+ *  HeyGen (âmbar, ⏳) e falha (rosa). SEMPRE curta e sem termo técnico — user
+ *  pediu (13/07): "mensagem resumida e clara, sem nada técnico, design bonito".
+ *  O erro cru continua no console/estado pra diagnóstico; aqui vai só o que o
+ *  user precisa saber e fazer. Mensagens já escritas à mão em PT passam
+ *  intactas; texto cru/técnico é traduzido pelo toFriendlyMessage. */
+function classifyBanner(raw: string | undefined, phase: BatchJob3DPhase): MsgBanner | null {
+  const t = (raw || '').trim();
+  const lower = t.toLowerCase();
+  // LIMITE DIÁRIO — banner âmbar em qualquer fase (failed, done-incompleto…).
+  if (/limite di[aá]rio|cota esgotada|cota di[aá]ria|maximum daily|daily limit|daily quota|usage has exceeded|exceeded the maximum/.test(lower)) {
+    return {
+      kind: 'quota',
+      title: 'Limite diário do HeyGen atingido',
+      hint: 'Renova em até 24h — depois clica em Retomar (⟳) que eu continuo sozinho. Não é erro do app.',
+    };
+  }
+  if (phase !== 'failed') return null;
+  if (!t) return { kind: 'fail', title: 'Não deu pra concluir agora.', hint: 'Clica em Retomar (⟳) que eu tento de novo.' };
+  // Texto com cara de erro CRU (inglês/código/status) → traduz. Frase humana
+  // escrita à mão (ex: "Recarregou a página — clique Retomar") → mantém.
+  const technical = /createvideo|tts_pending|processjob|jsoncall|status[ =]\d|status=\w+|\bapi \d|https?:|\bfetch\b|exception|[a-z]error\b|\bundefined\b|falharam:|your video|please try again/i.test(t);
+  if (!technical) {
+    return { kind: 'fail', title: t.length > 170 ? t.slice(0, 166).trim() + '…' : t };
+  }
+  return {
+    kind: 'fail',
+    title: toFriendlyMessage(t, 'Não deu pra concluir agora.'),
+    hint: 'Clica em Retomar (⟳) — o que já ficou pronto está salvo.',
+  };
+}
+
 // ───────────────────────── Componente principal ─────────────────────────
 
 export function BatchJobCard3D(props: BatchJob3DProps) {
@@ -457,6 +500,9 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
     : 'perspective(1200px) rotateX(0) rotateY(0) translateZ(0)';
 
   const friendlyMsg = humanizeMessage(message, phase);
+  // Banner especial (limite diário / falha): curto, sem termo técnico, sempre
+  // visível (mesmo com o card recolhido) — substitui o texto miúdo nesses casos.
+  const banner = classifyBanner(message, phase);
   const showProgress = phase !== 'done' && phase !== 'failed';
 
   return (
@@ -807,6 +853,34 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
             </div>
           ) : null}
 
+          {/* BANNER especial (limite diário / falha) — sempre visível, curto,
+           *  sem termo técnico, com hierarquia visual própria. */}
+          {banner ? (
+            <div
+              className={`mt-2.5 flex items-start gap-2.5 rounded-[12px] border px-3 py-2.5 ${
+                banner.kind === 'quota'
+                  ? 'border-amber-400/40 bg-gradient-to-br from-amber-400/[0.14] via-amber-400/[0.05] to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]'
+                  : 'border-rose-400/35 bg-gradient-to-br from-rose-500/[0.12] via-rose-500/[0.04] to-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]'
+              }`}
+            >
+              <span
+                className={`mt-[1px] flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
+                  banner.kind === 'quota' ? 'bg-amber-400/15 text-amber-300' : 'bg-rose-400/15 text-rose-300'
+                }`}
+              >
+                {banner.kind === 'quota' ? <IconHourglass size={13} /> : <IconAlert size={13} />}
+              </span>
+              <div className="min-w-0">
+                <div className={`text-[11.5px] font-semibold leading-snug ${banner.kind === 'quota' ? 'text-amber-100' : 'text-rose-100'}`}>
+                  {banner.title}
+                </div>
+                {banner.hint ? (
+                  <div className="mt-0.5 text-[10.5px] leading-snug text-text-muted">{banner.hint}</div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
           {/* Progress bar 3D animada — SEMPRE visivel se rodando (mesmo minimizado).
            *  User pediu: "se ta minimizada e gerando entao voce ver apenas a
            *  barrinha de carregamento animada carregando o processo". */}
@@ -830,7 +904,7 @@ export function BatchJobCard3D(props: BatchJob3DProps) {
                 </div>
               ) : null}
             </div>
-          ) : expanded && friendlyMsg ? (
+          ) : expanded && friendlyMsg && !banner ? (
             <div className="mono mt-1.5 text-[10px] text-text-muted">{friendlyMsg}</div>
           ) : null}
 
