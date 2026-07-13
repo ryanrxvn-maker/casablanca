@@ -1203,6 +1203,86 @@ export async function pollVideosUntilReady(
   }
 }
 
+/* ============= Exclusão de vídeo NEGADO (anti-memória de moderação) ============= */
+
+/** Falha SINTÉTICA cunhada pelo NOSSO poll client-side (zombie/timeout), em
+ *  oposição a uma falha REAL reportada pelo HeyGen (ex: moderação negou o
+ *  texto). Um zombie ainda PODE completar no servidor — o vídeo dele NÃO deve
+ *  ser excluído (a recuperação por título ainda pode aproveitá-lo). Os
+ *  marcadores casam com as mensagens mintadas em pollVideosUntilReady. */
+export function isSyntheticPollError(msg?: string | null): boolean {
+  return /Render travado|sumiu do historico|Timeout global do polling/i.test(msg || '');
+}
+
+let _deleteWorkingIdx: number | null = null;
+let _deleteUnsupported = false;
+
+/**
+ * Exclui um vídeo do histórico do HeyGen (best-effort, NUNCA lança).
+ *
+ * POR QUE EXISTE (fix 2026-07-12): quando a moderação NEGA uma parte, o
+ * registro negado fica vivo no histórico e o HeyGen "lembra" — re-submeter o
+ * MESMO texto era negado de novo (loop infinito de FALHA no re-disparo, mesmo
+ * criando video_id novo). Comprovado na mão pelo user: EXCLUIR o disparo
+ * negado e disparar de novo → o mesmo texto PASSA. Então todo re-disparo de
+ * parte com falha REAL agora exclui o vídeo negado ANTES do novo submit.
+ *
+ * O endpoint exato de delete não é documentado — tentamos os candidatos da
+ * mesma família api2 (irmãos do /v1/pacific/video.update, confirmado em
+ * produção) e CACHEAMOS o que funcionar (1 chamada nas próximas). Se nenhum
+ * funcionar com resposta HTTP real, marca sem-suporte na sessão e o fluxo
+ * segue EXATAMENTE como antes (sem regressão). Blip de proxy (status 0) NÃO
+ * marca sem-suporte — a próxima chamada tenta de novo.
+ */
+export async function deleteVideo(videoId: string, opts: { timeoutMs?: number } = {}): Promise<boolean> {
+  if (!videoId || _deleteUnsupported) return false;
+  const deadline = Date.now() + (opts.timeoutMs ?? 15_000);
+  // Campos redundantes (id + video_id) no MESMO body: servidor ignora campo
+  // extra — corta o nº de tentativas até achar o shape aceito.
+  const candidates: Array<{ label: string; run: () => Promise<{ status: number; ok: boolean; body: any }> }> = [
+    { label: 'POST /v1/pacific/video.delete', run: () => jsonCall('POST', '/v1/pacific/video.delete', { id: videoId, video_id: videoId }) },
+    { label: 'DELETE /v1/video.delete', run: () => jsonCall('DELETE', `/v1/video.delete?video_id=${encodeURIComponent(videoId)}`) },
+    { label: 'POST /v1/video.delete', run: () => jsonCall('POST', '/v1/video.delete', { id: videoId, video_id: videoId }) },
+    { label: 'POST /v1/pacific/item.delete', run: () => jsonCall('POST', '/v1/pacific/item.delete', { id: videoId, item_id: videoId, item_type: 'heygen_video' }) },
+    { label: 'POST /v1/project/item.delete', run: () => jsonCall('POST', '/v1/project/item.delete', { id: videoId, item_id: videoId, item_type: 'heygen_video' }) },
+    { label: 'POST /v1/project/items.delete', run: () => jsonCall('POST', '/v1/project/items.delete', { item_ids: [videoId], item_type: 'heygen_video' }) },
+  ];
+  const order = _deleteWorkingIdx != null ? [candidates[_deleteWorkingIdx]] : candidates;
+  let sawNetworkBlip = false;
+  for (const c of order) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) { sawNetworkBlip = true; break; }
+    try {
+      const r = await Promise.race([
+        c.run(),
+        new Promise<{ status: number; ok: boolean; body: any }>((resolve) =>
+          setTimeout(() => resolve({ status: 0, ok: false, body: { message: 'delete timeout' } }), Math.max(1500, remaining)),
+        ),
+      ]);
+      if (r.ok) {
+        if (_deleteWorkingIdx == null) {
+          _deleteWorkingIdx = candidates.indexOf(c);
+          console.log(`[heygen deleteVideo] endpoint de delete confirmado: ${c.label}`);
+        }
+        console.log(`[heygen deleteVideo] vídeo negado ${videoId} excluído via ${c.label}`);
+        return true;
+      }
+      if (r.status === 0) sawNetworkBlip = true;
+    } catch {
+      sawNetworkBlip = true;
+    }
+  }
+  // Só desiste na sessão quando TODOS os candidatos responderam com erro HTTP
+  // REAL (endpoint não existe mesmo). Blip de extensão/proxy não desliga nada.
+  if (_deleteWorkingIdx == null && !sawNetworkBlip) {
+    _deleteUnsupported = true;
+    console.warn('[heygen deleteVideo] nenhum endpoint de delete aceito nesta conta — re-disparo segue SEM excluir (comportamento antigo)');
+  } else if (!_deleteUnsupported) {
+    console.warn(`[heygen deleteVideo] não consegui excluir ${videoId} (blip transitório?) — re-disparo segue mesmo assim`);
+  }
+  return false;
+}
+
 /**
  * Baixa o MP4 de um videoUrl (CDN HeyGen). Tenta direct fetch primeiro;
  * se falhar (CORS), routeia via proxy da extensao (que tem origin certo).

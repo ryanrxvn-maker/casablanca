@@ -46,6 +46,8 @@ import {
   pollVideosUntilReady,
   downloadVideoBytes,
   isQuotaError,
+  deleteVideo,
+  isSyntheticPollError,
   type VideoStatus,
 } from '@/lib/heygen-api-direct';
 import { isChunkLoadError, reloadOnceForChunk } from '@/lib/chunk-guard';
@@ -154,6 +156,29 @@ async function persistDeliverableOrRescue(
     rescueDownloadToDisk(blob, filename);
     return { persisted: false, rescued: true };
   }
+}
+
+/** ANTI-MEMÓRIA DE MODERAÇÃO (fix 2026-07-12): EXCLUI do HeyGen os vídeos com
+ *  falha REAL (ex: texto negado pela moderação) ANTES de re-disparar as mesmas
+ *  partes. Com o registro negado vivo no histórico, o HeyGen "lembra" e nega o
+ *  MESMO texto de novo — por isso o Retomar nunca passava; excluindo e
+ *  disparando de novo (como o user faz na mão), o mesmo texto PASSA. Falha
+ *  SINTÉTICA do nosso poll (zombie/timeout) NÃO exclui: o vídeo ainda pode
+ *  completar no servidor e ser resgatado por título. Best-effort com teto de
+ *  tempo — se a exclusão falhar, o re-disparo segue exatamente como antes. */
+async function purgeRejectedVideosBeforeRedispatch(
+  entries: Array<{ videoId?: string | null; error?: string | null }>,
+  ctx: string,
+): Promise<void> {
+  const real = entries.filter((e) => e.videoId && !isSyntheticPollError(e.error));
+  if (real.length === 0) return;
+  console.log(`[${ctx}] excluindo ${real.length} vídeo(s) negado(s) no HeyGen antes do re-disparo (anti-memória de moderação):`, real.map((e) => e.videoId));
+  try {
+    await Promise.race([
+      Promise.allSettled(real.map((e) => deleteVideo(e.videoId!))),
+      new Promise((r) => setTimeout(r, 25_000)),
+    ]);
+  } catch { /* best-effort — nunca bloqueia o re-disparo */ }
 }
 
 /**
@@ -2949,6 +2974,17 @@ function ClickUpPilotInner() {
           console.warn(`[clickup-pilot] AUTO-CURA rodada ${round}/${MAX_HEAL_ROUNDS}: re-disparando ${redispatchIdxs.length} parte(s):`, redispatchIdxs.map((i) => plan!.parts[i].label));
           setBatchStates((prev) => ({ ...prev, [taskId]: { ...prev[taskId], phase: 'dispatching', message: `Auto-cura: re-disparando ${redispatchIdxs.length} parte(s) travada(s) (rodada ${round}/${MAX_HEAL_ROUNDS})...` } }));
 
+          // EXCLUI os vídeos NEGADOS antes do re-disparo — sem isso o HeyGen
+          // "lembra" do registro negado e nega o MESMO texto de novo (loop).
+          await purgeRejectedVideosBeforeRedispatch(
+            redispatchIdxs.map((i) => {
+              const vid = results[i]?.videoId;
+              const st = vid ? finalStatuses[vid] : null;
+              return { videoId: vid, error: st?.error || results[i]?.error };
+            }),
+            'clickup-pilot auto-cura',
+          );
+
           const healJobs = redispatchIdxs.map((i) => {
             const p = plan!.parts[i] as any; // plan parts carregam voiceId em runtime (mesmo padrao do dispatch original)
             return { label: p.label, copy: p.text, avatarId: p.avatarId!, voiceId: p.voiceId || undefined, motor: motorsPerPart[i] };
@@ -3422,6 +3458,18 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
               message: `Re-disparando ${zombieIdxs.length} parts travadas (rodada ${round}/${MAX_REDISPATCH_ROUNDS})...`,
             },
           }));
+
+          // EXCLUI os vídeos NEGADOS antes do re-disparo (anti-memória de
+          // moderação): re-submeter o MESMO texto com o registro negado vivo
+          // era negado de novo — RETOMAR ficava em loop de FALHA eterno.
+          await purgeRejectedVideosBeforeRedispatch(
+            zombieIdxs.map((i) => {
+              const p = state.parts[i];
+              const st = p.videoId ? finalStatuses[p.videoId] : null;
+              return { videoId: p.videoId, error: st?.error || p.error };
+            }),
+            'pilot resume',
+          );
 
           const jobsToRedispatch = zombieIdxs.map((i) => {
             const rp = state.replan!.parts[i];
@@ -4767,6 +4815,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       setRegenError('Texto vazio — preenche o script.');
       return;
     }
+    // Captura o vídeo NEGADO (se a parte falhou) ANTES do reset de state — vai
+    // ser excluído do HeyGen antes do novo submit (anti-memória de moderação).
+    const prevPart = b.parts[partIdx];
+    const rejectedVideoId = prevPart?.videoStatus === 'failed' ? (prevPart.videoId || null) : null;
     setRegeneratingPart({ taskId, label });
     setRegenError(null);
     // FECHA O MODAL NA HORA: a re-geração (dispatch + poll de até 25min + download)
@@ -4797,6 +4849,13 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
           },
         };
       });
+
+      // 1.5) EXCLUI o vídeo negado do HeyGen antes do novo submit. Sem isso,
+      //      re-gerar o MESMO texto era negado de novo (o HeyGen "lembra" do
+      //      registro negado vivo no histórico). Best-effort: não bloqueia.
+      if (rejectedVideoId) {
+        await purgeRejectedVideosBeforeRedispatch([{ videoId: rejectedVideoId, error: prevPart?.error }], 'edit-part');
+      }
 
       // 2) Dispara processJob com novo texto + (talvez) novo avatar + (talvez) nova voz
       const { processJob } = await import('@/lib/heygen-api-direct');
@@ -4913,6 +4972,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
       setError(`Áudio inválido pra parte ${label}.`);
       return;
     }
+    // Captura o vídeo NEGADO pra excluir do HeyGen antes do novo submit
+    // (anti-memória de moderação — mesma blindagem do regenerateSinglePart).
+    const rejectedVideoId = part.videoStatus === 'failed' ? (part.videoId || null) : null;
+    const rejectedError = part.error;
 
     // Marca a parte como "re-gerando agora" (overlay no card) + reseta erro.
     setRegeneratingPart({ taskId, label });
@@ -4931,6 +4994,10 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
     });
 
     try {
+      // EXCLUI o vídeo negado antes do novo submit (anti-memória de moderação).
+      if (rejectedVideoId) {
+        await purgeRejectedVideosBeforeRedispatch([{ videoId: rejectedVideoId, error: rejectedError }], 'edit-part-audio');
+      }
       const { processJob } = await import('@/lib/heygen-api-direct');
       const adNameSafe = b.baseAdId.replace(/[^A-Z0-9]/gi, '_');
       // MODO ÁUDIO: processJob com `file` → uploadAudio + createVideo
