@@ -12,7 +12,7 @@ const HUE = 'rgba(148,163,184,0.4)';
 
 const VPM_PRESETS = [50, 80, 100, 150, 200, 300] as const;
 
-type AdRow = { id: string; time: string; label?: string };
+type AdRow = { id: string; time: string; label?: string; vpm?: string };
 
 type SavedPix = { id: string; key: string };
 
@@ -32,6 +32,11 @@ function newAd(time = ''): AdRow {
  */
 function adLabel(ad: AdRow, i: number, sep = ''): string {
   return (ad.label || '').trim() || `AD${sep}${i + 1}`;
+}
+
+/** Preço digitado ("80", "99,90") → número. Vazio/inválido = 0. */
+function parseMoney(s: string): number {
+  return parseFloat((s || '').trim().replace(',', '.')) || 0;
 }
 
 /**
@@ -102,26 +107,44 @@ export default function CalculadoraPage() {
   const [pixOn, setPixOn] = useToolState<boolean>('calculadora:pixOn', false);
   const [pixKey, setPixKey] = useToolState<string>('calculadora:pixKey', '');
 
-  const vpm = parseFloat(valorPorMinuto.replace(',', '.')) || 0;
+  const vpm = parseMoney(valorPorMinuto);
   const desconto = Math.max(0, Math.min(100, parseFloat(descontoPct.replace(',', '.')) || 0));
+
+  // Preço efetivo do AD: o próprio (se preenchido) ou o da tabela.
+  const adRate = (ad: AdRow) => {
+    const own = parseMoney(ad.vpm ?? '');
+    return own > 0 ? own : vpm;
+  };
 
   const totalSeconds = ads.reduce((acc, ad) => acc + parseDur(ad.time), 0);
   const min = totalSeconds / 60;
-  const adsPreenchidos = ads.filter((ad) => parseDur(ad.time) > 0).length;
+  const adsFilled = ads.filter((ad) => parseDur(ad.time) > 0);
+  const adsPreenchidos = adsFilled.length;
+  // Preço único valendo pra todos os ADs preenchidos? null = misto (por AD).
+  const rates = adsFilled.map(adRate);
+  const uniformRate =
+    rates.length > 0 && rates.every((r) => Math.abs(r - rates[0]) < 0.001)
+      ? rates[0]
+      : null;
 
   const updateAd = (id: string, time: string) =>
     setAds((prev) => prev.map((ad) => (ad.id === id ? { ...ad, time } : ad)));
   const renameAd = (id: string, label: string) =>
     setAds((prev) => prev.map((ad) => (ad.id === id ? { ...ad, label } : ad)));
+  const priceAd = (id: string, price: string) =>
+    setAds((prev) => prev.map((ad) => (ad.id === id ? { ...ad, vpm: price } : ad)));
   const addAd = () => setAds((prev) => [...prev, newAd()]);
   const removeAd = (id: string) =>
     setAds((prev) => (prev.length > 1 ? prev.filter((ad) => ad.id !== id) : prev));
 
-  const subtotal = vpm * min;
+  const subtotal = ads.reduce(
+    (acc, ad) => acc + adRate(ad) * (parseDur(ad.time) / 60),
+    0,
+  );
   const valorDesconto = subtotal * (desconto / 100);
   const total = subtotal - valorDesconto;
 
-  const canPrint = vpm > 0 && totalSeconds > 0;
+  const canPrint = adsPreenchidos > 0 && rates.every((r) => r > 0);
   const [gerando, setGerando] = useState(false);
 
   // Chaves PIX salvas no navegador (localStorage) — reuso com 1 clique.
@@ -175,16 +198,19 @@ export default function CalculadoraPage() {
       year: 'numeric',
     });
 
+    // Preços mistos → cada item do PDF mostra o próprio R$/min.
+    const misto = uniformRate === null;
     const items = ads
       .map((ad, i) => ({ ad, i }))
       .filter(({ ad }) => parseDur(ad.time) > 0)
       .map(({ ad, i }) => {
         const sec = parseDur(ad.time);
+        const rate = adRate(ad);
         return {
           nome: adLabel(ad, i, ' '),
-          sub: 'Vídeo editado',
+          sub: misto ? `Vídeo editado · ${formatBRL(rate)}/min` : 'Vídeo editado',
           duracao: fmtDur(sec),
-          valor: formatBRL(vpm * (sec / 60)),
+          valor: formatBRL(rate * (sec / 60)),
         };
       });
 
@@ -194,7 +220,7 @@ export default function CalculadoraPage() {
         docNumber,
         dateLabel,
         cliente: cliente.trim(),
-        vpmLabel: formatBRL(vpm),
+        vpmLabel: uniformRate !== null ? formatBRL(uniformRate) : 'Por item',
         duracaoTotalLabel: fmtDur(totalSeconds),
         qtdAds: items.length,
         items,
@@ -219,12 +245,12 @@ export default function CalculadoraPage() {
     <ToolShell
       title="Calculadora"
       eyebrow="OPERACIONAL"
-      description="Quanto cobrar pelo projeto? Coloca a duração de cada AD, o valor por minuto e a gente fecha a conta."
+      description="Quanto cobrar pelo projeto? Coloca a duração de cada AD, o valor por minuto — geral ou próprio de cada AD — e a gente fecha a conta."
       hue={HUE}
       icon={<IconCalculadora size={56} />}
     >
       <div className="flex flex-col gap-5">
-        <ToolStep n={1} icon={<IconStepMoney size={18} />} title="Tabela de preço" hint="Quanto custa cada minuto entregue" hue={HUE}>
+        <ToolStep n={1} icon={<IconStepMoney size={18} />} title="Tabela de preço" hint="O valor padrão do minuto — vale pra todo AD que não tiver preço próprio" hue={HUE}>
           <label className="block">
             <span
               className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-text-muted"
@@ -260,11 +286,12 @@ export default function CalculadoraPage() {
           </div>
         </ToolStep>
 
-        <ToolStep n={2} icon={<IconStepClock size={18} />} title="Serviço" hint="Nomeie cada item (clique no rótulo) e digite os minutos — vira tempo sozinho (ex: 619 → 06:19)" hue={HUE}>
+        <ToolStep n={2} icon={<IconStepClock size={18} />} title="Serviço" hint="Nomeie cada item, digite os minutos (619 → 06:19) e, se quiser, um R$/min próprio — vazio usa a tabela" hue={HUE}>
           <div className="flex flex-col gap-2">
             {ads.map((ad, i) => {
               const sec = parseDur(ad.time);
-              const valorAd = vpm * (sec / 60);
+              const ownRate = parseMoney(ad.vpm ?? '');
+              const valorAd = adRate(ad) * (sec / 60);
               return (
                 <div key={ad.id} className="flex items-center gap-2">
                   <span className="adlabel" data-value={ad.label || `AD${i + 1}`}>
@@ -288,6 +315,27 @@ export default function CalculadoraPage() {
                     value={ad.time}
                     onChange={(e) => updateAd(ad.id, maskTime(e.target.value))}
                   />
+                  <span
+                    className={'advpm' + (ownRate > 0 ? ' advpm-set' : '')}
+                    title={
+                      ownRate > 0
+                        ? `${adLabel(ad, i)} usa preço próprio: ${formatBRL(ownRate)}/min`
+                        : 'Valor por minuto SÓ deste AD — vazio usa a tabela'
+                    }
+                  >
+                    <span aria-hidden>R$</span>
+                    <input
+                      inputMode="decimal"
+                      placeholder={vpm > 0 ? valorPorMinuto.trim() : '0,00'}
+                      value={ad.vpm ?? ''}
+                      onChange={(e) =>
+                        priceAd(ad.id, e.target.value.replace(/[^\d.,]/g, '').slice(0, 9))
+                      }
+                      aria-label={`Valor por minuto de ${adLabel(ad, i)} — vazio usa o valor da tabela`}
+                      autoComplete="off"
+                      spellCheck={false}
+                    />
+                  </span>
                   <span
                     className="mono w-24 shrink-0 text-right text-[12px] text-violet"
                     style={{ fontFamily: 'var(--font-mono)' }}
@@ -463,8 +511,12 @@ export default function CalculadoraPage() {
         <ToolResultCard
           title="Orçamento"
           meta={
-            vpm > 0 && min > 0
-              ? `${adsPreenchidos} AD${adsPreenchidos === 1 ? '' : 's'} · ${fmtDur(totalSeconds)} × ${formatBRL(vpm)}`
+            subtotal > 0 && min > 0
+              ? `${adsPreenchidos} AD${adsPreenchidos === 1 ? '' : 's'} · ${fmtDur(totalSeconds)}${
+                  uniformRate !== null
+                    ? ` × ${formatBRL(uniformRate)}`
+                    : ' · preço por AD'
+                }`
               : undefined
           }
           hue={HUE}
@@ -587,6 +639,58 @@ export default function CalculadoraPage() {
         }
         .adlabel:focus-within input {
           color: #fff;
+        }
+        /* Preço por minuto PRÓPRIO do AD ("R$ [150]"): compacto, mesma cara do
+           input-field. Vazio = herda a tabela (placeholder mostra o valor
+           herdado); preenchido ganha borda violeta pra sinalizar o override. */
+        .advpm {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          box-sizing: border-box;
+          height: 46px;
+          flex: 0 0 auto;
+          padding: 0 11px;
+          border: 1px solid rgb(var(--line-strong));
+          border-radius: 14px;
+          background: rgb(var(--bg-soft) / 0.6);
+          box-shadow:
+            0 1px 0 rgba(255, 255, 255, 0.03) inset,
+            0 2px 6px -4px rgba(0, 0, 0, 0.6);
+          transition: border-color 0.18s ease, background-color 0.18s ease;
+        }
+        .advpm > span {
+          font-family: var(--font-mono);
+          font-size: 10.5px;
+          font-weight: 700;
+          color: rgb(var(--text-muted));
+        }
+        .advpm input {
+          width: 5.5ch;
+          appearance: none;
+          border: 0;
+          outline: 0;
+          background: transparent;
+          font-family: var(--font-mono);
+          font-size: 13px;
+          color: #fff;
+          text-align: right;
+        }
+        .advpm input::placeholder {
+          color: rgb(var(--text-dim));
+        }
+        .advpm:hover {
+          border-color: rgb(var(--violet) / 0.4);
+        }
+        .advpm:focus-within {
+          border-color: rgb(var(--violet) / 0.6);
+          background: rgb(var(--violet) / 0.08);
+        }
+        .advpm-set {
+          border-color: rgb(var(--violet) / 0.45);
+        }
+        .advpm-set > span {
+          color: rgb(var(--violet));
         }
         .report3d {
           position: relative;

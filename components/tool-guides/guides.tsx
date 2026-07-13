@@ -611,7 +611,7 @@ export const GUIDES: Record<string, ToolGuide> = {
     steps: [
       {
         title: 'Defina o valor por minuto',
-        text: 'No card "Tabela de preço", informe o "Valor por minuto (R$)" — digitando ou tocando num dos presets (R$50 a R$300). Esse valor fica salvo no seu navegador: nos próximos orçamentos já vem preenchido.',
+        text: 'No card "Tabela de preço", informe o "Valor por minuto (R$)" — digitando ou tocando num dos presets (R$50 a R$300). Esse é o valor padrão: vale pra todo AD que você não precificar individualmente no passo seguinte.',
         visual: (
           <Shot label="Calculadora · preço">
             <MRow>
@@ -625,7 +625,7 @@ export const GUIDES: Record<string, ToolGuide> = {
       },
       {
         title: 'Adicione os ADs',
-        text: 'Uma linha por AD. Você só digita os números da duração e ela vira tempo sozinha, sempre no formato 00:00 — sem precisar de dois-pontos, vírgula ou ponto (digitou 619, virou 06:19; digitou 45, virou 00:45). Use "Adicionar AD" pra incluir linhas e o "×" pra remover. O valor de cada AD e a "Duração total" recalculam a cada tecla.',
+        text: 'Uma linha por AD. Você só digita os números da duração e ela vira tempo sozinha, sempre no formato 00:00 — sem precisar de dois-pontos, vírgula ou ponto (digitou 619, virou 06:19; digitou 45, virou 00:45). Cada linha também tem um campo "R$" próprio: preencha pra dar um valor por minuto diferente só àquele AD (a borda fica violeta) — vazio, ele usa a tabela. Use "Adicionar AD" pra incluir linhas e o "×" pra remover. O valor de cada AD e a "Duração total" recalculam a cada tecla.',
         visual: (
           <Shot label="Calculadora · ADs">
             <MRow>
@@ -650,7 +650,7 @@ export const GUIDES: Record<string, ToolGuide> = {
       },
       {
         title: 'Revise e gere o PDF',
-        text: 'O card "Orçamento" mostra Subtotal, Desconto e Total. Preencha "Cliente / Projeto (opcional)" pra personalizar e clique em "Baixar Relatório (PDF)": sai uma proposta profissional com a tabela de ADs, duração total, condições, validade de 7 dias e o bloco de pagamento PIX — pronta pra mandar no WhatsApp do cliente.',
+        text: 'O card "Orçamento" mostra Subtotal, Desconto e Total. Preencha "Cliente / Projeto (opcional)" pra personalizar e clique em "Baixar Relatório (PDF)": sai uma proposta profissional com a tabela de ADs (com o R$/min de cada um, quando os preços variam), duração total e o bloco de pagamento PIX — pronta pra mandar no WhatsApp do cliente.',
         visual: (
           <Shot label="Calculadora · orçamento">
             <MRow>
