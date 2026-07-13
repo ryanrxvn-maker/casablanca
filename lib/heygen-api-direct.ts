@@ -165,7 +165,12 @@ function unwrap(r: { ok: boolean; status: number; body: any }) {
  *  2026-06-23: VAs falhando = na verdade cota diária estourada). */
 export function isQuotaError(msg?: string): boolean {
   const m = (msg || '').toLowerCase();
-  return /quota|insufficient|saldo|cr[eé]ditos?\b|credit|maximum daily|daily limit|daily quota|usage has exceeded|exceeded the maximum|limit reached|usage limit/.test(m);
+  // Inclui os marcadores em PORTUGUÊS que NÓS mesmos mintamos (ex: o fail-fast
+  // do runner preenche jobs não-disparados com "Limite diário do HeyGen
+  // atingido (não disparado — cota esgotada)"). Sem eles, `failed.every(
+  // isQuotaError)` dava falso num batch todo-cota → o card mostrava o erro cru
+  // em vez do "⏳ Limite diário" e a auto-cura re-disparava contra cota morta.
+  return /quota|insufficient|saldo|cr[eé]ditos?\b|credit|maximum daily|daily limit|daily quota|usage has exceeded|exceeded the maximum|limit reached|usage limit|limite di[aá]rio|cota esgotada|cota di[aá]ria/.test(m);
 }
 
 /** AVATAR/LOOK de OUTRO workspace (space) que o ativo — TERMINAL: re-tentar NÃO
