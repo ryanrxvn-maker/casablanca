@@ -623,6 +623,11 @@ export async function muxAudioIntoVideo(
       outputName,
     ]);
     const data = await ff.readFile(outputName);
+    // GARANTIA (mesma política do concat/corte, fix 2026-07-03): instância
+    // zumbi/OOM pode "terminar" com a saída TRUNCADA — valida ANTES de
+    // devolver. O erro sobe pro retry do caller (a camuflagem re-tenta com
+    // instância limpa) em vez de entregar um vídeo que não abre.
+    assertValidMp4(data as Uint8Array, 'vídeo com áudio trocado');
     return toBlob(data, 'video/mp4');
   } finally {
     if (progressHandler) ff.off('progress', progressHandler);
@@ -1902,6 +1907,11 @@ export async function normalizeVolume(
     }
 
     const data = await ff.readFile(outputName);
+    // GARANTIA: saída mp4 truncada (OOM/instância zumbi) vira ERRO aqui — quem
+    // chama (prepareVoiceForDecupagem → regularVoz do pipeline) cai no arquivo
+    // ORIGINAL em vez de levar um clipe quebrado pro concat da montagem (que
+    // corromperia/derrubaria a montagem inteira de forma silenciosa).
+    if (params.output === 'mp4') assertValidMp4(data as Uint8Array, 'vídeo nivelado');
     const mime =
       params.output === 'mp4'
         ? 'video/mp4'

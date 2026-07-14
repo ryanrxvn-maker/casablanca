@@ -3219,8 +3219,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         const blob3 = await zipCamu.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
         camuName = `${adNameClean}_camuflado.zip`;
         camuUrl = URL.createObjectURL(blob3);
-        const rCamo = await persistDeliverableOrRescue(`batch:${taskId}:camo`, blob3, camuName);
-        if (rCamo.rescued) deliveryRescued = true;
+        // GUARD (mesma política do montado, fix 2026-07-03): só PERSISTE o zip
+        // camuflado se tiver camuflado REAL dentro. Um zip só de
+        // _CAMUFLAGEM_ERRO.txt não pode sobrescrever no IDB um camuflado BOM de
+        // tentativa anterior — após F5 é o IDB que re-hidrata o download.
+        if (assembled.some((it) => !!it.camuflado)) {
+          const rCamo = await persistDeliverableOrRescue(`batch:${taskId}:camo`, blob3, camuName);
+          if (rCamo.rescued) deliveryRescued = true;
+        }
       }
 
       const totalSize = takesBlob.size + (montadoUrl ? assembled.reduce((n, it) => n + (it.decupado?.size || it.rawAssembled?.size || 0), 0) : 0);
@@ -3809,8 +3815,14 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         const blob3 = await zipCamu.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
         camuName = `${adNameClean}_camuflado.zip`;
         camuUrl = URL.createObjectURL(blob3);
-        const rCamo = await persistDeliverableOrRescue(`batch:${taskId}:camo`, blob3, camuName);
-        if (rCamo.rescued) deliveryRescued = true;
+        // GUARD (mesma política do montado, fix 2026-07-03): só PERSISTE o zip
+        // camuflado se tiver camuflado REAL dentro. Um zip só de
+        // _CAMUFLAGEM_ERRO.txt não pode sobrescrever no IDB um camuflado BOM de
+        // tentativa anterior — após F5 é o IDB que re-hidrata o download.
+        if (assembled.some((it) => !!it.camuflado)) {
+          const rCamo = await persistDeliverableOrRescue(`batch:${taskId}:camo`, blob3, camuName);
+          if (rCamo.rescued) deliveryRescued = true;
+        }
       }
 
       const totalSize = takesBlob.size + (montadoUrl ? assembled.reduce((n, it) => n + (it.decupado?.size || it.rawAssembled?.size || 0), 0) : 0);
@@ -5182,7 +5194,11 @@ ${assembled.length === 0 ? 'Pipeline nao produziu nenhuma montagem (ver _DIAGNOS
         const camuBlob = await zipCamu.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
         camuName = `${adNameClean}_camuflado.zip`;
         camuUrl = URL.createObjectURL(camuBlob);
-        await persistDeliverableOrRescue(`batch:${taskId}:camo`, camuBlob, camuName);
+        // GUARD: zip só de erro NÃO sobrescreve camuflado BOM no IDB (o F5
+        // re-hidrata o download de lá) — mesma política do montado.
+        if (assembled.some((it) => !!it.camuflado)) {
+          await persistDeliverableOrRescue(`batch:${taskId}:camo`, camuBlob, camuName);
+        }
       }
 
       const decupagemOn = isDecupagemEnabled(taskId);

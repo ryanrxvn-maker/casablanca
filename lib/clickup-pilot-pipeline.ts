@@ -302,6 +302,12 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         allNormalized = false;
       }
     }
+    // HEAP FRESCO pro concat final: o loop de normalização acima rodou 1 exec
+    // por parte na MESMA instância — o heap do wasm só CRESCE (nunca devolve
+    // memória) e o concat é a op que carrega a montagem INTEIRA no MEMFS.
+    // Reciclar aqui custa ~1-3s (core em cache) e dá ao concat a mesma condição
+    // de instância recém-nascida que fazia o RETOMAR passar de primeira.
+    try { cancelFFmpeg(); } catch { /* ignora */ }
     // CRÍTICO: o fast-concat (concatVideosFast) usa -c:v copy. Ele SÓ é seguro se
     // TODAS as partes têm params de vídeo idênticos. Se UMA parte não normalizou
     // (ficou com params originais divergentes), o copy-concat DROPA o vídeo dela
@@ -373,10 +379,17 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
   // → sem robótico) + true-peak -1.5 (anti-clipping). NUNCA lança: se
   // falhar/timeout, devolve o blob original intacto.
   const regularVoz = async (blob: Blob, label: string): Promise<Blob> => {
+    // Timeout PROPORCIONAL ao tamanho (era 150s fixo): parte LONGA (BODY de
+    // 60-90s) num PC carregado estourava o teto no meio de um nivelamento
+    // LEGÍTIMO → a parte caía no clipe original (sem nivelar) e empurrava a
+    // montagem pros caminhos frágeis (concat misto/re-encode). Um HANG de
+    // verdade não depende deste teto: o watchdog por batimento do worker mata
+    // em ~3min de silêncio de qualquer jeito.
+    const levelMs = Math.min(600_000, Math.max(150_000, Math.round((blob.size / (1024 * 1024)) * 6_000)));
     try {
       return await withTimeout(
         prepareVoiceForDecupagem(blob, { onStage: (s) => console.log(`[clickup-pilot-pipeline] regul ${label}: ${s}`) }),
-        150_000,
+        levelMs,
         'regulagemVoz',
       );
     } catch (e) {
@@ -481,6 +494,14 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
     onProgress?.({ stage: 'regulando', currentFilename: filename, doneCount: g, totalCount: total });
     const leveledBlobs = await nivelarPartes(blobs, blobLabels, filename);
 
+    // HEAP FRESCO pro concat da montagem (raiz do AMARELO intermitente): o
+    // nivelamento acima rodou ~2 execs POR PARTE na mesma instância e o heap do
+    // wasm só cresce — o concat (que escreve a montagem INTEIRA no MEMFS) rodava
+    // numa instância inchada/fragmentada e estourava de forma intermitente. O
+    // RETOMAR "sempre passava" porque nasce com instância limpa + cache de clips
+    // — reciclar aqui (~1-3s, core em cache) reproduz essa condição boa JÁ no
+    // primeiro disparo, em vez de depender da cura depois.
+    try { cancelFFmpeg(); } catch { /* ignora */ }
     // Tenta fast concat (5-10x mais rapido) primeiro. Mas fast concat sem
     // re-encode pode produzir output corrompido se codec/dimensao divergem
     // entre as partes (raro com HeyGen mesmo avatar, mas acontece). Por isso
@@ -511,7 +532,17 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       assembled = await verifyConcatSync(assembled, leveledBlobs, `assemble ${filename}`);
     } catch (e) {
       console.error(`[clickup-pilot-pipeline] assemble ${filename}: FAIL (ambos paths)`, e);
-      out.push({ filename, rawAssembled: new Blob(), errors: { assemble: (e as Error)?.message || 'falha no concat' } });
+      out.push({
+        filename,
+        rawAssembled: new Blob(),
+        errors: { assemble: (e as Error)?.message || 'falha no concat' },
+        missingParts: missingExpected.length ? missingExpected : undefined,
+        // Guarda as partes JÁ NIVELADAS pro SALVAGE (Stage 1.5) re-tentar SÓ o
+        // concat com instância recém-reciclada — sem refazer o nivelamento e
+        // sem a task nunca chegar em 'done' amarela por uma falha transitória.
+        _salvageParts: leveledBlobs,
+        _partLabels: blobLabels,
+      } as AssembledPart & { _salvageParts: Blob[]; _partLabels: string[] });
       continue;
     }
     out.push({
@@ -525,6 +556,33 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       _leveledParts: leveledBlobs,
       _partLabels: blobLabels,
     } as AssembledPart & { _usedFastPath: boolean; _leveledParts: Blob[]; _partLabels: string[] });
+  }
+
+  // === Stage 1.5: SALVAGE do assemble (a "cura" AINDA DENTRO do run) ===
+  // Item que falhou o concat ganha UMA re-tentativa no FIM do Stage 1, com o
+  // worker RECICLADO (instância nova, heap compacto) e as partes já niveladas.
+  // É exatamente a condição que fazia o RETOMAR manual dar certo — só que
+  // automática e SEM a task aparecer AMARELA pro user. Se falhar de novo,
+  // mantém o erro e os gates + auto-cura existentes seguem como hoje.
+  for (const rescued of out) {
+    const s = rescued as AssembledPart & { _salvageParts?: Blob[]; _partLabels?: string[]; _leveledParts?: Blob[] };
+    if (!s.errors?.assemble || !s._salvageParts?.length) continue;
+    onProgress?.({ stage: 'assembling', currentFilename: `${s.filename} (resgate)`, doneCount: Math.max(0, total - 1), totalCount: total });
+    try { cancelFFmpeg(); } catch { /* ignora */ }
+    try {
+      let re = await concatRobust(s._salvageParts, `salvage ${s.filename}`);
+      re = await verifyConcatSync(re, s._salvageParts, `salvage ${s.filename}`);
+      s.rawAssembled = re;
+      s._leveledParts = s._salvageParts; // Stage 2 decupa normalmente
+      const rest = { ...s.errors };
+      delete rest.assemble;
+      s.errors = rest.decupagem || rest.camuflagem ? rest : undefined;
+      console.log(`[clickup-pilot-pipeline] salvage ${s.filename}: OK ${(re.size / (1024 * 1024)).toFixed(1)}MB — concat recuperado no MESMO run (sem AMARELO)`);
+    } catch (e) {
+      console.warn(`[clickup-pilot-pipeline] salvage ${s.filename}: re-tentativa também falhou (${(e as Error)?.message?.slice(0, 80)}) — mantém o erro pro RETOMAR/auto-cura`);
+    } finally {
+      s._salvageParts = undefined;
+    }
   }
 
   // (A regulagem de voz agora acontece POR PARTE no Stage 1, antes do concat —
@@ -621,6 +679,10 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
       continue;
     }
 
+    // HEAP FRESCO pro concat dos decupados: os cortes por parte acima rodaram
+    // vários execs na mesma instância (heap inchado) — mesma razão do recycle
+    // pré-concat do Stage 1. O concat grande merece instância recém-nascida.
+    try { cancelFFmpeg(); } catch { /* ignora */ }
     // Concatena os decupados. Se TODAS as partes foram cortadas, elas têm codec/
     // params idênticos (cutVideoSegments usa params fixos) → fast concat (copy,
     // sem re-encode, sem perda). Se houve MISTURA (alguma parte original como
@@ -703,6 +765,11 @@ export async function runPostPipeline(input: PipelineInputs): Promise<PipelineRe
         const source = item.decupado || item.rawAssembled;
         if (!source || item.errors?.assemble) continue;
         onProgress?.({ stage: 'camuflando', currentFilename: item.filename, doneCount: g, totalCount: total });
+        // HEAP FRESCO pra camuflagem: extractAudio + mux carregam o MONTADO
+        // INTEIRO no MEMFS (2 passadas). Instância recém-reciclada por item
+        // elimina o estouro intermitente que deixava o camuflado de fora
+        // (task amarela "pós-processo parcial") sem depender do retry.
+        try { cancelFFmpeg(); } catch { /* ignora */ }
         try {
           // AUTO-RETRY (reset entre tentativas): extrai BLACK → camufla → remuxa.
           // Camuflagem é HARD requirement do META (não pode entregar áudio NÃO
