@@ -109,7 +109,7 @@ function RecordChyron({ s }: { s: S }) {
 
         {/* faixa 3: ticker azul (opcional) */}
         {items.length ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 * k, height: 26 * k, background: REC_TAG, color: '#fff', padding: `0 ${12 * k}px`, fontSize: 12 * k, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+          <div data-fp-anim="ticker" style={{ display: 'flex', alignItems: 'center', gap: 8 * k, height: 26 * k, background: REC_TAG, color: '#fff', padding: `0 ${12 * k}px`, fontSize: 12 * k, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden' }}>
             {items.map((it, i) => (
               <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 * k }}>
                 {i > 0 ? <span style={{ color: REC_RED, fontWeight: 900 }}>▪</span> : null}
@@ -133,6 +133,8 @@ const RECORD: FakeModel<S> = {
   ratio: 9 / 16,
   exportW: 1920,
   usesPhone: false,
+  // tem relógio/ticker/bolinha AO VIVO animáveis → shell mostra 'Exportar vídeo'
+  anim: true,
   dims: (s) => newsDims(s.orient),
   defaultState: {
     ...defaultNewsBg,

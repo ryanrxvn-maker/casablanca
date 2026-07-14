@@ -88,7 +88,7 @@ function NnnBug({ s, k }: { s: S; k: number }) {
             borderRadius: 2 * k,
           }}
         >
-          <span style={{ width: 7 * k, height: 7 * k, borderRadius: '50%', background: '#fff', display: 'inline-block' }} />
+          <span data-fp-anim="livedot" style={{ width: 7 * k, height: 7 * k, borderRadius: '50%', background: '#fff', display: 'inline-block' }} />
           <span style={{ color: '#fff', fontWeight: 800, fontSize: 12 * k, letterSpacing: 0.8 * k }}>{s.live}</span>
         </div>
       ) : null}
@@ -166,13 +166,13 @@ function NnnChyron({ s }: { s: S }) {
                 textTransform: 'uppercase',
               }}
             >
-              {s.time.trim() ? <span>{s.time}</span> : null}
+              {s.time.trim() ? <span data-fp-anim="clock">{s.time}</span> : null}
               {s.time.trim() && s.date.trim() ? <span style={{ color: 'rgba(255,255,255,0.5)' }}>/</span> : null}
               {s.date.trim() ? <span>{s.date}</span> : null}
             </div>
           ) : null}
           {items.length ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 * k, padding: `0 ${12 * k}px`, fontSize: 12 * k, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', flex: 1 }}>
+            <div data-fp-anim="ticker" style={{ display: 'flex', alignItems: 'center', gap: 8 * k, padding: `0 ${12 * k}px`, fontSize: 12 * k, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', flex: 1 }}>
               {items.map((it, i) => (
                 <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 * k }}>
                   {i > 0 ? <span style={{ color: RED, fontWeight: 900 }}>▪</span> : null}
@@ -197,6 +197,8 @@ const NNN: FakeModel<S> = {
   ratio: 9 / 16,
   exportW: 1920,
   usesPhone: false,
+  // tem relógio/ticker/bolinha AO VIVO animáveis → shell mostra 'Exportar vídeo'
+  anim: true,
   dims: (s) => newsDims(s.orient),
   defaultState: {
     ...defaultNewsBg,

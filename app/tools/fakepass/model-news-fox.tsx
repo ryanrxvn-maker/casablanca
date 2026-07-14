@@ -82,7 +82,7 @@ function FoxChyron({ s }: { s: S }) {
             lineHeight: 1,
           }}
         >
-          <span style={{ width: 7 * k, height: 7 * k, borderRadius: '50%', background: '#fff', display: 'inline-block' }} />
+          <span data-fp-anim="livedot" style={{ width: 7 * k, height: 7 * k, borderRadius: '50%', background: '#fff', display: 'inline-block' }} />
           {s.live}
         </div>
       ) : null}
@@ -185,6 +185,8 @@ const FOX: FakeModel<S> = {
   ratio: 9 / 16,
   exportW: 1920,
   usesPhone: false,
+  // tem relógio/ticker/bolinha AO VIVO animáveis → shell mostra 'Exportar vídeo'
+  anim: true,
   dims: (s) => newsDims(s.orient),
   defaultState: {
     ...defaultNewsBg,

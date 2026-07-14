@@ -78,6 +78,7 @@ function CnnBrChyron({ s }: { s: S }) {
           }}
         >
           <span
+            data-fp-anim="clock"
             style={{
               background: 'rgba(20,20,20,0.85)',
               color: '#fff',
@@ -181,6 +182,7 @@ function CnnBrChyron({ s }: { s: S }) {
         {/* faixa 4: ticker escuro opcional */}
         {items.length ? (
           <div
+            data-fp-anim="ticker"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -218,6 +220,8 @@ const CNNBR: FakeModel<S> = {
   ratio: 9 / 16,
   exportW: 1920,
   usesPhone: false,
+  // tem relógio/ticker/bolinha AO VIVO animáveis → shell mostra 'Exportar vídeo'
+  anim: true,
   dims: (s) => newsDims(s.orient),
   defaultState: {
     ...defaultNewsBg,

@@ -528,7 +528,7 @@ export const GUIDES: Record<string, ToolGuide> = {
       },
       {
         title: 'Telejornal ou site? Monte a cena',
-        text: 'Os modelos de TV têm "Formato" (16:9 pra TV ou 9:16 pra Reels — os dois exportam em alta), "Layout da cena" (1, 2 ou 3 quadros, ou Repórter) e o "Fundo": a opção "Tela verde" gera o cenário em chroma key, pronto pra você encaixar qualquer imagem ou vídeo por trás dos gráficos no editor. Manchete, tag do assunto, hora, local e ticker são todos editáveis. Nos sites de notícia funciona igual: manchete, linha de apoio, autor e primeiro parágrafo, com a imagem principal também podendo sair em tela verde.',
+        text: 'Os modelos de TV têm "Formato" (16:9 pra TV ou 9:16 pra Reels — os dois exportam em alta), "Layout da cena" (1, 2 ou 3 quadros, ou Repórter) e o "Fundo": a opção "Tela verde" gera o cenário em chroma key, pronto pra você encaixar qualquer imagem ou vídeo por trás dos gráficos no editor. Manchete, tag do assunto, hora, local e ticker são todos editáveis. E além do PNG, os telejornais também têm "Exportar vídeo (.webm)": o gráfico sai VIVO — relógio rodando, ticker deslizando e a bolinha do "ao vivo" pulsando (3 a 15 segundos) — pronto pra sobrepor no editor. Nos sites de notícia funciona igual: manchete, linha de apoio, autor e primeiro parágrafo, com a imagem principal também podendo sair em tela verde.',
         visual: (
           <Shot label="FakePrint · telejornal">
             <MRow>

@@ -103,13 +103,47 @@ function measureLeaves(
   return res;
 }
 
+/** Estado ESTRESSADO: estica todo campo textual com texto longo + emojis —
+ *  simula o conteúdo real do cliente (nada de default curtinho). Campos que
+ *  parecem cor/URL/número/hora ficam intactos. Determinístico. */
+const STRESS_SUFIXO = ' aumentando bastante esse texto com emoji 🔥😱💯 pra estressar o layout e conferir que nada quebra nem desalinha no download';
+function stressify(s: any): any {
+  const out: any = {};
+  for (const [k, v] of Object.entries(s)) {
+    if (typeof v !== 'string') {
+      out[k] = v;
+      continue;
+    }
+    if (/^#|^https?:|^data:/.test(v) || /^[\d.,:%\sh]+$/i.test(v)) {
+      out[k] = v;
+      continue;
+    }
+    const textual = (v.includes(' ') && v.length >= 4) || v.length >= 12;
+    if (!textual) {
+      out[k] = v;
+      continue;
+    }
+    if (v.includes('\n')) {
+      out[k] = v
+        .split('\n')
+        .map((l) => (l.trim() ? l + ' — e uma resposta beeem mais looonga 😂🙏 pra testar a quebra' : l))
+        .join('\n');
+    } else {
+      out[k] = v + STRESS_SUFIXO;
+    }
+  }
+  return out;
+}
+
 export default function FpAuditPage() {
   const [idx, setIdx] = useState(-1);
+  const [stress, setStress] = useState(false);
   const stageRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    (window as any).__fpAuditStart = (from = 0) => {
+    (window as any).__fpAuditStart = (from = 0, opts: { stress?: boolean } = {}) => {
       (window as any).__fpAuditResults = [];
+      setStress(!!opts.stress);
       setIdx(from);
     };
   }, []);
@@ -124,11 +158,11 @@ export default function FpAuditPage() {
       if (cancel) return;
       const node = stageRef.current;
       const model = MODELS[idx];
-      const s = model.defaultState;
+      const s = stress ? stressify(model.defaultState) : model.defaultState;
       const dims = model.dims
         ? model.dims(s)
         : { stageW: model.stageW, ratio: model.ratio, exportW: model.exportW };
-      const out: any = { id: model.id, label: model.label };
+      const out: any = { id: model.id, label: model.label, stress };
       try {
         if (!node) throw new Error('sem stage');
         const scale = dims.exportW / dims.stageW;
@@ -149,7 +183,7 @@ export default function FpAuditPage() {
         out.desalinhado = leafResults.filter((l) => l.errPx !== null && Math.abs(l.errPx) > 2.5);
         out.maxErr = leafResults.reduce((m, l) => Math.max(m, Math.abs(l.errPx ?? 0)), 0);
         const blob: Blob | null = await new Promise((r) => A.toBlob(r, 'image/png'));
-        if (blob) await fetch(`/api/dev-fp-save?name=audit-${model.id}`, { method: 'POST', body: blob });
+        if (blob) await fetch(`/api/dev-fp-save?name=audit-${stress ? 'stress-' : ''}${model.id}`, { method: 'POST', body: blob });
       } catch (e: any) {
         out.error = String(e?.message || e);
       }
@@ -178,7 +212,7 @@ export default function FpAuditPage() {
       {model ? (
         <div data-fp-zoom style={{ zoom: 1, lineHeight: 0 }}>
           <div ref={stageRef} className={uiFont.variable} style={{ display: 'inline-block', lineHeight: 0 }}>
-            {model.Preview({ s: model.defaultState, status: defaultStatus })}
+            {model.Preview({ s: stress ? stressify(model.defaultState) : model.defaultState, status: defaultStatus })}
           </div>
         </div>
       ) : null}

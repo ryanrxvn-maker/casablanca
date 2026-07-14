@@ -58,6 +58,9 @@ export default function FakePassPage() {
     Object.fromEntries(MODELS.map((m) => [m.id, m.defaultState])),
   );
   const [gerando, setGerando] = useState(false);
+  const [gravandoVid, setGravandoVid] = useState(false);
+  const [vidMsg, setVidMsg] = useState('');
+  const [vidSecs, setVidSecs] = useState(8);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const previewBoxRef = useRef<HTMLDivElement | null>(null);
   const [pscale, setPscale] = useState(1);
@@ -102,6 +105,34 @@ export default function FakePassPage() {
       alert('Não consegui gerar a imagem agora. Tenta de novo em instantes.');
     } finally {
       setGerando(false);
+    }
+  };
+
+  // vídeo (modelos anim: relógio rodando + ticker deslizando + AO VIVO pulsando)
+  const baixarVideo = async () => {
+    const node = stageRef.current;
+    if (!node || gravandoVid) return;
+    setGravandoVid(true);
+    setVidMsg(`Gravando ${vidSecs} segundos de animação…`);
+    try {
+      const { recordStageVideo } = await import('./video-export');
+      const blob = await recordStageVideo(node, { seconds: vidSecs, targetW: dims.exportW, refW: dims.stageW });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `fakepass-${model.id}.webm`;
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setVidMsg('Vídeo baixado ✓');
+      logHistory({ tool: 'fakepass', kind: 'export', title: `Vídeo ${model.id} exportado` });
+    } catch (err) {
+      console.error('[fakepass] vídeo falhou', err);
+      setVidMsg('Não consegui gravar o vídeo agora — o PNG continua disponível. No Chrome funciona.');
+    } finally {
+      setGravandoVid(false);
     }
   };
 
@@ -280,6 +311,49 @@ export default function FakePassPage() {
             <p className="mt-2 text-center text-[11px] text-text-muted">
               Imagem em alta ({model.exportW}px) — pronta pra postar.
             </p>
+
+            {model.anim ? (
+              <div className="mt-4 flex flex-col gap-3 rounded-[14px] border border-line/60 bg-bg-soft/30 p-3.5">
+                <RangeField
+                  label="Duração do vídeo"
+                  value={vidSecs}
+                  min={3}
+                  max={15}
+                  onChange={setVidSecs}
+                  display={(v) => v + 's'}
+                />
+                <button
+                  type="button"
+                  onClick={baixarVideo}
+                  disabled={gravandoVid || gerando}
+                  className="flex w-full items-center justify-center gap-2 rounded-[14px] border border-white/15 px-5 py-3 text-[13.5px] font-bold text-white transition-all duration-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                  style={{
+                    fontFamily: 'var(--font-tech)',
+                    background: 'linear-gradient(180deg,#fb7185 0%,#e11d48 100%)',
+                    boxShadow: '0 8px 22px -8px rgba(244,63,94,0.65), inset 0 1px 0 rgba(255,255,255,0.3)',
+                  }}
+                >
+                  {gravandoVid ? (
+                    <>
+                      <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-white" />
+                      Gravando…
+                    </>
+                  ) : (
+                    <>
+                      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="2.5" y="6" width="13" height="12" rx="2.5" />
+                        <path d="M15.5 10.5 21 7v10l-5.5-3.5" />
+                      </svg>
+                      Exportar vídeo (.webm)
+                    </>
+                  )}
+                </button>
+                <p className="text-[11px] leading-relaxed text-text-dim">
+                  {vidMsg ||
+                    'O vídeo sai com o gráfico VIVO: relógio rodando, ticker deslizando e o "ao vivo" pulsando — com o cenário em tela verde, é só sobrepor no editor.'}
+                </p>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

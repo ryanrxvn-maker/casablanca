@@ -140,7 +140,7 @@ function MsnbcChyron({ s }: { s: S }) {
           >
             <MsnbcLogo k={k} />
             {liveLabel ? (
-              <span style={{ color: '#d31f26', fontWeight: 800, fontSize: 10.5 * k, letterSpacing: 0.8 * k, fontVariantNumeric: 'tabular-nums' }}>
+              <span data-fp-anim="clock" style={{ color: '#d31f26', fontWeight: 800, fontSize: 10.5 * k, letterSpacing: 0.8 * k, fontVariantNumeric: 'tabular-nums' }}>
                 {liveLabel}
               </span>
             ) : null}
@@ -183,6 +183,8 @@ const MSNBC: FakeModel<S> = {
   ratio: 9 / 16,
   exportW: 1920,
   usesPhone: false,
+  // tem relógio/ticker/bolinha AO VIVO animáveis → shell mostra 'Exportar vídeo'
+  anim: true,
   dims: (s) => newsDims(s.orient),
   defaultState: {
     ...defaultNewsBg,

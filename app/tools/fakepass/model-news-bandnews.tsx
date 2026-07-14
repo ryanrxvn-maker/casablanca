@@ -70,6 +70,7 @@ function BandNewsChyron({ s }: { s: S }) {
         >
           {s.time.trim() ? (
             <span
+              data-fp-anim="clock"
               style={{
                 color: '#fff',
                 fontWeight: 800,
@@ -101,7 +102,7 @@ function BandNewsChyron({ s }: { s: S }) {
                   textTransform: 'uppercase',
                 }}
               >
-                <span style={{ width: 6 * k, height: 6 * k, borderRadius: '50%', background: '#fff', display: 'inline-block' }} />
+                <span data-fp-anim="livedot" style={{ width: 6 * k, height: 6 * k, borderRadius: '50%', background: '#fff', display: 'inline-block' }} />
                 {s.live}
               </span>
             ) : null}
@@ -191,6 +192,8 @@ const BANDNEWS: FakeModel<S> = {
   ratio: 9 / 16,
   exportW: 1920,
   usesPhone: false,
+  // tem relógio/ticker/bolinha AO VIVO animáveis → shell mostra 'Exportar vídeo'
+  anim: true,
   dims: (s) => newsDims(s.orient),
   defaultState: {
     ...defaultNewsBg,

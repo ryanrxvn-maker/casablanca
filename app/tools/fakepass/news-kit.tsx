@@ -286,16 +286,16 @@ export function LiveTag({
         ...style,
       }}
     >
-      {dot ? <span style={{ width: 7 * k, height: 7 * k, borderRadius: '50%', background: color, display: 'inline-block' }} /> : null}
+      {dot ? <span data-fp-anim="livedot" style={{ width: 7 * k, height: 7 * k, borderRadius: '50%', background: color, display: 'inline-block' }} /> : null}
       {text}
     </span>
   );
 }
 
-/** Relógio/tempo simples. */
+/** Relógio/tempo simples. (data-fp-anim: vira relógio VIVO no export de vídeo) */
 export function Clock({ text, color = '#fff', k = 1, style }: { text: string; color?: string; k?: number; style?: CSSProperties }) {
   return (
-    <span style={{ color, fontWeight: 700, fontSize: 13 * k, fontVariantNumeric: 'tabular-nums', letterSpacing: 0.3 * k, ...style }}>
+    <span data-fp-anim="clock" style={{ color, fontWeight: 700, fontSize: 13 * k, fontVariantNumeric: 'tabular-nums', letterSpacing: 0.3 * k, ...style }}>
       {text}
     </span>
   );
@@ -337,7 +337,7 @@ export function Ticker({
           {labelText}
         </div>
       ) : null}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 * k, padding: `0 ${12 * k}px`, fontSize: fs, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', flex: 1 }}>
+      <div data-fp-anim="ticker" style={{ display: 'flex', alignItems: 'center', gap: 8 * k, padding: `0 ${12 * k}px`, fontSize: fs, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', flex: 1 }}>
         {items.map((it, i) => (
           <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 * k }}>
             {i > 0 ? <span style={{ color: sepColor ?? 'rgba(255,255,255,0.5)' }}>{sep}</span> : null}

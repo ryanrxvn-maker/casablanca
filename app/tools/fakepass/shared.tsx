@@ -89,6 +89,9 @@ export type FakeModel<S = any> = {
   usesPhone: boolean;
   /** Sub-grupo dentro da categoria (ex.: nome da emissora nas Notícias). */
   group?: string;
+  /** Tem relógio/ticker/bolinha animáveis ([data-fp-anim] no Preview)?
+   *  → o shell mostra "Exportar vídeo (.webm)" (motor em video-export.ts). */
+  anim?: boolean;
   /** Dimensões DINÂMICAS: quando presente, o shell usa isto no lugar de
    *  stageW/ratio/exportW fixos (ex.: alternar 16:9 ↔ 9:16 pelo estado). */
   dims?: (s: S) => StageDims;
@@ -211,6 +214,9 @@ export async function renderNodeToCanvas(
   node: HTMLElement,
   targetW: number,
   refW?: number,
+  /** Ajuste extra aplicado a CADA clone (todos os renders, sondas e final) —
+   *  usado pelo export de vídeo pra assar a base com a tinta animada oculta. */
+  onCloneExtra?: (root: HTMLElement) => void,
 ): Promise<HTMLCanvasElement> {
   // Fontes prontas ANTES de capturar: se a Inter não terminou de carregar, o
   // texto sai numa fonte de fallback com métrica diferente = desalinhado.
@@ -284,6 +290,13 @@ export async function renderNodeToCanvas(
       if (getComputedStyle(el).writingMode !== 'horizontal-tb') return;
       for (const n of kids) {
         if (n.nodeType !== 3 || !(n.textContent || '').trim()) continue;
+        // Texto que ATRAVESSA linhas não vira chip: o html2canvas EMBARALHA
+        // <span> inline multi-linha (linhas desenhadas umas sobre as outras).
+        // O chip compensável ("● LIVE") é de 1 linha por natureza; fluxo que
+        // quebra é tratado pelo flow-block (alvo no PAI, sem wrap).
+        const rg = el.ownerDocument.createRange();
+        rg.selectNodeContents(n);
+        if (rg.getClientRects().length > 1) continue;
         const span = el.ownerDocument.createElement('span');
         el.replaceChild(span, n);
         span.appendChild(n);
@@ -335,6 +348,29 @@ export async function renderNodeToCanvas(
   const applyEllipsisInClone = (root: HTMLElement) => {
     root.querySelectorAll<HTMLElement>('[data-fp-ellip]').forEach((el) => {
       el.textContent = el.dataset.fpEllip || el.textContent;
+    });
+    // ── Line-clamp → caixa dura ──
+    // O html2canvas NÃO entende `display:-webkit-box` + `-webkit-line-clamp`
+    // (embaralha as linhas quando o texto estoura o clamp). No clone o bloco
+    // vira block comum com a MESMA altura visível do DOM: as linhas quebram
+    // igual (mesma formatação inline) e o corte fica na mesma posição — só o
+    // "…" da última linha não sai (aceito).
+    root.querySelectorAll<HTMLElement>('[data-fp-clamp]').forEach((el) => {
+      el.style.display = 'block';
+      (el.style as any).webkitLineClamp = 'unset';
+      (el.style as any).webkitBoxOrient = 'unset';
+      el.style.overflow = 'hidden';
+      el.style.maxHeight = `${el.dataset.fpClamp}px`;
+    });
+  };
+  const clampEls: HTMLElement[] = [];
+  const computeClampShims = () => {
+    node.querySelectorAll<HTMLElement>('*').forEach((el) => {
+      const cs = getComputedStyle(el);
+      if (!cs.webkitLineClamp || cs.webkitLineClamp === 'none') return;
+      if (!cs.display.includes('box')) return;
+      el.dataset.fpClamp = String(el.clientHeight);
+      clampEls.push(el);
     });
   };
 
@@ -400,6 +436,7 @@ export async function renderNodeToCanvas(
     await new Promise((r) => setTimeout(r, 60));
 
     computeEllipsisShims();
+    computeClampShims();
     applyCropGuards();
     applyGapShims();
     wrapMixedText();
@@ -542,6 +579,14 @@ export async function renderNodeToCanvas(
     // username logo acima — a poluição que estragava a medição por peça). O erro vale
     // pro bloco todo, então subir o PAI preserva quebra, espaçamento e emojis.
     for (const par of flowParents) {
+      // ANINHADO: se um pai de fluxo está DENTRO de outro (legenda inteira +
+      // span interno da legenda), só o MAIS EXTERNO vira alvo — dois translateY
+      // COMPÕEM no clone e o texto interno deslocaria 2× (sobreposição).
+      let nested = false;
+      for (const other of flowParents) {
+        if (other !== par && other.contains(par)) { nested = true; break; }
+      }
+      if (nested) continue;
       const csP = getComputedStyle(par);
       if (csP.writingMode !== 'horizontal-tb' || axisUnsafeTf(csP.transform)) continue;
       let inStop = false;
@@ -553,6 +598,22 @@ export async function renderNodeToCanvas(
       range.selectNodeContents(par);
       const gr = range.getBoundingClientRect();
       if (!gr.height || gr.width < 3) continue;
+      // conteúdo CLIPADO (o texto estoura o palco OU QUALQUER ancestral com
+      // overflow que corte): a tinta visível não representa o range inteiro →
+      // a medição sairia errada e o deslocamento embaralharia (foi o caso da
+      // legenda do IG Post estressada, clipada pelo card interno). Fica como
+      // está — o clip é o MESMO da prévia.
+      let clipped = gr.bottom > nodeRect.bottom - 2 || gr.top < nodeRect.top + 2;
+      if (!clipped) {
+        for (let a: HTMLElement | null = par; a && a !== node.parentElement; a = a.parentElement) {
+          const csA = getComputedStyle(a);
+          if (/hidden|clip|auto|scroll/.test(csA.overflowY) || /hidden|clip|auto|scroll/.test(csA.overflowX)) {
+            const ar = a.getBoundingClientRect();
+            if (gr.bottom > ar.bottom + 1 || gr.top < ar.top - 1) { clipped = true; break; }
+          }
+        }
+      }
+      if (clipped) continue;
       par.dataset.fpFlow = '1';
       const half = gr.height / 2;
       flowTargets.push({
@@ -635,21 +696,21 @@ export async function renderNodeToCanvas(
       };
       const rawCanvas = await html2canvas(node, {
         ...h2cOpts,
-        onclone: (_d: Document, root: HTMLElement) => applyEllipsisInClone(root),
+        onclone: (_d: Document, root: HTMLElement) => { applyEllipsisInClone(root); onCloneExtra?.(root); },
       });
       const hid0Canvas = needLeafProbe ? await html2canvas(node, {
         ...h2cOpts,
-        onclone: (d: Document, root: HTMLElement) => { applyEllipsisInClone(root); hideSel('[data-fp-cal0]')(d, root); },
+        onclone: (d: Document, root: HTMLElement) => { applyEllipsisInClone(root); onCloneExtra?.(root); hideSel('[data-fp-cal0]')(d, root); },
       }) : null;
       const hid1Canvas = needLeafProbe ? await html2canvas(node, {
         ...h2cOpts,
-        onclone: (d: Document, root: HTMLElement) => { applyEllipsisInClone(root); hideSel('[data-fp-cal1]')(d, root); },
+        onclone: (d: Document, root: HTMLElement) => { applyEllipsisInClone(root); onCloneExtra?.(root); hideSel('[data-fp-cal1]')(d, root); },
       }) : null;
       // render dedicado dos FLOW-BLOCKS: esconde só eles (e seus pedaços coloridos);
       // todo o resto aparece igual nos dois renders e se cancela no diff.
       const hidFlowCanvas = flowTargets.length ? await html2canvas(node, {
         ...h2cOpts,
-        onclone: (d: Document, root: HTMLElement) => { applyEllipsisInClone(root); hideSel('[data-fp-flow], [data-fp-flow] *')(d, root); },
+        onclone: (d: Document, root: HTMLElement) => { applyEllipsisInClone(root); onCloneExtra?.(root); hideSel('[data-fp-flow], [data-fp-flow] *')(d, root); },
       }) : null;
       targets.forEach((t) => { delete t.el.dataset.fpCal0; delete t.el.dataset.fpCal1; });
       const ra = rawCanvas.getContext('2d');
@@ -716,7 +777,10 @@ export async function renderNodeToCanvas(
           }
           if (mid == null) continue;
           const err = (mid - t.cy) / scale; // + = html2canvas baixo demais
-          if (Math.abs(err) > 0.3 && Math.abs(err) < 60) {
+          // Cap de 16px (blindagem anti-embaralho): TODOS os erros REAIS já
+          // medidos ficam em 6-13px; acima de 16px é janela poluída (com texto
+          // fora do limite da UI, p.ex.) e a correção deslocaria ~1 linha.
+          if (Math.abs(err) > 0.3 && Math.abs(err) <= 16) {
             t.el.dataset.fpVcal = String(Math.round(err * 100) / 100);
             t.el.dataset.fpVmode = t.mode;
             // Elemento com FUNDO PRÓPRIO (caixa da caixinha "Faça uma pergunta", balão
@@ -775,11 +839,19 @@ export async function renderNodeToCanvas(
             }
           }
           if (minY < 0) continue;
+          // SANIDADE da medição (blindagem anti-embaralho): a caixa de tinta
+          // medida tem que ter ~a altura do range do bloco — muito menor/maior
+          // significa tinta parcial (clip/vizinho poluindo) e a correção sairia
+          // errada. E o erro REAL do html2canvas em fluxo é ~7-9px; acima de
+          // 12px é medição podre (deslocaria ~1 linha e EMBARALHARIA) → pula.
+          const inkH = maxY - minY;
+          const rangeH = t.half * 2;
+          if (inkH < rangeH * 0.55 || inkH > rangeH * 1.3) continue;
           const err = (y0 + (minY + maxY) / 2 - t.cy) / scale; // + = fluxo baixo demais
           // Piso de 2.5px: a assimetria natural ascendente/descendente da tinta multi-
           // linha (~1-2px) não é erro do html2canvas — só o desvio GRANDE do fluxo
           // (medido ~8px no bloco de Comentários) merece correção.
-          if (Math.abs(err) > 2.5 && Math.abs(err) < 60) {
+          if (Math.abs(err) > 2.5 && Math.abs(err) <= 12) {
             // FUNDO próprio no bloco de fluxo: mover o pai deslocaria o fundo (e o
             // contra-shift das imagens não cobre isso) — caso raro, fica como está.
             const csb = getComputedStyle(t.el);
@@ -806,6 +878,7 @@ export async function renderNodeToCanvas(
       ...h2cOpts,
       onclone: (doc: Document, root: HTMLElement) => {
         applyEllipsisInClone(root);
+        onCloneExtra?.(root);
         root.querySelectorAll<HTMLElement>('[data-fp-vcal]').forEach((el) => {
           const dy = parseFloat(el.dataset.fpVcal || '');
           if (!Number.isFinite(dy) || dy === 0) return;
@@ -858,6 +931,7 @@ export async function renderNodeToCanvas(
     if (vcompCleanup) vcompCleanup();
     textUnwrap.forEach((restore) => restore());
     ellipEls.forEach((el) => { delete el.dataset.fpEllip; });
+    clampEls.forEach((el) => { delete el.dataset.fpClamp; });
     if (zoomEl) zoomEl.style.zoom = prevZoom;
   }
 
@@ -915,17 +989,24 @@ function SignalBars({ n, color }: { n: number; color: string }) {
 }
 
 function WifiGlyph({ color }: { color: string }) {
+  // A TINTA (arcos+ponto) precisa ficar CENTRADA no viewBox: os arcos originais
+  // ocupavam y2.2–11.9 (centro 7.05) e o flex `align-items:center` alinha a CAIXA,
+  // então o wifi saía ~1px ABAIXO do eixo do sinal/bateria (medido no PNG). O
+  // transform recentra a tinta em y=6 e amplia 13% pra casar com a altura dos
+  // ícones vizinhos, igual ao iOS.
   return (
     <svg width="16" height="12" viewBox="0 0 16 12" fill="none" aria-hidden>
-      <path
-        d="M8 2.2c2.6 0 5 1 6.8 2.7l-1.5 1.6A7.6 7.6 0 0 0 8 4.3 7.6 7.6 0 0 0 2.7 6.5L1.2 4.9A9.8 9.8 0 0 1 8 2.2Z"
-        fill={color}
-      />
-      <path
-        d="M8 6.1c1.5 0 2.9.6 3.9 1.6l-1.6 1.6A2.9 2.9 0 0 0 8 8.4c-.9 0-1.7.4-2.3 1L4.1 7.7A5.5 5.5 0 0 1 8 6.1Z"
-        fill={color}
-      />
-      <circle cx="8" cy="10.6" r="1.3" fill={color} />
+      <g transform="translate(8 6) scale(1.13) translate(-8 -7.05)">
+        <path
+          d="M8 2.2c2.6 0 5 1 6.8 2.7l-1.5 1.6A7.6 7.6 0 0 0 8 4.3 7.6 7.6 0 0 0 2.7 6.5L1.2 4.9A9.8 9.8 0 0 1 8 2.2Z"
+          fill={color}
+        />
+        <path
+          d="M8 6.1c1.5 0 2.9.6 3.9 1.6l-1.6 1.6A2.9 2.9 0 0 0 8 8.4c-.9 0-1.7.4-2.3 1L4.1 7.7A5.5 5.5 0 0 1 8 6.1Z"
+          fill={color}
+        />
+        <circle cx="8" cy="10.6" r="1.3" fill={color} />
+      </g>
     </svg>
   );
 }
@@ -994,13 +1075,16 @@ export function StatusBar({
       ) : (
         <>
           {cfg.network && !ios ? (
-            <span style={{ fontSize: fs * 0.82, color, fontWeight: 600 }}>
+            // top 0.07em: a tinta do "5G" (maiúsculas, sem descendente) fica alta
+            // dentro da line-box; o nudge desce o glifo pro eixo óptico dos ícones
+            // (medido no PNG: 5G ficava ~1px acima do centro do sinal/bateria).
+            <span style={{ fontSize: fs * 0.82, color, fontWeight: 600, position: 'relative', top: '0.07em' }}>
               {cfg.network}
             </span>
           ) : null}
           <SignalBars n={cfg.signal} color={color} />
           {cfg.network && ios ? (
-            <span style={{ fontSize: fs * 0.82, color, fontWeight: 600 }}>
+            <span style={{ fontSize: fs * 0.82, color, fontWeight: 600, position: 'relative', top: '0.07em' }}>
               {cfg.network}
             </span>
           ) : null}

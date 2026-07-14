@@ -74,7 +74,7 @@ function CnnChyron({ s }: { s: S }) {
             <span style={{ background: 'rgba(20,20,20,0.85)', color: '#fff', fontSize: 12 * k, padding: `${4 * k}px ${9 * k}px` }}>{s.location}</span>
           ) : null}
           {s.time.trim() ? (
-            <span style={{ background: 'rgba(20,20,20,0.85)', color: '#fff', fontSize: 12 * k, padding: `${4 * k}px ${9 * k}px`, fontVariantNumeric: 'tabular-nums' }}>{s.time}</span>
+            <span data-fp-anim="clock" style={{ background: 'rgba(20,20,20,0.85)', color: '#fff', fontSize: 12 * k, padding: `${4 * k}px ${9 * k}px`, fontVariantNumeric: 'tabular-nums' }}>{s.time}</span>
           ) : null}
         </div>
       ) : null}
@@ -117,7 +117,7 @@ function CnnChyron({ s }: { s: S }) {
 
         {/* faixa 3: ticker preto */}
         {items.length ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 * k, height: 26 * k, background: '#111', color: '#fff', padding: `0 ${12 * k}px`, fontSize: 12 * k, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+          <div data-fp-anim="ticker" style={{ display: 'flex', alignItems: 'center', gap: 8 * k, height: 26 * k, background: '#111', color: '#fff', padding: `0 ${12 * k}px`, fontSize: 12 * k, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden' }}>
             {items.map((it, i) => (
               <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 * k }}>
                 {i > 0 ? <span style={{ color: '#cc0000', fontWeight: 900 }}>▪</span> : null}
@@ -141,6 +141,8 @@ const CNN: FakeModel<S> = {
   ratio: 9 / 16,
   exportW: 1920,
   usesPhone: false,
+  // tem relógio/ticker/bolinha AO VIVO animáveis → shell mostra 'Exportar vídeo'
+  anim: true,
   dims: (s) => newsDims(s.orient),
   defaultState: {
     ...defaultNewsBg,

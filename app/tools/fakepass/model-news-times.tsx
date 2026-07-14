@@ -107,7 +107,7 @@ function TimesChyron({ s }: { s: S }) {
                 <span style={{ color: '#fff', fontWeight: 900, fontSize: 12 * k, letterSpacing: 0.6 * k, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{s.brand}</span>
               ) : null}
               {(s.date.trim() || s.time.trim()) ? (
-                <span style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 700, fontSize: 11 * k, letterSpacing: 0.3 * k, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                <span data-fp-anim="clock" style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 700, fontSize: 11 * k, letterSpacing: 0.3 * k, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
                   {[s.date.trim(), s.time.trim()].filter(Boolean).join('  ·  ')}
                 </span>
               ) : null}
@@ -117,7 +117,7 @@ function TimesChyron({ s }: { s: S }) {
               <span style={{ color: '#fff', fontWeight: 800, fontSize: 12 * k, letterSpacing: 0.5 * k }}>CNBC</span>
               {s.live.trim() ? (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 * k, background: RED, color: '#fff', fontWeight: 800, fontSize: 10.5 * k, letterSpacing: 0.6 * k, padding: `${3 * k}px ${7 * k}px`, textTransform: 'uppercase' }}>
-                  <span style={{ width: 6 * k, height: 6 * k, borderRadius: '50%', background: '#fff', display: 'inline-block' }} />
+                  <span data-fp-anim="livedot" style={{ width: 6 * k, height: 6 * k, borderRadius: '50%', background: '#fff', display: 'inline-block' }} />
                   {s.live}
                 </span>
               ) : null}
@@ -127,7 +127,7 @@ function TimesChyron({ s }: { s: S }) {
 
         {/* faixa 3: ticker cripto (verde) */}
         {items.length ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 0, height: 26 * k, background: '#050b1c', padding: `0 ${12 * k}px`, fontSize: 12 * k, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+          <div data-fp-anim="ticker" style={{ display: 'flex', alignItems: 'center', gap: 0, height: 26 * k, background: '#050b1c', padding: `0 ${12 * k}px`, fontSize: 12 * k, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden' }}>
             {items.map((it, i) => (
               <span key={i} style={{ display: 'inline-flex', alignItems: 'center' }}>
                 {i > 0 ? <span style={{ color: 'rgba(255,255,255,0.22)', margin: `0 ${12 * k}px` }}>|</span> : null}
@@ -151,6 +151,8 @@ const TIMES: FakeModel<S> = {
   ratio: 9 / 16,
   exportW: 1920,
   usesPhone: false,
+  // tem relógio/ticker/bolinha AO VIVO animáveis → shell mostra 'Exportar vídeo'
+  anim: true,
   dims: (s) => newsDims(s.orient),
   defaultState: {
     ...defaultNewsBg,
