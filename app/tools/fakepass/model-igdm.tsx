@@ -80,7 +80,7 @@ function IgAudioBubble({ dur, me, dark, radius }: { dur: string; me: boolean; da
             <span key={i} style={{ width: 2, height: h, borderRadius: 2, background: wave, flexShrink: 0 }} />
           ))}
         </div>
-        <span style={{ fontSize: 11, color: meta, fontVariantNumeric: 'tabular-nums' }}>{dur}</span>
+        <span style={{ fontSize: 11, color: meta }}>{dur}</span>
       </div>
       <div style={{ fontSize: 12, color: meta, marginTop: 5 }}>Ver transcrição</div>
     </div>

@@ -140,7 +140,7 @@ function MsnbcChyron({ s }: { s: S }) {
           >
             <MsnbcLogo k={k} />
             {liveLabel ? (
-              <span data-fp-anim="clock" style={{ color: '#d31f26', fontWeight: 800, fontSize: 10.5 * k, letterSpacing: 0.8 * k, fontVariantNumeric: 'tabular-nums' }}>
+              <span data-fp-anim="clock" style={{ color: '#d31f26', fontWeight: 800, fontSize: 10.5 * k, letterSpacing: 0.8 * k }}>
                 {liveLabel}
               </span>
             ) : null}

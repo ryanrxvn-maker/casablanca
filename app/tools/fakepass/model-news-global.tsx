@@ -165,7 +165,7 @@ function GlobalChyron({ s }: { s: S }) {
                 <span style={{ fontWeight: 800, fontSize: 15 * k, letterSpacing: 1 * k }}>{s.live}</span>
               ) : null}
               {s.time.trim() ? (
-                <span data-fp-anim="clock" style={{ fontWeight: 600, fontSize: 10.5 * k, letterSpacing: 0.3 * k, opacity: 0.92, fontVariantNumeric: 'tabular-nums' }}>{s.time}</span>
+                <span data-fp-anim="clock" style={{ fontWeight: 600, fontSize: 10.5 * k, letterSpacing: 0.3 * k, opacity: 0.92 }}>{s.time}</span>
               ) : null}
             </div>
           ) : null}

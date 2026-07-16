@@ -76,7 +76,7 @@ function BandNewsChyron({ s }: { s: S }) {
                 fontWeight: 800,
                 fontSize: 30 * k,
                 lineHeight: 1,
-                fontVariantNumeric: 'tabular-nums',
+                /* tabular-nums REMOVIDO: h2c posiciona segmentos com métrica tabular do DOM mas desenha proporcional → vão no meio do texto (11 :20) */
                 letterSpacing: -0.5 * k,
                 textShadow: `0 ${1 * k}px ${3 * k}px rgba(0,0,0,0.55)`,
               }}

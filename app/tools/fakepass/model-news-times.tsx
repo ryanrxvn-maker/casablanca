@@ -107,7 +107,7 @@ function TimesChyron({ s }: { s: S }) {
                 <span style={{ color: '#fff', fontWeight: 900, fontSize: 12 * k, letterSpacing: 0.6 * k, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{s.brand}</span>
               ) : null}
               {(s.date.trim() || s.time.trim()) ? (
-                <span data-fp-anim="clock" style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 700, fontSize: 11 * k, letterSpacing: 0.3 * k, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                <span data-fp-anim="clock" style={{ color: 'rgba(255,255,255,0.7)', fontWeight: 700, fontSize: 11 * k, letterSpacing: 0.3 * k, whiteSpace: 'nowrap' }}>
                   {[s.date.trim(), s.time.trim()].filter(Boolean).join('  ·  ')}
                 </span>
               ) : null}
@@ -131,7 +131,7 @@ function TimesChyron({ s }: { s: S }) {
             {items.map((it, i) => (
               <span key={i} style={{ display: 'inline-flex', alignItems: 'center' }}>
                 {i > 0 ? <span style={{ color: 'rgba(255,255,255,0.22)', margin: `0 ${12 * k}px` }}>|</span> : null}
-                <span style={{ color: TICKER_GREEN, fontVariantNumeric: 'tabular-nums' }}>{it}</span>
+                <span style={{ color: TICKER_GREEN }}>{it}</span>
               </span>
             ))}
           </div>

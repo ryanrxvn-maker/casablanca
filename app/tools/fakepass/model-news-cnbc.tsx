@@ -115,7 +115,7 @@ function CnbcChyron({ s }: { s: S }) {
 
         {/* faixa 3: ticker escuro com cotações */}
         {items.length ? (
-          <div data-fp-anim="ticker" style={{ display: 'flex', alignItems: 'center', gap: 8 * k, height: 26 * k, background: CNBC_NAVY, color: '#fff', padding: `0 ${12 * k}px`, fontSize: 12 * k, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', fontVariantNumeric: 'tabular-nums' }}>
+          <div data-fp-anim="ticker" style={{ display: 'flex', alignItems: 'center', gap: 8 * k, height: 26 * k, background: CNBC_NAVY, color: '#fff', padding: `0 ${12 * k}px`, fontSize: 12 * k, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden' }}>
             {items.map((it, i) => (
               <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 * k }}>
                 {i > 0 ? <span style={{ color: 'rgba(255,255,255,0.35)', fontWeight: 900 }}>|</span> : null}

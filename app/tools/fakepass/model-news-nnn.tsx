@@ -162,7 +162,7 @@ function NnnChyron({ s }: { s: S }) {
                 fontSize: 12 * k,
                 letterSpacing: 0.4 * k,
                 whiteSpace: 'nowrap',
-                fontVariantNumeric: 'tabular-nums',
+                /* tabular-nums REMOVIDO: h2c posiciona segmentos com métrica tabular do DOM mas desenha proporcional → vão no meio do texto (11 :20) */
                 textTransform: 'uppercase',
               }}
             >

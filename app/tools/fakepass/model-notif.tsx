@@ -260,7 +260,7 @@ function LockScreen({ s, status }: { s: S; status: StatusCfg }) {
         color: '#ffffff',
         lineHeight: 1,
         letterSpacing: ios ? '-0.01em' : '-0.01em',
-        fontVariantNumeric: 'tabular-nums',
+        /* tabular-nums REMOVIDO: h2c posiciona segmentos com métrica tabular do DOM mas desenha proporcional → vão no meio do texto (11 :20) */
         textShadow: '0 1px 12px rgba(0,0,0,0.28)',
       }}
     >

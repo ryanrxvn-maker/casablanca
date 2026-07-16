@@ -17,7 +17,7 @@ const BOX_H = 55;
 
 function DigitBox({ d }: { d: string }) {
   return (
-    <div style={{ width: 38, height: BOX_H, borderRadius: 10, background: '#eef0f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 38, fontWeight: 700, color: '#2b2b2b', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+    <div style={{ width: 38, height: BOX_H, borderRadius: 10, background: '#eef0f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 38, fontWeight: 700, color: '#2b2b2b', lineHeight: 1 }}>
       {d}
     </div>
   );

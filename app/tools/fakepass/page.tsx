@@ -318,7 +318,7 @@ export default function FakePassPage() {
                   label="Duração do vídeo"
                   value={vidSecs}
                   min={3}
-                  max={15}
+                  max={20}
                   onChange={setVidSecs}
                   display={(v) => v + 's'}
                 />

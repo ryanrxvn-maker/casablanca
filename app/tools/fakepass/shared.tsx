@@ -548,6 +548,20 @@ export async function renderNodeToCanvas(
         }
       }
       const multi = gr.height > fs * 1.6;
+      // MULTI-LINHA: medir o ENVELOPE do bloco falha quando a ÚLTIMA linha é
+      // CURTA ("… MAS NÃO\nSÃO!"): a tinta dela não vence o threshold por linha
+      // (5% da largura do bloco) e a sonda só enxerga a linha 1 — cujo centro
+      // DESLOCADO cai em cima do centro do bloco → erro medido ≈ 0 e a manchete
+      // sai ~8-10px BAIXA no PNG (cortada pelo ticker; bug real da CNN 16.07).
+      // Correção: mirar a LINHA MAIS LARGA do bloco (rects do range) e medi-la
+      // como um chip (banda de tinta mais próxima). O h2c desloca o bloco
+      // INTEIRO por igual (medido: linha 1 +28px, linha 2 +27px de export),
+      // então o erro de UMA linha vale pro bloco todo.
+      let mr = gr;
+      if (multi) {
+        const lrs = Array.from(range.getClientRects()).filter((r) => r.height > 2 && r.width > 3);
+        if (lrs.length) mr = lrs.reduce((a, b) => (b.width > a.width ? b : a));
+      }
       const fit = el.hasAttribute('data-fp-fit');
       let band = false;
       for (let i = 0, a: HTMLElement | null = el; i < 6 && a; i++, a = a.parentElement) {
@@ -559,14 +573,14 @@ export async function renderNodeToCanvas(
       const mode: VMode = fit ? 'fit' : multi ? 'block' : 'inline';
       // Janela de medição ASSIMÉTRICA: o erro do html2canvas é sempre pra BAIXO, então
       // sobra pouca margem pra cima (evita capturar a tinta do alvo de cima) e mais
-      // pra baixo (cobre o deslocamento). Multi-linha cobre a caixa inteira (rh/2);
+      // pra baixo (cobre o deslocamento). Multi-linha mira a LINHA-ALVO (mr);
       // chip de 1 linha usa ±22 (não alcança vizinho empilhado ~24px).
-      const half = gr.height / 2;
+      const half = mr.height / 2;
       targets.push({
         el,
-        cx0: (gr.left - nodeRect.left) * scale,
-        cx1: (gr.right - nodeRect.left) * scale,
-        cy: ((gr.top + gr.bottom) / 2 - nodeRect.top) * scale,
+        cx0: (mr.left - nodeRect.left) * scale,
+        cx1: (mr.right - nodeRect.left) * scale,
+        cy: ((mr.top + mr.bottom) / 2 - nodeRect.top) * scale,
         half: half * scale,
         up: Math.round((multi ? half + 6 : 22) * scale),
         down: Math.round((multi ? half + 22 : 22) * scale),
@@ -750,30 +764,43 @@ export async function renderNodeToCanvas(
             }
             on[y] = cnt >= thr;
           }
+          // BANDA contígua de tinta mais PERTO do centro esperado (a própria tinta
+          // do alvo — todos deslocam pra baixo de forma parecida, então a própria
+          // fica mais perto que qualquer vizinha). Vale pro CHIP de 1 linha E pra
+          // LINHA-ALVO do multi-linha (a linha mais larga do bloco): as OUTRAS
+          // linhas do mesmo bloco viram bandas separadas (têm vão de tinta entre
+          // linhas) e mais distantes do centro esperado — não poluem.
           let mid: number | null = null;
-          if (t.multi) {
-            // MULTI-LINHA: a caixa de tinta INTEIRA (1ª→última linha com tinta) — o
-            // centro do bloco de N linhas. A janela assimétrica já exclui o alvo de
-            // cima; vizinho NÃO-alvo cancela no diff (só alvos são escondidos em B).
-            let minY = -1;
-            let maxY = -1;
-            for (let y = 0; y < rows; y++) if (on[y]) { if (minY < 0) minY = y; maxY = y; }
-            if (minY >= 0) mid = y0 + (minY + maxY) / 2;
-          } else {
-            // CHIP 1 LINHA: a BANDA contígua de tinta mais PERTO do centro esperado
-            // (a própria tinta do alvo — todos deslocam pra baixo de forma parecida,
-            // então a própria fica mais perto que qualquer vizinha).
-            let best: { mid: number; dist: number } | null = null;
+          {
+            // 1) coleta as bandas contíguas de tinta
+            const bandList: Array<[number, number]> = [];
             let s = -1;
             for (let y = 0; y <= rows; y++) {
               const hit = y < rows && on[y];
               if (hit && s < 0) s = y;
-              if (!hit && s >= 0) {
-                const m = y0 + (s + y - 1) / 2;
-                const dist = Math.abs(m - t.cy);
-                if (!best || dist < best.dist) best = { mid: m, dist };
-                s = -1;
-              }
+              if (!hit && s >= 0) { bandList.push([y0 + s, y0 + y - 1]); s = -1; }
+            }
+            // 2) FUNDE bandas separadas por vão MINÚSCULO (≤2px CSS): anti-aliasing
+            //    parte a tinta de um glifo em lasquinhas ("Economia" media [139,141]+
+            //    [143,157]) e a lasquinha de cima ganhava por proximidade → correção
+            //    saía pela METADE e o item afundava vs os vizinhos (bug da Folha).
+            //    Linhas de texto DISTINTAS têm vão real ≥5px CSS — não fundem.
+            const gapMax = Math.max(2, Math.round(2 * scale));
+            const merged: Array<[number, number]> = [];
+            for (const b of bandList) {
+              const last = merged[merged.length - 1];
+              if (last && b[0] - last[1] - 1 <= gapMax) last[1] = b[1];
+              else merged.push([b[0], b[1]]);
+            }
+            // 3) banda mais próxima do centro esperado, com viés pra BAIXO:
+            //    o erro do h2c é SEMPRE pra baixo, então banda bem ACIMA do centro
+            //    é vizinho/linha-de-cima deslocada — nunca o alvo (aceitá-la
+            //    inverteria a correção e afundaria o texto).
+            let best: { mid: number; dist: number } | null = null;
+            for (const [b0, b1] of merged) {
+              const m = (b0 + b1) / 2;
+              const dist = Math.abs(m - t.cy);
+              if (m >= t.cy - 5 * scale && (!best || dist < best.dist)) best = { mid: m, dist };
             }
             if (best) mid = best.mid;
           }
@@ -1125,7 +1152,7 @@ export function StatusBar({
           fontSize: fs,
           fontWeight: ios ? 600 : 500,
           letterSpacing: ios ? '0.01em' : 0,
-          fontVariantNumeric: 'tabular-nums',
+          /* tabular-nums REMOVIDO: h2c posiciona segmentos com métrica tabular do DOM mas desenha proporcional → vão no meio do texto (11 :20) */
         }}
       >
         {leftOverride !== undefined ? leftOverride : ios ? cfg.time : `${cfg.carrier ? cfg.carrier + '  ' : ''}${cfg.time}`}

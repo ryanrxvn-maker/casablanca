@@ -84,7 +84,7 @@ function CnnBrChyron({ s }: { s: S }) {
               color: '#fff',
               fontSize: 12 * k,
               padding: `${4 * k}px ${9 * k}px`,
-              fontVariantNumeric: 'tabular-nums',
+              /* tabular-nums REMOVIDO: h2c posiciona segmentos com métrica tabular do DOM mas desenha proporcional → vão no meio do texto (11 :20) */
             }}
           >
             {s.time}

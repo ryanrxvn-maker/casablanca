@@ -20,7 +20,7 @@ import { Field, Segmented, ImageUpload, Swatches, FONT_STACK, type StageDims } f
 
 /* ─────────────────────────── Tipos / dimensões ─────────────────────────── */
 
-export type NewsOrient = 'landscape' | 'portrait';
+export type NewsOrient = 'landscape' | 'portrait' | 'feed45';
 export type NewsBgMode = 'image' | 'solid' | 'green';
 /** Arranjo da CENA atrás do chyron: 1 quadro cheio, 2/3 quadros, ou PiP. */
 export type NewsLayout = 'single' | 'duplo' | 'triplo' | 'pip';
@@ -33,6 +33,8 @@ export const NEWS_FONT = FONT_STACK;
 export const NEWS_REF_W = 640;
 /** No 9:16 o chyron precisa ser MAIOR/mais evidente: referência menor => k maior. */
 export const NEWS_REF_W_PORTRAIT = 384;
+/** 4:5 (feed): entre a TV e o Reels — ref = stage => k = 1 (chyron proporcional). */
+export const NEWS_REF_W_45 = 432;
 
 /** Campos de fundo/orientação/cena que TODO template de notícia carrega. */
 export type NewsBg = {
@@ -59,11 +61,11 @@ export const defaultNewsBg: NewsBg = {
   pip: '',
 };
 
-/** Dimensões do palco por orientação. 16:9 → 1920×1080; 9:16 → 1080×1920. */
+/** Dimensões do palco por orientação. 16:9 → 1920×1080; 9:16 → 1080×1920; 4:5 → 1080×1350. */
 export function newsDims(orient: NewsOrient): StageDims {
-  return orient === 'portrait'
-    ? { stageW: 360, ratio: 16 / 9, exportW: 1080 }
-    : { stageW: 640, ratio: 9 / 16, exportW: 1920 };
+  if (orient === 'portrait') return { stageW: 360, ratio: 16 / 9, exportW: 1080 };
+  if (orient === 'feed45') return { stageW: 432, ratio: 5 / 4, exportW: 1080 };
+  return { stageW: 640, ratio: 9 / 16, exportW: 1920 };
 }
 
 /** Ajuda o template: largura/altura reais + fator de escala k (maior no 9:16). */
@@ -71,7 +73,7 @@ export function stageMetrics(orient: NewsOrient) {
   const d = newsDims(orient);
   const W = d.stageW;
   const H = Math.round(W * d.ratio);
-  const ref = orient === 'portrait' ? NEWS_REF_W_PORTRAIT : NEWS_REF_W;
+  const ref = orient === 'portrait' ? NEWS_REF_W_PORTRAIT : orient === 'feed45' ? NEWS_REF_W_45 : NEWS_REF_W;
   return { W, H, k: W / ref, orient };
 }
 
@@ -179,6 +181,7 @@ export function NewsBgControls({ bg, set }: { bg: NewsBg; set: (p: any) => void 
           options={[
             { value: 'landscape', label: '16:9 (TV)' },
             { value: 'portrait', label: '9:16 (Reels)' },
+            { value: 'feed45', label: '4:5 (Feed)' },
           ]}
           onChange={(v) => set({ orient: v })}
         />
@@ -295,7 +298,7 @@ export function LiveTag({
 /** Relógio/tempo simples. (data-fp-anim: vira relógio VIVO no export de vídeo) */
 export function Clock({ text, color = '#fff', k = 1, style }: { text: string; color?: string; k?: number; style?: CSSProperties }) {
   return (
-    <span data-fp-anim="clock" style={{ color, fontWeight: 700, fontSize: 13 * k, fontVariantNumeric: 'tabular-nums', letterSpacing: 0.3 * k, ...style }}>
+    <span data-fp-anim="clock" style={{ color, fontWeight: 700, fontSize: 13 * k, letterSpacing: 0.3 * k, ...style }}>
       {text}
     </span>
   );

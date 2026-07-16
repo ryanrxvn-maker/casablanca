@@ -15,8 +15,8 @@
  *  • PiP (sua câmera) acima da pílula, canto direito — verde, imagem ou oculto.
  *
  * A duração tem data-fp-anim="calltimer": no EXPORT DE VÍDEO ela CONTA a cada
- * segundo (0:42 → 0:43 → …), motor em video-export.ts. Formato 9:19,5 (tela do
- * celular) ou 9:16 (encaixa direto em vídeo vertical 1080×1920).
+ * segundo (0:42 → 0:43 → …), motor em video-export.ts. Formatos: 9:19,5 (tela
+ * do celular), 9:16 (vídeo vertical 1080×1920) e 4:5 (post de feed 1080×1350).
  */
 
 import {
@@ -43,7 +43,7 @@ type S = {
   bgColor: string;
   pipMode: 'green' | 'image' | 'off';
   pipImage: string;
-  formato: 'full' | '916';
+  formato: 'full' | '916' | '45';
   altoFalante: boolean;
   mudo: boolean;
   cripto: boolean;
@@ -53,8 +53,8 @@ const W = 320;
 
 function dimsFor(s: S): StageDims {
   // 9:19,5 = proporção da tela do celular (chamada real); 9:16 = quadro de
-  // vídeo vertical (1080×1920), pra sobrepor direto no editor.
-  const ratio = s.formato === '916' ? 16 / 9 : 19.5 / 9;
+  // vídeo vertical (1080×1920); 4:5 = post de feed (1080×1350).
+  const ratio = s.formato === '916' ? 16 / 9 : s.formato === '45' ? 5 / 4 : 19.5 / 9;
   return { stageW: W, ratio, exportW: 1080 };
 }
 
@@ -282,7 +282,7 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
               fontSize: 13.5,
               color: 'rgba(255,255,255,0.92)',
               lineHeight: 1.3,
-              fontVariantNumeric: 'tabular-nums',
+              /* tabular-nums REMOVIDO: h2c posiciona segmentos com métrica tabular do DOM mas desenha proporcional → vão no meio do texto (11 :20) */
               textShadow: txShadow,
             }}
           >
@@ -341,6 +341,10 @@ function Screen({ s, status }: { s: S; status: StatusCfg }) {
             overflow: 'hidden',
             zIndex: 3,
             background: s.pipMode === 'green' ? s.green : '#1f2c34',
+            // PiP verde ganha um ANEL escuro: separa a janelinha do fundo (que
+            // pode ser o MESMO verde) — dá pra keyar uma SEGUNDA tela verde ali
+            // sem as duas zonas se fundirem. Com imagem, sem anel (igual ao real).
+            border: s.pipMode === 'green' ? '2.5px solid #0b141a' : 'none',
             boxShadow: green ? 'none' : '0 6px 18px rgba(0,0,0,0.4)',
             display: 'flex',
             alignItems: 'center',
@@ -441,12 +445,13 @@ const MODEL: FakeModel<S> = {
           <ImageUpload value={s.pipImage} onChange={(v) => set({ pipImage: v })} label="selfie" />
         </Field>
       ) : null}
-      <Field label="Formato" hint="9:16 encaixa direto em vídeo vertical 1080×1920.">
+      <Field label="Formato" hint="9:16 = vídeo vertical 1080×1920; 4:5 = post de feed 1080×1350.">
         <Segmented
           value={s.formato}
           options={[
             { value: 'full', label: 'Celular (9:19,5)' },
             { value: '916', label: '9:16' },
+            { value: '45', label: '4:5' },
           ]}
           onChange={(v) => set({ formato: v })}
         />

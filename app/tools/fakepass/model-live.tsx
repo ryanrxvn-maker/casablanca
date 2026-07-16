@@ -885,7 +885,7 @@ function LiveControls({
         label="Duração do vídeo"
         value={s.segundos}
         min={3}
-        max={15}
+        max={20}
         onChange={(v) => set({ segundos: v })}
         display={(v) => v + 's'}
       />

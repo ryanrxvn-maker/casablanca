@@ -74,7 +74,7 @@ function CnnChyron({ s }: { s: S }) {
             <span style={{ background: 'rgba(20,20,20,0.85)', color: '#fff', fontSize: 12 * k, padding: `${4 * k}px ${9 * k}px` }}>{s.location}</span>
           ) : null}
           {s.time.trim() ? (
-            <span data-fp-anim="clock" style={{ background: 'rgba(20,20,20,0.85)', color: '#fff', fontSize: 12 * k, padding: `${4 * k}px ${9 * k}px`, fontVariantNumeric: 'tabular-nums' }}>{s.time}</span>
+            <span data-fp-anim="clock" style={{ background: 'rgba(20,20,20,0.85)', color: '#fff', fontSize: 12 * k, padding: `${4 * k}px ${9 * k}px` }}>{s.time}</span>
           ) : null}
         </div>
       ) : null}

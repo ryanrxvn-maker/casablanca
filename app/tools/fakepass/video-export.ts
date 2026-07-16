@@ -101,6 +101,34 @@ export function advanceClockText(text: string, plusMin: number): string {
   return text.slice(0, m.index) + `${hhStr}:${String(mm).padStart(2, '0')}` + text.slice(m.index + m[0].length);
 }
 
+/** Relógio COM SEGUNDOS (H:MM:SS): avança em `plusSec` segundos — no vídeo os
+ *  segundos CONTAM em tempo real (11:20:35 → 11:20:36 → …). Preserva zero à
+ *  esquerda e sufixo (AM/PM etc.); 12h vira 1 depois do 12, 24h zera no 23. */
+export function advanceClockSeconds(text: string, plusSec: number): string {
+  const m = /(\d{1,2}):([0-5]\d):([0-5]\d)/.exec(text);
+  if (!m) return text;
+  let hh = parseInt(m[1], 10);
+  let total = parseInt(m[2], 10) * 60 + parseInt(m[3], 10) + Math.max(0, Math.floor(plusSec));
+  while (total >= 3600) {
+    total -= 3600;
+    hh += 1;
+  }
+  const h12 = / ?[AP]M/i.test(text.slice(m.index + m[0].length));
+  if (h12) {
+    if (hh > 12) hh -= 12;
+  } else if (hh > 23) {
+    hh -= 24;
+  }
+  const mm = Math.floor(total / 60);
+  const ss = total % 60;
+  const hhStr = m[1].length === 2 && m[1][0] === '0' ? String(hh).padStart(2, '0') : String(hh);
+  return (
+    text.slice(0, m.index) +
+    `${hhStr}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}` +
+    text.slice(m.index + m[0].length)
+  );
+}
+
 /** Avança a PRIMEIRA duração M:SS achada no texto em `plusSec` segundos
  *  (cronômetro de chamada: 0:42 → 0:43 → … → 1:00). Sem M:SS, devolve igual. */
 export function advanceCallTimer(text: string, plusSec: number): string {
@@ -288,16 +316,19 @@ export async function prepareStageVideo(
     ctx.textBaseline = 'alphabetic';
     for (const sp of specs) {
       if (sp.kind === 'clock' || sp.kind === 'calltimer') {
-        // clock: o minuto vira no meio do vídeo (como quem pega a virada ao
-        // vivo). calltimer: duração de chamada CONTANDO a cada segundo.
-        // Se o texto novo ficar mais LARGO que a caixinha (9:59→10:00), o
-        // drawPiece comprime pra caber (guard na MESMA métrica do desenho).
+        // clock H:MM: o minuto vira no meio do vídeo (como quem pega a virada
+        // ao vivo). clock H:MM:SS: os SEGUNDOS contam em tempo real. calltimer:
+        // duração de chamada CONTANDO a cada segundo. Se o texto novo ficar
+        // mais LARGO que a caixinha (9:59→10:00), o drawPiece comprime pra
+        // caber (guard na MESMA métrica do desenho).
         const text =
           sp.kind === 'calltimer'
             ? advanceCallTimer(sp.piece.text, t)
-            : t >= 4
-              ? advanceClockText(sp.piece.text, 1)
-              : sp.piece.text;
+            : /\d{1,2}:[0-5]\d:[0-5]\d/.test(sp.piece.text)
+              ? advanceClockSeconds(sp.piece.text, t)
+              : t >= 4
+                ? advanceClockText(sp.piece.text, 1)
+                : sp.piece.text;
         ctx.font = sp.piece.font;
         (ctx as any).letterSpacing = `${sp.piece.letterSpacing}px`;
         drawPiece(ctx, sp.piece, text, sp.piece.x, sp.maxW);
