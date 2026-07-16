@@ -350,6 +350,7 @@ export default function FakePassPage() {
                 </button>
                 <p className="text-[11px] leading-relaxed text-text-dim">
                   {vidMsg ||
+                    model.vidHint ||
                     'O vídeo sai com o gráfico VIVO: relógio rodando, ticker deslizando e o "ao vivo" pulsando — com o cenário em tela verde, é só sobrepor no editor.'}
                 </p>
               </div>

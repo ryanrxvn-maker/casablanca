@@ -14,6 +14,7 @@ import { STORY_MODELS } from './model-story';
 import STORY_EXTRA from './model-story-extra';
 import IGDM from './model-igdm';
 import WHATSAPP from './model-whatsapp';
+import WHATSAPP_CALL from './model-whatsapp-call';
 import IGPOST from './model-igpost';
 import TWEET from './model-tweet';
 import COMMENTS from './model-comments';
@@ -61,6 +62,7 @@ export const MODELS: FakeModel[] = [
   // Conversas
   ...IGDM,
   ...WHATSAPP,
+  ...WHATSAPP_CALL,
   // Posts
   ...IGPOST,
   ...TWEET,

@@ -17,9 +17,11 @@
  *     pulsando. captureStream + MediaRecorder → .webm (mesmo motor das Lives).
  *
  * Tags reconhecidas:
- *  • data-fp-anim="clock"   — texto com hora (H:MM em qualquer posição);
- *  • data-fp-anim="ticker"  — faixa cujos itens deslizam (o rótulo fica fora);
- *  • data-fp-anim="livedot" — bolinha que pulsa (some da base e é redesenhada).
+ *  • data-fp-anim="clock"     — texto com hora (H:MM em qualquer posição);
+ *  • data-fp-anim="calltimer" — duração de chamada (M:SS) que CONTA a cada
+ *                               segundo, como um cronômetro real;
+ *  • data-fp-anim="ticker"    — faixa cujos itens deslizam (o rótulo fica fora);
+ *  • data-fp-anim="livedot"   — bolinha que pulsa (some da base e é redesenhada).
  */
 
 import { renderNodeToCanvas } from './shared';
@@ -49,7 +51,7 @@ function parseShadow(cs: CSSStyleDeclaration, scale: number) {
   return { color: m[1], x: parseFloat(m[2]) * scale, y: parseFloat(m[3]) * scale, blur: (parseFloat(m[4]) || 0) * scale };
 }
 
-type ClockSpec = { kind: 'clock'; rect: Rect; piece: Piece; maxW: number };
+type ClockSpec = { kind: 'clock' | 'calltimer'; rect: Rect; piece: Piece; maxW: number };
 type TickerSpec = { kind: 'ticker'; rect: Rect; pieces: Piece[]; totalW: number; speed: number };
 type DotSpec = { kind: 'livedot'; rect: Rect; color: string };
 type Spec = ClockSpec | TickerSpec | DotSpec;
@@ -99,6 +101,19 @@ export function advanceClockText(text: string, plusMin: number): string {
   return text.slice(0, m.index) + `${hhStr}:${String(mm).padStart(2, '0')}` + text.slice(m.index + m[0].length);
 }
 
+/** Avança a PRIMEIRA duração M:SS achada no texto em `plusSec` segundos
+ *  (cronômetro de chamada: 0:42 → 0:43 → … → 1:00). Sem M:SS, devolve igual. */
+export function advanceCallTimer(text: string, plusSec: number): string {
+  const m = /(\d{1,3}):([0-5]\d)/.exec(text);
+  if (!m) return text;
+  const total = parseInt(m[1], 10) * 60 + parseInt(m[2], 10) + Math.max(0, Math.floor(plusSec));
+  const mm = Math.floor(total / 60);
+  const ss = total % 60;
+  // preserva o zero à esquerda do minuto se o texto original tinha (00:42)
+  const mmStr = m[1].length === 2 && m[1][0] === '0' && mm < 100 ? String(mm).padStart(2, '0') : String(mm);
+  return text.slice(0, m.index) + `${mmStr}:${String(ss).padStart(2, '0')}` + text.slice(m.index + m[0].length);
+}
+
 export type StageVideo = {
   width: number;
   height: number;
@@ -141,7 +156,7 @@ export async function prepareStageVideo(
         return;
       }
 
-      if (kind === 'clock') {
+      if (kind === 'clock' || kind === 'calltimer') {
         // 1º text-node com conteúdo
         let tn: Node | null = null;
         const walk = (n: Node) => {
@@ -157,7 +172,7 @@ export async function prepareStageVideo(
         if (!tr) return;
         const pcs = getComputedStyle((tn as Node).parentElement || el);
         specs.push({
-          kind: 'clock',
+          kind,
           rect: rectOf(elRect),
           maxW: (elRect.width - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0)) * scale,
           piece: {
@@ -221,7 +236,7 @@ export async function prepareStageVideo(
 
   // ── 2) base = export real com a tinta animada oculta no clone ──
   const base = await renderNodeToCanvas(node, targetW, refW, (root) => {
-    root.querySelectorAll<HTMLElement>('[data-fp-anim="clock"], [data-fp-anim="ticker"]').forEach((el) => {
+    root.querySelectorAll<HTMLElement>('[data-fp-anim="clock"], [data-fp-anim="calltimer"], [data-fp-anim="ticker"]').forEach((el) => {
       el.style.color = 'transparent';
       el.style.textShadow = 'none';
       el.style.setProperty('-webkit-text-fill-color', 'transparent');
@@ -272,12 +287,17 @@ export async function prepareStageVideo(
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
     for (const sp of specs) {
-      if (sp.kind === 'clock') {
-        // o minuto vira no meio do vídeo (como quem pega a virada ao vivo);
-        // se a hora nova ficar mais LARGA que a caixinha (9:59→10:00), congela.
-        // Guard na MESMA métrica do desenho (canvas × scaleX de normalização).
-        const plus = t >= 4 ? 1 : 0;
-        let text = plus ? advanceClockText(sp.piece.text, plus) : sp.piece.text;
+      if (sp.kind === 'clock' || sp.kind === 'calltimer') {
+        // clock: o minuto vira no meio do vídeo (como quem pega a virada ao
+        // vivo). calltimer: duração de chamada CONTANDO a cada segundo.
+        // Se o texto novo ficar mais LARGO que a caixinha (9:59→10:00), o
+        // drawPiece comprime pra caber (guard na MESMA métrica do desenho).
+        const text =
+          sp.kind === 'calltimer'
+            ? advanceCallTimer(sp.piece.text, t)
+            : t >= 4
+              ? advanceClockText(sp.piece.text, 1)
+              : sp.piece.text;
         ctx.font = sp.piece.font;
         (ctx as any).letterSpacing = `${sp.piece.letterSpacing}px`;
         drawPiece(ctx, sp.piece, text, sp.piece.x, sp.maxW);
@@ -295,7 +315,7 @@ export async function prepareStageVideo(
           }
         }
         ctx.restore();
-      } else {
+      } else if (sp.kind === 'livedot') {
         // bolinha AO VIVO pulsando (1 Hz, nunca some de todo)
         const a = 0.3 + 0.7 * (0.5 + 0.5 * Math.sin(2 * Math.PI * t - Math.PI / 2));
         ctx.save();

@@ -92,6 +92,8 @@ export type FakeModel<S = any> = {
   /** Tem relógio/ticker/bolinha animáveis ([data-fp-anim] no Preview)?
    *  → o shell mostra "Exportar vídeo (.webm)" (motor em video-export.ts). */
   anim?: boolean;
+  /** Texto de apoio do export de vídeo (o que se mexe neste modelo). */
+  vidHint?: string;
   /** Dimensões DINÂMICAS: quando presente, o shell usa isto no lugar de
    *  stageW/ratio/exportW fixos (ex.: alternar 16:9 ↔ 9:16 pelo estado). */
   dims?: (s: S) => StageDims;

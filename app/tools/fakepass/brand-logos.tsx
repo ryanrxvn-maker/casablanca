@@ -235,6 +235,7 @@ export function BrandMark({ brand, size = 26 }: { brand: string; size?: number }
 /* ─────────────── model → marca ─────────────── */
 
 const GROUP_TO_BRAND: Record<string, string> = {
+  WhatsApp: 'whatsapp',
   CNN: 'cnn',
   BBC: 'bbc',
   'Fox News': 'fox',
