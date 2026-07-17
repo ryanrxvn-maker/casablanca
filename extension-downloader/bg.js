@@ -146,6 +146,169 @@ function sendProgress(tabId, payload) {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// INSTAGRAM — resolve pela SESSÃO LOGADA do próprio usuário.
+//
+// O IG bloqueou 100% o acesso anônimo (motor/yt-dlp e qualquer IP de
+// datacenter recebem "login_required"). Sites tipo sssinstagram só
+// funcionam porque o SERVIDOR deles mantém contas-robô + proxies. Nós
+// não precisamos disso: o usuário JÁ está logado no Instagram no próprio
+// navegador. Com host_permission de instagram.com, o fetch credenciado
+// DESTE service worker manda os cookies da sessão dele — então
+// resolvemos o mp4 real (com áudio) aqui, sem servidor e sem contas.
+//
+// Fluxo: permalink → media_id → API interna /api/v1/media/<id>/info/ →
+// video_versions (mp4 progressivo). A URL do CDN é ASSINADA e baixa sem
+// referer/cookie (testado), então entregamos direto pro chrome.downloads.
+// ═══════════════════════════════════════════════════════════════
+const IG_APP_ID = '936619743392459'; // app id oficial do web client
+
+function isInstagramUrl(u) {
+  try {
+    return /(^|\.)instagram\.com$/.test(new URL(u).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function igShortcode(u) {
+  try {
+    const m = new URL(u).pathname.match(/\/(?:reel|reels|p|tv)\/([\w-]+)/);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+// Resolve a melhor mp4 do post/reel na sessão logada. Retorna a URL do
+// CDN ou null (sem sessão, post privado sem acesso, ou não-vídeo).
+async function resolveInstagram(pageUrl) {
+  const sig = () =>
+    typeof AbortSignal !== 'undefined' && AbortSignal.timeout
+      ? AbortSignal.timeout(20000)
+      : undefined;
+  // HTML do permalink (server-render logado) → media_id.
+  const html = await fetch(pageUrl, {
+    credentials: 'include',
+    signal: sig(),
+  }).then((r) => r.text());
+  const mid =
+    (html.match(/instagram:\/\/media\?id=(\d+)/) || [])[1] ||
+    (html.match(/"media_id":"(\d+)"/) || [])[1];
+  if (!mid) return null;
+  const r = await fetch(
+    `https://www.instagram.com/api/v1/media/${mid}/info/`,
+    {
+      credentials: 'include',
+      headers: { 'x-ig-app-id': IG_APP_ID },
+      signal: sig(),
+    },
+  );
+  if (!r.ok) return null;
+  const item = (((await r.json()) || {}).items || [])[0];
+  const best = (it) =>
+    it && it.video_versions && it.video_versions.length
+      ? it.video_versions
+          .slice()
+          .sort((a, b) => (b.width || 0) - (a.width || 0))[0].url
+      : null;
+  let url = best(item);
+  if (!url && item && item.carousel_media) {
+    for (const cm of item.carousel_media) {
+      url = best(cm);
+      if (url) break;
+    }
+  }
+  return url || null;
+}
+
+// Baixa uma URL DIRETA (já resolvida) via chrome.downloads, reportando
+// progresso REAL pro content script/popup. Mesmo motor de progresso do
+// tryDownloadOnce, mas sem passar pelo motor local.
+function downloadDirect({ url, filename, tabId }) {
+  return new Promise((resolve) => {
+    chrome.downloads.download({ url, filename, saveAs: false }, (id) => {
+      if (chrome.runtime.lastError || id === undefined) {
+        resolve({
+          ok: false,
+          error: chrome.runtime.lastError?.message || 'falha ao iniciar',
+        });
+        return;
+      }
+      let settled = false;
+      const finish = (r) => {
+        if (settled) return;
+        settled = true;
+        chrome.downloads.onChanged.removeListener(onChanged);
+        clearInterval(poller);
+        clearTimeout(cap);
+        resolve(r);
+      };
+      const poller = setInterval(() => {
+        try {
+          chrome.downloads.search({ id }, (items) => {
+            const it = items && items[0];
+            if (!it) return;
+            const total = Number(it.totalBytes) || 0;
+            const recv = Number(it.bytesReceived) || 0;
+            const pct =
+              total > 0 ? Math.min(99, Math.floor((recv / total) * 100)) : -1;
+            sendProgress(tabId, { id, state: it.state, pct, recv, total });
+            if (it.state === 'complete') {
+              sendProgress(tabId, { id, state: 'complete', pct: 100 });
+              finish({ ok: true });
+            } else if (it.state === 'interrupted') {
+              sendProgress(tabId, {
+                id,
+                state: 'interrupted',
+                pct,
+                error: it.error || 'FAILED',
+              });
+              finish({ ok: false, error: it.error || 'FAILED' });
+            }
+          });
+        } catch {
+          /* SW suspendendo — próxima tick ok */
+        }
+      }, 600);
+      const onChanged = (delta) => {
+        if (delta.id !== id) return;
+        if (delta.state && delta.state.current === 'complete') {
+          sendProgress(tabId, { id, state: 'complete', pct: 100 });
+          finish({ ok: true });
+        } else if (delta.error && delta.error.current) {
+          sendProgress(tabId, {
+            id,
+            state: 'interrupted',
+            error: String(delta.error.current),
+          });
+          finish({ ok: false, error: String(delta.error.current) });
+        }
+      };
+      chrome.downloads.onChanged.addListener(onChanged);
+      const cap = setTimeout(
+        () => finish({ ok: false, error: 'tempo esgotado' }),
+        600000,
+      );
+    });
+  });
+}
+
+// Tenta baixar um link de Instagram pela sessão logada. Retorna
+// { handled: true, ok } se conseguiu resolver (mesmo que o download
+// falhe depois), ou { handled: false } pra deixar o fluxo do motor seguir.
+async function tryInstagramSession({ url, tabId }) {
+  try {
+    const cdn = await resolveInstagram(url);
+    if (!cdn) return { handled: false };
+    const filename = `instagram-${igShortcode(url) || Date.now()}.mp4`;
+    const r = await downloadDirect({ url: cdn, filename, tabId });
+    return { handled: true, ok: r.ok, error: r.error };
+  } catch {
+    return { handled: false };
+  }
+}
+
 async function tryDownloadOnce({ url, mode, quality, adult, tabId }) {
   // SEMPRE refaz pair antes do download. Custo: 1 GET extra (<5ms localhost),
   // mas elimina de vez o 401 por token stale.
@@ -249,6 +412,19 @@ async function tryDownloadOnce({ url, mode, quality, adult, tabId }) {
 }
 
 async function startDownload({ url, mode, quality, adult, tabId }) {
+  // INSTAGRAM (vídeo, não +18): resolve pela sessão logada do usuário
+  // ANTES de tentar o motor. O motor não consegue (IG exige login), então
+  // este é o caminho principal pra IG. Só cai no motor se a resolução
+  // falhar (post sem vídeo, sem sessão, etc.) — comportamento preservado.
+  if (adult !== true && mode === 'video' && isInstagramUrl(url)) {
+    const ig = await tryInstagramSession({ url, tabId });
+    if (ig.handled) {
+      if (ig.ok) return { ok: true };
+      return { ok: false, error: 'Falha: ' + (ig.error || 'instagram') };
+    }
+    // não resolvido → segue pro motor (fallback)
+  }
+
   // Tentativa 1
   let r = await tryDownloadOnce({ url, mode, quality, adult, tabId });
   // Se 401/auth (token defasado), re-pair forcado e tenta de novo —
@@ -275,6 +451,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const tabId = sender && sender.tab && sender.tab.id;
     startDownload({ ...msg, tabId }).then(sendResponse);
     return true; // resposta assíncrona
+  }
+  if (msg && msg.type === 'darko-ig-resolve') {
+    // Resolve um link de Instagram pela sessão logada e devolve a URL do
+    // CDN (mp4 com áudio) ou null. Usado pelo popup e pela página do site
+    // (via bridge) pra baixar por link colado, sem passar pelo motor.
+    (async () => {
+      try {
+        const cdn = await resolveInstagram(msg.url);
+        sendResponse({ ok: !!cdn, url: cdn || null });
+      } catch (e) {
+        sendResponse({ ok: false, error: String(e && e.message).slice(0, 160) });
+      }
+    })();
+    return true;
   }
   if (msg && msg.type === 'darko-force-rediscover') {
     // Hard-refresh do popup: apaga cache/token stale e redescobre do zero.

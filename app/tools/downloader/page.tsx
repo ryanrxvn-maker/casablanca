@@ -38,6 +38,77 @@ const QUALITIES: { value: Quality; label: string }[] = [
   { value: 'best', label: 'Máxima' },
 ];
 
+function isInstagramUrl(u: string): boolean {
+  try {
+    return /(^|\.)instagram\.com$/.test(new URL(u).hostname);
+  } catch {
+    return false;
+  }
+}
+
+// A extensão só sabe baixar IG por link colado (via bridge → sessão logada)
+// a partir da v1.6.0. Versões anteriores têm só o botão na página do IG.
+function versionAtLeast(v: string | undefined, min: number[]): boolean {
+  if (!v) return false;
+  const parts = v.split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < min.length; i++) {
+    const cur = parts[i] || 0;
+    if (cur < min[i]) return false;
+    if (cur > min[i]) return true;
+  }
+  return true;
+}
+
+// Baixa um link de Instagram pela EXTENSÃO (sessão logada do usuário). O
+// motor/servidor não consegue IG (o IG exige login), então quando a
+// extensão está presente pedimos pra ela resolver com os cookies do
+// próprio usuário e baixar via chrome.downloads. Resolve quando a extensão
+// confirma (DL_IG_RESULT); rejeita em erro ou timeout.
+function downloadIgViaExtension(url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const reqId = `ig-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    let done = false;
+    const onMsg = (e: MessageEvent) => {
+      const d = e.data;
+      if (
+        !d ||
+        d.source !== 'darko-dl-ext' ||
+        d.type !== 'DL_IG_RESULT' ||
+        d.reqId !== reqId
+      )
+        return;
+      if (done) return;
+      done = true;
+      window.removeEventListener('message', onMsg);
+      clearTimeout(timer);
+      if (d.ok) resolve();
+      else
+        reject(
+          new FriendlyError(
+            d.error
+              ? 'Instagram: ' + String(d.error)
+              : 'Não consegui baixar do Instagram. Confira se você está logado no Instagram neste navegador.',
+          ),
+        );
+    };
+    window.addEventListener('message', onMsg);
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      window.removeEventListener('message', onMsg);
+      reject(
+        new FriendlyError(
+          'A extensão não respondeu a tempo. Verifique se ela está conectada e tente de novo.',
+        ),
+      );
+    }, 600000);
+    window.postMessage(
+      { source: 'darko-dl', type: 'DL_IG_DOWNLOAD', url, reqId },
+      '*',
+    );
+  });
+}
+
 function detectSource(url: string): string {
   const u = url.toLowerCase();
   if (u.includes('tiktok')) return 'TikTok';
@@ -92,10 +163,10 @@ export default function DownloaderPage() {
     } catch {}
   }
 
-  // Versão MÍNIMA recomendada da extensão+motor. Abaixo disso, a versão
-  // antiga não baixa mais Instagram (o IG passou a exigir sessão logada;
-  // a v1.5.0 resolve baixando pela própria aba logada do usuário).
-  const MIN_EXT_VERSION = [1, 5, 0];
+  // Versão MÍNIMA recomendada da extensão+motor. A v1.6.0 baixa Instagram
+  // colando o link (resolve pela sessão logada do próprio usuário, sem
+  // servidor/contas); versões anteriores só tinham o botão na página do IG.
+  const MIN_EXT_VERSION = [1, 6, 0];
   function isOutdatedVersion(v?: string): boolean {
     if (!v) return false; // sem info de versão → não alarma
     const parts = v.split('.').map((n) => parseInt(n, 10) || 0);
@@ -256,6 +327,65 @@ export default function DownloaderPage() {
         i === idx ? { ...j, state: 'resolving', progress: null } : j,
       ),
     );
+
+    // INSTAGRAM (vídeo, extensão conectada): baixa pela sessão logada do
+    // usuário via extensão — o servidor não consegue (IG exige login). O
+    // arquivo cai na barra de downloads do navegador; aqui só marcamos o
+    // andamento. Sem extensão, segue pro /api/downloader (que orienta o
+    // usuário a instalar a extensão).
+    if (mode === 'video' && !(isAdmin && adult) && isInstagramUrl(url)) {
+      const canIgPaste = ext.connected && versionAtLeast(ext.version, [1, 6, 0]);
+      if (!canIgPaste) {
+        setJobs((prev) =>
+          prev.map((j, i) =>
+            i === idx
+              ? {
+                  ...j,
+                  state: 'error',
+                  error: ext.connected
+                    ? 'Atualize a extensão (passo 1 acima) pra baixar do Instagram por link. O download usa o seu próprio Instagram logado.'
+                    : 'Pra baixar do Instagram, instale e conecte a extensão (passo 1 acima). O download usa o seu próprio Instagram logado.',
+                  progress: null,
+                }
+              : j,
+          ),
+        );
+        return;
+      }
+      try {
+        setJobs((prev) =>
+          prev.map((j, i) =>
+            i === idx
+              ? { ...j, state: 'downloading', progress: null }
+              : j,
+          ),
+        );
+        await downloadIgViaExtension(url);
+        const filename = 'instagram.mp4';
+        setJobs((prev) =>
+          prev.map((j, i) =>
+            i === idx ? { ...j, state: 'done', filename, progress: null } : j,
+          ),
+        );
+        logHistory({ tool: 'downloader', kind: 'download', title: 'Instagram baixado' });
+        return;
+      } catch (e) {
+        setJobs((prev) =>
+          prev.map((j, i) =>
+            i === idx
+              ? {
+                  ...j,
+                  state: 'error',
+                  error: toFriendlyMessage(e, 'O download do Instagram falhou. Tenta de novo.'),
+                  progress: null,
+                }
+              : j,
+          ),
+        );
+        return;
+      }
+    }
+
     try {
       const res = await fetch('/api/downloader', {
         method: 'POST',
@@ -420,18 +550,19 @@ export default function DownloaderPage() {
                     className="mt-0.5 text-[14px] font-bold tracking-tight text-white"
                     style={{ fontFamily: 'var(--font-tech)' }}
                   >
-                    Instagram voltou — atualize a extensão
+                    Baixe Instagram colando o link — atualize a extensão
                   </div>
                   <p className="mt-2 text-[12.5px] leading-relaxed text-text-muted">
-                    O Instagram mudou e a sua versão atual (
-                    <b className="text-white">v{ext.version}</b>) parou de baixar
-                    vídeos de lá. A <b className="text-white">v1.5.0</b> corrige:
-                    o download passa a usar o seu próprio navegador logado.
+                    A nova versão (<b className="text-white">v1.6.0</b>) baixa do
+                    Instagram <b className="text-white">colando o link aqui</b>,
+                    usando o seu próprio Instagram logado — sem precisar abrir o
+                    post. Sua versão atual (<b className="text-white">v{ext.version}</b>)
+                    só baixava pelo botão na página do Instagram.
                   </p>
                   <ol className="mono mt-2.5 list-decimal space-y-1 pl-5 text-[11.5px] leading-relaxed text-text-muted">
                     <li>Baixe a nova extensão no botão abaixo e descompacte.</li>
                     <li>Em <code className="text-white">chrome://extensions</code>, remova a extensão antiga e carregue a nova pasta.</li>
-                    <li>Pronto — Instagram, TikTok, YouTube e Pinterest funcionando.</li>
+                    <li>Pronto — cole o link do Instagram e baixe.</li>
                   </ol>
                   <div className="mt-3">
                     <a
@@ -440,7 +571,7 @@ export default function DownloaderPage() {
                       className="inline-flex items-center gap-2 rounded-full border border-amber-400/55 bg-amber-400/15 px-4 py-1.5 text-[11.5px] font-bold uppercase tracking-[0.14em] text-amber-200 transition hover:bg-amber-400/25"
                       style={{ fontFamily: 'var(--font-tech)' }}
                     >
-                      ↓ Baixar extensão v1.5.0
+                      ↓ Baixar extensão v1.6.0
                     </a>
                   </div>
                 </div>

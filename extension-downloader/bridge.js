@@ -41,6 +41,39 @@
     const d = ev.data;
     if (!d || typeof d !== 'object' || d.source !== 'darko-dl') return;
     if (d.type === 'DL_PING' || d.type === 'DL_TEST') announce();
+    // Site pede pra baixar um link de Instagram pela sessão logada do
+    // usuário (o motor não consegue — IG exige login). Relaia pro service
+    // worker, que resolve com os cookies do próprio usuário e baixa via
+    // chrome.downloads. Devolve DL_IG_RESULT { reqId, ok, error } pro site.
+    if (d.type === 'DL_IG_DOWNLOAD' && d.url && d.reqId) {
+      try {
+        chrome.runtime.sendMessage(
+          {
+            type: 'darko-download',
+            url: d.url,
+            mode: 'video',
+            quality: '1080',
+            adult: false,
+          },
+          (resp) => {
+            const err = chrome.runtime.lastError;
+            toPage({
+              type: 'DL_IG_RESULT',
+              reqId: d.reqId,
+              ok: !err && !!(resp && resp.ok),
+              error: err ? err.message : resp && resp.error,
+            });
+          },
+        );
+      } catch (e) {
+        toPage({
+          type: 'DL_IG_RESULT',
+          reqId: d.reqId,
+          ok: false,
+          error: String(e && e.message),
+        });
+      }
+    }
   });
 
   // HEARTBEAT: anuncia proativamente em multiplos timings pra cobrir

@@ -242,8 +242,60 @@ async function postDownload(url) {
   });
 }
 
+function isInstagramUrl(u) {
+  try {
+    return /(^|\.)instagram\.com$/.test(new URL(u).hostname);
+  } catch {
+    return false;
+  }
+}
+function igShort(u) {
+  try {
+    const m = new URL(u).pathname.match(/\/(?:reel|reels|p|tv)\/([\w-]+)/);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+// Resolve o mp4 do IG pela sessão logada do usuário (via service worker) e
+// baixa direto do CDN. O motor não consegue IG (exige login), então este é
+// o caminho pra link de Instagram colado no popup.
+async function downloadInstagram(url, el) {
+  const cdn = await new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage({ type: 'darko-ig-resolve', url }, (r) => {
+        if (chrome.runtime.lastError) return resolve(null);
+        resolve(r && r.ok ? r.url : null);
+      });
+    } catch {
+      resolve(null);
+    }
+  });
+  if (!cdn) return false;
+  const name = `instagram-${igShort(url) || Date.now()}.mp4`;
+  await new Promise((resolve, reject) => {
+    chrome.downloads.download({ url: cdn, filename: name, saveAs: false }, (id) => {
+      if (chrome.runtime.lastError || id === undefined)
+        reject(new Error(chrome.runtime.lastError?.message || 'download'));
+      else resolve(id);
+    });
+  });
+  el.querySelector('.tag').className = 'tag ok';
+  el.querySelector('.tag').textContent = 'ok';
+  return true;
+}
+
 async function downloadOne(url, el) {
   try {
+    // Instagram (vídeo): resolve pela sessão logada; só cai no motor se
+    // falhar. MP3/WAV do IG continua indo pro motor (comportamento antigo).
+    if (state.mode === 'video' && isInstagramUrl(url)) {
+      try {
+        if (await downloadInstagram(url, el)) return;
+      } catch {
+        /* segue pro motor */
+      }
+    }
     // pega token vivo antes (sempre fresh — invalida storage stale)
     if (!state.token) await refreshPair();
     let res = await postDownload(url);
