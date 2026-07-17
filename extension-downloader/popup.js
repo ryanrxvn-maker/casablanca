@@ -1,15 +1,5 @@
 'use strict';
 
-const ADULT_SITES = [
-  'pornhub.com',
-  'xvideos.com',
-  'xhamster.com',
-  'redtube.com',
-  'youporn.com',
-  'xvideosputaria.com',
-  'buceteiro.com',
-];
-
 const $ = (id) => document.getElementById(id);
 const state = { token: '', port: 47923, mode: 'video', quality: '1080', adult: false };
 
@@ -212,13 +202,14 @@ wireChips('modes', 'mode');
 wireChips('quals', 'quality');
 
 // ---- +18 ----
+// Sem lista de sites na UI (pedido 17.07.26): o modo continua
+// funcionando igual, só não expõe os domínios suportados.
 $('adultBtn').addEventListener('click', () => {
   state.adult = !state.adult;
   $('adultBtn').classList.toggle('on', state.adult);
   const list = $('adultList');
   list.classList.toggle('hidden', !state.adult);
-  if (state.adult)
-    list.textContent = 'Sites +18: ' + ADULT_SITES.join('  ·  ');
+  if (state.adult) list.textContent = 'Modo +18 ativo';
 });
 
 // ---- download ----

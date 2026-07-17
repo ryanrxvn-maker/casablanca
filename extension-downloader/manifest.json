@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Auto Edit · Downloader",
-  "version": "1.4.4",
+  "version": "1.5.0",
   "description": "Baixa vídeos e áudios do YouTube, Instagram, TikTok e Pinterest direto pra você.",
   "action": {
     "default_title": "Auto Edit · Downloader",

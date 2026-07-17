@@ -226,11 +226,109 @@
     }
   }
 
-  function onClick() {
+  // ── Instagram: baixa DENTRO da sessão logada ─────────────────────
+  // Desde 2026 o Instagram não serve mais mídia pra acesso anônimo
+  // (headless do motor e yt-dlp sem cookies recebem "empty media
+  // response"). O caminho confiável é a própria aba logada do usuário:
+  // media_id da página → API interna do IG (mesma sessão) →
+  // video_versions (mp4 progressivo COM áudio) → baixa do CDN aqui
+  // mesmo, com progresso no anel. Se qualquer passo falhar, cai no
+  // fluxo antigo pelo motor — nada do que funciona muda.
+  const IG_APP_ID = '936619743392459'; // app id oficial do web client
+
+  function igShortcode() {
+    const m = location.pathname.match(/\/(?:reel|reels|p|tv)\/([\w-]+)/);
+    return m ? m[1] : null;
+  }
+
+  async function resolveInstagramMp4() {
+    const tmo = (ms) =>
+      typeof AbortSignal !== 'undefined' && AbortSignal.timeout
+        ? AbortSignal.timeout(ms)
+        : undefined;
+    // HTML fresco do permalink (server-render logado) → media_id do post.
+    // al:ios:url aponta SEMPRE pro post principal; "media_id" é fallback.
+    const html = await fetch(location.href, {
+      credentials: 'include',
+      signal: tmo(20000),
+    }).then((r) => r.text());
+    const mid =
+      (html.match(/instagram:\/\/media\?id=(\d+)/) || [])[1] ||
+      (html.match(/"media_id":"(\d+)"/) || [])[1];
+    if (!mid) return null;
+    const r = await fetch(`${location.origin}/api/v1/media/${mid}/info/`, {
+      credentials: 'include',
+      headers: { 'x-ig-app-id': IG_APP_ID },
+      signal: tmo(20000),
+    });
+    if (!r.ok) return null;
+    const item = (((await r.json()) || {}).items || [])[0];
+    const best = (it) =>
+      it && it.video_versions && it.video_versions.length
+        ? [...it.video_versions].sort(
+            (a, b) => (b.width || 0) - (a.width || 0),
+          )[0].url
+        : null;
+    let url = best(item);
+    if (!url && item && item.carousel_media) {
+      for (const cm of item.carousel_media) {
+        url = best(cm);
+        if (url) break;
+      }
+    }
+    return url || null;
+  }
+
+  async function instagramDirectDownload() {
+    try {
+      const url = await resolveInstagramMp4();
+      if (!url) return false;
+      const resp = await fetch(url);
+      if (!resp.ok || !resp.body) return false;
+      const total = Number(resp.headers.get('content-length')) || 0;
+      const reader = resp.body.getReader();
+      const chunks = [];
+      let recv = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        recv += value.byteLength;
+        setProgress(
+          total > 0 ? Math.min(99, Math.floor((recv / total) * 100)) : -1,
+        );
+      }
+      if (recv < 80_000) return false; // lixo/erro — deixa o motor tentar
+      const blob = new Blob(chunks, { type: 'video/mp4' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `instagram-${igShortcode() || Date.now()}.mp4`;
+      document.documentElement.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 60_000);
+      setProgress(100);
+      setTimeout(clearProgress, 1200);
+      setBtn('ok');
+      toast('Download iniciado!', 'ok');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function onClick() {
     const t = videoTarget();
     if (!t) {
       toast('Abra um vídeo para baixar.', 'err');
       return;
+    }
+    if (!t.adult && /(^|\.)instagram\.com$/.test(host)) {
+      setBtn('loading');
+      setProgress(-1);
+      toast('Enviando…', '');
+      if (await instagramDirectDownload()) return;
+      clearProgress(); // falhou o caminho direto → segue pelo motor
     }
     setBtn('loading');
     setProgress(-1); // anel indeterminado ate chegar % real

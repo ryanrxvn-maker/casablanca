@@ -38,16 +38,6 @@ const QUALITIES: { value: Quality; label: string }[] = [
   { value: 'best', label: 'Máxima' },
 ];
 
-const ADULT_SITES = [
-  'pornhub.com',
-  'xvideos.com',
-  'xhamster.com',
-  'redtube.com',
-  'youporn.com',
-  'xvideosputaria.com',
-  'buceteiro.com',
-];
-
 function detectSource(url: string): string {
   const u = url.toLowerCase();
   if (u.includes('tiktok')) return 'TikTok';
@@ -103,9 +93,9 @@ export default function DownloaderPage() {
   }
 
   // Versão MÍNIMA recomendada da extensão+motor. Abaixo disso, a versão
-  // antiga sofre de: (a) service worker MV3 hibernando (desconecta sozinho)
-  // e (b) janela preta de console no startup. A v1.4.0 corrige os dois.
-  const MIN_EXT_VERSION = [1, 4, 0];
+  // antiga não baixa mais Instagram (o IG passou a exigir sessão logada;
+  // a v1.5.0 resolve baixando pela própria aba logada do usuário).
+  const MIN_EXT_VERSION = [1, 5, 0];
   function isOutdatedVersion(v?: string): boolean {
     if (!v) return false; // sem info de versão → não alarma
     const parts = v.split('.').map((n) => parseInt(n, 10) || 0);
@@ -407,8 +397,8 @@ export default function DownloaderPage() {
     >
       <div className="flex flex-col gap-5">
         <ToolStep n={1} icon={<IconStepPlug size={18} />} title="Extensão + Motor" hint="Instala uma vez, baixa em qualquer site" hue={HUE}>
-          {/* AVISO DE ATUALIZAÇÃO (contas não-admin) — versão antiga sofre
-              de desconexão automática + janela preta. v1.4.0 corrige.
+          {/* AVISO DE ATUALIZAÇÃO (contas não-admin) — versão antiga não
+              baixa mais Instagram. v1.5.0 corrige (download pela aba logada).
               Admin (você) já aplicou o fix manualmente, então não vê isso. */}
           {!isAdmin && ext.connected && isOutdatedVersion(ext.version) && (
             <div
@@ -430,27 +420,27 @@ export default function DownloaderPage() {
                     className="mt-0.5 text-[14px] font-bold tracking-tight text-white"
                     style={{ fontFamily: 'var(--font-tech)' }}
                   >
-                    Reinstale a nova versão pra funcionar 100%
+                    Instagram voltou — atualize a extensão
                   </div>
                   <p className="mt-2 text-[12.5px] leading-relaxed text-text-muted">
-                    Sua versão atual (<b className="text-white">v{ext.version}</b>) pode
-                    <b className="text-white"> desconectar sozinha</b> e mostrar uma
-                    <b className="text-white"> janela preta</b> ao ligar o PC. A nova
-                    versão corrige os dois — fica conectada pra sempre e roda invisível.
+                    O Instagram mudou e a sua versão atual (
+                    <b className="text-white">v{ext.version}</b>) parou de baixar
+                    vídeos de lá. A <b className="text-white">v1.5.0</b> corrige:
+                    o download passa a usar o seu próprio navegador logado.
                   </p>
                   <ol className="mono mt-2.5 list-decimal space-y-1 pl-5 text-[11.5px] leading-relaxed text-text-muted">
-                    <li>Baixe e rode o novo instalador no botão abaixo.</li>
+                    <li>Baixe a nova extensão no botão abaixo e descompacte.</li>
                     <li>Em <code className="text-white">chrome://extensions</code>, remova a extensão antiga e carregue a nova pasta.</li>
-                    <li>Pronto — não desconecta mais nem aparece janela preta.</li>
+                    <li>Pronto — Instagram, TikTok, YouTube e Pinterest funcionando.</li>
                   </ol>
                   <div className="mt-3">
                     <a
-                      href="/api/downloader-engine/download"
+                      href="/api/downloader-extension/download"
                       download
                       className="inline-flex items-center gap-2 rounded-full border border-amber-400/55 bg-amber-400/15 px-4 py-1.5 text-[11.5px] font-bold uppercase tracking-[0.14em] text-amber-200 transition hover:bg-amber-400/25"
                       style={{ fontFamily: 'var(--font-tech)' }}
                     >
-                      ↓ Baixar nova versão (corrigida)
+                      ↓ Baixar extensão v1.5.0
                     </a>
                   </div>
                 </div>
@@ -729,11 +719,6 @@ export default function DownloaderPage() {
               <p className="label-tech text-[10px] uppercase tracking-widest text-rose-400">
                 Modo +18 ativo
               </p>
-              <div className="mono mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-rose-300/80">
-                {ADULT_SITES.map((s) => (
-                  <span key={s}>{s}</span>
-                ))}
-              </div>
             </div>
           )}
         </ToolStep>
