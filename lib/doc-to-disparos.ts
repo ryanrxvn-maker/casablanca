@@ -102,7 +102,9 @@ export type DiscoverResult = {
   diagnostic: string;
 };
 
-const AD_HEADING_RE = /^AD\d+[A-Z0-9]*\s*-\s*[A-Z0-9]+/i;
+/** Mesmo heading do copy-parser: `(?:\[[A-Z0-9]{1,6}\])?` cobre o marcador
+ *  entre colchetes do copywriter ("AD17G1VN[T]-RIPTVWA"). */
+const AD_HEADING_RE = /^AD\d+[A-Z0-9]*(?:\[[A-Z0-9]{1,6}\])?\s*-\s*[A-Z0-9]+/i;
 
 /** Normaliza um token AD pro seu BASE id removendo o infixo G<N> dos siblings.
  *  "AD139G1GL" -> "AD139GL" · "AD139GL" -> "AD139GL" · "AD23G2VN" -> "AD23VN". */

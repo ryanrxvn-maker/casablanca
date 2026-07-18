@@ -62,7 +62,12 @@ export type ParsedAdSection = {
   rawSection: string;
 };
 
-const AD_HEADING_RE = /^AD\d+[A-Z0-9]*\s*-\s*[A-Z0-9]+/i;
+/** Heading de AD. O bloco `(?:\[[A-Z0-9]{1,6}\])?` cobre o MARCADOR entre
+ *  colchetes que o copywriter cola no codigo — visto no briefing real
+ *  "AD17G1VN[T]-RIPTVWA" (18.07.26). Sem ele o `\s*-\s*` batia no "[" e a
+ *  linha NAO era reconhecida como heading: a secao do AD nunca era achada e
+ *  toda a lista caia em "Parser nao achou hooks nem body". */
+const AD_HEADING_RE = /^AD\d+[A-Z0-9]*(?:\[[A-Z0-9]{1,6}\])?\s*-\s*[A-Z0-9]+/i;
 
 /** True se a linha e um HEADING de AD de verdade (ex "AD03GL - RIPCFPB"), e NAO
  *  um nome de ARQUIVO que por acaso casa o padrao — ex a Referência
@@ -137,10 +142,45 @@ function headingMatchesTaskFuzzy(heading: string, taskId: string): boolean {
   return true;
 }
 
+/** Indice da linha NAO-VAZIA anterior a `i` (ou -1 se nao houver). */
+function prevNonEmptyIdx(lines: string[], i: number): number {
+  for (let j = i - 1; j >= 0; j--) {
+    if ((lines[j] || '').trim()) return j;
+  }
+  return -1;
+}
+
+/** True quando a linha `i` e um heading de AD que serve de REFERENCIA (o AD de
+ *  ORIGEM da copy), e NAO o começo de uma seção nova. Padrao real do briefing
+ *  RIPTVWA (18.07.26):
+ *
+ *      AD17G1VN[T]-RIPTVWA     ← heading da seção (a task)
+ *      AD65VN[T] - VFPB02      ← REFERENCIA: de onde a copy foi adaptada
+ *      Link do avatar: ...
+ *      GANCHO / BODY ...
+ *
+ *  Sem essa distinção a seção do AD17 terminava na PROPRIA linha seguinte
+ *  (1 linha, sem copy) e o parser voltava "nem hooks nem body".
+ *
+ *  Regra: dois headings de AD COLADOS (nada entre eles a nao ser linha em
+ *  branco) → o 2o e referência. Um AD de verdade SEMPRE tem avatar/copy
+ *  embaixo do heading, entao heading-seguido-de-heading nunca e seção real. */
+function isReferenceHeadingLine(lines: string[], i: number): boolean {
+  if (!isAdHeadingLine(lines[i] || '')) return false;
+  const p = prevNonEmptyIdx(lines, i);
+  return p >= 0 && isAdHeadingLine(lines[p]);
+}
+
+/** Heading que DELIMITA uma seção — heading de AD que nao seja linha de
+ *  referência (ver isReferenceHeadingLine). */
+function isSectionDelimiterLine(lines: string[], i: number): boolean {
+  return isAdHeadingLine(lines[i] || '') && !isReferenceHeadingLine(lines, i);
+}
+
 /** Encontra o próximo heading AD após startIdx (delimita section). */
 function findNextAdHeading(lines: string[], startIdx: number): number {
   for (let i = startIdx + 1; i < lines.length; i++) {
-    if (isAdHeadingLine(lines[i])) return i;
+    if (isSectionDelimiterLine(lines, i)) return i;
   }
   return lines.length;
 }
@@ -203,6 +243,9 @@ export function findAdSection(text: string, adIdOrPrefix: string, variant?: stri
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim().toUpperCase();
     if (!isAdHeadingLine(line)) continue;
+    // Linha de REFERENCIA ("AD65VN[T] - VFPB02" logo abaixo do heading real)
+    // NAO abre seção — a copy dela pertence ao AD de cima.
+    if (isReferenceHeadingLine(lines, i)) continue;
     // Filtro de VARIANTE: docs com varias variantes do mesmo AD (F2/P1/AVA05)
     // — so casa headings da variante pedida. Sem variant = sem filtro. Isso
     // impede o merge de poçar avatares/copy de variantes diferentes.
@@ -251,7 +294,7 @@ export function findAdSection(text: string, adIdOrPrefix: string, variant?: stri
   const startIdx = cands[0].idx;
   let endIdx = lines.length;
   for (let i = startIdx + 1; i < lines.length; i++) {
-    if (isAdHeadingLine(lines[i]) && !candIdxSet.has(i)) {
+    if (isSectionDelimiterLine(lines, i) && !candIdxSet.has(i)) {
       endIdx = i;
       break;
     }
@@ -1001,7 +1044,7 @@ export function findGSiblings(fullDocText: string, baseAdId: string, variant?: s
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim();
     const mm = t.match(re);
-    if (mm && headingHasVariant(t, variant)) {
+    if (mm && headingHasVariant(t, variant) && !isReferenceHeadingLine(lines, i)) {
       found.push({ gNum: parseInt(mm[1], 10), lineStart: i, heading: t });
     }
   }
@@ -1010,8 +1053,10 @@ export function findGSiblings(fullDocText: string, baseAdId: string, variant?: s
     .map((f) => {
       let end = lines.length;
       for (let i = f.lineStart + 1; i < lines.length; i++) {
-        const t = lines[i].trim();
-        if (isAdHeadingLine(t)) { end = i; break; }
+        // isSectionDelimiterLine (e nao isAdHeadingLine) pra que a linha de
+        // REFERENCIA logo abaixo do heading nao corte o sibling na 1a linha —
+        // era o que zerava hook+body no briefing "AD17G1VN[T]-RIPTVWA".
+        if (isSectionDelimiterLine(lines, i)) { end = i; break; }
       }
       return {
         gNum: f.gNum,
@@ -1742,6 +1787,7 @@ function findBaseCopyBlock(fullDocText: string, baseAdId: string, variant?: stri
   for (let i = 0; i < lines.length; i++) {
     const t = lines[i].trim();
     if (!isAdHeadingLine(t)) continue;
+    if (isReferenceHeadingLine(lines, i)) continue; // AD de origem, nao abre bloco
     // Variante: a copy pode estar sob heading com miolo de nicho diferente
     // ("AD14GL - VFPB04 - F2") mas SEMPRE carrega o token de variante. Filtra
     // por ele pra nao pegar a copy de outra variante (P1/AVA05).

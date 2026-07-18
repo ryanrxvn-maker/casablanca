@@ -12,7 +12,7 @@
  *   node .test-tmp/doc-to-disparos.real.test.js
  */
 import { buildDisparosFromNomenclatures, buildDisparosFromDoc, type AvatarCandidate } from './doc-to-disparos';
-import { matchAvatar } from './copy-parser';
+import { matchAvatar, parseDarkoBriefing } from './copy-parser';
 
 let fails = 0;
 function ok(cond: boolean, msg: string) {
@@ -192,6 +192,87 @@ if (d24) {
   ok(body24[0]?.avatarId === 'look_mul', '1o take do body = Mulher');
   ok(body24.some((p, i) => i > 0 && p.avatarId === '7558713641210531102'), 'algum take seguinte = Doutor (talking-photo)');
 }
+
+// ---------------------------------------------------------------------------
+// GARANTIA — briefing "ADVN - RIPTVWA" (18.07.26). Conteúdo REAL do doc.
+// Duas armadilhas que zeravam a identificação no ClickUp Pilot:
+//   1. o marcador "[T]" colado no código ("AD17G1VN[T]-RIPTVWA") fazia a linha
+//      NAO ser reconhecida como heading de AD;
+//   2. a linha logo abaixo é o AD de ORIGEM da copy ("AD65VN[T] - VFPB02") —
+//      tratada como heading, ela cortava a seção na 1a linha (sem copy).
+// Resultado: "Parser nao achou hooks nem body pra AD17VN no doc".
+// ---------------------------------------------------------------------------
+const DOC_RIPTVWA = `ADVN - RIPTVWA
+AD17 à 23
+
+AD17G1VN[T]-RIPTVWA
+
+AD65VN[T] - VFPB02
+
+Link do avatar:
+
+Doutor: @drromaoyouseff5.mp4
+
+Homem: kiko.urso.mp4
+
+Instruções para edição: Exportar uma versão com camuflagem e uma sem camuflagem. O AD é só lipsync, não vai ter edição.
+
+GANCHO
+
+Doutor
+
+Mas será mesmo que passar vick no meio das pernas realmente faz seu amigão ficar um monstro de grande?
+
+BODY
+
+Doutor
+
+Eu vou te mostrar como esse truque funciona na prática.
+
+Homem
+
+Duvidei no início. Mesmo assim fiz o truque como foi ensinado.
+
+AD18G1VN[T]-RIPTVWA
+
+AD01VN[T] - VFPB02
+
+Link do avatar:
+
+Doutor: @drromaoyouseff5.mp4
+
+Instruções para edição: Só lipsync.
+
+GANCHO
+
+Doutor
+
+Esse é o gancho do AD18 e ele NAO pode vazar pro AD17.
+
+BODY
+
+Doutor
+
+Corpo do AD18.`;
+
+console.log('\nGARANTIA — ADVN - RIPTVWA (heading com "[T]" + linha de AD de referência):');
+const b17 = parseDarkoBriefing(DOC_RIPTVWA, 'AD17VN', null, []);
+ok(!!b17, 'achou a seção do AD17VN (heading "AD17G1VN[T]-RIPTVWA")');
+if (b17) {
+  ok(b17.hooks.length === 1, `1 hook (got ${b17.hooks.length})`);
+  ok(/passar vick no meio das pernas/i.test(b17.hooks[0]?.text || ''), 'HOOK 1 = texto do gancho do AD17');
+  ok(!!b17.body && /funciona na prática/i.test(b17.body), 'BODY do AD17 presente');
+  ok(!/AD18/i.test(b17.body || '') && !/gancho do AD18/i.test(b17.body || ''), 'copy do AD18 NAO vazou pro AD17');
+  ok(b17.avatars.some((a) => /drromaoyouseff5/i.test(a.username)), 'avatar Doutor identificado');
+  ok(b17.avatars.some((a) => /kiko\.urso/i.test(a.username)), 'avatar Homem identificado');
+  // A linha de referência ("AD65VN[T] - VFPB02") é metadado — nunca fala.
+  ok(!/AD65/i.test(b17.body || '') && !/AD65/i.test(b17.hooks[0]?.text || ''), 'linha de referência AD65 nao virou fala');
+}
+const b18 = parseDarkoBriefing(DOC_RIPTVWA, 'AD18VN', null, []);
+ok(!!b18 && /gancho do AD18/i.test(b18.hooks[0]?.text || ''), 'AD18VN tambem identificado, com o proprio gancho');
+// O AD de REFERENCIA nao pode virar uma seção própria roubando a copy do AD17.
+const b65 = parseDarkoBriefing(DOC_RIPTVWA, 'AD65VN', null, []);
+ok(!b65 || (b65.hooks.length === 0 && !b65.body), 'AD65VN (referência) nao abre seção com a copy do AD17');
 
 console.log('');
 if (fails > 0) {
