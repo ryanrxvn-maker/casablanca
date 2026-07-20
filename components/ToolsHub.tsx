@@ -166,8 +166,6 @@ const TOOLS: ToolEntry[] = [
     icon: <IconLipsync size={26} />,
     hue: 'rgba(232, 121, 249, 0.42)',
     badge: 'IA',
-    video: '/cards/lipsync.mp4',
-    poster: '/cards/lipsync.jpg',
   },
   {
     href: '/tools/auto-broll',
@@ -176,8 +174,6 @@ const TOOLS: ToolEntry[] = [
     icon: <IconAutoBroll size={26} />,
     hue: 'rgba(240, 171, 252, 0.42)',
     badge: 'ADMIN',
-    video: '/cards/auto-broll.mp4',
-    poster: '/cards/auto-broll.jpg',
     adminOnly: true,
   },
   {
@@ -187,8 +183,6 @@ const TOOLS: ToolEntry[] = [
     icon: <IconRemoverElementos size={26} />,
     hue: 'rgba(244, 114, 182, 0.42)',
     badge: 'IA',
-    video: '/cards/removedor-legenda.mp4',
-    poster: '/cards/removedor-legenda.jpg',
     adminOnly: true,
   },
   {
@@ -198,8 +192,6 @@ const TOOLS: ToolEntry[] = [
     icon: <IconDecupageCopy size={26} />,
     hue: 'rgba(232, 121, 249, 0.42)',
     badge: 'IA',
-    video: '/cards/decupagem-inteligente.mp4',
-    poster: '/cards/decupagem-inteligente.jpg',
   },
   {
     href: '/tools/copy-srt',
@@ -208,8 +200,6 @@ const TOOLS: ToolEntry[] = [
     icon: <IconCopySRT size={26} />,
     hue: 'rgba(196, 181, 253, 0.42)',
     badge: 'IA',
-    video: '/cards/gerador-srt.mp4',
-    poster: '/cards/gerador-srt.jpg',
   },
   {
     href: '/tools/heygen-auto',
@@ -218,8 +208,6 @@ const TOOLS: ToolEntry[] = [
     icon: <IconHeyGenAuto size={26} />,
     hue: 'rgba(103, 232, 249, 0.42)',
     badge: 'ADMIN',
-    video: '/cards/hey-auto.mp4',
-    poster: '/cards/hey-auto.jpg',
     adminOnly: true,
   },
   {
@@ -229,8 +217,6 @@ const TOOLS: ToolEntry[] = [
     icon: <IconClickUpPilot size={26} />,
     hue: 'rgba(167, 139, 250, 0.42)',
     badge: 'ADMIN',
-    video: '/cards/fluxo-automatico.mp4',
-    poster: '/cards/fluxo-automatico.jpg',
     adminOnly: true,
   },
 ];
@@ -313,9 +299,9 @@ export function ToolsHub() {
         </h1>
       </section>
 
-      {/* Banner promocional das automações internas — SÓ pra admin.
-          Cliente não vê (nem sabe que existe). */}
-      {isAdmin ? <PromoBanner tier={tier} isAdmin={isAdmin} /> : null}
+      {/* Banner-herói: FakePrint (manchete de telejornal) pra TODOS.
+          Pilot e Auto B-roll entram como slides extras SÓ pra admin. */}
+      <PromoBanner tier={tier} isAdmin={isAdmin} />
 
       {/* Bloco DESTAQUES — grandes, com gradiente */}
       <section className="mt-10">
@@ -436,14 +422,18 @@ function PromoBanner({
   isAdmin: boolean;
 }) {
   const canStartAutomation = isAdmin || tierCanAutomate(tier);
-  return (
-    <PromoCarousel
-      slides={[
-        <PilotSlide key="pilot" canStartAutomation={canStartAutomation} />,
-        <AutoBrollSlide key="broll" canStartAutomation={canStartAutomation} />,
-      ]}
-    />
-  );
+  // FakePrint é o herói de TODOS (ferramenta free). As automações internas
+  // (Pilot / Auto B-roll) só existem no carrossel do admin.
+  const slides = [
+    <FakePrintSlide key="fakeprint" />,
+    ...(isAdmin
+      ? [
+          <PilotSlide key="pilot" canStartAutomation={canStartAutomation} />,
+          <AutoBrollSlide key="broll" canStartAutomation={canStartAutomation} />,
+        ]
+      : []),
+  ];
+  return <PromoCarousel slides={slides} />;
 }
 
 /* ────────── CAROUSEL WRAPPER ────────── */
@@ -510,25 +500,277 @@ function PromoCarousel({ slides }: { slides: React.ReactNode[] }) {
         </>
       )}
 
-      {/* Dots */}
-      <div className="mt-3 flex items-center justify-center gap-2">
-        {slides.map((_, i) => (
-          <button
-            key={i}
-            type="button"
-            onClick={() => go(i)}
-            aria-label={`Ir pro card ${i + 1}`}
-            className={
-              'h-1.5 rounded-full transition-all duration-300 ' +
-              (i === idx ? 'w-8 bg-lime shadow-[0_0_8px_rgba(200,232,124,0.6)]' : 'w-1.5 bg-white/30 hover:bg-white/60')
-            }
-          />
-        ))}
-      </div>
+      {/* Dots — só quando há mais de um slide (senão fica um pontinho órfão) */}
+      {slides.length > 1 ? (
+        <div className="mt-3 flex items-center justify-center gap-2">
+          {slides.map((_, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => go(i)}
+              aria-label={`Ir pro card ${i + 1}`}
+              className={
+                'h-1.5 rounded-full transition-all duration-300 ' +
+                (i === idx ? 'w-8 bg-lime shadow-[0_0_8px_rgba(200,232,124,0.6)]' : 'w-1.5 bg-white/30 hover:bg-white/60')
+              }
+            />
+          ))}
+        </div>
+      ) : null}
 
       <style jsx>{`
         .hide-scrollbar::-webkit-scrollbar {
           display: none;
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/* ────────── SLIDE HERÓI: FAKEPRINT (manchete de telejornal) ────────── */
+function FakePrintSlide() {
+  return (
+    <div
+      className="dark-island group relative overflow-hidden rounded-[26px] border border-line/60"
+      style={{ background: 'var(--banner-bg)' }}
+    >
+      {/* Estúdio de jornal: vermelho urgente + azul broadcast pulsando fora de fase */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(60% 90% at 0% 50%, rgba(239,68,68,0.26), transparent 60%)',
+          animation: 'promo-pulse-1 6s ease-in-out infinite',
+        }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(60% 90% at 100% 50%, rgba(59,130,246,0.22), transparent 60%)',
+          animation: 'promo-pulse-2 7s ease-in-out infinite',
+        }}
+      />
+      {/* Grid sutil de estúdio */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-[0.05]"
+        style={{
+          backgroundImage:
+            'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)',
+          backgroundSize: '46px 46px',
+        }}
+      />
+
+      <Sparkle className="absolute top-6 right-[46%]" delay={0} />
+      <Sparkle className="absolute top-[64%] right-[40%]" delay={800} />
+      <Sparkle className="absolute top-[24%] left-[46%]" delay={1600} />
+
+      {/* TV com a manchete à direita */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute right-6 top-1/2 hidden -translate-y-1/2 lg:block xl:right-12"
+        style={{ animation: 'promo-icon-float 6s ease-in-out infinite' }}
+      >
+        <NewsTvFrame />
+      </div>
+
+      <div className="relative z-[2] flex flex-col items-start gap-6 px-7 py-10 md:px-12 md:py-14 lg:max-w-[56%]">
+        <div>
+          {/* Chip AO VIVO */}
+          <div
+            className="mb-4 inline-flex items-center gap-2 rounded-full border border-red-500/50 bg-red-500/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-red-300 backdrop-blur-md"
+            style={{
+              fontFamily: 'var(--font-tech)',
+              boxShadow: '0 0 22px -6px rgba(239,68,68,0.6), inset 0 1px 0 rgba(255,255,255,0.08)',
+            }}
+          >
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-70" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-red-400 shadow-[0_0_10px_rgba(248,113,113,0.95)]" />
+            </span>
+            FakePrint · Zona de Notícias
+          </div>
+
+          <h3
+            className="text-[28px] font-extrabold leading-[1.05] tracking-tight text-white md:text-[40px]"
+            style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.025em' }}
+          >
+            Sua manchete no ar.
+            <br />
+            <span
+              style={{
+                background: 'linear-gradient(135deg, #f87171 0%, #fca5a5 45%, #ffffff 100%)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+              }}
+            >
+              Em qualquer telejornal.
+            </span>
+          </h3>
+          <p className="mt-3 max-w-[480px] text-[14.5px] leading-relaxed text-white/80">
+            Headlines de canais de notícia fiéis ao que vai ao ar: você escreve
+            a manchete, o FakePrint monta o print do telejornal pronto pra
+            postar — além dos modelos de redes sociais.
+          </p>
+
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <Link
+              href="/tools/fakepass"
+              className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full px-6 py-3 text-[13.5px] font-bold text-white"
+              style={{
+                background: 'linear-gradient(135deg, #ef4444 0%, #b91c1c 60%, #7f1d1d 100%)',
+                boxShadow:
+                  'inset 0 1px 0 rgba(255,255,255,0.35), 0 12px 32px -8px rgba(239,68,68,0.6), 0 2px 6px rgba(0,0,0,0.4)',
+              }}
+            >
+              <span className="relative z-10">Criar minha manchete</span>
+              <span className="relative z-10 transition-transform duration-300 group-hover/btn:translate-x-1">
+                →
+              </span>
+              <span
+                aria-hidden
+                className="absolute inset-0 -translate-x-[120%] bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 group-hover/btn:translate-x-[120%]"
+              />
+            </Link>
+            <Link
+              href="/tools/fakepass"
+              className="dark-island group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full border border-white/20 bg-black/60 px-6 py-3 text-[13.5px] font-bold text-white backdrop-blur-md transition-all duration-300 hover:-translate-y-[1px] hover:border-white/45 hover:bg-black/80"
+              style={{
+                boxShadow:
+                  'inset 0 1px 0 rgba(255,255,255,0.06), 0 12px 28px -10px rgba(0,0,0,0.7)',
+              }}
+            >
+              <span className="relative z-10">Ver todos os modelos</span>
+            </Link>
+          </div>
+        </div>
+      </div>
+
+      <style jsx>{`
+        @keyframes promo-pulse-1 {
+          0%, 100% { opacity: 0.55; transform: scale(1); }
+          50% { opacity: 0.85; transform: scale(1.05); }
+        }
+        @keyframes promo-pulse-2 {
+          0%, 100% { opacity: 0.55; transform: scale(1.03); }
+          50% { opacity: 0.85; transform: scale(0.97); }
+        }
+        @keyframes promo-icon-float {
+          0%, 100% { transform: translateY(-50%) translateX(0); }
+          50% { transform: translateY(calc(-50% - 8px)) translateX(-3px); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+/** TV do slide: jornalista IA + chyron estilo CNN com a manchete do produto. */
+function NewsTvFrame() {
+  return (
+    <div
+      className="w-[380px] xl:w-[440px]"
+      style={{
+        filter:
+          'drop-shadow(0 34px 64px rgba(0,0,0,0.65)) drop-shadow(0 0 44px rgba(239,68,68,0.3))',
+      }}
+    >
+      <div className="overflow-hidden rounded-[16px] border border-white/15 bg-black">
+        <div className="relative w-full" style={{ aspectRatio: '16/9' }}>
+          {/* Âncora gerada por IA (asset real do produto) */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/cards/criar-avatar.jpg"
+            alt=""
+            aria-hidden
+            decoding="async"
+            className="absolute inset-0 h-full w-full object-cover"
+            style={{
+              objectPosition: '50% 22%',
+              transform: 'scale(1.08) translateZ(0)',
+              filter: 'saturate(0.9) contrast(1.06) brightness(0.96)',
+            }}
+          />
+          {/* Vinheta broadcast (legibilidade do chyron) */}
+          <div
+            aria-hidden
+            className="absolute inset-0"
+            style={{
+              background:
+                'linear-gradient(to top, rgba(2,2,4,0.72) 0%, rgba(2,2,4,0.12) 34%, transparent 55%), radial-gradient(120% 90% at 50% 0%, transparent 55%, rgba(2,2,10,0.35) 100%)',
+            }}
+          />
+
+          {/* AO VIVO + relógio */}
+          <div className="absolute left-2.5 top-2.5 flex items-center gap-1.5 rounded-[4px] bg-black/70 px-2 py-1 backdrop-blur-sm">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-70" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-red-500" />
+            </span>
+            <span
+              className="text-[9px] font-black uppercase tracking-[0.18em] text-white"
+              style={{ fontFamily: 'var(--font-tech)' }}
+            >
+              Ao vivo
+            </span>
+          </div>
+          <div
+            className="num absolute right-2.5 top-2.5 rounded-[4px] bg-black/70 px-2 py-1 text-[9.5px] font-bold text-white/90 backdrop-blur-sm"
+            style={{ fontFamily: 'var(--font-mono)' }}
+          >
+            21:47
+          </div>
+
+          {/* Chyron estilo CNN: kicker vermelho + barra branca */}
+          <div className="absolute inset-x-0 bottom-0">
+            <div className="mx-2 mb-2 overflow-hidden rounded-[6px] shadow-[0_10px_28px_-10px_rgba(0,0,0,0.9)]">
+              <div className="flex items-stretch">
+                <span
+                  className="flex shrink-0 items-center bg-[#cc0000] px-2.5 text-[11px] font-black uppercase tracking-[0.08em] text-white"
+                  style={{ fontFamily: 'var(--font-tech)' }}
+                >
+                  Agora
+                </span>
+                <span
+                  className="flex-1 bg-white px-2.5 py-1.5 text-[12px] font-black uppercase leading-[1.15] tracking-tight text-[#111]"
+                  style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.01em' }}
+                >
+                  AutoEdit lança headlines de telejornal prontas pra postar
+                </span>
+              </div>
+              {/* Ticker */}
+              <div className="relative overflow-hidden bg-[#0c0c10] py-1">
+                <div className="ntf-ticker flex w-max items-center whitespace-nowrap">
+                  {[0, 1].map((i) => (
+                    <span
+                      key={i}
+                      className="px-3 text-[9px] font-bold uppercase tracking-[0.14em] text-white/75"
+                      style={{ fontFamily: 'var(--font-tech)' }}
+                    >
+                      Você escreve a manchete · o FakePrint monta o print fiel
+                      ao original · CNN, Globo, Record e + · pronto em segundos
+                      · sem Photoshop ·
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <style jsx>{`
+        .ntf-ticker {
+          animation: ntf-ticker-run 18s linear infinite;
+        }
+        @keyframes ntf-ticker-run {
+          from { transform: translateX(0); }
+          to { transform: translateX(-50%); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .ntf-ticker { animation: none; }
         }
       `}</style>
     </div>
