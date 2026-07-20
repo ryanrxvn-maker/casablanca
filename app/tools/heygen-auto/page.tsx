@@ -97,7 +97,7 @@ type PartResult = RunnerResult;
 
 export default function HeyGenAutoPage() {
   return (
-    <TierGate require="pro" toolName="Hey Auto">
+    <TierGate require="admin" toolName="Hey Auto">
       <HeyGenAutoInner />
     </TierGate>
   );

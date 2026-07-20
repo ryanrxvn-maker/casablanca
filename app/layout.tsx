@@ -67,7 +67,7 @@ const label = Inter({
 
 const SITE_URL = 'https://www.darkoautoedit.com';
 const SITE_DESC =
-  'Automatize decupagem, B-roll, lipsync e legendas. Ligue a fila e vá dormir — o estúdio entrega. Ferramentas de edição de vídeo no automático, direto no navegador.';
+  'Automatize decupagem, lipsync e legendas. Ligue a fila e vá dormir — o estúdio entrega. Ferramentas de edição de vídeo no automático, direto no navegador.';
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -79,11 +79,9 @@ export const metadata: Metadata = {
   keywords: [
     'automação de edição de vídeo',
     'decupagem automática',
-    'gerar b-roll com IA',
-    'lipsync em lote',
+    'lipsync video to video',
     'editor de vídeo automático',
     'automação UGC',
-    'HeyGen em lote',
     'gerador de legenda SRT',
     'compressor de vídeo online',
     'editar vídeo com IA',
@@ -185,8 +183,7 @@ const JSON_LD = {
       publisher: { '@id': `${SITE_URL}/#org` },
       featureList: [
         'Decupagem automática de vídeo',
-        'Geração de B-roll com IA',
-        'Lipsync em lote',
+        'Lipsync Video to Video',
         'Legendas (SRT) alinhadas à copy',
         'Compressão e ajuste de velocidade em lote',
       ],
@@ -194,19 +191,11 @@ const JSON_LD = {
         '@type': 'AggregateOffer',
         priceCurrency: 'BRL',
         lowPrice: '0',
-        highPrice: '116',
-        offerCount: 3,
+        highPrice: '57',
+        offerCount: 2,
         offers: [
           { '@type': 'Offer', name: 'Free', price: '0', priceCurrency: 'BRL' },
-          { '@type': 'Offer', name: 'Basic', price: '57', priceCurrency: 'BRL' },
-          // Pro está travado ("em breve") — PreOrder evita anunciar como comprável.
-          {
-            '@type': 'Offer',
-            name: 'Pro',
-            price: '116',
-            priceCurrency: 'BRL',
-            availability: 'https://schema.org/PreOrder',
-          },
+          { '@type': 'Offer', name: 'Premium', price: '57', priceCurrency: 'BRL' },
         ],
       },
     },

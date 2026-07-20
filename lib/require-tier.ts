@@ -22,10 +22,11 @@ export type Tier = 'free' | 'basic' | 'pro' | 'admin';
 
 const RANK: Record<Tier, number> = { free: 0, basic: 1, pro: 2, admin: 3 };
 
+// Labels de EXIBIÇÃO nos erros. Tier interno 'basic' = plano Premium.
 const NEED_LABEL: Record<Tier, string> = {
   free: 'Free',
-  basic: 'Basic',
-  pro: 'Pro',
+  basic: 'Premium',
+  pro: 'Premium',
   admin: 'Admin',
 };
 

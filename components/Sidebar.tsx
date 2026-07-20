@@ -181,30 +181,29 @@ export function Sidebar() {
           icon: <IconHome />,
           match: (p) => p === '/tools',
         },
-        {
-          href: '/tools/clickup-pilot',
-          label: 'Pilot',
-          icon: <IconPilot />,
-          match: (p) => p.startsWith('/tools/clickup-pilot'),
-        },
+        // Pilot é ferramenta de uso interno — só admin vê o atalho.
+        ...(profile?.is_admin
+          ? [
+              {
+                href: '/tools/clickup-pilot',
+                label: 'Pilot',
+                icon: <IconPilot />,
+                match: (p: string) => p.startsWith('/tools/clickup-pilot'),
+              },
+            ]
+          : []),
       ],
     },
     {
+      // Sem divisão Base × IA: um único atalho "Tools" cobre toda a suíte.
       label: 'Ferramentas',
       items: [
         {
           href: '/tools/decupagem',
-          label: 'Base',
+          label: 'Tools',
           icon: <IconBase />,
           match: (p) =>
-            BASE_PATHS.some((bp) => p === bp || p.startsWith(bp + '/')),
-        },
-        {
-          href: '/tools/auto-broll',
-          label: 'IA',
-          icon: <IconAi />,
-          match: (p) =>
-            AI_PATHS.some((bp) => p === bp || p.startsWith(bp + '/')),
+            TOOL_PATHS.some((bp) => p === bp || p.startsWith(bp + '/')),
         },
       ],
     },
@@ -454,8 +453,9 @@ export function Sidebar() {
   );
 }
 
-/* ─── Paths Base / IA (usados pra match do nav ativo) ─── */
-const BASE_PATHS = [
+/* ─── Paths de ferramentas (match do nav ativo — lista única, sem Base/IA) ─── */
+const TOOL_PATHS = [
+  '/tools/fakepass',
   '/tools/decupagem',
   '/tools/camuflagem',
   '/tools/downloader',
@@ -464,8 +464,7 @@ const BASE_PATHS = [
   '/tools/acelerador',
   '/tools/normalizador',
   '/tools/separador-audio',
-];
-const AI_PATHS = [
+  '/tools/lipsync',
   '/tools/auto-broll',
   '/tools/remover-elementos',
   '/tools/decupagem-copy',
@@ -539,28 +538,6 @@ function IconBase() {
         strokeLinecap="round"
         strokeLinejoin="round"
         fill="none"
-      />
-    </svg>
-  );
-}
-
-function IconAi() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-      <defs>
-        <linearGradient id="sb-ai" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#f0abfc" />
-          <stop offset="100%" stopColor="#a78bfa" />
-        </linearGradient>
-      </defs>
-      <path
-        d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z"
-        fill="url(#sb-ai)"
-      />
-      <path
-        d="M19 16l0.7 2 2 0.7-2 0.7-0.7 2-0.7-2-2-0.7 2-0.7 0.7-2z"
-        fill="url(#sb-ai)"
-        opacity="0.7"
       />
     </svg>
   );
@@ -642,7 +619,7 @@ function tierLabelOf(t: AvatarTier): string {
       : t === 'pro'
         ? 'PRO'
         : t === 'basic'
-          ? 'BASIC'
+          ? 'PREMIUM'
           : 'FREE';
 }
 

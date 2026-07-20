@@ -57,7 +57,7 @@ async function cleanupOldUserObjects(
 }
 
 export async function POST(req: Request) {
-  const guard = await requireToolAccess('/tools/lipsync', 'pro');
+  const guard = await requireToolAccess('/tools/lipsync', 'basic');
   if (!guard.ok) return guard.response;
 
   let body: { kind?: string; ext?: string };

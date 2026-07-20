@@ -119,10 +119,15 @@ export default function AssinaturaPage() {
   }
 
   const sub = data?.subscription ?? null;
-  // Rótulo/cor de exibição: um Pro vira BETA PRO (ciano) enquanto o lançamento
-  // do Pro está fechado. Valor, status e cobrança seguem 100% reais do Stripe.
+  // Rótulo/cor de exibição: o tier interno 'basic' exibe PREMIUM; um Pro
+  // legado vira BETA PRO (ciano). Valor, status e cobrança seguem 100% reais
+  // do Stripe — só o nome de exibição muda.
   const isBetaPlan = displayTierOf((sub?.plan as AccessTier | null) ?? null) === 'beta';
-  const planLabel = isBetaPlan ? 'Beta Pro' : sub?.plan ?? '';
+  const planLabel = isBetaPlan
+    ? 'Beta Pro'
+    : sub?.plan === 'basic'
+      ? 'Premium'
+      : sub?.plan ?? '';
   const hue = isBetaPlan
     ? '#22d3ee'
     : sub?.plan
@@ -132,7 +137,9 @@ export default function AssinaturaPage() {
   const courtesyLabel =
     displayTierOf(courtesyTier as AccessTier) === 'beta'
       ? 'BETA PRO'
-      : courtesyTier.toUpperCase();
+      : courtesyTier === 'basic'
+        ? 'PREMIUM'
+        : courtesyTier.toUpperCase();
 
   return (
     <div className="mx-auto w-full max-w-[760px] px-5 md:px-8">

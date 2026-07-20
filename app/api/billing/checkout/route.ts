@@ -64,13 +64,13 @@ export async function POST(req: Request) {
     // Enquanto o Pro está fechado, NINGUÉM inicia checkout de Pro — nem pela UI
     // (o /planos já mostra "em breve"), nem por curl/DevTools batendo direto
     // aqui. Assinaturas Pro já existentes seguem intocadas (nada disto mexe no
-    // Stripe). Basic continua liberado normalmente.
+    // Stripe). O Premium (tier interno 'basic') continua liberado normalmente.
     if (!PRO_LAUNCH_OPEN && plan === 'pro') {
       return NextResponse.json(
         {
           error:
-            'O plano Pro está em fase de lançamento e abre em breve. Por enquanto, aproveite o plano Basic.',
-          code: 'pro_coming_soon',
+            'Este plano não está disponível. Assine o plano Premium.',
+          code: 'pro_unavailable',
         },
         { status: 403 },
       );

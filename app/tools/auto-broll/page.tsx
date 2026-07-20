@@ -130,7 +130,7 @@ function newJob(name = ''): Job {
 
 export default function AutoBrollPage() {
   return (
-    <TierGate require="pro" toolName="Auto B-roll">
+    <TierGate require="admin" toolName="Auto B-roll">
       <AutoBrollInner />
     </TierGate>
   );

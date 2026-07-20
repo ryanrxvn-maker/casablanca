@@ -8,12 +8,12 @@ const SITE_URL = 'https://www.darkoautoedit.com';
 export const metadata: Metadata = {
   title: 'Recursos — automação de edição de vídeo',
   description:
-    'Guias do Auto Edit: decupagem automática, lipsync em lote, B-roll automático e legendas alinhadas. Aprenda a editar no automático e em lote.',
+    'Guias do Auto Edit: decupagem automática, lipsync de avatar e legendas alinhadas à copy. Aprenda a editar no automático e em lote.',
   alternates: { canonical: '/recursos' },
   openGraph: {
     title: 'Recursos · Auto Edit',
     description:
-      'Decupagem automática, lipsync em lote, B-roll automático e legendas alinhadas — guias práticos.',
+      'Decupagem automática, lipsync de avatar e legendas alinhadas à copy — guias práticos.',
     url: `${SITE_URL}/recursos`,
   },
 };

@@ -52,18 +52,16 @@ const FREE_ALLOWED_TOOLS = [
   '/tools/historico', // histórico geral — todo tier vê o próprio trabalho
 ];
 // Outras rotas (não-/tools) que free pode ver (educacionais/comerciais)
-const FREE_EXTRA_OK_PREFIXES = ['/pilot', '/planos'];
+const FREE_EXTRA_OK_PREFIXES = ['/planos'];
 
-// Ferramentas que SÓ Pro/Admin acessam — Basic é bloqueado nelas
-const PRO_ONLY_TOOLS = [
-  '/tools/auto-broll',
-  '/tools/heygen-auto',
-  '/tools/decupagem-copy',     // Smart Decup
-  '/tools/clickup-pilot',
-  '/tools/lipsync',            // Lipsync Video to Video — Pro-only
+// Ferramentas que SÓ Premium (tier interno 'basic') ou acima acessam —
+// free é mandado direto pra /planos ao tentar abrir
+const PREMIUM_ONLY_TOOLS = [
+  '/tools/decupagem-copy',     // Decupagem Inteligente
+  '/tools/lipsync',            // Lipsync Video to Video
 ];
 
-// Rotas exclusivamente do admin (mesmo Pro não acessa)
+// Rotas exclusivamente do admin (mesmo Pro legado não acessa)
 const ADMIN_ONLY_PREFIXES = [
   '/admin',
   '/tools/ltx-video',
@@ -71,6 +69,14 @@ const ADMIN_ONLY_PREFIXES = [
   '/tools/normalizador',      // uso interno — some pra conta não-admin
   '/tools/separador-audio',   // uso interno — some pra conta não-admin
   '/tools/remover-elementos', // Smart Remover (legenda + marca d'água) — admin-only
+  '/tools/auto-broll',        // uso interno — some pra conta não-admin
+  '/tools/heygen-auto',       // uso interno — some pra conta não-admin
+  '/tools/clickup-pilot',     // uso interno — some pra conta não-admin
+  '/tools/background',        // viewer da fila do Pilot — uso interno
+  '/tools/lipsync-history',   // histórico dos batches Pilot/VA — uso interno
+  '/pilot',                   // página de pitch do Pilot — uso interno
+  '/configuracoes/clickup-pilot',
+  '/configuracoes/magnific',
 ];
 
 export async function updateSession(request: NextRequest) {
@@ -161,6 +167,7 @@ export async function updateSession(request: NextRequest) {
     (pathname.startsWith('/tools') ||
       pathname.startsWith('/configuracoes') ||
       pathname.startsWith('/admin') ||
+      pathname.startsWith('/pilot') ||
       pathname.startsWith('/trocar-senha'))
   ) {
     const adminClient = createServerClient(
@@ -284,12 +291,12 @@ export async function updateSession(request: NextRequest) {
       return redir(url);
     }
 
-    // Tentou abrir ferramenta Pro sem ser Pro → manda DIRETO pra /planos
-    // pra fazer upgrade (sem furo: o gating é server-side, aqui).
+    // Tentou abrir ferramenta Premium sem ter o plano → manda DIRETO pra
+    // /planos pra fazer upgrade (sem furo: o gating é server-side, aqui).
     function planosRedirect() {
       const url = request.nextUrl.clone();
       url.pathname = '/planos';
-      url.searchParams.set('upgrade', 'pro');
+      url.searchParams.set('upgrade', 'premium');
       url.searchParams.set('from', pathname);
       return redir(url);
     }
@@ -314,27 +321,17 @@ export async function updateSession(request: NextRequest) {
         pathname.startsWith(p),
       );
       const isTool = pathname.startsWith('/tools/');
-      const isProOnly = PRO_ONLY_TOOLS.some(
+      const isPremiumOnly = PREMIUM_ONLY_TOOLS.some(
         (p) => pathname === p || pathname.startsWith(p + '/'),
       );
 
       if (isTool && !isAllowedTool) {
-        // Free tentando acessar tool Pro-only → vai DIRETO pra /planos.
-        // Tool de outro tier → flash de upgrade pra Basic.
-        return isProOnly ? planosRedirect() : lockedRedirect('basic');
+        // Free tentando acessar tool Premium → vai DIRETO pra /planos.
+        // Tool de outro tier → flash de upgrade pro Premium.
+        return isPremiumOnly ? planosRedirect() : lockedRedirect('basic');
       }
       if (!isHubExact && !isAllowedPrefix && !isExtraOk) {
         return lockedRedirect('basic');
-      }
-    }
-
-    // ─── Bloqueio pro tier 'basic' (acessa quase tudo, exceto IA premium) ───
-    if (tier === 'basic') {
-      const isProOnly = PRO_ONLY_TOOLS.some(
-        (p) => pathname === p || pathname.startsWith(p + '/'),
-      );
-      if (isProOnly) {
-        return planosRedirect();
       }
     }
 

@@ -68,7 +68,7 @@ async function rehostOutput(srcUrl: string, userId: string, workId: string): Pro
 }
 
 export async function GET(req: Request) {
-  const guard = await requireToolAccess('/tools/lipsync', 'pro');
+  const guard = await requireToolAccess('/tools/lipsync', 'basic');
   if (!guard.ok) return guard.response;
 
   const token = new URL(req.url).searchParams.get('job');

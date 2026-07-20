@@ -123,7 +123,7 @@ async function fetchAvatarList(apiKey: string): Promise<AvatarItem[]> {
 
 export async function GET(req: Request) {
   try {
-    const gate = await requireTier('pro');
+    const gate = await requireTier('admin');
     if (!gate.ok) return gate.response;
     const keyResult = await getUserKey('heygen');
     if ('response' in keyResult) return keyResult.response;

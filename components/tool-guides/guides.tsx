@@ -1203,7 +1203,7 @@ export const GUIDES: Record<string, ToolGuide> = {
           <Shot label="Histórico geral · timeline">
             <MStack>
               <MQueueItem name="criativo-final.mp4 · Compressor" status="PRONTO · 14:32" pct={100} tone="lime" />
-              <MQueueItem name="AD140GL · ClickUp Pilot" status="DISPARO · 11:05" pct={100} tone="violet" />
+              <MQueueItem name="AD140GL.mp4 · Decupagem" status="PRONTO · 11:05" pct={100} tone="violet" />
             </MStack>
           </Shot>
         ),
@@ -1222,8 +1222,8 @@ export const GUIDES: Record<string, ToolGuide> = {
         ),
       },
       {
-        title: 'Use os atalhos do topo',
-        text: 'Os dois atalhos levam pros painéis de operação: "Tarefas em segundo plano (ao vivo)" mostra o que está rodando agora, e "ZIPs de avatar (histórico de disparos)" abre o Histórico de avatares com os pacotes pra rebaixar.',
+        title: 'Limpe quando quiser',
+        text: 'O botão "Limpar histórico" zera a linha do tempo — só os registros, sem tocar em nenhum arquivo que você baixou. Como tudo fica no seu navegador, nada disso sobe pra servidor.',
       },
     ],
     tips: [

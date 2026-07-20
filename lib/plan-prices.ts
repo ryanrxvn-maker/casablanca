@@ -17,8 +17,10 @@ export const PRICE_AMOUNT: Record<PaidTier, Record<Billing, number>> = {
   pro: { monthly: 11600, annual: 110400 },
 };
 
+// Nome de EXIBIÇÃO no checkout do Stripe. O tier interno continua 'basic' —
+// preços, assinaturas ativas e webhooks intocados; só o rótulo virou Premium.
 export const PLAN_LABEL: Record<PaidTier, string> = {
-  basic: 'AutoEdit Basic',
+  basic: 'AutoEdit Premium',
   pro: 'AutoEdit Pro',
 };
 

@@ -27,7 +27,7 @@ function jsonError(message: string, status = 500, detail?: string) {
 
 export async function POST(req: Request) {
   try {
-    const gate = await requireTier('pro');
+    const gate = await requireTier('basic');
     if (!gate.ok) return gate.response;
     let form: FormData;
     try {

@@ -5,12 +5,12 @@
  *
  * Uma cena noturna de "estúdio rodando sozinho": piso em perspectiva que
  * esteira em direção ao viewer, aurora da marca, o coelho como núcleo de
- * energia e painéis de vidro flutuando em profundidades diferentes — fila do
- * Pilot, take de b-roll REAL (mp4 do produto), SRT alinhando e o ZIP caindo.
+ * energia e painéis de vidro flutuando em profundidades diferentes — fila de
+ * lipsync, take vertical REAL (mp4 do produto), SRT alinhando e o ZIP caindo.
  * Tudo reage ao mouse via <Parallax> (CSS vars --px/--py), sem WebGL.
  *
- * Honestidade: os painéis são HUD ilustrativo do produto real; ferramentas
- * Pro carregam a tag "PRO" (lançamento em breve — detalhado nas seções).
+ * Honestidade: os painéis são HUD ilustrativo do produto real — nada de
+ * ferramenta interna (admin-only) aparece aqui.
  */
 
 import Link from 'next/link';
@@ -165,7 +165,7 @@ export function HeroScene() {
               <NightClock />
             </div>
 
-            {/* Painel: fila do Pilot */}
+            {/* Painel: fila de lipsync */}
             <div
               className="absolute -right-2 top-[13%] hidden sm:block md:right-0"
               style={depth(-30, -20, -5)}
@@ -175,7 +175,7 @@ export function HeroScene() {
               </div>
             </div>
 
-            {/* Painel: take de b-roll real */}
+            {/* Painel: take vertical real (mp4 do produto) */}
             <div
               className="absolute left-0 top-[24%] md:left-2"
               style={depth(-18, -12, 6)}
@@ -214,7 +214,8 @@ export function HeroScene() {
               'Decupagem automática',
               'Legenda alinhada à copy',
               'Fila 24/7 no navegador',
-              '3 ZIPs por disparo',
+              'Lipsync Video to Video',
+              'Decupagem Inteligente',
               'Compressão em lote',
               'Camuflagem',
               'Downloader',
@@ -472,7 +473,7 @@ function NightClock() {
   );
 }
 
-/* ────────────────────── Painel: fila do Pilot ────────────────────── */
+/* ────────────────────── Painel: fila de lipsync ────────────────────── */
 
 function QueuePanel() {
   const rows = [
@@ -497,13 +498,7 @@ function QueuePanel() {
           className="ml-1.5 text-[9px] font-bold uppercase tracking-[0.18em] text-lime"
           style={{ fontFamily: 'var(--font-tech)' }}
         >
-          Pilot · em execução
-        </span>
-        <span
-          className="ml-auto rounded-full border border-violet/45 bg-violet/15 px-1.5 py-px text-[7.5px] font-bold uppercase tracking-[0.14em] text-violet"
-          style={{ fontFamily: 'var(--font-tech)' }}
-        >
-          PRO
+          Fila · em execução
         </span>
       </div>
 
@@ -585,7 +580,7 @@ function QueuePanel() {
   );
 }
 
-/* ────────────────────── Painel: b-roll real (9:16) ────────────────────── */
+/* ────────────────────── Painel: take vertical real (9:16) ────────────────────── */
 
 function BrollPanel() {
   return (

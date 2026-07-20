@@ -42,7 +42,7 @@ export default function PoliticaPage() {
 
         <div className="flex flex-col gap-8 text-[15px] leading-relaxed text-text-muted">
           <Section title="1. Como funciona a cobrança">
-            Os planos pagos (Basic e Pro) são cobrados no cartão de crédito.
+            O plano pago (Premium) é cobrado no cartão de crédito.
             Você escolhe o ciclo, e cada um funciona de um jeito:
             <ul className="mt-3 list-disc pl-5">
               <li>

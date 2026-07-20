@@ -150,13 +150,16 @@ export default function ConfiguracoesPage() {
   //  - sem href → seção INLINE nesta página (âncora, rola suave)
   // Sessão (logout) sai da lista de propósito — o card continua no fim
   // da página, mas não polui o índice de navegação.
+  // Magnific (Auto B-roll) e ClickUp (Pilot) são de uso interno — só admin vê.
   const sections: Array<{ id: string; label: string; href?: string }> = [
     { id: 'assinatura', label: 'Assinatura', href: '/configuracoes/assinatura' },
     { id: 'apis', label: 'Chaves IA', href: '/configuracoes/api' },
-    { id: 'magnific', label: 'Magnific', href: '/configuracoes/magnific' },
+    ...(isAdmin
+      ? [{ id: 'magnific', label: 'Magnific', href: '/configuracoes/magnific' }]
+      : []),
     { id: 'email', label: 'Email' },
     { id: 'senha', label: 'Senha' },
-    { id: 'clickup', label: 'ClickUp' },
+    ...(isAdmin ? [{ id: 'clickup', label: 'ClickUp' }] : []),
     { id: 'zona-perigo', label: 'Zona de perigo' },
   ];
 
@@ -337,33 +340,35 @@ export default function ConfiguracoesPage() {
               </a>
             </section>
 
-            {/* Magnific */}
-            <section id="magnific" className="fade-in-up" style={{ animationDelay: '60ms' }}>
-              <a
-                href="/configuracoes/magnific"
-                className="card-tool block p-5 md:p-6"
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <div className="mb-1 flex items-center gap-2">
-                      <span className="pill-lime text-[9px]">B-ROLL v2</span>
+            {/* Magnific (Auto B-roll) — ferramenta de uso interno; só admin vê */}
+            {isAdmin ? (
+              <section id="magnific" className="fade-in-up" style={{ animationDelay: '60ms' }}>
+                <a
+                  href="/configuracoes/magnific"
+                  className="card-tool block p-5 md:p-6"
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="mb-1 flex items-center gap-2">
+                        <span className="pill-lime text-[9px]">B-ROLL v2</span>
+                      </div>
+                      <div
+                        className="text-[17px] font-bold tracking-tight text-white"
+                        style={{ fontFamily: 'var(--font-tech)' }}
+                      >
+                        Magnific (Freepik)
+                      </div>
+                      <div className="mt-1 text-[13px] text-text-muted">
+                        Conecte sua sessão Magnific.com pra disparar B-rolls direto daqui.
+                      </div>
                     </div>
-                    <div
-                      className="text-[17px] font-bold tracking-tight text-white"
-                      style={{ fontFamily: 'var(--font-tech)' }}
-                    >
-                      Magnific (Freepik)
-                    </div>
-                    <div className="mt-1 text-[13px] text-text-muted">
-                      Conecte sua sessão Magnific.com pra disparar B-rolls direto daqui.
-                    </div>
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full border border-line-strong text-text-dim transition group-hover:border-lime group-hover:text-lime">
+                      →
+                    </span>
                   </div>
-                  <span className="flex h-9 w-9 items-center justify-center rounded-full border border-line-strong text-text-dim transition group-hover:border-lime group-hover:text-lime">
-                    →
-                  </span>
-                </div>
-              </a>
-            </section>
+                </a>
+              </section>
+            ) : null}
 
             {/* Email */}
             <SectionCard id="email" label="Email" delay={80}>
@@ -460,10 +465,12 @@ export default function ConfiguracoesPage() {
               </div>
             </SectionCard>
 
-            {/* ClickUp Pilot */}
-            <section id="clickup" className="fade-in-up" style={{ animationDelay: '200ms' }}>
-              <ClickUpPilotStatusSection flash={flash} />
-            </section>
+            {/* ClickUp Pilot — ferramenta de uso interno; só admin vê */}
+            {isAdmin ? (
+              <section id="clickup" className="fade-in-up" style={{ animationDelay: '200ms' }}>
+                <ClickUpPilotStatusSection flash={flash} />
+              </section>
+            ) : null}
 
             {/* Zona perigo */}
             <section

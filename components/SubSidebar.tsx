@@ -31,7 +31,9 @@ type Item = {
   adminOnly?: boolean;
 };
 
-const BASE_ITEMS: Item[] = [
+// Lista ÚNICA — sem divisão Base × IA (tudo é ferramenta). As de uso
+// interno levam adminOnly e somem pra cliente.
+const TOOL_ITEMS: Item[] = [
   { href: '/tools/fakepass', label: 'FakePrint', icon: <IconFakePass size={20} />, hue: 'rgba(167,139,250,0.4)' },
   { href: '/tools/decupagem', label: 'Decupagem', icon: <IconDecupagem size={20} />, hue: 'rgba(163,230,53,0.4)' },
   { href: '/tools/camuflagem', label: 'Camuflagem', icon: <IconCamuflagem size={20} />, hue: 'rgba(45,212,191,0.4)' },
@@ -39,31 +41,27 @@ const BASE_ITEMS: Item[] = [
   { href: '/tools/compressor', label: 'Compressor', icon: <IconCompressor size={20} />, hue: 'rgba(129,140,248,0.4)' },
   { href: '/tools/audio-split', label: 'Dividir áudios', icon: <IconAudioSplit size={20} />, hue: 'rgba(34,211,238,0.4)' },
   { href: '/tools/acelerador', label: 'Mixer de Velocidade', icon: <IconAcelerador size={20} />, hue: 'rgba(251,191,36,0.4)' },
-  { href: '/tools/normalizador', label: 'Normalizador', icon: <IconNormalizador size={20} />, hue: 'rgba(94,234,212,0.4)', adminOnly: true },
-  { href: '/tools/separador-audio', label: 'Separador de Áudio', icon: <IconSeparadorAudio size={20} />, hue: 'rgba(167,139,250,0.45)', adminOnly: true },
-];
-
-const AI_ITEMS: Item[] = [
   { href: '/tools/lipsync', label: 'Lipsync Video to Video', icon: <IconLipsync size={20} />, hue: 'rgba(232,121,249,0.45)' },
-  { href: '/tools/auto-broll', label: 'Auto B-roll', icon: <IconAutoBroll size={20} />, hue: 'rgba(240,171,252,0.45)' },
-  { href: '/tools/remover-elementos', label: 'Remover Legenda', icon: <IconRemoverElementos size={20} />, hue: 'rgba(244,114,182,0.45)', adminOnly: true },
   { href: '/tools/decupagem-copy', label: 'Decupagem Inteligente', icon: <IconDecupageCopy size={20} />, hue: 'rgba(232,121,249,0.45)' },
   { href: '/tools/copy-srt', label: 'Gerador de SRT', icon: <IconCopySRT size={20} />, hue: 'rgba(196,181,253,0.45)' },
-  { href: '/tools/heygen-auto', label: 'Hey Auto', icon: <IconHeyGenAuto size={20} />, hue: 'rgba(103,232,249,0.45)' },
+  { href: '/tools/normalizador', label: 'Normalizador', icon: <IconNormalizador size={20} />, hue: 'rgba(94,234,212,0.4)', adminOnly: true },
+  { href: '/tools/separador-audio', label: 'Separador de Áudio', icon: <IconSeparadorAudio size={20} />, hue: 'rgba(167,139,250,0.45)', adminOnly: true },
+  { href: '/tools/remover-elementos', label: 'Remover Legenda', icon: <IconRemoverElementos size={20} />, hue: 'rgba(244,114,182,0.45)', adminOnly: true },
+  { href: '/tools/auto-broll', label: 'Auto B-roll', icon: <IconAutoBroll size={20} />, hue: 'rgba(240,171,252,0.45)', adminOnly: true },
+  { href: '/tools/heygen-auto', label: 'Hey Auto', icon: <IconHeyGenAuto size={20} />, hue: 'rgba(103,232,249,0.45)', adminOnly: true },
 ];
 
-const BASE_PATHS = BASE_ITEMS.map((i) => i.href);
-const AI_PATHS = AI_ITEMS.map((i) => i.href);
+const TOOL_PATHS = TOOL_ITEMS.map((i) => i.href);
 
 /**
- * SubSidebar — coluna lateral 240px com a lista de ferramentas
- * da categoria atual (Base ou IA). Aparece SÓ quando o pathname
- * pertence a uma das suites.
+ * SubSidebar — coluna lateral 240px com a lista ÚNICA de ferramentas
+ * (sem divisão Base × IA). Aparece SÓ quando o pathname pertence a
+ * uma ferramenta da suíte.
  *
  * Estrutura:
  *   ┌──────────────────────┐
- *   │ TRABALHO RÁPIDO      │ ← eyebrow
- *   │ 9 ferramentas        │ ← contador
+ *   │ FERRAMENTAS          │ ← eyebrow
+ *   │ 10 ferramentas       │ ← contador
  *   ├──────────────────────┤
  *   │ [ic] Decupagem       │ ← lista vertical
  *   │ [ic] Camuflagem ←    │
@@ -96,21 +94,14 @@ export function SubSidebar() {
     };
   }, []);
 
-  const inBase = BASE_PATHS.some(
-    (p) => pathname === p || pathname.startsWith(p + '/'),
-  );
-  const inAi = AI_PATHS.some(
+  const inTools = TOOL_PATHS.some(
     (p) => pathname === p || pathname.startsWith(p + '/'),
   );
 
-  if (!inBase && !inAi) return null;
+  if (!inTools) return null;
 
-  const items = (inBase ? BASE_ITEMS : AI_ITEMS).filter(
-    (it) => !it.adminOnly || isAdmin,
-  );
-  const meta = inBase
-    ? { eyebrow: 'TRABALHO RÁPIDO', dot: '#c2cf86' }
-    : { eyebrow: 'INTELIGÊNCIA', dot: '#a78bfa' };
+  const items = TOOL_ITEMS.filter((it) => !it.adminOnly || isAdmin);
+  const meta = { eyebrow: 'FERRAMENTAS', dot: '#a78bfa' };
 
   return (
     <aside
@@ -252,11 +243,7 @@ export function SubSidebar() {
  */
 export function useSubSidebarActive() {
   const pathname = usePathname();
-  const inBase = BASE_PATHS.some(
+  return TOOL_PATHS.some(
     (p) => pathname === p || pathname.startsWith(p + '/'),
   );
-  const inAi = AI_PATHS.some(
-    (p) => pathname === p || pathname.startsWith(p + '/'),
-  );
-  return inBase || inAi;
 }

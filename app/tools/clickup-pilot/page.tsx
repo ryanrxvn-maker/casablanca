@@ -780,7 +780,7 @@ function ClickUpPilotLocked({ tier }: { tier: 'free' | 'basic' | 'pro' | 'admin'
 
 export default function ClickUpPilotPage() {
   return (
-    <TierGate require="pro" toolName="ClickUp Pilot">
+    <TierGate require="admin" toolName="ClickUp Pilot">
       <ClickUpPilotInner />
     </TierGate>
   );

@@ -110,7 +110,7 @@ function jsonError(message: string, status = 500, detail?: string) {
 
 export async function POST(req: Request) {
   try {
-    const gate = await requireTier('pro');
+    const gate = await requireTier('admin');
     if (!gate.ok) return gate.response;
     const keyResult = await getUserKey('anthropic');
     if ('response' in keyResult) return keyResult.response;

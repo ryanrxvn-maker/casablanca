@@ -58,7 +58,7 @@ export default function OpengraphImage() {
             maxWidth: 940,
           }}
         >
-          Decupagem, B-roll, lipsync e legendas — ligue a fila e vá dormir.
+          Decupagem, lipsync e legendas — ligue a fila e vá dormir.
         </div>
         <div
           style={{

@@ -90,140 +90,12 @@ export const PILLARS: Pillar[] = [
       },
       {
         q: 'A decupagem automática é gratuita?',
-        a: 'Você pode começar no plano grátis do Auto Edit, sem cartão. O plano Basic (R$ 57/mês) libera mais volume e ferramentas; o Pro, com as automações completas, abre em breve.',
+        a: 'Você pode começar no plano grátis do Auto Edit, sem cartão. O plano Premium (R$ 57/mês) libera todas as ferramentas e mais volume.',
       },
     ],
     related: [
       { slug: 'gerar-legenda-automatica', label: 'Gerar legenda automática' },
-      { slug: 'b-roll-automatico', label: 'Gerar B-roll automático' },
-    ],
-  },
-  {
-    slug: 'lipsync-em-lote',
-    keyword: 'lipsync em lote',
-    title: 'Lipsync em lote: vários avatares de uma vez (estilo HeyGen)',
-    description:
-      'Faça lipsync em lote e dispare todos os avatares de uma vez. Mande a fila à noite e acorde com os vídeos prontos. Escale UGC sem clicar um por um.',
-    kicker: 'Lipsync',
-    h1: 'Lipsync em lote',
-    intro: [
-      'Lipsync em lote é gerar vários vídeos de avatar falante de uma vez, em vez de um por um. Você prepara os áudios e os avatares, liga a fila e o Auto Edit dispara todos juntos — manda à noite e acorda com os vídeos prontos.',
-      'É a forma mais rápida de escalar produção de UGC e avatares falantes sem ficar clicando vídeo por vídeo dentro de uma ferramenta como o HeyGen.',
-    ],
-    blocks: [
-      {
-        h2: 'O que é lipsync em lote?',
-        body: [
-          'Lipsync é a sincronização da boca do avatar com um áudio. Fazer "em lote" significa rodar essa sincronização pra muitos avatares e áudios ao mesmo tempo, numa fila única, sem repetir o processo manualmente pra cada um.',
-          'Você define os pares de avatar + áudio, liga a fila e o estúdio entrega todos os vídeos.',
-        ],
-      },
-      {
-        h2: 'Por que fazer lipsync em lote em vez de um por um?',
-        body: [
-          'Quem produz UGC em escala precisa de dezenas de variações por dia. Fazer cada vídeo na mão, esperando renderizar antes de começar o próximo, trava a operação. O lote resolve isso processando tudo em sequência enquanto você faz outra coisa.',
-        ],
-        list: [
-          'Dispara todos os avatares de uma vez',
-          'Manda a fila à noite, acorda com tudo pronto',
-          'Escala variações de UGC sem operador no monitor',
-          'Menos clique manual, mais vídeo por dia',
-        ],
-      },
-      {
-        h2: 'Lipsync em lote para agências de UGC',
-        body: [
-          'Pra agência, o gargalo não é gravar — é montar a variação de cada criativo. Com o lipsync em lote você transforma um avatar e vários áudios em uma fila de vídeos prontos, padronizando a entrega e liberando o time pro trabalho criativo.',
-        ],
-      },
-      {
-        h2: 'Precisa instalar algo para fazer lipsync em lote?',
-        body: [
-          'Só a extensão do Chrome que conecta a sua conta do HeyGen — instala em um minuto. O resto roda no navegador: você sobe os áudios, escolhe os avatares, liga a fila e baixa os vídeos prontos.',
-        ],
-      },
-    ],
-    faq: [
-      {
-        q: 'O lipsync em lote substitui o HeyGen?',
-        a: 'Ele resolve a parte que o fluxo manual de um avatar por vez não dá conta: rodar muitos avatares de uma só vez numa fila. O foco é escala e automação da produção em lote.',
-      },
-      {
-        q: 'Quantos avatares dá pra processar de uma vez?',
-        a: 'Você empilha vários avatares e áudios na mesma fila; a quantidade depende do seu plano e do volume contratado. O objetivo é justamente não ter que disparar um por um.',
-      },
-      {
-        q: 'Os vídeos ficam prontos para baixar?',
-        a: 'Sim. Quando a fila termina, os vídeos com lipsync ficam disponíveis pra download, prontos pra finalizar ou publicar.',
-      },
-    ],
-    related: [
-      { slug: 'b-roll-automatico', label: 'Gerar B-roll automático' },
-      { slug: 'automacao-de-ugc', label: 'Automação de UGC' },
-    ],
-  },
-  {
-    slug: 'b-roll-automatico',
-    keyword: 'B-roll automático',
-    title: 'B-roll automático: gere cortes de cobertura com IA em lote',
-    description:
-      'Gere B-roll automático com IA em lote: cola o JSON, liga a fila e volta com a pasta cheia de cortes congruentes. Sem garimpar banco de imagens. Comece grátis.',
-    kicker: 'B-roll',
-    h1: 'B-roll automático com IA',
-    intro: [
-      'B-roll automático é gerar os cortes de cobertura (as imagens que entram por cima da fala) sem garimpar banco de imagem na mão. No Auto Edit você cola o JSON com o roteiro, liga a fila e volta com a pasta cheia de B-roll congruente com o que está sendo dito.',
-      'Em vez de pausar a edição pra procurar cada clipe, o B-roll automático entrega o conjunto pronto, em lote, direto no navegador.',
-    ],
-    blocks: [
-      {
-        h2: 'Como gerar B-roll automático?',
-        body: [
-          'Você fornece o roteiro estruturado (o JSON) e o Auto Edit interpreta cada trecho pra trazer um corte de cobertura coerente com o contexto. A fila processa tudo e organiza o resultado numa pasta, pronto pra encaixar na timeline.',
-          'O foco é congruência: o B-roll precisa combinar com a fala, não ser imagem genérica.',
-        ],
-      },
-      {
-        h2: 'Por que automatizar o B-roll?',
-        body: [
-          'Procurar B-roll manualmente é um dos trabalhos mais lentos da edição. Você interrompe o ritmo, abre banco de imagem, baixa, testa, descarta. Automatizar isso devolve o tempo pro que realmente faz diferença no vídeo.',
-        ],
-        list: [
-          'Cola o JSON e liga a fila',
-          'Volta com a pasta cheia de cortes',
-          'B-roll congruente com a fala, não genérico',
-          'Processa o dia inteiro em lote',
-        ],
-      },
-      {
-        h2: 'B-roll automático em lote para volume',
-        body: [
-          'Como o resto do Auto Edit, o B-roll roda em fila. Dá pra preparar o material do dia inteiro de uma vez e deixar o estúdio entregar enquanto você cuida da decupagem, do lipsync ou da finalização.',
-        ],
-      },
-      {
-        h2: 'Precisa instalar algo?',
-        body: [
-          'Não. O B-roll automático roda no navegador, sem download. Você começa no plano grátis e libera mais volume no plano Basic (R$ 57/mês).',
-        ],
-      },
-    ],
-    faq: [
-      {
-        q: 'O B-roll automático combina com o que estou falando?',
-        a: 'Sim, esse é o ponto. A ferramenta lê o roteiro e busca cobertura congruente com cada trecho, em vez de devolver imagem genérica solta.',
-      },
-      {
-        q: 'Em que formato eu entrego o roteiro?',
-        a: 'Você cola um JSON estruturado com o roteiro. O Auto Edit interpreta cada trecho e gera o B-roll correspondente na fila.',
-      },
-      {
-        q: 'Dá pra gerar B-roll de vários vídeos de uma vez?',
-        a: 'Dá. O processamento é em lote: você prepara o material do dia e a fila entrega tudo, sem operar um por um.',
-      },
-    ],
-    related: [
-      { slug: 'lipsync-em-lote', label: 'Lipsync em lote' },
-      { slug: 'decupagem-automatica', label: 'Decupagem automática' },
+      { slug: 'automacao-de-edicao-de-video', label: 'Automação de edição de vídeo' },
     ],
   },
   {
@@ -231,11 +103,11 @@ export const PILLARS: Pillar[] = [
     keyword: 'automação de edição de vídeo',
     title: 'Automação de edição de vídeo: edite no automático e em lote',
     description:
-      'Automação de edição de vídeo: decupagem, B-roll, lipsync e legendas em lote, no navegador. Você liga a fila e o estúdio entrega. Comece grátis.',
+      'Automação de edição de vídeo: decupagem, lipsync e legendas em lote, no navegador. Você liga a fila e o estúdio entrega. Comece grátis.',
     kicker: 'Automação',
     h1: 'Automação de edição de vídeo',
     intro: [
-      'Automação de edição de vídeo é usar software pra fazer as tarefas repetitivas da edição — cortar silêncio, buscar B-roll, sincronizar avatar, gerar legenda — sem você executar cada passo na mão. Em vez de operar a timeline clipe por clipe, você liga uma fila e o resultado vem pronto.',
+      'Automação de edição de vídeo é usar software pra fazer as tarefas repetitivas da edição — cortar silêncio, sincronizar avatar, gerar legenda — sem você executar cada passo na mão. Em vez de operar a timeline clipe por clipe, você liga uma fila e o resultado vem pronto.',
       'O Auto Edit junta essas automações num só lugar, rodando em lote e no navegador: você empilha o trabalho do dia e o estúdio entrega enquanto você cuida do que é criativo.',
     ],
     blocks: [
@@ -246,8 +118,8 @@ export const PILLARS: Pillar[] = [
         ],
         list: [
           'Decupagem automática — remove silêncios e cortes mortos',
-          'B-roll automático — gera cobertura congruente a partir do roteiro',
-          'Lipsync em lote — dispara vários avatares de uma vez',
+          'Decupagem Inteligente — a IA escolhe o melhor take seguindo a copy',
+          'Lipsync Video to Video — o avatar falando exatamente a sua copy',
           'Compressão e ajuste de velocidade em lote',
           'Legendas automáticas alinhadas à copy',
         ],
@@ -268,14 +140,14 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Precisa instalar algo para automatizar a edição?',
         body: [
-          'Não. Toda a automação roda no navegador, sem download nem plugin. Você começa no plano grátis e libera mais volume no plano Basic (R$ 57/mês).',
+          'Não. Toda a automação roda no navegador, sem download nem plugin. Você começa no plano grátis e libera todas as ferramentas no plano Premium (R$ 57/mês).',
         ],
       },
     ],
     faq: [
       {
         q: 'A automação substitui o editor de vídeo?',
-        a: 'Não. Ela automatiza o trabalho repetitivo (decupagem, B-roll, legenda, lipsync) pra o editor focar na parte criativa e produzir muito mais por dia.',
+        a: 'Não. Ela automatiza o trabalho repetitivo (decupagem, legenda, lipsync) pra o editor focar na parte criativa e produzir muito mais por dia.',
       },
       {
         q: 'Automação de edição de vídeo funciona pra canais dark?',
@@ -296,18 +168,18 @@ export const PILLARS: Pillar[] = [
     keyword: 'editar vídeo mais rápido',
     title: 'Como editar vídeo mais rápido: automatize o trabalho repetitivo',
     description:
-      'O jeito de editar vídeo mais rápido é automatizar decupagem, B-roll e legendas e processar em lote. Menos timeline, mais entrega. Comece grátis.',
+      'O jeito de editar vídeo mais rápido é automatizar decupagem e legendas e processar em lote. Menos timeline, mais entrega. Comece grátis.',
     kicker: 'Velocidade',
     h1: 'Como editar vídeo mais rápido',
     intro: [
-      'A forma real de editar vídeo mais rápido não é apertar atalho na timeline — é tirar de você o trabalho repetitivo. Decupagem, busca de B-roll e legenda consomem a maior parte do tempo e não exigem criatividade. Quando essas etapas viram automáticas, o vídeo fica pronto em uma fração do tempo.',
+      'A forma real de editar vídeo mais rápido não é apertar atalho na timeline — é tirar de você o trabalho repetitivo. Decupagem e legenda consomem a maior parte do tempo e não exigem criatividade. Quando essas etapas viram automáticas, o vídeo fica pronto em uma fração do tempo.',
       'No Auto Edit você joga essas tarefas numa fila em lote e elas acontecem sozinhas, no navegador, enquanto você avança no resto.',
     ],
     blocks: [
       {
         h2: 'O que mais trava a velocidade da edição?',
         body: [
-          'Três tarefas dominam o tempo de uma edição de fala: cortar os silêncios, achar o B-roll certo e legendar. Juntas, elas costumam ser mais da metade do trabalho — e são justamente as mais mecânicas.',
+          'Duas tarefas dominam o tempo de uma edição de fala: cortar os silêncios e legendar. Juntas, elas costumam ser mais da metade do trabalho — e são justamente as mais mecânicas.',
         ],
       },
       {
@@ -317,9 +189,9 @@ export const PILLARS: Pillar[] = [
         ],
       },
       {
-        h2: 'B-roll e legenda no automático',
+        h2: 'Legenda no automático',
         body: [
-          'Em vez de pausar pra garimpar banco de imagem, o B-roll automático entrega a cobertura a partir do roteiro. E as legendas saem direto da fala. Duas etapas lentas resolvidas sem você no monitor.',
+          'Em vez de digitar e sincronizar linha por linha, a legenda sai direto da fala — e, se você tem a copy, o Gerador de SRT alinha o texto exato palavra por palavra. Uma etapa lenta resolvida sem você no monitor.',
         ],
       },
       {
@@ -332,11 +204,11 @@ export const PILLARS: Pillar[] = [
     faq: [
       {
         q: 'Qual a forma mais rápida de editar um vídeo de fala?',
-        a: 'Automatizar a decupagem (corte de silêncios), o B-roll e a legenda, e processar em lote. Essas três etapas são as mais lentas e as que mais ganham com automação.',
+        a: 'Automatizar a decupagem (corte de silêncios) e a legenda, e processar em lote. Essas etapas são as mais lentas e as que mais ganham com automação.',
       },
       {
         q: 'Editar mais rápido piora a qualidade?',
-        a: 'Não, porque a automação cuida do trabalho mecânico (cortar silêncio, achar cobertura, legendar). A parte criativa continua com você.',
+        a: 'Não, porque a automação cuida do trabalho mecânico (cortar silêncio, legendar). A parte criativa continua com você.',
       },
       {
         q: 'Funciona pra muitos vídeos por dia?',
@@ -382,7 +254,7 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Precisa instalar algo para legendar?',
         body: [
-          'Não. A legenda automática funciona 100% no navegador, sem download. Você começa no plano grátis e amplia o volume no plano Basic (R$ 57/mês).',
+          'Não. A legenda automática funciona 100% no navegador, sem download. Você começa no plano grátis e amplia o volume no plano Premium (R$ 57/mês).',
         ],
       },
     ],
@@ -410,11 +282,11 @@ export const PILLARS: Pillar[] = [
     keyword: 'editar vídeos para canais dark',
     title: 'Editar vídeos para canais dark no automático e em lote',
     description:
-      'Editar vídeos para canais dark em escala: decupagem, B-roll, lipsync e legendas no automático e em lote. Poste vários por dia sem travar. Comece grátis.',
+      'Editar vídeos para canais dark em escala: decupagem, lipsync e legendas no automático e em lote. Poste vários por dia sem travar. Comece grátis.',
     kicker: 'Canais dark',
     h1: 'Editar vídeos para canais dark',
     intro: [
-      'Editar vídeos para canais dark em escala é um problema de volume: pra monetizar, você precisa postar muito, e a edição manual não acompanha. A saída é automatizar as etapas repetitivas — decupagem, B-roll, lipsync e legenda — e processar tudo em lote.',
+      'Editar vídeos para canais dark em escala é um problema de volume: pra monetizar, você precisa postar muito, e a edição manual não acompanha. A saída é automatizar as etapas repetitivas — decupagem, lipsync e legenda — e processar tudo em lote.',
       'O Auto Edit foi feito pra esse ritmo: você empilha os vídeos do dia numa fila e o estúdio entrega, no navegador, sem você ficar na timeline.',
     ],
     blocks: [
@@ -431,8 +303,8 @@ export const PILLARS: Pillar[] = [
         ],
         list: [
           'Decupagem automática corta os silêncios da narração',
-          'B-roll automático cobre a fala a partir do roteiro',
-          'Lipsync em lote gera os avatares falando, se o canal usar avatar',
+          'Decupagem Inteligente escolhe o melhor take seguindo o roteiro',
+          'Lipsync Video to Video gera o avatar falando, se o canal usar avatar',
           'Legenda automática fecha o vídeo',
         ],
       },
@@ -445,14 +317,14 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Precisa instalar programa pesado?',
         body: [
-          'Não. Tudo roda no navegador, sem download nem máquina parruda. Você começa no plano grátis e libera mais volume no plano Basic (R$ 57/mês).',
+          'Não. Tudo roda no navegador, sem download nem máquina parruda. Você começa no plano grátis e libera todas as ferramentas no plano Premium (R$ 57/mês).',
         ],
       },
     ],
     faq: [
       {
         q: 'O Auto Edit serve para qualquer nicho de canal dark?',
-        a: 'Serve, porque automatiza etapas que todo canal de narração usa: corte de silêncio, cobertura de B-roll, legenda e, quando há avatar, o lipsync. O fluxo é o mesmo independentemente do tema.',
+        a: 'Serve, porque automatiza etapas que todo canal de narração usa: corte de silêncio, legenda e, quando há avatar, o lipsync. O fluxo é o mesmo independentemente do tema.',
       },
       {
         q: 'Consigo manter uma frequência alta de postagem?',
@@ -465,7 +337,7 @@ export const PILLARS: Pillar[] = [
     ],
     related: [
       { slug: 'automacao-de-edicao-de-video', label: 'Automação de edição de vídeo' },
-      { slug: 'b-roll-automatico', label: 'Gerar B-roll automático' },
+      { slug: 'decupagem-automatica', label: 'Decupagem automática' },
     ],
   },
   {
@@ -473,12 +345,12 @@ export const PILLARS: Pillar[] = [
     keyword: 'automação de UGC',
     title: 'Automação de UGC: produza criativos em lote sem regravar',
     description:
-      'Automação de UGC pra agências: lipsync em lote, decupagem e legendas pra multiplicar criativos em escala. Comece grátis no Auto Edit.',
+      'Automação de UGC pra agências: lipsync, decupagem e legendas pra multiplicar criativos em escala. Comece grátis no Auto Edit.',
     kicker: 'UGC',
     h1: 'Automação de UGC',
     intro: [
       'Automação de UGC é produzir e adaptar criativos de usuário (user-generated content) em escala, sem regravar e sem montar cada variação na mão. Pra agência, o gargalo nunca é gravar — é multiplicar o mesmo criativo em dezenas de versões.',
-      'O Auto Edit resolve isso com ferramentas em lote: lipsync de vários avatares de uma vez, decupagem automática e legenda alinhada pra cada variação.',
+      'O Auto Edit resolve isso com ferramentas em lote: lipsync de avatar, decupagem automática e legenda alinhada pra cada variação.',
     ],
     blocks: [
       {
@@ -487,7 +359,7 @@ export const PILLARS: Pillar[] = [
           'As tarefas que mais consomem tempo numa operação de UGC são justamente as repetitivas — e todas têm automação no Auto Edit:',
         ],
         list: [
-          'Lipsync em lote — dezenas de variações de avatar de uma vez',
+          'Lipsync Video to Video — o avatar falando cada variação da copy',
           'Decupagem automática pra limpar cada take sem editar na mão',
           'Legenda automática pra cada variação',
         ],
@@ -507,7 +379,7 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Dá para começar de graça?',
         body: [
-          'Dá. O Auto Edit tem plano grátis sem cartão. O plano Basic (R$ 57/mês) libera mais volume e ferramentas; o Pro, com as automações completas, abre em breve.',
+          'Dá. O Auto Edit tem plano grátis sem cartão. O plano Premium (R$ 57/mês) libera todas as ferramentas e mais volume.',
         ],
       },
     ],
@@ -518,7 +390,7 @@ export const PILLARS: Pillar[] = [
       },
       {
         q: 'Dá para adaptar um criativo para vários clientes?',
-        a: 'Sim. Com o lipsync em lote e a legenda automática, dá pra transformar o mesmo criativo aprovado em variações pra campanhas e marcas diferentes.',
+        a: 'Sim. Com o lipsync e a legenda automática, dá pra transformar o mesmo criativo aprovado em variações pra campanhas e marcas diferentes.',
       },
       {
         q: 'Funciona para volume de agência?',
@@ -526,7 +398,8 @@ export const PILLARS: Pillar[] = [
       },
     ],
     related: [
-      { slug: 'lipsync-em-lote', label: 'Lipsync em lote' },
+      { slug: 'automacao-de-edicao-de-video', label: 'Automação de edição de vídeo' },
+      { slug: 'decupagem-automatica', label: 'Decupagem automática' },
     ],
   },
   {
@@ -567,7 +440,7 @@ export const PILLARS: Pillar[] = [
       {
         h2: 'Precisa instalar algo para comprimir?',
         body: [
-          'Não. O compressor roda 100% no navegador, sem download. Você pode usar no plano grátis e ampliar o volume no plano Basic (R$ 57/mês).',
+          'Não. O compressor roda 100% no navegador, sem download. Você pode usar no plano grátis e ampliar o volume no plano Premium (R$ 57/mês).',
         ],
       },
     ],

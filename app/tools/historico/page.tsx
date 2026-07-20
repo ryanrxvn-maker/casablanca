@@ -93,6 +93,31 @@ export default function HistoricoPage() {
   const [tool, setTool] = useState<string>('all');
   const [query, setQuery] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Atalhos de fila/ZIPs de avatar apontam pra páginas de uso interno
+  // (Pilot/Hey Auto) — só admin vê.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { createClient } = await import('@/lib/supabase/client');
+        const supabase = createClient();
+        const { data: u } = await supabase.auth.getUser();
+        const uid = u.user?.id;
+        if (!uid) return;
+        const { data } = await supabase
+          .from('profiles')
+          .select('is_admin')
+          .eq('id', uid)
+          .maybeSingle();
+        if (!cancelled) setIsAdmin(!!data?.is_admin);
+      } catch {}
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Carrega + atualiza ao vivo quando qualquer ferramenta registra evento.
   useEffect(() => {
@@ -156,27 +181,29 @@ export default function HistoricoPage() {
         }
       />
 
-      {/* Acessos rápidos que saíram da barra superior */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Link
-          href="/tools/background"
-          className="inline-flex items-center gap-2 rounded-full border border-line-strong bg-bg-soft/60 px-4 py-2 text-[12px] font-semibold text-text-muted transition-all hover:-translate-y-px hover:border-violet/45 hover:text-text"
-          style={{ fontFamily: 'var(--font-tech)' }}
-        >
-          <span
-            aria-hidden
-            className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-violet"
-          />
-          Tarefas em segundo plano (ao vivo)
-        </Link>
-        <Link
-          href="/tools/lipsync-history"
-          className="inline-flex items-center gap-2 rounded-full border border-line-strong bg-bg-soft/60 px-4 py-2 text-[12px] font-semibold text-text-muted transition-all hover:-translate-y-px hover:border-violet/45 hover:text-text"
-          style={{ fontFamily: 'var(--font-tech)' }}
-        >
-          ZIPs de avatar (histórico de disparos)
-        </Link>
-      </div>
+      {/* Acessos rápidos das filas internas — só admin (uso interno) */}
+      {isAdmin ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/tools/background"
+            className="inline-flex items-center gap-2 rounded-full border border-line-strong bg-bg-soft/60 px-4 py-2 text-[12px] font-semibold text-text-muted transition-all hover:-translate-y-px hover:border-violet/45 hover:text-text"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            <span
+              aria-hidden
+              className="inline-block h-1.5 w-1.5 animate-pulse-soft rounded-full bg-violet"
+            />
+            Tarefas em segundo plano (ao vivo)
+          </Link>
+          <Link
+            href="/tools/lipsync-history"
+            className="inline-flex items-center gap-2 rounded-full border border-line-strong bg-bg-soft/60 px-4 py-2 text-[12px] font-semibold text-text-muted transition-all hover:-translate-y-px hover:border-violet/45 hover:text-text"
+            style={{ fontFamily: 'var(--font-tech)' }}
+          >
+            ZIPs de avatar (histórico de disparos)
+          </Link>
+        </div>
+      ) : null}
 
       {/* Filtros */}
       <div

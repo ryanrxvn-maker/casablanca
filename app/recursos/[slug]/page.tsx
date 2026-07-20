@@ -221,7 +221,7 @@ export default function PillarPage({ params }: { params: { slug: string } }) {
           </h2>
           <p className="mx-auto mt-2 max-w-[460px] text-[14.5px] leading-relaxed text-text-muted">
             {p.keyword.charAt(0).toUpperCase() + p.keyword.slice(1)} e o resto do
-            fluxo — decupagem, B-roll, lipsync e legendas — no automático.
+            fluxo — decupagem, lipsync e legendas — no automático.
           </p>
           <div className="mt-6 flex flex-wrap justify-center gap-3">
             <Link href="/register" className="btn-primary">

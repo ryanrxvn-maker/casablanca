@@ -86,11 +86,10 @@ export default async function RemoverLegendaPage() {
               <div className="label-tech text-[10px] uppercase tracking-widest text-red-300">
                 Acesso restrito
               </div>
-              <h1 className="mt-1 text-2xl font-bold text-white">Esta ferramenta é do plano Pro</h1>
+              <h1 className="mt-1 text-2xl font-bold text-white">Ferramenta de uso interno</h1>
               <p className="mt-1 text-[13px] text-text-muted">
-                Você está logado, mas sua conta ainda não tem o{' '}
-                <span className="mono text-white">Pro</span>. Faça o upgrade pra
-                liberar o acesso na hora.
+                Você está logado, mas esta ferramenta é restrita à{' '}
+                <span className="mono text-white">administração</span> do estúdio.
               </p>
             </div>
 
@@ -102,7 +101,7 @@ export default async function RemoverLegendaPage() {
               <div className="grid grid-cols-[140px_1fr] gap-x-3 gap-y-1 mt-3">
                 <span className="text-text-muted">Email</span>
                 <span className="mono text-white">{d.email ?? '—'}</span>
-                <span className="text-text-muted">Plano Pro</span>
+                <span className="text-text-muted">Acesso liberado</span>
                 <span className={`mono ${d.isPro ? 'text-lime' : 'text-red-300'}`}>{d.isPro ? 'sim' : 'não'}</span>
                 <span className="text-text-muted">Conta ativa</span>
                 <span className={`mono ${d.isActive ? 'text-lime' : 'text-red-300'}`}>{d.isActive ? 'sim' : 'não'}</span>
@@ -114,7 +113,7 @@ export default async function RemoverLegendaPage() {
                 href="/planos"
                 className="label-tech rounded-lg border border-lime/60 px-4 py-2 text-[11px] uppercase tracking-widest text-lime hover:bg-lime/10"
               >
-                Fazer upgrade pra Pro →
+                Ver planos →
               </Link>
               <Link
                 href="/tools"

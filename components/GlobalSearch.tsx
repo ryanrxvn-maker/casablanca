@@ -36,6 +36,7 @@ import {
   IconDownloader,
   IconFakePass,
   IconHeyGenAuto,
+  IconLipsync,
   IconNormalizador,
   IconRemoverElementos,
   IconSeparadorAudio,
@@ -69,32 +70,32 @@ const ENTRIES: Entry[] = [
   { id: 'audio-split', group: 'Ferramentas', label: 'Dividir áudios', hint: 'Divide pelo silêncio', href: '/tools/audio-split', icon: <IconAudioSplit size={20} />, keywords: ['split', 'dividir', 'separar'] },
   { id: 'acelerador', group: 'Ferramentas', label: 'Mixer de Velocidade', hint: 'Acelera/desacelera sem ficar robótico', href: '/tools/acelerador', icon: <IconAcelerador size={20} />, keywords: ['velocidade', 'speed', 'rápido', 'lento'] },
   { id: 'normalizador', group: 'Ferramentas', label: 'Normalizador', hint: 'Iguala volume de vários arquivos', href: '/tools/normalizador', icon: <IconNormalizador size={20} />, keywords: ['volume', 'loudness', 'lufs', 'normalizar'], adminOnly: true },
-  { id: 'separador-audio', group: 'IA', label: 'Separador de Áudio', hint: 'Separa voz, instrumental e SFX', href: '/tools/separador-audio', icon: <IconSeparadorAudio size={20} />, keywords: ['stem', 'spleeter', 'demucs', 'voz', 'instrumental', 'sfx', 'karaoke'], adminOnly: true },
+  { id: 'separador-audio', group: 'Ferramentas', label: 'Separador de Áudio', hint: 'Separa voz, instrumental e SFX', href: '/tools/separador-audio', icon: <IconSeparadorAudio size={20} />, keywords: ['stem', 'spleeter', 'demucs', 'voz', 'instrumental', 'sfx', 'karaoke'], adminOnly: true },
   { id: 'calculadora', group: 'Ferramentas', label: 'Calculadora', hint: 'Cálculo de preço por minuto', href: '/tools/calculadora', icon: <IconCalculadora size={20} />, keywords: ['valor', 'preço', 'orçamento'] },
 
-  // IA
-  { id: 'auto-broll', group: 'IA', label: 'Auto B-roll', hint: 'Gera B-rolls em massa pelo JSON', href: '/tools/auto-broll', icon: <IconAutoBroll size={20} />, keywords: ['broll', 'b-roll', 'magnific'] },
-  { id: 'remover', group: 'IA', label: 'Remover Legenda/Marca d’Água', hint: 'Remove legenda e marca d’água', href: '/tools/remover-elementos', icon: <IconRemoverElementos size={20} />, keywords: ['smart remover', 'watermark', 'marca', 'logo', 'inpaint'], adminOnly: true },
-  { id: 'decupagem-copy', group: 'IA', label: 'Decupagem Inteligente', hint: 'Decupa seguindo sua copy', href: '/tools/decupagem-copy', icon: <IconDecupageCopy size={20} />, keywords: ['smart decup', 'script', 'roteiro'] },
-  { id: 'copy-srt', group: 'IA', label: 'Gerador de SRT', hint: 'Legendas no tempo do seu áudio', href: '/tools/copy-srt', icon: <IconCopySRT size={20} />, keywords: ['srt generator', 'legenda', 'subtitle'] },
-  { id: 'heygen-auto', group: 'IA', label: 'Hey Auto', hint: 'Lipsync automático em lote', href: '/tools/heygen-auto', icon: <IconHeyGenAuto size={20} />, keywords: ['avatar', 'lipsync', 'falar'] },
+  { id: 'lipsync', group: 'Ferramentas', label: 'Lipsync Video to Video', hint: 'O rosto do seu vídeo falando qualquer áudio novo', href: '/tools/lipsync', icon: <IconLipsync size={20} />, keywords: ['lipsync', 'avatar', 'boca', 'sincronizar', 'video to video'] },
+  { id: 'auto-broll', group: 'Ferramentas', label: 'Auto B-roll', hint: 'Gera B-rolls em massa pelo JSON', href: '/tools/auto-broll', icon: <IconAutoBroll size={20} />, keywords: ['broll', 'b-roll', 'magnific'], adminOnly: true },
+  { id: 'remover', group: 'Ferramentas', label: 'Remover Legenda/Marca d’Água', hint: 'Remove legenda e marca d’água', href: '/tools/remover-elementos', icon: <IconRemoverElementos size={20} />, keywords: ['smart remover', 'watermark', 'marca', 'logo', 'inpaint'], adminOnly: true },
+  { id: 'decupagem-copy', group: 'Ferramentas', label: 'Decupagem Inteligente', hint: 'Decupa seguindo sua copy', href: '/tools/decupagem-copy', icon: <IconDecupageCopy size={20} />, keywords: ['smart decup', 'script', 'roteiro'] },
+  { id: 'copy-srt', group: 'Ferramentas', label: 'Gerador de SRT', hint: 'Legendas no tempo do seu áudio', href: '/tools/copy-srt', icon: <IconCopySRT size={20} />, keywords: ['srt generator', 'legenda', 'subtitle'] },
+  { id: 'heygen-auto', group: 'Ferramentas', label: 'Hey Auto', hint: 'Lipsync automático em lote', href: '/tools/heygen-auto', icon: <IconHeyGenAuto size={20} />, keywords: ['avatar', 'lipsync', 'falar'], adminOnly: true },
 
   // Atalhos
   { id: 'home', group: 'Atalhos', label: 'Início', hint: 'Hub principal', href: '/tools', icon: <IconSearch size={20} />, keywords: ['hub', 'home'] },
   // pilot-tool é renderizado como destaque (FEATURED) — não duplicar nos atalhos.
   // Mantemos o id e as keywords aqui pra o scoring funcionar igual ao resto da app.
-  { id: 'pilot-tool', group: 'Atalhos', label: 'ClickUp Pilot', hint: 'Disparar automação agora', href: '/tools/clickup-pilot', icon: <IconClickUpPilot size={20} />, keywords: ['automatizar', 'rodar', 'automação', 'clickup', 'avatar', 'briefing', 'pilot'] },
-  { id: 'background', group: 'Atalhos', label: 'Tarefas em segundo plano', hint: 'Acompanha jobs rodando', href: '/tools/background', icon: <IconStepGear size={20} />, keywords: ['bg', 'fila', 'job', 'running'] },
+  { id: 'pilot-tool', group: 'Atalhos', label: 'ClickUp Pilot', hint: 'Disparar automação agora', href: '/tools/clickup-pilot', icon: <IconClickUpPilot size={20} />, keywords: ['automatizar', 'rodar', 'automação', 'clickup', 'avatar', 'briefing', 'pilot'], adminOnly: true },
+  { id: 'background', group: 'Atalhos', label: 'Tarefas em segundo plano', hint: 'Acompanha jobs rodando', href: '/tools/background', icon: <IconStepGear size={20} />, keywords: ['bg', 'fila', 'job', 'running'], adminOnly: true },
   { id: 'historico-geral', group: 'Atalhos', label: 'Histórico geral', hint: 'Tudo que você produziu nos últimos 7 dias', href: '/tools/historico', icon: <IconStepGear size={20} />, keywords: ['historico', 'histórico', 'history', 'registro', 'atividade', 'log', 'trabalho'] },
-  { id: 'history', group: 'Atalhos', label: 'Histórico de avatares', hint: 'Lipsyncs anteriores', href: '/tools/lipsync-history', icon: <IconHeyGenAuto size={20} />, keywords: ['history', 'lipsync', 'avatar'] },
+  { id: 'history', group: 'Atalhos', label: 'Histórico de avatares', hint: 'Lipsyncs anteriores', href: '/tools/lipsync-history', icon: <IconHeyGenAuto size={20} />, keywords: ['history', 'lipsync', 'avatar'], adminOnly: true },
 
   // Configurações
   { id: 'config', group: 'Configurações', label: 'Configurações', hint: 'Preferências da conta', href: '/configuracoes', icon: <IconStepGear size={20} />, keywords: ['settings', 'preferências'] },
   { id: 'config-api', group: 'Configurações', label: 'Chaves de IA', hint: 'Suas chaves de integração', href: '/configuracoes/api', icon: <IconStepGear size={20} />, keywords: ['groq', 'openai', 'eleven', 'anthropic', 'api', 'key'] },
-  { id: 'config-pilot', group: 'Configurações', label: 'ClickUp Pilot · ajustes', hint: 'Tokens e workspace', href: '/configuracoes/clickup-pilot', icon: <IconStepGear size={20} />, keywords: ['clickup', 'token'] },
+  { id: 'config-pilot', group: 'Configurações', label: 'ClickUp Pilot · ajustes', hint: 'Tokens e workspace', href: '/configuracoes/clickup-pilot', icon: <IconStepGear size={20} />, keywords: ['clickup', 'token'], adminOnly: true },
 
   // Conta
-  { id: 'plans', group: 'Conta', label: 'Ver planos', hint: 'Free · Basic · Pro · Admin', href: '/planos?upgrade=1', icon: <IconStepGear size={20} />, keywords: ['plan', 'upgrade', 'pro', 'basic'] },
+  { id: 'plans', group: 'Conta', label: 'Ver planos', hint: 'Free · Premium', href: '/planos?upgrade=1', icon: <IconStepGear size={20} />, keywords: ['plan', 'upgrade', 'premium', 'assinatura'] },
 ];
 
 /**
@@ -514,16 +515,17 @@ function SearchModal({ onClose }: { onClose: () => void }) {
     [isAdmin],
   );
 
-  // Destaques sempre no topo. Sem query → todos. Com query → só os
-  // que batem (consistência com o resto da lista; evita ruído visual
-  // quando o usuário busca algo específico tipo "compressor").
+  // Destaques (automações internas) — SÓ pra admin. Cliente não vê os
+  // cards nem acha por busca (as entries correspondentes são adminOnly).
+  // Sem query → todos. Com query → só os que batem.
   const featuredVisible = useMemo(() => {
+    if (!isAdmin) return [];
     if (!q.trim()) return FEATURED;
     return FEATURED.filter((f) => {
       const e = ENTRIES.find((x) => x.id === f.id);
       return e ? score(q, e) > 0 : false;
     });
-  }, [q]);
+  }, [q, isAdmin]);
 
   // Resultados regulares — exclui IDs que já estão nos destaques
   // pra não duplicar entre os cards 3D e a lista de baixo.

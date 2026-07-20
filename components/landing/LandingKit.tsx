@@ -271,6 +271,44 @@ export function Marquee({ children, speed = 26, reverse = false, className = '' 
   );
 }
 
+/* ─────────────────── SectionKicker (cabeçalho numerado) ─────────────────── */
+
+type SectionKickerProps = {
+  index: string;
+  label: string;
+  accent?: string;
+  right?: ReactNode;
+  invert?: boolean;
+};
+
+/** Cabeçalho numerado de seção — "001 ─ LABEL". */
+export function SectionKicker({
+  index,
+  label,
+  accent = 'rgb(var(--violet))',
+  right,
+  invert = false,
+}: SectionKickerProps) {
+  return (
+    <div
+      className={
+        'flex items-baseline gap-3 text-white/35 ' + (invert ? 'flex-row-reverse' : '')
+      }
+      style={{ fontFamily: 'var(--font-mono)' }}
+    >
+      <span className="num text-[10.5px] tracking-[0.32em]">{index}</span>
+      <span className="h-px w-10 self-center bg-white/25" />
+      <span
+        className="text-[10.5px] uppercase tracking-[0.28em]"
+        style={{ fontFamily: 'var(--font-tech)', color: accent }}
+      >
+        {label}
+      </span>
+      {right}
+    </div>
+  );
+}
+
 /* ────────────────────────── CountUp ────────────────────────── */
 
 type CountUpProps = {

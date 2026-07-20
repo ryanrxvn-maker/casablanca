@@ -84,7 +84,7 @@ type AuditReport = {
 
 export default function DecupagemCopyPage() {
   return (
-    <TierGate require="pro" toolName="Decupagem Inteligente">
+    <TierGate require="basic" toolName="Decupagem Inteligente">
       <DecupagemCopyInner />
     </TierGate>
   );

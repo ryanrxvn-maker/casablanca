@@ -112,7 +112,7 @@ async function download(
 }
 
 export async function POST(req: Request) {
-  const guard = await requireToolAccess('/tools/lipsync', 'pro');
+  const guard = await requireToolAccess('/tools/lipsync', 'basic');
   if (!guard.ok) return guard.response;
 
   if (!hasAccounts()) {

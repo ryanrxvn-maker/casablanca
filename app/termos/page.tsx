@@ -64,7 +64,7 @@ export default function TermosPage() {
           </S>
 
           <S title="4. Planos, pagamento e acesso">
-            Os recursos pagos (Basic e Pro) exigem assinatura ativa. O acesso é
+            Os recursos pagos (plano Premium) exigem assinatura ativa. O acesso é
             liberado apenas mediante pagamento confirmado ou concessão expressa do
             administrador. Tentar burlar o controle de acesso é proibido e resulta
             em suspensão imediata. Detalhes de cobrança, renovação e reembolso na{' '}

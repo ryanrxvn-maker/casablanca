@@ -4,13 +4,14 @@ import { createClient } from '@/lib/supabase/server';
 import LipSyncTool from '@/components/tools/LipSyncTool';
 
 /**
- * /tools/lipsync — Ferramenta Pro (Lipsync Video to Video).
+ * /tools/lipsync — Ferramenta Premium (Lipsync Video to Video).
  *
- * Liberada pra Pro + Admin (profiles.tier = 'pro'/'beta' OU is_admin).
- * O bloqueio real é em camadas: middleware (PRO_ONLY_TOOLS) +
- * requireToolAccess('/tools/lipsync','pro') nas rotas /api/tools/lipsync/*.
- * Esta checagem é defesa extra; em vez de redirect silencioso pra /tools,
- * mostra diagnostico explicito (login expirado, tier insuficiente, inativa).
+ * Liberada pra Premium + Pro legado + Admin (profiles.tier =
+ * 'basic'/'pro'/'beta' OU is_admin). O bloqueio real é em camadas:
+ * middleware (PREMIUM_ONLY_TOOLS) + requireToolAccess('/tools/lipsync',
+ * 'basic') nas rotas /api/tools/lipsync/*. Esta checagem é defesa extra;
+ * em vez de redirect silencioso pra /tools, mostra diagnostico explicito
+ * (login expirado, tier insuficiente, inativa).
  */
 
 export const dynamic = 'force-dynamic';
@@ -57,9 +58,11 @@ async function checkAccess(): Promise<{ ok: true } | { ok: false; diag: Diag }> 
   const isAdmin = Boolean(profile?.is_admin);
   const isActive = Boolean(profile?.is_active);
   const rawTier = (profile as { tier?: string | null } | null)?.tier ?? '';
-  const isPro = rawTier === 'pro' || rawTier === 'beta';
+  // Premium (tier interno 'basic') + Pro legado + beta contam como liberados.
+  const isPro =
+    rawTier === 'pro' || rawTier === 'beta' || rawTier === 'basic';
 
-  // Liberado pra Pro + Admin (conta ativa).
+  // Liberado pra Premium + Admin (conta ativa).
   if ((isAdmin || isPro) && isActive) {
     return { ok: true };
   }
@@ -98,12 +101,12 @@ export default async function LipSyncPage() {
                 Acesso restrito
               </div>
               <h1 className="mt-1 text-2xl font-bold text-white">
-                Esta ferramenta é do plano Pro
+                Esta ferramenta é do plano Premium
               </h1>
               <p className="mt-1 text-[13px] text-text-muted">
                 Você está logado, mas sua conta ainda não tem o{' '}
-                <span className="mono text-white">Pro</span>. Faça o upgrade pra
-                liberar o acesso na hora.
+                <span className="mono text-white">Premium</span>. Faça o upgrade
+                pra liberar o acesso na hora.
               </p>
             </div>
 
@@ -113,7 +116,7 @@ export default async function LipSyncPage() {
               </div>
               <p>
                 A ferramenta de criar avatar (lipsync) faz parte do plano{' '}
-                <span className="mono text-white">Pro</span>. Assine ou faça
+                <span className="mono text-white">Premium</span>. Assine ou faça
                 upgrade na página de planos pra liberar o acesso na hora.
               </p>
             </div>
@@ -130,7 +133,7 @@ export default async function LipSyncPage() {
                 <span className={`mono ${d.profileFound ? 'text-lime' : 'text-red-300'}`}>
                   {d.profileFound ? 'sim' : 'NÃO'}
                 </span>
-                <span className="text-text-muted">Plano Pro</span>
+                <span className="text-text-muted">Plano Premium</span>
                 <span className={`mono ${d.isPro ? 'text-lime' : 'text-red-300'}`}>
                   {d.isPro ? 'sim' : 'não'}
                 </span>

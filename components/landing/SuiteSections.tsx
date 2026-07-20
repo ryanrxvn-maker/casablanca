@@ -2,11 +2,11 @@
 
 /**
  * SuiteSections — vitrine da suíte (vídeos reais do produto), como funciona,
- * preços honestos (só o Basic vende hoje; Pro = em breve), FAQ (mesma fonte
+ * preços honestos (Free e Premium — só dois planos), FAQ (mesma fonte
  * do JSON-LD) e CTA final.
  *
- * Regra de ouro: cada card carrega o chip do PLANO REAL (Free / Basic /
- * Pro·em breve), espelhando lib/use-tier.ts. Nada admin-only aparece.
+ * Regra de ouro: cada card carrega o chip do PLANO REAL (Free / Premium),
+ * espelhando lib/use-tier.ts. Nada admin-only ou de uso interno aparece.
  */
 
 import Link from 'next/link';
@@ -22,19 +22,17 @@ import {
   IconDownloader,
   IconFakePass,
 } from '../ToolIcons';
-import { Magnetic, Reveal } from './LandingKit';
-import { ProSoonChip, SectionKicker } from './FlagshipSections';
+import { Magnetic, Reveal, SectionKicker } from './LandingKit';
 
 /* ────────────────────── chip de plano ────────────────────── */
 
-type PlanTag = 'free' | 'basic' | 'pro';
+type PlanTag = 'free' | 'premium';
 
 function PlanChip({ plan }: { plan: PlanTag }) {
-  if (plan === 'pro') return <ProSoonChip />;
   const cfg =
     plan === 'free'
       ? { label: 'Grátis', color: '#c9c9d2', border: 'rgba(201,201,210,0.35)', bg: 'rgba(201,201,210,0.08)' }
-      : { label: 'Basic', color: '#f472b6', border: 'rgba(244,114,182,0.4)', bg: 'rgba(244,114,182,0.08)' };
+      : { label: 'Premium', color: '#f472b6', border: 'rgba(244,114,182,0.4)', bg: 'rgba(244,114,182,0.08)' };
   return (
     <span
       className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.18em] backdrop-blur-md"
@@ -61,36 +59,28 @@ const VIDEO_TOOLS: Array<{
   hue: string;
 }> = [
   {
-    title: 'Gerador de SRT',
-    desc: 'Áudio + copy entram. A legenda sai alinhada palavra por palavra, pronta pro CapCut.',
-    video: '/cards/gerador-srt.mp4',
-    poster: '/cards/gerador-srt.jpg',
-    plan: 'basic',
-    hue: 'rgba(196,181,253,0.5)',
+    title: 'Lipsync Video to Video',
+    desc: 'O rosto do seu vídeo falando qualquer áudio novo, com a boca encaixada.',
+    video: '/cards/lipsync.mp4',
+    poster: '/cards/lipsync.jpg',
+    plan: 'premium',
+    hue: 'rgba(232,121,249,0.4)',
   },
   {
     title: 'Decupagem Inteligente',
     desc: 'A IA lê a copy e escolhe o melhor take de cada frase do seu bruto.',
     video: '/cards/decupagem-inteligente.mp4',
     poster: '/cards/decupagem-inteligente.jpg',
-    plan: 'pro',
+    plan: 'premium',
     hue: 'rgba(232,121,249,0.45)',
   },
   {
-    title: 'Hey Auto',
-    desc: 'Lipsync em lote na sua conta do HeyGen — a fila inteira num clique, sem abrir o HeyGen.',
-    video: '/cards/hey-auto.mp4',
-    poster: '/cards/hey-auto.jpg',
-    plan: 'pro',
-    hue: 'rgba(103,232,249,0.45)',
-  },
-  {
-    title: 'Lipsync Video to Video',
-    desc: 'O rosto do seu vídeo falando qualquer áudio novo, com a boca encaixada.',
-    video: '/cards/lipsync.mp4',
-    poster: '/cards/lipsync.jpg',
-    plan: 'pro',
-    hue: 'rgba(232,121,249,0.4)',
+    title: 'Gerador de SRT',
+    desc: 'Áudio + copy entram. A legenda sai alinhada palavra por palavra, pronta pro CapCut.',
+    video: '/cards/gerador-srt.mp4',
+    poster: '/cards/gerador-srt.jpg',
+    plan: 'premium',
+    hue: 'rgba(196,181,253,0.5)',
   },
 ];
 
@@ -126,14 +116,14 @@ const ICON_TOOLS: Array<{
     title: 'Mixer de Velocidade',
     desc: 'Acelera ou desacelera sem ficar robótico.',
     icon: <IconAcelerador size={26} />,
-    plan: 'basic',
+    plan: 'premium',
     hue: 'rgba(251,191,36,0.4)',
   },
   {
     title: 'Dividir Áudios',
     desc: 'Divide o áudio em pedaços pelas pausas, sem cortar falas.',
     icon: <IconAudioSplit size={26} />,
-    plan: 'basic',
+    plan: 'premium',
     hue: 'rgba(34,211,238,0.4)',
   },
   {
@@ -152,7 +142,7 @@ export function SuiteSection() {
         <div className="mb-12 flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
           <div className="max-w-[720px]">
             <div className="mb-4">
-              <SectionKicker index="003" label="A suíte completa" />
+              <SectionKicker index="001" label="A suíte completa" />
             </div>
             <h2 className="section-title text-[38px] md:text-[54px]" style={{ lineHeight: 1.02 }}>
               <SmokeText text="Uma ferramenta" className="block" />
@@ -166,14 +156,13 @@ export function SuiteSection() {
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2 pb-1">
             <PlanChip plan="free" />
-            <PlanChip plan="basic" />
-            <PlanChip plan="pro" />
+            <PlanChip plan="premium" />
           </div>
         </div>
       </Reveal>
 
       {/* linha 1 — cards de vídeo (hover dá play no produto real) */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {VIDEO_TOOLS.map((t, i) => (
           <Reveal key={t.title} delay={i * 90}>
             <VideoToolCard {...t} />
@@ -348,7 +337,7 @@ export function HowSection() {
   ];
   const checks = [
     'O processamento pesado de vídeo e áudio roda no seu navegador.',
-    'HeyGen e Magnific rodam no seu próprio login — suas contas, suas regras.',
+    'Seus arquivos ficam na sua máquina — nada de upload escondido.',
     'A fila continua em segundo plano e você acompanha tudo em tempo real.',
     'Sem taxa escondida, sem letra miúda. Cancela quando quiser.',
   ];
@@ -358,7 +347,7 @@ export function HowSection() {
       <Reveal>
         <div className="mb-12 max-w-[720px]">
           <div className="mb-4">
-            <SectionKicker index="004" label="Como funciona" accent="#7ed5e2" />
+            <SectionKicker index="002" label="Como funciona" accent="#7ed5e2" />
           </div>
           <h2 className="section-title text-[38px] md:text-[54px]" style={{ lineHeight: 1.02 }}>
             <SmokeText text="Liga a fila." className="block" />
@@ -442,7 +431,7 @@ export function PricingSection() {
       <Reveal>
         <div className="mb-12 max-w-[720px]">
           <div className="mb-4">
-            <SectionKicker index="005" label="Planos" accent="#f472b6" />
+            <SectionKicker index="003" label="Planos" accent="#f472b6" />
           </div>
           <h2 className="section-title text-[38px] md:text-[54px]" style={{ lineHeight: 1.02 }}>
             <SmokeText text="Comece grátis." className="block" />
@@ -453,7 +442,7 @@ export function PricingSection() {
         </div>
       </Reveal>
 
-      <div className="grid grid-cols-1 items-stretch gap-4 lg:grid-cols-3">
+      <div className="mx-auto grid max-w-[880px] grid-cols-1 items-stretch gap-4 md:grid-cols-2">
         {/* FREE */}
         <Reveal delay={0}>
           <div className="flex h-full flex-col rounded-[24px] border border-line/70 bg-bg-soft/40 p-7 backdrop-blur-md md:p-8">
@@ -487,7 +476,7 @@ export function PricingSection() {
           </div>
         </Reveal>
 
-        {/* BASIC — destaque */}
+        {/* PREMIUM — destaque */}
         <Reveal delay={110}>
           <div
             className="relative flex h-full flex-col overflow-hidden rounded-[24px] border p-7 md:p-8"
@@ -509,13 +498,13 @@ export function PricingSection() {
                 className="text-[11px] font-bold uppercase tracking-[0.22em] text-pink-300"
                 style={{ fontFamily: 'var(--font-tech)', color: '#f472b6' }}
               >
-                Basic
+                Premium
               </div>
               <span
                 className="rounded-full border border-pink-400/50 bg-pink-400/10 px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.18em]"
                 style={{ fontFamily: 'var(--font-tech)', color: '#f9a8d4' }}
               >
-                Disponível hoje
+                Acesso completo
               </span>
             </div>
             <div className="mt-4 flex items-baseline gap-1.5">
@@ -532,68 +521,23 @@ export function PricingSection() {
             </p>
             <ul className="mt-6 flex-1 space-y-2.5">
               <PriceLi text="Tudo do Free" tone="#f472b6" strong />
-              {['Gerador de SRT (legenda pela copy)', 'Camuflagem', 'Mixer de Velocidade', 'Dividir Áudios', 'Calculadora'].map(
-                (f) => (
-                  <PriceLi key={f} text={f} tone="#f472b6" />
-                ),
-              )}
+              {[
+                'Lipsync Video to Video',
+                'Decupagem Inteligente',
+                'Gerador de SRT (legenda pela copy)',
+                'Camuflagem',
+                'Mixer de Velocidade',
+                'Dividir Áudios',
+                'Calculadora',
+              ].map((f) => (
+                <PriceLi key={f} text={f} tone="#f472b6" />
+              ))}
             </ul>
             <Magnetic strength={6} className="mt-7">
               <Link href="/planos" className="btn-primary w-full !py-3 text-center">
-                Assinar o Basic →
+                Assinar o Premium →
               </Link>
             </Magnetic>
-          </div>
-        </Reveal>
-
-        {/* PRO — em breve */}
-        <Reveal delay={220}>
-          <div
-            className="relative flex h-full flex-col overflow-hidden rounded-[24px] border border-violet/40 p-7 md:p-8"
-            style={{
-              background:
-                'linear-gradient(160deg, rgba(167,139,250,0.12) 0%, rgba(0,0,0,0.22) 100%), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
-            }}
-          >
-            <div
-              aria-hidden
-              className="pointer-events-none absolute -left-14 -top-14 h-44 w-44 rounded-full opacity-50 blur-3xl"
-              style={{ background: 'rgba(167,139,250,0.4)' }}
-            />
-            <div className="flex items-center justify-between">
-              <div
-                className="text-[11px] font-bold uppercase tracking-[0.22em]"
-                style={{ fontFamily: 'var(--font-tech)', color: '#c4b5fd' }}
-              >
-                Pro
-              </div>
-              <ProSoonChip />
-            </div>
-            <div className="mt-4 flex items-baseline gap-1.5">
-              <span
-                className="text-[34px] font-extrabold leading-none text-white"
-                style={{ fontFamily: 'var(--font-tech)', letterSpacing: '-0.02em' }}
-              >
-                Em breve
-              </span>
-            </div>
-            <p className="mt-2 text-[13px] leading-relaxed text-text-muted">
-              As automações completas, em fase final de lançamento.
-            </p>
-            <ul className="mt-6 flex-1 space-y-2.5">
-              <PriceLi text="Tudo do Basic" tone="#a78bfa" strong />
-              {['ClickUp Pilot', 'Auto B-roll', 'Hey Auto (lipsync em lote)', 'Lipsync Video to Video', 'Decupagem Inteligente'].map(
-                (f) => (
-                  <PriceLi key={f} text={f} tone="#a78bfa" />
-                ),
-              )}
-            </ul>
-            <Link
-              href="/register"
-              className="mt-7 inline-flex w-full items-center justify-center gap-2 rounded-full border border-violet/45 bg-violet/10 px-5 py-3 text-[13px] font-bold text-violet backdrop-blur-md transition-all duration-300 hover:-translate-y-[1px] hover:border-violet/70 hover:bg-violet/20 hover:text-white"
-            >
-              Criar conta e acompanhar
-            </Link>
           </div>
         </Reveal>
       </div>
@@ -639,7 +583,7 @@ export function FaqSection() {
       <Reveal>
         <div className="mb-10 max-w-[720px]">
           <div className="mb-4">
-            <SectionKicker index="006" label="Perguntas frequentes" accent="#ebc860" />
+            <SectionKicker index="004" label="Perguntas frequentes" accent="#ebc860" />
           </div>
           <h2 className="section-title text-[38px] md:text-[48px]" style={{ lineHeight: 1.02 }}>
             <SmokeText text="Tira a dúvida." className="block" />

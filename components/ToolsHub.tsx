@@ -57,6 +57,7 @@ type ToolEntry = {
 
 // DESTAQUES — 3 carros-chefe em cards de VÍDEO (estilo HeyGen): o vídeo só
 // roda quando o mouse passa em cima, e aí revela a copy da ferramenta.
+// ⚠ Só ferramentas acessíveis a CLIENTE aqui — nada de uso interno.
 const FEATURED: ToolEntry[] = [
   {
     href: '/tools/lipsync',
@@ -69,28 +70,30 @@ const FEATURED: ToolEntry[] = [
     poster: '/cards/criar-avatar.jpg',
   },
   {
-    href: '/tools/clickup-pilot',
-    label: 'Seu fluxo automático',
-    description: 'Conecta no seu ClickUp, lê o briefing de cada task e dispara os lipsyncs em fila. Você só revisa — o estúdio entrega no automático.',
-    icon: <IconClickUpPilot size={28} />,
-    hue: 'rgba(167, 139, 250, 0.45)',
+    href: '/tools/decupagem-copy',
+    label: 'Decupagem Inteligente',
+    description: 'A IA lê a copy, escolhe o melhor take de cada frase e monta o corte — você diz o que precisa ser dito, ela entrega.',
+    icon: <IconDecupageCopy size={28} />,
+    hue: 'rgba(232, 121, 249, 0.45)',
     badge: 'IA',
-    video: '/cards/fluxo-automatico.mp4',
-    poster: '/cards/fluxo-automatico.jpg',
+    video: '/cards/decupagem-inteligente.mp4',
+    poster: '/cards/decupagem-inteligente.jpg',
   },
   {
-    href: '/tools/auto-broll',
-    label: 'Tenha b-rolls infinitos',
-    description: 'Cole a lista de prompts e a IA gera b-roll cinematográfico — inserts prontos, no clima certo, enquanto você faz outra coisa.',
-    icon: <IconAutoBroll size={28} />,
-    hue: 'rgba(103, 232, 249, 0.45)',
+    href: '/tools/copy-srt',
+    label: 'Gerador de SRT',
+    description: 'Cole a copy, suba o áudio e a legenda sai alinhada palavra por palavra — pronta pra importar no editor.',
+    icon: <IconCopySRT size={28} />,
+    hue: 'rgba(196, 181, 253, 0.45)',
     badge: 'IA',
-    video: '/cards/b-rolls.mp4',
-    poster: '/cards/b-rolls.jpg',
+    video: '/cards/gerador-srt.mp4',
+    poster: '/cards/gerador-srt.jpg',
   },
 ];
 
-const BASE: ToolEntry[] = [
+// Lista ÚNICA de ferramentas — sem divisão Base × IA (tudo é ferramenta).
+// As de uso interno levam adminOnly (somem pra cliente).
+const TOOLS: ToolEntry[] = [
   {
     href: '/tools/fakepass',
     label: 'FakePrint',
@@ -156,9 +159,6 @@ const BASE: ToolEntry[] = [
     hue: 'rgba(167, 139, 250, 0.45)',
     adminOnly: true,
   },
-];
-
-const AI: ToolEntry[] = [
   {
     href: '/tools/lipsync',
     label: 'Lipsync Video to Video',
@@ -175,9 +175,10 @@ const AI: ToolEntry[] = [
     description: 'Uma lista. Um clique. Dezenas de vídeos.',
     icon: <IconAutoBroll size={26} />,
     hue: 'rgba(240, 171, 252, 0.42)',
-    badge: 'IA',
+    badge: 'ADMIN',
     video: '/cards/auto-broll.mp4',
     poster: '/cards/auto-broll.jpg',
+    adminOnly: true,
   },
   {
     href: '/tools/remover-elementos',
@@ -216,9 +217,21 @@ const AI: ToolEntry[] = [
     description: 'Lipsync no HeyGen em lote, num clique — sem abrir o HeyGen.',
     icon: <IconHeyGenAuto size={26} />,
     hue: 'rgba(103, 232, 249, 0.42)',
-    badge: 'IA',
+    badge: 'ADMIN',
     video: '/cards/hey-auto.mp4',
     poster: '/cards/hey-auto.jpg',
+    adminOnly: true,
+  },
+  {
+    href: '/tools/clickup-pilot',
+    label: 'ClickUp Pilot',
+    description: 'Lê o briefing de cada task e dispara os lipsyncs em fila.',
+    icon: <IconClickUpPilot size={26} />,
+    hue: 'rgba(167, 139, 250, 0.42)',
+    badge: 'ADMIN',
+    video: '/cards/fluxo-automatico.mp4',
+    poster: '/cards/fluxo-automatico.jpg',
+    adminOnly: true,
   },
 ];
 
@@ -259,8 +272,7 @@ export function ToolsHub() {
     };
   }, []);
 
-  const base = BASE.filter((it) => !it.adminOnly || isAdmin);
-  const ai = AI.filter((it) => !it.adminOnly || isAdmin);
+  const tools = TOOLS.filter((it) => !it.adminOnly || isAdmin);
   const featured = FEATURED.filter((it) => !it.adminOnly || isAdmin);
 
   // Manutenção: admin acessa (modo 'admin'); emails liberados (ex.: Elder)
@@ -301,8 +313,9 @@ export function ToolsHub() {
         </h1>
       </section>
 
-      {/* Banner promocional / destaque (estilo HeyGen) */}
-      <PromoBanner tier={tier} isAdmin={isAdmin} />
+      {/* Banner promocional das automações internas — SÓ pra admin.
+          Cliente não vê (nem sabe que existe). */}
+      {isAdmin ? <PromoBanner tier={tier} isAdmin={isAdmin} /> : null}
 
       {/* Bloco DESTAQUES — grandes, com gradiente */}
       <section className="mt-10">
@@ -338,43 +351,19 @@ export function ToolsHub() {
         </div>
       </section>
 
-      {/* TRABALHO RÁPIDO (Base Suite) */}
+      {/* FERRAMENTAS — lista única, sem divisão Base × IA */}
       <section className="mt-14">
         <SectionTitle
-          eyebrow="ESSENCIAIS"
-          title="Trabalho rápido"
-          sub="Cortes, ajustes e arquivos — sem espera."
+          eyebrow="ESTÚDIO"
+          title="Ferramentas"
+          sub="Cortes, ajustes, arquivos e IA — sem espera."
           delay={300}
         />
         <div
           className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 fade-in-up"
           style={{ animationDelay: '340ms' }}
         >
-          {base.map((it, i) => (
-            <ToolCard
-              key={it.href}
-              entry={it}
-              delay={i * 35}
-              locked={!tierAllowsTool(tier, it.href)}
-              maint={maintOf(it.href)}
-            />
-          ))}
-        </div>
-      </section>
-
-      {/* INTELIGÊNCIA (AI Suite) */}
-      <section className="mt-14">
-        <SectionTitle
-          eyebrow="INTELIGÊNCIA"
-          title="Com a IA"
-          sub="Quando você quer um passo a menos no caminho."
-          delay={420}
-        />
-        <div
-          className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 fade-in-up"
-          style={{ animationDelay: '460ms' }}
-        >
-          {ai.map((it, i) => (
+          {tools.map((it, i) => (
             <ToolCard
               key={it.href}
               entry={it}
@@ -659,7 +648,7 @@ function PilotSlide({ canStartAutomation }: { canStartAutomation: boolean }) {
             ) : (
               <Link
                 href="/planos?upgrade=1"
-                title="Disponível só no plano Pro"
+                title="Disponível no plano Premium"
                 className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full border border-lime/35 bg-lime/5 px-6 py-3 text-[13.5px] font-bold text-lime/70 backdrop-blur-md transition-all duration-300 hover:border-lime/55 hover:text-lime"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -796,7 +785,7 @@ function AutoBrollSlide({ canStartAutomation }: { canStartAutomation: boolean })
             ) : (
               <Link
                 href="/planos?upgrade=1"
-                title="Disponível só no plano Pro"
+                title="Disponível no plano Premium"
                 className="group/btn relative inline-flex items-center gap-2 overflow-hidden rounded-full border border-violet/35 bg-violet/5 px-6 py-3 text-[13.5px] font-bold text-violet/70 backdrop-blur-md transition-all duration-300 hover:border-violet/55 hover:text-violet"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -1011,7 +1000,7 @@ function FeaturedVideoCard({
 
         {/* SEM cadeado/bloqueio visual nos destaques: o card é sempre bonito e
             clicável pra TODOS. O gating real é server-side (middleware):
-            Pro abre a ferramenta; Free/Basic caem direto em /planos. */}
+            Premium abre a ferramenta; Free cai direto em /planos. */}
       </div>
 
       {/* PAINEL — abre ABAIXO do vídeo no hover (copy + botão animado).
@@ -1059,7 +1048,7 @@ function FeaturedVideoCard({
       onMouseLeave={stop}
     >
       {/* Sempre clicável pra TODOS — sem estado visual de bloqueio. O acesso
-          real é decidido server-side no clique (Pro abre; Free/Basic → /planos). */}
+          real é decidido server-side no clique (Premium abre; Free → /planos). */}
       <Link
         href={entry.href}
         className="group relative block overflow-hidden rounded-[20px] border border-line/70 transition-all duration-300 hover:border-violet/45 hover:shadow-[0_30px_70px_-26px_rgba(0,0,0,0.95)]"
@@ -1226,7 +1215,7 @@ function FeaturedCard({
           className={cardClass}
           style={cardStyle}
           aria-disabled
-          title={isBlocked ? 'Em manutenção' : 'Disponível só no plano Pro'}
+          title={isBlocked ? 'Em manutenção' : 'Disponível no plano Premium'}
         >
           {body}
         </div>
@@ -1406,7 +1395,7 @@ function ToolCard({
         className={vcls}
         style={vstyle}
         aria-disabled
-        title={isBlocked ? 'Em manutenção' : 'Disponível só no plano Pro'}
+        title={isBlocked ? 'Em manutenção' : 'Disponível no plano Premium'}
         onMouseEnter={playCardVideo}
         onMouseLeave={stopCardVideo}
       >
@@ -1505,7 +1494,7 @@ function ToolCard({
       className={cls}
       style={style}
       aria-disabled
-      title={isBlocked ? 'Em manutenção' : 'Disponível só no plano Pro'}
+      title={isBlocked ? 'Em manutenção' : 'Disponível no plano Premium'}
     >
       {body}
     </div>
@@ -1544,14 +1533,12 @@ function LockIcon({ size = 18 }: { size?: number }) {
   );
 }
 
-// Mapa de path → label legível (espelha TopBar). Usado pra mostrar
-// "Hey Auto requer Pro" em vez de "/tools/heygen-auto requer Pro".
+// Mapa de path → label legível (espelha TopBar). Usado no flash de bloqueio.
+// ⚠ Ferramentas de uso interno (admin-only) NÃO entram aqui — o flash cai no
+// genérico "Esta ferramenta" sem revelar o nome pra cliente.
 const TOOL_LABELS: Record<string, string> = {
-  '/tools/auto-broll': 'Auto B-roll',
-  '/tools/heygen-auto': 'Hey Auto',
   '/tools/decupagem-copy': 'Decupagem Inteligente',
-  '/tools/clickup-pilot': 'ClickUp Pilot',
-  '/tools/remover-elementos': 'Remover Legenda/Marca d’Água',
+  '/tools/lipsync': 'Lipsync Video to Video',
   '/tools/camuflagem': 'Camuflagem',
   '/tools/compressor': 'Compressor',
   '/tools/audio-split': 'Dividir áudios',
@@ -1577,9 +1564,9 @@ function LockedFlash({
 }) {
   const toolName = TOOL_LABELS[from] || 'Esta ferramenta';
   const needLabel =
-    need === 'admin' ? 'Admin' : need === 'pro' ? 'Pro' : need === 'basic' ? 'Basic' : null;
+    need === 'admin' ? 'Admin' : need === 'pro' || need === 'basic' ? 'Premium' : null;
   const tierLabel =
-    tier === 'free' ? 'FREE' : tier === 'basic' ? 'BASIC' : tier === 'pro' ? 'PRO' : 'ADMIN';
+    tier === 'free' ? 'FREE' : tier === 'basic' ? 'PREMIUM' : tier === 'pro' ? 'PRO' : 'ADMIN';
 
   const accent =
     need === 'admin'

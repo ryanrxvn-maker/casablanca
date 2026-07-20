@@ -16,6 +16,8 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/compressor',
     '/tools/historico',
   ]),
+  // basic = plano PREMIUM (nome de exibição). Tier interno continua 'basic'
+  // — Stripe e banco intocados.
   basic: new Set([
     '/tools/decupagem',
     '/tools/downloader',
@@ -27,11 +29,16 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/acelerador',
     '/tools/calculadora',
     '/tools/copy-srt',
+    '/tools/decupagem-copy',
+    '/tools/lipsync',
     '/tools/historico',
-    // ⚠ NÃO inclui: auto-broll, heygen-auto, decupagem-copy (smart decup), remover-elementos (smart remover), normalizador (admin-only), separador-audio (admin-only), ltx-video, clickup-pilot
+    // ⚠ NÃO inclui as ferramentas de uso interno (admin-only): auto-broll,
+    // heygen-auto, clickup-pilot, remover-elementos, normalizador,
+    // separador-audio, ltx-video
   ]),
+  // pro (legado, não vendido) = mesmo conjunto do Premium. As ferramentas de
+  // automação interna (auto-broll, heygen-auto, clickup-pilot) são admin-only.
   pro: new Set([
-    // pro = tudo, EXCETO ferramentas admin-only (normalizador, separador-audio, remover-elementos)
     '/tools/decupagem',
     '/tools/downloader',
     '/tools/caixinha-pergunta',
@@ -42,10 +49,7 @@ const TIER_PATHS: Record<Tier, ReadonlySet<string>> = {
     '/tools/acelerador',
     '/tools/calculadora',
     '/tools/copy-srt',
-    '/tools/auto-broll',
-    '/tools/heygen-auto',
     '/tools/decupagem-copy',
-    '/tools/clickup-pilot',
     '/tools/lipsync',
     '/tools/historico',
   ]),
@@ -244,9 +248,9 @@ export function tierAllowsTool(tier: Tier | null, toolHref: string): boolean {
   );
 }
 
-/** Admin / Pro podem disparar automação Pilot. */
+/** Só admin dispara automação Pilot (ferramenta de uso interno). */
 export function tierCanAutomate(tier: Tier | null): boolean {
-  return tier === 'admin' || tier === 'pro';
+  return tier === 'admin';
 }
 
 /** Cor de destaque do tier (pra moldura de avatar, badges, etc) */
@@ -272,7 +276,7 @@ export function tierAccent(tier: Tier | null): {
       return {
         primary: '#f472b6',
         glow: 'rgba(244,114,182,0.55)',
-        label: 'Basic',
+        label: 'Premium',
       };
     case 'free':
     default:

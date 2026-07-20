@@ -37,9 +37,11 @@ const TIER_RANK: Record<Tier, number> = {
   admin: 3,
 };
 
+// Labels de EXIBIÇÃO — o tier interno 'basic' é o plano Premium; 'pro'
+// (legado, não vendido) também exibe Premium pra nunca citar plano extinto.
 const TIER_LABEL: Record<Exclude<Tier, 'free'>, string> = {
-  basic: 'Basic',
-  pro: 'Pro',
+  basic: 'Premium',
+  pro: 'Premium',
   admin: 'Admin',
 };
 
@@ -134,7 +136,7 @@ export function TierGate({
                 <span
                   className="mono rounded-full border border-line-strong bg-bg-soft/60 px-2 py-0.5 text-[10px] uppercase tracking-widest text-text-muted"
                 >
-                  {tier === 'free' ? 'FREE' : tier === 'basic' ? 'BASIC' : tier.toUpperCase()}
+                  {tier === 'free' ? 'FREE' : tier === 'basic' ? 'PREMIUM' : tier.toUpperCase()}
                 </span>{' '}
                 · pra desbloquear o <span className="text-white">{toolName}</span> faça
                 upgrade pra{' '}

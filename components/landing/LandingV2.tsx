@@ -5,20 +5,19 @@
  *
  * Direção: "o estúdio que trabalha enquanto você dorme". Cena 3D em CSS puro
  * (parallax de ponteiro, piso em perspectiva, aurora), painéis HUD com o
- * produto REAL (mp4s de /cards), pipeline animado e copy 100% honesta:
- *  • só ferramentas que o cliente usa hoje (nada admin-only);
- *  • Pro sempre com selo "em breve" (trava de lançamento);
+ * produto REAL (mp4s de /cards) e copy 100% honesta:
+ *  • só ferramentas que o cliente usa hoje (nada admin-only ou interno);
+ *  • dois planos: Free e Premium — nada de "em breve";
  *  • sem absolutos ("ilimitado", "100%", etc).
  *
- * A Landing antiga (components/Landing.tsx) segue viva — /pilot importa
- * PilotHowItWorks de lá. Aqui é só a home.
+ * A Landing antiga (components/Landing.tsx) segue viva — /pilot (admin-only)
+ * importa PilotHowItWorks de lá. Aqui é só a home.
  */
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Brand } from '../Brand';
 import { HeroScene } from './HeroScene';
-import { BrollFlagship, PilotFlagship, ProofStrip } from './FlagshipSections';
 import {
   FaqSection,
   FinalCta,
@@ -47,9 +46,6 @@ export function LandingV2() {
 
       <div className="relative z-[1]">
         <HeroScene />
-        <ProofStrip />
-        <PilotFlagship />
-        <BrollFlagship />
         <SuiteSection />
         <HowSection />
         <PricingSection />
@@ -86,8 +82,6 @@ function LandingHeader() {
   }, []);
 
   const anchors = [
-    { href: '#pilot', label: 'Pilot' },
-    { href: '#broll', label: 'B-roll' },
     { href: '#suite', label: 'Suíte' },
     { href: '#precos', label: 'Planos' },
     { href: '#faq', label: 'FAQ' },

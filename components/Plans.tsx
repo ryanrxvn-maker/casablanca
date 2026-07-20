@@ -1,79 +1,40 @@
 'use client';
 
 import Link from 'next/link';
-import {
-  type MouseEvent as ReactMouseEvent,
-  useMemo,
-  useState,
-} from 'react';
+import { useMemo, useState } from 'react';
 import { Brand } from './Brand';
 import { SmokeText } from './SmokeText';
-import { PRO_LOCKED } from '@/lib/launch-flags';
 
 /**
- * Plans v3 — vitrine pública /planos.
+ * Plans v4 — vitrine pública /planos.
  *
- * Novidades v3:
+ * Dois planos, sem "em breve":
+ *  • Free — pra sentir o corte, sem cartão
+ *  • Premium — todas as ferramentas do estúdio (tier interno 'basic';
+ *    Stripe e banco intocados, só o NOME de exibição mudou)
  *  • Toggle MENSAL/ANUAL com -20% no anual
- *  • Pro com OFERTA -15% (sale neon aceso, preço riscado + novo)
- *  • Lista de features em duas camadas:
- *      ▼ FEATURED 3D — ClickUp Pilot, Hey Auto, Auto B-roll
- *        (mini-cards com tilt no mouse + glow + sparkle)
- *      ▼ Resto — linhas simples como antes
- *  • Coelho com aura progressiva (Free → Basic → Pro)
- *  • Nomes 100% PT-BR (sem Smart Remover, sem SRT Generator)
+ *  • Coelho com aura progressiva (Free → Premium)
+ *  • Nomes 100% PT-BR
  */
 
 /* ─────────────────────── Dados ─────────────────────── */
 
-type Featured = 'pilot' | 'heygen' | 'broll';
-
 type Tool = {
   key: string;
   label: string;
-  /** Se for `featured`, ganha mini-card 3D no topo da lista do plano */
-  featured?: Featured;
-  /** Subtítulo curto exibido só nos featured cards */
-  featuredHint?: string;
-  /** Cor de destaque dos featured cards */
-  featuredHue?: string;
 };
 
-/** Lista única de TODAS as ferramentas. Os 3 featured aparecem
- * primeiro em CADA card de plano, em forma de mini-card 3D animado;
- * o resto vira lista simples abaixo. Nomes 100% em português. */
+/** Lista única de TODAS as ferramentas visíveis ao cliente.
+ * ⚠ SÓ ferramentas REAIS e acessíveis ao cliente. Espelha o acesso de
+ * lib/use-tier.ts. NÃO listar admin-only (Normalizador, Separador de Áudio,
+ * Removedor de Legenda, automações internas) nem tools inexistentes —
+ * isso vira propaganda enganosa. */
 const ALL_TOOLS: Tool[] = [
-  // ─── FEATURED (sempre no topo, cards 3D) ───
-  {
-    key: 'clickup-pilot',
-    label: 'ClickUp Pilot',
-    featured: 'pilot',
-    featuredHint: 'Mapeia as tasks e dispara o lipsync de todas',
-    featuredHue: 'rgba(200,232,124,0.55)',
-  },
-  {
-    key: 'heygen-auto',
-    label: 'Hey Auto',
-    featured: 'heygen',
-    featuredHint: 'Dispara todos os lipsyncs em lote',
-    featuredHue: 'rgba(103,232,249,0.55)',
-  },
-  {
-    key: 'auto-broll',
-    label: 'Auto B-roll',
-    featured: 'broll',
-    featuredHint: 'Gera B-rolls do JSON enquanto você dorme',
-    featuredHue: 'rgba(240,171,252,0.55)',
-  },
-  // ─── Lista comum ───
-  // ⚠ SÓ ferramentas REAIS e acessíveis ao cliente. Espelha o acesso de
-  // lib/use-tier.ts. NÃO listar admin-only (Normalizador, Separador de Áudio,
-  // Removedor de Legenda) nem tools inexistentes — isso vira propaganda enganosa.
   { key: 'lipsync', label: 'Lipsync Video to Video' },
   { key: 'decupagem-inteligente', label: 'Decupagem Inteligente' },
+  { key: 'gerador-srt', label: 'Gerador de SRT' },
   { key: 'decupagem', label: 'Decupagem' },
   { key: 'camuflagem', label: 'Camuflagem' },
-  { key: 'gerador-srt', label: 'Gerador de SRT' },
   { key: 'mixer-velocidade', label: 'Mixer de Velocidade' },
   { key: 'separar-audios', label: 'Dividir áudios' },
   { key: 'compressor', label: 'Compressor' },
@@ -83,25 +44,16 @@ const ALL_TOOLS: Tool[] = [
 
 /** Quais ferramentas cada plano libera (por `key` da ALL_TOOLS).
  *  Espelha EXATAMENTE o acesso real de lib/use-tier.ts (TIER_PATHS). */
-const UNLOCKED: Record<'free' | 'basic' | 'pro', Set<string>> = {
+const UNLOCKED: Record<'free' | 'basic', Set<string>> = {
   free: new Set(['decupagem', 'downloader', 'fakepass', 'compressor']),
-  basic: new Set([
-    'decupagem',
-    'downloader',
-    'fakepass',
-    'compressor',
-    'camuflagem',
-    'separar-audios',
-    'mixer-velocidade',
-    'gerador-srt',
-  ]),
-  pro: new Set(ALL_TOOLS.map((t) => t.key)),
+  // basic = plano PREMIUM (nome de exibição) — libera a suíte inteira.
+  basic: new Set(ALL_TOOLS.map((t) => t.key)),
 };
 
 type Billing = 'monthly' | 'annual';
 
 type Plan = {
-  id: 'free' | 'basic' | 'pro';
+  id: 'free' | 'basic';
   name: string;
   cta: string;
   borderHue: string;
@@ -118,8 +70,7 @@ type Plan = {
 /**
  * Pricing:
  *  • Free: sempre R$ 0
- *  • Basic: 57 mensal → 45 anual (-20%)
- *  • Pro:   137 (riscado) → 116 mensal (-15% sale) → 92 anual (-15% + -20%)
+ *  • Premium: 57 mensal → 45 anual (-20%)
  */
 const PLANS: Plan[] = [
   {
@@ -138,37 +89,22 @@ const PLANS: Plan[] = [
   },
   {
     id: 'basic',
-    name: 'Plano Basic',
-    cta: 'Quero o Basic',
+    name: 'Plano Premium',
+    cta: 'Quero o Premium',
     borderHue: 'rgba(244,114,182,0.7)',
     rabbitHue: '#f472b6',
     glowHue: 'rgba(244,114,182,0.55)',
     bulletHue: '#f472b6',
     highlight: true,
-    rabbitTier: 1,
+    rabbitTier: 2,
     pricing: {
       monthly: { price: 57 },
       annual: { price: 45 },
     },
   },
-  {
-    id: 'pro',
-    name: 'Plano Pro',
-    cta: 'Quero o Pro',
-    borderHue: 'rgba(192,132,252,0.75)',
-    rabbitHue: '#d8b4fe',
-    glowHue: 'rgba(192,132,252,0.6)',
-    bulletHue: '#c084fc',
-    rabbitTier: 2,
-    pricing: {
-      monthly: { price: 116, original: 137 },
-      annual: { price: 92, original: 137 },
-    },
-  },
 ];
 
 const ANNUAL_DISCOUNT_PCT = 20;
-const PRO_SALE_PCT = 15;
 
 /* ─────────────────────── Página ─────────────────────── */
 
@@ -229,17 +165,8 @@ export function Plans() {
           </span>
         </h1>
         <p className="mx-auto mt-5 max-w-[560px] text-[15px] leading-relaxed text-text-muted">
-          {PRO_LOCKED ? (
-            <>
-              Comece grátis hoje. Assine o Basic e automatize o dia inteiro — o
-              plano Pro chega em breve.
-            </>
-          ) : (
-            <>
-              Comece grátis hoje. Quando estiver pronto pra automatizar o dia
-              inteiro, sobe pro Basic ou Pro.
-            </>
-          )}
+          Comece grátis hoje. Quando estiver pronto pra automatizar o dia
+          inteiro, o Premium libera a suíte completa.
         </p>
 
         {/* Toggle Mensal/Anual */}
@@ -249,8 +176,8 @@ export function Plans() {
       </section>
 
       {/* Cards */}
-      <section className="relative z-10 mx-auto mt-16 max-w-[1280px] px-5 pb-16 md:px-8 md:pb-24">
-        <div className="grid grid-cols-1 gap-7 md:grid-cols-3 md:gap-6 md:pt-6">
+      <section className="relative z-10 mx-auto mt-16 max-w-[920px] px-5 pb-16 md:px-8 md:pb-24">
+        <div className="grid grid-cols-1 gap-7 md:grid-cols-2 md:gap-6 md:pt-6">
           {PLANS.map((plan, i) => (
             <PlanCard
               key={plan.id}
@@ -405,19 +332,8 @@ function PlanCard({
   const unlocked = UNLOCKED[plan.id];
   const pricing = plan.pricing[billing];
   const isFree = plan.id === 'free';
-  // Pro travado no pré-lançamento → card vira "Em breve" (sem oferta/checkout).
-  const comingSoon = plan.id === 'pro' && PRO_LOCKED;
-  const hasSale = !!pricing.original && plan.id === 'pro' && !comingSoon;
 
-  // Separa as ferramentas: featured primeiro (cards 3D), resto como linhas
-  const featuredTools = useMemo(
-    () => ALL_TOOLS.filter((t) => t.featured),
-    [],
-  );
-  const standardTools = useMemo(
-    () => ALL_TOOLS.filter((t) => !t.featured),
-    [],
-  );
+  const tools = useMemo(() => ALL_TOOLS, []);
 
   return (
     <div
@@ -484,28 +400,20 @@ function PlanCard({
               'linear-gradient(180deg, rgba(255,255,255,0.025), rgba(0,0,0,0.20)), linear-gradient(180deg, rgb(var(--bg-softer)), var(--card-deep))',
           }}
         >
-          {/* Badges no topo — "MAIS POPULAR" + "OFERTA", ou "EM BREVE" no Pro
-              travado (que substitui qualquer oferta). */}
+          {/* Badge no topo — "MAIS POPULAR" no plano em destaque. */}
           <div className="flex flex-wrap items-center justify-center gap-2">
-            {comingSoon ? (
-              <ComingSoonSeal />
-            ) : (
-              <>
-                {plan.highlight ? (
-                  <span
-                    className="-mt-3 rounded-full border border-white/20 bg-black/70 px-3 py-1 text-[9.5px] font-bold uppercase tracking-[0.22em] backdrop-blur-md"
-                    style={{
-                      fontFamily: 'var(--font-tech)',
-                      color: plan.rabbitHue,
-                      boxShadow: `0 0 18px -4px ${plan.glowHue}`,
-                    }}
-                  >
-                    ★ MAIS POPULAR
-                  </span>
-                ) : null}
-                {hasSale ? <SaleBadge pct={PRO_SALE_PCT} /> : null}
-              </>
-            )}
+            {plan.highlight ? (
+              <span
+                className="-mt-3 rounded-full border border-white/20 bg-black/70 px-3 py-1 text-[9.5px] font-bold uppercase tracking-[0.22em] backdrop-blur-md"
+                style={{
+                  fontFamily: 'var(--font-tech)',
+                  color: plan.rabbitHue,
+                  boxShadow: `0 0 18px -4px ${plan.glowHue}`,
+                }}
+              >
+                ★ MAIS POPULAR
+              </span>
+            ) : null}
           </div>
 
           {/* Nome + preço */}
@@ -520,49 +428,14 @@ function PlanCard({
               {plan.name}
             </div>
 
-            {/* Preço — Mensal: R$ X/mês · Anual: R$ X*12/ano + "12x de R$ X"
-                Pro com sale: original riscado em cima (também anualizado se anual).
-                v3.1: sale e parcelado com muito mais peso visual.
-                Pro travado: troca o preço inteiro pelo lockup "Em breve". */}
-            {comingSoon ? (
-              <ComingSoonPrice />
-            ) : (
+            {/* Preço — Mensal: R$ X/mês · Anual: R$ X*12/ano + equivalente. */}
             <div className="mt-3 flex flex-col items-center justify-center gap-1.5">
-              {hasSale && pricing.original ? (
-                <span
-                  className="mono flex items-center gap-2 text-[18px] font-bold tracking-tight md:text-[20px]"
-                  style={{
-                    fontFamily: 'var(--font-tech)',
-                    color: '#fca5a5',
-                  }}
-                >
-                  <span
-                    className="text-rose-300/70"
-                    style={{
-                      textDecoration: 'line-through',
-                      textDecorationColor: 'rgba(244,63,94,0.95)',
-                      textDecorationThickness: '2.5px',
-                    }}
-                  >
-                    De R${' '}
-                    {billing === 'annual'
-                      ? (pricing.original * 12).toLocaleString('pt-BR')
-                      : pricing.original}
-                    {billing === 'annual' ? '/ano' : '/mês'}
-                  </span>
-                </span>
-              ) : null}
               <div className="flex items-baseline justify-center gap-1">
                 <span
                   className="text-[44px] font-extrabold tracking-tight text-white md:text-[52px]"
                   style={{
                     fontFamily: 'var(--font-tech)',
                     letterSpacing: '-0.03em',
-                    background: hasSale
-                      ? 'linear-gradient(135deg, #fff 0%, #d8b4fe 60%, #c084fc 100%)'
-                      : undefined,
-                    WebkitBackgroundClip: hasSale ? 'text' : undefined,
-                    WebkitTextFillColor: hasSale ? 'transparent' : undefined,
                   }}
                 >
                   {isFree
@@ -579,26 +452,6 @@ function PlanCard({
                   <span className="text-[15px] text-text-muted">/mês</span>
                 )}
               </div>
-
-              {/* Badge "VOCÊ ECONOMIZA R$ X" só quando tem sale — dá
-                  peso REAL ao desconto, não só "−15%". */}
-              {hasSale && pricing.original ? (
-                <span
-                  className="economy-badge inline-flex items-center gap-1.5 rounded-full border border-rose-400/65 bg-gradient-to-r from-rose-500/20 to-fuchsia-500/20 px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.16em] text-rose-100 backdrop-blur-sm"
-                  style={{
-                    fontFamily: 'var(--font-tech)',
-                    boxShadow: '0 0 16px -3px rgba(244,63,94,0.55)',
-                  }}
-                >
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M7 17l10-10M7 7h10v10" />
-                  </svg>
-                  Você economiza R${' '}
-                  {billing === 'annual'
-                    ? ((pricing.original - pricing.price) * 12).toLocaleString('pt-BR') + '/ano'
-                    : (pricing.original - pricing.price) + '/mês'}
-                </span>
-              ) : null}
 
               {/* Subtitle no anual: equivalente mensal (cobrado 1x/ano). */}
               {!isFree && billing === 'annual' ? (
@@ -632,7 +485,6 @@ function PlanCard({
                 </div>
               ) : null}
             </div>
-            )}
           </div>
 
           {/* Coelho com aura tier */}
@@ -644,33 +496,9 @@ function PlanCard({
             />
           </div>
 
-          {/* FEATURED — 3 mini-cards 3D destacados no topo da lista */}
-          <div className="mt-7 flex flex-col gap-2.5">
-            {featuredTools.map((t) => (
-              <FeaturedToolMini
-                key={t.key}
-                tool={t}
-                locked={!unlocked.has(t.key)}
-                planHue={plan.glowHue}
-              />
-            ))}
-          </div>
-
-          {/* Divisor sutil */}
-          <div className="my-5 flex items-center gap-3">
-            <span className="h-px flex-1 bg-line/60" />
-            <span
-              className="text-[9.5px] font-bold uppercase tracking-[0.22em] text-text-dim"
-              style={{ fontFamily: 'var(--font-tech)' }}
-            >
-              também inclui
-            </span>
-            <span className="h-px flex-1 bg-line/60" />
-          </div>
-
-          {/* Resto das ferramentas como linhas simples */}
-          <ul className="flex flex-1 flex-col gap-2.5">
-            {standardTools.map((tool) => {
+          {/* Ferramentas do plano */}
+          <ul className="mt-7 flex flex-1 flex-col gap-2.5">
+            {tools.map((tool) => {
               const isUnlocked = unlocked.has(tool.key);
               return (
                 <li
@@ -727,14 +555,9 @@ function PlanCard({
             })}
           </ul>
 
-          {/* CTA — Free → cadastro · Basic/Pro → checkout Stripe · Pro travado
-              → botão "Lançamento em breve" + atalho pro Basic. */}
+          {/* CTA — Free → cadastro · Premium → checkout Stripe. */}
           <div className="mt-8">
-            {comingSoon ? (
-              <ComingSoonCTA />
-            ) : (
-              <PlanCTA plan={plan} billing={billing} />
-            )}
+            <PlanCTA plan={plan} billing={billing} />
           </div>
         </div>
       </div>
@@ -754,9 +577,10 @@ function PlanCard({
 
 /* ─────────────────────── PlanCTA (botão de ação do plano) ─────────────────────── */
 /**
- * Free → leva pro cadastro. Basic/Pro → dispara o checkout Stripe respeitando
- * o ciclo (mensal/anual) selecionado no toggle. Se não estiver logado, o
- * endpoint responde 401 e mandamos pro cadastro com retorno pra /planos.
+ * Free → leva pro cadastro. Premium → dispara o checkout Stripe respeitando
+ * o ciclo (mensal/anual) selecionado no toggle (o endpoint recebe o id
+ * interno 'basic' — Stripe intocado). Se não estiver logado, o endpoint
+ * responde 401 e mandamos pro cadastro com retorno pra /planos.
  */
 function PlanCTA({ plan, billing }: { plan: Plan; billing: Billing }) {
   const [loading, setLoading] = useState(false);
@@ -842,496 +666,6 @@ function PlanCTA({ plan, billing }: { plan: Plan; billing: Billing }) {
         </div>
       ) : null}
     </>
-  );
-}
-
-/* ─────────────────────── SaleBadge (cartaz neon) ─────────────────────── */
-
-function SaleBadge({ pct }: { pct: number }) {
-  return (
-    <span
-      className="sale-badge -mt-3 inline-flex items-center gap-1.5 rounded-full border border-rose-400/70 bg-gradient-to-r from-rose-500/35 via-fuchsia-500/30 to-violet/35 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.20em] text-rose-100 backdrop-blur-md"
-      style={{
-        fontFamily: 'var(--font-tech)',
-        boxShadow:
-          '0 0 22px -2px rgba(244,63,94,0.65), 0 0 38px -8px rgba(192,132,252,0.55), inset 0 1px 0 rgba(255,255,255,0.18)',
-        textShadow: '0 0 8px rgba(244,63,94,0.55)',
-      }}
-    >
-      <svg width="11" height="11" viewBox="0 0 24 24" fill="none">
-        <path
-          d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3z"
-          fill="#fda4af"
-        />
-      </svg>
-      OFERTA −{pct}%
-      <style jsx>{`
-        .sale-badge {
-          animation: sale-flicker 2.6s ease-in-out infinite;
-        }
-        @keyframes sale-flicker {
-          0%, 100% {
-            box-shadow:
-              0 0 22px -2px rgba(244, 63, 94, 0.65),
-              0 0 38px -8px rgba(192, 132, 252, 0.55),
-              inset 0 1px 0 rgba(255, 255, 255, 0.18);
-          }
-          50% {
-            box-shadow:
-              0 0 32px 0px rgba(244, 63, 94, 0.85),
-              0 0 56px -4px rgba(192, 132, 252, 0.75),
-              inset 0 1px 0 rgba(255, 255, 255, 0.28);
-          }
-        }
-      `}</style>
-    </span>
-  );
-}
-
-/* ─────────────────────── Pro "Em breve" (pré-lançamento) ─────────────────────── */
-/**
- * Trio de peças que transformam o card Pro em "Lançamento em breve" enquanto o
- * Pro está travado (lib/launch-flags). Zero checkout, muito hype — fonte premium
- * (var(--font-tech)), brilho controlado, sem botão morto (o atalho leva ao Basic).
- */
-
-/** Selo neon "EM BREVE" que substitui MAIS POPULAR/OFERTA no topo do card. */
-function ComingSoonSeal() {
-  return (
-    <span
-      className="coming-seal -mt-3 inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] backdrop-blur-md"
-      style={{
-        fontFamily: 'var(--font-tech)',
-        color: '#e9d5ff',
-        borderColor: 'rgba(192,132,252,0.65)',
-        background:
-          'linear-gradient(135deg, rgba(103,232,249,0.22), rgba(192,132,252,0.28))',
-        boxShadow:
-          '0 0 22px -4px rgba(192,132,252,0.75), 0 0 40px -10px rgba(103,232,249,0.5), inset 0 1px 0 rgba(255,255,255,0.2)',
-      }}
-    >
-      <span
-        aria-hidden
-        className="inline-block h-1.5 w-1.5 rounded-full bg-cyan-300 shadow-[0_0_8px_rgba(103,232,249,0.95)]"
-        style={{ animation: 'coming-dot 1.6s ease-in-out infinite' }}
-      />
-      Em breve
-      <style jsx>{`
-        .coming-seal {
-          animation: coming-seal 2.8s ease-in-out infinite;
-        }
-        @keyframes coming-seal {
-          0%,
-          100% {
-            box-shadow:
-              0 0 22px -4px rgba(192, 132, 252, 0.75),
-              0 0 40px -10px rgba(103, 232, 249, 0.5),
-              inset 0 1px 0 rgba(255, 255, 255, 0.2);
-          }
-          50% {
-            box-shadow:
-              0 0 30px -2px rgba(192, 132, 252, 0.95),
-              0 0 56px -6px rgba(103, 232, 249, 0.7),
-              inset 0 1px 0 rgba(255, 255, 255, 0.3);
-          }
-        }
-        @keyframes coming-dot {
-          0%,
-          100% {
-            opacity: 0.55;
-            transform: scale(0.85);
-          }
-          50% {
-            opacity: 1;
-            transform: scale(1.15);
-          }
-        }
-      `}</style>
-    </span>
-  );
-}
-
-/** Lockup de preço "Em breve" — substitui o preço enquanto o Pro está travado. */
-function ComingSoonPrice() {
-  return (
-    <div className="mt-3 flex flex-col items-center justify-center gap-2.5">
-      <div
-        className="coming-word text-[42px] font-extrabold leading-none tracking-tight md:text-[48px]"
-        style={{
-          fontFamily: 'var(--font-tech)',
-          letterSpacing: '-0.03em',
-          background:
-            'linear-gradient(135deg, #fff 0%, #d8b4fe 55%, #67e8f9 100%)',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          filter: 'drop-shadow(0 0 22px rgba(192,132,252,0.35))',
-        }}
-      >
-        Em breve
-      </div>
-      <span
-        className="inline-flex items-center gap-1.5 rounded-full border border-violet/40 bg-violet/[0.08] px-3 py-1 text-[10.5px] font-bold uppercase tracking-[0.16em] text-violet"
-        style={{ fontFamily: 'var(--font-tech)' }}
-      >
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-        >
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 7v5l3 2" />
-        </svg>
-        Lançamento em breve
-      </span>
-      <p className="max-w-[220px] text-[12px] leading-relaxed text-text-muted">
-        Estamos finalizando o Pro. Por enquanto, aproveite o plano{' '}
-        <span className="font-semibold text-white">Basic</span>.
-      </p>
-      <style jsx>{`
-        .coming-word {
-          animation: coming-word 3.6s ease-in-out infinite;
-        }
-        @keyframes coming-word {
-          0%,
-          100% {
-            filter: drop-shadow(0 0 22px rgba(192, 132, 252, 0.3));
-          }
-          50% {
-            filter: drop-shadow(0 0 30px rgba(103, 232, 249, 0.5));
-          }
-        }
-      `}</style>
-    </div>
-  );
-}
-
-/** CTA do Pro travado — botão "Lançamento em breve" (inerte) + atalho pro Basic. */
-function ComingSoonCTA() {
-  const goToBasic = () => {
-    const el = document.getElementById('plan-basic');
-    if (!el) return;
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    el.classList.add('tool-info-highlight');
-    setTimeout(() => el.classList.remove('tool-info-highlight'), 2200);
-  };
-
-  return (
-    <div className="flex flex-col items-stretch gap-3">
-      <div
-        aria-disabled="true"
-        className="coming-cta relative block w-full overflow-hidden rounded-full border px-5 py-3.5 text-center text-[13.5px] font-bold"
-        style={{
-          fontFamily: 'var(--font-tech)',
-          borderColor: 'rgba(192,132,252,0.55)',
-          color: '#fff',
-          cursor: 'default',
-          letterSpacing: '0.02em',
-          background:
-            'linear-gradient(135deg, rgba(192,132,252,0.28), rgba(103,232,249,0.14) 70%), rgba(0,0,0,0.4)',
-          boxShadow: '0 12px 28px -12px rgba(192,132,252,0.6)',
-        }}
-      >
-        <span className="relative z-10 inline-flex items-center justify-center gap-2 uppercase tracking-[0.12em]">
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
-          >
-            <rect x="4" y="11" width="16" height="10" rx="2" />
-            <path d="M8 11V7a4 4 0 018 0v4" />
-          </svg>
-          Lançamento em breve
-        </span>
-        {/* Sheen infinito sutil */}
-        <span
-          aria-hidden
-          className="coming-sheen absolute inset-0 -translate-x-[120%] bg-gradient-to-r from-transparent via-white/25 to-transparent"
-        />
-      </div>
-
-      <button
-        type="button"
-        onClick={goToBasic}
-        className="group inline-flex items-center justify-center gap-1.5 text-[12.5px] font-bold uppercase tracking-[0.14em] text-lime transition hover:text-white"
-        style={{ fontFamily: 'var(--font-tech)' }}
-      >
-        Aproveite o plano Basic
-        <span className="transition-transform group-hover:translate-x-1">→</span>
-      </button>
-
-      <style jsx>{`
-        .coming-sheen {
-          animation: coming-sheen 3.2s ease-in-out infinite;
-        }
-        @keyframes coming-sheen {
-          0% {
-            transform: translateX(-120%);
-          }
-          55%,
-          100% {
-            transform: translateX(120%);
-          }
-        }
-      `}</style>
-    </div>
-  );
-}
-
-/* ─────────────────────── FeaturedToolMini (card 3D dentro do plano) ─────────────────────── */
-/**
- * Mini-card 3D que destaca uma ferramenta premium dentro do PlanCard.
- *  • Tilt no mouse + spotlight + sheen sweep
- *  • Ícone gradient próprio
- *  • Lock overlay com cadeado quando bloqueado naquele plano
- *  • Clicável: scroll suave + highlight pulse na seção dedicada do catálogo
- */
-function FeaturedToolMini({
-  tool,
-  locked,
-  planHue: _planHue,
-}: {
-  tool: Tool;
-  locked: boolean;
-  /** Hue do plano — não usado no design final, mantido pra futuro */
-  planHue: string;
-}) {
-  const hue = tool.featuredHue || 'rgba(167,139,250,0.55)';
-  const handleMove = (e: ReactMouseEvent<HTMLButtonElement>) => {
-    const el = e.currentTarget;
-    const rect = el.getBoundingClientRect();
-    const px = (e.clientX - rect.left) / rect.width;
-    const py = (e.clientY - rect.top) / rect.height;
-    el.style.setProperty('--gx', `${(px * 100).toFixed(1)}%`);
-    el.style.setProperty('--gy', `${(py * 100).toFixed(1)}%`);
-    el.style.setProperty('--rx', `${(-(py - 0.5) * 8).toFixed(2)}deg`);
-    el.style.setProperty('--ry', `${((px - 0.5) * 10).toFixed(2)}deg`);
-  };
-  const handleLeave = (e: ReactMouseEvent<HTMLButtonElement>) => {
-    e.currentTarget.style.setProperty('--rx', '0deg');
-    e.currentTarget.style.setProperty('--ry', '0deg');
-  };
-
-  // Clica → scrolla pra seção dedicada e dá highlight pulse nela.
-  // Funciona MESMO quando bloqueado — assim o usuário sempre pode
-  // entender a ferramenta antes de decidir o plano. Anchor: tool-<key>
-  const handleClick = () => {
-    const id = `tool-${tool.key}`;
-    const target = document.getElementById(id);
-    if (!target) return;
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    target.classList.add('tool-info-highlight');
-    setTimeout(() => target.classList.remove('tool-info-highlight'), 2200);
-  };
-
-  return (
-    <div className="ftm-perspective" style={{ perspective: '700px' }}>
-      <button
-        type="button"
-        onMouseMove={handleMove}
-        onMouseLeave={handleLeave}
-        onClick={handleClick}
-        aria-label={`Saiba mais sobre ${tool.label}`}
-        className={
-          'ftm group relative block w-full overflow-hidden rounded-[14px] border p-3 text-left ' +
-          (locked ? 'ftm-locked' : '')
-        }
-        style={{
-          borderColor: locked
-            ? 'rgba(90,90,100,0.55)'
-            : hue.replace('0.55', '0.45'),
-          background:
-            'linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.25)), linear-gradient(180deg, rgb(var(--bg-softer)), rgb(var(--bg-soft)))',
-          cursor: 'pointer',
-        }}
-      >
-        {/* Sparkles flutuantes (só quando unlocked) */}
-        {!locked ? (
-          <>
-            <span aria-hidden className="ftm-sparkle" style={{ top: 6, right: 36, animationDelay: '0ms' }} />
-            <span aria-hidden className="ftm-sparkle" style={{ top: 14, right: 14, animationDelay: '700ms' }} />
-            <span aria-hidden className="ftm-sparkle" style={{ bottom: 10, right: 60, animationDelay: '1400ms' }} />
-          </>
-        ) : null}
-
-        {/* Spotlight radial */}
-        {!locked ? (
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-0 rounded-[14px] opacity-0 transition-opacity duration-300 group-hover:opacity-100"
-            style={{
-              background: `radial-gradient(140px circle at var(--gx, 50%) var(--gy, 50%), ${hue}, transparent 60%)`,
-            }}
-          />
-        ) : null}
-
-        {/* Conic border giratório */}
-        {!locked ? (
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-0 rounded-[14px] opacity-0 transition-opacity duration-400 group-hover:opacity-100"
-            style={{
-              padding: '1px',
-              background: `conic-gradient(from var(--angle, 0deg), transparent 0%, ${hue} 25%, transparent 50%, ${hue} 75%, transparent 100%)`,
-              WebkitMask:
-                'linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)',
-              WebkitMaskComposite: 'xor',
-              maskComposite: 'exclude',
-              animation: 'ftm-conic 4s linear infinite',
-            }}
-          />
-        ) : null}
-
-        {/* Sheen sweep */}
-        {!locked ? (
-          <span
-            aria-hidden
-            className="pointer-events-none absolute inset-0 -translate-x-[120%] rounded-[14px] bg-gradient-to-r from-transparent via-white/22 to-transparent transition-transform duration-700 group-hover:translate-x-[120%]"
-          />
-        ) : null}
-
-        {/* Lock overlay */}
-        {locked ? (
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-end pr-3"
-          >
-            <span className="flex h-7 w-7 items-center justify-center rounded-full border border-line/70 bg-black/60 backdrop-blur-md">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9c9ca6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="4" y="11" width="16" height="10" rx="2" />
-                <path d="M8 11V7a4 4 0 018 0v4" />
-              </svg>
-            </span>
-          </div>
-        ) : null}
-
-        <div
-          className="relative flex items-center gap-3"
-          style={{ opacity: locked ? 0.55 : 1 }}
-        >
-          <span
-            className="ftm-icon flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px]"
-            style={{
-              background: locked
-                ? 'linear-gradient(135deg, rgba(70,70,80,0.5), rgba(40,40,50,0.5))'
-                : `linear-gradient(135deg, ${hue}, transparent 70%), rgba(0,0,0,0.5)`,
-              border: `1px solid ${locked ? 'rgba(90,90,100,0.5)' : hue}`,
-              boxShadow: locked ? 'none' : `0 0 18px -4px ${hue}`,
-            }}
-          >
-            <FeaturedIcon kind={tool.featured!} muted={locked} />
-          </span>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <span
-                className="truncate text-[13.5px] font-bold tracking-tight text-white"
-                style={{ fontFamily: 'var(--font-tech)' }}
-              >
-                {tool.label}
-              </span>
-              {!locked ? (
-                <span
-                  className="shrink-0 rounded-full border border-lime/45 bg-lime/10 px-1.5 py-0 text-[8px] font-bold uppercase tracking-[0.18em] text-lime"
-                  style={{ fontFamily: 'var(--font-tech)' }}
-                >
-                  PREMIUM
-                </span>
-              ) : null}
-            </div>
-            {tool.featuredHint ? (
-              <p className="mt-0.5 truncate text-[11.5px] leading-snug text-text-muted">
-                {tool.featuredHint}
-              </p>
-            ) : null}
-          </div>
-        </div>
-      </button>
-
-      <style jsx>{`
-        .ftm {
-          transform-style: preserve-3d;
-          transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
-          transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1), border-color 280ms ease;
-        }
-        .ftm:hover {
-          border-color: ${hue};
-        }
-        .ftm:active {
-          transform: rotateX(0) rotateY(0) scale(0.97);
-          transition-duration: 80ms;
-        }
-        .ftm-icon {
-          transition: transform 360ms cubic-bezier(0.34, 1.56, 0.64, 1);
-        }
-        .ftm:hover .ftm-icon {
-          transform: ${locked ? 'none' : 'rotate(-6deg) scale(1.08) translateZ(20px)'};
-        }
-        .ftm-sparkle {
-          position: absolute;
-          width: 4px;
-          height: 4px;
-          border-radius: 50%;
-          background: #fff;
-          opacity: 0;
-          animation: ftm-sparkle 2.4s ease-in-out infinite;
-          box-shadow: 0 0 8px rgba(255, 255, 255, 0.9);
-        }
-        @keyframes ftm-sparkle {
-          0%, 100% { opacity: 0; transform: scale(0.5); }
-          50% { opacity: 1; transform: scale(1.2); }
-        }
-        @keyframes ftm-conic {
-          to { --angle: 360deg; }
-        }
-      `}</style>
-    </div>
-  );
-}
-
-/** Ícone do mini-card por categoria featured. Cada um remete à
- * ferramenta — ClickUp = pilot pin, HeyGen = avatar, B-roll = clapper. */
-function FeaturedIcon({ kind, muted }: { kind: Featured; muted: boolean }) {
-  const stroke = muted ? '#9c9ca6' : 'var(--card-deep)';
-  const fill = muted ? 'transparent' : '#fff';
-  if (kind === 'pilot') {
-    return (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M16 6l5 5-3 1-1 3-5-5 4-4z" fill={fill} />
-        <path d="M14 12l-8 8" />
-        <rect x="3" y="4" width="9" height="14" rx="2" />
-        <path d="M5.5 8h4M5.5 12h4" opacity="0.7" />
-      </svg>
-    );
-  }
-  if (kind === 'heygen') {
-    return (
-      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="9" cy="8" r="3" />
-        <path d="M3 19v-1a4 4 0 014-4h4a4 4 0 014 4v1" />
-        <path d="M16 7c1.5 1 1.5 6 0 7" />
-        <path d="M19 5c2.5 1.5 2.5 8.5 0 10" opacity="0.6" />
-        <path d="M21 3l0.4 1 1 0.4-1 0.4-0.4 1-0.4-1L20 4.4l1-0.4 0.4-1z" fill={fill} />
-      </svg>
-    );
-  }
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="7" width="18" height="13" rx="2" />
-      <path d="M3 11h18" />
-      <path d="M6 7l-1.5 3M11 7l-1.5 3M16 7l-1.5 3" opacity="0.7" />
-      <path d="M19 3l0.5 1.2 1.3 0.5-1.3 0.5L19 6.4l-0.5-1.2L17.2 4.7l1.3-0.5L19 3z" fill={fill} />
-    </svg>
   );
 }
 
@@ -1563,103 +897,6 @@ type ToolInfo = {
 };
 
 const TOOL_DETAILS: ToolInfo[] = [
-  // ─── FEATURED no topo ───
-  {
-    key: 'clickup-pilot',
-    name: 'ClickUp Pilot',
-    cat: 'Automação',
-    hue: 'rgba(200,232,124,0.55)',
-    desc: 'Conecta no seu ClickUp, lê os briefings e dispara os avatares sozinho.',
-    win: 'Saia do escritório. O Pilot continua editando. Você só revisa.',
-    featured: true,
-    howItWorks: [
-      {
-        step: 'Conecta no ClickUp',
-        detail: 'Você cola o token da API ClickUp uma vez. O Pilot passa a ler todas as suas tasks com briefing.',
-      },
-      {
-        step: 'Lê o briefing',
-        detail: 'Cada task selecionada vira um job. O Pilot extrai roteiro, avatar e voz do briefing — sem você abrir nada.',
-      },
-      {
-        step: 'Dispara o avatar',
-        detail: 'O HeyGen entra automaticamente e gera o lipsync parte por parte, respeitando a fila — tudo na sua própria conta.',
-      },
-      {
-        step: 'Você só revisa',
-        detail: 'Quando você volta, cada task entrega os ZIPs prontos — takes, montado e camuflado — pra revisar e publicar.',
-      },
-    ],
-    highlights: [
-      'Pra equipe que entrega 20+ vídeos por dia',
-      'A fila roda de dia e de noite — disparos noturnos, finais de semana',
-      'Cada vídeo nasce com o briefing exato do cliente',
-    ],
-  },
-  {
-    key: 'heygen-auto',
-    name: 'Hey Auto',
-    cat: 'IA',
-    hue: 'rgba(103,232,249,0.55)',
-    desc: 'Dispara todos os lipsyncs do dia no HeyGen com um clique.',
-    win: 'Operação em escala. O time só revisa o que já está pronto.',
-    featured: true,
-    howItWorks: [
-      {
-        step: 'Estrutura hooks e body',
-        detail: 'Cole a copy ou suba os áudios: cada hook vira um take e o body é dividido em partes automaticamente.',
-      },
-      {
-        step: 'Escolhe avatar e voz',
-        detail: 'Direto da sua biblioteca do HeyGen, com preview — e o app memoriza as combinações que você mais usa.',
-      },
-      {
-        step: 'Dispara em fila',
-        detail: 'Cada AD dispara, renderiza e baixa em sequência. A fila roda em segundo plano e você acompanha tudo ao vivo.',
-      },
-      {
-        step: 'Baixa em ZIP',
-        detail: 'Cada AD entrega três pacotes — takes na ordem, montado e camuflado — prontos pra revisar e publicar.',
-      },
-    ],
-    highlights: [
-      'A fila inteira do dia sai com minutos de preparação',
-      'Deixa a fila rodando e volta com tudo entregue',
-      'Histórico completo — retome qualquer lote de onde parou',
-    ],
-  },
-  {
-    key: 'auto-broll',
-    name: 'Auto B-roll',
-    cat: 'IA',
-    hue: 'rgba(240,171,252,0.55)',
-    desc: 'Recebe um JSON e gera todos os B-rolls da campanha, em segundo plano.',
-    win: 'Liga a fila, vai dormir. Acorda com a pasta cheia de cortes prontos.',
-    featured: true,
-    howItWorks: [
-      {
-        step: 'Cola o JSON com os prompts',
-        detail: 'Lista de cenas — descrição visual de cada B-roll. Cada linha vira um clipe gerado em paralelo.',
-      },
-      {
-        step: 'Conecta a extensão Magnific',
-        detail: 'Usa SUA conta Premium+ — gera sem gastar crédito de API. A extensão controla o Magnific direto do navegador.',
-      },
-      {
-        step: 'Roda enquanto você faz outra coisa',
-        detail: 'Mande a lista inteira: a fila roda em série, take após take, sem você intervir — e dá pra acompanhar ao vivo.',
-      },
-      {
-        step: 'Recebe a pasta pronta',
-        detail: 'Tudo zipado e nomeado pela cena, no padrão 9:16 · 10s · 720p, direto pra timeline.',
-      },
-    ],
-    highlights: [
-      'Funciona com Premium+ — sem custo extra de geração',
-      'Feito pra lotes grandes — fila serial e estável',
-      'Cada cena vira um arquivo nomeado e pronto pra timeline',
-    ],
-  },
   // ─── Demais ───
   {
     key: 'lipsync',

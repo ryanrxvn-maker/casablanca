@@ -10,7 +10,7 @@
  *
  * Respostas escritas pra "citabilidade": resposta direta nas primeiras
  * frases, fatos específicos, blocos auto-contidos, palavras-chave de cauda
- * longa (decupagem automática, lipsync em lote, b-roll, legenda SRT).
+ * longa (decupagem automática, lipsync, legenda SRT).
  *
  * ⚠ Só prometer o que o cliente consegue usar HOJE — ferramentas admin-only
  *   ou em manutenção não entram aqui.
@@ -20,7 +20,7 @@ export type FaqItem = { q: string; a: string };
 export const FAQ: FaqItem[] = [
   {
     q: 'O que é o Auto Edit?',
-    a: 'O Auto Edit é uma plataforma de automação de edição de vídeo. Ele faz decupagem automática, gera B-roll com IA, dispara lipsyncs em fila e cria legendas alinhadas à copy — você liga a fila e recebe tudo pronto, sem ficar no monitor.',
+    a: 'O Auto Edit é uma plataforma de automação de edição de vídeo. Ele faz decupagem automática, lipsync de avatar, legendas alinhadas à copy e ajustes de arquivo em lote — você liga a fila e recebe tudo pronto, sem ficar no monitor.',
   },
   {
     q: 'Como funciona a decupagem automática?',
@@ -31,19 +31,15 @@ export const FAQ: FaqItem[] = [
     a: 'Você cola a copy e sobe o áudio ou vídeo. O Gerador de SRT alinha o texto palavra por palavra com a fala e devolve o arquivo .srt pronto pra importar no CapCut — com os modelos e animações de legenda funcionando normalmente em cima dele.',
   },
   {
-    q: 'Consigo fazer lipsync de vários avatares de uma vez (HeyGen em lote)?',
-    a: 'Consegue. O Hey Auto monta a fila e dispara todos os avatares de uma vez na sua própria conta do HeyGen — você deixa a fila rodando e volta com os vídeos prontos. É a forma mais rápida de escalar produção de UGC e avatares falantes sem clicar um por um.',
-  },
-  {
-    q: 'Dá pra gerar B-roll automaticamente?',
-    a: 'Dá. Você cola a lista de prompts, liga a fila e o Auto B-roll gera take por take na sua conta Magnific (Freepik Premium+), sem crédito extra por vídeo. No final sai um ZIP organizado, com todos os MP4s nomeados e prontos pra timeline.',
+    q: 'Dá pra fazer lipsync de avatar (video to video)?',
+    a: 'Dá. No Lipsync Video to Video você sobe o vídeo com o rosto e o áudio novo, e a boca sai encaixada fala por fala — o avatar dizendo exatamente a copy que você quiser. Disponível no plano Premium.',
   },
   {
     q: 'Tem plano grátis? Quanto custa?',
-    a: 'Tem plano grátis pra começar sem cartão. O plano pago disponível é o Basic (R$ 57/mês), com mais ferramentas e volume; o Pro, com as automações completas, está em fase final e abre em breve. A assinatura mensal é recorrente no cartão e o plano anual pode ser parcelado em até 12×.',
+    a: 'Tem plano grátis pra começar sem cartão. O plano pago é o Premium (R$ 57/mês), que libera todas as ferramentas — incluindo Lipsync Video to Video, Decupagem Inteligente e Gerador de SRT. A assinatura mensal é recorrente no cartão e o plano anual pode ser parcelado em até 12×.',
   },
   {
     q: 'Serve pra agência e produção em escala?',
-    a: 'Serve. O Auto Edit foi feito pra volume: fila de processamento, lote nas ferramentas e um pipeline que puxa o briefing no ClickUp e entrega sem clique manual. É pensado pra editores e agências que produzem muito vídeo por dia.',
+    a: 'Serve. O Auto Edit foi feito pra volume: fila de processamento e lote em todas as ferramentas — vários arquivos de uma vez, rodando em segundo plano. É pensado pra editores e agências que produzem muito vídeo por dia.',
   },
 ];
