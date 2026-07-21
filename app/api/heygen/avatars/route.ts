@@ -123,7 +123,9 @@ async function fetchAvatarList(apiKey: string): Promise<AvatarItem[]> {
 
 export async function GET(req: Request) {
   try {
-    const gate = await requireTier('admin');
+    const gate = await requireTier('admin', {
+      unlockTools: ['/tools/heygen-auto', '/tools/clickup-pilot'],
+    });
     if (!gate.ok) return gate.response;
     const keyResult = await getUserKey('heygen');
     if ('response' in keyResult) return keyResult.response;

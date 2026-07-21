@@ -6,12 +6,14 @@ import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { withRetry } from '@/lib/retry';
 import { displayTierOf } from '@/lib/launch-flags';
+import { emailUnlocksPath } from '@/lib/tool-unlocks';
 import { DarkoLogo } from './DarkoLogo';
 
 type Profile = {
   name: string | null;
   avatar_url: string | null;
   is_admin: boolean;
+  email: string | null;
   tier: 'free' | 'basic' | 'pro' | 'admin' | null;
 };
 
@@ -66,12 +68,15 @@ export function Sidebar() {
       const supabase = createClient();
       // uid via sessão LOCAL (instantâneo); getUser() (rede) só de fallback.
       let uid: string | undefined;
+      let email: string | null = null;
       const sess = await supabase.auth.getSession();
       uid = sess.data.session?.user?.id;
+      email = sess.data.session?.user?.email ?? null;
       if (!uid) {
         const { data: userData, error: uErr } = await supabase.auth.getUser();
         if (uErr) throw uErr;
         uid = userData.user?.id;
+        email = userData.user?.email ?? email;
       }
       // Sem uid pode ser o token renovando — lança pra re-tentar.
       if (!uid) throw new Error('sem sessão (uid ausente)');
@@ -112,6 +117,7 @@ export function Sidebar() {
         name: row?.name ?? null,
         avatar_url: row?.avatar_url ?? null,
         is_admin: !!row?.is_admin,
+        email,
         tier: resolvedTier,
       };
     }
@@ -181,8 +187,10 @@ export function Sidebar() {
           icon: <IconHome />,
           match: (p) => p === '/tools',
         },
-        // Pilot é ferramenta de uso interno — só admin vê o atalho.
-        ...(profile?.is_admin
+        // Pilot é ferramenta de uso interno — só admin vê o atalho
+        // (ou email com desbloqueio pontual em lib/tool-unlocks.ts).
+        ...(profile?.is_admin ||
+        emailUnlocksPath(profile?.email, '/tools/clickup-pilot')
           ? [
               {
                 href: '/tools/clickup-pilot',

@@ -44,6 +44,7 @@ import {
   IconStepGear,
 } from './ToolIcons';
 import { createClient } from '@/lib/supabase/client';
+import { emailUnlocksPath } from '@/lib/tool-unlocks';
 
 type Entry = {
   id: string;
@@ -477,6 +478,7 @@ function SearchModal({ onClose }: { onClose: () => void }) {
   const [q, setQ] = useState('');
   const [active, setActive] = useState(0);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   // Foca o input ao abrir
@@ -488,7 +490,8 @@ function SearchModal({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
-  // Ferramentas adminOnly (uso interno) só aparecem pra admin.
+  // Ferramentas adminOnly (uso interno) só aparecem pra admin — ou pra
+  // email com desbloqueio pontual (lib/tool-unlocks.ts), que vê só as dele.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -497,6 +500,7 @@ function SearchModal({ onClose }: { onClose: () => void }) {
         const { data: u } = await supabase.auth.getUser();
         const uid = u.user?.id;
         if (!uid) return;
+        if (!cancelled) setUserEmail(u.user?.email ?? null);
         const { data } = await supabase
           .from('profiles')
           .select('is_admin')
@@ -511,21 +515,28 @@ function SearchModal({ onClose }: { onClose: () => void }) {
   }, []);
 
   const visibleEntries = useMemo(
-    () => ENTRIES.filter((e) => !e.adminOnly || isAdmin),
-    [isAdmin],
+    () =>
+      ENTRIES.filter(
+        (e) => !e.adminOnly || isAdmin || emailUnlocksPath(userEmail, e.href),
+      ),
+    [isAdmin, userEmail],
   );
 
-  // Destaques (automações internas) — SÓ pra admin. Cliente não vê os
-  // cards nem acha por busca (as entries correspondentes são adminOnly).
-  // Sem query → todos. Com query → só os que batem.
+  // Destaques (automações internas) — SÓ pra admin ou email desbloqueado.
+  // Cliente não vê os cards nem acha por busca (as entries são adminOnly).
+  // Sem query → todos os visíveis. Com query → só os que batem.
   const featuredVisible = useMemo(() => {
-    if (!isAdmin) return [];
-    if (!q.trim()) return FEATURED;
-    return FEATURED.filter((f) => {
+    const vis = FEATURED.filter((f) => {
+      const e = ENTRIES.find((x) => x.id === f.id);
+      if (!e) return false;
+      return !e.adminOnly || isAdmin || emailUnlocksPath(userEmail, e.href);
+    });
+    if (!q.trim()) return vis;
+    return vis.filter((f) => {
       const e = ENTRIES.find((x) => x.id === f.id);
       return e ? score(q, e) > 0 : false;
     });
-  }, [q, isAdmin]);
+  }, [q, isAdmin, userEmail]);
 
   // Resultados regulares — exclui IDs que já estão nos destaques
   // pra não duplicar entre os cards 3D e a lista de baixo.

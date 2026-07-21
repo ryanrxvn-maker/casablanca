@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { isPaidExpired } from '@/lib/plan-prices';
 import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
 import { cliMachineIdentity } from '@/lib/cli-auth';
+import { emailUnlocksAnyTool } from '@/lib/tool-unlocks';
 
 /**
  * Guard de tier server-side pra route handlers (/api/*).
@@ -34,7 +35,18 @@ export type TierGate =
   | { ok: true; userId: string; email: string | null; tier: Tier; isAdmin: boolean }
   | { ok: false; response: NextResponse };
 
-export async function requireTier(min: Tier): Promise<TierGate> {
+export async function requireTier(
+  min: Tier,
+  opts?: {
+    /**
+     * Paths de ferramenta (ex.: '/tools/clickup-pilot') que, se o EMAIL do
+     * caller tiver desbloqueio pontual (lib/tool-unlocks.ts), furam o rank
+     * de tier — cliente liberado usa a rota mesmo sem ser admin. As demais
+     * checagens (conta ativa, sessão) continuam valendo.
+     */
+    unlockTools?: readonly string[];
+  },
+): Promise<TierGate> {
   // Auth de máquina (CLI/MCP): atalho server-to-server. Concede tier admin —
   // passa qualquer `min`. Inerte se AUTOEDIT_CLI_KEY não estiver setada.
   const machine = cliMachineIdentity();
@@ -95,7 +107,12 @@ export async function requireTier(min: Tier): Promise<TierGate> {
       tier = 'free';
     }
 
-    if (RANK[tier] < RANK[min]) {
+    const unlocked =
+      RANK[tier] < RANK[min] &&
+      !!opts?.unlockTools?.length &&
+      emailUnlocksAnyTool(user.email, opts.unlockTools);
+
+    if (RANK[tier] < RANK[min] && !unlocked) {
       return {
         ok: false,
         response: NextResponse.json(

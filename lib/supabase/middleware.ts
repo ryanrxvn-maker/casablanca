@@ -2,6 +2,7 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { isPaidExpired } from '@/lib/plan-prices';
 import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
+import { emailUnlocksPath } from '@/lib/tool-unlocks';
 
 type CookieToSet = { name: string; value: string; options: CookieOptions };
 
@@ -302,8 +303,10 @@ export async function updateSession(request: NextRequest) {
     }
 
     // ─── Bloqueio admin-only (mesmo beta não acessa) ───
+    // Exceção: emails com desbloqueio pontual de ferramenta interna
+    // (lib/tool-unlocks.ts) passam SÓ nos paths desbloqueados.
     if (ADMIN_ONLY_PREFIXES.some((p) => pathname.startsWith(p))) {
-      if (!isAdmin) {
+      if (!isAdmin && !emailUnlocksPath(user.email, pathname)) {
         return lockedRedirect('admin');
       }
     }
@@ -311,9 +314,10 @@ export async function updateSession(request: NextRequest) {
     // ─── Bloqueio pro tier 'free' ───
     if (tier === 'free') {
       const isHubExact = pathname === '/tools';
-      const isAllowedTool = FREE_ALLOWED_TOOLS.some(
-        (p) => pathname === p || pathname.startsWith(p + '/'),
-      );
+      const isAllowedTool =
+        FREE_ALLOWED_TOOLS.some(
+          (p) => pathname === p || pathname.startsWith(p + '/'),
+        ) || emailUnlocksPath(user.email, pathname);
       const isAllowedPrefix = FREE_ALLOWED_PREFIXES.some((p) =>
         pathname.startsWith(p),
       );

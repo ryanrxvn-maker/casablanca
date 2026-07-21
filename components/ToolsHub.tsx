@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useTier, tierAllowsTool, tierCanAutomate } from '@/lib/use-tier';
+import { emailUnlocksPath } from '@/lib/tool-unlocks';
 import { isToolInMaintenance, canBypassMaintenance } from '@/lib/maintenance';
 import { MaintenanceBadge } from '@/components/MaintenanceBadge';
 import { HeroSlideBg } from './HeroSlideBg';
@@ -230,6 +231,7 @@ export function ToolsHub() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [firstName, setFirstName] = useState<string>('');
   const [maintBypass, setMaintBypass] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -239,7 +241,10 @@ export function ToolsHub() {
         const { data: u } = await supabase.auth.getUser();
         const uid = u.user?.id;
         if (!uid) return;
-        if (!cancelled) setMaintBypass(canBypassMaintenance(u.user?.email));
+        if (!cancelled) {
+          setMaintBypass(canBypassMaintenance(u.user?.email));
+          setUserEmail(u.user?.email ?? null);
+        }
         const { data } = await supabase
           .from('profiles')
           .select('is_admin, name')
@@ -258,8 +263,12 @@ export function ToolsHub() {
     };
   }, []);
 
-  const tools = TOOLS.filter((it) => !it.adminOnly || isAdmin);
-  const featured = FEATURED.filter((it) => !it.adminOnly || isAdmin);
+  // adminOnly some pra cliente — exceto email com desbloqueio pontual
+  // (lib/tool-unlocks.ts), que vê SÓ as ferramentas liberadas pra ele.
+  const canSeeTool = (it: ToolEntry) =>
+    !it.adminOnly || isAdmin || emailUnlocksPath(userEmail, it.href);
+  const tools = TOOLS.filter(canSeeTool);
+  const featured = FEATURED.filter(canSeeTool);
 
   // Manutenção: admin acessa (modo 'admin'); emails liberados (ex.: Elder)
   // acessam normal (undefined); o resto é bloqueado.
@@ -329,7 +338,10 @@ export function ToolsHub() {
                 key={it.href}
                 entry={it}
                 delay={140 + i * 60}
-                locked={!tierAllowsTool(tier, it.href)}
+                locked={
+                  !tierAllowsTool(tier, it.href) &&
+                  !emailUnlocksPath(userEmail, it.href)
+                }
                 maint={maintOf(it.href)}
               />
             ),
@@ -354,7 +366,10 @@ export function ToolsHub() {
               key={it.href}
               entry={it}
               delay={i * 35}
-              locked={!tierAllowsTool(tier, it.href)}
+              locked={
+                !tierAllowsTool(tier, it.href) &&
+                !emailUnlocksPath(userEmail, it.href)
+              }
               maint={maintOf(it.href)}
             />
           ))}

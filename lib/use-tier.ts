@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { withRetry } from '@/lib/retry';
+import { emailUnlocksPath } from '@/lib/tool-unlocks';
 
 export type Tier = 'free' | 'basic' | 'pro' | 'admin';
 
@@ -71,6 +72,27 @@ let memTier: Tier | null = null;
 let inflight: Promise<Tier> | null = null;
 const SS_KEY = 'autoedit:tier';
 
+// Email da sessão — usado pelos desbloqueios pontuais (lib/tool-unlocks.ts).
+// undefined = ainda não resolvido; null = deslogado/sem email.
+let memEmail: string | null | undefined = undefined;
+const SS_EMAIL_KEY = 'autoedit:email';
+
+function ssReadEmail(): string | null {
+  try {
+    return sessionStorage.getItem(SS_EMAIL_KEY);
+  } catch {
+    return null;
+  }
+}
+function ssWriteEmail(e: string | null) {
+  try {
+    if (e) sessionStorage.setItem(SS_EMAIL_KEY, e);
+    else sessionStorage.removeItem(SS_EMAIL_KEY);
+  } catch {
+    /* sessionStorage indisponível — segue sem cache */
+  }
+}
+
 function ssRead(): Tier | null {
   try {
     const v = sessionStorage.getItem(SS_KEY);
@@ -114,11 +136,16 @@ async function resolveTier(): Promise<Tier> {
   let uid: string | undefined;
   const sess = await withTimeout(supabase.auth.getSession(), 6000);
   uid = sess.data.session?.user?.id;
+  let email: string | null = sess.data.session?.user?.email ?? null;
   if (!uid) {
     const u = await withTimeout(supabase.auth.getUser(), 6000);
     if (u.error) throw u.error;
     uid = u.data.user?.id;
+    email = u.data.user?.email ?? email;
   }
+  // Aquece o cache de email (desbloqueios por email na UI).
+  memEmail = uid ? email : null;
+  ssWriteEmail(memEmail);
   // Sem uid = genuinamente deslogado (não é erro) → free, sem re-tentar.
   if (!uid) return 'free';
 
@@ -207,6 +234,11 @@ export function useTier(): Tier | null {
         apply(cached);
       }
     }
+    // Restaura o email junto (desbloqueios por email pintam sem esperar rede).
+    if (memEmail === undefined) {
+      const cachedEmail = ssReadEmail();
+      if (cachedEmail) memEmail = cachedEmail;
+    }
 
     // Revalida sempre em background; com cache na tela, a lentidão fica
     // invisível. Só cai pra free se NUNCA houve cache (1º load de fato).
@@ -221,7 +253,9 @@ export function useTier(): Tier | null {
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
         memTier = null;
+        memEmail = null;
         ssClear();
+        ssWriteEmail(null);
         apply('free');
         return;
       }
@@ -240,6 +274,7 @@ export function useTier(): Tier | null {
 }
 
 export function tierAllowsTool(tier: Tier | null, toolHref: string): boolean {
+  if (emailUnlocksPath(memEmail, toolHref)) return true; // desbloqueio pontual
   if (!tier) return false;
   if (tier === 'admin') return true; // admin acessa tudo
   const set = TIER_PATHS[tier];
@@ -248,9 +283,60 @@ export function tierAllowsTool(tier: Tier | null, toolHref: string): boolean {
   );
 }
 
-/** Só admin dispara automação Pilot (ferramenta de uso interno). */
+/**
+ * Só admin dispara automação Pilot (ferramenta de uso interno) — ou email
+ * com desbloqueio pontual do Pilot (lib/tool-unlocks.ts).
+ */
 export function tierCanAutomate(tier: Tier | null): boolean {
+  if (emailUnlocksPath(memEmail, '/tools/clickup-pilot')) return true;
   return tier === 'admin';
+}
+
+/**
+ * Hook: email da sessão logada, com cache (memória + sessionStorage).
+ * undefined = ainda resolvendo · null = deslogado/sem email.
+ * Use junto com emailUnlocksPath() pra UI de desbloqueios pontuais.
+ */
+export function useUserEmail(): string | null | undefined {
+  const [email, setEmail] = useState<string | null | undefined>(memEmail);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (memEmail !== undefined) {
+      setEmail(memEmail);
+    } else {
+      const cached = ssReadEmail();
+      if (cached) {
+        memEmail = cached;
+        setEmail(cached);
+      }
+    }
+
+    const supabase = createClient();
+    supabase.auth
+      .getSession()
+      .then(async ({ data }) => {
+        let e: string | null = data.session?.user?.email ?? null;
+        if (!e && data.session?.user?.id) {
+          const u = await supabase.auth.getUser().catch(() => null);
+          e = u?.data.user?.email ?? null;
+        }
+        memEmail = e;
+        ssWriteEmail(e);
+        if (!cancelled) setEmail(e);
+      })
+      .catch(() => {
+        // Falha de rede: mantém o cache; sem cache, marca como deslogado
+        // pra UI não ficar pendurada em "resolvendo" pra sempre.
+        if (!cancelled && memEmail === undefined) setEmail(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return email;
 }
 
 /** Cor de destaque do tier (pra moldura de avatar, badges, etc) */

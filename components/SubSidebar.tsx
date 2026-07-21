@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { isToolInMaintenance } from '@/lib/maintenance';
+import { emailUnlocksPath } from '@/lib/tool-unlocks';
 import {
   IconAcelerador,
   IconAudioSplit,
@@ -72,6 +73,7 @@ const TOOL_PATHS = TOOL_ITEMS.map((i) => i.href);
 export function SubSidebar() {
   const pathname = usePathname();
   const [isAdmin, setIsAdmin] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,6 +83,7 @@ export function SubSidebar() {
         const { data: u } = await supabase.auth.getUser();
         const uid = u.user?.id;
         if (!uid) return;
+        if (!cancelled) setUserEmail(u.user?.email ?? null);
         const { data } = await supabase
           .from('profiles')
           .select('is_admin')
@@ -100,7 +103,9 @@ export function SubSidebar() {
 
   if (!inTools) return null;
 
-  const items = TOOL_ITEMS.filter((it) => !it.adminOnly || isAdmin);
+  const items = TOOL_ITEMS.filter(
+    (it) => !it.adminOnly || isAdmin || emailUnlocksPath(userEmail, it.href),
+  );
   const meta = { eyebrow: 'FERRAMENTAS', dot: '#a78bfa' };
 
   return (

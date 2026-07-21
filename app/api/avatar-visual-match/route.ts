@@ -50,7 +50,7 @@ async function fetchImageBase64(url: string): Promise<{ data: string; mediaType:
 
 export async function POST(req: Request) {
   try {
-    const gate = await requireTier('admin');
+    const gate = await requireTier('admin', { unlockTools: ['/tools/clickup-pilot'] });
     if (!gate.ok) return gate.response;
     const keyResult = await getUserKey('anthropic');
     if ('response' in keyResult) return keyResult.response;

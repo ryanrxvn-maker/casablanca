@@ -1,7 +1,8 @@
 'use client';
 
 import { ReactNode } from 'react';
-import { useTier, type Tier } from '@/lib/use-tier';
+import { useTier, useUserEmail, type Tier } from '@/lib/use-tier';
+import { emailUnlocksPath } from '@/lib/tool-unlocks';
 import { ToolShell } from '@/components/ToolShell';
 
 /**
@@ -54,16 +55,26 @@ const TIER_HUE: Record<Exclude<Tier, 'free'>, string> = {
 export function TierGate({
   require,
   toolName,
+  toolPath,
   children,
 }: {
   require: 'basic' | 'pro' | 'admin';
   toolName: string;
+  /**
+   * Path da ferramenta (ex.: '/tools/clickup-pilot'). Quando presente,
+   * emails com desbloqueio pontual (lib/tool-unlocks.ts) passam mesmo
+   * sem o tier exigido — espelha o furo já aberto no middleware.
+   */
+  toolPath?: string;
   children: ReactNode;
 }) {
   const tier = useTier();
+  const email = useUserEmail();
 
-  // Loading: spinner discreto enquanto tier não chega
-  if (tier === null) {
+  // Loading: spinner discreto enquanto tier não chega — ou, pra ferramenta
+  // com desbloqueio por email, enquanto o email ainda resolve (evita flash
+  // de "Requer plano Admin" pro cliente liberado).
+  if (tier === null || (toolPath !== undefined && email === undefined)) {
     return (
       <ToolShell title={toolName} description="Verificando acesso…" hue={TIER_HUE[require]}>
         <div
@@ -77,7 +88,10 @@ export function TierGate({
   }
 
   // Tem acesso? Renderiza o conteúdo real
-  if (TIER_RANK[tier] >= TIER_RANK[require]) {
+  if (
+    TIER_RANK[tier] >= TIER_RANK[require] ||
+    (toolPath !== undefined && emailUnlocksPath(email, toolPath))
+  ) {
     return <>{children}</>;
   }
 
